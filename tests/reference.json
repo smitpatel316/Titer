@@ -31649,10 +31649,10 @@
     "size": 13
    },
    "margin": {
-    "l": 16,
+    "l": 152.8,
     "r": 99,
     "t": 16,
-    "b": 16
+    "b": 159
    },
    "showlegend": true,
    "legend": {
@@ -31674,7 +31674,22 @@
     "title": {
      "text": "Days",
      "standoff": 12
-    }
+    },
+    "tickmode": "array",
+    "tickvals": [
+     0,
+     5,
+     10,
+     15,
+     20
+    ],
+    "ticktext": [
+     "0",
+     "5",
+     "10",
+     "15",
+     "20"
+    ]
    },
    "yaxis": {
     "showgrid": false,
@@ -31690,7 +31705,359 @@
      "text": "Percent survival",
      "standoff": 2
     }
-   }
+   },
+   "annotations": [
+    {
+     "xref": "paper",
+     "yref": "paper",
+     "x": -0.02060793405,
+     "y": -0.2298245614,
+     "xanchor": "right",
+     "yanchor": "middle",
+     "text": "<b>Number at risk</b>",
+     "showarrow": false,
+     "font": {
+      "color": "#111827",
+      "size": 13
+     }
+    },
+    {
+     "xref": "paper",
+     "yref": "paper",
+     "x": -0.02060793405,
+     "y": -0.2964912281,
+     "xanchor": "right",
+     "yanchor": "middle",
+     "text": "Treated",
+     "showarrow": false,
+     "font": {
+      "color": "#111827",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 0,
+     "y": -0.2964912281,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "5",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 5,
+     "y": -0.2964912281,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "4",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 10,
+     "y": -0.2964912281,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "3",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 15,
+     "y": -0.2964912281,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "2",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 20,
+     "y": -0.2964912281,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "1",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "paper",
+     "yref": "paper",
+     "x": -0.02060793405,
+     "y": -0.3631578947,
+     "xanchor": "right",
+     "yanchor": "middle",
+     "text": "Treated censored",
+     "showarrow": false,
+     "font": {
+      "color": "#111827",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 0,
+     "y": -0.3631578947,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "0",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 5,
+     "y": -0.3631578947,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "0",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 10,
+     "y": -0.3631578947,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "1",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 15,
+     "y": -0.3631578947,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "1",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 20,
+     "y": -0.3631578947,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "1",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "paper",
+     "yref": "paper",
+     "x": -0.02060793405,
+     "y": -0.4298245614,
+     "xanchor": "right",
+     "yanchor": "middle",
+     "text": "Placebo",
+     "showarrow": false,
+     "font": {
+      "color": "#111827",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 0,
+     "y": -0.4298245614,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "5",
+     "showarrow": false,
+     "font": {
+      "color": "#E69F00",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 5,
+     "y": -0.4298245614,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "5",
+     "showarrow": false,
+     "font": {
+      "color": "#E69F00",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 10,
+     "y": -0.4298245614,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "2",
+     "showarrow": false,
+     "font": {
+      "color": "#E69F00",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 15,
+     "y": -0.4298245614,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "1",
+     "showarrow": false,
+     "font": {
+      "color": "#E69F00",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 20,
+     "y": -0.4298245614,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "0",
+     "showarrow": false,
+     "font": {
+      "color": "#E69F00",
+      "size": 13
+     }
+    },
+    {
+     "xref": "paper",
+     "yref": "paper",
+     "x": -0.02060793405,
+     "y": -0.4964912281,
+     "xanchor": "right",
+     "yanchor": "middle",
+     "text": "Placebo censored",
+     "showarrow": false,
+     "font": {
+      "color": "#111827",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 0,
+     "y": -0.4964912281,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "0",
+     "showarrow": false,
+     "font": {
+      "color": "#E69F00",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 5,
+     "y": -0.4964912281,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "0",
+     "showarrow": false,
+     "font": {
+      "color": "#E69F00",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 10,
+     "y": -0.4964912281,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "0",
+     "showarrow": false,
+     "font": {
+      "color": "#E69F00",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 15,
+     "y": -0.4964912281,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "1",
+     "showarrow": false,
+     "font": {
+      "color": "#E69F00",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 20,
+     "y": -0.4964912281,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "1",
+     "showarrow": false,
+     "font": {
+      "color": "#E69F00",
+      "size": 13
+     }
+    }
+   ]
   }
  },
  "graph survival freireich": {
@@ -31980,10 +32347,10 @@
     "size": 13
    },
    "margin": {
-    "l": 16,
+    "l": 137.2,
     "r": 99,
     "t": 16,
-    "b": 16
+    "b": 140
    },
    "showlegend": true,
    "legend": {
@@ -32005,7 +32372,20 @@
     "title": {
      "text": "Weeks",
      "standoff": 12
-    }
+    },
+    "tickmode": "array",
+    "tickvals": [
+     0,
+     10,
+     20,
+     30
+    ],
+    "ticktext": [
+     "0",
+     "10",
+     "20",
+     "30"
+    ]
    },
    "yaxis": {
     "showgrid": false,
@@ -32021,7 +32401,233 @@
      "text": "Percent survival",
      "standoff": 2
     }
-   }
+   },
+   "annotations": [
+    {
+     "xref": "paper",
+     "yref": "paper",
+     "x": -0.01981178801,
+     "y": -0.2154605263,
+     "xanchor": "right",
+     "yanchor": "middle",
+     "text": "<b>Number at risk</b>",
+     "showarrow": false,
+     "font": {
+      "color": "#111827",
+      "size": 13
+     }
+    },
+    {
+     "xref": "paper",
+     "yref": "paper",
+     "x": -0.01981178801,
+     "y": -0.2779605263,
+     "xanchor": "right",
+     "yanchor": "middle",
+     "text": "6-MP",
+     "showarrow": false,
+     "font": {
+      "color": "#111827",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 0,
+     "y": -0.2779605263,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "21",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 10,
+     "y": -0.2779605263,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "15",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 20,
+     "y": -0.2779605263,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "8",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 30,
+     "y": -0.2779605263,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "4",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "paper",
+     "yref": "paper",
+     "x": -0.01981178801,
+     "y": -0.3404605263,
+     "xanchor": "right",
+     "yanchor": "middle",
+     "text": "6-MP censored",
+     "showarrow": false,
+     "font": {
+      "color": "#111827",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 0,
+     "y": -0.3404605263,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "0",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 10,
+     "y": -0.3404605263,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "2",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 20,
+     "y": -0.3404605263,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "6",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 30,
+     "y": -0.3404605263,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "8",
+     "showarrow": false,
+     "font": {
+      "color": "#000000",
+      "size": 13
+     }
+    },
+    {
+     "xref": "paper",
+     "yref": "paper",
+     "x": -0.01981178801,
+     "y": -0.4029605263,
+     "xanchor": "right",
+     "yanchor": "middle",
+     "text": "Placebo",
+     "showarrow": false,
+     "font": {
+      "color": "#111827",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 0,
+     "y": -0.4029605263,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "21",
+     "showarrow": false,
+     "font": {
+      "color": "#E69F00",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 10,
+     "y": -0.4029605263,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "8",
+     "showarrow": false,
+     "font": {
+      "color": "#E69F00",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 20,
+     "y": -0.4029605263,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "2",
+     "showarrow": false,
+     "font": {
+      "color": "#E69F00",
+      "size": 13
+     }
+    },
+    {
+     "xref": "x",
+     "yref": "paper",
+     "x": 30,
+     "y": -0.4029605263,
+     "xanchor": "center",
+     "yanchor": "middle",
+     "text": "0",
+     "showarrow": false,
+     "font": {
+      "color": "#E69F00",
+      "size": 13
+     }
+    }
+   ]
   }
  },
  "graph forest-plot coxTable": {
