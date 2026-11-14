@@ -4,6 +4,7 @@ r-packages/
 src-tauri/target/
 src-tauri/mcp-bridge/target/
 src-tauri/gen/
+broker/target/
 .DS_Store
 
 # v3 stdio bridge (Phase 1): staged sidecar binaries + built .mcpb bundles are
