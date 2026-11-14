@@ -18,7 +18,10 @@
     "q1": 11.5,
     "q3": 13.1,
     "cv": 44.44461939,
-    "geoMean": 13.53168056
+    "geoMean": 13.53168056,
+    "sum": 114.7,
+    "skewness": 2.205926356,
+    "kurtosis": 2.988556623
    },
    {
     "name": "Low",
@@ -35,7 +38,10 @@
     "q1": 14.1,
     "q3": 15.5,
     "cv": 5.688316403,
-    "geoMean": 14.82247051
+    "geoMean": 14.82247051,
+    "sum": 103.9,
+    "skewness": 0.3279737961,
+    "kurtosis": -1.026585569
    },
    {
     "name": "High",
@@ -52,7 +58,10 @@
     "q1": 18.65,
     "q3": 20.4,
     "cv": 5.522645577,
-    "geoMean": 19.5919028
+    "geoMean": 19.5919028,
+    "sum": 117.7,
+    "skewness": 0.2597626993,
+    "kurtosis": -0.8107687707
    },
    {
     "name": "Sparse",
@@ -69,10 +78,13 @@
     "q1": 9.375,
     "q3": 11.75,
     "cv": 11.76470588,
-    "geoMean": 10.56821001
+    "geoMean": 10.56821001,
+    "sum": 42.5,
+    "skewness": -0.3233161507,
+    "kurtosis": -1.076266667
    }
   ],
-  "notes": "Range is Max − Min. 95% CI is the t-based confidence interval of the mean. The 25th and 75th percentiles are R's type 6, the (n + 1)p method. The coefficient of variation is SD ÷ mean. Columns with fewer than 2 values have no SD, SEM, CI or CV; the geometric mean needs every value above 0."
+  "notes": "Range is Max − Min. 95% CI is the t-based confidence interval of the mean. The 25th and 75th percentiles are R's type 6, the (n + 1)p method. The coefficient of variation is SD ÷ mean. Skewness is the moment coefficient m3/m2^1.5 and kurtosis is the excess m4/m2^2 − 3 (0 for a normal distribution); both need at least 3 values and a non-constant column. Columns with fewer than 2 values have no SD, SEM, CI or CV; the geometric mean needs every value above 0."
  },
  "compare-two-groups column {\"paired\":false,\"gaussian\":true,\"equalVariance\":false,\"ratio\":false,\"tails\":\"two-sided\"}": {
   "testType": "compare-two-groups",
@@ -22635,7 +22647,10 @@
     "q1": 67.25,
     "q3": 88.5,
     "cv": 15.74012882,
-    "geoMean": 75.45021301
+    "geoMean": 75.45021301,
+    "sum": 763,
+    "skewness": 0.1637912903,
+    "kurtosis": -1.145903721
    },
    {
     "name": "Height",
@@ -22652,7 +22667,10 @@
     "q1": 169,
     "q3": 183,
     "cv": 5.053244814,
-    "geoMean": 175.1327303
+    "geoMean": 175.1327303,
+    "sum": 1578,
+    "skewness": -0.194692533,
+    "kurtosis": -0.8369000771
    },
    {
     "name": "Age",
@@ -22669,7 +22687,10 @@
     "q1": 32,
     "q3": 48.75,
     "cv": 24.65414778,
-    "geoMean": 38.7729186
+    "geoMean": 38.7729186,
+    "sum": 399,
+    "skewness": 0.04088384809,
+    "kurtosis": -1.166727203
    },
    {
     "name": "Dose",
@@ -22686,10 +22707,13 @@
     "q1": 1,
     "q3": 3,
     "cv": 46.08394925,
-    "geoMean": 1.711769859
+    "geoMean": 1.711769859,
+    "sum": 19,
+    "skewness": 0.1884300309,
+    "kurtosis": -1.526149968
    }
   ],
-  "notes": "Range is Max − Min. 95% CI is the t-based confidence interval of the mean. The 25th and 75th percentiles are R's type 6, the (n + 1)p method. The coefficient of variation is SD ÷ mean. Columns with fewer than 2 values have no SD, SEM, CI or CV; the geometric mean needs every value above 0."
+  "notes": "Range is Max − Min. 95% CI is the t-based confidence interval of the mean. The 25th and 75th percentiles are R's type 6, the (n + 1)p method. The coefficient of variation is SD ÷ mean. Skewness is the moment coefficient m3/m2^1.5 and kurtosis is the excess m4/m2^2 − 3 (0 for a normal distribution); both need at least 3 values and a non-constant column. Columns with fewer than 2 values have no SD, SEM, CI or CV; the geometric mean needs every value above 0."
  },
  "outliers multiple {\"q\":1}": {
   "testType": "outliers",
@@ -26513,7 +26537,10 @@
     "q1": 9.375,
     "q3": 11.75,
     "cv": 11.76470588,
-    "geoMean": 10.56821001
+    "geoMean": 10.56821001,
+    "sum": 42.5,
+    "skewness": -0.3233161507,
+    "kurtosis": -1.076266667
    },
    {
     "name": "Low",
@@ -26530,10 +26557,13 @@
     "q1": 14.1,
     "q3": 15.5,
     "cv": 5.688316403,
-    "geoMean": 14.82247051
+    "geoMean": 14.82247051,
+    "sum": 103.9,
+    "skewness": 0.3279737961,
+    "kurtosis": -1.026585569
    }
   ],
-  "notes": "Range is Max − Min. 95% CI is the t-based confidence interval of the mean. The 25th and 75th percentiles are R's type 6, the (n + 1)p method. The coefficient of variation is SD ÷ mean. Columns with fewer than 2 values have no SD, SEM, CI or CV; the geometric mean needs every value above 0."
+  "notes": "Range is Max − Min. 95% CI is the t-based confidence interval of the mean. The 25th and 75th percentiles are R's type 6, the (n + 1)p method. The coefficient of variation is SD ÷ mean. Skewness is the moment coefficient m3/m2^1.5 and kurtosis is the excess m4/m2^2 − 3 (0 for a normal distribution); both need at least 3 values and a non-constant column. Columns with fewer than 2 values have no SD, SEM, CI or CV; the geometric mean needs every value above 0."
  },
  "compare-two-groups column {\"paired\":false,\"gaussian\":true,\"equalVariance\":false,\"ratio\":false,\"tails\":\"two-sided\",\"sets\":[\"High\",\"Control\"]}": {
   "testType": "compare-two-groups",
@@ -26992,10 +27022,13 @@
     "q1": 95.75669676,
     "q3": 119.7445363,
     "cv": 19.13846806,
-    "geoMean": 100.8606392
+    "geoMean": 100.8606392,
+    "sum": 2057.576006,
+    "skewness": -0.5687930667,
+    "kurtosis": -0.03039876753
    }
   ],
-  "notes": "Range is Max − Min. 95% CI is the t-based confidence interval of the mean. The 25th and 75th percentiles are R's type 6, the (n + 1)p method. The coefficient of variation is SD ÷ mean. Columns with fewer than 2 values have no SD, SEM, CI or CV; the geometric mean needs every value above 0."
+  "notes": "Range is Max − Min. 95% CI is the t-based confidence interval of the mean. The 25th and 75th percentiles are R's type 6, the (n + 1)p method. The coefficient of variation is SD ÷ mean. Skewness is the moment coefficient m3/m2^1.5 and kurtosis is the excess m4/m2^2 − 3 (0 for a normal distribution); both need at least 3 values and a non-constant column. Columns with fewer than 2 values have no SD, SEM, CI or CV; the geometric mean needs every value above 0."
  },
  "monte-carlo mcPower {\"targetAnalysis\":\"compare-two-groups\",\"summaryStatistic\":\"P value\",\"repeats\":5000,\"seed\":42,\"groupMeans\":{\"A\":0,\"B\":0.5},\"groupSds\":{\"A\":1,\"B\":1},\"equalVariance\":true}": {
   "testType": "monte-carlo",
