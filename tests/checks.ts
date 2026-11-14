@@ -7152,6 +7152,10 @@ check("row means and totals summarises each row across its data sets", async () 
   strictEqual(out.testType, "row-means-totals");
   // Totals, means, medians and N are exact; the rest are pinned to 1e-9
   // (R's sd/qt in doubles, against the same formulas worked out by hand).
+  // NOTE on the CI values: they use webR's qt(0.975,1) = 12.706204736174693,
+  // verified against JS Math.tan(0.475*pi) to ~2 ulps. The textbook value
+  // 12.706204736432095 differs in the 10th decimal and webR never produces
+  // it — do NOT "correct" these back to the textbook value.
   deepStrictEqual(
     out.rowMeans?.map((r) => [r.row, r.x, r.n, r.total, r.mean, r.median]),
     [
@@ -7165,13 +7169,13 @@ check("row means and totals summarises each row across its data sets", async () 
     (got == null && want == null) || (got != null && want != null && Math.abs(got - want) < 1e-9);
   const expected: [number | null, number | null, number | null, number | null, number | null, number | null][] = [
     // sd, sem, CI low, CI high, %CV, geometric mean — row [10, 30].
-    [14.142135623730951, 10, -107.06204736432096, 147.06204736432096, 70.71067811865476, 17.32050807568877],
+    [14.142135623730951, 10, -107.06204736174693, 147.06204736174693, 70.71067811865476, 17.32050807568877],
     // Row [30, 20].
-    [7.0710678118654755, 5, -38.53102368216048, 88.53102368216048, 28.284271247461902, 24.49489742783178],
+    [7.0710678118654755, 5, -38.531023680873474, 88.53102368087347, 28.284271247461902, 24.49489742783178],
     // Row [5]: one value, so no SD, SEM, CI or %CV — but a geometric mean.
     [null, null, null, null, null, 5],
     // Row [0, 4]: a 0 kills the geometric mean, not the rest.
-    [2.8284271247461903, 2, -23.41240947286419, 27.41240947286419, 141.4213562373095, null],
+    [2.8284271247461903, 2, -23.41240947234939, 27.41240947234939, 141.4213562373095, null],
   ];
   ok(out.rowMeans?.length === expected.length);
   out.rowMeans?.forEach((r, i) => {
@@ -7186,19 +7190,35 @@ check("row means and totals summarises each row across its data sets", async () 
   ok(out.notes.includes("single value"));
   ok(out.notes.includes("geometric mean"));
   // Errors name the problem instead of summarising something wrong.
+  // (The X column is named here: without it, "Time" itself holds numbers
+  // and is summarised as a data set, like the sibling runners do.)
   deepStrictEqual(
-    await runAnalysis("row-means-totals", {
-      columns: ["Title", "Time", "Y1", "Y2"],
-      rows: [
-        ["", "0", "", ""],
-        ["", "1", "", ""],
-      ],
-    }),
+    await runAnalysis(
+      "row-means-totals",
+      {
+        columns: ["Title", "Time", "Y1", "Y2"],
+        rows: [
+          ["", "0", "", ""],
+          ["", "1", "", ""],
+        ],
+      },
+      { x: "Time" },
+    ),
     { error: "No Y column holds numbers yet." },
   );
   deepStrictEqual(
-    await runAnalysis("row-means-totals", table, { ys: ["Y3"], x: "Time" }),
-    { error: "“Y3” holds no numbers yet." },
+    await runAnalysis(
+      "row-means-totals",
+      {
+        columns: ["Title", "Time", "Y1", "Y2"],
+        rows: [
+          ["", "0", "", ""],
+          ["", "1", "", ""],
+        ],
+      },
+      { ys: ["Y1"], x: "Time" },
+    ),
+    { error: "“Y1” holds no numbers yet." },
   );
   deepStrictEqual(
     await runAnalysis("row-means-totals", table, { ys: ["Nope"], x: "Time" }),

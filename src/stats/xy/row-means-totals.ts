@@ -62,13 +62,17 @@ export async function runRowMeansTotals(
     geoMean: v[`gm_${i}`] ?? null,
   }));
   const single = rowMeans.filter((r) => r.n < 2).length;
+  // Name what the user chose, not the resolved columns: on a grouped table
+  // the choice is the data set ("A", "B"), while the columns are its
+  // subcolumns ("A:Y1", ...). With no explicit choice, name the columns.
+  const named = params?.ys?.length ? params.ys : targets.map((c) => c.name);
   return {
     testType: "row-means-totals",
     subtitle: "Row means and totals",
     stats: [],
     groups: [],
     notes:
-      `Summarised each row across ${targets.map((c) => `“${c.name}”`).join(", ")}: the row's total, mean, SD, SEM, ` +
+      `Summarised each row across ${named.map((n) => `“${n}”`).join(", ")}: the row's total, mean, SD, SEM, ` +
       "median, 95% CI of the mean, %CV and geometric mean. " +
       "Only values present in the row count; rows holding no value are not listed. " +
       "95% CI is the t-based confidence interval of the mean. " +
