@@ -88,9 +88,25 @@ export async function askToRetryUpdate(version: string, detail: string): Promise
 /** This app's version ("1.0.0"), from its bundle. */
 export const appVersion = getVersion;
 
-/** `defaultPath` may be a bare file name; the panel then picks the folder. */
-export function pickSavePath(title: string, defaultPath: string, name: string, ext: string) {
-  return save({ title, defaultPath, filters: [{ name, extensions: [ext] }] });
+/** `defaultPath` may be a bare file name; the panel then picks the folder.
+ *  GTK's save panel does not append the filter extension when the user edits
+ *  the Name field directly (it only does so via the location bar), and the
+ *  shell refuses extensionless writes — so the extension is ensured here, for
+ *  every caller, rather than trusting the dialog to return one. */
+export async function pickSavePath(title: string, defaultPath: string, name: string, ext: string) {
+  const path = await save({ title, defaultPath, filters: [{ name, extensions: [ext] }] });
+  return path === null ? null : ensureSaveExtension(path, ext);
+}
+
+/** The path a save dialog returned, with the format extension ensured: an
+ *  extensionless name gets `.${ext}` (a trailing dot is stripped first, so
+ *  "figure." becomes "figure.png", not "figure..png"). A name that already
+ *  has any extension is left alone — a user who typed "figure.jpg" for a PNG
+ *  export keeps what they typed. Dots in a folder name are not an extension. */
+export function ensureSaveExtension(path: string, ext: string): string {
+  const base = path.slice(path.lastIndexOf("/") + 1);
+  if (/\.([^/.]+)$/.test(base)) return path;
+  return `${path.replace(/\.+$/, "")}.${ext}`;
 }
 
 // ── Files ──────────────────────────────────────────────────────────────

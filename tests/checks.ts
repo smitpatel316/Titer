@@ -152,6 +152,7 @@ import {
   validateFigureSize,
 } from "../src/lib/figure";
 import { buildPanelFigure } from "../src/views/figures/panel-figure";
+import { ensureSaveExtension } from "../src/native";
 import { sampleProject } from "./sample-project";
 import { crc32 } from "node:zlib";
 import type { AnalysisOutcome, AnalysisParams, AnalysisResult, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, RegressionCoefficient, SimulationSpec } from "../src/stats/types";
@@ -5022,6 +5023,27 @@ check("an oversize figure offers the largest fitting size, never silently (F-12)
   ok(out.capped && out.reason !== undefined, JSON.stringify(out));
   ok(out.width * out.height <= 7500 * 5625, `${out.width} × ${out.height}`);
   ok(!figureExportSize({ widthIn: 10, heightIn: 7.5 }, 600).capped);
+});
+
+// 1.2.1: GTK's save panel does not append the filter extension when the user
+// edits the Name field directly (only via the location bar), and the shell
+// refuses extensionless writes — so the save path must carry the extension
+// by the time it reaches writeFile. The reported case: typing
+// "figure-600dpi-600" in the Export Figure dialog errored with
+// "Titer can't access …/figure-600dpi-600".
+check("a save dialog's extensionless name gets the format extension (1.2.1)", () => {
+  strictEqual(
+    ensureSaveExtension("/home/hatch/workspace/.v2int-gui-tmp/figure-600dpi-600", "png"),
+    "/home/hatch/workspace/.v2int-gui-tmp/figure-600dpi-600.png",
+  );
+  strictEqual(ensureSaveExtension("/tmp/figure-600dpi-600.png", "png"), "/tmp/figure-600dpi-600.png");
+  strictEqual(ensureSaveExtension("/tmp/figure-600dpi-600.PNG", "png"), "/tmp/figure-600dpi-600.PNG");
+  strictEqual(ensureSaveExtension("/tmp/figure.", "png"), "/tmp/figure.png");
+  // A different extension is the user's choice, not this bug's: left alone.
+  strictEqual(ensureSaveExtension("/tmp/figure.jpg", "png"), "/tmp/figure.jpg");
+  // Dots in a folder name are not an extension.
+  strictEqual(ensureSaveExtension("/tmp/my.dir/figure", "png"), "/tmp/my.dir/figure.png");
+  strictEqual(ensureSaveExtension("/tmp/project.hlx", "hlx"), "/tmp/project.hlx");
 });
 
 check("figure labels run A…Z then AA, AB…; manual labels stick; duplicates are found", () => {
