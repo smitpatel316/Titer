@@ -7773,6 +7773,12 @@ check("Open Recent loads FileHandle entries, migrating legacy plain paths", () =
       { kind: "local", path: "/a.hlx" },
       { kind: "remote", provider: "box", accountId: "u1", fileId: "123", path: "/Research/Data.hlx" },
     ]);
+    // Malformed remote entries (missing fileId) are dropped, well-formed kept.
+    stored["titer.recent"] =
+      '[{"kind":"remote","provider":"box","accountId":"u1","fileId":"f9","path":"/Budget.hlx"},{"kind":"remote","provider":"box","accountId":"u1","path":"/NoId.hlx"}]';
+    deepStrictEqual(loadRecents(), [
+      { kind: "remote", provider: "box", accountId: "u1", fileId: "f9", path: "/Budget.hlx" },
+    ]);
   } finally {
     delete (globalThis as { localStorage?: unknown }).localStorage;
   }
