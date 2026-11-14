@@ -1236,10 +1236,15 @@ mod tests {
         assert_eq!(dose["range"]["min"], 0.1);
         assert_eq!(dose["range"]["max"], 100.0);
         // Response B: 11, (missing), 91, "excluded?" excluded — 2 numeric, 1 missing.
+        // The excluded cell counts in excluded_cells only: excluded cells are
+        // dropped from every count and range (contract §5), so it is NOT
+        // also a non-numeric value. (Fixed 2026-11-14 in v3/mcp-integration:
+        // the test asserted 1 here, contradicting the documented design;
+        // the implementation was already correct.)
         let resp_b = &out["columns"][2];
         assert_eq!(resp_b["numeric_values"], 2);
         assert_eq!(resp_b["missing_values"], 1);
-        assert_eq!(resp_b["non_numeric_values"], 1);
+        assert_eq!(resp_b["non_numeric_values"], 0);
         assert_eq!(out["excluded_cells"], 1);
     }
 

@@ -292,3 +292,20 @@ succeeds without restarting Claude.
    `src-tauri/Cargo.lock` pins rmcp 3.10 (v3/claude-code). All four
    providers' artifacts (docs, configs, .mcpb, plugin) are intact.
    Log: `~/workspace/.helix-mcp-recon/investigations.md`.
+7. **Staged-bridge prerequisite (found + fixed in v3/mcp-integration,
+   Nov 14):** `tauri.conf.json` declares `externalBin`
+   `binaries/titer-stdio-bridge`, and Tauri's build script FAILS any
+   app-crate compile (`cargo check` / `cargo test` / `tauri build`) in
+   a fresh checkout unless `scripts/build-stdio-bridge.sh` has staged
+   the binary into `src-tauri/binaries/` (gitignored, never committed)
+   — the first app-crate compile on this branch failed exactly this
+   way. `package.json` `build:linux` now runs the staging script
+   before `tauri build` (verified: staging exit 0, then `cargo test
+   --bin titer mcp` 9/9 green). The Mac `build` script does NOT yet
+   stage it — the plain script stages only the host triple, so Mac
+   needs `./scripts/build-stdio-bridge.sh --target
+   aarch64-apple-darwin --target x86_64-apple-darwin` wired in the
+   same way; that path is UNVERIFIED (no Mac build in this lane — disk)
+   and is a follow-up before the Mac release flow uses this branch.
+   The full `npm run build:linux` run itself was not executed here
+   (only the staging step + cargo test); the GUI lane owns Linux builds.
