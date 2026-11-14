@@ -10,6 +10,7 @@ import { ANALYSES } from "../../stats";
 import { cancelActiveEvals } from "../../stats/webr";
 import { titleCase } from "../../lib/format";
 import { AnalysisResultsView } from "./analysis-results-view";
+import { AddFloatingNoteButton, FloatingNotesLayer } from "../../components/floating-notes";
 import { useAnalysis, useRQueue } from "./use-analysis";
 import { publishAnalysisResult } from "../../store/mcp-publish";
 import { rQueueStatusText } from "../../stats/r-queue";
@@ -70,8 +71,12 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
 
   return (
     <>
-      <Toolbar title={node.name} tag={titleCase(ANALYSES[node.analysisType!].label)} />
-      <div className="flex-1 overflow-auto">
+      <Toolbar
+        title={node.name}
+        tag={titleCase(ANALYSES[node.analysisType!].label)}
+        actions={<AddFloatingNoteButton node={node} />}
+      />
+      <div className="relative flex-1 overflow-auto">
         {outcome && !("error" in outcome) ? (
           <AnalysisResultsView result={outcome} />
         ) : data && !outcome ? (
@@ -91,6 +96,7 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
             )}
           </div>
         )}
+        <FloatingNotesLayer node={node} />
       </div>
     </>
   );
