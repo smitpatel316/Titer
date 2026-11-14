@@ -116,6 +116,7 @@ import { yieldToPaint } from "../src/lib/yield-to-paint";
 import { fitWidths, fitZoom } from "../src/store/use-layout";
 import { prismDropSkippedMessage } from "../src/store/use-document";
 import { computeGroupedDEG } from "../src/lib/deg";
+import { binCounts, binEdges } from "../src/lib/histogram";
 import { logisticCurveNote } from "../src/views/graphs/logistic-curve";
 import { ANALYSES, runAnalysis } from "../src/stats";
 import {
@@ -1628,6 +1629,61 @@ check("the Bland-Altman wizard never offers the X column as a method on XY table
   if (secondOneY.kind !== "choice") throw new Error("second is not a choice question");
   deepStrictEqual(secondOneY.options, []);
   ok(secondOneY.emptyMessage?.includes("only one Y data set"));
+});
+
+check("the linear-regression wizard weights every Y set it is asked to fit", async () => {
+  const wizard = WIZARDS["linear-regression"]!;
+  const data: TableData = {
+    columns: ["Title", "X", "Y1", "Y2"],
+    rows: [
+      ["", "1", "2.0", "3.0"],
+      ["", "2", "3.9", "5.1"],
+      ["", "3", "6.2", "7.0"],
+      ["", "4", "7.8", "10.2"],
+      ["", "5", "10.5", "12.1"],
+      ["", "6", "11.9", "15.3"],
+      ["", "7", "14.8", "16.0"],
+      ["", "8", "15.5", "20.4"],
+      ["", "9", "19.0", "21.2"],
+      ["", "10", "20.3", "25.1"],
+    ],
+  };
+  const table = readTable(data);
+  const asked = (a: Answers) => wizard.questions(a, table, "xy").filter(Boolean) as Question[];
+  // The wizard asks weights on an XY table and lets several Y sets be picked.
+  const weights = asked({}).find((q) => q.id === "weights") as Question;
+  if (weights.kind !== "choice") throw new Error("weights is not a choice question");
+  deepStrictEqual(
+    weights.options.map((o) => o.value),
+    ["none", "1/y", "1/y2", "1/x", "1/x2"],
+  );
+  deepStrictEqual(wizard.finish({ ys: ["Y1", "Y2"], origin: "no", weights: "1/y" }, table), {
+    type: "linear-regression",
+    params: { ys: ["Y1", "Y2"], forceOrigin: false, weights: "1/y" },
+  });
+  // Those params must actually weight each set: R's weighted lm slopes are
+  // 2.04868 and 2.38165 (the unweighted ones are 2.05636 and 2.41939).
+  const out = await runAnalysis("linear-regression", data, {
+    ys: ["Y1", "Y2"],
+    forceOrigin: false,
+    weights: "1/y",
+  });
+  if ("error" in out) throw new Error(out.error);
+  const slopes = out.fit?.rows.find((r) => r.label === "Slope")?.values;
+  ok(slopes && Math.abs(slopes[0]! - 2.0486847584757886) < 1e-9);
+  ok(slopes && Math.abs(slopes[1]! - 2.381647696450292) < 1e-9);
+  ok(!out.fit?.rows.some((r) => r.label === "Pearson r"));
+  ok(out.notes.includes("Weighted by 1/Y"));
+  // A weighted single-Y fit shows no Pearson r either: r is the unweighted
+  // cor(x,y), so r² ≠ the weighted R² in the same table.
+  const single = await runAnalysis("linear-regression", data, { y: "Y1", forceOrigin: false, weights: "1/y" });
+  if ("error" in single) throw new Error(single.error);
+  ok(!single.stats.some((s) => s.label === "Pearson r"));
+  ok(Math.abs((single.stats.find((s) => s.label === "Slope")?.value ?? NaN) - 2.0486847584757886) < 1e-9);
+  // …while an unweighted fit still shows it.
+  const plain = await runAnalysis("linear-regression", data, { y: "Y1", forceOrigin: false });
+  if ("error" in plain) throw new Error(plain.error);
+  ok(plain.stats.some((s) => s.label === "Pearson r"));
 });
 
 check("the Bland-Altman graph never plots X as a method on XY tables (FL-f8-graph)", () => {
@@ -7836,16 +7892,16 @@ check("Cox regression leaves the proportional-hazards P open when a group is nev
   strictEqual(out.hazardRatios?.length, 1, "one hazard ratio still reported");
 });
 
-check("frequency bins are left-closed with the last bin closed, and empty bins stay", () => {
-  // On-edge values go into the bin above them; the maximum stays in the last bin.
+check("frequency bins are right-closed with the first bin closed, and empty bins stay", () => {
+  // On-edge values go into the bin below them; the minimum stays in the first bin.
   deepStrictEqual(
     computeFrequencyBins([2, 4, 6, 8], { binMode: "width", binWidth: 2, startAt: 2 }).bins.map((b) => b.count),
-    [1, 1, 2],
+    [2, 1, 1],
   );
   // A gap leaves zero-count bins in place.
   deepStrictEqual(
     computeFrequencyBins([1, 2, 9, 10], { binMode: "width", binWidth: 2, startAt: 0 }).bins.map((b) => b.count),
-    [1, 1, 0, 0, 2],
+    [2, 0, 0, 0, 2],
   );
   // Relative and cumulative frequencies sum to 1.
   const { bins } = computeFrequencyBins([2.1, 3.5, 3.9, 4.2, 5, 5.8, 6.1, 7.4, 8, 9.3], {
@@ -7858,24 +7914,24 @@ check("frequency bins are left-closed with the last bin closed, and empty bins s
     [
       [3, 0.3, 3, 0.3],
       [3, 0.3, 6, 0.6],
-      [2, 0.2, 8, 0.8],
-      [2, 0.2, 10, 1],
+      [3, 0.3, 9, 0.9],
+      [1, 0.1, 10, 1],
     ],
   );
 });
 
-check("frequency bins put a value exactly on an edge into the bin above it, not below", () => {
-  // (0.3 - 0.1) / 0.1 is 1.9999999999999998 in doubles, so Math.floor alone
-  // bins 0.3 into "0.2 to <0.3"; the index is nudged against the actual
-  // edges until the value lies inside its bin.
-  const { bins } = computeFrequencyBins([0.1, 0.3, 0.5], { binMode: "auto" });
+check("frequency bins put a value exactly on an edge into the bin below it, not above", () => {
+  // (0.2 - 0.1) / 0.1 is 1 in doubles, so Math.floor alone puts 0.2 in
+  // "(0.2, 0.3]"; the index is nudged against the actual edges until the
+  // value lies inside its bin.
+  const { bins } = computeFrequencyBins([0.1, 0.2, 0.3, 0.5], { binMode: "auto" });
   deepStrictEqual(
     bins.map((b) => [b.bin, b.count]),
     [
-      ["0.1 to <0.2", 1],
-      ["0.2 to <0.3", 0],
-      ["0.3 to <0.4", 1],
-      ["0.4 to 0.5", 1],
+      ["[0.1, 0.2]", 2],
+      ["(0.2, 0.3]", 1],
+      ["(0.3, 0.4]", 0],
+      ["(0.4, 0.5]", 1],
     ],
   );
 });
@@ -7892,6 +7948,14 @@ check("pretty breaks stay distinct at large magnitudes instead of collapsing to 
     [1, 0, 1],
   );
   ok(bins.every((b) => Number.isFinite(b.count) && Number.isFinite(b.relativeFrequency)));
+});
+
+check("binCounts keeps a value exactly on the first edge at large magnitudes", () => {
+  // fuzz = 1e-7 × median width is below half a ULP at 1e9, so the fuzzed
+  // first edge rounds back to the edge itself; a strict `>` dropped the
+  // value sitting on it. R's hist() counts it (include.lowest): [3, 1].
+  const values = [1e9, 1e9 + 0.0002, 1e9 + 0.0005, 1e9 + 0.001];
+  deepStrictEqual(binCounts(values, binEdges(values)), [3, 1]);
 });
 
 check("width-mode binning terminates when the width is below the rounding resolution at 1e9", () => {
