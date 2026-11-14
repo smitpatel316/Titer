@@ -30,7 +30,8 @@ type Selector =
   | { kind: "save-prompt" }
   | { kind: "conflict" }
   | { kind: "remote-picker" }
-  | { kind: "cloud-settings" };
+  | { kind: "cloud-settings" }
+  | { kind: "ai-connections" };
 
 /** The project's content: what a file holds, and what Undo brings back. */
 interface Content {
