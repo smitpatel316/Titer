@@ -10432,12 +10432,31 @@ check("menus and pickers name things in title case, as macOS does", () => {
 // so only the Mac repro proves the fix.
 check("the Match popup menu passes an explicit position and window, with a re-entrancy guard", () => {
   const native = readFileSync(fileURLToPath(new URL("../src/native.ts", import.meta.url)), "utf8");
-  ok(native.includes("menu.popup(new LogicalPosition(event.clientX, event.clientY), getCurrentWindow())"));
+  ok(native.includes("menu.popup(new LogicalPosition(x, y), getCurrentWindow())"));
   ok(native.includes("popupMenu(items: PopupItem[], event?: { clientX: number; clientY: number })"));
   const match = readFileSync(fileURLToPath(new URL("../src/views/graphs/match-graph.tsx", import.meta.url)), "utf8");
   ok(match.includes("const choose = async (event: React.MouseEvent) => {"));
   ok(match.includes("if (popupOpen.current) return;"));
   ok(match.includes("await choose(event);"));
+});
+
+// BUG-2: the Match popup's anchor came from the click event's clientX/clientY, read
+// after async work — an AX press on a button below the fold scrolls it into view,
+// and the event can still hold the pre-scroll position, far off-screen. muda then
+// parks the main thread in NSMenu's tracking loop with an invisible menu and destroys
+// every window (QA-LOG BUG-2, confirmed x2 Nov 9; reproduced on 1.2.0 Nov 15). The
+// anchor now comes from the button's live rect (scrolled into view first, read
+// synchronously before the first await), and popupMenu clamps it to the viewport as
+// a backstop. This pins the CHANGE only — only the Mac repro proves the fix.
+check("the Match popup menu anchors on the button's live rect, clamped to the viewport", () => {
+  const match = readFileSync(fileURLToPath(new URL("../src/views/graphs/match-graph.tsx", import.meta.url)), "utf8");
+  ok(match.includes('button.scrollIntoView({ behavior: "instant", block: "nearest" })'));
+  ok(match.includes("const rect = button.getBoundingClientRect();"));
+  ok(match.includes("{ clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 }"));
+  ok(!match.includes("        event,\n      );"));
+  const native = readFileSync(fileURLToPath(new URL("../src/native.ts", import.meta.url)), "utf8");
+  ok(native.includes("Math.min(Math.max(event.clientX, 0), window.innerWidth - 1)"));
+  ok(native.includes("Math.min(Math.max(event.clientY, 0), window.innerHeight - 1)"));
 });
 
 check("Open Recent loads FileHandle entries, migrating legacy plain paths", () => {

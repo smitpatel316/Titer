@@ -576,7 +576,10 @@ function shifted({ rgba, width, height }: Picture, by: number): Picture {
  *  item may show a picture before its text, in a submenu too. With the click `event`,
  *  the menu pops up at the click's position in this window: on macOS a position-less
  *  popup takes muda's nil-view + mouse-location branch, which parked the main thread
- *  inside NSMenu's tracking loop and destroyed every window (QAB-1). */
+ *  inside NSMenu's tracking loop and destroyed every window (QAB-1). The position is
+ *  clamped to the visible viewport: a click's coordinates can arrive stale (below the
+ *  fold after a scroll-into-view), and an anchor far off-screen parks the main thread
+ *  the same way (BUG-2). */
 export async function popupMenu(items: PopupItem[], event?: { clientX: number; clientY: number }) {
   if (!isNative) return;
   const images: Image[] = [];
@@ -601,8 +604,11 @@ export async function popupMenu(items: PopupItem[], event?: { clientX: number; c
     ) as Promise<MenuItems>;
   };
   const menu = await Menu.new({ items: await withImages(items) });
-  if (event) await menu.popup(new LogicalPosition(event.clientX, event.clientY), getCurrentWindow());
-  else await menu.popup();
+  if (event) {
+    const x = Math.min(Math.max(event.clientX, 0), window.innerWidth - 1);
+    const y = Math.min(Math.max(event.clientY, 0), window.innerHeight - 1);
+    await menu.popup(new LogicalPosition(x, y), getCurrentWindow());
+  } else await menu.popup();
   await menu.close();
   for (const image of images) void image.close();
 }

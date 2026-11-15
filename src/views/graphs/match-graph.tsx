@@ -188,13 +188,24 @@ export function MatchSection({
     if (popupOpen.current) return;
     popupOpen.current = true;
     try {
+      // Anchor on the button's live rect, not the click's coordinates: an AX
+      // press on a button below the fold scrolls it into view, and the
+      // event's clientX/clientY may still hold the pre-scroll position —
+      // far off-screen. muda then parks the main thread in NSMenu's tracking
+      // loop with an invisible menu and destroys every window (BUG-2). Scroll
+      // the button into view first (instant), then read where it actually is.
+      // Read synchronously, before the first await: React nulls currentTarget
+      // once the handler returns.
+      const button = event.currentTarget;
+      button.scrollIntoView({ behavior: "instant", block: "nearest" });
+      const rect = button.getBoundingClientRect();
       await popupMenu(
         others.flatMap(({ table, graphs }, i) => [
           ...(i > 0 ? [separator] : []),
           { text: table, enabled: false },
           ...graphs.map((g) => ({ text: g.name, checked: g.id === exampleId, action: () => setExampleId(g.id) })),
         ]),
-        event,
+        { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 },
       );
     } finally {
       popupOpen.current = false;
