@@ -8,7 +8,7 @@ import { Button } from "../../ui/controls";
 import { Row, Section } from "../../components/inspector";
 import { popupMenu } from "../../native";
 import { separator } from "../../menus";
-import { useOutline, useProjectStore, type OutlineNode } from "../../store/use-project-store";
+import { useOutline, useProjectActions, useProjectStore, type OutlineNode } from "../../store/use-project-store";
 import { paletteOf } from "../../lib/palettes";
 import {
   DEFAULT_GRAPH_OPTIONS,
@@ -19,6 +19,7 @@ import {
 } from "../../store/types";
 import { GRAPHS, graphSeries } from ".";
 import { Toggle } from "./panel-controls";
+import { BatchMagicDialog, type BatchMagicGroup } from "./batch-magic-dialog";
 
 interface Property {
   id: string;
@@ -30,7 +31,7 @@ interface Property {
 }
 
 // prettier-ignore
-const PROPERTIES: Property[] = [
+export const PROPERTIES: Property[] = [
   { id: "points", label: "Points", keys: ["pointSize", "pointShape", "pointFill", "pointOutline", "pointOutlineColor"] },
   { id: "shapes", label: "Fill and outline", keys: ["fill", "outline", "outlineColor", "barGap"] },
   { id: "lines", label: "Lines", keys: ["lineWidth", "lineDash"] },
@@ -85,6 +86,32 @@ export function matched(target: Matched, example: Matched, ids: string[]): Graph
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
+/** A node as matching sees it: its type, its table, its options and its series. */
+export const asMatched = (node: ProjectNode, nodes: Record<string, ProjectNode>): Matched => {
+  const table = nodes[node.parentId!];
+  const options = { ...DEFAULT_GRAPH_OPTIONS, ...node.graphOptions };
+  return {
+    type: node.graphType!,
+    table: table.id,
+    options,
+    series: graphSeries(node.graphType!, table.data!, table.tableType!, options),
+  };
+};
+
+/** Batch Magic (Prism's Magic over many graphs): `matched()` for each target,
+ *  leaving out the ones it would not change — the same gray-out as Match's
+ *  toggles, so an Apply never dirties a graph it leaves alone. */
+export function batchMatched(
+  targets: { id: string; matched: Matched }[],
+  example: Matched,
+  ids: string[],
+): { id: string; options: GraphOptions }[] {
+  return targets.flatMap(({ id, matched: target }) => {
+    const options = matched(target, example, ids);
+    return same(options, target.options) ? [] : [{ id, options }];
+  });
+}
+
 /** Whether taking property `p` of `example` changes `target`. */
 function changes(p: Property, target: Matched, example: Matched) {
   const next = matched(target, example, [p.id]);
@@ -132,28 +159,20 @@ export function MatchSection({
   onToggle: (all: boolean) => void;
 }) {
   const { nodes } = useProjectStore();
+  const { updateGraphs } = useProjectActions();
   const { tables } = useOutline();
   const [exampleId, setExampleId] = React.useState<string | null>(null);
   const [ticked, setTicked] = React.useState(readTicked);
+  const [batchOpen, setBatchOpen] = React.useState(false);
   // A popup already open ignores further clicks (QAB-1 re-entrancy guard).
   const popupOpen = React.useRef(false);
 
   const others = examplesFor(graphId, tables, nodes);
   if (!others.length) return null;
 
-  const asMatched = (node: ProjectNode): Matched => {
-    const table = nodes[node.parentId!];
-    const options = { ...DEFAULT_GRAPH_OPTIONS, ...node.graphOptions };
-    return {
-      type: node.graphType!,
-      table: table.id,
-      options,
-      series: graphSeries(node.graphType!, table.data!, table.tableType!, options),
-    };
-  };
-  const target = asMatched(nodes[graphId]);
+  const target = asMatched(nodes[graphId], nodes);
   const exampleNode = exampleId ? nodes[exampleId] : undefined; // none once deleted
-  const example = exampleNode && asMatched(exampleNode);
+  const example = exampleNode && asMatched(exampleNode, nodes);
   const offered = example ? PROPERTIES.filter((p) => changes(p, target, example)).map((p) => p.id) : [];
   const chosen = ticked.filter((id) => offered.includes(id));
   const tick = (id: string, on: boolean) => {
@@ -180,6 +199,47 @@ export function MatchSection({
     } finally {
       popupOpen.current = false;
     }
+  };
+
+  // Batch Magic: every other graph but the example, grouped by table in
+  // sidebar order — the current graph first in its table's group. A graph
+  // the ticked properties would not change is flagged, for the dialog to gray.
+  const batchGroups: BatchMagicGroup[] = example
+    ? (() => {
+        const groups: { table: string; graphs: { id: string; name: string; matched: Matched }[] }[] = others.map(
+          ({ table, graphs }) => ({
+            table,
+            graphs: graphs
+              .filter((g) => g.id !== exampleId)
+              .map((g) => ({ id: g.id, name: g.name, matched: asMatched(nodes[g.id], nodes) })),
+          }),
+        );
+        const tableName = nodes[target.table]?.name ?? "";
+        const group = groups.find((g) => g.table === tableName);
+        const current = { id: graphId, name: nodes[graphId].name, matched: target };
+        if (group) group.graphs.unshift(current);
+        else groups.unshift({ table: tableName, graphs: [current] });
+        return groups
+          .filter((g) => g.graphs.length)
+          .map(({ table, graphs }) => ({
+            table,
+            graphs: graphs.map(({ id, name, matched: m }) => ({
+              id,
+              name,
+              wouldChange: !same(matched(m, example, chosen), m.options),
+            })),
+          }));
+      })()
+    : [];
+  const applyBatch = (ids: string[]) => {
+    if (!example) return;
+    const updates = batchMatched(
+      ids.map((id) => ({ id, matched: asMatched(nodes[id], nodes) })),
+      example,
+      chosen,
+    );
+    if (updates.length) updateGraphs(updates);
+    setBatchOpen(false);
   };
 
   return (
@@ -211,6 +271,19 @@ export function MatchSection({
           <Button variant="accent" disabled={!chosen.length} onClick={() => set(matched(target, example, chosen))}>
             Apply
           </Button>
+          <Button disabled={!chosen.length} onClick={() => setBatchOpen(true)}>
+            Apply to Multiple Graphs…
+          </Button>
+          {batchOpen && exampleNode && (
+            <BatchMagicDialog
+              exampleName={exampleNode.name}
+              properties={PROPERTIES.filter((p) => chosen.includes(p.id)).map((p) => p.label)}
+              groups={batchGroups}
+              currentId={graphId}
+              onClose={() => setBatchOpen(false)}
+              onApply={applyBatch}
+            />
+          )}
         </>
       )}
     </Section>

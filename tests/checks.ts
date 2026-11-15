@@ -134,7 +134,7 @@ import { addEstimationPlot, estimationDiffLabel } from "../src/views/graphs/esti
 import { addSchildPlot, schildPlotPoints } from "../src/views/graphs/schild-plot";
 import { addRegression, fitLinear } from "../src/views/graphs/regression-overlay";
 import { addObservedFitted } from "../src/views/graphs/observed-fitted";
-import { examplesFor, matched, type Matched } from "../src/views/graphs/match-graph";
+import { batchMatched, examplesFor, matched, type Matched } from "../src/views/graphs/match-graph";
 import type { OutlineNode } from "../src/store/use-project-store";
 import { addSignificance, deriveComparisons } from "../src/views/graphs/significance-overlay";
 import { createElement } from "react";
@@ -5573,6 +5573,72 @@ check("Match Another Graph… takes only what is ticked, series in order", () =>
     g3: { ...child("g3"), graphType: "sankey" as GraphType }, // from a newer Helix
   } as Record<string, ProjectNode>;
   deepStrictEqual(examplesFor("g1", tables, nodes), [{ table: "T", graphs: [child("g2")] }]);
+});
+
+check("Batch Magic applies the ticked properties to many graphs at once, in one undo step", () => {
+  const graph = (type: GraphType, table: string, series: string[], over: Partial<GraphOptions>): Matched => ({
+    type,
+    table,
+    series,
+    options: { ...newGraphOptions(type), ...over },
+  });
+  const example = graph("mean-error", "t1", ["Vehicle", "Low"], {
+    pointSize: 12,
+    series: { Vehicle: { color: "#000000" } },
+  });
+  const first = graph("box-violin", "t2", ["A", "B"], { series: { A: { color: "#00FF00" } } });
+  const second = graph("mean-error", "t2", ["Vehicle"], {});
+  // Already matches on BOTH ticked properties: the example's point size, its
+  // palette, and its first series' color in order — so nothing would change.
+  const already = graph("box-violin", "t2", ["A", "B"], {
+    pointSize: 12,
+    palette: example.options.palette,
+    series: { A: { color: "#000000" } },
+  });
+  // A graph that would not change is left out (same gray-out as Match's toggles).
+  const out = batchMatched(
+    [
+      { id: "g1", matched: first },
+      { id: "g2", matched: second },
+      { id: "g3", matched: already },
+    ],
+    example,
+    ["points", "colors"],
+  );
+  deepStrictEqual(
+    out.map((u) => u.id),
+    ["g1", "g2"],
+  );
+  strictEqual(out[0].options.pointSize, 12);
+  deepStrictEqual(out[0].options.series, { A: { color: "#000000" } });
+  strictEqual(out[1].options.pointSize, 12);
+
+  // One dispatch updates both graphs; one Undo takes both back.
+  let s = makeInitialState();
+  const tableId = s.rootOrder[0];
+  s = reducer(s, {
+    type: "create",
+    node: { id: "g1", type: "graph", name: "First", parentId: tableId, graphType: "box-violin", graphOptions: first.options },
+  });
+  s = reducer(s, {
+    type: "create",
+    node: { id: "g2", type: "graph", name: "Second", parentId: tableId, graphType: "mean-error", graphOptions: second.options },
+  });
+  s = reducer(s, { type: "updateGraphs", updates: out, at: 1000 });
+  strictEqual(s.nodes.g1.graphOptions?.pointSize, 12);
+  strictEqual(s.nodes.g2.graphOptions?.pointSize, 12);
+  ok(s.isDirty);
+  s = reducer(s, { type: "undo" });
+  strictEqual(s.nodes.g1.graphOptions?.pointSize, first.options.pointSize);
+  strictEqual(s.nodes.g2.graphOptions?.pointSize, second.options.pointSize);
+  // An unknown id (a graph deleted since the dialog opened) is skipped, not fatal.
+  s = reducer(s, {
+    type: "updateGraphs",
+    updates: [...out, { id: "gone", options: out[0].options }],
+    at: 2000,
+  });
+  strictEqual(s.nodes.g1.graphOptions?.pointSize, 12);
+  strictEqual(s.nodes.gone, undefined);
 });
 
 check("a column graph's bars stand at their column, even with one-way error bars", () => {

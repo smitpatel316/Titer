@@ -108,6 +108,8 @@ type Action =
   /** `label` names the edit in the Edit menu; `move`: what it renamed or moved. */
   | { type: "updateTable"; id: string; data: TableData; label: string; move?: TableMove }
   | { type: "updateGraph"; id: string; options: GraphOptions; at: number }
+  /** Batch Magic: several graphs at once, in one undo step. */
+  | { type: "updateGraphs"; updates: { id: string; options: GraphOptions }[]; at: number }
   | { type: "updateFloatingNotes"; id: string; notes: FloatingNote[]; at: number }
   /** `highlight`: the sheet's Navigator color, or null to clear it. */
   | { type: "setHighlight"; id: string; highlight: SheetHighlight | null }
@@ -381,6 +383,19 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         isDirty: true,
       };
     }
+    case "updateGraphs": {
+      // A graph deleted since the dialog opened is skipped, not fatal.
+      const nodes = { ...state.nodes };
+      let changed = false;
+      for (const { id, options } of action.updates) {
+        const node = nodes[id];
+        if (!node || node.type !== "graph") continue;
+        nodes[id] = { ...node, graphOptions: options };
+        changed = true;
+      }
+      if (!changed) return state; // nothing applied: no dirty flag, no undo step
+      return { ...state, nodes, isDirty: true };
+    }
     case "updateFloatingNotes": {
       const node = state.nodes[action.id];
       if (!node) return state;
@@ -491,6 +506,7 @@ const UNDOABLE = new Set<Action["type"]>([
   "duplicateFamily",
   "updateTable",
   "updateGraph",
+  "updateGraphs",
   "updateFloatingNotes",
   "setHighlight",
   "updateFigure",
@@ -521,6 +537,8 @@ function changeName(action: Action): string {
       return action.label;
     case "updateGraph":
       return "Format Change";
+    case "updateGraphs":
+      return "Match Graphs";
     case "updateFloatingNotes":
       return "Note Change";
     case "setHighlight":
@@ -542,7 +560,9 @@ export function reducer(state: ProjectState, action: Action): ProjectState {
   const change =
     action.type === "updateGraph"
       ? { key: `graph ${action.id}`, at: action.at }
-      : action.type === "updateFloatingNotes"
+      : action.type === "updateGraphs"
+        ? { key: "graphs batch", at: action.at }
+        : action.type === "updateFloatingNotes"
         ? { key: `notes ${action.id}`, at: action.at }
         : action.type === "updateFigure"
           ? { key: `figure ${action.id}`, at: action.at }
@@ -616,6 +636,8 @@ interface ProjectActions {
    *  and the rows it moved, which the table's analyses and graphs then follow. */
   updateTable: (id: string, data: TableData, label: string, move?: TableMove) => void;
   updateGraph: (id: string, options: GraphOptions) => void;
+  /** Batch Magic: several graphs' options at once, in one undo step. */
+  updateGraphs: (updates: { id: string; options: GraphOptions }[]) => void;
   /** Replaces a sheet's floating notes (an empty list clears them). */
   updateFloatingNotes: (id: string, notes: FloatingNote[]) => void;
   /** Highlights a sheet in the Navigator (null clears it). Undoable. */
@@ -802,6 +824,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       duplicateFamily: (id) => dispatch({ type: "duplicateFamily", id }),
       updateTable: (id, data, label, move) => dispatch({ type: "updateTable", id, data, label, move }),
       updateGraph: (id, options) => dispatch({ type: "updateGraph", id, options, at: Date.now() }),
+      updateGraphs: (updates) => dispatch({ type: "updateGraphs", updates, at: Date.now() }),
       updateFloatingNotes: (id, notes) => dispatch({ type: "updateFloatingNotes", id, notes, at: Date.now() }),
       setSheetHighlight: (id, highlight) => dispatch({ type: "setHighlight", id, highlight }),
       openSelector: (selector) => dispatch({ type: "openSelector", selector }),
