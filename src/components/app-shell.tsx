@@ -20,6 +20,7 @@ import { TABLE_TYPE_OPTIONS } from "../views/tables";
 import { TableDetail } from "../views/tables/table-detail";
 import { analysisOptionsForTable } from "../views/analyses";
 import { AnalysisWizard } from "../views/analyses/analysis-wizard";
+import { WandDialog } from "./wand-dialog";
 import { SimulateDataDialog } from "./simulate-data-dialog";
 import { useStartAnalysis } from "../views/analyses/use-analysis-launcher";
 import { GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
@@ -86,6 +87,8 @@ export function AppShell() {
       />
 
       <AnalysisWizard />
+
+      <WandDialog />
 
       <SimulateDataDialog />
 

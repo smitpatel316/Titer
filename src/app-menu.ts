@@ -95,6 +95,15 @@ export function useAppMenu(doc: DocumentActions) {
   }, []);
   const tableType = activeTableId ? nodes[activeTableId]?.tableType : undefined;
   const hasTable = activeTableId !== null;
+  // Wand needs an example: another table with ≥ 1 analysis or graph child.
+  const wandAvailable = Object.values(nodes).some(
+    (n) =>
+      n.type === "table" &&
+      n.id !== activeTableId &&
+      Object.values(nodes).some(
+        (c) => c.parentId === n.id && (c.type === "analysis" || c.type === "graph"),
+      ),
+  );
   const tableCount = Object.values(nodes).filter((n) => n.type === "table").length;
   // The data-dependent Analysis items (three-way ANOVA, nested t-test/ANOVA)
   // change with the table data, not with any other dep below — without this
@@ -237,6 +246,12 @@ export function useAppMenu(doc: DocumentActions) {
             enabled: hasTable,
             action: run((l, id) => l.store.openSelector({ kind: "simulate-data", tableId: id })),
           },
+          {
+            // Wand (plan 37): analyze + graph this table like another table.
+            text: "Use Wand…",
+            enabled: hasTable && wandAvailable,
+            action: run((l, id) => l.store.openSelector({ kind: "wand", tableId: id })),
+          },
           sep,
           ...(tableType
             ? analysisOptionsForTable(tableType, activeTableId ? nodes[activeTableId]?.data : undefined)
@@ -335,6 +350,7 @@ export function useAppMenu(doc: DocumentActions) {
     focused,
     tableType,
     hasTable,
+    wandAvailable,
     analysisKey,
     activeNodeId !== null,
     activeNode?.type,

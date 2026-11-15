@@ -197,6 +197,7 @@ export function ProjectSidebar() {
     void popupMenu([
       { text: "New Analysis…", action: () => openSelector({ kind: "new-analysis", tableId: table.id }) },
       { text: "Simulate data…", action: () => openSelector({ kind: "simulate-data", tableId: table.id }) },
+      { text: "Use Wand…", action: () => openSelector({ kind: "wand", tableId: table.id }) },
       { text: "New Graph…", action: () => openSelector({ kind: "new-graph", tableId: table.id }) },
       { text: "New Figure…", action: () => createFigure() },
       { item: "Separator" },
