@@ -4404,6 +4404,143 @@ check("a markers-only xy-scatter keeps table row order, not X order (R2-G-F9)", 
   deepStrictEqual(line.y, [10, 20, 30]);
 });
 
+check("a bubble plot sizes its symbols by a third variable, area ∝ value", () => {
+  type Trace = {
+    type: string;
+    mode: string;
+    name: string;
+    x: number[];
+    y: number[];
+    customdata?: string[];
+    text?: string[];
+    marker?: { size: number[]; sizemode: string; color: unknown; symbol: unknown };
+  };
+  // Multiple Variables table: Height (X) vs Weight (Y), N = bubble size.
+  // S3's N is 0 and S4's is blank: neither is a positive size, so both rows drop.
+  const data = {
+    columns: ["Title", "Height", "Weight", "N", "Group", "Score"],
+    rows: [
+      ["S1", "170", "65", "10", "A", "1.5"],
+      ["S2", "180", "80", "40", "B", "2.5"],
+      ["S3", "160", "55", "0", "A", "3.5"],
+      ["S4", "175", "70", null, "B", "4.5"],
+      ["S5", "165", "60", "90", "A", "5.5"],
+    ],
+  };
+  const options: GraphOptions = {
+    ...newGraphOptions("bubble-plot"),
+    xVariable: "Height",
+    yVariable: "Weight",
+    bubbleSizeVariable: "N",
+  };
+  const cols = plotColumns(readTable(data), "bubble-plot", options, "multiple");
+  deepStrictEqual(
+    cols.map((c) => c.name),
+    ["Height", "Weight", "N"],
+  );
+  const fig = GRAPHS["bubble-plot"].build(cols, options, paintOf(options, 1), readTable(data).titles);
+  const [trace] = fig.data as Trace[];
+  strictEqual(trace.type, "scatter");
+  strictEqual(trace.mode, "markers");
+  strictEqual(trace.name, "Weight");
+  deepStrictEqual(trace.x, [170, 180, 165]);
+  deepStrictEqual(trace.y, [65, 80, 60]);
+  deepStrictEqual(trace.customdata, ["Weight#0", "Weight#1", "Weight#4"]);
+  // Area ∝ N: diameter = 40 * sqrt(N / 90), so N = 10 → 40/3, N = 40 → 80/3, N = 90 → 40.
+  strictEqual(trace.marker?.sizemode, "diameter");
+  const sizes = trace.marker?.size ?? [];
+  strictEqual(sizes.length, 3);
+  for (const [got, want] of [
+    [sizes[0], 40 / 3],
+    [sizes[1], 80 / 3],
+    [sizes[2], 40],
+  ] as const)
+    ok(Math.abs(got - want) < 1e-9, `bubble diameter ${got}, expected ${want}`);
+  // The hover names the raw size, not the pixel diameter.
+  deepStrictEqual(trace.text, [
+    "S1<br>Height: 170<br>Weight: 65<br>N: 10",
+    "S2<br>Height: 180<br>Weight: 80<br>N: 40",
+    "S5<br>Height: 165<br>Weight: 60<br>N: 90",
+  ]);
+  const notes = (fig.layout.annotations as { name?: string; text?: string }[] | undefined) ?? [];
+  ok(
+    notes.some((a) => a.name === "note" && (a.text ?? "").includes("2 rows")),
+    `the figure must say 2 rows were dropped, got ${JSON.stringify(notes.map((a) => a.text))}`,
+  );
+});
+
+check("a bubble plot colors by a fourth variable: gradient for numbers, one color per group for text", () => {
+  type Trace = {
+    marker?: {
+      color?: unknown;
+      colorscale?: unknown;
+      showscale?: boolean;
+      colorbar?: { title?: { text?: string } };
+    };
+  };
+  const data = {
+    columns: ["Title", "Height", "Weight", "N", "Group", "Score"],
+    rows: [
+      ["S1", "170", "65", "10", "A", "1.5"],
+      ["S2", "180", "80", "40", "B", "2.5"],
+      ["S5", "165", "60", "90", "A", "5.5"],
+    ],
+  };
+  const base: GraphOptions = {
+    ...newGraphOptions("bubble-plot"),
+    xVariable: "Height",
+    yVariable: "Weight",
+    bubbleSizeVariable: "N",
+  };
+  // Numeric color: the values themselves, on the graph's palette gradient, with a scale.
+  const numeric = GRAPHS["bubble-plot"].build(
+    plotColumns(readTable(data), "bubble-plot", { ...base, bubbleColorVariable: "Score" }, "multiple"),
+    { ...base, bubbleColorVariable: "Score" },
+    paintOf(base, 1),
+  );
+  const [numTrace] = numeric.data as Trace[];
+  deepStrictEqual(numTrace.marker?.color, [1.5, 2.5, 5.5]);
+  ok(Array.isArray(numTrace.marker?.colorscale), "a numeric color variable needs a colorscale");
+  strictEqual(numTrace.marker?.showscale, true);
+  strictEqual(numTrace.marker?.colorbar?.title?.text, "Score");
+  // Text color: one palette color per distinct value — the two "A" rows match.
+  const grouped = GRAPHS["bubble-plot"].build(
+    plotColumns(readTable(data), "bubble-plot", { ...base, bubbleColorVariable: "Group" }, "multiple"),
+    { ...base, bubbleColorVariable: "Group" },
+    paintOf(base, 1),
+  );
+  const [grpTrace] = grouped.data as Trace[];
+  const colors = grpTrace.marker?.color as string[];
+  strictEqual(colors.length, 3);
+  strictEqual(colors[0], colors[2]);
+  ok(colors[0] !== colors[1], "different groups must differ");
+  strictEqual(grpTrace.marker?.showscale, undefined);
+});
+
+check("a bubble plot defaults to the first two numeric variables, the third for size, one color", () => {
+  type Trace = { x: number[]; y: number[]; marker?: { color?: unknown; colorscale?: unknown; size: number[] } };
+  const data = {
+    columns: ["Title", "Height", "Weight", "N"],
+    rows: [
+      ["S1", "170", "65", "10"],
+      ["S2", "180", "80", "40"],
+    ],
+  };
+  const options = newGraphOptions("bubble-plot");
+  const fig = GRAPHS["bubble-plot"].build(
+    plotColumns(readTable(data), "bubble-plot", options, "multiple"),
+    options,
+    paintOf(options, 1),
+  );
+  const [trace] = fig.data as Trace[];
+  deepStrictEqual(trace.x, [170, 180]);
+  deepStrictEqual(trace.y, [65, 80]);
+  ok(Math.abs(trace.marker!.size[0] - 20) < 1e-9, "N = 10 of max 40 → diameter 20");
+  strictEqual(trace.marker!.size[1], 40);
+  strictEqual(typeof trace.marker?.color, "string");
+  strictEqual(trace.marker?.colorscale, undefined);
+});
+
 check("a linked weighted linear regression draws its weighted fit, band and equation (R3-08)", async () => {
   // BUG-REPORT #8: the overlay ignored params.weights and always drew the
   // unweighted OLS line. Heteroscedastic data where the two fits disagree
@@ -6931,10 +7068,10 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
   );
   // Multiple Variables tables offer the scatter plot, the histogram, the
   // forest plot, the observed-vs-fitted graph, the scree plot, the scores
-  // biplot, the cluster scatter, and survival curves.
+  // biplot, the cluster scatter, the bubble plot, and survival curves.
   deepStrictEqual(
     GRAPH_OPTIONS_BY_TABLE["multiple"].map((o) => o.value),
-    ["xy-scatter", "histogram", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "survival"],
+    ["xy-scatter", "bubble-plot", "histogram", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "survival"],
   );
   // Renaming a column follows the Cox analysis's params.
   const renamed = followTable(

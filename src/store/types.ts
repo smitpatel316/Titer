@@ -41,6 +41,7 @@ export type GraphType =
   | "pca-biplot"
   | "kmeans-scatter"
   | "monte-carlo-histogram"
+  | "bubble-plot"
   | "histogram";
 
 /** The choices of a graph's options, one list each: the types come from them, and a
@@ -100,6 +101,8 @@ export const GRAPH_LIMITS = {
   volcanoLabelCount: { min: 0, max: 50 },
   volcanoFcThreshold: { min: 0, max: Infinity },
   volcanoPThreshold: { min: 0, max: Infinity },
+  /** A bubble plot's largest symbol, in px of diameter (its smallest is 3 px). */
+  bubbleMaxSize: { min: 4, max: 200 },
   /** The biplot's plotted components, 1-based (PC1 vs PC2 by default);
    *  clamped to the components the linked PCA actually reported. */
   pcaX: { min: 1, max: 20 },
@@ -215,6 +218,14 @@ export interface GraphOptions {
   // the first two holding numbers.
   xVariable?: string;
   yVariable?: string;
+  // A Multiple Variables table's bubble plot (Prism 9): X and Y set the location; a
+  // third variable sets each symbol's size (area ∝ value) and a fourth, optionally,
+  // its color — a gradient for numbers, one palette color per value for text.
+  // Omitted, the third variable holding numbers sizes the bubbles, and the series'
+  // color colors them. `bubbleMaxSize` is the largest symbol's diameter, in px.
+  bubbleSizeVariable?: string;
+  bubbleColorVariable?: string;
+  bubbleMaxSize: number;
   // Smooth curve (XY family only): the fitted curve of a sibling "Spline and
   // Lowess" analysis, drawn over the scatter (see smooth-curve.ts) — the graph
   // runs the same cached runAnalysis result, no extra R call. Without a linked
@@ -361,6 +372,7 @@ export const DEFAULT_GRAPH_OPTIONS: GraphOptions = {
   volcanoLabelCount: 10,
   volcanoEffect: "log2ratio",
   volcanoSignificance: "pvalue",
+  bubbleMaxSize: 40,
   pcaX: 1,
   pcaY: 2,
   stackAs: "values",

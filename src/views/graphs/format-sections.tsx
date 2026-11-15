@@ -772,6 +772,10 @@ export function dataControls(c: SectionContext): React.ReactNode {
           </>
         )
       );
+    case "bubble-plot":
+      return (
+        <BubbleData numericNames={c.numericNames} allNames={c.allNames} options={options} set={set} />
+      );
     case "xy-bar":
     case "xy-area":
       return (
@@ -824,6 +828,54 @@ function VariablePair({
         value={options.yVariable ?? numericNames.find((n) => n !== x)}
         names={numericNames}
         onChange={(yVariable) => set({ yVariable })}
+      />
+    </>
+  );
+}
+
+/** A bubble plot of a Multiple Variables table: X and Y set the location, a third
+ *  variable the symbol's size, a fourth (any column, or none) its color. */
+function BubbleData({
+  numericNames,
+  allNames,
+  options,
+  set,
+}: {
+  numericNames: string[];
+  allNames: string[];
+  options: GraphOptions;
+  set: SetOptions;
+}) {
+  const x = options.xVariable ?? numericNames[0];
+  const y = options.yVariable ?? numericNames.find((n) => n !== x);
+  return (
+    <>
+      <ColumnSelectRow label="X variable" value={x} names={numericNames} onChange={(xVariable) => set({ xVariable })} />
+      <ColumnSelectRow
+        label="Y variable"
+        value={y}
+        names={numericNames}
+        onChange={(yVariable) => set({ yVariable })}
+      />
+      <ColumnSelectRow
+        label="Size variable"
+        value={options.bubbleSizeVariable ?? numericNames.find((n) => n !== x && n !== y)}
+        names={numericNames}
+        onChange={(bubbleSizeVariable) => set({ bubbleSizeVariable })}
+      />
+      <ColumnSelectRow
+        label="Color variable"
+        value={options.bubbleColorVariable}
+        names={allNames}
+        allowNone
+        onChange={(bubbleColorVariable) => set({ bubbleColorVariable })}
+      />
+      <Stepper
+        label="Max bubble size"
+        value={options.bubbleMaxSize}
+        {...GRAPH_LIMITS.bubbleMaxSize}
+        step={2}
+        onChange={(bubbleMaxSize) => set({ bubbleMaxSize })}
       />
     </>
   );

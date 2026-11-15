@@ -120,7 +120,16 @@ export function GraphView({ node }: { node: ProjectNode }) {
   const dataset = data ? readTable(data) : null;
   const columns = React.useMemo(
     () => (dataset && parent?.tableType ? plotColumns(dataset, type, options, parent.tableType) : []),
-    [dataset, type, options.center, options.xVariable, options.yVariable, parent?.tableType],
+    [
+      dataset,
+      type,
+      options.center,
+      options.xVariable,
+      options.yVariable,
+      options.bubbleSizeVariable,
+      options.bubbleColorVariable,
+      parent?.tableType,
+    ],
   );
   // A graph of a table with an X needs numbers in X and in a Y column, and says which it lacks —
   // except the ROC curve, whose truth (X) may be text ("Diseased"/"Healthy"):
@@ -194,10 +203,11 @@ export function GraphView({ node }: { node: ProjectNode }) {
   const rightCols = right ? columns.slice(1).filter((c) => c.name === right) : [];
   const logLeftOut = {
     x: family === "xy" && options.xScale !== "linear" ? atOrUnder0(columns.slice(0, 1)) : 0,
-    // A histogram's Y counts values: an empty bin is simply not drawn.
+    // A histogram's Y counts values: an empty bin is simply not drawn. A bubble
+    // plot's size and color columns are not Y data: only its Y column counts.
     y:
       options.yScale !== "linear" && family !== "histogram"
-        ? atOrUnder0((family === "xy" ? columns.slice(1) : columns).filter((c) => c.name !== right))
+        ? atOrUnder0((family === "xy" ? columns.slice(1, type === "bubble-plot" ? 2 : undefined) : columns).filter((c) => c.name !== right))
         : 0,
     y2: right && options.y2Scale !== "linear" ? atOrUnder0(rightCols) : 0,
   };

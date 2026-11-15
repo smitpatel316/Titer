@@ -19,6 +19,7 @@ import { beforeAfter, groupedBeforeAfter } from "./before-after";
 import { boxViolin } from "./box-violin";
 import { meanError } from "./mean-error";
 import { xyScatter } from "./xy-scatter";
+import { bubblePlot } from "./bubble-plot";
 import { xyBar } from "./xy-bar";
 import { xyArea } from "./xy-area";
 import { groupedBars } from "./grouped-bars";
@@ -85,6 +86,7 @@ export const GRAPHS: Record<GraphType, GraphModule> = {
   "box-violin": boxViolin,
   "mean-error": meanError,
   "xy-scatter": xyScatter,
+  "bubble-plot": bubblePlot,
   "xy-bar": xyBar,
   "xy-area": xyArea,
   "grouped-bars": groupedBars,
@@ -149,6 +151,18 @@ export function plotColumns(
   if (family === "volcano") return columns;
   if (family === "heatmap")
     return sets.filter((s) => s.columns.some((c) => c.values.length)).map((s) => centerColumn(s, options.center));
+  // A bubble plot of a Multiple Variables table: X then Y, the size variable, the
+  // color variable — each chosen, else the next holding numbers (the size's default
+  // is the third numeric; no color variable colors it the series' color). The color
+  // variable may be text (one color per value), so it is looked up among all the
+  // columns, not just the numeric ones.
+  if (type === "bubble-plot" && tableType === "multiple") {
+    const [x, y] = variablePair(numeric, options);
+    const byName = (name?: string) => numeric.find((c) => c.name === name);
+    const color = columns.find((c) => c.name === options.bubbleColorVariable);
+    const size = byName(options.bubbleSizeVariable) ?? numeric.find((c) => c !== x && c !== y && c !== color);
+    return [x, y, size, color].filter((c): c is (typeof numeric)[number] => c !== undefined);
+  }
   // A Multiple Variables table's histogram: its one variable, as a scatter's X.
   if (family === "histogram" && tableType === "multiple") {
     const x = variablePair(numeric, options)[0];
@@ -253,7 +267,7 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
   // `groupsOf`, which takes a nested column's group prefix ("A" for
   // "A:S1:R1"), so bars, scatter and lines all draw from nested columns.
   nested: optionsFor(["grouped-bars", "grouped-scatter", "grouped-lines"]),
-  multiple: optionsFor(["xy-scatter", "histogram", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "survival"]),
+  multiple: optionsFor(["xy-scatter", "bubble-plot", "histogram", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "survival"]),
   // Outcomes as series across the row categories, as Prism graphs contingency tables.
   contingency: optionsFor(["grouped-bars", "grouped-stacked", "grouped-hbars", "heatmap"]),
   survival: optionsFor(["survival"]),
