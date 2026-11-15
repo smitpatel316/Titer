@@ -84,7 +84,9 @@ interface Segment {
  *  figure's own axis ranges and plot size (margins from `marginsFor`, legend
  *  room from `legendRightMargin`); the Y range is the data extent with
  *  Plotly's default 5% autorange padding, or the user's explicit bounds when
- *  both are set. Annotation positions are log-transformed on a log Y axis,
+ *  both are set. On a log axis a bound at or below 0 is treated as unset,
+ *  exactly as the axis itself does — log10(0) = −Infinity would collapse
+ *  the span and flatten every arrow. Annotation positions are log-transformed on a log Y axis,
  *  as Plotly requires (`onAxis`). */
 function arrowAnnotations(
   segments: Segment[],
@@ -101,8 +103,14 @@ function arrowAnnotations(
   const plotH = Math.max(1, options.height - margin.t - margin.b);
   const ys = yValues.map((v) => onAxis(v, options.yScale)).filter((v) => Number.isFinite(v));
   let [yLo, yHi] = ys.length ? [Math.min(...ys), Math.max(...ys)] : [0, 1];
-  if (options.yMin != null && options.yMax != null) {
-    [yLo, yHi] = [onAxis(options.yMin, options.yScale), onAxis(options.yMax, options.yScale)];
+  // Mirror `logAxis`: a bound at or below 0 has no place on a log axis and
+  // counts as unset (log10(0) = −Infinity would make ySpan infinite and
+  // flatten every arrow); on a linear axis every bound counts.
+  const at = (v?: number) =>
+    v != null && (options.yScale === "linear" || v > 0) ? onAxis(v, options.yScale) : undefined;
+  const [lo, hi] = [at(options.yMin), at(options.yMax)];
+  if (lo != null && hi != null) {
+    [yLo, yHi] = [lo, hi];
   } else {
     const pad = (yHi - yLo) * 0.05 || 1;
     yLo -= pad;
