@@ -468,6 +468,20 @@ export async function onPrismFilePicked(handler: (path: string | null) => void) 
   return getCurrentWebviewWindow().listen<string | null>("prism-file-picked", ({ payload }) => handler(payload));
 }
 
+/** Analysis ▸ Apply Method…: the Open panel for a method file (`.pzm`).
+ *  Non-blocking, like `choosePrismFile`: the invoke returns at once, and the
+ *  shell emits "method-file-picked" with the path, or null on Cancel, once
+ *  the user picks. */
+export const chooseMethodFile = () => invoke("choose_method_file");
+
+/** Calls `handler` once with the path picked in the Apply Method panel, or
+ *  null if the user cancelled. Await it before opening the panel so the pick
+ *  is never missed; it returns the unlisten function. */
+export async function onMethodFilePicked(handler: (path: string | null) => void) {
+  if (!isNative) return () => {};
+  return getCurrentWebviewWindow().listen<string | null>("method-file-picked", ({ payload }) => handler(payload));
+}
+
 /** A Prism `.pzfx` file's text, for import. */
 export const readPrismText = (path: string) => invoke<string>("read_prism_text", { path });
 

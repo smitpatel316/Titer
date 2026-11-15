@@ -173,6 +173,25 @@ export function useAppMenu(doc: DocumentActions) {
           { text: "Save", accelerator: "CmdOrCtrl+S", enabled: isDirty, action: () => latest.current.doc.save() },
           { text: "Save As…", accelerator: "CmdOrCtrl+Shift+S", action: () => latest.current.doc.save(true) },
           sep,
+          // Save Special (plan 38): a template / example / method file is this
+          // project with a `template` envelope block, under a `.pzt`/`.pzm`
+          // name. An example is saved from a graph, a method from a data
+          // table (Prism's rules); a template from anywhere.
+          {
+            text: "Save As Template…",
+            action: () => latest.current.store.openSelector({ kind: "save-template", templateKind: "template" }),
+          },
+          {
+            text: "Save As Example…",
+            enabled: activeNode?.type === "graph",
+            action: () => latest.current.store.openSelector({ kind: "save-template", templateKind: "example" }),
+          },
+          {
+            text: "Save As Method…",
+            enabled: activeNode?.type === "table",
+            action: () => latest.current.store.openSelector({ kind: "save-template", templateKind: "method" }),
+          },
+          sep,
           { item: "CloseWindow" },
         ],
       },
@@ -251,6 +270,13 @@ export function useAppMenu(doc: DocumentActions) {
             text: "Use Wand…",
             enabled: hasTable && wandAvailable,
             action: run((l, id) => l.store.openSelector({ kind: "wand", tableId: id })),
+          },
+          {
+            // Applies a `.pzm` method file's analyses and graphs to the
+            // active table (plan 38).
+            text: "Apply Method…",
+            enabled: activeNode?.type === "table",
+            action: () => void latest.current.doc.applyMethod(),
           },
           sep,
           ...(tableType

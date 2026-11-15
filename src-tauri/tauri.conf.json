@@ -61,7 +61,10 @@
       "../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",
       "Credits.rtf": "Credits.rtf"
     },
-    "fileAssociations": [{ "ext": ["hlx"], "name": "Titer Project", "role": "Editor" }],
+    "fileAssociations": [
+      { "ext": ["hlx"], "name": "Titer Project", "role": "Editor" },
+      { "ext": ["pzt"], "name": "Titer Template", "role": "Editor" }
+    ],
     "macOS": {
       "minimumSystemVersion": "13.3",
       "signingIdentity": "-",

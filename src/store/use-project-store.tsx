@@ -13,6 +13,7 @@ import {
 import type { AnalysisParams, AnalysisPickerValue, AnalysisType } from "../stats/types";
 import { TABLES } from "../views/tables";
 import { GRAPHS, newGraphOptions } from "../views/graphs";
+import type { TemplateKind } from "../lib/template";
 import { ANALYSES } from "../stats";
 import { followTable, type TableMove } from "./references";
 import { applyWand as planWand, type WandReport } from "../lib/wand";
@@ -31,6 +32,7 @@ type Selector =
   | { kind: "simulate-data"; tableId: string }
   | { kind: "converter" }
   | { kind: "save-prompt" }
+  | { kind: "save-template"; templateKind: TemplateKind }
   | { kind: "conflict" }
   | { kind: "remote-picker" }
   | { kind: "cloud-settings" }
@@ -429,8 +431,12 @@ interface ProjectActions {
    *  filled, not from a type's defaults — the reducer's "create" names it
    *  among the tables ("Simulated data", "Simulated data 2"…). */
   createSimulatedTable: (tableType: TableType, data: TableData) => void;
-  createAnalysis: (parentId: string, analysisType: AnalysisType, analysisParams?: AnalysisParams) => void;
-  createGraph: (parentId: string, graphType: GraphType) => void;
+  createAnalysis: (parentId: string, analysisType: AnalysisType, analysisParams?: AnalysisParams) => string;
+  /** `graphOptions` (plan 38, Apply Method): the cloned options of a method
+   *  file's graph, with its analysis links remapped; omitted, the graph gets
+   *  its defaults as today. Returns the new node's id, so the caller can
+   *  remap what links to it. */
+  createGraph: (parentId: string, graphType: GraphType, graphOptions?: GraphOptions) => string;
   /** Wand (plan 37): copies the example table's analyses + graphs onto the
    *  target tables as one undo step; returns the per-table report (created /
    *  skipped) for the dialog's summary. Throws when the example has nothing to copy. */
@@ -549,10 +555,11 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       // Named for the test it runs, as in Prism.
       createAnalysis: (parentId, analysisType, analysisParams) => {
         const { label, name } = ANALYSES[analysisType];
+        const id = genId("analysis");
         dispatch({
           type: "create",
           node: {
-            id: genId("analysis"),
+            id,
             type: "analysis",
             name: name?.(analysisParams) ?? label,
             parentId,
@@ -560,19 +567,23 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
             analysisParams,
           },
         });
+        return id;
       },
-      createGraph: (parentId, graphType) =>
+      createGraph: (parentId, graphType, graphOptions) => {
+        const id = genId("graph");
         dispatch({
           type: "create",
           node: {
-            id: genId("graph"),
+            id,
             type: "graph",
             name: GRAPHS[graphType].label,
             parentId,
             graphType,
-            graphOptions: newGraphOptions(graphType),
+            graphOptions: graphOptions ?? newGraphOptions(graphType),
           },
-        }),
+        });
+        return id;
+      },
       applyWand: (exampleId, targetIds, prefix) => {
         const s = latest.current;
         const result = planWand({ nodes: s.nodes, childOrder: s.childOrder }, exampleId, targetIds, prefix);

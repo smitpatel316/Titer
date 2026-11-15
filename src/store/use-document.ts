@@ -1,6 +1,18 @@
 import * as React from "react";
 import { useProjectStore, type ProjectNode } from "./use-project-store";
 import { parseProjectText, serializeProjectFile, PROJECT_FILE_EXTENSION } from "../lib/project-file";
+import {
+  extractMethod,
+  formatMethodReport,
+  isMethodPath,
+  isTemplatePath,
+  METHOD_FILE_EXTENSION,
+  methodForTable,
+  remapGraphOptions,
+  TEMPLATE_FILE_EXTENSION,
+  type TemplateInfo,
+  type TemplateKind,
+} from "../lib/template";
 import { parsePzfx } from "../lib/pzfx";
 import { convertPrism, formatReport } from "../lib/prism";
 import { writePrism } from "../lib/prism-write";
@@ -49,6 +61,12 @@ export function useDocument() {
   // and quitting (Quirk 2). Set when a load brings a file up to date.
   const [projectUpdated, setProjectUpdated] = React.useState(false);
   const dismissProjectUpdated = () => setProjectUpdated(false);
+  // The template instructions notice (plan 38): a `.pzt` that carries
+  // instructions (or a description with no instructions) shows them in-app
+  // when it opens — Prism's popup on open. In-app, not native.alert: the
+  // native dialog's window lingered on macOS after dismissal (Quirk 2).
+  const [templateNotice, setTemplateNotice] = React.useState<TemplateInfo | null>(null);
+  const dismissTemplateNotice = () => setTemplateNotice(null);
   // The window's title while the project isn't saved anywhere.
   const [untitled, setUntitled] = React.useState(UNTITLED);
   // Other windows change the list too: this one reads it again when it comes to the front.
@@ -543,6 +561,46 @@ export function useDocument() {
     }
   };
 
+  /** File ▸ Save As Template / Example / Method (plan 38): writes the current
+   *  project JSON + a `template` envelope block to a `.pzt`/`.pzm` path from
+   *  the native save panel (a download in the web build). The current project
+   *  keeps its own path and dirty state — saving a template never moves the
+   *  project, exactly as Prism's Save Special doesn't. */
+  const saveTemplate = async (kind: TemplateKind, info: TemplateInfo): Promise<void> => {
+    const s = latest.current.get();
+    const ext = kind === "method" ? METHOD_FILE_EXTENSION : TEMPLATE_FILE_EXTENSION;
+    const label = kind === "method" ? "Method" : kind === "example" ? "Example" : "Template";
+    const text = serializeProjectFile({ ...s, template: info });
+    if (native.isNative) {
+      const target = await native.pickSavePath(
+        `Save As ${label}`,
+        `${title}.${ext}`,
+        `Titer ${label}`,
+        ext,
+      );
+      if (!target) return;
+      try {
+        await native.writeFile(target, text);
+      } catch (err) {
+        await native.alert(
+          "Couldn't Save Template",
+          `“${fileName(target)}” couldn't be saved there (${err}). Try another folder.`,
+          "error",
+        );
+      }
+      return;
+    }
+    // Web build (no native shell): download a `.pzt`/`.pzm` file.
+    const blob = new Blob([text], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${title}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+
   /** True when it's fine to discard the project (saved, or the user said so).
    *  One prompt per window: a second close request while one is already
    *  asking (⌘Q twice, ⌘W during a quit) awaits the same answer instead of
@@ -592,6 +650,10 @@ export function useDocument() {
       latest.current.loadProject({ ...parsed.project, filePath: target.filePath, edited });
       if (target.untitled) setUntitled(fileTitle(target.displayName));
       afterLoad();
+      // A template that carries instructions (or a description) says so on
+      // open (plan 38); any other file clears a stale notice.
+      const info = parsed.project.template;
+      setTemplateNotice(info && (info.instructions || info.description) ? info : null);
       // The project is loaded; still tell the user what in it couldn't be read as is.
       const { issues } = parsed;
       const save = edited ? "Save the project to keep it as it is now." : "";
@@ -769,16 +831,152 @@ export function useDocument() {
     }
   };
 
+  /** Applies a method file's text to the active table (plan 38): clones its
+   *  first table's analyses + graphs — only what that table offers — then
+   *  reports what was applied and what was skipped. A graph keeps its link
+   *  to a cloned analysis (remapped to the new id); a link to an analysis
+   *  that wasn't cloned is dropped and named, and the graph is still applied. */
+  const applyMethodText = async (text: string, name: string): Promise<void> => {
+    const tableId = latest.current.activeTableId;
+    const table = tableId ? latest.current.nodes[tableId] : undefined;
+    if (!table || table.type !== "table") {
+      await native.alert(
+        "Apply Method",
+        "Open a data table first, then apply a method to it.",
+        "error",
+      );
+      return;
+    }
+    let parsed;
+    try {
+      parsed = parseProjectText(text);
+    } catch {
+      await native.alert("Couldn't Apply Method", `“${name}” couldn't be read as a method file.`, "error");
+      return;
+    }
+    if ("error" in parsed) {
+      await native.alert("Couldn't Apply Method", parsed.error, "error");
+      return;
+    }
+    const method = extractMethod(parsed.project);
+    if (!method || (method.analyses.length === 0 && method.graphs.length === 0)) {
+      await native.alert(
+        "Couldn't Apply Method",
+        `“${name}” has no analyses or graphs to apply.`,
+        "error",
+      );
+      return;
+    }
+    const kept = methodForTable(method, table.tableType, table.data);
+    if (kept.analyses.length === 0 && kept.graphs.length === 0) {
+      await native.alert(
+        "Nothing to Apply",
+        formatMethodReport({
+          methodName: name,
+          tableName: table.name,
+          appliedAnalyses: [],
+          appliedGraphs: [],
+          skipped: kept.skipped,
+        }),
+        "info",
+      );
+      return;
+    }
+    // Analyses first (their new ids), then graphs with links remapped.
+    const idMap: Record<string, string> = {};
+    const appliedAnalyses: { name: string }[] = [];
+    for (const a of kept.analyses) {
+      idMap[a.id] = latest.current.createAnalysis(tableId, a.analysisType, a.analysisParams);
+      appliedAnalyses.push({ name: a.name });
+    }
+    const appliedGraphs: { name: string }[] = [];
+    const droppedLinks: string[] = [];
+    for (const g of kept.graphs) {
+      const { options, dropped } = remapGraphOptions(g.graphOptions, idMap);
+      latest.current.createGraph(tableId, g.graphType, options);
+      appliedGraphs.push({ name: g.name });
+      for (const key of dropped) droppedLinks.push(`• ${g.name} — dropped its link to an analysis that wasn't applied (${key}).`);
+    }
+    let report = formatMethodReport({
+      methodName: name,
+      tableName: table.name,
+      appliedAnalyses,
+      appliedGraphs,
+      skipped: kept.skipped,
+    });
+    if (droppedLinks.length) report += `\n\nDropped links:\n${droppedLinks.join("\n")}`;
+    await native.alert("Method Applied", report, "info");
+  };
+
+  /** Applies a `.pzm` file at `path` to the active table (a dropped method file). */
+  const applyMethodFile = async (path: string): Promise<void> => {
+    let text: string;
+    try {
+      text = await native.readText(path);
+    } catch {
+      return native.alert("Couldn't Apply Method", `“${fileName(path)}” couldn't be read.`, "error");
+    }
+    await applyMethodText(text, fileTitle(path));
+  };
+
+  /** Analysis ▸ Apply Method… (plan 38): pick a `.pzm` file (native open
+   *  panel, non-blocking event pattern like `choosePrismFile` — a blocking
+   *  picker deadlocked the app Nov 9) and apply it to the active table. In
+   *  the web build (no native shell) the pick is a file input instead. */
+  const applyMethod = async (): Promise<void> => {
+    if (native.isNative) {
+      // Listen first, then open the panel: the shell emits
+      // "method-file-picked" (path, or null on Cancel) when the user picks.
+      const off = await native.onMethodFilePicked((path) => {
+        off();
+        if (path) void applyMethodFile(path);
+      });
+      await native.chooseMethodFile();
+      return;
+    }
+    const picked = await new Promise<{ name: string; data: string } | null>((resolve) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".pzm";
+      input.onchange = () => {
+        const file = input.files?.[0];
+        if (!file) return resolve(null);
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, data: reader.result as string });
+        reader.onerror = () => resolve(null);
+        reader.readAsText(file);
+      };
+      input.click();
+    });
+    if (!picked) return;
+    await applyMethodText(picked.data, picked.name.replace(/\.pzm$/i, ""));
+  };
+
   const openPaths = (paths: string[]) => {
-    const projects = paths.filter(isProjectFile);
+    // A `.pzt` opens as a project (the shell forgets its name — see
+    // `opening_for` in main.rs); a `.pzm` applies to the active table.
+    const projects = paths.filter((p) => isProjectFile(p) || isTemplatePath(p));
+    const methods = paths.filter(isMethodPath);
     const prism = paths.filter((p) => p.toLowerCase().endsWith(".pzfx") || p.toLowerCase().endsWith(".prism"));
-    if (paths.length > projects.length + prism.length) {
+    if (paths.length > projects.length + methods.length + prism.length) {
       void native.alert(
         "Can't Open File",
-        "Titer can only open .hlx project files and import .pzfx / .prism Prism files. To convert a Prism file without opening it, use File ▸ Convert….",
+        "Titer can only open .hlx project files and .pzt templates, apply .pzm method files, and import .pzfx / .prism Prism files. To convert a Prism file without opening it, use File ▸ Convert….",
       );
     }
     if (projects.length) openProjectsOrSay(projects);
+    // One method file at a time: it applies to the active table, never
+    // silently swallowing the rest.
+    if (methods.length) {
+      void applyMethodFile(methods[0]);
+      if (methods.length > 1) {
+        const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
+        void native.alert(
+          "Applied One Method File",
+          `Applied ${base(methods[0])}; ${methods.slice(1).map(base).join(", ")} ${methods.length === 2 ? "was" : "were"} not applied — drop one file at a time, or use Analysis ▸ Apply Method….`,
+        );
+      }
+    }
     // One Prism file at a time: each imports as its own untitled project.
     // (FF-F15) If several were dropped, import the first and name the rest —
     // never silently swallow files.
@@ -802,12 +1000,17 @@ export function useDocument() {
 
   return {
     save,
+    saveTemplate,
+    applyMethod,
+    title,
     recents,
     forgetRecent,
     clearRecents,
     importPrism,
     projectUpdated,
     dismissProjectUpdated,
+    templateNotice,
+    dismissTemplateNotice,
     resolveSavePrompt,
     remote,
     openRemotePicker,

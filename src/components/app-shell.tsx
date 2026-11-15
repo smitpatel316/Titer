@@ -12,6 +12,7 @@ import { ConverterDialog } from "./converter-dialog";
 import { AiConnectionsDialog } from "./ai-connections-dialog";
 import { useMcpSnapshotPublisher } from "../store/mcp-publish";
 import { SavePromptDialog } from "./save-prompt-dialog";
+import { TemplateDialog } from "./template-dialog";
 import { ConflictDialog } from "./conflict-dialog";
 import { RemotePickerDialog } from "./remote-picker";
 import { CloudSettingsDialog } from "./cloud-settings";
@@ -39,6 +40,7 @@ export function AppShell() {
   // v3 Phase 1: this window's project goes to the MCP server on every edit.
   useMcpSnapshotPublisher();
   const { projectUpdated, dismissProjectUpdated } = documentActions;
+  const { templateNotice, dismissTemplateNotice } = documentActions;
   const { sidebar } = useLayout();
   const [fullscreen, setFullscreen] = React.useState(false);
   React.useEffect(() => onFullscreenChange(setFullscreen), []);
@@ -108,6 +110,31 @@ export function AppShell() {
       <AiConnectionsDialog />
 
       <SavePromptDialog onChoose={(choice, remember) => documentActions.resolveSavePrompt(choice, remember)} />
+
+      <TemplateDialog
+        defaultName={documentActions.title}
+        onSave={(kind, info) => void documentActions.saveTemplate(kind, info)}
+      />
+
+      {/* A template's instructions on open (plan 38): Prism's popup, in-app
+          — the native dialog's window lingered on macOS after dismissal
+          (Quirk 2). The template opens untitled, so saving it asks for a name
+          and the template file itself is never overwritten. */}
+      <Dialog
+        open={templateNotice !== null}
+        onClose={dismissTemplateNotice}
+        onReturn={dismissTemplateNotice}
+        dismissLabel="OK"
+        title={templateNotice?.name ?? "Template"}
+        description={
+          <>
+            {templateNotice?.instructions ?? templateNotice?.description}
+            <br />
+            <br />
+            This template opens as a new, unsaved project — saving it asks where to put it, and the template file itself is never changed.
+          </>
+        }
+      />
 
       <ConflictDialog
         conflict={documentActions.conflict}

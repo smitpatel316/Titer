@@ -105,11 +105,13 @@ export interface ProjectFilePayload {
 
 // ── Writing ──────────────────────────────────────────────────────────────
 
-export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeId, fileUnknowns, projectUnknowns }: ProjectFilePayload): string {
+export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeId, template, fileUnknowns, projectUnknowns }: ProjectFilePayload): string {
   // Unknown keys go back where they came from, under the known keys — a
   // hand-edited file can't smuggle a second `nodes` or `app` past the reader.
   const project: ProjectFilePayload = { ...projectUnknowns, nodes, rootOrder, childOrder, activeNodeId };
-  return format({ ...fileUnknowns, app: "titer", schemaVersion: 1, savedAt: new Date().toISOString(), project }, "") + "\n";
+  // The `template` block lives at the file level, beside `project` (plan 38):
+  // a plain `.hlx` never carries one — only the template saver passes it.
+  return format({ ...fileUnknowns, app: "titer", schemaVersion: 1, savedAt: new Date().toISOString(), template, project }, "") + "\n";
 }
 
 /** Indented JSON, with each list of plain values (a table row, the column names)
@@ -156,7 +158,7 @@ const unknownsOf = (obj: Obj, known: readonly string[]): Obj => {
 
 // Every field Titer knows, per level. The `satisfies` checks make TypeScript
 // flag any field added to a type but not listed here.
-const FILE_KEYS = ["app", "schemaVersion", "savedAt", "project"];
+const FILE_KEYS = ["app", "schemaVersion", "savedAt", "template", "project"];
 const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId"] satisfies (keyof ProjectFilePayload)[];
 // prettier-ignore
 const NODE_KEYS = Object.keys({
@@ -1263,6 +1265,10 @@ export function parseProjectFile(
     }
   }
 
+  // The `template` block (plan 38) is metadata, not project data: a missing
+  // or broken block is dropped, never an error, and carrying it is not a
+  // repair — a template file still opens unedited.
+  const template = parseTemplateInfo(file.template);
   // Unknown keys from the envelopes (FF-F12): the file's own, and the project's —
   // kept on the project so saving writes them back where they came from.
   const fileUnknowns = unknownsOf(file, FILE_KEYS);
@@ -1272,6 +1278,7 @@ export function parseProjectFile(
     rootOrder,
     childOrder,
     activeNodeId,
+    ...(template ? { template } : {}),
     ...(Object.keys(fileUnknowns).length ? { fileUnknowns } : {}),
     ...(Object.keys(projectUnknowns).length ? { projectUnknowns } : {}),
   };

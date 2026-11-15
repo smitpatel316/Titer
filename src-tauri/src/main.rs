@@ -148,6 +148,19 @@ fn build_window(app: &AppHandle, label: String) -> tauri::Result<()> {
     Ok(())
 }
 
+/// A template (`.pzt`) opens as a new document (plan 38): the shell forgets
+/// its file name, so the first Save prompts for one — Prism's rule, via the
+/// existing untitled path, not a new one. A `.pzm` never opens as a project
+/// (it applies to a table instead), so it is not untitled here.
+fn opening_for(path: &str) -> Opening {
+    let untitled = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|ext| ext == "pzt");
+    Opening { path: path.into(), untitled }
+}
+
 /// Opens `opening` in the window `into` if that one is blank, else as described on `Projects`.
 fn open(app: &AppHandle, into: Option<String>, opening: Opening) -> tauri::Result<()> {
     let state = app.state::<Projects>();
@@ -200,7 +213,7 @@ async fn open_projects(app: AppHandle, window: WebviewWindow, paths: Vec<String>
         return Err(gone.clone());
     }
     for path in paths {
-        open(&app, Some(window.label().into()), Opening { path, untitled: false }).map_err(|e| e.to_string())?;
+        open(&app, Some(window.label().into()), opening_for(&path)).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -219,12 +232,13 @@ async fn new_project(app: AppHandle) -> Result<(), String> {
 }
 
 /// File ▸ Open…: the Open panel, then the project opens as `open` decides.
+/// A `.pzt` opens untitled (see `opening_for`).
 #[tauri::command]
 fn choose_project(app: AppHandle, window: WebviewWindow) {
     let into = window.label().to_string();
-    app.dialog().file().set_title("Open Project").add_filter("Titer Project", &["hlx"]).pick_file(move |file| {
+    app.dialog().file().set_title("Open Project").add_filter("Titer Project", &["hlx", "pzt"]).pick_file(move |file| {
         if let Some(path) = file.and_then(|file| file.into_path().ok()) {
-            let _ = open(&app, Some(into), Opening { path: path.to_string_lossy().into_owned(), untitled: false });
+            let _ = open(&app, Some(into), opening_for(&path.to_string_lossy()));
         }
     });
 }
@@ -289,6 +303,21 @@ fn close_next_project_window(app: &AppHandle) -> bool {
     true
 }
 
+/// Analysis ▸ Apply Method…: the Open panel for a method file (`.pzm`).
+/// Non-blocking, like choose_prism_file (a blocking picker deadlocked the
+/// app Nov 9): the event carries the path, or null on Cancel, so the page
+/// can unsubscribe either way.
+#[tauri::command]
+fn choose_method_file(app: AppHandle, window: WebviewWindow) {
+    let label = window.label().to_string();
+    app.dialog().file().set_title("Apply Method").add_filter("Titer Method File", &["pzm"]).pick_file(
+        move |file| {
+            let picked = file.and_then(|file| file.into_path().ok()).map(|path| path.to_string_lossy().into_owned());
+            let _ = app.emit_to(label.as_str(), "method-file-picked", picked);
+        },
+    );
+}
+
 /// A window refused to close (its user chose Cancel): Titer doesn't quit after all.
 #[tauri::command]
 fn cancel_quit(projects: State<Projects>) {
@@ -341,7 +370,7 @@ fn save_session(app: &AppHandle) {
 fn restore_session(app: &AppHandle) {
     let text = session_file(app).and_then(|file| fs::read_to_string(file).ok()).unwrap_or_default();
     for path in text.lines().filter(|path| Path::new(path).is_file()) {
-        let _ = open(app, None, Opening { path: path.into(), untitled: false });
+        let _ = open(app, None, opening_for(path));
     }
     let opened = !app.state::<Projects>().0.lock().unwrap().documents.is_empty();
     if !opened && front_window(app).is_none() {
@@ -363,11 +392,12 @@ fn check_extension(path: &str, allowed: &[&str]) -> Result<(), String> {
 
 #[tauri::command]
 fn read_text(path: String) -> Result<String, String> {
-    check_extension(&path, &["hlx"])?;
+    check_extension(&path, &["hlx", "pzt", "pzm"])?;
     fs::read_to_string(path).map_err(|e| e.to_string())
 }
 
-/// A Prism `.pzfx` file's text, for import. Only `.pzfx`, as read_text is only `.hlx`.
+/// A Prism `.pzfx` file's text, for import. Only `.pzfx` — project files
+/// (`.hlx`, `.pzt`, `.pzm`) go through `read_text`.
 #[tauri::command]
 fn read_prism_text(path: String) -> Result<String, String> {
     check_extension(&path, &["pzfx"])?;
@@ -388,7 +418,7 @@ fn read_prism_bytes(path: String) -> Result<String, String> {
 fn write_file(request: Request) -> Result<(), String> {
     let header = request.headers().get("path").and_then(|v| v.to_str().ok()).ok_or("missing path")?;
     let path = percent_encoding::percent_decode_str(header).decode_utf8().map_err(|e| e.to_string())?;
-    check_extension(&path, &["hlx", "prism", "png", "jpg", "jpeg", "svg"])?;
+    check_extension(&path, &["hlx", "prism", "pzt", "pzm", "png", "jpg", "jpeg", "svg"])?;
     let InvokeBody::Raw(data) = request.body() else { return Err("expected raw bytes".into()) };
     write_atomically(Path::new(path.as_ref()), data)
 }
@@ -1128,6 +1158,7 @@ fn main() {
             new_project,
             choose_project,
             choose_prism_file,
+            choose_method_file,
             cancel_quit,
             quit_app,
             updater::download_update,
@@ -1186,7 +1217,7 @@ fn main() {
                     for path in paths {
                         let into = front_window(&app).map(|w| w.label().to_string());
                         let path = path.to_string_lossy().into_owned();
-                        let _ = open(&app, into, Opening { path, untitled: false });
+                        let _ = open(&app, into, opening_for(&path));
                     }
                 });
             }

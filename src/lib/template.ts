@@ -73,8 +73,10 @@ export function parseTemplateInfo(v: unknown): TemplateInfo | undefined {
 
 // ── Method application ───────────────────────────────────────────────────
 
-/** One analysis a method file carries, to clone onto a table. */
+/** One analysis a method file carries, to clone onto a table. `id` is the
+ *  source node's id, so a cloned graph can remap its links to the new ids. */
 export interface MethodAnalysis {
+  id: string;
   analysisType: AnalysisType;
   analysisParams?: AnalysisParams;
   name: string;
@@ -82,6 +84,7 @@ export interface MethodAnalysis {
 
 /** One graph a method file carries, to clone onto a table. */
 export interface MethodGraph {
+  id: string;
   graphType: GraphType;
   graphOptions?: GraphOptions;
   name: string;
@@ -112,9 +115,9 @@ export function extractMethod(project: ProjectFilePayload): ExtractedMethod | nu
   const graphs: MethodGraph[] = [];
   for (const child of children) {
     if (child.type === "analysis" && child.analysisType) {
-      analyses.push({ analysisType: child.analysisType, analysisParams: child.analysisParams, name: child.name });
+      analyses.push({ id: child.id, analysisType: child.analysisType, analysisParams: child.analysisParams, name: child.name });
     } else if (child.type === "graph" && child.graphType) {
-      graphs.push({ graphType: child.graphType, graphOptions: child.graphOptions, name: child.name });
+      graphs.push({ id: child.id, graphType: child.graphType, graphOptions: child.graphOptions, name: child.name });
     }
   }
   return {
