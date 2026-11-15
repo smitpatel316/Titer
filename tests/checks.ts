@@ -191,6 +191,14 @@ import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
 import { evaluate as evaluateCurve } from "../src/views/graphs/fitted-curve";
 import { parseInhibitorConcentration } from "../src/stats/xy/enzyme-inhibition";
+import {
+  cumulativeIntegral,
+  equallySpaced,
+  firstDerivative,
+  savitzkyGolayCoefficients,
+  secondDerivative,
+  smoothValues,
+} from "../src/stats/xy/smooth-differentiate-integrate";
 import { monteCarloRCode, percentile } from "../src/stats/simulation/monte-carlo";
 import { addMonteCarloHistogram } from "../src/views/graphs/monte-carlo-histogram";
 
@@ -3758,6 +3766,243 @@ check("a smoothing spline fits tied X values, one fitted value per observation (
   deepStrictEqual(await runAnalysis("spline-lowess", few, { method: "spline" } as never), {
     error: "A smoothing spline needs at least 4 distinct X values.",
   });
+});
+
+// Smooth, differentiate or integrate a curve (v2): Savitzky–Golay smoothing,
+// a first or second numerical derivative, or a cumulative integral — each a
+// NEW curve table per Y data set (Prism's Analyse → Smooth, Differentiate or
+// Integrate a Curve). The pure maths is pinned directly; the runner pins go
+// through runAnalysis like every other analysis.
+check("Savitzky–Golay coefficients match the published window-5 values and reproduce a quadratic", () => {
+  const w5 = savitzkyGolayCoefficients(5, 3);
+  const expected = [-3, 12, 17, 12, -3].map((c) => c / 35);
+  strictEqual(w5.length, 5);
+  w5.forEach((c, i) => ok(Math.abs(c - expected[i]) < 1e-12, `w5[${i}] ${c}`));
+  // Orders 2 and 3 coincide for a symmetric window (the odd terms vanish).
+  deepStrictEqual(savitzkyGolayCoefficients(5, 2), w5);
+  // Smoothing y = x² reproduces x² exactly at interior points (order ≥ 2
+  // is invariant on a quadratic) — and the edge rows are dropped, counted.
+  const xs = [0, 1, 2, 3, 4, 5, 6];
+  const out = smoothValues(xs, xs.map((x) => x * x), 5, 3);
+  deepStrictEqual(out.x, [2, 3, 4]);
+  out.y.forEach((y, i) => ok(Math.abs(y - out.x[i] ** 2) < 1e-9, `smoothed[${i}] ${y}`));
+  strictEqual(out.dropped, 4);
+  // Window-5 smoothing of [1,2,1,2,1,2,1]: the first window's centre is 59/35.
+  const alt = smoothValues([0, 1, 2, 3, 4, 5, 6], [1, 2, 1, 2, 1, 2, 1], 5, 3);
+  ok(Math.abs(alt.y[0] - 59 / 35) < 1e-12, `centre ${alt.y[0]}`);
+  strictEqual(equallySpaced([0, 1, 2, 3]), true);
+  strictEqual(equallySpaced([0, 1, 3]), false);
+});
+
+check("first and second derivatives follow Prism's forward-difference algorithm, and the integral the trapezoid rule", () => {
+  const d1 = firstDerivative([0, 1, 2, 3], [0, 1, 4, 9]);
+  deepStrictEqual(d1.x, [0.5, 1.5, 2.5]);
+  deepStrictEqual(d1.y, [1, 3, 5]);
+  const d2 = secondDerivative([0, 1, 2, 3], [0, 1, 4, 9]);
+  deepStrictEqual(d2.x, [1, 2]);
+  deepStrictEqual(d2.y, [2, 2]);
+  deepStrictEqual(cumulativeIntegral([0, 1, 2], [0, 2, 4], 0, 0).y, [0, 1, 4]);
+  deepStrictEqual(cumulativeIntegral([0, 1, 2], [0, 2, 4], 2, 0).y, [0, -1, 0]);
+});
+
+check("smooth, differentiate or integrate a curve returns a new curve table per data set", async () => {
+  const table: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["", "0", "0"],
+      ["", "1", "1"],
+      ["", "2", "4"],
+      ["", "3", "9"],
+      ["", "4", "16"],
+      ["", "5", "25"],
+      ["", "6", "36"],
+    ],
+  };
+  const smooth = await runAnalysis("smooth-differentiate-integrate", table, {
+    operation: "smooth",
+    window: 5,
+    order: 3,
+  });
+  if ("error" in smooth) throw new Error(smooth.error);
+  strictEqual(smooth.derivedCurves?.length, 1);
+  deepStrictEqual(smooth.derivedCurves![0].x, [2, 3, 4]);
+  smooth.derivedCurves![0].y.forEach((y, i) =>
+    ok(Math.abs(y - smooth.derivedCurves![0].x[i] ** 2) < 1e-9, `smoothed[${i}] ${y}`),
+  );
+  strictEqual(smooth.derivedCurves![0].dropped, 4);
+  strictEqual(smooth.stats.find((s) => s.label === "Smoothed(Y1) — N")?.value, 3);
+  strictEqual(smooth.stats.find((s) => s.label === "Smoothed(Y1) — rows dropped")?.value, 4);
+
+  const deriv = await runAnalysis("smooth-differentiate-integrate", table, { operation: "first-derivative" });
+  if ("error" in deriv) throw new Error(deriv.error);
+  deepStrictEqual(deriv.derivedCurves![0].x, [0.5, 1.5, 2.5, 3.5, 4.5, 5.5]);
+  deepStrictEqual(deriv.derivedCurves![0].y, [1, 3, 5, 7, 9, 11]);
+  strictEqual(deriv.derivedCurves![0].dropped, 1);
+
+  const deriv2 = await runAnalysis("smooth-differentiate-integrate", table, { operation: "second-derivative" });
+  if ("error" in deriv2) throw new Error(deriv2.error);
+  deepStrictEqual(deriv2.derivedCurves![0].x, [1, 2, 3, 4, 5]);
+  deepStrictEqual(deriv2.derivedCurves![0].y, [2, 2, 2, 2, 2]);
+  strictEqual(deriv2.derivedCurves![0].dropped, 2);
+
+  const integral = await runAnalysis("smooth-differentiate-integrate", table, {
+    operation: "integral",
+    baseline: 0,
+    startValue: 0,
+  });
+  if ("error" in integral) throw new Error(integral.error);
+  deepStrictEqual(integral.derivedCurves![0].x, [0, 1, 2, 3, 4, 5, 6]);
+  deepStrictEqual(integral.derivedCurves![0].y, [0, 0.5, 3, 9.5, 22, 42.5, 73]);
+  strictEqual(integral.derivedCurves![0].dropped, 0);
+  // The source table is unchanged — the derived curve lives in the result only.
+  strictEqual(table.rows.length, 7);
+});
+
+check("smooth, differentiate or integrate a curve names its failures", async () => {
+  // Uneven X + smoothing: Savitzky–Golay needs a uniform grid.
+  const uneven: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["", "0", "0"],
+      ["", "1", "1"],
+      ["", "3", "9"],
+      ["", "4", "16"],
+      ["", "5", "25"],
+      ["", "6", "36"],
+      ["", "7", "49"],
+    ],
+  };
+  deepStrictEqual(
+    await runAnalysis("smooth-differentiate-integrate", uneven, { operation: "smooth", window: 5, order: 3 }),
+    { error: "“Y1” does not have equally spaced X values — Savitzky–Golay smoothing needs a uniform X grid." },
+  );
+  // Too few points for the window, and for a derivative.
+  const few: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["", "0", "0"],
+      ["", "1", "1"],
+      ["", "2", "4"],
+    ],
+  };
+  deepStrictEqual(
+    await runAnalysis("smooth-differentiate-integrate", few, { operation: "smooth", window: 5, order: 3 }),
+    { error: "“Y1” has only 3 points — smoothing with a window of 5 neighbours needs at least 5." },
+  );
+  const one: TableData = { columns: ["Title", "X", "Y1"], rows: [["", "0", "0"]] };
+  deepStrictEqual(
+    await runAnalysis("smooth-differentiate-integrate", one, { operation: "first-derivative" }),
+    { error: "“Y1” has only 1 point — first derivative needs at least 2." },
+  );
+  // A named data set holding no numbers is named, not silently skipped.
+  const empty: TableData = {
+    columns: ["Title", "X", "Y1", "Y3"],
+    rows: [
+      ["", "0", "0", ""],
+      ["", "1", "1", ""],
+      ["", "2", "4", ""],
+    ],
+  };
+  deepStrictEqual(
+    await runAnalysis("smooth-differentiate-integrate", empty, { operation: "smooth", ys: ["Y3"], window: 5, order: 3 }),
+    { error: "“Y3” holds no numbers yet." },
+  );
+  // Smoothing a derivative that came out shorter than the window is named,
+  // not silently returned empty.
+  const four: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["", "0", "0"],
+      ["", "1", "1"],
+      ["", "2", "4"],
+      ["", "3", "9"],
+    ],
+  };
+  deepStrictEqual(
+    await runAnalysis("smooth-differentiate-integrate", four, {
+      operation: "first-derivative",
+      smoothResults: true,
+      window: 5,
+      order: 3,
+    }),
+    { error: "“Y1” — after first derivative there are only 3 points, fewer than the 5 neighbours smoothing needs." },
+  );
+});
+
+check("smooth, differentiate or integrate wizard asks the operation and its settings, and the menu offers it after Spline and Lowess", () => {
+  const data: TableData = {
+    columns: ["Title", "Time", "Y1", "Y2"],
+    rows: [
+      ["", "0", "10", "30"],
+      ["", "1", "30", "20"],
+    ],
+  };
+  const table = readTable(data);
+  const wizard = WIZARDS["smooth-differentiate-integrate"]!;
+  const ids = (a: Answers) =>
+    wizard.questions(a, table, "xy").filter(Boolean).map((q) => (q as Question).id);
+  deepStrictEqual(ids({}), ["ys", "operation"]);
+  deepStrictEqual(ids({ operation: "smooth" }), ["ys", "operation", "window", "order"]);
+  deepStrictEqual(ids({ operation: "integral" }), ["ys", "operation", "smoothResults", "baseline", "startValue"]);
+  deepStrictEqual(ids({ operation: "first-derivative", smoothResults: "yes" }), [
+    "ys",
+    "operation",
+    "smoothResults",
+    "window",
+    "order",
+  ]);
+  deepStrictEqual(
+    wizard.finish(
+      { ys: ["Y1"], operation: "integral", smoothResults: "no", baseline: 2, startValue: 0 },
+      table,
+      "xy",
+    ),
+    {
+      type: "smooth-differentiate-integrate",
+      params: { ys: ["Y1"], x: "Time", operation: "integral", window: 9, order: 3, smoothResults: false, baseline: 2, startValue: 0 },
+    },
+  );
+  const xyOrder = analysisOptionsForTable("xy").map((o) => o.value);
+  strictEqual(xyOrder[xyOrder.indexOf("smooth-differentiate-integrate") - 1], "spline-lowess");
+});
+
+check("smooth, differentiate or integrate params survive a project save and load", () => {
+  const withAnalysis = (id: string, type: string, params: unknown) => {
+    const file = JSON.parse(serializeProjectFile(payload)) as { project: ProjectFilePayload };
+    file.project.nodes[id] = {
+      id,
+      type: "analysis",
+      name: id,
+      parentId: "t1",
+      analysisType: type,
+      analysisParams: params,
+    } as ProjectNode;
+    file.project.childOrder.t1 = [...file.project.childOrder.t1, id];
+    return read(JSON.stringify(file));
+  };
+  const paramsOf = (result: ReturnType<typeof read>, id: string) =>
+    (result.project.nodes[id] as ProjectNode).analysisParams as Record<string, unknown>;
+  const saved = withAnalysis("sdi", "smooth-differentiate-integrate", {
+    ys: ["Y1"],
+    x: "Time",
+    operation: "integral",
+    window: 9,
+    order: 3,
+    smoothResults: false,
+    baseline: 2,
+    startValue: 0,
+  });
+  deepStrictEqual(paramsOf(saved, "sdi"), {
+    ys: ["Y1"],
+    x: "Time",
+    operation: "integral",
+    window: 9,
+    order: 3,
+    smoothResults: false,
+    baseline: 2,
+    startValue: 0,
+  });
+  strictEqual(saved.issues.length, 0);
 });
 
 // Remove baseline (v2): subtract a baseline — first value, mean of the first

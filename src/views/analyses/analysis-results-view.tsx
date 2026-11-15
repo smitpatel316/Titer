@@ -677,6 +677,18 @@ export function AnalysisResultsView({ result }: { result: AnalysisResult }) {
         />
       )}
 
+      {result.derivedCurves?.map((c) => (
+        <Table
+          key={`${c.label} — ${c.dataset}`}
+          title={`${c.label} — ${c.dataset}`}
+          columns={[
+            { label: "X", numeric: true },
+            { label: c.label, numeric: true },
+          ]}
+          rows={c.x.map((x, i) => [num(x), num(c.y[i])])}
+        />
+      ))}
+
       {result.baselineRemoved?.map((col) => {
         const hasX = col.rows.some((r) => r.x !== undefined);
         return (

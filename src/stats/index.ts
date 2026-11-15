@@ -39,6 +39,7 @@ import type {
   RocParams,
   ShapiroWilkParams,
   SplineLowessParams,
+  SmoothDifferentiateIntegrateParams,
   ThreeWayAnovaParams,
   TransformConcentrationsParams,
   TwoWayAnovaParams,
@@ -69,6 +70,7 @@ import { runBindingKinetics, runBindingSaturation } from "./xy/binding";
 import { runEnzymeInhibition } from "./xy/enzyme-inhibition";
 import { runDoseResponseSpecial } from "./xy/dose-response-special";
 import { runSplineLowess } from "./xy/spline-lowess";
+import { runSmoothDifferentiateIntegrate } from "./xy/smooth-differentiate-integrate";
 import { runTwoWayAnova } from "./grouped/two-way-anova";
 import { runThreeWayAnova } from "./grouped/three-way-anova";
 import { runMultipleTTests } from "./grouped/multiple-t-tests";
@@ -246,6 +248,11 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     label: "Spline and Lowess",
     minColumns: 2,
     run: (c, p) => runSplineLowess(c, p as SplineLowessParams),
+  },
+  "smooth-differentiate-integrate": {
+    label: "Smooth, differentiate or integrate a curve",
+    minColumns: 2,
+    run: (c, p) => runSmoothDifferentiateIntegrate(c, p as SmoothDifferentiateIntegrateParams),
   },
   "two-way-anova": {
     label: "Two-way ANOVA",

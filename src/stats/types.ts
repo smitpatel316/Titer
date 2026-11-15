@@ -30,6 +30,7 @@ export type AnalysisType =
   | "principal-component-analysis"
   | "k-means"
   | "spline-lowess"
+  | "smooth-differentiate-integrate"
   | "binding-saturation"
   | "binding-kinetics"
   | "enzyme-inhibition"
@@ -606,6 +607,38 @@ export interface SplineLowessParams {
   df?: number | null;
 }
 
+/** The operations "smooth-differentiate-integrate" offers (Prism's one
+ *  analysis: smooth a curve and/or convert it to its derivative or
+ *  integral). */
+export const SMOOTH_DIFF_INT_OPERATIONS = ["smooth", "first-derivative", "second-derivative", "integral"] as const;
+export type SmoothDifferentiateIntegrateOperation = (typeof SMOOTH_DIFF_INT_OPERATIONS)[number];
+/** Savitzky–Golay window sizes (Prism's classic neighbour counts) and
+ *  polynomial orders. */
+export const SMOOTH_WINDOWS = [5, 9, 13] as const;
+export const SMOOTH_ORDERS = [2, 3] as const;
+
+/** Params for "smooth-differentiate-integrate" (XY table): which operation
+ *  to run on the chosen Y data sets, and the Savitzky–Golay settings
+ *  (window = neighbours in the window, order = smoothing polynomial order)
+ *  used when smoothing — either as the operation itself, or after a
+ *  derivative/integral when `smoothResults` is set (Prism does the
+ *  derivative/integral first, then smooths). `baseline`/`startValue` are
+ *  integral-only: the Y the cumulative area is measured from, and the
+ *  integral's first Y value (both usually 0). The wizard always sets
+ *  `operation`; the runner defaults the rest. */
+export interface SmoothDifferentiateIntegrateParams {
+  /** Omitted: every Y data set. */
+  ys?: string[];
+  /** XY tables only: the X column, for the result rows' X values. */
+  x?: string;
+  operation: SmoothDifferentiateIntegrateOperation;
+  window?: number;
+  order?: number;
+  smoothResults?: boolean;
+  baseline?: number;
+  startValue?: number;
+}
+
 /** Params for "chi-square": whether the user confirmed the rows/columns are
  *  ordered and equally spaced, so the chi-square test for trend
  *  (Cochran–Armitage) runs on a qualifying 2×k / k×2 table. */
@@ -974,6 +1007,7 @@ export type AnalysisParams = DataSetsParam &
     | PrincipalComponentAnalysisParams
     | KMeansParams
     | SplineLowessParams
+    | SmoothDifferentiateIntegrateParams
     | CoxPHParams
     | MixedEffectsParams
     | ChiSquareParams
@@ -1232,6 +1266,18 @@ export interface RowMeansRow {
   ciHigh: number | null;
   cv: number | null;
   geoMean: number | null;
+}
+
+/** One Y data set's derived curve ("smooth-differentiate-integrate"): the
+ *  operation's label, the result X and Y values, and how many input rows
+ *  the result lost (edge rows the smoothing window cannot centre on, or the
+ *  rows a derivative consumes). */
+export interface DerivedCurve {
+  dataset: string;
+  label: string;
+  x: number[];
+  y: number[];
+  dropped: number;
 }
 
 /** One row of "area-under-curve" results: one Y series' trapezoidal AUC vs. X. */
@@ -1534,6 +1580,10 @@ export interface AnalysisResult {
    *  smoother on a dense grid (100 points across the X range) for drawing. */
   fitted?: FittedPoint[];
   curve?: { x: number; y: number }[];
+  /** Optional per-Y derived curves ("smooth-differentiate-integrate"): one
+   *  new curve table per Y data set — the smoothed curve, the first or
+   *  second derivative, or the cumulative integral. */
+  derivedCurves?: DerivedCurve[];
   /** Optional Monte Carlo summary ("monte-carlo"): the statistic's
    *  distribution across repeats, its 95% percentile interval, the
    *  estimated power (when the statistic is a P value), the observed

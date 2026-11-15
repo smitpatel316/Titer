@@ -62,6 +62,7 @@ import {
   RANK_POSTHOCS,
   REMOVE_BASELINE_METHODS,
   ROUT_Q,
+  SMOOTH_DIFF_INT_OPERATIONS,
   TAILS,
   THREE_WAY_TERMS,
   TRANSFORM_FUNCTIONS,
@@ -251,6 +252,10 @@ const PARAMS = {
   totalBy: FRACTION_OF_TOTAL_TOTALS, format: FRACTION_OF_TOTAL_FORMATS,
   alpha: { min: 0.001, max: 0.5 }, iterate: "yes/no",
   f: "number", spar: "number", df: "number",
+  // Smooth, differentiate or integrate a curve (v2): the operation is a
+  // choice; window/order are numbers the runner validates (5/9/13, 2/3);
+  // `baseline` already has an entry above.
+  operation: SMOOTH_DIFF_INT_OPERATIONS, window: "number", order: "number", smoothResults: "yes/no", startValue: "number",
   y: "name-or-names", y2: "name", ys: "names", dependent: "name", reference: "name", control: "name", compareWith: "name", datasets: "names", predictors: "names", sets: "names",
   // Transform concentrations (v2): the column to convert, and the units
   // it is in now vs. the units it is converted to.

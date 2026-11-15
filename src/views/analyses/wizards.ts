@@ -41,6 +41,7 @@ import type {
   PrincipalComponentAnalysisParams,
   ShapiroWilkParams,
   SplineLowessParams,
+  SmoothDifferentiateIntegrateParams,
   ThreeWayAnovaParams,
   TransformFunction,
   TransformConcentrationsParams,
@@ -2787,6 +2788,81 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         },
       };
     },
+  },
+
+  // Smooth, differentiate or integrate a curve (v2): Savitzky–Golay
+  // smoothing, a first or second numerical derivative, or a cumulative
+  // integral — each producing a NEW curve table per Y data set (Prism's
+  // Analyse → Smooth, Differentiate or Integrate a Curve). The derivative
+  // or integral runs first, then the smoothing, as Prism does.
+  "smooth-differentiate-integrate": {
+    questions: (a, table) => {
+      const operation = a.operation as string | undefined;
+      const needsSmooth = operation === "smooth" || a.smoothResults === "yes";
+      return [
+        {
+          id: "ys",
+          ask: "Which data sets should be smoothed, differentiated or integrated?",
+          kind: "names",
+          options: yNames(table),
+          min: 1,
+        },
+        choice("operation", "What should be done with each data set?", [
+          ["smooth", "Smooth the curve (Savitzky–Golay)"],
+          ["first-derivative", "First derivative — the slope at each point"],
+          ["second-derivative", "Second derivative — the rate of change of the slope"],
+          ["integral", "Cumulative integral — the area under the curve so far"],
+        ]),
+        (operation === "first-derivative" || operation === "second-derivative" || operation === "integral") &&
+          choice("smoothResults", "Smooth the result afterwards (Savitzky–Golay)?", [
+            ["yes", "Yes — smooth the derived curve"],
+            ["no", "No — keep the derived curve as calculated"],
+          ]),
+        needsSmooth &&
+          choice("window", "How many neighbouring points should each smoothed value use?", [
+            ["5", "5 neighbours"],
+            ["9", "9 neighbours"],
+            ["13", "13 neighbours"],
+          ]),
+        needsSmooth &&
+          choice("order", "What order should the smoothing polynomial be?", [
+            ["2", "Quadratic (order 2)"],
+            ["3", "Cubic (order 3)"],
+          ]),
+        operation === "integral" && {
+          id: "baseline",
+          ask: "From which baseline should the area be measured? Area below it counts as negative.",
+          kind: "number",
+          label: "Baseline Y =",
+          initial: 0,
+        },
+        operation === "integral" && {
+          id: "startValue",
+          ask: "What should the integral's first value be? Usually 0.",
+          kind: "number",
+          label: "Starting value =",
+          initial: 0,
+        },
+      ];
+    },
+    finish: (a, table) => ({
+      type: "smooth-differentiate-integrate",
+      params: {
+        ys: a.ys as string[],
+        x: table.columns[0]?.name,
+        operation:
+          (a.operation as SmoothDifferentiateIntegrateParams["operation"] | undefined) ?? "smooth",
+        window: Number(a.window ?? 9),
+        order: Number(a.order ?? 3),
+        smoothResults: a.smoothResults === "yes",
+        ...(a.operation === "integral"
+          ? {
+              baseline: (a.baseline as number | undefined) ?? 0,
+              startValue: (a.startValue as number | undefined) ?? 0,
+            }
+          : {}),
+      },
+    }),
   },
 
   "two-way-anova": {
