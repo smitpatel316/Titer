@@ -335,6 +335,18 @@ export function useAppMenu(doc: DocumentActions) {
         ],
       },
       {
+        text: "Info Sheet",
+        items: [
+          {
+            text: "New Info Sheet…",
+            accelerator: "CmdOrCtrl+Alt+I",
+            action: () => latest.current.store.createInfoSheet(),
+          },
+          sep,
+          deleteItem("info"),
+        ],
+      },
+      {
         text: "Settings",
         items: [
           {

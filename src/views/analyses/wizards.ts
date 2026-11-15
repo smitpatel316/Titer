@@ -63,6 +63,7 @@ import type {
 import { parseInhibitorConcentration } from "../../stats/xy/enzyme-inhibition";
 import { columnFactorName } from "../../stats/mixed/mixed-effects";
 import { splitXY, type Dataset } from "../../lib/dataset";
+import { constantRefName, isConstantRef } from "../../lib/info-sheets";
 
 export type Answer = string | number | string[];
 export type Answers = Record<string, Answer | undefined>;
@@ -174,6 +175,66 @@ export function parseOptionalBounds(text: string, label: string): { value?: [num
     return { error: `“${t}” is not two numbers — enter bounds as “lower, upper”, or leave it blank.` };
   if (lo >= hi) return { error: `The lower bound (${lo}) must be below the upper bound (${hi}).` };
   return { value: [lo, hi] };
+}
+
+/** A `{{Name}}` reference is valid wherever a number is asked — an
+ *  info-constant hook. The wizard stores the raw text and `finish` separates
+ *  hooks from numbers, so a hooked value resolves live at run time. Blank
+ *  stays valid for optional fields. */
+export function parseHookableNumber(text: string, label: string): { error?: string } {
+  const t = text.trim();
+  if (t === "" || isConstantRef(t)) return {};
+  return parseOptionalNumber(t, label);
+}
+
+/** A number that must be supplied, or a `{{Name}}` hook. */
+export function parseHookableRequiredNumber(text: string, label: string): { error?: string } {
+  const t = text.trim();
+  if (isConstantRef(t)) return {};
+  if (t === "") return { error: `Enter a ${label} — or {{Constant name}} from an info sheet.` };
+  return parseOptionalNumber(t, label);
+}
+
+/** Bounds "lower, upper" where either side may be a `{{Name}}` hook. */
+export function parseHookableBounds(text: string, label: string): { error?: string } {
+  const t = text.trim();
+  if (t === "") return {};
+  const parts = t.split(",").map((p) => p.trim());
+  if (parts.length !== 2)
+    return { error: `Enter ${label} bounds as “lower, upper” (e.g. “0, 2”), or leave it blank for unbounded.` };
+  for (const side of parts) {
+    if (side === "" || isConstantRef(side) || Number.isFinite(Number(side))) continue;
+    return { error: `“${side}” is not a number or a {{Constant name}} — enter bounds as “lower, upper”.` };
+  }
+  return {};
+}
+
+/** A required positive number, or a `{{Name}}` hook. */
+export function parseHookableRequiredPositive(text: string, label: string): { error?: string } {
+  const t = text.trim();
+  if (isConstantRef(t)) return {};
+  return parseRequiredPositive(t, label);
+}
+
+/** A wizard's constant answer (a number, or a `{{Name}}` hook) as params:
+ *  the hook field when it names a constant, else the number. */
+function constantParam(raw: unknown): { constant?: number; constantHook?: string } {
+  const hook = constantRefName(String(raw ?? ""));
+  if (hook) return { constantHook: hook };
+  const n = Number(raw);
+  return Number.isFinite(n) ? { constant: n } : {};
+}
+function zeroConstantParam(raw: unknown): { zeroConstant?: number; zeroConstantHook?: string } {
+  const hook = constantRefName(String(raw ?? ""));
+  if (hook) return { zeroConstantHook: hook };
+  const n = Number(raw);
+  return Number.isFinite(n) ? { zeroConstant: n } : {};
+}
+function hundredConstantParam(raw: unknown): { hundredConstant?: number; hundredConstantHook?: string } {
+  const hook = constantRefName(String(raw ?? ""));
+  if (hook) return { hundredConstantHook: hook };
+  const n = Number(raw);
+  return Number.isFinite(n) ? { hundredConstant: n } : {};
 }
 
 /** Parse a required positive number (association-then-dissociation's
@@ -1937,10 +1998,11 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         },
         method === "constant" && {
           id: "constant",
-          ask: "What constant value should be subtracted from each value?",
-          kind: "number",
+          ask: "What constant value should be subtracted from each value? (Or {{Constant name}} to hook it to an info sheet.)",
+          kind: "text",
           label: "Constant baseline value",
-          initial: 0,
+          initial: "0",
+          parse: (text: string) => parseHookableRequiredNumber(text, "constant baseline value"),
         },
       ];
     },
@@ -1952,7 +2014,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         baselineMethod: a.baselineMethod as RemoveBaselineParams["baselineMethod"],
         ...(a.baselineMethod === "mean-first-n" ? { firstN: a.firstN as number } : {}),
         ...(a.baselineMethod === "mean-of-controls" ? { controls: a.controls as string[] } : {}),
-        ...(a.baselineMethod === "constant" ? { constant: a.constant as number } : {}),
+        ...(a.baselineMethod === "constant" ? constantParam(a.constant) : {}),
       },
     }),
   },
@@ -2227,10 +2289,11 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         },
         method === "percent-of-constant" && {
           id: "constant",
-          ask: "What value is 100%?",
-          kind: "number",
+          ask: "What value is 100%? (Or {{Constant name}} to hook it to an info sheet.)",
+          kind: "text",
           label: "100% reference value",
-          initial: 100,
+          initial: "100",
+          parse: (text: string) => parseHookableRequiredNumber(text, "100% reference value"),
         },
         method === "zero-to-hundred" &&
           choice("zeroDef", "What is 0%?", [
@@ -2241,10 +2304,11 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         method === "zero-to-hundred" &&
           a.zeroDef === "constant" && {
             id: "zeroConstant",
-            ask: "What value is 0%?",
-            kind: "number",
+            ask: "What value is 0%? (Or {{Constant name}} to hook it to an info sheet.)",
+            kind: "text",
             label: "0% value",
-            initial: 0,
+            initial: "0",
+            parse: (text: string) => parseHookableRequiredNumber(text, "0% value"),
           },
         method === "zero-to-hundred" &&
           choice("hundredDef", "What is 100%?", [
@@ -2256,10 +2320,11 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         method === "zero-to-hundred" &&
           a.hundredDef === "constant" && {
             id: "hundredConstant",
-            ask: "What value is 100%?",
-            kind: "number",
+            ask: "What value is 100%? (Or {{Constant name}} to hook it to an info sheet.)",
+            kind: "text",
             label: "100% value",
-            initial: 100,
+            initial: "100",
+            parse: (text: string) => parseHookableRequiredNumber(text, "100% value"),
           },
       ];
     },
@@ -2271,13 +2336,13 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         normalizeMethod: a.normalizeMethod as NormalizeParams["normalizeMethod"],
         ...((a.normalizeMethod as string) !== "zero-to-hundred" ? { asPercent: a.scale !== "fraction" } : {}),
         ...(a.normalizeMethod === "percent-of-mean-controls" ? { controls: a.controls as string[] } : {}),
-        ...(a.normalizeMethod === "percent-of-constant" ? { constant: a.constant as number } : {}),
+        ...(a.normalizeMethod === "percent-of-constant" ? constantParam(a.constant) : {}),
         ...(a.normalizeMethod === "zero-to-hundred"
           ? {
               zeroDef: a.zeroDef as NormalizeParams["zeroDef"],
               hundredDef: a.hundredDef as NormalizeParams["hundredDef"],
-              ...(a.zeroDef === "constant" ? { zeroConstant: a.zeroConstant as number } : {}),
-              ...(a.hundredDef === "constant" ? { hundredConstant: a.hundredConstant as number } : {}),
+              ...(a.zeroDef === "constant" ? zeroConstantParam(a.zeroConstant) : {}),
+              ...(a.hundredDef === "constant" ? hundredConstantParam(a.hundredConstant) : {}),
             }
           : {}),
       },
@@ -2382,19 +2447,19 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ? terms.flatMap((term): Question[] => [
               {
                 id: `fix_${term}`,
-                ask: `Fix ${termLabel(term)} to a constant? Leave blank to fit it. (A fixed parameter is held at the value you enter, not fitted.)`,
+                ask: `Fix ${termLabel(term)} to a constant? Leave blank to fit it. (A fixed parameter is held at the value you enter, not fitted — or enter {{Constant name}} to hook it to an info sheet.)`,
                 kind: "text",
                 label: `Fix ${termLabel(term)} =`,
                 initial: "",
-                parse: (text: string) => parseOptionalNumber(text, termLabel(term)),
+                parse: (text: string) => parseHookableNumber(text, termLabel(term)),
               },
               {
                 id: `bound_${term}`,
-                ask: `Bound ${termLabel(term)}? Leave blank for unbounded, or enter “lower, upper”. (A bounded parameter is fitted within the bounds.)`,
+                ask: `Bound ${termLabel(term)}? Leave blank for unbounded, or enter “lower, upper”. (A bounded parameter is fitted within the bounds — either side can be a {{Constant name}} from an info sheet.)`,
                 kind: "text",
                 label: `${termLabel(term)} bounds [lower, upper] =`,
                 initial: "",
-                parse: (text: string) => parseOptionalBounds(text, termLabel(term)),
+                parse: (text: string) => parseHookableBounds(text, termLabel(term)),
               },
             ])
           : []),
@@ -2414,23 +2479,23 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           (a.fitKi === "yes" || modelName === "homologous-competition-logx") &&
           {
             id: "ligandConcentration",
-            ask: "Radioligand concentration [L], in the same units as X.",
+            ask: "Radioligand concentration [L], in the same units as X. (Or {{Constant name}} to hook it to an info sheet.)",
             kind: "text",
             label: "Radioligand concentration [L] =",
             initial: "",
             placeholder: "e.g. 1",
-            parse: (text: string) => parseRequiredPositive(text, "radioligand concentration [L]"),
+            parse: (text: string) => parseHookableRequiredPositive(text, "radioligand concentration [L]"),
           },
         dose &&
           a.fitKi === "yes" &&
           {
             id: "ligandKd",
-            ask: "Radioligand Kd, in the same units as [L] — Ki = IC50 / (1 + [L]/Kd).",
+            ask: "Radioligand Kd, in the same units as [L] — Ki = IC50 / (1 + [L]/Kd). (Or {{Constant name}} to hook it to an info sheet.)",
             kind: "text",
             label: "Radioligand Kd =",
             initial: "",
             placeholder: "e.g. 0.5",
-            parse: (text: string) => parseRequiredPositive(text, "radioligand Kd"),
+            parse: (text: string) => parseHookableRequiredPositive(text, "radioligand Kd"),
           },
       ];
     },
@@ -2457,18 +2522,47 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             ? { sharedParams: (a.sharedParams as string[] | undefined) ?? [] }
             : {};
       // Fixed/bounded parameters from the advanced section (blank = fit it /
-      // unbounded). A parameter fixed AND bounded is refused by the runner —
-      // the wizard has no cross-question validation to refuse it here.
+      // unbounded). A hook — `{{Constant name}}` — goes in the `*Constants`
+      // field instead, and resolves live at run time; a bound with a hook on
+      // either side goes there whole (its numeric side rides along as text).
+      // A parameter fixed AND bounded is refused by the runner — the wizard
+      // has no cross-question validation to refuse it here.
       const fixed: Record<string, number> = {};
+      const fixedConstants: Record<string, string> = {};
       const bounds: Record<string, [number, number]> = {};
+      const boundsConstants: Record<string, [string, string]> = {};
       for (const term of terms) {
-        const f = parseOptionalNumber(String(a[`fix_${term}`] ?? ""), termLabel(term));
-        if (f.value !== undefined) fixed[term] = f.value;
-        const b = parseOptionalBounds(String(a[`bound_${term}`] ?? ""), termLabel(term));
-        if (b.value !== undefined) bounds[term] = b.value;
+        const fixText = String(a[`fix_${term}`] ?? "").trim();
+        const fixHook = constantRefName(fixText);
+        if (fixHook) fixedConstants[term] = fixHook;
+        else {
+          const f = parseOptionalNumber(fixText, termLabel(term));
+          if (f.value !== undefined) fixed[term] = f.value;
+        }
+        const boundText = String(a[`bound_${term}`] ?? "").trim();
+        if (boundText !== "") {
+          const parts = boundText.split(",").map((p) => p.trim());
+          if (parts.length === 2) {
+            const numeric = parts.map((p) => (constantRefName(p) ? undefined : Number(p)));
+            if (
+              numeric[0] !== undefined &&
+              numeric[1] !== undefined &&
+              Number.isFinite(numeric[0]) &&
+              Number.isFinite(numeric[1])
+            )
+              bounds[term] = [numeric[0], numeric[1]];
+            else boundsConstants[term] = [constantRefName(parts[0]) ?? parts[0], constantRefName(parts[1]) ?? parts[1]];
+          }
+        }
       }
-      const ligand = parseRequiredPositive(String(a.ligandConcentration ?? ""), "radioligand concentration [L]");
-      const kd = parseRequiredPositive(String(a.ligandKd ?? ""), "radioligand Kd");
+      const ligandText = String(a.ligandConcentration ?? "").trim();
+      const ligandHook = constantRefName(ligandText);
+      const ligand = ligandHook
+        ? { value: undefined }
+        : parseRequiredPositive(ligandText, "radioligand concentration [L]");
+      const kdText = String(a.ligandKd ?? "").trim();
+      const kdHook = constantRefName(kdText);
+      const kd = kdHook ? { value: undefined } : parseRequiredPositive(kdText, "radioligand Kd");
       const wantsKi = a.fitKi === "yes";
       const isHomologous = a.model === "homologous-competition-logx";
       return {
@@ -2483,12 +2577,20 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ...global,
           ...sharedParams,
           ...(Object.keys(fixed).length ? { fixed } : {}),
+          ...(Object.keys(fixedConstants).length ? { fixedConstants } : {}),
           ...(Object.keys(bounds).length ? { bounds } : {}),
+          ...(Object.keys(boundsConstants).length ? { boundsConstants } : {}),
           ...(wantsKi ? { fitKi: true } : {}),
-          ...((wantsKi || isHomologous) && ligand.value !== undefined
-            ? { ligandConcentration: ligand.value }
-            : {}),
-          ...(wantsKi && kd.value !== undefined ? { ligandKd: kd.value } : {}),
+          ...((wantsKi || isHomologous) && ligandHook
+            ? { ligandConcentrationConstant: ligandHook }
+            : (wantsKi || isHomologous) && ligand.value !== undefined
+              ? { ligandConcentration: ligand.value }
+              : {}),
+          ...(wantsKi && kdHook
+            ? { ligandKdConstant: kdHook }
+            : wantsKi && kd.value !== undefined
+              ? { ligandKd: kd.value }
+              : {}),
         },
       };
     },

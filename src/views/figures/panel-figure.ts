@@ -14,6 +14,7 @@
 
 import { DEFAULT_GRAPH_OPTIONS, type ProjectNode } from "../../store/types";
 import { readTable } from "../../lib/dataset";
+import { infoSheetsOf, resolveGraphOptions } from "../../lib/info-sheets";
 import { GRAPHS, graphSeries, plotColumns, type GraphFigure } from "../graphs";
 import { paintOf } from "../graphs/plot-helpers";
 
@@ -31,7 +32,10 @@ export function buildPanelFigure(
   if (graph.type !== "graph" || !graph.graphType || !Object.hasOwn(GRAPHS, graph.graphType)) return null;
   const parent = graph.parentId ? nodes[graph.parentId] : undefined;
   if (!parent?.data || !parent.tableType) return null;
-  const options = { ...DEFAULT_GRAPH_OPTIONS, ...graph.graphOptions };
+  // The graph's own view resolves the same hooks (see graph-view.tsx), so a
+  // panel's titles and axis limits match the graph exactly.
+  const sheets = infoSheetsOf(nodes, Object.keys(nodes));
+  const options = resolveGraphOptions({ ...DEFAULT_GRAPH_OPTIONS, ...graph.graphOptions }, sheets);
   const dataset = readTable(parent.data);
   const columns = plotColumns(dataset, graph.graphType, options, parent.tableType);
   if (!columns.some((c) => c.values.length > 0)) return null;

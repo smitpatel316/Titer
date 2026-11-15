@@ -4,13 +4,14 @@
 import type { AnalysisParams, AnalysisResult, AnalysisType } from "../stats/types";
 import type { SummaryFormat } from "../lib/summary-format";
 
-export type NodeType = "table" | "analysis" | "graph" | "figure";
+export type NodeType = "table" | "analysis" | "graph" | "figure" | "info";
 /** What an item is, as menus name it ("Delete Graph…"). */
 export const NODE_NAMES: Record<NodeType, string> = {
   table: "Table",
   analysis: "Analysis",
   graph: "Graph",
   figure: "Figure",
+  info: "Info Sheet",
 };
 export type TableType = "column" | "xy" | "grouped" | "nested" | "multiple" | "contingency" | "survival";
 /** Tables whose first data column is X (a Survival table's is the time). */
@@ -175,6 +176,13 @@ export interface GraphOptions {
   y2Min?: number;
   y2Max?: number;
   y2Step?: number;
+  // An axis limit hooked to an info constant (the constant's name, not its
+  // value): resolved live in GraphView, so editing the constant moves the
+  // axis. A hooked limit wins over its number above when it resolves.
+  yMinConstant?: string;
+  yMaxConstant?: string;
+  xMinConstant?: string;
+  xMaxConstant?: string;
   // A histogram's bin width, in the values' units; omitted (or 0 and under), R's own bins.
   binWidth?: number;
   // Significance annotations (Column family only): read a sibling analysis's
@@ -593,6 +601,23 @@ export interface TableData {
   notes?: string;
 }
 
+/** One row of an info sheet's structured table: a name and a string value,
+ *  as Prism stores it ("2018-07-23", "0.5", ""). Numeric when a hook needs it. */
+export interface InfoConstant {
+  id: string;
+  name: string;
+  value: string;
+}
+
+/** An info sheet's data: its constants (left) and its free notes (right).
+ *  `linkedTableId` ties it to one table (Prism's per-table info sheet);
+ *  omitted, it is project info, global to the project. */
+export interface InfoSheetData {
+  constants: InfoConstant[];
+  notes: string;
+  linkedTableId?: string | null;
+}
+
 export interface ProjectNode {
   id: string;
   type: NodeType;
@@ -637,6 +662,8 @@ export interface ProjectNode {
   figureTitle?: string;
   sharedLegend?: SharedLegend;
   dpi?: Resolution;
+  /** Info sheet nodes only: its constants, notes, and linked table. */
+  info?: InfoSheetData;
 }
 
 /** One panel of a multi-panel figure: a reference to an existing graph node,

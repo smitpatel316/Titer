@@ -14,8 +14,10 @@ import {
   SigmaIcon,
   TextTIcon,
 } from "@phosphor-icons/react";
-import { Button } from "../../ui/controls";
+import { Button, Select } from "../../ui/controls";
 import { Section, Stepper } from "../../components/inspector";
+import { useProjectStore } from "../../store/use-project-store";
+import { allConstantNames } from "../../lib/info-sheets";
 import { paletteColor, paletteOf, reversedPalette, savedPalette, withoutColors } from "../../lib/palettes";
 import { GRAPH_LIMITS, type GraphOptions, type PointStyle, type SeriesStyle } from "../../store/types";
 import { GRAPHS, newGraphOptions } from ".";
@@ -124,6 +126,10 @@ function remember(key: string, value: unknown) {
 export function FormatPanel(props: Props) {
   const { graphType, options, set, seriesNames, setSeriesStyle, selection } = props;
   const family = GRAPHS[graphType].family;
+  // The project's info constants, for the axis-limit hook pickers below.
+  const { nodes, rootOrder } = useProjectStore();
+  const constants = React.useMemo(() => allConstantNames(nodes, rootOrder), [nodes, rootOrder]);
+  const constantItems = constants.map((name) => ({ value: name, label: name }));
   const hasAxes = family !== "pie";
   // The data set on the right Y axis, if the pick is still a series (a stale or
   // renamed name silently falls back to the left axis — see rightYDataset).
@@ -283,6 +289,11 @@ export function FormatPanel(props: Props) {
         action={reset(["fontSize", "xTitleGap", "yTitleGap", "legend", "note"])}
       >
         <TextRow label="Title" value={options.title} onChange={(title) => set({ title })} />
+        {constants.length > 0 && (
+          <p className="text-small text-secondary">
+            {"{{Constant name}}"} in a title or axis title pulls that info constant&rsquo;s value, live.
+          </p>
+        )}
         {hasAxes && (
           <>
             <TextRow label="X axis title" value={options.xLabel} onChange={(xLabel) => set({ xLabel })} />
@@ -324,6 +335,10 @@ export function FormatPanel(props: Props) {
             "xMin",
             "xMax",
             "xStep",
+            "yMinConstant",
+            "yMaxConstant",
+            "xMinConstant",
+            "xMaxConstant",
             "xScale",
             "yScale",
             "axisWidth",
@@ -354,7 +369,11 @@ export function FormatPanel(props: Props) {
               max={options.yMax}
               step={options.yStep}
               log={family !== "volcano" && options.yScale !== "linear"}
+              minHook={options.yMinConstant}
+              maxHook={options.yMaxConstant}
+              constants={constantItems}
               onChange={(yMin, yMax, yStep) => set({ yMin, yMax, yStep })}
+              onHookChange={(yMinConstant, yMaxConstant) => set({ yMinConstant, yMaxConstant })}
             />
           )}
           {family === "xy" && (
@@ -372,7 +391,11 @@ export function FormatPanel(props: Props) {
               max={options.xMax}
               step={options.xStep}
               log={family === "xy" && options.xScale !== "linear"}
+              minHook={options.xMinConstant}
+              maxHook={options.xMaxConstant}
+              constants={constantItems}
               onChange={(xMin, xMax, xStep) => set({ xMin, xMax, xStep })}
+              onHookChange={(xMinConstant, xMaxConstant) => set({ xMinConstant, xMaxConstant })}
             />
           )}
           {family === "xy" && seriesNames.length >= 2 && (
@@ -525,28 +548,77 @@ export function FormatPanel(props: Props) {
   );
 }
 
-/** One axis's Min / Max / Step; a blank field is Auto. */
-/** An axis's range; a log axis has no step (its ticks are the powers). */
+/** One axis's Min / Max / Step; a blank field is Auto. With info constants
+ *  in the project, each limit can instead be hooked to a constant — the
+ *  axis follows the constant's value, live. */
 function AxisRange({
   axis,
   min,
   max,
   step,
   log,
+  minHook,
+  maxHook,
+  constants,
   onChange,
+  onHookChange,
 }: {
   axis: "X" | "Y" | "Right";
   min?: number;
   max?: number;
   step?: number;
   log: boolean;
+  minHook?: string;
+  maxHook?: string;
+  constants: { value: string; label: string }[];
   onChange: (min?: number, max?: number, step?: number) => void;
+  onHookChange: (minHook?: string, maxHook?: string) => void;
 }) {
   return (
-    <div className="grid grid-cols-3 gap-2">
-      <NumRow label={`${axis} min`} value={min} onChange={(v) => onChange(v, max, step)} />
-      <NumRow label={`${axis} max`} value={max} onChange={(v) => onChange(min, v, step)} />
-      {!log && <NumRow label={`${axis} step`} value={step} onChange={(v) => onChange(min, max, v)} />}
+    <>
+      <div className="grid grid-cols-3 gap-2">
+        <NumRow label={`${axis} min`} value={min} onChange={(v) => onChange(v, max, step)} />
+        <NumRow label={`${axis} max`} value={max} onChange={(v) => onChange(min, v, step)} />
+        {!log && <NumRow label={`${axis} step`} value={step} onChange={(v) => onChange(min, max, v)} />}
+      </div>
+      {constants.length > 0 && (
+        <div className="grid grid-cols-2 gap-2">
+          <HookRow
+            label={`${axis} min from`}
+            value={minHook ?? ""}
+            constants={constants}
+            onChange={(v) => onHookChange(v || undefined, maxHook)}
+          />
+          <HookRow
+            label={`${axis} max from`}
+            value={maxHook ?? ""}
+            constants={constants}
+            onChange={(v) => onHookChange(minHook, v || undefined)}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
+/** One limit's info-constant hook: a constant's value, or "None" for the typed number. */
+function HookRow({
+  label,
+  value,
+  constants,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  constants: { value: string; label: string }[];
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-small text-secondary">{label}</span>
+      <div className="min-w-0 flex-1">
+        <Select value={value} onChange={onChange} options={constants} placeholder="None" />
+      </div>
     </div>
   );
 }

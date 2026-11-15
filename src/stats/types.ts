@@ -297,6 +297,9 @@ export interface RemoveBaselineParams {
   controls?: string[];
   /** The baseline value (method "constant"). */
   constant?: number;
+  /** Info-constant hook for the baseline (the constant's name): resolved live
+   *  in useAnalysis, so editing the constant re-runs the transform. */
+  constantHook?: string;
 }
 
 export const PRUNE_ROWS_CONDITIONS = ["empty", "below", "above", "outside"] as const;
@@ -367,6 +370,12 @@ export interface NonlinearRegressionParams {
   /** Parameter name -> [lower, upper] bounds (nls models only, via algorithm="port").
    *  A parameter cannot be both fixed and bounded. */
   bounds?: Record<string, [number, number]>;
+  /** Info-constant hooks for the above (the constant's name, not its value):
+   *  `fixedConstants` resolves to `fixed`, `boundsConstants` — each side a
+   *  plain number or a constant name — to `bounds`. Live: resolved in
+   *  useAnalysis before the run, so editing the constant re-runs the fit. */
+  fixedConstants?: Record<string, string>;
+  boundsConstants?: Record<string, [string, string]>;
   /** A second MODEL fitted to the same data and compared (extra-sum-of-squares
    *  F test when the pair is nested, AICc always). NOTE: the plan's `compareWith`
    *  name is already taken (the other Y data set's column), so the model
@@ -387,6 +396,10 @@ export interface NonlinearRegressionParams {
    *  Required when `fitKi` is set (Cheng–Prusoff divisor 1 + [L]/Kd);
    *  ignored otherwise. The homologous model fits Kd — it is not entered. */
   ligandKd?: number;
+  /** Info-constant hooks for [L] and Kd (the constant's name): resolved live
+   *  in useAnalysis, like `fixedConstants` above. */
+  ligandConcentrationConstant?: string;
+  ligandKdConstant?: string;
   /** When true on a one-site (inhibitor 3PL) or two-site competition fit,
    *  the result also reports Ki (Cheng–Prusoff: Ki = IC50 / (1 + [L]/Kd))
    *  alongside IC50. False/absent: today's behaviour (IC50 only). */
@@ -821,14 +834,20 @@ export interface NormalizeParams {
   controls?: string[];
   /** The 100% reference value (method "percent-of-constant"). */
   constant?: number;
+  /** Info-constant hook for the 100% value (the constant's name). */
+  constantHook?: string;
   /** What 0% is (method "zero-to-hundred"). */
   zeroDef?: NormalizeZeroDef;
   /** The 0% value (zeroDef "constant"). */
   zeroConstant?: number;
+  /** Info-constant hook for the 0% value (the constant's name). */
+  zeroConstantHook?: string;
   /** What 100% is (method "zero-to-hundred"). */
   hundredDef?: NormalizeHundredDef;
   /** The 100% value (hundredDef "constant"). */
   hundredConstant?: number;
+  /** Info-constant hook for the 100% value (the constant's name). */
+  hundredConstantHook?: string;
 }
 
 /** Params for "mixed-effects" (Column or Grouped table): a repeated-measures

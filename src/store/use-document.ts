@@ -720,6 +720,12 @@ export function useDocument() {
     const lines = [
       `Imported ${imported.tables.length} table${imported.tables.length === 1 ? "" : "s"} from “${name}”:`,
       ...imported.tables.map((t) => `• ${t}`),
+      ...(imported.infoSheets.length
+        ? [
+            `Imported ${imported.infoSheets.length} info sheet${imported.infoSheets.length === 1 ? "" : "s"}:`,
+            ...imported.infoSheets.map((t) => `• ${t}`),
+          ]
+        : []),
     ];
     if (imported.issues.length > 0) {
       lines.push("", "Notes:", ...imported.issues.slice(0, 12).map((i) => `• ${i.message}`));

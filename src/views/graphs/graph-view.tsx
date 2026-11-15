@@ -24,6 +24,7 @@ import { summaryTableProblem } from "../../lib/summary-format";
 import { paletteOf } from "../../lib/palettes";
 import { computeGroupedDEG } from "../../lib/deg";
 import { useAnalysis } from "../analyses/use-analysis";
+import { infoSheetsOf, resolveGraphOptions } from "../../lib/info-sheets";
 import { GRAPHS, graphSeries, plotColumns } from ".";
 import { addFittedCurve } from "./fitted-curve";
 import { addBindingCurve, addDoseResponseSpecialCurve, addEnzymeInhibitionCurve } from "./binding-curve";
@@ -73,13 +74,15 @@ type Size = { width: number; height: number };
 type Margins = { l: number; r: number; t: number; b: number };
 
 export function GraphView({ node }: { node: ProjectNode }) {
-  const { nodes, updateGraph, openSelector } = useProjectStore();
+  const { nodes, rootOrder, updateGraph, openSelector } = useProjectStore();
   const type = node.graphType!;
   const family = GRAPHS[type].family;
   const parent = node.parentId ? nodes[node.parentId] : undefined;
   const data = parent?.data;
   // Merged over the defaults, so options added after a file was saved have a value.
   const options = { ...DEFAULT_GRAPH_OPTIONS, ...node.graphOptions };
+  // The project's info sheets, for the live `{{Constant}}` hooks below.
+  const sheets = React.useMemo(() => infoSheetsOf(nodes, rootOrder), [nodes, rootOrder]);
   // A setting chosen again (a choice already on) changes nothing, and leaves no Undo step.
   const set = (patch: Partial<GraphOptions>) => {
     const same = (Object.keys(patch) as (keyof GraphOptions)[]).every(
@@ -198,18 +201,23 @@ export function GraphView({ node }: { node: ProjectNode }) {
   const seriesNames = data && parent?.tableType ? graphSeries(type, data, parent.tableType, options) : [];
 
   // The grouped volcano maps the computed DEG columns (P values) onto its axes; an XY
-  // table's X is its X column.
-  const buildOptions = volcanoGroups
-    ? {
-        ...options,
-        volcanoLabel: "Gene",
-        volcanoX: "Log2 FC",
-        volcanoY: options.volcanoSignificance === "fdr" ? "FDR" : "P",
-        volcanoYIsPValue: true,
-      }
-    : family === "volcano" && parent?.tableType === "xy"
-      ? { ...options, volcanoX: dataset?.columns[0]?.name }
-      : options;
+  // table's X is its X column. The options the builders draw from resolve the
+  // info-constant hooks live — `{{Name}}` in the title and axis titles, and
+  // the hooked axis limits — so editing a constant moves the graph.
+  const buildOptions = resolveGraphOptions(
+    volcanoGroups
+      ? {
+          ...options,
+          volcanoLabel: "Gene",
+          volcanoX: "Log2 FC",
+          volcanoY: options.volcanoSignificance === "fdr" ? "FDR" : "P",
+          volcanoYIsPValue: true,
+        }
+      : family === "volcano" && parent?.tableType === "xy"
+        ? { ...options, volcanoX: dataset?.columns[0]?.name }
+        : options,
+    sheets,
+  );
   // What a graph can't draw, said in its Format panel: values at or under 0 on a log axis
   // (X: only a numeric one; on XY, its first column is X), a volcano's P values under 0.
   const atOrUnder0 = (cols: Column[]) => cols.reduce((n, c) => n + c.values.filter((v) => v <= 0).length, 0);

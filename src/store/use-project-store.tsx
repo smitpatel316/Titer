@@ -3,6 +3,7 @@ import * as React from "react";
 import {
   NODE_NAMES,
   type FloatingNote,
+  type InfoSheetData,
   type NodeType,
   type ProjectNode,
   type SheetHighlight,
@@ -11,6 +12,7 @@ import {
   type GraphType,
   type GraphOptions,
 } from "./types";
+import { MAX_INFO_SHEETS, newInfoSheetData } from "../lib/info-sheets";
 import type { AnalysisParams, AnalysisPickerValue, AnalysisResult, AnalysisType } from "../stats/types";
 import { TABLES } from "../views/tables";
 import { GRAPHS, newGraphOptions } from "../views/graphs";
@@ -110,6 +112,7 @@ type Action =
   | { type: "updateGraph"; id: string; options: GraphOptions; at: number }
   /** Batch Magic: several graphs at once, in one undo step. */
   | { type: "updateGraphs"; updates: { id: string; options: GraphOptions }[]; at: number }
+  | { type: "updateInfoSheet"; id: string; info: InfoSheetData; at: number }
   | { type: "updateFloatingNotes"; id: string; notes: FloatingNote[]; at: number }
   /** `highlight`: the sheet's Navigator color, or null to clear it. */
   | { type: "setHighlight"; id: string; highlight: SheetHighlight | null }
@@ -203,6 +206,12 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
     case "create": {
       const pid = action.node.parentId;
       if (pid !== null && state.nodes[pid]?.type !== "table") return state;
+      // Prism caps a project at 500 info sheets.
+      if (
+        action.node.type === "info" &&
+        Object.values(state.nodes).filter((n) => n.type === "info").length >= MAX_INFO_SHEETS
+      )
+        return state;
       // Named among the names taken now: a table "Table N" (the smallest free N), an
       // analysis or a graph what it is, with " 2" when a sibling has the name.
       const taken = (pid === null ? state.rootOrder : (state.childOrder[pid] ?? [])).map(
@@ -215,8 +224,11 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       // parseProjectFile reorders rootOrder tables-then-figures, so
       // appending a table after a figure would mark every save/load
       // round-trip as updated (#22). Figures still append at the end.
+      // An info sheet goes there too (tables, then info sheets, then figures).
       const firstFigure =
-        node.type === "table" ? state.rootOrder.findIndex((id) => state.nodes[id]?.type === "figure") : -1;
+        node.type === "table" || node.type === "info"
+          ? state.rootOrder.findIndex((id) => state.nodes[id]?.type === "figure")
+          : -1;
       const rootOrder =
         pid === null
           ? firstFigure === -1
@@ -269,9 +281,15 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       for (const [id, n] of Object.entries(state.nodes)) {
         if (remove.has(id)) continue;
         const orphan = orphaned.find((o) => o.id === id);
+        // Deleting a table unlinks the info sheets tied to it (they stay,
+        // as project info); deleting anything else leaves links alone.
+        const unlinked =
+          n.type === "info" && n.info?.linkedTableId && remove.has(n.info.linkedTableId)
+            ? { ...n, info: { ...n.info, linkedTableId: null } }
+            : n;
         nodes[id] = orphan
           ? { ...orphan, parentId: null, orphaned: true, sourceTableName: target?.name }
-          : n;
+          : unlinked;
       }
       const rootOrder = [...state.rootOrder.filter((id) => !remove.has(id)), ...orphaned.map((o) => o.id)];
       // Drop removed tables' order lists, and removed children from surviving lists.
@@ -396,6 +414,15 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       if (!changed) return state; // nothing applied: no dirty flag, no undo step
       return { ...state, nodes, isDirty: true };
     }
+    case "updateInfoSheet": {
+      const node = state.nodes[action.id];
+      if (!node || node.type !== "info") return state;
+      return {
+        ...state,
+        nodes: { ...state.nodes, [action.id]: { ...node, info: action.info } },
+        isDirty: true,
+      };
+    }
     case "updateFloatingNotes": {
       const node = state.nodes[action.id];
       if (!node) return state;
@@ -507,6 +534,7 @@ const UNDOABLE = new Set<Action["type"]>([
   "updateTable",
   "updateGraph",
   "updateGraphs",
+  "updateInfoSheet",
   "updateFloatingNotes",
   "setHighlight",
   "updateFigure",
@@ -539,6 +567,8 @@ function changeName(action: Action): string {
       return "Format Change";
     case "updateGraphs":
       return "Match Graphs";
+    case "updateInfoSheet":
+      return "Info Sheet Change";
     case "updateFloatingNotes":
       return "Note Change";
     case "setHighlight":
@@ -562,11 +592,9 @@ export function reducer(state: ProjectState, action: Action): ProjectState {
       ? { key: `graph ${action.id}`, at: action.at }
       : action.type === "updateGraphs"
         ? { key: "graphs batch", at: action.at }
-        : action.type === "updateFloatingNotes"
-        ? { key: `notes ${action.id}`, at: action.at }
-        : action.type === "updateFigure"
-          ? { key: `figure ${action.id}`, at: action.at }
-          : null;
+        : action.type === "updateInfoSheet"
+          ? { key: `info ${action.id}`, at: action.at }
+          : action.type === "updateFloatingNotes"
   const merged = change && state.lastChange?.key === change.key && change.at - state.lastChange.at < MERGE_MS;
   const before = {
     label: changeName(action),
@@ -610,6 +638,10 @@ interface ProjectActions {
   cloneGraph: (graphId: string, options: CloneOptions) => void;
   /** A figure at the project root; `graphIds` (in order) start as its panels. */
   createFigure: (graphIds?: string[]) => void;
+  /** An info sheet at the project root, optionally linked to one table. */
+  createInfoSheet: (linkedTableId?: string | null) => void;
+  /** Replaces an info sheet's constants, notes and table link. */
+  updateInfoSheet: (id: string, info: InfoSheetData) => void;
   updateFigure: (
     id: string,
     patch: Partial<{
@@ -665,6 +697,8 @@ interface ProjectActions {
 
 interface ProjectContextValue extends ProjectActions {
   nodes: Record<string, ProjectNode>;
+  /** The project-root items (tables, info sheets, figures) in sidebar order. */
+  rootOrder: string[];
   activeNodeId: string | null;
   activeNode: ProjectNode | null;
   activeTableId: string | null;
@@ -679,10 +713,11 @@ interface ProjectContextValue extends ProjectActions {
 /** An item as the sidebar shows it. */
 export type OutlineNode = Pick<ProjectNode, "id" | "type" | "name" | "parentId" | "highlight">;
 /** What the sidebar shows: the tables in order, each with its analyses and graphs,
- *  then the figures (project-root items, since a figure may span tables), then the
+ *  then the info sheets, then the figures (project-root items, since a figure may span tables), then the
  *  orphaned analyses (their tables deleted — they live at the project root too). */
 interface Outline {
   tables: (OutlineNode & { children: OutlineNode[] })[];
+  infos: OutlineNode[];
   figures: OutlineNode[];
   orphaned: OutlineNode[];
   activeNodeId: string | null;
@@ -815,6 +850,18 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           },
         });
       },
+      createInfoSheet: (linkedTableId = null) =>
+        dispatch({
+          type: "create",
+          node: {
+            id: genId("info"),
+            type: "info",
+            name: "Info Sheet",
+            parentId: null,
+            info: { ...newInfoSheetData(), linkedTableId },
+          },
+        }),
+      updateInfoSheet: (id, info) => dispatch({ type: "updateInfoSheet", id, info, at: Date.now() }),
       updateFigure: (id, patch) => dispatch({ type: "updateFigure", id, patch, at: Date.now() }),
       setActiveNode: (id) => dispatch({ type: "setActive", id }),
       renameNode: (id, name) => dispatch({ type: "rename", id, name }),
@@ -845,6 +892,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     return {
       ...actions,
       nodes: state.nodes,
+      rootOrder: state.rootOrder,
       activeNodeId: state.activeNodeId,
       activeNode,
       activeTableId,
@@ -862,6 +910,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     tables: state.rootOrder
       .filter((id) => state.nodes[id]?.type === "table")
       .map((id) => ({ ...outlineNode(state.nodes[id]), children: childrenOf(state, id).map(outlineNode) })),
+    infos: state.rootOrder
+      .filter((id) => state.nodes[id]?.type === "info")
+      .map((id) => outlineNode(state.nodes[id])),
     figures: state.rootOrder
       .filter((id) => state.nodes[id]?.type === "figure")
       .map((id) => outlineNode(state.nodes[id])),

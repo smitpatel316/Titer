@@ -2,6 +2,7 @@ import * as React from "react";
 import {
   ChartLineIcon,
   GridNineIcon,
+  InfoIcon,
   LayoutIcon,
   MagnifyingGlassIcon,
   PlusCircleIcon,
@@ -69,8 +70,8 @@ export function SidebarToggle({ className }: { className?: string }) {
 
 export function ProjectSidebar() {
   // The outline, not the whole project: editing a table or a graph doesn't redraw the sidebar.
-  const { tables, figures, orphaned, activeNodeId } = useOutline();
-  const { get, setActiveNode, renameNode, removeNode, duplicateFamily, openSelector, reorderTables, reorderChildren, createFigure, setSheetHighlight } =
+  const { tables, infos, figures, orphaned, activeNodeId } = useOutline();
+  const { get, setActiveNode, renameNode, removeNode, duplicateFamily, openSelector, reorderTables, reorderChildren, createFigure, setSheetHighlight, createInfoSheet } =
     useProjectActions();
   const { sidebar, sidebarWidth, setLayout } = useLayout();
 
@@ -201,12 +202,13 @@ export function ProjectSidebar() {
     setTimeout(() => listRef.current?.focus()); // after the view shows
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
-    const node = [...tables.flatMap((t) => [t, ...t.children]), ...figures, ...orphaned].find(
+    const node = [...tables.flatMap((t) => [t, ...t.children]), ...infos, ...figures, ...orphaned].find(
       (n) => n.id === activeNodeId,
     );
     if (!node || e.metaKey || e.altKey || e.ctrlKey) return;
     const rows = [
       ...tables.flatMap((t) => [t.id, ...(collapsed.has(t.id) ? [] : t.children.map((c) => c.id))]),
+      ...infos.map((f) => f.id),
       ...figures.map((f) => f.id),
       ...orphaned.map((o) => o.id),
     ];
@@ -283,10 +285,16 @@ export function ProjectSidebar() {
       onResize={(width, open) => setLayout({ sidebar: open, sidebarWidth: clampWidth(width, SIDEBAR_WIDTH) })}
       header={<SidebarToggle />}
       footer={
-        <Button variant="ghost" className="text-secondary" onClick={() => openSelector({ kind: "new-table" })}>
-          <PlusCircleIcon className="size-4" />
-          New Table…
-        </Button>
+        <div className="flex flex-col">
+          <Button variant="ghost" className="text-secondary" onClick={() => openSelector({ kind: "new-table" })}>
+            <PlusCircleIcon className="size-4" />
+            New Table…
+          </Button>
+          <Button variant="ghost" className="text-secondary" onClick={() => createInfoSheet()}>
+            <PlusCircleIcon className="size-4" />
+            New Info Sheet…
+          </Button>
+        </div>
       }
     >
       <div className="px-2 pt-1">
@@ -386,6 +394,21 @@ export function ProjectSidebar() {
               />
             ))}
           </SidebarItem>
+        ))}
+        {infos.map((info) => (
+          <SidebarItem
+            key={info.id}
+            icon={<InfoIcon className="size-4" />}
+            title={info.name}
+            selected={activeNodeId === info.id}
+            renaming={renaming === info.id}
+            onRename={(name) => rename(info, name)}
+            onClick={() => select(info.id)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              childMenu(info);
+            }}
+          />
         ))}
         {figures.map((figure) => (
           <SidebarItem

@@ -21,6 +21,7 @@ import {
   type Limits,
   type GraphOptions,
   type GraphPalette,
+  type InfoSheetData,
   type NodeType,
   PALETTE_KINDS,
   type PaletteColor,
@@ -73,6 +74,7 @@ import {
 } from "../stats/types";
 import { NAMED_COLORS, paletteNamed, savedPalette } from "./palettes";
 import { parseTemplateInfo, type TemplateInfo } from "./template";
+import { readInfoConstants } from "./info-sheets";
 import { TABLES } from "../views/tables";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
 import { ANALYSES } from "../stats";
@@ -171,6 +173,7 @@ const NODE_KEYS = Object.keys({
   id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, highlight: 1, tableType: 1, data: 1,
   analysisType: 1, analysisParams: 1, cachedResult: 1, frozen: 1, orphaned: 1, sourceTableName: 1, graphType: 1, graphOptions: 1,
   panels: 1, grid: 1, figureSize: 1, labelStyle: 1, figureTitle: 1, sharedLegend: 1, dpi: 1,
+  info: 1,
 } satisfies Record<keyof ProjectNode, 1>);
 // prettier-ignore
 const DATA_KEYS = Object.keys({
@@ -185,6 +188,7 @@ type OptionalOption = {
 // prettier-ignore
 const OPTIONAL_OPTIONS = {
   yMin: "number", yMax: "number", yStep: "number", xMin: "number", xMax: "number", xStep: "number", y2Min: "number", y2Max: "number", y2Step: "number", binWidth: "number",
+  yMinConstant: "text", yMaxConstant: "text", xMinConstant: "text", xMaxConstant: "text",
   sigAnalysisId: "text", sigPairs: "texts", regAnalysisId: "text", demingAnalysisId: "text", coxAnalysisId: "text", ttestAnalysisId: "text", poissonAnalysisId: "text", smoothAnalysisId: "text", pcaAnalysisId: "text", kmeansAnalysisId: "text", monteCarloAnalysisId: "text", xVariable: "text", yVariable: "text", bubbleSizeVariable: "text", bubbleColorVariable: "text",
   volcanoX: "text", volcanoY: "text", volcanoLabel: "text", volcanoGroupA: "text", volcanoGroupB: "text", rightYDataset: "text", y2Label: "text",
   palette: "palette", series: "styles", points: "pointStyles", outlineColor: "color", pointOutlineColor: "color", errorColor: "color",
@@ -221,6 +225,8 @@ type ParamKind =
   | "numbers-by-name"
   | "number-pairs-by-name"
   | "plot-curves"
+  | "texts-by-name"
+  | "text-pairs-by-name"
   | readonly string[]
   | Limits;
 // prettier-ignore
@@ -243,6 +249,16 @@ const PARAMS = {
   sharedParams: "names",
   fixed: "numbers-by-name",
   bounds: "number-pairs-by-name",
+  // Info-constant hooks (v2): the constant's name per fixed parameter, and
+  // per bound side a plain number or a constant name — resolved live before
+  // the run, never passed to R as text.
+  fixedConstants: "texts-by-name",
+  boundsConstants: "text-pairs-by-name",
+  ligandConcentrationConstant: "name",
+  ligandKdConstant: "name",
+  constantHook: "name",
+  zeroConstantHook: "name",
+  hundredConstantHook: "name",
   hypotheticalValue: "number", baseline: "number", q: ROUT_Q, lambda: "number",
   // Remove baseline (v2): how the baseline is defined, and the values it needs.
   baselineMethod: REMOVE_BASELINE_METHODS, firstN: "number", controls: "names", constant: "number",
@@ -686,6 +702,24 @@ function readParam(kind: ParamKind, v: unknown, report?: (dropped: number) => vo
     if (dropped) report?.(dropped);
     return Object.keys(kept).length ? kept : undefined;
   }
+  if (kind === "texts-by-name") {
+    if (!isObj(v)) return undefined;
+    const kept = Object.fromEntries(Object.entries(v).filter(([, s]) => typeof s === "string"));
+    const dropped = Object.keys(v).length - Object.keys(kept).length;
+    if (dropped) report?.(dropped);
+    return Object.keys(kept).length ? kept : undefined;
+  }
+  if (kind === "text-pairs-by-name") {
+    if (!isObj(v)) return undefined;
+    const kept = Object.fromEntries(
+      Object.entries(v).filter(
+        ([, p]) => Array.isArray(p) && p.length === 2 && p.every((s) => typeof s === "string"),
+      ),
+    );
+    const dropped = Object.keys(v).length - Object.keys(kept).length;
+    if (dropped) report?.(dropped);
+    return Object.keys(kept).length ? kept : undefined;
+  }
   if (kind === "name-and-names") {
     if (!isObj(v) || typeof v.name !== "string" || !Array.isArray(v.levels)) return undefined;
     const levels = v.levels.filter((s): s is string => typeof s === "string");
@@ -884,7 +918,20 @@ function readFloatingNotes(raw: unknown, label: string, issues: ProjectIssue[]):
   return notes.length ? notes : undefined;
 }
 
-const NODE_TYPES: NodeType[] = ["table", "analysis", "graph", "figure"];
+const NODE_TYPES: NodeType[] = ["table", "analysis", "graph", "figure", "info"];
+
+/** An info sheet as a file holds it, forgivingly: constants read as names +
+ *  string values, notes as text, and the linked table as an id (checked
+ *  against the project's tables in parseProjectFile). Always carries
+ *  `linkedTableId` (null when global), so a save/load round-trips clean. */
+function readInfoSheet(raw: unknown): InfoSheetData {
+  const obj = isObj(raw) ? raw : {};
+  return {
+    constants: readInfoConstants(obj.constants),
+    notes: typeof obj.notes === "string" ? obj.notes : "",
+    linkedTableId: typeof obj.linkedTableId === "string" ? obj.linkedTableId : null,
+  };
+}
 
 /** A figure's fields as a file holds them, forgivingly: a missing or empty
  *  `panels` opens as an empty figure (not an error); a panel out of range is
@@ -1024,6 +1071,10 @@ function readNode(
     const cached = readCachedResult(node.cachedResult, node.analysisType as string, node.name, issues);
     if (cached) node.cachedResult = cached;
     else delete node.cachedResult;
+  } else if (type === "info") {
+    // An info sheet lives at the project root, never under a table.
+    node.parentId = null;
+    node.info = readInfoSheet(n.info);
   } else if (type === "figure") {
     // A figure may span tables, so it lives at the project root, never under one table.
     node.parentId = null;
@@ -1285,12 +1336,13 @@ export function parseProjectFile(
   /** The item with this id: one of the file's own, never a name every object has ("constructor"). */
   const nodeOf = (id: unknown) => (isIn(nodes, id) ? nodes[id as string] : undefined);
   // Analyses and graphs belong to a table: drop those whose table didn't survive.
-  // Figures live at the project root (they may span tables), so they stay.
+  // Figures and info sheets live at the project root (a figure may span tables),
+  // so they stay.
   // Orphaned analyses stay too (v2 item 5): their table is gone, and the saved
   // result is what they show. A flag that contradicts a surviving table is
   // cleared instead — the analysis still has its table, so it isn't orphaned.
   for (const node of Object.values(nodes)) {
-    if (node.type === "figure") continue;
+    if (node.type === "figure" || node.type === "info") continue;
     if (node.type === "analysis" && node.orphaned) {
       if (nodeOf(node.parentId)?.type === "table") {
         delete node.orphaned;
@@ -1303,6 +1355,12 @@ export function parseProjectFile(
     if (node.type !== "table" && nodeOf(node.parentId)?.type !== "table") {
       delete nodes[node.id];
       skipped++;
+    }
+  }
+  // An info sheet linked to a table that didn't survive becomes project info.
+  for (const node of Object.values(nodes)) {
+    if (node.type === "info" && node.info?.linkedTableId && nodeOf(node.info.linkedTableId)?.type !== "table") {
+      node.info = { ...node.info, linkedTableId: null };
     }
   }
   if (skipped) {
@@ -1327,14 +1385,18 @@ export function parseProjectFile(
   // with neither, there is nothing to show.
   if (tables.length === 0 && orphans.length === 0)
     return { error: "This project file has no readable data tables." };
-  // Saved order first, then anything the order missed: tables, then figures
-  // (figures live at the project root, after the tables, in creation order),
-  // then orphaned analyses (they live at the project root too).
+  // Saved order first, then anything the order missed: tables, then info
+  // sheets, then figures (figures live at the project root, after the
+  // tables, in creation order), then orphaned analyses (they live at the
+  // project root too).
   const figures = Object.values(nodes).filter((n) => n.type === "figure");
+  const infos = Object.values(nodes).filter((n) => n.type === "info");
   const rootOrder = [
     ...new Set([
       ...ids(project.rootOrder).filter((id) => nodeOf(id)?.type === "table"),
       ...tables.map((t) => t.id),
+      ...ids(project.rootOrder).filter((id) => nodeOf(id)?.type === "info"),
+      ...infos.map((f) => f.id),
       ...ids(project.rootOrder).filter((id) => nodeOf(id)?.type === "figure"),
       ...figures.map((f) => f.id),
       ...ids(project.rootOrder).filter((id) => nodeOf(id)?.type === "analysis" && nodeOf(id)?.orphaned),

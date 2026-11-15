@@ -4,8 +4,8 @@
 // `pzfx` (R, MIT) and `pypzfx` (Python, MIT) readers and their `.pzfx` test
 // files — never from Prism's own code. Only the data tables are in the file's
 // readable XML: analyses, graphs and layouts live in a compressed `<Template>`
-// blob Titer doesn't read, so an import brings in the tables only; analyses
-// and graphs are rebuilt in Titer.
+// blob Titer doesn't read, so an import brings in the tables and the info
+// sheets; analyses and graphs are rebuilt in Titer.
 //
 // What maps where (Prism `TableType` → Titer table):
 //   OneWay      → Column    (each Y column is a group)
@@ -39,6 +39,7 @@
 
 import type { ProjectFilePayload } from "./project-file";
 import type { ProjectNode, TableData, TableErrorFormat, TableType } from "../store/types";
+import { newConstantId, readInfoConstants } from "./info-sheets";
 
 export interface PzfxIssue {
   severity: "error" | "warning";
@@ -49,6 +50,8 @@ export interface PzfxImport {
   project: ProjectFilePayload;
   /** Tables imported, in file order. */
   tables: string[];
+  /** Info sheets imported, in file order. */
+  infoSheets: string[];
   issues: PzfxIssue[];
 }
 
@@ -603,6 +606,7 @@ export function parsePzfx(text: string): PzfxImport {
     return {
       project: { nodes: {}, rootOrder: [], childOrder: {}, activeNodeId: null },
       tables: [],
+      infoSheets: [],
       issues: [{ severity: "error", message: err instanceof Error ? err.message : "Not a valid .pzfx file." }],
     };
   }
@@ -610,6 +614,7 @@ export function parsePzfx(text: string): PzfxImport {
     return {
       project: { nodes: {}, rootOrder: [], childOrder: {}, activeNodeId: null },
       tables: [],
+      infoSheets: [],
       issues: [{ severity: "error", message: "This file isn't a GraphPad Prism .pzfx file." }],
     };
   }
@@ -633,9 +638,38 @@ export function parsePzfx(text: string): PzfxImport {
   if (tables.length === 0 && issues.every((i) => i.severity === "warning")) {
     issues.unshift({ severity: "error", message: "No tables in this file could be imported." });
   }
+  // Info sheets live beside the tables (`<Info>` under the root): their
+  // constants and notes come in as info nodes at the project root, after the
+  // tables — a `.pzfx` carries no table link for them, so they open as
+  // project info.
+  const infoSheets: string[] = [];
+  for (const infoNode of root.children.filter((c) => c.tag === "Info")) {
+    const childText = (tag: string) => infoNode.children.find((c) => c.tag === tag)?.text ?? "";
+    const constants = readInfoConstants(
+      infoNode.children
+        .filter((c) => c.tag === "Constant")
+        .map((c) => ({
+          id: newConstantId(),
+          name: c.children.find((x) => x.tag === "Name")?.text ?? "",
+          value: c.children.find((x) => x.tag === "Value")?.text ?? "",
+        })),
+    );
+    const title = childText("Title");
+    const node: ProjectNode = {
+      id: genId("info"),
+      type: "info",
+      name: title === "" ? "Project info" : title,
+      parentId: null,
+      info: { constants, notes: childText("Notes"), linkedTableId: null },
+    };
+    nodes[node.id] = node;
+    rootOrder.push(node.id);
+    infoSheets.push(node.name);
+  }
   return {
     project: { nodes, rootOrder, childOrder, activeNodeId: rootOrder[0] ?? null },
     tables,
+    infoSheets,
     issues,
   };
 }

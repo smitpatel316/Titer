@@ -44,6 +44,7 @@ import type { ProjectFilePayload } from "./project-file";
 import type { ProjectNode, TableData, TableType } from "../store/types";
 import type { NonlinearModel } from "../stats/types";
 import { parseCsv } from "./prism-csv";
+import { newConstantId, readInfoConstants } from "./info-sheets";
 
 export interface ConvertIssue {
   severity: "error" | "warning";
@@ -64,6 +65,8 @@ export interface ConvertReport {
   graphsNotTransferred: number;
   layoutsNotTransferred: number;
   infoSheets: number;
+  /** Info sheets transferred, in file order. */
+  infoSheetNames: string[];
   orphanSheetsIgnored: number;
   unreferencedTablesIgnored: number;
   issues: ConvertIssue[];
@@ -429,6 +432,7 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
     graphsNotTransferred: (sheets.graphs ?? []).length,
     layoutsNotTransferred: (sheets.layouts ?? []).length,
     infoSheets: (sheets.info ?? []).length,
+    infoSheetNames: [],
     orphanSheetsIgnored: 0,
     unreferencedTablesIgnored: 0,
     issues,
@@ -795,6 +799,43 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
     report.tables.push(name);
   }
 
+  // ── Info sheets ──
+  // `info/<uid>/sheet.json` holds the constants (name + string value) and
+  // the notes; the sheet has no table link in the format Titer can trust
+  // (no `table` reference on an InfoSheet), so it opens as project info.
+  // The trailing empty-named constant Prism writes (name "" + value "") is
+  // the new-row placeholder, not a constant — it is left out.
+  interface PrismInfoSheet {
+    title?: string;
+    notesText?: string;
+    constants?: { name?: string; value?: string | number }[];
+  }
+  for (const infoUid of sheets.info ?? []) {
+    const sheet = await readJson<PrismInfoSheet>(`info/${infoUid}/sheet.json`);
+    if (!sheet) {
+      issues.push({ severity: "warning", message: `Info sheet “${infoUid}” has no sheet.json; it was left out.` });
+      continue;
+    }
+    const name = titleOf(infoUid, typeof sheet.title === "string" && sheet.title !== "" ? sheet.title : "Project info");
+    const constants = readInfoConstants(
+      (sheet.constants ?? []).map((c) => ({
+        id: newConstantId(),
+        name: c.name ?? "",
+        value: c.value === undefined ? "" : String(c.value),
+      })),
+    );
+    const node: ProjectNode = {
+      id: genId("info"),
+      type: "info",
+      name,
+      parentId: null,
+      info: { constants, notes: sheet.notesText ?? "", linkedTableId: null },
+    };
+    nodes[node.id] = node;
+    rootOrder.push(node.id);
+    report.infoSheetNames.push(name);
+  }
+
   // ── Analyses ──
   for (const analysisUid of sheets.analyses ?? []) {
     const sheet = await readJson<PrismAnalysisSheet>(`analyses/${analysisUid}/sheet.json`);
@@ -926,7 +967,10 @@ export function formatReport(report: ConvertReport): string {
   if (report.layoutsNotTransferred) {
     lines.push(`Layouts not transferred: ${report.layoutsNotTransferred} — re-create with the figure builder.`);
   }
-  if (report.infoSheets) lines.push(`Info sheets not transferred: ${report.infoSheets} (Titer has no info sheet).`);
+  if (report.infoSheets)
+    lines.push(
+      `Info sheets transferred: ${report.infoSheets}${report.infoSheetNames.length ? " — " + report.infoSheetNames.join(", ") : ""}.`,
+    );
   if (report.orphanSheetsIgnored || report.unreferencedTablesIgnored) {
     lines.push(
       `Ignored: ${report.orphanSheetsIgnored} orphan sheet(s) and ${report.unreferencedTablesIgnored} unreferenced table(s) that document.json doesn't list.`,

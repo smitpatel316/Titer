@@ -32,7 +32,7 @@ function check(name: string, ok: boolean, detail: string) {
 const input = await readFile(DEMO);
 const zip = await JSZip.loadAsync(input);
 const { project } = await convertPrism(new Uint8Array(input), "prism2R-demo_dataset.prism");
-const tables = project.rootOrder.map((id) => project.nodes[id]);
+const tables = project.rootOrder.map((id) => project.nodes[id]).filter((n) => n?.type === "table");
 const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis");
 
 // W1+W2 (C-06): round-trip .prism → .hlx → .prism on the demo file — tables
@@ -40,7 +40,7 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
 {
   const written = await writePrism(project, "1.0.7");
   const back = await convertPrism(written.bytes, "round-trip.prism");
-  const backTables = back.project.rootOrder.map((id) => back.project.nodes[id]);
+  const backTables = back.project.rootOrder.map((id) => back.project.nodes[id]).filter((n) => n?.type === "table");
   const tablesIdentical =
     backTables.length === tables.length &&
     backTables.every((t, i) => JSON.stringify(t.data) === JSON.stringify(tables[i].data));
@@ -84,6 +84,36 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
       !writtenPaths.some((p) => p.startsWith("graphs/") || p.startsWith("layouts/")) &&
       !writtenPaths.some((p) => p.endsWith("results.json")),
     `createdBy ${writtenDoc.createdBy?.name} ${writtenDoc.createdBy?.version}, format ${writtenDoc.formatVersion}, ${writtenUuids.size} fresh UUIDs, ${writtenPaths.length} entries`,
+  );
+  // W6: the demo's info sheet round-trips — written as `info/<uid>/sheet.json`
+  // and listed in document.json's sheets.info, and read back as the same
+  // info node with the same constants.
+  const writtenInfoPaths = writtenPaths.filter((p) => p.startsWith("info/") && p.endsWith("sheet.json"));
+  const writtenInfoDoc =
+    writtenInfoPaths.length === 1
+      ? (JSON.parse((await writtenZip.file(writtenInfoPaths[0])!.async("string")) as string) as {
+          "@class"?: string;
+          title?: string;
+          notesText?: string;
+          constants?: { name?: string; value?: string }[];
+        })
+      : null;
+  const backInfos = Object.values(back.project.nodes).filter((n) => n.type === "info");
+  const sourceInfo = Object.values(project.nodes).find((n) => n.type === "info");
+  // Constant ids are fresh per import, so the round-trip compares name/value pairs only.
+  const pairs = (n: (typeof backInfos)[number] | undefined) =>
+    JSON.stringify((n?.info?.constants ?? []).map((c) => [c.name, c.value]));
+  check(
+    "W6 round-trip info sheet",
+    written.report.infoSheets.join(", ") === "Project info 1" &&
+      writtenInfoPaths.length === 1 &&
+      writtenInfoDoc?.["@class"] === "InfoSheet" &&
+      writtenInfoDoc?.title === "Project info 1" &&
+      (writtenDoc as { sheets?: { info?: string[] } }).sheets?.info?.length === 1 &&
+      backInfos.length === 1 &&
+      backInfos[0].name === "Project info 1" &&
+      pairs(backInfos[0]) === pairs(sourceInfo),
+    `written ${writtenInfoPaths.length} info sheet.json; back: ${backInfos.map((i) => i.name).join(", ")}`,
   );
   // W4: a minimal one-table project writes exactly the required entries.
   const minimal = await writePrism(

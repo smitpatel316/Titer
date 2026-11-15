@@ -73,7 +73,7 @@ try {
   process.exit(1);
 }
 const { project, report } = result;
-const tables = project.rootOrder.map((id) => project.nodes[id]);
+const tables = project.rootOrder.map((id) => project.nodes[id]).filter((n) => n?.type === "table");
 const tableByName = new Map<string, (typeof tables)[number][]>();
 for (const t of tables) {
   const list = tableByName.get(t.name) ?? [];
@@ -249,10 +249,34 @@ check(
     report.orphanSheetsIgnored === 7 &&
     report.unreferencedTablesIgnored === 8 &&
     report.analysesUnsupported.length === 0 &&
+    report.infoSheets === 1 &&
+    report.infoSheetNames.join(", ") === "Project info 1" &&
+    reportText.includes("Info sheets transferred: 1 — Project info 1.") &&
     reportText.includes("not transferred") &&
     !reportText.includes("100% compatible"),
-  `tables=${report.tables.length} graphs=${report.graphsNotTransferred} layouts=${report.layoutsNotTransferred} orphans=${report.orphanSheetsIgnored} unreferenced=${report.unreferencedTablesIgnored} unsupported=${report.analysesUnsupported.length}`,
+  `tables=${report.tables.length} graphs=${report.graphsNotTransferred} layouts=${report.layoutsNotTransferred} orphans=${report.orphanSheetsIgnored} unreferenced=${report.unreferencedTablesIgnored} unsupported=${report.analysesUnsupported.length} info=${report.infoSheets}`,
 );
+
+// P10: the demo file's info sheet transfers — name, constants (string
+// values, as Prism stores them) and notes — as an info node at the project
+// root, after the tables. The trailing empty-named constant Prism writes is
+// the new-row placeholder, not a constant.
+{
+  const infos = project.rootOrder.map((id) => project.nodes[id]).filter((n) => n?.type === "info");
+  const sheet = infos[0]?.info;
+  const byName = new Map((sheet?.constants ?? []).map((c) => [c.name, c.value]));
+  check(
+    "P10 info sheet",
+    infos.length === 1 &&
+      infos[0].name === "Project info 1" &&
+      project.rootOrder.indexOf(infos[0].id) === 14 &&
+      byName.get("Experiment Date") === "Dec-01-2024" &&
+      byName.size === 6 &&
+      sheet?.notes === "" &&
+      sheet?.linkedTableId === null,
+    `${infos.length} info sheet(s); constants: ${(sheet?.constants ?? []).map((c) => `${c.name}=${JSON.stringify(c.value)}`).join(", ")}`,
+  );
+}
 
 // P9 (C-11): corrupt files fail with a plain-language error, never a crash.
 async function expectRefusal(name: string, bytes: Uint8Array, want: string) {

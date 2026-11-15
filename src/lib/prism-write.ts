@@ -42,6 +42,8 @@ export interface PrismWriteReport {
   analyses: string[];
   /** Analyses present in the project that weren't written (named, not dropped). */
   analysesNotWritten: string[];
+  /** Info sheets written, in project order. */
+  infoSheets: string[];
   issues: PrismWriteIssue[];
 }
 
@@ -190,7 +192,7 @@ const replicateEntry = (lastRow: number) => ({
 
 export async function writePrism(project: ProjectFilePayload, appVersion: string): Promise<PrismWriteResult> {
   const issues: PrismWriteIssue[] = [];
-  const report: PrismWriteReport = { tables: [], analyses: [], analysesNotWritten: [], issues };
+  const report: PrismWriteReport = { tables: [], analyses: [], analysesNotWritten: [], infoSheets: [], issues };
   const zip = new JSZip();
   const setJson = (path: string, value: unknown) => zip.file(path, JSON.stringify(value, null, 2));
 
@@ -570,6 +572,27 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
       "Graphs and layouts are not written — Prism stores them in a binary format it does not document. Re-create them in Prism from the tables.",
   });
 
+  // Info sheets: one `info/<uid>/sheet.json` each, listed in document.json's
+  // sheets.info — the shape the importer reads (an InfoSheet with title,
+  // notesText and name/value constants). The trailing empty constant Prism
+  // writes is a new-row placeholder Titer doesn't emit.
+  const infoUids: string[] = [];
+  for (const infoNode of project.rootOrder.map((id) => project.nodes[id]).filter((n) => n?.type === "info")) {
+    const infoUid = crypto.randomUUID().toUpperCase();
+    infoUids.push(infoUid);
+    titles[infoUid] = { title: infoNode.name };
+    setJson(`info/${infoUid}/sheet.json`, {
+      "@class": "InfoSheet",
+      $id: "sheets/info_sheet/info_sheet.schema.json",
+      uid: infoUid,
+      fenID: 0,
+      title: infoNode.name,
+      notesText: infoNode.info?.notes ?? "",
+      constants: (infoNode.info?.constants ?? []).map((c) => ({ name: c.name, value: c.value })),
+    });
+    report.infoSheets.push(infoNode.name);
+  }
+
   setJson("document.json", {
     "@class": "Document",
     creationDate: new Date().toISOString(),
@@ -581,7 +604,7 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
       graphs: [],
       layouts: [],
       analyses: analysisUids,
-      info: [],
+      info: infoUids,
       data: dataSheetUids,
     },
     sheetAttributesMap: titles,
@@ -596,6 +619,9 @@ export function formatWriteReport(report: PrismWriteReport): string {
   const lines: string[] = [
     `Tables written: ${report.tables.length}${report.tables.length ? " — " + report.tables.join(", ") : ""}`,
     `Analyses written: ${report.analyses.length}${report.analyses.length ? " — " + report.analyses.join(", ") : ""}`,
+    ...(report.infoSheets.length
+      ? [`Info sheets written: ${report.infoSheets.length} — ${report.infoSheets.join(", ")}`]
+      : []),
   ];
   if (report.analysesNotWritten.length) {
     lines.push(`Analyses not written (not yet supported in Prism): ${report.analysesNotWritten.join("; ")}`);

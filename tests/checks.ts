@@ -33,6 +33,15 @@ import {
 import { highlightStyle, searchProject } from "../src/lib/project-search";
 import { kaplanMeier } from "../src/lib/kaplan-meier";
 import { writePrism } from "../src/lib/prism-write";
+import {
+  infoSheetsOf,
+  newInfoSheetData,
+  resolveAnalysisParams,
+  resolveBoundSide,
+  resolveConstantText,
+  resolveGraphOptions,
+  resolveHookedNumber,
+} from "../src/lib/info-sheets";
 import JSZip from "jszip";
 import {
   DEFAULT_GRAPH_OPTIONS,
@@ -461,6 +470,279 @@ check("replacing the copy's data leaves the original family untouched", () => {
   ok(JSON.stringify(s.nodes[t1].data?.rows) !== JSON.stringify(replacement.rows), "the original keeps its own values");
   strictEqual(s.nodes[copyAnalysis].parentId, copyId);
   strictEqual(s.nodes.a1.parentId, t1);
+});
+
+// R3 #22b: an info sheet goes between tables and figures, carries Prism's
+// six default constants, edits undo as one change, and survives its table
+// (the link clears) when the table is deleted.
+check("info sheet creation, edits, and the 500-sheet cap (R3 #22b)", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  const figure: ProjectNode = {
+    id: "f1",
+    type: "figure",
+    name: "Figure",
+    parentId: null,
+    panels: [],
+    grid: { rows: 1, cols: 1 },
+    figureSize: { widthIn: 10, heightIn: 7.5 },
+    labelStyle: { position: "top-left", fontSizePt: 12, bold: true },
+    figureTitle: "",
+    sharedLegend: "none",
+    dpi: "600",
+  } as ProjectNode;
+  s = reducer(s, { type: "create", node: figure });
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "i1",
+      type: "info",
+      name: "Project info",
+      parentId: null,
+      info: { constants: [], notes: "", linkedTableId: t1 },
+    },
+  });
+  deepStrictEqual(s.rootOrder, [t1, "i1", "f1"]);
+  // The blank sheet the store creates carries Prism's six default constants.
+  deepStrictEqual(
+    newInfoSheetData().constants.map((c) => c.name),
+    ["Experiment Date", "Experiment ID", "Notebook ID", "Project", "Experimenter", "Protocol"],
+  );
+  const edited = reducer(s, {
+    type: "updateInfoSheet",
+    id: "i1",
+    info: { constants: [], notes: "hello", linkedTableId: t1 },
+    at: Date.now(),
+  });
+  strictEqual(edited.nodes.i1?.info?.notes, "hello");
+  strictEqual(reducer(edited, { type: "undo" }).nodes.i1?.info?.notes, "");
+  const unlinked = reducer(edited, { type: "remove", id: t1 });
+  strictEqual(unlinked.nodes.i1?.info?.linkedTableId, null);
+  ok(unlinked.nodes.i1, "sheet survives its table");
+  // The 500-sheet cap: 500 create in, the 501st refused.
+  let capped = makeInitialState();
+  for (let n = 0; n < 500; n++) {
+    capped = reducer(capped, {
+      type: "create",
+      node: {
+        id: `info-${n}`,
+        type: "info",
+        name: "Info",
+        parentId: null,
+        info: { constants: [], notes: "", linkedTableId: null },
+      },
+    });
+  }
+  const before = capped.rootOrder.length;
+  capped = reducer(capped, {
+    type: "create",
+    node: {
+      id: "info-500",
+      type: "info",
+      name: "Info",
+      parentId: null,
+      info: { constants: [], notes: "", linkedTableId: null },
+    },
+  });
+  strictEqual(capped.rootOrder.length, before);
+});
+
+// R3 #22c: an info sheet round-trips through .hlx, and a link to a table
+// that didn't survive the load becomes project info.
+check("info sheet .hlx round-trip and dangling links (R3 #22c)", () => {
+  const node: ProjectNode = {
+    id: "i1",
+    type: "info",
+    name: "Project info",
+    parentId: null,
+    info: {
+      constants: [{ id: "c1", name: "Lot", value: "A123" }],
+      notes: "n",
+      linkedTableId: "missing",
+    },
+  };
+  const first = read(
+    JSON.stringify({ version: 1, nodes: { i1: node }, rootOrder: ["i1"], childOrder: {}, activeNodeId: "i1" }),
+  );
+  strictEqual(first.project.nodes.i1?.info?.linkedTableId, null);
+  strictEqual(first.project.nodes.i1?.info?.constants[0]?.value, "A123");
+  const again = read(serializeProjectFile(first.project));
+  strictEqual(again.updated, false);
+  strictEqual(again.project.nodes.i1?.info?.constants[0]?.name, "Lot");
+});
+
+// R3 #22d: `{{Name}}` in a title resolves to the constant's value (an
+// unknown name stays visible), and a hooked number either resolves or
+// errors — never silently guesses.
+check("info-constant hooks resolve in titles and numbers (R3 #22d)", () => {
+  const nodes: Record<string, ProjectNode> = {
+    i1: {
+      id: "i1",
+      type: "info",
+      name: "Project info",
+      parentId: null,
+      info: {
+        constants: [
+          { id: "c1", name: "Lot", value: "A123" },
+          { id: "c2", name: "Dose", value: "3.5" },
+          { id: "c3", name: "Blank", value: "" },
+          { id: "c4", name: "Word", value: "abc" },
+        ],
+        notes: "",
+        linkedTableId: null,
+      },
+    },
+  };
+  const sheets = infoSheetsOf(nodes, ["i1"]);
+  strictEqual(resolveConstantText("Lot {{Lot}}", sheets), "Lot A123");
+  strictEqual(resolveConstantText("{{Nope}} stays", sheets), "{{Nope}} stays");
+  deepStrictEqual(resolveBoundSide("3.5", sheets), { value: 3.5 });
+  deepStrictEqual(resolveHookedNumber("{{Dose}}", sheets), { value: 3.5 });
+  deepStrictEqual(resolveHookedNumber("{{Nope}}", sheets), { error: "No info constant named “Nope”." });
+  deepStrictEqual(resolveHookedNumber("{{Blank}}", sheets), { error: "Info constant “Blank” is empty." });
+  deepStrictEqual(resolveHookedNumber("{{Word}}", sheets), { error: "Info constant “Word” is “abc”, not a number." });
+});
+
+// R3 #22e: a hooked axis limit wins over the typed number; an unresolvable
+// hook falls back to it.
+check("info-constant hooks resolve in axis limits (R3 #22e)", () => {
+  const nodes: Record<string, ProjectNode> = {
+    i1: {
+      id: "i1",
+      type: "info",
+      name: "Project info",
+      parentId: null,
+      info: {
+        constants: [
+          { id: "c1", name: "Max", value: "10" },
+          { id: "c2", name: "Word", value: "abc" },
+        ],
+        notes: "",
+        linkedTableId: null,
+      },
+    },
+  };
+  const sheets = infoSheetsOf(nodes, ["i1"]);
+  const hooked = resolveGraphOptions(
+    { yMax: 5, yMaxConstant: "Max", title: "T {{Max}}" } as GraphOptions,
+    sheets,
+  );
+  strictEqual(hooked.yMax, 10);
+  strictEqual(hooked.title, "T 10");
+  const broken = resolveGraphOptions({ yMax: 5, yMaxConstant: "Word", yMin: 1 } as GraphOptions, sheets);
+  strictEqual(broken.yMax, 5);
+  strictEqual(broken.yMin, 1);
+});
+
+// R3 #22f: nonlinear-regression hooks (fixed, bounds, ligand, Kd) resolve;
+// a missing hook errors instead of running with a guessed number.
+check("info-constant hooks resolve in nonlinear-regression params (R3 #22f)", () => {
+  const nodes: Record<string, ProjectNode> = {
+    i1: {
+      id: "i1",
+      type: "info",
+      name: "Project info",
+      parentId: null,
+      info: {
+        constants: [
+          { id: "c1", name: "EC50", value: "-6" },
+          { id: "c2", name: "Lo", value: "0" },
+          { id: "c3", name: "Hi", value: "2" },
+          { id: "c4", name: "Ligand", value: "1" },
+          { id: "c5", name: "Kd", value: "0.5" },
+        ],
+        notes: "",
+        linkedTableId: null,
+      },
+    },
+  };
+  const sheets = infoSheetsOf(nodes, ["i1"]);
+  const okResult = resolveAnalysisParams(
+    {
+      model: "sigmoidal-4pl-logx",
+      fixedConstants: { LogEC50: "EC50" },
+      boundsConstants: { HillSlope: ["Lo", "Hi"] },
+      ligandConcentrationConstant: "Ligand",
+      ligandKdConstant: "Kd",
+    },
+    "nonlinear-regression",
+    sheets,
+  );
+  ok(!("error" in okResult), "all hooks resolve");
+  if ("params" in okResult) {
+    const p = okResult.params as {
+      fixed?: Record<string, number>;
+      bounds?: Record<string, [number, number]>;
+      ligandConcentration?: number;
+      ligandKd?: number;
+    };
+    strictEqual(p.fixed?.LogEC50, -6);
+    deepStrictEqual(p.bounds?.HillSlope, [0, 2]);
+    strictEqual(p.ligandConcentration, 1);
+    strictEqual(p.ligandKd, 0.5);
+  }
+  const bad = resolveAnalysisParams(
+    { model: "sigmoidal-4pl-logx", fixedConstants: { LogEC50: "Nope" } },
+    "nonlinear-regression",
+    sheets,
+  );
+  ok("error" in bad && bad.error.includes("No info constant"), "missing hook errors, never guesses");
+});
+
+// R3 #22g: transform constants (remove-baseline, normalize) resolve hooks.
+check("info-constant hooks resolve in transform constants (R3 #22g)", () => {
+  const nodes: Record<string, ProjectNode> = {
+    i1: {
+      id: "i1",
+      type: "info",
+      name: "Project info",
+      parentId: null,
+      info: {
+        constants: [
+          { id: "c1", name: "Base", value: "3.5" },
+          { id: "c2", name: "Zero", value: "0" },
+          { id: "c3", name: "Hundred", value: "100" },
+        ],
+        notes: "",
+        linkedTableId: null,
+      },
+    },
+  };
+  const sheets = infoSheetsOf(nodes, ["i1"]);
+  const base = resolveAnalysisParams(
+    { baselineMethod: "constant", constantHook: "Base" },
+    "remove-baseline",
+    sheets,
+  );
+  ok("params" in base, "baseline hook resolves");
+  if ("params" in base) strictEqual((base.params as { constant?: number }).constant, 3.5);
+  const norm = resolveAnalysisParams(
+    {
+      normalizeMethod: "zero-to-hundred",
+      constantHook: "Base",
+      zeroConstantHook: "Zero",
+      hundredConstantHook: "Hundred",
+    },
+    "normalize",
+    sheets,
+  );
+  ok("params" in norm, "normalize hooks resolve");
+  if ("params" in norm) {
+    const p = norm.params as { constant?: number; zeroConstant?: number; hundredConstant?: number };
+    strictEqual(p.constant, 3.5);
+    strictEqual(p.zeroConstant, 0);
+    strictEqual(p.hundredConstant, 100);
+  }
+});
+
+// R3 #22h: a .pzfx file's <Info> comes in as an info sheet after the tables.
+check(".pzfx info sheets import (R3 #22h)", () => {
+  const imported = parsePzfx(readFileSync("tests/testdata/column.pzfx", "utf8"));
+  deepStrictEqual(imported.infoSheets, ["Project info 1"]);
+  const info = imported.project.rootOrder.map((id) => imported.project.nodes[id]).find((n) => n?.type === "info");
+  strictEqual(info?.info?.constants.length, 6);
+  strictEqual(info?.info?.constants.find((c) => c.name === "Experiment Date")?.value, "2018-07-23");
+  strictEqual(imported.project.rootOrder.at(-1), info?.id);
 });
 
 // R2 FF-F12: a newer (or hand-edited) file's unknown keys and params survive a
