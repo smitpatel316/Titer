@@ -2591,8 +2591,8 @@ check("the native Analysis menu key follows the data-dependent tests (R3-16)", (
   };
   // A third data group swaps the nested t-test for the nested ANOVA.
   ok(analysisOptionsKey("nested", nestedTwo) !== analysisOptionsKey("nested", nestedThree));
-  strictEqual(analysisOptionsKey("nested", nestedTwo), "nested-t-test");
-  strictEqual(analysisOptionsKey("nested", nestedThree), "nested-anova");
+  strictEqual(analysisOptionsKey("nested", nestedTwo), "nested-t-test,plot-function");
+  strictEqual(analysisOptionsKey("nested", nestedThree), "nested-anova,plot-function");
   strictEqual(analysisOptionsKey(undefined, nestedTwo), "");
 });
 
@@ -8758,13 +8758,13 @@ check("row-means-totals wizard asks for the data sets, and finishes with its par
     type: "row-means-totals",
     params: { ys: ["A"] },
   });
-  // The menu offers it after Fraction of total on XY tables, and last
-  // (after Multiple t tests) on grouped tables.
+  // The menu offers it after Fraction of total on XY tables, and after
+  // Multiple t tests on grouped tables (Plot a function follows it there).
   const xyOrder = analysisOptionsForTable("xy").map((o) => o.value);
   strictEqual(xyOrder[xyOrder.indexOf("row-means-totals") - 1], "fraction-of-total");
   const groupedOrder = analysisOptionsForTable("grouped").map((o) => o.value);
   strictEqual(groupedOrder[groupedOrder.indexOf("row-means-totals") - 1], "multiple-t-tests");
-  strictEqual(groupedOrder[groupedOrder.length - 1], "row-means-totals");
+  strictEqual(groupedOrder[groupedOrder.indexOf("row-means-totals") + 1], "plot-function");
   // Not offered on column tables: per-column descriptives already cover them.
   ok(!analysisOptionsForTable("column").some((o) => o.value === "row-means-totals"));
 });
