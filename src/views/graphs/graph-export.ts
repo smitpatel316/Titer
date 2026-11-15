@@ -4,16 +4,19 @@ import { loadPlotly } from "./plotly";
 import { withoutSelection } from "./selection";
 import { vectorTraces } from "./plot-helpers";
 import { largestAt, PX_PER_INCH, withDpi } from "../../lib/image-dpi";
+import { decodePng, pdfEncode, tiffEncode } from "../../lib/raster-export";
 
-export type ExportFormat = "png" | "jpeg" | "svg";
+export type ExportFormat = "png" | "jpeg" | "svg" | "pdf" | "tiff";
 export const EXPORT_FORMATS: { value: ExportFormat; label: string }[] = [
   { value: "png", label: "PNG" },
   { value: "jpeg", label: "JPG" },
   { value: "svg", label: "SVG" },
+  { value: "pdf", label: "PDF" },
+  { value: "tiff", label: "TIFF" },
 ];
-const EXTENSION: Record<ExportFormat, string> = { png: "png", jpeg: "jpg", svg: "svg" };
+const EXTENSION: Record<ExportFormat, string> = { png: "png", jpeg: "jpg", svg: "svg", pdf: "pdf", tiff: "tiff" };
 /** A raster image's resolution, in dots per inch (SVG has none). */
-export const RESOLUTIONS = ["150", "300", "600"] as const;
+export const RESOLUTIONS = ["150", "300", "600", "900", "1200"] as const;
 export type Resolution = (typeof RESOLUTIONS)[number];
 
 // The folder of the last export, offered again for the next one this session.
@@ -21,7 +24,8 @@ let lastFolder: string | null = null;
 
 type Size = { width: number; height: number };
 
-// JPEG has no transparency: a transparent graph is drawn on white for it.
+// JPEG, PDF and TIFF have no transparency: a transparent graph is drawn on
+// white for them (PDF/TIFF composite the PNG onto white in raster-export).
 const WHITE = { paper_bgcolor: "#ffffff", plot_bgcolor: "#ffffff" };
 
 const reason = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -39,12 +43,18 @@ function tooLarge(size: Size, dpi: Resolution) {
  *  a raster one at `dpi`. */
 async function toImage(el: HTMLElement, size: Size, format: ExportFormat, dpi: Resolution) {
   const drawn = el as HTMLElement & { data: unknown[]; layout: object };
-  const layout = format === "jpeg" ? { ...drawn.layout, ...WHITE } : drawn.layout;
+  // PDF/TIFF are built from the PNG Plotly draws (it has no PDF/TIFF output).
+  const drawnFormat = format === "pdf" || format === "tiff" ? "png" : format;
+  const layout = drawnFormat === "jpeg" || format === "pdf" || format === "tiff" ? { ...drawn.layout, ...WHITE } : drawn.layout;
   const figure = { data: vectorTraces(withoutSelection(drawn.data)), layout };
   const scale = format === "svg" ? 1 : Number(dpi) / PX_PER_INCH;
-  const url = await (await loadPlotly()).toImage(figure, { format, ...size, scale });
+  const url = await (await loadPlotly()).toImage(figure, { format: drawnFormat, ...size, scale });
   const image = await (await fetch(url)).blob();
-  return format === "svg" ? image : withDpi(new Uint8Array(await image.arrayBuffer()), format, Number(dpi));
+  if (format === "svg") return image;
+  const png = new Uint8Array(await image.arrayBuffer());
+  if (format === "pdf") return new Blob([pdfEncode(decodePng(png), Number(dpi)) as BlobPart], { type: "application/pdf" });
+  if (format === "tiff") return new Blob([tiffEncode(decodePng(png), Number(dpi)) as BlobPart], { type: "image/tiff" });
+  return withDpi(png, format as "png" | "jpeg", Number(dpi));
 }
 
 export async function saveGraphImage(el: HTMLElement, size: Size, format: ExportFormat, dpi: Resolution, name: string) {

@@ -8,6 +8,7 @@ import { loadPlotly } from "../graphs/plotly";
 import { withoutSelection } from "../graphs/selection";
 import { vectorTraces } from "../graphs/plot-helpers";
 import { PX_PER_INCH, withDpi } from "../../lib/image-dpi";
+import { decodePng, pdfEncode, tiffEncode } from "../../lib/raster-export";
 import {
   composeFigureSvg,
   figureExportSize,
@@ -22,7 +23,7 @@ import { buildPanelFigure } from "./panel-figure";
 import type { ExportFormat, Resolution } from "../graphs/graph-export";
 import type { FigurePanel, ProjectNode } from "../../store/types";
 
-const EXTENSION: Record<ExportFormat, string> = { png: "png", jpeg: "jpg", svg: "svg" };
+const EXTENSION: Record<ExportFormat, string> = { png: "png", jpeg: "jpg", svg: "svg", pdf: "pdf", tiff: "tiff" };
 let lastFolder: string | null = null;
 const reason = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -59,13 +60,18 @@ async function panelImage(
       { displayModeBar: false, scrollZoom: false, doubleClick: false },
     );
     const drawn = el as unknown as { data: unknown[]; layout: object };
+    // PDF/TIFF panels are drawn as PNG (Plotly has no PDF/TIFF output); the
+    // figure's raster path encodes the composited canvas, not the panel.
+    const drawnFormat = format === "pdf" || format === "tiff" ? "png" : format;
     const layout =
-      format === "jpeg" ? { ...drawn.layout, paper_bgcolor: "#ffffff", plot_bgcolor: "#ffffff" } : drawn.layout;
+      drawnFormat === "jpeg" || format === "pdf" || format === "tiff"
+        ? { ...drawn.layout, paper_bgcolor: "#ffffff", plot_bgcolor: "#ffffff" }
+        : drawn.layout;
     const figure = { data: vectorTraces(withoutSelection(drawn.data)), layout };
     const scale = format === "svg" ? 1 : Number(dpi) / PX_PER_INCH;
-    const url = await Plotly.toImage(figure, { format, ...plotSize, scale });
+    const url = await Plotly.toImage(figure, { format: drawnFormat, ...plotSize, scale });
     const image = await (await fetch(url)).blob();
-    return format === "svg" ? image : withDpi(new Uint8Array(await image.arrayBuffer()), format, Number(dpi));
+    return format === "svg" ? image : withDpi(new Uint8Array(await image.arrayBuffer()), drawnFormat, Number(dpi));
   } finally {
     void loadPlotly().then((Plotly) => Plotly.purge(el));
     el.remove();
@@ -104,7 +110,7 @@ function figureOf(figure: ProjectNode) {
 export async function renderFigureRaster(
   figure: ProjectNode,
   nodes: Record<string, ProjectNode>,
-  format: "png" | "jpeg",
+  format: "png" | "jpeg" | "pdf" | "tiff",
   dpi: Resolution,
 ): Promise<{ blob: Blob; missing: number; capped: boolean; reason?: string }> {
   const g = geometry(figure, dpi);
@@ -180,13 +186,19 @@ export async function renderFigureRaster(
       x += widths[i] + gap;
     });
   }
+  // PDF/TIFF are encoded from the composited canvas PNG (canvas has no
+  // PDF/TIFF output); PNG/JPEG keep their existing paths unchanged.
+  const rasterFormat = format === "pdf" || format === "tiff" ? "png" : format;
   const blob = await new Promise<Blob>((resolve, reject) =>
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't draw the figure."))), `image/${format}`),
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't draw the figure."))), `image/${rasterFormat}`),
   );
+  const png = new Uint8Array(await blob.arrayBuffer());
   const stamped =
-    format === "png" || format === "jpeg"
-      ? withDpi(new Uint8Array(await blob.arrayBuffer()), format, Number(dpi))
-      : blob;
+    format === "pdf"
+      ? new Blob([pdfEncode(decodePng(png), Number(dpi)) as BlobPart], { type: "application/pdf" })
+      : format === "tiff"
+        ? new Blob([tiffEncode(decodePng(png), Number(dpi)) as BlobPart], { type: "image/tiff" })
+        : withDpi(png, rasterFormat, Number(dpi));
   return { blob: stamped, missing: missing.length, capped: g.exported.capped, reason: g.exported.reason };
 }
 

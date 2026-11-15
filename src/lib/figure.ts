@@ -25,7 +25,7 @@ import {
 export const DEFAULT_FIGURE_SIZE: FigureSize = { widthIn: 10, heightIn: 7.5 };
 export const DEFAULT_LABEL_STYLE: FigureLabelStyle = { position: "top-left", fontSizePt: 12, bold: true };
 export const DEFAULT_FIGURE_DPI: Resolution = "600";
-export const FIGURE_RESOLUTIONS: Resolution[] = ["150", "300", "600"];
+export const FIGURE_RESOLUTIONS: Resolution[] = ["150", "300", "600", "900", "1200"];
 /** A figure's page, in inches: papers are in inches, and beyond this is
  *  almost certainly a typo (also see the 4:1 aspect rule below). */
 export const FIGURE_SIZE_LIMITS = { min: 1, max: 20 };

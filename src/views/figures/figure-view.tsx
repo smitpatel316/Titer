@@ -32,7 +32,7 @@ import { GRAPHS } from "../graphs";
 import { DEFAULT_GRAPH_OPTIONS, type FigurePanel, type ProjectNode, type Resolution } from "../../store/types";
 import { PanelPlot } from "./panel-plot";
 import { copyFigureImage, saveFigureImage } from "./figure-export";
-import { saveGraphImage, type ExportFormat } from "../graphs/graph-export";
+import { EXPORT_FORMATS, saveGraphImage, type ExportFormat } from "../graphs/graph-export";
 
 /** Screen pixels per inch in the editor (the figure keeps its true aspect ratio). */
 const SCREEN_PX_PER_IN = 72;
@@ -337,11 +337,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
           <RadioList
             value={exportFormat}
             onChange={setExportFormat}
-            options={[
-              { value: "png", label: "PNG" },
-              { value: "jpeg", label: "JPG" },
-              { value: "svg", label: "SVG" },
-            ]}
+            options={EXPORT_FORMATS}
           />
           <Field label="Resolution">
             <Segmented
