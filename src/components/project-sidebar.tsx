@@ -213,7 +213,10 @@ export function ProjectSidebar() {
   const childMenu = (child: OutlineNode) =>
     void popupMenu([
       ...(child.type === "graph"
-        ? [{ text: "New Figure from this Graph…", action: () => createFigure([child.id]) }]
+        ? [
+            { text: "New Figure from this Graph…", action: () => createFigure([child.id]) },
+            { text: "Clone Graph…", action: () => openSelector({ kind: "clone-graph", graphId: child.id }) },
+          ]
         : []),
       { text: "Rename", action: () => setRenaming(child.id) },
       { text: `Delete ${NODE_NAMES[child.type]}…`, action: () => removeWithConfirm(child, removeNode) },

@@ -138,6 +138,7 @@ import { convertPrism } from "../src/lib/prism";
 import { yieldToPaint } from "../src/lib/yield-to-paint";
 import { fitWidths, fitZoom } from "../src/store/use-layout";
 import { prismDropSkippedMessage } from "../src/store/use-document";
+import { cloneGraphPlan, DEFAULT_CLONE_OPTIONS, type CloneOptions } from "../src/lib/clone-graph";
 import { computeGroupedDEG } from "../src/lib/deg";
 import { binCounts, binEdges } from "../src/lib/histogram";
 import { logisticCurveNote } from "../src/views/graphs/logistic-curve";
@@ -8203,6 +8204,136 @@ check("a deleted table comes back with its analyses and graphs", () => {
   s = reducer(s, { type: "undo" });
   deepStrictEqual(Object.keys(s.nodes).sort(), [analysis.id, tableId].sort());
   deepStrictEqual(s.childOrder[tableId], [analysis.id]);
+});
+
+// ── Clone a graph ────────────────────────────────────────────────────────
+
+// Deterministic ids for the clone plan: `table-c1`, `analysis-c2`, … in creation order.
+const cloneIds = () => {
+  let n = 0;
+  return () => `c${++n}`;
+};
+const KEEP_ALL: CloneOptions = { clearY: false, clearX: false, clearTitles: false };
+
+check("cloning a graph duplicates its table, its embedded analysis and its formatting", () => {
+  let s = reducer(makeInitialState(), { type: "load", ...payload, filePath: null });
+  // A second analysis on the table, not shown on the graph: Prism leaves it behind.
+  s = reducer(s, { type: "create", node: { ...analysis, id: "a2", name: "Second fit", parentId: "t1" } });
+  const planned = cloneGraphPlan(s, "g1", KEEP_ALL, cloneIds());
+  ok("plan" in planned, "the clone should plan");
+  const before = s.nodes.g1.graphOptions!;
+  s = reducer(s, { type: "cloneGraph", plan: planned.plan });
+  strictEqual(s.past.at(-1)?.label, "Clone Graph"); // one undo step takes the whole clone back
+  deepStrictEqual(s.rootOrder, ["t1", "c1"]);
+  const tableId = "c1";
+  strictEqual(s.nodes[tableId].name, "Doses 2");
+  strictEqual(s.nodes[tableId].type, "table");
+  deepStrictEqual(s.nodes[tableId].data, table.data); // a copy, values and all
+  ok(s.nodes[tableId].data !== table.data);
+  deepStrictEqual(s.childOrder[tableId], ["c3", "c2"]); // graph then analysis, as in the original
+  const graphId = "c3";
+  strictEqual(s.activeNodeId, graphId);
+  const cloned = s.nodes[graphId];
+  strictEqual(cloned.name, "Plot");
+  strictEqual(cloned.graphType, "xy-scatter");
+  strictEqual(cloned.graphOptions!.title, "My Title");
+  strictEqual(cloned.graphOptions!.yMax, 10);
+  deepStrictEqual(cloned.graphOptions!.series, { Y1: { color: "#D55E00" } });
+  deepStrictEqual(cloned.graphOptions!.points, { "Y1#0": { color: "#0072B2", size: 10 } });
+  // The embedded regression comes along, re-pointed at the copy.
+  strictEqual(cloned.graphOptions!.regAnalysisId, "c2");
+  const clonedAnalysis = s.nodes.c2;
+  strictEqual(clonedAnalysis.name, "Fit");
+  strictEqual(clonedAnalysis.analysisType, "linear-regression");
+  deepStrictEqual(clonedAnalysis.analysisParams, { y: "Y1", forceOrigin: true });
+  // The analysis not on the graph stays behind, and the original is untouched.
+  strictEqual(Object.keys(s.nodes).length, 7);
+  ok(!Object.values(s.nodes).some((n) => n.name === "Second fit" && n.parentId === tableId));
+  strictEqual(s.nodes.g1.graphOptions!.regAnalysisId, "a1");
+  deepStrictEqual(s.nodes.g1.graphOptions, before);
+  // Undo takes the whole clone back; redo brings it back.
+  s = reducer(s, { type: "undo" });
+  strictEqual(Object.keys(s.nodes).length, 4);
+  deepStrictEqual(s.rootOrder, ["t1"]);
+  s = reducer(s, { type: "redo" });
+  strictEqual(Object.keys(s.nodes).length, 7);
+});
+
+check("cloning a graph clears Y values by default and keeps X values and titles", () => {
+  const s = reducer(makeInitialState(), { type: "load", ...payload, filePath: null });
+  const planned = cloneGraphPlan(s, "g1", DEFAULT_CLONE_OPTIONS, cloneIds());
+  ok("plan" in planned);
+  deepStrictEqual(planned.plan.nodes.c1.data, {
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["a", "1", null],
+      [null, "2", null],
+    ],
+  });
+  ok(!("excluded" in planned.plan.nodes.c1.data!)); // exclusions pointed at cleared cells
+  // The embedded analysis still comes along: clearing data doesn't drop it.
+  ok(planned.plan.nodes.c2 && planned.plan.nodes.c2.type === "analysis");
+  strictEqual(DEFAULT_CLONE_OPTIONS.clearY, true);
+  strictEqual(DEFAULT_CLONE_OPTIONS.clearX, false);
+  strictEqual(DEFAULT_CLONE_OPTIONS.clearTitles, false);
+});
+
+check("cloning a graph can clear X values and titles too", () => {
+  const s = reducer(makeInitialState(), { type: "load", ...payload, filePath: null });
+  const planned = cloneGraphPlan(s, "g1", { clearY: true, clearX: true, clearTitles: true }, cloneIds());
+  ok("plan" in planned);
+  deepStrictEqual(planned.plan.nodes.c1.data!.rows, [
+    [null, null, null],
+    [null, null, null],
+  ]);
+});
+
+check("cloning a column table's graph clears every data cell (there is no X to keep)", () => {
+  let s = makeInitialState();
+  const tableId = s.rootOrder[0];
+  s = reducer(s, {
+    type: "updateTable",
+    id: tableId,
+    data: { columns: ["Title", "A", "B"], rows: [["r1", "1", "2"]] },
+    label: "Typing",
+  });
+  s = reducer(s, {
+    type: "create",
+    node: { ...graph, id: "g9", parentId: tableId, graphType: "individual", graphOptions: newGraphOptions("individual") },
+  });
+  const planned = cloneGraphPlan(s, "g9", DEFAULT_CLONE_OPTIONS, cloneIds());
+  ok("plan" in planned);
+  deepStrictEqual(planned.plan.nodes.c1.data!.rows, [["r1", null, null]]);
+});
+
+check("cloning refuses a missing graph and a node that isn't a graph", () => {
+  const s = reducer(makeInitialState(), { type: "load", ...payload, filePath: null });
+  const missing = cloneGraphPlan(s, "nope", KEEP_ALL, cloneIds());
+  ok("error" in missing);
+  const notGraph = cloneGraphPlan(s, "a1", KEEP_ALL, cloneIds());
+  ok("error" in notGraph);
+});
+
+check("a cloned graph keeps a link to an analysis outside its family", () => {
+  const other: ProjectNode = { ...table, id: "t2", name: "Other" };
+  const far: ProjectNode = { ...analysis, id: "a9", name: "Far fit", parentId: "t2" };
+  const linked: ProjectNode = {
+    ...graph,
+    graphOptions: { ...graph.graphOptions!, regAnalysisId: "a9" },
+  };
+  const s = reducer(makeInitialState(), {
+    type: "load",
+    nodes: { t1: table, t2: other, a9: far, g1: linked },
+    rootOrder: ["t1", "t2"],
+    childOrder: { t1: ["g1"], t2: ["a9"] },
+    activeNodeId: "g1",
+    filePath: null,
+  });
+  const planned = cloneGraphPlan(s, "g1", KEEP_ALL, cloneIds());
+  ok("plan" in planned);
+  strictEqual(Object.keys(planned.plan.nodes).length, 2); // the table and the graph only
+  strictEqual(planned.plan.nodes.c2.graphOptions!.regAnalysisId, "a9");
+  strictEqual(Object.values(planned.plan.nodes).filter((n) => n.name === "Far fit").length, 0);
 });
 
 check("quick edits to one graph undo together; a pause starts a new step", () => {

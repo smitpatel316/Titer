@@ -17,6 +17,7 @@ import type { TemplateKind } from "../lib/template";
 import { ANALYSES } from "../stats";
 import { followTable, type TableMove } from "./references";
 import { applyWand as planWand, type WandReport } from "../lib/wand";
+import { cloneGraphPlan, type CloneOptions, type ClonePlan } from "../lib/clone-graph";
 import { DEFAULT_FIGURE_DPI, DEFAULT_FIGURE_SIZE, DEFAULT_LABEL_STYLE, newFigurePanels } from "../lib/figure";
 import type { FigureGrid, FigureLabelStyle, FigurePanel, FigureSize, Resolution, SharedLegend } from "./types";
 
@@ -29,6 +30,7 @@ type Selector =
   | { kind: "analysis-params"; tableId: string; testType: AnalysisPickerValue }
   | { kind: "new-graph"; tableId: string }
   | { kind: "wand"; tableId: string }
+  | { kind: "clone-graph"; graphId: string }
   | { kind: "simulate-data"; tableId: string }
   | { kind: "converter" }
   | { kind: "save-prompt" }
@@ -84,6 +86,10 @@ type Action =
       childOrder: Record<string, string[]>;
       activeNodeId: string | null;
     }
+  /** `plan` comes from `cloneGraphPlan` (src/lib/clone-graph.ts): the new
+   *  nodes and the orders with them in place. One undo step takes the whole
+   *  clone back. */
+  | { type: "cloneGraph"; plan: ClonePlan }
   | { type: "setActive"; id: string | null }
   | { type: "rename"; id: string; name: string }
   | { type: "remove"; id: string }
@@ -216,6 +222,15 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
     }
     case "setActive":
       return { ...state, activeNodeId: action.id };
+    case "cloneGraph":
+      return {
+        ...state,
+        nodes: { ...state.nodes, ...action.plan.nodes },
+        rootOrder: action.plan.rootOrder,
+        childOrder: action.plan.childOrder,
+        activeNodeId: action.plan.activeNodeId,
+        isDirty: true,
+      };
     case "rename": {
       const node = state.nodes[action.id];
       if (!node || node.name === action.name) return state;
@@ -357,6 +372,7 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
 const UNDOABLE = new Set<Action["type"]>([
   "create",
   "applyWand",
+  "cloneGraph",
   "rename",
   "remove",
   "updateTable",
@@ -375,6 +391,8 @@ function changeName(action: Action): string {
       return `New ${NODE_NAMES[action.node.type]}`;
     case "applyWand":
       return "Use Wand";
+    case "cloneGraph":
+      return "Clone Graph";
     case "rename":
       return "Rename";
     case "remove":
@@ -441,6 +459,9 @@ interface ProjectActions {
    *  target tables as one undo step; returns the per-table report (created /
    *  skipped) for the dialog's summary. Throws when the example has nothing to copy. */
   applyWand: (exampleId: string, targetIds: string[], prefix: string) => WandReport;
+  /** Clones a graph with its data table and the analyses shown on it
+   *  (src/lib/clone-graph.ts): one undoable step, opening on the clone. */
+  cloneGraph: (graphId: string, options: CloneOptions) => void;
   /** A figure at the project root; `graphIds` (in order) start as its panels. */
   createFigure: (graphIds?: string[]) => void;
   updateFigure: (
@@ -594,6 +615,10 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           activeNodeId: result.firstCreatedId ?? s.activeNodeId,
         });
         return result.report;
+      },
+      cloneGraph: (graphId, options) => {
+        const planned = cloneGraphPlan(latest.current, graphId, options);
+        if ("plan" in planned) dispatch({ type: "cloneGraph", plan: planned.plan });
       },
       createFigure: (graphIds = []) => {
         const names: Record<string, string> = {};
