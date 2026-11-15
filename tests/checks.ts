@@ -14151,6 +14151,21 @@ check("script: ExportTIF validates resolution and mode, and resolves paths throu
   ok(scriptLog(noPath).includes("SetPath"), scriptLog(noPath));
 });
 
+// Mac GUI proof #1 (S1 PARTIAL): ExportTIF/BMP/Table failed live — the
+// Tauri write_file allowlist covered only hlx/prism/png/jpg/jpeg/svg, so
+// .tif/.bmp/.csv/.txt were refused ("Titer can't access …"). ExportPNG
+// worked, isolating it to this allowlist. Same class as the send-office
+// .docx/.pptx pin on its own branch.
+check("script: the Tauri write path allows .tif/.tiff/.bmp/.csv/.txt script exports", () => {
+  const main = readFileSync("src-tauri/src/main.rs", "utf8");
+  const match = /fn write_file[\s\S]*?check_extension\(&path, &\[([^\]]*)\]\)/.exec(main);
+  ok(match, "write_file must gate on a check_extension allowlist");
+  const allowed = match![1];
+  for (const ext of ["tif", "tiff", "bmp", "csv", "txt"]) {
+    ok(new RegExp(`"${ext}"`).test(allowed), `write_file allowlist must include .${ext}`);
+  }
+});
+
 check("script: ForEach repeats with %N and ForEach Sheet visits each sheet with %S", () => {
   const counted = runScript(scriptDoc(), "ForEach 3\nSetInfo \"loop %N\", 1\nNext");
   strictEqual(counted.stopped, false);
