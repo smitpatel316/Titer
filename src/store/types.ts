@@ -66,6 +66,9 @@ export const GRAPH_CHOICES = {
   lineDash: ["solid", "dash", "dot", "dashdot"],
   errorDirection: ["both", "above"],
   background: ["white", "transparent"],
+  gridX: ["none", "major", "major-minor"],
+  gridY: ["none", "major", "major-minor"],
+  tickDirection: ["outside", "inside", "none"],
 } as const;
 type Choice<K extends keyof typeof GRAPH_CHOICES> = (typeof GRAPH_CHOICES)[K][number];
 
@@ -90,6 +93,7 @@ export const GRAPH_LIMITS = {
   errorWidth: { min: 0.5, max: 6 },
   axisWidth: { min: 0.5, max: 6 },
   errorCaps: { min: 0, max: 20 },
+  tickLength: { min: 0, max: 20 },
   xTitleGap: { min: 0, max: 40 },
   yTitleGap: { min: 0, max: 40 },
   fontSize: { min: 8, max: 28 },
@@ -306,6 +310,15 @@ export interface GraphOptions {
   // font size (px) for tick labels, axis titles, and the chart title.
   axisWidth: number;
   fontSize: number;
+  // Gridlines (Prism-style, per axis): none, at the major ticks only, or at the
+  // major and minor ticks — light, so values can be read off a journal figure
+  // without the lines competing with the data. Off by default: the minimalist
+  // look stays until the user asks for them.
+  gridX: Choice<"gridX">;
+  gridY: Choice<"gridY">;
+  // Tick marks: which side of the spine they sit on, and how long they are (px).
+  tickDirection: Choice<"tickDirection">;
+  tickLength: number;
   // The sheet behind the graph: white, or none (a PNG or SVG with a transparent background;
   // JPEG has no transparency and stays on white).
   background: Choice<"background">;
@@ -358,6 +371,10 @@ export const DEFAULT_GRAPH_OPTIONS: GraphOptions = {
   yScale: "linear",
   y2Scale: "linear",
   axisWidth: 1,
+  gridX: "none",
+  gridY: "none",
+  tickDirection: "outside",
+  tickLength: 5,
   fontSize: 13,
   fill: 1,
   pointFill: 1,

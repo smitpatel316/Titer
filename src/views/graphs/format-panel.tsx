@@ -314,7 +314,27 @@ export function FormatPanel(props: Props) {
           title="Axes"
           icon={<RulerIcon />}
           {...fold("Axes")}
-          action={reset(["yMin", "yMax", "yStep", "xMin", "xMax", "xStep", "xScale", "yScale", "axisWidth", "rightYDataset", "y2Label", "y2Scale", "y2Min", "y2Max", "y2Step"])}
+          action={reset([
+            "yMin",
+            "yMax",
+            "yStep",
+            "xMin",
+            "xMax",
+            "xStep",
+            "xScale",
+            "yScale",
+            "axisWidth",
+            "rightYDataset",
+            "y2Label",
+            "y2Scale",
+            "y2Min",
+            "y2Max",
+            "y2Step",
+            "gridX",
+            "gridY",
+            "tickDirection",
+            "tickLength",
+          ])}
         >
           {family !== "heatmap" && family !== "volcano" && (
             <Scale
@@ -389,6 +409,43 @@ export function FormatPanel(props: Props) {
             value={options.axisWidth}
             limits={GRAPH_LIMITS.axisWidth}
             onChange={(axisWidth) => set({ axisWidth })}
+          />
+          <Choice
+            label="X gridlines"
+            value={options.gridX}
+            onChange={(gridX) => set({ gridX })}
+            items={[
+              { value: "none", label: "None" },
+              { value: "major", label: "Major" },
+              { value: "major-minor", label: "Major + minor" },
+            ]}
+          />
+          <Choice
+            label="Y gridlines"
+            value={options.gridY}
+            onChange={(gridY) => set({ gridY })}
+            items={[
+              { value: "none", label: "None" },
+              { value: "major", label: "Major" },
+              { value: "major-minor", label: "Major + minor" },
+            ]}
+          />
+          <Choice
+            label="Tick direction"
+            value={options.tickDirection}
+            onChange={(tickDirection) => set({ tickDirection })}
+            items={[
+              { value: "outside", label: "Outside" },
+              { value: "inside", label: "Inside" },
+              { value: "none", label: "None" },
+            ]}
+          />
+          <Stepper
+            label="Tick length"
+            value={options.tickLength}
+            {...GRAPH_LIMITS.tickLength}
+            step={1}
+            onChange={(tickLength) => set({ tickLength })}
           />
         </Section>
       )}

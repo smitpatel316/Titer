@@ -109,7 +109,7 @@ import {
 } from "../src/views/analyses/wizards";
 import { initialAnswer } from "../src/views/analyses/analysis-wizard";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, movedText, paintOf, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, movedText, paintOf, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -4956,6 +4956,77 @@ check("a legend shown outside the plot reserves its own right margin (M13)", () 
   const heat = heatmapLayout({ ...options, heatmapShowScale: true }, ["A", "B"], ["R1"]);
   ok((heat.margin as { r: number }).r >= 78);
   strictEqual((heatmapLayout({ ...options, heatmapShowScale: false }, ["A", "B"], ["R1"]).margin as { r: number }).r, 16);
+});
+
+// ── Gridlines + tick controls (v2 item 30) ───────────────────────────────
+
+type Axis = Record<string, unknown> & { minor?: Record<string, unknown> };
+
+check("gridlines + tick controls: off by default, per-axis, and round-tripped through a file", () => {
+  const options = newGraphOptions("xy-scatter");
+  // Defaults preserve the minimalist look: no gridlines, outward ticks.
+  strictEqual(options.gridX, "none");
+  strictEqual(options.gridY, "none");
+  strictEqual(options.tickDirection, "outside");
+  strictEqual(options.tickLength, 5);
+  const plain = xyLayout(options, "X", 1);
+  strictEqual((plain.xaxis as Axis).showgrid, false);
+  strictEqual((plain.yaxis as Axis).showgrid, false);
+  strictEqual((plain.xaxis as Axis).ticks, "outside");
+  strictEqual((plain.xaxis as Axis).ticklen, 5);
+  // Major Y gridlines only: horizontal lines at the Y majors, X stays clean.
+  const yMajor = xyLayout({ ...options, gridY: "major" }, "X", 1);
+  strictEqual((yMajor.yaxis as Axis).showgrid, true);
+  strictEqual((yMajor.yaxis as Axis).gridcolor, "#E5E7EB");
+  strictEqual((yMajor.xaxis as Axis).showgrid, false);
+  // Major + minor on X: minor gridlines and minor ticks appear too.
+  const xBoth = xyLayout({ ...options, gridX: "major-minor" }, "X", 1);
+  strictEqual((xBoth.xaxis as Axis).showgrid, true);
+  strictEqual((xBoth.xaxis as Axis).minor?.showgrid, true);
+  strictEqual((xBoth.xaxis as Axis).minor?.gridcolor, "#F3F4F6");
+  strictEqual((xBoth.yaxis as Axis).minor?.showgrid, undefined);
+  // Tick direction + length apply to both axes.
+  const ticks = xyLayout({ ...options, tickDirection: "inside", tickLength: 8 }, "X", 1);
+  strictEqual((ticks.xaxis as Axis).ticks, "inside");
+  strictEqual((ticks.yaxis as Axis).ticks, "inside");
+  strictEqual((ticks.xaxis as Axis).ticklen, 8);
+  strictEqual((ticks.yaxis as Axis).ticklen, 8);
+  const noTicks = xyLayout({ ...options, tickDirection: "none" }, "X", 1);
+  strictEqual((noTicks.xaxis as Axis).ticks, "");
+  // A log axis keeps its minor ticks and gains minor gridlines with major-minor.
+  const log = xyLayout({ ...options, yScale: "log10", gridY: "major-minor" }, "X", 1);
+  strictEqual((log.yaxis as Axis).minor?.showgrid, true);
+  ok(Array.isArray((log.yaxis as Axis).minor?.tickvals));
+  // …and "no ticks" silences the log minor ticks too (the log minor object
+  // replaces axisChrome's, so it must carry the direction itself).
+  const logNoTicks = xyLayout({ ...options, yScale: "log10", gridY: "major-minor", tickDirection: "none" }, "X", 1);
+  strictEqual((logNoTicks.yaxis as Axis).minor?.ticks, "");
+  // Horizontal grouped bars: the grid choice follows the physical axis — the
+  // value axis sits on X there, so gridX lights X and gridY lights Y.
+  const hBarX = groupedBarLayout({ ...options, gridX: "major" }, 1, { horizontal: true });
+  strictEqual((hBarX.xaxis as Axis).showgrid, true);
+  strictEqual((hBarX.yaxis as Axis).showgrid, false);
+  const hBarY = groupedBarLayout({ ...options, gridY: "major" }, 1, { horizontal: true });
+  strictEqual((hBarY.xaxis as Axis).showgrid, false);
+  strictEqual((hBarY.yaxis as Axis).showgrid, true);
+  // The Column family's value axis honours gridY too.
+  const col = baseLayout({ ...options, gridY: "major" }, ["A", "B"]);
+  strictEqual((col.yaxis as Axis).showgrid, true);
+  strictEqual((col.xaxis as Axis).showgrid, false);
+  // Round-trip through a file: valid values kept, a wrong grid value falls back
+  // to none, and a tick length past its limit is clamped.
+  const file = JSON.parse(serializeProjectFile(payload));
+  Object.assign(file.project.nodes.g1.graphOptions, {
+    gridX: "major",
+    gridY: "wavy",
+    tickDirection: "diagonal",
+    tickLength: 99,
+  });
+  const o = read(JSON.stringify(file)).project.nodes.g1.graphOptions!;
+  strictEqual(o.gridX, "major");
+  strictEqual(o.gridY, "none");
+  strictEqual(o.tickDirection, "outside");
+  strictEqual(o.tickLength, 20);
 });
 
 // ── Selected points ──────────────────────────────────────────────────────

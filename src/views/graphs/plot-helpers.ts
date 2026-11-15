@@ -454,16 +454,33 @@ function axisRange(min?: number, max?: number, step?: number, zeroBase?: boolean
   return { ...range, ...(step != null ? { dtick: step, tick0: min ?? 0 } : {}) };
 }
 
-/** Shared axis chrome spread into every family's axes: a minimalist spine + outward
- *  ticks (no gridlines), non-interactive, at the user's Appearance thickness — so
- *  changing thickness affects every axis line and every tick uniformly. */
-function axisChrome(options: GraphOptions): Record<string, unknown> {
+/** Shared axis chrome spread into every family's axes: a minimalist spine +
+ *  outward ticks (gridlines off unless the axis asks for them), non-interactive,
+ *  at the user's Appearance thickness — so changing thickness affects every
+ *  axis line and every tick uniformly. `grid` is that axis's gridlines choice. */
+export const GRID_MAJOR_COLOR = "#E5E7EB";
+export const GRID_MINOR_COLOR = "#F3F4F6";
+function axisChrome(options: GraphOptions, grid: GraphOptions["gridX"] = "none"): Record<string, unknown> {
+  const ticks = options.tickDirection === "none" ? "" : options.tickDirection;
   return {
-    showgrid: false,
+    showgrid: grid !== "none",
+    ...(grid !== "none" ? { gridcolor: GRID_MAJOR_COLOR, gridwidth: 1 } : {}),
+    ...(grid === "major-minor"
+      ? {
+          minor: {
+            showgrid: true,
+            gridcolor: GRID_MINOR_COLOR,
+            gridwidth: 1,
+            ticks,
+            ticklen: Math.max(options.tickLength - 2, 0),
+          },
+        }
+      : {}),
     zeroline: false,
     linecolor: INK,
     linewidth: options.axisWidth,
-    ticks: "outside",
+    ticks,
+    ticklen: options.tickLength,
     tickwidth: options.axisWidth,
     fixedrange: true,
     automargin: true,
@@ -495,8 +512,15 @@ export function curveXs(xs: number[], scale: GraphOptions["xScale"], steps: numb
 /** A logarithmic axis: ticks at the powers of `base` (only those in range show), small
  *  ticks between the powers of 10, and its range typed in real values (above 0). Values
  *  at or under 0 have no place on it: Plotly leaves them out (the Format panel says how
- *  many). No step: the ticks are the powers. */
-function logAxis(scale: "log10" | "log2", min?: number, max?: number): Record<string, unknown> {
+ *  many). No step: the ticks are the powers. With `major-minor` gridlines, the minor
+ *  gridlines follow the small ticks (base 10 only — base 2 has no minor ticks). */
+function logAxis(
+  scale: "log10" | "log2",
+  min?: number,
+  max?: number,
+  grid: GraphOptions["gridX"] = "none",
+  tickDirection: GraphOptions["tickDirection"] = "outside",
+): Record<string, unknown> {
   const base = scale === "log2" ? 2 : 10;
   const ticks = POWERS.map((k) => base ** k);
   const at = (v?: number) => (v != null && v > 0 ? Math.log10(v) : undefined);
@@ -507,7 +531,16 @@ function logAxis(scale: "log10" | "log2", min?: number, max?: number): Record<st
     tickvals: ticks,
     ticktext: ticks.map((v) => powerLabel(v, base)),
     ...(base === 10
-      ? { minor: { tickvals: POWERS.flatMap((k) => [2, 3, 4, 5, 6, 7, 8, 9].map((d) => d * 10 ** k)), ticklen: 3 } }
+      ? {
+          minor: {
+            tickvals: POWERS.flatMap((k) => [2, 3, 4, 5, 6, 7, 8, 9].map((d) => d * 10 ** k)),
+            ticklen: 3,
+            // The minor object replaces axisChrome's (spread later), so it must
+            // carry the tick direction itself — otherwise "none" still draws them.
+            ticks: tickDirection === "none" ? "" : tickDirection,
+            ...(grid === "major-minor" ? { showgrid: true, gridcolor: GRID_MINOR_COLOR, gridwidth: 1 } : {}),
+          },
+        }
       : {}),
     ...(lo != null && hi != null
       ? { range: [lo, hi], autorange: false }
@@ -518,19 +551,19 @@ function logAxis(scale: "log10" | "log2", min?: number, max?: number): Record<st
 }
 
 /** The value axis's scale and range: linear (from 0 when `zeroBase`, for bars), or log. */
-const yAxisRange = (options: GraphOptions, zeroBase?: boolean) =>
+const yAxisRange = (options: GraphOptions, zeroBase?: boolean, grid: GraphOptions["gridX"] = "none") =>
   options.yScale === "linear"
     ? axisRange(options.yMin, options.yMax, options.yStep, zeroBase)
-    : logAxis(options.yScale, options.yMin, options.yMax);
+    : logAxis(options.yScale, options.yMin, options.yMax, grid, options.tickDirection);
 /** The right axis's scale and range, independent of the left's. */
 const y2AxisRange = (options: GraphOptions, zeroBase?: boolean) =>
   options.y2Scale === "linear"
     ? axisRange(options.y2Min, options.y2Max, options.y2Step, zeroBase)
     : logAxis(options.y2Scale, options.y2Min, options.y2Max);
-const xAxisRange = (options: GraphOptions, zeroBase?: boolean) =>
+const xAxisRange = (options: GraphOptions, zeroBase?: boolean, grid: GraphOptions["gridX"] = "none") =>
   options.xScale === "linear"
     ? axisRange(options.xMin, options.xMax, options.xStep, zeroBase)
-    : logAxis(options.xScale, options.xMin, options.xMax);
+    : logAxis(options.xScale, options.xMin, options.xMax, grid, options.tickDirection);
 
 /** Where a label goes on an axis of this scale: Plotly places shapes and traces at
  *  their values, but texts (annotations) at the log10 of them on a log axis. */
@@ -554,13 +587,13 @@ export function baseLayout(
       autotickangles: [0, 90],
       // Symmetric half-unit padding so categories never hug the Y axis (uniform across graph types).
       range: [-0.5, names.length - 0.5],
-      ...axisChrome(options),
+      ...axisChrome(options, options.gridX),
       ...axisTitle(options.xLabel, options.xTitleGap),
     },
     yaxis: {
-      // Minimalist: only the axis spine + ticks — no internal gridlines.
-      ...axisChrome(options),
-      ...yAxisRange(options, opts.zeroBase),
+      // Gridlines only when the axis asks for them (off by default).
+      ...axisChrome(options, options.gridY),
+      ...yAxisRange(options, opts.zeroBase, options.gridY),
       ...axisTitle(options.yLabel, options.yTitleGap),
     },
   };
@@ -587,7 +620,7 @@ export function heatmapLayout(options: GraphOptions, colNames: string[], rowName
       categoryorder: "array",
       categoryarray: colNames,
       autotickangles: [0, 90],
-      ...axisChrome(options),
+      ...axisChrome(options, options.gridX),
       ...axisTitle(options.xLabel, options.xTitleGap),
     },
     yaxis: {
@@ -595,7 +628,7 @@ export function heatmapLayout(options: GraphOptions, colNames: string[], rowName
       categoryorder: "array",
       categoryarray: rowNames,
       autorange: "reversed",
-      ...axisChrome(options),
+      ...axisChrome(options, options.gridY),
       ...axisTitle(options.yLabel, options.yTitleGap),
     },
   };
@@ -640,13 +673,13 @@ export function xyLayout(
     legend: legendOf(options),
     xaxis: {
       type: "linear",
-      ...axisChrome(options),
-      ...xAxisRange(options), // type "log" when X is on a log scale
+      ...axisChrome(options, options.gridX),
+      ...xAxisRange(options, undefined, options.gridX), // type "log" when X is on a log scale
       ...axisTitle(options.xLabel || xName, options.xTitleGap),
     },
     yaxis: {
-      ...axisChrome(options),
-      ...yAxisRange(options, opts.zeroBase),
+      ...axisChrome(options, options.gridY),
+      ...yAxisRange(options, opts.zeroBase, options.gridY),
       ...axisTitle(options.yLabel || (opts.yName ?? ""), options.yTitleGap),
     },
     ...(opts.rightY ? { yaxis2: rightYAxis(options, opts.rightY, opts.zeroBase) } : {}),
@@ -762,9 +795,13 @@ export function groupedBarLayout(
   seriesCount: number,
   opts: { horizontal?: boolean; separated?: SeparatedAxis; seriesNames?: string[] } = {},
 ): Record<string, unknown> {
+  // The grid choice follows the PHYSICAL axis: when horizontal, the value axis
+  // sits on X and the category axis on Y, so the choices swap with them.
+  const valueGrid = opts.horizontal ? options.gridX : options.gridY;
+  const categoryGrid = opts.horizontal ? options.gridY : options.gridX;
   const value = {
-    ...axisChrome(options),
-    ...yAxisRange(options, true),
+    ...axisChrome(options, valueGrid),
+    ...yAxisRange(options, true, valueGrid),
     ...axisTitle(options.yLabel, options.yTitleGap),
   };
   // Separated blocks need numeric positions with gaps between them, so they use
@@ -778,7 +815,7 @@ export function groupedBarLayout(
           range: opts.separated.range,
         }
       : { type: "category" }),
-    ...axisChrome(options),
+    ...axisChrome(options, categoryGrid),
     ...axisTitle(options.xLabel, options.xTitleGap),
   };
   return {
@@ -808,12 +845,12 @@ export function groupedScatterLayout(
       tickvals: separated ? separated.tickvals : labels.map((_, i) => i),
       ticktext: separated ? separated.ticktext : labels,
       range: separated ? separated.range : [-0.5, labels.length - 0.5],
-      ...axisChrome(options),
+      ...axisChrome(options, options.gridX),
       ...axisTitle(options.xLabel, options.xTitleGap),
     },
     yaxis: {
-      ...axisChrome(options),
-      ...yAxisRange(options),
+      ...axisChrome(options, options.gridY),
+      ...yAxisRange(options, undefined, options.gridY),
       ...axisTitle(options.yLabel, options.yTitleGap),
     },
   };
