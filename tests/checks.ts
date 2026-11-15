@@ -5764,6 +5764,24 @@ check("the export dialogs offer PDF/TIFF and 900/1200 DPI (item 20)", () => {
   ok(readFileSync("src/views/figures/figure-view.tsx", "utf8").includes("options={EXPORT_FORMATS}"));
 });
 
+// Frozen-tip Mac GUI proof (S5 FAIL): PDF/TIFF graph export was refused at
+// write time — the Tauri write_file allowlist covered only
+// hlx/prism/pzt/pzm/png/jpg/jpeg/svg, so .pdf/.tiff were rejected with
+// "Titer can't access …" and NO file was written, while PNG worked. The
+// v1.3.0 PDF/TIFF lane added the TS encoders but never extended the Rust
+// allowlist. Same class as the prism-scripts pin (4b15ed7); bmp/csv/txt
+// deliberately NOT added here — no 1.3.0 write path writes them, they belong
+// to the unmerged prism-scripts branch and the v1.4.0 merge reconciles.
+check("export: the Tauri write path allows .pdf/.tif/.tiff graph exports", () => {
+  const main = readFileSync("src-tauri/src/main.rs", "utf8");
+  const match = /fn write_file[\s\S]*?check_extension\(&path, &\[([^\]]*)\]\)/.exec(main);
+  ok(match, "write_file must gate on a check_extension allowlist");
+  const allowed = match![1];
+  for (const ext of ["pdf", "tif", "tiff"]) {
+    ok(new RegExp(`"${ext}"`).test(allowed), `write_file allowlist must include .${ext}`);
+  }
+});
+
 // ── Analyses ─────────────────────────────────────────────────────────────
 
 // P-value adjustments (plan 25): Šídák and Holm–Šídák are pure TypeScript
