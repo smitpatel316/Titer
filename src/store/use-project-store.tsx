@@ -5,6 +5,7 @@ import {
   type FloatingNote,
   type NodeType,
   type ProjectNode,
+  type SheetHighlight,
   type TableData,
   type TableType,
   type GraphType,
@@ -108,6 +109,8 @@ type Action =
   | { type: "updateTable"; id: string; data: TableData; label: string; move?: TableMove }
   | { type: "updateGraph"; id: string; options: GraphOptions; at: number }
   | { type: "updateFloatingNotes"; id: string; notes: FloatingNote[]; at: number }
+  /** `highlight`: the sheet's Navigator color, or null to clear it. */
+  | { type: "setHighlight"; id: string; highlight: SheetHighlight | null }
   | {
       type: "updateFigure";
       id: string;
@@ -211,9 +214,7 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       // appending a table after a figure would mark every save/load
       // round-trip as updated (#22). Figures still append at the end.
       const firstFigure =
-        node.type === "table"
-          ? state.rootOrder.findIndex((id) => state.nodes[id]?.type === "figure")
-          : -1;
+        node.type === "table" ? state.rootOrder.findIndex((id) => state.nodes[id]?.type === "figure") : -1;
       const rootOrder =
         pid === null
           ? firstFigure === -1
@@ -394,6 +395,20 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         isDirty: true,
       };
     }
+    case "setHighlight": {
+      const node = state.nodes[action.id];
+      if (!node || node.highlight === (action.highlight ?? undefined)) return state;
+      // No highlight reads as no field, so a cleared sheet saves clean
+      // and an older file still opens identical.
+      const next = { ...node };
+      if (action.highlight) next.highlight = action.highlight;
+      else delete next.highlight;
+      return {
+        ...state,
+        nodes: { ...state.nodes, [action.id]: next },
+        isDirty: true,
+      };
+    }
     case "updateFigure": {
       const node = state.nodes[action.id];
       if (!node || node.type !== "figure") return state;
@@ -477,6 +492,7 @@ const UNDOABLE = new Set<Action["type"]>([
   "updateTable",
   "updateGraph",
   "updateFloatingNotes",
+  "setHighlight",
   "updateFigure",
   "reorderRoot",
   "reorderChildren",
@@ -507,6 +523,8 @@ function changeName(action: Action): string {
       return "Format Change";
     case "updateFloatingNotes":
       return "Note Change";
+    case "setHighlight":
+      return "Highlight Sheet";
     case "updateFigure":
       return "Figure Change";
     default:
@@ -596,6 +614,8 @@ interface ProjectActions {
   updateGraph: (id: string, options: GraphOptions) => void;
   /** Replaces a sheet's floating notes (an empty list clears them). */
   updateFloatingNotes: (id: string, notes: FloatingNote[]) => void;
+  /** Highlights a sheet in the Navigator (null clears it). Undoable. */
+  setSheetHighlight: (id: string, highlight: SheetHighlight | null) => void;
   openSelector: (selector: Selector) => void;
   closeSelector: () => void;
   reorderTables: (order: string[]) => void;
@@ -631,7 +651,7 @@ interface ProjectContextValue extends ProjectActions {
 }
 
 /** An item as the sidebar shows it. */
-export type OutlineNode = Pick<ProjectNode, "id" | "type" | "name" | "parentId">;
+export type OutlineNode = Pick<ProjectNode, "id" | "type" | "name" | "parentId" | "highlight">;
 /** What the sidebar shows: the tables in order, each with its analyses and graphs,
  *  then the figures (project-root items, since a figure may span tables), then the
  *  orphaned analyses (their tables deleted — they live at the project root too). */
@@ -642,7 +662,13 @@ interface Outline {
   activeNodeId: string | null;
 }
 
-const outlineNode = ({ id, type, name, parentId }: ProjectNode): OutlineNode => ({ id, type, name, parentId });
+const outlineNode = ({ id, type, name, parentId, highlight }: ProjectNode): OutlineNode => ({
+  id,
+  type,
+  name,
+  parentId,
+  highlight,
+});
 
 /** A table's analyses and graphs, in sidebar order. */
 const childrenOf = ({ nodes, childOrder }: ProjectState, tableId: string) =>
@@ -766,8 +792,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       duplicateFamily: (id) => dispatch({ type: "duplicateFamily", id }),
       updateTable: (id, data, label, move) => dispatch({ type: "updateTable", id, data, label, move }),
       updateGraph: (id, options) => dispatch({ type: "updateGraph", id, options, at: Date.now() }),
-      updateFloatingNotes: (id, notes) =>
-        dispatch({ type: "updateFloatingNotes", id, notes, at: Date.now() }),
+      updateFloatingNotes: (id, notes) => dispatch({ type: "updateFloatingNotes", id, notes, at: Date.now() }),
+      setSheetHighlight: (id, highlight) => dispatch({ type: "setHighlight", id, highlight }),
       openSelector: (selector) => dispatch({ type: "openSelector", selector }),
       closeSelector: () => dispatch({ type: "closeSelector" }),
       reorderTables: (order) => dispatch({ type: "reorderRoot", order }),

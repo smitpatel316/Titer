@@ -30,6 +30,7 @@ import {
   remapGraphOptions,
   type TemplateInfo,
 } from "../src/lib/template";
+import { highlightStyle, searchProject } from "../src/lib/project-search";
 import { kaplanMeier } from "../src/lib/kaplan-meier";
 import { writePrism } from "../src/lib/prism-write";
 import JSZip from "jszip";
@@ -1017,6 +1018,126 @@ check("floating notes are hidden when printing", () => {
   ok(css.includes("@media print"), "no print stylesheet");
   ok(css.includes(".floating-notes-layer"), "notes layer not hidden in print");
   ok(/@media print\s*\{[^}]*display:\s*none/.test(css), "print rule doesn't hide the notes");
+});
+
+// Project search + sheet highlighting (v2 item 18): Prism's Navigator has a
+// search box above it, searching every sheet's text, and lets any sheet be
+// highlighted in a color of the user's choice, to mark it for review or draw
+// a colleague's attention. The highlight is screen-only, like a floating
+// note — never printed or exported.
+check("project search finds a sheet by name, column, cell, note and floating note", () => {
+  const searched: Record<string, ProjectNode> = {
+    t1: {
+      ...table,
+      data: { ...table.data!, notes: "control group" },
+      floatingNotes: [{ id: "n1", text: "Check this outlier", color: "yellow", x: 10, y: 20 }],
+    },
+    g1: graph,
+    f1: { id: "f1", type: "figure", name: "Summary figure", parentId: null },
+  };
+  const rootOrder = ["t1", "f1"];
+  const childOrder = { t1: ["g1"] };
+  // Name, case-insensitive.
+  const byName = searchProject(searched, rootOrder, childOrder, "DOSES");
+  strictEqual(byName.length, 1);
+  strictEqual(byName[0].nodeId, "t1");
+  ok(byName[0].fields.includes("name"));
+  // A column name.
+  ok(searchProject(searched, rootOrder, childOrder, "y1").some((m) => m.nodeId === "t1" && m.fields.includes("column")));
+  // A cell value.
+  ok(searchProject(searched, rootOrder, childOrder, "2.5").some((m) => m.nodeId === "t1" && m.fields.includes("cell")));
+  // The table's notes.
+  ok(searchProject(searched, rootOrder, childOrder, "control").some((m) => m.nodeId === "t1" && m.fields.includes("note")));
+  // A floating note's text.
+  ok(searchProject(searched, rootOrder, childOrder, "outlier").some((m) => m.nodeId === "t1" && m.fields.includes("floating note")));
+  // A child sheet's name, in sidebar order after its table.
+  const byChild = searchProject(searched, rootOrder, childOrder, "plot");
+  strictEqual(byChild.length, 1);
+  strictEqual(byChild[0].nodeId, "g1");
+  strictEqual(byChild[0].parentName, "Doses");
+  // One entry per sheet, however many hits it holds.
+  const many = searchProject(searched, rootOrder, childOrder, "a");
+  strictEqual(new Set(many.map((m) => m.nodeId)).size, many.length);
+  // Nothing matches, and an empty query matches nothing.
+  deepStrictEqual(searchProject(searched, rootOrder, childOrder, "zzz-no-such-text"), []);
+  deepStrictEqual(searchProject(searched, rootOrder, childOrder, "   "), []);
+});
+
+check("a sheet highlight survives a save and reload, on any sheet", () => {
+  const highlighted: ProjectFilePayload = {
+    ...payload,
+    nodes: {
+      ...payload.nodes,
+      t1: { ...table, highlight: "red" },
+      g1: { ...graph, highlight: "blue" },
+    },
+  };
+  const { project, issues, updated } = read(serializeProjectFile(highlighted));
+  deepStrictEqual(project, highlighted);
+  deepStrictEqual(issues, []);
+  strictEqual(updated, false);
+  // An emptied highlight reads as no highlight, like a sheet that never had one.
+  const file = JSON.parse(serializeProjectFile(highlighted));
+  delete file.project.nodes.t1.highlight;
+  strictEqual("highlight" in read(JSON.stringify(file)).project.nodes.t1, false);
+});
+
+check("a sheet highlight's unreadable value is dropped, and said", () => {
+  const file = JSON.parse(serializeProjectFile(payload));
+  file.project.nodes.t1.highlight = "magenta";
+  const { project, issues, updated } = read(JSON.stringify(file));
+  strictEqual("highlight" in project.nodes.t1, false);
+  strictEqual(updated, true);
+  ok(issues.some((i) => i.message.includes("highlight")));
+});
+
+check("a sheet highlight never reaches a .prism export", async () => {
+  const written = await writePrism(
+    {
+      nodes: {
+        table_1: {
+          id: "table_1",
+          type: "table",
+          name: "Minimal",
+          parentId: null,
+          tableType: "column",
+          data: { columns: ["Title", "A"], rows: [[null, "1"], [null, "2"]] },
+          highlight: "red",
+        },
+      },
+      rootOrder: ["table_1"],
+      childOrder: { table_1: [] },
+      activeNodeId: "table_1",
+    },
+    "1.2.0",
+  );
+  const zip = await JSZip.loadAsync(written.bytes);
+  const texts = await Promise.all(
+    Object.values(zip.files)
+      .filter((f) => !f.dir)
+      .map((f) => f.async("string")),
+  );
+  ok(!texts.some((t) => t.includes("highlight")), "highlight leaked into the .prism file");
+});
+
+check("the sidebar wires project search and sheet highlighting", () => {
+  // Static-read pins (same shape as the figure-export pins): the search box
+  // and its results list, the highlight submenu on every sheet's menu, and
+  // the dot + tint on a highlighted row.
+  const sidebar = readFileSync("src/components/project-sidebar.tsx", "utf8");
+  ok(sidebar.includes('aria-label="Search project"'), "no project search box in the sidebar");
+  ok(sidebar.includes("searchProject("), "sidebar doesn't run the project search");
+  ok(sidebar.includes('aria-label="Project search results"'), "no search results list in the sidebar");
+  ok(sidebar.includes("Highlight Sheet"), "no Highlight Sheet menu in the sidebar");
+  ok(sidebar.includes("SHEET_HIGHLIGHTS"), "highlight menu doesn't offer every color");
+  ok(sidebar.includes("setSheetHighlight"), "highlight menu isn't wired to the store");
+  const layout = readFileSync("src/ui/layout.tsx", "utf8");
+  ok(layout.includes('aria-label="Highlighted sheet"'), "highlighted row has no dot");
+  ok(layout.includes("highlight.tint"), "highlighted row has no tint");
+  // The highlight styles themselves: six colors, each with a swatch and a tint.
+  strictEqual(highlightStyle("red")?.swatch, "#D92D20");
+  ok(highlightStyle("yellow")!.tint.length > 0);
+  strictEqual(highlightStyle(undefined), null);
 });
 
 check("only the project is saved (no app state, no file path)", () => {
@@ -4518,6 +4639,24 @@ check("a floating note's edits undo as one change, and clearing them drops the f
   s = reducer(s, { type: "updateFloatingNotes", id: tableId, notes: first, at: 3000 });
   s = reducer(s, { type: "updateFloatingNotes", id: tableId, notes: [], at: 4000 });
   strictEqual("floatingNotes" in s.nodes[tableId], false);
+});
+
+check("a sheet highlight's edits undo, and clearing it drops the field", () => {
+  let s = makeInitialState();
+  const tableId = s.rootOrder[0];
+  s = reducer(s, { type: "setHighlight", id: tableId, highlight: "red" });
+  strictEqual(s.nodes[tableId].highlight, "red");
+  s = reducer(s, { type: "undo" });
+  strictEqual(s.nodes[tableId].highlight, undefined);
+  // Re-highlighting, then clearing, leaves no empty field behind.
+  s = reducer(s, { type: "setHighlight", id: tableId, highlight: "blue" });
+  s = reducer(s, { type: "setHighlight", id: tableId, highlight: null });
+  strictEqual("highlight" in s.nodes[tableId], false);
+  // Setting the color it already has is a no-op, not a new Undo step.
+  s = reducer(s, { type: "setHighlight", id: tableId, highlight: "green" });
+  const before = s;
+  s = reducer(s, { type: "setHighlight", id: tableId, highlight: "green" });
+  strictEqual(s, before);
 });
 
 // ── Graphs ───────────────────────────────────────────────────────────────

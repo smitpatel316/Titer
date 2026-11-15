@@ -102,6 +102,9 @@ type SidebarItemProps = Omit<React.ComponentProps<"div">, "title" | "onToggle"> 
   icon: React.ReactNode;
   title: string;
   selected: boolean;
+  /** A sheet highlight (v2 item 18): its dot and its row's soft tint. The tint
+   *  stays off the selected row, whose selection color already marks it. */
+  highlight?: { swatch: string; tint: string };
   /** Whether its children show, for a row that has some; `onToggle`'s `all`: with ⌥,
    *  every row like it too. */
   open?: boolean;
@@ -122,6 +125,7 @@ export function SidebarItem({
   icon,
   title,
   selected,
+  highlight,
   open = true,
   onToggle,
   renaming,
@@ -135,6 +139,7 @@ export function SidebarItem({
   return (
     <>
       <div
+        style={!selected && highlight ? { backgroundColor: highlight.tint } : undefined}
         className={cn(
           "flex h-7 items-center gap-1.5 rounded-md pr-2 pl-1 text-regular",
           selected && "bg-separator group-focus:bg-accent group-focus:text-white",
@@ -142,6 +147,14 @@ export function SidebarItem({
         )}
         {...props}
       >
+        {highlight && (
+          <span
+            aria-label="Highlighted sheet"
+            title="Highlighted sheet"
+            className="size-2 shrink-0 rounded-full"
+            style={{ backgroundColor: highlight.swatch }}
+          />
+        )}
         <button
           type="button"
           tabIndex={-1}

@@ -31,6 +31,8 @@ import {
   type RowGroup,
   SAME_AS_FILL,
   type SeriesStyle,
+  SHEET_HIGHLIGHTS,
+  type SheetHighlight,
   type TableData,
 } from "../store/types";
 import {
@@ -165,7 +167,7 @@ const FILE_KEYS = ["app", "schemaVersion", "savedAt", "template", "project"];
 const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId"] satisfies (keyof ProjectFilePayload)[];
 // prettier-ignore
 const NODE_KEYS = Object.keys({
-  id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, tableType: 1, data: 1,
+  id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, highlight: 1, tableType: 1, data: 1,
   analysisType: 1, analysisParams: 1, cachedResult: 1, frozen: 1, orphaned: 1, sourceTableName: 1, graphType: 1, graphOptions: 1,
   panels: 1, grid: 1, figureSize: 1, labelStyle: 1, figureTitle: 1, sharedLegend: 1, dpi: 1,
 } satisfies Record<keyof ProjectNode, 1>);
@@ -459,7 +461,10 @@ function describeDroppedBand(b: unknown): string {
  *  rebuilt set — a gapped sub-column ("A:Y3" with no "A:Y2") — so `regroupDropped`
  *  names the valued columns that went, for a warning: without it the values
  *  would vanish on load and the loss would be saved over the file. */
-function readData(raw: Obj, type: unknown): {
+function readData(
+  raw: Obj,
+  type: unknown,
+): {
   data: TableData;
   colors: TableColors;
   beyond: number;
@@ -488,7 +493,8 @@ function readData(raw: Obj, type: unknown): {
     : {};
   const rowGroups = readRowGroups(d.rowGroups);
   // Groups of sub-columns: a Grouped table's, a Nested table's, or an XY table's data sets of replicates (after X).
-  const grouping = (type === "grouped" || type === "xy" || type === "nested") && isCount(d.groups) && isCount(d.replicates);
+  const grouping =
+    (type === "grouped" || type === "xy" || type === "nested") && isCount(d.groups) && isCount(d.replicates);
   let data = defined({
     ...d,
     columns,
@@ -552,18 +558,20 @@ function readData(raw: Obj, type: unknown): {
       data = defined(renestTable(data, groups.length, subgroups, replicates));
     }
   }
-  return { data, colors: { series: colors(seriesColors), cells: colors(pointColors) }, beyond, regroupDropped: regroupDroppedNames, rowGroupsDropped: rowGroups.dropped };
+  return {
+    data,
+    colors: { series: colors(seriesColors), cells: colors(pointColors) },
+    beyond,
+    regroupDropped: regroupDroppedNames,
+    rowGroupsDropped: rowGroups.dropped,
+  };
 }
 
 /** Every option, of the right type, one of its choices and within its limits: a missing
  *  or wrong one takes its default, a number beyond its limits the nearest it can be. */
 function readOptions(raw: unknown, label: string, issues: ProjectIssue[]): GraphOptions {
   const o = isObj(raw)
-    ? canonical(raw, [
-        ...Object.keys(DEFAULT_GRAPH_OPTIONS),
-        ...Object.keys(OPTIONAL_OPTIONS),
-        ...LEGACY_DOSE_OPTIONS,
-      ])
+    ? canonical(raw, [...Object.keys(DEFAULT_GRAPH_OPTIONS), ...Object.keys(OPTIONAL_OPTIONS), ...LEGACY_DOSE_OPTIONS])
     : {};
   const out: Obj = { ...o, ...DEFAULT_GRAPH_OPTIONS };
   for (const [key, fallback] of Object.entries(DEFAULT_GRAPH_OPTIONS)) {
@@ -841,7 +849,8 @@ function readFloatingNotes(raw: unknown, label: string, issues: ProjectIssue[]):
       dropped++;
       continue;
     }
-    const id = typeof entry.id === "string" && entry.id !== "" ? entry.id : `note_${Math.random().toString(36).slice(2, 10)}`;
+    const id =
+      typeof entry.id === "string" && entry.id !== "" ? entry.id : `note_${Math.random().toString(36).slice(2, 10)}`;
     if (seen.has(id)) {
       dropped++;
       continue;
@@ -873,10 +882,9 @@ const NODE_TYPES: NodeType[] = ["table", "analysis", "graph", "figure"];
  *  size outside 1–20 in is brought within, and an aspect beyond 4:1 is
  *  reined in by shrinking the longer side. Unknown figure fields are kept
  *  by the node's spread in `readNode` and written back on save. */
-function readFigure(raw: Obj): Pick<
-  ProjectNode,
-  "panels" | "grid" | "figureSize" | "labelStyle" | "figureTitle" | "sharedLegend" | "dpi"
-> {
+function readFigure(
+  raw: Obj,
+): Pick<ProjectNode, "panels" | "grid" | "figureSize" | "labelStyle" | "figureTitle" | "sharedLegend" | "dpi"> {
   const panels = (Array.isArray(raw.panels) ? raw.panels : [])
     .filter((p): p is Obj => isObj(p) && typeof p.graphId === "string" && p.graphId !== "")
     .map((p) => {
@@ -894,9 +902,7 @@ function readFigure(raw: Obj): Pick<
       }) as FigurePanel;
     });
   const gridRaw = isObj(raw.grid) ? raw.grid : {};
-  const cols = isCount(gridRaw.cols)
-    ? (gridRaw.cols as number)
-    : Math.max(1, Math.min(panels.length || 1, 4));
+  const cols = isCount(gridRaw.cols) ? (gridRaw.cols as number) : Math.max(1, Math.min(panels.length || 1, 4));
   const rows = isCount(gridRaw.rows) ? (gridRaw.rows as number) : Math.max(1, Math.ceil(panels.length / cols));
   const grid = { rows, cols };
   const clamped = assignLabels(panels.map((p) => clampPanel(p, grid)));
@@ -943,6 +949,19 @@ function readNode(
   const floatingNotes = readFloatingNotes(n.floatingNotes, node.name, issues);
   if (floatingNotes) node.floatingNotes = floatingNotes;
   else delete node.floatingNotes;
+  // A sheet's highlight is its own (any type): an unknown color is dropped
+  // and said, so a hand-edited file can't smuggle a value in — and a sheet
+  // that was never highlighted reads as before.
+  const highlight = oneOf(SHEET_HIGHLIGHTS, n.highlight) as SheetHighlight | undefined;
+  if (highlight) node.highlight = highlight;
+  else {
+    delete node.highlight;
+    if (n.highlight !== undefined)
+      issues.push({
+        severity: "warning",
+        message: `Sheet “${node.name}” had a highlight color that couldn't be read; it was left out.`,
+      });
+  }
 
   if (type === "table") {
     const read = isObj(n.data) ? readData(n.data, lower(n.tableType)) : null;
@@ -1525,11 +1544,7 @@ const LEGACY_OPTIONS = ["heatmapColorScale", "volcanoColorUp", "volcanoColorDown
  *  A graph that saved its fill, point size, outline, bar gap or series keeps
  *  them; the rebuild fills in the rest, so a missing palette alone never
  *  rewrites a graph's own options. */
-function colorsFromTiter1(
-  node: ProjectNode,
-  tableColors: Record<string, PaletteColor> | undefined,
-  saved: unknown,
-) {
+function colorsFromTiter1(node: ProjectNode, tableColors: Record<string, PaletteColor> | undefined, saved: unknown) {
   const all = node.graphOptions as unknown as Obj;
   const old = canonical(all, LEGACY_OPTIONS);
   const named = (v: unknown, fallback: PaletteColor) => (isNamed(lower(v)) ? (lower(v) as PaletteColor) : fallback);
@@ -1558,9 +1573,7 @@ function colorsFromTiter1(
   // hold the global defaults for what it didn't, so only this tells the two apart.
   const savedKeys = new Set(
     isObj(saved)
-      ? Object.keys(
-          canonical(saved, [...Object.keys(DEFAULT_GRAPH_OPTIONS), ...Object.keys(OPTIONAL_OPTIONS)]),
-        )
+      ? Object.keys(canonical(saved, [...Object.keys(DEFAULT_GRAPH_OPTIONS), ...Object.keys(OPTIONAL_OPTIONS)]))
       : [],
   );
   const titer1: Obj = { ...options };

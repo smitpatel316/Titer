@@ -1,11 +1,21 @@
 import * as React from "react";
-import { ChartLineIcon, GridNineIcon, LayoutIcon, PlusCircleIcon, SidebarSimpleIcon, SigmaIcon } from "@phosphor-icons/react";
+import {
+  ChartLineIcon,
+  GridNineIcon,
+  LayoutIcon,
+  MagnifyingGlassIcon,
+  PlusCircleIcon,
+  SidebarSimpleIcon,
+  SigmaIcon,
+  XIcon,
+} from "@phosphor-icons/react";
 import { Button, IconButton } from "../ui/controls";
 import { SidePanel, SidebarItem } from "../ui/layout";
 import { popupMenu } from "../native";
 import { useOutline, useProjectActions, type OutlineNode } from "../store/use-project-store";
 import { removeWithConfirm } from "../store/use-document";
-import { NODE_NAMES } from "../store/types";
+import { NODE_NAMES, SHEET_HIGHLIGHTS, SHEET_HIGHLIGHT_STYLE } from "../store/types";
+import { highlightStyle, searchProject, SEARCH_FIELD_LABELS } from "../lib/project-search";
 import { clampWidth, SIDEBAR_WIDTH, useLayout } from "../store/use-layout";
 
 /** What's currently being dragged. Tables reorder among tables; children reorder
@@ -60,9 +70,23 @@ export function SidebarToggle({ className }: { className?: string }) {
 export function ProjectSidebar() {
   // The outline, not the whole project: editing a table or a graph doesn't redraw the sidebar.
   const { tables, figures, orphaned, activeNodeId } = useOutline();
-  const { get, setActiveNode, renameNode, removeNode, duplicateFamily, openSelector, reorderTables, reorderChildren, createFigure } =
+  const { get, setActiveNode, renameNode, removeNode, duplicateFamily, openSelector, reorderTables, reorderChildren, createFigure, setSheetHighlight } =
     useProjectActions();
   const { sidebar, sidebarWidth, setLayout } = useLayout();
+
+  // Project search (v2 item 18): Prism's Navigator has a search box above it,
+  // searching every sheet's text. The results come from the project as it is
+  // now (the outline only redraws on names, order and selection, so the
+  // search reads the store directly); a click jumps to the sheet.
+  const [query, setQuery] = React.useState("");
+  const results = React.useMemo(() => {
+    if (!query.trim()) return [];
+    const s = get();
+    return searchProject(s.nodes, s.rootOrder, s.childOrder, query);
+    // The outline (tables, figures) changes on every rename, reorder and
+    // selection — enough to refresh the results while the user types.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, tables, figures]);
 
   const dragInfo = React.useRef<DragInfo | null>(null);
   const dropTargetRef = React.useRef<DropTarget | null>(null);
@@ -206,6 +230,7 @@ export function ProjectSidebar() {
       { item: "Separator" },
       { text: "Duplicate Family", action: () => duplicateFamily(table.id) },
       { text: "Rename", action: () => setRenaming(table.id) },
+      highlightMenu(table),
       // The last table stays: a project is never empty.
       {
         text: `Delete ${NODE_NAMES.table}…`,
@@ -221,6 +246,21 @@ export function ProjectSidebar() {
       },
     ]);
 
+  // A sheet's highlight color (v2 item 18): Prism marks a sheet for review or
+  // a colleague's attention with a color of the user's choice, from the
+  // Navigator's right-click menu. The current color gets a check mark.
+  const highlightMenu = (node: OutlineNode) => ({
+    text: "Highlight Sheet",
+    items: [
+      ...SHEET_HIGHLIGHTS.map((color) => ({
+        text: `${node.highlight === color ? "✓ " : ""}${SHEET_HIGHLIGHT_STYLE[color].label}`,
+        action: () => setSheetHighlight(node.id, color),
+      })),
+      { item: "Separator" },
+      { text: "None", action: () => setSheetHighlight(node.id, null) },
+    ],
+  });
+
   const childMenu = (child: OutlineNode) =>
     void popupMenu([
       ...(child.type === "graph"
@@ -230,6 +270,7 @@ export function ProjectSidebar() {
           ]
         : []),
       { text: "Rename", action: () => setRenaming(child.id) },
+      highlightMenu(child),
       { text: `Delete ${NODE_NAMES[child.type]}…`, action: () => removeWithConfirm(child, removeNode) },
     ]);
 
@@ -248,6 +289,55 @@ export function ProjectSidebar() {
         </Button>
       }
     >
+      <div className="px-2 pt-1">
+        <div className="flex h-7 items-center gap-1.5 rounded-md bg-control px-2">
+          <MagnifyingGlassIcon className="size-4 shrink-0 text-secondary" />
+          <input
+            aria-label="Search project"
+            value={query}
+            onChange={(e) => setQuery(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setQuery("");
+            }}
+            placeholder="Search project"
+            className="min-w-0 flex-1 bg-transparent text-regular outline-none placeholder:text-secondary"
+          />
+          {query !== "" && (
+            <IconButton aria-label="Clear search" onClick={() => setQuery("")}>
+              <XIcon className="size-4" />
+            </IconButton>
+          )}
+        </div>
+        {query.trim() !== "" && (
+          <div role="listbox" aria-label="Project search results" className="mt-1 max-h-56 overflow-y-auto">
+            {results.length === 0 ? (
+              <p className="px-2 py-1 text-regular text-secondary">No sheets match “{query.trim()}”.</p>
+            ) : (
+              results.map((r) => (
+                <button
+                  key={r.nodeId}
+                  type="button"
+                  role="option"
+                  aria-label={`Search result: ${r.nodeName}`}
+                  onClick={() => {
+                    if (r.parentId) setOpen(r.parentId, true);
+                    select(r.nodeId);
+                  }}
+                  className="flex w-full flex-col items-start rounded-md px-2 py-1 text-left hover:bg-control"
+                >
+                  <span className="w-full truncate text-regular">{r.nodeName}</span>
+                  <span className="w-full truncate text-small text-secondary">
+                    {r.parentName ? `${r.parentName} · ` : ""}
+                    {r.count} {r.count === 1 ? "match" : "matches"} ·{" "}
+                    {r.fields.map((f) => SEARCH_FIELD_LABELS[f]).join(", ")}
+                  </span>
+                  <span className="w-full truncate text-small text-secondary">“{r.snippet}”</span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
       <div
         ref={listRef}
         role="tree"
@@ -262,6 +352,7 @@ export function ProjectSidebar() {
             icon={<GridNineIcon className="size-4" />}
             title={table.name}
             selected={activeNodeId === table.id}
+            highlight={highlightStyle(table.highlight) ?? undefined}
             renaming={renaming === table.id}
             onRename={(name) => rename(table, name)}
             open={!collapsed.has(table.id)}
@@ -282,6 +373,7 @@ export function ProjectSidebar() {
                 }
                 title={child.name}
                 selected={activeNodeId === child.id}
+                highlight={highlightStyle(child.highlight) ?? undefined}
                 renaming={renaming === child.id}
                 onRename={(name) => rename(child, name)}
                 onClick={() => select(child.id)}
@@ -301,6 +393,7 @@ export function ProjectSidebar() {
             icon={<LayoutIcon className="size-4" />}
             title={figure.name}
             selected={activeNodeId === figure.id}
+            highlight={highlightStyle(figure.highlight) ?? undefined}
             renaming={renaming === figure.id}
             onRename={(name) => rename(figure, name)}
             onClick={() => select(figure.id)}

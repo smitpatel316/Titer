@@ -6,7 +6,12 @@ import type { SummaryFormat } from "../lib/summary-format";
 
 export type NodeType = "table" | "analysis" | "graph" | "figure";
 /** What an item is, as menus name it ("Delete Graph…"). */
-export const NODE_NAMES: Record<NodeType, string> = { table: "Table", analysis: "Analysis", graph: "Graph", figure: "Figure" };
+export const NODE_NAMES: Record<NodeType, string> = {
+  table: "Table",
+  analysis: "Analysis",
+  graph: "Graph",
+  figure: "Figure",
+};
 export type TableType = "column" | "xy" | "grouped" | "nested" | "multiple" | "contingency" | "survival";
 /** Tables whose first data column is X (a Survival table's is the time). */
 export const hasXColumn = (type: TableType) => type === "xy" || type === "survival";
@@ -485,6 +490,24 @@ export interface FloatingNote {
   y: number;
 }
 
+/** A sheet's highlight color in the Navigator: Prism lets a sheet be highlighted
+ *  in a color of the user's choice, to mark it for review or draw a colleague's
+ *  attention ("Highlight the pages that you want to review, or want a colleague
+ *  to look at. Choose a different color highlight for different purposes.").
+ *  Screen-only, like floating notes — never printed or exported. */
+export const SHEET_HIGHLIGHTS = ["red", "orange", "yellow", "green", "blue", "purple"] as const;
+export type SheetHighlight = (typeof SHEET_HIGHLIGHTS)[number];
+/** Each highlight's name, its solid swatch (the dot in the Navigator) and the
+ *  soft tint behind a highlighted row. */
+export const SHEET_HIGHLIGHT_STYLE: Record<SheetHighlight, { label: string; swatch: string; tint: string }> = {
+  red: { label: "Red", swatch: "#D92D20", tint: "rgba(217, 45, 32, 0.12)" },
+  orange: { label: "Orange", swatch: "#DC6803", tint: "rgba(220, 104, 3, 0.12)" },
+  yellow: { label: "Yellow", swatch: "#B54708", tint: "rgba(220, 160, 0, 0.18)" },
+  green: { label: "Green", swatch: "#067647", tint: "rgba(6, 118, 71, 0.12)" },
+  blue: { label: "Blue", swatch: "#175CD3", tint: "rgba(23, 92, 211, 0.12)" },
+  purple: { label: "Purple", swatch: "#6941C6", tint: "rgba(105, 65, 198, 0.12)" },
+};
+
 /** An outline color that is the color of what it outlines. */
 export const SAME_AS_FILL = "fill";
 
@@ -555,6 +578,9 @@ export interface ProjectNode {
   /** Floating notes pinned to this sheet (any type): shown on screen, never
    *  printed or exported. Omitted when the sheet has none. */
   floatingNotes?: FloatingNote[];
+  /** The sheet's highlight color in the Navigator (any type): a color marking
+   *  it for review or a colleague's attention. Omitted when not highlighted. */
+  highlight?: SheetHighlight;
   tableType?: TableType;
   data?: TableData;
   /** Analysis nodes only: which statistical test this node runs. */
