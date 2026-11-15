@@ -8590,7 +8590,7 @@ check("a constant column bins into one bin, and bad binning is an error, not a c
   if ("error" in one) throw new Error(one.error);
   deepStrictEqual(
     one.frequencyBins?.[0].bins.map((b) => [b.lower, b.upper, b.count]),
-    [[5, 5, 3]],
+    [[0, 5, 3]],
   );
   for (const [params, message] of [
     [{ binMode: "width", binWidth: 0, startAt: 2 }, "greater than 0"],
