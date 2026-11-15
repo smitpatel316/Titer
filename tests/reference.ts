@@ -26,7 +26,7 @@ import { R_MAXIMUM_T } from "../src/stats/column/anova";
 import { R_GRUBBS } from "../src/stats/column/rout";
 import { addFittedCurves, evaluate as doseCurveAt, logisticAt } from "../src/views/graphs/fitted-curve";
 import { NONLINEAR_MODELS, type NonlinearModel } from "../src/stats/types";
-import { positiveXOnly } from "../src/stats/xy/nonlinear-regression";
+import { invertModel, positiveXOnly } from "../src/stats/xy/nonlinear-regression";
 import { ensurePackages, evalNamedVector, setPackageRepo, startR } from "../src/stats/webr";
 import { computeFrequencyBins, prettyBreaks } from "../src/stats/column/frequency-distribution";
 import { simulateTableData } from "../src/stats/simulation/simulate";
@@ -453,6 +453,54 @@ const expTooFew = table(
     ["", "1", "59.2178890114"],
     ["", "2", "42.6820395865"],
     ["", "3", "35.2117707225"],
+  ],
+);
+
+/** Other classic curves (v2): noiseless by construction on the shared grid
+ *  X = 0, 0.5, …, 12, so each fit must recover its generating parameters.
+ *  G: Gaussian Amplitude=100, Mean=5, SD=1.5. B: Boltzmann sigmoid
+ *  Bottom=0, Top=100, V50=5, Slope=1. L: Lorentzian Amplitude=100,
+ *  Center=5, Width=1.5. S: sine wave Amplitude=5, Wavelength=4,
+ *  PhaseShift=0.5, Baseline=10. */
+const classicX = table(
+  ["Title", "X", "G", "B", "L", "S"],
+  [
+    ["", "0", "0.3865920139", "0.6692850924", "8.2568807339", "12.397127693"],
+    ["", "0.5", "1.1108996538", "1.0986942631", "10", "14.7977481499"],
+    ["", "1", "2.8565500785", "1.7986209962", "12.3287671233", "14.3879128095"],
+    ["", "1.5", "6.5728528617", "2.9312230751", "15.5172413793", "11.4076976557"],
+    ["", "2", "13.5335283237", "4.7425873178", "20", "7.602872307"],
+    ["", "2.5", "24.9352208777", "7.5858180021", "26.4705882353", "5.2022518501"],
+    ["", "3", "41.1112290507", "11.9202922022", "36", "5.6120871905"],
+    ["", "3.5", "60.6530659713", "18.2425523806", "50", "8.5923023443"],
+    ["", "4", "80.0737402917", "26.894142137", "69.2307692308", "12.397127693"],
+    ["", "4.5", "94.5959468907", "37.7540668798", "90", "14.7977481499"],
+    ["", "5", "100", "50", "100", "14.3879128095"],
+    ["", "5.5", "94.5959468907", "62.2459331202", "90", "11.4076976557"],
+    ["", "6", "80.0737402917", "73.105857863", "69.2307692308", "7.602872307"],
+    ["", "6.5", "60.6530659713", "81.7574476194", "50", "5.2022518501"],
+    ["", "7", "41.1112290507", "88.0797077978", "36", "5.6120871905"],
+    ["", "7.5", "24.9352208777", "92.4141819979", "26.4705882353", "8.5923023443"],
+    ["", "8", "13.5335283237", "95.2574126822", "20", "12.397127693"],
+    ["", "8.5", "6.5728528617", "97.0687769249", "15.5172413793", "14.7977481499"],
+    ["", "9", "2.8565500785", "98.2013790038", "12.3287671233", "14.3879128095"],
+    ["", "9.5", "1.1108996538", "98.9013057369", "10", "11.4076976557"],
+    ["", "10", "0.3865920139", "99.3307149076", "8.2568807339", "7.602872307"],
+    ["", "10.5", "0.1203859995", "99.5929862284", "6.9230769231", "5.2022518501"],
+    ["", "11", "0.0335462628", "99.7527376843", "5.8823529412", "5.6120871905"],
+    ["", "11.5", "0.0083648347", "99.8498817743", "5.0561797753", "8.5923023443"],
+    ["", "12", "0.0018664469", "99.9088948806", "4.3902439024", "12.397127693"],
+  ],
+);
+
+/** A sine wave needs ≥ 5 points (4 parameters + 1) — this has 4. */
+const classicTooFew = table(
+  ["Title", "X", "Y"],
+  [
+    ["", "0", "12.397127693"],
+    ["", "0.5", "14.7977481499"],
+    ["", "1", "14.3879128095"],
+    ["", "1.5", "11.4076976557"],
   ],
 );
 
@@ -2329,6 +2377,13 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["expX", expX, "nonlinear-regression", { y: "E", model: "plateau-decay" }],
   ["plateauOneSided", plateauOneSided, "nonlinear-regression", { model: "plateau-decay" }],
   ["expTooFew", expTooFew, "nonlinear-regression", { model: "two-phase-decay" }],
+  // Other classic curves (v2) — noiseless fixtures G/B/L/S, and the
+  // too-few-points error for the sine wave (4 parameters + 1).
+  ["classicX", classicX, "nonlinear-regression", { y: "G", model: "gaussian" }],
+  ["classicX", classicX, "nonlinear-regression", { y: "B", model: "boltzmann-sigmoid" }],
+  ["classicX", classicX, "nonlinear-regression", { y: "L", model: "lorentzian" }],
+  ["classicX", classicX, "nonlinear-regression", { y: "S", model: "sine-wave" }],
+  ["classicTooFew", classicTooFew, "nonlinear-regression", { model: "sine-wave" }],
   // Enzyme kinetics (plan 09) — noiseless fixtures A/A2/B/C, the noisy
   // CI fixture, and the negative-X / constant-X / too-few-points errors.
   ["enzymeS", enzymeS, "nonlinear-regression", { y: "A", model: "michaelis-menten" }],
@@ -4078,6 +4133,167 @@ async function disagreements(): Promise<string[]> {
   if (!("error" in tooFew) || !tooFew.error.includes("need at least 6"))
     out.push(
       `Exponential two-phase too-few: ${"error" in tooFew ? tooFew.error : "ran without error"}, expected an error naming at least 6 points`,
+    );
+  // Other classic curves (v2): Prism's Gaussian, Boltzmann sigmoid,
+  // Lorentzian and sine-wave models, by construction (noiseless fixtures)
+  // and re-verified against WebR nls() before locking. Tolerances as for
+  // the exponentials: parameters and derived rows 1e-3 relative, R² 1e-6.
+  const checkClassic = async (
+    label: string,
+    y: string,
+    model: "gaussian" | "boltzmann-sigmoid" | "lorentzian" | "sine-wave",
+    coefs: [string, number][],
+    stats: [string, number][],
+  ) => {
+    const r = await runAnalysis("nonlinear-regression", classicX, { y, model });
+    if ("error" in r) {
+      out.push(`Classic curves ${label}: ${r.error}`);
+      return null;
+    }
+    for (const [term, want] of coefs) {
+      const got = r.coefficients?.find((c) => c.term === term)?.estimate;
+      if (!relClose(got, want, 1e-3)) out.push(`Classic curves ${label} ${term}: ${got}, plan says ${want}`);
+    }
+    for (const [name, want] of stats) {
+      const got = r.fit?.rows.find((row) => row.label === name)?.values?.[0];
+      const ok = name === "R squared" ? got != null && Math.abs(got - want) <= 1e-6 : relClose(got, want, 1e-3);
+      if (!ok) out.push(`Classic curves ${label} ${name}: ${got}, plan says ${want}`);
+    }
+    return r;
+  };
+  // The TypeScript overlay evaluator matches an independent R evaluation
+  // of the fitted formula at the data X to 1e-6 (the exponential overlay
+  // pattern).
+  const checkClassicOverlay = async (
+    label: string,
+    y: string,
+    model: "gaussian" | "boltzmann-sigmoid" | "lorentzian" | "sine-wave",
+    fit: AnalysisResult,
+    rExpr: (p: Record<string, number>) => string,
+  ) => {
+    const fig = await scatterWithFittedCurve(classicX, y, model, fit);
+    const traces = fig.data as { mode?: string; x?: number[]; y?: number[] }[];
+    const curve = traces.find((t) => t.mode === "lines" && t.x?.length === 101);
+    if (!curve || curve.x?.[0] !== 0 || curve.x?.at(-1) !== 12)
+      out.push(`Classic curves ${label} overlay: no 101-point curve over [0, 12]`);
+    const coefs: Record<string, number> = {};
+    for (const c of fit.coefficients ?? []) if (c.estimate != null) coefs[c.term] = c.estimate;
+    const xs = [...Array(25)].map((_, i) => i * 0.5);
+    const rY = await evalNamedVector(
+      `x<-c(${xs.join(",")});yv<-${rExpr(coefs)};` + `c(${xs.map((_, i) => `y${i}=yv[${i + 1}]`).join(",")})`,
+    );
+    xs.forEach((x, i) => {
+      const ts = doseCurveAt(model, fit.coefficients ?? [], x);
+      const rv = rY[`y${i}`];
+      if (rv == null || Math.abs(ts - rv) > 1e-6) out.push(`Classic curves ${label} overlay at X=${x}: TS ${ts}, R ${rv}`);
+    });
+  };
+  const fitG = await checkClassic(
+    "gaussian",
+    "G",
+    "gaussian",
+    [
+      ["Amplitude", 100],
+      ["Mean", 5],
+      ["SD", 1.5],
+    ],
+    [
+      ["Area", 375.9942],
+      ["FWHM", 3.5322],
+      ["R squared", 1],
+    ],
+  );
+  if (fitG) {
+    if (fitG.equation !== "Y = 100·exp(−0.5·((X − 5)/1.5)²)")
+      out.push(`Classic curves gaussian equation: ${fitG.equation}`);
+    if (!fitG.notes.includes("Starting values: Amplitude = 100, Mean = 5, SD = 3."))
+      out.push(`Classic curves gaussian notes missing starts: ${fitG.notes}`);
+    await checkClassicOverlay("gaussian", "G", "gaussian", fitG, (p) =>
+      `${p.Amplitude!.toPrecision(15)}*exp(-0.5*((x-${p.Mean!.toPrecision(15)})/${p.SD!.toPrecision(15)})^2)`,
+    );
+  }
+  const fitB = await checkClassic(
+    "boltzmann sigmoid",
+    "B",
+    "boltzmann-sigmoid",
+    [
+      ["Bottom", 0],
+      ["Top", 100],
+      ["V50", 5],
+      ["Slope", 1],
+    ],
+    [
+      ["Span", 100],
+      ["R squared", 1],
+    ],
+  );
+  if (fitB) {
+    // The fitted Bottom is 1.565e-8, not exactly 0, so the equation carries
+    // that tiny value — assert the shape, not the literal string (the
+    // one-phase association case does the same for its fitted Y0).
+    if (fitB.equation == null || !fitB.equation.startsWith("Y = ") || !fitB.equation.includes("/(1 + exp((5 − X)/1))"))
+      out.push(`Classic curves boltzmann equation: ${fitB.equation}`);
+    if (!fitB.notes.includes("Starting values: Bottom = 0.6693, Top = 99.91, V50 = 6, Slope = 3."))
+      out.push(`Classic curves boltzmann notes missing starts: ${fitB.notes}`);
+    // The Boltzmann inverse is closed-form: the fitted curve reads X = 5
+    // back off Y = 50 (the midpoint), and null outside the asymptotes.
+    if (invertModel("boltzmann-sigmoid", fitB.coefficients ?? [], 50) == null)
+      out.push(`Classic curves boltzmann inverse at Y=50 returned null`);
+    else if (Math.abs(invertModel("boltzmann-sigmoid", fitB.coefficients ?? [], 50)! - 5) > 1e-3)
+      out.push(`Classic curves boltzmann inverse at Y=50: ${invertModel("boltzmann-sigmoid", fitB.coefficients ?? [], 50)}, expected 5`);
+    if (invertModel("boltzmann-sigmoid", fitB.coefficients ?? [], 150) !== null)
+      out.push(`Classic curves boltzmann inverse above Top should be null`);
+  }
+  const fitL = await checkClassic(
+    "lorentzian",
+    "L",
+    "lorentzian",
+    [
+      ["Amplitude", 100],
+      ["Center", 5],
+      ["Width", 1.5],
+    ],
+    [
+      ["Area", 471.2389],
+      ["FWHM", 3],
+      ["R squared", 1],
+    ],
+  );
+  if (fitL) {
+    if (fitL.equation !== "Y = 100/(1 + ((X − 5)/1.5)²)")
+      out.push(`Classic curves lorentzian equation: ${fitL.equation}`);
+    if (!fitL.notes.includes("Starting values: Amplitude = 100, Center = 5, Width = 3."))
+      out.push(`Classic curves lorentzian notes missing starts: ${fitL.notes}`);
+  }
+  const fitS = await checkClassic(
+    "sine wave",
+    "S",
+    "sine-wave",
+    [
+      ["Amplitude", 5],
+      ["Wavelength", 4],
+      ["PhaseShift", 0.5],
+      ["Baseline", 10],
+    ],
+    [
+      ["Frequency", 0.25],
+      ["R squared", 1],
+    ],
+  );
+  if (fitS) {
+    if (fitS.equation !== "Y = 5·sin((2π·X/4) + 0.5) + 10")
+      out.push(`Classic curves sine equation: ${fitS.equation}`);
+    if (!fitS.notes.includes("Starting values: Amplitude = 4.798, Wavelength = 4, PhaseShift = 0, Baseline = 10.1."))
+      out.push(`Classic curves sine notes missing starts: ${fitS.notes}`);
+    await checkClassicOverlay("sine wave", "S", "sine-wave", fitS, (p) =>
+      `${p.Amplitude!.toPrecision(15)}*sin((2*pi*x/${p.Wavelength!.toPrecision(15)})+${p.PhaseShift!.toPrecision(15)})+${p.Baseline!.toPrecision(15)}`,
+    );
+  }
+  // The sine wave needs ≥ 5 points (4 parameters + 1) — this has 4.
+  const classicFew = await runAnalysis("nonlinear-regression", classicTooFew, { model: "sine-wave" });
+  if (!("error" in classicFew) || !classicFew.error.includes("need at least 5"))
+    out.push(
+      `Classic curves sine too-few: ${"error" in classicFew ? classicFew.error : "ran without error"}, expected an error naming at least 5 points`,
     );
   // Enzyme kinetics (plan 09): the plan's values, by construction
   // (noiseless fixtures) and re-verified against WebR nls() before locking.

@@ -82,6 +82,14 @@ export function evaluate(
         : c("Plateau") + (c("Y0") - c("Plateau")) * Math.exp(-c("K") * (x - c("X0")));
     case "one-phase-association":
       return c("Y0") + (c("Plateau") - c("Y0")) * (1 - Math.exp(-c("K") * x));
+    case "gaussian":
+      return c("Amplitude") * Math.exp(-0.5 * ((x - c("Mean")) / c("SD")) ** 2);
+    case "boltzmann-sigmoid":
+      return c("Bottom") + (c("Top") - c("Bottom")) / (1 + Math.exp((c("V50") - x) / c("Slope")));
+    case "lorentzian":
+      return c("Amplitude") / (1 + ((x - c("Center")) / c("Width")) ** 2);
+    case "sine-wave":
+      return c("Amplitude") * Math.sin((2 * Math.PI * x) / c("Wavelength") + c("PhaseShift")) + c("Baseline");
     case "michaelis-menten":
       return (c("Vmax") * x) / (c("Km") + x);
     case "allosteric-sigmoidal":

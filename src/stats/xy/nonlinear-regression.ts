@@ -31,6 +31,7 @@ import { rowName } from "../grouped/base";
 import {
   ENZYME_MODELS,
   EXPONENTIAL_MODELS,
+  CLASSIC_MODELS,
   applyFitOptions,
   fitEntries,
   fitError,
@@ -105,7 +106,13 @@ export const invertMethod = (model: NonlinearModel): InvertMethod =>
   model === "user-defined" ||
   model === "two-phase-decay" ||
   model === "plateau-decay" ||
-  model === "substrate-inhibition"
+  model === "substrate-inhibition" ||
+  // Other classic curves (v2): the Gaussian and Lorentzian have two X
+  // roots each (either side of the peak) and the sine wave infinitely many,
+  // so no single closed-form inverse — invert numerically.
+  model === "gaussian" ||
+  model === "lorentzian" ||
+  model === "sine-wave"
     ? "numeric"
     : "closed-form";
 
@@ -214,6 +221,15 @@ export function invertModel(
       const q = (y - y0) / (p - y0);
       if (q <= 0 || q >= 1) return null;
       return -Math.log(1 - q) / k;
+    }
+    case "boltzmann-sigmoid": {
+      // Y = Bottom + (Top−Bottom)/(1+exp((V50−X)/Slope)):
+      // X = V50 − Slope·ln((Top−Y)/(Y−Bottom)).
+      const r = ratio();
+      const v50 = c("V50");
+      const slope = c("Slope");
+      if (r == null || v50 == null || slope == null || slope === 0) return null;
+      return v50 - slope * Math.log(r);
     }
     case "exponential-growth": {
       const y0 = c("Y0");
@@ -380,6 +396,10 @@ const isExponential = (model: NonlinearModel) => EXPONENTIAL_MODELS.includes(mod
 const isEnzyme = (model: NonlinearModel) => ENZYME_MODELS.includes(model);
 /** v2 item 23: the user types their own equation. */
 const isUserDefined = (model: NonlinearModel) => model === "user-defined";
+/** Other classic curves (v2): Gaussian, Boltzmann sigmoid, Lorentzian,
+ *  sine wave — same result shape as the exponential family (fitted
+ *  equation + starting-values note). */
+const isClassic = (model: NonlinearModel) => CLASSIC_MODELS.includes(model);
 /** Binding competition (plan 28): the one-site Fit logIC50 (inhibitor 3PL)
  *  and the two-site models, which the Fit-Ki toggle applies to. */
 const isTwoSiteCompetition = (model: NonlinearModel) =>
@@ -456,6 +476,36 @@ function equation(
     case "exponential-growth":
       if (y0 == null || k == null) return undefined;
       return `Y = ${num(y0)}·exp(${num(k)}·X)`;
+    case "gaussian": {
+      const amp = coefOf(coefficients, "Amplitude");
+      const mean = coefOf(coefficients, "Mean");
+      const sd = coefOf(coefficients, "SD");
+      if (amp == null || mean == null || sd == null) return undefined;
+      return `Y = ${num(amp)}·exp(−0.5·((X − ${num(mean)})/${num(sd)})²)`;
+    }
+    case "boltzmann-sigmoid": {
+      const bottom = coefOf(coefficients, "Bottom");
+      const top = coefOf(coefficients, "Top");
+      const v50 = coefOf(coefficients, "V50");
+      const slope = coefOf(coefficients, "Slope");
+      if (bottom == null || top == null || v50 == null || slope == null) return undefined;
+      return `Y = ${num(bottom)} + (${num(top)} − ${num(bottom)})/(1 + exp((${num(v50)} − X)/${num(slope)}))`;
+    }
+    case "lorentzian": {
+      const amp = coefOf(coefficients, "Amplitude");
+      const center = coefOf(coefficients, "Center");
+      const width = coefOf(coefficients, "Width");
+      if (amp == null || center == null || width == null) return undefined;
+      return `Y = ${num(amp)}/(1 + ((X − ${num(center)})/${num(width)})²)`;
+    }
+    case "sine-wave": {
+      const amp = coefOf(coefficients, "Amplitude");
+      const wl = coefOf(coefficients, "Wavelength");
+      const phase = coefOf(coefficients, "PhaseShift");
+      const base = coefOf(coefficients, "Baseline");
+      if (amp == null || wl == null || phase == null || base == null) return undefined;
+      return `Y = ${num(amp)}·sin((2π·X/${num(wl)}) + ${num(phase)}) + ${num(base)}`;
+    }
     case "michaelis-menten": {
       const vmax = coefOf(coefficients, "Vmax");
       const km = coefOf(coefficients, "Km");
@@ -552,6 +602,27 @@ function startingValues(
       return `Starting values: Y0 = ${num(yAtMinX)}, Plateau = ${num(maxY)}, K = 0.5.`;
     case "exponential-growth":
       return `Starting values: Y0 = ${num(yAtMinX)}, K = 0.1.`;
+    case "gaussian": {
+      const xAtMaxY = xs[ys.indexOf(maxY)];
+      return `Starting values: Amplitude = ${num(maxY)}, Mean = ${num(xAtMaxY)}, SD = ${num((Math.max(...xs) - Math.min(...xs)) / 4)}.`;
+    }
+    case "boltzmann-sigmoid":
+      return `Starting values: Bottom = ${num(minY)}, Top = ${num(maxY)}, V50 = ${num(median(xs))}, Slope = ${num((Math.max(...xs) - Math.min(...xs)) / 4)}.`;
+    case "lorentzian": {
+      const xAtMaxY = xs[ys.indexOf(maxY)];
+      return `Starting values: Amplitude = ${num(maxY)}, Center = ${num(xAtMaxY)}, Width = ${num((Math.max(...xs) - Math.min(...xs)) / 4)}.`;
+    }
+    case "sine-wave": {
+      // The R start counts the mean-crossings of the demeaned data (each
+      // crossing half a cycle) — same count here, so the note names what
+      // nls() actually started from.
+      const meanY = ys.reduce((s, v) => s + v, 0) / ys.length;
+      const signs = ys.map((v) => Math.sign(v - meanY));
+      let crossings = 0;
+      for (let i = 1; i < signs.length; i++) if (signs[i] !== signs[i - 1]) crossings++;
+      const wl = (2 * (Math.max(...xs) - Math.min(...xs))) / Math.max(1, crossings);
+      return `Starting values: Amplitude = ${num((maxY - minY) / 2)}, Wavelength = ${num(wl)}, PhaseShift = 0, Baseline = ${num(meanY)}.`;
+    }
     case "michaelis-menten":
       return `Starting values: Vmax = ${num(maxY * 1.1)}, Km = ${num(median(xs.filter((x) => x > 0)))}.`;
     case "allosteric-sigmoidal":
@@ -639,6 +710,23 @@ function fitWarnings(model: NonlinearModel, coefficients: RegressionCoefficient[
       const positive = xs.filter((x) => x > 0);
       if (Math.max(...xs) < km || Math.min(...positive) > km)
         out.push("The substrate range does not bracket Km — Km is imprecisely estimated.");
+    }
+  }
+  if (isClassic(model)) {
+    // The width parameters are bounded below at 0 in the fit, so a
+    // non-positive value can only arrive via a fixed parameter — the
+    // derived width quantities are null then, and the note says why.
+    if (model === "gaussian") {
+      const sd = coefOf(coefficients, "SD");
+      if (sd != null && sd <= 0) out.push("Fitted SD ≤ 0 — the width (and area) is not defined.");
+    }
+    if (model === "lorentzian") {
+      const w = coefOf(coefficients, "Width");
+      if (w != null && w <= 0) out.push("Fitted Width ≤ 0 — the width (and area) is not defined.");
+    }
+    if (model === "sine-wave") {
+      const wl = coefOf(coefficients, "Wavelength");
+      if (wl != null && wl <= 0) out.push("Fitted Wavelength ≤ 0 — frequency not defined.");
     }
   }
   if (isTwoSiteCompetition(model)) {
@@ -2059,7 +2147,7 @@ async function assembleResult(
     interpolation +
     (rout ? routNotes(rout.q, rout.outliers, sets.map((s) => s.name)) : "");
   const eq =
-    isExponential(model) || isEnzyme(model) || isCompetition(model) || isUserDefined(model)
+    isExponential(model) || isEnzyme(model) || isCompetition(model) || isClassic(model) || isUserDefined(model)
       ? equation(model, coefficients, params?.ligandConcentration, params?.customEquation)
       : undefined;
   const extraNotes: string[] = [];
@@ -2131,7 +2219,7 @@ async function assembleResult(
     extraNotes.push(
       `A ${model === "quartic" ? "fourth" : "fifth"} order polynomial can overfit — it follows the noise as well as the trend, so prefer a lower order unless the extra terms are justified.`,
     );
-  if (isExponential(model) || isEnzyme(model)) {
+  if (isExponential(model) || isEnzyme(model) || isClassic(model)) {
     extraNotes.push(startingValues(model, first.xs, first.ys));
     if (isEnzyme(model)) {
       if (first.xs.includes(0))

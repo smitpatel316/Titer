@@ -113,6 +113,13 @@ export const NONLINEAR_MODELS = [
   // already in KINETIC_MODELS).
   "allosteric-sigmoidal",
   "substrate-inhibition",
+  // Other classic curves (v2): Prism's Gaussian, Boltzmann sigmoid,
+  // Lorentzian and sine-wave models — nls() fits in nonlinear-fit.ts,
+  // same shape as the plan 08 exponential family.
+  "gaussian",
+  "boltzmann-sigmoid",
+  "lorentzian",
+  "sine-wave",
   // Plan 28: binding competition (two-site + homologous) — already in
   // DOSE_MODELS above, so they are covered by the spread; do NOT list them
   // again here (a duplicate entry double-runs every NONLINEAR_MODELS sweep

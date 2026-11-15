@@ -13304,6 +13304,463 @@
  "nonlinear-regression expTooFew {\"model\":\"two-phase-decay\"}": {
   "error": "Not enough complete points (5) to fit this curve; need at least 6."
  },
+ "nonlinear-regression classicX {\"y\":\"G\",\"model\":\"gaussian\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Gaussian",
+  "equation": "Y = 100·exp(−0.5·((X − 5)/1.5)²)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "G"
+   ],
+   "rows": [
+    {
+     "label": "Area",
+     "values": [
+      375.9942412
+     ]
+    },
+    {
+     "label": "FWHM",
+     "values": [
+      3.532230068
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       3.532230068,
+       3.532230068
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      3.211609495e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      2.26917582e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      22
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "G",
+    "mean": 30.07293662,
+    "sd": 35.6861679,
+    "sem": 7.13723358,
+    "median": 13.53352832,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Gaussian\") of “G” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: Amplitude = 100, Mean = 5, SD = 3.",
+  "coefficients": [
+   {
+    "term": "Amplitude",
+    "estimate": 100,
+    "stdError": 1.705794069e-11,
+    "t": 5862372359000,
+    "p": 1.244027387e-267,
+    "low": 100,
+    "high": 100
+   },
+   {
+    "term": "Mean",
+    "estimate": 5,
+    "stdError": 2.954490817e-13,
+    "t": 16923389880000,
+    "p": 9.241082013e-278,
+    "low": 5,
+    "high": 5
+   },
+   {
+    "term": "SD",
+    "estimate": 1.5,
+    "stdError": 2.954630278e-13,
+    "t": 5076777326000,
+    "p": 2.947855619e-266,
+    "low": 1.5,
+    "high": 1.5
+   }
+  ]
+ },
+ "nonlinear-regression classicX {\"y\":\"B\",\"model\":\"boltzmann-sigmoid\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Boltzmann sigmoid",
+  "equation": "Y = 1.565e-8 + (100 − 1.565e-8)/(1 + exp((5 − X)/1))",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "B"
+   ],
+   "rows": [
+    {
+     "label": "Span",
+     "values": [
+      99.99999998
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       99.99999997,
+       99.99999999
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      9.084824795e-9
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.733214873e-15
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      21
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "B",
+    "mean": 57.96418002,
+    "sd": 41.34795546,
+    "sem": 8.269591091,
+    "median": 73.10585786,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Boltzmann sigmoid\") of “B” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: Bottom = 0.6693, Top = 99.91, V50 = 6, Slope = 3.",
+  "coefficients": [
+   {
+    "term": "Bottom",
+    "estimate": 1.565029954e-8,
+    "stdError": 1.275679947e-9,
+    "t": 12.2682022,
+    "p": 4.838612025e-11,
+    "low": 1.299737786e-8,
+    "high": 1.830322122e-8
+   },
+   {
+    "term": "Top",
+    "estimate": 100,
+    "stdError": 3.405241389e-9,
+    "t": 29366493760,
+    "p": 1.968206927e-207,
+    "low": 99.99999999,
+    "high": 100
+   },
+   {
+    "term": "V50",
+    "estimate": 5.000000001,
+    "stdError": 1.880178753e-10,
+    "t": 26593216170,
+    "p": 1.58043502e-206,
+    "low": 5.000000001,
+    "high": 5.000000001
+   },
+   {
+    "term": "Slope",
+    "estimate": 0.9999999995,
+    "stdError": 1.706418601e-10,
+    "t": 5860226787,
+    "p": 9.834717654e-193,
+    "low": 0.9999999991,
+    "high": 0.9999999998
+   }
+  ]
+ },
+ "nonlinear-regression classicX {\"y\":\"L\",\"model\":\"lorentzian\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Lorentzian",
+  "equation": "Y = 100/(1 + ((X − 5)/1.5)²)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "L"
+   ],
+   "rows": [
+    {
+     "label": "Area",
+     "values": [
+      471.238898
+     ]
+    },
+    {
+     "label": "FWHM",
+     "values": [
+      3
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       3,
+       3
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.044790806e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      9.19857277e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      22
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "L",
+    "mean": 31.91441388,
+    "sd": 29.83651744,
+    "sem": 5.967303488,
+    "median": 20,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Lorentzian\") of “L” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: Amplitude = 100, Center = 5, Width = 3.",
+  "coefficients": [
+   {
+    "term": "Amplitude",
+    "estimate": 100,
+    "stdError": 1.339611904e-11,
+    "t": 7464848566000,
+    "p": 6.109176864e-270,
+    "low": 100,
+    "high": 100
+   },
+   {
+    "term": "Center",
+    "estimate": 5,
+    "stdError": 2.000115876e-13,
+    "t": 24998551630000,
+    "p": 1.731083846e-281,
+    "low": 5,
+    "high": 5
+   },
+   {
+    "term": "Width",
+    "estimate": 1.5,
+    "stdError": 2.900777224e-13,
+    "t": 5171027915000,
+    "p": 1.966768898e-266,
+    "low": 1.5,
+    "high": 1.5
+   }
+  ]
+ },
+ "nonlinear-regression classicX {\"y\":\"S\",\"model\":\"sine-wave\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Sine wave",
+  "equation": "Y = 5·sin((2π·X/4) + 0.5) + 10",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "S"
+   ],
+   "rows": [
+    {
+     "label": "Frequency",
+     "values": [
+      0.25
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       0.25,
+       0.25
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.864610013e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.723258011e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      21
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "S",
+    "mean": 10.09588511,
+    "sd": 3.567891373,
+    "sem": 0.7135782745,
+    "median": 11.40769766,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Sine wave\") of “S” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: Amplitude = 4.798, Wavelength = 4, PhaseShift = 0, Baseline = 10.1.",
+  "coefficients": [
+   {
+    "term": "Amplitude",
+    "estimate": 5,
+    "stdError": 8.205256465e-12,
+    "t": 609365474600,
+    "p": 4.330420341e-235,
+    "low": 5,
+    "high": 5
+   },
+   {
+    "term": "Wavelength",
+    "estimate": 4,
+    "stdError": 1.114906462e-12,
+    "t": 3587744924000,
+    "p": 2.935702579e-251,
+    "low": 4,
+    "high": 4
+   },
+   {
+    "term": "PhaseShift",
+    "estimate": 0.5,
+    "stdError": 3.14789843e-12,
+    "t": 158836128700,
+    "p": 7.925553896e-223,
+    "low": 0.5,
+    "high": 0.5
+   },
+   {
+    "term": "Baseline",
+    "estimate": 10,
+    "stdError": 5.769365994e-12,
+    "t": 1733292707000,
+    "p": 1.266644327e-244,
+    "low": 10,
+    "high": 10
+   }
+  ]
+ },
+ "nonlinear-regression classicTooFew {\"model\":\"sine-wave\"}": {
+  "error": "Not enough complete points (4) to fit this curve; need at least 5."
+ },
  "nonlinear-regression enzymeS {\"y\":\"A\",\"model\":\"michaelis-menten\"}": {
   "testType": "nonlinear-regression",
   "subtitle": "Michaelis-Menten",

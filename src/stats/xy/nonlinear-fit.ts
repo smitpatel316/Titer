@@ -43,6 +43,12 @@ export const MODEL_LABEL: Record<NonlinearModel, string> = {
   // michaelis-menten's label already exists above).
   "allosteric-sigmoidal": "Allosteric sigmoidal",
   "substrate-inhibition": "Substrate inhibition",
+  // Prism's "Other classic curves" (v2): Gaussian, Boltzmann sigmoid,
+  // Lorentzian, sine wave — Prism's Curve Fitting Guide equations.
+  gaussian: "Gaussian",
+  "boltzmann-sigmoid": "Boltzmann sigmoid",
+  lorentzian: "Lorentzian",
+  "sine-wave": "Sine wave",
   // Prism's "Binding — Competition" (plan 28): two-site competition and
   // homologous competition. The one-site Fit logIC50 is the inhibitor 3PL
   // above; Fit Ki is a derived quantity on it (see modelSpec's opts).
@@ -76,6 +82,21 @@ export const ENZYME_MODELS: NonlinearModel[] = [
   "michaelis-menten",
   "allosteric-sigmoidal",
   "substrate-inhibition",
+];
+
+/** The other classic curves (v2): Prism's Gaussian, Boltzmann sigmoid,
+ *  Lorentzian and sine-wave models. Fitted with nls() algorithm "port"
+ *  like the plan 08/09 models: the default Gauss-Newton fails to converge
+ *  on (near-)noiseless fits in WebR's R 4.6.0 even from exact starts,
+ *  while "port" recovers the generating parameters. The width parameters
+ *  (SD, Width, Wavelength) are bounded below at 0 — a negative width is
+ *  meaningless (and for the Gaussian/Lorentzian the sign is unidentifiable,
+ *  the formula depending on the square). */
+export const CLASSIC_MODELS: NonlinearModel[] = [
+  "gaussian",
+  "boltzmann-sigmoid",
+  "lorentzian",
+  "sine-wave",
 ];
 
 /** A derived quantity, as R expressions of the fit (`cf`, its coefficients;
@@ -135,6 +156,15 @@ const overK = (label: string, c: string, k = "K"): Derived => {
     high: `if(prod(pci("${k}"))>0)${ends}[2] else NA`,
   };
 };
+/** `f` × a coefficient (a FWHM from a width), its CI `f` × the
+ *  coefficient's — the factor is positive, so the interval keeps its
+ *  order. Null when the fitted coefficient ≤ 0. */
+const scaled = (label: string, f: string, p: string): Derived => ({
+  label,
+  expr: `ifelse(cf[["${p}"]]>0,${f}*cf[["${p}"]],NA_real_)`,
+  low: `ifelse(cf[["${p}"]]>0,${f}*pci("${p}")[1],NA_real_)`,
+  high: `ifelse(cf[["${p}"]]>0,${f}*pci("${p}")[2],NA_real_)`,
+});
 
 /** R that assigns `m<-lm(...)` or `m<-nls(...,start=...)`; `x`/`y` are in scope. */
 export interface ModelSpec {
@@ -520,6 +550,80 @@ export function modelSpec(
         derived: [overK("Doubling time", "log(2)"), overK("Tau", "1")],
         curveFn: 'g<-function(xv,p) p[["Y0"]]*exp(p[["K"]]*xv)',
       };
+    // ── Other classic curves (v2) ───────────────────────────────────────
+    // Prism's Gaussian, Boltzmann sigmoid, Lorentzian and sine-wave
+    // models (Curve Fitting Guide, "Other classic curves"). All four fit
+    // with nls() algorithm "port" like the plan 08/09 models: the default
+    // Gauss-Newton fails to converge on (near-)noiseless fits in WebR's
+    // R 4.6.0 even from exact starts, while "port" recovers the generating
+    // parameters (verified in WebR before implementing).
+    case "gaussian":
+      // Y = Amplitude·exp(−0.5·((X−Mean)/SD)²). Area under the curve =
+      // Amplitude·SD·√(2π) (the guide's Amplitude·SD/0.3989);
+      // FWHM = 2·√(2·ln 2)·SD ≈ 2.3548·SD.
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~Amplitude*exp(-0.5*((x-Mean)/SD)^2),start=list(Amplitude=max(y),Mean=x[which.max(y)],SD=(max(x)-min(x))/4),algorithm=\"port\",lower=c(-Inf,-Inf,0),control=nls.control(maxiter=200))",
+        terms: ["Amplitude", "Mean", "SD"],
+        derived: [
+          {
+            label: "Area",
+            expr: 'ifelse(cf[["SD"]]>0,cf[["Amplitude"]]*cf[["SD"]]*sqrt(2*pi),NA_real_)',
+          },
+          scaled("FWHM", "2*sqrt(2*log(2))", "SD"),
+        ],
+        curveFn:
+          'g<-function(xv,p) p[["Amplitude"]]*exp(-0.5*((xv-p[["Mean"]])/p[["SD"]])^2)',
+      };
+    case "boltzmann-sigmoid":
+      // Y = Bottom + (Top−Bottom)/(1+exp((V50−X)/Slope)). V50 is the X at
+      // the curve's midpoint; Slope is positive for a rising curve.
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~Bottom+(Top-Bottom)/(1+exp((V50-x)/Slope)),start=list(Bottom=min(y),Top=max(y),V50=median(x),Slope=(max(x)-min(x))/4),algorithm=\"port\",control=nls.control(maxiter=200))",
+        terms: ["Bottom", "Top", "V50", "Slope"],
+        derived: [difference("Top", "Bottom")],
+        curveFn:
+          'g<-function(xv,p) p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+exp((p[["V50"]]-xv)/p[["Slope"]]))',
+        asymptotes: ["Bottom", "Top"],
+      };
+    case "lorentzian":
+      // Y = Amplitude/(1+((X−Center)/Width)²). Width is the half-width at
+      // half-maximum, so FWHM = 2·Width; area = π·Amplitude·Width.
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~Amplitude/(1+((x-Center)/Width)^2),start=list(Amplitude=max(y),Center=x[which.max(y)],Width=(max(x)-min(x))/4),algorithm=\"port\",lower=c(-Inf,-Inf,0),control=nls.control(maxiter=200))",
+        terms: ["Amplitude", "Center", "Width"],
+        derived: [
+          {
+            label: "Area",
+            expr: 'ifelse(cf[["Width"]]>0,pi*cf[["Amplitude"]]*cf[["Width"]],NA_real_)',
+          },
+          scaled("FWHM", "2", "Width"),
+        ],
+        curveFn:
+          'g<-function(xv,p) p[["Amplitude"]/(1+((xv-p[["Center"]])/p[["Width"]])^2)',
+      };
+    case "sine-wave": {
+      // Y = Amplitude·sin((2π·X/Wavelength)+PhaseShift)+Baseline — Prism's
+      // sine wave with nonzero baseline; Baseline fixed at 0 is the
+      // standard sine wave (plan 26). The Wavelength start counts the
+      // mean-crossings of the demeaned data: each crossing is half a
+      // cycle, so Wavelength ≈ 2·range/crossings. Prism's own guide warns
+      // its built-in initial values "rarely work" for this model — the
+      // crossing count is the data-driven equivalent (verified in WebR
+      // before implementing).
+      const start =
+        "list(Amplitude=(max(y)-min(y))/2,Wavelength=2*(max(x)-min(x))/max(1,sum(diff(sign(y-mean(y)))!=0)),PhaseShift=0,Baseline=mean(y))";
+      return {
+        kind: "nls",
+        fit: `m<-nls(y~Amplitude*sin((2*pi*x/Wavelength)+PhaseShift)+Baseline,start=${start},algorithm="port",lower=c(-Inf,0,-Inf,-Inf),control=nls.control(maxiter=200))`,
+        terms: ["Amplitude", "Wavelength", "PhaseShift", "Baseline"],
+        derived: [overK("Frequency", "1", "Wavelength")],
+        curveFn:
+          'g<-function(xv,p) p[["Amplitude"]]*sin((2*pi*xv/p[["Wavelength"]])+p[["PhaseShift"]])+p[["Baseline"]]',
+      };
+    }
     // ── Enzyme kinetics (plan 09) ───────────────────────────────────────
     // All three fit with nls() algorithm "port" (nl2sol), like plan 08's
     // exponentials: the default Gauss-Newton fails to converge on
