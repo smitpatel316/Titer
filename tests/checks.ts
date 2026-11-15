@@ -4517,6 +4517,50 @@ check("a bubble plot colors by a fourth variable: gradient for numbers, one colo
   strictEqual(grpTrace.marker?.showscale, undefined);
 });
 
+check("a bubble plot with a numeric color variable still draws: its points survive the draw path", () => {
+  // The draw path (pointLabels / drawnKeys before Plotly.react) used to throw
+  // `TypeError: css.match is not a function` on a numeric color variable: the
+  // builder colors by value (marker.color = [1.5, 2.5, 5.5]) and drawnPoints
+  // fed those numbers to hexOf. The figure then never rebuilt, and a fresh
+  // load with Score saved drew nothing.
+  type Trace = { marker?: { colorscale?: [number, string][] } };
+  const data = {
+    columns: ["Title", "Height", "Weight", "N", "Group", "Score"],
+    rows: [
+      ["S1", "170", "65", "10", "A", "1.5"],
+      ["S2", "180", "80", "40", "B", "2.5"],
+      ["S5", "165", "60", "90", "A", "5.5"],
+    ],
+  };
+  const options: GraphOptions = {
+    ...newGraphOptions("bubble-plot"),
+    xVariable: "Height",
+    yVariable: "Weight",
+    bubbleSizeVariable: "N",
+    bubbleColorVariable: "Score",
+  };
+  const fig = GRAPHS["bubble-plot"].build(
+    plotColumns(readTable(data), "bubble-plot", options, "multiple"),
+    options,
+    paintOf(options, 1),
+  );
+  deepStrictEqual(
+    [...drawnKeys(fig.data)].sort(),
+    ["Weight#0", "Weight#1", "Weight#2"],
+  );
+  // And each point's drawn style follows the gradient Plotly shows, not one
+  // uniform color: the lowest Score takes the scale's first stop, the highest
+  // its last, the middle one somewhere between.
+  const [trace] = fig.data as Trace[];
+  const scale = trace.marker?.colorscale ?? [];
+  const first = scale[0]?.[1];
+  const last = scale[scale.length - 1]?.[1];
+  strictEqual(drawnStyle(fig.data, "Weight#0")?.color, first);
+  strictEqual(drawnStyle(fig.data, "Weight#2")?.color, last);
+  const mid = drawnStyle(fig.data, "Weight#1")?.color;
+  ok(mid !== undefined && mid !== first && mid !== last, `middle Score must sit between the scale's ends, got ${mid}`);
+});
+
 check("a bubble plot defaults to the first two numeric variables, the third for size, one color", () => {
   type Trace = { x: number[]; y: number[]; marker?: { color?: unknown; colorscale?: unknown; size: number[] } };
   const data = {

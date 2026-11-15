@@ -325,6 +325,23 @@ export const paletteBackground = ({ kind, colors }: GraphPalette) =>
 /** A gradient palette as a Plotly colorscale. */
 export const colorscaleOf = ({ colors }: GraphPalette) => colors.map((c, i) => [i / (colors.length - 1), c]);
 
+/** The #RRGGBB of `value` on a Plotly colorscale (`[stop, #RRGGBB]` pairs),
+ *  scaled between `min` and `max` — Plotly's own default when it draws one is
+ *  the values' own extremes, so a bubble plot's numeric color variable lands
+ *  here on the same gradient the figure shows. */
+export function colorscaleColor(colorscale: [number, string][], value: number, min: number, max: number): string {
+  if (colorscale.length === 0) return "#111827";
+  if (colorscale.length === 1) return colorscale[0][1];
+  const t = max > min ? Math.min(1, Math.max(0, (value - min) / (max - min))) : 0;
+  for (let i = 0; i < colorscale.length - 1; i++) {
+    const [t0, c0] = colorscale[i];
+    const [t1, c1] = colorscale[i + 1];
+    if (t <= t1 || i === colorscale.length - 2)
+      return t1 > t0 ? mix(c0, c1, Math.min(1, Math.max(0, (t - t0) / (t1 - t0)))) : c1;
+  }
+  return colorscale[colorscale.length - 1][1];
+}
+
 /** The #RRGGBB of `css`: a hex color, or one `withOpacity` made (its opacity dropped). */
 export function hexOf(css: string): string {
   const rgb = css.match(/^rgba\((\d+),(\d+),(\d+),/);

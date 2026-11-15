@@ -3,7 +3,7 @@
 // show theirs. The selection itself is the graph view's, never saved.
 import { clamp, GRAPH_LIMITS, type PointShape, type PointStyle } from "../../store/types";
 import { parsePointKey } from "../../lib/columns";
-import { hexOf, opacityOf } from "../../lib/palettes";
+import { colorscaleColor, hexOf, opacityOf } from "../../lib/palettes";
 import { INK, pointName, textWidth } from "./plot-helpers";
 
 /** A trace of individual points, as `seriesPoints` (or the volcano) makes it: a style
@@ -14,7 +14,12 @@ interface PointsTrace {
   y: number[];
   customdata?: unknown;
   marker?: {
-    color?: PerPoint<string>;
+    // A numeric color variable (the bubble plot's) colors per point by value,
+    // on `colorscale` between `cmin`/`cmax` — never a string per point.
+    color?: PerPoint<string> | number[];
+    colorscale?: [number, string][];
+    cmin?: number;
+    cmax?: number;
     size?: PerPoint<number>;
     symbol?: PerPoint<PointShape>;
     line?: { width?: PerPoint<number> };
@@ -26,22 +31,39 @@ const at = <T>(v: PerPoint<T> | undefined, i: number, fallback: T) => (Array.isA
 
 /** Every keyed point the figure draws: where, and how (its color, and apart its fill's opacity). */
 function drawnPoints(data: unknown[]) {
-  return (data as PointsTrace[]).flatMap((t) =>
-    Array.isArray(t.customdata)
+  return (data as PointsTrace[]).flatMap((t) => {
+    // A numeric `marker.color` is a value per point, not a color: map it
+    // through the trace's own colorscale, the way Plotly draws it — a
+    // `hexOf` on a number would throw and abort the whole draw.
+    const values = Array.isArray(t.marker?.color) && t.marker.color.every((c) => typeof c === "number")
+      ? (t.marker.color as number[])
+      : null;
+    const scale = values && t.marker?.colorscale?.length ? t.marker.colorscale : null;
+    const lo = t.marker?.cmin ?? (values?.length ? Math.min(...values) : 0);
+    const hi = t.marker?.cmax ?? (values?.length ? Math.max(...values) : 0);
+    const colorAt = (i: number) =>
+      scale
+        ? colorscaleColor(scale, values![i], lo, hi)
+        : values
+          ? INK // numeric colors, no scale to map them on: the series' ink
+          : hexOf(at(t.marker?.color as PerPoint<string> | undefined, i, INK));
+    const fillAt = (i: number) =>
+      values ? 1 : opacityOf(at(t.marker?.color as PerPoint<string> | undefined, i, INK));
+    return Array.isArray(t.customdata)
       ? (t.customdata as string[]).map((key, i) => ({
           key,
           x: t.x[i],
           y: t.y[i],
           style: {
-            color: hexOf(at(t.marker?.color, i, INK)),
+            color: colorAt(i),
             size: at(t.marker?.size, i, 7),
             shape: at(t.marker?.symbol, i, "circle" as PointShape),
-            fill: opacityOf(at(t.marker?.color, i, INK)),
+            fill: fillAt(i),
             outline: at(t.marker?.line?.width, i, 0),
           },
         }))
-      : [],
-  );
+      : [];
+  });
 }
 
 /** How the figure draws the point `key`, if it does. */
