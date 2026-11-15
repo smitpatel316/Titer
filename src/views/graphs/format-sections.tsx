@@ -1058,6 +1058,13 @@ function linesGroup({ graphType, options, set }: SectionContext) {
         onChange={(lineWidth) => set({ lineWidth })}
       />
       <DashRow value={options.lineDash} onChange={(lineDash) => set({ lineDash })} />
+      {(graphType === "before-after" || graphType === "grouped-before-after") && (
+        <Toggle
+          label="Show arrows on lines"
+          checked={options.beforeAfterArrows}
+          onChange={(beforeAfterArrows) => set({ beforeAfterArrows })}
+        />
+      )}
       {graphType === "survival" && (
         <Toggle
           label="Show number at risk table"

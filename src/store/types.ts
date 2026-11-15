@@ -12,6 +12,7 @@ export const hasXColumn = (type: TableType) => type === "xy" || type === "surviv
 // Every graph type; views/graphs/index.ts says what each draws and for which tables.
 export type GraphType =
   | "individual"
+  | "before-after"
   | "box-violin"
   | "mean-error"
   | "xy-scatter"
@@ -19,6 +20,7 @@ export type GraphType =
   | "xy-area"
   | "grouped-bars"
   | "grouped-scatter"
+  | "grouped-before-after"
   | "grouped-box"
   | "grouped-lines"
   | "grouped-stacked"
@@ -259,6 +261,9 @@ export interface GraphOptions {
   volcanoGroupB?: string;
   volcanoEffect: Choice<"volcanoEffect">;
   volcanoSignificance: Choice<"volcanoSignificance">;
+  // Before-and-after plots (Column and Grouped families): draw an arrowhead
+  // on each subject's line, pointing from the earlier to the later condition.
+  beforeAfterArrows: boolean;
   // Colors. `palette`: its name and colors, saved with the graph so a figure keeps
   // them whatever becomes of Titer's catalog (lib/palettes.ts). `series`: the series
   // colored by hand, by name (a column, a group, a volcano's "up" and "down"); the
@@ -331,6 +336,7 @@ export const DEFAULT_GRAPH_OPTIONS: GraphOptions = {
   smoothShowCurve: true,
   heatmapShowValues: false,
   heatmapShowScale: true,
+  beforeAfterArrows: false,
   survivalMode: "codes",
   survivalShowCensors: true,
   survivalShowBand: false,

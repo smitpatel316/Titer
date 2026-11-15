@@ -15,6 +15,7 @@ import { paletteNamed, savedPalette } from "../../lib/palettes";
 import { titleCase } from "../../lib/format";
 import { centerColumn, type Paint } from "./plot-helpers";
 import { individual } from "./individual";
+import { beforeAfter, groupedBeforeAfter } from "./before-after";
 import { boxViolin } from "./box-violin";
 import { meanError } from "./mean-error";
 import { xyScatter } from "./xy-scatter";
@@ -80,6 +81,7 @@ export interface GraphModule {
 
 export const GRAPHS: Record<GraphType, GraphModule> = {
   individual,
+  "before-after": beforeAfter,
   "box-violin": boxViolin,
   "mean-error": meanError,
   "xy-scatter": xyScatter,
@@ -87,6 +89,7 @@ export const GRAPHS: Record<GraphType, GraphModule> = {
   "xy-area": xyArea,
   "grouped-bars": groupedBars,
   "grouped-scatter": groupedScatter,
+  "grouped-before-after": groupedBeforeAfter,
   "grouped-lines": groupedLines,
   "grouped-stacked": groupedStacked,
   "grouped-hbars": groupedHbars,
@@ -211,6 +214,7 @@ const optionsFor = (types: GraphType[]): SelectorOption<GraphType>[] =>
 export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>[]> = {
   column: optionsFor([
     "individual",
+    "before-after",
     "box-violin",
     "mean-error",
     "histogram",
@@ -235,6 +239,7 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
   ]),
   grouped: optionsFor([
     "grouped-scatter",
+    "grouped-before-after",
     "grouped-box",
     "grouped-bars",
     "grouped-lines",
