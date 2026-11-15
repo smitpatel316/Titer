@@ -561,8 +561,16 @@ check("info sheet .hlx round-trip and dangling links (R3 #22c)", () => {
       linkedTableId: "missing",
     },
   };
+  // A link to a table that didn't survive the load becomes project info.
+  // (The file needs a real table too — a project with no readable tables
+  // is rejected outright.)
   const first = read(
-    JSON.stringify({ version: 1, nodes: { i1: node }, rootOrder: ["i1"], childOrder: {}, activeNodeId: "i1" }),
+    serializeProjectFile({
+      nodes: { t1: table, i1: node },
+      rootOrder: ["t1", "i1"],
+      childOrder: {},
+      activeNodeId: "t1",
+    }),
   );
   strictEqual(first.project.nodes.i1?.info?.linkedTableId, null);
   strictEqual(first.project.nodes.i1?.info?.constants[0]?.value, "A123");
@@ -624,12 +632,15 @@ check("info-constant hooks resolve in axis limits (R3 #22e)", () => {
   };
   const sheets = infoSheetsOf(nodes, ["i1"]);
   const hooked = resolveGraphOptions(
-    { yMax: 5, yMaxConstant: "Max", title: "T {{Max}}" } as GraphOptions,
+    { ...newGraphOptions("xy-scatter"), yMax: 5, yMaxConstant: "Max", title: "T {{Max}}" },
     sheets,
   );
   strictEqual(hooked.yMax, 10);
   strictEqual(hooked.title, "T 10");
-  const broken = resolveGraphOptions({ yMax: 5, yMaxConstant: "Word", yMin: 1 } as GraphOptions, sheets);
+  const broken = resolveGraphOptions(
+    { ...newGraphOptions("xy-scatter"), yMax: 5, yMaxConstant: "Word", yMin: 1 },
+    sheets,
+  );
   strictEqual(broken.yMax, 5);
   strictEqual(broken.yMin, 1);
 });
