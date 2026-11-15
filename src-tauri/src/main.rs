@@ -278,7 +278,8 @@ fn close_next_project_window(app: &AppHandle) -> bool {
     // Check and set under one lock: two quits at once must not both pass,
     // and a `cancel_quit` that landed after the quit was marked must stop
     // the sequence before another window is asked.
-    let mut projects = app.state::<Projects>().0.lock().unwrap();
+    let state = app.state::<Projects>();
+    let mut projects = state.0.lock().unwrap();
     if !projects.quitting || projects.quit_closing.is_some() {
         return false;
     }
