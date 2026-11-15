@@ -117,6 +117,9 @@ export const NONLINEAR_MODELS = [
   // DOSE_MODELS above, so they are covered by the spread; do NOT list them
   // again here (a duplicate entry double-runs every NONLINEAR_MODELS sweep
   // and doubles the model enum in project-file.ts).
+  // v2 item 23: the user types their own equation (see user-defined.ts) —
+  // not a dose model, so the wizard offers it under "Another curve".
+  "user-defined",
 ] as const;
 /** What comparing two curves asks: is the EC50 different, or does one curve fit both. */
 export const CURVE_COMPARISONS = ["ec50", "all"] as const;
@@ -407,6 +410,11 @@ export interface NonlinearRegressionParams {
   /** Find each data set's outliers by ROUT (at `q`, in %) and leave them out of its fit. */
   rout?: boolean;
   q?: number;
+  /** User-defined equation (v2 item 23, model "user-defined" only): the equation as the
+   *  user typed it (`Y = A*exp(-k*X) + C`, or just the right-hand side), and each named
+   *  parameter's starting value. The fitter fits the parameters from those starts. */
+  customEquation?: string;
+  customParameters?: Record<string, number>;
 }
 
 /** Params for "correlation-matrix": Pearson (parametric) vs. Spearman
@@ -1674,6 +1682,10 @@ export interface AnalysisResult {
    *  (Y = Bmax·[L]/([L] + 10^X + Kd) + Bottom), and the result alone does
    *  not carry it. Set whenever the run supplied one. */
   ligandConcentration?: number;
+  /** The user-defined equation a "user-defined" fit used (v2 item 23): the fitted-curve
+   *  overlays need it to evaluate the curve, and the result alone does not carry it.
+   *  Set whenever the run supplied one. */
+  customEquation?: string;
   /** Optional variance components ("mixed-effects"): one row per
    *  random-effects grouping (subject intercept + residual in v1). */
   varianceComponents?: VarianceComponent[];

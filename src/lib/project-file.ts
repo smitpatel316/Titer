@@ -268,6 +268,10 @@ const PARAMS = {
   constantHook: "name",
   zeroConstantHook: "name",
   hundredConstantHook: "name",
+  // v2 item 23: the user-defined equation (a free string, read as a name) and its
+  // parameters' starting values (numbers by name).
+  customEquation: "name",
+  customParameters: "numbers-by-name",
   hypotheticalValue: "number", baseline: "number", q: ROUT_Q, lambda: "number",
   // Remove baseline (v2): how the baseline is defined, and the values it needs.
   baselineMethod: REMOVE_BASELINE_METHODS, firstN: "number", controls: "names", constant: "number",

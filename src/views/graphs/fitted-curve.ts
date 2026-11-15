@@ -4,6 +4,7 @@
 import type { GraphOptions } from "../../store/types";
 import type { AnalysisResult, NonlinearModel, RegressionCoefficient } from "../../stats/types";
 import { nonNegativeXOnly, positiveXOnly, coefficientsForSet, termLabel } from "../../stats/xy/nonlinear-regression";
+import { evaluateUserEquation } from "../../stats/xy/user-defined";
 import { xyPoints, type Column, type DataSet } from "../../lib/dataset";
 import type { GraphFigure } from ".";
 import { num } from "../../lib/format";
@@ -16,17 +17,25 @@ function coef(coefficients: RegressionCoefficient[], term: string): number {
 /** The fitted curve at `x`: the model's equation (nonlinear-regression.ts) with its coefficients.
  *  The homologous model also needs the radioligand concentration [L] (its
  *  fit carries it — see AnalysisResult.ligandConcentration); without it the
- *  curve is undefined (NaN). */
+ *  curve is undefined (NaN). A user-defined fit carries its equation instead
+ *  (AnalysisResult.customEquation, v2 item 23) — without it, no curve. */
 export function evaluate(
   model: NonlinearModel,
   coefficients: RegressionCoefficient[],
   x: number,
   ligandConcentration?: number,
+  customEquation?: string,
 ): number {
   const c = (term: string) => coef(coefficients, termLabel(term));
   const [bottom, top, hill, s] = [c("Bottom"), c("Top"), c("HillSlope"), c("S")];
   const rise = top - bottom;
   switch (model) {
+    case "user-defined": {
+      if (!customEquation) return NaN;
+      const values: Record<string, number> = {};
+      for (const coefRow of coefficients) values[coefRow.term] = coefRow.estimate ?? NaN;
+      return evaluateUserEquation(customEquation, values, x);
+    }
     case "sigmoidal-4pl-logx":
       return bottom + rise / (1 + 10 ** ((c("LogEC50") - x) * hill));
     case "sigmoidal-4pl-x":
@@ -107,13 +116,14 @@ function fittedCurve(
   xMax: number,
   steps = 100,
   ligandConcentration?: number,
+  customEquation?: string,
 ): { x: number[]; y: number[] } {
   const x: number[] = [];
   const y: number[] = [];
   for (let i = 0; i <= steps; i++) {
     const x0 = xMin + ((xMax - xMin) * i) / steps;
     x.push(x0);
-    y.push(evaluate(model, coefficients, x0, ligandConcentration));
+    y.push(evaluate(model, coefficients, x0, ligandConcentration, customEquation));
   }
   return { x, y };
 }
@@ -180,7 +190,7 @@ export function addFittedCurves(
     if (!y || !xs.length || !coefficients.some((c) => c.estimate != null)) return [];
     const lines = curveLines(fit, i, coefficients);
     notes.push(many ? `${name}: ${lines.join(", ")}` : lines.join("<br>"));
-    const curve = fittedCurve(model, coefficients, ...extent(xs), 100, fit.ligandConcentration);
+    const curve = fittedCurve(model, coefficients, ...extent(xs), 100, fit.ligandConcentration, fit.customEquation);
     return [
       {
         type: "scatter",
@@ -224,7 +234,7 @@ export function addFittedCurve(
       const yCol = ys.find((c) => c.name === setName) ?? y;
       const xs = xyPoints(x, yCol).x.filter((v) => keepCurveX(model, v));
       if (!xs.length) continue;
-      const curve = fittedCurve(model, coefficientsForSet(coefficients, setName, sets), ...extent(xs), 100, fit.ligandConcentration);
+      const curve = fittedCurve(model, coefficientsForSet(coefficients, setName, sets), ...extent(xs), 100, fit.ligandConcentration, fit.customEquation);
       fig.data = [
         {
           type: "scatter",
@@ -242,7 +252,7 @@ export function addFittedCurve(
   }
   const xs = xyPoints(x, y).x.filter((v) => keepCurveX(model, v));
   if (!xs.length) return;
-  const curve = fittedCurve(model, coefficients, ...extent(xs), 100, fit.ligandConcentration);
+  const curve = fittedCurve(model, coefficients, ...extent(xs), 100, fit.ligandConcentration, fit.customEquation);
   fig.data = [
     {
       type: "scatter",

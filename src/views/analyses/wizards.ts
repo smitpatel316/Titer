@@ -16,6 +16,7 @@ import {
 import type { TableType } from "../../store/types";
 import { MODEL_LABEL, termLabel } from "../../stats/xy/nonlinear-regression";
 import { modelSpec } from "../../stats/xy/nonlinear-fit";
+import { parseCustomParameters, parseUserEquation } from "../../stats/xy/user-defined";
 import { dataGroups, pairedGroups } from "../../stats/column/base";
 import { distinctTruthValues } from "../../stats/column/roc-curve";
 
@@ -2377,7 +2378,14 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ["1/x2", "Weight by 1/X²"],
         ...(yNames(table).length > 1 ? [["1/sd2", "Weight by 1/SD² (needs replicates)"] as [string, string]] : []),
       ];
-      const terms = a.model ? modelSpec(a.model as NonlinearModel).terms : [];
+      const terms = a.model
+        ? a.model === "user-defined"
+          ? (() => {
+              const parsed = parseUserEquation(String(a.customEquation ?? ""));
+              return "error" in parsed ? [] : parsed.params;
+            })()
+          : modelSpec(a.model as NonlinearModel).terms
+        : [];
       return [
         ysQuestion(table, "Which Y data sets should be fitted? Each is fitted on its own."),
         choice("kind", "Which kind of curve?", [
@@ -2385,6 +2393,35 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ["other", "Another curve (line, polynomial, exponential, Michaelis-Menten…)"],
         ]),
         choice("model", "Which curve should be fitted to X and Y?", models),
+        // v2 item 23: a user-defined equation — the equation first, then one starting
+        // value per parameter it names. The comparison and global-fit questions below
+        // are hidden for it (the runner cannot build those from an equation yet).
+        a.model === "user-defined" && {
+          id: "customEquation",
+          ask: "Type your equation, with X as the independent variable and named parameters — for example “Y = A*exp(-k*X) + C”. Functions: exp, log (natural), log10, log2, sqrt, abs, sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, expm1, log1p; pi is the constant.",
+          kind: "text",
+          label: "Equation =",
+          initial: "",
+          placeholder: "Y = A*exp(-k*X) + C",
+          parse: (text: string) => {
+            const parsed = parseUserEquation(text);
+            return "error" in parsed ? parsed : {};
+          },
+        },
+        a.model === "user-defined" &&
+          a.customEquation !== undefined && {
+            id: "customParameters",
+            ask: "Starting value for each parameter, as “name=value” separated by commas — the fit searches from these, so values read off the data work best.",
+            kind: "text",
+            label: "Starting values =",
+            initial: "",
+            placeholder: "A=8, k=0.3, C=1",
+            parse: (text: string) => {
+              const parsed = parseUserEquation(String(a.customEquation ?? ""));
+              if ("error" in parsed) return { error: parsed.error };
+              return parseCustomParameters(text, parsed.params);
+            },
+          },
         choice("weights", "Weight the points?", weightOptions),
         dose &&
           others.length > 0 &&
@@ -2405,13 +2442,15 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             ["no", "No — fit every point"],
             ["yes", "Yes — ROUT method (Q = 1%)"],
           ]),
-        choice("compareModel", "Also fit another model to the same data and compare (F test + AICc)?", [
-          ["none", "No comparison — fit this model only"],
-          ...models
-            .filter(([m]) => m !== a.model)
-            .map(([m, label]): [string, string] => [m, `Also fit ${label}`]),
-        ]),
+        a.model !== "user-defined" &&
+          choice("compareModel", "Also fit another model to the same data and compare (F test + AICc)?", [
+            ["none", "No comparison — fit this model only"],
+            ...models
+              .filter(([m]) => m !== a.model && m !== "user-defined")
+              .map(([m, label]): [string, string] => [m, `Also fit ${label}`]),
+          ]),
         others.length > 0 &&
+          a.model !== "user-defined" &&
           choice("global", "Fit additional Y data sets together with shared parameters (a global fit)?", [
             ["no", "No — fit this data set alone"],
             ["yes", "Yes — fit them together"],
@@ -2514,7 +2553,26 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           : {};
       const globalY = a.global === "yes" ? ((a.globalY as string[] | undefined) ?? []) : [];
       const global = globalY.length ? { globalY } : {};
-      const terms = modelSpec(a.model as NonlinearModel).terms;
+      // v2 item 23: a user equation's terms are its parameters, not a curated model's.
+      const terms =
+        a.model === "user-defined"
+          ? (() => {
+              const parsed = parseUserEquation(String(a.customEquation ?? ""));
+              return "error" in parsed ? [] : parsed.params;
+            })()
+          : modelSpec(a.model as NonlinearModel).terms;
+      // The equation and its starting values (the wizard's parse gates already checked
+      // both; an invalid value here is omitted and the runner refuses it plainly).
+      const custom =
+        a.model === "user-defined"
+          ? (() => {
+              const parsed = parseUserEquation(String(a.customEquation ?? ""));
+              if ("error" in parsed) return {};
+              const initials = parseCustomParameters(String(a.customParameters ?? ""), parsed.params);
+              if (initials.error) return {};
+              return { customEquation: String(a.customEquation), customParameters: initials.values };
+            })()
+          : {};
       const sharedParams =
         globalY.length && a.shared === "all"
           ? { sharedParams: terms }
@@ -2570,6 +2628,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         params: {
           ...fittedYs(a),
           model: a.model as NonlinearModel,
+          ...custom,
           ...compare,
           ...(a.rout === "yes" && !compare.compareWith ? { rout: true } : {}),
           ...weights,

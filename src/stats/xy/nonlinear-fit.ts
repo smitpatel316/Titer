@@ -14,6 +14,7 @@ import type { AnalysisOutcome, Column, NonlinearModel, RegressionCoefficient, St
 import { rVec } from "../column/base";
 import { datasetColumns, pairUp, splitXY, xyProblem } from "../../lib/dataset";
 import { evalNamedVector, type RVector } from "../webr";
+import { userDefinedSpec } from "./user-defined";
 
 export const MODEL_LABEL: Record<NonlinearModel, string> = {
   line: "Line",
@@ -48,6 +49,9 @@ export const MODEL_LABEL: Record<NonlinearModel, string> = {
   "two-site-competition-logx": "Two sites — Fit logIC50, X is log(concentration)",
   "two-site-competition-x": "Two sites — Fit logIC50, X is concentration",
   "homologous-competition-logx": "One site — Homologous, X is log(concentration)",
+  // v2 item 23: the user types their own equation (user-defined.ts) — its spec is built
+  // from the equation and starting values, not from a case below.
+  "user-defined": "User-defined equation",
 };
 
 /** The exponential-curve models (plan 08): fitted with nls() algorithm
@@ -216,8 +220,21 @@ export function modelSpec(
      *  `L` instead — the runner must then define it (it always supplies
      *  opts, after validating [L] > 0). */
     ligandConcentration?: number;
+    /** User-defined equation (v2 item 23, model "user-defined" only): the equation as
+     *  the user typed it, and each named parameter's starting value. Both are
+     *  required — without them the spec cannot be built. */
+    customEquation?: string;
+    customParameters?: Record<string, number>;
   },
 ): ModelSpec {
+  // v2 item 23: the spec comes from the user's equation, not a curated case.
+  if (model === "user-defined") {
+    if (opts?.customEquation === undefined || opts?.customParameters === undefined)
+      throw new Error(
+        "A user-defined equation needs its equation and every parameter's starting value — enter both before fitting.",
+      );
+    return userDefinedSpec(opts.customEquation, opts.customParameters);
+  }
   switch (model) {
     case "line":
       return { kind: "lm", fit: "m<-lm(y~x)", terms: ["Intercept", "Slope"] };
@@ -1034,6 +1051,9 @@ export function prepareFit(
   /** Parameters held fixed (plan 26): they are not fitted, so they do not
    *  count toward the minimum-points rule. */
   fixedCount = 0,
+  /** A spec built already (v2 item 23): the user-defined model's spec comes from its
+   *  equation, and `modelSpec(model)` alone cannot build it — pass it here. */
+  specOverride?: ModelSpec,
 ): { xCol: Column; yCol: Column; xs: number[]; ys: number[]; rows: number[]; columns: string[] } | { error: string } {
   const { x: xCol, ys: yCols } = splitXY(columns);
   // A Y data set's replicates pool into one fit (see datasetColumns): a name
@@ -1068,7 +1088,7 @@ export function prepareFit(
           },
           { x: [] as number[], y: [] as number[], rows: [] as number[], columns: [] as string[] },
         );
-  const spec = modelSpec(model);
+  const spec = specOverride ?? modelSpec(model);
   const nParams = spec.terms.length - fixedCount;
 
   // A log-X curve drops its X = 0 vehicle/control point (log(0) is

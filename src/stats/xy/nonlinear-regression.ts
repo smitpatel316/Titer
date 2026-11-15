@@ -63,12 +63,17 @@ import {
 // which is safe: both sides only call across it inside function bodies,
 // never at module top level.
 import { evaluate as evaluateCurve } from "../../views/graphs/fitted-curve";
+import { parseUserEquation, type ExprNode } from "./user-defined";
 
 // Re-exported for upstream importers (wizards.ts, fitted-curve.ts): the labels
 // live in nonlinear-fit.ts now; positiveXOnly matches upstream's helper.
 export { MODEL_LABEL };
-export const positiveXOnly = (model: NonlinearModel) => modelSpec(model).positiveX === true;
-export const nonNegativeXOnly = (model: NonlinearModel) => modelSpec(model).nonNegativeX === true;
+export const positiveXOnly = (model: NonlinearModel) =>
+  // v2 item 23: a user equation has no X restriction, and its spec cannot be built
+  // without the equation — never call modelSpec on it bare.
+  model === "user-defined" ? false : modelSpec(model).positiveX === true;
+export const nonNegativeXOnly = (model: NonlinearModel) =>
+  model === "user-defined" ? false : modelSpec(model).nonNegativeX === true;
 
 /** A parameter as results name it (its name in the equations otherwise). */
 const TERM_LABEL: Record<string, string> = { HillSlope: "Hill slope", S: "Asymmetry (S)" };
@@ -95,6 +100,9 @@ export const invertMethod = (model: NonlinearModel): InvertMethod =>
   model === "quartic" ||
   model === "quintic" ||
   model === "segmental-linear" ||
+  // v2 item 23: a user equation has no closed-form inverse — the interpolation path
+  // inverts it numerically (uniroot on the fitted curve), as for the polynomials.
+  model === "user-defined" ||
   model === "two-phase-decay" ||
   model === "plateau-decay" ||
   model === "substrate-inhibition"
@@ -370,6 +378,8 @@ export function coefficientsForSet(
 // doubling time null (see the derived expressions) and is noted, not hidden.
 const isExponential = (model: NonlinearModel) => EXPONENTIAL_MODELS.includes(model);
 const isEnzyme = (model: NonlinearModel) => ENZYME_MODELS.includes(model);
+/** v2 item 23: the user types their own equation. */
+const isUserDefined = (model: NonlinearModel) => model === "user-defined";
 /** Binding competition (plan 28): the one-site Fit logIC50 (inhibitor 3PL)
  *  and the two-site models, which the Fit-Ki toggle applies to. */
 const isTwoSiteCompetition = (model: NonlinearModel) =>
@@ -389,11 +399,41 @@ function equation(
   model: NonlinearModel,
   coefficients: RegressionCoefficient[],
   ligandConcentration?: number,
+  customEquation?: string,
 ): string | undefined {
   const y0 = coefOf(coefficients, "Y0");
   const plateau = coefOf(coefficients, "Plateau");
   const k = coefOf(coefficients, "K");
   switch (model) {
+    case "user-defined": {
+      // The user's equation with the fitted values in place of the parameters.
+      if (!customEquation) return undefined;
+      const parsed = parseUserEquation(customEquation);
+      if ("error" in parsed) return undefined;
+      const values: Record<string, number> = {};
+      for (const p of parsed.params) {
+        const v = coefOf(coefficients, p);
+        if (v == null) return undefined;
+        values[p] = v;
+      }
+      const render = (node: ExprNode): string => {
+        switch (node.kind) {
+          case "num":
+            return num(node.value);
+          case "var":
+            return node.name.toLowerCase() === "x" ? "X" : num(values[node.name]!);
+          case "const":
+            return "π";
+          case "neg":
+            return `(-${render(node.arg)})`;
+          case "bin":
+            return `(${render(node.left)} ${node.op === "*" ? "·" : node.op} ${render(node.right)})`;
+          case "call":
+            return `${node.fn}(${render(node.arg)})`;
+        }
+      };
+      return `Y = ${render(parsed.ast)}`;
+    }
     case "one-phase-decay":
       if (y0 == null || plateau == null || k == null) return undefined;
       return `Y = (${num(y0)} − ${num(plateau)})·exp(−${num(k)}·X) + ${num(plateau)}`;
@@ -483,6 +523,7 @@ function startingValues(
   xs: number[],
   ys: number[],
   ligandConcentration?: number,
+  customParameters?: Record<string, number>,
 ): string {
   const minY = Math.min(...ys);
   const maxY = Math.max(...ys);
@@ -492,6 +533,11 @@ function startingValues(
     return s.length % 2 === 1 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
   };
   switch (model) {
+    case "user-defined":
+      if (!customParameters) return "";
+      return `Starting values: ${Object.entries(customParameters)
+        .map(([p, v]) => `${p} = ${num(v)}`)
+        .join(", ")}.`;
     case "one-phase-decay":
       return `Starting values: Y0 = ${num(yAtMinX)}, Plateau = ${num(minY)}, K = 0.5.`;
     case "two-phase-decay":
@@ -1383,6 +1429,8 @@ export async function runNonlinearRegression(
 ): Promise<AnalysisOutcome> {
   const model = params?.model;
   if (!model || !Object.hasOwn(MODEL_LABEL, model)) return { error: "Choose a standard curve to fit." };
+  // v2 item 23: the user types their own equation.
+  const isUserDefinedModel = model === "user-defined";
 
   const { x: xCol, ys: yCols } = splitXY(columns);
   // A Y data set's replicates pool (see datasetColumns): "Control" fits
@@ -1413,10 +1461,20 @@ export async function runNonlinearRegression(
         "Enter the radioligand concentration [L] and Kd (both greater than 0, in the same units as X) to calculate Ki — Ki = IC50 / (1 + [L]/Kd).",
     };
   const kiDivisor = wantsKi ? 1 + ligand! / ligandKd! : undefined;
-  const spec = modelSpec(model, {
-    ...(kiDivisor != null ? { kiDivisor } : {}),
-    ...(isHomologous ? { ligandConcentration: ligand } : {}),
-  });
+  // The spec comes from the user's equation for a user-defined fit — a bad equation or
+  // bad starting values are a user-facing error, not an R crash.
+  let spec: ModelSpec;
+  try {
+    spec = modelSpec(model, {
+      ...(kiDivisor != null ? { kiDivisor } : {}),
+      ...(isHomologous ? { ligandConcentration: ligand } : {}),
+      ...(isUserDefinedModel
+        ? { customEquation: params?.customEquation, customParameters: params?.customParameters }
+        : {}),
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
   // A two-site fit that does not converge says so plainly (plan 28): the
   // likeliest cause is data with a single phase, not a numerical quirk.
   const twoSiteError: AnalysisOutcome = {
@@ -1474,6 +1532,17 @@ export async function runNonlinearRegression(
     return { error: "Fixing or bounding parameters is only supported for nonlinear (nls) curves, not for line/polynomial fits." };
   if (comparingSets && (weightsScheme !== "none" || fixedNames.length || boundNames.length))
     return { error: "Weighting, fixed parameters and bounds can't be combined with comparing two data sets yet — fit each data set separately." };
+  // v2 item 23: a user-defined equation fits on its own for now — the comparison and
+  // global paths build their specs from curated models, and cannot build one from an
+  // equation yet. Each refusal names what to do instead.
+  if (isUserDefinedModel && comparingModels)
+    return { error: "Comparing models can't be combined with a user-defined equation yet — fit the equation on its own first." };
+  if (comparingModels && params.compareModel === "user-defined")
+    return { error: "A user-defined equation can't be the comparison model yet — compare two built-in models, or fit the equation on its own." };
+  if (isUserDefinedModel && comparingSets)
+    return { error: "Comparing two data sets' curves can't be combined with a user-defined equation yet — fit each data set on its own first." };
+  if (isUserDefinedModel && global)
+    return { error: "A global fit can't be combined with a user-defined equation yet — fit each data set on its own first." };
   if (global) {
     for (const name of params.globalY!) {
       if (name === yCol.name) return { error: `“${name}” is already the fitted data set — pick other Y data sets for the global fit.` };
@@ -1509,7 +1578,7 @@ export async function runNonlinearRegression(
     let anyRetried = false;
     let retryMethod: string | undefined;
     for (const name of params.ys!) {
-      let prep = prepareFit(columns, name, model, fixedNames.length);
+      let prep = prepareFit(columns, name, model, fixedNames.length, spec);
       if ("error" in prep) return prep;
       const wr = computeWeights(weightsScheme, prep, yColsAll);
       if ("error" in wr) return wr;
@@ -1607,7 +1676,7 @@ export async function runNonlinearRegression(
   if (comparingSets && !other) return { error: xyProblem(columns, params.compareWith)! };
   if (other && !spec.dose) return { error: "Only dose-response curves can be compared." };
 
-  let first = prepareFit(columns, params?.y, model, fixedNames.length);
+  let first = prepareFit(columns, params?.y, model, fixedNames.length, spec);
   if ("error" in first) return first;
   // Weighting needs the fitted points (and, for 1/SD², their rows).
   const weightResult = computeWeights(weightsScheme, first, yCols.flatMap((s) => s.columns));
@@ -1990,10 +2059,14 @@ async function assembleResult(
     interpolation +
     (rout ? routNotes(rout.q, rout.outliers, sets.map((s) => s.name)) : "");
   const eq =
-    isExponential(model) || isEnzyme(model) || isCompetition(model)
-      ? equation(model, coefficients, params?.ligandConcentration)
+    isExponential(model) || isEnzyme(model) || isCompetition(model) || isUserDefined(model)
+      ? equation(model, coefficients, params?.ligandConcentration, params?.customEquation)
       : undefined;
   const extraNotes: string[] = [];
+  if (isUserDefined(model)) {
+    const starts = startingValues(model, first.xs, first.ys, undefined, params?.customParameters);
+    if (starts) extraNotes.push(starts);
+  }
   if (isCompetition(model)) {
     const starts = startingValues(model, first.xs, first.ys, params?.ligandConcentration);
     if (starts) extraNotes.push(starts);
@@ -2023,6 +2096,14 @@ async function assembleResult(
         : retryMethod === "port"
           ? "The first fit did not converge; retried with the port optimizer and converged."
           : "The first fit did not converge; retried and converged.",
+    );
+  }
+  // v2 item 23: the user fit's primary is the port optimizer; a retry means Gauss–Newton won.
+  if (retried && model === "user-defined") {
+    extraNotes.push(
+      retryMethod === "Gauss-Newton"
+        ? "The first fit did not converge; retried with the Gauss–Newton algorithm and converged."
+        : "The first fit did not converge; retried and converged.",
     );
   }
   // Plan 29: the segmental note states the fitted breakpoint and both
@@ -2085,5 +2166,7 @@ async function assembleResult(
     ...(rout?.outliers.length ? { curveOutliers: rout.outliers } : {}),
     // The overlays need [L] to evaluate a homologous curve (plan 28).
     ...(params?.ligandConcentration != null ? { ligandConcentration: params.ligandConcentration } : {}),
+    // The overlays need the equation to evaluate a user-defined curve (v2 item 23).
+    ...(params?.customEquation != null ? { customEquation: params.customEquation } : {}),
   };
 }

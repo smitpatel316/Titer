@@ -201,7 +201,7 @@ import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { decodePng, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
 import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
-import type { AnalysisOutcome, AnalysisParams, AnalysisResult, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, PlotFunctionParams, RegressionCoefficient, SimulationSpec } from "../src/stats/types";
+import type { AnalysisOutcome, AnalysisParams, AnalysisResult, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, SimulationSpec } from "../src/stats/types";
 import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation/simulate";
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
 import { evaluate as evaluateCurve } from "../src/views/graphs/fitted-curve";
@@ -214,6 +214,7 @@ import {
   secondDerivative,
   smoothValues,
 } from "../src/stats/xy/smooth-differentiate-integrate";
+import { evaluateUserEquation, parseCustomParameters, parseUserEquation } from "../src/stats/xy/user-defined";
 import { monteCarloRCode, percentile } from "../src/stats/simulation/monte-carlo";
 import { addMonteCarloHistogram } from "../src/views/graphs/monte-carlo-histogram";
 import { addGeneratedCurves } from "../src/views/graphs/generated-curves";
@@ -4159,6 +4160,216 @@ check("closed-form inverses read unknowns off the fitted curve", async () => {
   strictEqual(invertMethod("segmental-linear"), "numeric");
   strictEqual(invertMethod("sigmoidal-4pl-logx"), "closed-form");
   strictEqual(invertModel("quadratic", dose.coefficients, 50), null);
+});
+
+// v2 item 23: user-defined equations for nonlinear regression — the user types their own
+// equation with named parameters and starting values, and the fitter fits it.
+check("a user-defined equation fits its own parameters", async () => {
+  const xs = [0, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 8];
+  const ys = xs.map((x) => 10 * Math.exp(-0.5 * x) + 2);
+  const table: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  };
+  const out = await runAnalysis("nonlinear-regression", table, {
+    y: "Y1",
+    model: "user-defined",
+    customEquation: "Y = A*exp(-k*X) + C",
+    customParameters: { A: 8, k: 0.3, C: 1 },
+  });
+  ok(!("error" in out), `user-defined fit failed: ${"error" in out ? out.error : ""}`);
+  const coef = (term: string) => out.coefficients?.find((c) => c.term === term)?.estimate;
+  ok(coef("A") != null && Math.abs(coef("A")! - 10) < 0.05, `A should be ~10, got ${coef("A")}`);
+  ok(coef("k") != null && Math.abs(coef("k")! - 0.5) < 0.02, `k should be ~0.5, got ${coef("k")}`);
+  ok(coef("C") != null && Math.abs(coef("C")! - 2) < 0.05, `C should be ~2, got ${coef("C")}`);
+  const r2 = out.fit?.rows.find((r) => r.label === "R squared")?.values?.[0];
+  ok(r2 != null && r2 > 0.999, `R² should be ~1 on noiseless data, got ${r2}`);
+  ok(out.equation?.includes("Y ="), `result should carry the fitted equation, got ${out.equation}`);
+  // Error paths: no equation at all, and starting values that don't cover the equation's parameters.
+  const noEq = await runAnalysis("nonlinear-regression", table, {
+    y: "Y1",
+    model: "user-defined",
+    customParameters: { A: 8 },
+  });
+  ok("error" in noEq && noEq.error.includes("equation"), `missing equation should be refused, got ${JSON.stringify(noEq)}`);
+  const missingC = await runAnalysis("nonlinear-regression", table, {
+    y: "Y1",
+    model: "user-defined",
+    customEquation: "Y = A*exp(-k*X) + C",
+    customParameters: { A: 8, k: 0.3 },
+  });
+  ok("error" in missingC && missingC.error.includes("C"), `missing starting value for C should be refused, got ${JSON.stringify(missingC)}`);
+  // A second shape: a power law, fitted from starting values far from the truth.
+  const px = [1, 2, 3, 4, 5, 6, 8, 10];
+  const py = px.map((x) => 3 * x ** 0.7);
+  const pTable: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: px.map((x, i) => ["", String(x), String(py[i])]),
+  };
+  const pOut = await runAnalysis("nonlinear-regression", pTable, {
+    y: "Y1",
+    model: "user-defined",
+    customEquation: "a*X^b",
+    customParameters: { a: 1, b: 1 },
+  });
+  ok(!("error" in pOut), `power-law fit failed: ${"error" in pOut ? pOut.error : ""}`);
+  const pCoef = (term: string) => pOut.coefficients?.find((c) => c.term === term)?.estimate;
+  ok(pCoef("a") != null && Math.abs(pCoef("a")! - 3) < 0.05, `a should be ~3, got ${pCoef("a")}`);
+  ok(pCoef("b") != null && Math.abs(pCoef("b")! - 0.7) < 0.02, `b should be ~0.7, got ${pCoef("b")}`);
+});
+
+// v2 item 23: the equation parser — what it accepts, what it renders as R, and what it refuses.
+check("a user equation parses to R and rejects what it cannot fit", () => {
+  const good = parseUserEquation("Y = A*exp(-k*X) + C");
+  ok(!("error" in good), `valid equation should parse: ${JSON.stringify(good)}`);
+  deepStrictEqual(good.params, ["A", "k", "C"]);
+  ok(good.rExpr.includes("exp(") && good.rExpr.includes("x"), `R expression should use exp() on x, got ${good.rExpr}`);
+  ok(
+    good.curveFn.includes('p[["A"]]') && good.curveFn.includes('p[["k"]]') && good.curveFn.includes('p[["C"]]') && good.curveFn.includes("xv"),
+    `curve function should read parameters from p at xv, got ${good.curveFn}`,
+  );
+  // No `Y =` prefix needed; `ln` is the natural log; `^` binds tighter than `*`.
+  const bare = parseUserEquation("a*X^b");
+  ok(!("error" in bare) && bare.params.join() === "a,b");
+  const ln = parseUserEquation("Y = A*ln(X)");
+  ok(!("error" in ln) && ln.rExpr.includes("log("), `ln should render as R log(), got ${"error" in ln ? ln.error : ln.rExpr}`);
+  strictEqual(evaluateUserEquation("Y = A+3*X^2", { A: 2 }, 2), 14);
+  strictEqual(evaluateUserEquation("Y = A*exp(-k*X) + C", { A: 10, k: 0.5, C: 2 }, 0), 12);
+  ok(Math.abs(evaluateUserEquation("Y = A*exp(-k*X) + C", { A: 10, k: 0.5, C: 2 }, 2) - (10 * Math.exp(-1) + 2)) < 1e-12);
+  const bad = (eq: string, want: string) => {
+    const r = parseUserEquation(eq);
+    ok("error" in r && r.error.includes(want), `“${eq}” should be refused mentioning “${want}”, got ${JSON.stringify(r)}`);
+  };
+  bad("", "Enter an equation");
+  bad("Y = 2*X", "no parameters");
+  bad("Z = A*X", "left");
+  bad("Y = A*X + B; print(1)", "not allowed");
+  bad("Y = A*foo(X)", "not a function");
+  bad("Y = y*X", "cannot be a parameter");
+  bad("Y = A*X + a*X", "capitalisation");
+  bad("Y = S*X", "cannot be a parameter");
+  bad("Y = A*X + ", "ends unexpectedly");
+  bad("Y = A*(X", "not closed");
+  // Starting values: every parameter needs one, and no value may name a parameter
+  // the equation does not use.
+  deepStrictEqual(parseCustomParameters("A=8, k=0.3, C=1", ["A", "k", "C"]).values, { A: 8, k: 0.3, C: 1 });
+  ok(parseCustomParameters("A=8, k=0.3", ["A", "k", "C"]).error?.includes("C"));
+  ok(parseCustomParameters("A=8, k=0.3, C=1, D=2", ["A", "k", "C"]).error?.includes("D"));
+  ok(parseCustomParameters("A=eight", ["A"]).error?.includes("not a number"));
+});
+
+// v2 item 23: the wizard asks for the equation and its starting values only for a
+// user-defined fit — built-in models ask nothing new — and finish makes the params.
+check("the curve wizard asks for a user equation and its starting values", () => {
+  const wizard = WIZARDS["nonlinear-regression"]!;
+  const table = readTable({ columns: ["Title", "X", "A", "B"], rows: [["", "1", "2", "3"]] });
+  const asked = (a: Answers) => wizard.questions(a, table).flatMap((q) => (q ? [q] : []));
+  ok(!asked({ ys: ["A"], kind: "other", model: "line" }).some((q) => q.id === "customEquation"));
+  ok(asked({ ys: ["A"], kind: "other", model: "user-defined" }).some((q) => q.id === "customEquation"));
+  ok(!asked({ ys: ["A"], kind: "other", model: "user-defined" }).some((q) => q.id === "customParameters"));
+  const withEq = asked({
+    ys: ["A"],
+    kind: "other",
+    model: "user-defined",
+    customEquation: "Y = A*exp(-k*X) + C",
+  });
+  ok(withEq.some((q) => q.id === "customParameters"));
+  // ... and hides the comparison / global questions the runner cannot do yet.
+  ok(!withEq.some((q) => q.id === "compareModel"));
+  ok(!withEq.some((q) => q.id === "global"));
+  deepStrictEqual(
+    wizard.finish(
+      {
+        ys: ["A"],
+        kind: "other",
+        model: "user-defined",
+        customEquation: "Y = A*exp(-k*X) + C",
+        customParameters: "A=8, k=0.3, C=1",
+      },
+      table,
+    ).params,
+    {
+      y: "A",
+      model: "user-defined",
+      customEquation: "Y = A*exp(-k*X) + C",
+      customParameters: { A: 8, k: 0.3, C: 1 },
+    },
+  );
+});
+
+// v2 item 23: the fitted-curve overlay evaluates a user-defined equation from the fitted
+// coefficients — the curve it draws is the curve R fitted.
+check("the fitted curve overlay evaluates a user-defined equation", async () => {
+  const xs = [0, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 8];
+  const ys = xs.map((x) => 10 * Math.exp(-0.5 * x) + 2);
+  const table: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  };
+  const out = await runAnalysis("nonlinear-regression", table, {
+    y: "Y1",
+    model: "user-defined",
+    customEquation: "Y = A*exp(-k*X) + C",
+    customParameters: { A: 8, k: 0.3, C: 1 },
+  });
+  ok(!("error" in out) && out.coefficients, `fit failed: ${"error" in out ? out.error : ""}`);
+  ok(out.customEquation === "Y = A*exp(-k*X) + C", `result should carry the equation, got ${out.customEquation}`);
+  const at = (x: number) => evaluateCurve("user-defined", out.coefficients!, x, undefined, out.customEquation);
+  ok(Math.abs(at(0) - 12) < 0.05, `overlay at X = 0 should be ~12, got ${at(0)}`);
+  ok(Math.abs(at(2) - (10 * Math.exp(-1) + 2)) < 0.05, `overlay at X = 2 should be ~${10 * Math.exp(-1) + 2}, got ${at(2)}`);
+  // A user-defined equation has no closed-form inverse — the interpolation path inverts
+  // it numerically, so an unknown still reads off the curve.
+  strictEqual(invertMethod("user-defined"), "numeric");
+  const withUnknown: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: [...xs.map((x, i) => ["", String(x), String(ys[i])]), ["", "", String(10 * Math.exp(-1) + 2)]],
+  };
+  const interp = await runAnalysis("nonlinear-regression", withUnknown, {
+    y: "Y1",
+    model: "user-defined",
+    customEquation: "Y = A*exp(-k*X) + C",
+    customParameters: { A: 8, k: 0.3, C: 1 },
+    interpolate: true,
+  });
+  ok(!("error" in interp) && interp.interpolated?.length === 1, `interpolation failed: ${"error" in interp ? interp.error : ""}`);
+  const ix = interp.interpolated![0].x;
+  ok(ix != null && Math.abs(ix - 2) < 0.05, `interpolated X should be ~2, got ${ix}`);
+});
+
+// v2 item 23: the equation and its starting values survive a project-file round trip.
+check("a user-defined fit survives a project-file round trip", () => {
+  const params: NonlinearRegressionParams = {
+    y: "Y1",
+    model: "user-defined",
+    customEquation: "Y = A*exp(-k*X) + C",
+    customParameters: { A: 8, k: 0.3, C: 1 },
+  };
+  const file: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "Data",
+        parentId: null,
+        tableType: "xy",
+        data: { columns: ["Title", "X", "Y1"], rows: [[null, "0", "12"], [null, "1", "8"]] },
+      },
+      a1: {
+        id: "a1",
+        type: "analysis",
+        name: "Fit",
+        parentId: "t1",
+        analysisType: "nonlinear-regression",
+        analysisParams: params,
+      },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: ["a1"] },
+    activeNodeId: "a1",
+  };
+  const { project, updated } = read(serializeProjectFile(file));
+  strictEqual(updated, false);
+  deepStrictEqual(project.nodes.a1.analysisParams, params);
 });
 
 // ROUT-in-fit (v2, upstream 1.0.9): a gross outlier in a 4PL dose-response
