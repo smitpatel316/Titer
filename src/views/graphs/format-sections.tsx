@@ -114,6 +114,19 @@ export function statisticsControls(c: SectionContext): React.ReactNode {
     }
     return <MonteCarloControls analyses={sources} options={options} set={set} />;
   }
+  // Before the column-family catch-all below: estimation-plot's family is
+  // "column", so this branch would be unreachable after it.
+  if (graphType === "estimation-plot") {
+    const sources = c.analyses.filter((a) => a.analysisType === "compare-two-groups");
+    if (!sources.length) {
+      return (
+        <NoAnalysis test="compare-two-groups" onNewAnalysis={c.onNewAnalysis}>
+          Draw the difference between means with its 95% CI from a Compare two groups analysis of this table.
+        </NoAnalysis>
+      );
+    }
+    return <TtestControls analyses={sources} options={options} set={set} />;
+  }
   if (GRAPHS[graphType].family === "column") {
     const sources = c.analyses.filter((a) => SIGNIFICANCE_SOURCES.has(a.analysisType));
     if (!sources.length) {
@@ -197,17 +210,6 @@ export function statisticsControls(c: SectionContext): React.ReactNode {
       );
     }
     return <CoxControls analyses={sources} options={options} set={set} />;
-  }
-  if (graphType === "estimation-plot") {
-    const sources = c.analyses.filter((a) => a.analysisType === "compare-two-groups");
-    if (!sources.length) {
-      return (
-        <NoAnalysis test="compare-two-groups" onNewAnalysis={c.onNewAnalysis}>
-          Draw the difference between means with its 95% CI from a Compare two groups analysis of this table.
-        </NoAnalysis>
-      );
-    }
-    return <TtestControls analyses={sources} options={options} set={set} />;
   }
   if (graphType === "observed-fitted") {
     const sources = c.analyses.filter((a) => a.analysisType === "poisson-regression");

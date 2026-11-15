@@ -8338,6 +8338,26 @@ check("a two-tailed t test reports its difference with its 95% CI, a one-tailed 
   strictEqual(nonparam.difference, undefined);
 });
 
+check("the estimation plot's Statistics controls come before the column-family catch-all (v2-12)", () => {
+  // Mac GUI proof #1 (Nov 15): the Format panel never offered the "New Compare
+  // two groups…" affordance for an estimation plot, because statisticsControls
+  // checked the column-family catch-all first and the estimation-plot branch
+  // below it was unreachable — its family is "column", so the graph always got
+  // SignificanceControls instead of TtestControls and ttestAnalysisId had no
+  // live writer. The branch must sit above the catch-all, as the
+  // monte-carlo-histogram branch already does.
+  const src = readFileSync("src/views/graphs/format-sections.tsx", "utf8");
+  const fn = src.slice(src.indexOf("export function statisticsControls"));
+  const estimation = fn.indexOf('if (graphType === "estimation-plot")');
+  const column = fn.indexOf('if (GRAPHS[graphType].family === "column")');
+  ok(estimation !== -1, "statisticsControls must have an estimation-plot branch");
+  ok(column !== -1, "statisticsControls must have a column-family catch-all");
+  ok(
+    estimation < column,
+    "the estimation-plot branch must come before the column-family catch-all, or it is unreachable",
+  );
+});
+
 check("the observed-vs-fitted plot drops overflowed fitted counts with a note instead of hiding the worst misfit (R2-G-F15)", () => {
   const options = newGraphOptions("observed-fitted");
   const fig = GRAPHS["observed-fitted"].build([], options, paintOf(options, 1));
