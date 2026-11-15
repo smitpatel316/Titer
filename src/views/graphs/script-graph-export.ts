@@ -26,17 +26,28 @@ function tooLarge(size: { width: number; height: number }, dpi: number): string 
   return null;
 }
 
-/** PNG bytes as RGBA pixels (for the TIFF/BMP encoders). */
+/** PNG bytes as RGBA pixels (for the TIFF/BMP encoders). The bitmap's size
+ *  is read BEFORE close(): a closed ImageBitmap reports 0×0, so reading it
+ *  after close() silently encoded an empty image (Mac proof #2: a valid
+ *  0×0 TIFF / header-only BMP, run log reporting success). An empty decode
+ *  throws instead of writing a silent 0×0 file. */
 async function pngToRgba(bytes: Uint8Array): Promise<{ rgba: Uint8Array; width: number; height: number }> {
   const bitmap = await createImageBitmap(new Blob([bytes as BlobPart], { type: "image/png" }));
+  const width = bitmap.width;
+  const height = bitmap.height;
+  if (width <= 0 || height <= 0)
+    throw new Error("The graph image decoded to an empty picture — nothing was exported.");
   const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext("2d")!;
   ctx.drawImage(bitmap, 0, 0);
-  const data = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+  const data = ctx.getImageData(0, 0, width, height).data;
   bitmap.close();
-  return { rgba: new Uint8Array(data), width: bitmap.width, height: bitmap.height };
+  const rgba = new Uint8Array(data);
+  if (rgba.length !== width * height * 4)
+    throw new Error("The graph image read back the wrong number of pixels — nothing was exported.");
+  return { rgba, width, height };
 }
 
 /** One graph, drawn offscreen, as an image of `format` at `dpi`. */

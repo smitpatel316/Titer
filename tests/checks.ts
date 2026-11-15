@@ -14166,6 +14166,35 @@ check("script: the Tauri write path allows .tif/.tiff/.bmp/.csv/.txt script expo
   }
 });
 
+// Mac GUI proof #2 (S1): ExportTIF/ExportBMP wrote structurally valid but
+// EMPTY images (0×0 TIFF, header-only BMP) while the run log reported
+// success. Root cause was in pngToRgba (script-graph-export.ts): it read
+// bitmap.width/bitmap.height in the return AFTER bitmap.close() — and a
+// closed ImageBitmap reports 0×0 (MDN: "ImageBitmap { width: 0, height: 0 }
+// — disposed"). The canvas readback itself used the real dimensions, so
+// only the dimensions were lost and the encoders faithfully wrote 0×0.
+// The headless harness has no DOM, so it cannot drive the canvas readback
+// — this pin guards the ordering and the loud-failure throw in source
+// instead; the live Mac re-proof #3 verifies the dimensions end to end.
+check("script: pngToRgba reads the bitmap size before close() and fails loud on an empty decode", () => {
+  const src = readFileSync("src/views/graphs/script-graph-export.ts", "utf8");
+  const fn = /async function pngToRgba[\s\S]*?\n}/.exec(src);
+  ok(fn, "pngToRgba must exist in script-graph-export.ts");
+  const body = fn![0];
+  const closeAt = body.indexOf("bitmap.close()");
+  ok(closeAt >= 0, "pngToRgba must close the bitmap");
+  ok(body.includes("bitmap.width") && body.includes("bitmap.height"), "pngToRgba must read the bitmap dimensions");
+  const afterClose = body.slice(closeAt);
+  ok(
+    !afterClose.includes("bitmap.width") && !afterClose.includes("bitmap.height"),
+    "pngToRgba must not read bitmap.width/height after bitmap.close() — a closed ImageBitmap reports 0×0",
+  );
+  ok(
+    /width <= 0 \|\| height <= 0/.test(body) && /throw new Error/.test(body),
+    "pngToRgba must throw instead of encoding a 0×0 decode",
+  );
+});
+
 check("script: ForEach repeats with %N and ForEach Sheet visits each sheet with %S", () => {
   const counted = runScript(scriptDoc(), "ForEach 3\nSetInfo \"loop %N\", 1\nNext");
   strictEqual(counted.stopped, false);
