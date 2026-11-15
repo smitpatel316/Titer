@@ -12462,6 +12462,286 @@ check("transpose refuses a table Prism could not transpose", async () => {
   );
 });
 
+// Extract and rearrange (v2, item 10): build a new XY / Column / Grouped /
+// Contingency table from a subset of a multiple-variables table — Prism's
+// Analyze > Extract and rearrange. The source table is never touched; the
+// new table's data rides in `extracted`, ready for "Create table".
+const EXTRACT_TABLE: TableData = {
+  columns: ["Title", "Time", "Score", "Group", "Subject", "Label"],
+  rows: [
+    ["", "0", "5", "A", "S1", "L1"],
+    ["", "0", "7", "B", "S1", "L2"],
+    ["", "1", "6", "A", "S1", "L3"],
+    ["", "1", "9", "B", "S2", "L4"],
+    ["", "1", "11", "A", "S2", "L5"],
+    ["", "2", "8", "B", "S1", "L6"],
+  ],
+};
+
+check("extract and rearrange builds an XY table from a multiple-variables table", async () => {
+  const out = await runAnalysis("extract-rearrange", EXTRACT_TABLE, {
+    target: "xy",
+    x: "Time",
+    response: "Score",
+    grouping: "Group",
+    subject: "Subject",
+    completeRows: true,
+  });
+  if ("error" in out) throw new Error(out.error);
+  strictEqual(out.testType, "extract-rearrange");
+  strictEqual(out.extracted?.tableType, "xy");
+  const table = out.extracted?.table;
+  // One Y column per grouping level, one subcolumn per subject (global
+  // first-appearance order: S1 then S2), X condensed to its distinct values.
+  deepStrictEqual(table?.columns, ["Title", "X", "A:Y1", "A:Y2", "B:Y1", "B:Y2"]);
+  strictEqual(table?.groups, 2);
+  strictEqual(table?.replicates, 2);
+  deepStrictEqual(table?.rows, [
+    ["", "0", "5", null, "7", null],
+    ["", "1", "6", "11", null, "9"],
+    ["", "2", null, null, "8", null],
+  ]);
+  // The extracted table reads back as an XY table with two Y data sets.
+  strictEqual(splitXY(readTable(table!).columns).ys.length, 2);
+  ok(out.notes.includes("source table is unchanged"));
+  // The source table is untouched by the run.
+  deepStrictEqual(EXTRACT_TABLE.rows[0], ["", "0", "5", "A", "S1", "L1"]);
+  // Offered on Multiple Variables tables only — not the other data tables.
+  ok(analysisOptionsForTable("multiple").some((o) => o.value === "extract-rearrange"));
+  ok(!analysisOptionsForTable("column").some((o) => o.value === "extract-rearrange"));
+  ok(!analysisOptionsForTable("xy").some((o) => o.value === "extract-rearrange"));
+  ok(!analysisOptionsForTable("grouped").some((o) => o.value === "extract-rearrange"));
+  strictEqual(ANALYSES["extract-rearrange"].label, "Extract and rearrange");
+});
+
+check("extract and rearrange keeps source-row alignment when complete rows is off", async () => {
+  const out = await runAnalysis("extract-rearrange", EXTRACT_TABLE, {
+    target: "xy",
+    x: "Time",
+    response: "Score",
+    grouping: "Group",
+    subject: "Subject",
+    rowTitles: "Label",
+    completeRows: false,
+  });
+  if ("error" in out) throw new Error(out.error);
+  // One output row per source row, each value in its own dataset/subcolumn,
+  // row titles from the Label column.
+  deepStrictEqual(out.extracted?.table.rows, [
+    ["L1", "0", "5", null, null, null],
+    ["L2", "0", null, null, "7", null],
+    ["L3", "1", "6", null, null, null],
+    ["L4", "1", null, null, null, "9"],
+    ["L5", "1", null, "11", null, null],
+    ["L6", "2", null, null, "8", null],
+  ]);
+});
+
+check("extract and rearrange builds a Column table, subjects aligned to rows", async () => {
+  const table: TableData = {
+    columns: ["Title", "Score", "Sex", "Subject"],
+    rows: [
+      ["", "10", "F", "S1"],
+      ["", "12", "M", "S1"],
+      ["", "14", "F", "S2"],
+      ["", "16", "M", "S2"],
+    ],
+  };
+  const out = await runAnalysis("extract-rearrange", table, {
+    target: "column",
+    response: "Score",
+    grouping: "Sex",
+    subject: "Subject",
+  });
+  if ("error" in out) throw new Error(out.error);
+  strictEqual(out.extracted?.tableType, "column");
+  deepStrictEqual(out.extracted?.table.columns, ["Title", "F", "M"]);
+  // Same subject on the same row across the group columns.
+  deepStrictEqual(out.extracted?.table.rows, [
+    ["S1", "10", "12"],
+    ["S2", "14", "16"],
+  ]);
+  // Without a grouping variable: one column, named for the response.
+  const single = await runAnalysis("extract-rearrange", table, { target: "column", response: "Score" });
+  if ("error" in single) throw new Error(single.error);
+  deepStrictEqual(single.extracted?.table.columns, ["Title", "Score"]);
+  deepStrictEqual(single.extracted?.table.rows, [
+    ["", "10"],
+    ["", "12"],
+    ["", "14"],
+    ["", "16"],
+  ]);
+  // With prefixes, the variable name leads the level ("Sex = F").
+  const prefixed = await runAnalysis("extract-rearrange", table, {
+    target: "column",
+    response: "Score",
+    grouping: "Sex",
+    subject: "Subject",
+    prefixNames: true,
+  });
+  if ("error" in prefixed) throw new Error(prefixed.error);
+  deepStrictEqual(prefixed.extracted?.table.columns, ["Title", "Sex = F", "Sex = M"]);
+});
+
+check("extract and rearrange builds a Grouped table from row and column factors", async () => {
+  const table: TableData = {
+    columns: ["Title", "Score", "Dose", "Drug", "Subject"],
+    rows: [
+      ["", "10", "Low", "A", "S1"],
+      ["", "12", "Low", "B", "S1"],
+      ["", "20", "High", "A", "S1"],
+      ["", "22", "High", "B", "S2"],
+      ["", "24", "High", "A", "S2"],
+      ["", "26", "Low", "B", "S2"],
+    ],
+  };
+  const out = await runAnalysis("extract-rearrange", table, {
+    target: "grouped",
+    response: "Score",
+    rowFactor: "Dose",
+    columnFactor: "Drug",
+    subject: "Subject",
+  });
+  if ("error" in out) throw new Error(out.error);
+  strictEqual(out.extracted?.tableType, "grouped");
+  const extracted = out.extracted?.table;
+  deepStrictEqual(extracted?.columns, ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"]);
+  strictEqual(extracted?.groups, 2);
+  strictEqual(extracted?.replicates, 2);
+  deepStrictEqual(extracted?.rows, [
+    ["Low", "10", null, "12", "26"],
+    ["High", "20", "24", null, "22"],
+  ]);
+  ok(isGrouped(extracted!));
+  // With prefixes, factor levels are named for their variable.
+  const prefixed = await runAnalysis("extract-rearrange", table, {
+    target: "grouped",
+    response: "Score",
+    rowFactor: "Dose",
+    columnFactor: "Drug",
+    subject: "Subject",
+    prefixNames: true,
+  });
+  if ("error" in prefixed) throw new Error(prefixed.error);
+  deepStrictEqual(prefixed.extracted?.table.columns, ["Title", "Drug = A:Y1", "Drug = A:Y2", "Drug = B:Y1", "Drug = B:Y2"]);
+  deepStrictEqual(prefixed.extracted?.table.rows, [
+    ["Dose = Low", "10", null, "12", "26"],
+    ["Dose = High", "20", "24", null, "22"],
+  ]);
+});
+
+check("extract and rearrange builds a Contingency table by cross-tabulation", async () => {
+  const table: TableData = {
+    columns: ["Title", "Treatment", "Outcome", "Count"],
+    rows: [
+      ["", "T1", "Yes", "2"],
+      ["", "T1", "No", "1"],
+      ["", "T2", "Yes", "3"],
+      ["", "T1", "Yes", "1"],
+      ["", "T2", "No", ""],
+    ],
+  };
+  // Without a count variable, every source row increments its cell by 1.
+  const out = await runAnalysis("extract-rearrange", table, {
+    target: "contingency",
+    rowVariable: "Treatment",
+    outcome: "Outcome",
+  });
+  if ("error" in out) throw new Error(out.error);
+  strictEqual(out.extracted?.tableType, "contingency");
+  deepStrictEqual(out.extracted?.table.columns, ["Title", "Yes", "No"]);
+  deepStrictEqual(out.extracted?.table.rows, [
+    ["T1", "2", "1"],
+    ["T2", "1", "1"],
+  ]);
+  // With a count variable, each row increments by its count (blank counts as 1).
+  const counted = await runAnalysis("extract-rearrange", table, {
+    target: "contingency",
+    rowVariable: "Treatment",
+    outcome: "Outcome",
+    count: "Count",
+  });
+  if ("error" in counted) throw new Error(counted.error);
+  deepStrictEqual(counted.extracted?.table.rows, [
+    ["T1", "3", "1"],
+    ["T2", "3", "1"],
+  ]);
+});
+
+check("extract and rearrange refuses bad inputs with clear errors", async () => {
+  // No numbers in the response.
+  deepStrictEqual(
+    await runAnalysis("extract-rearrange", { columns: ["Title", "Score", "Group"], rows: [["", "high", "A"]] }, {
+      target: "column",
+      response: "Score",
+      grouping: "Group",
+    }),
+    { error: "“Score” holds no numbers yet — pick a response variable with numbers in it." },
+  );
+  // No numbers in X.
+  deepStrictEqual(
+    await runAnalysis("extract-rearrange", EXTRACT_TABLE, {
+      target: "xy",
+      x: "Group",
+      response: "Score",
+      grouping: "Group",
+    }),
+    { error: "“Group”, the X variable, holds no numbers yet — pick an X variable with numbers in it." },
+  );
+  // A factor with no levels.
+  deepStrictEqual(
+    await runAnalysis(
+      "extract-rearrange",
+      { columns: ["Title", "Score", "Group"], rows: [["", "5", ""]] },
+      { target: "column", response: "Score", grouping: "Group" },
+    ),
+    { error: "“Group” has no levels yet — pick a grouping variable with values in it." },
+  );
+  // Contingency needs two different variables.
+  deepStrictEqual(
+    await runAnalysis(
+      "extract-rearrange",
+      { columns: ["Title", "Treatment", "Outcome"], rows: [["", "T1", "Yes"]] },
+      { target: "contingency", rowVariable: "Treatment", outcome: "Treatment" },
+    ),
+    { error: "The row and column variables must be different — pick two different variables." },
+  );
+  // More than 20 subjects cannot become subcolumns (Helix caps replicates at 20).
+  const manySubjects: TableData = {
+    columns: ["Title", "Time", "Score", "Subject"],
+    rows: Array.from({ length: 21 }, (_, r) => ["", "0", String(r + 1), `S${r + 1}`]),
+  };
+  deepStrictEqual(
+    await runAnalysis("extract-rearrange", manySubjects, {
+      target: "xy",
+      x: "Time",
+      response: "Score",
+      subject: "Subject",
+    }),
+    { error: "“Subject” has 21 subjects — a table holds at most 20 subcolumns per data set." },
+  );
+  // A column renamed away after the wizard ran is caught before the runner.
+  deepStrictEqual(
+    await runAnalysis("extract-rearrange", EXTRACT_TABLE, {
+      target: "column",
+      response: "Gone",
+      grouping: "Group",
+    }),
+    { error: "“Gone” is no longer in the table — run the analysis again and pick the variables." },
+  );
+  // A wizard drives it: target first, then the variables for that target.
+  const wizard = WIZARDS["extract-rearrange"];
+  ok(wizard);
+  const finish = wizard!.finish(
+    { target: "column", prefixNames: "no", completeRows: "yes", response: "Score", grouping: "Sex", subject: "", rowTitles: "" },
+    readTable({ columns: ["Title", "Score", "Sex"], rows: [["", "1", "F"]] }),
+  );
+  deepStrictEqual(finish, {
+    type: "extract-rearrange",
+    params: { target: "column", response: "Score", grouping: "Sex", prefixNames: false, completeRows: true },
+  });
+});
+
 // Prune rows (v2): drop rows matching a condition — empty, below a
 // threshold, above a threshold, or outside a range — from the chosen
 // columns, listing what was dropped; the source table is never touched.

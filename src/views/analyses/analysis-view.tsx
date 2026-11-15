@@ -47,7 +47,7 @@ function Running() {
 }
 
 export function AnalysisView({ node }: { node: ProjectNode }) {
-  const { nodes } = useProjectStore();
+  const { nodes, createTableWithData } = useProjectStore();
   const { cacheAnalysisResult, setAnalysisFrozen } = useProjectActions();
   const data = node.parentId ? nodes[node.parentId]?.data : undefined;
   // A frozen or orphaned sheet never re-runs: it shows its saved result, so
@@ -129,7 +129,10 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
           </p>
         )}
         {shown ? (
-          <AnalysisResultsView result={shown} />
+          <AnalysisResultsView
+            result={shown}
+            onCreateTable={(tableType, table) => createTableWithData(tableType, table, "Extracted data")}
+          />
         ) : liveData && !outcome ? (
           <Running />
         ) : (

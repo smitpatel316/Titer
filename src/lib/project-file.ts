@@ -51,6 +51,7 @@ import {
   DOSE_MODELS,
   DOSE_RESPONSE_SPECIAL_MODELS,
   ENZYME_INHIBITION_MODELS,
+  EXTRACT_REARRANGE_TARGETS,
   FRACTION_OF_TOTAL_FORMATS,
   FRACTION_OF_TOTAL_TOTALS,
   MONTE_CARLO_STATISTICS,
@@ -308,6 +309,12 @@ const PARAMS = {
   segments: { min: 10, max: 1000 },
   extra: ["none", "first-derivative", "second-derivative", "integral"],
   curves: "plot-curves",
+  // Extract and rearrange (v2, item 10): the target table type, the
+  // variables that fill it, and the two format options.
+  target: EXTRACT_REARRANGE_TARGETS,
+  response: "name", grouping: "name", subject: "name", rowTitles: "name",
+  rowFactor: "name", columnFactor: "name", rowVariable: "name", outcome: "name", count: "name",
+  prefixNames: "yes/no", completeRows: "yes/no",
 } satisfies Record<ParamKey, ParamKind>;
 
 const isFiniteNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);

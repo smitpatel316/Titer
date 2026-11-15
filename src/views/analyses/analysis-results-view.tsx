@@ -4,7 +4,8 @@
 // notes. Numbers keep same-width digits so columns line up; everything is selectable.
 import type * as React from "react";
 import type { AnalysisResult, GroupDescriptives, StatRow } from "../../stats/types";
-import { cn } from "../../ui/controls";
+import type { TableData, TableType } from "../../store/types";
+import { Button, cn } from "../../ui/controls";
 import { isSignificant, num, pStars, pValue } from "../../lib/format";
 
 /** A P value with its stars, green when significant. */
@@ -102,7 +103,16 @@ const DESCRIPTIVE_ROWS: [string, (g: GroupDescriptives) => React.ReactNode][] = 
   ["Range", (g) => num(g.range)],
 ];
 
-export function AnalysisResultsView({ result }: { result: AnalysisResult }) {
+/** `onCreateTable` (the analysis view wires it to the store) adds the
+ *  extracted table to the project — without it (tests, static renders) the
+ *  table is shown but the button is absent. */
+export function AnalysisResultsView({
+  result,
+  onCreateTable,
+}: {
+  result: AnalysisResult;
+  onCreateTable?: (tableType: TableType, table: TableData) => void;
+}) {
   const headlineP = headline(result.stats);
   const showP = headlineP != null && !Number.isNaN(headlineP);
   const groups = result.groups;
@@ -286,6 +296,36 @@ export function AnalysisResultsView({ result }: { result: AnalysisResult }) {
             ),
           )}
         />
+      )}
+
+      {result.extracted && (
+        <>
+          <Table
+            title="Extracted table"
+            columns={result.extracted.table.columns.map((label, i) => ({ label, numeric: i > 0 }))}
+            rows={result.extracted.table.rows.map((row) =>
+              row.map((cell, j) =>
+                j === 0 ? (
+                  (cell ?? "")
+                ) : cell == null ? (
+                  <span className="text-secondary">—</span>
+                ) : (
+                  cell
+                ),
+              ),
+            )}
+          />
+          {onCreateTable && (
+            <div>
+              <Button
+                variant="accent"
+                onClick={() => onCreateTable(result.extracted!.tableType, result.extracted!.table)}
+              >
+                Create table
+              </Button>
+            </div>
+          )}
+        </>
       )}
 
       {result.comparisons && result.comparisons.length > 0 && (

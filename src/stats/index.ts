@@ -89,6 +89,7 @@ import { runSurvival } from "./survival/survival-analysis";
 import { runCox } from "./survival/cox-regression";
 import { runMcNemar } from "./contingency/mcnemar";
 import { runCoxPH } from "./survival/cox-ph";
+import { runExtractRearrange } from "./multiple/extract-rearrange";
 import { runMixedEffects } from "./mixed/mixed-effects";
 import { runBlandAltman } from "./column/bland-altman";
 import { runRocCurve } from "./column/roc-curve";
@@ -98,7 +99,7 @@ import { runTransformConcentrations } from "./column/transform-concentrations";
 import { runNormalize } from "./xy/normalize";
 import { runTranspose } from "./column/transpose";
 import { runMonteCarlo } from "./simulation/monte-carlo";
-import type { MonteCarloParams } from "./types";
+import type { ExtractRearrangeParams, MonteCarloParams } from "./types";
 import type { TableData } from "../store/types";
 import { datasetColumns, readTable, setColumns, type Column } from "../lib/dataset";
 import { REPLICATE_TESTS, summaryTableProblem } from "../lib/summary-format";
@@ -384,6 +385,14 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     label: "Transpose rows/columns",
     minColumns: 1,
     run: (c, _p, t) => runTranspose(c, t),
+  },
+  "extract-rearrange": {
+    label: "Extract and rearrange",
+    // minColumns is a floor only: a Column extract needs just one numeric
+    // column (the response), XY needs two — the wizard offers only what
+    // the table holds, and the runner validates per target.
+    minColumns: 1,
+    run: (c, p, t) => runExtractRearrange(c, p as ExtractRearrangeParams, t),
   },
 };
 

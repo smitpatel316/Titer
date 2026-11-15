@@ -1,6 +1,8 @@
 // Analysis contract — the single source of truth for what a test receives
 // (columns + params) and returns (a result or an error).
 
+import type { TableData } from "../store/types";
+
 export type AnalysisType =
   | "descriptive-statistics"
   | "compare-two-groups"
@@ -50,6 +52,7 @@ export type AnalysisType =
   | "transform-concentrations"
   | "normalize"
   | "transpose"
+  | "extract-rearrange"
   | "prune-rows"
   | "fraction-of-total"
   | "row-means-totals"
@@ -455,6 +458,53 @@ export interface PrincipalComponentAnalysisParams {
 export interface KMeansParams {
   clusters: number;
   standardise?: boolean;
+}
+
+/** The tables "extract-rearrange" can build from a Multiple Variables
+ *  table (Prism's Analyze > Extract and rearrange): XY, Column, Grouped
+ *  or Contingency. */
+export const EXTRACT_REARRANGE_TARGETS = ["xy", "column", "grouped", "contingency"] as const;
+export type ExtractRearrangeTarget = (typeof EXTRACT_REARRANGE_TARGETS)[number];
+
+/** Params for "extract-rearrange": which kind of table to build (`target`),
+ *  and the variables that fill it — only the ones `target` needs are read:
+ *  XY takes `x` + `response`, with `grouping` (data sets) and `subject`
+ *  (replicate sub-columns) optional; Column takes `response`, with
+ *  `grouping` (columns) and `subject` (rows) optional; Grouped takes
+ *  `response` + `rowFactor` + `columnFactor`, with `subject` (replicates)
+ *  optional; Contingency takes `rowVariable` + `outcome` (its columns),
+ *  with `count` (increments per source row) optional. `rowTitles` names the
+ *  column the new table's row titles come from (XY/Column). `prefixNames`
+ *  prefixes level-derived titles with their variable ("Sex = F");
+ *  `completeRows` (default true) condenses XY/Column to the distinct
+ *  values, false keeps one output row per source row. */
+export interface ExtractRearrangeParams {
+  target: ExtractRearrangeTarget;
+  /** XY only: the X variable (numbers). */
+  x?: string;
+  /** XY / Column / Grouped: the response variable (numbers). */
+  response?: string;
+  /** XY / Column: the variable whose levels become the data sets / columns. */
+  grouping?: string;
+  /** XY / Column / Grouped: the variable whose levels become the replicate
+   *  sub-columns (XY/Grouped) or the rows (Column). */
+  subject?: string;
+  /** XY / Column: the column the new table's row titles come from. */
+  rowTitles?: string;
+  /** Grouped only: the variable whose levels become the rows. */
+  rowFactor?: string;
+  /** Grouped only: the variable whose levels become the column groups. */
+  columnFactor?: string;
+  /** Contingency only: the variable whose levels become the rows. */
+  rowVariable?: string;
+  /** Contingency only: the variable whose levels become the columns. */
+  outcome?: string;
+  /** Contingency only: the variable holding each source row's increment. */
+  count?: string;
+  /** Prefix level-derived titles with their variable name. */
+  prefixNames?: boolean;
+  /** Condense to complete rows (XY/Column); false keeps source-row alignment. */
+  completeRows?: boolean;
 }
 
 /** Params for "two-way-anova" on a Grouped table's column-groups × row position:
@@ -1072,6 +1122,7 @@ export type AnalysisParams = DataSetsParam &
     | PoissonRegressionParams
     | PrincipalComponentAnalysisParams
     | KMeansParams
+    | ExtractRearrangeParams
     | SplineLowessParams
     | SmoothDifferentiateIntegrateParams
     | CoxPHParams
@@ -1454,6 +1505,16 @@ export interface NormalizedColumn {
   referenceDescription: string;
   rows: NormalizedRow[];
 }
+/** The extracted table ("extract-rearrange"): the new table's type and its
+ *  data — a real table the user can create (via "Create table" in the
+ *  results view) and then graph or analyse. `table` carries `groups` /
+ *  `replicates` where the target type needs them (XY with subjects,
+ *  Grouped), so the created table reads back as that type. */
+export interface ExtractedTable {
+  tableType: ExtractRearrangeTarget;
+  table: TableData;
+}
+
 /** One cell of a transposed table ("transpose"): a number where the source
  *  cell held one, the raw text where it held text, null where it was blank
  *  (or excluded). */
@@ -1623,6 +1684,11 @@ export interface AnalysisResult {
    *  and columns swapped — one column per source row, one row per source
    *  data column. */
   transposed?: TransposedTable;
+  /** Optional extracted table ("extract-rearrange"): the new XY / Column /
+   *  Grouped / Contingency table built from a subset of a Multiple
+   *  Variables table — the results view renders it and offers "Create
+   *  table" to add it to the project as a real table. */
+  extracted?: ExtractedTable;
   /** Optional ROC points ("roc-curve"): one row per threshold (unique score
    *  values, descending); Youden's J is computed at render time. */
   rocCurve?: RocPoint[];

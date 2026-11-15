@@ -36,6 +36,7 @@ import type {
   CoxPHParams,
   DoseResponseSpecialParams,
   EnzymeInhibitionParams,
+  ExtractRearrangeParams,
   FrequencyDistributionParams,
   MultipleTTestsParams,
   NestedAnovaParams,
@@ -3170,6 +3171,153 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       type: "multiple-regression",
       params: { dependent: a.dependent as string, predictors: a.predictors as string[] },
     }),
+  },
+
+  "extract-rearrange": {
+    questions: (a, table) => {
+      const target = a.target as string | undefined;
+      const all = table.columns.map((c) => c.name);
+      const numeric = dataNames(table);
+      /** An optional pick: "None" first, so the wizard defaults to leaving it out. */
+      const optional = (id: string, ask: string, options: string[], noneLabel: string): Question =>
+        choice(id, ask, [["none", noneLabel], ...options.map((n): [string, string] => [n, n])]);
+      const notPicked = (...ids: string[]) => all.filter((n) => !ids.some((id) => a[id] === n));
+      return [
+        choice("target", "What kind of table should the extracted data become?", [
+          ["xy", "XY — X values against Y values, one data set per group"],
+          ["column", "Column — one column per group"],
+          ["grouped", "Grouped — rows and columns from two factors"],
+          ["contingency", "Contingency — counts of one variable against another"],
+        ]),
+        choice("prefixNames", "Include variable names as prefixes for the new titles?", [
+          ["no", "No — titles are the levels alone (“F”, “Low”)"],
+          ["yes", "Yes — titles name their variable (“Sex = F”, “Dose = Low”)"],
+        ]),
+        choice("completeRows", "Only include complete rows?", [
+          ["yes", "Yes — condense to the distinct values (XY and Column tables)"],
+          ["no", "No — keep one row per source row, in source order"],
+        ]),
+        target === "xy" && choice("x", "Which variable is X?", names(numeric)),
+        (target === "xy" || target === "column" || target === "grouped") &&
+          choice(
+            "response",
+            "Which variable is the response?",
+            names(numeric.filter((n) => n !== a.x)),
+          ),
+        (target === "xy" || target === "column") &&
+          optional(
+            "grouping",
+            "Which variable groups the data into data sets (XY) or columns (Column)?",
+            notPicked("x", "response"),
+            target === "xy" ? "None — one data set" : "None — one column",
+          ),
+        (target === "xy" || target === "column" || target === "grouped") &&
+          optional(
+            "subject",
+            "Which variable identifies the subject? Its levels become the replicate sub-columns (XY, Grouped) or the rows (Column).",
+            notPicked("x", "response", "grouping"),
+            "None",
+          ),
+        (target === "xy" || target === "column") &&
+          optional(
+            "rowTitles",
+            "Which variable holds the new table's row titles?",
+            notPicked("x", "response", "grouping", "subject"),
+            "None — blank row titles",
+          ),
+        target === "grouped" &&
+          choice("rowFactor", "Which variable is the row factor?", names(all.filter((n) => n !== a.response))),
+        target === "grouped" &&
+          choice(
+            "columnFactor",
+            "Which variable is the column factor?",
+            names(all.filter((n) => n !== a.response && n !== a.rowFactor)),
+          ),
+        target === "contingency" &&
+          choice("rowVariable", "Which variable's levels become the rows?", names(all)),
+        target === "contingency" &&
+          choice(
+            "outcome",
+            "Which variable's levels become the columns?",
+            names(all.filter((n) => n !== a.rowVariable)),
+          ),
+        target === "contingency" &&
+          optional(
+            "count",
+            "Which variable holds each row's count?",
+            numeric.filter((n) => n !== a.rowVariable && n !== a.outcome),
+            "None — every row counts as 1",
+          ),
+      ];
+    },
+    finish: (a) => {
+      const target = a.target as ExtractRearrangeParams["target"];
+      /** An optional answer: blank, or "None", counts as not picked. */
+      const opt = (id: string): string | undefined => {
+        const v = a[id] as string | undefined;
+        return v === undefined || v === "" || v === "none" ? undefined : v;
+      };
+      const grouping = opt("grouping");
+      const subject = opt("subject");
+      const rowTitles = opt("rowTitles");
+      const count = opt("count");
+      const prefixNames = a.prefixNames === "yes";
+      const completeRows = a.completeRows !== "no";
+      switch (target) {
+        case "xy":
+          return {
+            type: "extract-rearrange",
+            params: {
+              target,
+              x: a.x as string,
+              response: a.response as string,
+              ...(grouping ? { grouping } : {}),
+              ...(subject ? { subject } : {}),
+              ...(rowTitles ? { rowTitles } : {}),
+              prefixNames,
+              completeRows,
+            },
+          };
+        case "column":
+          return {
+            type: "extract-rearrange",
+            params: {
+              target,
+              response: a.response as string,
+              ...(grouping ? { grouping } : {}),
+              ...(subject ? { subject } : {}),
+              ...(rowTitles ? { rowTitles } : {}),
+              prefixNames,
+              completeRows,
+            },
+          };
+        case "grouped":
+          return {
+            type: "extract-rearrange",
+            params: {
+              target,
+              response: a.response as string,
+              rowFactor: a.rowFactor as string,
+              columnFactor: a.columnFactor as string,
+              ...(subject ? { subject } : {}),
+              prefixNames,
+              completeRows,
+            },
+          };
+        case "contingency":
+          return {
+            type: "extract-rearrange",
+            params: {
+              target,
+              rowVariable: a.rowVariable as string,
+              outcome: a.outcome as string,
+              ...(count ? { count } : {}),
+              prefixNames,
+              completeRows,
+            },
+          };
+      }
+    },
   },
 
   survival: {

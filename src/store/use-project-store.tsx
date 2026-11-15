@@ -569,8 +569,12 @@ interface ProjectActions {
   createTable: (tableType: TableType) => void;
   /** A table of simulated values (plan 22): created with its data already
    *  filled, not from a type's defaults — the reducer's "create" names it
-   *  among the tables ("Simulated data", "Simulated data 2"…). */
+   *  among the tables ("Simulated data 1", "Simulated data 2"…). */
   createSimulatedTable: (tableType: TableType, data: TableData) => void;
+  /** A table created with its data already filled (extract-and-rearrange's
+   *  new table): `name` is the base the reducer numbers ("Extracted data 1",
+   *  "Extracted data 2"… — root tables are numbered from 1). */
+  createTableWithData: (tableType: TableType, data: TableData, name: string) => void;
   createAnalysis: (parentId: string, analysisType: AnalysisType, analysisParams?: AnalysisParams) => string;
   /** `graphOptions` (plan 38, Apply Method): the cloned options of a method
    *  file's graph, with its analysis links remapped; omitted, the graph gets
@@ -685,8 +689,20 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     latest.current = state;
   });
 
-  const actions = React.useMemo<ProjectActions>(
-    () => ({
+  const actions = React.useMemo<ProjectActions>(() => {
+    const createTableWithData = (tableType: TableType, data: TableData, name: string) =>
+      dispatch({
+        type: "create",
+        node: {
+          id: genId("table"),
+          type: "table",
+          name,
+          parentId: null,
+          tableType,
+          data,
+        },
+      });
+    return {
       get: () => latest.current,
       createTable: (tableType) =>
         dispatch({
@@ -700,18 +716,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
             data: TABLES[tableType].defaultData(),
           },
         }),
-      createSimulatedTable: (tableType, data) =>
-        dispatch({
-          type: "create",
-          node: {
-            id: genId("table"),
-            type: "table",
-            name: "Simulated data",
-            parentId: null,
-            tableType,
-            data,
-          },
-        }),
+      createTableWithData,
+      createSimulatedTable: (tableType, data) => createTableWithData(tableType, data, "Simulated data"),
       // Named for the test it runs, as in Prism.
       createAnalysis: (parentId, analysisType, analysisParams) => {
         const { label, name } = ANALYSES[analysisType];
@@ -802,9 +808,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       redo: () => dispatch({ type: "redo" }),
       loadProject: (payload) => dispatch({ type: "load", ...payload }),
       markProjectSaved: (filePath, savedRevision) => dispatch({ type: "markSaved", filePath, savedRevision }),
-    }),
-    [],
-  );
+    };
+  }, []);
 
   const value = React.useMemo<ProjectContextValue>(() => {
     const activeNode = state.activeNodeId ? (state.nodes[state.activeNodeId] ?? null) : null;
