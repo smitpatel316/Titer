@@ -365,7 +365,7 @@ export function FormatPanel(props: Props) {
             <>
               <TextRow
                 label="Right Y axis title"
-                value={options.y2Label}
+                value={options.y2Label ?? ""}
                 onChange={(y2Label) => set({ y2Label })}
               />
               <Scale

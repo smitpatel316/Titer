@@ -178,9 +178,9 @@ type OptionalOption = {
 }[keyof GraphOptions];
 // prettier-ignore
 const OPTIONAL_OPTIONS = {
-  yMin: "number", yMax: "number", yStep: "number", xMin: "number", xMax: "number", xStep: "number", binWidth: "number",
+  yMin: "number", yMax: "number", yStep: "number", xMin: "number", xMax: "number", xStep: "number", y2Min: "number", y2Max: "number", y2Step: "number", binWidth: "number",
   sigAnalysisId: "text", sigPairs: "texts", regAnalysisId: "text", demingAnalysisId: "text", coxAnalysisId: "text", poissonAnalysisId: "text", smoothAnalysisId: "text", pcaAnalysisId: "text", kmeansAnalysisId: "text", monteCarloAnalysisId: "text", xVariable: "text", yVariable: "text",
-  volcanoX: "text", volcanoY: "text", volcanoLabel: "text", volcanoGroupA: "text", volcanoGroupB: "text",
+  volcanoX: "text", volcanoY: "text", volcanoLabel: "text", volcanoGroupA: "text", volcanoGroupB: "text", rightYDataset: "text", y2Label: "text",
   palette: "palette", series: "styles", points: "pointStyles", outlineColor: "color", pointOutlineColor: "color", errorColor: "color",
   legend: "place", note: "place",
 } as const satisfies Record<OptionalOption, keyof typeof READ_OPTION>;
@@ -190,7 +190,7 @@ const OPTIONAL_OPTIONS = {
 // from every graph on the way out (see parseProjectFile).
 const LEGACY_DOSE_OPTIONS = ["doseY", "doseModel", "doseShowCurve", "doseShowEquation", "doseLigandConcentration"];
 // Options whose text is the user's (titles, column names), not a choice from a list.
-const FREE_TEXT_OPTIONS = new Set(["title", "xLabel", "yLabel"]);
+const FREE_TEXT_OPTIONS = new Set(["title", "xLabel", "yLabel", "y2Label"]);
 
 // Every graph option offering choices has its list, and every number its limits.
 type ChoiceOption = {

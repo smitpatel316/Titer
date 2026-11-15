@@ -48,6 +48,7 @@ export const GRAPH_CHOICES = {
   error: ["none", "sd", "sem", "ci"],
   xScale: ["linear", "log10", "log2"],
   yScale: ["linear", "log10", "log2"],
+  y2Scale: ["linear", "log10", "log2"],
   stackAs: ["values", "percent"],
   shape: ["bar", "point", "line"],
   kind: ["box", "violin"],
@@ -152,7 +153,7 @@ export interface GraphOptions {
   // left. `rightYDataset` names the set (max one by construction); blank = off.
   rightYDataset?: string;
   y2Label?: string;
-  y2Scale: Choice<"yScale">;
+  y2Scale: Choice<"y2Scale">;
   y2Min?: number;
   y2Max?: number;
   y2Step?: number;
