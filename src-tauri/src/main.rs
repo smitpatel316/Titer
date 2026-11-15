@@ -66,6 +66,13 @@ struct ProjectWindows {
     documents: HashMap<String, Document>,
     openings: HashMap<String, Opening>,
     quitting: bool,
+    /// A quit-driven close is in flight: the label of the project window that
+    /// has been asked to close, while Titer waits for its answer. While set,
+    /// a second quit (⌘Q twice, or the updater's `quit_app` racing the
+    /// menu's quit hook) asks nothing more — the Destroyed handler advances
+    /// the sequence. Cleared when that window is destroyed, or by
+    /// `cancel_quit`.
+    quit_closing: Option<String>,
 }
 
 impl Opening {
@@ -242,24 +249,63 @@ fn choose_prism_file(app: AppHandle, window: WebviewWindow) {
     );
 }
 
+/// The project windows, lowest label first ("project-2" before "project-10"),
+/// as `save_session` orders them.
+fn project_labels(app: &AppHandle) -> Vec<String> {
+    let mut labels: Vec<_> = app
+        .webview_windows()
+        .keys()
+        .filter(|l| is_project(l))
+        .cloned()
+        .collect();
+    labels.sort_by_key(|l| l.trim_start_matches("project-").parse::<u32>().unwrap_or(0));
+    labels
+}
+
+/// Asks ONE project window to close (the lowest label), as the next step of a
+/// quit: that window asks about its unsaved changes, and only once it is
+/// gone does the Destroyed handler ask the next one. Asking all of them at
+/// once raced their native save dialogs — two attached as sheets, a third
+/// came up standalone and dead to input (bugfix/quit-save-dialog). Returns
+/// false when there is no window to close, or one is already being closed.
+fn close_next_project_window(app: &AppHandle) -> bool {
+    let Some(label) = project_labels(app).into_iter().next() else {
+        return false;
+    };
+    let Some(window) = app.get_webview_window(&label) else {
+        return false;
+    };
+    // Check and set under one lock: two quits at once must not both pass,
+    // and a `cancel_quit` that landed after the quit was marked must stop
+    // the sequence before another window is asked.
+    let state = app.state::<Projects>();
+    let mut projects = state.0.lock().unwrap();
+    if !projects.quitting || projects.quit_closing.is_some() {
+        return false;
+    }
+    projects.quit_closing = Some(label);
+    drop(projects);
+    let _ = window.close();
+    true
+}
+
 /// A window refused to close (its user chose Cancel): Titer doesn't quit after all.
 #[tauri::command]
 fn cancel_quit(projects: State<Projects>) {
-    projects.0.lock().unwrap().quitting = false;
+    let mut projects = projects.0.lock().unwrap();
+    projects.quitting = false;
+    projects.quit_closing = None;
 }
 
 /// Quits through the normal flow, as the macOS quit hook does: mark the
-/// quit, close the project windows (each asks about its unsaved changes),
-/// and the run loop ends Titer once the last one is gone. Used by the
-/// updater after staging a relaunch. A window whose user cancels the quit
-/// calls `cancel_quit`, which clears the flag, so Titer stays.
+/// quit, close the project windows one at a time (each asks about its
+/// unsaved changes), and the run loop ends Titer once the last one is gone.
+/// Used by the updater after staging a relaunch. A window whose user cancels
+/// the quit calls `cancel_quit`, which clears the flag, so Titer stays.
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.state::<Projects>().0.lock().unwrap().quitting = true;
-    for window in app.webview_windows().into_values().filter(|w| is_project(w.label())) {
-        let _ = window.close();
-    }
-    if !app.webview_windows().keys().any(|l| is_project(l)) {
+    if !close_next_project_window(&app) && project_labels(&app).is_empty() {
         app.exit(0);
     }
 }
@@ -771,14 +817,15 @@ fn ask_before_quitting_macos(app: &AppHandle) {
     extern "C-unwind" fn should_terminate(_: &AnyObject, _: Sel, _: &AnyObject) -> usize {
         let Some(app) = APP.get() else { return 1 };
         save_session(app);
-        let windows: Vec<_> = app.webview_windows().into_values().filter(|w| is_project(w.label())).collect();
-        if windows.is_empty() {
+        let windows_exist = !project_labels(app).is_empty();
+        if !windows_exist {
             return 1; // NSTerminateNow
         }
         app.state::<Projects>().0.lock().unwrap().quitting = true;
-        for window in windows {
-            let _ = window.close();
-        }
+        // One window at a time: asking all of them at once raced their
+        // native save dialogs (bugfix/quit-save-dialog). The Destroyed
+        // handler asks the next one once this one is gone.
+        let _ = close_next_project_window(app);
         0 // NSTerminateCancel
     }
     let _ = APP.set(app.clone());
@@ -1099,6 +1146,13 @@ fn main() {
                 projects.documents.remove(&label);
                 projects.openings.remove(&label);
                 let quitting = projects.quitting;
+                // Only the window the quit sequence asked to close advances
+                // it; a window the user closed by hand meanwhile leaves the
+                // sequence waiting on its own window's answer.
+                let advance = quitting && projects.quit_closing.as_deref() == Some(label.as_str());
+                if advance {
+                    projects.quit_closing = None;
+                }
                 drop(projects);
                 if !app.webview_windows().keys().any(|l| is_project(l) && *l != label) {
                     if quitting {
@@ -1107,6 +1161,11 @@ fn main() {
                         // Titer stays open: the engine window sets the menu bar for no window.
                         let _ = app.emit_to("engine", "no-windows", ());
                     }
+                } else if advance {
+                    // The quit's current window is gone: ask the next one.
+                    // (close_next_project_window re-checks `quitting`, so a
+                    // cancel that landed meanwhile stops the sequence.)
+                    let _ = close_next_project_window(app);
                 }
             }
             // A click on the Dock icon while no window is open: a new project.
