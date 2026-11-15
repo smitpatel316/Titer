@@ -8317,6 +8317,25 @@ check("the estimation plot says why a test with no CI draws no third dataset (v2
   );
 });
 
+// Mac re-proof #2 S2/S4: the linked t test's result arrives async, but the
+// draw effect's dep array never listed ttestResult — so the first draw (result
+// still null) left the "Run a Compare two groups analysis…" note on the canvas
+// forever, and only a forced redraw (e.g. toggling violins) showed the overlay.
+// The harness can't drive async React redraws, so the pin is source-level:
+// the dep array of the draw effect that uses ttestResult must list it.
+check("the estimation plot redraws when its t test result arrives (v2-12)", () => {
+  const src = readFileSync("src/views/graphs/graph-view.tsx", "utf8");
+  const use = src.indexOf("if (ttestResult) addEstimationPlot");
+  ok(use >= 0, "the draw effect must use ttestResult for the estimation plot");
+  const depsStart = src.indexOf("  }, [", use);
+  const depsEnd = src.indexOf("  ]);", depsStart);
+  ok(depsStart >= 0 && depsEnd > depsStart, "the draw effect must have a dep array");
+  ok(
+    src.slice(depsStart, depsEnd).includes("ttestResult"),
+    "the draw effect's dep array must include ttestResult so the overlay appears when the async result arrives",
+  );
+});
+
 check("a two-tailed t test reports its difference with its 95% CI, a one-tailed or non-parametric one reports none (v2-12)", async () => {
   const table = treatments(["Control", "Drug A"]);
   const two = await runAnalysis("compare-two-groups", table, { paired: false } as AnalysisParams);

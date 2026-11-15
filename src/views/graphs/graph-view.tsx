@@ -752,6 +752,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
     logisticFit,
     logisticOutcome,
     coxResult,
+    ttestResult,
     poissonResult,
     poissonParams,
     pcaResult,
