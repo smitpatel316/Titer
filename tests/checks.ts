@@ -4964,6 +4964,94 @@ check("enzyme standard curves interpolate unknowns to positive X with positive C
   ok(um.low != null && um.high != null && um.low > 0 && um.low < um.x && um.x < um.high, `Michaelis-Menten CI should be positive and bracket X, got [${um.low}, ${um.high}]`);
 });
 
+// The four classic curves are standard curves to interpolate: the
+// Interpolate-a-Standard-Curve wizard must offer them, like the Plan 08
+// exponentials — the main nonlinear wizard never sets interpolate, so
+// without a list entry the Boltzmann inverse (R-pinned at Y=50 -> X=5)
+// has no GUI path at all.
+check("classic curves interpolate: the interpolate wizard offers all four classic curves", () => {
+  const table = readTable({
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["", "0", "1.1"],
+      ["", "1", "2.9"],
+      ["", "2", "5.2"],
+    ],
+  });
+  const choiceValues = (q: Question) => {
+    if (q.kind !== "choice") throw new Error(`${q.id} is not a choice question`);
+    return q.options.map((o) => o.value);
+  };
+  const model = WIZARDS["interpolate"]!
+    .questions({}, table)
+    .filter(Boolean)
+    .find((q) => (q as Question).id === "model") as Question;
+  deepStrictEqual(choiceValues(model), [
+    "sigmoidal-4pl-logx",
+    "sigmoidal-4pl-x",
+    "asymmetric-5pl-logx",
+    "asymmetric-5pl-x",
+    "line",
+    "semilog-line",
+    "hyperbola",
+    "quadratic",
+    "cubic",
+    "one-phase-decay",
+    "two-phase-decay",
+    "plateau-decay",
+    "one-phase-association",
+    "exponential-growth",
+    "michaelis-menten",
+    "allosteric-sigmoidal",
+    "substrate-inhibition",
+    "gaussian",
+    "boltzmann-sigmoid",
+    "lorentzian",
+    "sine-wave",
+  ]);
+});
+
+// The list entry must actually drive an inverse, not just name the model:
+// the interpolation path (interpolate: true) is model-generic — it inverts
+// the fitted curveFn — so each classic curve reads its unknown off the
+// fitted curve. Noiseless fixtures from the generating formulas (the
+// reference leg's classicX values); the expected X are the first crossings
+// from the lowest X, as the runner reports them.
+check("classic curves interpolate: the standard-curve path inverts all four models", async () => {
+  const xs = [...Array(25)].map((_, i) => i * 0.5);
+  const table = (f: (x: number) => number, unknownY: number): TableData => ({
+    columns: ["Title", "X", "Y1"],
+    rows: [...xs.map((x) => ["", String(x), String(f(x))]), ["", "", String(unknownY)]],
+  });
+  const interp = async (f: (x: number) => number, unknownY: number, model: string) => {
+    const r = await runAnalysis("nonlinear-regression", table(f, unknownY), {
+      y: "Y1",
+      model: model as never,
+      interpolate: true,
+    });
+    ok(!("error" in r) && r.interpolated?.length === 1, `${model} interpolation failed: ${"error" in r ? r.error : "no interpolated row"}`);
+    return r.interpolated[0].x;
+  };
+  // Boltzmann: Y = 50 is the midpoint V50 = 5; above Top there is no X.
+  const boltz = (x: number) => 100 / (1 + Math.exp((5 - x) / 1));
+  const bX = await interp(boltz, 50, "boltzmann-sigmoid");
+  ok(bX != null && Math.abs(bX - 5) < 0.01, `Boltzmann Y=50 should interpolate to X=5, got ${bX}`);
+  const bHigh = await interp(boltz, 150, "boltzmann-sigmoid");
+  ok(bHigh == null, `Boltzmann Y=150 should interpolate to null (above Top), got ${bHigh}`);
+  // Gaussian: Y = 50 first crossed at 5 - 1.5*sqrt(2 ln 2) ~= 3.2339.
+  const gauss = (x: number) => 100 * Math.exp(-0.5 * ((x - 5) / 1.5) ** 2);
+  const gX = await interp(gauss, 50, "gaussian");
+  ok(gX != null && Math.abs(gX - (5 - 1.5 * Math.sqrt(2 * Math.log(2)))) < 0.01, `Gaussian Y=50 should interpolate to X~=3.2339, got ${gX}`);
+  // Lorentzian: Y = 50 first crossed at 5 - 1.5 = 3.5.
+  const lor = (x: number) => 100 / (1 + ((x - 5) / 1.5) ** 2);
+  const lX = await interp(lor, 50, "lorentzian");
+  ok(lX != null && Math.abs(lX - 3.5) < 0.01, `Lorentzian Y=50 should interpolate to X=3.5, got ${lX}`);
+  // Sine wave: Y = 10 (the baseline) first crossed at 2 - 1/pi ~= 1.6817.
+  const sine = (x: number) => 5 * Math.sin((2 * Math.PI * x) / 4 + 0.5) + 10;
+  const sX = await interp(sine, 10, "sine-wave");
+  ok(sX != null && Math.abs(sX - (2 - 1 / Math.PI)) < 0.01, `Sine Y=10 should interpolate to X~=1.6817, got ${sX}`);
+});
+
 check("data sets ticked again keep the table's order", () => {
   const options = ["A", "B", "C"];
   deepStrictEqual(toggled(options, ["A", "C"], "B", true), ["A", "B", "C"]);

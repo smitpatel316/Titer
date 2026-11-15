@@ -2687,6 +2687,11 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ["michaelis-menten", "Michaelis-Menten"],
         ["allosteric-sigmoidal", "Allosteric sigmoidal"],
         ["substrate-inhibition", "Substrate inhibition"],
+        // Prism's "Other classic curves" family (v2).
+        ["gaussian", "Gaussian"],
+        ["boltzmann-sigmoid", "Boltzmann sigmoid"],
+        ["lorentzian", "Lorentzian"],
+        ["sine-wave", "Sine wave"],
       ]),
     ],
     finish: (a) => ({

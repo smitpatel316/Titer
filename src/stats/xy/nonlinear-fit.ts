@@ -602,7 +602,7 @@ export function modelSpec(
           scaled("FWHM", "2", "Width"),
         ],
         curveFn:
-          'g<-function(xv,p) p[["Amplitude"]/(1+((xv-p[["Center"]])/p[["Width"]])^2)',
+          'g<-function(xv,p) p[["Amplitude"]]/(1+((xv-p[["Center"]])/p[["Width"]])^2)',
       };
     case "sine-wave": {
       // Y = Amplitude·sin((2π·X/Wavelength)+PhaseShift)+Baseline — Prism's
