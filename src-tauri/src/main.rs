@@ -418,7 +418,7 @@ fn read_prism_bytes(path: String) -> Result<String, String> {
 fn write_file(request: Request) -> Result<(), String> {
     let header = request.headers().get("path").and_then(|v| v.to_str().ok()).ok_or("missing path")?;
     let path = percent_encoding::percent_decode_str(header).decode_utf8().map_err(|e| e.to_string())?;
-    check_extension(&path, &["hlx", "prism", "pzt", "pzm", "png", "jpg", "jpeg", "svg", "pdf", "tif", "tiff"])?;
+    check_extension(&path, &["hlx", "prism", "pzt", "pzm", "png", "jpg", "jpeg", "svg", "pdf", "tif", "tiff", "docx", "pptx"])?;
     let InvokeBody::Raw(data) = request.body() else { return Err("expected raw bytes".into()) };
     write_atomically(Path::new(path.as_ref()), data)
 }

@@ -6298,6 +6298,21 @@ check("an Office export refuses a zero size or DPI (Office)", async () => {
   await rejects(buildOfficeDocument("powerpoint", { png, title: "x", widthPx: 10, heightPx: 10, dpi: 0 }), /DPI/);
 });
 
+// The Tauri write path must accept the extensions the Office exporters write.
+// Regression pin for Mac GUI proof #2 (Nov 15): sendGraphToOffice /
+// sendFigureToOffice end in writeFile(path, doc), but write_file's allowlist
+// in main.rs had no "docx"/"pptx", so check_extension rejected every Office
+// save with "Titer can't access …". Source-level pin: the Tauri write path
+// can't be exercised in this TS harness, so the pin reads the allowlist
+// directly (same static-read shape as the figure-export pins below).
+check("the Tauri write path allows .docx and .pptx exports (Office)", () => {
+  const main = readFileSync("src-tauri/src/main.rs", "utf8");
+  const writeFile = main.slice(main.indexOf("fn write_file"));
+  const allowlist = /check_extension\(&path, &\[([^\]]+)\]\)/.exec(writeFile)?.[1] ?? "";
+  ok(allowlist.includes('"docx"'), `write_file allowlist must include "docx": [${allowlist}]`);
+  ok(allowlist.includes('"pptx"'), `write_file allowlist must include "pptx": [${allowlist}]`);
+});
+
 check("a figure holds references, not copies, of its graphs (F-07)", () => {
   const before = figurePayload();
   const { project } = read(serializeProjectFile(before));
