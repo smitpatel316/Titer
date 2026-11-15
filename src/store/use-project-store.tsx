@@ -35,6 +35,7 @@ type Selector =
   | { kind: "wand"; tableId: string }
   | { kind: "clone-graph"; graphId: string }
   | { kind: "simulate-data"; tableId: string }
+  | { kind: "script" }
   | { kind: "converter" }
   | { kind: "save-prompt" }
   | { kind: "save-template"; templateKind: TemplateKind }
@@ -50,6 +51,8 @@ interface Content {
   rootOrder: string[];
   /** Each table's analyses and graphs, in sidebar order. */
   childOrder: Record<string, string[]>;
+  /** The script-set project name (v2 item 6). */
+  projectName?: string;
 }
 
 interface ProjectState extends Content {
@@ -132,6 +135,16 @@ type Action =
     }
   | { type: "undo" }
   | { type: "redo" }
+  /** A Prism script's run, as one change ("Run Script"): the engine's whole
+   *  resulting project, so one run is one undo step. */
+  | {
+      type: "applyScript";
+      nodes: Record<string, ProjectNode>;
+      rootOrder: string[];
+      childOrder: Record<string, string[]>;
+      activeNodeId: string | null;
+      projectName?: string;
+    }
   | { type: "openSelector"; selector: Selector }
   | { type: "closeSelector" }
   | { type: "reorderRoot"; order: string[] }
@@ -142,6 +155,7 @@ type Action =
       rootOrder: string[];
       childOrder: Record<string, string[]>;
       activeNodeId: string | null;
+      projectName?: string;
       fileUnknowns?: Record<string, unknown>;
       projectUnknowns?: Record<string, unknown>;
       filePath: string | null;
@@ -460,6 +474,22 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         isDirty: true,
       };
     }
+    case "applyScript": {
+      // One run, one change: the engine's whole resulting project replaces
+      // the content (an absent projectName clears the old one — a run
+      // that drops it must not leave a stale copy behind).
+      const next: ProjectState = {
+        ...state,
+        nodes: action.nodes,
+        rootOrder: action.rootOrder,
+        childOrder: action.childOrder,
+        activeNodeId: action.activeNodeId,
+        isDirty: true,
+      };
+      if (action.projectName) next.projectName = action.projectName;
+      else delete next.projectName;
+      return next;
+    }
     case "openSelector":
       return { ...state, selector: action.selector };
     case "closeSelector":
@@ -482,7 +512,12 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       if (!restored) return state;
       const current = {
         label: restored.label,
-        content: { nodes: state.nodes, rootOrder: state.rootOrder, childOrder: state.childOrder },
+        content: {
+          nodes: state.nodes,
+          rootOrder: state.rootOrder,
+          childOrder: state.childOrder,
+          projectName: state.projectName,
+        },
       };
       const rest = stack.slice(0, -1);
       const history = undo
@@ -501,6 +536,7 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         rootOrder: action.rootOrder,
         childOrder: action.childOrder,
         activeNodeId: action.activeNodeId,
+        ...(action.projectName ? { projectName: action.projectName } : {}),
         ...(action.fileUnknowns ? { fileUnknowns: action.fileUnknowns } : {}),
         ...(action.projectUnknowns ? { projectUnknowns: action.projectUnknowns } : {}),
         selector: null,
@@ -538,6 +574,7 @@ const UNDOABLE = new Set<Action["type"]>([
   "updateFloatingNotes",
   "setHighlight",
   "updateFigure",
+  "applyScript",
   "reorderRoot",
   "reorderChildren",
   "setAnalysisFrozen",
@@ -575,6 +612,8 @@ function changeName(action: Action): string {
       return "Highlight Sheet";
     case "updateFigure":
       return "Figure Change";
+    case "applyScript":
+      return "Run Script";
     default:
       return "Move";
   }
@@ -602,7 +641,12 @@ export function reducer(state: ProjectState, action: Action): ProjectState {
   const merged = change && state.lastChange?.key === change.key && change.at - state.lastChange.at < MERGE_MS;
   const before = {
     label: changeName(action),
-    content: { nodes: state.nodes, rootOrder: state.rootOrder, childOrder: state.childOrder },
+    content: {
+      nodes: state.nodes,
+      rootOrder: state.rootOrder,
+      childOrder: state.childOrder,
+      projectName: state.projectName,
+    },
   };
   return {
     ...next,
@@ -658,6 +702,14 @@ interface ProjectActions {
       dpi: Resolution;
     }>,
   ) => void;
+  /** Applies a Prism script run's whole resulting project, as one undo step. */
+  applyScript: (doc: {
+    nodes: Record<string, ProjectNode>;
+    rootOrder: string[];
+    childOrder: Record<string, string[]>;
+    activeNodeId: string | null;
+    projectName?: string;
+  }) => void;
   setActiveNode: (id: string | null) => void;
   renameNode: (id: string, name: string) => void;
   removeNode: (id: string) => void;
@@ -689,6 +741,7 @@ interface ProjectActions {
     rootOrder: string[];
     childOrder: Record<string, string[]>;
     activeNodeId: string | null;
+    projectName?: string;
     fileUnknowns?: Record<string, unknown>;
     projectUnknowns?: Record<string, unknown>;
     /** null: a project not saved anywhere yet (the sample project). */
@@ -706,6 +759,8 @@ interface ProjectContextValue extends ProjectActions {
   activeNodeId: string | null;
   activeNode: ProjectNode | null;
   activeTableId: string | null;
+  /** The script-set project name (v2 item 6). */
+  projectName?: string;
   selector: ProjectState["selector"];
   filePath: string | null;
   isDirty: boolean;
@@ -867,6 +922,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         }),
       updateInfoSheet: (id, info) => dispatch({ type: "updateInfoSheet", id, info, at: Date.now() }),
       updateFigure: (id, patch) => dispatch({ type: "updateFigure", id, patch, at: Date.now() }),
+      applyScript: (doc) => dispatch({ type: "applyScript", ...doc }),
       setActiveNode: (id) => dispatch({ type: "setActive", id }),
       renameNode: (id, name) => dispatch({ type: "rename", id, name }),
       removeNode: (id) => dispatch({ type: "remove", id }),
@@ -900,6 +956,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       activeNodeId: state.activeNodeId,
       activeNode,
       activeTableId,
+      projectName: state.projectName,
       selector: state.selector,
       filePath: state.filePath,
       isDirty: state.isDirty,

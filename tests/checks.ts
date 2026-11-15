@@ -176,6 +176,8 @@ import { decideUpdate, type ChannelManifest } from "../src/lib/channel";
 import { titleCase } from "../src/lib/format";
 import { loadRecents } from "../src/store/recents";
 import { largestAt, PX_PER_INCH, withDpi } from "../src/lib/image-dpi";
+import { runScript, scriptImportFiles, type ScriptDoc } from "../src/lib/prism-script";
+import { encodeBmp, encodeTiff } from "../src/lib/tiff";
 import {
   assignLabels,
   clampPanel,
@@ -13930,6 +13932,509 @@ check("Wand offers only tables with analyses or graphs as examples, never the ta
     wandExamples(nodes, childOrder, ["ex", "bare", "t1"], "t1").map((t) => t.id),
     ["ex"],
   );
+});
+
+// ── Prism scripts (v2 item 6) ────────────────────────────────────────────
+
+const scriptTable = (): ProjectNode => ({
+  id: "t1",
+  type: "table",
+  name: "Data 1",
+  parentId: null,
+  tableType: "xy",
+  data: {
+    columns: ["Title", "X", "Y1", "Y2"],
+    rows: [
+      ["a", "1", "2", "3"],
+      ["b", "2", "4", "5"],
+      ["c", "3", "6", "7"],
+    ],
+  },
+});
+const scriptGraph = (): ProjectNode => ({
+  id: "g1",
+  type: "graph",
+  name: "Graph 1",
+  parentId: "t1",
+  graphType: "xy-scatter",
+  graphOptions: newGraphOptions("xy-scatter"),
+});
+const scriptDoc = (extra?: Partial<ScriptDoc>): ScriptDoc => {
+  const t1 = scriptTable();
+  const g1 = scriptGraph();
+  return { nodes: { t1, g1 }, rootOrder: ["t1"], childOrder: { t1: ["g1"] }, activeNodeId: "t1", ...extra };
+};
+const scriptLog = (result: ReturnType<typeof runScript>) => result.log.join("\n");
+
+/** The first info sheet's constants without their ids (ids are random per
+ *  run) — what a script's SetInfo wrote, for the checks to assert on. */
+const constantValues = (doc: ScriptDoc) =>
+  infoSheetsOf(doc.nodes, doc.rootOrder)[0]?.info?.constants.map(({ name, value, notes }) => ({
+    name,
+    value,
+    ...(notes !== undefined ? { notes } : {}),
+  }));
+
+check("script: comments and quoted commas parse; an unknown command names its line and stops the run", () => {
+  const okRun = runScript(
+    scriptDoc(),
+    `// a comment\nSetInfo "a, b", 1\n/* multi\nline */ SetProjectName "Exp 1"`,
+  );
+  strictEqual(okRun.stopped, false);
+  strictEqual(okRun.doc.projectName, "Exp 1");
+  // SetInfo wrote into the first info sheet (created by the run).
+  deepStrictEqual(constantValues(okRun.doc), [{ name: "", value: "a, b" }]);
+  const bad = runScript(scriptDoc(), `SetInfo "x", 1\nNope 2\nSetInfo "y", 2`);
+  strictEqual(bad.stopped, true);
+  ok(scriptLog(bad).includes('Line 2: unknown command "Nope"'), scriptLog(bad));
+  // Atomic: a run that stops changes nothing — no info sheet was created.
+  strictEqual(infoSheetsOf(bad.doc.nodes, bad.doc.rootOrder).length, 0);
+});
+
+check("script: SetYReplicates regroups a grouped table, replicates an XY table, and warn-skips a Column table", () => {
+  const xy = runScript(scriptDoc(), "SetYReplicates 3");
+  strictEqual(xy.stopped, false);
+  deepStrictEqual(xy.doc.nodes.t1.data!.columns, ["Title", "X", "A:Y1", "A:Y2", "A:Y3", "B:Y1", "B:Y2", "B:Y3"]);
+  deepStrictEqual(xy.doc.nodes.t1.data!.rows[0], ["a", "1", "2", null, null, "3", null, null]);
+  const grouped = scriptDoc();
+  grouped.nodes.t2 = {
+    id: "t2",
+    type: "table",
+    name: "Grouped",
+    parentId: null,
+    tableType: "grouped",
+    data: writeBlock(newGroupedTable(2, 3), 0, 0, [["r1", "a1", "a2", "a3", "b1", "b2", "b3"]], "grouped"),
+  };
+  grouped.rootOrder = ["t1", "t2"];
+  grouped.childOrder.t2 = [];
+  const g = runScript(grouped, "GoTo D, 2\nSetYReplicates 2");
+  strictEqual(g.stopped, false);
+  deepStrictEqual(g.doc.nodes.t2.data!.columns, ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"]);
+  deepStrictEqual(g.doc.nodes.t2.data!.rows[0], ["r1", "a1", "a2", "b1", "b2"]);
+  const column = scriptDoc();
+  column.nodes.t1.tableType = "column";
+  column.nodes.t1.data = { columns: ["Title", "A", "B"], rows: [[null, "1", "2"]] };
+  const c = runScript(column, "SetYReplicates 3");
+  strictEqual(c.stopped, false);
+  ok(scriptLog(c).includes("no replicate"), scriptLog(c));
+  deepStrictEqual(c.doc.nodes.t1.data!.columns, ["Title", "A", "B"]);
+});
+
+check("script: ClearTable with no args erases the whole table but keeps its links", () => {
+  const result = runScript(scriptDoc(), "ClearTable");
+  strictEqual(result.stopped, false);
+  deepStrictEqual(result.doc.nodes.t1.data!.rows, [
+    [null, null, null, null],
+    [null, null, null, null],
+    [null, null, null, null],
+  ]);
+  // The graph survives: ClearTable keeps links to analyses and graphs.
+  ok(result.doc.nodes.g1);
+});
+
+check("script: ClearTable with args erases left-and-below the cell only", () => {
+  const result = runScript(scriptDoc(), "ClearTable 2, 1");
+  strictEqual(result.stopped, false);
+  deepStrictEqual(result.doc.nodes.t1.data!.rows, [
+    ["a", "1", "2", "3"],
+    ["b", null, null, "5"],
+    ["c", null, null, "7"],
+  ]);
+});
+
+check("script: DeleteAllDataSets clears every table and drops its analyses and graphs", () => {
+  const doc = scriptDoc();
+  doc.nodes.a1 = {
+    id: "a1",
+    type: "analysis",
+    name: "Fit",
+    parentId: "t1",
+    analysisType: "linear-regression",
+    analysisParams: { y: "Y1" },
+  };
+  doc.childOrder.t1 = ["g1", "a1"];
+  const result = runScript(doc, "DeleteAllDataSets");
+  strictEqual(result.stopped, false);
+  deepStrictEqual(Object.keys(result.doc.nodes), ["t1"]);
+  deepStrictEqual(result.doc.nodes.t1.data!.rows, [
+    [null, null, null, null],
+    [null, null, null, null],
+    [null, null, null, null],
+  ]);
+  deepStrictEqual(result.doc.childOrder, { t1: [] });
+});
+
+check("script: SetInfo sets values, names and appends notes; SetValueToInfo copies a cell", () => {
+  const result = runScript(
+    scriptDoc(),
+    `SetInfo "Exp 1", 1\nSetInfo "Assay", 1, 0\nSetInfo "run in triplicate", 1, 2\nSetInfo " on Monday", 1, 2\nSetValueToInfo 1, 2, 1, 1`,
+  );
+  strictEqual(result.stopped, false);
+  deepStrictEqual(constantValues(result.doc), [
+    { name: "Assay", value: "Exp 1", notes: "run in triplicate on Monday" },
+    { name: "", value: "2" },
+  ]);
+  const badTable = runScript(scriptDoc(), "SetValueToInfo 2, 1, 1, 1");
+  strictEqual(badTable.stopped, true);
+  ok(scriptLog(badTable).includes("must be 1, not 2"), scriptLog(badTable));
+});
+
+check("script: GoTo moves between sheets and GoTo + steps to the next one", () => {
+  const doc = scriptDoc();
+  doc.nodes.t2 = {
+    id: "t2",
+    type: "table",
+    name: "Data 2",
+    parentId: null,
+    tableType: "column",
+    data: { columns: ["Title", "A"], rows: [[null, "1"]] },
+  };
+  doc.rootOrder = ["t1", "t2"];
+  doc.childOrder.t2 = [];
+  const result = runScript(doc, "GoTo D, 2\nSetSheetTitle Renamed\nGoTo +\nSetSheetTitle First");
+  strictEqual(result.stopped, false);
+  strictEqual(result.doc.nodes.t2.name, "Renamed");
+  // The sheet after Data 2 wraps to the first sheet, Data 1.
+  strictEqual(result.doc.nodes.t1.name, "First");
+  const bad = runScript(doc, "GoTo G, 5");
+  strictEqual(bad.stopped, true);
+  ok(scriptLog(bad).includes("graph 5"), scriptLog(bad));
+});
+
+check("script: InsertData writes an inline <Data> block at the given position", () => {
+  const result = runScript(
+    scriptDoc(),
+    `InsertData 1, 1, 1\n<Data>\n10, 20\n30, 40\n</Data>`,
+  );
+  strictEqual(result.stopped, false);
+  deepStrictEqual(result.doc.nodes.t1.data!.rows, [
+    ["a", "1", "10", "20"],
+    ["b", "2", "30", "40"],
+    ["c", "3", "6", "7"],
+  ]);
+  const sameLine = runScript(scriptDoc(), "InsertData 1, 0, 1, <Data>, 9, 8, </Data>");
+  strictEqual(sameLine.stopped, false);
+  strictEqual(sameLine.doc.nodes.t1.data!.rows[0][1], "9");
+  strictEqual(sameLine.doc.nodes.t1.data!.rows[0][2], "8");
+  const noBlock = runScript(scriptDoc(), "InsertData 1, 1, 1");
+  strictEqual(noBlock.stopped, true);
+  ok(scriptLog(noBlock).includes("<Data>"), scriptLog(noBlock));
+});
+
+check("script: DuplicateDataTable copies the table without its children", () => {
+  const result = runScript(scriptDoc(), "DuplicateDataTable");
+  strictEqual(result.stopped, false);
+  const copies = Object.values(result.doc.nodes).filter((n) => n.type === "table" && n.id !== "t1");
+  strictEqual(copies.length, 1);
+  strictEqual(copies[0].name, "Copy of Data 1");
+  deepStrictEqual(copies[0].data, scriptTable().data);
+  deepStrictEqual(result.doc.rootOrder, ["t1", copies[0].id]);
+  deepStrictEqual(result.doc.childOrder[copies[0].id], []);
+  // The original keeps its graph; the copy has none.
+  deepStrictEqual(result.doc.childOrder.t1, ["g1"]);
+});
+
+check("script: ExportTIF validates resolution and mode, and resolves paths through SetPath", () => {
+  const badRes = runScript(scriptDoc(), 'SetPath "/tmp/out"\nGoTo G, 1\nExportTIF "g.tif", 200');
+  strictEqual(badRes.stopped, true);
+  ok(scriptLog(badRes).includes("200"), scriptLog(badRes));
+  const badMode = runScript(scriptDoc(), 'SetPath "/tmp/out"\nGoTo G, 1\nExportTIF "g.tif", 300, CMYK');
+  strictEqual(badMode.stopped, true);
+  ok(scriptLog(badMode).includes("CMYK"), scriptLog(badMode));
+  const okRun = runScript(scriptDoc(), 'SetPath "/tmp/out"\nGoTo G, 1\nExportTIF "g.tif", 600, RGBhi');
+  strictEqual(okRun.stopped, false);
+  deepStrictEqual(okRun.effects, [
+    { type: "export-graph", graphId: "g1", format: "tif", dpi: 600, clear: false, mode: "rgbhi", path: "/tmp/out/g.tif" },
+  ]);
+  const noPath = runScript(scriptDoc(), "GoTo G, 1\nExportTIF");
+  strictEqual(noPath.stopped, true);
+  ok(scriptLog(noPath).includes("SetPath"), scriptLog(noPath));
+});
+
+check("script: ForEach repeats with %N and ForEach Sheet visits each sheet with %S", () => {
+  const counted = runScript(scriptDoc(), "ForEach 3\nSetInfo \"loop %N\", 1\nNext");
+  strictEqual(counted.stopped, false);
+  strictEqual(constantValues(counted.doc)![0].value, "loop 3");
+  ok(scriptLog(counted).includes("loop 1") && scriptLog(counted).includes("loop 2"), scriptLog(counted));
+  const sheets = runScript(scriptDoc(), 'ForEach Sheet\nSetSheetTitle "%S (copy)"\nNext');
+  strictEqual(sheets.stopped, false);
+  strictEqual(sheets.doc.nodes.t1.name, "Data 1 (copy)");
+  strictEqual(sheets.doc.nodes.g1.name, "Graph 1 (copy)");
+  const unclosed = runScript(scriptDoc(), "ForEach 2\nSetInfo \"x\", 1");
+  strictEqual(unclosed.stopped, true);
+  ok(scriptLog(unclosed).includes("ForEach"), scriptLog(unclosed));
+});
+
+check("script: text output writes the title, text, a cell and the sheet", () => {
+  const result = runScript(
+    scriptDoc(),
+    'SetPath "/tmp/out"\nOpenOutput "out.txt"\nWTitle\nWText "hello"\nWCell 1, 1\nWSheet\nCloseOutput',
+  );
+  strictEqual(result.stopped, false);
+  strictEqual(result.effects.length, 1);
+  strictEqual(result.effects[0].type, "write-text-file");
+  if (result.effects[0].type !== "write-text-file") throw new Error("expected a text file effect");
+  strictEqual(result.effects[0].path, "/tmp/out/out.txt");
+  const text = result.effects[0].text;
+  ok(text.includes("Untitled"), text);
+  ok(text.includes("hello"), text);
+  ok(text.includes("\n2\n") || text.endsWith("\n2"), text);
+  ok(text.includes("Title\tX\tY1\tY2"), text);
+  const noOutput = runScript(scriptDoc(), 'WText "hello"');
+  strictEqual(noOutput.stopped, true);
+  ok(scriptLog(noOutput).includes("OpenOutput"), scriptLog(noOutput));
+});
+
+check("script: graph commands set the title, axis titles and limits, and apply a palette", () => {
+  const result = runScript(
+    scriptDoc(),
+    'GoTo G, 1\nSetGraphTitle "Dose"\nSetXTitle "Conc"\nSetYTitle "Resp"\nSetAxisLimits Y, 0, 100, 10\nApplyColorScheme "Okabe-Ito"',
+  );
+  strictEqual(result.stopped, false);
+  const options = result.doc.nodes.g1.graphOptions!;
+  strictEqual(options.title, "Dose");
+  strictEqual(options.xLabel, "Conc");
+  strictEqual(options.yLabel, "Resp");
+  strictEqual(options.yMin, 0);
+  strictEqual(options.yMax, 100);
+  strictEqual(options.yStep, 10);
+  strictEqual(options.palette!.name, "okabe-ito");
+  const bad = runScript(scriptDoc(), 'GoTo G, 1\nApplyColorScheme "No Such Palette"');
+  strictEqual(bad.stopped, true);
+  ok(scriptLog(bad).includes("No Such Palette"), scriptLog(bad));
+});
+
+check("script: ExportTable writes the current table, and ALL writes every table", () => {
+  const one = runScript(scriptDoc(), 'SetPath "/tmp/out"\nExportTable "t.csv"');
+  strictEqual(one.stopped, false);
+  strictEqual(one.effects.length, 1);
+  if (one.effects[0].type !== "write-text-file") throw new Error("expected a text file effect");
+  strictEqual(one.effects[0].path, "/tmp/out/t.csv");
+  ok(one.effects[0].text.startsWith("Title,X,Y1,Y2\n"), one.effects[0].text);
+  ok(one.effects[0].text.includes("a,1,2,3"), one.effects[0].text);
+  const doc = scriptDoc();
+  doc.nodes.t2 = {
+    id: "t2",
+    type: "table",
+    name: "Second",
+    parentId: null,
+    tableType: "column",
+    data: { columns: ["Title", "A"], rows: [[null, "1"]] },
+  };
+  doc.rootOrder = ["t1", "t2"];
+  doc.childOrder.t2 = [];
+  const all = runScript(doc, 'SetPath "/tmp/out"\nExportTable ALL');
+  strictEqual(all.stopped, false);
+  strictEqual(all.effects.length, 2);
+  deepStrictEqual(
+    all.effects.map((e) => (e.type === "write-text-file" ? e.path : "")),
+    ["/tmp/out/Data 1.csv", "/tmp/out/Second.csv"],
+  );
+});
+
+check("script: Copy and Paste move a table's grid", () => {
+  const doc = scriptDoc();
+  doc.nodes.t2 = {
+    id: "t2",
+    type: "table",
+    name: "Data 2",
+    parentId: null,
+    tableType: "xy",
+    data: { columns: ["Title", "X", "Y1", "Y2"], rows: [[null, null, null, null]] },
+  };
+  doc.rootOrder = ["t1", "t2"];
+  doc.childOrder.t2 = [];
+  const result = runScript(doc, "Copy\nGoTo D, 2\nPaste");
+  strictEqual(result.stopped, false);
+  deepStrictEqual(result.doc.nodes.t2.data!.rows, [
+    ["a", "1", "2", "3"],
+    ["b", "2", "4", "5"],
+    ["c", "3", "6", "7"],
+  ]);
+});
+
+check("script: CreateLayout builds a figure from the graphs in order", () => {
+  const doc = scriptDoc();
+  doc.nodes.g2 = {
+    id: "g2",
+    type: "graph",
+    name: "Graph 2",
+    parentId: "t1",
+    graphType: "xy-scatter",
+    graphOptions: newGraphOptions("xy-scatter"),
+  };
+  doc.childOrder.t1 = ["g1", "g2"];
+  const result = runScript(doc, "CreateLayout 1, 2");
+  strictEqual(result.stopped, false);
+  const figures = Object.values(result.doc.nodes).filter((n) => n.type === "figure");
+  strictEqual(figures.length, 1);
+  deepStrictEqual(figures[0].grid, { rows: 1, cols: 2 });
+  strictEqual(figures[0].panels!.length, 2);
+  deepStrictEqual(
+    figures[0].panels!.map((p) => p.graphId),
+    ["g1", "g2"],
+  );
+});
+
+check("script: Save, Print and CloseScriptDialog become effects; SetPath resolves relative names", () => {
+  const result = runScript(scriptDoc(), 'SetPath "/tmp/out"\nSave\nPrint\nCloseScriptDialog');
+  strictEqual(result.stopped, false);
+  deepStrictEqual(
+    result.effects.map((e) => e.type),
+    ["save-project", "print", "close-dialog"],
+  );
+  const relative = runScript(scriptDoc(), 'SetPath "/tmp/out"\nGoTo G, 1\nExportPNG "g.png"');
+  strictEqual(relative.stopped, false);
+  if (relative.effects[0].type !== "export-graph") throw new Error("expected a graph export effect");
+  strictEqual(relative.effects[0].path, "/tmp/out/g.png");
+  strictEqual(relative.effects[0].dpi, 300);
+});
+
+check("script: Import reads a file's CSV into the current table at the given position", () => {
+  deepStrictEqual(scriptImportFiles('Import "data.csv", 1, 1, 1'), ["data.csv"]);
+  const result = runScript(scriptDoc(), 'Import "data.csv", 1, 1, 1', { "data.csv": "10,20\n30,40" });
+  strictEqual(result.stopped, false);
+  deepStrictEqual(result.doc.nodes.t1.data!.rows, [
+    ["a", "1", "10", "20"],
+    ["b", "2", "30", "40"],
+    ["c", "3", "6", "7"],
+  ]);
+  const missing = runScript(scriptDoc(), 'Import "gone.csv"');
+  strictEqual(missing.stopped, true);
+  ok(scriptLog(missing).includes("gone.csv"), scriptLog(missing));
+});
+
+check("script: the TIFF encoder writes a baseline TIFF and the BMP encoder a 24-bit BMP", () => {
+  const rgba = new Uint8Array([255, 0, 0, 255, 0, 255, 0, 255]);
+  const tif = encodeTiff(rgba, 2, 1, { mode: "rgbhi", dpi: 300 });
+  strictEqual(String.fromCharCode(tif[0], tif[1]), "II");
+  const view = new DataView(tif.buffer, tif.byteOffset);
+  strictEqual(view.getUint16(2, true), 42);
+  // The strip holds the two pixels, red then green, uncompressed.
+  const strip = tif.subarray(tif.length - 6);
+  deepStrictEqual([...strip], [255, 0, 0, 0, 255, 0]);
+  const gray = encodeTiff(new Uint8Array([10, 10, 10, 255, 200, 200, 200, 255]), 2, 1, {
+    mode: "gray",
+    dpi: 300,
+  });
+  deepStrictEqual([...gray.subarray(gray.length - 2)], [10, 200]);
+  const bmp = encodeBmp(rgba, 2, 1, { dpi: 300 });
+  strictEqual(String.fromCharCode(bmp[0], bmp[1]), "BM");
+  const bview = new DataView(bmp.buffer, bmp.byteOffset);
+  strictEqual(bview.getUint32(18, true), 2);
+  strictEqual(bview.getUint32(22, true), 1);
+  // BGR, bottom-up, rows padded to 4 bytes: blue, green, red + 2 pad bytes.
+  deepStrictEqual([...bmp.subarray(54, 62)], [0, 0, 255, 0, 255, 0, 0, 0]);
+});
+
+check("script: info constants and the project name round-trip through .hlx, and old files stay clean", () => {
+  // Constants live in the info sheet (the full store) — a script-set
+  // constant round-trips as the sheet's row, id and note included.
+  const doc = scriptDoc();
+  const infoNode: ProjectNode = {
+    id: "info1",
+    type: "info",
+    name: "Info Sheet",
+    parentId: null,
+    info: {
+      constants: [{ id: "c1", name: "Assay", value: "Exp 1", notes: "triplicate" }],
+      notes: "",
+      linkedTableId: null,
+    },
+  };
+  const payload: ProjectFilePayload = {
+    ...doc,
+    nodes: { ...doc.nodes, info1: infoNode },
+    rootOrder: [...doc.rootOrder, "info1"],
+    projectName: "Exp 1",
+  };
+  const text = serializeProjectFile(payload);
+  const parsed = read(text);
+  strictEqual(parsed.updated, false);
+  deepStrictEqual((parsed.project.nodes.info1 as ProjectNode).info?.constants, [
+    { id: "c1", name: "Assay", value: "Exp 1", notes: "triplicate" },
+  ]);
+  strictEqual(parsed.project.projectName, "Exp 1");
+  // A file without them stays without them: no new keys, no repair flag.
+  const oldText = serializeProjectFile(scriptDoc());
+  ok(!oldText.includes("infoConstants"), oldText);
+  ok(!oldText.includes("projectName"), oldText);
+  const oldParsed = read(oldText);
+  strictEqual(oldParsed.updated, false);
+  strictEqual(oldParsed.project.projectName, undefined);
+  // A broken entry in the sheet is dropped on its own (the sheet reader is
+  // forgiving and silent — no warning, but the file reads as updated).
+  const broken = JSON.parse(text) as Record<string, unknown>;
+  const brokenNodes = (broken.project as Record<string, unknown>).nodes as Record<string, Record<string, unknown>>;
+  (brokenNodes.info1.info as Record<string, unknown>).constants = [{ name: "Kept", value: "1" }, 42, { value: "no name" }];
+  const repaired = read(JSON.stringify(broken));
+  strictEqual(repaired.updated, true);
+  deepStrictEqual(
+    (repaired.project.nodes.info1 as ProjectNode).info?.constants.map(({ name, value }) => ({ name, value })),
+    [{ name: "Kept", value: "1" }],
+  );
+});
+
+check("script: one Run Script is one undo step", () => {
+  let s = makeInitialState();
+  const firstId = s.rootOrder[0];
+  const run = runScript(
+    { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
+    'SetSheetTitle "Renamed"',
+  );
+  strictEqual(run.stopped, false);
+  s = reducer(s, { type: "applyScript", ...run.doc });
+  strictEqual(s.nodes[firstId].name, "Renamed");
+  strictEqual(s.past.length, 1);
+  strictEqual(s.past[0].label, "Run Script");
+  s = reducer(s, { type: "undo" });
+  strictEqual(s.nodes[firstId].name, "Table 1");
+});
+
+check("script: the project name never reaches a .prism export; info constants export as an InfoSheet", async () => {
+  // Constants live in the info sheet, and Prism's own format carries info
+  // sheets — so a constant DOES reach the export, as an InfoSheet name/value
+  // pair. What must never leak is the project name (no Prism equivalent)
+  // and the Titer-internal field name.
+  const constMarker = "CONST-9c41";
+  const nameMarker = "NAME-9c41";
+  const payload = {
+    nodes: {
+      table_1: {
+        id: "table_1",
+        type: "table",
+        name: "Minimal",
+        parentId: null,
+        tableType: "column",
+        data: { columns: ["Title", "A"], rows: [[null, "1"], [null, "2"]] },
+      },
+      info_1: {
+        id: "info_1",
+        type: "info",
+        name: "Info Sheet",
+        parentId: null,
+        info: {
+          constants: [{ id: "c1", name: constMarker, value: constMarker }],
+          notes: "",
+          linkedTableId: null,
+        },
+      },
+    },
+    rootOrder: ["table_1", "info_1"],
+    childOrder: { table_1: [] },
+    activeNodeId: "table_1",
+    projectName: nameMarker,
+  };
+  const written = await writePrism(payload as unknown as Parameters<typeof writePrism>[0], "1.2.0");
+  const zip = await JSZip.loadAsync(written.bytes);
+  const texts = await Promise.all(
+    Object.values(zip.files)
+      .filter((f) => !f.dir)
+      .map((f) => f.async("string")),
+  );
+  ok(!texts.some((t) => t.includes(nameMarker)), "project name leaked into the .prism file");
+  ok(!texts.some((t) => t.includes("infoConstants")), "infoConstants field leaked into the .prism file");
+  ok(texts.some((t) => t.includes(constMarker)), "info constant missing from the .prism InfoSheet");
 });
 
 // ── Run ──────────────────────────────────────────────────────────────────

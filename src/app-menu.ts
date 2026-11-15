@@ -177,6 +177,10 @@ export function useAppMenu(doc: DocumentActions) {
             text: "Convert…",
             action: () => latest.current.store.openSelector({ kind: "converter" }),
           },
+          {
+            text: "Run Script…",
+            action: () => latest.current.store.openSelector({ kind: "script" }),
+          },
           sep,
           { text: "Save", accelerator: "CmdOrCtrl+S", enabled: isDirty, action: () => latest.current.doc.save() },
           { text: "Save As…", accelerator: "CmdOrCtrl+Shift+S", action: () => latest.current.doc.save(true) },

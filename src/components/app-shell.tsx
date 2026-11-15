@@ -24,6 +24,7 @@ import { AnalysisWizard } from "../views/analyses/analysis-wizard";
 import { WandDialog } from "./wand-dialog";
 import { SimulateDataDialog } from "./simulate-data-dialog";
 import { CloneGraphDialog } from "./clone-graph-dialog";
+import { ScriptDialog } from "./script-dialog";
 import { useStartAnalysis } from "../views/analyses/use-analysis-launcher";
 import { GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
 
@@ -96,6 +97,8 @@ export function AppShell() {
       <SimulateDataDialog />
 
       <CloneGraphDialog />
+
+      <ScriptDialog onSave={() => void documentActions.save()} />
 
       {/* The "Project Updated" notice, in-app: the native dialog's window lingered
           on macOS after dismissal, blocking clicks and quitting (Quirk 2). */}

@@ -103,6 +103,8 @@ export interface ProjectFilePayload {
    *  template's kind and its name/description/instructions. A plain `.hlx`
    *  never carries one — the saver only writes it for `.pzt`/`.pzm`. */
   template?: TemplateInfo;
+  /** The name a script's SetProjectName gave the project. Omitted when unset. */
+  projectName?: string;
   /** Unknown keys from a newer or hand-edited file (FF-F12): the file envelope's
    *  and the project's, kept verbatim and written back on save, so opening a
    *  newer file in this Titer doesn't silently lose its forward-compat data.
@@ -113,13 +115,21 @@ export interface ProjectFilePayload {
 
 // ── Writing ──────────────────────────────────────────────────────────────
 
-export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeId, template, fileUnknowns, projectUnknowns }: ProjectFilePayload): string {
+export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeId, template, projectName, fileUnknowns, projectUnknowns }: ProjectFilePayload): string {
   // Unknown keys go back where they came from, under the known keys — a
   // hand-edited file can't smuggle a second `nodes` or `app` past the reader.
-  const project: ProjectFilePayload = { ...projectUnknowns, nodes, rootOrder, childOrder, activeNodeId };
+  const project: ProjectFilePayload = {
+    ...projectUnknowns,
+    nodes,
+    rootOrder,
+    childOrder,
+    activeNodeId,
+    ...(projectName ? { projectName } : {}),
+  };
   // The `template` block lives at the file level, beside `project` (plan 38):
   // a plain `.hlx` never carries one — only the template saver passes it.
   return format({ ...fileUnknowns, app: "titer", schemaVersion: 1, savedAt: new Date().toISOString(), template, project }, "") + "\n";
+}
 }
 
 /** Indented JSON, with each list of plain values (a table row, the column names)
@@ -167,7 +177,7 @@ const unknownsOf = (obj: Obj, known: readonly string[]): Obj => {
 // Every field Titer knows, per level. The `satisfies` checks make TypeScript
 // flag any field added to a type but not listed here.
 const FILE_KEYS = ["app", "schemaVersion", "savedAt", "template", "project"];
-const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId"] satisfies (keyof ProjectFilePayload)[];
+const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId", "projectName"] satisfies (keyof ProjectFilePayload)[];
 // prettier-ignore
 const NODE_KEYS = Object.keys({
   id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, highlight: 1, tableType: 1, data: 1,
@@ -1421,6 +1431,7 @@ export function parseProjectFile(
     }),
   );
   const activeNodeId = nodeOf(project.activeNodeId) ? (project.activeNodeId as string) : rootOrder[0];
+  const projectName = typeof project.projectName === "string" && project.projectName !== "" ? project.projectName : undefined;
 
   for (const node of Object.values(nodes)) {
     if (node.type === "figure") {
@@ -1484,12 +1495,13 @@ export function parseProjectFile(
     childOrder,
     activeNodeId,
     ...(template ? { template } : {}),
+    ...(projectName ? { projectName } : {}),
     ...(Object.keys(fileUnknowns).length ? { fileUnknowns } : {}),
     ...(Object.keys(projectUnknowns).length ? { projectUnknowns } : {}),
   };
   // `updated` compares what Titer knows only: carrying unknowns through is not
   // a repair, so a newer file that needed no repair still opens unedited.
-  const known = { nodes, rootOrder, childOrder, activeNodeId };
+  const known = { nodes, rootOrder, childOrder, activeNodeId, projectName };
   const filed = Object.fromEntries(PROJECT_KEYS.map((k) => [k, project[k]]));
   return { project: read, issues, updated: contents(known) !== contents(filed) };
 }

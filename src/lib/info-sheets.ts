@@ -243,18 +243,20 @@ export function resolveAnalysisParams(
 }
 
 /** A constant as a file or an import holds it, forgivingly: a name and a
- *  value, both strings; anything else is left out. */
+ *  value, both strings; anything else is left out. A script-written note
+ *  (SetInfo position 2) is kept when it is a string. */
 export function readInfoConstants(raw: unknown): InfoConstant[] {
   if (!Array.isArray(raw)) return [];
   const kept: InfoConstant[] = [];
   for (const entry of raw.slice(0, MAX_INFO_CONSTANTS)) {
     if (typeof entry !== "object" || entry === null) continue;
-    const { name, value } = entry as { name?: unknown; value?: unknown };
+    const { name, value, notes } = entry as { name?: unknown; value?: unknown; notes?: unknown };
     if (typeof name !== "string" || name.trim() === "") continue;
     kept.push({
       id: typeof (entry as { id?: unknown }).id === "string" ? (entry as { id: string }).id : newConstantId(),
       name,
       value: typeof value === "string" ? value : value === undefined || value === null ? "" : String(value),
+      ...(typeof notes === "string" ? { notes } : {}),
     });
   }
   return kept;

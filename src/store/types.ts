@@ -602,11 +602,14 @@ export interface TableData {
 }
 
 /** One row of an info sheet's structured table: a name and a string value,
- *  as Prism stores it ("2018-07-23", "0.5", ""). Numeric when a hook needs it. */
+ *  as Prism stores it ("2018-07-23", "0.5", ""). Numeric when a hook needs it.
+ *  `notes` is a script-only appendage (a script's SetInfo position 2) — the
+ *  sheet UI doesn't edit it, but the file keeps it. */
 export interface InfoConstant {
   id: string;
   name: string;
   value: string;
+  notes?: string;
 }
 
 /** An info sheet's data: its constants (left) and its free notes (right).
