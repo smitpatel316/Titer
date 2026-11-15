@@ -158,7 +158,7 @@ export function useDocument() {
   const saveAsPrism = async (): Promise<boolean> => {
     const s = latest.current.get();
     const revision = s.revision;
-    const version = native.isNative ? await native.appVersion().catch(() => "1.2.0") : "1.2.0";
+    const version = native.isNative ? await native.appVersion().catch(() => "1.3.0") : "1.3.0";
     let bytes: Uint8Array;
     try {
       bytes = (
@@ -491,7 +491,7 @@ export function useDocument() {
     if (!saveAs && filePath?.toLowerCase().endsWith(".prism")) {
       const s = latest.current.get();
       const revision = s.revision;
-      const version = native.isNative ? await native.appVersion().catch(() => "1.2.0") : "1.2.0";
+      const version = native.isNative ? await native.appVersion().catch(() => "1.3.0") : "1.3.0";
       try {
         const { bytes } = await writePrism(
           { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
