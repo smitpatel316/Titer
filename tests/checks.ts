@@ -3,7 +3,7 @@
 // trusted, table edits keeping every value where it belongs, graphs drawing each
 // setting and following renamed columns, selected points, exports, analyses on the
 // data asked, Undo, and the app's menus, recents and update check. `npm test` runs them.
-import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -19,6 +19,7 @@ import {
   type RQueueSnapshot,
 } from "../src/stats/r-queue";
 import { parseProjectFile, parseProjectText, readPalette, serializeProjectFile, type ProjectFilePayload } from "../src/lib/project-file";
+import { applyWand, wandExamples, wandReportMessage } from "../src/lib/wand";
 import { kaplanMeier } from "../src/lib/kaplan-meier";
 import { writePrism } from "../src/lib/prism-write";
 import JSZip from "jszip";
@@ -10549,6 +10550,232 @@ check("cloud invokes send camelCase arg keys, matching the Rust command params (
     const bad = keys.filter((key) => /[a-z]+_[a-z]/.test(key));
     ok(bad.length === 0, `cloud invoke arg keys must be camelCase, found snake_case key(s) ${bad.join(", ")} in { ${args.trim()} }`);
   }
+});
+
+// ── Wand (plan 37) ───────────────────────────────────────────────────────
+// Apply an example table's analyses + graphs to new tables, batch. The
+// planner is pure (src/lib/wand.ts), so these pins drive applyWand directly
+// with a deterministic idGen; one pin goes through the store's applyWand
+// action + undo, and one through a save/load round-trip.
+
+const wandIdGen = () => {
+  let n = 0;
+  return (type: "analysis" | "graph") => `${type}_${++n}`;
+};
+const wandColumnTable = (id: string, name: string, columns: string[] = ["A", "B"]): ProjectNode => ({
+  id,
+  type: "table",
+  name,
+  parentId: null,
+  tableType: "column",
+  data: treatments(columns),
+});
+const twoGroupsParams = { paired: false, gaussian: true, equalVariance: true, ratio: false, tails: "two-sided" } as const;
+
+check("Wand copies an example's analyses to a new table, params deep-copied", () => {
+  const nodes: Record<string, ProjectNode> = {
+    ex: wandColumnTable("ex", "Experiment 1"),
+    a1: { id: "a1", type: "analysis", name: "Descriptives", parentId: "ex", analysisType: "descriptive-statistics" },
+    a2: {
+      id: "a2",
+      type: "analysis",
+      name: "Two groups",
+      parentId: "ex",
+      analysisType: "compare-two-groups",
+      analysisParams: { ...twoGroupsParams },
+    },
+    t1: wandColumnTable("t1", "Experiment 2"),
+  };
+  const childOrder = { ex: ["a1", "a2"], t1: [] };
+  const result = applyWand({ nodes, childOrder }, "ex", ["t1"], "", wandIdGen());
+  strictEqual(result.report.created.length, 1);
+  strictEqual(result.report.created[0].analyses, 2);
+  strictEqual(result.report.created[0].graphs, 0);
+  strictEqual(result.report.skipped.length, 0);
+  const [c1, c2] = result.childOrder.t1;
+  strictEqual(result.nodes[c1].analysisType, "descriptive-statistics");
+  strictEqual(result.nodes[c2].analysisType, "compare-two-groups");
+  strictEqual(result.nodes[c1].name, "Descriptives");
+  strictEqual(result.nodes[c2].name, "Two groups");
+  deepStrictEqual(result.nodes[c2].analysisParams, nodes.a2.analysisParams);
+  // Mutating the copy's params leaves the example's untouched: deep copy, not a reference.
+  (result.nodes[c2].analysisParams as { paired: boolean }).paired = true;
+  strictEqual((nodes.a2.analysisParams as { paired: boolean }).paired, false);
+  strictEqual(result.firstCreatedId, c1);
+  ok(wandReportMessage(result.report).includes("2 analyses"));
+});
+
+check("Wand remaps a graph's linked analysis to the new copy and drops a dangling link", () => {
+  const nodes: Record<string, ProjectNode> = {
+    ex: { id: "ex", type: "table", name: "Clusters", parentId: null, tableType: "multiple", data: treatments(["V1", "V2"]) },
+    a1: { id: "a1", type: "analysis", name: "K-means", parentId: "ex", analysisType: "k-means", analysisParams: { clusters: 3 } },
+    g1: {
+      id: "g1",
+      type: "graph",
+      name: "Cluster plot",
+      parentId: "ex",
+      graphType: "kmeans-scatter",
+      graphOptions: { ...newGraphOptions("kmeans-scatter"), kmeansAnalysisId: "a1" },
+    },
+    g2: {
+      id: "g2",
+      type: "graph",
+      name: "PCA plot",
+      parentId: "ex",
+      graphType: "pca-biplot",
+      graphOptions: { ...newGraphOptions("pca-biplot"), pcaAnalysisId: "ghost" },
+    },
+    t1: { id: "t1", type: "table", name: "Clusters 2", parentId: null, tableType: "multiple", data: treatments(["V1", "V2"]) },
+  };
+  const childOrder = { ex: ["a1", "g1", "g2"], t1: [] };
+  const result = applyWand({ nodes, childOrder }, "ex", ["t1"], "", wandIdGen());
+  strictEqual(result.report.created[0].analyses, 1);
+  strictEqual(result.report.created[0].graphs, 2);
+  const [na, ng1, ng2] = result.childOrder.t1;
+  ok(na !== "a1");
+  strictEqual(result.nodes[ng1].graphOptions!.kmeansAnalysisId, na);
+  ok(!("pcaAnalysisId" in (result.nodes[ng2].graphOptions ?? {})));
+});
+
+check("Wand skips a target whose table type the example's tests don't fit", () => {
+  const xy = (id: string, name: string): ProjectNode => ({
+    id,
+    type: "table",
+    name,
+    parentId: null,
+    tableType: "xy",
+    data: treatments(["X", "Y1"]),
+  });
+  const nodes: Record<string, ProjectNode> = {
+    ex: xy("ex", "Dose-response"),
+    a1: {
+      id: "a1",
+      type: "analysis",
+      name: "Fit",
+      parentId: "ex",
+      analysisType: "linear-regression",
+      analysisParams: { y: "Y1", forceOrigin: true },
+    },
+    g1: { id: "g1", type: "graph", name: "Plot", parentId: "ex", graphType: "xy-scatter", graphOptions: newGraphOptions("xy-scatter") },
+    t1: wandColumnTable("t1", "Column target"),
+    t2: xy("t2", "XY target"),
+  };
+  const childOrder = { ex: ["a1", "g1"], t1: [], t2: [] };
+  const result = applyWand({ nodes, childOrder }, "ex", ["t1", "t2"], "", wandIdGen());
+  strictEqual(result.report.created.length, 1);
+  strictEqual(result.report.created[0].tableId, "t2");
+  strictEqual(result.report.created[0].analyses, 1);
+  strictEqual(result.report.created[0].graphs, 1);
+  strictEqual(result.report.skipped.length, 1);
+  strictEqual(result.report.skipped[0].tableId, "t1");
+  ok(/none of its analyses or graphs apply/.test(result.report.skipped[0].reason));
+  strictEqual(result.childOrder.t1.length, 0);
+});
+
+check("Wand refuses an example with nothing to copy", () => {
+  const nodes: Record<string, ProjectNode> = { ex: wandColumnTable("ex", "Empty"), t1: wandColumnTable("t1", "Target") };
+  throws(() => applyWand({ nodes, childOrder: { ex: [], t1: [] } }, "ex", ["t1"]), /has no analyses or graphs to copy/);
+});
+
+check("Wand prefixes new sheet names and uniquifies a collision", () => {
+  const nodes: Record<string, ProjectNode> = {
+    ex: wandColumnTable("ex", "Experiment 1"),
+    a1: { id: "a1", type: "analysis", name: "Desc", parentId: "ex", analysisType: "descriptive-statistics" },
+    t1: wandColumnTable("t1", "Experiment 2"),
+    old: { id: "old", type: "analysis", name: "* Desc", parentId: "t1", analysisType: "descriptive-statistics" },
+  };
+  const childOrder = { ex: ["a1"], t1: ["old"] };
+  const result = applyWand({ nodes, childOrder }, "ex", ["t1"], "* ", wandIdGen());
+  strictEqual(result.childOrder.t1.length, 2);
+  strictEqual(result.nodes[result.childOrder.t1[1]].name, "* Desc 2");
+});
+
+check("Wand reports a target with no numeric data and one undo step removes every copy", () => {
+  const nodes: Record<string, ProjectNode> = {
+    ex: wandColumnTable("ex", "Experiment 1"),
+    a1: { id: "a1", type: "analysis", name: "Desc", parentId: "ex", analysisType: "descriptive-statistics" },
+    t1: wandColumnTable("t1", "Experiment 2"),
+    t2: { id: "t2", type: "table", name: "Empty", parentId: null, tableType: "column", data: { columns: ["Title", "A", "B"], rows: [] } },
+  };
+  const childOrder = { ex: ["a1"], t1: [], t2: [] };
+  const result = applyWand({ nodes, childOrder }, "ex", ["t1", "t2"], "", wandIdGen());
+  strictEqual(result.report.created.length, 1);
+  strictEqual(result.report.created[0].tableId, "t1");
+  strictEqual(result.report.skipped.length, 1);
+  strictEqual(result.report.skipped[0].tableId, "t2");
+  strictEqual(result.report.skipped[0].reason, "has no numeric data");
+  // Reducer round-trip: the same content through the store's applyWand action, then one undo.
+  const base = { ...makeInitialState(), nodes, rootOrder: ["ex", "t1", "t2"], childOrder, activeNodeId: "ex" };
+  let s = reducer(base, { type: "applyWand", nodes: result.nodes, childOrder: result.childOrder, activeNodeId: result.firstCreatedId });
+  strictEqual(s.childOrder.t1.length, 1);
+  strictEqual(s.activeNodeId, result.firstCreatedId);
+  s = reducer(s, { type: "undo" });
+  deepStrictEqual(s.nodes, nodes);
+  deepStrictEqual(s.childOrder, childOrder);
+});
+
+check("Wand notes an analysis its target is too narrow for and still copies the rest", () => {
+  const nodes: Record<string, ProjectNode> = {
+    ex: wandColumnTable("ex", "Experiment 1"),
+    a1: { id: "a1", type: "analysis", name: "Desc", parentId: "ex", analysisType: "descriptive-statistics" },
+    a2: {
+      id: "a2",
+      type: "analysis",
+      name: "Two groups",
+      parentId: "ex",
+      analysisType: "compare-two-groups",
+      analysisParams: { ...twoGroupsParams },
+    },
+    t1: { id: "t1", type: "table", name: "One column", parentId: null, tableType: "column", data: treatments(["A"]) },
+  };
+  const childOrder = { ex: ["a1", "a2"], t1: [] };
+  const result = applyWand({ nodes, childOrder }, "ex", ["t1"], "", wandIdGen());
+  strictEqual(result.report.created.length, 1);
+  strictEqual(result.report.created[0].analyses, 1);
+  strictEqual(result.report.created[0].notes.length, 1);
+  ok(/Compare two groups.*needs at least 2 columns/.test(result.report.created[0].notes[0]));
+});
+
+check("Wand copies survive a save/load round-trip with the remapped link intact", () => {
+  const nodes: Record<string, ProjectNode> = {
+    ex: { id: "ex", type: "table", name: "Clusters", parentId: null, tableType: "multiple", data: treatments(["V1", "V2"]) },
+    a1: { id: "a1", type: "analysis", name: "K-means", parentId: "ex", analysisType: "k-means", analysisParams: { clusters: 3 } },
+    g1: {
+      id: "g1",
+      type: "graph",
+      name: "Cluster plot",
+      parentId: "ex",
+      graphType: "kmeans-scatter",
+      graphOptions: { ...newGraphOptions("kmeans-scatter"), kmeansAnalysisId: "a1" },
+    },
+    t1: { id: "t1", type: "table", name: "Clusters 2", parentId: null, tableType: "multiple", data: treatments(["V1", "V2"]) },
+  };
+  const childOrder = { ex: ["a1", "g1"], t1: [] };
+  const result = applyWand({ nodes, childOrder }, "ex", ["t1"], "", wandIdGen());
+  const [na, ng1] = result.childOrder.t1;
+  const payload: ProjectFilePayload = {
+    nodes: result.nodes,
+    rootOrder: ["ex", "t1"],
+    childOrder: result.childOrder,
+    activeNodeId: result.firstCreatedId,
+  };
+  const back = read(serializeProjectFile(payload));
+  strictEqual(back.project.nodes[na].analysisType, "k-means");
+  strictEqual(back.project.nodes[ng1].graphOptions!.kmeansAnalysisId, na);
+});
+
+check("Wand offers only tables with analyses or graphs as examples, never the target", () => {
+  const nodes: Record<string, ProjectNode> = {
+    ex: wandColumnTable("ex", "Experiment 1"),
+    a1: { id: "a1", type: "analysis", name: "Desc", parentId: "ex", analysisType: "descriptive-statistics" },
+    bare: wandColumnTable("bare", "No children yet"),
+    t1: wandColumnTable("t1", "Target"),
+  };
+  const childOrder = { ex: ["a1"], bare: [], t1: [] };
+  deepStrictEqual(
+    wandExamples(nodes, childOrder, ["ex", "bare", "t1"], "t1").map((t) => t.id),
+    ["ex"],
+  );
 });
 
 // ── Run ──────────────────────────────────────────────────────────────────
