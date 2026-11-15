@@ -9777,7 +9777,7 @@ check("a template file round-trips through serialize/parse, and a plain .hlx car
 });
 
 check("extractMethod takes a table's analyses and graphs in sidebar order, never its figures", () => {
-  const figure: ProjectNode = { id: "f1", type: "figure", name: "Fig", parentId: null, panels: [], grid: { rows: 1, cols: 1 }, figureSize: { widthIn: 6, heightIn: 4 }, labelStyle: { position: "top-left", fontSizePt: 10, bold: true }, figureTitle: "", sharedLegend: "none", dpi: 600 };
+  const figure: ProjectNode = { id: "f1", type: "figure", name: "Fig", parentId: null, panels: [], grid: { rows: 1, cols: 1 }, figureSize: { widthIn: 6, heightIn: 4 }, labelStyle: { position: "top-left", fontSizePt: 10, bold: true }, figureTitle: "", sharedLegend: "none", dpi: "600" };
   const method = extractMethod({
     nodes: { ...payload.nodes, f1: figure },
     rootOrder: ["t1", "f1"],
@@ -9839,13 +9839,13 @@ check("a cloned graph keeps only the analysis links the same apply cloned (remap
   const options = { ...newGraphOptions("xy-scatter"), regAnalysisId: "a1", sigAnalysisId: "a9" };
   // Both analyses cloned: both links remap to the new ids.
   const both = remapGraphOptions(options, { a1: "n1", a9: "n2" });
-  strictEqual(both.options.regAnalysisId, "n1");
-  strictEqual(both.options.sigAnalysisId, "n2");
+  strictEqual(both.options?.regAnalysisId, "n1");
+  strictEqual(both.options?.sigAnalysisId, "n2");
   deepStrictEqual(both.dropped, []);
   // Only one cloned: the other link is dropped, the graph still applies.
   const one = remapGraphOptions(options, { a1: "n1" });
-  strictEqual(one.options.regAnalysisId, "n1");
-  strictEqual(one.options.sigAnalysisId, undefined);
+  strictEqual(one.options?.regAnalysisId, "n1");
+  strictEqual(one.options?.sigAnalysisId, undefined);
   deepStrictEqual(one.dropped, ["sigAnalysisId"]);
   // The input is never mutated.
   strictEqual(options.sigAnalysisId, "a9");

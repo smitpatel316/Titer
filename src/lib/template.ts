@@ -59,7 +59,8 @@ const textField = (v: unknown, max: number): string | undefined => {
  *  file … to have a .pzt extension"). Unknown keys are dropped. */
 export function parseTemplateInfo(v: unknown): TemplateInfo | undefined {
   if (!isObj(v)) return undefined;
-  const kind = typeof v.kind === "string" ? KINDS.find((k) => k === v.kind.toLowerCase()) : undefined;
+  const kindRaw = typeof v.kind === "string" ? v.kind.toLowerCase() : undefined;
+  const kind = kindRaw ? KINDS.find((k) => k === kindRaw) : undefined;
   if (!kind) return undefined;
   const info: TemplateInfo = { kind };
   const name = textField(v.name, TEMPLATE_NAME_MAX);

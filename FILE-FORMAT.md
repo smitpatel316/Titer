@@ -45,6 +45,55 @@ it: your data are never locked into Titer.
   shown after the others.
 - `activeNodeId` is the item shown when the file opens.
 
+## Templates, examples and method files (`.pzt` / `.pzm`)
+
+A template, example or method file **is a regular Titer project file** — the
+same JSON above — with a different extension and one added envelope block.
+This mirrors Prism ("a Prism template is a regular Prism file") and means no
+new parser: a `.pzt` / `.pzm` reads exactly as a `.hlx` does.
+
+- `.pzt` — a template or an example. `.pzm` — a method.
+- The envelope block sits beside `project`, at the file level:
+
+```json
+{
+  "app": "titer",
+  "schemaVersion": 1,
+  "savedAt": "2026-09-24T12:00:00.000Z",
+  "template": { "kind": "template", "name": "ELISA standard curve",
+                "description": "…", "instructions": "Paste your standards…" },
+  "project": { … }
+}
+```
+
+- `template.kind` is `"template"`, `"example"` or `"method"`. `name`,
+  `description` and `instructions` are free text: `name` is capped at 120
+  characters, `description` and `instructions` at 2000 each (over-long values
+  are trimmed on read). The dialog's name is metadata, not the file name —
+  the file name is whatever the user picks in the save panel.
+- A plain `.hlx` never carries a `template` block (only the template saver
+  writes one); a hand-added one on a `.hlx` is read and carried through, not
+  stripped.
+- Forgiving reading: a missing or broken `template` block is not an error —
+  the file still opens as a project (a `.pzt` without metadata is an informal
+  template, as in Prism: "you can rename any Prism file … to have a .pzt
+  extension"). Unknown keys inside the block are dropped.
+
+Opening a template:
+
+- A `.pzt` opens **untitled**: Titer forgets the file name, so the first Save
+  prompts for one and the template file itself is never overwritten. If the
+  file carries `instructions` (or a `description` with no instructions),
+  Titer shows them when it opens.
+- A `.pzm` never opens as a project: it is *applied* to a data table
+  (Analysis ▸ Apply Method…), cloning that file's first table's analyses and
+  graphs onto the table — only what the table offers; the rest is reported as
+  skipped, with a reason each. Figures are not carried (they span tables).
+  A graph's link to a cloned analysis is remapped to the new analysis's id;
+  a link to an analysis that wasn't applied is dropped and the graph is still
+  applied. Applying never deletes or replaces the target table's own
+  analyses or graphs — it only adds.
+
 ## Items
 
 Every item has `id`, `type` (`"table"`, `"analysis"`, `"graph"` or `"figure"`),

@@ -839,10 +839,18 @@ export function useDocument() {
   const applyMethodText = async (text: string, name: string): Promise<void> => {
     const tableId = latest.current.activeTableId;
     const table = tableId ? latest.current.nodes[tableId] : undefined;
-    if (!table || table.type !== "table") {
+    if (!tableId || !table || table.type !== "table") {
       await native.alert(
         "Apply Method",
         "Open a data table first, then apply a method to it.",
+        "error",
+      );
+      return;
+    }
+    if (!table.tableType) {
+      await native.alert(
+        "Couldn't Apply Method",
+        "The active table has no type, so nothing can be applied to it.",
         "error",
       );
       return;
