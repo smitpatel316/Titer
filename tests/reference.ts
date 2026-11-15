@@ -3282,19 +3282,15 @@ async function disagreements(): Promise<string[]> {
       out.push(`Histogram of ${values.join(",")}: ${edges} / ${counts}, R ${rBreaks} / ${rCounts}`);
     // The frequency-distribution analysis counts the same way as R's hist():
     // its bins (auto, or the typed width from the same first edge) must match
-    // the same live-R counts. A constant column is the known exception: R's
-    // pretty() breaks expand it ([42] -> [40, 50]) while computeFrequencyBins
-    // keeps the zero-width [42, 42] bin (separate minor, not fixed here).
-    const isConstant = Math.min(...values) === Math.max(...values);
-    if (!isConstant) {
-      const freq = computeFrequencyBins(
-        values,
-        width ? { binMode: "width", binWidth: width, startAt: edges[0] } : { binMode: "auto" },
-      );
-      const freqCounts = freq.bins.map((b) => b.count);
-      if (freqCounts.join() !== rCounts.join())
-        out.push(`Frequency distribution of ${values.join(",")}: ${freqCounts}, R hist(): ${rCounts}`);
-    }
+    // the same live-R counts — including a constant column, whose range R's
+    // pretty() expands ([42] -> [40, 50]).
+    const freq = computeFrequencyBins(
+      values,
+      width ? { binMode: "width", binWidth: width, startAt: edges[0] } : { binMode: "auto" },
+    );
+    const freqCounts = freq.bins.map((b) => b.count);
+    if (freqCounts.join() !== rCounts.join())
+      out.push(`Frequency distribution of ${values.join(",")}: ${freqCounts}, R hist(): ${rCounts}`);
   }
   const tests = await runAnalysis("multiple-t-tests", twoGroups, {
     paired: false,

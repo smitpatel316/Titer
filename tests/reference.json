@@ -17505,7 +17505,7 @@
    },
    {
     "label": "Values — Bin width",
-    "value": 0
+    "value": 5
    },
    {
     "label": "Values — Minimum",
@@ -17532,8 +17532,8 @@
     "column": "Values",
     "bins": [
      {
-      "bin": "[5, 5]",
-      "lower": 5,
+      "bin": "[0, 5]",
+      "lower": 0,
       "upper": 5,
       "count": 3,
       "relativeFrequency": 1,

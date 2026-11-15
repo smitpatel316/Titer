@@ -25,6 +25,7 @@ import type {
   StatRow,
 } from "../types";
 import { dataGroups, describe } from "./base";
+import { binEdges as libBinEdges } from "../../lib/histogram";
 
 /** Sturges' rule: the number of bins R's `nclass.Sturges` asks for. */
 export function sturgesCount(n: number): number {
@@ -98,7 +99,36 @@ function binEdges(values: number[], p: FrequencyDistributionParams): {
 } {
   const min = Math.min(...values);
   const max = Math.max(...values);
-  if (min === max) return { edges: [min, max], binWidth: 0 };
+  if (min === max) {
+    // A constant column has no range: R's pretty() expands it (hist(42) ->
+    // [40, 50], hist(rep(5, 5)) -> [0, 5]) instead of binning a zero-width
+    // interval. The lib's pretty() is a faithful port of R_pretty, so the
+    // auto mode takes its breaks verbatim; width/count modes bin the
+    // expanded range the same way they bin any range.
+    const expanded = libBinEdges(values);
+    if (p.binMode === "width") {
+      const width = p.binWidth!;
+      const start = Math.min(p.startAt ?? min, min);
+      const count = Math.max(1, Math.ceil((max - start) / width));
+      if (count > 10000) {
+        throw new Error("Bin width is too small for this range (more than 10,000 bins).");
+      }
+      const edges = Array.from({ length: count + 1 }, (_, i) => clean(start + i * width));
+      edges[count] = Math.max(edges[count], clean(max));
+      return { edges, binWidth: width };
+    }
+    if (p.binMode === "count") {
+      const count = p.binCount!;
+      const start = Math.min(p.startAt ?? expanded[0], min);
+      const end = expanded.at(-1)!;
+      const width = (end - start) / count;
+      const edges = Array.from({ length: count + 1 }, (_, i) => clean(start + i * width));
+      edges[count] = end;
+      return { edges, binWidth: width };
+    }
+    const k = sturgesCount(values.length);
+    return { edges: expanded, binWidth: 0, requestedBins: k };
+  }
   if (p.binMode === "width") {
     const width = p.binWidth!;
     const start = Math.min(p.startAt ?? min, min);
