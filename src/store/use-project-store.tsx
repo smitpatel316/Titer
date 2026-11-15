@@ -595,6 +595,10 @@ export function reducer(state: ProjectState, action: Action): ProjectState {
         : action.type === "updateInfoSheet"
           ? { key: `info ${action.id}`, at: action.at }
           : action.type === "updateFloatingNotes"
+            ? { key: `notes ${action.id}`, at: action.at }
+            : action.type === "updateFigure"
+              ? { key: `figure ${action.id}`, at: action.at }
+              : null;
   const merged = change && state.lastChange?.key === change.key && change.at - state.lastChange.at < MERGE_MS;
   const before = {
     label: changeName(action),

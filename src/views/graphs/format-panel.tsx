@@ -426,7 +426,12 @@ export function FormatPanel(props: Props) {
                 max={options.y2Max}
                 step={options.y2Step}
                 log={options.y2Scale !== "linear"}
+                constants={[]}
                 onChange={(y2Min, y2Max, y2Step) => set({ y2Min, y2Max, y2Step })}
+                // The right axis has no hook fields (no y2MinConstant /
+                // y2MaxConstant in GraphOptions), so it offers no hooks:
+                // an empty list hides the hook rows, and this never fires.
+                onHookChange={() => {}}
               />
             </>
           )}
