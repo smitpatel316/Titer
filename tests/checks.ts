@@ -20,6 +20,16 @@ import {
 } from "../src/stats/r-queue";
 import { parseProjectFile, parseProjectText, readPalette, serializeProjectFile, type ProjectFilePayload } from "../src/lib/project-file";
 import { applyWand, wandExamples, wandReportMessage } from "../src/lib/wand";
+import {
+  extractMethod,
+  formatMethodReport,
+  isMethodPath,
+  isTemplatePath,
+  methodForTable,
+  parseTemplateInfo,
+  remapGraphOptions,
+  type TemplateInfo,
+} from "../src/lib/template";
 import { kaplanMeier } from "../src/lib/kaplan-meier";
 import { writePrism } from "../src/lib/prism-write";
 import JSZip from "jszip";
@@ -9718,6 +9728,148 @@ check("the Convert dialog finishes when requestAnimationFrame never fires (FL-r3
     if (savedRaf === undefined) delete g.requestAnimationFrame;
     else g.requestAnimationFrame = savedRaf;
   }
+});
+
+// ── Templates (.pzt), example files, method files (plan 38) ─────────────
+
+check("a template block round-trips, and a broken one is dropped, not an error", () => {
+  const info: TemplateInfo = { kind: "template", name: "ELISA", instructions: "Paste standards." };
+  deepStrictEqual(parseTemplateInfo(JSON.parse(JSON.stringify(info))), info);
+  deepStrictEqual(parseTemplateInfo({ kind: "nope" }), undefined);
+  deepStrictEqual(parseTemplateInfo("x"), undefined);
+  deepStrictEqual(parseTemplateInfo(null), undefined);
+  deepStrictEqual(parseTemplateInfo([1, 2]), undefined);
+  // Unknown keys dropped, known keys kept.
+  deepStrictEqual(parseTemplateInfo({ kind: "method", name: "M", bogus: 1 }), { kind: "method", name: "M" });
+  // Over-long values are trimmed to the caps on read.
+  strictEqual(parseTemplateInfo({ kind: "template", name: "x".repeat(200) })?.name?.length, 120);
+  strictEqual(parseTemplateInfo({ kind: "template", instructions: "y".repeat(3000) })?.instructions?.length, 2000);
+  // Blank text is no text.
+  deepStrictEqual(parseTemplateInfo({ kind: "example", name: "   ", description: "" }), { kind: "example" });
+  // Path helpers: case-insensitive, extension only.
+  ok(isTemplatePath("Dose.pzt") && isTemplatePath("/tmp/x.PZT") && !isTemplatePath("x.pzt.bak"));
+  ok(isMethodPath("ELISA.pzm") && !isMethodPath("ELISA.pzt"));
+});
+
+check("a template file round-trips through serialize/parse, and a plain .hlx carries none", () => {
+  const withTemplate = serializeProjectFile({
+    ...payload,
+    template: { kind: "example", name: "Dose–response", description: "An example." },
+  });
+  const readBack = read(withTemplate);
+  deepStrictEqual(readBack.project.template, { kind: "example", name: "Dose–response", description: "An example." });
+  // The template block is metadata, not a repair: the file still opens unedited.
+  strictEqual(readBack.updated, false);
+  // Saving the same project again keeps the block (the saver writes what it was given).
+  deepStrictEqual(JSON.parse(serializeProjectFile(readBack.project)).template, {
+    kind: "example",
+    name: "Dose–response",
+    description: "An example.",
+  });
+  // A plain .hlx never carries one.
+  strictEqual(read(serializeProjectFile(payload)).project.template, undefined);
+  // A broken `template` block is dropped and the project still opens.
+  const file = JSON.parse(serializeProjectFile(payload)) as Record<string, unknown>;
+  file.template = "x";
+  const broken = read(JSON.stringify(file));
+  strictEqual(broken.project.template, undefined);
+  strictEqual(broken.project.nodes.t1.name, "Doses");
+});
+
+check("extractMethod takes a table's analyses and graphs in sidebar order, never its figures", () => {
+  const figure: ProjectNode = { id: "f1", type: "figure", name: "Fig", parentId: null, panels: [], grid: { rows: 1, cols: 1 }, figureSize: { widthIn: 6, heightIn: 4 }, labelStyle: { position: "top-left", fontSizePt: 10, bold: true }, figureTitle: "", sharedLegend: "none", dpi: 600 };
+  const method = extractMethod({
+    nodes: { ...payload.nodes, f1: figure },
+    rootOrder: ["t1", "f1"],
+    childOrder: { t1: ["a1", "g1"] },
+    activeNodeId: "t1",
+  });
+  ok(method !== null, "expected a method from a project with a table");
+  strictEqual(method.sourceTableId, "t1");
+  strictEqual(method.analyses.length, 1);
+  strictEqual(method.analyses[0].analysisType, "linear-regression");
+  strictEqual(method.graphs.length, 1);
+  strictEqual(method.graphs[0].graphType, "xy-scatter");
+  // No table, no method.
+  strictEqual(extractMethod({ nodes: {}, rootOrder: [], childOrder: {}, activeNodeId: null }), null);
+  // A table with no children extracts empty-handed (the apply step errors, it doesn't crash).
+  const empty = extractMethod({ nodes: { t1: table }, rootOrder: ["t1"], childOrder: { t1: [] }, activeNodeId: "t1" });
+  deepStrictEqual(empty?.analyses, []);
+  deepStrictEqual(empty?.graphs, []);
+});
+
+check("methodForTable keeps only what the target table offers, and says what it skipped", () => {
+  // The shared fixture is an XY table: a linear regression + an XY scatter.
+  const method = extractMethod(payload)!;
+  // Against a Column table neither survives: no linear regression, no XY scatter.
+  const column = methodForTable(method, "column", {
+    columns: ["Title", "A", "B"],
+    rows: [[null, "1", "2"]],
+  });
+  strictEqual(column.analyses.length, 0);
+  strictEqual(column.graphs.length, 0);
+  strictEqual(column.skipped.length, 2);
+  ok(column.skipped.every((s) => s.reason.includes("Column")), "skip reasons name the table type");
+  // Against an XY table with the same columns both survive.
+  const xy = methodForTable(method, "xy", table.data);
+  strictEqual(xy.analyses.length, 1);
+  strictEqual(xy.graphs.length, 1);
+  strictEqual(xy.skipped.length, 0);
+  // A t-test survives on a Column table; a param naming a missing column skips it.
+  const tTest = extractMethod({
+    nodes: {
+      t1: { ...table, tableType: "column", data: { columns: ["Title", "A", "B"], rows: [[null, "1", "2"]] } },
+      a1: { id: "a1", type: "analysis", name: "t test", parentId: "t1", analysisType: "compare-two-groups", analysisParams: { y: "A" } },
+      g1: { id: "g1", type: "graph", name: "Plot", parentId: "t1", graphType: "individual", graphOptions: newGraphOptions("individual") },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: ["a1", "g1"] },
+    activeNodeId: "t1",
+  })!;
+  const kept = methodForTable(tTest, "column", { columns: ["Title", "A", "B"], rows: [[null, "1", "2"]] });
+  strictEqual(kept.analyses.length, 1);
+  strictEqual(kept.graphs.length, 1);
+  const missingColumn = methodForTable(tTest, "column", { columns: ["Title", "C"], rows: [[null, "1"]] });
+  strictEqual(missingColumn.analyses.length, 0);
+  strictEqual(missingColumn.graphs.length, 1);
+  ok(missingColumn.skipped[0].reason.includes("“A”"), "skip reason names the missing column");
+});
+
+check("a cloned graph keeps only the analysis links the same apply cloned (remapGraphOptions)", () => {
+  const options = { ...newGraphOptions("xy-scatter"), regAnalysisId: "a1", sigAnalysisId: "a9" };
+  // Both analyses cloned: both links remap to the new ids.
+  const both = remapGraphOptions(options, { a1: "n1", a9: "n2" });
+  strictEqual(both.options.regAnalysisId, "n1");
+  strictEqual(both.options.sigAnalysisId, "n2");
+  deepStrictEqual(both.dropped, []);
+  // Only one cloned: the other link is dropped, the graph still applies.
+  const one = remapGraphOptions(options, { a1: "n1" });
+  strictEqual(one.options.regAnalysisId, "n1");
+  strictEqual(one.options.sigAnalysisId, undefined);
+  deepStrictEqual(one.dropped, ["sigAnalysisId"]);
+  // The input is never mutated.
+  strictEqual(options.sigAnalysisId, "a9");
+});
+
+check("the method report names what was applied and what was skipped", () => {
+  const report = formatMethodReport({
+    methodName: "ELISA method",
+    tableName: "Data 1",
+    appliedAnalyses: [{ name: "t test" }, { name: "One-way ANOVA" }],
+    appliedGraphs: [{ name: "Scatter" }],
+    skipped: [{ name: "Heatmap", reason: "not offered for a Column table" }],
+  });
+  ok(report.includes("Applied 2 analyses and 1 graph from “ELISA method” to “Data 1”"));
+  ok(report.includes("• t test") && report.includes("• Scatter"));
+  ok(report.includes("Skipped:") && report.includes("• Heatmap — not offered for a Column table"));
+  const noneSkipped = formatMethodReport({
+    methodName: "M",
+    tableName: "Data 1",
+    appliedAnalyses: [{ name: "t test" }],
+    appliedGraphs: [],
+    skipped: [],
+  });
+  ok(!noneSkipped.includes("Skipped:"));
 });
 
 // ── R3-01: the release pipeline ships the vendored webR repo ─────────────

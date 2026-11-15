@@ -67,6 +67,7 @@ import {
   TWO_WAY_DESIGNS,
 } from "../stats/types";
 import { NAMED_COLORS, paletteNamed, savedPalette } from "./palettes";
+import { parseTemplateInfo, type TemplateInfo } from "./template";
 import { TABLES } from "../views/tables";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
 import { ANALYSES } from "../stats";
@@ -90,6 +91,10 @@ export interface ProjectFilePayload {
   /** Each table's analyses and graphs, in sidebar order. */
   childOrder: Record<string, string[]>;
   activeNodeId: string | null;
+  /** The `template` envelope block of a `.pzt`/`.pzm` file (plan 38): the
+   *  template's kind and its name/description/instructions. A plain `.hlx`
+   *  never carries one — the saver only writes it for `.pzt`/`.pzm`. */
+  template?: TemplateInfo;
   /** Unknown keys from a newer or hand-edited file (FF-F12): the file envelope's
    *  and the project's, kept verbatim and written back on save, so opening a
    *  newer file in this Titer doesn't silently lose its forward-compat data.
