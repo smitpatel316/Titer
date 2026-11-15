@@ -254,6 +254,11 @@ export function useAppMenu(doc: DocumentActions) {
             action: () => latest.current.store.createTable(o.value),
           })),
           sep,
+          {
+            text: "Duplicate Family",
+            enabled: hasTable,
+            action: run((l, id) => l.store.duplicateFamily(id)),
+          },
           deleteItem("table"),
         ],
       },

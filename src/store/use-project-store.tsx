@@ -100,6 +100,10 @@ type Action =
   /** Freeze (or unfreeze) a results sheet: frozen, it shows its cached
    *  result and stops auto-updating when the data change. */
   | { type: "setAnalysisFrozen"; id: string; frozen: boolean }
+  /** Duplicates a data table together with its analyses and graphs (its family):
+   *  the copy takes new data and its analyses follow the copy (Prism 10,
+   *  "Repeating an analysis"). Figures are not part of a family and stay put. */
+  | { type: "duplicateFamily"; id: string }
   /** `label` names the edit in the Edit menu; `move`: what it renamed or moved. */
   | { type: "updateTable"; id: string; data: TableData; label: string; move?: TableMove }
   | { type: "updateGraph"; id: string; options: GraphOptions; at: number }
@@ -298,6 +302,60 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       else delete next.frozen;
       return { ...state, nodes: { ...state.nodes, [action.id]: next }, isDirty: true };
     }
+    case "duplicateFamily": {
+      const source = state.nodes[action.id];
+      if (!source || source.type !== "table") return state;
+      // The copy's name: "<source> copy", uniquified among the root tables
+      // ("<source> copy 2", …) when a copy already exists.
+      const taken = state.rootOrder.map((id) => state.nodes[id]?.name ?? "");
+      const newTableId = genId("table");
+      const copy: ProjectNode = {
+        ...source,
+        id: newTableId,
+        name: uniqueName(`${source.name} copy`, taken),
+        data: source.data ? JSON.parse(JSON.stringify(source.data)) : undefined,
+        floatingNotes: source.floatingNotes
+          ? JSON.parse(JSON.stringify(source.floatingNotes))
+          : undefined,
+      };
+      // Every child (analysis or graph, in sidebar order) is cloned with a
+      // fresh id and re-parented to the copy; its params/options are deep
+      // copies, so editing the copy's family never touches the source's.
+      const childIds = state.childOrder[action.id] ?? [];
+      const clonedChildren: ProjectNode[] = childIds.flatMap((childId) => {
+        const child = state.nodes[childId];
+        if (!child) return [];
+        return [
+          {
+            ...child,
+            id: genId(child.type),
+            parentId: newTableId,
+            analysisParams: child.analysisParams
+              ? JSON.parse(JSON.stringify(child.analysisParams))
+              : undefined,
+            graphOptions: child.graphOptions
+              ? JSON.parse(JSON.stringify(child.graphOptions))
+              : undefined,
+            floatingNotes: child.floatingNotes
+              ? JSON.parse(JSON.stringify(child.floatingNotes))
+              : undefined,
+          },
+        ];
+      });
+      const nodes = { ...state.nodes, [newTableId]: copy };
+      for (const child of clonedChildren) nodes[child.id] = child;
+      const sourceIndex = state.rootOrder.indexOf(action.id);
+      const rootOrder = [
+        ...state.rootOrder.slice(0, sourceIndex + 1),
+        newTableId,
+        ...state.rootOrder.slice(sourceIndex + 1),
+      ];
+      const childOrder = {
+        ...state.childOrder,
+        [newTableId]: clonedChildren.map((c) => c.id),
+      };
+      return { ...state, nodes, rootOrder, childOrder, activeNodeId: newTableId, isDirty: true };
+    }
     case "updateTable": {
       const node = state.nodes[action.id];
       if (!node || node.type !== "table") return state;
@@ -415,6 +473,7 @@ const UNDOABLE = new Set<Action["type"]>([
   "cloneGraph",
   "rename",
   "remove",
+  "duplicateFamily",
   "updateTable",
   "updateGraph",
   "updateFloatingNotes",
@@ -440,6 +499,8 @@ function changeName(action: Action): string {
       return "Delete";
     case "setAnalysisFrozen":
       return action.frozen ? "Freeze Results" : "Unfreeze Results";
+    case "duplicateFamily":
+      return "Duplicate Family";
     case "updateTable":
       return action.label;
     case "updateGraph":
@@ -527,6 +588,8 @@ interface ProjectActions {
   cacheAnalysisResult: (id: string, result: AnalysisResult) => void;
   /** Freeze (or unfreeze) a results sheet. Orphaned sheets can't freeze. */
   setAnalysisFrozen: (id: string, frozen: boolean) => void;
+  /** Duplicates a data table together with its analyses and graphs (its family). */
+  duplicateFamily: (id: string) => void;
   /** `label` names the edit for Undo ("Paste"); `move`: the columns or groups it renamed
    *  and the rows it moved, which the table's analyses and graphs then follow. */
   updateTable: (id: string, data: TableData, label: string, move?: TableMove) => void;
@@ -700,6 +763,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       removeNode: (id) => dispatch({ type: "remove", id }),
       cacheAnalysisResult: (id, result) => dispatch({ type: "cacheAnalysisResult", id, result }),
       setAnalysisFrozen: (id, frozen) => dispatch({ type: "setAnalysisFrozen", id, frozen }),
+      duplicateFamily: (id) => dispatch({ type: "duplicateFamily", id }),
       updateTable: (id, data, label, move) => dispatch({ type: "updateTable", id, data, label, move }),
       updateGraph: (id, options) => dispatch({ type: "updateGraph", id, options, at: Date.now() }),
       updateFloatingNotes: (id, notes) =>

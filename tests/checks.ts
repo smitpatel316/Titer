@@ -346,6 +346,118 @@ check("a table created after a figure still opens unedited (R3 #22)", () => {
   strictEqual(updated, false);
 });
 
+// v2 item 4 (Duplicate a family): duplicating a data table copies it together
+// with its analyses and graphs, so the copy can take new data and its analyses
+// update (Prism 10 User Guide, "Repeating an analysis"). Before the fix the
+// reducer had no such action: the duplicate was a no-op and the copy never appeared.
+check("duplicating a family copies the table with its analyses and graphs", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  const originalData = s.nodes[t1].data;
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "a1",
+      type: "analysis",
+      name: "Descriptive statistics",
+      parentId: t1,
+      analysisType: "descriptive-statistics",
+      analysisParams: { columns: ["Y1"] } as AnalysisParams,
+    },
+  });
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "g1",
+      type: "graph",
+      name: "Individual values",
+      parentId: t1,
+      graphType: "individual",
+      graphOptions: newGraphOptions("individual"),
+    },
+  });
+  const before = s;
+  s = reducer(s, { type: "duplicateFamily", id: t1 });
+  strictEqual(s.rootOrder.length, 2);
+  const copyId = s.rootOrder[1];
+  ok(copyId !== t1, "the copy is a new table, not the source");
+  const copy = s.nodes[copyId];
+  strictEqual(copy.type, "table");
+  strictEqual(copy.name, "Table 1 copy");
+  strictEqual(copy.tableType, "column");
+  deepStrictEqual(copy.data, originalData);
+  ok(copy.data !== originalData && copy.data?.rows !== originalData?.rows, "the copy owns its data");
+  strictEqual(s.activeNodeId, copyId);
+  strictEqual(s.isDirty, true);
+  const copyChildren = s.childOrder[copyId];
+  strictEqual(copyChildren.length, 2);
+  const [copyA, copyG] = copyChildren.map((id) => s.nodes[id]);
+  ok(copyA.id !== "a1" && copyG.id !== "g1", "the children get fresh ids");
+  strictEqual(copyA.parentId, copyId);
+  strictEqual(copyG.parentId, copyId);
+  strictEqual(copyA.name, "Descriptive statistics");
+  strictEqual(copyG.name, "Individual values");
+  deepStrictEqual(copyA.analysisParams, { columns: ["Y1"] });
+  deepStrictEqual(copyG.graphOptions, s.nodes.g1.graphOptions);
+  ok(copyA.analysisParams !== s.nodes.a1.analysisParams, "params are copied, not shared");
+  // The source family is untouched.
+  deepStrictEqual(s.childOrder[t1], ["a1", "g1"]);
+  strictEqual(s.nodes.a1.parentId, t1);
+  // A second duplicate uniquifies the copy's name; the newest copy lands
+  // right after the source, ahead of the first copy.
+  s = reducer(s, { type: "duplicateFamily", id: t1 });
+  strictEqual(s.nodes[s.rootOrder[1]].name, "Table 1 copy 2");
+  strictEqual(s.nodes[s.rootOrder[2]].name, "Table 1 copy");
+  // One Undo takes the whole copied family back (both copies, two undos).
+  s = reducer(s, { type: "undo" });
+  strictEqual(s.rootOrder.length, 2);
+  s = reducer(s, { type: "undo" });
+  deepStrictEqual(s.rootOrder, before.rootOrder);
+  deepStrictEqual(s.childOrder, before.childOrder);
+});
+
+// v2 item 4: a table with no children duplicates clean, and an unknown id is a no-op.
+check("duplicating a childless table copies just the table; an unknown id is a no-op", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  s = reducer(s, { type: "duplicateFamily", id: t1 });
+  strictEqual(s.rootOrder.length, 2);
+  strictEqual(s.nodes[s.rootOrder[1]].name, "Table 1 copy");
+  deepStrictEqual(s.childOrder[s.rootOrder[1]], []);
+  const unchanged = reducer(s, { type: "duplicateFamily", id: "no-such-table" });
+  strictEqual(unchanged, s);
+});
+
+// v2 item 4: the Prism workflow — replace the data on the copy and the copy's
+// analyses follow the copy, while the original (data and analyses) is untouched.
+check("replacing the copy's data leaves the original family untouched", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "a1",
+      type: "analysis",
+      name: "Descriptive statistics",
+      parentId: t1,
+      analysisType: "descriptive-statistics",
+    },
+  });
+  s = reducer(s, { type: "duplicateFamily", id: t1 });
+  const copyId = s.rootOrder[1];
+  const copyAnalysis = s.childOrder[copyId][0];
+  const replacement = {
+    columns: s.nodes[copyId].data!.columns,
+    rows: [["x", "9", "8"], ["y", "7", "6"]],
+  };
+  s = reducer(s, { type: "updateTable", id: copyId, data: replacement, label: "Typing" });
+  deepStrictEqual(s.nodes[copyId].data, replacement);
+  ok(s.nodes[t1].data !== replacement, "the original keeps its own data");
+  ok(JSON.stringify(s.nodes[t1].data?.rows) !== JSON.stringify(replacement.rows), "the original keeps its own values");
+  strictEqual(s.nodes[copyAnalysis].parentId, copyId);
+  strictEqual(s.nodes.a1.parentId, t1);
+});
+
 // R2 FF-F12: a newer (or hand-edited) file's unknown keys and params survive a
 // save instead of being dropped or lowercased — the file header's forward-compat
 // promise. Before the fix the top-level and project keys were dropped outright,

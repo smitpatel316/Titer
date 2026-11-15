@@ -60,7 +60,7 @@ export function SidebarToggle({ className }: { className?: string }) {
 export function ProjectSidebar() {
   // The outline, not the whole project: editing a table or a graph doesn't redraw the sidebar.
   const { tables, figures, orphaned, activeNodeId } = useOutline();
-  const { get, setActiveNode, renameNode, removeNode, openSelector, reorderTables, reorderChildren, createFigure } =
+  const { get, setActiveNode, renameNode, removeNode, duplicateFamily, openSelector, reorderTables, reorderChildren, createFigure } =
     useProjectActions();
   const { sidebar, sidebarWidth, setLayout } = useLayout();
 
@@ -204,6 +204,7 @@ export function ProjectSidebar() {
       { text: "New Graph…", action: () => openSelector({ kind: "new-graph", tableId: table.id }) },
       { text: "New Figure…", action: () => createFigure() },
       { item: "Separator" },
+      { text: "Duplicate Family", action: () => duplicateFamily(table.id) },
       { text: "Rename", action: () => setRenaming(table.id) },
       // The last table stays: a project is never empty.
       {
