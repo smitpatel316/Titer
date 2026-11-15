@@ -15,6 +15,7 @@ import { TABLES } from "../views/tables";
 import { GRAPHS, newGraphOptions } from "../views/graphs";
 import { ANALYSES } from "../stats";
 import { followTable, type TableMove } from "./references";
+import { applyWand as planWand, type WandReport } from "../lib/wand";
 import { DEFAULT_FIGURE_DPI, DEFAULT_FIGURE_SIZE, DEFAULT_LABEL_STYLE, newFigurePanels } from "../lib/figure";
 import type { FigureGrid, FigureLabelStyle, FigurePanel, FigureSize, Resolution, SharedLegend } from "./types";
 
@@ -26,6 +27,7 @@ type Selector =
   | { kind: "new-analysis"; tableId: string }
   | { kind: "analysis-params"; tableId: string; testType: AnalysisPickerValue }
   | { kind: "new-graph"; tableId: string }
+  | { kind: "wand"; tableId: string }
   | { kind: "simulate-data"; tableId: string }
   | { kind: "converter" }
   | { kind: "save-prompt" }
@@ -74,6 +76,12 @@ const MERGE_MS = 1000;
 
 type Action =
   | { type: "create"; node: ProjectNode }
+  | {
+      type: "applyWand";
+      nodes: Record<string, ProjectNode>;
+      childOrder: Record<string, string[]>;
+      activeNodeId: string | null;
+    }
   | { type: "setActive"; id: string | null }
   | { type: "rename"; id: string; name: string }
   | { type: "remove"; id: string }
@@ -198,6 +206,11 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
           ? { ...state.childOrder, [node.id]: [] } // a new table starts empty
           : { ...state.childOrder, [pid]: [...(state.childOrder[pid] ?? []), node.id] };
       return { ...state, nodes, rootOrder, childOrder, activeNodeId: node.id, isDirty: true };
+    }
+    case "applyWand": {
+      // The planner (src/lib/wand.ts) already built the new content: one swap,
+      // one undo step, and the first created node becomes the active one.
+      return { ...state, nodes: action.nodes, childOrder: action.childOrder, activeNodeId: action.activeNodeId, isDirty: true };
     }
     case "setActive":
       return { ...state, activeNodeId: action.id };
@@ -341,6 +354,7 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
 // `revision`; a no-op (the same state back, e.g. a reorder that moved nothing) does not.
 const UNDOABLE = new Set<Action["type"]>([
   "create",
+  "applyWand",
   "rename",
   "remove",
   "updateTable",
@@ -357,6 +371,8 @@ function changeName(action: Action): string {
   switch (action.type) {
     case "create":
       return `New ${NODE_NAMES[action.node.type]}`;
+    case "applyWand":
+      return "Use Wand";
     case "rename":
       return "Rename";
     case "remove":
@@ -415,6 +431,10 @@ interface ProjectActions {
   createSimulatedTable: (tableType: TableType, data: TableData) => void;
   createAnalysis: (parentId: string, analysisType: AnalysisType, analysisParams?: AnalysisParams) => void;
   createGraph: (parentId: string, graphType: GraphType) => void;
+  /** Wand (plan 37): copies the example table's analyses + graphs onto the
+   *  target tables as one undo step; returns the per-table report (created /
+   *  skipped) for the dialog's summary. Throws when the example has nothing to copy. */
+  applyWand: (exampleId: string, targetIds: string[], prefix: string) => WandReport;
   /** A figure at the project root; `graphIds` (in order) start as its panels. */
   createFigure: (graphIds?: string[]) => void;
   updateFigure: (
@@ -553,6 +573,17 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
             graphOptions: newGraphOptions(graphType),
           },
         }),
+      applyWand: (exampleId, targetIds, prefix) => {
+        const s = latest.current;
+        const result = planWand({ nodes: s.nodes, childOrder: s.childOrder }, exampleId, targetIds, prefix);
+        dispatch({
+          type: "applyWand",
+          nodes: result.nodes,
+          childOrder: result.childOrder,
+          activeNodeId: result.firstCreatedId ?? s.activeNodeId,
+        });
+        return result.report;
+      },
       createFigure: (graphIds = []) => {
         const names: Record<string, string> = {};
         for (const id of graphIds) {
