@@ -8345,8 +8345,8 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
   // is its own entry now, and two variables of a Multiple Variables table
   // regress on each other), Principal component analysis after Multiple
   // regression, K-means clustering after that, Outliers after that, Multiple
-  // logistic regression after that, Poisson regression after that, and Cox
-  // after that.
+  // logistic regression after that, Poisson regression after that, Cox
+  // after that, Extract and rearrange after that, and Plot a function last.
   deepStrictEqual(
     analysisOptionsForTable("multiple").map((o) => o.value),
     [
@@ -8361,6 +8361,7 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
       "multiple-logistic-regression",
       "poisson-regression",
       "cox-proportional-hazards",
+      "extract-rearrange",
       "plot-function",
     ],
   );
