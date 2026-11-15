@@ -22,6 +22,7 @@ import { GRAPHS, newGraphOptions } from ".";
 import { EXPORT_FORMATS, RESOLUTIONS, type ExportFormat, type Resolution } from "./graph-export";
 import {
   Choice,
+  ColumnSelectRow,
   NumRow,
   OutlineRows,
   PercentRow,
@@ -33,6 +34,7 @@ import {
   ThicknessRow,
   Toggle,
 } from "./panel-controls";
+import { rightYDataset } from "./plot-helpers";
 import { dataControls, statisticsControls, styleControls, type SectionContext } from "./format-sections";
 import { VOLCANO_SERIES } from "./volcano";
 import { MatchSection } from "./match-graph";
@@ -120,6 +122,9 @@ export function FormatPanel(props: Props) {
   const { graphType, options, set, seriesNames, setSeriesStyle, selection } = props;
   const family = GRAPHS[graphType].family;
   const hasAxes = family !== "pie";
+  // The data set on the right Y axis, if the pick is still a series (a stale or
+  // renamed name silently falls back to the left axis — see rightYDataset).
+  const right = family === "xy" ? rightYDataset(options, seriesNames) : undefined;
   const [exported, setExported] = React.useState(readExport);
   const chooseExport = (choice: Partial<ExportChoice>) => {
     const next = { ...exported, ...choice };
