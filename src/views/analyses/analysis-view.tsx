@@ -1,9 +1,10 @@
 // Host for an analysis node: runs the chosen test on the parent table and
 // renders the result.
 import * as React from "react";
+import { SnowflakeIcon } from "@phosphor-icons/react";
 import type { ProjectNode } from "../../store/types";
-import { useProjectStore } from "../../store/use-project-store";
-import { Button } from "../../ui/controls";
+import { useProjectActions, useProjectStore } from "../../store/use-project-store";
+import { Button, IconButton } from "../../ui/controls";
 import { Toolbar } from "../../ui/layout";
 import { isNative, setSpinner } from "../../native";
 import { ANALYSES } from "../../stats";
@@ -47,10 +48,16 @@ function Running() {
 
 export function AnalysisView({ node }: { node: ProjectNode }) {
   const { nodes } = useProjectStore();
+  const { cacheAnalysisResult, setAnalysisFrozen } = useProjectActions();
   const data = node.parentId ? nodes[node.parentId]?.data : undefined;
+  // A frozen or orphaned sheet never re-runs: it shows its saved result, so
+  // the live run gets no data to run on (a frozen sheet stops auto-updating
+  // when the data change; an orphaned one has no source table left).
+  const frozenOrOrphaned = Boolean(node.frozen || node.orphaned);
+  const liveData = frozenOrOrphaned ? undefined : data;
   // Bumps to re-run the test after an error, a timeout or a cancel.
   const [retryNonce, setRetryNonce] = React.useState(0);
-  const outcome = useAnalysis(node.analysisType, data, node.analysisParams, { retryKey: retryNonce });
+  const outcome = useAnalysis(node.analysisType, liveData, node.analysisParams, { retryKey: retryNonce });
   const queue = useRQueue();
   // v3 Phase 1: the outcome, once computed, is what `titer_read_results`
   // serves. (An analysis never opened in this session has no result — the
@@ -58,8 +65,25 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
   React.useEffect(() => {
     if (outcome) publishAnalysisResult(node.id, outcome);
   }, [outcome, node.id]);
-  const running = Boolean(data && !outcome);
-  const errored = Boolean(data && outcome && "error" in outcome);
+  // A successful live run is kept on the node, so the sheet still has
+  // something to show once frozen or orphaned (a failed run is not cached,
+  // so it runs again for real).
+  React.useEffect(() => {
+    if (outcome && !("error" in outcome) && !frozenOrOrphaned) cacheAnalysisResult(node.id, outcome);
+  }, [outcome, frozenOrOrphaned, node.id, cacheAnalysisResult]);
+  const running = Boolean(liveData && !outcome);
+  const errored = Boolean(liveData && outcome && "error" in outcome);
+  // What the sheet shows: a frozen or orphaned sheet shows its saved result;
+  // a live one shows the run that just finished.
+  const shown = frozenOrOrphaned
+    ? node.cachedResult
+    : outcome && !("error" in outcome)
+      ? outcome
+      : undefined;
+  // Freezing needs something to freeze: a finished run, or a result saved
+  // from an earlier one. An orphaned sheet can't freeze (it already keeps
+  // its last result, and its parameters can't change anyway).
+  const canFreeze = Boolean(node.frozen || (outcome && !("error" in outcome)) || node.cachedResult);
   const [elapsedMs, setElapsedMs] = React.useState(0);
   React.useEffect(() => {
     if (!running) return;
@@ -73,20 +97,53 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
     <>
       <Toolbar
         title={node.name}
-        tag={titleCase(ANALYSES[node.analysisType!].label)}
-        actions={<AddFloatingNoteButton node={node} />}
+        tag={
+          titleCase(ANALYSES[node.analysisType!].label) +
+          (node.frozen ? " · Frozen" : node.orphaned ? " · Orphaned" : "")
+        }
+        actions={
+          <>
+            {!node.orphaned && (
+              <IconButton
+                aria-label={node.frozen ? "Unfreeze results" : "Freeze results"}
+                disabled={!canFreeze}
+                onClick={() => setAnalysisFrozen(node.id, !node.frozen)}
+              >
+                <SnowflakeIcon weight={node.frozen ? "fill" : "regular"} />
+              </IconButton>
+            )}
+            <AddFloatingNoteButton node={node} />
+          </>
+        }
       />
       <div className="relative flex-1 overflow-auto">
-        {outcome && !("error" in outcome) ? (
-          <AnalysisResultsView result={outcome} />
-        ) : data && !outcome ? (
+        {node.frozen && (
+          <p className="border-b border-separator bg-control px-8 py-2 text-regular text-secondary">
+            Frozen — these results will not update when the data change.
+          </p>
+        )}
+        {node.orphaned && (
+          <p className="border-b border-separator bg-control px-8 py-2 text-regular text-secondary">
+            Orphaned — the source table “{node.sourceTableName ?? "Unknown"}” was deleted. These results are kept
+            as they were; the analysis parameters cannot be changed.
+          </p>
+        )}
+        {shown ? (
+          <AnalysisResultsView result={shown} />
+        ) : liveData && !outcome ? (
           <Running />
         ) : (
           <div className="flex flex-col items-start gap-3 px-8 py-6">
             <p className="text-regular text-secondary">
-              {!data
-                ? "This analysis has no source table."
-                : (outcome?.error ?? `Running… ${formatElapsed(elapsedMs)}${rQueueStatusText(queue)}`)}
+              {node.orphaned
+                ? "This analysis has no saved results — it never ran before its table was deleted."
+                : node.frozen
+                  ? "This analysis has no saved results yet — unfreeze it to run."
+                  : !data
+                    ? "This analysis has no source table."
+                    : outcome && "error" in outcome
+                      ? outcome.error
+                      : `Running… ${formatElapsed(elapsedMs)}${rQueueStatusText(queue)}`}
             </p>
             {running && <Button onClick={() => cancelActiveEvals()}>Cancel</Button>}
             {errored && (
@@ -94,6 +151,7 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
                 Retry
               </Button>
             )}
+            {node.frozen && <Button onClick={() => setAnalysisFrozen(node.id, false)}>Unfreeze</Button>}
           </div>
         )}
         <FloatingNotesLayer node={node} />

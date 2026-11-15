@@ -35,6 +35,7 @@ import {
 } from "../store/types";
 import {
   type AnalysisParams,
+  type AnalysisResult,
   ANOVA_POSTHOCS,
   BINDING_KINETICS_MODELS,
   BINDING_SATURATION_MODELS,
@@ -164,7 +165,7 @@ const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId"] satisf
 // prettier-ignore
 const NODE_KEYS = Object.keys({
   id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, tableType: 1, data: 1,
-  analysisType: 1, analysisParams: 1, graphType: 1, graphOptions: 1,
+  analysisType: 1, analysisParams: 1, cachedResult: 1, frozen: 1, orphaned: 1, sourceTableName: 1, graphType: 1, graphOptions: 1,
   panels: 1, grid: 1, figureSize: 1, labelStyle: 1, figureTitle: 1, sharedLegend: 1, dpi: 1,
 } satisfies Record<keyof ProjectNode, 1>);
 // prettier-ignore
@@ -667,6 +668,29 @@ function readParam(kind: ParamKind, v: unknown, report?: (dropped: number) => vo
   return Array.isArray(kind) ? oneOf(kind, v) : within(v, kind as Limits);
 }
 
+/** A saved result is only trusted when it looks like one — an object whose
+ *  `testType` is this analysis, with the stats, groups and notes a result
+ *  always carries. Anything else is a hand edit or a newer file's shape,
+ *  dropped with a warning rather than shown as if it had been computed. */
+function readCachedResult(
+  raw: unknown,
+  analysisType: string,
+  label: string,
+  issues: ProjectIssue[],
+): AnalysisResult | null {
+  if (!isObj(raw)) return null;
+  const plausible =
+    raw.testType === analysisType && Array.isArray(raw.stats) && Array.isArray(raw.groups) && typeof raw.notes === "string";
+  if (!plausible) {
+    issues.push({
+      severity: "warning",
+      message: `Analysis “${label}” had a saved result this version couldn't read; it was left out.`,
+    });
+    return null;
+  }
+  return raw as unknown as AnalysisResult;
+}
+
 function readParams(
   raw: unknown,
   analysisType: string | undefined,
@@ -930,6 +954,16 @@ function readNode(
     if (!isIn(ANALYSES, node.analysisType)) {
       issues.push({ severity: "error", message: `Analysis “${node.name}” uses a test this version doesn't know.` });
     }
+    // Frozen / orphaned results (v2 item 5): the flags only ever mean anything
+    // as `true`, the source name only as a string, and a saved result only when
+    // it looks like a result of this analysis — anything else is a hand edit or
+    // a newer file's field, dropped rather than trusted.
+    if (node.frozen !== true) delete node.frozen;
+    if (node.orphaned !== true) delete node.orphaned;
+    if (typeof node.sourceTableName !== "string") delete node.sourceTableName;
+    const cached = readCachedResult(node.cachedResult, node.analysisType as string, node.name, issues);
+    if (cached) node.cachedResult = cached;
+    else delete node.cachedResult;
   } else if (type === "figure") {
     // A figure may span tables, so it lives at the project root, never under one table.
     node.parentId = null;
@@ -940,6 +974,14 @@ function readNode(
     if (!isIn(GRAPHS, node.graphType) && (node.graphType as string) !== DOSE_GRAPH) {
       issues.push({ severity: "error", message: `Graph “${node.name}” uses a chart this version doesn't know.` });
     }
+  }
+  if (type !== "analysis") {
+    // Frozen / orphaned results belong to analyses only: a hand-edited file
+    // can't freeze a table or orphan a graph.
+    delete node.frozen;
+    delete node.orphaned;
+    delete node.sourceTableName;
+    delete node.cachedResult;
   }
   return node;
 }
@@ -1184,8 +1226,20 @@ export function parseProjectFile(
   const nodeOf = (id: unknown) => (isIn(nodes, id) ? nodes[id as string] : undefined);
   // Analyses and graphs belong to a table: drop those whose table didn't survive.
   // Figures live at the project root (they may span tables), so they stay.
+  // Orphaned analyses stay too (v2 item 5): their table is gone, and the saved
+  // result is what they show. A flag that contradicts a surviving table is
+  // cleared instead — the analysis still has its table, so it isn't orphaned.
   for (const node of Object.values(nodes)) {
     if (node.type === "figure") continue;
+    if (node.type === "analysis" && node.orphaned) {
+      if (nodeOf(node.parentId)?.type === "table") {
+        delete node.orphaned;
+        delete node.sourceTableName;
+      } else {
+        node.parentId = null;
+      }
+      continue;
+    }
     if (node.type !== "table" && nodeOf(node.parentId)?.type !== "table") {
       delete nodes[node.id];
       skipped++;
@@ -1207,9 +1261,15 @@ export function parseProjectFile(
   }
   const ids = (v: unknown) => (Array.isArray(v) ? v.filter((id): id is string => typeof id === "string") : []);
   const tables = Object.values(nodes).filter((n) => n.type === "table");
-  if (tables.length === 0) return { error: "This project file has no readable data tables." };
+  const orphans = Object.values(nodes).filter((n) => n.type === "analysis" && n.orphaned);
+  // A file with no tables at all still opens when its orphaned results survive
+  // (a project whose tables were all deleted keeps its results, as in Prism);
+  // with neither, there is nothing to show.
+  if (tables.length === 0 && orphans.length === 0)
+    return { error: "This project file has no readable data tables." };
   // Saved order first, then anything the order missed: tables, then figures
-  // (figures live at the project root, after the tables, in creation order).
+  // (figures live at the project root, after the tables, in creation order),
+  // then orphaned analyses (they live at the project root too).
   const figures = Object.values(nodes).filter((n) => n.type === "figure");
   const rootOrder = [
     ...new Set([
@@ -1217,11 +1277,17 @@ export function parseProjectFile(
       ...tables.map((t) => t.id),
       ...ids(project.rootOrder).filter((id) => nodeOf(id)?.type === "figure"),
       ...figures.map((f) => f.id),
+      ...ids(project.rootOrder).filter((id) => nodeOf(id)?.type === "analysis" && nodeOf(id)?.orphaned),
+      ...orphans.map((o) => o.id),
     ]),
   ];
   const savedChildren = isObj(project.childOrder) ? project.childOrder : {};
   const childOrder = Object.fromEntries(
-    rootOrder.map((tableId) => {
+    rootOrder
+      // Orphaned analyses live at the root but hold no children, so they get no
+      // order list (a file that never had one still opens unedited).
+      .filter((id) => nodeOf(id)?.type === "table" || nodeOf(id)?.type === "figure")
+      .map((tableId) => {
       const children = Object.values(nodes)
         .filter((n) => n.parentId === tableId)
         .map((n) => n.id);

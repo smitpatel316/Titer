@@ -137,8 +137,16 @@ export function useAppMenu(doc: DocumentActions) {
           const focus = focusKind();
           if (focus === "grid") edit("delete");
           if (focus) return;
-          const { activeNode, removeNode } = latest.current.store;
-          if (activeNode?.type === type) void removeWithConfirm(activeNode, removeNode);
+          const { activeNode, removeNode, nodes } = latest.current.store;
+          if (activeNode?.type === type)
+            void removeWithConfirm(
+              activeNode,
+              removeNode,
+              type === "table" &&
+                Object.values(nodes).some((n) => n.parentId === activeNode.id && n.type === "analysis")
+                ? "Its analyses will be kept as orphaned results and its graphs will be deleted. You can undo this."
+                : undefined,
+            );
         },
       };
     };

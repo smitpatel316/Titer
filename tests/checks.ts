@@ -8464,10 +8464,158 @@ check("a deleted table comes back with its analyses and graphs", () => {
   const tableId = s.rootOrder[0];
   s = reducer(s, { type: "create", node: { ...analysis, parentId: tableId } });
   s = reducer(s, { type: "remove", id: tableId });
-  strictEqual(Object.keys(s.nodes).length, 0);
+  // The analysis survives its table's deletion as an orphaned result (v2 item
+  // 5) — only the table itself is gone.
+  deepStrictEqual(Object.keys(s.nodes), [analysis.id]);
+  strictEqual(s.nodes[analysis.id].orphaned, true);
   s = reducer(s, { type: "undo" });
   deepStrictEqual(Object.keys(s.nodes).sort(), [analysis.id, tableId].sort());
   deepStrictEqual(s.childOrder[tableId], [analysis.id]);
+  strictEqual(s.nodes[analysis.id].orphaned, undefined);
+});
+
+// Frozen / orphaned results (v2 item 5): a minimal stored result, as the
+// AnalysisView caches it after a successful live run.
+const frozenResult: AnalysisResult = {
+  testType: "linear-regression",
+  stats: [{ label: "Slope", value: 2 }],
+  groups: [],
+  notes: "",
+};
+
+check("deleting a table keeps its analyses as orphaned results and deletes its graphs", () => {
+  let s = makeInitialState();
+  const tableId = s.rootOrder[0];
+  // The node arrives with the result its view cached after a live run.
+  s = reducer(s, { type: "create", node: { ...analysis, parentId: tableId, cachedResult: frozenResult } });
+  s = reducer(s, { type: "create", node: { ...graph, parentId: tableId } });
+  s = reducer(s, { type: "remove", id: tableId });
+  // The graph is gone (its data is gone); the analysis survives, orphaned,
+  // carrying the last computed result — Prism keeps orphaned results.
+  strictEqual(s.nodes[graph.id], undefined);
+  const orphan = s.nodes[analysis.id];
+  ok(orphan, "the analysis must survive its table's deletion");
+  strictEqual(orphan.orphaned, true);
+  strictEqual(orphan.parentId, null);
+  strictEqual(orphan.sourceTableName, "Table 1");
+  deepStrictEqual(orphan.cachedResult, frozenResult);
+  strictEqual(s.rootOrder.includes(analysis.id), true);
+  strictEqual(s.childOrder[tableId], undefined);
+  s = reducer(s, { type: "undo" });
+  deepStrictEqual(Object.keys(s.nodes).sort(), [analysis.id, graph.id, tableId].sort());
+  deepStrictEqual(s.childOrder[tableId], [analysis.id, graph.id]);
+  strictEqual(s.nodes[analysis.id].orphaned, undefined);
+});
+
+check("an orphaned analysis survives a save and reload, with its frozen result", () => {
+  const orphaned: ProjectNode = {
+    ...analysis,
+    parentId: null,
+    orphaned: true,
+    sourceTableName: "Doses",
+    cachedResult: frozenResult,
+  };
+  const file = {
+    nodes: { t1: table, a1: orphaned },
+    rootOrder: ["t1", "a1"],
+    childOrder: { t1: [] },
+    activeNodeId: "a1",
+  };
+  const readBack = read(serializeProjectFile(file));
+  strictEqual(readBack.updated, false);
+  const kept = readBack.project.nodes.a1;
+  ok(kept, "an orphaned analysis must survive a reload");
+  strictEqual(kept.orphaned, true);
+  strictEqual(kept.sourceTableName, "Doses");
+  deepStrictEqual(kept.cachedResult, frozenResult);
+  deepStrictEqual(readBack.project.rootOrder, ["t1", "a1"]);
+});
+
+check("freezing a results sheet keeps its cached result and stops it caching new ones", () => {
+  let s = makeInitialState();
+  const tableId = s.rootOrder[0];
+  s = reducer(s, { type: "create", node: { ...analysis, parentId: tableId } });
+  s = reducer(s, { type: "cacheAnalysisResult", id: analysis.id, result: frozenResult });
+  deepStrictEqual(s.nodes[analysis.id].cachedResult, frozenResult);
+  s = reducer(s, { type: "setAnalysisFrozen", id: analysis.id, frozen: true });
+  strictEqual(s.nodes[analysis.id].frozen, true);
+  // While frozen, a new live run is not cached (the view never runs one).
+  const newer: AnalysisResult = {
+    testType: "linear-regression",
+    stats: [{ label: "Slope", value: 3 }],
+    groups: [],
+    notes: "",
+  };
+  s = reducer(s, { type: "cacheAnalysisResult", id: analysis.id, result: newer });
+  deepStrictEqual(s.nodes[analysis.id].cachedResult, frozenResult);
+  s = reducer(s, { type: "setAnalysisFrozen", id: analysis.id, frozen: false });
+  strictEqual(s.nodes[analysis.id].frozen, undefined);
+  s = reducer(s, { type: "cacheAnalysisResult", id: analysis.id, result: newer });
+  deepStrictEqual(s.nodes[analysis.id].cachedResult, newer);
+  // Freezing is an undo step, like any edit.
+  s = reducer(s, { type: "setAnalysisFrozen", id: analysis.id, frozen: true });
+  s = reducer(s, { type: "undo" });
+  strictEqual(s.nodes[analysis.id].frozen, undefined);
+  // An orphaned sheet can't freeze (it already keeps its last result).
+  s = reducer(s, { type: "remove", id: tableId });
+  strictEqual(s.nodes[analysis.id].orphaned, true);
+  s = reducer(s, { type: "setAnalysisFrozen", id: analysis.id, frozen: true });
+  strictEqual(s.nodes[analysis.id].frozen, undefined);
+});
+
+check("a non-orphaned analysis whose table is gone is still dropped on reload", () => {
+  const file = {
+    nodes: { t1: table, a1: { ...analysis, parentId: "t-gone" } },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const readBack = read(serializeProjectFile(file));
+  strictEqual(readBack.project.nodes.a1, undefined);
+  strictEqual(readBack.updated, true);
+});
+
+check("a saved result that doesn't match its analysis is dropped with a warning", () => {
+  const bad: ProjectNode = {
+    ...analysis,
+    parentId: null,
+    orphaned: true,
+    sourceTableName: "Doses",
+    cachedResult: { testType: "one-sample-t", stats: [], groups: [], notes: "" },
+  };
+  const file = {
+    nodes: { t1: table, a1: bad },
+    rootOrder: ["t1", "a1"],
+    childOrder: { t1: [] },
+    activeNodeId: "a1",
+  };
+  const readBack = read(serializeProjectFile(file));
+  const kept = readBack.project.nodes.a1;
+  ok(kept, "the orphaned analysis itself must survive");
+  strictEqual(kept.cachedResult, undefined);
+  ok(
+    readBack.issues.some((i) => i.message.includes("couldn't read")),
+    "a warning names the dropped result",
+  );
+});
+
+check("an orphaned flag on an analysis whose table survived is cleared on reload", () => {
+  const file = {
+    nodes: {
+      t1: table,
+      a1: { ...analysis, parentId: "t1", orphaned: true, sourceTableName: "Doses", cachedResult: frozenResult },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: ["a1"] },
+    activeNodeId: "a1",
+  };
+  const readBack = read(serializeProjectFile(file));
+  const kept = readBack.project.nodes.a1;
+  ok(kept, "the analysis must survive — only its orphaned flag goes");
+  strictEqual(kept.orphaned, undefined);
+  strictEqual(kept.sourceTableName, undefined);
+  deepStrictEqual(kept.cachedResult, frozenResult);
+  deepStrictEqual(readBack.project.childOrder.t1, ["a1"]);
 });
 
 // ── Clone a graph ────────────────────────────────────────────────────────

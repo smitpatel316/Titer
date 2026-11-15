@@ -59,7 +59,7 @@ export function SidebarToggle({ className }: { className?: string }) {
 
 export function ProjectSidebar() {
   // The outline, not the whole project: editing a table or a graph doesn't redraw the sidebar.
-  const { tables, figures, activeNodeId } = useOutline();
+  const { tables, figures, orphaned, activeNodeId } = useOutline();
   const { get, setActiveNode, renameNode, removeNode, openSelector, reorderTables, reorderChildren, createFigure } =
     useProjectActions();
   const { sidebar, sidebarWidth, setLayout } = useLayout();
@@ -177,11 +177,14 @@ export function ProjectSidebar() {
     setTimeout(() => listRef.current?.focus()); // after the view shows
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
-    const node = [...tables.flatMap((t) => [t, ...t.children]), ...figures].find((n) => n.id === activeNodeId);
+    const node = [...tables.flatMap((t) => [t, ...t.children]), ...figures, ...orphaned].find(
+      (n) => n.id === activeNodeId,
+    );
     if (!node || e.metaKey || e.altKey || e.ctrlKey) return;
     const rows = [
       ...tables.flatMap((t) => [t.id, ...(collapsed.has(t.id) ? [] : t.children.map((c) => c.id))]),
       ...figures.map((f) => f.id),
+      ...orphaned.map((o) => o.id),
     ];
     const i = rows.indexOf(node.id);
     if (e.key === "ArrowDown") select(rows[Math.min(rows.length - 1, i + 1)]);
@@ -193,7 +196,7 @@ export function ProjectSidebar() {
     e.preventDefault();
   };
 
-  const tableMenu = (table: OutlineNode) =>
+  const tableMenu = (table: OutlineNode & { children: OutlineNode[] }) =>
     void popupMenu([
       { text: "New Analysis…", action: () => openSelector({ kind: "new-analysis", tableId: table.id }) },
       { text: "Simulate data…", action: () => openSelector({ kind: "simulate-data", tableId: table.id }) },
@@ -206,7 +209,14 @@ export function ProjectSidebar() {
       {
         text: `Delete ${NODE_NAMES.table}…`,
         enabled: tables.length > 1,
-        action: () => removeWithConfirm(table, removeNode),
+        action: () =>
+          removeWithConfirm(
+            table,
+            removeNode,
+            table.children.some((c) => c.type === "analysis")
+              ? "Its analyses will be kept as orphaned results and its graphs will be deleted. You can undo this."
+              : undefined,
+          ),
       },
     ]);
 
@@ -296,6 +306,22 @@ export function ProjectSidebar() {
             onContextMenu={(e) => {
               e.preventDefault();
               childMenu(figure);
+            }}
+          />
+        ))}
+        {orphaned.map((orphan) => (
+          <SidebarItem
+            key={orphan.id}
+            icon={<SigmaIcon className="size-4" />}
+            title={orphan.name}
+            suffix="(orphaned)"
+            selected={activeNodeId === orphan.id}
+            renaming={renaming === orphan.id}
+            onRename={(name) => rename(orphan, name)}
+            onClick={() => select(orphan.id)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              childMenu(orphan);
             }}
           />
         ))}

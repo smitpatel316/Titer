@@ -1,7 +1,7 @@
 // Shared project-tree types — kept light so both the store and the table-type
 // modules can depend on it without creating a cycle.
 
-import type { AnalysisParams, AnalysisType } from "../stats/types";
+import type { AnalysisParams, AnalysisResult, AnalysisType } from "../stats/types";
 import type { SummaryFormat } from "../lib/summary-format";
 
 export type NodeType = "table" | "analysis" | "graph" | "figure";
@@ -561,6 +561,22 @@ export interface ProjectNode {
   analysisType?: AnalysisType;
   /** Analysis nodes only: wizard-chosen params for the test, when it has any. */
   analysisParams?: AnalysisParams;
+  /** Analysis nodes only: the last successfully computed result, kept so a
+   *  frozen or orphaned sheet can show it without re-running (a frozen sheet
+   *  never re-runs; an orphaned one has no source table left to run on).
+   *  Written to the `.hlx` file with the node, so the results survive a
+   *  save and reload. */
+  cachedResult?: AnalysisResult;
+  /** Analysis nodes only: frozen — the sheet shows `cachedResult` and stops
+   *  auto-updating when the data change (Prism's freeze button). */
+  frozen?: boolean;
+  /** Analysis nodes only: orphaned — the source table was deleted, so the
+   *  results stay as they were and the analysis parameters cannot be changed
+   *  (Prism's orphaned results). The node lives at the project root. */
+  orphaned?: boolean;
+  /** Analysis nodes only: the source table's name when orphaned, for the
+   *  banner ("the source table “Doses” was deleted"). */
+  sourceTableName?: string;
   /** Graph nodes only: which chart this node draws + its display options. */
   graphType?: GraphType;
   graphOptions?: GraphOptions;

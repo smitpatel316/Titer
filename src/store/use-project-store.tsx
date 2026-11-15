@@ -10,7 +10,7 @@ import {
   type GraphType,
   type GraphOptions,
 } from "./types";
-import type { AnalysisParams, AnalysisPickerValue, AnalysisType } from "../stats/types";
+import type { AnalysisParams, AnalysisPickerValue, AnalysisResult, AnalysisType } from "../stats/types";
 import { TABLES } from "../views/tables";
 import { GRAPHS, newGraphOptions } from "../views/graphs";
 import type { TemplateKind } from "../lib/template";
@@ -93,6 +93,13 @@ type Action =
   | { type: "setActive"; id: string | null }
   | { type: "rename"; id: string; name: string }
   | { type: "remove"; id: string }
+  /** The view's last successful live run, kept on the node so a frozen or
+   *  orphaned sheet can show it. Not an Undo step (a snapshot, not an edit),
+   *  but it does dirty the file — the result is saved with the node. */
+  | { type: "cacheAnalysisResult"; id: string; result: AnalysisResult }
+  /** Freeze (or unfreeze) a results sheet: frozen, it shows its cached
+   *  result and stops auto-updating when the data change. */
+  | { type: "setAnalysisFrozen"; id: string; frozen: boolean }
   /** `label` names the edit in the Edit menu; `move`: what it renamed or moved. */
   | { type: "updateTable"; id: string; data: TableData; label: string; move?: TableMove }
   | { type: "updateGraph"; id: string; options: GraphOptions; at: number }
@@ -241,11 +248,25 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       };
     }
     case "remove": {
+      const target = state.nodes[action.id];
       const remove = new Set<string>([action.id]);
-      for (const n of Object.values(state.nodes)) if (n.parentId === action.id) remove.add(n.id);
+      // Deleting a data table orphans its analyses (Prism: the results stay,
+      // viewable but unchangeable) and deletes its graphs (their data is gone).
+      const orphaned: ProjectNode[] = [];
+      for (const n of Object.values(state.nodes)) {
+        if (n.parentId !== action.id) continue;
+        if (target?.type === "table" && n.type === "analysis") orphaned.push(n);
+        else remove.add(n.id);
+      }
       const nodes: Record<string, ProjectNode> = {};
-      for (const [id, n] of Object.entries(state.nodes)) if (!remove.has(id)) nodes[id] = n;
-      const rootOrder = state.rootOrder.filter((id) => !remove.has(id));
+      for (const [id, n] of Object.entries(state.nodes)) {
+        if (remove.has(id)) continue;
+        const orphan = orphaned.find((o) => o.id === id);
+        nodes[id] = orphan
+          ? { ...orphan, parentId: null, orphaned: true, sourceTableName: target?.name }
+          : n;
+      }
+      const rootOrder = [...state.rootOrder.filter((id) => !remove.has(id)), ...orphaned.map((o) => o.id)];
       // Drop removed tables' order lists, and removed children from surviving lists.
       const childOrder: Record<string, string[]> = {};
       for (const [pid, ids] of Object.entries(state.childOrder)) {
@@ -257,6 +278,25 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       const activeNodeId =
         state.activeNodeId && remove.has(state.activeNodeId) ? (rootOrder[0] ?? null) : state.activeNodeId;
       return { ...state, nodes, rootOrder, childOrder, activeNodeId, isDirty: true };
+    }
+    case "cacheAnalysisResult": {
+      const node = state.nodes[action.id];
+      if (!node || node.type !== "analysis" || node.frozen || node.orphaned) return state;
+      if (node.cachedResult === action.result) return state;
+      return {
+        ...state,
+        nodes: { ...state.nodes, [action.id]: { ...node, cachedResult: action.result } },
+        isDirty: true,
+      };
+    }
+    case "setAnalysisFrozen": {
+      const node = state.nodes[action.id];
+      if (!node || node.type !== "analysis" || node.orphaned) return state;
+      if (node.frozen === true ? action.frozen : !action.frozen) return state;
+      const next = { ...node };
+      if (action.frozen) next.frozen = true;
+      else delete next.frozen;
+      return { ...state, nodes: { ...state.nodes, [action.id]: next }, isDirty: true };
     }
     case "updateTable": {
       const node = state.nodes[action.id];
@@ -381,8 +421,9 @@ const UNDOABLE = new Set<Action["type"]>([
   "updateFigure",
   "reorderRoot",
   "reorderChildren",
+  "setAnalysisFrozen",
 ]);
-const MUTATING = new Set<Action["type"]>([...UNDOABLE, "undo", "redo", "load"]);
+const MUTATING = new Set<Action["type"]>([...UNDOABLE, "cacheAnalysisResult", "undo", "redo", "load"]);
 
 /** What a change is called in the Edit menu ("Undo Rename"). */
 function changeName(action: Action): string {
@@ -397,6 +438,8 @@ function changeName(action: Action): string {
       return "Rename";
     case "remove":
       return "Delete";
+    case "setAnalysisFrozen":
+      return action.frozen ? "Freeze Results" : "Unfreeze Results";
     case "updateTable":
       return action.label;
     case "updateGraph":
@@ -479,6 +522,11 @@ interface ProjectActions {
   setActiveNode: (id: string | null) => void;
   renameNode: (id: string, name: string) => void;
   removeNode: (id: string) => void;
+  /** Keeps a successful live run on its analysis node, so a frozen or
+   *  orphaned sheet can show it. */
+  cacheAnalysisResult: (id: string, result: AnalysisResult) => void;
+  /** Freeze (or unfreeze) a results sheet. Orphaned sheets can't freeze. */
+  setAnalysisFrozen: (id: string, frozen: boolean) => void;
   /** `label` names the edit for Undo ("Paste"); `move`: the columns or groups it renamed
    *  and the rows it moved, which the table's analyses and graphs then follow. */
   updateTable: (id: string, data: TableData, label: string, move?: TableMove) => void;
@@ -522,10 +570,12 @@ interface ProjectContextValue extends ProjectActions {
 /** An item as the sidebar shows it. */
 export type OutlineNode = Pick<ProjectNode, "id" | "type" | "name" | "parentId">;
 /** What the sidebar shows: the tables in order, each with its analyses and graphs,
- *  then the figures (project-root items, since a figure may span tables). */
+ *  then the figures (project-root items, since a figure may span tables), then the
+ *  orphaned analyses (their tables deleted — they live at the project root too). */
 interface Outline {
   tables: (OutlineNode & { children: OutlineNode[] })[];
   figures: OutlineNode[];
+  orphaned: OutlineNode[];
   activeNodeId: string | null;
 }
 
@@ -648,6 +698,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       setActiveNode: (id) => dispatch({ type: "setActive", id }),
       renameNode: (id, name) => dispatch({ type: "rename", id, name }),
       removeNode: (id) => dispatch({ type: "remove", id }),
+      cacheAnalysisResult: (id, result) => dispatch({ type: "cacheAnalysisResult", id, result }),
+      setAnalysisFrozen: (id, frozen) => dispatch({ type: "setAnalysisFrozen", id, frozen }),
       updateTable: (id, data, label, move) => dispatch({ type: "updateTable", id, data, label, move }),
       updateGraph: (id, options) => dispatch({ type: "updateGraph", id, options, at: Date.now() }),
       updateFloatingNotes: (id, notes) =>
@@ -690,6 +742,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       .map((id) => ({ ...outlineNode(state.nodes[id]), children: childrenOf(state, id).map(outlineNode) })),
     figures: state.rootOrder
       .filter((id) => state.nodes[id]?.type === "figure")
+      .map((id) => outlineNode(state.nodes[id])),
+    orphaned: state.rootOrder
+      .filter((id) => state.nodes[id]?.type === "analysis" && state.nodes[id]?.orphaned)
       .map((id) => outlineNode(state.nodes[id])),
   });
   const outline = React.useMemo<Outline>(

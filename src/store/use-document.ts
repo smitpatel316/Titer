@@ -1041,10 +1041,16 @@ export function prismDropSkippedMessage(firstName: string, skippedNames: string[
 
 export type DocumentActions = ReturnType<typeof useDocument>;
 
-/** Deletes a table (with its analyses and graphs), an analysis or a graph once the
- *  user confirms (Edit ▸ Undo brings it back). */
-export async function removeWithConfirm(node: Pick<ProjectNode, "id" | "name" | "type">, remove: (id: string) => void) {
-  const detail =
+/** Deletes a table (its analyses stay as orphaned results, its graphs go), an
+ *  analysis or a graph once the user confirms (Edit ▸ Undo brings it back).
+ *  `detail` overrides the confirm's second line — a table with analyses says
+ *  its analyses will be kept, not deleted. */
+export async function removeWithConfirm(
+  node: Pick<ProjectNode, "id" | "name" | "type">,
+  remove: (id: string) => void,
+  detail?: string,
+) {
+  const fallback =
     node.type === "table" ? "Its analyses and graphs will be deleted too. You can undo this." : "You can undo this.";
-  if (await native.confirmDelete(`Delete “${node.name}”?`, detail)) remove(node.id);
+  if (await native.confirmDelete(`Delete “${node.name}”?`, detail ?? fallback)) remove(node.id);
 }

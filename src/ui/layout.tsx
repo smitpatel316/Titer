@@ -110,6 +110,9 @@ type SidebarItemProps = Omit<React.ComponentProps<"div">, "title" | "onToggle"> 
    *  Escape). */
   renaming?: boolean;
   onRename?: (name: string) => void;
+  /** Muted text after the name, never part of it — an orphaned analysis shows
+   *  "(orphaned)" here, so renaming still edits the bare name. */
+  suffix?: string;
 };
 
 /** A sidebar row. With children, it gets a disclosure triangle. The selected row is
@@ -123,6 +126,7 @@ export function SidebarItem({
   onToggle,
   renaming,
   onRename,
+  suffix,
   children,
   className,
   ...props
@@ -155,9 +159,14 @@ export function SidebarItem({
         {renaming ? (
           <NameField name={title} onDone={onRename!} />
         ) : (
-          <span className="truncate" title={title}>
-            {title}
-          </span>
+          <>
+            <span className="truncate" title={title}>
+              {title}
+            </span>
+            {suffix && (
+              <span className={cn("shrink-0 text-secondary", selected && "group-focus:text-white")}>{suffix}</span>
+            )}
+          </>
         )}
       </div>
       {hasChildren && open && <div className="pl-2">{children}</div>}
