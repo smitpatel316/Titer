@@ -3,6 +3,16 @@
 // and how the answers make the test's params; analysis-wizard.tsx asks them.
 // A test without an entry here runs as soon as it is picked.
 import { DOSE_MODELS, CONCENTRATION_UNITS, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, NONLINEAR_MODELS, ROUT_Q, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel } from "../../stats/types";
+import type { PlotFunctionExtra, PlotFunctionModel } from "../../stats/types";
+import {
+  PLOT_FUNCTION_DEFAULTS,
+  PLOT_FUNCTION_LABEL,
+  PLOT_FUNCTION_MAX_CURVES,
+  PLOT_FUNCTION_MODELS,
+  PLOT_FUNCTION_SEGMENTS,
+  plotFunctionParams,
+  plotFunctionXRange,
+} from "../../stats/xy/plot-function";
 import type { TableType } from "../../store/types";
 import { MODEL_LABEL, termLabel } from "../../stats/xy/nonlinear-regression";
 import { modelSpec } from "../../stats/xy/nonlinear-fit";
@@ -35,6 +45,7 @@ import type {
   RemoveBaselineParams,
   PruneRowsParams,
   FractionOfTotalParams,
+  PlotFunctionParams,
   RowMeansTotalsParams,
   SurvivalParams,
   CoxParams,
@@ -2064,6 +2075,119 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ...(tableType === "xy" ? { x: table.columns[0]?.name } : {}),
       } satisfies RowMeansTotalsParams,
     }),
+  },
+
+  // "Plot a function" (Prism's Generate Curve): no data is analysed — the
+  // curves come from an equation + parameters. The equation is asked first
+  // (the X range and the per-curve questions follow it), then the range, the
+  // line segments, the extra series, and how many curves the family holds;
+  // each curve then gets a name and one question per parameter. The
+  // homologous model also needs its [L] constant, as the fitter does.
+  "plot-function": {
+    questions: (a) => {
+      const model = a.equation as PlotFunctionModel | undefined;
+      const count = (a.curves as number | undefined) ?? 1;
+      const [defMin, defMax] = plotFunctionXRange(model ?? "line");
+      const paramNames = model ? plotFunctionParams(model) : [];
+      return [
+        choice(
+          "equation",
+          "Which equation should the curve come from?",
+          PLOT_FUNCTION_MODELS.map((m): [string, string] => [m, PLOT_FUNCTION_LABEL[m]]),
+        ),
+        {
+          id: "xMin",
+          ask: "Where should the X axis start?",
+          kind: "number",
+          label: "Starting X",
+          initial: defMin,
+        },
+        {
+          id: "xMax",
+          ask: "Where should the X axis end?",
+          kind: "number",
+          label: "Ending X",
+          initial: defMax,
+        },
+        {
+          id: "segments",
+          ask: "How many line segments should draw each curve? (Prism's default is 150 — more segments draw a smoother curve.)",
+          kind: "number",
+          label: "Line segments",
+          initial: PLOT_FUNCTION_SEGMENTS.default,
+          min: PLOT_FUNCTION_SEGMENTS.min,
+          max: PLOT_FUNCTION_SEGMENTS.max,
+        },
+        choice("extra", "Plot anything alongside the function?", [
+          ["none", "No — the function only"],
+          ["first-derivative", "Its first derivative"],
+          ["second-derivative", "Its second derivative"],
+          ["integral", "Its integral"],
+        ]),
+        {
+          id: "curves",
+          ask: "How many curves should this family hold? (Each gets its own parameter values.)",
+          kind: "number",
+          label: "Curves",
+          initial: 1,
+          min: 1,
+          max: PLOT_FUNCTION_MAX_CURVES,
+        },
+        model === "homologous-competition-logx" && {
+          id: "ligandConcentration",
+          ask: "Radioligand concentration [L], in the same units as X.",
+          kind: "text",
+          label: "Radioligand concentration [L] =",
+          initial: "",
+          placeholder: "e.g. 1",
+          parse: (text: string) => parseRequiredPositive(text, "radioligand concentration [L]"),
+        },
+        ...(model
+          ? Array.from({ length: count }, (_, i) => i).flatMap((i): Question[] => [
+              {
+                id: `curve${i + 1}_label`,
+                ask: `What should curve ${i + 1} be called? (Leave blank for “Curve ${i + 1}”.)`,
+                kind: "text",
+                label: `Curve ${i + 1} name`,
+                initial: "",
+                parse: () => ({}),
+              },
+              ...paramNames.map(
+                (name): Question => ({
+                  id: `curve${i + 1}_${name}`,
+                  ask: `Curve ${i + 1}: what is ${name}?`,
+                  kind: "number",
+                  label: name,
+                  initial: PLOT_FUNCTION_DEFAULTS[model][name] ?? 0,
+                }),
+              ),
+            ])
+          : []),
+      ];
+    },
+    finish: (a) => {
+      const model = a.equation as PlotFunctionModel;
+      const count = (a.curves as number | undefined) ?? 1;
+      const paramNames = plotFunctionParams(model);
+      const ligand = parseRequiredPositive(String(a.ligandConcentration ?? ""), "radioligand concentration [L]");
+      return {
+        type: "plot-function",
+        params: {
+          equation: model,
+          xMin: a.xMin as number,
+          xMax: a.xMax as number,
+          segments: a.segments as number,
+          curves: Array.from({ length: count }, (_, i) => ({
+            label: String(a[`curve${i + 1}_label`] ?? "").trim() || `Curve ${i + 1}`,
+            params: Object.fromEntries(paramNames.map((name) => [name, a[`curve${i + 1}_${name}`] as number])),
+          })),
+          extra: (a.extra as PlotFunctionExtra | "none" | undefined) ?? "none",
+          ...(model === "homologous-competition-logx" && ligand.value !== undefined
+            ? { ligandConcentration: ligand.value }
+            : {}),
+        } satisfies PlotFunctionParams,
+      };
+    },
   },
 
   "normalize": {

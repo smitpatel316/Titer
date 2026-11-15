@@ -689,6 +689,37 @@ export function AnalysisResultsView({ result }: { result: AnalysisResult }) {
         />
       ))}
 
+      {result.parameterValues && result.parameterValues.length > 0 && (
+        <Table
+          title="Parameter values"
+          columns={[
+            { label: "Curve" },
+            ...result.parameterValues[0].values.map((v) => ({ label: v.name, numeric: true })),
+          ]}
+          rows={result.parameterValues.map((c) => [c.label, ...c.values.map((v) => num(v.value))])}
+        />
+      )}
+
+      {result.generatedCurves && result.generatedCurves.curves.length > 0 && (
+        <Table
+          title="Generated curves"
+          columns={[
+            { label: "X", numeric: true },
+            ...result.generatedCurves.curves.flatMap((c) => [
+              { label: c.label, numeric: true },
+              ...(c.extra ? [{ label: c.extra.label, numeric: true }] : []),
+            ]),
+          ]}
+          rows={result.generatedCurves.x.map((x, i) => [
+            num(x),
+            ...result.generatedCurves!.curves.flatMap((c) => [
+              c.y[i] == null ? <span className="text-secondary">—</span> : num(c.y[i]),
+              ...(c.extra ? [c.extra.y[i] == null ? <span className="text-secondary">—</span> : num(c.extra.y[i])] : []),
+            ]),
+          ])}
+        />
+      )}
+
       {result.baselineRemoved?.map((col) => {
         const hasX = col.rows.some((r) => r.x !== undefined);
         return (

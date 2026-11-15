@@ -217,6 +217,7 @@ type ParamKind =
   | "name-and-names"
   | "numbers-by-name"
   | "number-pairs-by-name"
+  | "plot-curves"
   | readonly string[]
   | Limits;
 // prettier-ignore
@@ -296,6 +297,15 @@ const PARAMS = {
   rout: "yes/no", x: "name",
   // Transform data (v2): which function to apply.
   function: TRANSFORM_FUNCTIONS,
+  // Plot a function (v2): the equation, the X range, how many line segments
+  // draw each curve, the extra series, and the curves themselves (each a
+  // label + its parameter values, read by the "plot-curves" kind below).
+  equation: [...NONLINEAR_MODELS, "gaussian"],
+  xMin: "number",
+  xMax: "number",
+  segments: { min: 10, max: 1000 },
+  extra: ["none", "first-derivative", "second-derivative", "integral"],
+  curves: "plot-curves",
 } satisfies Record<ParamKey, ParamKind>;
 
 const isFiniteNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -663,6 +673,22 @@ function readParam(kind: ParamKind, v: unknown, report?: (dropped: number) => vo
     const levels = v.levels.filter((s): s is string => typeof s === "string");
     if (levels.length !== v.levels.length) report?.(v.levels.length - levels.length);
     return levels.length ? { ...v, levels } : undefined;
+  }
+  if (kind === "plot-curves") {
+    // One curve per entry: a label + its parameter values (each a finite
+    // number). A curve with a non-numeric value is left out whole — a half
+    // curve would run on the wrong parameters — and reported, like the other
+    // collection kinds (M6).
+    if (!Array.isArray(v)) return undefined;
+    const kept = v.filter(
+      (c): c is { label: string; params: Record<string, number> } =>
+        isObj(c) &&
+        typeof c.label === "string" &&
+        isObj(c.params) &&
+        Object.values(c.params).every(isFiniteNumber),
+    );
+    if (kept.length !== v.length) report?.(v.length - kept.length);
+    return kept.length ? kept : undefined;
   }
   if (kind === "names") {
     if (!Array.isArray(v)) return undefined;

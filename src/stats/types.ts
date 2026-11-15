@@ -52,7 +52,8 @@ export type AnalysisType =
   | "transpose"
   | "prune-rows"
   | "fraction-of-total"
-  | "row-means-totals";
+  | "row-means-totals"
+  | "plot-function";
 
 /** What the New Analysis picker offers: a test, or "Compare more than two groups",
  *  which its wizard resolves to one-way ANOVA, Kruskal-Wallis, repeated-measures ANOVA
@@ -969,6 +970,71 @@ export interface RocPoint {
 
 /** The data sets an analysis runs on, in this order: columns, or a grouped table's groups.
  *  Absent (files before Titer 1.0.5): all of them, the first two for a two-group test. */
+/** The equations "plot-function" can generate a curve from (Prism's "Plot a
+ *  function"): every nonlinear-regression model — evaluated by the same
+ *  `evaluate()` the fitted-curve overlay uses — plus a Gaussian, Prism's
+ *  canonical example (mean 0, SD 1, amplitude 100 over X −3..3), which the
+ *  fitter does not offer, so it lives here only. */
+export type PlotFunctionModel = NonlinearModel | "gaussian";
+
+/** What "plot-function" plots alongside the function itself (Prism's Options
+ *  tab): its first derivative, its second derivative, or its integral — one
+ *  extra series per curve, never instead of the function. */
+export type PlotFunctionExtra = "first-derivative" | "second-derivative" | "integral";
+
+/** One curve of a "plot-function" family: its label (the results table's and
+ *  the graph legend's column name) and its parameter values, keyed by the
+ *  model's parameter names (`modelSpec`'s terms, plus "X0" for the
+ *  segmental-linear hinge — a coefficient the fitter derives, so the
+ *  plotter asks for it outright). */
+export interface PlotFunctionCurve {
+  label: string;
+  params: Record<string, number>;
+}
+
+/** Params for "plot-function" (no data — the table it hangs off is only its
+ *  home): which equation, the X range, how many line segments define each
+ *  curve (Prism's default 150), the curves' labels + parameter values, and
+ *  the extra series. `ligandConcentration` is the homologous model's [L]
+ *  constant (reuses NonlinearRegressionParams' key); the other models
+ *  ignore it. */
+export interface PlotFunctionParams {
+  equation: PlotFunctionModel;
+  xMin: number;
+  xMax: number;
+  /** Line segments per curve (points = segments + 1); omitted = 150. */
+  segments?: number;
+  curves: PlotFunctionCurve[];
+  /** Extra series per curve; omitted or "none" = the function only. */
+  extra?: PlotFunctionExtra | "none";
+  ligandConcentration?: number;
+}
+
+/** One generated curve of a "plot-function" result: the shared X grid is on
+ *  the result, each curve carries its Y at those X (`null`: the equation is
+ *  undefined there — a log model at X ≤ 0, a pole — shown blank, never NaN)
+ *  and, when asked for, the extra series at the same X. */
+export interface GeneratedCurve {
+  label: string;
+  y: (number | null)[];
+  extra?: { kind: PlotFunctionExtra; label: string; y: (number | null)[] };
+}
+
+/** One generated curve's parameter values ("plot-function"): the curve's
+ *  label and the values it was generated from, in the order the wizard
+ *  asked them — tabled in the results view. */
+export interface PlotFunctionParameterValues {
+  label: string;
+  values: { name: string; value: number }[];
+}
+
+/** The generated curves of a "plot-function" result: the X grid (segments +
+ *  1 evenly spaced values from xMin to xMax) shared by every curve. */
+export interface GeneratedCurves {
+  x: number[];
+  curves: GeneratedCurve[];
+}
+
 interface DataSetsParam {
   sets?: string[];
 }
@@ -1022,6 +1088,7 @@ export type AnalysisParams = DataSetsParam &
     | TransformDataParams
     | TransformConcentrationsParams
     | NormalizeParams
+    | PlotFunctionParams
   );
 
 /** Params for "survival" (Survival table): the test comparing the curves — log-rank,
@@ -1584,6 +1651,13 @@ export interface AnalysisResult {
    *  new curve table per Y data set — the smoothed curve, the first or
    *  second derivative, or the cumulative integral. */
   derivedCurves?: DerivedCurve[];
+  /** Optional generated curves ("plot-function"): the X grid shared by every
+   *  curve, each curve's Y at those X, and its extra series when asked for —
+   *  the results view tables them and an XY scatter draws them. */
+  generatedCurves?: GeneratedCurves;
+  /** Optional parameter values ("plot-function"): one entry per generated
+   *  curve — the values it was generated from, tabled in the results view. */
+  parameterValues?: PlotFunctionParameterValues[];
   /** Optional Monte Carlo summary ("monte-carlo"): the statistic's
    *  distribution across repeats, its 95% percentile interval, the
    *  estimated power (when the statistic is a P value), the observed

@@ -27,6 +27,7 @@ import { useAnalysis } from "../analyses/use-analysis";
 import { GRAPHS, graphSeries, plotColumns } from ".";
 import { addFittedCurve } from "./fitted-curve";
 import { addBindingCurve, addDoseResponseSpecialCurve, addEnzymeInhibitionCurve } from "./binding-curve";
+import { addGeneratedCurves } from "./generated-curves";
 import { addSchildPlot } from "./schild-plot";
 import { addSmoothCurve } from "./smooth-curve";
 import { addLogisticCurve, logisticCurveNote } from "./logistic-curve";
@@ -132,6 +133,17 @@ export function GraphView({ node }: { node: ProjectNode }) {
       parent?.tableType,
     ],
   );
+  // An XY scatter also draws a sibling "Plot a function" analysis's generated
+  // curves — the curves come from an equation + parameters, not the table, so
+  // the scatter draws even when the parent table is empty. The exemption is
+  // on the analysis node (not its outcome, which lands after the run): the
+  // graph draws its empty axes meanwhile, then the curves when they arrive.
+  const plotFunctionAnalysis =
+    type === "xy-scatter"
+      ? Object.values(nodes).find(
+          (n) => n.type === "analysis" && n.parentId === node.parentId && n.analysisType === "plot-function",
+        )
+      : undefined;
   // A graph of a table with an X needs numbers in X and in a Y column, and says which it lacks —
   // except the ROC curve, whose truth (X) may be text ("Diseased"/"Healthy"):
   // its build draws nothing when the truth has other than two classes.
@@ -146,6 +158,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
       : family === "xy" &&
         type !== "roc-curve" &&
         type !== "forest-plot" &&
+        !(type === "xy-scatter" && plotFunctionAnalysis) &&
         !(type === "survival" && parent?.tableType === "multiple") &&
         parent?.tableType &&
         hasXColumn(parent.tableType) &&
@@ -238,7 +251,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
       ? summaryTableProblem(data, GRAPHS[type].label)
       : undefined;
   const lack = xyLack ?? summaryLack ?? (gone === undefined ? undefined : `The column “${gone}” is no longer in the table.`);
-  const hasData = !lack && columns.some((c) => c.values.length > 0);
+  const hasData = !lack && (columns.some((c) => c.values.length > 0) || plotFunctionAnalysis !== undefined);
 
   // The figure's traces as last drawn, without the selection ring.
   const [drawn, setDrawn] = React.useState<unknown[]>([]);
@@ -391,6 +404,17 @@ export function GraphView({ node }: { node: ProjectNode }) {
   const specialOutcome = useAnalysis(specialAnalysis?.analysisType, data, specialAnalysis?.analysisParams);
   const specialFit = specialOutcome && !("error" in specialOutcome) ? specialOutcome : null;
   const specialParams = (specialAnalysis?.analysisParams ?? undefined) as DoseResponseSpecialParams | undefined;
+  // An XY scatter also draws a sibling "Plot a function" analysis's generated
+  // curves — from the same cached run (no extra work), as the overlays above.
+  // The node itself is found before the data checks (above), so an empty
+  // parent table still draws; the outcome lands here when the run finishes.
+  const plotFunctionOutcome = useAnalysis(
+    plotFunctionAnalysis?.analysisType,
+    data,
+    plotFunctionAnalysis?.analysisParams,
+  );
+  const plotFunctionResult =
+    plotFunctionOutcome && !("error" in plotFunctionOutcome) ? plotFunctionOutcome : null;
   // A logistic-curve graph fits its own curve (no analysis node needed): the
   // first Y series is the binary outcome, as in the analysis's default.
   const logisticY = columns[1]?.name;
@@ -596,6 +620,15 @@ export function GraphView({ node }: { node: ProjectNode }) {
         addEnzymeInhibitionCurve(fig, columns, options, inhibitionFit, inhibitionParams, paint);
       if (specialFit && specialParams && type === "xy-scatter")
         addDoseResponseSpecialCurve(fig, columns, options, specialFit, specialParams, paint);
+      if (type === "xy-scatter" && plotFunctionResult?.generatedCurves)
+        addGeneratedCurves(fig, plotFunctionResult, paint, seriesNames.length);
+      else if (
+        type === "xy-scatter" &&
+        plotFunctionAnalysis &&
+        plotFunctionOutcome &&
+        "error" in plotFunctionOutcome
+      )
+        addNote(fig, plotFunctionOutcome.error, options);
       if (type === "schild-plot") {
         if (
           specialFit &&
@@ -689,6 +722,8 @@ export function GraphView({ node }: { node: ProjectNode }) {
     inhibitionParams,
     specialFit,
     specialParams,
+    plotFunctionResult,
+    plotFunctionOutcome,
     smoothResult,
     logisticFit,
     logisticOutcome,

@@ -20,6 +20,7 @@ import type {
   PruneRowsParams,
   FractionOfTotalParams,
   RowMeansTotalsParams,
+  PlotFunctionParams,
   KMeansParams,
   McNemarParams,
   MixedEffectsParams,
@@ -65,6 +66,7 @@ import { runRemoveBaseline } from "./xy/remove-baseline";
 import { runPruneRows } from "./xy/prune-rows";
 import { runFractionOfTotal } from "./xy/fraction-of-total";
 import { runRowMeansTotals } from "./xy/row-means-totals";
+import { runPlotFunction } from "./xy/plot-function";
 import { runNonlinearRegression } from "./xy/nonlinear-regression";
 import { runBindingKinetics, runBindingSaturation } from "./xy/binding";
 import { runEnzymeInhibition } from "./xy/enzyme-inhibition";
@@ -208,6 +210,13 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     label: "Row means and totals",
     minColumns: 1,
     run: (c, p, t) => runRowMeansTotals(c, p as RowMeansTotalsParams, t),
+  },
+  // minColumns 0: the curves come from an equation + parameters, never from
+  // the table — the table is only the analysis's home, so an empty table runs.
+  "plot-function": {
+    label: "Plot a function",
+    minColumns: 0,
+    run: (_c, p) => runPlotFunction(p as PlotFunctionParams | undefined),
   },
   "nonlinear-regression": {
     label: "Nonlinear regression",

@@ -186,7 +186,7 @@ import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { decodePng, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
 import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
-import type { AnalysisOutcome, AnalysisParams, AnalysisResult, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, RegressionCoefficient, SimulationSpec } from "../src/stats/types";
+import type { AnalysisOutcome, AnalysisParams, AnalysisResult, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, PlotFunctionParams, RegressionCoefficient, SimulationSpec } from "../src/stats/types";
 import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation/simulate";
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
 import { evaluate as evaluateCurve } from "../src/views/graphs/fitted-curve";
@@ -201,6 +201,7 @@ import {
 } from "../src/stats/xy/smooth-differentiate-integrate";
 import { monteCarloRCode, percentile } from "../src/stats/simulation/monte-carlo";
 import { addMonteCarloHistogram } from "../src/views/graphs/monte-carlo-histogram";
+import { addGeneratedCurves } from "../src/views/graphs/generated-curves";
 
 const checks: [string, () => void | Promise<void>][] = [];
 const check = (name: string, fn: () => void | Promise<void>) => checks.push([name, fn]);
@@ -1954,11 +1955,11 @@ check("nested tests are offered only for their group count", () => {
   };
   deepStrictEqual(
     analysisOptionsForTable("nested", two).map((o) => o.value),
-    ["nested-t-test"],
+    ["nested-t-test", "plot-function"],
   );
   deepStrictEqual(
     analysisOptionsForTable("nested", three).map((o) => o.value),
-    ["nested-anova"],
+    ["nested-anova", "plot-function"],
   );
 });
 
@@ -2529,20 +2530,22 @@ check("the three-way ANOVA is offered only with at least 2 row bands", () => {
     ],
   };
   const values = (data?: TableData) => analysisOptionsForTable("grouped", data).map((o) => o.value);
-  deepStrictEqual(values(withBands), ["two-way-anova", "mixed-effects", "three-way-anova", "multiple-t-tests", "row-means-totals"]);
+  deepStrictEqual(values(withBands), ["two-way-anova", "mixed-effects", "three-way-anova", "multiple-t-tests", "row-means-totals", "plot-function"]);
   deepStrictEqual(values({ ...withBands, rowGroups: [{ name: "All rows", count: 2 }] }), [
     "two-way-anova",
     "mixed-effects",
     "multiple-t-tests",
     "row-means-totals",
+    "plot-function",
   ]);
   deepStrictEqual(values({ ...withBands, rowGroups: undefined }), [
     "two-way-anova",
     "mixed-effects",
     "multiple-t-tests",
     "row-means-totals",
+    "plot-function",
   ]);
-  deepStrictEqual(values(), ["two-way-anova", "mixed-effects", "multiple-t-tests", "row-means-totals"]);
+  deepStrictEqual(values(), ["two-way-anova", "mixed-effects", "multiple-t-tests", "row-means-totals", "plot-function"]);
 });
 
 // The native Analysis menu's effect depends on this key, not on the table data
@@ -7262,18 +7265,18 @@ check("the ROC wizard asks truth, score and positive class, defaulting to the la
     { truth: "Truth", score: "Score", positive: 1 },
   );
   // The menu offers ROC curve after Bland-Altman on column tables, and ROC
-  // curve last (after Interpolate) on XY tables.
+  // curve after Interpolate on XY tables — Plot a function last on both.
   deepStrictEqual(
     analysisOptionsForTable("column")
       .map((o) => o.value)
-      .slice(-2),
-    ["bland-altman", "roc-curve"],
+      .slice(-3),
+    ["bland-altman", "roc-curve", "plot-function"],
   );
   deepStrictEqual(
     analysisOptionsForTable("xy")
       .map((o) => o.value)
-      .slice(-2),
-    ["interpolate", "roc-curve"],
+      .slice(-3),
+    ["interpolate", "roc-curve", "plot-function"],
   );
 });
 
@@ -7525,12 +7528,12 @@ check("the chi-square wizard asks about ordering only on a 2×k / k×2 table, de
     type: "chi-square",
     params: { trendOrdered: false },
   });
-  // McNemar's test sits after chi-square on contingency tables.
+  // McNemar's test sits after chi-square and Plot a function on contingency tables.
   deepStrictEqual(
     analysisOptionsForTable("contingency").map((o) => o.value),
-    ["chi-square", "mcnemar"],
+    ["chi-square", "plot-function", "mcnemar"],
   );
-  deepStrictEqual(analysisOptionsForTable("contingency")[1]?.label, "McNemar's test (paired proportions)");
+  deepStrictEqual(analysisOptionsForTable("contingency")[2]?.label, "McNemar's test (paired proportions)");
 });
 
 // QAB-4: the 2×2 chi-square shown for reference is the UNCORRECTED Pearson
@@ -7730,6 +7733,7 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
       "multiple-logistic-regression",
       "poisson-regression",
       "cox-proportional-hazards",
+      "plot-function",
     ],
   );
   // Multiple Variables tables offer the scatter plot, the histogram, the
@@ -8763,6 +8767,370 @@ check("row-means-totals wizard asks for the data sets, and finishes with its par
   strictEqual(groupedOrder[groupedOrder.length - 1], "row-means-totals");
   // Not offered on column tables: per-column descriptives already cover them.
   ok(!analysisOptionsForTable("column").some((o) => o.value === "row-means-totals"));
+});
+
+// Plot a function (v2 item 14): curves from an equation + parameters, no data
+// analysed — Prism's Generate Curve → Plot a function. The runner is pure
+// TypeScript (the fitter's evaluate() + a local Gaussian), so the pins are
+// exact, not R-rounded.
+check("plot a function generates Prism's Gaussian example", async () => {
+  // An empty table runs: the table is only the analysis's home.
+  const empty: TableData = { columns: ["Title", "X", "Y1"], rows: [] };
+  const out = await runAnalysis("plot-function", empty, {
+    equation: "gaussian",
+    xMin: -3,
+    xMax: 3,
+    segments: 150,
+    curves: [{ label: "Gaussian", params: { Amplitude: 100, Mean: 0, SD: 1 } }],
+  });
+  if ("error" in out) throw new Error(out.error);
+  strictEqual(out.testType, "plot-function");
+  strictEqual(out.subtitle, "Gaussian");
+  deepStrictEqual(out.stats, [
+    { label: "Line segments", value: 150 },
+    { label: "Curves", value: 1 },
+  ]);
+  deepStrictEqual(out.groups, []);
+  ok(out.summary?.includes("Gaussian equation"));
+  ok(out.summary?.includes("No data was analysed"));
+  const { x, curves } = out.generatedCurves!;
+  strictEqual(x.length, 151);
+  strictEqual(x[0], -3);
+  strictEqual(x[150], 3);
+  const y = curves[0].y;
+  // The peak is the amplitude at the mean; the curve is symmetric.
+  strictEqual(y[75], 100);
+  const close = (got: number | null, want: number | null) =>
+    got != null && want != null && Math.abs(got - want) < 1e-12;
+  ok(close(y[0], 100 * Math.exp(-4.5)) && close(y[150], 100 * Math.exp(-4.5)));
+  ok(close(y[50], y[100]));
+  deepStrictEqual(out.parameterValues, [
+    {
+      label: "Gaussian",
+      values: [
+        { name: "Amplitude", value: 100 },
+        { name: "Mean", value: 0 },
+        { name: "SD", value: 1 },
+      ],
+    },
+  ]);
+});
+
+check("plot a function plots derivatives and integrals from the same grid", async () => {
+  const empty: TableData = { columns: ["Title", "X", "Y1"], rows: [] };
+  const closeAll = (got: (number | null)[], want: number[]) =>
+    got.length === want.length &&
+    got.every((g, i) => g != null && Math.abs(g - want[i]) < 1e-9);
+  const line: PlotFunctionParams = {
+    equation: "line",
+    xMin: 0,
+    xMax: 2,
+    segments: 10,
+    curves: [{ label: "Line", params: { Intercept: 1, Slope: 2 } }],
+  };
+  // The first derivative of 1 + 2x is 2 everywhere (central differences are
+  // exact on a line, ends included).
+  const d1 = await runAnalysis("plot-function", empty, { ...line, extra: "first-derivative" });
+  if ("error" in d1) throw new Error(d1.error);
+  strictEqual(d1.generatedCurves!.curves[0].extra?.kind, "first-derivative");
+  strictEqual(d1.generatedCurves!.curves[0].extra?.label, "Line (1st derivative)");
+  ok(closeAll(d1.generatedCurves!.curves[0].extra!.y, Array(11).fill(2)));
+  // The second derivative of x² is 2 — in the interior, where the central
+  // difference is exact; the one-sided ends read 1, and the points beside
+  // them 1.5, which is the honest finite-difference answer on this grid,
+  // not a bug to pin over.
+  const d2 = await runAnalysis("plot-function", empty, {
+    equation: "quadratic",
+    xMin: 0,
+    xMax: 2,
+    segments: 10,
+    curves: [{ label: "Quad", params: { B0: 0, B1: 0, B2: 1 } }],
+    extra: "second-derivative",
+  });
+  if ("error" in d2) throw new Error(d2.error);
+  ok(closeAll(d2.generatedCurves!.curves[0].extra!.y, [1, 1.5, 2, 2, 2, 2, 2, 2, 2, 1.5, 1]));
+  // The integral of x from 0 is x²/2 (the cumulative trapezoid is exact on a line).
+  const integ = await runAnalysis("plot-function", empty, {
+    ...line,
+    curves: [{ label: "Line", params: { Intercept: 0, Slope: 1 } }],
+    extra: "integral",
+  });
+  if ("error" in integ) throw new Error(integ.error);
+  strictEqual(integ.generatedCurves!.curves[0].extra?.kind, "integral");
+  strictEqual(integ.generatedCurves!.curves[0].extra?.label, "Line (Integral)");
+  ok(
+    closeAll(
+      integ.generatedCurves!.curves[0].extra!.y,
+      Array.from({ length: 11 }, (_, i) => (0.2 * i) ** 2 / 2),
+    ),
+  );
+});
+
+check("plot a function plots a family of curves, with gaps where the equation is undefined", async () => {
+  const empty: TableData = { columns: ["Title", "X", "Y1"], rows: [] };
+  const out = await runAnalysis("plot-function", empty, {
+    equation: "semilog-line",
+    xMin: -1,
+    xMax: 2,
+    segments: 10,
+    curves: [
+      { label: "A", params: { Intercept: 0, Slope: 1 } },
+      { label: "B", params: { Intercept: 0, Slope: 2 } },
+    ],
+  });
+  if ("error" in out) throw new Error(out.error);
+  // X = -1 + 3i/10: the log is undefined at X ≤ 0, so those Y are blank —
+  // the graph leaves a gap there instead of joining across it.
+  const x = Array.from({ length: 11 }, (_, i) => -1 + (3 * i) / 10);
+  deepStrictEqual(out.generatedCurves!.x, x);
+  deepStrictEqual(
+    out.generatedCurves!.curves.map((c) => c.label),
+    ["A", "B"],
+  );
+  const closeAll = (got: (number | null)[], want: (number | null)[]) =>
+    got.length === want.length &&
+    got.every((g, i) => (g == null && want[i] == null) || (g != null && want[i] != null && Math.abs(g - want[i]) < 1e-12));
+  ok(closeAll(out.generatedCurves!.curves[0].y, x.map((v) => (v <= 0 ? null : Math.log(v)))));
+  ok(closeAll(out.generatedCurves!.curves[1].y, x.map((v) => (v <= 0 ? null : 2 * Math.log(v)))));
+});
+
+check("plot a function refuses bad equations, ranges and parameter values", async () => {
+  const empty: TableData = { columns: ["Title", "X", "Y1"], rows: [] };
+  const base: PlotFunctionParams = {
+    equation: "gaussian",
+    xMin: -3,
+    xMax: 3,
+    segments: 150,
+    curves: [{ label: "G", params: { Amplitude: 100, Mean: 0, SD: 1 } }],
+  };
+  deepStrictEqual(await runAnalysis("plot-function", empty, undefined), {
+    error: "Choose an equation and its parameter values first.",
+  });
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, { ...base, equation: "nope" } as unknown as PlotFunctionParams),
+    { error: "“nope” is not an equation this analysis can plot." },
+  );
+  deepStrictEqual(await runAnalysis("plot-function", empty, { ...base, xMin: 3, xMax: -3 }), {
+    error: "The starting X (3) must be below the ending X (-3).",
+  });
+  deepStrictEqual(await runAnalysis("plot-function", empty, { ...base, segments: 9 }), {
+    error: "The number of line segments must be a whole number from 10 to 1000.",
+  });
+  deepStrictEqual(await runAnalysis("plot-function", empty, { ...base, curves: [] }), {
+    error: "Enter parameter values for at least one curve.",
+  });
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, {
+      ...base,
+      curves: Array.from({ length: 9 }, (_, i) => ({ label: `C${i + 1}`, params: { Amplitude: 1, Mean: 0, SD: 1 } })),
+    }),
+    { error: "Plot at most 8 curves in one family." },
+  );
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, {
+      ...base,
+      curves: [{ label: "G", params: { Amplitude: 100, Mean: 0 } }],
+    }),
+    { error: "“G” needs a number for SD." },
+  );
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, {
+      ...base,
+      curves: [{ label: "G", params: { Amplitude: 100, Mean: 0, SD: 0 } }],
+    }),
+    { error: "“G”: the Gaussian's SD must be greater than 0." },
+  );
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, {
+      equation: "homologous-competition-logx",
+      xMin: -12,
+      xMax: -6,
+      curves: [{ label: "H", params: { Bmax: 100, LogKd: -9, Bottom: 0 } }],
+    }),
+    { error: "The homologous model needs the radioligand concentration [L] (greater than 0)." },
+  );
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, {
+      equation: "homologous-competition-logx",
+      xMin: -12,
+      xMax: -6,
+      ligandConcentration: 0,
+      curves: [{ label: "H", params: { Bmax: 100, LogKd: -9, Bottom: 0 } }],
+    }),
+    { error: "The radioligand concentration [L] must be greater than 0." },
+  );
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, { ...base, extra: "sideways" } as unknown as PlotFunctionParams),
+    { error: "“sideways” is not something this analysis can plot alongside the function." },
+  );
+});
+
+check("plot a function wizard asks for the equation, range and each curve's parameters", () => {
+  const empty: TableData = { columns: ["Title", "X", "Y1"], rows: [] };
+  const table = readTable(empty);
+  const wizard = WIZARDS["plot-function"]!;
+  const asked = (a: Record<string, string | number> = {}) =>
+    wizard.questions(a, table).flatMap((q) => (q ? [q.id] : []));
+  // Before the equation is answered there are no per-curve questions yet.
+  deepStrictEqual(asked(), ["equation", "xMin", "xMax", "segments", "extra", "curves"]);
+  deepStrictEqual(asked({ equation: "gaussian" }), [
+    "equation",
+    "xMin",
+    "xMax",
+    "segments",
+    "extra",
+    "curves",
+    "curve1_label",
+    "curve1_Amplitude",
+    "curve1_Mean",
+    "curve1_SD",
+  ]);
+  deepStrictEqual(asked({ equation: "gaussian", curves: 2 }), [
+    "equation",
+    "xMin",
+    "xMax",
+    "segments",
+    "extra",
+    "curves",
+    "curve1_label",
+    "curve1_Amplitude",
+    "curve1_Mean",
+    "curve1_SD",
+    "curve2_label",
+    "curve2_Amplitude",
+    "curve2_Mean",
+    "curve2_SD",
+  ]);
+  // The homologous model asks for its [L] constant, as the fitter does.
+  ok(asked({ equation: "homologous-competition-logx" }).includes("ligandConcentration"));
+  ok(!asked({ equation: "gaussian" }).includes("ligandConcentration"));
+  // A two-curve family finishes with both curves' values; a blank name
+  // becomes "Curve N".
+  deepStrictEqual(
+    wizard.finish(
+      {
+        equation: "gaussian",
+        xMin: -3,
+        xMax: 3,
+        segments: 150,
+        extra: "none",
+        curves: 2,
+        curve1_label: "A",
+        curve1_Amplitude: 100,
+        curve1_Mean: 0,
+        curve1_SD: 1,
+        curve2_label: "",
+        curve2_Amplitude: 50,
+        curve2_Mean: 1,
+        curve2_SD: 2,
+      },
+      table,
+    ),
+    {
+      type: "plot-function",
+      params: {
+        equation: "gaussian",
+        xMin: -3,
+        xMax: 3,
+        segments: 150,
+        curves: [
+          { label: "A", params: { Amplitude: 100, Mean: 0, SD: 1 } },
+          { label: "Curve 2", params: { Amplitude: 50, Mean: 1, SD: 2 } },
+        ],
+        extra: "none",
+      },
+    },
+  );
+  // Offered on every table type (Prism: start from any data table) — last,
+  // except on contingency tables, where McNemar's test follows it.
+  for (const t of ["column", "xy", "grouped", "nested", "multiple", "survival", "contingency"] as const) {
+    const order = analysisOptionsForTable(t).map((o) => o.value);
+    ok(order.includes("plot-function"), `plot-function missing from ${t}`);
+    if (t === "contingency") strictEqual(order[order.indexOf("plot-function") + 1], "mcnemar");
+    else strictEqual(order[order.length - 1], "plot-function");
+  }
+});
+
+check("plot a function params survive a .hlx round-trip; a bogus equation is dropped", () => {
+  const withAnalysis: ProjectFilePayload = {
+    ...payload,
+    nodes: {
+      ...payload.nodes,
+      a1: {
+        id: "a1",
+        type: "analysis",
+        name: "Curve",
+        parentId: "t1",
+        analysisType: "plot-function",
+        analysisParams: {
+          equation: "gaussian",
+          xMin: -3,
+          xMax: 3,
+          segments: 150,
+          curves: [{ label: "Gaussian", params: { Amplitude: 100, Mean: 0, SD: 1 } }],
+          extra: "first-derivative",
+        },
+      },
+    },
+    childOrder: { t1: ["a1"] },
+  };
+  deepStrictEqual(read(serializeProjectFile(withAnalysis)).project.nodes.a1.analysisParams, {
+    equation: "gaussian",
+    xMin: -3,
+    xMax: 3,
+    segments: 150,
+    curves: [{ label: "Gaussian", params: { Amplitude: 100, Mean: 0, SD: 1 } }],
+    extra: "first-derivative",
+  });
+  const bogus = JSON.parse(serializeProjectFile(withAnalysis));
+  bogus.project.nodes.a1.analysisParams.equation = "nope";
+  strictEqual(
+    (read(JSON.stringify(bogus)).project.nodes.a1.analysisParams as { equation?: string } | undefined)?.equation,
+    undefined,
+  );
+  // A curve with a non-numeric parameter is left out whole; the good curve stays.
+  const bogusCurve = JSON.parse(serializeProjectFile(withAnalysis));
+  bogusCurve.project.nodes.a1.analysisParams.curves = [
+    { label: "Gaussian", params: { Amplitude: 100, Mean: 0, SD: 1 } },
+    { label: "Bad", params: { Amplitude: "lots", Mean: 0, SD: 1 } },
+  ];
+  deepStrictEqual(
+    (read(JSON.stringify(bogusCurve)).project.nodes.a1.analysisParams as { curves?: unknown } | undefined)?.curves,
+    [{ label: "Gaussian", params: { Amplitude: 100, Mean: 0, SD: 1 } }],
+  );
+});
+
+check("the generated-curves overlay draws each curve and its dashed extra series", () => {
+  const result: AnalysisResult = {
+    testType: "plot-function",
+    subtitle: "Gaussian",
+    stats: [],
+    groups: [],
+    notes: "",
+    generatedCurves: {
+      x: [0, 1, 2],
+      curves: [
+        {
+          label: "A",
+          y: [1, 2, 3],
+          extra: { kind: "first-derivative", label: "A (1st derivative)", y: [0, 1, 1] },
+        },
+        { label: "B", y: [3, 2, 1] },
+      ],
+    },
+  };
+  const options = newGraphOptions("xy-scatter");
+  const paint = paintOf(options, 0);
+  const fig = GRAPHS["xy-scatter"].build([], options, paint);
+  addGeneratedCurves(fig, result, paint);
+  const traces = fig.data as { name: string; y: (number | null)[]; line: { dash?: string } }[];
+  deepStrictEqual(
+    traces.map((t) => t.name),
+    ["A", "A (1st derivative)", "B"],
+  );
+  deepStrictEqual(traces[0].y, [1, 2, 3]);
+  strictEqual(traces[1].line.dash, "dash");
+  strictEqual(traces[2].line.dash, undefined);
 });
 
 // ── Undo and names ───────────────────────────────────────────────────────
