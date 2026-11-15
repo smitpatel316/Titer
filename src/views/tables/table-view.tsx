@@ -4,13 +4,15 @@ import { GROUPED_LIMITS, type ProjectNode, type RowGroup, type TableData } from 
 import type { TableMove } from "../../store/references";
 import { useProjectActions } from "../../store/use-project-store";
 import { Section, Stepper, WithInspector } from "../../components/inspector";
-import { Button, Input } from "../../ui/controls";
+import { Button, Input, Select } from "../../ui/controls";
 import { useLayout } from "../../store/use-layout";
 import { ColumnsIcon, MinusIcon, PlusIcon } from "@phosphor-icons/react";
 import { Toolbar } from "../../ui/layout";
 import { Grid } from "./grid";
 import {
   addRowGroup,
+  applySummaryFormat,
+  applySummaryFormatLoses,
   defaultRowGroups,
   regroupLoses,
   regroupTable,
@@ -23,6 +25,7 @@ import {
   setRowGroupName,
 } from "./table-data";
 import { isGrouped, isNested } from "../../lib/dataset";
+import { SUMMARY_FORMATS, summaryFormatOf, summarySubcolumns, type SummaryFormat } from "../../lib/summary-format";
 import { seriesKeyOf } from "../../lib/columns";
 import { confirmDelete } from "../../native";
 import { AddFloatingNoteButton, FloatingNotesLayer } from "../../components/floating-notes";
@@ -146,6 +149,31 @@ function GroupsPanel({ data, update }: { data: TableData; update: (next: TableDa
     }
     update(regroupTable(data, g, r), "Change Groups");
   };
+  // The sub-columns' format: raw replicates, or pre-calculated summaries
+  // (mean / SD or SEM / N…) entered instead of replicates. A summary format's
+  // width is fixed — the Sub-columns stepper is pinned to it (min = max =
+  // its width, so both buttons disable) — and narrowing to a shorter format
+  // asks first when a sub-column past its width holds values.
+  const format = summaryFormatOf(data);
+  const formatWidth = format === "replicates" ? replicates : summarySubcolumns(format).length;
+  const changeFormat = async (next: SummaryFormat) => {
+    if (next === format) return;
+    if (applySummaryFormatLoses(data, next)) {
+      const newWidth = next === "replicates" ? replicates : summarySubcolumns(next).length;
+      const dropped = data.columns
+        .slice(1, 1 + replicates)
+        .map((n) => n.slice(n.indexOf(":") + 1))
+        .slice(newWidth);
+      if (
+        !(await confirmDelete(
+          `Delete sub-column ${dropped.map((s) => `“${s}”`).join(", ")} of each group?`,
+          DELETED,
+        ))
+      )
+        return;
+    }
+    update(applySummaryFormat(data, next), "Change Sub-column Format");
+  };
   return (
     <Section title="Groups" icon={<ColumnsIcon />}>
       <Stepper
@@ -155,10 +183,19 @@ function GroupsPanel({ data, update }: { data: TableData; update: (next: TableDa
         step={1}
         onChange={(g) => void regroup(g, replicates)}
       />
+      <div className="flex items-center justify-between">
+        <span className="text-small text-secondary">Sub-column format</span>
+        <Select
+          value={format}
+          onChange={(f) => void changeFormat(f)}
+          options={SUMMARY_FORMATS.map((f) => ({ value: f.value, label: f.label }))}
+        />
+      </div>
       <Stepper
         label="Sub-columns"
         value={replicates}
-        {...GROUPED_LIMITS.replicates}
+        min={format === "replicates" ? GROUPED_LIMITS.replicates.min : formatWidth}
+        max={format === "replicates" ? GROUPED_LIMITS.replicates.max : formatWidth}
         step={1}
         onChange={(r) => void regroup(groups, r)}
       />

@@ -3,6 +3,7 @@
 // is parsed once (numeric.ts decides what a number is), and the reading is cached
 // per table version. An edit makes a new TableData, so the cache is never stale.
 import { hasXColumn, type TableData, type TableType } from "../store/types";
+import { summaryFormatOf, type SummaryFormat } from "./summary-format";
 import { excludedKey, seriesKeyOf } from "./columns";
 import { parseCell } from "./numeric";
 
@@ -37,6 +38,10 @@ export interface Dataset {
   /** A nested table's groups with their subgroups (empty for other tables) —
    *  the structure the nested tests read, alongside `sets`. */
   nested: NestedGroup[];
+  /** A grouped table's sub-column format: "replicates", or the summaries its
+   *  sub-columns hold (see src/lib/summary-format.ts) — the graphs' and the
+   *  stats' shared reading, so a summary table is never mistaken for replicates. */
+  summary: SummaryFormat;
 }
 
 /** A column, or a grouped table's group with its sub-columns. */
@@ -95,6 +100,7 @@ export function readTable(data: TableData): Dataset {
           ? byGroup(columns)
           : columns.map((c) => ({ name: c.name, columns: [c] })),
       nested: isNested(data) ? nestedGroupsOf(columns) : [],
+      summary: summaryFormatOf(data),
     };
     cache.set(data, dataset);
   }

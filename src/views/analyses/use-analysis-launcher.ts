@@ -9,6 +9,7 @@ import type { AnalysisParams, AnalysisPickerValue, AnalysisType } from "../../st
 import { countDataColumns, countDataGroups, hasRowGroups } from ".";
 import { WIZARDS } from "./wizards";
 import { readTable } from "../../lib/dataset";
+import { REPLICATE_TESTS, summaryTableProblem } from "../../lib/summary-format";
 
 /** Checks the table has at least `need` data columns; warns (naming `label`) otherwise. */
 function useColumnsPrecheck() {
@@ -32,6 +33,17 @@ function useAnalysisPrecheck() {
   return (tableId: string, testType: AnalysisType) => {
     const { label, minColumns } = ANALYSES[testType];
     if (!columnsPrecheck(tableId, minColumns, label)) return false;
+    // A test that needs raw replicates cannot run on a summary table (its
+    // sub-columns hold pre-calculated means, not values to test) — say so
+    // here, naming the way back, instead of running R on the summaries.
+    if ((REPLICATE_TESTS as readonly string[]).includes(testType)) {
+      const tableData = get().nodes[tableId]?.data;
+      const problem = tableData && summaryTableProblem(tableData, label);
+      if (problem) {
+        alert(`${label} can't run on this table.`, problem);
+        return false;
+      }
+    }
     // Multiple t tests compares 2 column groups per row. Count the groups that hold
     // data, not the table's structural group count.
     if (testType === "multiple-t-tests" && countDataGroups(get().nodes[tableId]?.data) < 2) {

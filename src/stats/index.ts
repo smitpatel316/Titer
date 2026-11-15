@@ -97,6 +97,7 @@ import { runMonteCarlo } from "./simulation/monte-carlo";
 import type { MonteCarloParams } from "./types";
 import type { TableData } from "../store/types";
 import { datasetColumns, readTable, setColumns, type Column } from "../lib/dataset";
+import { REPLICATE_TESTS, summaryTableProblem } from "../lib/summary-format";
 import { ensurePackages, packageErrorMessage, packageStatus } from "./webr";
 
 /** How every test runs: the columns of its data sets (`sets`, all by default), the
@@ -403,6 +404,13 @@ export function runAnalysis(
   const analysis = Object.hasOwn(ANALYSES, testType) ? ANALYSES[testType] : undefined;
   if (!analysis) return Promise.resolve({ error: `Unknown analysis type: ${String(testType)}` });
   const table = readTable(data);
+  // A test that needs raw replicates cannot run on a summary table — the
+  // launcher blocks it first, but a stale node (or a graph overlay) still
+  // lands here, so the run itself refuses with the same message.
+  if ((REPLICATE_TESTS as readonly string[]).includes(testType)) {
+    const problem = summaryTableProblem(data, analysis.label);
+    if (problem) return Promise.resolve({ error: problem });
+  }
   // A data set or a column the analysis names (a regression's Y…) must still be there.
   // Enzyme inhibition names several Y series (its `y` is a string[]), so an
   // array `y` is spread — a bare array here would stringify to one bogus

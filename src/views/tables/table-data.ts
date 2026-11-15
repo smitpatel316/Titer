@@ -12,6 +12,11 @@
 import type { RowGroup, TableData, TableType } from "../../store/types";
 import { seriesKeyOf } from "../../lib/columns";
 import { isGrouped, isNested } from "../../lib/dataset";
+import {
+  summaryFormatOf,
+  summarySubcolumns,
+  type SummaryFormat,
+} from "../../lib/summary-format";
 
 type Cell = string | null;
 
@@ -61,9 +66,15 @@ export function newTable(type: TableType, count: number): TableData {
   return { columns: ["Title", ...freshColumnNames(["Title"], type, count)], rows: [] };
 }
 
-/** A grouped table's sub-column names: "A:Y1", "A:Y2"… for each group key. */
-const subColumns = (keys: string[], replicates: number) =>
-  keys.flatMap((key) => Array.from({ length: replicates }, (_, r) => `${key}:Y${r + 1}`));
+/** A grouped table's sub-column names: "A:Y1", "A:Y2"… for each group key — or,
+ *  for a summary format, its named sub-columns ("A:Mean", "A:SD", "A:N"), whose
+ *  count is the format's width. */
+const subColumns = (keys: string[], replicates: number, format: SummaryFormat = "replicates") => {
+  const names = summarySubcolumns(format);
+  return keys.flatMap((key) =>
+    names.length ? names.map((n) => `${key}:${n}`) : Array.from({ length: replicates }, (_, r) => `${key}:Y${r + 1}`),
+  );
+};
 
 export function newGroupedTable(groups: number, replicates: number): TableData {
   const keys = Array.from({ length: groups }, (_, g) => columnLetter(g));
@@ -309,7 +320,10 @@ export function renameSubgroup(data: TableData, groupKey: string, oldSub: string
 
 /** Changes how many groups and sub-columns a grouped table has. Every value stays
  *  in its group and sub-column (with its exclusion); groups keep their
- *  names; only groups or sub-columns beyond the new counts are dropped. */
+ *  names; only groups or sub-columns beyond the new counts are dropped.
+ *  Format-aware: a summary table's sub-columns keep their summary names
+ *  ("A:Mean"…), so a load-time rebuild or a group-count change never renames
+ *  them back to "A:Y1" (the name-based mapping then still finds them). */
 export function regroupTable(
   data: TableData,
   groups: number,
@@ -321,7 +335,7 @@ export function regroupTable(
   const keys = [...new Set(data.columns.slice(lead).map(seriesKeyOf))].slice(0, groups);
   // A new group takes the letter of its place (C for the third), or the next free one.
   for (let i = keys.length; keys.length < groups; i++) if (!keys.includes(columnLetter(i))) keys.push(columnLetter(i));
-  const columns = [...data.columns.slice(0, lead), ...subColumns(keys, replicates)];
+  const columns = [...data.columns.slice(0, lead), ...subColumns(keys, replicates, summaryFormatOf(data))];
   const from = columns.map((name, c) => (c < lead ? c : data.columns.indexOf(name)));
   const to = (c: number) => (c < lead ? c : columns.indexOf(data.columns[c]));
   return {
@@ -341,6 +355,59 @@ export function regroupTable(
 export function regroupDropped(data: TableData, groups: number, replicates: number, type: "grouped" | "xy" = "grouped"): string[] {
   const kept = new Set(regroupTable(data, groups, replicates, type).columns);
   return data.columns.filter((name, c) => !kept.has(name) && data.rows.some((row) => row[c]));
+}
+
+/** Switches a grouped table's sub-column format (raw replicates, or
+ *  pre-calculated summaries). Unlike `regroupTable`'s name-based mapping —
+ *  which would drop every value on a rename, since no "A:Mean" is ever an
+ *  "A:Y1" — this rebuilds positionally: every value stays in its group's
+ *  slot, so switching formats never moves a value, and narrowing to a
+ *  shorter format drops only the slots past its width. */
+export function applySummaryFormat(data: TableData, format: SummaryFormat): TableData {
+  const groups = data.groups!;
+  const oldWidth = data.replicates!;
+  const newWidth = format === "replicates" ? oldWidth : summarySubcolumns(format).length;
+  const keys = [...new Set(data.columns.slice(1).map(seriesKeyOf))].slice(0, groups);
+  for (let i = keys.length; keys.length < groups; i++) if (!keys.includes(columnLetter(i))) keys.push(columnLetter(i));
+  const columns = ["Title", ...subColumns(keys, newWidth, format)];
+  // Slot (group, position within the group) of a column, in the old width and
+  // in the new one: a value stays in its group's slot when the format changes.
+  const oldSlot = (c: number): [number, number] => [Math.floor((c - 1) / oldWidth), (c - 1) % oldWidth];
+  const newSlot = (c: number): [number, number] => [Math.floor((c - 1) / newWidth), (c - 1) % newWidth];
+  const at = (c: number): number | null => {
+    const [g, s] = oldSlot(c);
+    return s < newWidth ? 1 + g * newWidth + s : null;
+  };
+  return {
+    ...data,
+    columns,
+    rows: data.rows.map((row) =>
+      columns.map((_, c) => {
+        if (c === 0) return row[0] ?? null;
+        const [g, s] = newSlot(c);
+        const from = 1 + g * oldWidth + s;
+        return from < data.columns.length ? (row[from] ?? null) : null;
+      }),
+    ),
+    replicates: newWidth,
+    summaryFormat: format === "replicates" ? undefined : format,
+    excluded: remapExcluded(data, (r, c) => {
+      const to = c === 0 ? 0 : at(c);
+      return to === null ? null : [r, to];
+    }),
+    widths: widthsOf(data.widths, columns),
+  };
+}
+
+/** Whether switching to `format` deletes a value: a sub-column past the new
+ *  format's width holding one (same width, or widening, never does). */
+export function applySummaryFormatLoses(data: TableData, format: SummaryFormat): boolean {
+  const oldWidth = data.replicates!;
+  const newWidth = format === "replicates" ? oldWidth : summarySubcolumns(format).length;
+  if (newWidth >= oldWidth) return false;
+  return data.columns.some(
+    (_, c) => c >= 1 && (c - 1) % oldWidth >= newWidth && data.rows.some((row) => row[c]),
+  );
 }
 
 /** Sets how many replicates each Y data set of an XY table holds: one column each, named

@@ -45,6 +45,8 @@ import {
 } from "../src/store/types";
 import {
   addRowGroup,
+  applySummaryFormat,
+  applySummaryFormatLoses,
   columnsBeyond,
   defaultRowGroups,
   deleteColumns,
@@ -74,6 +76,8 @@ import { flattenThreeWay, rowGroupBands } from "../src/stats/grouped/base";
 import { gridMenu } from "../src/views/tables/grid-menu";
 import { analysisOptionsForTable, analysisOptionsKey } from "../src/views/analyses";
 import { followTable } from "../src/store/references";
+import { isSummaryFormatValue, summaryFormatOf, summaryTableProblem } from "../src/lib/summary-format";
+import { tCrit95 } from "../src/lib/student-t";
 import { pairKey } from "../src/lib/columns";
 import {
   NAMED_COLORS,
@@ -109,7 +113,7 @@ import {
 } from "../src/views/analyses/wizards";
 import { initialAnswer } from "../src/views/analyses/analysis-wizard";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, movedText, paintOf, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, movedText, paintOf, perRowSummaryStats, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -1340,6 +1344,266 @@ check("fewer sub-columns keep each value in its group", () => {
   deepStrictEqual(t.columns, ["Title", "A:Y1", "A:Y2", "Treated:Y1", "Treated:Y2"]);
   deepStrictEqual(t.rows[0], ["r1", "a1", "a2", "b1", "b2"]);
   deepStrictEqual(t.excluded, ["0,3"]);
+});
+
+// ── Summary sub-columns (v2 item 8) ───────────────────────────────────────
+
+/** A grouped table holding pre-calculated summaries (Mean, SD, N per group). */
+const summaryTable = (): TableData => ({
+  columns: ["Title", "A:Mean", "A:SD", "A:N", "B:Mean", "B:SD", "B:N"],
+  rows: [
+    ["r1", "10", "2", "4", "20", "4", "9"],
+    ["r2", "12", "3", "4", "22", "6", "9"],
+  ],
+  groups: 2,
+  replicates: 3,
+  summaryFormat: "mean-sd-n",
+});
+
+check("summary subcolumns: switching format renames sub-columns in place, values stay in their slot", () => {
+  const t = applySummaryFormat(grouped(), "mean-sd-n");
+  deepStrictEqual(t.columns, ["Title", "A:Mean", "A:SD", "A:N", "Treated:Mean", "Treated:SD", "Treated:N"]);
+  deepStrictEqual(t.rows[0], ["r1", "a1", "a2", "a3", "b1", "b2", "b3"]);
+  strictEqual(t.replicates, 3);
+  strictEqual(t.summaryFormat, "mean-sd-n");
+  strictEqual(summaryFormatOf(t), "mean-sd-n");
+  // Narrowing to Mean, SD drops the N column (its values go with it).
+  const narrow = applySummaryFormat(t, "mean-sd");
+  deepStrictEqual(narrow.columns, ["Title", "A:Mean", "A:SD", "Treated:Mean", "Treated:SD"]);
+  deepStrictEqual(narrow.rows[0], ["r1", "a1", "a2", "b1", "b2"]);
+  strictEqual(narrow.replicates, 2);
+  strictEqual(narrow.summaryFormat, "mean-sd");
+  // Back to Replicates restores Y names, values still in their slots.
+  const back = applySummaryFormat(narrow, "replicates");
+  deepStrictEqual(back.columns, ["Title", "A:Y1", "A:Y2", "Treated:Y1", "Treated:Y2"]);
+  deepStrictEqual(back.rows[0], ["r1", "a1", "a2", "b1", "b2"]);
+  strictEqual(back.summaryFormat, undefined);
+});
+
+check("summary subcolumns: narrowing only asks when a dropped sub-column holds values", () => {
+  const t = applySummaryFormat(grouped(), "mean-sd-n");
+  strictEqual(applySummaryFormatLoses(t, "mean-sd"), true); // the N column holds a3/b3
+  strictEqual(applySummaryFormatLoses(t, "mean-sem-n"), false); // same width, nothing dropped
+  strictEqual(applySummaryFormatLoses(t, "replicates"), false);
+  const empty = applySummaryFormat(newGroupedTable(2, 3), "mean-sd-n");
+  strictEqual(applySummaryFormatLoses(empty, "mean-sd"), false);
+});
+
+check("summary subcolumns: regrouping a summary table keeps its summary names", () => {
+  const t = regroupTable(applySummaryFormat(grouped(), "mean-sd-n"), 3, 3);
+  deepStrictEqual(t.columns, [
+    "Title",
+    "A:Mean",
+    "A:SD",
+    "A:N",
+    "Treated:Mean",
+    "Treated:SD",
+    "Treated:N",
+    "C:Mean",
+    "C:SD",
+    "C:N",
+  ]);
+  deepStrictEqual(t.rows[0], ["r1", "a1", "a2", "a3", "b1", "b2", "b3", null, null, null]);
+  strictEqual(t.summaryFormat, "mean-sd-n");
+});
+
+check("summary subcolumns: a summary table survives a save and reload", () => {
+  const data = summaryTable();
+  const file: ProjectFilePayload = {
+    nodes: { t1: { id: "t1", type: "table", name: "Summary", parentId: null, tableType: "grouped", data } },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const { project, updated } = read(serializeProjectFile(file));
+  strictEqual(updated, false);
+  const back = project.nodes.t1.data!;
+  strictEqual(back.summaryFormat, "mean-sd-n");
+  deepStrictEqual(back.columns, data.columns);
+  deepStrictEqual(back.rows, data.rows);
+  strictEqual(summaryFormatOf(back), "mean-sd-n");
+});
+
+check("summary subcolumns: a summaryFormat that doesn't match its columns is dropped on load", () => {
+  const file: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "Mismatch",
+        parentId: null,
+        tableType: "grouped",
+        data: { ...grouped(), summaryFormat: "mean-sd-n" },
+      },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const { project } = read(serializeProjectFile(file));
+  strictEqual(project.nodes.t1.data!.summaryFormat, undefined);
+  strictEqual(isSummaryFormatValue(project.nodes.t1.data!.summaryFormat), false);
+});
+
+check("summary subcolumns: per-row stats read the stored error, converting SD↔SEM via N", () => {
+  const sets = readTable(summaryTable()).sets;
+  // A: mean 10, SD 2, N 4 → SEM 1, 95% CI half-width t(3) × 1.
+  deepStrictEqual(perRowSummaryStats(sets[0].columns, 2, "mean-sd-n", "sem"), {
+    center: [10, 12],
+    error: [1, 1.5],
+    errorMinus: null,
+  });
+  deepStrictEqual(perRowSummaryStats(sets[0].columns, 2, "mean-sd-n", "sd").error, [2, 3]);
+  deepStrictEqual(perRowSummaryStats(sets[0].columns, 2, "mean-sd-n", "ci").error, [
+    tCrit95(3) * 1,
+    tCrit95(3) * 1.5,
+  ]);
+  // B: mean 20, SD 4, N 9 → SEM 4/3.
+  deepStrictEqual(perRowSummaryStats(sets[1].columns, 2, "mean-sd-n", "sem").error, [4 / 3, 2]);
+  // No error bars when error is off, and no SEM without an N column.
+  strictEqual(perRowSummaryStats(sets[0].columns, 2, "mean-sd-n", "none").error, null);
+  const noN: TableData = {
+    columns: ["Title", "A:Mean", "A:SD"],
+    rows: [["r1", "10", "2"]],
+    groups: 1,
+    replicates: 2,
+    summaryFormat: "mean-sd",
+  };
+  deepStrictEqual(perRowSummaryStats(readTable(noN).sets[0].columns, 1, "mean-sd", "sem"), {
+    center: [10],
+    error: [null],
+    errorMinus: null,
+  });
+  // Asymmetric formats keep their two sides apart.
+  const pm: TableData = {
+    columns: ["Title", "A:Mean", "A:+error", "A:−error"],
+    rows: [["r1", "10", "3", "1"]],
+    groups: 1,
+    replicates: 3,
+    summaryFormat: "mean-plus-minus",
+  };
+  deepStrictEqual(perRowSummaryStats(readTable(pm).sets[0].columns, 1, "mean-plus-minus", "sem"), {
+    center: [10],
+    error: [3],
+    errorMinus: [1],
+  });
+  const ul: TableData = {
+    columns: ["Title", "A:Mean", "A:Upper limit", "A:Lower limit"],
+    rows: [["r1", "10", "13", "8"]],
+    groups: 1,
+    replicates: 3,
+    summaryFormat: "mean-upper-lower",
+  };
+  deepStrictEqual(perRowSummaryStats(readTable(ul).sets[0].columns, 1, "mean-upper-lower", "sem"), {
+    center: [10],
+    error: [3],
+    errorMinus: [2],
+  });
+});
+
+check("summary subcolumns: grouped bars draw the mean with the stored error (SEM by default)", () => {
+  const dataset = readTable(summaryTable());
+  const options = newGraphOptions("grouped-bars");
+  const fig = GRAPHS["grouped-bars"].build(
+    dataset.numeric,
+    options,
+    paintOf(options, 2),
+    dataset.titles,
+    "mean-sd-n",
+  );
+  const traces = fig.data as { name: string; y: (number | null)[]; error_y?: { array: number[] } }[];
+  deepStrictEqual(traces.map((t) => t.name), ["A", "B"]);
+  deepStrictEqual(traces[0].y, [10, 12]);
+  deepStrictEqual(traces[0].error_y?.array, [1, 1.5]);
+  deepStrictEqual(traces[1].y, [20, 22]);
+  deepStrictEqual(traces[1].error_y?.array, [4 / 3, 2]);
+});
+
+check("summary subcolumns: interleaved scatter on a summary table draws centers, not points", () => {
+  const dataset = readTable(summaryTable());
+  const options = newGraphOptions("grouped-scatter");
+  const fig = GRAPHS["grouped-scatter"].build(
+    dataset.numeric,
+    options,
+    paintOf(options, 2),
+    dataset.titles,
+    "mean-sd-n",
+  );
+  // Two traces per group (center line + error whiskers) — no individual-points trace.
+  strictEqual(fig.data.length, 4);
+  const traces = fig.data as { mode?: string; name?: string }[];
+  ok(!traces.some((t) => t.mode === "markers" && (t.name === "A" || t.name === "B")));
+});
+
+check("summary subcolumns: the heatmap plots the Mean column, not the mean of Mean/SD/N", () => {
+  const dataset = readTable(summaryTable());
+  const cols = plotColumns(dataset, "heatmap", newGraphOptions("heatmap"), "grouped");
+  deepStrictEqual(cols.map((c) => c.name), ["A:Mean", "B:Mean"]);
+  deepStrictEqual(cols[0].byRow, [10, 12]);
+  deepStrictEqual(cols[1].byRow, [20, 22]);
+});
+
+check("summary subcolumns: a grouped summary table writes one y_sd_n dataset per group", async () => {
+  const written = await writePrism(
+    {
+      nodes: {
+        table_1: {
+          id: "table_1",
+          type: "table",
+          name: "Summary",
+          parentId: null,
+          tableType: "grouped",
+          data: summaryTable(),
+        },
+      },
+      rootOrder: ["table_1"],
+      childOrder: { table_1: [] },
+      activeNodeId: "table_1",
+    },
+    "1.2.0",
+  );
+  const zip = await JSZip.loadAsync(written.bytes);
+  const setJsons = await Promise.all(
+    Object.keys(zip.files)
+      .filter((p) => p.startsWith("data/sets/") && p.endsWith(".json"))
+      .map(async (p) => JSON.parse(await zip.files[p].async("string"))),
+  );
+  const ySets = setJsons.filter((s) => s.attributes?.includes("DS_ATTR_Y"));
+  deepStrictEqual(
+    ySets.map((s) => [s.title, s.format]),
+    [
+      ["A", "y_sd_n"],
+      ["B", "y_sd_n"],
+    ],
+  );
+  const sheetJsons = await Promise.all(
+    Object.keys(zip.files)
+      .filter((p) => p.startsWith("data/sheets/") && p.endsWith(".json"))
+      .map(async (p) => JSON.parse(await zip.files[p].async("string"))),
+  );
+  strictEqual(sheetJsons[0].table.dataFormat, "y_sd_n");
+  strictEqual(sheetJsons[0].table.replicatesCount, undefined);
+});
+
+check("summary subcolumns: replicate-needing tests refuse a summary table", async () => {
+  const out = await runAnalysis("two-way-anova", summaryTable());
+  ok("error" in out && /pre-calculated summaries \(Mean, SD, N\)/.test(out.error));
+  ok("error" in out && /back to Replicates/.test(out.error));
+  // The guard names the problem, and a replicates table has none.
+  strictEqual(summaryTableProblem(grouped(), "Two-way ANOVA"), undefined);
+  ok(/Mean, SD, N/.test(summaryTableProblem(summaryTable(), "Two-way ANOVA") ?? ""));
+});
+
+check("summary subcolumns: the Groups panel offers the format and box/volcano refuse it", () => {
+  const view = readFileSync("src/views/tables/table-view.tsx", "utf8");
+  ok(/SUMMARY_FORMATS/.test(view), "Groups panel doesn't offer the summary formats");
+  ok(/applySummaryFormat/.test(view), "Groups panel doesn't switch the format");
+  const graphView = readFileSync("src/views/graphs/graph-view.tsx", "utf8");
+  ok(
+    /grouped-box/.test(graphView) && /summaryTableProblem/.test(graphView),
+    "graph-view doesn't refuse box/violin on a summary table",
+  );
+  ok(/family === "volcano"/.test(graphView) && /summary/.test(graphView), "grouped volcano isn't refused on a summary table");
 });
 
 check("clearing an excluded cell drops its exclusion, so no phantom * and no auto-exclude (#21)", () => {

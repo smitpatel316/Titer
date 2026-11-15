@@ -72,6 +72,7 @@ import { TABLES } from "../views/tables";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
 import { ANALYSES } from "../stats";
 import { isGrouped, isNested } from "./dataset";
+import { isSummaryFormatValue, summarySubcolumns } from "./summary-format";
 import { seriesKeyOf } from "./columns";
 import { regroupDropped, regroupTable, renestDropped, renestTable } from "../views/tables/table-data";
 import {
@@ -169,7 +170,7 @@ const NODE_KEYS = Object.keys({
 // prettier-ignore
 const DATA_KEYS = Object.keys({
   columns: 1, rows: 1, groups: 1, replicates: 1, subgroups: 1, rowGroups: 1, excluded: 1,
-  widths: 1, freezeTitle: 1, notes: 1,
+  widths: 1, freezeTitle: 1, notes: 1, summaryFormat: 1,
 } satisfies Record<keyof TableData, 1>);
 
 // Graph options without a default, by the kind of value they hold.
@@ -490,6 +491,21 @@ function readData(raw: Obj, type: unknown): {
   // (a hand-built or pre-1.0.9 file), whose groups start right after Title.
   const lead = type === "xy" && !columns[1]?.includes(":") ? 2 : 1;
   const kind = lead === 2 ? "xy" : "grouped";
+  // A summary format survives only when it fits its columns: a known format,
+  // whose width is the table's sub-column count, with every group's suffixes
+  // in its order ("A:Mean", "A:SD", "A:N"). Anything else is a stale or
+  // hand-edited value — dropped, so the columns read as plain replicates and
+  // the load-time rebuild below can put the names straight.
+  if (isGrouped(data) && data.summaryFormat !== undefined) {
+    const format = data.summaryFormat;
+    const subs = isSummaryFormatValue(format) ? summarySubcolumns(format) : [];
+    const fits =
+      subs.length === data.replicates &&
+      columns
+        .slice(lead)
+        .every((name, i) => name.slice(name.indexOf(":") + 1) === subs[i % subs.length]);
+    if (!fits) data = defined({ ...data, summaryFormat: undefined });
+  }
   if (isGrouped(data) && columns.length > lead) {
     const groups = [...new Set(columns.slice(lead).map(seriesKeyOf))];
     const replicates = Math.max(...groups.map((g) => columns.slice(lead).filter((c) => seriesKeyOf(c) === g).length));

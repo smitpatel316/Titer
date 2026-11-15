@@ -28,6 +28,7 @@
 import JSZip from "jszip";
 import type { ProjectFilePayload } from "./project-file";
 import type { NonlinearModel } from "../stats/types";
+import { summaryFormatDef } from "./summary-format";
 
 export interface PrismWriteIssue {
   severity: "error" | "warning";
@@ -250,26 +251,43 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
     let sets: WriteSet[];
     if (tableType === "grouped") {
       format = "grouped";
-      // Columns are "Group:Y1"… — regroup by the part before ":Y".
+      // Columns are "Group:Mean"… or "Group:Y1"… — regroup by the part before
+      // the last ":". A summary table emits one dataset per group in its
+      // matching dataFormat (y_sd_n, y_se_n, …); a replicates table one
+      // y_replicates dataset per group, as before.
       const groups = new Map<string, number[]>();
       yColumns.forEach((c, i) => {
-        const m = /^(.*):Y\d+$/.exec(c.name);
-        const group = m ? m[1] : c.name;
+        const group = c.name.includes(":") ? c.name.slice(0, c.name.lastIndexOf(":")) : c.name;
         const list = groups.get(group) ?? [];
         list.push(i);
         groups.set(group, list);
       });
+      const def =
+        data.summaryFormat && data.summaryFormat !== "replicates" ? summaryFormatDef(data.summaryFormat) : null;
+      // A summary dataFormat only when the columns actually hold it (the
+      // first group's suffixes, in order) — a mismatched table writes as
+      // replicates instead of claiming a format its columns don't hold.
+      const firstGroup = [...groups.values()][0] ?? [];
+      const suffixesMatch =
+        def !== null &&
+        firstGroup.length === def.subcolumns.length &&
+        firstGroup.every(
+          (ci, k) => yColumns[ci].name.slice(yColumns[ci].name.lastIndexOf(":") + 1) === def.subcolumns[k],
+        );
+      const summaryDataFormat = suffixesMatch ? (def!.dataFormat ?? "y_replicates") : "y_replicates";
       sets = [...groups.entries()].map(([title, cols]) => ({
         title,
         columns: cols,
-        dataFormat: "y_replicates",
-        replicatesCount: cols.length,
+        dataFormat: summaryDataFormat,
+        ...(summaryDataFormat === "y_replicates" ? { replicatesCount: cols.length } : {}),
       }));
-      dataFormat = "y_replicates";
+      dataFormat = summaryDataFormat;
       replicatesCount =
-        data.groups !== undefined && data.replicates !== undefined
-          ? data.replicates
-          : Math.max(...sets.map((s) => s.columns.length));
+        summaryDataFormat === "y_replicates"
+          ? data.groups !== undefined && data.replicates !== undefined
+            ? data.replicates
+            : Math.max(...sets.map((s) => s.columns.length))
+          : undefined;
     } else {
       sets = groupDatasets(yColumns);
       // The table's dataFormat is its datasets' format when they agree

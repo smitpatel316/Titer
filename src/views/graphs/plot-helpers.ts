@@ -14,6 +14,7 @@ import { pointKeyOf } from "../../lib/columns";
 import type { GraphFigure } from ".";
 import { paletteColor, paletteOf, withOpacity } from "../../lib/palettes";
 import { mean, median, sd, sem } from "../../lib/summary";
+import { summaryFormatDef, type SummaryFormat } from "../../lib/summary-format";
 import { tCrit95 } from "../../lib/student-t";
 
 export const INK = "#111827"; // axes + titles only
@@ -31,8 +32,10 @@ export interface Paint {
   bars: (key: string, index: number) => Record<string, unknown>;
   /** The pattern over its fill, if it has one (Plotly's `pattern` / `fillpattern`). */
   pattern: (key: string, index: number) => { shape: string; fgcolor: string; bgcolor: string } | undefined;
-  /** Its error bars of `array` (Plotly's `error_y` or `error_x`). */
-  errorBars: (key: string, index: number, array: number[]) => Record<string, unknown>;
+  /** Its error bars of `array` (Plotly's `error_y` or `error_x`), with an
+   *  optional `arrayminus` for asymmetric errors (a summary table's +error /
+   *  −error, or upper / lower limits, which differ above and below the mean). */
+  errorBars: (key: string, index: number, array: number[], arrayminus?: number[]) => Record<string, unknown>;
   /** Its mean or median line, drawn like its error bars (Plotly's `line`). */
   centerLine: (key: string, index: number) => { color: string; width: number };
   /** The fill of its bars, boxes, violins and areas. */
@@ -107,13 +110,19 @@ export function paintOf(options: GraphOptions, count: number): Paint {
       return { color: fill(key, index), line: edge(key, index), ...(over && { pattern: over }) };
     },
     pattern,
-    errorBars: (key, index, array) => {
+    errorBars: (key, index, array, arrayminus?) => {
       // Only above (or right of) the value: none below, and no cap at its foot (`withCaps`).
+      // An asymmetric error keeps its own lower side instead — unless the bars
+      // go one way only, which has no lower side at all.
       const above = options.errorDirection === "above";
       return {
         type: "data",
         array,
-        ...(above ? { symmetric: false, arrayminus: array.map(() => 0) } : {}),
+        ...(above
+          ? { symmetric: false, arrayminus: array.map(() => 0) }
+          : arrayminus
+            ? { symmetric: false, arrayminus }
+            : {}),
         color: errorColor(key, index),
         thickness: options.errorWidth,
         width: above ? 0 : options.errorCaps,
@@ -736,6 +745,73 @@ export function perRowStats(
   return { center: c, error: e };
 }
 
+/** Per-row center and error for one group of a summary table: the center is
+ *  the stored Mean; the error is the stored error, converted to the graph's
+ *  error kind exactly via N when N is present (SD ↔ SEM), or the 95% CI
+ *  half-width (t × SEM) when N ≥ 2. A conversion that needs an N the format
+ *  doesn't store (Mean, SD with SEM or CI asked) has no error bar — a null
+ *  there, never a guessed number. `errorMinus` carries the lower side for the
+ *  asymmetric formats (Mean, +error, −error and Mean, upper, lower limits),
+ *  whose upper and lower errors differ; it is null for the symmetric ones.
+ *  `center[r]` is null where the group has no Mean in that row. */
+export function perRowSummaryStats(
+  cols: Column[],
+  rows: number,
+  format: SummaryFormat,
+  error: GraphOptions["error"],
+): { center: (number | null)[]; error: (number | null)[] | null; errorMinus: (number | null)[] | null } {
+  const def = summaryFormatDef(format);
+  const suffixOf = (name: string) => name.slice(name.indexOf(":") + 1);
+  const col = (suffix: string) => cols.find((c) => suffixOf(c.name) === suffix);
+  const meanCol = col("Mean");
+  const nCol = col("N");
+  const center: (number | null)[] = [];
+  const err: (number | null)[] | null = error === "none" ? null : [];
+  const errMinus: (number | null)[] | null = error === "none" ? null : [];
+  for (let r = 0; r < rows; r++) {
+    const m = meanCol?.byRow[r] ?? null;
+    center.push(m);
+    if (!err || !errMinus) continue;
+    if (m == null) {
+      err.push(null);
+      errMinus.push(null);
+      continue;
+    }
+    const n = nCol?.byRow[r] ?? null;
+    if (def.errorKind === "plus-minus") {
+      err.push(col("+error")?.byRow[r] ?? null);
+      errMinus.push(col("−error")?.byRow[r] ?? null);
+      continue;
+    }
+    if (def.errorKind === "upper-lower") {
+      const upper = col("Upper limit")?.byRow[r] ?? null;
+      const lower = col("Lower limit")?.byRow[r] ?? null;
+      err.push(upper == null ? null : upper - m);
+      errMinus.push(lower == null ? null : m - lower);
+      continue;
+    }
+    // The stored error, as an SD: SD itself, SEM × √N, or CV% of the mean.
+    const stored = def.errorKind === "sd" ? col("SD")?.byRow[r] ?? null : def.errorKind === "sem" ? col("SEM")?.byRow[r] ?? null : col("CV")?.byRow[r] ?? null;
+    const asSd =
+      stored == null
+        ? null
+        : def.errorKind === "sem"
+          ? n == null
+            ? null
+            : stored * Math.sqrt(n)
+          : def.errorKind === "cv"
+            ? (stored / 100) * m
+            : stored;
+    const asSem =
+      asSd == null ? null : def.errorKind === "sem" ? stored : n == null ? null : asSd / Math.sqrt(n);
+    err.push(
+      error === "sd" ? asSd : error === "sem" ? asSem : n == null || n < 2 || asSem == null ? null : tCrit95(n - 1) * asSem,
+    );
+    errMinus.push(null);
+  }
+  return { center, error: err, errorMinus: errMinus?.every((v) => v == null) ? null : errMinus };
+}
+
 /** A data set as one column: on each row, the center (mean or median) of its values.
  *  A set of one column is that column. */
 export function centerColumn({ name, columns }: DataSet, center: GraphOptions["center"]): Column {
@@ -749,6 +825,12 @@ export function centerColumn({ name, columns }: DataSet, center: GraphOptions["c
     values: rows.map((r) => byRow[r]!),
     rows,
   };
+}
+
+/** A data set's Mean column (a summary table's group), if it has one — what a
+ *  heatmap plots, instead of `centerColumn` (which would average Mean/SD/N). */
+export function summaryMeanColumn({ columns }: DataSet): Column | undefined {
+  return columns.find((c) => c.name.slice(c.name.indexOf(":") + 1) === "Mean");
 }
 
 /** Horizontal offset of group `g` within a row's slot, so interleaved scatter

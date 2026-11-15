@@ -20,6 +20,7 @@ import {
 import type { BindingKineticsParams, BindingSaturationParams, DoseResponseSpecialParams, EnzymeInhibitionParams, LinearRegressionParams, SimpleLogisticRegressionParams, NonlinearRegressionParams, CoxPHParams, PoissonRegressionParams, DemingRegressionParams } from "../../stats/types";
 import { useProjectStore } from "../../store/use-project-store";
 import { groupsOf, isGrouped, readTable, splitXY, xyProblem, type Column } from "../../lib/dataset";
+import { summaryTableProblem } from "../../lib/summary-format";
 import { paletteOf } from "../../lib/palettes";
 import { computeGroupedDEG } from "../../lib/deg";
 import { useAnalysis } from "../analyses/use-analysis";
@@ -154,8 +155,9 @@ export function GraphView({ node }: { node: ProjectNode }) {
 
   // A volcano on a grouped table: Titer computes the DEGs between two of its groups
   // (per-row Welch t test + BH FDR) and plots them, read like any other table.
+  // Not on a summary table: a Welch test on stored Means is silently wrong.
   const volcanoGroups =
-    family === "volcano" && parent?.tableType === "grouped" && dataset
+    family === "volcano" && parent?.tableType === "grouped" && dataset && dataset.summary === "replicates"
       ? groupsOf(dataset.numeric).map((g) => g.name)
       : undefined;
   const volcanoColumns = React.useMemo(() => {
@@ -228,7 +230,14 @@ export function GraphView({ node }: { node: ProjectNode }) {
   const volcanoBelowZero = volcanoY?.values.filter((p) => p < 0).length ?? 0;
   // A volcano whose chosen column is gone says so, and draws no other in its place.
   const gone = family === "volcano" ? volcanoAxes([], volcanoColumns, buildOptions).gone : undefined;
-  const lack = xyLack ?? (gone === undefined ? undefined : `The column “${gone}” is no longer in the table.`);
+  // Box and violin need raw replicates (a box from Mean/SD/N would be silently
+  // wrong), as does a grouped volcano (a Welch test on stored Means) — a
+  // summary table says so here instead of drawing.
+  const summaryLack =
+    data && parent?.tableType === "grouped" && (type === "grouped-box" || family === "volcano")
+      ? summaryTableProblem(data, GRAPHS[type].label)
+      : undefined;
+  const lack = xyLack ?? summaryLack ?? (gone === undefined ? undefined : `The column “${gone}” is no longer in the table.`);
   const hasData = !lack && columns.some((c) => c.values.length > 0);
 
   // The figure's traces as last drawn, without the selection ring.
@@ -566,7 +575,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
           ? kmeansResult.kmeansClusters.length
           : seriesNames.length,
       );
-      const fig = GRAPHS[type].build(coxSurvivalCols ?? volcanoColumns, buildOptions, paint, dataset?.titles);
+      const fig = GRAPHS[type].build(coxSurvivalCols ?? volcanoColumns, buildOptions, paint, dataset?.titles, dataset?.summary);
       fig.data = withCaps(fig.data, options);
       if (family === "column" && options.sigAnalysisId) addSignificance(fig, columns, type, options, comparisons ?? []);
       if (type === "xy-scatter" && curveParams) {

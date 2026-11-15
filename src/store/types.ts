@@ -2,6 +2,7 @@
 // modules can depend on it without creating a cycle.
 
 import type { AnalysisParams, AnalysisType } from "../stats/types";
+import type { SummaryFormat } from "../lib/summary-format";
 
 export type NodeType = "table" | "analysis" | "graph" | "figure";
 /** What an item is, as menus name it ("Delete Graph…"). */
@@ -518,6 +519,10 @@ export interface TableData {
   groups?: number;
   /** Grouped tables only: replicate sub-columns per group. */
   replicates?: number;
+  /** Grouped tables only: how the sub-columns are formatted — raw replicates,
+   *  or pre-calculated summaries (mean / SD or SEM / N, …) entered instead of
+   *  replicates (see src/lib/summary-format.ts). Omitted = replicates. */
+  summaryFormat?: SummaryFormat;
   /** Nested tables only: subgroups per group (each subgroup is one animal /
    *  subject, whose replicate measurements sit in its sub-columns). */
   subgroups?: number;

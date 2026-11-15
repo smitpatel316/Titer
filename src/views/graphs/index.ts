@@ -11,9 +11,10 @@ import {
 } from "../../store/types";
 import type { SelectorOption } from "../../components/universal-modal";
 import { readTable, seriesOf, splitXY, type Column, type Dataset } from "../../lib/dataset";
+import type { SummaryFormat } from "../../lib/summary-format";
 import { paletteNamed, savedPalette } from "../../lib/palettes";
 import { titleCase } from "../../lib/format";
-import { centerColumn, type Paint } from "./plot-helpers";
+import { centerColumn, summaryMeanColumn, type Paint } from "./plot-helpers";
 import { individual } from "./individual";
 import { beforeAfter, groupedBeforeAfter } from "./before-after";
 import { boxViolin } from "./box-violin";
@@ -77,6 +78,9 @@ export interface GraphModule {
     paint: Paint,
     /** Row titles, which label the rows on a grouped graph or a heatmap. */
     titles?: (string | null)[],
+    /** A grouped table's sub-column format ("replicates", or the summaries its
+     *  sub-columns hold) — only the grouped builders read it. */
+    summary?: SummaryFormat,
   ) => GraphFigure;
 }
 
@@ -131,7 +135,7 @@ export function variablePair<T extends { name: string }>(numeric: T[], options: 
  *  to the XY family's X-first shape: its two methods are Y columns only (see
  *  the special case below), so X is never handed to its builder as a method. */
 export function plotColumns(
-  { columns, numeric, sets }: Dataset,
+  { columns, numeric, sets, summary }: Dataset,
   type: GraphType,
   options: GraphOptions,
   tableType: TableType,
@@ -150,7 +154,13 @@ export function plotColumns(
   if (type === "bland-altman" && tableType === "xy") return splitXY(columns).ys.flatMap((s) => s.columns);
   if (family === "volcano") return columns;
   if (family === "heatmap")
-    return sets.filter((s) => s.columns.some((c) => c.values.length)).map((s) => centerColumn(s, options.center));
+    return sets
+      .filter((s) => s.columns.some((c) => c.values.length))
+      .map((s) =>
+        // A summary table's heatmap plots the Mean column — averaging
+        // Mean/SD/N (what centerColumn would do) is meaningless.
+        summary !== "replicates" ? (summaryMeanColumn(s) ?? centerColumn(s, options.center)) : centerColumn(s, options.center),
+      );
   // A bubble plot of a Multiple Variables table: X then Y, the size variable, the
   // color variable — each chosen, else the next holding numbers (the size's default
   // is the third numeric; no color variable colors it the series' color). The color

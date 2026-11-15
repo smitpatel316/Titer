@@ -10,6 +10,7 @@ import {
   rowCountOf,
   rowLabels,
   perRowStats,
+  perRowSummaryStats,
   groupOffset,
   groupedBarLayout,
   groupedScatterLayout,
@@ -20,13 +21,16 @@ import {
   type Paint,
 } from "./plot-helpers";
 import { pointKeyOf } from "../../lib/columns";
+import type { SummaryFormat } from "../../lib/summary-format";
 
 /** Interleaved / stacked / horizontal bars: one bar trace per group, bar height =
  *  the group's center (mean/median) per row. Stacked bars omit error whiskers
  *  (they'd overlap the stack); interleaved/horizontal show them when enabled.
  *  "Separated" (group mode only — stacking already combines groups per category)
  *  gives each group its own block of categories instead of interleaving within
- *  each row's slot. */
+ *  each row's slot. On a summary table (`summary` ≠ "replicates") the bars are
+ *  the stored Means and the whiskers the stored errors (converted to the
+ *  graph's error kind); there are no replicates to average. */
 export function buildGroupedBars(
   columns: Column[],
   options: GraphOptions,
@@ -34,6 +38,7 @@ export function buildGroupedBars(
   horizontal: boolean,
   paint: Paint,
   titles?: (string | null)[],
+  summary: SummaryFormat = "replicates",
 ): GraphFigure {
   const groups = groupsOf(columns);
   const rows = rowCountOf(columns);
@@ -42,7 +47,13 @@ export function buildGroupedBars(
   const separated =
     mode === "group" && options.groupLayout === "separated" ? separatedPositions(groups.length, labels) : undefined;
 
-  const stats = groups.map((g) => perRowStats(g.columns, rows, options.center, showError ? options.error : "none"));
+  // A summary table's stats carry a lower side too (asymmetric errors); a
+  // replicates table's don't — normalised to the same shape here.
+  const stats = groups.map((g) =>
+    summary === "replicates"
+      ? { ...perRowStats(g.columns, rows, options.center, showError ? options.error : "none"), errorMinus: null }
+      : perRowSummaryStats(g.columns, rows, summary, showError ? options.error : "none"),
+  );
   // 100 % stacked bars: each group's share of its row's total.
   const percent = mode === "stack" && options.stackAs === "percent";
   if (percent) {
@@ -53,8 +64,9 @@ export function buildGroupedBars(
   }
 
   const data = groups.map((g, i) => {
-    const { center, error } = stats[i];
+    const { center, error, errorMinus } = stats[i];
     const errArr = error ? error.map((e) => e ?? NaN) : null; // NaN: no error bar
+    const errMinusArr = errorMinus ? errorMinus.map((e) => e ?? NaN) : undefined;
     const x = separated ? Array.from({ length: rows }, (_, r) => separated.posOf(i, r)) : labels;
     return {
       type: "bar",
@@ -65,7 +77,7 @@ export function buildGroupedBars(
       marker: paint.bars(g.name, i),
       ...(errArr
         ? {
-            [horizontal ? "error_x" : "error_y"]: paint.errorBars(g.name, i, errArr),
+            [horizontal ? "error_x" : "error_y"]: paint.errorBars(g.name, i, errArr, errMinusArr),
           }
         : {}),
       hoverinfo: horizontal ? "y+x" : "x+y",
@@ -92,12 +104,15 @@ export function buildGroupedBars(
 /** Connected/interaction lines: one line per group through its per-row centers
  *  (mean/median), a marker at each row, and optional error whiskers. Lines connect
  *  each group across the row categories, so parallel lines mean no interaction and
- *  crossing/diverging lines highlight one (Prism's interaction graph). */
+ *  crossing/diverging lines highlight one (Prism's interaction graph). On a
+ *  summary table the centers are the stored Means and the whiskers the stored
+ *  errors, as for bars. */
 export function buildGroupedLines(
   columns: Column[],
   options: GraphOptions,
   paint: Paint,
   titles?: (string | null)[],
+  summary: SummaryFormat = "replicates",
 ): GraphFigure {
   const groups = groupsOf(columns);
   const rows = rowCountOf(columns);
@@ -105,7 +120,10 @@ export function buildGroupedLines(
   const x = labels.map((_, i) => i);
 
   const data = groups.map((g, i) => {
-    const { center, error } = perRowStats(g.columns, rows, options.center, options.error);
+    const { center, error, errorMinus } =
+      summary === "replicates"
+        ? { ...perRowStats(g.columns, rows, options.center, options.error), errorMinus: null }
+        : perRowSummaryStats(g.columns, rows, summary, options.error);
     return {
       type: "scatter",
       mode: "lines+markers",
@@ -122,6 +140,7 @@ export function buildGroupedLines(
               g.name,
               i,
               error.map((e) => e ?? NaN),
+              errorMinus ? errorMinus.map((e) => e ?? NaN) : undefined,
             ),
           }
         : {}),
@@ -135,12 +154,15 @@ export function buildGroupedLines(
 /** Interleaved scatter (individual values): every replicate as a jittered point,
  *  groups fanned out within each row (or, in "Separated" layout, given their own
  *  block of categories), plus a short center line and optional error whiskers
- *  per group. */
+ *  per group. On a summary table there are no individual values to plot — the
+ *  points trace is skipped and only the center line and whiskers are drawn
+ *  (from the stored Means and errors). */
 export function buildGroupedScatter(
   columns: Column[],
   options: GraphOptions,
   paint: Paint,
   titles?: (string | null)[],
+  summary: SummaryFormat = "replicates",
 ): GraphFigure {
   const groups = groupsOf(columns);
   const rows = rowCountOf(columns);
@@ -152,32 +174,37 @@ export function buildGroupedScatter(
   groups.forEach((g, gi) => {
     const basePos = (r: number) => (separated ? separated.posOf(gi, r) : r + groupOffset(gi, total));
 
-    // The individual points for this group.
-    const px: number[] = [];
-    const py: number[] = [];
-    const pointKeys: string[] = [];
-    for (let r = 0; r < rows; r++) {
-      g.columns.forEach((c, ci) => {
-        const v = c.byRow[r] ?? null;
-        if (v != null) {
-          px.push(basePos(r) + jitter(gi, r * 10 + ci) * 0.4);
-          py.push(v);
-          pointKeys.push(pointKeyOf(c.name, r));
-        }
+    // The individual points for this group — none on a summary table.
+    if (summary === "replicates") {
+      const px: number[] = [];
+      const py: number[] = [];
+      const pointKeys: string[] = [];
+      for (let r = 0; r < rows; r++) {
+        g.columns.forEach((c, ci) => {
+          const v = c.byRow[r] ?? null;
+          if (v != null) {
+            px.push(basePos(r) + jitter(gi, r * 10 + ci) * 0.4);
+            py.push(v);
+            pointKeys.push(pointKeyOf(c.name, r));
+          }
+        });
+      }
+      data.push({
+        type: "scatter",
+        mode: "markers",
+        name: g.name,
+        x: px,
+        y: py,
+        ...seriesPoints(paint, g.name, gi, pointKeys),
+        hoverinfo: "y",
       });
     }
-    data.push({
-      type: "scatter",
-      mode: "markers",
-      name: g.name,
-      x: px,
-      y: py,
-      ...seriesPoints(paint, g.name, gi, pointKeys),
-      hoverinfo: "y",
-    });
 
     // Center line + optional error whiskers at each row for this group.
-    const { center, error } = perRowStats(g.columns, rows, options.center, options.error);
+    const { center, error, errorMinus } =
+      summary === "replicates"
+        ? { ...perRowStats(g.columns, rows, options.center, options.error), errorMinus: null }
+        : perRowSummaryStats(g.columns, rows, summary, options.error);
     const lineX: (number | null)[] = [];
     const lineY: (number | null)[] = [];
     center.forEach((c, r) => {
@@ -201,11 +228,13 @@ export function buildGroupedScatter(
       const ex: number[] = [];
       const ey: number[] = [];
       const ea: number[] = [];
+      const em: number[] = [];
       center.forEach((c, r) => {
         if (c != null) {
           ex.push(basePos(r));
           ey.push(c);
           ea.push(error[r] ?? NaN);
+          em.push(errorMinus?.[r] ?? NaN);
         }
       });
       data.push({
@@ -214,7 +243,7 @@ export function buildGroupedScatter(
         x: ex,
         y: ey,
         marker: { opacity: 0 },
-        error_y: paint.errorBars(g.name, gi, ea),
+        error_y: paint.errorBars(g.name, gi, ea, errorMinus ? em : undefined),
         hoverinfo: "skip",
         showlegend: false,
       });
