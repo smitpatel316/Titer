@@ -543,11 +543,25 @@ export function useDocument() {
     }
   };
 
-  /** True when it's fine to discard the project (saved, or the user said so). */
+  /** True when it's fine to discard the project (saved, or the user said so).
+   *  One prompt per window: a second close request while one is already
+   *  asking (⌘Q twice, ⌘W during a quit) awaits the same answer instead of
+   *  opening a second native dialog on a window that already has one
+   *  (bugfix/quit-save-dialog). */
+  const confirmDiscardInFlight = React.useRef<Promise<boolean> | null>(null);
   const confirmDiscard = async (): Promise<boolean> => {
-    if (!latest.current.isDirty) return true;
-    const answer = await native.askToSave();
-    return answer === "save" ? save() : answer === "discard";
+    if (confirmDiscardInFlight.current) return confirmDiscardInFlight.current;
+    const asked = (async () => {
+      if (!latest.current.isDirty) return true;
+      const answer = await native.askToSave();
+      return answer === "save" ? save() : answer === "discard";
+    })();
+    confirmDiscardInFlight.current = asked;
+    try {
+      return await asked;
+    } finally {
+      confirmDiscardInFlight.current = null;
+    }
   };
 
   /** Parses `.hlx` text and loads it as the window's project. `filePath` is
