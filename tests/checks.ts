@@ -164,6 +164,7 @@ import {
   clampPanel,
   composeFigureSvg,
   duplicateLabels,
+  FIGURE_RESOLUTIONS,
   figureExportSize,
   figureLabel,
   figurePixelSize,
@@ -177,7 +178,9 @@ import {
 import { buildPanelFigure } from "../src/views/figures/panel-figure";
 import { ensureSaveExtension } from "../src/native";
 import { sampleProject } from "./sample-project";
-import { crc32 } from "node:zlib";
+import { crc32, deflateSync, inflateSync } from "node:zlib";
+import { decodePng, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
+import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
 import type { AnalysisOutcome, AnalysisParams, AnalysisResult, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, RegressionCoefficient, SimulationSpec } from "../src/stats/types";
 import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation/simulate";
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
@@ -5637,6 +5640,128 @@ check("an exported image says its resolution, and none of the headers that say 7
     0xdb,
     9,
   ]);
+});
+
+// ── PDF / TIFF export (item 20) ──────────────────────────────────────────
+
+// A 4×3 RGB fixture PNG, built the same way the withDpi check builds its
+// chunks (deflateSync + CRC): red, green, blue, white across, then the same
+// row reversed, then black, red, green, blue. `filter` picks the PNG filter
+// byte (0 = None, 1 = Sub) applied to every scanline.
+const fixturePixels = [
+  [255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255],
+  [255, 255, 255, 0, 0, 255, 0, 255, 0, 255, 0, 0],
+  [0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255],
+];
+const fixtureRgba = new Uint8Array([
+  255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
+  255, 255, 255, 255, 0, 0, 255, 255, 0, 255, 0, 255, 255, 0, 0, 255,
+  0, 0, 0, 255, 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255,
+]);
+const fixtureRgb = new Uint8Array(fixturePixels.flat());
+const fixturePng = (filter: 0 | 1) => {
+  const chunk = (name: string, data: number[]) => [
+    (data.length >>> 24) & 255,
+    (data.length >>> 16) & 255,
+    (data.length >>> 8) & 255,
+    data.length & 255,
+    ...[...name].map((c) => c.charCodeAt(0)),
+    ...data,
+    ...[...new Uint8Array(new Uint32Array([crc32(Buffer.from([...[...name].map((c) => c.charCodeAt(0)), ...data]))]).buffer)].reverse(),
+  ];
+  const raw: number[] = [];
+  for (const row of fixturePixels) {
+    raw.push(filter);
+    for (let x = 0; x < 12; x++) {
+      const left = filter === 1 && x >= 3 ? row[x - 3]! : 0;
+      raw.push((row[x]! - left + 256) % 256);
+    }
+  }
+  return new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ...chunk("IHDR", [0, 0, 0, 4, 0, 0, 0, 3, 8, 2, 0, 0, 0]),
+    ...chunk("IDAT", [...deflateSync(Buffer.from(raw))]),
+    ...chunk("IEND", []),
+  ]);
+};
+
+check("a drawn PNG decodes to its exact pixels, None and Sub filters alike (item 20)", () => {
+  for (const filter of [0, 1] as const) {
+    const decoded = decodePng(fixturePng(filter));
+    strictEqual(decoded.width, 4);
+    strictEqual(decoded.height, 3);
+    deepStrictEqual([...decoded.rgba], [...fixtureRgba]);
+  }
+  // Anything that is not an 8-bit non-interlaced PNG errors, naming the PNG.
+  ok.throws(() => decodePng(new Uint8Array([1, 2, 3])), /Not a PNG/);
+});
+
+check("TIFF export at 1200 DPI tags 1200 DPI and PackBits round-trips exactly (item 20)", () => {
+  const tiff = tiffEncode({ width: 4, height: 3, rgba: fixtureRgba }, 1200);
+  const view = new DataView(tiff.buffer);
+  deepStrictEqual([...tiff.subarray(0, 4)], [0x49, 0x49, 42, 0]); // "II*\0"
+  strictEqual(view.getUint32(4, true), 8);
+  const count = view.getUint16(8, true);
+  const tags = new Map<number, { type: number; count: number; value: number }>();
+  for (let i = 0; i < count; i++) {
+    const at = 10 + i * 12;
+    tags.set(view.getUint16(at, true), {
+      type: view.getUint16(at + 2, true),
+      count: view.getUint32(at + 4, true),
+      value: view.getUint32(at + 8, true),
+    });
+  }
+  strictEqual(tags.get(256)?.value, 4);
+  strictEqual(tags.get(257)?.value, 3);
+  strictEqual(tags.get(259)?.value, 32773); // PackBits
+  strictEqual(tags.get(262)?.value, 2); // RGB
+  strictEqual(tags.get(277)?.value, 3);
+  strictEqual(tags.get(296)?.value, 2); // inch
+  for (const tag of [282, 283]) {
+    const off = tags.get(tag)!.value;
+    strictEqual(view.getUint32(off, true), 1200);
+    strictEqual(view.getUint32(off + 4, true), 1);
+  }
+  // PackBits round-trip: decode the one strip and compare with the fixture RGB.
+  const strip = tiff.subarray(tags.get(273)!.value, tags.get(273)!.value + tags.get(279)!.value);
+  const out: number[] = [];
+  for (let i = 0; i < strip.length;) {
+    const n = strip[i]!;
+    if (n <= 127) {
+      for (let j = 0; j <= n; j++) out.push(strip[i + 1 + j]!);
+      i += n + 2;
+    } else if (n >= 129) {
+      for (let j = 0; j < 257 - n; j++) out.push(strip[i + 1]!);
+      i += 2;
+    } else {
+      i += 1; // 128: no-op
+    }
+  }
+  deepStrictEqual(new Uint8Array(out), fixtureRgb);
+  // And the encoder's own PackBits output is what the TIFF carries.
+  deepStrictEqual(strip, packBits(fixtureRgb));
+});
+
+check("PDF export at 1200 DPI is one page at printed size with a Flate image (item 20)", () => {
+  const pdf = pdfEncode({ width: 4, height: 3, rgba: fixtureRgba }, 1200);
+  const text = new TextDecoder().decode(pdf);
+  ok(text.startsWith("%PDF-1.4"), text.slice(0, 20));
+  ok(text.includes("/MediaBox [0 0 0.24 0.18]"), "4 px × 72/1200 = 0.24 pt, 3 px = 0.18 pt");
+  ok(text.includes("/Width 4 /Height 3 /BitsPerComponent 8 /ColorSpace /DeviceRGB /Filter /FlateDecode"));
+  const start = text.indexOf("stream\n") + "stream\n".length;
+  const end = text.indexOf("\nendstream", start);
+  deepStrictEqual(new Uint8Array(inflateSync(pdf.subarray(start, end))), fixtureRgb);
+});
+
+check("the export dialogs offer PDF/TIFF and 900/1200 DPI (item 20)", () => {
+  deepStrictEqual(
+    EXPORT_FORMATS.map((f) => f.value),
+    ["png", "jpeg", "svg", "pdf", "tiff"],
+  );
+  deepStrictEqual([...RESOLUTIONS], ["150", "300", "600", "900", "1200"]);
+  deepStrictEqual(FIGURE_RESOLUTIONS, ["150", "300", "600", "900", "1200"]);
+  // The figure dialog renders the shared list, so it offers PDF/TIFF too.
+  ok(readFileSync("src/views/figures/figure-view.tsx", "utf8").includes("options={EXPORT_FORMATS}"));
 });
 
 // ── Analyses ─────────────────────────────────────────────────────────────
