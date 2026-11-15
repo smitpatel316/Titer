@@ -4,12 +4,13 @@
 import type { GraphOptions } from "../../store/types";
 import type { GraphModule, GraphFigure } from ".";
 import { splitXY, type Column } from "../../lib/dataset";
-import { xyDrawn, xyLayout, type Paint } from "./plot-helpers";
+import { rightYDataset, xyDrawn, xyLayout, type Paint } from "./plot-helpers";
 
 function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFigure {
   const { x: xCol, ys } = splitXY(columns);
   if (!xCol || ys.length === 0) return { data: [], layout: xyLayout(options, columns[0]?.name ?? "X", 0) };
 
+  const right = rightYDataset(options, ys.map((y) => y.name));
   const data = ys.map((set, i) => {
     // A bar stands for one value per X: replicates as their center, whatever `xyReplicates`.
     const drawn = xyDrawn(xCol, set, { ...options, xyReplicates: "mean" });
@@ -18,6 +19,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
       name: set.name,
       x: drawn.x,
       y: drawn.y,
+      ...(set.name === right ? { yaxis: "y2" } : {}),
       marker: paint.bars(set.name, i),
       ...(drawn.errors ? { error_y: paint.errorBars(set.name, i, drawn.errors) } : {}),
       hoverinfo: "x+y",
@@ -28,7 +30,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
   return {
     data,
     layout: {
-      ...xyLayout(options, xCol.name, ys.length, { zeroBase: true, seriesNames: ys.map((y) => y.name) }),
+      ...xyLayout(options, xCol.name, ys.length, { zeroBase: true, seriesNames: ys.map((y) => y.name), rightY: right }),
       barmode: "group",
       bargroupgap: options.barGap,
     },

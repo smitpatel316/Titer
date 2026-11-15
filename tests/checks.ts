@@ -4064,6 +4064,134 @@ check("a log axis: ticks at the powers, a range typed in values, curves drawn ev
   strictEqual(read(JSON.stringify(file)).project.nodes.g1.graphOptions!.yScale, "linear");
 });
 
+// ── Right (second) Y axis (v1.3.0 item 26) ────────────────────────────────
+// One Y dataset on a right-hand axis, with its own title, scale and range.
+
+const twoScaleXY = {
+  columns: ["Title", "Dose", "Response", "Viability"],
+  rows: [
+    [null, "0", "10", "95"],
+    [null, "1", "20", "80"],
+    [null, "2", "40", "60"],
+    [null, "3", "80", "30"],
+  ],
+};
+
+check("a right Y axis plots one dataset on the right and leaves the rest on the left", () => {
+  type Trace = { name?: string; yaxis?: string };
+  type Axis2 = { overlaying?: string; side?: string; title?: { text?: string } };
+  const options = { ...newGraphOptions("xy-scatter"), rightYDataset: "Viability" };
+  const fig = GRAPHS["xy-scatter"].build(readTable(twoScaleXY).columns, options, paintOf(options, 2));
+  const traces = fig.data as Trace[];
+  strictEqual(traces.find((t) => t.name === "Viability")?.yaxis, "y2");
+  strictEqual(traces.find((t) => t.name === "Response")?.yaxis, undefined);
+  const y2 = fig.layout.yaxis2 as Axis2;
+  deepStrictEqual([y2.overlaying, y2.side], ["y", "right"]);
+  strictEqual(y2.title?.text, "Viability");
+  // Off by default: no right axis, no trace on y2.
+  const off = GRAPHS["xy-scatter"].build(
+    readTable(twoScaleXY).columns,
+    newGraphOptions("xy-scatter"),
+    paintOf(options, 2),
+  );
+  strictEqual(off.layout.yaxis2, undefined);
+  ok(!(off.data as Trace[]).some((t) => t.yaxis === "y2"));
+});
+
+check("a right Y axis takes its own title, range and scale", () => {
+  type Axis2 = { title?: { text?: string }; range?: number[]; type?: string };
+  const titled = {
+    ...newGraphOptions("xy-scatter"),
+    rightYDataset: "Viability",
+    y2Label: "Viability (%)",
+    y2Min: 0,
+    y2Max: 100,
+  };
+  const fig = GRAPHS["xy-scatter"].build(readTable(twoScaleXY).columns, titled, paintOf(titled, 2));
+  const y2 = fig.layout.yaxis2 as Axis2;
+  strictEqual(y2.title?.text, "Viability (%)");
+  deepStrictEqual(y2.range, [0, 100]);
+  // A log right axis: its range typed in values, like the left.
+  const logged = { ...newGraphOptions("xy-scatter"), rightYDataset: "Viability", y2Scale: "log10" as const, y2Min: 1, y2Max: 100 };
+  const logFig = GRAPHS["xy-scatter"].build(readTable(twoScaleXY).columns, logged, paintOf(logged, 2));
+  const logY2 = logFig.layout.yaxis2 as Axis2;
+  strictEqual(logY2.type, "log");
+  deepStrictEqual(logY2.range, [0, 2]);
+});
+
+check("a right Y axis naming no dataset draws nothing on the right", () => {
+  type Trace = { yaxis?: string };
+  const gone = { ...newGraphOptions("xy-scatter"), rightYDataset: "Gone" };
+  const fig = GRAPHS["xy-scatter"].build(readTable(twoScaleXY).columns, gone, paintOf(gone, 2));
+  strictEqual(fig.layout.yaxis2, undefined);
+  ok(!(fig.data as Trace[]).some((t) => t.yaxis === "y2"));
+  // One dataset: the pick is ignored (there is nothing to move right).
+  const one = { ...newGraphOptions("xy-scatter"), rightYDataset: "Y" };
+  const single = GRAPHS["xy-scatter"].build(
+    readTable({ columns: ["Title", "X", "Y"], rows: [[null, "1", "2"], [null, "2", "3"]] }).columns,
+    one,
+    paintOf(one, 1),
+  );
+  strictEqual(single.layout.yaxis2, undefined);
+  ok(!(single.data as Trace[]).some((t) => t.yaxis === "y2"));
+  // A renamed dataset follows the rename, like every other named option.
+  const node: ProjectNode = {
+    id: "g",
+    type: "graph",
+    name: "G",
+    parentId: "t",
+    graphType: "xy-scatter",
+    graphOptions: { ...newGraphOptions("xy-scatter"), rightYDataset: "Viability" },
+  };
+  strictEqual(
+    followTable(node, { renamed: { Viability: "Alive" } }, ["Title", "Dose", "Response", "Alive"]).graphOptions!
+      .rightYDataset,
+    "Alive",
+  );
+});
+
+check("xy-bar and xy-area plot the picked dataset on the right axis too", () => {
+  for (const type of ["xy-bar", "xy-area"] as const) {
+    const options = { ...newGraphOptions(type), rightYDataset: "Viability" };
+    const fig = GRAPHS[type].build(readTable(twoScaleXY).columns, options, paintOf(options, 2));
+    const traces = fig.data as { name?: string; yaxis?: string }[];
+    strictEqual(traces.find((t) => t.name === "Viability")?.yaxis, "y2");
+    strictEqual(traces.find((t) => t.name === "Response")?.yaxis, undefined);
+    strictEqual((fig.layout.yaxis2 as { side?: string } | undefined)?.side, "right");
+  }
+});
+
+check("above-only error bars on the right dataset cap on the right axis", () => {
+  const reps = {
+    columns: ["Title", "Dose", "Response", "Viability:Y1", "Viability:Y2"],
+    rows: [
+      [null, "0", "10", "95", "93"],
+      [null, "1", "20", "80", "78"],
+      [null, "2", "40", "60", "58"],
+    ],
+  };
+  const options = { ...newGraphOptions("xy-scatter"), rightYDataset: "Viability", errorDirection: "above" as const };
+  const fig = GRAPHS["xy-scatter"].build(readTable(reps).columns, options, paintOf(options, 2));
+  // Only the replicated Viability set has error bars: Response (one column)
+  // draws none, so the capped figure is its trace, Viability's, and one twin.
+  const capped = withCaps(fig.data, options) as { yaxis?: string; showlegend?: boolean }[];
+  strictEqual(capped.length, 3);
+  const [twin] = capped.filter((t) => t.showlegend === false);
+  strictEqual(twin?.yaxis, "y2");
+});
+
+check("the right axis range is independent of the left", () => {
+  type Axis = { range?: number[] };
+  const leftOnly = { ...newGraphOptions("xy-scatter"), rightYDataset: "Viability", yMin: 0, yMax: 50 };
+  const leftFig = GRAPHS["xy-scatter"].build(readTable(twoScaleXY).columns, leftOnly, paintOf(leftOnly, 2));
+  deepStrictEqual((leftFig.layout.yaxis as Axis).range, [0, 50]);
+  strictEqual((leftFig.layout.yaxis2 as Axis | undefined)?.range, undefined);
+  const rightOnly = { ...newGraphOptions("xy-scatter"), rightYDataset: "Viability", y2Min: 0, y2Max: 100 };
+  const rightFig = GRAPHS["xy-scatter"].build(readTable(twoScaleXY).columns, rightOnly, paintOf(rightOnly, 2));
+  strictEqual((rightFig.layout.yaxis as Axis).range, undefined);
+  deepStrictEqual((rightFig.layout.yaxis2 as Axis).range, [0, 100]);
+});
+
 check("on a log axis, the stars' brackets take values and their labels log10 values", () => {
   const data = treatments(["A", "B"]); // A: 1, 2, 3; B: 2, 3, 4
   const key = pairKey("A", "B");

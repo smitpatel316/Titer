@@ -170,6 +170,7 @@ interface ErrorTrace {
   type: string;
   x: (number | string | null)[];
   y: (number | string | null)[];
+  yaxis?: string;
   orientation?: string;
   width?: number;
   offsetgroup?: string;
@@ -208,6 +209,7 @@ export function withCaps(data: unknown[], options: GraphOptions): unknown[] {
       orientation: trace.orientation,
       x: trace.x,
       y: trace.y,
+      ...(trace.yaxis ? { yaxis: trace.yaxis } : {}),
       [along]: tips,
       width: trace.width,
       ...(bar ? { offsetgroup: group } : { mode: "markers" }),
@@ -520,6 +522,11 @@ const yAxisRange = (options: GraphOptions, zeroBase?: boolean) =>
   options.yScale === "linear"
     ? axisRange(options.yMin, options.yMax, options.yStep, zeroBase)
     : logAxis(options.yScale, options.yMin, options.yMax);
+/** The right axis's scale and range, independent of the left's. */
+const y2AxisRange = (options: GraphOptions, zeroBase?: boolean) =>
+  options.y2Scale === "linear"
+    ? axisRange(options.y2Min, options.y2Max, options.y2Step, zeroBase)
+    : logAxis(options.y2Scale, options.y2Min, options.y2Max);
 const xAxisRange = (options: GraphOptions, zeroBase?: boolean) =>
   options.xScale === "linear"
     ? axisRange(options.xMin, options.xMax, options.xStep, zeroBase)
@@ -594,6 +601,29 @@ export function heatmapLayout(options: GraphOptions, colNames: string[], rowName
   };
 }
 
+/** The data set plotted on the right Y axis: the named one, only when it is
+ *  among `names` and there are at least two — anything else (a stale or
+ *  renamed name, a single data set) falls back to the left axis. */
+export function rightYDataset(options: GraphOptions, names: string[]): string | undefined {
+  return names.length >= 2 && options.rightYDataset && names.includes(options.rightYDataset)
+    ? options.rightYDataset
+    : undefined;
+}
+
+/** The right-hand Y axis's layout: overlaid on the left axis, on the right
+ *  side, titled with its data set's name unless titled by hand, scaled and
+ *  ranged independently of the left axis. Follows the scree plot's hardcoded
+ *  `yaxis2` precedent (scree-plot.ts) — this is the general one. */
+export function rightYAxis(options: GraphOptions, dataset: string, zeroBase?: boolean): Record<string, unknown> {
+  return {
+    overlaying: "y",
+    side: "right",
+    ...axisChrome(options),
+    ...y2AxisRange(options, zeroBase),
+    ...axisTitle(options.y2Label || dataset, options.yTitleGap),
+  };
+}
+
 /** XY family layout: a genuine numeric X axis (not category ticks), with a legend
  *  once there's more than one Y series. `xName` (the X column's name) and `yName`
  *  title the axes the user hasn't titled. The legend's series names reserve the
@@ -602,7 +632,7 @@ export function xyLayout(
   options: GraphOptions,
   xName: string,
   seriesCount: number,
-  opts: { zeroBase?: boolean; yName?: string; seriesNames?: string[] } = {},
+  opts: { zeroBase?: boolean; yName?: string; seriesNames?: string[]; rightY?: string } = {},
 ): Record<string, unknown> {
   return {
     ...chromeLayout(options, seriesCount > 1 ? legendRightMargin(options, opts.seriesNames ?? []) : undefined),
@@ -619,6 +649,7 @@ export function xyLayout(
       ...yAxisRange(options, opts.zeroBase),
       ...axisTitle(options.yLabel || (opts.yName ?? ""), options.yTitleGap),
     },
+    ...(opts.rightY ? { yaxis2: rightYAxis(options, opts.rightY, opts.zeroBase) } : {}),
   };
 }
 

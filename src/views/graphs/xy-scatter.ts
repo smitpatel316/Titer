@@ -5,7 +5,7 @@
 import type { GraphOptions } from "../../store/types";
 import type { GraphModule, GraphFigure } from ".";
 import { splitXY, type Column } from "../../lib/dataset";
-import { addNote, seriesMarker, seriesPoints, xyDrawn, xyLayout, type Paint } from "./plot-helpers";
+import { addNote, rightYDataset, seriesMarker, seriesPoints, xyDrawn, xyLayout, type Paint } from "./plot-helpers";
 
 /** The most points an XY scatter draws in total. An SVG `scatter` trace costs
  *  about 0.1 ms of blocked UI thread per point — timed renders (R2-G-F18,
@@ -26,6 +26,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
   // is on the total plotted, so the stride is shared — each series keeps its
   // shape and the total stays at the cap.
   const drawn = ys.map((set) => xyDrawn(xCol, set, options));
+  const right = rightYDataset(options, ys.map((y) => y.name));
   const total = drawn.reduce((sum, d) => sum + d.x.length, 0);
   const stride = total > XY_SCATTER_MAX_POINTS ? Math.ceil(total / XY_SCATTER_MAX_POINTS) : 1;
   const thin = <T>(values: T[] | undefined): T[] | undefined =>
@@ -50,6 +51,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
       name: set.name,
       x: px,
       y: py,
+      ...(set.name === right ? { yaxis: "y2" } : {}),
       ...(mode !== "lines"
         ? pkeys
           ? seriesPoints(paint, set.name, i, pkeys)
@@ -63,7 +65,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
 
   const fig: GraphFigure = {
     data,
-    layout: xyLayout(options, xCol.name, ys.length, { seriesNames: ys.map((y) => y.name) }),
+    layout: xyLayout(options, xCol.name, ys.length, { seriesNames: ys.map((y) => y.name), rightY: right }),
   };
   if (stride > 1) {
     const shown = data.reduce((sum, t) => sum + (t.x?.length ?? 0), 0);

@@ -147,6 +147,15 @@ export interface GraphOptions {
   xMin?: number;
   xMax?: number;
   xStep?: number;
+  // Right (second) Y axis (XY family only): one Y data set plotted against a
+  // right-hand axis, with its own title, scale and range; the rest stay on the
+  // left. `rightYDataset` names the set (max one by construction); blank = off.
+  rightYDataset?: string;
+  y2Label?: string;
+  y2Scale: Choice<"yScale">;
+  y2Min?: number;
+  y2Max?: number;
+  y2Step?: number;
   // A histogram's bin width, in the values' units; omitted (or 0 and under), R's own bins.
   binWidth?: number;
   // Significance annotations (Column family only): read a sibling analysis's
@@ -340,6 +349,7 @@ export const DEFAULT_GRAPH_OPTIONS: GraphOptions = {
   yLabel: "",
   xScale: "linear",
   yScale: "linear",
+  y2Scale: "linear",
   axisWidth: 1,
   fontSize: 13,
   fill: 1,
