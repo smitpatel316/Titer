@@ -34,7 +34,7 @@ import { addLogisticCurve, logisticCurveNote } from "./logistic-curve";
 import { addForestPlot } from "./forest-plot";
 import { coxSurvivalColumns } from "./survival";
 import { FormatPanel } from "./format-panel";
-import { copyGraphImage, saveGraphImage } from "./graph-export";
+import { copyGraphImage, saveGraphImage, sendGraphToOffice } from "./graph-export";
 import { addNote, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, rightYDataset, withCaps } from "./plot-helpers";
 import { addLogisticCurve as addAnalysisLogisticCurve } from "./fitted-curve";
 import { useStartAnalysis } from "../analyses/use-analysis-launcher";
@@ -853,6 +853,9 @@ export function GraphView({ node }: { node: ProjectNode }) {
             plottedRef.current && saveGraphImage(plottedRef.current, size, format, dpi, node.name)
           }
           onCopy={(dpi) => plottedRef.current && copyGraphImage(plottedRef.current, size, dpi)}
+          onSendToOffice={(target, dpi) =>
+            plottedRef.current && sendGraphToOffice(plottedRef.current, size, target, dpi, node.name)
+          }
         />
       }
     >

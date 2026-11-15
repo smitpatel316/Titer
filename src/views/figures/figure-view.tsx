@@ -31,7 +31,8 @@ import { fitZoom } from "../../store/use-layout";
 import { GRAPHS } from "../graphs";
 import { DEFAULT_GRAPH_OPTIONS, type FigurePanel, type ProjectNode, type Resolution } from "../../store/types";
 import { PanelPlot } from "./panel-plot";
-import { copyFigureImage, saveFigureImage } from "./figure-export";
+import { copyFigureImage, saveFigureImage, sendFigureToOffice } from "./figure-export";
+import type { OfficeTarget } from "../../lib/office-export";
 import { EXPORT_FORMATS, saveGraphImage, type ExportFormat } from "../graphs/graph-export";
 
 /** Screen pixels per inch in the editor (the figure keeps its true aspect ratio). */
@@ -160,6 +161,16 @@ export function FigureView({ node }: { node: ProjectNode }) {
     setExporting(true);
     try {
       await saveFigureImage(node, nodes, exportFormat, dpi, node.name);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // One-click Send to Word / PowerPoint for the whole layout (v2 item 19).
+  const onSendToOffice = async (target: OfficeTarget) => {
+    setExporting(true);
+    try {
+      await sendFigureToOffice(node, nodes, target, dpi, node.name);
     } finally {
       setExporting(false);
     }
@@ -356,6 +367,27 @@ export function FigureView({ node }: { node: ProjectNode }) {
           >
             Copy Figure (PNG)
           </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="ghost"
+              className="flex-1"
+              disabled={!panels.length || exporting}
+              onClick={() => void onSendToOffice("word")}
+            >
+              Send to Word…
+            </Button>
+            <Button
+              variant="ghost"
+              className="flex-1"
+              disabled={!panels.length || exporting}
+              onClick={() => void onSendToOffice("powerpoint")}
+            >
+              Send to PowerPoint…
+            </Button>
+          </div>
+          <p className="text-small text-secondary">
+            Send to Word / PowerPoint saves a Word or PowerPoint file with the whole figure in it.
+          </p>
           {hasEmptyCell(panels, grid) && (
             <p className="text-small text-secondary">The figure has an empty cell — it exports blank.</p>
           )}

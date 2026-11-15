@@ -20,6 +20,7 @@ import { paletteColor, paletteOf, reversedPalette, savedPalette, withoutColors }
 import { GRAPH_LIMITS, type GraphOptions, type PointStyle, type SeriesStyle } from "../../store/types";
 import { GRAPHS, newGraphOptions } from ".";
 import { EXPORT_FORMATS, RESOLUTIONS, type ExportFormat, type Resolution } from "./graph-export";
+import type { OfficeTarget } from "../../lib/office-export";
 import {
   Choice,
   ColumnSelectRow,
@@ -58,6 +59,8 @@ interface Props extends SectionContext {
   canExport: boolean;
   onSave: (format: ExportFormat, dpi: Resolution) => void;
   onCopy: (dpi: Resolution) => void;
+  /** One-click Send to Word / PowerPoint (v2 item 19). */
+  onSendToOffice?: (target: OfficeTarget, dpi: Resolution) => void;
 }
 
 // What the Style section sets, put back by its Reset.
@@ -495,6 +498,28 @@ export function FormatPanel(props: Props) {
             Copy
           </Button>
         </div>
+        {props.onSendToOffice && (
+          <div className="flex gap-2">
+            <Button
+              className="flex-1"
+              disabled={!props.canExport}
+              onClick={() => props.onSendToOffice!("word", exported.dpi)}
+            >
+              Send to Word…
+            </Button>
+            <Button
+              className="flex-1"
+              disabled={!props.canExport}
+              onClick={() => props.onSendToOffice!("powerpoint", exported.dpi)}
+            >
+              Send to PowerPoint…
+            </Button>
+          </div>
+        )}
+        <p className="text-small text-secondary">
+          Send to Word / PowerPoint saves a Word or PowerPoint file with the graph in it — open it in Word or
+          PowerPoint.
+        </p>
       </Section>
     </>
   );

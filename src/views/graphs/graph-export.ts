@@ -1,5 +1,6 @@
 // Saving a graph as an image file, or copying it to the clipboard.
 import { alert, pickSavePath, writeFile } from "../../native";
+import { buildOfficeDocument, officeDialogTitle, officeExtension, pngSize, type OfficeTarget } from "../../lib/office-export";
 import { loadPlotly } from "./plotly";
 import { withoutSelection } from "./selection";
 import { vectorTraces } from "./plot-helpers";
@@ -86,4 +87,41 @@ export function copyGraphImage(el: HTMLElement, size: Size, dpi: Resolution) {
   navigator.clipboard
     .write([new ClipboardItem({ "image/png": toImage(el, size, "png", dpi) })])
     .catch((err) => alert("Couldn't Copy the Graph", reason(err), "error"));
+}
+
+/** One-click Send to Word / PowerPoint (v2 item 19): the graph as a PNG at
+ *  `dpi`, embedded at its physical size in a real .docx / .pptx file. There
+ *  is no COM automation on Mac/Linux, so the file — not a live app handoff —
+ *  is the cross-platform form of Prism's one-click export; the user opens it
+ *  in Word/PowerPoint. */
+export async function sendGraphToOffice(el: HTMLElement, size: Size, target: OfficeTarget, dpi: Resolution, name: string) {
+  const title = officeDialogTitle(target);
+  const why = tooLarge(size, dpi);
+  if (why) return alert(title, why, "error");
+  try {
+    const image = await toImage(el, size, "png", dpi);
+    const bytes = new Uint8Array(await image.arrayBuffer());
+    const dims = pngSize(bytes);
+    if (!dims) throw new Error("Couldn't draw the graph as a PNG image.");
+    const doc = await buildOfficeDocument(target, {
+      png: bytes,
+      title: name,
+      widthPx: dims.widthPx,
+      heightPx: dims.heightPx,
+      dpi: Number(dpi),
+    });
+    const ext = officeExtension(target);
+    const fileName = `${name}.${ext}`;
+    const path = await pickSavePath(
+      title,
+      lastFolder ? `${lastFolder}/${fileName}` : fileName,
+      target === "word" ? "Word Document" : "PowerPoint Presentation",
+      ext,
+    );
+    if (!path) return;
+    lastFolder = path.slice(0, path.lastIndexOf("/"));
+    await writeFile(path, doc);
+  } catch (err) {
+    alert(title, reason(err), "error");
+  }
 }

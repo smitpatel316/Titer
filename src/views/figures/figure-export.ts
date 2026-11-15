@@ -21,6 +21,7 @@ import {
 } from "../../lib/figure";
 import { buildPanelFigure } from "./panel-figure";
 import type { ExportFormat, Resolution } from "../graphs/graph-export";
+import { buildOfficeDocument, officeDialogTitle, officeExtension, type OfficeTarget } from "../../lib/office-export";
 import type { FigurePanel, ProjectNode } from "../../store/types";
 
 const EXTENSION: Record<ExportFormat, string> = { png: "png", jpeg: "jpg", svg: "svg", pdf: "pdf", tiff: "tiff" };
@@ -115,7 +116,7 @@ export async function renderFigureRaster(
   nodes: Record<string, ProjectNode>,
   format: "png" | "jpeg" | "pdf" | "tiff",
   dpi: Resolution,
-): Promise<{ blob: Blob; missing: number; capped: boolean; reason?: string }> {
+): Promise<{ blob: Blob; missing: number; capped: boolean; reason?: string; width: number; height: number }> {
   const g = geometry(figure, dpi);
   const legend =
     figure.sharedLegend === "shared" ? sharedLegendCheck(g.panels, nodes) : { ok: false as const };
@@ -202,7 +203,7 @@ export async function renderFigureRaster(
       : format === "tiff"
         ? new Blob([tiffEncode(decodePng(png), Number(dpi)) as BlobPart], { type: "image/tiff" })
         : withDpi(png, rasterFormat, Number(dpi));
-  return { blob: stamped, missing: missing.length, capped: g.exported.capped, reason: g.exported.reason };
+  return { blob: stamped, missing: missing.length, capped: g.exported.capped, reason: g.exported.reason, width, height };
 }
 
 /** The whole figure as one SVG (vector, editable): each panel's SVG embedded
@@ -287,4 +288,52 @@ export function copyFigureImage(figure: ProjectNode, nodes: Record<string, Proje
       }),
     ])
     .catch((err) => alert("Couldn't Copy the Figure", reason(err), "error"));
+}
+
+/** One-click Send to Word / PowerPoint for a whole layout (v2 item 19): the
+ *  figure's composited PNG at `dpi`, embedded at its physical size in a real
+ *  .docx / .pptx file — the cross-platform form of Prism's one-click export
+ *  (no COM automation on Mac/Linux; the user opens the file in Word/PowerPoint). */
+export async function sendFigureToOffice(
+  figure: ProjectNode,
+  nodes: Record<string, ProjectNode>,
+  target: OfficeTarget,
+  dpi: Resolution,
+  name: string,
+) {
+  const title = officeDialogTitle(target);
+  if (!figure.panels?.length) return alert(title, "Add a panel first.", "error");
+  const g = geometry(figure, dpi);
+  if (hasEmptyCell(g.panels, g.grid))
+    await alert("Empty Cell", "The figure has an empty cell — it exports blank.", "warning");
+  try {
+    const out = await renderFigureRaster(figure, nodes, "png", dpi);
+    if (out.capped && out.reason) await alert("Figure Too Large", `${out.reason} Exporting at the largest fitting size.`, "warning");
+    const doc = await buildOfficeDocument(target, {
+      png: new Uint8Array(await out.blob.arrayBuffer()),
+      title: name,
+      widthPx: out.width,
+      heightPx: out.height,
+      dpi: Number(dpi),
+    });
+    const ext = officeExtension(target);
+    const fileName = `${name}.${ext}`;
+    const path = await pickSavePath(
+      title,
+      lastFolder ? `${lastFolder}/${fileName}` : fileName,
+      target === "word" ? "Word Document" : "PowerPoint Presentation",
+      ext,
+    );
+    if (!path) return;
+    lastFolder = path.slice(0, path.lastIndexOf("/"));
+    await writeFile(path, doc);
+    if (out.missing)
+      await alert(
+        "Figure Exported",
+        `${out.missing} panel${out.missing === 1 ? "" : "s"} couldn't be drawn — ${out.missing === 1 ? "its" : "their"} graph is missing. The ${out.missing === 1 ? "cell was left" : "cells were left"} blank.`,
+        "warning",
+      );
+  } catch (err) {
+    alert(title, reason(err), "error");
+  }
 }

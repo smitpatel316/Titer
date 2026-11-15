@@ -182,6 +182,7 @@ import {
 } from "../src/lib/figure";
 import { buildPanelFigure } from "../src/views/figures/panel-figure";
 import { ensureSaveExtension } from "../src/native";
+import { buildOfficeDocument, officeExtension } from "../src/lib/office-export";
 import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { decodePng, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
@@ -6224,6 +6225,77 @@ check("a figure's SVG export is one vector parent with labelled panels (F-03, F-
   ok(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg" width="720" height="540"'));
   ok(svg.includes("<text") && svg.includes(">A</text>") && svg.includes(">B</text>"), svg);
   strictEqual((svg.match(/<svg x="/g) ?? []).length, 2);
+});
+
+/** A minimal valid PNG of `width`×`height` (solid black), with correct CRCs. */
+function testPng(width: number, height: number): Uint8Array {
+  const chunk = (type: string, data: Buffer): Buffer => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body) >>> 0);
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // 8-bit
+  ihdr[9] = 2; // RGB
+  const raw = Buffer.alloc(height * (1 + width * 3)); // filter byte 0 + black pixels
+  return new Uint8Array(
+    Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk("IHDR", ihdr),
+      chunk("IDAT", deflateSync(raw)),
+      chunk("IEND", Buffer.alloc(0)),
+    ]),
+  );
+}
+
+check("a Word export is a real .docx with the graph image at its size (Office)", async () => {
+  strictEqual(officeExtension("word"), "docx");
+  strictEqual(officeExtension("powerpoint"), "pptx");
+  const png = testPng(600, 300);
+  const bytes = await buildOfficeDocument("word", { png, title: "Dose response", widthPx: 600, heightPx: 300, dpi: 150 });
+  const zip = await JSZip.loadAsync(bytes);
+  const names = Object.keys(zip.files);
+  for (const part of ["[Content_Types].xml", "_rels/.rels", "word/document.xml", "word/_rels/document.xml.rels", "word/media/image1.png"])
+    ok(names.includes(part), `${part} missing from ${names.join(", ")}`);
+  const doc = await zip.file("word/document.xml")!.async("text");
+  ok(doc.includes("Dose response"), doc);
+  // 600×300 px at 150 DPI = 4×2 in = 3657600×1828800 EMU, inside the 6.5×9 in text area.
+  ok(doc.includes('cx="3657600"') && doc.includes('cy="1828800"'), doc);
+  deepStrictEqual(new Uint8Array(await zip.file("word/media/image1.png")!.async("uint8array")), png);
+});
+
+check("a PowerPoint export is a real .pptx with the graph on a slide (Office)", async () => {
+  const png = testPng(600, 300);
+  const bytes = await buildOfficeDocument("powerpoint", { png, title: "Dose response", widthPx: 600, heightPx: 300, dpi: 150 });
+  const zip = await JSZip.loadAsync(bytes);
+  const names = Object.keys(zip.files);
+  for (const part of ["[Content_Types].xml", "_rels/.rels", "ppt/presentation.xml", "ppt/slideMasters/slideMaster1.xml", "ppt/slideLayouts/slideLayout1.xml", "ppt/theme/theme1.xml", "ppt/slides/slide1.xml", "ppt/slides/_rels/slide1.xml.rels", "ppt/media/image1.png"])
+    ok(names.includes(part), `${part} missing from ${names.join(", ")}`);
+  const slide = await zip.file("ppt/slides/slide1.xml")!.async("text");
+  // The picture's own extent (not the group shape's full-slide extent).
+  const extent = slide.match(/<p:pic>[\s\S]*?<a:ext cx="(\d+)" cy="(\d+)"/);
+  ok(extent, slide);
+  // 4×2 in image, centred on a 13.333×7.5 in slide: fits, never cropped.
+  ok(Number(extent[1]) === 3657600 && Number(extent[2]) === 1828800, slide);
+  deepStrictEqual(new Uint8Array(await zip.file("ppt/media/image1.png")!.async("uint8array")), png);
+});
+
+check("an Office export refuses a non-PNG image (Office)", async () => {
+  await rejects(
+    buildOfficeDocument("word", { png: new TextEncoder().encode("not a png"), title: "x", widthPx: 10, heightPx: 10, dpi: 150 }),
+    /PNG/,
+  );
+});
+
+check("an Office export refuses a zero size or DPI (Office)", async () => {
+  const png = testPng(10, 10);
+  await rejects(buildOfficeDocument("word", { png, title: "x", widthPx: 0, heightPx: 10, dpi: 150 }), /size/);
+  await rejects(buildOfficeDocument("powerpoint", { png, title: "x", widthPx: 10, heightPx: 10, dpi: 0 }), /DPI/);
 });
 
 check("a figure holds references, not copies, of its graphs (F-07)", () => {
