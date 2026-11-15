@@ -10,7 +10,7 @@ import { useOutline, useProjectStore } from "../store/use-project-store";
 import { wandReportMessage } from "../lib/wand";
 
 export function WandDialog() {
-  const { nodes, selector, closeSelector, applyWand } = useProjectStore();
+  const { selector, closeSelector, applyWand } = useProjectStore();
   const { tables } = useOutline();
   const [exampleId, setExampleId] = React.useState("");
   const [prefix, setPrefix] = React.useState("");
