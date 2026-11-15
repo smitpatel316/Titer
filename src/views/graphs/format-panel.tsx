@@ -314,7 +314,7 @@ export function FormatPanel(props: Props) {
           title="Axes"
           icon={<RulerIcon />}
           {...fold("Axes")}
-          action={reset(["yMin", "yMax", "yStep", "xMin", "xMax", "xStep", "xScale", "yScale", "axisWidth"])}
+          action={reset(["yMin", "yMax", "yStep", "xMin", "xMax", "xStep", "xScale", "yScale", "axisWidth", "rightYDataset", "y2Label", "y2Scale", "y2Min", "y2Max", "y2Step"])}
         >
           {family !== "heatmap" && family !== "volcano" && (
             <Scale
@@ -351,6 +351,38 @@ export function FormatPanel(props: Props) {
               log={family === "xy" && options.xScale !== "linear"}
               onChange={(xMin, xMax, xStep) => set({ xMin, xMax, xStep })}
             />
+          )}
+          {family === "xy" && seriesNames.length >= 2 && (
+            <ColumnSelectRow
+              label="Right Y axis"
+              value={right}
+              names={seriesNames}
+              allowNone
+              onChange={(rightYDataset) => set({ rightYDataset })}
+            />
+          )}
+          {family === "xy" && right && (
+            <>
+              <TextRow
+                label="Right Y axis title"
+                value={options.y2Label}
+                onChange={(y2Label) => set({ y2Label })}
+              />
+              <Scale
+                axis="Right"
+                value={options.y2Scale}
+                leftOut={props.logLeftOut.y2}
+                onChange={(y2Scale) => set({ y2Scale })}
+              />
+              <AxisRange
+                axis="Right"
+                min={options.y2Min}
+                max={options.y2Max}
+                step={options.y2Step}
+                log={options.y2Scale !== "linear"}
+                onChange={(y2Min, y2Max, y2Step) => set({ y2Min, y2Max, y2Step })}
+              />
+            </>
           )}
           <ThicknessRow
             label="Axis thickness"
@@ -421,7 +453,7 @@ function AxisRange({
   log,
   onChange,
 }: {
-  axis: "X" | "Y";
+  axis: "X" | "Y" | "Right";
   min?: number;
   max?: number;
   step?: number;
@@ -444,7 +476,7 @@ function Scale({
   leftOut,
   onChange,
 }: {
-  axis: "X" | "Y";
+  axis: "X" | "Y" | "Right";
   value: GraphOptions["xScale"];
   leftOut: number;
   onChange: (scale: GraphOptions["xScale"]) => void;

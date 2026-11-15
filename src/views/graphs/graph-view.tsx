@@ -33,7 +33,7 @@ import { addForestPlot } from "./forest-plot";
 import { coxSurvivalColumns } from "./survival";
 import { FormatPanel } from "./format-panel";
 import { copyGraphImage, saveGraphImage } from "./graph-export";
-import { addNote, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, withCaps } from "./plot-helpers";
+import { addNote, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, rightYDataset, withCaps } from "./plot-helpers";
 import { addLogisticCurve as addAnalysisLogisticCurve } from "./fitted-curve";
 import { useStartAnalysis } from "../analyses/use-analysis-launcher";
 import { loadPlotly } from "./plotly";
@@ -188,13 +188,18 @@ export function GraphView({ node }: { node: ProjectNode }) {
   // What a graph can't draw, said in its Format panel: values at or under 0 on a log axis
   // (X: only a numeric one; on XY, its first column is X), a volcano's P values under 0.
   const atOrUnder0 = (cols: Column[]) => cols.reduce((n, c) => n + c.values.filter((v) => v <= 0).length, 0);
+  // The data set on the right Y axis, if the pick is still a series — its
+  // values live on the right axis, so they count under y2, not under y.
+  const right = family === "xy" ? rightYDataset(options, seriesNames) : undefined;
+  const rightCols = right ? columns.slice(1).filter((c) => c.name === right) : [];
   const logLeftOut = {
     x: family === "xy" && options.xScale !== "linear" ? atOrUnder0(columns.slice(0, 1)) : 0,
     // A histogram's Y counts values: an empty bin is simply not drawn.
     y:
       options.yScale !== "linear" && family !== "histogram"
-        ? atOrUnder0(family === "xy" ? columns.slice(1) : columns)
+        ? atOrUnder0((family === "xy" ? columns.slice(1) : columns).filter((c) => c.name !== right))
         : 0,
+    y2: right && options.y2Scale !== "linear" ? atOrUnder0(rightCols) : 0,
   };
   const binsTooMany =
     family === "histogram" &&
