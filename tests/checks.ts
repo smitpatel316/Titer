@@ -10509,6 +10509,48 @@ check("descriptive statistics reports sum, moment skewness and excess kurtosis, 
     throw new Error(`Constant skewness/kurtosis should be null, got ${constant.skewness}, ${constant.kurtosis}`);
 });
 
+// Tauri v2 `#[tauri::command]` renames args to camelCase by default, so a
+// Rust param `prefer_byo` must be invoked as `preferByo` — the cloud
+// wrappers sent snake_case keys, and every multi-word cloud invoke failed
+// at runtime with "missing required key preferByo" (broker Mac GUI proof,
+// attempt 3: the "Always use my own Box app" checkbox never flipped).
+// Rust tests cannot catch this class: they call the Rust fns directly,
+// bypassing IPC arg mapping. Pin the JS-side keys here, and cross-check
+// them against the Rust signatures so a renamed param fails this check
+// instead of failing silently on the Mac.
+check("cloud invokes send camelCase arg keys, matching the Rust command params (broker IPC)", () => {
+  const native = readFileSync("src/native.ts", "utf8");
+  const main = readFileSync("src-tauri/src/main.rs", "utf8");
+  // Every multi-word key the cloud wrappers must send, and the Rust param
+  // it maps from (snake_case in Rust, camelCase over IPC).
+  const expected: [string, string][] = [
+    ["preferByo", "prefer_byo"],
+    ["clientId", "client_id"],
+    ["clientSecret", "client_secret"],
+    ["accountId", "account_id"],
+    ["folderId", "folder_id"],
+    ["fileId", "file_id"],
+    ["expectedVersion", "expected_version"],
+    ["parentId", "parent_id"],
+    ["newParentId", "new_parent_id"],
+    ["isFolder", "is_folder"],
+  ];
+  for (const [camel, snake] of expected) {
+    ok(new RegExp(`\\b${camel}\\b`).test(native), `native.ts must send { ${camel} } for cloud commands`);
+    ok(new RegExp(`\\b${snake}\\b`).test(main), `main.rs must still declare the Rust param ${snake}`);
+  }
+  // No snake_case key may survive inside any cloud invoke's arg object.
+  // (Keys only: the values are the wrappers' own snake_case parameters,
+  // which are untouched — only the IPC keys change.)
+  const cloudInvokes = [...native.matchAll(/invoke<[^>]*>\("cloud_[a-z_]+", \{([^}]*)\}\)/g)];
+  ok(cloudInvokes.length > 0, "native.ts must still have cloud invokes to check");
+  for (const [, args] of cloudInvokes) {
+    const keys = args.split(",").map((part) => part.split(":")[0].trim());
+    const bad = keys.filter((key) => /[a-z]+_[a-z]/.test(key));
+    ok(bad.length === 0, `cloud invoke arg keys must be camelCase, found snake_case key(s) ${bad.join(", ")} in { ${args.trim()} }`);
+  }
+});
+
 // ── Run ──────────────────────────────────────────────────────────────────
 
 // Descriptives are computed by R since the v1.0.7 rebase, so checks that run
