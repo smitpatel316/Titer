@@ -71,7 +71,10 @@ async function panelImage(
     const scale = format === "svg" ? 1 : Number(dpi) / PX_PER_INCH;
     const url = await Plotly.toImage(figure, { format: drawnFormat, ...plotSize, scale });
     const image = await (await fetch(url)).blob();
-    return format === "svg" ? image : withDpi(new Uint8Array(await image.arrayBuffer()), drawnFormat, Number(dpi));
+    // In the non-SVG branch `drawnFormat` is png|jpeg (pdf/tiff panels were
+    // drawn as PNG); name that so `withDpi`'s "png"|"jpeg" parameter accepts it.
+    const rasterFormat: "png" | "jpeg" = drawnFormat === "jpeg" ? "jpeg" : "png";
+    return format === "svg" ? image : withDpi(new Uint8Array(await image.arrayBuffer()), rasterFormat, Number(dpi));
   } finally {
     void loadPlotly().then((Plotly) => Plotly.purge(el));
     el.remove();

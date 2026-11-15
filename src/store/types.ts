@@ -582,4 +582,4 @@ export interface FigureLabelStyle {
 export type SharedLegend = "none" | "shared";
 
 /** An export resolution, in dots per inch (same choices as a single graph). */
-export type Resolution = "150" | "300" | "600";
+export type Resolution = "150" | "300" | "600" | "900" | "1200";

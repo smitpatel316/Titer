@@ -5693,7 +5693,7 @@ check("a drawn PNG decodes to its exact pixels, None and Sub filters alike (item
     deepStrictEqual([...decoded.rgba], [...fixtureRgba]);
   }
   // Anything that is not an 8-bit non-interlaced PNG errors, naming the PNG.
-  ok.throws(() => decodePng(new Uint8Array([1, 2, 3])), /Not a PNG/);
+  throws(() => decodePng(new Uint8Array([1, 2, 3])), /Not a PNG/);
 });
 
 check("TIFF export at 1200 DPI tags 1200 DPI and PackBits round-trips exactly (item 20)", () => {
