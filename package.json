@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
-    "build": "./scripts/build-webr-repo.sh && tauri build --target aarch64-apple-darwin && tauri build --target x86_64-apple-darwin",
+    "build": "./scripts/build-webr-repo.sh && ./scripts/build-stdio-bridge.sh --target aarch64-apple-darwin --target x86_64-apple-darwin && tauri build --target aarch64-apple-darwin && tauri build --target x86_64-apple-darwin",
     "build:linux": "./scripts/build-webr-repo.sh && ./scripts/build-stdio-bridge.sh && tauri build --no-bundle",
     "install-app": "tauri build --bundles app && rm -rf /Applications/Titer.app && ditto src-tauri/target/release/bundle/macos/Titer.app /Applications/Titer.app",
     "web": "vite",
