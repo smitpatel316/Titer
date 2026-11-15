@@ -4162,6 +4162,10 @@ check("xy-bar and xy-area plot the picked dataset on the right axis too", () => 
 });
 
 check("above-only error bars on the right dataset cap on the right axis", () => {
+  // A grouped XY table: its ":Y1"/":Y2" sub-columns are one "Viability" set
+  // with replicates (an XY table has replicates only when it carries
+  // groups/replicates — cf. graph-view's `replicates` prop), so the set is
+  // drawn at its center with error bars, and its caps' twin must ride y2.
   const reps = {
     columns: ["Title", "Dose", "Response", "Viability:Y1", "Viability:Y2"],
     rows: [
@@ -4169,6 +4173,8 @@ check("above-only error bars on the right dataset cap on the right axis", () => 
       [null, "1", "20", "80", "78"],
       [null, "2", "40", "60", "58"],
     ],
+    groups: 2,
+    replicates: 2,
   };
   const options = { ...newGraphOptions("xy-scatter"), rightYDataset: "Viability", errorDirection: "above" as const };
   const fig = GRAPHS["xy-scatter"].build(readTable(reps).columns, options, paintOf(options, 2));
