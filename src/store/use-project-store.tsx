@@ -736,6 +736,10 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         return id;
       },
       createGraph: (parentId, graphType, graphOptions) => {
+        // A new graph inherits its table's error format: an SD-formatted
+        // table's graphs default to SD error bars (a table with no format
+        // recorded reads as SEM, the default, as before).
+        const parent = latest.current.nodes[parentId];
         const id = genId("graph");
         dispatch({
           type: "create",
@@ -745,7 +749,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
             name: GRAPHS[graphType].label,
             parentId,
             graphType,
-            graphOptions: graphOptions ?? newGraphOptions(graphType),
+            graphOptions: graphOptions ?? newGraphOptions(graphType, parent?.data?.errorFormat),
           },
         });
         return id;

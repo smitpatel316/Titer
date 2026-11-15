@@ -48,6 +48,7 @@ import {
   addRowGroup,
   applySummaryFormat,
   applySummaryFormatLoses,
+  changeErrorFormat,
   columnsBeyond,
   defaultRowGroups,
   deleteColumns,
@@ -930,6 +931,15 @@ check("a saved project reads back identical", () => {
   const { project, issues } = read(serializeProjectFile(payload));
   deepStrictEqual(project, payload);
   deepStrictEqual(issues, []);
+});
+
+check("a table's error format survives a save and reload; a bogus one reads as SEM", () => {
+  const sdTable: ProjectNode = { ...table, data: { ...table.data!, errorFormat: "sd" } };
+  const sdFile = { ...payload, nodes: { ...payload.nodes, t1: sdTable } };
+  strictEqual(read(serializeProjectFile(sdFile)).project.nodes.t1.data!.errorFormat, "sd");
+  const bogus: ProjectNode = { ...table, data: { ...table.data!, errorFormat: "ci" as never } };
+  const bogusFile = { ...payload, nodes: { ...payload.nodes, t1: bogus } };
+  strictEqual(read(serializeProjectFile(bogusFile)).project.nodes.t1.data!.errorFormat, undefined);
 });
 
 // Floating notes (v2): color-coded notes pinned to a sheet — shown on screen,
@@ -1888,6 +1898,38 @@ check("fewer groups or sub-columns ask first only when they hold values", () => 
   ok(regroupLoses(t, 1, 4)); // Treated
   ok(regroupLoses(t, 3, 2)); // A:Y3, Treated:Y3
   ok(!regroupLoses(t, 3, 5));
+});
+
+check("changing a table's error format renames its summary error columns, values untouched", () => {
+  const summary = treatments(["A_MEAN", "A_SEM", "A_N", "B_MEAN", "B_SEM", "B_N"]);
+  const sd = changeErrorFormat(summary, "sd");
+  strictEqual(sd.errorFormat, "sd");
+  deepStrictEqual(sd.columns, ["Title", "A_MEAN", "A_SD", "A_N", "B_MEAN", "B_SD", "B_N"]);
+  deepStrictEqual(sd.rows, summary.rows);
+  const back = changeErrorFormat(sd, "sem");
+  strictEqual(back.errorFormat, "sem");
+  deepStrictEqual(back.columns, ["Title", "A_MEAN", "A_SEM", "A_N", "B_MEAN", "B_SEM", "B_N"]);
+  deepStrictEqual(back.rows, summary.rows);
+});
+
+check("changing a table's error format to the one it already has leaves it untouched (no undo entry)", () => {
+  const summary = treatments(["A_MEAN", "A_SEM", "A_N"]);
+  strictEqual(changeErrorFormat(summary, "sem"), summary); // default is SEM, columns already match
+  const sd = changeErrorFormat(summary, "sd");
+  strictEqual(changeErrorFormat(sd, "sd"), sd);
+});
+
+check("a colliding error-column rename is skipped, so no column loses its name", () => {
+  const both = treatments(["A_SD", "A_SEM"]);
+  const sd = changeErrorFormat(both, "sd");
+  strictEqual(sd.errorFormat, "sd");
+  deepStrictEqual(sd.columns, ["Title", "A_SD", "A_SEM"]); // A_SEM → A_SD would collide
+});
+
+check("a new graph inherits its table's error format; otherwise it defaults to SEM", () => {
+  strictEqual(newGraphOptions("xy-scatter", "sd").error, "sd");
+  strictEqual(newGraphOptions("xy-scatter", "sem").error, "sem");
+  strictEqual(newGraphOptions("xy-scatter").error, "sem");
 });
 
 // ── Nested tables (plan 14) ──────────────────────────────────────────────
@@ -10220,6 +10262,25 @@ check(".pzfx import names summary subcolumns and warns they aren't replicates", 
   deepStrictEqual(table.data!.columns, ["Title", "A_MEAN", "A_SD", "A_N", "B_MEAN", "B_SD", "B_N"]);
   deepStrictEqual(table.data!.rows[0], [null, "100", "10", "2", "10", "1", "10"]);
   ok(imported.issues.some((i) => i.message.includes("not raw replicates")), "warns about summaries");
+});
+
+check(".pzfx import records a summary table's error format from its YFormat", () => {
+  strictEqual(importedTable("column_sdn").table.data!.errorFormat, "sd");
+  const sem = parsePzfx(
+    `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">` +
+      `<Table ID="Table0" XFormat="none" YFormat="SEN" TableType="OneWay">` +
+      `<Title>Data 1</Title>` +
+      `<YColumn Width="89" Decimals="0" Subcolumns="3"><Title>A</Title>` +
+      `<Subcolumn><d>100.</d></Subcolumn><Subcolumn><d>5.</d></Subcolumn><Subcolumn><d>4.</d></Subcolumn>` +
+      `</YColumn></Table></GraphPadPrismFile>`,
+  );
+  strictEqual(sem.tables.length, 1, "SEN table imports");
+  const semNode = sem.project.nodes[sem.project.rootOrder[0]];
+  if (!semNode || semNode.type !== "table") throw new Error("SEN: no table node");
+  strictEqual(semNode.data!.errorFormat, "sem");
+  deepStrictEqual(semNode.data!.columns, ["Title", "A_MEAN", "A_SEM", "A_N"]);
+  // A replicates table carries no entered error values, so it records none.
+  strictEqual(importedTable("x_y_rep").table.data!.errorFormat, undefined);
 });
 
 check(".pzfx import never assumes an empty YFormat means replicates (FF-F7)", () => {

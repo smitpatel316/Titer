@@ -153,6 +153,7 @@ Optional fields:
 | --- | --- |
 | `rowGroups` | A grouped table's third-factor bands, as `{ "name", "count" }` per band |
 | `subgroups` | A nested table's subgroups per group |
+| `errorFormat` | The table's error format, `"sd"` or `"sem"` — what its entered error values are (its summary error columns are `_SD` or `_SEM`); graphs made from the table use it for their error bars. Without it, SEM |
 | `excluded` | Cells excluded from analyses and graphs, as `"row,column"` (0-based, column 0 is Title): `["2,1"]` |
 | `widths` | Column widths set by the user, in pixels, by column name |
 | `freezeTitle` | `true` keeps the Title column visible while scrolling |

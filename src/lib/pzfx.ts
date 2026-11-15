@@ -38,7 +38,7 @@
 // A `.prism` file (Prism 10's newer format) is not `.pzfx` and is not imported.
 
 import type { ProjectFilePayload } from "./project-file";
-import type { ProjectNode, TableData, TableType } from "../store/types";
+import type { ProjectNode, TableData, TableErrorFormat, TableType } from "../store/types";
 
 export interface PzfxIssue {
   severity: "error" | "warning";
@@ -408,6 +408,11 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
   let titerType: TableType;
   let groups: number | undefined;
   let replicates: number | undefined;
+  /** The table's error format, from its YFormat: a summary table's error
+   *  subcolumns are SD (SDN/SD) or SEM (SEN/SE); a replicates table carries
+   *  no entered error values, so it records none (reads as SEM). */
+  const errorFormat: TableErrorFormat | undefined =
+    yFormat === "SDN" || yFormat === "SD" ? "sd" : yFormat === "SEN" || yFormat === "SE" ? "sem" : undefined;
   // Only an explicit "replicates" YFormat is replicates. An empty or missing
   // YFormat must not default to replicates: a summary table (mean/SD/N) whose
   // YFormat wasn't recorded would otherwise import as grouped replicates,
@@ -565,6 +570,10 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
       ...columns.map((c) => c.values[r] ?? null),
     ]),
     ...(groups !== undefined && replicates !== undefined ? { groups, replicates } : {}),
+    // The table's error format, from its YFormat: a summary table's error
+    // subcolumns are SD (SDN/SD) or SEM (SEN/SE); a replicates table carries
+    // no entered error values, so it records none (reads as SEM).
+    ...(errorFormat ? { errorFormat } : {}),
     excluded: Array.from(
       new Set(
         columns.flatMap((c, ci) => [...c.excluded].map((r) => `${r},${ci + 1}`)),

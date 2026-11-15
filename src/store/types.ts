@@ -535,9 +535,23 @@ export interface RowGroup {
   count: number;
 }
 
+/** A table's error format: SD or SEM — what its entered error values are. */
+export type TableErrorFormat = "sd" | "sem";
+
+/** A table's error format, defaulting to SEM (the graphs' default). */
+export const tableErrorFormat = (data: TableData): TableErrorFormat =>
+  data.errorFormat === "sd" ? "sd" : "sem";
+
 export interface TableData {
   columns: string[];
   rows: (string | null)[][];
+  /** A table's error format: what its entered error values are — SD or SEM
+   *  (Prism's "Changing a data table format": a table formatted for SEM whose
+   *  values are really SD can be switched). It labels the table's summary
+   *  error columns (`_SD` vs `_SEM`) and is the default error bars of graphs
+   *  made from the table; a graph's own error setting still wins for that
+   *  graph. Omitted = SEM, the graphs' default. */
+  errorFormat?: TableErrorFormat;
   /** Grouped tables only: number of top-level group headers (Group A, B, …). */
   groups?: number;
   /** Grouped tables only: replicate sub-columns per group. */

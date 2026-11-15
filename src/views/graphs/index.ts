@@ -7,6 +7,7 @@ import {
   type GraphType,
   type GraphOptions,
   type TableData,
+  type TableErrorFormat,
   type TableType,
 } from "../../store/types";
 import type { SelectorOption } from "../../components/universal-modal";
@@ -217,10 +218,17 @@ export function graphSeries(type: GraphType, data: TableData, tableType: TableTy
   return seriesOf(data, tableType);
 }
 
-/** A new graph's options: the defaults, with its type's palette and own defaults. */
-export function newGraphOptions(type: GraphType): GraphOptions {
+/** A new graph's options: the defaults, with its type's palette and own defaults.
+ *  `error`: a table's error format, when the graph is made from that table — an
+ *  SD-formatted table's graphs default to SD error bars. Omitted: SEM, as before. */
+export function newGraphOptions(type: GraphType, error?: TableErrorFormat): GraphOptions {
   const { palette, defaults } = GRAPHS[type];
-  return { ...DEFAULT_GRAPH_OPTIONS, palette: savedPalette(paletteNamed(palette ?? "okabe-ito")!), ...defaults };
+  return {
+    ...DEFAULT_GRAPH_OPTIONS,
+    palette: savedPalette(paletteNamed(palette ?? "okabe-ito")!),
+    ...defaults,
+    ...(error ? { error } : {}),
+  };
 }
 
 const optionsFor = (types: GraphType[]): SelectorOption<GraphType>[] =>

@@ -1,10 +1,17 @@
 // A data table: the grid, and (grouped tables) the Groups panel. Every edit goes to
 // the project store, which keeps the Undo history for the whole project.
-import { GROUPED_LIMITS, type ProjectNode, type RowGroup, type TableData } from "../../store/types";
+import {
+  GROUPED_LIMITS,
+  tableErrorFormat,
+  type ProjectNode,
+  type RowGroup,
+  type TableData,
+  type TableErrorFormat,
+} from "../../store/types";
 import type { TableMove } from "../../store/references";
 import { useProjectActions } from "../../store/use-project-store";
-import { Section, Stepper, WithInspector } from "../../components/inspector";
-import { Button, Input, Select } from "../../ui/controls";
+import { Row, Section, Stepper, WithInspector } from "../../components/inspector";
+import { Button, Input, RadioList, Select } from "../../ui/controls";
 import { useLayout } from "../../store/use-layout";
 import { ColumnsIcon, MinusIcon, PlusIcon } from "@phosphor-icons/react";
 import { Toolbar } from "../../ui/layout";
@@ -13,6 +20,7 @@ import {
   addRowGroup,
   applySummaryFormat,
   applySummaryFormatLoses,
+  changeErrorFormat,
   defaultRowGroups,
   regroupLoses,
   regroupTable,
@@ -58,13 +66,31 @@ export function TableView({ node }: { node: ProjectNode }) {
   );
 
   // An XY table has settings of its own: its replicates. A grouped or nested
-  // table has settings of its own: its groups.
+  // table has settings of its own: its groups. Every table that can carry
+  // error values (column, XY, grouped, nested) has one more: its error format.
   if (node.tableType === "xy") {
     return (
       <WithInspector
         title={node.name}
         tag={tag}
-        inspector={<ReplicatesPanel data={data} update={update} />}
+        inspector={
+          <>
+            <ReplicatesPanel data={data} update={update} />
+            <FormatPanel data={data} update={update} />
+          </>
+        }
+        actions={<AddFloatingNoteButton node={node} />}
+      >
+        {sheet}
+      </WithInspector>
+    );
+  }
+  if (node.tableType === "column") {
+    return (
+      <WithInspector
+        title={node.name}
+        tag={tag}
+        inspector={<FormatPanel data={data} update={update} />}
         actions={<AddFloatingNoteButton node={node} />}
       >
         {sheet}
@@ -83,11 +109,47 @@ export function TableView({ node }: { node: ProjectNode }) {
     <WithInspector
       title={node.name}
       tag={tag}
-      inspector={<GroupsPanel data={data} update={update} />}
+      inspector={
+        <>
+          <GroupsPanel data={data} update={update} />
+          <FormatPanel data={data} update={update} />
+        </>
+      }
       actions={<AddFloatingNoteButton node={node} />}
     >
       {sheet}
     </WithInspector>
+  );
+}
+
+/** A table's error format: what its entered error values are — SD or SEM
+ *  (Prism's "Changing a data table format": a table formatted for SEM whose
+ *  values are really SD can be switched). Switching relabels its summary
+ *  error columns (`_SD` ↔ `_SEM`, values untouched) and sets the default
+ *  error bars of graphs made from the table; graphs already made keep their own. */
+function FormatPanel({ data, update }: { data: TableData; update: (next: TableData, label: string) => void }) {
+  const format: TableErrorFormat = tableErrorFormat(data);
+  return (
+    <Section title="Format" icon={<ColumnsIcon />}>
+      <Row label="Error format">
+        <RadioList
+          value={format}
+          onChange={(next) => {
+            if (next === format) return;
+            update(changeErrorFormat(data, next), "Change Error Format");
+          }}
+          options={[
+            { value: "sd", label: "SD (standard deviation)" },
+            { value: "sem", label: "SEM (standard error of the mean)" },
+          ]}
+        />
+      </Row>
+      <p className="text-small text-secondary">
+        The error values in this table are{" "}
+        {format === "sd" ? "standard deviations" : "standard errors of the mean"}. Graphs made from this table
+        use it for their error bars.
+      </p>
+    </Section>
   );
 }
 

@@ -9,7 +9,8 @@
 // Excluded cells ("row,col" keys) follow the cells around: structural edits remap
 // them so they stay attached to their values. (Graphs follow on their own: see
 // store/references.ts.)
-import type { RowGroup, TableData, TableType } from "../../store/types";
+import type { RowGroup, TableData, TableErrorFormat, TableType } from "../../store/types";
+import { tableErrorFormat } from "../../store/types";
 import { seriesKeyOf } from "../../lib/columns";
 import { isGrouped, isNested } from "../../lib/dataset";
 import {
@@ -316,6 +317,35 @@ export function renameSubgroup(data: TableData, groupKey: string, oldSub: string
     columns: data.columns.map(rename),
     widths,
   };
+}
+
+/** A summary error subcolumn's suffix: `_SD`, `_SEM` or `_SE` (Prism's
+ *  YFormats SDN/SEN/SD/SE name them so on import — see src/lib/pzfx.ts). */
+const SUMMARY_ERROR_SUFFIXES = ["_SD", "_SEM", "_SE"] as const;
+
+/** The error suffix a format's columns carry: `_SD` for SD, `_SEM` for SEM. */
+const errorSuffix = (format: TableErrorFormat) => (format === "sd" ? "_SD" : "_SEM");
+
+/**
+ * A table's error format, changed: the format is recorded, and its summary
+ * error subcolumns are renamed to match (`A_SD` → `A_SEM`, values untouched)
+ * — Prism's "you entered SD but the table is formatted for SEM" switch. A
+ * rename that would collide with a column already there is skipped, so no
+ * column ever loses its name to another. Returns the table unchanged when
+ * the format already holds and every error column already matches, so the
+ * switch leaves no undo entry behind.
+ */
+export function changeErrorFormat(data: TableData, format: TableErrorFormat): TableData {
+  const target = errorSuffix(format);
+  const columns = data.columns.map((name) => {
+    const hit = SUMMARY_ERROR_SUFFIXES.find((s) => name.endsWith(s));
+    if (!hit || hit === target) return name;
+    const next = name.slice(0, -hit.length) + target;
+    return data.columns.includes(next) ? name : next;
+  });
+  const renamed = columns.some((c, i) => c !== data.columns[i]);
+  if (tableErrorFormat(data) === format && !renamed) return data;
+  return { ...data, errorFormat: format, columns };
 }
 
 /** Changes how many groups and sub-columns a grouped table has. Every value stays

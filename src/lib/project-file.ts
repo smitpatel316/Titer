@@ -175,7 +175,7 @@ const NODE_KEYS = Object.keys({
 // prettier-ignore
 const DATA_KEYS = Object.keys({
   columns: 1, rows: 1, groups: 1, replicates: 1, subgroups: 1, rowGroups: 1, excluded: 1,
-  widths: 1, freezeTitle: 1, notes: 1, summaryFormat: 1,
+  widths: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1,
 } satisfies Record<keyof TableData, 1>);
 
 // Graph options without a default, by the kind of value they hold.
@@ -513,6 +513,9 @@ function readData(
     excluded: excluded.length ? excluded : undefined,
     widths: Object.keys(widths).length ? (widths as Record<string, number>) : undefined,
     freezeTitle: d.freezeTitle === true || undefined,
+    // Only "sd" or "sem" survives: a hand-edited file holding anything else
+    // reads as SEM, the default, instead of carrying a bogus format.
+    errorFormat: d.errorFormat === "sd" || d.errorFormat === "sem" ? d.errorFormat : undefined,
   } as TableData);
   const regroupDroppedNames: string[] = [];
   // Where the groups start: an XY table's X column comes first — unless the
