@@ -43,6 +43,7 @@ export type GraphType =
   | "roc-curve"
   | "observed-fitted"
   | "smooth-curve"
+  | "estimation-plot"
   | "scree-plot"
   | "pca-biplot"
   | "kmeans-scatter"
@@ -130,6 +131,8 @@ export interface GraphOptions {
   // Box & violin
   kind: Choice<"kind">;
   showPoints: boolean; // overlay individual points on box/violin
+  // Estimation plot: draw violins behind the raw points (else a scatterplot).
+  estimationViolin: boolean;
   // XY scatter: markers only, connecting line only, or both
   xyStyle: Choice<"xyStyle">;
   // An XY table's replicates: each X's center and error (`center`, `error`), or each value.
@@ -202,6 +205,11 @@ export interface GraphOptions {
   // hazard ratios from, or a survival curve stratifies by (see forest-plot.ts
   // and survival.ts) — the graph runs the same cached runAnalysis result.
   coxAnalysisId?: string;
+  // Compare two groups (Column only): the sibling "Compare two groups"
+  // (t test) analysis an estimation plot draws its difference between means
+  // with its 95% CI from (see estimation-plot.ts) — the graph runs the same
+  // cached runAnalysis result.
+  ttestAnalysisId?: string;
   // Poisson regression (Multiple Variables only): the sibling
   // "Poisson regression" analysis an observed-vs-fitted graph draws its
   // fitted counts from (see observed-fitted.ts) — the graph runs the same
@@ -351,6 +359,7 @@ export const DEFAULT_GRAPH_OPTIONS: GraphOptions = {
   shape: "bar",
   kind: "box",
   showPoints: false,
+  estimationViolin: false,
   xyStyle: "points",
   xyReplicates: "mean",
   pieValue: "sum",

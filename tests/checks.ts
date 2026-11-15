@@ -130,6 +130,7 @@ import {
 import { cutoffAsP, cutoffOfP, genesNamed, VOLCANO_MAX_LOG10 } from "../src/views/graphs/volcano";
 import { XY_SCATTER_MAX_POINTS } from "../src/views/graphs/xy-scatter";
 import { addForestPlot } from "../src/views/graphs/forest-plot";
+import { addEstimationPlot, estimationDiffLabel } from "../src/views/graphs/estimation-plot";
 import { addSchildPlot, schildPlotPoints } from "../src/views/graphs/schild-plot";
 import { addRegression, fitLinear } from "../src/views/graphs/regression-overlay";
 import { addObservedFitted } from "../src/views/graphs/observed-fitted";
@@ -8116,6 +8117,225 @@ check("the forest plot names a covariate whose CI bound came back null (R2-M14)"
     notes.some((n) => n.text?.includes("“Safe”")),
     `the null-bound covariate must be named on the figure, got ${JSON.stringify(notes.map((n) => n.text))}`,
   );
+});
+
+// Estimation plots (v2-12): Prism's "Graph confidence interval of
+// differences between means" — the raw data plus a third dataset plotting
+// the difference with its 95% CI.
+check("a column table offers the estimation plot (v2-12)", () => {
+  ok(
+    GRAPH_OPTIONS_BY_TABLE["column"].some((o) => o.value === "estimation-plot"),
+    "column tables must offer the estimation plot",
+  );
+  strictEqual(GRAPHS["estimation-plot"].label, "Estimation plot");
+  strictEqual(GRAPHS["estimation-plot"].family, "column");
+});
+
+check("the estimation plot draws the raw data plus the difference between means with its 95% CI (v2-12)", () => {
+  const options = newGraphOptions("estimation-plot");
+  const columns = readTable(treatments(["Control", "Drug A"])).columns;
+  const fig = GRAPHS["estimation-plot"].build(columns, options, paintOf(options, 2));
+  // The raw data: one jittered scatter trace per group.
+  const raw = fig.data as { type?: string; mode?: string; y?: number[] }[];
+  strictEqual(raw.filter((t) => t.type === "scatter").length, 2);
+  deepStrictEqual(raw[0].y, [1, 2, 3]);
+  deepStrictEqual(raw[1].y, [2, 3, 4]);
+  addEstimationPlot(
+    fig,
+    columns,
+    {
+      testType: "compare-two-groups",
+      subtitle: "Unpaired t test",
+      stats: [],
+      groups: [],
+      notes: "",
+      difference: { mode: "difference", estimate: -1, low: -2.2, high: 0.2, label: "Difference between means" },
+    },
+    paintOf(options, 2),
+    options,
+  );
+  const traces = fig.data as {
+    type?: string;
+    mode?: string;
+    x?: number[];
+    y?: number[];
+    text?: string[];
+    error_y?: { array?: number[]; arrayminus?: number[] };
+  }[];
+  // The third dataset sits one slot past the raw groups, with asymmetric CI whiskers.
+  const diff = traces.find((t) => t.mode === "markers" && t.x?.[0] === 2);
+  deepStrictEqual(diff?.y, [-1]);
+  // Asymmetric CI whiskers: 0.2 − (−1) above, −1 − (−2.2) below (to float tolerance).
+  const close = (a: number | undefined, b: number) => a !== undefined && Math.abs(a - b) < 1e-9;
+  ok(close(diff?.error_y?.array?.[0], 1.2), `upper whisker must reach 0.2, got ${diff?.error_y?.array?.[0]}`);
+  ok(close(diff?.error_y?.arrayminus?.[0], 1.2), `lower whisker must reach −2.2, got ${diff?.error_y?.arrayminus?.[0]}`);
+  strictEqual(
+    diff?.text?.[0],
+    estimationDiffLabel(-1, -2.2, 0.2, "Difference between means"),
+  );
+  // Its slot is labelled on the X axis, and the zero line marks no difference.
+  const xaxis = fig.layout.xaxis as { ticktext?: string[]; range?: [number, number] };
+  ok(xaxis.ticktext?.includes("Difference between means"), `X ticks must name the difference, got ${JSON.stringify(xaxis.ticktext)}`);
+  deepStrictEqual(xaxis.range, [-0.5, 2.5]);
+  const shapes = fig.layout.shapes as { y0?: number; y1?: number }[];
+  ok(shapes?.some((s) => s.y0 === 0 && s.y1 === 0), "a zero line must mark no difference");
+  // No difference dataset is added twice: the raw traces plus exactly one diff trace.
+  strictEqual(traces.filter((t) => t.mode === "markers").length, 3);
+});
+
+check("the estimation plot draws violins behind the points when asked (v2-12)", () => {
+  const options = { ...newGraphOptions("estimation-plot"), estimationViolin: true };
+  const columns = readTable(treatments(["Control", "Drug A"])).columns;
+  const fig = GRAPHS["estimation-plot"].build(columns, options, paintOf(options, 2));
+  const traces = fig.data as { type?: string }[];
+  strictEqual(traces.filter((t) => t.type === "violin").length, 2);
+  strictEqual(traces.filter((t) => t.type === "scatter").length, 2);
+});
+
+check("the estimation plot draws a lognormal t test on the log scale (v2-12)", () => {
+  const options = newGraphOptions("estimation-plot");
+  const columns = readTable(treatments(["Control", "Drug A"])).columns;
+  const fig = GRAPHS["estimation-plot"].build(columns, options, paintOf(options, 2));
+  addEstimationPlot(
+    fig,
+    columns,
+    {
+      testType: "compare-two-groups",
+      subtitle: "Lognormal t test",
+      stats: [],
+      groups: [],
+      notes: "",
+      difference: {
+        mode: "log-difference",
+        estimate: Math.log(2),
+        low: Math.log(1.2),
+        high: Math.log(3.4),
+        label: "Difference of log means",
+      },
+    },
+    paintOf(options, 2),
+    options,
+  );
+  // The raw values are drawn as their natural logs, on a linear axis titled as such
+  // (a linear axis carries no `type` in Plotly — it defaults to linear).
+  const traces = fig.data as { type?: string; y?: (number | null)[] }[];
+  const raw = traces.filter((t) => t.type === "scatter");
+  deepStrictEqual(raw[0].y?.map((v) => v?.toFixed(4)), [0, 1, 2].map((v) => Math.log(v + 1).toFixed(4)));
+  const yaxis = fig.layout.yaxis as { type?: string; title?: { text?: string } };
+  ok(yaxis.type === undefined || yaxis.type === "linear", `y axis must be linear, got ${yaxis.type}`);
+  strictEqual(yaxis.title?.text, "Log value");
+  // And a log Y scale is forced linear: the ln scale is itself logarithmic,
+  // so a log axis would log the values twice.
+  const logOptions = { ...newGraphOptions("estimation-plot"), yScale: "log10" as const };
+  const logFig = GRAPHS["estimation-plot"].build(columns, logOptions, paintOf(logOptions, 2));
+  strictEqual((logFig.layout.yaxis as { type?: string }).type, "log");
+  addEstimationPlot(
+    logFig,
+    columns,
+    {
+      testType: "compare-two-groups",
+      subtitle: "Lognormal t test",
+      stats: [],
+      groups: [],
+      notes: "",
+      difference: {
+        mode: "log-difference",
+        estimate: Math.log(2),
+        low: Math.log(1.2),
+        high: Math.log(3.4),
+        label: "Difference of log means",
+      },
+    },
+    paintOf(logOptions, 2),
+    logOptions,
+  );
+  const logYaxis = logFig.layout.yaxis as { type?: string; tickvals?: unknown[] };
+  strictEqual(logYaxis.type, "linear");
+  strictEqual(logYaxis.tickvals, undefined);
+  // The difference of log means sits on that same ln scale, with the zero line.
+  const diff = (traces as { name?: string; y?: (number | null)[] }[]).find(
+    (t) => t.name === "Difference of log means",
+  );
+  deepStrictEqual(diff?.y, [Math.log(2)]);
+  const shapes = fig.layout.shapes as { y0?: number; y1?: number }[];
+  ok(shapes?.some((s) => s.y0 === 0 && s.y1 === 0), "a zero line must mark no difference");
+});
+
+check("the estimation plot draws a paired ratio t test on a second log axis (v2-12)", () => {
+  const options = newGraphOptions("estimation-plot");
+  const columns = readTable(treatments(["Control", "Drug A"])).columns;
+  const fig = GRAPHS["estimation-plot"].build(columns, options, paintOf(options, 2));
+  addEstimationPlot(
+    fig,
+    columns,
+    {
+      testType: "compare-two-groups",
+      subtitle: "Ratio paired t test",
+      stats: [],
+      groups: [],
+      notes: "",
+      difference: { mode: "ratio", estimate: 1.5, low: 1.1, high: 2.0, label: "Geometric mean ratio" },
+    },
+    paintOf(options, 2),
+    options,
+  );
+  // The raw groups stay on their own scale; the ratio is on a second log axis.
+  const traces = fig.data as { type?: string; y?: number[]; yaxis?: string }[];
+  const raw = traces.filter((t) => t.type === "scatter" && !t.yaxis);
+  strictEqual(raw.length, 2);
+  deepStrictEqual(raw[0].y, [1, 2, 3]);
+  const y2 = fig.layout.yaxis2 as { type?: string; range?: number[]; overlaying?: string; side?: string };
+  strictEqual(y2.type, "log");
+  strictEqual(y2.overlaying, "y");
+  strictEqual(y2.side, "right");
+  ok(y2.range?.every((v) => Number.isFinite(v)), `ratio axis range must be finite, got ${JSON.stringify(y2.range)}`);
+  const ratio = traces.find((t) => t.yaxis === "y2");
+  deepStrictEqual(ratio?.y, [1.5]);
+  // The reference line sits at 1 on the ratio axis — no difference.
+  const shapes = fig.layout.shapes as { y0?: number; y1?: number; yref?: string }[];
+  ok(shapes?.some((s) => s.y0 === 1 && s.y1 === 1 && s.yref === "y2"), "a reference line at 1 must mark no difference");
+});
+
+check("the estimation plot says why a test with no CI draws no third dataset (v2-12)", () => {
+  const options = newGraphOptions("estimation-plot");
+  const columns = readTable(treatments(["Control", "Drug A"])).columns;
+  const fig = GRAPHS["estimation-plot"].build(columns, options, paintOf(options, 2));
+  const before = fig.data.length;
+  addEstimationPlot(
+    fig,
+    columns,
+    { testType: "compare-two-groups", subtitle: "Mann-Whitney test", stats: [], groups: [], notes: "" },
+    paintOf(options, 2),
+    options,
+  );
+  // The raw data stands alone, and the figure says why.
+  strictEqual(fig.data.length, before);
+  const notes = (fig.layout.annotations as { text?: string }[] | undefined) ?? [];
+  ok(
+    notes.some((n) => n.text?.includes("Mann-Whitney test") && n.text?.includes("no difference with a 95% CI")),
+    `the figure must name the reason, got ${JSON.stringify(notes.map((n) => n.text))}`,
+  );
+});
+
+check("a two-tailed t test reports its difference with its 95% CI, a one-tailed or non-parametric one reports none (v2-12)", async () => {
+  const table = treatments(["Control", "Drug A"]);
+  const two = await runAnalysis("compare-two-groups", table, { paired: false } as AnalysisParams);
+  if ("error" in two) throw new Error(`expected a result, got ${two.error}`);
+  // The difference matches the result's own rows: the mean difference and its CI.
+  const stat = (label: string) => two.stats.find((s) => s.label === label)?.value;
+  deepStrictEqual(two.difference, {
+    mode: "difference",
+    estimate: stat("Mean difference"),
+    low: stat("95% CI lower"),
+    high: stat("95% CI upper"),
+    label: "Difference between means",
+  });
+  const one = await runAnalysis("compare-two-groups", table, { paired: false, tails: "less" } as AnalysisParams);
+  if ("error" in one) throw new Error(`expected a result, got ${one.error}`);
+  strictEqual(one.difference, undefined);
+  const nonparam = await runAnalysis("compare-two-groups", table, { paired: false, gaussian: false } as AnalysisParams);
+  if ("error" in nonparam) throw new Error(`expected a result, got ${nonparam.error}`);
+  strictEqual(nonparam.difference, undefined);
 });
 
 check("the observed-vs-fitted plot drops overflowed fitted counts with a note instead of hiding the worst misfit (R2-G-F15)", () => {

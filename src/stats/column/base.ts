@@ -3,7 +3,7 @@
 // resulting numbers. Every number an analysis shows comes from R, its groups'
 // descriptives too (`describe`): the same for every test.
 
-import type { TAILS, AnalysisType, AnalysisOutcome, Column, ComparisonRow, GroupDescriptives, NormalityRow, StatRow } from "../types";
+import type { TAILS, AnalysisType, AnalysisOutcome, Column, ComparisonRow, DifferenceResult, GroupDescriptives, NormalityRow, StatRow } from "../types";
 import { evalNamedVector } from "../webr";
 
 /** A group as a test sees it: a name and its numbers. */
@@ -272,6 +272,15 @@ export interface ColumnTestSpec<P = unknown> {
   rCode: (groups: Group[], params: P | undefined) => string;
   /** Map the marshalled R values (+ descriptives) into display rows. */
   rows: (v: Record<string, number | null>, groups: GroupDescriptives[], params: P | undefined) => StatRow[];
+  /** The difference with its 95% CI the test estimates, for an estimation
+   *  plot (see DifferenceResult in ../types): undefined when the test
+   *  reports no such difference (a non-parametric test, or a one-tailed
+   *  one whose CI is one-sided). */
+  difference?: (
+    v: Record<string, number | null>,
+    groups: GroupDescriptives[],
+    params: P | undefined,
+  ) => DifferenceResult | undefined;
   /** The per-data-set normality table (`AnalysisOutcome.normality`), from the
    *  same R values — the wizard's "Not sure — check for normality first"
    *  reads it, and the results view renders it. Without it the wizard
@@ -338,6 +347,7 @@ export async function runColumnTest<P>(
     subtitle: spec.subtitle?.(params),
     equation: spec.equation?.(v, described, params),
     stats: spec.rows(v, described, params),
+    difference: spec.difference?.(v, described, params),
     normality: spec.normality?.(v, described, params),
     groups: described,
     notes: typeof spec.notes === "function" ? spec.notes(params, groups, columns) : spec.notes,

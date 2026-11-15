@@ -37,6 +37,7 @@ import { logisticCurveGraph } from "./logistic-curve";
 import { heatmap } from "./heatmap";
 import { survival } from "./survival";
 import { forestPlot } from "./forest-plot";
+import { estimationPlot } from "./estimation-plot";
 import { volcano, VOLCANO_SERIES } from "./volcano";
 import { blandAltmanGraph } from "./bland-altman";
 import { rocCurveGraph } from "./roc-curve";
@@ -109,6 +110,7 @@ export const GRAPHS: Record<GraphType, GraphModule> = {
   heatmap,
   survival,
   "forest-plot": forestPlot,
+  "estimation-plot": estimationPlot,
   volcano,
   "bland-altman": blandAltmanGraph,
   "roc-curve": rocCurveGraph,
@@ -249,6 +251,7 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
     "before-after",
     "box-violin",
     "mean-error",
+    "estimation-plot",
     "histogram",
     "pie",
     "donut",

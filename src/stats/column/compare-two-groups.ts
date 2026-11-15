@@ -187,6 +187,36 @@ export const compareTwoGroupsSpec: ColumnTestSpec<CompareTwoGroupsParams> = {
     }
     return rows;
   },
+  // The difference with its 95% CI, for an estimation plot: the mean
+  // difference (unpaired) or mean of the paired differences, the difference
+  // of the log means (unpaired lognormal — the R result carries the ratio
+  // of geometric means, whose log is the log-difference), or the geometric
+  // mean ratio (paired ratio). None for a non-parametric test (no CI
+  // computed) or a one-tailed one (R's CI is one-sided: one bound null).
+  difference: (v, _groups, params) => {
+    const p = withDefaults(params);
+    if (!p.gaussian) return undefined;
+    const finite = (x: number | null | undefined): x is number => typeof x === "number" && Number.isFinite(x);
+    // The ratio variants carry the geometric-mean ratio, the others the mean difference.
+    const ratio = p.paired ? p.ratio : p.lognormal;
+    const [estimate, low, high] = ratio ? [v.gmr, v.ci_lo, v.ci_hi] : [v.md, v.ci_lo, v.ci_hi];
+    if (!finite(estimate) || !finite(low) || !finite(high) || low > high) return undefined;
+    if (p.paired && p.ratio) {
+      if (estimate <= 0 || low <= 0 || high <= 0) return undefined;
+      return { mode: "ratio", estimate, low, high, label: "Geometric mean ratio" };
+    }
+    if (!p.paired && p.lognormal) {
+      if (estimate <= 0 || low <= 0 || high <= 0) return undefined;
+      return {
+        mode: "log-difference",
+        estimate: Math.log(estimate),
+        low: Math.log(low),
+        high: Math.log(high),
+        label: "Difference of log means",
+      };
+    }
+    return { mode: "difference", estimate, low, high, label: p.paired ? "Mean of differences" : "Difference between means" };
+  },
   // Prism compares exactly two data sets: say which two, when the table has more.
   notes: (params, groups, columns) => {
     const ignored = dataGroups(columns)

@@ -32,6 +32,7 @@ import { addSchildPlot } from "./schild-plot";
 import { addSmoothCurve } from "./smooth-curve";
 import { addLogisticCurve, logisticCurveNote } from "./logistic-curve";
 import { addForestPlot } from "./forest-plot";
+import { addEstimationPlot } from "./estimation-plot";
 import { coxSurvivalColumns } from "./survival";
 import { FormatPanel } from "./format-panel";
 import { copyGraphImage, saveGraphImage, sendGraphToOffice } from "./graph-export";
@@ -476,6 +477,20 @@ export function GraphView({ node }: { node: ProjectNode }) {
     kmeansAnalysis?.analysisParams,
   );
   const kmeansResult = kmeansOutcome && !("error" in kmeansOutcome) ? kmeansOutcome : null;
+  // An estimation plot draws a sibling Compare two groups analysis's
+  // difference between means with its 95% CI — the same cached runAnalysis
+  // result (no extra R call). Without one it draws only the raw data, and
+  // the Format panel says to run the analysis first — exactly like the
+  // forest plot.
+  const ttestAnalysis = options.ttestAnalysisId ? nodes[options.ttestAnalysisId] : undefined;
+  const ttestOutcome = useAnalysis(
+    type === "estimation-plot" && ttestAnalysis?.analysisType === "compare-two-groups"
+      ? "compare-two-groups"
+      : undefined,
+    data,
+    ttestAnalysis?.analysisParams,
+  );
+  const ttestResult = ttestOutcome && !("error" in ttestOutcome) ? ttestOutcome : null;
   // A smooth-curve graph draws a sibling Spline and Lowess analysis's fitted
   // curve — the same cached runAnalysis result (no extra R call). Without one
   // it draws only the points, and the Format panel prompts for one.
@@ -650,6 +665,15 @@ export function GraphView({ node }: { node: ProjectNode }) {
         }
       }
       if (type === "forest-plot" && coxResult) addForestPlot(fig, coxResult, paint, options);
+      if (type === "estimation-plot") {
+        if (ttestResult) addEstimationPlot(fig, columns, ttestResult, paint, options);
+        else
+          addNote(
+            fig,
+            "Run a Compare two groups analysis on this table to draw the difference between means with its 95% CI.",
+            options,
+          );
+      }
       if (type === "observed-fitted" && poissonResult)
         addObservedFitted(fig, columns, poissonResult, poissonParams, paint, options);
       if (type === "scree-plot") {

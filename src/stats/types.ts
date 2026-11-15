@@ -1607,6 +1607,25 @@ export interface MonteCarloResult {
   bins: { edges: number[]; counts: number[] };
 }
 /** Unified result shape returned by every analysis module. */
+/** The difference a t test estimates with its 95% CI, for an estimation plot
+ *  (Prism's "Graph confidence interval of differences between means"): the
+ *  third dataset the plot draws beside the raw groups. `difference` = the
+ *  difference between means (unpaired t test) or the mean of the paired
+ *  differences, in the data's units; `log-difference` = the difference of the
+ *  log means (unpaired lognormal t test), on the natural-log scale (its
+ *  exponential is the ratio of geometric means); `ratio` = the geometric
+ *  mean ratio (paired ratio t test), plotted on a log axis against 1. Only a
+ *  two-tailed parametric t test reports one: a non-parametric test computes
+ *  no CI, and a one-tailed test's CI is one-sided (one bound infinite). */
+export interface DifferenceResult {
+  mode: "difference" | "log-difference" | "ratio";
+  estimate: number;
+  low: number;
+  high: number;
+  /** Label for the third dataset, e.g. "Difference between means". */
+  label: string;
+}
+
 export interface AnalysisResult {
   testType: AnalysisType;
   /** Resolved test name when params pick a specific variant, e.g. "Welch's t test". */
@@ -1729,6 +1748,9 @@ export interface AnalysisResult {
    *  estimated power (when the statistic is a P value), the observed
    *  value on the real data, and the bins the histogram graph draws. */
   monteCarlo?: MonteCarloResult;
+  /** Optional difference with its 95% CI ("compare-two-groups"): what an
+   *  estimation plot draws as its third dataset (see DifferenceResult). */
+  difference?: DifferenceResult;
 }
 
 /** A test returns either a result or a user-facing error message. */

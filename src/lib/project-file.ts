@@ -185,7 +185,7 @@ type OptionalOption = {
 // prettier-ignore
 const OPTIONAL_OPTIONS = {
   yMin: "number", yMax: "number", yStep: "number", xMin: "number", xMax: "number", xStep: "number", y2Min: "number", y2Max: "number", y2Step: "number", binWidth: "number",
-  sigAnalysisId: "text", sigPairs: "texts", regAnalysisId: "text", demingAnalysisId: "text", coxAnalysisId: "text", poissonAnalysisId: "text", smoothAnalysisId: "text", pcaAnalysisId: "text", kmeansAnalysisId: "text", monteCarloAnalysisId: "text", xVariable: "text", yVariable: "text", bubbleSizeVariable: "text", bubbleColorVariable: "text",
+  sigAnalysisId: "text", sigPairs: "texts", regAnalysisId: "text", demingAnalysisId: "text", coxAnalysisId: "text", ttestAnalysisId: "text", poissonAnalysisId: "text", smoothAnalysisId: "text", pcaAnalysisId: "text", kmeansAnalysisId: "text", monteCarloAnalysisId: "text", xVariable: "text", yVariable: "text", bubbleSizeVariable: "text", bubbleColorVariable: "text",
   volcanoX: "text", volcanoY: "text", volcanoLabel: "text", volcanoGroupA: "text", volcanoGroupB: "text", rightYDataset: "text", y2Label: "text",
   palette: "palette", series: "styles", points: "pointStyles", outlineColor: "color", pointOutlineColor: "color", errorColor: "color",
   legend: "place", note: "place",
@@ -1396,6 +1396,7 @@ export function parseProjectFile(
       (o.regAnalysisId && !nodeOf(o.regAnalysisId)) ||
       (o.demingAnalysisId && !nodeOf(o.demingAnalysisId)) ||
       (o.coxAnalysisId && !nodeOf(o.coxAnalysisId)) ||
+      (o.ttestAnalysisId && !nodeOf(o.ttestAnalysisId)) ||
       (o.poissonAnalysisId && !nodeOf(o.poissonAnalysisId)) ||
       (o.pcaAnalysisId && !nodeOf(o.pcaAnalysisId)) ||
       (o.smoothAnalysisId && !nodeOf(o.smoothAnalysisId))

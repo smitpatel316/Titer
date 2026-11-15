@@ -145,6 +145,13 @@
     "p": true
    }
   ],
+  "difference": {
+   "mode": "difference",
+   "estimate": -0.5053571429,
+   "low": -5.84415731,
+   "high": 4.833443024,
+   "label": "Difference between means"
+  },
   "groups": [
    {
     "name": "Control",
@@ -286,6 +293,13 @@
     "value": -0.0292286567
    }
   ],
+  "difference": {
+   "mode": "difference",
+   "estimate": -0.2428571429,
+   "low": -6.917753059,
+   "high": 6.432038773,
+   "label": "Mean of differences"
+  },
   "groups": [
    {
     "name": "Control",
@@ -336,6 +350,13 @@
     "value": 1.310966207
    }
   ],
+  "difference": {
+   "mode": "ratio",
+   "estimate": 0.9233181829,
+   "low": 0.6502962949,
+   "high": 1.310966207,
+   "label": "Geometric mean ratio"
+  },
   "groups": [
    {
     "name": "Control",
@@ -26168,6 +26189,13 @@
     "value": 0.810083593
    }
   ],
+  "difference": {
+   "mode": "log-difference",
+   "estimate": -0.2789720511,
+   "low": -0.3473262669,
+   "high": -0.2106178354,
+   "label": "Difference of log means"
+  },
   "groups": [
    {
     "name": "Low",
@@ -26624,6 +26652,13 @@
     "p": true
    }
   ],
+  "difference": {
+   "mode": "difference",
+   "estimate": 5.279166667,
+   "low": -0.07277239614,
+   "high": 10.63110573,
+   "label": "Difference between means"
+  },
   "groups": [
    {
     "name": "High",
@@ -26686,6 +26721,13 @@
     "value": 0.6473156407
    }
   ],
+  "difference": {
+   "mode": "difference",
+   "estimate": 1.375,
+   "low": -1.070777795,
+   "high": 3.820777795,
+   "label": "Mean of differences"
+  },
   "groups": [
    {
     "name": "Control",

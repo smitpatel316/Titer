@@ -198,6 +198,17 @@ export function statisticsControls(c: SectionContext): React.ReactNode {
     }
     return <CoxControls analyses={sources} options={options} set={set} />;
   }
+  if (graphType === "estimation-plot") {
+    const sources = c.analyses.filter((a) => a.analysisType === "compare-two-groups");
+    if (!sources.length) {
+      return (
+        <NoAnalysis test="compare-two-groups" onNewAnalysis={c.onNewAnalysis}>
+          Draw the difference between means with its 95% CI from a Compare two groups analysis of this table.
+        </NoAnalysis>
+      );
+    }
+    return <TtestControls analyses={sources} options={options} set={set} />;
+  }
   if (graphType === "observed-fitted") {
     const sources = c.analyses.filter((a) => a.analysisType === "poisson-regression");
     if (!sources.length) {
@@ -353,6 +364,27 @@ function CoxControls({ analyses, options, set }: { analyses: ProjectNode[]; opti
       analyses={analyses}
       value={options.coxAnalysisId}
       onChange={(coxAnalysisId) => set({ coxAnalysisId })}
+    />
+  );
+}
+
+/** Pick a Compare two groups analysis: the estimation plot draws its
+ *  difference between means (or mean of the paired differences) with its
+ *  95% CI as the third dataset. */
+function TtestControls({
+  analyses,
+  options,
+  set,
+}: {
+  analyses: ProjectNode[];
+  options: GraphOptions;
+  set: SetOptions;
+}) {
+  return (
+    <AnalysisRow
+      analyses={analyses}
+      value={options.ttestAnalysisId}
+      onChange={(ttestAnalysisId) => set({ ttestAnalysisId })}
     />
   );
 }
@@ -1271,6 +1303,19 @@ function ownStyle(context: SectionContext): React.ReactNode {
       );
     case "box-violin":
       return boxOrViolin;
+    case "estimation-plot":
+      return (
+        <>
+          <Group title="Raw data">
+            <Toggle
+              label="Show violins"
+              checked={options.estimationViolin}
+              onChange={(estimationViolin) => set({ estimationViolin })}
+            />
+          </Group>
+          {points}
+        </>
+      );
     case "grouped-box":
       return (
         <>
