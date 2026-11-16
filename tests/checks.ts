@@ -8576,6 +8576,60 @@ check("the chi-square trend test names a constant first row or column instead of
   close(stat("P value (test for trend)"), 0.0000361, 1e-6, "trend p value");
 });
 
+// v1.5.0 m6: a row or column holding no counts makes R's chisq.test return
+// NaN (no error) — the statistic, P and Cramér's V rendered as unexplained
+// nulls. The runner names the empty row/column instead of calling R.
+check("a chi-square table with an empty row or column names it instead of returning nulls", async () => {
+  const empty = async (data: TableData) => {
+    const out = await runAnalysis("chi-square", data);
+    if (!("error" in out)) throw new Error(`expected an empty-marginal error, got ${JSON.stringify(out.stats)}`);
+    return out.error;
+  };
+  const emptyCol: TableData = {
+    columns: ["Title", "Outcome A", "Outcome B", "Outcome C"],
+    rows: [
+      ["Cat 1", "10", "5", "0"],
+      ["Cat 2", "8", "3", "0"],
+      ["Cat 3", "6", "4", "0"],
+    ],
+  };
+  const eCol = await empty(emptyCol);
+  ok(eCol.includes("Outcome C") && eCol.includes("no counts"), eCol);
+  const emptyRow: TableData = {
+    columns: ["Title", "Outcome A", "Outcome B"],
+    rows: [
+      ["Cat 1", "10", "5"],
+      ["Cat 2", "0", "0"],
+      ["Cat 3", "6", "4"],
+    ],
+  };
+  const eRow = await empty(emptyRow);
+  ok(eRow.includes("row 2") && eRow.includes("no counts"), eRow);
+  // A 2×2 with an empty column errors too: Fisher's p would be 1, but the
+  // chi-square reference and Phi are undefined.
+  const twoByTwo: TableData = {
+    columns: ["Title", "Outcome A", "Outcome B"],
+    rows: [
+      ["Drug", "15", "0"],
+      ["Placebo", "6", "0"],
+    ],
+  };
+  const e2 = await empty(twoByTwo);
+  ok(e2.includes("Outcome B") && e2.includes("no counts"), e2);
+  // A table with no empty marginal still runs.
+  const okTable: TableData = {
+    columns: ["Title", "Outcome A", "Outcome B", "Outcome C"],
+    rows: [
+      ["Cat 1", "10", "5", "3"],
+      ["Cat 2", "8", "3", "6"],
+      ["Cat 3", "6", "4", "2"],
+    ],
+  };
+  const out = await runAnalysis("chi-square", okTable);
+  if ("error" in out) throw new Error(out.error);
+  ok(out.stats.find((s) => s.label === "Chi-square")?.value != null, "chi-square should compute");
+});
+
 check("the McNemar wizard confirms paired data and defaults the correction on", () => {
   const data: TableData = {
     columns: ["Title", "Second: Yes", "Second: No"],

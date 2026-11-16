@@ -54,6 +54,26 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
     };
   }
 
+  // A row or column holding no counts at all makes the test itself
+  // undefined: its expected counts are all 0, so (O − E)² / E is 0/0 and
+  // R's chisq.test returns NaN for the statistic and P (no error) — the
+  // result would render as unexplained nulls. Name the empty row/column
+  // instead of calling R. (Checked after the trend guard above, so a
+  // constant first row/column keeps that test's more specific message.)
+  const rowSums = matrix.map((r) => r.reduce((s, v) => s + v, 0));
+  const colSums = matrix[0].map((_, c) => matrix.reduce((s, r) => s + r[c], 0));
+  const emptyRow = rowSums.findIndex((s) => s === 0);
+  const emptyCol = colSums.findIndex((s) => s === 0);
+  if (emptyRow !== -1 || emptyCol !== -1) {
+    const empty = emptyRow !== -1 ? `row ${emptyRow + 1}` : `column “${groups[emptyCol].name}”`;
+    const kind = emptyRow !== -1 ? "row" : "column";
+    return {
+      error:
+        `The chi-square test can't run on this table: ${empty} holds no counts, so its expected counts are all 0 ` +
+        `and the statistic would be 0/0. Add counts to the empty ${kind}, or drop it, and try again.`,
+    };
+  }
+
   // as.numeric() drops R's own names ("X-squared", "df"…): the keys are only ours.
   const rCode = is2x2
     ? `m<-matrix(c(${flat.join(",")}),nrow=2,byrow=TRUE);ft<-fisher.test(m);ct<-suppressWarnings(chisq.test(m, correct=FALSE));` +
