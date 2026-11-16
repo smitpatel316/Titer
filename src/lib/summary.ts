@@ -1,5 +1,12 @@
 // The mean, SD, SEM and median of numbers, for what the graphs draw at once (error bars,
 // centers); analyses take theirs from R.
+//
+// Empty-input contract (v1.5.0 m18): mean([]) and median([]) are NaN by
+// definition (0/0), sem([]) likewise — these helpers never see an empty
+// group from a current caller, and their return type stays `number` so the
+// ~10 graph/stats call sites need no null-plumbing. The boundary that
+// surfaces descriptives, `describe` in stats/column/base.ts, coerces NaN
+// to null for an empty group instead.
 
 export const mean = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
 

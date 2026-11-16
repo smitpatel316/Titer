@@ -42,31 +42,42 @@ export function pairedGroups(columns: Column[]): Group[] {
 }
 
 /** R: each group's (`G`, a list) n, mean, SD and SEM (n − 1; none under 2 values) and
- *  median, named `n_i`, `m_i`, `s_i`, `e_i`, `md_i`. */
+ *  median, named `n_i`, `m_i`, `s_i`, `e_i`, `md_i`. An empty group arrives as
+ *  `c()`, i.e. NULL — and `median(NULL)` is NULL (length 0), so without the
+ *  `is.null` coercion `setNames` got 5 names for a 4-vector and the whole
+ *  call threw a raw R error instead of returning nulls (v1.5.0 m18). */
 export const R_DESCRIBE =
-  "unlist(lapply(seq_along(G),function(i){x<-G[[i]];n<-length(x);s<-if(n>1)sd(x) else NA;" +
+  "unlist(lapply(seq_along(G),function(i){x<-G[[i]];if(is.null(x))x<-numeric(0);n<-length(x);s<-if(n>1)sd(x) else NA;" +
   'setNames(c(n,mean(x),s,s/sqrt(n),median(x)),paste0(c("n_","m_","s_","e_","md_"),i-1))}))';
 
 /** Each group's descriptives, computed by R, and the difference of means of each of
- *  `pairs` (`diff(i, j)`). */
+ *  `pairs` (`diff(i, j)`). An empty group comes back as nulls (n = 0), never
+ *  NaN: R's `mean(numeric(0))` is NaN, and `?? null` does not catch NaN, so
+ *  the mapping coerces it here (v1.5.0 m18). */
 export async function describe(
   groups: Group[],
   pairs: [number, number][] = [],
 ): Promise<{ groups: GroupDescriptives[]; diff: (i: number, j: number) => number | null }> {
   const v = await evalNamedVector(
     `G<-list(${groups.map((g) => rVec(g.values)).join(",")});` +
+      // An empty group is NULL in R and mean(NULL) warns; coerce once here
+      // so both R_DESCRIBE and the difference below see numeric(0).
+      `G<-lapply(G,function(x)if(is.null(x))numeric(0) else x);` +
       `c(${R_DESCRIBE}${pairs.map(([i, j]) => `,d_${i}_${j}=mean(G[[${i + 1}]])-mean(G[[${j + 1}]])`).join("")})`,
   );
+  // NaN is not null: R's mean of an empty group is NaN, and `?? null` would
+  // let it through as a value. The same guard covers the difference of means.
+  const num = (x: number | null | undefined): number | null => (x == null || Number.isNaN(x) ? null : x);
   return {
     groups: groups.map((g, i) => ({
       name: g.name,
-      mean: v[`m_${i}`] ?? null,
-      sd: v[`s_${i}`] ?? null,
-      sem: v[`e_${i}`] ?? null,
-      median: v[`md_${i}`] ?? null,
+      mean: num(v[`m_${i}`]),
+      sd: num(v[`s_${i}`]),
+      sem: num(v[`e_${i}`]),
+      median: num(v[`md_${i}`]),
       n: v[`n_${i}`] ?? 0,
     })),
-    diff: (i, j) => v[`d_${i}_${j}`] ?? null,
+    diff: (i, j) => num(v[`d_${i}_${j}`]),
   };
 }
 

@@ -106,7 +106,7 @@ import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, newGraphOptions, plotColumns, type Grap
 import { datasetColumns, isGrouped, isNested, readTable, setColumns, splitXY, xyPoints, type Dataset } from "../src/lib/dataset";
 import { nestedMeans } from "../src/stats/nested/base";
 import { prepareFit } from "../src/stats/xy/nonlinear-fit";
-import { adjustComparisonRows, adjustPValues, incompleteRows, missingColumn } from "../src/stats/column/base";
+import { adjustComparisonRows, adjustPValues, describe, incompleteRows, missingColumn } from "../src/stats/column/base";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
 import { compareTwoGroupsSpec } from "../src/stats/column/compare-two-groups";
 import { kruskalWallisSpec } from "../src/stats/column/kruskal-wallis";
@@ -2299,6 +2299,30 @@ check("a nested subgroup mean pools all values present (v1.5.0 m16)", () => {
     ],
   });
   deepStrictEqual(nestedMeans(t.columns).groups[0].means, [30]);
+});
+
+// v1.5.0 m18: describe() on an empty group used to throw a raw R error
+// ("'names' attribute [5] must be the same length as the vector [4]") —
+// rVec([]) is c(), i.e. NULL in R, and median(NULL) is NULL (length 0),
+// so setNames got 5 names for a 4-vector. An empty group now comes back
+// as nulls (n = 0): never NaN, never a throw. mean([])/median([]) in
+// lib/summary.ts still return NaN by definition, so the guard lives at
+// this boundary, where descriptives surface.
+check("describe returns nulls, not NaN or a raw R error, for an empty group (v1.5.0 m18)", async () => {
+  const { groups, diff } = await describe(
+    [
+      { name: "Empty", values: [] },
+      { name: "Full", values: [1, 2, 3] },
+    ],
+    [[0, 1]],
+  );
+  deepStrictEqual(groups[0], { name: "Empty", mean: null, sd: null, sem: null, median: null, n: 0 });
+  strictEqual(groups[1].mean, 2);
+  strictEqual(groups[1].sd, 1);
+  strictEqual(groups[1].median, 2);
+  strictEqual(groups[1].n, 3);
+  ok(groups[1].sem != null && Math.abs(groups[1].sem - 1 / Math.sqrt(3)) < 1e-12);
+  strictEqual(diff(0, 1), null);
 });
 
 check("fewer subgroups keep each value in its group and subgroup", () => {
