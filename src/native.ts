@@ -189,6 +189,20 @@ export async function cancelR(): Promise<void> {
   }
 }
 
+/** De-duplicates engine request ids within one engine page: the shell can
+ *  re-send an id `r_ready` already sent directly (CC-m6) — this page runs
+ *  it once. A fresh page starts with an empty set, so a genuine restart's
+ *  re-send still runs. Returns whether this id is new (run it) or a repeat
+ *  (drop it). */
+export function createEvalDedupe() {
+  const seen = new Set<number>();
+  return (id: number): boolean => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  };
+}
+
 /** In the engine window: answers every request with `evaluate`, one at a
  *  time, in arrival order — the app's explicit FIFO (M17: webR serializes
  *  internally too, but that queue is invisible; this one publishes its
@@ -204,17 +218,23 @@ export async function serveR(evaluate: (code: string) => Promise<RVector>) {
   // so a request arriving between this window's listeners attaching and
   // `r_ready` is queued once and re-sent once — never emitted twice.
   await invoke("r_starting");
+  const dedupeEval = createEvalDedupe();
   const queue = createEvalQueue((snapshot) => {
     setRQueueSnapshot(snapshot);
     // Best effort: project windows listen for "r-queue" and show the depth.
     void getCurrentWebviewWindow().emit("r-queue", snapshot).catch(() => {});
   });
-  await getCurrentWebviewWindow().listen<[number, string]>("r-eval", ({ payload: [id, code] }) =>
+  await getCurrentWebviewWindow().listen<[number, string]>("r-eval", ({ payload: [id, code] }) => {
+    // The shell can re-send an id `r_ready` already sent directly (CC-m6):
+    // this page runs each id once, so the re-send is dropped here. A fresh
+    // page starts with an empty set, so a genuine restart's re-send — the
+    // old page's evaluations are dead with it — still runs.
+    if (!dedupeEval(id)) return;
     queue.enqueue(() => evaluate(code), id).then(
       (values) => invoke("r_result", { id, values }),
       (err: unknown) => invoke("r_result", { id, error: err instanceof Error ? err.message : String(err) }),
-    ),
-  );
+    );
+  });
   // A project window cancelled its own requests (its watchdog fired, or
   // the user hit Cancel): the shell dropped them and sends their ids.
   // Dequeue the ones still waiting — without touching R — and interrupt R
@@ -268,26 +288,6 @@ export async function onEngineReset() {
   return getCurrentWebviewWindow().listen("r-reset", () => resetR());
 }
 
-// ── Window ─────────────────────────────────────────────────────────────
-
-/** The window's title, and what the shell needs to know of its project: its file,
- *  its unsaved changes (the dot in the close button), and whether it is blank. */
-export function setDocument(title: string, path: string | null, edited: boolean, blank: boolean) {
-  if (!isNative) return;
-  void win().setTitle(title);
-  void invoke("set_document", { path, edited, blank });
-}
-
-/** Recent projects (newest first), also listed by macOS in the Dock icon's menu. */
-export function setRecentDocuments(paths: string[]) {
-  if (isNative) void invoke("set_recent_documents", { paths });
-}
-
-/** Run `canClose` whenever the window is about to close (red button, ⌘W, ⌘Q). A window
- *  that stays open while Titer quits stops the quitting. */
-export function onCloseRequested(canClose: () => Promise<boolean>) {
-  if (!isNative) return () => {};
-  const off = win().onCloseRequested(async (event) => {
 /** In the engine window: publish the R boot status to every project window
  *  (CC-m7). A failed boot is no longer silent: project windows show it in
  *  the analysis view instead of leaving the user to discover it on the
@@ -322,6 +322,26 @@ export async function onEngineBootStatus(handler: (status: EngineBootStatus) => 
   return off;
 }
 
+// ── Window ─────────────────────────────────────────────────────────────
+
+/** The window's title, and what the shell needs to know of its project: its file,
+ *  its unsaved changes (the dot in the close button), and whether it is blank. */
+export function setDocument(title: string, path: string | null, edited: boolean, blank: boolean) {
+  if (!isNative) return;
+  void win().setTitle(title);
+  void invoke("set_document", { path, edited, blank });
+}
+
+/** Recent projects (newest first), also listed by macOS in the Dock icon's menu. */
+export function setRecentDocuments(paths: string[]) {
+  if (isNative) void invoke("set_recent_documents", { paths });
+}
+
+/** Run `canClose` whenever the window is about to close (red button, ⌘W, ⌘Q). A window
+ *  that stays open while Titer quits stops the quitting. */
+export function onCloseRequested(canClose: () => Promise<boolean>) {
+  if (!isNative) return () => {};
+  const off = win().onCloseRequested(async (event) => {
     if (await canClose()) return;
     event.preventDefault();
     void invoke("cancel_quit");

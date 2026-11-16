@@ -201,7 +201,7 @@ import {
   validateFigureSize,
 } from "../src/lib/figure";
 import { buildPanelFigure } from "../src/views/figures/panel-figure";
-import { ensureSaveExtension } from "../src/native";
+import { createEvalDedupe, ensureSaveExtension } from "../src/native";
 import { engineStatusText, getEngineStatus, onEngineStatus, setEngineStatus } from "../src/stats/engine-status";
 import { buildOfficeDocument, officeExtension } from "../src/lib/office-export";
 import { sampleProject } from "./sample-project";
@@ -13706,6 +13706,20 @@ check("the engine boot line shows only a failed boot, with its reason", () => {
   } finally {
     off();
   }
+});
+
+// CC-m6 (engine-window half): a request id the shell re-sends runs once per
+// page — the receiver drops the repeat. The shell half (take_unsent) is
+// pinned by the Rust tests in src-tauri/src/main.rs.
+check("a re-sent engine request id runs once per engine page (CC-m6)", () => {
+  const isNew = createEvalDedupe();
+  ok(isNew(1));
+  ok(!isNew(1), "the same id twice is a repeat, not a second run");
+  ok(isNew(2));
+  ok(!isNew(2));
+  // A fresh page starts empty: a restart's re-send still runs.
+  const fresh = createEvalDedupe();
+  ok(fresh(1));
 });
 
 // ── M17: the R queue is an explicit FIFO, and the UI shows it ───────────
