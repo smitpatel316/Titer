@@ -7155,6 +7155,19 @@ check("the Tauri write path allows .docx and .pptx exports (Office)", () => {
   ok(allowlist.includes('"pptx"'), `write_file allowlist must include "pptx": [${allowlist}]`);
 });
 
+// Mac GUI proof Phase 3a (item 104, Nov 16): the .pzfx writer generates
+// bytes fine in-memory, but every .pzfx save was refused at write time —
+// write_file's allowlist had no "pzfx", so check_extension rejected the
+// save with "Titer can't access …". The control proves it is
+// extension-specific: a .hlx save to the same folder PASSES. Same class
+// as the .docx/.pptx pin above and the .pdf/.tif/.tiff pin below.
+check("the Tauri write path allows .pzfx saves (pzfx-write)", () => {
+  const main = readFileSync("src-tauri/src/main.rs", "utf8");
+  const writeFile = main.slice(main.indexOf("fn write_file"));
+  const allowlist = /check_extension\(&path, &\[([^\]]+)\]\)/.exec(writeFile)?.[1] ?? "";
+  ok(allowlist.includes('"pzfx"'), `write_file allowlist must include "pzfx": [${allowlist}]`);
+});
+
 check("a figure holds references, not copies, of its graphs (F-07)", () => {
   const before = figurePayload();
   const { project } = read(serializeProjectFile(before));
