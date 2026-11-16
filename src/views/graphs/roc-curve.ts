@@ -70,6 +70,11 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
       showlegend: false,
     },
   ];
+  // The annotation flips by quadrant, so it never clips at the plot edge:
+  // the axes are fixed [0, 1], so an optimum at the top or right sits on the
+  // edge and a fixed (30, −30) offset put the label outside the plot (a
+  // near-perfect classifier's optimum (0, 1) had its label above the plot).
+  // The text is anchored so it extends away from the nearest edge.
   const annotations: unknown[] = [
     {
       x: optX,
@@ -82,8 +87,10 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
       arrowsize: 1,
       arrowwidth: 1,
       arrowcolor: INK,
-      ax: 30,
-      ay: -30,
+      ax: optX > 0.5 ? -30 : 30,
+      ay: optY > 0.5 ? 30 : -30,
+      xanchor: optX > 0.5 ? "right" : "left",
+      yanchor: optY > 0.5 ? "top" : "bottom",
       font: { color: INK, size: Math.max(options.fontSize - 1, 8) },
     },
   ];

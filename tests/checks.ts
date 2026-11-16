@@ -125,11 +125,12 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, movedText, paintOf, perRowSummaryStats, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, movedText, paintOf, perRowSummaryStats, textWidth, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
   keysOf,
+  labelPlotGeometry,
   picked,
   pointLabels,
   resizePoints,
@@ -144,6 +145,7 @@ import { addEstimationPlot, estimationDiffLabel } from "../src/views/graphs/esti
 import { addSchildPlot, schildPlotPoints } from "../src/views/graphs/schild-plot";
 import { addRegression, fitLinear } from "../src/views/graphs/regression-overlay";
 import { fitDeming } from "../src/views/graphs/deming-overlay";
+import { addPcaBiplot } from "../src/views/graphs/pca-biplot";
 import { addObservedFitted } from "../src/views/graphs/observed-fitted";
 import { batchMatched, examplesFor, matched, type Matched } from "../src/views/graphs/match-graph";
 import type { OutlineNode } from "../src/store/use-project-store";
@@ -2748,6 +2750,93 @@ check("the Bland-Altman graph still draws its lines on a two-method table (FL-ba
     .map((t) => t.y![0])
     .sort((a, b) => a - b);
   deepStrictEqual(lines, [-0.8506528983575519, -0.36, 0.1306528983575519]);
+});
+
+// G-F6: the Bland-Altman bias and upper-limit labels both sit above their
+// lines, so they overlap when the plotted y-range is wide relative to the SD
+// (a user comparing against another plot's scale sets wide manual limits, or
+// an outlier stretches the span). With diffs of SD ≈ 0.0015 on y ∈ [−5, 5]
+// the gap between the lines is 0.11 px against a 16 px label — the old code
+// gave both labels the same 4 px shift, so they printed on top of each other.
+// The upper label is now pushed up until a full label height separates them;
+// the default autorange case (gap 260 px) needs no shift at all.
+check("G-F6: Bland-Altman bias and upper-limit labels keep a minimum vertical separation", () => {
+  const a = [10.0, 10.1, 9.9, 10.05, 9.95, 10.02, 9.98, 10.08];
+  const b = a.map((v, i) => v - 1.0 + [0.001, -0.001, 0.002, -0.002, 0.001, 0.0, -0.001, 0.002][i]);
+  const data = readTable({
+    columns: ["Title", "Method A", "Method B"],
+    rows: a.map((v, i) => ["", String(v), String(b[i])]),
+  });
+  type BaAnn = { name: string; y: number; yshift: number; text: string };
+  const annsOf = (options: GraphOptions) =>
+    (GRAPHS["bland-altman"].build(plotColumns(data, "bland-altman", options, "column"), options, paintOf(options, 2))
+      .layout.annotations as BaAnn[]);
+  // Wide manual limits: the two labels must not overlap in px.
+  const wide = { ...newGraphOptions("bland-altman"), yMin: -5, yMax: 5 };
+  const anns = annsOf(wide);
+  const bias = anns.find((x) => x.name === "bland-bias")!;
+  const upper = anns.find((x) => x.name === "bland-upper")!;
+  ok(upper.yshift > bias.yshift, "upper label pushed up past the bias label");
+  const plotH = wide.height - 16 - 52;
+  const labelH = Math.max(wide.fontSize - 1, 8) + 4;
+  const toPy = (y: number) => plotH - ((y + 5) / 10) * plotH;
+  const biasBox = { top: toPy(bias.y) - bias.yshift - labelH, bottom: toPy(bias.y) - bias.yshift };
+  const upperBox = { top: toPy(upper.y) - upper.yshift - labelH, bottom: toPy(upper.y) - upper.yshift };
+  ok(upperBox.bottom <= biasBox.top, "upper label's bottom clears the bias label's top");
+  // Default autorange: the gap is 260 px, so no extra shift is applied.
+  const auto = annsOf(newGraphOptions("bland-altman"));
+  strictEqual(auto.find((x) => x.name === "bland-upper")!.yshift, 4);
+  strictEqual(auto.find((x) => x.name === "bland-bias")!.yshift, 4);
+});
+
+// ── Row groups (a grouped table's third factor, plan 03) ─────────────────
+
+// G-F5: the ROC optimal-cutpoint annotation flips by quadrant instead of
+// clipping at the plot edge. The axes are fixed [0, 1], so an optimum at the
+// top or right sits on the plot edge and the old fixed offset (30, −30) put
+// the label outside the plot: a near-perfect classifier's optimum (0, 1) had
+// its label 38 px above the plot, and an overlapping-distributions optimum
+// (0.583, 0.917) 5 px above it. The annotation now points away from the
+// nearest edges (left/down at the top/right), anchored so the text stays
+// inside; a bottom-left optimum keeps the old direction.
+check("G-F5: the ROC optimal-cutpoint annotation flips by quadrant (no edge clipping)", () => {
+  type RocAnn = { x: number; y: number; ax: number; ay: number; xanchor?: string; yanchor?: string };
+  const annOf = (rows: [string, string][]) => {
+    const data = readTable({ columns: ["Title", "Truth", "Score"], rows: rows.map(([t, s]) => ["", t, s]) });
+    const options = newGraphOptions("roc-curve");
+    return (GRAPHS["roc-curve"].build(data.columns, options, paintOf(options, 1)).layout.annotations as RocAnn[])[0];
+  };
+  // Near-perfect classifier: optimum (0, 1), top-left corner.
+  const good = annOf([
+    ["Diseased", "0.05"], ["Diseased", "0.07"], ["Diseased", "0.09"], ["Diseased", "0.1"],
+    ["Healthy", "0.9"], ["Healthy", "0.93"], ["Healthy", "0.91"], ["Healthy", "0.95"],
+  ]);
+  deepStrictEqual([good.x, good.y], [0, 1]);
+  ok(good.ay > 0, "top optimum: label below its point");
+  strictEqual(good.yanchor, "top");
+  ok(good.ax > 0, "left optimum: label right of its point");
+  strictEqual(good.xanchor, "left");
+  // Overlapping distributions: optimum (0.583, 0.917), top-right.
+  const overlap = annOf([
+    ["P", "0.39"], ["P", "0.478"], ["P", "0.635"], ["P", "0.69"], ["P", "0.333"], ["P", "0.475"],
+    ["P", "0.551"], ["P", "0.427"], ["P", "0.32"], ["P", "0.611"], ["P", "0.755"], ["P", "0.962"],
+    ["N", "0.326"], ["N", "0.279"], ["N", "0.691"], ["N", "0.487"], ["N", "0.638"], ["N", "0.443"],
+    ["N", "0.466"], ["N", "0.283"], ["N", "0.612"], ["N", "0.642"], ["N", "0.095"], ["N", "0.097"],
+  ]);
+  ok(Math.abs(overlap.x - 0.5833) < 1e-3 && Math.abs(overlap.y - 0.9167) < 1e-3);
+  ok(overlap.ax < 0, "right optimum: label left of its point");
+  strictEqual(overlap.xanchor, "right");
+  ok(overlap.ay > 0, "top optimum: label below its point");
+  strictEqual(overlap.yanchor, "top");
+  // Weak classifier: optimum (0, 0.333), bottom-left — the old direction stands.
+  const weak = annOf([
+    ["P", "0.1"], ["P", "0.2"], ["P", "0.9"],
+    ["N", "0.3"], ["N", "0.4"], ["N", "0.5"], ["N", "0.6"], ["N", "0.7"], ["N", "0.8"],
+  ]);
+  deepStrictEqual([weak.x, weak.y], [0, 1 / 3]);
+  ok(weak.ax > 0 && weak.ay < 0, "bottom-left optimum keeps the (30, −30) offset");
+  strictEqual(weak.xanchor, "left");
+  strictEqual(weak.yanchor, "bottom");
 });
 
 // ── Row groups (a grouped table's third factor, plan 03) ─────────────────
@@ -6608,6 +6697,128 @@ check("texts moved by hand stay where they were dropped", () => {
     [o.legend, o.note, o.points],
     [{ x: 0.9, y: 0.4 }, undefined, { "Y1#0": { labelOffset: { x: 12, y: -8 } } }],
   );
+});
+
+// G-F14: the fit-equation note goes in the plot's emptiest corner instead of
+// always being pinned top-left over the data (up to ~7 lines). With the data
+// clustered top-left (5 of 7 points) the note moves to the empty top-right;
+// with nothing plotted it stays top-left, as before.
+check("G-F14: the fit-equation note goes in the emptiest corner, not always top-left", () => {
+  const data = readTable({
+    columns: ["Title", "X", "Y1"],
+    rows: [["", "1", "90"], ["", "1.5", "95"], ["", "2", "88"], ["", "2.5", "92"], ["", "3", "97"], ["", "8", "10"], ["", "9", "12"]],
+  });
+  const options = newGraphOptions("xy-scatter");
+  const fig = GRAPHS["xy-scatter"].build(plotColumns(data, "xy-scatter", options, "xy"), options, paintOf(options, 1));
+  addNote(fig, "Y = 2.0487 X + 0.5123<br>R² = 0.9981<br>n = 7", options);
+  const [note] = fig.layout.annotations as { x: number; y: number; xanchor: string; yanchor: string }[];
+  deepStrictEqual([note.x, note.y, note.xanchor, note.yanchor], [0.98, 0.98, "right", "top"]);
+  // Nothing plotted: top-left, as before.
+  const empty: GraphFigure = { data: [], layout: {} };
+  addNote(empty, "Run a Principal component analysis on this table to draw the scores biplot.", options);
+  const [prompt] = empty.layout.annotations as { x: number; y: number; xanchor: string; yanchor: string }[];
+  deepStrictEqual([prompt.x, prompt.y, prompt.xanchor, prompt.yanchor], [0.02, 0.98, "left", "top"]);
+});
+
+// G-F17: a biplot score label sits above its point ("top center"), so the
+// top point's label pokes past the top edge — ~4 px under autorange, 21.5 px
+// with a manual yMax at the data max. That point's label now goes below its
+// point instead. And the degenerate all-scores-equal cloud (every point
+// stacked at one place, labels piled up, loading arrows filtered out) now
+// says so on the plot instead of silently drawing the stack.
+check("G-F17: biplot score labels flip below top-edge points; the degenerate cloud is explained", () => {
+  const outcome = (scores: [string, number[]][]): AnalysisResult =>
+    ({
+      pcaVariance: [
+        { component: "PC1", eigenvalue: 2, sd: 1, proportion: 0.6, cumulative: 0.6 },
+        { component: "PC2", eigenvalue: 1, sd: 1, proportion: 0.3, cumulative: 0.9 },
+      ],
+      pcaLoadings: [
+        { variable: "V1", loadings: [0.9, 0.1] },
+        { variable: "V2", loadings: [0.1, 0.9] },
+      ],
+      pcaScores: scores.map(([row, s]) => ({ row, scores: s })),
+    }) as unknown as AnalysisResult;
+  const cloud: [string, number[]][] = [
+    ["S1", [-8, -2]], ["S2", [0, 0]], ["S3", [5, 3]], ["S4", [10, 9.5]], ["S5", [-3, 7]],
+  ];
+  const positionsOf = (options: GraphOptions) => {
+    const fig = GRAPHS["pca-biplot"].build([], options, paintOf(options, 0));
+    addPcaBiplot(fig, outcome(cloud), options, paintOf(options, 1));
+    return (fig.data[0] as { textposition: string | string[] }).textposition;
+  };
+  const flipped = ["top center", "top center", "top center", "bottom center", "top center"];
+  deepStrictEqual(positionsOf(newGraphOptions("pca-biplot")), flipped);
+  deepStrictEqual(positionsOf({ ...newGraphOptions("pca-biplot"), yMax: 9.5 }), flipped);
+  // Degenerate, all scores zero: one stacked point, no arrows, and a note saying so.
+  const options = newGraphOptions("pca-biplot");
+  const fig = GRAPHS["pca-biplot"].build([], options, paintOf(options, 0));
+  addPcaBiplot(
+    fig,
+    outcome([["S1", [0, 0]], ["S2", [0, 0]], ["S3", [0, 0]], ["S4", [0, 0]], ["S5", [0, 0]]]),
+    options,
+    paintOf(options, 1),
+  );
+  const anns = (fig.layout.annotations as { name?: string; text: string }[]) ?? [];
+  const notes = anns.filter((a) => a.name === "note");
+  strictEqual(notes.length, 1);
+  ok(/origin/.test(notes[0].text) && /stack/.test(notes[0].text) && /arrow/.test(notes[0].text));
+  ok(!anns.some((a) => a.text === "V1" || a.text === "V2"), "no loading arrows are drawn");
+  // Degenerate but nonzero: the note says identical, and the arrows still draw.
+  const fig2 = GRAPHS["pca-biplot"].build([], options, paintOf(options, 0));
+  addPcaBiplot(fig2, outcome([["S1", [2, 3]], ["S2", [2, 3]], ["S3", [2, 3]]]), options, paintOf(options, 1));
+  const anns2 = (fig2.layout.annotations as { name?: string; text: string }[]) ?? [];
+  ok(anns2.some((a) => a.name === "note" && /identical/.test(a.text)));
+  ok(anns2.some((a) => a.text === "V1"), "arrows still drawn when loadings scale");
+});
+
+// G-F4: a selected point's label was never clamped to the plot edge — the
+// default offset always points right (and centres on the point vertically),
+// so a label on the rightmost point ran 255 px past the right edge. The
+// default offset now flips left past the right edge and shifts below/above
+// past the top/bottom edge, the way the volcano places its gene names. A
+// label the user moved by hand is never touched.
+check("G-F4: selected-point labels clamp/flip at the plot edge", () => {
+  const data = readTable({
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["A", "1", "2"],
+      ["B", "2", "3"],
+      ["C", "3", "2.5"],
+      ["D", "4", "4"],
+      ["Subject number five with a very long name", "5", "3.5"],
+    ],
+  });
+  const fontSize = 13;
+  const textSize = Math.max(fontSize - 2, 8);
+  const labelsOf = (options: GraphOptions, plot?: Parameters<typeof pointLabels>[4]) => {
+    const fig = GRAPHS["xy-scatter"].build(plotColumns(data, "xy-scatter", options, "xy"), options, paintOf(options, 1));
+    return { fig, labels: pointLabels(fig.data, options.points, data.titles, fontSize, plot) };
+  };
+  // Rightmost point, long title: the label flips left of its point.
+  const right = { ...newGraphOptions("xy-scatter"), points: { "Y1#4": { label: true } } };
+  const bare = labelsOf(right);
+  ok(bare.labels[0].ax < 0, "right-edge point: label flips left (no geometry passed)");
+  const { fig, labels } = labelsOf(right, labelPlotGeometry(bare.fig.data, bare.fig.layout, right));
+  ok(labels[0].ax < 0, "right-edge point: label flips left (with plot geometry)");
+  // …and the flipped box stays inside the plot.
+  const plot = labelPlotGeometry(fig.data, fig.layout, right);
+  const w = textWidth(labels[0].text, textSize);
+  const px = ((5 - plot.x[0]) / (plot.x[1] - plot.x[0])) * plot.width;
+  ok(px + labels[0].ax + w / 2 <= plot.width, "flipped label's right edge is inside the plot");
+  ok(px + labels[0].ax - w / 2 >= 0, "flipped label's left edge is inside the plot");
+  // Top point: the label shifts below its point instead of centring on it.
+  const top = { ...newGraphOptions("xy-scatter"), points: { "Y1#3": { label: true } } };
+  ok(labelsOf(top).labels[0].ay > 0, "top-edge point: label shifts below its point");
+  // Left-edge point keeps its rightward label.
+  const left = { ...newGraphOptions("xy-scatter"), points: { "Y1#0": { label: true } } };
+  ok(labelsOf(left).labels[0].ax > 0, "left-edge point: label stays right of its point");
+  // A label the user moved by hand is never clamped.
+  const moved = {
+    ...newGraphOptions("xy-scatter"),
+    points: { "Y1#4": { label: true, labelOffset: { x: 200, y: 0 } } },
+  };
+  strictEqual(labelsOf(moved).labels[0].ax, 200);
 });
 
 check("a legend shown outside the plot reserves its own right margin (M13)", () => {

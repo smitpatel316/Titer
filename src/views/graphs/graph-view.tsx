@@ -55,6 +55,7 @@ import {
   drawnKeys,
   drawnStyle,
   keysOf,
+  labelPlotGeometry,
   picked,
   pointLabels,
   resizePoints,
@@ -703,11 +704,18 @@ export function GraphView({ node }: { node: ProjectNode }) {
         else addNote(fig, "Run a K-means clustering on this table to draw the cluster scatter.", options);
       }
       // The points' names are part of the figure (the volcano places its own, among the
-      // genes it names); the selection ring only of the view.
+      // genes it names); the selection ring only of the view. Labels clamp to the plot
+      // edge (G-F4): the geometry comes from the figure's own ranges and size.
       const labels =
         family === "volcano"
           ? []
-          : pointLabels(fig.data, options.points, dataset?.titles, options.fontSize).map((label) => ({
+          : pointLabels(
+              fig.data,
+              options.points,
+              dataset?.titles,
+              options.fontSize,
+              labelPlotGeometry(fig.data, fig.layout, options),
+            ).map((label) => ({
               ...label,
               // A text sits at the log10 of its place on a log axis (X: only a numeric one).
               x: family === "xy" ? onAxis(label.x, options.xScale) : label.x,

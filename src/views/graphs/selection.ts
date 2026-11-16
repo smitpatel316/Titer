@@ -1,10 +1,10 @@
 // Points picked on a graph (by their key, see `pointKeyOf`): the ring drawn round
 // them, never exported; the style set on them; and the names of the points that
 // show theirs. The selection itself is the graph view's, never saved.
-import { clamp, GRAPH_LIMITS, type PointShape, type PointStyle } from "../../store/types";
+import { clamp, GRAPH_LIMITS, type GraphOptions, type PointShape, type PointStyle } from "../../store/types";
 import { parsePointKey } from "../../lib/columns";
 import { colorscaleColor, hexOf, opacityOf } from "../../lib/palettes";
-import { INK, pointName, textWidth } from "./plot-helpers";
+import { extent, INK, plotAreaPx, pointName, textWidth } from "./plot-helpers";
 
 /** A trace of individual points, as `seriesPoints` (or the volcano) makes it: a style
  *  field is one value for all, or one per point. */
@@ -133,21 +133,94 @@ export function resizePoints(
   return Object.keys(next).length ? next : undefined;
 }
 
+/** The plot geometry a label is clamped against: the axis ranges in data
+ *  units and the plot area's size in px. */
+export interface LabelPlot {
+  x: [number, number];
+  y: [number, number];
+  width: number;
+  height: number;
+}
+
+/** The plot geometry for a figure's labels: the layout's explicit ranges
+ *  where set, else the drawn points' extent padded the way Plotly's
+ *  autorange pads it; the plot area's px size from the figure's options.
+ *  (On a log axis the ranges are in the plotted units and the labels are
+ *  placed in linear ones, so the flip is by relative position — the right
+ *  answer in direction, approximate in px.) */
+export function labelPlotGeometry(
+  data: unknown[],
+  layout: Record<string, unknown>,
+  options: Pick<GraphOptions, "width" | "height">,
+): LabelPlot {
+  const axisRange = (axis: unknown): [number, number] | undefined => {
+    const range = (axis as { range?: unknown } | undefined)?.range;
+    return Array.isArray(range) && range.length === 2 && range.every((v) => typeof v === "number")
+      ? (range as [number, number])
+      : undefined;
+  };
+  const pts = drawnPoints(data);
+  const range = (vs: number[], set?: [number, number]): [number, number] => {
+    if (set) return set;
+    if (!vs.length) return [0, 1];
+    const [lo, hi] = extent(vs);
+    const pad = (hi - lo) * 0.05 || 1;
+    return [lo - pad, hi + pad];
+  };
+  const { width, height } = plotAreaPx(options as GraphOptions);
+  return {
+    x: range(
+      pts.map((p) => p.x),
+      axisRange((layout as { xaxis?: unknown }).xaxis),
+    ),
+    y: range(
+      pts.map((p) => p.y),
+      axisRange((layout as { yaxis?: unknown }).yaxis),
+    ),
+    width,
+    height,
+  };
+}
+
 /** The names of the points that show theirs (`label`): each its row's title, else
- *  "Row N", just right of it or where it was moved. */
+ *  "Row N", just right of it or where it was moved. The default offset (right
+ *  of the point, centred on it) is clamped to the plot edge — flipped left
+ *  past the right edge, shifted below/above past the top/bottom edge, the
+ *  way the volcano places its gene names — so a label on an edge point is
+ *  never cut. A label the user moved by hand (`labelOffset`) is never
+ *  touched. Without `plot` the ranges are the drawn points' extent and the
+ *  size the default figure's plot area, which still flips the edge points. */
 export function pointLabels(
   data: unknown[],
   points: Record<string, PointStyle> | undefined,
   titles: (string | null)[] = [],
   fontSize: number,
+  plot?: LabelPlot,
 ) {
   const textSize = Math.max(fontSize - 2, 8);
-  return drawnPoints(data)
+  const pts = drawnPoints(data);
+  const [x0, x1] = plot?.x ?? extent(pts.map((p) => p.x));
+  const [y0, y1] = plot?.y ?? extent(pts.map((p) => p.y));
+  const plotW = plot?.width ?? 564;
+  const plotH = plot?.height ?? 392;
+  const labelH = textSize + 4;
+  return pts
     .filter((p) => points?.[p.key]?.label)
     .map((p) => {
       const { row } = parsePointKey(p.key);
       const text = titles[row]?.trim() || `Row ${row + 1}`;
-      const offset = points?.[p.key]?.labelOffset ?? { x: p.style.size / 2 + 3 + textWidth(text, textSize) / 2, y: 0 };
+      const moved = points?.[p.key]?.labelOffset;
+      let offset = moved ?? { x: p.style.size / 2 + 3 + textWidth(text, textSize) / 2, y: 0 };
+      if (!moved) {
+        // The label's box in px, centred on its tail (point + offset).
+        const w = textWidth(text, textSize);
+        const px = ((p.x - x0) / (x1 - x0 || 1)) * plotW;
+        const py = plotH - ((p.y - y0) / (y1 - y0 || 1)) * plotH;
+        const half = w / 2;
+        if (px + offset.x + half > plotW) offset = { ...offset, x: -(p.style.size / 2 + 3 + half) };
+        if (py + offset.y - labelH / 2 < 0) offset = { ...offset, y: labelH / 2 + 2 };
+        else if (py + offset.y + labelH / 2 > plotH) offset = { ...offset, y: -(labelH / 2 + 2) };
+      }
       return pointName(p.key, p.x, p.y, text, offset, p.style.size, textSize);
     });
 }

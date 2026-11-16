@@ -231,6 +231,15 @@ export function withCaps(data: unknown[], options: GraphOptions): unknown[] {
   });
 }
 
+/** The plot area's size in px, as the volcano's label placement estimates
+ *  it: the figure minus the usual room for tick labels and axis titles.
+ *  Label-placement fixes (Bland-Altman, biplot) convert data gaps to px
+ *  with this instead of guessing the plot size. */
+export const plotAreaPx = (options: GraphOptions) => ({
+  width: options.width - 76,
+  height: options.height - (options.title ? 44 : 16) - 52,
+});
+
 /** Smallest and largest value (a loop, safe for any number of points). */
 export const extent = (v: number[]): [number, number] => [
   v.reduce((a, b) => Math.min(a, b), Infinity),
@@ -282,18 +291,51 @@ export function movedText(moved: Record<string, number | undefined>, names: (str
   return name && ax !== undefined && ay !== undefined ? { name, at: { x: ax, y: ay } } : null;
 }
 
-/** Adds a text note in the plot's top-left corner (a fit's equation), or where it was moved. */
+/** Adds a text note in the plot's emptiest corner (a fit's equation), or where it was moved.
+ *  The corner is picked from the plotted points: the quadrant with the fewest
+ *  of them, so a note up to ~7 lines long doesn't sit over the data. With
+ *  nothing plotted (a "run the analysis first" prompt) every corner is empty
+ *  and it stays top-left, as before. A fitted curve's dense grid counts the
+ *  same as the points, so it can't by itself push the note into a corner the
+ *  data fills. */
 export function addNote(fig: GraphFigure, text: string, options: GraphOptions) {
+  const corners = [
+    { x: 0.02, y: 0.98, xanchor: "left", yanchor: "top" },
+    { x: 0.98, y: 0.98, xanchor: "right", yanchor: "top" },
+    { x: 0.02, y: 0.02, xanchor: "left", yanchor: "bottom" },
+    { x: 0.98, y: 0.02, xanchor: "right", yanchor: "bottom" },
+  ];
+  let corner = corners[0];
+  const pts: [number, number][] = [];
+  for (const t of fig.data as { x?: unknown; y?: unknown }[]) {
+    if (!Array.isArray(t.x) || !Array.isArray(t.y)) continue;
+    for (let i = 0; i < Math.min(t.x.length, t.y.length); i++) {
+      const x = t.x[i];
+      const y = t.y[i];
+      if (typeof x === "number" && typeof y === "number" && Number.isFinite(x) && Number.isFinite(y)) pts.push([x, y]);
+    }
+  }
+  if (pts.length) {
+    const [x0, x1] = extent(pts.map((p) => p[0]));
+    const [y0, y1] = extent(pts.map((p) => p[1]));
+    const mx = (x0 + x1) / 2;
+    const my = (y0 + y1) / 2;
+    const counts = [0, 0, 0, 0];
+    for (const [x, y] of pts) counts[y >= my ? (x < mx ? 0 : 1) : (x < mx ? 2 : 3)]++;
+    let best = 0;
+    for (let i = 1; i < 4; i++) if (counts[i] < counts[best]) best = i;
+    corner = corners[best];
+  }
   fig.layout.annotations = [
     ...((fig.layout.annotations as unknown[]) ?? []),
     {
       name: "note",
       xref: "paper",
       yref: "paper",
-      x: 0.02,
-      y: 0.98,
-      xanchor: "left",
-      yanchor: "top",
+      x: corner.x,
+      y: corner.y,
+      xanchor: corner.xanchor,
+      yanchor: corner.yanchor,
       align: "left",
       showarrow: true,
       arrowcolor: "rgba(0,0,0,0)",
