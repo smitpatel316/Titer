@@ -11660,6 +11660,60 @@ check("a constant column bins into one bin, and bad binning is an error, not a c
     throw new Error(`expected the too-few-values error, got ${JSON.stringify(few)}`);
 });
 
+check("m9 deming jackknife skips leave-one-out replicates with no covariation", async () => {
+  // Points 1–5 have Sxy = 0 exactly; point 6 gives the full data Sxy ≠ 0,
+  // so the LOO subset without point 6 has sxy2 = 0 and no defined slope.
+  // Before the fix its NaN slope poisoned the SEs and all four CI bounds
+  // came back null with no note; now the replicate is skipped and the
+  // intervals use the remaining 5.
+  const xyTable = (rows: [string, string][]): TableData => ({
+    columns: ["Title", "X", "Y"],
+    rows: rows.map(([x, y]) => [null, x, y]),
+  });
+  const loo = await runAnalysis(
+    "deming-regression",
+    xyTable([
+      ["1", "1"],
+      ["2", "2"],
+      ["3", "1"],
+      ["4", "2"],
+      ["5", "1"],
+      ["6", "3"],
+    ]),
+    { y: "Y", lambda: 1 },
+  );
+  if ("error" in loo) throw new Error(loo.error);
+  const stat = (label: string) => loo.stats.find((s) => s.label === label)?.value;
+  const slope = stat("Slope");
+  if (slope == null || Math.abs(slope - 0.2628457697811293) > 1e-9)
+    throw new Error(`Deming slope: ${slope}, expected ≈ 0.2628`);
+  for (const label of ["Slope 95% CI lower", "Slope 95% CI upper", "Intercept 95% CI lower", "Intercept 95% CI upper"]) {
+    const v = stat(label);
+    if (v == null || !Number.isFinite(v)) throw new Error(`Deming ${label}: ${v}, expected a finite bound`);
+  }
+  if (!(stat("Slope 95% CI lower")! < slope && slope < stat("Slope 95% CI upper")!))
+    throw new Error("Deming slope CI does not contain the slope");
+  if (!loo.notes.includes("skipped") || !loo.notes.includes("remaining 5 replicates"))
+    throw new Error(`Deming notes do not name the skipped replicate: ${loo.notes}`);
+  // Only one usable replicate remains: the slope and intercept still fit,
+  // but no jackknife interval can be computed — and the notes must say so.
+  const one = await runAnalysis(
+    "deming-regression",
+    xyTable([
+      ["1", "1"],
+      ["1", "2"],
+      ["2", "2"],
+    ]),
+    { y: "Y", lambda: 1 },
+  );
+  if ("error" in one) throw new Error(one.error);
+  const oneStat = (label: string) => one.stats.find((s) => s.label === label)?.value;
+  if (oneStat("Slope 95% CI lower") !== null || oneStat("Slope 95% CI upper") !== null)
+    throw new Error("Deming with one usable replicate should report null CIs");
+  if (!one.notes.includes("no jackknife confidence interval could be computed"))
+    throw new Error(`Deming notes do not say the CI could not be computed: ${one.notes}`);
+});
+
 check("transform concentrations converts between molar units by exact powers of 1000", async () => {
   // Each molar step is ×1000, up and down the scale.
   strictEqual(concentrationFactor("µM", "nM"), 1000);

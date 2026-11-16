@@ -299,6 +299,13 @@ export interface ColumnTestSpec<P = unknown> {
    *  the parsed groups and raw columns, for notes that depend on data shape (e.g. how
    *  many rows were dropped for missing data). */
   notes: string | ((params: P | undefined, groups: Group[], columns: Column[]) => string);
+  /** Extra notes from the R values (e.g. a caveat only the computed values
+   *  can state); appended to `notes` when it returns a non-empty string. */
+  valueNotes?: (
+    v: Record<string, number | null>,
+    groups: GroupDescriptives[],
+    params: P | undefined,
+  ) => string | undefined;
   /** Resolved test name shown under the result heading, e.g. "Welch's t test". */
   subtitle?: (params: P | undefined) => string;
   /** Optional human-readable fitted-model equation (regressions), from the R values. */
@@ -342,6 +349,8 @@ export async function runColumnTest<P>(
   const { groups: described, diff } = await describe(groups, pairs);
   const raw = posthoc ? buildComparisons(groups, pairs, diff, (i, j) => v[`p_${i}_${j}`] ?? null) : undefined;
   const comparisons = raw ? (spec.adjustComparisons?.(raw, params) ?? raw) : undefined;
+  const baseNotes = typeof spec.notes === "function" ? spec.notes(params, groups, columns) : spec.notes;
+  const extraNotes = spec.valueNotes?.(v, described, params);
   return {
     testType: spec.testType,
     subtitle: spec.subtitle?.(params),
@@ -350,7 +359,7 @@ export async function runColumnTest<P>(
     difference: spec.difference?.(v, described, params),
     normality: spec.normality?.(v, described, params),
     groups: described,
-    notes: typeof spec.notes === "function" ? spec.notes(params, groups, columns) : spec.notes,
+    notes: extraNotes ? `${baseNotes} ${extraNotes}` : baseNotes,
     comparisons,
     comparisonsLabel: posthoc,
   };
