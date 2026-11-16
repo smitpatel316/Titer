@@ -2747,6 +2747,43 @@ check("the Bland-Altman graph still draws its lines on a two-method table (FL-ba
   deepStrictEqual(lines, [-0.8506528983575519, -0.36, 0.1306528983575519]);
 });
 
+// G-F6: the Bland-Altman bias and upper-limit labels both sit above their
+// lines, so they overlap when the plotted y-range is wide relative to the SD
+// (a user comparing against another plot's scale sets wide manual limits, or
+// an outlier stretches the span). With diffs of SD ≈ 0.0015 on y ∈ [−5, 5]
+// the gap between the lines is 0.11 px against a 16 px label — the old code
+// gave both labels the same 4 px shift, so they printed on top of each other.
+// The upper label is now pushed up until a full label height separates them;
+// the default autorange case (gap 260 px) needs no shift at all.
+check("G-F6: Bland-Altman bias and upper-limit labels keep a minimum vertical separation", () => {
+  const a = [10.0, 10.1, 9.9, 10.05, 9.95, 10.02, 9.98, 10.08];
+  const b = a.map((v, i) => v - 1.0 + [0.001, -0.001, 0.002, -0.002, 0.001, 0.0, -0.001, 0.002][i]);
+  const data = readTable({
+    columns: ["Title", "Method A", "Method B"],
+    rows: a.map((v, i) => ["", String(v), String(b[i])]),
+  });
+  type BaAnn = { name: string; y: number; yshift: number; text: string };
+  const annsOf = (options: GraphOptions) =>
+    (GRAPHS["bland-altman"].build(plotColumns(data, "bland-altman", options, "column"), options, paintOf(options, 2))
+      .layout.annotations as BaAnn[]);
+  // Wide manual limits: the two labels must not overlap in px.
+  const wide = { ...newGraphOptions("bland-altman"), yMin: -5, yMax: 5 };
+  const anns = annsOf(wide);
+  const bias = anns.find((x) => x.name === "bland-bias")!;
+  const upper = anns.find((x) => x.name === "bland-upper")!;
+  ok(upper.yshift > bias.yshift, "upper label pushed up past the bias label");
+  const plotH = wide.height - 16 - 52;
+  const labelH = Math.max(wide.fontSize - 1, 8) + 4;
+  const toPy = (y: number) => plotH - ((y + 5) / 10) * plotH;
+  const biasBox = { top: toPy(bias.y) - bias.yshift - labelH, bottom: toPy(bias.y) - bias.yshift };
+  const upperBox = { top: toPy(upper.y) - upper.yshift - labelH, bottom: toPy(upper.y) - upper.yshift };
+  ok(upperBox.bottom <= biasBox.top, "upper label's bottom clears the bias label's top");
+  // Default autorange: the gap is 260 px, so no extra shift is applied.
+  const auto = annsOf(newGraphOptions("bland-altman"));
+  strictEqual(auto.find((x) => x.name === "bland-upper")!.yshift, 4);
+  strictEqual(auto.find((x) => x.name === "bland-bias")!.yshift, 4);
+});
+
 // ── Row groups (a grouped table's third factor, plan 03) ─────────────────
 
 // G-F5: the ROC optimal-cutpoint annotation flips by quadrant instead of

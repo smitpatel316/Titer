@@ -231,6 +231,15 @@ export function withCaps(data: unknown[], options: GraphOptions): unknown[] {
   });
 }
 
+/** The plot area's size in px, as the volcano's label placement estimates
+ *  it: the figure minus the usual room for tick labels and axis titles.
+ *  Label-placement fixes (Bland-Altman, biplot) convert data gaps to px
+ *  with this instead of guessing the plot size. */
+export const plotAreaPx = (options: GraphOptions) => ({
+  width: options.width - 76,
+  height: options.height - (options.title ? 44 : 16) - 52,
+});
+
 /** Smallest and largest value (a loop, safe for any number of points). */
 export const extent = (v: number[]): [number, number] => [
   v.reduce((a, b) => Math.min(a, b), Infinity),
