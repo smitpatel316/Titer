@@ -37157,7 +37157,34 @@
     ],
     "showscale": true,
     "hoverongaps": false,
-    "texttemplate": "%{z}",
+    "text": [
+     [
+      "11",
+      "14",
+      "10"
+     ],
+     [
+      "13",
+      "18",
+      "11"
+     ],
+     [
+      "15",
+      "22",
+      "12"
+     ],
+     [
+      "18",
+      "27",
+      "13"
+     ],
+     [
+      "21",
+      "31",
+      "13"
+     ]
+    ],
+    "texttemplate": "%{text}",
     "textfont": {
      "size": 10
     }
@@ -44888,7 +44915,24 @@
     ],
     "showscale": true,
     "hoverongaps": false,
-    "texttemplate": "%{z}",
+    "text": [
+     [
+      "20",
+      "15",
+      "10"
+     ],
+     [
+      "12",
+      "18",
+      "25"
+     ],
+     [
+      "14",
+      "16",
+      "15"
+     ]
+    ],
+    "texttemplate": "%{text}",
     "textfont": {
      "size": 10
     }
@@ -46012,7 +46056,24 @@
     ],
     "showscale": true,
     "hoverongaps": false,
-    "texttemplate": "%{z}",
+    "text": [
+     [
+      "20",
+      "15",
+      "10"
+     ],
+     [
+      "12",
+      "18",
+      "25"
+     ],
+     [
+      "14",
+      "",
+      "15"
+     ]
+    ],
+    "texttemplate": "%{text}",
     "textfont": {
      "size": 10
     }
