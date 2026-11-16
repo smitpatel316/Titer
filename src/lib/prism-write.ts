@@ -57,7 +57,18 @@ export interface PrismWriteResult {
  *  whose Prism equation + definition + parameters were seen in a real file
  *  (demo or corpus) are here. The log-X definition is Prism's
  *  Y=Bottom+(Top-Bottom)/(1+10^((LogEC50-X)*HillSlope)) — the same fit the
- *  importer maps from log(agonist)/log(inhibitor) files. */
+ *  importer maps from log(agonist)/log(inhibitor) files. The classic-curve
+ *  entries use the Curve Fitting Guide definitions, each the same formula
+ *  the importer's comment checks against modelSpec: Gaussian
+ *  Y=Amplitude*exp(-0.5*((X-Mean)/SD)^2); Boltzmann sigmoid
+ *  Y=Bottom+(Top-Bottom)/(1+exp((V50-X)/Slope)); Lorentzian
+ *  Y=Amplitude/(1+((X-Center)/Width)^2); sine wave (nonzero-baseline form)
+ *  Y=Amplitude*sin((2*pi*X/Wavelength)+PhaseShift)+Baseline; two-phase
+ *  decay Y=Plateau+Span1*exp(-K1*X)+Span2*exp(-K2*X) (Prism 8's classic
+ *  "Two phase exponential decay"; Prism 10's built-in spells the spans
+ *  SpanFast/SpanSlow, same curve family). The written name is the guide's
+ *  — "Two phase decay", unhyphenated — and the importer accepts the
+ *  hyphenated spelling too, so either round-trips. */
 const PRISM_EQUATION: Partial<Record<NonlinearModel, { name: string; definition: string; parameters: string[] }>> = {
   "sigmoidal-4pl-x": {
     name: "Sigmoidal, 4PL, X is concentration",
@@ -83,6 +94,31 @@ const PRISM_EQUATION: Partial<Record<NonlinearModel, { name: string; definition:
     name: "Second order polynomial (quadratic)",
     definition: "Y=B0+B1*X+B2*X^2",
     parameters: ["B0", "B1", "B2"],
+  },
+  gaussian: {
+    name: "Gaussian",
+    definition: "Y=Amplitude*exp(-0.5*((X-Mean)/SD)^2)",
+    parameters: ["Amplitude", "Mean", "SD"],
+  },
+  "boltzmann-sigmoid": {
+    name: "Boltzmann sigmoid",
+    definition: "Y=Bottom+(Top-Bottom)/(1+exp((V50-X)/Slope))",
+    parameters: ["Bottom", "Top", "V50", "Slope"],
+  },
+  lorentzian: {
+    name: "Lorentzian",
+    definition: "Y=Amplitude/(1+((X-Center)/Width)^2)",
+    parameters: ["Amplitude", "Center", "Width"],
+  },
+  "sine-wave": {
+    name: "Sine wave",
+    definition: "Y=Amplitude*sin((2*pi*X/Wavelength)+PhaseShift)+Baseline",
+    parameters: ["Amplitude", "Wavelength", "PhaseShift", "Baseline"],
+  },
+  "two-phase-decay": {
+    name: "Two phase decay",
+    definition: "Y=Plateau+Span1*exp(-K1*X)+Span2*exp(-K2*X)",
+    parameters: ["Plateau", "Span1", "K1", "Span2", "K2"],
   },
 };
 
