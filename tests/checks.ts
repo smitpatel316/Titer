@@ -11929,6 +11929,7 @@ check("the frequency wizard validates the bin width as greater than 0 (F6)", () 
   strictEqual(binWidth.validate?.(0), "The bin width must be greater than 0.");
   strictEqual(binWidth.validate?.(-1), "The bin width must be greater than 0.");
   strictEqual(binWidth.validate?.(2), undefined);
+});
 
 check("m9 deming jackknife skips leave-one-out replicates with no covariation", async () => {
   // Points 1–5 have Sxy = 0 exactly; point 6 gives the full data Sxy ≠ 0,
