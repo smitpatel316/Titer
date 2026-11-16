@@ -6669,6 +6669,27 @@ check("texts moved by hand stay where they were dropped", () => {
   );
 });
 
+// G-F14: the fit-equation note goes in the plot's emptiest corner instead of
+// always being pinned top-left over the data (up to ~7 lines). With the data
+// clustered top-left (5 of 7 points) the note moves to the empty top-right;
+// with nothing plotted it stays top-left, as before.
+check("G-F14: the fit-equation note goes in the emptiest corner, not always top-left", () => {
+  const data = readTable({
+    columns: ["Title", "X", "Y1"],
+    rows: [["", "1", "90"], ["", "1.5", "95"], ["", "2", "88"], ["", "2.5", "92"], ["", "3", "97"], ["", "8", "10"], ["", "9", "12"]],
+  });
+  const options = newGraphOptions("xy-scatter");
+  const fig = GRAPHS["xy-scatter"].build(plotColumns(data, "xy-scatter", options, "xy"), options, paintOf(options, 1));
+  addNote(fig, "Y = 2.0487 X + 0.5123<br>R² = 0.9981<br>n = 7", options);
+  const [note] = fig.layout.annotations as { x: number; y: number; xanchor: string; yanchor: string }[];
+  deepStrictEqual([note.x, note.y, note.xanchor, note.yanchor], [0.98, 0.98, "right", "top"]);
+  // Nothing plotted: top-left, as before.
+  const empty: GraphFigure = { data: [], layout: {} };
+  addNote(empty, "Run a Principal component analysis on this table to draw the scores biplot.", options);
+  const [prompt] = empty.layout.annotations as { x: number; y: number; xanchor: string; yanchor: string }[];
+  deepStrictEqual([prompt.x, prompt.y, prompt.xanchor, prompt.yanchor], [0.02, 0.98, "left", "top"]);
+});
+
 check("a legend shown outside the plot reserves its own right margin (M13)", () => {
   const options = { ...newGraphOptions("xy-scatter") };
   const names = ["Control", "Treated with a very long drug name"];
