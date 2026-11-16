@@ -2840,6 +2840,39 @@ check("G-F5: the ROC optimal-cutpoint annotation flips by quadrant (no edge clip
   strictEqual(weak.yanchor, "bottom");
 });
 
+// v1.5.0 m15 (plan 05): the runner's ROC points are one row per threshold
+// PLUS the (0,0)/(1,1) endpoints for the graph — the graph used to add them
+// itself while the runner's table stopped at the extreme thresholds. The
+// endpoints carry no threshold (null — rendered "—" in the results table)
+// and never compete for the Youden optimum.
+check("ROC runner points include the (0,0)/(1,1) endpoints (v1.5.0 m15)", async () => {
+  const data: TableData = {
+    columns: ["Title", "Truth", "Score"],
+    rows: [
+      ["", "1", "0.9"],
+      ["", "1", "0.8"],
+      ["", "0", "0.7"],
+      ["", "0", "0.6"],
+    ],
+  };
+  const out = await runAnalysis("roc-curve", data, { truth: "Truth", score: "Score", positive: 1 });
+  if ("error" in out) throw new Error(`expected a result, got ${out.error}`);
+  const points = out.rocCurve!;
+  strictEqual(points.length, 6, `4 thresholds + 2 endpoints, got ${points.length}`);
+  deepStrictEqual(points[0], { threshold: null, sensitivity: 0, specificity: 1 });
+  deepStrictEqual(points[points.length - 1], { threshold: null, sensitivity: 1, specificity: 0 });
+  // The optimum is still a real threshold, not an endpoint.
+  strictEqual(out.stats.find((s) => s.label === "Optimal cutpoint (Youden)")?.value, 0.8);
+  // And the graph draws the runner's points as-is — no duplicated endpoints.
+  const options = newGraphOptions("roc-curve");
+  const fig = GRAPHS["roc-curve"].build(readTable(data).columns, options, paintOf(options, 1));
+  const curve = (fig.data as { mode?: string; x?: number[]; y?: number[] }[]).find(
+    (t) => t.mode === "lines+markers",
+  );
+  deepStrictEqual(curve?.x, points.map((p) => 1 - p.specificity));
+  deepStrictEqual(curve?.y, points.map((p) => p.sensitivity));
+});
+
 // ── Row groups (a grouped table's third factor, plan 03) ─────────────────
 
 check("row groups split, resize and merge keeping every row covered", () => {

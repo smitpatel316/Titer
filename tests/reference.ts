@@ -4640,7 +4640,8 @@ async function disagreements(): Promise<string[]> {
     const s61 = at(0.61);
     if (s61?.sensitivity !== 0.9 || s61?.specificity !== 0.8)
       out.push(`ROC at 0.61: sens ${s61?.sensitivity}, spec ${s61?.specificity}, expected 0.90/0.80`);
-    if (roc.rocCurve?.length !== 20) out.push(`ROC points: ${roc.rocCurve?.length}, expected 20 thresholds`);
+    if (roc.rocCurve?.length !== 22)
+      out.push(`ROC points: ${roc.rocCurve?.length}, expected 20 thresholds + 2 endpoints`);
     // The graph smoke: the curve passes through (1 − spec, sens) = (0.00, 0.80)
     // at the optimal point and includes (0,0) and (1,1); the diagonal and the
     // optimal-point marker are drawn.

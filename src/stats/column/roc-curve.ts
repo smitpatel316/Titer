@@ -148,10 +148,12 @@ export function computeRocCurve(pairs: RocPair[], positive: string): RocComputat
 
   // Thresholds = each unique score, descending; predict positive iff score ≥ t.
   // The optimum keeps the FIRST largest J in this order — the highest
-  // threshold among tied J values.
+  // threshold among tied J values — and is chosen over the threshold points
+  // only: the (0,0)/(1,1) endpoints below have J = 0 and no threshold, so
+  // they must never win the optimum.
   const thresholds = [...new Set([...positiveScores, ...negativeScores])].sort((a, b) => b - a);
   let optimum: RocComputation["optimum"] | null = null;
-  const points = thresholds.map((t) => {
+  const thresholdPoints = thresholds.map((t) => {
     const tp = m - lowerBound(posSorted, t);
     const tn = lowerBound(negSorted, t);
     const sensitivity = tp / m;
@@ -160,6 +162,17 @@ export function computeRocCurve(pairs: RocPair[], positive: string): RocComputat
     if (optimum === null || youden > optimum.youden) optimum = { threshold: t, sensitivity, specificity, youden };
     return { threshold: t, sensitivity, specificity };
   });
+  // Plan 05: one row per threshold PLUS the (0,0)/(1,1) endpoints for the
+  // graph — the runner's points are the graph's points, so the graph draws
+  // them as-is instead of adding the endpoints itself (it used to, which
+  // left the runner's table stopping at the extreme thresholds). The
+  // endpoints carry no threshold; the graph and the results table render
+  // them from sensitivity/specificity alone.
+  const points: RocPoint[] = [
+    { threshold: null, sensitivity: 0, specificity: 1 },
+    ...thresholdPoints,
+    { threshold: null, sensitivity: 1, specificity: 0 },
+  ];
   return {
     auc,
     se,

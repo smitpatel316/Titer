@@ -1048,7 +1048,9 @@ export interface MonteCarloParams {
  *  score ≥ threshold. The (0,0) and (1,1) endpoints have no score threshold —
  *  the graph adds them when it draws the curve. */
 export interface RocPoint {
-  threshold: number;
+  /** The threshold this row is the (sensitivity, specificity) at; null for
+   *  the (0,0)/(1,1) endpoints, which belong to no threshold (plan 05). */
+  threshold: number | null;
   sensitivity: number;
   specificity: number;
 }
