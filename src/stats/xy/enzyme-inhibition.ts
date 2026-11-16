@@ -346,6 +346,18 @@ export async function runEnzymeInhibition(
   if (!allX.some((x) => x > 0)) return { error: "No positive substrate concentration — Km cannot be estimated." };
   if (new Set(allX).size === 1) return { error: "All substrate concentrations are equal — Km cannot be estimated." };
   if (Math.max(...zero.y) <= 0) return { error: "No positive velocities — Vmax cannot be estimated." };
+  // Km's start is the median positive X of the uninhibited series — a
+  // control series measured only at X = 0 makes that median NaN, and the
+  // fit then failed with the misleading "non-finite start value" (the
+  // all-series check above does not catch a control-only gap, since other
+  // series can still have positive X). Name the control series instead.
+  if (!zero.x.some((x) => x > 0))
+    return {
+      error:
+        `“${zero.col.name}” is the uninhibited series ([I] = 0) but has no positive substrate concentration — ` +
+        `Km is estimated from the uninhibited series, so it cannot be fitted. ` +
+        `Give the uninhibited series a positive substrate concentration.`,
+    };
 
   const starts = globalStarts(
     zero,

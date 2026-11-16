@@ -8345,6 +8345,39 @@ check("a bare-string y in enzyme inhibition means one series", async () => {
   ok(kiapp != null && Math.abs(kiapp - 2) < 0.01, `Kiapp should be ~2, got ${kiapp}`);
 });
 
+// v1.5.0 m13: the global fit's Km start is the median positive X of the
+// uninhibited (control) series — when the control series has no positive X
+// the median of [] is NaN and the fit failed with the misleading
+// "could not be fitted … non-finite start value" instead of naming the
+// control series. The runner now validates the control series up front.
+check("enzyme inhibition names the control series when it has no positive X (v1.5.0 m13)", async () => {
+  const data: TableData = {
+    columns: ["Title", "X", "Control", "Treated 10 nM"],
+    rows: [
+      ["", "0", "10", "9"],
+      ["", "0", "11", "8.5"],
+      ["", "0", "10", "8"],
+      ["", "0", "11", "7.5"],
+      ["", "1", null, "6"],
+      ["", "2", null, "5"],
+      ["", "5", null, "4"],
+      ["", "10", null, "3"],
+    ],
+  };
+  deepStrictEqual(
+    await runAnalysis("enzyme-inhibition", data, {
+      model: "competitive",
+      inhibitorConcentrations: { Control: 0, "Treated 10 nM": 10 },
+    } as AnalysisParams),
+    {
+      error:
+        "“Control” is the uninhibited series ([I] = 0) but has no positive substrate concentration — " +
+        "Km is estimated from the uninhibited series, so it cannot be fitted. " +
+        "Give the uninhibited series a positive substrate concentration.",
+    },
+  );
+});
+
 check("a wizard asks which data sets only when there is a choice", () => {
   const ids = (type: keyof typeof WIZARDS, data: TableData, a = {}) =>
     WIZARDS[type]!.questions(a, readTable(data)).flatMap((q) => (q ? [q.id] : []));
