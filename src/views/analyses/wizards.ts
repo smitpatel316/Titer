@@ -2982,15 +2982,30 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             : "The first series is the control (no antagonist). Which series is it?",
           names(ys),
         ),
-        // Schild / EC50 shift only: one B field per included series
-        // except the control, pre-filled from the column title
-        // ("10 nM" → 10); a blank field blocks Next.
+        // Schild / EC50 shift only: the units first (F9 — the B values are
+        // meaningless until the units are known; pA2 is the negative log of
+        // B in these units), then one B field per included series except
+        // the control, pre-filled from the column title ("10 nM" → 10);
+        // a blank field blocks Next.
+        ...(needsB
+          ? [
+              choice(
+                "bUnits",
+                "Which units is B entered in? pA2 is the negative log of B in these units — a nanomolar antagonist has pA2 ≈ 8–9 in M, ≈ −1 in nM.",
+                [
+                  ["M", "M (molar)"],
+                  ["nM", "nM (nanomolar)"],
+                  ["µM", "µM (micromolar)"],
+                ],
+              ),
+            ]
+          : []),
         ...(needsB
           ? ys
               .filter((name) => name !== first)
               .map((name) => ({
                 id: `B:${name}`,
-                ask: `Antagonist concentration B for “${name}” (same units for every series; pA2 is reported in these units).`,
+                ask: `Antagonist concentration B for “${name}” in ${(a.bUnits as string | undefined) ?? "M"} (pA2 is reported in these units).`,
                 kind: "text" as const,
                 label: `B for “${name}”`,
                 initial: parseInhibitorConcentration(name)?.toString() ?? "",
@@ -2998,16 +3013,6 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
                 parse: (text: string) => parseRequiredNonNegative(text, "antagonist concentration"),
               }))
           : []),
-        needsB &&
-          choice(
-            "bUnits",
-            "Which units is B entered in? pA2 is the negative log of B in these units — a nanomolar antagonist has pA2 ≈ 8–9 in M, ≈ −1 in nM.",
-            [
-              ["M", "M (molar)"],
-              ["nM", "nM (nanomolar)"],
-              ["µM", "µM (micromolar)"],
-            ],
-          ),
         isSchild &&
           choice(
             "fixHillSlope",

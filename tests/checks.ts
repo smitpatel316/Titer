@@ -8403,6 +8403,36 @@ check("a multi-select below its minimum names the minimum instead of silently di
   strictEqual(namesShortfall(oneQ, []), "Choose at least 1 — 0 chosen.");
 });
 
+check("the dose-response — Special wizard asks bUnits before the B values (F9)", () => {
+  const two = treatments(["X", "Y1", "Y2"]);
+  const order = (a: Answers) =>
+    WIZARDS["dose-response-special"]!.questions(a, readTable(two)).flatMap((q) => (q ? [q.id] : []));
+  // Schild: bUnits comes before the per-series B fields (it used to come after,
+  // so the user typed concentrations before knowing the pA2 units).
+  deepStrictEqual(order({ model: "schild-slope-1", ys: ["Y1", "Y2"], first: "Y1" }), [
+    "model",
+    "ys",
+    "first",
+    "bUnits",
+    "B:Y2",
+    "fixHillSlope",
+  ]);
+  const bQ = WIZARDS["dose-response-special"]!
+    .questions({ model: "schild-slope-1", ys: ["Y1", "Y2"], first: "Y1", bUnits: "nM" }, readTable(two))
+    .find((q) => q && q.id === "B:Y2");
+  ok(bQ && bQ.kind === "text" && /in nM/.test(bQ.ask), "the B question names the units just chosen");
+  // EC50 shift asks bUnits + B but no HillSlope question; the operational model
+  // asks neither (no B values at all).
+  deepStrictEqual(order({ model: "ec50-shift", ys: ["Y1", "Y2"], first: "Y1" }), [
+    "model",
+    "ys",
+    "first",
+    "bUnits",
+    "B:Y2",
+  ]);
+  deepStrictEqual(order({ model: "operational-partial", ys: ["Y1", "Y2"], first: "Y1" }), ["model", "ys", "first"]);
+});
+
 check("mixed-effects skips entirely empty rows in a Grouped table and reports a dropped rank-deficient term as NA", async () => {
   // Group B holds data only at the first row, so the Group × Row interaction
   // column is all zeros: lmer drops it from summary(m)$coefficients, and
