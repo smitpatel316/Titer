@@ -6210,6 +6210,9 @@ async function disagreements(): Promise<string[]> {
     ["f = 1.5", { y: "Response", method: "lowess", f: 1.5 }, "between 0 and 1"],
     ["spar = 2", { y: "Response", method: "spline", f: 2 / 3, spar: 2 }, "between 0 and 1.5"],
     ["spar + df", { y: "Response", method: "spline", f: 2 / 3, spar: 0.5, df: 4 }, "not both"],
+    ["df = 0.5", { y: "Response", method: "spline", f: 2 / 3, df: 0.5 }, "greater than 1"],
+    ["df = 1", { y: "Response", method: "spline", f: 2 / 3, df: 1 }, "greater than 1"],
+    ["df = 11", { y: "Response", method: "spline", f: 2 / 3, df: 11 }, "distinct x values"],
   ];
   for (const [label, params, want] of errCases) {
     const r = await runAnalysis("spline-lowess", doseLog, params as AnalysisParams);

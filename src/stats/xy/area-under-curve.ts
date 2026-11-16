@@ -10,6 +10,7 @@ export async function runAreaUnderCurve(
   params: AreaUnderCurveParams | undefined,
 ): Promise<AnalysisOutcome> {
   const baseline = params?.baseline ?? 0;
+  if (!Number.isFinite(baseline)) return { error: "The baseline must be a finite number." };
   const { x: xCol, ys: yCols } = splitXY(columns);
   if (!xCol || yCols.length < 1) return { error: xyProblem(columns)! };
 

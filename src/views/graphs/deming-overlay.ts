@@ -26,7 +26,7 @@ export interface DemingFit {
  *  the analysis reports as errors. */
 export function fitDeming(x: number[], y: number[], lambda: number): DemingFit | null {
   const n = x.length;
-  if (n < 2 || !(lambda > 0)) return null;
+  if (n < 2 || !Number.isFinite(lambda) || lambda <= 0) return null;
   const xbar = mean(x);
   const ybar = mean(y);
   const sxx = x.reduce((s, xi) => s + (xi - xbar) ** 2, 0);

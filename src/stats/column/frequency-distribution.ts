@@ -231,6 +231,16 @@ export async function runFrequencyDistribution(
   if (p.binMode === "count" && (p.binCount == null || !Number.isInteger(p.binCount) || p.binCount < 2)) {
     return { error: "Number of bins must be a whole number of at least 2." };
   }
+  // m20 (v1.5.0): a non-finite startAt crashed with "Invalid array length" —
+  // refuse it with a clean error. (Checked first: the m14 clamp below would
+  // otherwise let a hand-built request sail through.)
+  if (p.startAt != null && !Number.isFinite(p.startAt)) {
+    return { error: "The first bin's starting value must be a finite number." };
+  }
+  // m20 (v1.5.0): an absurd bin count is refused rather than attempted.
+  if (p.binMode === "count" && p.binCount! > 10000) {
+    return { error: "Number of bins must be at most 10,000." };
+  }
   // m14 (v1.5.0): plan 06 caps the bin count at 100 — clamp, don't error:
   // the wizard blocks > 100 at entry and the file loader clamps saved
   // values the same way, so only a hand-built request reaches here, and it

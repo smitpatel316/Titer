@@ -142,6 +142,7 @@ import { addForestPlot } from "../src/views/graphs/forest-plot";
 import { addEstimationPlot, estimationDiffLabel } from "../src/views/graphs/estimation-plot";
 import { addSchildPlot, schildPlotPoints } from "../src/views/graphs/schild-plot";
 import { addRegression, fitLinear } from "../src/views/graphs/regression-overlay";
+import { fitDeming } from "../src/views/graphs/deming-overlay";
 import { addObservedFitted } from "../src/views/graphs/observed-fitted";
 import { batchMatched, examplesFor, matched, type Matched } from "../src/views/graphs/match-graph";
 import type { OutlineNode } from "../src/store/use-project-store";
@@ -206,6 +207,7 @@ import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
 import { evaluate as evaluateCurve } from "../src/views/graphs/fitted-curve";
 import { parseInhibitorConcentration } from "../src/stats/xy/enzyme-inhibition";
+import { runGlobalFit } from "../src/stats/xy/global-fit";
 import {
   cumulativeIntegral,
   equallySpaced,
@@ -11927,6 +11929,227 @@ check("the frequency wizard validates the bin width as greater than 0 (F6)", () 
   strictEqual(binWidth.validate?.(0), "The bin width must be greater than 0.");
   strictEqual(binWidth.validate?.(-1), "The bin width must be greater than 0.");
   strictEqual(binWidth.validate?.(2), undefined);
+
+check("m9 deming jackknife skips leave-one-out replicates with no covariation", async () => {
+  // Points 1–5 have Sxy = 0 exactly; point 6 gives the full data Sxy ≠ 0,
+  // so the LOO subset without point 6 has sxy2 = 0 and no defined slope.
+  // Before the fix its NaN slope poisoned the SEs and all four CI bounds
+  // came back null with no note; now the replicate is skipped and the
+  // intervals use the remaining 5.
+  const xyTable = (rows: [string, string][]): TableData => ({
+    columns: ["Title", "X", "Y"],
+    rows: rows.map(([x, y]) => [null, x, y]),
+  });
+  const loo = await runAnalysis(
+    "deming-regression",
+    xyTable([
+      ["1", "1"],
+      ["2", "2"],
+      ["3", "1"],
+      ["4", "2"],
+      ["5", "1"],
+      ["6", "3"],
+    ]),
+    { y: "Y", lambda: 1 },
+  );
+  if ("error" in loo) throw new Error(loo.error);
+  const stat = (label: string) => loo.stats.find((s) => s.label === label)?.value;
+  const slope = stat("Slope");
+  if (slope == null || Math.abs(slope - 0.2628457697811293) > 1e-9)
+    throw new Error(`Deming slope: ${slope}, expected ≈ 0.2628`);
+  for (const label of ["Slope 95% CI lower", "Slope 95% CI upper", "Intercept 95% CI lower", "Intercept 95% CI upper"]) {
+    const v = stat(label);
+    if (v == null || !Number.isFinite(v)) throw new Error(`Deming ${label}: ${v}, expected a finite bound`);
+  }
+  if (!(stat("Slope 95% CI lower")! < slope && slope < stat("Slope 95% CI upper")!))
+    throw new Error("Deming slope CI does not contain the slope");
+  if (!loo.notes.includes("skipped") || !loo.notes.includes("remaining 5 replicates"))
+    throw new Error(`Deming notes do not name the skipped replicate: ${loo.notes}`);
+  // Only one usable replicate remains: the slope and intercept still fit,
+  // but no jackknife interval can be computed — and the notes must say so.
+  const one = await runAnalysis(
+    "deming-regression",
+    xyTable([
+      ["1", "1"],
+      ["1", "2"],
+      ["2", "2"],
+    ]),
+    { y: "Y", lambda: 1 },
+  );
+  if ("error" in one) throw new Error(one.error);
+  const oneStat = (label: string) => one.stats.find((s) => s.label === label)?.value;
+  if (oneStat("Slope 95% CI lower") !== null || oneStat("Slope 95% CI upper") !== null)
+    throw new Error("Deming with one usable replicate should report null CIs");
+  if (!one.notes.includes("no jackknife confidence interval could be computed"))
+    throw new Error(`Deming notes do not say the CI could not be computed: ${one.notes}`);
+});
+
+check("m19 spline df is range-checked against the distinct X values", async () => {
+  // R's smooth.spline does not error on an out-of-range df — it warns and
+  // silently falls back to GCV, so the user gets a fit they did not ask for
+  // (df = 11 on 10 distinct X values came back as df = 2). The runner now
+  // refuses with a clean error naming the bound: 1 < df <= #{distinct X}.
+  const doseLog: TableData = {
+    columns: ["Title", "X", "Response"],
+    rows: [
+      [null, "1", "1.4"],
+      [null, "2", "1.9"],
+      [null, "3", "3.6"],
+      [null, "4", "3.8"],
+      [null, "5", "5.5"],
+      [null, "6", "5.7"],
+      [null, "7", "7.4"],
+      [null, "8", "7.6"],
+      [null, "9", "9.5"],
+      [null, "10", "9.8"],
+    ],
+  };
+  for (const df of [0.5, 1, 11, 100]) {
+    const r = await runAnalysis("spline-lowess", doseLog, { y: "Response", method: "spline", f: 2 / 3, df });
+    if (!("error" in r) || !r.error.includes("greater than 1") || !r.error.includes("distinct X values"))
+      throw new Error(`spline df=${df}: ${"error" in r ? r.error : "ran"}, expected a range error`);
+  }
+  // In-range df still runs, including the top of the range (df = #{distinct X}).
+  const top = await runAnalysis("spline-lowess", doseLog, { y: "Response", method: "spline", f: 2 / 3, df: 10 });
+  if ("error" in top) throw new Error(top.error);
+  const dfUsed = top.stats.find((s) => s.label === "Effective degrees of freedom")?.value;
+  if (dfUsed == null || Math.abs(dfUsed - 10) > 0.01)
+    throw new Error(`spline df=10: effective df ${dfUsed}, expected 10`);
+  // On tied X the bound is the distinct count, not n: 10 points, 5 distinct.
+  const tiedX: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "1", "1.1"],
+      [null, "1", "1.3"],
+      [null, "2", "2.0"],
+      [null, "2", "2.2"],
+      [null, "3", "2.9"],
+      [null, "3", "3.1"],
+      [null, "4", "4.0"],
+      [null, "4", "4.2"],
+      [null, "5", "5.1"],
+      [null, "5", "4.9"],
+    ],
+  };
+  const tied = await runAnalysis("spline-lowess", tiedX, { y: "Y", method: "spline", f: 2 / 3, df: 6 });
+  if (!("error" in tied) || !tied.error.includes("distinct X values"))
+    throw new Error(`spline tied-X df=6: ${"error" in tied ? tied.error : "ran"}, expected a range error`);
+});
+
+check("m19 lowess runs on tied X values", async () => {
+  // Whether R lowess errors on tied X was unconfirmed: it does not — it runs
+  // cleanly (10 fitted values, no error). Pin that, so a future guard does
+  // not refuse tied X by mistake.
+  const tiedX: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "1", "1.1"],
+      [null, "1", "1.3"],
+      [null, "2", "2.0"],
+      [null, "2", "2.2"],
+      [null, "3", "2.9"],
+      [null, "3", "3.1"],
+      [null, "4", "4.0"],
+      [null, "4", "4.2"],
+      [null, "5", "5.1"],
+      [null, "5", "4.9"],
+    ],
+  };
+  const r = await runAnalysis("spline-lowess", tiedX, { y: "Y", method: "lowess", f: 2 / 3 });
+  if ("error" in r) throw new Error(r.error);
+  strictEqual(r.fitted?.length, 10, "lowess on tied X should fit all 10 points");
+});
+
+check("m20 non-finite numeric params are refused with a clean error", async () => {
+  // All three params are wizard-validated in practice, so this is
+  // defense-in-depth for a hand-edited file: before the fix λ = ∞ reached R
+  // as the bare word "Infinity" ("object 'Infinity' not found"), a NaN AUC
+  // baseline ran and returned a null area labelled "baseline Y = NaN", and
+  // a NaN frequency startAt crashed with "Invalid array length".
+  const xy: TableData = {
+    columns: ["Title", "X", "Response"],
+    rows: [
+      [null, "1", "1.4"],
+      [null, "2", "1.9"],
+      [null, "3", "3.6"],
+      [null, "4", "3.8"],
+      [null, "5", "5.5"],
+      [null, "6", "5.7"],
+      [null, "7", "7.4"],
+      [null, "8", "7.6"],
+      [null, "9", "9.5"],
+      [null, "10", "9.8"],
+    ],
+  };
+  for (const lambda of [Infinity, -Infinity, NaN]) {
+    const r = await runAnalysis("deming-regression", xy, { y: "Response", lambda });
+    if (!("error" in r) || !r.error.includes("finite"))
+      throw new Error(`deming lambda=${lambda}: ${"error" in r ? r.error : "ran"}, expected a finite-number error`);
+  }
+  // The graph overlay's closed form shares the same guard: λ = ∞ gave a
+  // NaN slope instead of no fit.
+  strictEqual(fitDeming([1, 2, 3], [1.4, 1.9, 3.6], Infinity), null, "fitDeming with λ = ∞ should be null");
+  strictEqual(fitDeming([1, 2, 3], [1.4, 1.9, 3.6], NaN), null, "fitDeming with λ = NaN should be null");
+  for (const baseline of [NaN, Infinity]) {
+    const r = await runAnalysis("area-under-curve", xy, { baseline });
+    if (!("error" in r) || !r.error.includes("finite"))
+      throw new Error(`AUC baseline=${baseline}: ${"error" in r ? r.error : "ran"}, expected a finite-number error`);
+  }
+  const col: TableData = {
+    columns: ["Title", "A"],
+    rows: [
+      [null, "1.2"],
+      [null, "2.5"],
+      [null, "3.1"],
+      [null, "4.7"],
+      [null, "5.0"],
+      [null, "6.3"],
+    ],
+  };
+  for (const startAt of [NaN, Infinity]) {
+    const r = await runAnalysis("frequency-distribution", col, { binMode: "width", binWidth: 1, startAt });
+    if (!("error" in r) || !r.error.includes("finite"))
+      throw new Error(`frequency startAt=${startAt}: ${"error" in r ? r.error : "ran"}, expected a finite-number error`);
+  }
+});
+
+check("m21 per-series R² is null, not NaN, when the evaluator returns NaN", async () => {
+  // A global fit whose closed-form evaluator returns NaN (e.g. a log of a
+  // negative fitted value) made rSquared return NaN — JSON renders it as
+  // null, but the in-memory outcome carried a real NaN, which the results
+  // view would print as "NaN". The fit itself still runs; only the R² is
+  // unknowable, so it is null like the constant-Y case.
+  const g = await runGlobalFit(
+    [{ name: "S", x: [1, 2, 3, 4, 5], y: [2, 4, 6, 8, 10], covariate: 0 }],
+    {
+      formula: "a+b*x",
+      params: [
+        { name: "a", shared: true, start: () => 0 },
+        { name: "b", shared: true, start: () => 1 },
+      ],
+      evaluate: () => Math.sqrt(-1),
+    },
+  );
+  strictEqual(g.perSeries[0].rSquared, null, "R² with a NaN evaluator should be null, not NaN");
+  // And a finite evaluator still yields a real R²: the linear fit is exact.
+  const good = await runGlobalFit(
+    [{ name: "S", x: [1, 2, 3, 4, 5], y: [2, 4, 6, 8, 10], covariate: 0 }],
+    {
+      formula: "a+b*x",
+      params: [
+        { name: "a", shared: true, start: () => 0 },
+        { name: "b", shared: true, start: () => 1 },
+      ],
+      evaluate: (coefficients, _series, _i, x) => {
+        const a = coefficients.find((c) => c.term === "a")?.estimate ?? 0;
+        const b = coefficients.find((c) => c.term === "b")?.estimate ?? 0;
+        return a + b * x;
+      },
+    },
+  );
+  const goodR2 = good.perSeries[0].rSquared;
+  if (goodR2 == null || Math.abs(goodR2 - 1) > 1e-9)
+    throw new Error(`R² with an exact linear evaluator: ${goodR2}, expected 1`);
 });
 
 check("transform concentrations converts between molar units by exact powers of 1000", async () => {

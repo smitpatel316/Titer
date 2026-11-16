@@ -42,7 +42,8 @@ function pickXY(columns: Column[], params: DemingRegressionParams | undefined): 
  *  has no defined slope. */
 function demingProblem(columns: Column[], params: DemingRegressionParams | undefined): string | undefined {
   const lambda = (params ?? DEFAULTS).lambda;
-  if (!(lambda > 0)) return "The error variance ratio must be greater than 0.";
+  if (!Number.isFinite(lambda) || lambda <= 0)
+    return "The error variance ratio must be a finite number greater than 0.";
   const base = xyProblem(columns, params?.y);
   if (base) return base;
   const groups = pickXY(columns, params);
@@ -87,13 +88,16 @@ export const demingRegressionSpec: ColumnTestSpec<DemingRegressionParams> = {
       `x<-${rVec(groups[0].values)};y<-${rVec(groups[1].values)};lam<-${lambda};n<-length(x);` +
       `xb<-mean(x);yb<-mean(y);sxx<-sum((x-xb)^2);syy<-sum((y-yb)^2);sxy<-sum((x-xb)*(y-yb));` +
       `d<-syy-lam*sxx;b<-(d+sqrt(d^2+4*lam*sxy^2))/(2*sxy);a<-yb-b*xb;` +
-      // Leave-one-out jackknife: refit on each n−1 subset, SE = √((n−1)·Σ(θᵢ − θ̄)²).
-      `th<-sapply(1:n,function(i){xx<-x[-i];yy<-y[-i];xbm<-mean(xx);ybm<-mean(yy);sx<-sum((xx-xbm)^2);sy<-sum((yy-ybm)^2);sxy2<-sum((xx-xbm)*(yy-ybm));dd<-sy-lam*sx;bb<-(dd+sqrt(dd^2+4*lam*sxy2^2))/(2*sxy2);c(bb,ybm-bb*xbm)});` +
-      `seb<-sqrt((n-1)*sum((th[1,]-mean(th[1,]))^2));sea<-sqrt((n-1)*sum((th[2,]-mean(th[2,]))^2));` +
+      // Leave-one-out jackknife: refit on each n−1 subset, SE = √((k−1)·Σ(θᵢ − θ̄)²)
+      // over the k usable replicates. A subset whose X and Y do not covary
+      // (sxy2 = 0) has no defined Deming slope, so it contributes no replicate
+      // instead of a NaN one; looDropped counts the skipped subsets.
+      `th<-sapply(1:n,function(i){xx<-x[-i];yy<-y[-i];xbm<-mean(xx);ybm<-mean(yy);sx<-sum((xx-xbm)^2);sy<-sum((yy-ybm)^2);sxy2<-sum((xx-xbm)*(yy-ybm));dd<-sy-lam*sx;bb<-if(is.na(sxy2)||sxy2==0)NA else (dd+sqrt(dd^2+4*lam*sxy2^2))/(2*sxy2);if(is.na(bb)||!is.finite(bb))bb<-NA;c(bb,ybm-bb*xbm)});` +
+      `k<-sum(!is.na(th[1,]));seb<-if(k<2)NA else sqrt((k-1)*sum((th[1,]-mean(th[1,],na.rm=TRUE))^2,na.rm=TRUE));sea<-if(k<2)NA else sqrt((k-1)*sum((th[2,]-mean(th[2,],na.rm=TRUE))^2,na.rm=TRUE));` +
       `m<-lm(y~x);` +
       `c(slope=b,intercept=a,slopeSe=seb,interceptSe=sea,` +
       `slopeCiLo=b-1.96*seb,slopeCiHi=b+1.96*seb,interceptCiLo=a-1.96*sea,interceptCiHi=a+1.96*sea,` +
-      `lambda=lam,olsSlope=unname(coef(m)[2]),olsIntercept=unname(coef(m)[1]),n=n)`
+      `lambda=lam,olsSlope=unname(coef(m)[2]),olsIntercept=unname(coef(m)[1]),n=n,looDropped=n-k)`
     );
   },
   rows: (v, _groups, _params) => [
@@ -127,6 +131,21 @@ export const demingRegressionSpec: ColumnTestSpec<DemingRegressionParams> = {
       "If the slope CI excludes 1 there is proportional bias; if the intercept CI excludes 0 there is constant bias. " +
       "Assumes the errors in X and Y are independent and roughly homoscedastic."
     );
+  },
+  valueNotes: (v) => {
+    const dropped = v.looDropped;
+    if (dropped == null || dropped === 0) return undefined;
+    const kept = (v.n ?? 0) - dropped;
+    const plural = dropped === 1 ? "replicate" : "replicates";
+    const skipped =
+      `${dropped} of the ${v.n} leave-one-out jackknife ${plural} had no covariation ` +
+      `(removing that point left X and Y uncorrelated) and ${dropped === 1 ? "was" : "were"} skipped; `;
+    if (v.slopeSe == null)
+      return (
+        skipped +
+        `with only ${kept} usable ${kept === 1 ? "replicate" : "replicates"} no jackknife confidence interval could be computed.`
+      );
+    return skipped + `the confidence intervals use the remaining ${kept} replicates.`;
   },
   subtitle: () => "Deming regression",
   equation: (v, _groups, _params) => {

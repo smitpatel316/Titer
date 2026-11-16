@@ -98,13 +98,16 @@ export interface GlobalFitResult {
   rCode: string;
 }
 
-/** R² of `ys` against their fitted values (null when Y is constant). */
+/** R² of `ys` against their fitted values (null when Y is constant, or
+ *  when the fitted values are non-finite — an evaluator that returns NaN
+ *  makes the R² unknowable, not NaN). */
 function rSquared(ys: number[], fitted: number[]): number | null {
   const mean = ys.reduce((s, v) => s + v, 0) / ys.length;
   const sst = ys.reduce((s, v) => s + (v - mean) ** 2, 0);
   if (sst === 0) return null;
   const ssr = ys.reduce((s, v, i) => s + (v - fitted[i]) ** 2, 0);
-  return 1 - ssr / sst;
+  const r2 = 1 - ssr / sst;
+  return Number.isFinite(r2) ? r2 : null;
 }
 
 const rNum = (v: number): string => (v === Infinity ? "Inf" : v === -Infinity ? "-Inf" : String(v));

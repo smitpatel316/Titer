@@ -92,6 +92,14 @@ export async function fitSmooth(
           ? "A smoothing spline needs at least 4 distinct X values."
           : "Smoothing needs at least 4 complete pairs of X and Y values.",
     };
+  // R's smooth.spline does not error on an out-of-range df — it warns and
+  // silently falls back to GCV ("not using invalid df; must have
+  // 1 < df <= n := #{unique x}"), so the user gets a fit they did not ask
+  // for. Refuse up front instead, naming the bound R enforces.
+  if (method === "spline" && df != null && (df <= 1 || df > uniqueX))
+    return {
+      error: `The degrees of freedom (df) must be greater than 1 and no more than the number of distinct X values (${uniqueX}).`,
+    };
   const minX = xs[0];
   const maxX = xs[n - 1];
 
