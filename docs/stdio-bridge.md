@@ -307,5 +307,16 @@ succeeds without restarting Claude.
    aarch64-apple-darwin --target x86_64-apple-darwin` wired in the
    same way; that path is UNVERIFIED (no Mac build in this lane — disk)
    and is a follow-up before the Mac release flow uses this branch.
+   UPDATE 2026-11-15 (fix/rebuild-stdio-bridge-in-build): the follow-up
+   landed the hard way — the 7fbeab7 Mac batch build shipped a STALE
+   bridge (Nov 14 11:00 binary, predating the reconciliation commits;
+   no MCP-Protocol-Version/Accept headers -> HTTP 400, Claude Code
+   "Failed to connect"). `scripts/build-mac-dmg.sh` now rebuilds the
+   bridge per target before every `tauri build` and fails hard if the
+   staged binary is missing; the Linux AppImage path got the same fix
+   as a new `scripts/build-linux-appimage.sh` (the v1.3.0 lane's ad-hoc
+   build.sh had the staging step only in its scratch dir, and its
+   attempt 2 failed on the missing sidecar). Client e2e re-proof
+   against a release DMG rides the 1.4.0 release build.
    The full `npm run build:linux` run itself was not executed here
    (only the staging step + cargo test); the GUI lane owns Linux builds.
