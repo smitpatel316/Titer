@@ -124,11 +124,12 @@ import {
 } from "../src/views/analyses/wizards";
 import { initialAnswer } from "../src/views/analyses/analysis-wizard";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, movedText, paintOf, perRowSummaryStats, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, movedText, paintOf, perRowSummaryStats, textWidth, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
   keysOf,
+  labelPlotGeometry,
   picked,
   pointLabels,
   resizePoints,
@@ -6741,6 +6742,55 @@ check("G-F17: biplot score labels flip below top-edge points; the degenerate clo
   const anns2 = (fig2.layout.annotations as { name?: string; text: string }[]) ?? [];
   ok(anns2.some((a) => a.name === "note" && /identical/.test(a.text)));
   ok(anns2.some((a) => a.text === "V1"), "arrows still drawn when loadings scale");
+});
+
+// G-F4: a selected point's label was never clamped to the plot edge — the
+// default offset always points right (and centres on the point vertically),
+// so a label on the rightmost point ran 255 px past the right edge. The
+// default offset now flips left past the right edge and shifts below/above
+// past the top/bottom edge, the way the volcano places its gene names. A
+// label the user moved by hand is never touched.
+check("G-F4: selected-point labels clamp/flip at the plot edge", () => {
+  const data = readTable({
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["A", "1", "2"],
+      ["B", "2", "3"],
+      ["C", "3", "2.5"],
+      ["D", "4", "4"],
+      ["Subject number five with a very long name", "5", "3.5"],
+    ],
+  });
+  const fontSize = 13;
+  const textSize = Math.max(fontSize - 2, 8);
+  const labelsOf = (options: GraphOptions, plot?: Parameters<typeof pointLabels>[4]) => {
+    const fig = GRAPHS["xy-scatter"].build(plotColumns(data, "xy-scatter", options, "xy"), options, paintOf(options, 1));
+    return { fig, labels: pointLabels(fig.data, options.points, data.titles, fontSize, plot) };
+  };
+  // Rightmost point, long title: the label flips left of its point.
+  const right = { ...newGraphOptions("xy-scatter"), points: { "Y1#4": { label: true } } };
+  const bare = labelsOf(right);
+  ok(bare.labels[0].ax < 0, "right-edge point: label flips left (no geometry passed)");
+  const { fig, labels } = labelsOf(right, labelPlotGeometry(bare.fig.data, bare.fig.layout, right));
+  ok(labels[0].ax < 0, "right-edge point: label flips left (with plot geometry)");
+  // …and the flipped box stays inside the plot.
+  const plot = labelPlotGeometry(fig.data, fig.layout, right);
+  const w = textWidth(labels[0].text, textSize);
+  const px = ((5 - plot.x[0]) / (plot.x[1] - plot.x[0])) * plot.width;
+  ok(px + labels[0].ax + w / 2 <= plot.width, "flipped label's right edge is inside the plot");
+  ok(px + labels[0].ax - w / 2 >= 0, "flipped label's left edge is inside the plot");
+  // Top point: the label shifts below its point instead of centring on it.
+  const top = { ...newGraphOptions("xy-scatter"), points: { "Y1#3": { label: true } } };
+  ok(labelsOf(top).labels[0].ay > 0, "top-edge point: label shifts below its point");
+  // Left-edge point keeps its rightward label.
+  const left = { ...newGraphOptions("xy-scatter"), points: { "Y1#0": { label: true } } };
+  ok(labelsOf(left).labels[0].ax > 0, "left-edge point: label stays right of its point");
+  // A label the user moved by hand is never clamped.
+  const moved = {
+    ...newGraphOptions("xy-scatter"),
+    points: { "Y1#4": { label: true, labelOffset: { x: 200, y: 0 } } },
+  };
+  strictEqual(labelsOf(moved).labels[0].ax, 200);
 });
 
 check("a legend shown outside the plot reserves its own right margin (M13)", () => {
