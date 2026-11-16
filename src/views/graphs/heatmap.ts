@@ -6,6 +6,7 @@
 import type { GraphOptions } from "../../store/types";
 import type { GraphModule, GraphFigure } from ".";
 import type { Column } from "../../lib/dataset";
+import { num } from "../../lib/format";
 import { colorscaleOf, paletteOf } from "../../lib/palettes";
 import { heatmapLayout, rowCountOf, rowLabels, type Paint } from "./plot-helpers";
 
@@ -29,7 +30,15 @@ function build(columns: Column[], options: GraphOptions, _paint: Paint, titles?:
         ...(options.legend && { colorbar: options.legend }),
         hoverongaps: false,
         ...(options.heatmapShowValues
-          ? { texttemplate: "%{z}", textfont: { size: Math.max(options.fontSize - 3, 8) } }
+          ? {
+              // The values, formatted with the shared num() (4 sig figs) —
+              // the raw %{z} printed every digit, so a long value overflowed
+              // its narrow cell and overlapped its neighbours (G-F13). A
+              // gap cell stays blank; hover still shows the raw value.
+              text: z.map((row) => row.map((v) => (v == null ? "" : num(v)))),
+              texttemplate: "%{text}",
+              textfont: { size: Math.max(options.fontSize - 3, 8) },
+            }
           : {}),
       },
     ],

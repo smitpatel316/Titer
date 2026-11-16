@@ -125,7 +125,7 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, movedText, paintOf, perRowSummaryStats, textWidth, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, movedText, paintOf, perRowSummaryStats, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -141,6 +141,7 @@ import {
 import { cutoffAsP, cutoffOfP, genesNamed, VOLCANO_MAX_LOG10 } from "../src/views/graphs/volcano";
 import { XY_SCATTER_MAX_POINTS } from "../src/views/graphs/xy-scatter";
 import { addForestPlot } from "../src/views/graphs/forest-plot";
+import { addScreePlot } from "../src/views/graphs/scree-plot";
 import { addEstimationPlot, estimationDiffLabel } from "../src/views/graphs/estimation-plot";
 import { addSchildPlot, schildPlotPoints } from "../src/views/graphs/schild-plot";
 import { addRegression, fitLinear } from "../src/views/graphs/regression-overlay";
@@ -6849,6 +6850,28 @@ check("a legend shown outside the plot reserves its own right margin (M13)", () 
   strictEqual((heatmapLayout({ ...options, heatmapShowScale: false }, ["A", "B"], ["R1"]).margin as { r: number }).r, 16);
 });
 
+// G-F13: "Show values" printed the raw cell value at full precision
+// (`%{z}`) — a long value overflowed its narrow cell and overlapped its
+// neighbours. The values are now formatted with the shared num() (4 sig
+// figs) before they reach Plotly, so what a cell shows is short.
+check("'Show values' prints formatted numbers on a heatmap (G-F13)", () => {
+  const options = { ...newGraphOptions("heatmap"), heatmapShowValues: true };
+  const cols = readTable({
+    columns: ["Title", "A", "B"],
+    rows: [
+      [null, "0.123456789", "1234567.89"],
+      [null, "0.3333333333", "2"],
+    ],
+  }).numeric;
+  const fig = GRAPHS.heatmap.build(cols, options, paintOf(options, 0));
+  const trace = fig.data[0] as { texttemplate?: string; text?: (string | null)[][] };
+  strictEqual(trace.texttemplate, "%{text}");
+  deepStrictEqual(trace.text, [
+    ["0.1235", "1235000"],
+    ["0.3333", "2"],
+  ]);
+});
+
 // ── Gridlines + tick controls (v2 item 30) ───────────────────────────────
 
 type Axis = Record<string, unknown> & { minor?: Record<string, unknown> };
@@ -9424,6 +9447,60 @@ check("the estimation plot redraws when its t test result arrives (v2-12)", () =
   );
 });
 
+// G-F7: a forest, observed-vs-fitted or smooth-curve graph whose sibling
+// analysis isn't linked drew only its axes (or its points), with no on-canvas
+// explanation — while the Schild, scree, biplot, Monte Carlo, K-means and
+// estimation graphs all name the analysis to run. The prompts live in one
+// helper so the wording stays identical everywhere it appears.
+check("unlinked forest / observed-fitted / smooth-curve graphs name the analysis to run (G-F7)", () => {
+  strictEqual(
+    unlinkedAnalysisNote("forest-plot"),
+    "Run a Cox proportional hazards analysis on this table to draw the forest plot.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("observed-fitted"),
+    "Run a Poisson regression on this table to draw the observed-vs-fitted plot.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("smooth-curve"),
+    "Run a Spline and Lowess analysis on this table to draw the smooth curve.",
+  );
+  // The prompts that already existed keep their wording.
+  strictEqual(
+    unlinkedAnalysisNote("schild-plot"),
+    "Run a Gaddum/Schild analysis on this table to draw the Schild plot.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("scree-plot"),
+    "Run a Principal component analysis on this table to draw the scree plot.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("pca-biplot"),
+    "Run a Principal component analysis on this table to draw the scores biplot.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("monte-carlo-histogram"),
+    "Run a Monte Carlo simulation on this table to draw the histogram.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("kmeans-scatter"),
+    "Run a K-means clustering on this table to draw the cluster scatter.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("estimation-plot"),
+    "Run a Compare two groups analysis on this table to draw the difference between means with its 95% CI.",
+  );
+  strictEqual(unlinkedAnalysisNote("xy-scatter"), null);
+  strictEqual(unlinkedAnalysisNote("heatmap"), null);
+  // And the view actually prompts for the three graphs (source-level pin —
+  // the harness can't drive async React redraws; same pattern as the
+  // estimation-plot redraw check above).
+  const src = readFileSync("src/views/graphs/graph-view.tsx", "utf8");
+  for (const t of ["forest-plot", "observed-fitted", "smooth-curve"]) {
+    ok(src.includes(`unlinked("${t}")`), `graph-view must prompt for an unlinked ${t}`);
+  }
+});
+
 check("a two-tailed t test reports its difference with its 95% CI, a one-tailed or non-parametric one reports none (v2-12)", async () => {
   const table = treatments(["Control", "Drug A"]);
   const two = await runAnalysis("compare-two-groups", table, { paired: false } as AnalysisParams);
@@ -9880,6 +9957,210 @@ check("a logistic curve on a non-binary Y shows the points and says the outcome 
   ok(!("error" in good), `binary logistic fit: ${"error" in good ? good.error : "ok"}`);
   strictEqual(logisticCurveNote(good), null);
   strictEqual(logisticCurveNote(null), null);
+});
+
+// G-F8: the Axes min/max inputs were silently ignored on fixed-range graphs —
+// the builders overwrote what the user typed. A typed bound now replaces the
+// fixed range (or, where the axis is categorical, the input is not offered).
+check("an ROC curve honours the Axes min/max inputs, defaulting to 0–1 (G-F8)", () => {
+  const data: TableData = {
+    columns: ["Title", "Truth", "Score"],
+    rows: [
+      [null, "Diseased", "0.9"],
+      [null, "Diseased", "0.8"],
+      [null, "Diseased", "0.6"],
+      [null, "Healthy", "0.4"],
+      [null, "Healthy", "0.3"],
+      [null, "Healthy", "0.1"],
+    ],
+  };
+  const build = (over: Partial<GraphOptions>) => {
+    const opts = { ...newGraphOptions("roc-curve"), ...over };
+    return GRAPHS["roc-curve"].build(plotColumns(readTable(data), "roc-curve", opts, "xy"), opts, paintOf(opts, 1));
+  };
+  const def = build({});
+  deepStrictEqual((def.layout.xaxis as { range?: number[] }).range, [0, 1]);
+  deepStrictEqual((def.layout.yaxis as { range?: number[] }).range, [0, 1]);
+  ok(def.data.length > 0, "the ROC curve must draw");
+  const ranged = build({ xMin: 0.2, xMax: 0.8, yMin: 0.1, yMax: 0.9 });
+  deepStrictEqual((ranged.layout.xaxis as { range?: number[] }).range, [0.2, 0.8]);
+  deepStrictEqual((ranged.layout.yaxis as { range?: number[] }).range, [0.1, 0.9]);
+});
+
+check("a logistic curve honours a set Y range, defaulting to the fixed 0–1 axis (G-F8)", () => {
+  const data: TableData = {
+    columns: ["Title", "X", "Response"],
+    rows: [
+      [null, "0", "0"],
+      [null, "1", "0"],
+      [null, "2", "0"],
+      [null, "3", "0"],
+      [null, "4", "1"],
+      [null, "5", "0"],
+      [null, "6", "1"],
+      [null, "7", "1"],
+      [null, "8", "1"],
+      [null, "9", "1"],
+    ],
+  };
+  const build = (over: Partial<GraphOptions>) => {
+    const opts = { ...newGraphOptions("logistic-curve"), ...over };
+    return GRAPHS["logistic-curve"].build(
+      plotColumns(readTable(data), "logistic-curve", opts, "xy"),
+      opts,
+      paintOf(opts, 1),
+      readTable(data).titles,
+    );
+  };
+  deepStrictEqual((build({}).layout.yaxis as { range?: number[] }).range, [-0.05, 1.05]);
+  const ranged = build({ yMin: 0, yMax: 0.6 });
+  deepStrictEqual((ranged.layout.yaxis as { range?: number[] }).range, [0, 0.6]);
+  deepStrictEqual((ranged.layout.yaxis as { tickvals?: number[] }).tickvals, [0, 1]);
+});
+
+check("a scree plot honours a set Y range on both axes (G-F8)", () => {
+  const options = newGraphOptions("scree-plot");
+  const outcome: AnalysisResult = {
+    testType: "principal-component-analysis",
+    stats: [],
+    groups: [],
+    notes: "",
+    pcaVariance: [
+      { component: "PC1", eigenvalue: 2, sd: 1.4, proportion: 0.6, cumulative: 0.6 },
+      { component: "PC2", eigenvalue: 1, sd: 1, proportion: 0.3, cumulative: 0.9 },
+      { component: "PC3", eigenvalue: 0.3, sd: 0.55, proportion: 0.1, cumulative: 1 },
+    ],
+  };
+  const draw = (over: Partial<GraphOptions>) => {
+    const opts = { ...options, ...over };
+    const fig = GRAPHS["scree-plot"].build([], opts, paintOf(opts, 1));
+    addScreePlot(fig, outcome, paintOf(opts, 1), opts);
+    return fig;
+  };
+  const def = draw({});
+  deepStrictEqual((def.layout.yaxis as { range?: number[] }).range, [0, 100]);
+  deepStrictEqual((def.layout.yaxis2 as { range?: number[] }).range, [0, 100]);
+  const ranged = draw({ yMin: 0, yMax: 50 });
+  deepStrictEqual((ranged.layout.yaxis as { range?: number[] }).range, [0, 50]);
+  deepStrictEqual((ranged.layout.yaxis2 as { range?: number[] }).range, [0, 50]);
+});
+
+check("a forest plot honours a set X range on its log axis (G-F8)", () => {
+  const options = newGraphOptions("forest-plot");
+  const outcome: AnalysisResult = {
+    testType: "cox-proportional-hazards",
+    stats: [],
+    groups: [],
+    notes: "",
+    coefficients: [
+      { term: "Trt", estimate: null, stdError: null, t: null, p: null, hazardRatio: 0.5, low: 0.25, high: 1 },
+      { term: "Age", estimate: null, stdError: null, t: null, p: null, hazardRatio: 2, low: 1.5, high: 3 },
+    ],
+  };
+  const draw = (over: Partial<GraphOptions>) => {
+    const opts = { ...options, ...over };
+    const fig = GRAPHS["forest-plot"].build([], opts, paintOf(opts, 1));
+    addForestPlot(fig, outcome, paintOf(opts, 1), opts);
+    return fig;
+  };
+  const def = draw({});
+  const defRange = (def.layout.xaxis as { range?: number[] }).range!;
+  ok(defRange.every((v) => Number.isFinite(v)), `forest-plot range must be finite, got ${JSON.stringify(defRange)}`);
+  ok(
+    defRange[0] < Math.log10(0.25) && defRange[1] > Math.log10(3),
+    `the default range must cover the whiskers [0.25, 3], got ${JSON.stringify(defRange)}`,
+  );
+  const ranged = draw({ xMin: 0.5, xMax: 2 });
+  deepStrictEqual((ranged.layout.xaxis as { range?: number[] }).range, [Math.log10(0.5), Math.log10(2)]);
+});
+
+check("regression toggles explain a fit that cannot be drawn (G-F8)", () => {
+  const draw = (rows: (string | null)[][], over: Partial<GraphOptions>, params: LinearRegressionParams) => {
+    const options = {
+      ...newGraphOptions("xy-scatter"),
+      regShowLine: true,
+      regShowBand: false,
+      regShowEquation: false,
+      ...over,
+    };
+    const { columns } = readTable({ columns: ["Title", "X", "Y"], rows });
+    const fig: GraphFigure = { data: [], layout: {} };
+    addRegression(fig, [columns[0], columns[1]], options, params, paintOf(options, 1));
+    return fig;
+  };
+  const notes = (fig: GraphFigure) =>
+    ((fig.layout.annotations as { text?: string }[] | undefined) ?? []).map((n) => n.text ?? "");
+  const params: LinearRegressionParams = { x: "X", y: "Y", forceOrigin: false };
+  // Fewer than 3 points: no line, and the figure says why.
+  const two = draw(
+    [
+      [null, "1", "3"],
+      [null, "2", "4"],
+    ],
+    {},
+    params,
+  );
+  strictEqual(two.data.length, 0);
+  ok(notes(two).some((n) => n.includes("at least 3 points")), `two points must explain why, got ${JSON.stringify(notes(two))}`);
+  // Constant X: no line, and the figure says why.
+  const flat = draw(
+    [
+      [null, "5", "1"],
+      [null, "5", "2"],
+      [null, "5", "3"],
+      [null, "5", "4"],
+    ],
+    {},
+    params,
+  );
+  strictEqual(flat.data.length, 0);
+  ok(
+    notes(flat).some((n) => n.includes("all X values are the same")),
+    `constant X must explain why, got ${JSON.stringify(notes(flat))}`,
+  );
+  // A weighting scheme that cannot apply: no line, and the figure says why.
+  const weighted = draw(
+    [
+      [null, "1", "1"],
+      [null, "2", "0"],
+      [null, "3", "2"],
+    ],
+    {},
+    { ...params, weights: "1/y" },
+  );
+  strictEqual(weighted.data.length, 0);
+  ok(
+    notes(weighted).some((n) => n.includes("weighting scheme")),
+    `an inapplicable weighting scheme must explain why, got ${JSON.stringify(notes(weighted))}`,
+  );
+  // Toggles off: silence is correct — no note for a fit nobody asked to see.
+  const off = draw(
+    [
+      [null, "1", "3"],
+      [null, "2", "4"],
+    ],
+    { regShowLine: false },
+    params,
+  );
+  strictEqual(off.data.length, 0);
+  strictEqual(notes(off).length, 0);
+});
+
+// A categorical axis takes no min/max, so the Format panel does not offer
+// the range row for it (G-F8): the scree plot's X is its components, the
+// forest plot's Y its covariates. Every other graph offers both rows.
+check("categorical axes offer no Axes min/max inputs (G-F8)", () => {
+  deepStrictEqual(axesRangeInputs("scree-plot"), { x: false, y: true });
+  deepStrictEqual(axesRangeInputs("forest-plot"), { x: true, y: false });
+  deepStrictEqual(axesRangeInputs("roc-curve"), { x: true, y: true });
+  deepStrictEqual(axesRangeInputs("logistic-curve"), { x: true, y: true });
+  deepStrictEqual(axesRangeInputs("xy-scatter"), { x: true, y: true });
+  // And the panel actually gates its range rows on the helper (source-level
+  // pin — the harness can't drive the React panel; same pattern as the
+  // estimation-plot redraw check).
+  const panel = readFileSync("src/views/graphs/format-panel.tsx", "utf8");
+  ok(panel.includes("axesRangeInputs(graphType).x"), "the panel must gate the X range row on axesRangeInputs");
+  ok(panel.includes("axesRangeInputs(graphType).y"), "the panel must gate the Y range row on axesRangeInputs");
 });
 
 check("the poisson regression wizard asks for the dependent, predictors, and quasi-Poisson", () => {

@@ -92,8 +92,11 @@ export function addForestPlot(
   const layout = fig.layout as Record<string, unknown>;
   // The range covers every whisker plus the reference line at 1, with room
   // for the labels: a log axis takes data units, not log units.
-  const lo = Math.min(1, ...los) * 0.7;
-  const hi = Math.max(1, ...his) * 1.4;
+  // A typed X bound replaces the data-driven end of the range (G-F8: the
+  // Axes inputs were silently ignored); a bound at or below 0 has no place
+  // on a log axis, so it falls back to the data-driven end.
+  const lo = options.xMin != null && options.xMin > 0 ? options.xMin : Math.min(1, ...los) * 0.7;
+  const hi = options.xMax != null && options.xMax > 0 ? options.xMax : Math.max(1, ...his) * 1.4;
   // A log axis takes its range in log10 units (Plotly reference: "If the axis
   // `type` is `log`, then you must take the log of your desired range"). The
   // first version passed data units [0.072, 1.89] and rendered [1.18, 78] —

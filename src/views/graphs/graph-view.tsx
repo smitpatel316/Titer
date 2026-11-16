@@ -13,6 +13,7 @@ import {
   hasXColumn,
   SAME_AS_FILL,
   type GraphOptions,
+  type GraphType,
   type PointStyle,
   type ProjectNode,
   type SeriesStyle,
@@ -37,7 +38,7 @@ import { addEstimationPlot } from "./estimation-plot";
 import { coxSurvivalColumns } from "./survival";
 import { FormatPanel } from "./format-panel";
 import { copyGraphImage, saveGraphImage, sendGraphToOffice } from "./graph-export";
-import { addNote, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, rightYDataset, withCaps } from "./plot-helpers";
+import { addNote, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, rightYDataset, unlinkedAnalysisNote, withCaps } from "./plot-helpers";
 import { addLogisticCurve as addAnalysisLogisticCurve } from "./fitted-curve";
 import { useStartAnalysis } from "../analyses/use-analysis-launcher";
 import { loadPlotly } from "./plotly";
@@ -625,6 +626,12 @@ export function GraphView({ node }: { node: ProjectNode }) {
       );
       const fig = GRAPHS[type].build(coxSurvivalCols ?? volcanoColumns, buildOptions, paint, dataset?.titles, dataset?.summary);
       fig.data = withCaps(fig.data, options);
+      // A graph whose sibling analysis isn't linked draws only its axes or
+      // points: say so on the canvas (G-F7), instead of leaving bare axes.
+      const unlinked = (t: GraphType) => {
+        const note = unlinkedAnalysisNote(t);
+        if (note) addNote(fig, note, options);
+      };
       if (family === "column" && options.sigAnalysisId) addSignificance(fig, columns, type, options, comparisons ?? []);
       if (type === "xy-scatter" && curveParams) {
         const { x, ys } = splitXY(columns);
@@ -660,9 +667,12 @@ export function GraphView({ node }: { node: ProjectNode }) {
           (specialParams.model === "schild" || specialParams.model === "schild-slope-1")
         )
           addSchildPlot(fig, specialFit, specialParams, paint, options);
-        else addNote(fig, "Run a Gaddum/Schild analysis on this table to draw the Schild plot.", options);
+        else unlinked("schild-plot");
       }
-      if (type === "smooth-curve" && smoothResult) addSmoothCurve(fig, columns, options, smoothResult, paint);
+      if (type === "smooth-curve") {
+        if (smoothResult) addSmoothCurve(fig, columns, options, smoothResult, paint);
+        else unlinked("smooth-curve");
+      }
       if (type === "logistic-curve") {
         // A non-binary Y has no fit to draw: the build already leaves the
         // points on their own scale, and the runner's error is shown as a
@@ -673,35 +683,34 @@ export function GraphView({ node }: { node: ProjectNode }) {
           if (note) addNote(fig, note, options);
         }
       }
-      if (type === "forest-plot" && coxResult) addForestPlot(fig, coxResult, paint, options);
+      if (type === "forest-plot") {
+        if (coxResult) addForestPlot(fig, coxResult, paint, options);
+        else unlinked("forest-plot");
+      }
       if (type === "estimation-plot") {
         if (ttestResult) addEstimationPlot(fig, columns, ttestResult, paint, options);
-        else
-          addNote(
-            fig,
-            "Run a Compare two groups analysis on this table to draw the difference between means with its 95% CI.",
-            options,
-          );
+        else unlinked("estimation-plot");
       }
-      if (type === "observed-fitted" && poissonResult)
-        addObservedFitted(fig, columns, poissonResult, poissonParams, paint, options);
+      if (type === "observed-fitted") {
+        if (poissonResult) addObservedFitted(fig, columns, poissonResult, poissonParams, paint, options);
+        else unlinked("observed-fitted");
+      }
       if (type === "scree-plot") {
-        if (pcaResult) addScreePlot(fig, pcaResult, paint);
-        else addNote(fig, "Run a Principal component analysis on this table to draw the scree plot.", options);
+        if (pcaResult) addScreePlot(fig, pcaResult, paint, options);
+        else unlinked("scree-plot");
       }
       if (type === "monte-carlo-histogram") {
         if (mcResult) addMonteCarloHistogram(fig, mcResult, paint);
-        else
-          addNote(fig, "Run a Monte Carlo simulation on this table to draw the histogram.", options);
+        else unlinked("monte-carlo-histogram");
       }
       if (type === "pca-biplot") {
         if (pcaResult) addPcaBiplot(fig, pcaResult, options, paint);
-        else addNote(fig, "Run a Principal component analysis on this table to draw the scores biplot.", options);
+        else unlinked("pca-biplot");
       }
       if (type === "kmeans-scatter") {
         if (kmeansResult)
           addKmeansScatter(fig, columns, kmeansResult, options, paint, dataset?.titles);
-        else addNote(fig, "Run a K-means clustering on this table to draw the cluster scatter.", options);
+        else unlinked("kmeans-scatter");
       }
       // The points' names are part of the figure (the volcano places its own, among the
       // genes it names); the selection ring only of the view. Labels clamp to the plot

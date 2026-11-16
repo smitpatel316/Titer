@@ -89,7 +89,16 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
   const plottedY = xCol && ySeries[0] ? pairUp(xCol, ySeries[0]).y : [];
   const binary = plottedY.length > 0 && plottedY.every((v) => v === 0 || v === 1);
   if (!binary) return fig;
-  const yaxis = { ...(fig.layout.yaxis as Record<string, unknown>), range: [-0.05, 1.05], autorange: false, tickmode: "array", tickvals: [0, 1] };
+  // A typed Y bound replaces the fixed 0–1 range (G-F8: the input was
+  // silently ignored); xyLayout already applied it, in log units on a log
+  // axis, so leaving its axis alone honours it. The 0/1 ticks stay.
+  const userY = options.yMin != null || options.yMax != null;
+  const yaxis = {
+    ...(fig.layout.yaxis as Record<string, unknown>),
+    ...(userY ? {} : { range: [-0.05, 1.05], autorange: false }),
+    tickmode: "array",
+    tickvals: [0, 1],
+  };
   return { data: fig.data, layout: { ...fig.layout, yaxis } };
 }
 

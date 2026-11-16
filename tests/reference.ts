@@ -5385,7 +5385,7 @@ async function disagreements(): Promise<string[]> {
         paintOf(screeOpts, 1),
         readTable(pca).titles,
       );
-      addScreePlot(screeFig, pcaCorr, paintOf(screeOpts, 1));
+      addScreePlot(screeFig, pcaCorr, paintOf(screeOpts, 1), screeOpts);
       const traces = screeFig.data as { type?: string; x?: string[]; y?: number[]; yaxis?: string }[];
       const bars = traces.find((t) => t.type === "bar");
       const line = traces.find((t) => t.type === "scatter");

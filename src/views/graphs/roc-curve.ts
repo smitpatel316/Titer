@@ -17,11 +17,20 @@ import type { GraphFigure, GraphModule } from ".";
 function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFigure {
   const layout = xyLayout(options, "1 − Specificity", 1, { yName: "Sensitivity" });
   const axes = {
-    // Both axes are fixed 0–1 (an ROC curve has no values outside them).
+    // Both axes are fixed 0–1 (an ROC curve has no values outside them) —
+    // unless the user typed bounds, which replace the fixed range (G-F8: the
+    // inputs were silently ignored). xyLayout already applied a typed bound,
+    // in log units on a log axis, so leaving its axis alone honours it.
     // Equal aspect is not forced: on a wider-than-tall sheet Plotly's
     // scaleanchor would stretch the X range past [0, 1] to keep it square.
-    xaxis: { ...(layout.xaxis as Record<string, unknown>), range: [0, 1] },
-    yaxis: { ...(layout.yaxis as Record<string, unknown>), range: [0, 1] },
+    xaxis: {
+      ...(layout.xaxis as Record<string, unknown>),
+      ...(options.xMin == null && options.xMax == null ? { range: [0, 1] } : {}),
+    },
+    yaxis: {
+      ...(layout.yaxis as Record<string, unknown>),
+      ...(options.yMin == null && options.yMax == null ? { range: [0, 1] } : {}),
+    },
   };
   const [truthCol, scoreCol] = columns;
   if (!truthCol || !scoreCol) return { data: [], layout: { ...layout, ...axes } };
