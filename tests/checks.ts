@@ -3393,6 +3393,31 @@ check("Games-Howell and Dunnett's T3 need Welch's ANOVA, and Welch needs two val
     throw new Error(`expected the missing-control error, got ${JSON.stringify(missing)}`);
 });
 
+// v1.5.0 m22: a one-way ANOVA with one value in every group has residual
+// df = N − k = 0 — R's F and P are NaN (nulls) while eta squared misleadingly
+// reads 1. The runner names the missing within-group variation instead.
+check("a one-way ANOVA with one value in every group names the missing variation", async () => {
+  const one: TableData = {
+    columns: ["Title", "A", "B", "C"],
+    rows: [["", "12.1", "14.3", "18.2"]],
+  };
+  const out = await runAnalysis("anova", one);
+  if (!("error" in out) || !out.error.includes("only one value"))
+    throw new Error(`expected the one-value-a-group error, got ${JSON.stringify(out).slice(0, 300)}`);
+  // One group holding two values is enough for a residual df: it runs.
+  const two: TableData = {
+    columns: ["Title", "A", "B", "C"],
+    rows: [
+      ["", "12.1", "14.3", "18.2"],
+      ["", "11.4", "", ""],
+    ],
+  };
+  const out2 = await runAnalysis("anova", two);
+  if ("error" in out2) throw new Error(`one group with two values should run, got ${out2.error}`);
+  const stat = (label: string) => out2.stats.find((s) => s.label === label)?.value;
+  ok(stat("F") != null && stat("P value") != null, "F and P should compute with df 1");
+});
+
 check("a two-way ANOVA of one value per cell asks nothing and runs the ordinary one", () => {
   const wizard = WIZARDS["two-way-anova"]!;
   const single = readTable({
