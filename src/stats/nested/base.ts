@@ -18,11 +18,19 @@ export interface NestedMeans {
   dropped: string[];
 }
 
-/** Every group's subcolumn means, in table order. A subgroup's mean is over
- *  all the numbers in its replicate columns (every row); a subgroup with zero
- *  numbers is dropped, not an error — its name is returned so the runner can
- *  say so in its notes. Excluded cells never reach here: `readTable` drops
- *  them before the means are computed. */
+/** Every group's subcolumn means, in table order. PINNED (v1.5.0 m16):
+ *  a subgroup's mean is POOLED — the mean over every value present in its
+ *  replicate columns, blanks ignored. A blank cell contributes nothing; it
+ *  never discards a present value from a sibling replicate (the
+ *  complete-rows-only reading — mean over rows where every replicate
+ *  column holds a value — would drop a whole subgroup when one replicate
+ *  of one row is blank, and differs from pooled with unbalanced
+ *  missingness). Pooled is the Prism subcolumn mean: the mean of all
+ *  values in the subcolumn, blanks ignored; it is also the only reading
+ *  under which plan 14's "unbalanced subgroups … v1 handles naturally"
+ *  holds. A subgroup with zero numbers is dropped, not an error — its
+ *  name is returned so the runner can say so in its notes. Excluded cells
+ *  never reach here: `readTable` drops them before the means are computed. */
 export function nestedMeans(columns: Column[]): { groups: NestedMeans[]; dropped: string[] } {
   const groups = nestedGroupsOf(columns).map((g) => {
     const means: number[] = [];

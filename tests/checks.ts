@@ -104,6 +104,7 @@ import {
 import { deletePalette, keepPalette, loadMyPalettes } from "../src/store/my-palettes";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
 import { datasetColumns, isGrouped, isNested, readTable, setColumns, splitXY, xyPoints, type Dataset } from "../src/lib/dataset";
+import { nestedMeans } from "../src/stats/nested/base";
 import { prepareFit } from "../src/stats/xy/nonlinear-fit";
 import { adjustComparisonRows, adjustPValues, incompleteRows, missingColumn } from "../src/stats/column/base";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
@@ -2276,6 +2277,28 @@ check("nestedGroupsOf splits columns into groups and subgroups, and sets scope b
     "B:S2:R1",
     "B:S2:R2",
   ]);
+});
+
+// v1.5.0 m16 (plan 14): the subgroup mean is PINNED to pooled — the mean
+// over every value present in the subgroup's replicate columns, blanks
+// ignored. The alternative (mean over complete rows only, i.e. rows where
+// every replicate column holds a value) differs with unbalanced
+// missingness: below, pooled is (10+20+30+40+50)/5 = 30 while
+// complete-rows-only is (10+30+40)/3 ≈ 26.67. Pooled is the Prism
+// subcolumn mean (the mean of all values in the subcolumn, blanks
+// ignored), and it is the only reading under which plan 14's "unbalanced
+// subgroups … v1 handles naturally" holds — complete-rows-only would drop
+// a whole subgroup when one replicate of one row is blank. A subgroup
+// with zero numbers is still dropped, not an error.
+check("a nested subgroup mean pools all values present (v1.5.0 m16)", () => {
+  const t = readTable({
+    columns: ["Title", "A:S1:R1", "A:S1:R2", "A:S1:R3"],
+    rows: [
+      ["r1", "10", "30", "40"],
+      ["r2", "20", null, "50"],
+    ],
+  });
+  deepStrictEqual(nestedMeans(t.columns).groups[0].means, [30]);
 });
 
 check("fewer subgroups keep each value in its group and subgroup", () => {
