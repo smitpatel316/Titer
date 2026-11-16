@@ -56,6 +56,31 @@ export async function runMultipleLogisticRegression(
   if (n <= p + 1) {
     return { error: `Not enough complete rows (${n}) to fit ${p} predictor(s). Enter more data and try again.` };
   }
+  // Plan-01 guardrails, mirrored for several predictors (m4, bug-fix queue
+  // item 38): a handful of rows, or of the rarer outcome, cannot support a
+  // multi-parameter fit — a 1-event fit is a nominal glm MLE, but its
+  // coefficients are absurd (|b| in the teens) and the odds ratios are
+  // meaningless. The minority rule generalizes per predictor: plan 01's
+  // minority ≥ 2 with one predictor is 2 events per predictor, so with p
+  // predictors the rarer outcome needs at least 2p observations.
+  if (n < 5) {
+    return {
+      error: `Only ${n} complete row${n === 1 ? "" : "s"} — logistic regression needs at least 5 (a Titer guardrail, not Prism's).`,
+    };
+  }
+  const minority = Math.min(ones, n - ones);
+  if (minority < 2) {
+    return {
+      error: `Only ${minority} observation of the less common outcome — logistic regression needs at least 2 of each outcome (a Titer guardrail, not Prism's).`,
+    };
+  }
+  if (minority < 2 * p) {
+    return {
+      error:
+        `Only ${minority} observations of the less common outcome for ${p} predictors — ` +
+        "logistic regression needs at least 2 events per predictor (a Titer guardrail, not Prism's).",
+    };
+  }
 
   const decls = [`y<-${rVec(aligned[0])}`, ...predictors.map((_, i) => `x${i}<-${rVec(aligned[i + 1])}`)];
   const formula = `y~${predictors.map((_, i) => `x${i}`).join("+")}`;

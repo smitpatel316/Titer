@@ -9338,6 +9338,70 @@ check("multiple logistic regression refuses a non-binary or constant outcome, an
   );
 });
 
+// m4 (v1.5.0): multiple logistic regression mirrors plan 01's guardrails —
+// n ≥ 5, minority ≥ 2, and at least 2 events per predictor. Before the fix
+// all three cases below fit and reported coefficients (the 1-event fit's
+// |coefficients| ran into the teens), so a user could read absurd odds
+// ratios as a real result.
+check("multiple logistic regression enforces plan-01 guardrails (m4)", async () => {
+  const table = (outcome: (string | null)[], age: (string | null)[], dose: (string | null)[]): TableData => ({
+    columns: ["Title", "Outcome", "Age", "Dose"],
+    rows: outcome.map((v, r) => [null, v, age[r], dose[r]]),
+  });
+  const params = { dependent: "Outcome", predictors: ["Age", "Dose"] };
+  // One event in eight rows: the rarer outcome has a single observation.
+  deepStrictEqual(
+    await runAnalysis(
+      "multiple-logistic-regression",
+      table(["0", "0", "0", "1", "0", "0", "0", "0"], ["22", "25", "28", "31", "34", "37", "40", "43"], ["0", "1", "0", "1", "0", "1", "0", "1"]),
+      params,
+    ),
+    {
+      error:
+        "Only 1 observation of the less common outcome — logistic regression needs at least 2 of each outcome " +
+        "(a Titer guardrail, not Prism's).",
+    },
+  );
+  // Four complete rows cannot support the fit even with one predictor.
+  deepStrictEqual(
+    await runAnalysis(
+      "multiple-logistic-regression",
+      table(["0", "1", "0", "1"], ["22", "25", "28", "31"], ["0", "1", "0", "1"]),
+      { dependent: "Outcome", predictors: ["Age"] },
+    ),
+    { error: "Only 4 complete rows — logistic regression needs at least 5 (a Titer guardrail, not Prism's)." },
+  );
+  // Two events for two predictors is one event per predictor — too few.
+  deepStrictEqual(
+    await runAnalysis(
+      "multiple-logistic-regression",
+      table(
+        ["0", "0", "0", "1", "0", "0", "0", "0", "0", "1", "0", "0"],
+        ["22", "25", "28", "31", "34", "37", "40", "43", "46", "49", "52", "55"],
+        ["0", "1", "0", "1", "0", "1", "0", "1", "0", "1", "0", "1"],
+      ),
+      params,
+    ),
+    {
+      error:
+        "Only 2 observations of the less common outcome for 2 predictors — logistic regression needs at least 2 " +
+        "events per predictor (a Titer guardrail, not Prism's).",
+    },
+  );
+  // A well-supported fit still fits (the plan-11 reference shape: n = 12,
+  // 6 events, 2 predictors).
+  const good = await runAnalysis(
+    "multiple-logistic-regression",
+    table(
+      ["0", "0", "0", "1", "0", "1", "0", "1", "1", "0", "1", "1"],
+      ["22", "25", "28", "31", "35", "38", "42", "45", "49", "53", "57", "61"],
+      ["0", "0", "1", "0", "1", "1", "0", "1", "1", "0", "1", "1"],
+    ),
+    params,
+  );
+  ok(!("error" in good), `well-supported fit should run, got ${"error" in good ? good.error : "ok"}`);
+});
+
 check("a logistic curve on a non-binary Y shows the points and says the outcome must be 0/1 (F-02)", async () => {
   // The textbook dose-response table (F-02's fixture): X −2..2, Response 2..98.
   const textbook: TableData = {
