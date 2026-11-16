@@ -122,7 +122,8 @@ import {
   type Answers,
   type Question,
 } from "../src/views/analyses/wizards";
-import { initialAnswer } from "../src/views/analyses/analysis-wizard";
+import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
+import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
 import { addNote, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, movedText, paintOf, perRowSummaryStats, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
@@ -8342,8 +8343,10 @@ check("the mixed-effects wizard asks the layout's questions, and the menu offers
   deepStrictEqual(asked(column, { groups: "yes" }), ["sets", "matched", "groups", "groupName", "groupLevels"]);
   const setsQ = WIZARDS["mixed-effects"]!.questions({}, readTable(column))[0];
   ok(setsQ && setsQ.kind === "names" && setsQ.min === 3);
-  // A Grouped table: interaction, then matched-subjects.
-  deepStrictEqual(asked(grouped()), ["interaction", "matched"]);
+  // A Grouped table: matched-subjects, then the interaction (F10 — the
+  // interaction is only asked when matched, so a not-matched answer never
+  // discards a choice the user made).
+  deepStrictEqual(asked(grouped()), ["matched", "interaction"]);
   // The finish names the time factor from the columns' shared prefix (T0–T3 → "T").
   deepStrictEqual(
     WIZARDS["mixed-effects"]!.finish({ sets: ["T0", "T1", "T2", "T3"], matched: "matched" }, readTable(column)),
@@ -8411,6 +8414,122 @@ check("parseGroupLevels validates the mixed-effects per-row group list", () => {
     strictEqual(groupNameQ.parse?.("Treatment")?.error, undefined);
     ok(groupNameQ.parse?.("")?.error);
   }
+});
+
+// ── v1.5.0 wizard state (B1-5) ────────────────────────────────────────
+
+check("a multi-select below its minimum names the minimum instead of silently disabling Next (F7)", () => {
+  // Mixed-effects on a Column table: `sets` needs at least 3. Unticking below
+  // that used to disable Next with no explanation — the dialog kept showing
+  // the question, which never states the minimum.
+  const setsQ = WIZARDS["mixed-effects"]!.questions({}, readTable(treatments(["T0", "T1", "T2", "T3"])))[0];
+  ok(setsQ && setsQ.kind === "names" && setsQ.min === 3);
+  strictEqual(namesShortfall(setsQ, ["T0", "T1", "T2", "T3"]), null, "at the minimum: no hint");
+  strictEqual(namesShortfall(setsQ, ["T0", "T1"]), "Choose at least 3 — 2 chosen.");
+  strictEqual(namesShortfall(setsQ, []), "Choose at least 3 — 0 chosen.");
+  // No minimum stated, no hint: a min-1 question with one chosen is fine.
+  const oneQ: Question = { id: "x", ask: "Which?", kind: "names", options: ["A"], min: 1 };
+  strictEqual(namesShortfall(oneQ, ["A"]), null);
+  strictEqual(namesShortfall(oneQ, []), "Choose at least 1 — 0 chosen.");
+});
+
+check("the dose-response — Special wizard asks bUnits before the B values (F9)", () => {
+  const two = treatments(["X", "Y1", "Y2"]);
+  const order = (a: Answers) =>
+    WIZARDS["dose-response-special"]!.questions(a, readTable(two)).flatMap((q) => (q ? [q.id] : []));
+  // Schild: bUnits comes before the per-series B fields (it used to come after,
+  // so the user typed concentrations before knowing the pA2 units).
+  deepStrictEqual(order({ model: "schild-slope-1", ys: ["Y1", "Y2"], first: "Y1" }), [
+    "model",
+    "ys",
+    "first",
+    "bUnits",
+    "B:Y2",
+    "fixHillSlope",
+  ]);
+  const bQ = WIZARDS["dose-response-special"]!
+    .questions({ model: "schild-slope-1", ys: ["Y1", "Y2"], first: "Y1", bUnits: "nM" }, readTable(two))
+    .find((q) => q && q.id === "B:Y2");
+  ok(bQ && bQ.kind === "text" && /in nM/.test(bQ.ask), "the B question names the units just chosen");
+  // EC50 shift asks bUnits + B but no HillSlope question; the operational model
+  // asks neither (no B values at all).
+  deepStrictEqual(order({ model: "ec50-shift", ys: ["Y1", "Y2"], first: "Y1" }), [
+    "model",
+    "ys",
+    "first",
+    "bUnits",
+    "B:Y2",
+  ]);
+  deepStrictEqual(order({ model: "operational-partial", ys: ["Y1", "Y2"], first: "Y1" }), ["model", "ys", "first"]);
+});
+
+check("the grouped mixed-effects wizard asks matchedness before the interaction, and never asks it when not matched (F10)", () => {
+  const asked = (a: Answers = {}) =>
+    WIZARDS["mixed-effects"]!.questions(a, readTable(grouped())).flatMap((q) => (q ? [q.id] : []));
+  deepStrictEqual(asked(), ["matched", "interaction"]);
+  deepStrictEqual(asked({ matched: "matched" }), ["matched", "interaction"]);
+  // Not matched: the interaction is never asked, so no answer of the user's is
+  // discarded by the ordinary-two-way-ANOVA fallback.
+  deepStrictEqual(asked({ matched: "not-matched" }), ["matched"]);
+  deepStrictEqual(WIZARDS["mixed-effects"]!.finish({ matched: "not-matched" }, readTable(grouped())), {
+    type: "two-way-anova",
+    params: { design: "ordinary", posthoc: "none", posthocTarget: "groups" },
+  });
+  // Matched: the interaction choice is kept (default included, "no" excludes it).
+  const kept = WIZARDS["mixed-effects"]!.finish({ matched: "matched", interaction: "no" }, readTable(grouped()));
+  strictEqual(kept.type, "mixed-effects");
+  strictEqual((kept.params as { interaction?: boolean }).interaction, false);
+  const included = WIZARDS["mixed-effects"]!.finish({ matched: "matched" }, readTable(grouped()));
+  strictEqual((included.params as { interaction?: boolean }).interaction, true);
+});
+
+check("the Cox wizard drops a stratifyBy that is no longer among the covariates (F12)", () => {
+  const data: TableData = {
+    columns: ["Title", "Time", "Status", "Sex", "Age"],
+    rows: [
+      ["", "1", "1", "0", "20"],
+      ["", "2", "1", "1", "30"],
+      ["", "3", "0", "0", "40"],
+      ["", "4", "1", "1", "50"],
+      ["", "5", "0", "1", "60"],
+      ["", "6", "1", "0", "70"],
+    ],
+  };
+  const table = readTable(data);
+  // While Sex is a covariate it is offered as the stratifier…
+  const stratQ = WIZARDS["cox-proportional-hazards"]!
+    .questions({ time: "Time", status: "Status", covariates: ["Sex", "Age"] }, table)
+    .find((q): q is Question => q !== false && q.id === "stratifyBy");
+  ok(stratQ && stratQ.kind === "choice");
+  if (stratQ?.kind === "choice") ok(stratQ.options.some((o) => o.value === "Sex"));
+  // …but once Sex leaves the covariates, a stored stratifyBy=Sex must not
+  // survive into the params — the runner ignores it and the graph would
+  // stratify by a non-covariate column.
+  deepStrictEqual(
+    WIZARDS["cox-proportional-hazards"]!.finish(
+      { time: "Time", status: "Status", covariates: ["Age"], stratifyBy: "Sex", ties: "efron" },
+      table,
+    ),
+    {
+      type: "cox-proportional-hazards",
+      params: { time: "Time", status: "Status", covariates: ["Age"], ties: "efron" },
+    },
+  );
+  // The graph then draws one curve for all subjects, not Sex strata.
+  const cols = coxSurvivalColumns(
+    data,
+    WIZARDS["cox-proportional-hazards"]!.finish(
+      { time: "Time", status: "Status", covariates: ["Age"], stratifyBy: "Sex", ties: "efron" },
+      table,
+    ).params as never,
+  );
+  deepStrictEqual(cols?.map((c) => c.name), ["Time", "All subjects"]);
+  // A stratifyBy still among the covariates is kept.
+  const kept = WIZARDS["cox-proportional-hazards"]!.finish(
+    { time: "Time", status: "Status", covariates: ["Sex", "Age"], stratifyBy: "Sex", ties: "efron" },
+    table,
+  );
+  strictEqual((kept.params as { stratifyBy?: string }).stratifyBy, "Sex");
 });
 
 check("mixed-effects skips entirely empty rows in a Grouped table and reports a dropped rank-deficient term as NA", async () => {

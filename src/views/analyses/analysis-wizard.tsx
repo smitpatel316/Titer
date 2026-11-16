@@ -59,6 +59,16 @@ export function initialAnswer(q: Question, given: Answer | undefined): Answer | 
   return Array.isArray(given) ? given.filter((n) => q.options.includes(n)) : q.options;
 }
 
+/** A multi-select (`names`) answer below its minimum disables Next with no
+ *  other explanation (F7 — enzyme `y`, dose `ys`, mixed `sets` never state
+ *  the minimum): the hint names the minimum and how many are chosen so far,
+ *  so the user knows what to fix. Null when the answer meets its minimum. */
+export function namesShortfall(q: Question, value: Answer | null): string | null {
+  if (q.kind !== "names" || !Array.isArray(value)) return null;
+  const min = q.min ?? 1;
+  return value.length < min ? `Choose at least ${min} — ${value.length} chosen.` : null;
+}
+
 function Steps({
   title,
   wizard,
@@ -190,7 +200,7 @@ function Steps({
             ? "Running the Shapiro-Wilk normality test…"
             : emptyChoice
               ? (q.kind === "choice" && q.emptyMessage) || emptyMessage
-              : (textError ?? numberError ?? q.ask)
+              : (textError ?? numberError ?? namesShortfall(q, value) ?? q.ask)
       }
       footer={
         !checking && (

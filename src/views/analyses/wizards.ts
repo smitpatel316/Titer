@@ -1260,15 +1260,12 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
     questions: (a, table) => {
       const grouped = isGroupedTable(table);
       if (grouped) {
+        // Matchedness first (F10): the interaction is only meaningful for
+        // matched subjects, and asking it first meant a not-matched answer
+        // silently discarded a choice the user had just made (the fallback
+        // is ordinary two-way ANOVA). Not matched, the interaction is never
+        // asked at all — the wizard ends after this question.
         return [
-          choice(
-            "interaction",
-            "Fixed factor A is the column groups, fixed factor B is the rows (time/condition). The interaction A×B is included by default.",
-            [
-              ["yes", "Include the A×B interaction"],
-              ["no", "Main effects only — no interaction"],
-            ],
-          ),
           choice(
             "matched",
             "Subjects are the replicate columns within each group: replicate 1 in group A is the same subject as replicate 1 in group B, measured at every row. The model fits a random intercept per subject, so it uses every observed value even when some are missing.",
@@ -1277,6 +1274,15 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
               ["not-matched", "Replicates are NOT the same subjects — stop and use ordinary two-way ANOVA instead"],
             ],
           ),
+          a.matched !== "not-matched" &&
+            choice(
+              "interaction",
+              "Fixed factor A is the column groups, fixed factor B is the rows (time/condition). The interaction A×B is included by default.",
+              [
+                ["yes", "Include the A×B interaction"],
+                ["no", "Main effects only — no interaction"],
+              ],
+            ),
         ];
       }
       const rowCount = table.numeric[0]?.byRow.length ?? 0;
@@ -2993,15 +2999,30 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             : "The first series is the control (no antagonist). Which series is it?",
           names(ys),
         ),
-        // Schild / EC50 shift only: one B field per included series
-        // except the control, pre-filled from the column title
-        // ("10 nM" → 10); a blank field blocks Next.
+        // Schild / EC50 shift only: the units first (F9 — the B values are
+        // meaningless until the units are known; pA2 is the negative log of
+        // B in these units), then one B field per included series except
+        // the control, pre-filled from the column title ("10 nM" → 10);
+        // a blank field blocks Next.
+        ...(needsB
+          ? [
+              choice(
+                "bUnits",
+                "Which units is B entered in? pA2 is the negative log of B in these units — a nanomolar antagonist has pA2 ≈ 8–9 in M, ≈ −1 in nM.",
+                [
+                  ["M", "M (molar)"],
+                  ["nM", "nM (nanomolar)"],
+                  ["µM", "µM (micromolar)"],
+                ],
+              ),
+            ]
+          : []),
         ...(needsB
           ? ys
               .filter((name) => name !== first)
               .map((name) => ({
                 id: `B:${name}`,
-                ask: `Antagonist concentration B for “${name}” (same units for every series; pA2 is reported in these units).`,
+                ask: `Antagonist concentration B for “${name}” in ${(a.bUnits as string | undefined) ?? "M"} (pA2 is reported in these units).`,
                 kind: "text" as const,
                 label: `B for “${name}”`,
                 initial: parseInhibitorConcentration(name)?.toString() ?? "",
@@ -3009,16 +3030,6 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
                 parse: (text: string) => parseRequiredNonNegative(text, "antagonist concentration"),
               }))
           : []),
-        needsB &&
-          choice(
-            "bUnits",
-            "Which units is B entered in? pA2 is the negative log of B in these units — a nanomolar antagonist has pA2 ≈ 8–9 in M, ≈ −1 in nM.",
-            [
-              ["M", "M (molar)"],
-              ["nM", "nM (nanomolar)"],
-              ["µM", "µM (micromolar)"],
-            ],
-          ),
         isSchild &&
           choice(
             "fixHillSlope",
@@ -3681,16 +3692,27 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ]),
       ];
     },
-    finish: (a) => ({
-      type: "cox-proportional-hazards",
-      params: {
-        time: a.time as string,
-        status: a.status as string,
-        covariates: a.covariates as string[],
-        ties: (a.ties as CoxPHParams["ties"] | undefined) ?? "efron",
-        ...(a.stratifyBy !== undefined && a.stratifyBy !== "none" ? { stratifyBy: a.stratifyBy as string } : {}),
-      },
-    }),
+    finish: (a) => {
+      // Re-validate stratifyBy against the final covariates (F12): the
+      // stored answer can go stale when the user goes back and changes the
+      // covariates, and the runner ignores it while the graph stratifies by
+      // whatever column it names — so a stratifier that is no longer a
+      // covariate is dropped instead of reaching the params.
+      const covariates = (a.covariates as string[] | undefined) ?? [];
+      const stratifyBy = (a.stratifyBy as string | undefined) ?? "none";
+      return {
+        type: "cox-proportional-hazards",
+        params: {
+          time: a.time as string,
+          status: a.status as string,
+          covariates: a.covariates as string[],
+          ties: (a.ties as CoxPHParams["ties"] | undefined) ?? "efron",
+          ...(stratifyBy !== "none" && covariates.includes(stratifyBy)
+            ? { stratifyBy }
+            : {}),
+        },
+      };
+    },
     checklist: () => CHECKLISTS["cox-ph"],
   },
 
