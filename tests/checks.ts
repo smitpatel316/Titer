@@ -7938,8 +7938,8 @@ check("serializing a column as an R literal stays linear and small (CC-m10)", as
   ok(v.m !== null && Math.abs(v.m - 50.02) < 0.01, `mean ${v.m}`);
 });
 
-  const column = readTable(treatments(["Control", "Drug A", "Drug B"]));
 check("an analysis runs on the data sets chosen, in their order", async () => {
+  const column = readTable(treatments(["Control", "Drug A", "Drug B"]));
   deepStrictEqual(
     setColumns(column, ["Drug B", "Control"]).map((c) => c.name),
     ["Drug B", "Control"],
