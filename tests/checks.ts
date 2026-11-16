@@ -11660,6 +11660,47 @@ check("a constant column bins into one bin, and bad binning is an error, not a c
     throw new Error(`expected the too-few-values error, got ${JSON.stringify(few)}`);
 });
 
+// v1.5.0 m14: the runner accepted up to 10,000 bins though plan 06 caps the
+// count at 100 — a hand-built 500-bin request ran 500 bins. It now clamps to
+// the plan maximum and says so in the notes (the file loader already clamps
+// saved values the same way, FF-F16); the histogram graph draws from the
+// same counter, so it is pinned here too.
+check("frequency-distribution clamps binCount to the plan maximum of 100 (m14)", async () => {
+  const table = (values: number[]): TableData => ({
+    columns: ["Title", "V"],
+    rows: values.map((v) => [null, String(v)]),
+  });
+  const values = [2.1, 3.5, 3.9, 4.2, 5, 5.8, 6.1, 7.4, 8, 9.3];
+  const out = await runAnalysis("frequency-distribution", table(values), {
+    binMode: "count",
+    binCount: 500,
+    startAt: 0,
+  });
+  if ("error" in out) throw new Error(out.error);
+  strictEqual(out.frequencyBins?.[0].bins.length, 100);
+  ok(
+    out.notes.includes("500") && out.notes.includes("100"),
+    `notes should say the request was clamped, got: ${out.notes}`,
+  );
+  strictEqual(
+    out.frequencyBins?.[0].bins.reduce((s, b) => s + b.count, 0),
+    values.length,
+    "the clamped bins still cover every value",
+  );
+  // The graph's shared counter clamps the same way, so it can never draw
+  // more bins than the analysis reports.
+  strictEqual(computeFrequencyBins(values, { binMode: "count", binCount: 500, startAt: 0 }).bins.length, 100);
+  // 100 stays 100, and an in-range request says nothing about clamping.
+  const hundred = await runAnalysis("frequency-distribution", table(values), {
+    binMode: "count",
+    binCount: 100,
+    startAt: 0,
+  });
+  if ("error" in hundred) throw new Error(hundred.error);
+  strictEqual(hundred.frequencyBins?.[0].bins.length, 100);
+  ok(!hundred.notes.includes("clamped"), "an in-range request says nothing about clamping");
+});
+
 check("transform concentrations converts between molar units by exact powers of 1000", async () => {
   // Each molar step is ×1000, up and down the scale.
   strictEqual(concentrationFactor("µM", "nM"), 1000);
