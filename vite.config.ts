@@ -11,6 +11,18 @@ import tailwindcss from "@tailwindcss/vite";
 // The vendored R package repo (plan 00) rides along the same way at
 // /webr-repo/: scripts/build-webr-repo.sh builds it; a build without it
 // still works, but package installs fall back to the CDN.
+//
+// Size (CC-m9, measured 2026-11-16): 57.0 MB / 45 packages (11 pinned +
+// 34 transitive hard deps) — the whole repo ships in the DMG, so the
+// manifest is the budget and tests/packages.ts pins the count and the
+// total bytes. Largest install batch is mixed-effects (lme4+lmerTest) at
+// 34.2 MB of .tgz, 50.0 MB once extracted into the engine's in-memory FS.
+// in-memory FS (webr.ts `ensurePackages`) — bounded by this closure, and
+// cleared on engine restart (`resetR`). Six pinned packages have no
+// runtime caller (pROC, multcomp, mvtnorm, outliers, deming, MethComp —
+// their analyses went inline); ~16 MB of the repo. Kept deliberately:
+// they are the reference implementations the parity values were verified
+// against, and tests/packages.ts pins their install path.
 const WEBR_DIST = resolve("node_modules/webr/dist");
 const WEBR_RUNTIME = ["R.js", "R.wasm", "libRblas.so", "libRlapack.so", "webr-worker.js", "vfs"];
 const WEBR_REPO = resolve("webr-repo");

@@ -72,7 +72,8 @@ const buildManifest = JSON.parse(readFileSync(`${ROOT}scripts/webr-repo-manifest
 const repoManifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
   webr: string;
   r: string;
-  packages: { name: string; version: string; file: string; md5: string }[];
+  totalBytes: number;
+  packages: { name: string; version: string; file: string; md5: string; size: number }[];
 };
 check("manifest webr version", buildManifest.webr === WEBR_VERSION, `${buildManifest.webr} vs ${WEBR_VERSION}`);
 check("manifest R version", buildManifest.r === R_VERSION, `${buildManifest.r} vs ${R_VERSION}`);
@@ -102,6 +103,28 @@ for (const p of repoManifest.packages) {
   check(`index lists ${p.name}`, new RegExp(`^Package: ${p.name}$`, "m").test(indexText));
 }
 check("repo includes codetools", repoVersions.has("codetools"), "multcomp Imports it; webR's base library does not ship it");
+
+// CC-m9: the whole vendored repo ships in the DMG, so its size and closure
+// are pinned — growth must be deliberate, not a side effect of a rebuild.
+// Measured 2026-11-16: 57.0 MB / 45 packages (11 pinned + 34 transitive
+// hard deps); largest install batch is mixed-effects at 34.2 MB of .tgz.
+const manifestFiles = new Set(repoManifest.packages.map((p) => p.file));
+check(
+  "repo holds no package outside the manifest (CC-m9)",
+  [...repoFiles].filter((f) => f.endsWith(".tgz")).every((f) => manifestFiles.has(f)),
+  "a .tgz in the repo that the manifest does not list ships untracked",
+);
+check(
+  "repo total size matches its manifest (CC-m9)",
+  repoManifest.packages.reduce((sum, p) => sum + statSync(`${CONTRIB}/${p.file}`).size, 0) ===
+    repoManifest.totalBytes,
+  `on-disk .tgz bytes vs manifest totalBytes ${repoManifest.totalBytes}`,
+);
+check(
+  "repo closure is the pinned set plus its hard dependencies (CC-m9)",
+  repoManifest.packages.length === 45,
+  `expected 45 packages (11 pinned + 34 transitive), got ${repoManifest.packages.length} — a bigger closure ships a bigger DMG; update this pin deliberately`,
+);
 
 // ── Serve the bundled repo on localhost ────────────────────────────────
 
