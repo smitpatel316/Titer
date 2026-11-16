@@ -12820,6 +12820,43 @@ check("a graph's dangling analysis link is cleared on load, warned once (FF-F13)
   );
 });
 
+// ── FF-F18: slopeVariable is dropped, not a known param ───────────────────
+// DECISION: DROP. `slopeVariable` was accepted, stored, never read — the
+// mixed-effects runner errors on `randomStructure: "slope"` before any
+// slope could be fit, and the wizard never sets it. Wiring it to the
+// compare-slopes feature (#46) is a design decision, not a bug fix, so the
+// registry and the type no longer declare it. An old file carrying it keeps
+// the value verbatim as an unknown param (FF-F12 carry-through) — nothing
+// is lost, nothing reads it.
+check("slopeVariable is dropped as a dead param, not a known one (FF-F18)", async () => {
+  const file = JSON.parse(serializeProjectFile(payload));
+  file.project.nodes.a1 = {
+    type: "analysis",
+    name: "Mixed",
+    parentId: "t1",
+    analysisType: "mixed-effects",
+    analysisParams: { randomStructure: "slope", slopeVariable: 5 },
+  };
+  // A non-string value used to be dropped by the known "name" kind; as an
+  // unknown param it is now carried verbatim.
+  const parsed = read(JSON.stringify(file));
+  deepStrictEqual(parsed.project.nodes.a1.analysisParams, { randomStructure: "slope", slopeVariable: 5 });
+  // A string value round-trips verbatim either way — dropping the param
+  // loses nothing from an old file.
+  file.project.nodes.a1.analysisParams = { randomStructure: "slope", slopeVariable: "Dose" };
+  const kept = read(JSON.stringify(file));
+  deepStrictEqual(kept.project.nodes.a1.analysisParams, { randomStructure: "slope", slopeVariable: "Dose" });
+  // The runner's answer is unchanged: it still refuses random slopes,
+  // with or without the dead param.
+  const out = await runAnalysis("mixed-effects", table.data!, {
+    randomStructure: "slope",
+    slopeVariable: "Dose",
+  } as AnalysisParams);
+  deepStrictEqual(out, {
+    error: "Random slopes are not yet supported — run the random-intercept model (random slopes arrive in v2).",
+  });
+});
+
 // ── FL-rebrand: the prism-format surface says Titer, never Helix ────────
 // The rebrand branch was cut before the prism-format code landed, so
 // user-visible "Helix" strings survived in the converter dialog, the save

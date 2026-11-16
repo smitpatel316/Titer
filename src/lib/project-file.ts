@@ -331,8 +331,14 @@ const PARAMS = {
   clusters: "number", standardise: "yes/no",
   // Mixed-effects model (plan 20): the random structure and the subject
   // identity are choices; `subjectFactor` is one name + its per-row levels.
+  // (FF-F18) `slopeVariable` was dropped in v1.5.0: a dead param, accepted
+  // and stored but never read — the runner errors on randomStructure
+  // "slope" before any slope could be fit, and the wizard never sets it.
+  // Wiring it to the compare-slopes feature (#46) is a design decision,
+  // not a bug fix. An old file carrying it keeps the value verbatim as an
+  // unknown param (FF-F12 carry-through).
   randomStructure: ["intercept", "slope"], subjectId: ["row", "replicate"], interaction: "yes/no",
-  fixedFactors: "names", slopeVariable: "name", subjectFactor: "name-and-names",
+  fixedFactors: "names", subjectFactor: "name-and-names",
   // Monte Carlo simulation (plan 22): the target analysis + statistic are
   // choices; repeats/seed are numbers; the per-column simulated means/SDs
   // are numbers-by-name (the target's own options — equalVariance,

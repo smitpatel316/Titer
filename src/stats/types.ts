@@ -877,13 +877,14 @@ export interface NormalizeParams {
  *  table row, in row order — the reference test's Treatment arm); the v1
  *  wizard asks for it (optional "groups" question: factor name + one level
  *  per row) — without it the fit is the repeated-measure factor only.
- *  `randomStructure` is "intercept" in v1 — "slope"
- *  (with `slopeVariable`) is the v2 follow-on, and the runner errors on it
- *  rather than fitting something else. */
+ *  `randomStructure` is "intercept" in v1 — "slope" is the v2 follow-on
+ *  (compare-slopes, #46), and the runner errors on it rather than fitting
+ *  something else. `slopeVariable` was dropped in v1.5.0 (FF-F18): a dead
+ *  param, accepted and stored but never read; old files keep the value
+ *  verbatim as an unknown param. */
 export interface MixedEffectsParams {
   fixedFactors?: string[];
   randomStructure: "intercept" | "slope";
-  slopeVariable?: string;
   subjectId?: "row" | "replicate";
   /** Between-subject factor (Column tables): one level per subject row, in row order. */
   subjectFactor?: { name: string; levels: string[] };
