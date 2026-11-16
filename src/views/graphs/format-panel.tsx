@@ -37,7 +37,7 @@ import {
   ThicknessRow,
   Toggle,
 } from "./panel-controls";
-import { rightYDataset } from "./plot-helpers";
+import { axesRangeInputs, rightYDataset } from "./plot-helpers";
 import { dataControls, statisticsControls, styleControls, type SectionContext } from "./format-sections";
 import { VOLCANO_SERIES } from "./volcano";
 import { MatchSection } from "./match-graph";
@@ -362,7 +362,7 @@ export function FormatPanel(props: Props) {
               onChange={(yScale) => set({ yScale })}
             />
           )}
-          {family !== "heatmap" && (
+          {family !== "heatmap" && axesRangeInputs(graphType).y && (
             <AxisRange
               axis="Y"
               min={options.yMin}
@@ -384,20 +384,21 @@ export function FormatPanel(props: Props) {
               onChange={(xScale) => set({ xScale })}
             />
           )}
-          {(family === "xy" || family === "volcano" || family === "histogram" || family === "multiple") && (
-            <AxisRange
-              axis="X"
-              min={options.xMin}
-              max={options.xMax}
-              step={options.xStep}
-              log={family === "xy" && options.xScale !== "linear"}
-              minHook={options.xMinConstant}
-              maxHook={options.xMaxConstant}
-              constants={constantItems}
-              onChange={(xMin, xMax, xStep) => set({ xMin, xMax, xStep })}
-              onHookChange={(xMinConstant, xMaxConstant) => set({ xMinConstant, xMaxConstant })}
-            />
-          )}
+          {(family === "xy" || family === "volcano" || family === "histogram" || family === "multiple") &&
+            axesRangeInputs(graphType).x && (
+              <AxisRange
+                axis="X"
+                min={options.xMin}
+                max={options.xMax}
+                step={options.xStep}
+                log={family === "xy" && options.xScale !== "linear"}
+                minHook={options.xMinConstant}
+                maxHook={options.xMaxConstant}
+                constants={constantItems}
+                onChange={(xMin, xMax, xStep) => set({ xMin, xMax, xStep })}
+                onHookChange={(xMinConstant, xMaxConstant) => set({ xMinConstant, xMaxConstant })}
+              />
+            )}
           {family === "xy" && seriesNames.length >= 2 && (
             <ColumnSelectRow
               label="Right Y axis"

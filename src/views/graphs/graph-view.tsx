@@ -695,7 +695,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
         else unlinked("observed-fitted");
       }
       if (type === "scree-plot") {
-        if (pcaResult) addScreePlot(fig, pcaResult, paint);
+        if (pcaResult) addScreePlot(fig, pcaResult, paint, options);
         else unlinked("scree-plot");
       }
       if (type === "monte-carlo-histogram") {

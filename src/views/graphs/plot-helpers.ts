@@ -334,6 +334,18 @@ export function unlinkedAnalysisNote(graphType: GraphType): string | null {
   }
 }
 
+/** Which Axes-section range rows the Format panel offers for a graph: a
+ *  categorical axis takes no min/max (G-F8) — the scree plot's X is its
+ *  components, the forest plot's Y its covariates — so the row is not
+ *  offered at all instead of silently ignoring what the user types. Every
+ *  other graph offers both rows; whether a typed bound takes effect is the
+ *  builder's business (fixed-range graphs honour it, see roc-curve.ts). */
+export function axesRangeInputs(graphType: GraphType): { x: boolean; y: boolean } {
+  if (graphType === "scree-plot") return { x: false, y: true };
+  if (graphType === "forest-plot") return { x: true, y: false };
+  return { x: true, y: true };
+}
+
 /** A point's name (`key`, see `pointKeyOf`) at `offset` px from it, joined to it by a
  *  thin line once it's moved away from a point `size` px wide. */
 export const pointName = (

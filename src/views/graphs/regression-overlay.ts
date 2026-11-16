@@ -51,6 +51,34 @@ function weightAt(scheme: Exclude<NonlinearWeightScheme, "1/sd2">, xi: number, y
   }
 }
 
+/** Why a linear fit cannot be drawn, or null when it can — the same three
+ *  guards as fitLinear (fewer than 3 points, a weighting scheme that cannot
+ *  apply to every point, a degenerate all-identical X), as a reason the
+ *  graph can show instead of silently drawing nothing (G-F8). fitLinear
+ *  answers with this first, so the two can never disagree about whether a
+ *  fit exists. */
+export function linearFitProblem(
+  x: number[],
+  y: number[],
+  forceOrigin: boolean,
+  weights: Exclude<NonlinearWeightScheme, "1/sd2"> = "none",
+): string | null {
+  if (x.length < 3) return "it needs at least 3 points";
+  const w: number[] = [];
+  for (let i = 0; i < x.length; i++) {
+    const wi = weightAt(weights, x[i], y[i]);
+    if (wi == null) return "the weighting scheme cannot apply to every point";
+    w.push(wi);
+  }
+  const wSum = w.reduce((s, wi) => s + wi, 0);
+  const xbar = w.reduce((s, wi, i) => s + wi * x[i], 0) / wSum;
+  const sxx = forceOrigin
+    ? w.reduce((s, wi, i) => s + wi * x[i] * x[i], 0)
+    : w.reduce((s, wi, i) => s + wi * (x[i] - xbar) ** 2, 0);
+  if (sxx === 0) return "all X values are the same";
+  return null;
+}
+
 /** (Weighted) least-squares fit of y on x (optionally forced through the
  *  origin), plus the slope's P value. Returns null with fewer than 3 points,
  *  a degenerate (all-identical) X, or weights that cannot apply to the data —
@@ -64,13 +92,11 @@ export function fitLinear(
   forceOrigin: boolean,
   weights: Exclude<NonlinearWeightScheme, "1/sd2"> = "none",
 ): LinearFit | null {
+  if (linearFitProblem(x, y, forceOrigin, weights)) return null;
   const n = x.length;
-  if (n < 3) return null;
   const w: number[] = [];
   for (let i = 0; i < n; i++) {
-    const wi = weightAt(weights, x[i], y[i]);
-    if (wi == null) return null;
-    w.push(wi);
+    w.push(weightAt(weights, x[i], y[i])!);
   }
   const wSum = w.reduce((s, wi) => s + wi, 0);
   const xbar = w.reduce((s, wi, i) => s + wi * x[i], 0) / wSum;
@@ -78,7 +104,6 @@ export function fitLinear(
   const sxx = forceOrigin
     ? w.reduce((s, wi, i) => s + wi * x[i] * x[i], 0)
     : w.reduce((s, wi, i) => s + wi * (x[i] - xbar) ** 2, 0);
-  if (sxx === 0) return null;
   const slope = forceOrigin
     ? w.reduce((s, wi, i) => s + wi * x[i] * y[i], 0) / sxx
     : w.reduce((s, wi, i) => s + wi * (x[i] - xbar) * (y[i] - ybar), 0) / sxx;
@@ -154,12 +179,23 @@ export function addRegression(
   const many = names.length > 1;
   const traces: unknown[] = [];
   const notes: string[] = [];
+  // A fit the toggles asked for but that cannot be drawn is named on the
+  // figure instead of silently drawing nothing (G-F8). Only when a toggle
+  // is on: with all three off, nobody asked to see a fit.
+  const failed: string[] = [];
+  const wantsFit = options.regShowLine || options.regShowBand || options.regShowEquation;
   for (const name of names) {
     const y = ys.find((s) => s.name === name);
     if (!y) continue;
     const pairs = xyPoints(x, y);
     const fit = fitLinear(pairs.x, pairs.y, params?.forceOrigin ?? false, params?.weights ?? "none");
-    if (!fit) continue;
+    if (!fit) {
+      if (wantsFit) {
+        const reason = linearFitProblem(pairs.x, pairs.y, params?.forceOrigin ?? false, params?.weights ?? "none");
+        if (reason) failed.push(`Linear fit for “${y.name}” not drawn: ${reason}.`);
+      }
+      continue;
+    }
     const color = paint.color(y.name, ys.indexOf(y));
     const curve = regressionCurve(fit, pairs.x, options.xScale);
     const line = (yv: number[], style: object) => ({
@@ -184,4 +220,5 @@ export function addRegression(
   }
   fig.data = [...traces, ...fig.data];
   if (options.regShowEquation && notes.length) addNote(fig, notes.join("<br>"), options);
+  if (failed.length) addNote(fig, failed.join("<br>"), options);
 }

@@ -15,7 +15,7 @@ export const SCREE_SERIES = "Scree plot";
 /** Draw the scree bars + cumulative-% line of a PCA result onto a scree-plot
  *  figure (its build's axes). No-op when the result has no variance table
  *  (not a PCA result, or the fit failed). */
-export function addScreePlot(fig: GraphFigure, outcome: AnalysisResult, paint: Paint): void {
+export function addScreePlot(fig: GraphFigure, outcome: AnalysisResult, paint: Paint, options: GraphOptions): void {
   const variance = outcome.pcaVariance ?? [];
   if (!variance.length) return;
   const xs = variance.map((v) => v.component);
@@ -29,16 +29,21 @@ export function addScreePlot(fig: GraphFigure, outcome: AnalysisResult, paint: P
     categoryorder: "array",
     categoryarray: xs,
   };
+  // Both Y axes are percentages, 0–100 by definition — unless the user typed
+  // bounds, which replace the fixed range on both (G-F8: the inputs were
+  // silently ignored). They must match: both axes are %. A bound typed on
+  // one side only leaves that side to xyLayout's clamp, and the second axis
+  // follows with the same bound.
+  const userY = options.yMin != null || options.yMax != null;
   layout.yaxis = {
     ...(layout.yaxis as Record<string, unknown>),
-    range: [0, 100],
-    autorange: false,
+    ...(userY ? {} : { range: [0, 100], autorange: false }),
   };
   layout.yaxis2 = {
     title: { text: "Cumulative %", standoff: 2 },
     overlaying: "y",
     side: "right",
-    range: [0, 100],
+    range: [options.yMin ?? 0, options.yMax ?? 100],
     autorange: false,
     tickfont: { color: INK },
   };
