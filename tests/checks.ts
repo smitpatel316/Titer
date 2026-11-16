@@ -7912,7 +7912,6 @@ check("P-value adjustments pass nulls through", () => {
   );
 });
 
-check("an analysis runs on the data sets chosen, in their order", async () => {
 // CC-m10: the full column is re-serialized as an R literal on every run —
 // measured, not capped. The cost is linear and small at realistic sizes
 // (measured 2026-11-16: 100k rows ≈ 35 ms / 1.8 MB per column on the JS
@@ -7940,6 +7939,7 @@ check("serializing a column as an R literal stays linear and small (CC-m10)", as
 });
 
   const column = readTable(treatments(["Control", "Drug A", "Drug B"]));
+check("an analysis runs on the data sets chosen, in their order", async () => {
   deepStrictEqual(
     setColumns(column, ["Drug B", "Control"]).map((c) => c.name),
     ["Drug B", "Control"],
