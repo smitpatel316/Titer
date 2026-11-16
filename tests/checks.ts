@@ -2749,6 +2749,56 @@ check("the Bland-Altman graph still draws its lines on a two-method table (FL-ba
 
 // ── Row groups (a grouped table's third factor, plan 03) ─────────────────
 
+// G-F5: the ROC optimal-cutpoint annotation flips by quadrant instead of
+// clipping at the plot edge. The axes are fixed [0, 1], so an optimum at the
+// top or right sits on the plot edge and the old fixed offset (30, −30) put
+// the label outside the plot: a near-perfect classifier's optimum (0, 1) had
+// its label 38 px above the plot, and an overlapping-distributions optimum
+// (0.583, 0.917) 5 px above it. The annotation now points away from the
+// nearest edges (left/down at the top/right), anchored so the text stays
+// inside; a bottom-left optimum keeps the old direction.
+check("G-F5: the ROC optimal-cutpoint annotation flips by quadrant (no edge clipping)", () => {
+  type RocAnn = { x: number; y: number; ax: number; ay: number; xanchor?: string; yanchor?: string };
+  const annOf = (rows: [string, string][]) => {
+    const data = readTable({ columns: ["Title", "Truth", "Score"], rows: rows.map(([t, s]) => ["", t, s]) });
+    const options = newGraphOptions("roc-curve");
+    return (GRAPHS["roc-curve"].build(data.columns, options, paintOf(options, 1)).layout.annotations as RocAnn[])[0];
+  };
+  // Near-perfect classifier: optimum (0, 1), top-left corner.
+  const good = annOf([
+    ["Diseased", "0.05"], ["Diseased", "0.07"], ["Diseased", "0.09"], ["Diseased", "0.1"],
+    ["Healthy", "0.9"], ["Healthy", "0.93"], ["Healthy", "0.91"], ["Healthy", "0.95"],
+  ]);
+  deepStrictEqual([good.x, good.y], [0, 1]);
+  ok(good.ay > 0, "top optimum: label below its point");
+  strictEqual(good.yanchor, "top");
+  ok(good.ax > 0, "left optimum: label right of its point");
+  strictEqual(good.xanchor, "left");
+  // Overlapping distributions: optimum (0.583, 0.917), top-right.
+  const overlap = annOf([
+    ["P", "0.39"], ["P", "0.478"], ["P", "0.635"], ["P", "0.69"], ["P", "0.333"], ["P", "0.475"],
+    ["P", "0.551"], ["P", "0.427"], ["P", "0.32"], ["P", "0.611"], ["P", "0.755"], ["P", "0.962"],
+    ["N", "0.326"], ["N", "0.279"], ["N", "0.691"], ["N", "0.487"], ["N", "0.638"], ["N", "0.443"],
+    ["N", "0.466"], ["N", "0.283"], ["N", "0.612"], ["N", "0.642"], ["N", "0.095"], ["N", "0.097"],
+  ]);
+  ok(Math.abs(overlap.x - 0.5833) < 1e-3 && Math.abs(overlap.y - 0.9167) < 1e-3);
+  ok(overlap.ax < 0, "right optimum: label left of its point");
+  strictEqual(overlap.xanchor, "right");
+  ok(overlap.ay > 0, "top optimum: label below its point");
+  strictEqual(overlap.yanchor, "top");
+  // Weak classifier: optimum (0, 0.333), bottom-left — the old direction stands.
+  const weak = annOf([
+    ["P", "0.1"], ["P", "0.2"], ["P", "0.9"],
+    ["N", "0.3"], ["N", "0.4"], ["N", "0.5"], ["N", "0.6"], ["N", "0.7"], ["N", "0.8"],
+  ]);
+  deepStrictEqual([weak.x, weak.y], [0, 1 / 3]);
+  ok(weak.ax > 0 && weak.ay < 0, "bottom-left optimum keeps the (30, −30) offset");
+  strictEqual(weak.xanchor, "left");
+  strictEqual(weak.yanchor, "bottom");
+});
+
+// ── Row groups (a grouped table's third factor, plan 03) ─────────────────
+
 check("row groups split, resize and merge keeping every row covered", () => {
   const bands = [
     { name: "WT", count: 2 },
