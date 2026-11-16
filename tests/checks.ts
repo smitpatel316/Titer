@@ -124,7 +124,7 @@ import {
 } from "../src/views/analyses/wizards";
 import { initialAnswer } from "../src/views/analyses/analysis-wizard";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, movedText, paintOf, perRowSummaryStats, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, movedText, paintOf, perRowSummaryStats, unlinkedAnalysisNote, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -9008,6 +9008,60 @@ check("the estimation plot redraws when its t test result arrives (v2-12)", () =
     src.slice(depsStart, depsEnd).includes("ttestResult"),
     "the draw effect's dep array must include ttestResult so the overlay appears when the async result arrives",
   );
+});
+
+// G-F7: a forest, observed-vs-fitted or smooth-curve graph whose sibling
+// analysis isn't linked drew only its axes (or its points), with no on-canvas
+// explanation — while the Schild, scree, biplot, Monte Carlo, K-means and
+// estimation graphs all name the analysis to run. The prompts live in one
+// helper so the wording stays identical everywhere it appears.
+check("unlinked forest / observed-fitted / smooth-curve graphs name the analysis to run (G-F7)", () => {
+  strictEqual(
+    unlinkedAnalysisNote("forest-plot"),
+    "Run a Cox proportional hazards analysis on this table to draw the forest plot.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("observed-fitted"),
+    "Run a Poisson regression on this table to draw the observed-vs-fitted plot.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("smooth-curve"),
+    "Run a Spline and Lowess analysis on this table to draw the smooth curve.",
+  );
+  // The prompts that already existed keep their wording.
+  strictEqual(
+    unlinkedAnalysisNote("schild-plot"),
+    "Run a Gaddum/Schild analysis on this table to draw the Schild plot.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("scree-plot"),
+    "Run a Principal component analysis on this table to draw the scree plot.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("pca-biplot"),
+    "Run a Principal component analysis on this table to draw the scores biplot.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("monte-carlo-histogram"),
+    "Run a Monte Carlo simulation on this table to draw the histogram.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("kmeans-scatter"),
+    "Run a K-means clustering on this table to draw the cluster scatter.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("estimation-plot"),
+    "Run a Compare two groups analysis on this table to draw the difference between means with its 95% CI.",
+  );
+  strictEqual(unlinkedAnalysisNote("xy-scatter"), null);
+  strictEqual(unlinkedAnalysisNote("heatmap"), null);
+  // And the view actually prompts for the three graphs (source-level pin —
+  // the harness can't drive async React redraws; same pattern as the
+  // estimation-plot redraw check above).
+  const src = readFileSync("src/views/graphs/graph-view.tsx", "utf8");
+  for (const t of ["forest-plot", "observed-fitted", "smooth-curve"]) {
+    ok(src.includes(`unlinked("${t}")`), `graph-view must prompt for an unlinked ${t}`);
+  }
 });
 
 check("a two-tailed t test reports its difference with its 95% CI, a one-tailed or non-parametric one reports none (v2-12)", async () => {

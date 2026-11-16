@@ -4,6 +4,7 @@ import {
   SAME_AS_FILL,
   type FillPattern,
   type GraphOptions,
+  type GraphType,
   type LineDash,
   type Place,
   type PointShape,
@@ -303,6 +304,34 @@ export function addNote(fig: GraphFigure, text: string, options: GraphOptions) {
       font: { color: INK, size: Math.max(options.fontSize - 1, 8) },
     },
   ];
+}
+
+/** The on-canvas prompt for a graph whose sibling analysis isn't linked: what
+ *  to run to draw it, instead of bare axes (G-F7). Null for a graph that
+ *  draws from its table alone — it never needs a sibling analysis. */
+export function unlinkedAnalysisNote(graphType: GraphType): string | null {
+  switch (graphType) {
+    case "schild-plot":
+      return "Run a Gaddum/Schild analysis on this table to draw the Schild plot.";
+    case "smooth-curve":
+      return "Run a Spline and Lowess analysis on this table to draw the smooth curve.";
+    case "forest-plot":
+      return "Run a Cox proportional hazards analysis on this table to draw the forest plot.";
+    case "estimation-plot":
+      return "Run a Compare two groups analysis on this table to draw the difference between means with its 95% CI.";
+    case "observed-fitted":
+      return "Run a Poisson regression on this table to draw the observed-vs-fitted plot.";
+    case "scree-plot":
+      return "Run a Principal component analysis on this table to draw the scree plot.";
+    case "monte-carlo-histogram":
+      return "Run a Monte Carlo simulation on this table to draw the histogram.";
+    case "pca-biplot":
+      return "Run a Principal component analysis on this table to draw the scores biplot.";
+    case "kmeans-scatter":
+      return "Run a K-means clustering on this table to draw the cluster scatter.";
+    default:
+      return null;
+  }
 }
 
 /** A point's name (`key`, see `pointKeyOf`) at `offset` px from it, joined to it by a
