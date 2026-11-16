@@ -11725,6 +11725,24 @@ check("the frequency wizard validates the bin count as a whole number from 2 to 
   strictEqual(binCount.validate?.(100), undefined);
 });
 
+// v1.5.0 F6: the bin-width question had no validation at all — 0/negative
+// sailed through to a runner error after Run. The wizard now blocks both
+// before Run, with the runner's own wording.
+check("the frequency wizard validates the bin width as greater than 0 (F6)", () => {
+  const table = readTable({
+    columns: ["Title", "V"],
+    rows: [["", "2.1"], ["", "3.5"], ["", "5"], ["", "7.4"], ["", "9.3"]],
+  });
+  const binWidth = WIZARDS["frequency-distribution"]!
+    .questions({ binMode: "width" }, table)
+    .filter(Boolean)
+    .find((q) => (q as Question).id === "binWidth") as Question;
+  if (binWidth.kind !== "number") throw new Error("binWidth is not a number question");
+  strictEqual(binWidth.validate?.(0), "The bin width must be greater than 0.");
+  strictEqual(binWidth.validate?.(-1), "The bin width must be greater than 0.");
+  strictEqual(binWidth.validate?.(2), undefined);
+});
+
 check("transform concentrations converts between molar units by exact powers of 1000", async () => {
   // Each molar step is ×1000, up and down the scale.
   strictEqual(concentrationFactor("µM", "nM"), 1000);

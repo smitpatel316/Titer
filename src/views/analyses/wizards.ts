@@ -1519,6 +1519,10 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           kind: "number",
           label: "Bin width",
           initial: width,
+          // F6 (v1.5.0): no validation at all — 0/negative sailed through
+          // to a runner error after Run. The error blocks Next/Run before
+          // either, in the runner's own wording.
+          validate: (v) => (v > 0 ? undefined : "The bin width must be greater than 0."),
         },
         mode === "count" && {
           id: "binCount",
