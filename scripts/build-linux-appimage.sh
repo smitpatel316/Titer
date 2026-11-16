@@ -55,7 +55,7 @@ ls -lh "src-tauri/binaries/titer-stdio-bridge-$HOST_TRIPLE"
 echo "=== tauri build --bundles appimage ==="
 npx tauri build --bundles appimage || true
 
-BUNDLE_DIR="src-tauri/target/release/bundle/appimage"
+BUNDLE_DIR="$ROOT/src-tauri/target/release/bundle/appimage"
 BUILT="$(ls -t "$BUNDLE_DIR"/*.AppImage 2>/dev/null | head -1 || true)"
 if [ -z "$BUILT" ]; then
   echo "=== tauri bundling produced no AppImage — manual linuxdeploy fallback ==="
