@@ -2,8 +2,12 @@
 // v2 backlog item 76).
 //
 // Pass criteria (all three must hold):
-//   1. FAILS on the pre-fix tip 3cd7dc4 (the dialog stalls on its progress line).
-//   2. PASSES on 2f8eca2 (the rAF await is a setTimeout yield).
+//   1. FAILS with the pre-fix paint await (the dialog stalls on its progress
+//      line) — run-linux-prefixed.sh swaps yieldToPaint -> rAF surgically on
+//      the same tip. (The old pre-fix tip 3cd7dc4 file no longer applies: the
+//      dialog has since gained the .pzfx direction.)
+//   2. PASSES on the rebased spike tip (spike/tauri-e2e on current main —
+//      the paint await is the setTimeout yieldToPaint).
 //   3. Works with the window UNFOCUSED — nothing here focuses the window, and
 //      the run happens under bare Xvfb (no window manager), so no window is
 //      ever the active one. That is the exact condition that stalled the
