@@ -11714,6 +11714,82 @@ check("m9 deming jackknife skips leave-one-out replicates with no covariation", 
     throw new Error(`Deming notes do not say the CI could not be computed: ${one.notes}`);
 });
 
+check("m19 spline df is range-checked against the distinct X values", async () => {
+  // R's smooth.spline does not error on an out-of-range df — it warns and
+  // silently falls back to GCV, so the user gets a fit they did not ask for
+  // (df = 11 on 10 distinct X values came back as df = 2). The runner now
+  // refuses with a clean error naming the bound: 1 < df <= #{distinct X}.
+  const doseLog: TableData = {
+    columns: ["Title", "X", "Response"],
+    rows: [
+      [null, "1", "1.4"],
+      [null, "2", "1.9"],
+      [null, "3", "3.6"],
+      [null, "4", "3.8"],
+      [null, "5", "5.5"],
+      [null, "6", "5.7"],
+      [null, "7", "7.4"],
+      [null, "8", "7.6"],
+      [null, "9", "9.5"],
+      [null, "10", "9.8"],
+    ],
+  };
+  for (const df of [0.5, 1, 11, 100]) {
+    const r = await runAnalysis("spline-lowess", doseLog, { y: "Response", method: "spline", f: 2 / 3, df });
+    if (!("error" in r) || !r.error.includes("greater than 1") || !r.error.includes("distinct X values"))
+      throw new Error(`spline df=${df}: ${"error" in r ? r.error : "ran"}, expected a range error`);
+  }
+  // In-range df still runs, including the top of the range (df = #{distinct X}).
+  const top = await runAnalysis("spline-lowess", doseLog, { y: "Response", method: "spline", f: 2 / 3, df: 10 });
+  if ("error" in top) throw new Error(top.error);
+  const dfUsed = top.stats.find((s) => s.label === "Effective degrees of freedom")?.value;
+  if (dfUsed == null || Math.abs(dfUsed - 10) > 0.01)
+    throw new Error(`spline df=10: effective df ${dfUsed}, expected 10`);
+  // On tied X the bound is the distinct count, not n: 10 points, 5 distinct.
+  const tiedX: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "1", "1.1"],
+      [null, "1", "1.3"],
+      [null, "2", "2.0"],
+      [null, "2", "2.2"],
+      [null, "3", "2.9"],
+      [null, "3", "3.1"],
+      [null, "4", "4.0"],
+      [null, "4", "4.2"],
+      [null, "5", "5.1"],
+      [null, "5", "4.9"],
+    ],
+  };
+  const tied = await runAnalysis("spline-lowess", tiedX, { y: "Y", method: "spline", f: 2 / 3, df: 6 });
+  if (!("error" in tied) || !tied.error.includes("distinct X values"))
+    throw new Error(`spline tied-X df=6: ${"error" in tied ? tied.error : "ran"}, expected a range error`);
+});
+
+check("m19 lowess runs on tied X values", async () => {
+  // Whether R lowess errors on tied X was unconfirmed: it does not — it runs
+  // cleanly (10 fitted values, no error). Pin that, so a future guard does
+  // not refuse tied X by mistake.
+  const tiedX: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "1", "1.1"],
+      [null, "1", "1.3"],
+      [null, "2", "2.0"],
+      [null, "2", "2.2"],
+      [null, "3", "2.9"],
+      [null, "3", "3.1"],
+      [null, "4", "4.0"],
+      [null, "4", "4.2"],
+      [null, "5", "5.1"],
+      [null, "5", "4.9"],
+    ],
+  };
+  const r = await runAnalysis("spline-lowess", tiedX, { y: "Y", method: "lowess", f: 2 / 3 });
+  if ("error" in r) throw new Error(r.error);
+  strictEqual(r.fitted?.length, 10, "lowess on tied X should fit all 10 points");
+});
+
 check("transform concentrations converts between molar units by exact powers of 1000", async () => {
   // Each molar step is ×1000, up and down the scale.
   strictEqual(concentrationFactor("µM", "nM"), 1000);
