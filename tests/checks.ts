@@ -153,7 +153,7 @@ import { loadPrismSaveChoice, nextSaveAction } from "../src/lib/prism-nudge";
 import { convertPrism } from "../src/lib/prism";
 import { yieldToPaint } from "../src/lib/yield-to-paint";
 import { fitWidths, fitZoom } from "../src/store/use-layout";
-import { prismDropSkippedMessage } from "../src/store/use-document";
+import { isGoneReadError, prismDropSkippedMessage } from "../src/store/use-document";
 import { cloneGraphPlan, DEFAULT_CLONE_OPTIONS, type CloneOptions } from "../src/lib/clone-graph";
 import { computeGroupedDEG } from "../src/lib/deg";
 import { binCounts, binEdges } from "../src/lib/histogram";
@@ -12709,6 +12709,28 @@ check("a multi-file Prism drop names the skipped files", () => {
   strictEqual(
     prismDropSkippedMessage("a.prism", ["b.prism", "c.pzfx"]),
     "Imported a.prism; b.prism, c.pzfx were not imported — drop one file at a time, or use File ▸ Convert….",
+  );
+});
+
+// ── FF-F11: a read failure is only "gone" when the file is really missing ──
+// The shell prefixes a missing file with "not found:"; any other read
+// failure (not UTF-8, no permission, a refused extension) is unreadable,
+// not gone — only a gone file leaves Open Recent. Tauri rejects with the
+// plain string, so both a string and an Error are accepted.
+check("only a missing file counts as gone (FF-F11)", () => {
+  ok(isGoneReadError("not found: /tmp/no-such.hlx"), "missing file should count as gone");
+  ok(isGoneReadError(new Error("not found: /tmp/no-such.hlx")), "missing file as Error should count as gone");
+  ok(!isGoneReadError("not UTF-8: /tmp/latin1.hlx"), "a non-UTF-8 file is unreadable, not gone");
+  ok(!isGoneReadError("Titer can't access /tmp/a.prism"), "a refused extension is unreadable, not gone");
+  ok(!isGoneReadError("Permission denied (os error 13)"), "a permission failure is unreadable, not gone");
+  ok(!isGoneReadError(undefined), "no error at all is not gone");
+  // `load` only drops a really-gone file from Recents; an unreadable one
+  // stays, and says it couldn't be read.
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const useDocument = readFileSync(join(root, "src/store/use-document.ts"), "utf8");
+  ok(
+    useDocument.includes("isGoneReadError(err)") && useDocument.includes("It stays in Open Recent"),
+    "load should only drop a really-gone file from Recents; an unreadable one stays",
   );
 });
 

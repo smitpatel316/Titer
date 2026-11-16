@@ -776,11 +776,20 @@ export function useDocument() {
     let text: string;
     try {
       text = await native.readText(path);
-    } catch {
+    } catch (err) {
       report();
-      // Gone since it was opened last: it leaves Open Recent too.
-      setRecents((list) => list.filter((e) => !(e.kind === "local" && e.path === path)));
-      return sayGone(path);
+      // Only a file that is really gone leaves Open Recent (FF-F11): a file
+      // that exists but can't be read — wrong encoding, no permission — stays,
+      // and says what happened instead of "couldn't be found".
+      if (isGoneReadError(err)) {
+        setRecents((list) => list.filter((e) => !(e.kind === "local" && e.path === path)));
+        return sayGone(path);
+      }
+      return native.alert(
+        "Couldn't Open Project",
+        `“${fileName(path)}” couldn't be read. It may be damaged, or in an encoding Titer can't read. It stays in Open Recent.`,
+        "error",
+      );
     }
     setRemote(null);
     await applyProjectText(
@@ -1139,6 +1148,17 @@ export function useDocument() {
 export function prismDropSkippedMessage(firstName: string, skippedNames: string[]): string {
   const skipped = skippedNames.join(", ");
   return `Imported ${firstName}; ${skipped} ${skippedNames.length === 1 ? "was" : "were"} not imported — drop one file at a time, or use File ▸ Convert….`;
+}
+
+/** (FF-F11) Whether a `read_text` failure means the file is gone: the shell
+ *  prefixes a missing file with "not found:" — any other read failure (a
+ *  file that exists but isn't UTF-8, a refusal, no permission) is unreadable,
+ *  not gone, and stays in Open Recent. Tauri rejects the invoke with the
+ *  plain string, so both a string and an Error are accepted. Pure, so
+ *  checks.ts pins it. */
+export function isGoneReadError(err: unknown): boolean {
+  const message = typeof err === "string" ? err : err instanceof Error ? err.message : "";
+  return message.startsWith("not found:");
 }
 
 export type DocumentActions = ReturnType<typeof useDocument>;
