@@ -142,6 +142,7 @@ import { addForestPlot } from "../src/views/graphs/forest-plot";
 import { addEstimationPlot, estimationDiffLabel } from "../src/views/graphs/estimation-plot";
 import { addSchildPlot, schildPlotPoints } from "../src/views/graphs/schild-plot";
 import { addRegression, fitLinear } from "../src/views/graphs/regression-overlay";
+import { addPcaBiplot } from "../src/views/graphs/pca-biplot";
 import { addObservedFitted } from "../src/views/graphs/observed-fitted";
 import { batchMatched, examplesFor, matched, type Matched } from "../src/views/graphs/match-graph";
 import type { OutlineNode } from "../src/store/use-project-store";
@@ -6688,6 +6689,58 @@ check("G-F14: the fit-equation note goes in the emptiest corner, not always top-
   addNote(empty, "Run a Principal component analysis on this table to draw the scores biplot.", options);
   const [prompt] = empty.layout.annotations as { x: number; y: number; xanchor: string; yanchor: string }[];
   deepStrictEqual([prompt.x, prompt.y, prompt.xanchor, prompt.yanchor], [0.02, 0.98, "left", "top"]);
+});
+
+// G-F17: a biplot score label sits above its point ("top center"), so the
+// top point's label pokes past the top edge — ~4 px under autorange, 21.5 px
+// with a manual yMax at the data max. That point's label now goes below its
+// point instead. And the degenerate all-scores-equal cloud (every point
+// stacked at one place, labels piled up, loading arrows filtered out) now
+// says so on the plot instead of silently drawing the stack.
+check("G-F17: biplot score labels flip below top-edge points; the degenerate cloud is explained", () => {
+  const outcome = (scores: [string, number[]][]): AnalysisResult =>
+    ({
+      pcaVariance: [
+        { component: "PC1", eigenvalue: 2, sd: 1, proportion: 0.6, cumulative: 0.6 },
+        { component: "PC2", eigenvalue: 1, sd: 1, proportion: 0.3, cumulative: 0.9 },
+      ],
+      pcaLoadings: [
+        { variable: "V1", loadings: [0.9, 0.1] },
+        { variable: "V2", loadings: [0.1, 0.9] },
+      ],
+      pcaScores: scores.map(([row, s]) => ({ row, scores: s })),
+    }) as unknown as AnalysisResult;
+  const cloud: [string, number[]][] = [
+    ["S1", [-8, -2]], ["S2", [0, 0]], ["S3", [5, 3]], ["S4", [10, 9.5]], ["S5", [-3, 7]],
+  ];
+  const positionsOf = (options: GraphOptions) => {
+    const fig = GRAPHS["pca-biplot"].build([], options, paintOf(options, 0));
+    addPcaBiplot(fig, outcome(cloud), options, paintOf(options, 1));
+    return (fig.data[0] as { textposition: string | string[] }).textposition;
+  };
+  const flipped = ["top center", "top center", "top center", "bottom center", "top center"];
+  deepStrictEqual(positionsOf(newGraphOptions("pca-biplot")), flipped);
+  deepStrictEqual(positionsOf({ ...newGraphOptions("pca-biplot"), yMax: 9.5 }), flipped);
+  // Degenerate, all scores zero: one stacked point, no arrows, and a note saying so.
+  const options = newGraphOptions("pca-biplot");
+  const fig = GRAPHS["pca-biplot"].build([], options, paintOf(options, 0));
+  addPcaBiplot(
+    fig,
+    outcome([["S1", [0, 0]], ["S2", [0, 0]], ["S3", [0, 0]], ["S4", [0, 0]], ["S5", [0, 0]]]),
+    options,
+    paintOf(options, 1),
+  );
+  const anns = (fig.layout.annotations as { name?: string; text: string }[]) ?? [];
+  const notes = anns.filter((a) => a.name === "note");
+  strictEqual(notes.length, 1);
+  ok(/origin/.test(notes[0].text) && /stack/.test(notes[0].text) && /arrow/.test(notes[0].text));
+  ok(!anns.some((a) => a.text === "V1" || a.text === "V2"), "no loading arrows are drawn");
+  // Degenerate but nonzero: the note says identical, and the arrows still draw.
+  const fig2 = GRAPHS["pca-biplot"].build([], options, paintOf(options, 0));
+  addPcaBiplot(fig2, outcome([["S1", [2, 3]], ["S2", [2, 3]], ["S3", [2, 3]]]), options, paintOf(options, 1));
+  const anns2 = (fig2.layout.annotations as { name?: string; text: string }[]) ?? [];
+  ok(anns2.some((a) => a.name === "note" && /identical/.test(a.text)));
+  ok(anns2.some((a) => a.text === "V1"), "arrows still drawn when loadings scale");
 });
 
 check("a legend shown outside the plot reserves its own right margin (M13)", () => {

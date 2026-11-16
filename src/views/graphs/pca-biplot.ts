@@ -8,7 +8,7 @@ import type { GraphOptions } from "../../store/types";
 import type { AnalysisResult } from "../../stats/types";
 import type { Column } from "../../lib/dataset";
 import { pointKeyOf } from "../../lib/columns";
-import { addNote, GUIDE, INK, seriesPoints, xyLayout, type Paint } from "./plot-helpers";
+import { addNote, GUIDE, INK, plotAreaPx, seriesPoints, xyLayout, type Paint } from "./plot-helpers";
 import type { GraphFigure, GraphModule } from ".";
 
 /** The one series this graph draws, as the Series section names it. */
@@ -84,6 +84,23 @@ export function addPcaBiplot(
   const xs = scores.map((s) => s.scores[x - 1] ?? null);
   const ys = scores.map((s) => s.scores[y - 1] ?? null);
   const scale = biplotArrowScale(loadings, scores, x, y);
+  // Score labels sit above their points — except a point whose label would
+  // poke past the top edge (a manual yMax at the data max, or the equal-
+  // aspect range leaving no pad above it), whose label goes below its point
+  // instead. The range is the one the layout will use (the explicit limits,
+  // else the scores' extent padded the way Plotly's autorange pads it).
+  const labelH = Math.max(options.fontSize - 2, 8) + 4;
+  const plotH = plotAreaPx(options).height;
+  const yNums = ys.filter((v): v is number => v !== null);
+  const [yLo0, yHi0] = yNums.length ? [Math.min(...yNums), Math.max(...yNums)] : [0, 1];
+  const padY = (yHi0 - yLo0) * 0.05 || 1;
+  const yLo = options.yMin ?? yLo0 - padY;
+  const yHi = options.yMax ?? yHi0 + padY;
+  const needBelow = (v: number | null) => {
+    if (v === null) return false;
+    const py = plotH - ((v - yLo) / (yHi - yLo)) * plotH;
+    return py < labelH + options.pointSize / 2 + 4;
+  };
   fig.data = [
     {
       type: "scatter",
@@ -92,7 +109,7 @@ export function addPcaBiplot(
       x: xs,
       y: ys,
       text: scores.map((s) => s.row),
-      textposition: "top center",
+      textposition: ys.map((v) => (needBelow(v) ? "bottom center" : "top center")),
       textfont: { color: INK, size: Math.max(options.fontSize - 2, 8) },
       ...seriesPoints(paint, PCA_BIPLOT_SERIES, 0, scores.map((_, i) => pointKeyOf(PCA_BIPLOT_SERIES, i))),
       hoverinfo: "text+x+y",
@@ -127,6 +144,21 @@ export function addPcaBiplot(
     .filter((a): a is NonNullable<typeof a> => a !== null);
   if (annotations.length) {
     fig.layout.annotations = [...((fig.layout.annotations as unknown[]) ?? []), ...annotations];
+  }
+  // Degenerate: every score identical, so every point plots at the same
+  // place and the labels pile into one unreadable stack. Say so on the plot
+  // instead of silently drawing the stack — and when the arrows are filtered
+  // out too (nothing to scale them to), say that as well.
+  if (scores.length > 1) {
+    const sx = scores[0].scores[x - 1];
+    const sy = scores[0].scores[y - 1];
+    if (scores.every((s) => s.scores[x - 1] === sx && s.scores[y - 1] === sy)) {
+      const base =
+        sx === 0 && sy === 0
+          ? "All scores are zero, so every point plots at the origin and the labels stack on top of each other."
+          : "All scores are identical, so every point plots at the same place and the labels stack on top of each other.";
+      addNote(fig, base + (scale === 0 ? " No loading arrows are drawn (nothing to scale them to)." : ""), options);
+    }
   }
 }
 
