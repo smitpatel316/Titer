@@ -1,0 +1,585 @@
+<!-- Prism 8 Mac XML Schema, from GraphPad FAQ 1638
+     (GraphPad-pzfx-schemas-FAQ1638.zip, schemasstylesheets/Schemas/Mac/Prism8XMLSchema.xsd).
+     Namespace-stripped for validation: the shipped XSD declares
+     targetNamespace="http://graphpad.com/prism/Prism.htm" with
+     elementFormDefault="qualified", but Prism's own .pzfx files carry no
+     namespace at all, so strict validation against the shipped XSD fails
+     every file — including Prism's own. Only the namespace declaration was
+     removed (default xmlns, targetNamespace, elementFormDefault); the
+     content model is unchanged. Used by tests/pzfx-write.ts (W6) via
+     tests/validate-pzfx.py. -->
+<xs:schema
+	
+        xmlns:dt="urn:schemas-microsoft-com:datatypes"
+	
+        
+	xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:annotation>
+    <xs:documentation>
+    XML Schema for storing data and info tables from GraphPad Prism 8.0.
+    Copyright 1992-2019 GraphPad Software, Inc.
+    </xs:documentation>
+  </xs:annotation>
+
+  <xs:import namespace="urn:schemas-microsoft-com:datatypes"/>
+
+  <xs:element name="GraphPadPrismFile" type="GraphPadPrismFile"/>
+
+  <xs:complexType name="Font" mixed="true">
+    <xs:sequence>
+      <xs:element name="BR" minOccurs="0" maxOccurs="unbounded">
+        <xs:complexType>
+          <xs:complexContent>
+            <xs:restriction base="xs:anyType"/>
+          </xs:complexContent>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="br" minOccurs="0" maxOccurs="unbounded">
+        <xs:complexType>
+          <xs:complexContent>
+            <xs:restriction base="xs:anyType"/>
+          </xs:complexContent>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="Face"/>
+    <xs:attribute name="Color"/>
+    <xs:attribute name="Size" type="xs:integer"/>
+  </xs:complexType>
+
+  <xs:complexType name="Version" mixed="true">
+    <xs:complexContent>
+      <xs:restriction base="xs:anyType">
+        <xs:attribute name="CreatedByProgram" type="xs:string"/>
+        <xs:attribute name="CreatedByVersion" type="xs:string"/>
+        <xs:attribute name="RegisteredTo" type="xs:string"/>
+        <xs:attribute name="Login" type="xs:string"/>
+        <xs:attribute name="DateTime" type="xs:dateTime"/>
+        <xs:attribute name="MinVersion" type="xs:string"/>
+      </xs:restriction>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="Created" mixed="true">
+    <xs:all>
+      <xs:element name="OriginalVersion" type="Version" minOccurs="0"/>
+      <xs:element name="MostRecentVersion" type="Version" minOccurs="0"/>
+    </xs:all>
+  </xs:complexType>
+
+  <xs:complexType name="HelpTopic">
+    <xs:complexContent>
+      <xs:restriction base="xs:anyType">
+        <xs:sequence>
+          <xs:any namespace="##targetNamespace" processContents="lax"/>
+        </xs:sequence>
+        <xs:attribute name="TopicID" type="xs:integer" use="optional"/>
+        <xs:attribute name="TopicName" use="optional"/>
+      </xs:restriction>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="DefGraphButton">
+    <xs:complexContent>
+      <xs:restriction base="xs:anyType">
+        <xs:sequence>
+          <xs:any namespace="##targetNamespace" processContents="lax" minOccurs="0"/>
+        </xs:sequence>
+        <xs:attribute name="ButtonID" type="xs:integer" use="optional"/>
+      </xs:restriction>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="WebLink" mixed="true">
+    <xs:complexContent>
+      <xs:restriction base="xs:anyType">
+        <xs:attribute name="ToolTip" use="optional"/>
+        <xs:attribute name="URL" use="required"/>
+        <xs:attribute name="Flags" type="xs:integer" default="0" use="optional"/>
+      </xs:restriction>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="FormattedText" mixed="true">
+    <xs:sequence>
+      <xs:choice minOccurs="0" maxOccurs="unbounded">
+        <xs:element name="Font" type="Font"/>
+        <xs:element name="B" type="FormattedText"/>
+        <xs:element name="b" type="FormattedText"/>
+        <xs:element name="I" type="FormattedText"/>
+        <xs:element name="i" type="FormattedText"/>
+        <xs:element name="U" type="FormattedText"/>
+        <xs:element name="u" type="FormattedText"/>
+        <xs:element name="SUP" type="FormattedText"/>
+        <xs:element name="sup" type="FormattedText"/>
+        <xs:element name="SUB" type="FormattedText"/>
+        <xs:element name="sub" type="FormattedText"/>
+        <xs:element name="TextAlign" type="AlignedText"/>
+        <xs:element name="LineStyles" type="StyledText"/>
+      </xs:choice>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="AlignedText">
+    <xs:complexContent>
+      <xs:extension base="FormattedText">
+        <xs:attribute name="align" use="required">
+          <xs:simpleType>
+            <xs:restriction base="xs:NMTOKEN">
+              <xs:enumeration value="Left"/>
+              <xs:enumeration value="Center"/>
+              <xs:enumeration value="Right"/>
+            </xs:restriction>
+          </xs:simpleType>
+        </xs:attribute>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="StyledText">
+    <xs:complexContent>
+      <xs:extension base="FormattedText">
+        <xs:attribute name="align" use="optional">
+          <xs:simpleType>
+            <xs:restriction base="xs:NMTOKEN">
+              <xs:enumeration value="Left"/>
+              <xs:enumeration value="Center"/>
+              <xs:enumeration value="Right"/>
+            </xs:restriction>
+          </xs:simpleType>
+        </xs:attribute>
+        <xs:attribute name="spacing" type="xs:integer" use="optional"/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="FloatingNote" mixed="true">
+    <xs:sequence>
+      <xs:element name="WebLink" type="WebLink" minOccurs="0" maxOccurs="unbounded"/>
+      <xs:choice minOccurs="0" maxOccurs="unbounded">
+        <xs:element name="Font" type="Font"/>
+        <xs:element name="B" type="FormattedText"/>
+        <xs:element name="b" type="FormattedText"/>
+        <xs:element name="I" type="FormattedText"/>
+        <xs:element name="i" type="FormattedText"/>
+        <xs:element name="U" type="FormattedText"/>
+        <xs:element name="u" type="FormattedText"/>
+        <xs:element name="SUP" type="FormattedText"/>
+        <xs:element name="sup" type="FormattedText"/>
+        <xs:element name="SUB" type="FormattedText"/>
+        <xs:element name="sub" type="FormattedText"/>
+        <xs:element name="TextAlign" type="AlignedText"/>
+        <xs:element name="LineStyles" type="StyledText"/>
+      </xs:choice>
+    </xs:sequence>
+    <xs:attribute name="ID" type="xs:ID" use="optional"/>
+    <xs:attribute name="Auto" type="xs:boolean" use="optional"/>
+    <xs:attribute name="Left" type="xs:integer"/>
+    <xs:attribute name="Top" type="xs:integer"/>
+    <xs:attribute name="Width" type="xs:integer"/>
+    <xs:attribute name="Height" type="xs:integer"/>
+    <xs:attribute name="ScrWidth" type="xs:integer"/>
+	<xs:attribute name="ScrHeight" type="xs:integer"/>	
+	<xs:attribute name="ScrDPI" type="xs:integer"/>
+    <xs:attribute name="Color">
+      <xs:simpleType>
+        <xs:restriction base="xs:NMTOKEN">
+          <xs:enumeration value="Yellow"/>
+          <xs:enumeration value="Red"/>
+          <xs:enumeration value="Blue"/>
+          <xs:enumeration value="Green"/>
+          <xs:enumeration value="Purple"/>
+          <xs:enumeration value="Orange"/>
+          <xs:enumeration value="Gray"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>            
+  </xs:complexType>
+
+  <xs:complexType name="Ref">
+    <xs:complexContent>
+      <xs:restriction base="xs:anyType">
+        <xs:attribute name="ID" type="xs:IDREF"/>
+        <xs:attribute name="Selected" type="xs:boolean"/>
+      </xs:restriction>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="InfoSequence">
+    <xs:sequence>
+      <xs:element name="Ref" type="Ref" maxOccurs="unbounded" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="Selected" type="xs:boolean" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="TableSequence">
+    <xs:sequence>
+      <xs:element name="Ref" type="Ref" maxOccurs="unbounded" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="Selected" type="xs:boolean" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="Title" mixed="true">
+    <xs:complexContent>
+      <xs:restriction base="xs:anyType">
+        <xs:sequence minOccurs="0" maxOccurs="unbounded">
+          <xs:any namespace="##targetNamespace" processContents="lax"/>
+        </xs:sequence>
+      </xs:restriction>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="Name" mixed="true">
+    <xs:complexContent>
+      <xs:restriction base="xs:anyType">
+        <xs:sequence minOccurs="0" maxOccurs="unbounded">
+          <xs:any namespace="##targetNamespace" processContents="lax"/>
+        </xs:sequence>
+      </xs:restriction>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="Value" mixed="true">
+    <xs:complexContent>
+      <xs:restriction base="xs:anyType">
+        <xs:sequence minOccurs="0" maxOccurs="unbounded">
+          <xs:any namespace="##targetNamespace" processContents="lax"/>
+        </xs:sequence>
+      </xs:restriction>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="Constant">
+    <xs:sequence>
+      <xs:element name="Name" type="Name" maxOccurs="1" minOccurs="1"/>
+      <xs:element name="Value" type="Value" maxOccurs="1" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="Info">
+    <xs:sequence>
+      <xs:element name="Title" type="Title" maxOccurs="1" minOccurs="0"/>
+      <xs:element name="Notes" type="FormattedText" maxOccurs="1" minOccurs="0"/>
+      <xs:element name="FloatingNote" type="FloatingNote" maxOccurs="unbounded" minOccurs="0"/>
+      <xs:element name="Constant" type="Constant" maxOccurs="unbounded" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="ID" type="xs:ID"/>
+    <xs:attribute name="Icon" use="optional"/>
+    <xs:attribute name="Highlighted" type="xs:integer" use="optional"/>
+    <xs:attribute name="HighlightColor" type="xs:string" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="d" mixed="true">
+    <xs:complexContent>
+      <xs:extension base="FormattedText">
+        <xs:sequence minOccurs="0" maxOccurs="unbounded">
+          <xs:any namespace="##targetNamespace" processContents="lax"/>
+        </xs:sequence>
+        <xs:attribute name="Excluded" type="xs:boolean" default="0"/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="Subcolumn">
+    <xs:sequence>
+      <xs:element name="Title" type="FormattedText" maxOccurs="1" minOccurs="0"/>
+      <xs:element name="d" type="d" maxOccurs="unbounded" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="SubColumnTitles">
+    <xs:sequence>
+      <xs:element name="Subcolumn" type="Subcolumn" maxOccurs="unbounded" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="OwnSet" type="xs:integer"/>
+  </xs:complexType>
+
+  <xs:complexType name="RowTitlesColumn">
+    <xs:sequence>
+      <xs:element name="Subcolumn" type="Subcolumn" maxOccurs="1" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="Width"/>
+  </xs:complexType>
+
+  <xs:complexType name="XColumn">
+    <xs:sequence>
+      <xs:element name="Title" type="FormattedText" maxOccurs="1" minOccurs="0"/>
+      <xs:element name="Subcolumn" type="Subcolumn" maxOccurs="unbounded" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="Width"/>
+    <xs:attribute name="Decimals"/>
+    <xs:attribute name="Subcolumns"/>
+    <xs:attribute name="Scientific" type="xs:boolean"/>
+  </xs:complexType>
+
+  <xs:complexType name="XAdvancedColumn">
+    <xs:sequence>
+      <xs:element name="Title" type="FormattedText" maxOccurs="1" minOccurs="0"/>
+      <xs:element name="Subcolumn" type="Subcolumn" maxOccurs="unbounded" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="Version"/>
+    <xs:attribute name="Width"/>
+    <xs:attribute name="Decimals"/>
+    <xs:attribute name="Subcolumns"/>
+    <xs:attribute name="Scientific" type="xs:boolean"/>
+  </xs:complexType>
+
+  <xs:complexType name="YColumn">
+    <xs:sequence>
+      <xs:element name="Title" type="FormattedText" maxOccurs="1" minOccurs="0"/>
+      <xs:element name="Subcolumn" type="Subcolumn" maxOccurs="unbounded" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="Width"/>
+    <xs:attribute name="Decimals"/>
+    <xs:attribute name="Subcolumns"/>
+    <xs:attribute name="Scientific" type="xs:boolean"/>
+  </xs:complexType>
+
+  <xs:complexType name="Table">
+    <xs:sequence>
+      <xs:element name="Title" type="Title" maxOccurs="1" minOccurs="0"/>
+      <xs:element name="FloatingNote" type="FloatingNote" maxOccurs="unbounded" minOccurs="0"/>
+      <xs:element name="Info" type="Info" maxOccurs="unbounded" minOccurs="0"/>
+      <xs:element name="RowTitlesColumn" type="RowTitlesColumn" maxOccurs="1" minOccurs="0"/>
+      <xs:element name="SubColumnTitles" type="SubColumnTitles" maxOccurs="1" minOccurs="0"/>
+      <xs:element name="XColumn" type="XColumn" maxOccurs="1" minOccurs="0"/>
+      <xs:element name="XAdvancedColumn" type="XAdvancedColumn" maxOccurs="1" minOccurs="0"/>
+      <xs:element name="YColumn" type="YColumn" maxOccurs="unbounded" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="ID" type="xs:ID"/>
+    <xs:attribute name="XFormat">
+      <xs:simpleType>
+        <xs:restriction base="xs:NMTOKEN">
+          <xs:enumeration value="none"/>
+          <xs:enumeration value="text"/>
+          <xs:enumeration value="numbers"/>
+          <xs:enumeration value="error"/>
+          <xs:enumeration value="series"/>
+          <xs:enumeration value="date"/>
+          <xs:enumeration value="startenddate"/>
+          <xs:enumeration value="time"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="YFormat">
+      <xs:simpleType>
+        <xs:restriction base="xs:NMTOKEN">
+          <xs:enumeration value="replicates"/>
+          <xs:enumeration value="SD"/>
+          <xs:enumeration value="SE"/>
+          <xs:enumeration value="CV"/>
+          <xs:enumeration value="SDN"/>
+          <xs:enumeration value="SEN"/>
+          <xs:enumeration value="CVN"/>
+          <xs:enumeration value="low-high"/>
+          <xs:enumeration value="text"/>
+          <xs:enumeration value="upper-lower-limits"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="Replicates" type="xs:integer"/>
+    <xs:attribute name="StartAt"/>
+    <xs:attribute name="Interval"/>
+    <xs:attribute name="Icon"/>
+    <xs:attribute name="Highlighted" type="xs:integer"/>
+    <xs:attribute name="HighlightColor" type="xs:string" use="optional"/>
+    <xs:attribute name="TableType" use="optional">
+      <xs:simpleType>
+        <xs:restriction base="xs:NMTOKEN">
+          <xs:enumeration value="Result"/>
+          <xs:enumeration value="Legacy"/>
+          <xs:enumeration value="XY"/>
+          <xs:enumeration value="OneWay"/>
+          <xs:enumeration value="TwoWay"/>
+          <xs:enumeration value="Contingency"/>
+          <xs:enumeration value="Survival"/>
+          <xs:enumeration value="PartsOfWhole"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="ExtTableType" use="optional">
+        <xs:simpleType>
+            <xs:restriction base="xs:NMTOKEN">
+                <xs:enumeration value="MultipleVariables"/>
+                <xs:enumeration value="Nested"/>
+            </xs:restriction>
+        </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="EVFormat" use="optional">
+      <xs:simpleType>
+        <xs:restriction base="xs:NMTOKEN">
+          <xs:enumeration value="Number"/>
+          <xs:enumeration value="AsteriskAfterNumber"/>
+          <xs:enumeration value="Blank"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  
+   <xs:complexType name="HugeTable">
+    <xs:sequence>
+      <xs:element name="Title" type="Title" maxOccurs="1" minOccurs="0"/>
+      <xs:element name="FloatingNote" type="FloatingNote" maxOccurs="unbounded" minOccurs="0"/>
+      <xs:element name="Info" type="Info" maxOccurs="unbounded" minOccurs="0"/>
+      <xs:element name="RowTitlesColumn" type="RowTitlesColumn" maxOccurs="1" minOccurs="0"/>
+      <xs:element name="SubColumnTitles" type="SubColumnTitles" maxOccurs="1" minOccurs="0" />
+      <xs:element name="XColumn" type="XColumn" maxOccurs="1" minOccurs="0"/>
+      <xs:element name="XAdvancedColumn" type="XAdvancedColumn" maxOccurs="1" minOccurs="0" />
+      <xs:element name="YColumn" type="YColumn" maxOccurs="unbounded" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="ID" type="xs:ID"/>
+    <xs:attribute name="XFormat">
+      <xs:simpleType>
+        <xs:restriction base="xs:NMTOKEN">
+          <xs:enumeration value="none"/>
+          <xs:enumeration value="text"/>
+          <xs:enumeration value="numbers"/>
+          <xs:enumeration value="error"/>
+          <xs:enumeration value="series"/>
+          <xs:enumeration value="date"/>
+          <xs:enumeration value="startenddate"/>
+          <xs:enumeration value="time"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="YFormat">
+      <xs:simpleType>
+        <xs:restriction base="xs:NMTOKEN">
+          <xs:enumeration value="replicates"/>
+          <xs:enumeration value="SD"/>
+          <xs:enumeration value="SE"/>
+          <xs:enumeration value="CV"/>
+          <xs:enumeration value="SDN"/>
+          <xs:enumeration value="SEN"/>
+          <xs:enumeration value="CVN"/>
+          <xs:enumeration value="low-high"/>
+          <xs:enumeration value="text"/>
+          <xs:enumeration value="upper-lower-limits"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="Replicates" type="xs:integer"/>
+    <xs:attribute name="StartAt"/>
+    <xs:attribute name="Interval"/>
+    <xs:attribute name="Icon"/>
+    <xs:attribute name="Highlighted" type="xs:integer"/>
+    <xs:attribute name="HighlightColor" type="xs:string" use="optional"/>
+    <xs:attribute name="TableType" use="optional">
+      <xs:simpleType>
+        <xs:restriction base="xs:NMTOKEN">
+          <xs:enumeration value="Result"/>
+          <xs:enumeration value="Legacy"/>
+          <xs:enumeration value="XY"/>
+          <xs:enumeration value="OneWay"/>
+          <xs:enumeration value="TwoWay"/>
+          <xs:enumeration value="Contingency"/>
+          <xs:enumeration value="Survival"/>
+          <xs:enumeration value="PartsOfWhole"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="ExtTableType" use="optional">
+        <xs:simpleType>
+            <xs:restriction base="xs:NMTOKEN">
+                <xs:enumeration value="MultipleVariables"/>
+                <xs:enumeration value="Nested"/>
+            </xs:restriction>
+        </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="EVFormat" use="optional">
+      <xs:simpleType>
+        <xs:restriction base="xs:NMTOKEN">
+          <xs:enumeration value="Number"/>
+          <xs:enumeration value="AsteriskAfterNumber"/>
+          <xs:enumeration value="Blank"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="Script" mixed="true">
+    <xs:attribute name="RunOnFileOpen" default="no" use="optional">
+      <xs:simpleType>
+        <xs:restriction base="xs:NMTOKEN">
+          <xs:enumeration value="0"/>
+          <xs:enumeration value="no"/>
+          <xs:enumeration value="false"/>
+          <xs:enumeration value="1"/>
+          <xs:enumeration value="yes"/>
+          <xs:enumeration value="true"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="RunOnFileClose" default="no" use="optional">
+      <xs:simpleType>
+        <xs:restriction base="xs:NMTOKEN">
+          <xs:enumeration value="0"/>
+          <xs:enumeration value="no"/>
+          <xs:enumeration value="false"/>
+          <xs:enumeration value="1"/>
+          <xs:enumeration value="yes"/>
+          <xs:enumeration value="true"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="Name" use="required"/>
+  </xs:complexType>
+    
+  <xs:simpleType name="TemplateDescription">
+    <xs:restriction base="xs:string"/>
+  </xs:simpleType>
+
+  <xs:complexType name="Template">
+    <xs:simpleContent>
+      <xs:extension base="xs:base64Binary">
+        <xs:attribute name="FileName" use="optional"/>
+        <xs:anyAttribute namespace="urn:schemas-microsoft-com:datatypes" processContents="lax"/> 
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+
+
+ <xs:complexType name="GraphPadPrismFile">
+    <xs:sequence>
+      <xs:element name="Created" type="Created" minOccurs="0" maxOccurs="1"/>
+      <xs:element name="HelpTopic" type="HelpTopic" minOccurs="0" maxOccurs="1"/>
+      <xs:element name="DefGraphButton" type="DefGraphButton" minOccurs="0" maxOccurs="1"/>
+      <xs:element name="InfoSequence" type="InfoSequence" minOccurs="0" maxOccurs="1"/>
+      <xs:element name="Info" type="Info" minOccurs="0" maxOccurs="unbounded"/>
+      <xs:choice>
+        <xs:sequence>
+          <xs:element name="TableSequence" type="TableSequence"/>
+          <xs:element name="Title" type="Title" minOccurs="0" maxOccurs="1"/>
+          <xs:choice minOccurs="0" maxOccurs="unbounded">
+              <xs:element name="Table" type="Table"/>
+              <xs:element name="HugeTable" type="HugeTable"/>
+          </xs:choice>
+        </xs:sequence>
+        <xs:sequence>
+          <xs:element name="Title" type="Title"/>
+          <xs:choice minOccurs="0" maxOccurs="unbounded">
+              <xs:element name="Table" type="Table"/>
+              <xs:element name="HugeTable" type="HugeTable"/>
+          </xs:choice>
+          <xs:element name="TableSequence" type="TableSequence" minOccurs="0" maxOccurs="1"/>
+        </xs:sequence>
+        <xs:sequence>
+          <xs:choice minOccurs="1" maxOccurs="unbounded">
+              <xs:element name="Table" type="Table"/>
+              <xs:element name="HugeTable" type="HugeTable"/>
+          </xs:choice>
+          <xs:element name="TableSequence" type="TableSequence" minOccurs="0" maxOccurs="1"/>
+        </xs:sequence>
+        <xs:sequence>
+        </xs:sequence>
+      </xs:choice>
+      <xs:element name="Script" type="Script" minOccurs="0" maxOccurs="unbounded"/>
+      <xs:element name="TemplateDescription" type="TemplateDescription" minOccurs="0" maxOccurs="1"/>
+      <xs:element name="Template" type="Template" minOccurs="0" maxOccurs="1"/>
+    </xs:sequence>
+    <xs:attribute name="CreatedByPrismVersion" use="optional"/>
+    <xs:attribute name="LowestVersionThatCanOpen" use="optional"/>
+    <xs:attribute name="PrismXMLVersion" use="required"/>
+  </xs:complexType>
+
+</xs:schema>

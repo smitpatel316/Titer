@@ -31,7 +31,7 @@ the releasable line; the working branch merges into it at release.
    Non-login shells need `~/.cargo/bin` on `PATH` (cargo lives at
    `/home/hatch/.cargo/bin`, not `/root/.cargo/bin`).
 2. `npm run check` — `tsc --noEmit`. Must be clean.
-3. `npm test` — six legs: `checks.ts`, `prism.ts`, `prism-write.ts`,
+3. `npm test` — eight legs: `checks.ts`, `cloud.ts`, `prism.ts`, `prism-write.ts`, `pzfx-write.ts`,
    `reference.ts`, `parity.ts`, `packages.ts`. All must be green; the
    checks count grows as fixes land.
 4. `cargo check` — Rust side. Slow (minutes); run it before claiming a
