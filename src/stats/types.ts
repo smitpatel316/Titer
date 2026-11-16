@@ -1051,8 +1051,10 @@ export interface RocPoint {
  *  function"): every nonlinear-regression model — evaluated by the same
  *  `evaluate()` the fitted-curve overlay uses — plus a Gaussian, Prism's
  *  canonical example (mean 0, SD 1, amplitude 100 over X −3..3), which the
- *  fitter does not offer, so it lives here only. */
-export type PlotFunctionModel = NonlinearModel | "gaussian";
+ *  fitter does not offer, so it lives here only. A user-defined equation is
+ *  NOT plottable: the wizard has no equation input, and its spec can't be
+ *  built without one (modelSpec throws), so it is excluded here. */
+export type PlotFunctionModel = Exclude<NonlinearModel, "user-defined"> | "gaussian";
 
 /** What "plot-function" plots alongside the function itself (Prism's Options
  *  tab): its first derivative, its second derivative, or its integral — one

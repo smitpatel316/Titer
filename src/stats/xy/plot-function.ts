@@ -6,6 +6,7 @@
 import type {
   AnalysisOutcome,
   GeneratedCurve,
+  NonlinearModel,
   PlotFunctionExtra,
   PlotFunctionModel,
   PlotFunctionParams,
@@ -16,11 +17,16 @@ import { evaluate } from "../../views/graphs/fitted-curve";
 import { NONLINEAR_MODELS } from "../types";
 
 /** The equations the wizard offers, in Prism's spirit: the fitter's whole
- *  library, then the Gaussian. */
-export const PLOT_FUNCTION_MODELS: PlotFunctionModel[] = [...NONLINEAR_MODELS, "gaussian"];
+ *  library, then the Gaussian — except a user-defined equation, which has
+ *  no equation for the wizard to plot (see PlotFunctionModel). */
+export const PLOT_FUNCTION_MODELS: PlotFunctionModel[] = [
+  ...NONLINEAR_MODELS.filter((m): m is Exclude<NonlinearModel, "user-defined"> => m !== "user-defined"),
+  "gaussian",
+];
 
 /** The equation's plain-language name, as the wizard, the results and the graph note show it. */
-export const PLOT_FUNCTION_LABEL: Record<PlotFunctionModel, string> = { ...MODEL_LABEL, gaussian: "Gaussian" };
+const { "user-defined": _unplottable, ...PLOTTABLE_LABELS } = MODEL_LABEL;
+export const PLOT_FUNCTION_LABEL: Record<PlotFunctionModel, string> = { ...PLOTTABLE_LABELS, gaussian: "Gaussian" };
 
 /** A Gaussian's parameters, in the order the wizard asks them. */
 const GAUSSIAN_PARAMS = ["Amplitude", "Mean", "SD"] as const;
