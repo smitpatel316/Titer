@@ -5231,7 +5231,7 @@
   "notes": "Deming regression of “Y” on “X”, λ = 0.25 (the error variance in Y is 0.25× that in X). 95% confidence intervals are leave-one-out jackknife intervals. The ordinary least-squares fit is Y = 0.9685*X + 0.2933, for comparison — OLS assumes X is measured without error, so it attenuates the slope. If the slope CI excludes 1 there is proportional bias; if the intercept CI excludes 0 there is constant bias. Assumes the errors in X and Y are independent and roughly homoscedastic."
  },
  "deming-regression deming {\"y\":\"Y\",\"lambda\":0}": {
-  "error": "The error variance ratio must be greater than 0."
+  "error": "The error variance ratio must be a finite number greater than 0."
  },
  "deming-regression demingNoCovary {\"y\":\"Y\",\"lambda\":1}": {
   "error": "X and Y do not covary — Deming regression has no defined slope here"
