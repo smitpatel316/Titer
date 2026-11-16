@@ -11530,6 +11530,49 @@ check("the survival analysis refuses bad survival data", async () => {
   }
 });
 
+// v1.5.0 m17: the log-rank (and Cox on a Survival table) accepted a time of
+// 0 while Cox regression rejected time ≤ 0. Survival times must be positive.
+check("the survival analysis refuses a time of 0, like Cox does", async () => {
+  const data = logRankTable(
+    ["Title", "Days", "Treated", "Placebo"],
+    [
+      ["", "0", "1", ""],
+      ["", "5", "", "1"],
+      ["", "7", "0", "1"],
+      ["", "8", "", "1"],
+      ["", "10", "1", ""],
+      ["", "12", "", "0"],
+      ["", "15", "1", "1"],
+      ["", "20", "0", ""],
+    ],
+  );
+  for (const curveTest of ["logrank", "gehan"] as const) {
+    const out = await runAnalysis("survival", data, { curveTest, correction: "holm" });
+    if (!("error" in out) || !out.error.includes("must be positive")) {
+      throw new Error(`survival/${curveTest}: expected a "must be positive" error, got ${JSON.stringify(out).slice(0, 200)}`);
+    }
+  }
+  const cox = await runAnalysis("cox", data, {});
+  if (!("error" in cox) || !cox.error.includes("must be positive")) {
+    throw new Error(`cox: expected a "must be positive" error, got ${JSON.stringify(cox).slice(0, 200)}`);
+  }
+  // A negative time errors with the same message (it used to say only
+  // "Times can't be negative.").
+  const negative = logRankTable(
+    ["Title", "Days", "Treated", "Placebo"],
+    [
+      ["", "-1", "1", ""],
+      ["", "5", "", "1"],
+      ["", "7", "0", "1"],
+      ["", "8", "", "1"],
+    ],
+  );
+  const neg = await runAnalysis("survival", negative, { curveTest: "logrank", correction: "holm" });
+  if (!("error" in neg) || !neg.error.includes("must be positive")) {
+    throw new Error(`expected a "must be positive" error for a negative time, got ${JSON.stringify(neg).slice(0, 200)}`);
+  }
+});
+
 check("the survival analysis and Cox refuse a table with no events at all", async () => {
   // All subjects censored: the log-rank path used to return a meaningless
   // chi-square of 0 (P = 1), the Gehan path crashed in solve() on a singular
