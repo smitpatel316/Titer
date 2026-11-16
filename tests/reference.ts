@@ -5041,9 +5041,10 @@ async function disagreements(): Promise<string[]> {
     }
     // The wizard asks the repeated-measure columns + the matched-subjects
     // question + the optional between-subject-factor question on a Column
-    // table, and interaction + matched-subjects on a Grouped table; finish
-    // maps the answers to the runner's params, and the not-matched escape
-    // resolves to the ordinary ANOVA instead. With no groups the finish is
+    // table, and matched-subjects + interaction on a Grouped table (F10 —
+    // matchedness first, so a not-matched answer never discards the
+    // interaction); finish maps the answers to the runner's params, and the
+    // not-matched escape resolves to the ordinary ANOVA instead. With no groups the finish is
     // the single-factor fit (y ~ T); with groups it carries the subject
     // factor, and feeding those params to the runner must reproduce the
     // two-factor reference fit — that is the GUI path to the pinned values.
@@ -5056,7 +5057,7 @@ async function disagreements(): Promise<string[]> {
       JSON.stringify(["sets", "matched", "groups", "groupName", "groupLevels"])
     )
       out.push(`Mixed-effects wizard (column, groups): ${JSON.stringify(mixAsked({ groups: "yes" }, mixedBalanced))}`);
-    if (JSON.stringify(mixAsked({}, grouped)) !== JSON.stringify(["interaction", "matched"]))
+    if (JSON.stringify(mixAsked({}, grouped)) !== JSON.stringify(["matched", "interaction"]))
       out.push(`Mixed-effects wizard (grouped): ${JSON.stringify(mixAsked({}, grouped))}`);
     const mixSetsQ = WIZARDS["mixed-effects"]!.questions({}, readTable(mixedBalanced))[0];
     if (!mixSetsQ || mixSetsQ.kind !== "names" || mixSetsQ.min !== 3)
@@ -7517,14 +7518,15 @@ async function disagreements(): Promise<string[]> {
       out.push(`Operational partial curve at X=−4: ${c1.y[100]}, expected 75.7926`);
   }
   // The wizard asks model, then Y series, then which series is first
-  // (the control / full agonist), then one B field per other series, the
-  // B units and — for Schild — the HillSlope constraint; the operational
-  // model asks nothing more.
+  // (the control / full agonist), then the B units (F9 — asked before the
+  // B values, so the user knows the pA2 units before typing
+  // concentrations), one B field per other series, and — for Schild — the
+  // HillSlope constraint; the operational model asks nothing more.
   const specialAsked = (a: Record<string, string | string[]>) =>
     WIZARDS["dose-response-special"]!.questions(a, readTable(schild)).flatMap((q) => (q ? [q.id] : []));
   if (
     JSON.stringify(specialAsked({})) !==
-    JSON.stringify(["model", "ys", "first", "B:1e-8 M", "B:1e-7 M", "bUnits", "fixHillSlope"])
+    JSON.stringify(["model", "ys", "first", "bUnits", "B:1e-8 M", "B:1e-7 M", "fixHillSlope"])
   )
     out.push(`Dose-response — Special wizard first steps: ${JSON.stringify(specialAsked({}))}`);
   if (
@@ -7536,7 +7538,7 @@ async function disagreements(): Promise<string[]> {
     );
   if (
     JSON.stringify(specialAsked({ model: "ec50-shift", ys: ["0 nM", "10 nM"] })) !==
-    JSON.stringify(["model", "ys", "first", "B:10 nM", "bUnits"])
+    JSON.stringify(["model", "ys", "first", "bUnits", "B:10 nM"])
   )
     out.push(
       `Dose-response — Special wizard (ec50-shift): ${JSON.stringify(specialAsked({ model: "ec50-shift", ys: ["0 nM", "10 nM"] }))}`,
