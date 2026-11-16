@@ -12651,10 +12651,40 @@ check("the save prompt asks once per Prism project, and a remembered choice appl
   // Remembered choices apply silently — "don't ask again" (f.4).
   strictEqual(nextSaveAction({ prismOrigin: true, prompted: false, remembered: "hlx" }), "save-hlx");
   strictEqual(nextSaveAction({ prismOrigin: true, prompted: false, remembered: "prism" }), "save-prism");
+  strictEqual(nextSaveAction({ prismOrigin: true, prompted: false, remembered: "pzfx" }), "save-pzfx");
   // A remembered choice doesn't matter once prompted: still no prompt.
   strictEqual(nextSaveAction({ prismOrigin: true, prompted: true, remembered: "prism" }), "save-prism");
+  strictEqual(nextSaveAction({ prismOrigin: true, prompted: true, remembered: "pzfx" }), "save-pzfx");
   // No localStorage under Node: reads as "no remembered choice", never throws.
   strictEqual(loadPrismSaveChoice(), null);
+});
+
+// ── Item 104 Phase 2: the save prompt and converter offer .pzfx ────────
+// Pre-fix FAIL pin: before Phase 2 the save prompt had no "pzfx" choice,
+// the converter had no Titer → .pzfx direction (it said Titer doesn't write
+// .pzfx), and the remote picker didn't open .pzfx files.
+check("the save prompt and converter offer .pzfx (item 104 Phase 2)", () => {
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const savePrompt = readFileSync(join(root, "src/components/save-prompt-dialog.tsx"), "utf8");
+  ok(savePrompt.includes('"pzfx"'), "save prompt has no \"pzfx\" choice");
+  ok(savePrompt.includes("Save as .pzfx"), "save prompt has no \"Save as .pzfx\" button");
+  ok(savePrompt.includes("Save as .prism"), "save prompt's Prism button should name the format (.prism)");
+  const converter = readFileSync(join(root, "src/components/converter-dialog.tsx"), "utf8");
+  ok(converter.includes("Titer (this project) → Prism (.pzfx)"), "converter has no Titer → .pzfx direction");
+  ok(!converter.includes("Titer doesn't write"), "converter still says Titer doesn't write .pzfx");
+  ok(
+    converter.includes("tables-only") || converter.includes("Tables only"),
+    "converter .pzfx direction should say it is tables-only",
+  );
+  ok(converter.includes("formatPzfxWriteReport"), "converter doesn't surface the .pzfx transfer report");
+  const picker = readFileSync(join(root, "src/components/remote-picker.tsx"), "utf8");
+  ok(picker.includes('.pzfx'), "remote picker doesn't open .pzfx files");
+  const useDocument = readFileSync(join(root, "src/store/use-document.ts"), "utf8");
+  ok(useDocument.includes("saveAsPzfx"), "use-document has no saveAsPzfx");
+  ok(
+    useDocument.includes('endsWith(".pzfx")'),
+    "use-document has no .pzfx save-back branch",
+  );
 });
 
 // ── FF-F15: a multi-file Prism drop imports the first and names the rest ──
@@ -12695,6 +12725,7 @@ check("prism-format surface strings say Titer, not Helix (FL-rebrand)", () => {
     "the open Titer format",
     "Prism (.prism) → Titer (.hlx)",
     "Titer (this project) → Prism (.prism)",
+    "Titer (this project) → Prism (.pzfx)",
     "the analyses Titer offers",
     "Open in Titer",
     "Titer Project",

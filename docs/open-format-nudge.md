@@ -10,8 +10,8 @@ hides the Prism option.
 
 | "I'm trapped because…" | Way out (verified in the app) |
 |---|---|
-| "My collaborator needs Prism" | Save prompt → "Save as Prism (.prism)"; also File ▸ Convert… → Helix → Prism → "Save .prism…". Prism 10+ can itself save as `.pzfx`, so a collaborator who needs `.pzfx` gets it by opening Helix's `.prism` in Prism and re-saving. |
-| "My lab only accepts Prism files" | Same as above — "Save as Prism" is one click in the save prompt, every time until "don't ask again" is set; after that, File ▸ Convert… is still one click away. |
+| "My collaborator needs Prism" | Save prompt → "Save as .prism" or "Save as .pzfx"; also File ▸ Convert… → Titer → Prism → "Save .prism…" / "Save .pzfx…". `.prism` is the richer path for Prism 10 collaborators (it carries analyses); `.pzfx` is tables-only, for Prism 5–9 / older workflows. |
+| "My lab only accepts Prism files" | Same as above — "Save as .prism" / "Save as .pzfx" is one click in the save prompt, every time until "don't ask again" is set; after that, File ▸ Convert… is still one click away. |
 | "I already sent the `.prism`" | The original file is never modified by import, conversion, or migration (proved by checksum in tests/prism.ts, P7/C-08). The sent file is untouched; send the new `.prism` when ready, or keep working in `.hlx` and convert at the end. |
 | "I don't want to lose my graphs/layouts" | The transfer report says so plainly at import and at conversion: graphs and layouts are not transferred (Prism stores them in an undocumented binary format). They are re-created in Helix (graphs) or with the figure builder (layouts) — nothing is silently dropped. |
 | "I clicked the wrong thing and now I'm stuck in `.hlx`" | Nothing is stuck: File ▸ Convert… converts back to `.prism` at any time, and the save prompt's Prism option is always visible, never behind a second click. |

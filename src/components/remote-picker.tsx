@@ -1,7 +1,7 @@
 // The remote file picker (cloud storage, v2 item 75): in-app folder
 // browsing of a connected account. The native OS dialog can't browse cloud
 // locations, so this lists folders here instead — same dialog styling as
-// the rest of the app. Only `.hlx` / `.prism` files open; folders navigate.
+// the rest of the app. Only `.hlx` / `.prism` / `.pzfx` files open; folders navigate.
 import * as React from "react";
 import { Button } from "../ui/controls";
 import { Dialog } from "../ui/dialog";
@@ -9,7 +9,8 @@ import { useProjectStore } from "../store/use-project-store";
 import * as native from "../native";
 import { cloudErrorMessage, remoteHandle, type FileHandle, type RemoteEntry } from "../lib/cloud";
 
-const OPENABLE = (name: string) => name.toLowerCase().endsWith(".hlx") || name.toLowerCase().endsWith(".prism");
+const OPENABLE = (name: string) =>
+  name.toLowerCase().endsWith(".hlx") || name.toLowerCase().endsWith(".prism") || name.toLowerCase().endsWith(".pzfx");
 
 interface Crumb {
   id: string;
@@ -117,7 +118,7 @@ export function RemotePickerDialog({
       description={
         accounts.length === 0
           ? "No cloud account is connected yet."
-          : `Browsing ${accounts.find((a) => a.id === accountId)?.name ?? "Box"} — only .hlx and .prism files open.`
+          : `Browsing ${accounts.find((a) => a.id === accountId)?.name ?? "Box"} — only .hlx, .prism and .pzfx files open.`
       }
       footer={
         accounts.length === 0 ? (

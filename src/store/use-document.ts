@@ -14,6 +14,7 @@ import {
   type TemplateKind,
 } from "../lib/template";
 import { parsePzfx } from "../lib/pzfx";
+import { writePzfx } from "../lib/pzfx-write";
 import { convertPrism, formatReport } from "../lib/prism";
 import { writePrism } from "../lib/prism-write";
 import { loadPrismSaveChoice, nextSaveAction, savePrismSaveChoice } from "../lib/prism-nudge";
@@ -195,11 +196,58 @@ export function useDocument() {
     }
   };
 
+  /** Save the current project as a Prism `.pzfx` file (the prompt's .pzfx
+   *  option, or the remembered choice). Mirrors saveAsPrism: same
+   *  error-alert + path-picker + mark-saved flow, but through writePzfx —
+   *  tables (and info sheets) only, never analyses or graphs. Returns false
+   *  when the user cancels the path picker — the save is abandoned, not
+   *  silently saved as `.hlx`. */
+  const saveAsPzfx = async (): Promise<boolean> => {
+    const s = latest.current.get();
+    const revision = s.revision;
+    const version = native.isNative ? await native.appVersion().catch(() => "1.4.0") : "1.4.0";
+    let bytes: Uint8Array;
+    try {
+      bytes = (
+        await writePzfx(
+          { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
+          version,
+        )
+      ).bytes;
+    } catch (err) {
+      await native.alert(
+        "Couldn't Save as .pzfx",
+        err instanceof Error ? err.message : "This project couldn't be written as .pzfx.",
+        "error",
+      );
+      return false;
+    }
+    const target = await native.pickSavePath("Save as .pzfx", `${title}.pzfx`, "GraphPad Prism File", "pzfx");
+    if (!target) return false;
+    try {
+      await native.writeFile(target, bytes);
+      latest.current.markProjectSaved(target, revision);
+      // The project now lives on local disk, even if it came from the cloud.
+      setRemote(null);
+      addRecent({ kind: "local", path: target });
+      return true;
+    } catch (err) {
+      const name = fileName(target);
+      await native.alert(
+        "Couldn't Save Project",
+        `“${name}” couldn't be saved there (${err}). Try Save As… another folder.`,
+        "error",
+      );
+      return false;
+    }
+  };
+
   // ── Remote save / open / conflict / offline (cloud storage) ────────────
 
   /** Saves the current project back to its remote file, conditional on the
    *  version seen at open/last-save. A `.prism` remote saves as Prism
-   *  bytes, a `.hlx` remote as project JSON — the same rule as local files.
+   *  bytes, a `.pzfx` remote as `.pzfx` bytes, a `.hlx` remote as project
+   *  JSON — the same rule as local files.
    *  A conflict opens the three-choice dialog instead of overwriting; an
    *  offline save shows the offline notice instead of losing the document. */
   const saveRemote = async (handle: RemoteHandle): Promise<boolean> => {
@@ -215,7 +263,14 @@ export function useDocument() {
               version,
             )
           ).bytes
-        : new TextEncoder().encode(serializeProjectFile(s));
+        : handle.path.toLowerCase().endsWith(".pzfx")
+          ? (
+              await writePzfx(
+                { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
+                version,
+              )
+            ).bytes
+          : new TextEncoder().encode(serializeProjectFile(s));
     } catch (err) {
       await native.alert(
         "Couldn't Save Project",
@@ -276,11 +331,11 @@ export function useDocument() {
     }
   };
 
-  /** Opens a remote `.hlx` / `.prism` file in this window. Downloads it
+  /** Opens a remote `.hlx` / `.prism` / `.pzfx` file in this window. Downloads it
    *  (and writes the cache copy); offline, opens the cache copy instead and
    *  says so. A `.prism` file imports as a project that saves back as
    *  `.prism` — the open keeps its remote handle, unlike a local import,
-   *  which starts untitled. */
+   *  which starts untitled. Same for a `.pzfx` file. */
   const loadRemote = async (handle: RemoteHandle): Promise<void> => {
     const recent: RecentEntry = {
       kind: "remote",
@@ -304,6 +359,8 @@ export function useDocument() {
       }
       if (handle.path.toLowerCase().endsWith(".prism")) {
         if (!(await importPrismBytes(cached, fileTitle(handle.path)))) return false;
+      } else if (handle.path.toLowerCase().endsWith(".pzfx")) {
+        if (!(await importPrismText(new TextDecoder().decode(cached), fileTitle(handle.path)))) return false;
       } else {
         const ok = await applyProjectText(new TextDecoder().decode(cached), { filePath: null, untitled: false, displayName: handle.path }, () => {});
         if (!ok) return false;
@@ -349,6 +406,17 @@ export function useDocument() {
       if (!(await importPrismBytes(base64ToBytes(downloaded.base64), fileTitle(handle.path)))) return;
       // The project came from a `.prism` file: it saves back as `.prism`,
       // like a local file after Save as Prism — no format nudge.
+      prismOrigin.current = false;
+      setRemote(next);
+      setUntitled(fileTitle(handle.path));
+      addRecent(recent);
+      return;
+    }
+    if (handle.path.toLowerCase().endsWith(".pzfx")) {
+      if (!(await importPrismText(new TextDecoder().decode(base64ToBytes(downloaded.base64)), fileTitle(handle.path))))
+        return;
+      // The project came from a `.pzfx` file: it saves back as `.pzfx`,
+      // like a local file after Save as .pzfx — no format nudge.
       prismOrigin.current = false;
       setRemote(next);
       setUntitled(fileTitle(handle.path));
@@ -509,6 +577,29 @@ export function useDocument() {
         return false;
       }
     }
+    // A project already saved as `.pzfx` saves back as `.pzfx` — never
+    // write `.hlx` JSON into a `.pzfx` file. Same branch as `.prism` above.
+    if (!saveAs && filePath?.toLowerCase().endsWith(".pzfx")) {
+      const s = latest.current.get();
+      const revision = s.revision;
+      const version = native.isNative ? await native.appVersion().catch(() => "1.4.0") : "1.4.0";
+      try {
+        const { bytes } = await writePzfx(
+          { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
+          version,
+        );
+        await native.writeFile(filePath, bytes);
+        latest.current.markProjectSaved(filePath, revision);
+        return true;
+      } catch (err) {
+        await native.alert(
+          "Couldn't Save Project",
+          err instanceof Error ? err.message : "This project couldn't be written as .pzfx.",
+          "error",
+        );
+        return false;
+      }
+    }
     // Nudge (f.1/f.4): a Prism-origin project prompts once; a remembered
     // choice applies silently. Marked prompted before awaiting, so a
     // re-entrant save can't double-prompt.
@@ -522,10 +613,15 @@ export function useDocument() {
         prompted.current = true;
         return saveAsPrism();
       }
+      if (action === "save-pzfx") {
+        prompted.current = true;
+        return saveAsPzfx();
+      }
       if (action === "prompt") {
         prompted.current = true;
         const { choice } = await askSaveFormat();
         if (choice === "prism") return saveAsPrism();
+        if (choice === "pzfx") return saveAsPzfx();
         // "hlx" or Cancel: fall through to the normal `.hlx` save below.
       }
     }

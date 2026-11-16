@@ -8,7 +8,7 @@
 // no guilt copy. The prompt never blocks saving: Esc / Cancel still saves
 // in the current format.
 
-export type PrismSaveChoice = "hlx" | "prism";
+export type PrismSaveChoice = "hlx" | "prism" | "pzfx";
 
 const CHOICE_KEY = "helix.prism-save-choice";
 
@@ -19,7 +19,7 @@ export function loadPrismSaveChoice(): PrismSaveChoice | null {
   try {
     if (typeof localStorage === "undefined") return null;
     const value = localStorage.getItem(CHOICE_KEY);
-    return value === "hlx" || value === "prism" ? value : null;
+    return value === "hlx" || value === "prism" || value === "pzfx" ? value : null;
   } catch {
     return null;
   }
@@ -56,7 +56,7 @@ export interface SavePromptState {
   remembered: PrismSaveChoice | null;
 }
 
-export type SaveAction = "prompt" | "save-hlx" | "save-prism";
+export type SaveAction = "prompt" | "save-hlx" | "save-prism" | "save-pzfx";
 
 /** What save() should do next, given the nudge state. A remembered choice
  *  wins over "already prompted" — prompting suppresses the prompt, never
@@ -64,6 +64,7 @@ export type SaveAction = "prompt" | "save-hlx" | "save-prism";
 export function nextSaveAction(state: SavePromptState): SaveAction {
   if (!state.prismOrigin) return "save-hlx";
   if (state.remembered === "prism") return "save-prism";
+  if (state.remembered === "pzfx") return "save-pzfx";
   if (state.remembered === "hlx" || state.prompted) return "save-hlx";
   return "prompt";
 }

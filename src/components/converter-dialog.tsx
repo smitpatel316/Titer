@@ -7,9 +7,13 @@
 //     come across; graphs and layouts don't (Prism stores them in a binary
 //     format it doesn't document), and fitted results aren't carried —
 //     Titer recomputes every analysis from the table when the file opens.
-//   Titer → Prism: write the current project as `.prism` (Save As Prism).
-//     A collaborator who needs `.pzfx` can open the `.prism` in Prism and
-//     re-save it there — Titer doesn't write `.pzfx`.
+//   Titer → Prism: write the current project as `.prism` (Prism 10 — the
+//     richer path for Prism 10 collaborators, it carries analyses as well
+//     as tables) or as `.pzfx` (tables only, for Prism 5–9 and older
+//     workflows). The transfer report says exactly what was written and
+//     what wasn't — analyses, graphs and results are never in a `.pzfx`
+//     file, and need re-creating in Prism from the tables; info sheets
+//     are written.
 //
 // The source file is only ever read, never written. The picker is the
 // non-blocking one (the Nov 9 deadlock fix): `pick_file`, never
@@ -23,10 +27,11 @@ import { useProjectStore } from "../store/use-project-store";
 import { convertPrism, formatReport, type ConvertResult } from "../lib/prism";
 import { yieldToPaint } from "../lib/yield-to-paint";
 import { formatWriteReport, writePrism, type PrismWriteResult } from "../lib/prism-write";
+import { formatPzfxWriteReport, writePzfx } from "../lib/pzfx-write";
 import { serializeProjectFile } from "../lib/project-file";
 import { fileTitle } from "../lib/paths";
 
-type Direction = "prism-to-hlx" | "hlx-to-prism";
+type Direction = "prism-to-hlx" | "hlx-to-prism" | "hlx-to-pzfx";
 
 interface Done {
   direction: Direction;
@@ -116,46 +121,49 @@ export function ConverterDialog() {
     input.click();
   };
 
-  const convertCurrentProject = async () => {
+  const convertCurrentProject = async (format: "prism" | "pzfx") => {
     setError(null);
     setDone(null);
     const project = get();
-    setProgress(`Writing ${project.rootOrder.length} tables as .prism…`);
+    setProgress(`Writing ${project.rootOrder.length} tables as .${format}…`);
     await paint();
     try {
       const version = native.isNative ? await native.appVersion().catch(() => "1.4.0") : "1.4.0";
-      const written: PrismWriteResult = await writePrism(
-        {
-          nodes: project.nodes,
-          rootOrder: project.rootOrder,
-          childOrder: project.childOrder,
-          activeNodeId: project.activeNodeId,
-        },
-        version,
-      );
+      const payload = {
+        nodes: project.nodes,
+        rootOrder: project.rootOrder,
+        childOrder: project.childOrder,
+        activeNodeId: project.activeNodeId,
+      };
+      const written: PrismWriteResult =
+        format === "prism" ? await writePrism(payload, version) : await writePzfx(payload, version);
       setDone({
-        direction: "hlx-to-prism",
+        direction: format === "prism" ? "hlx-to-prism" : "hlx-to-pzfx",
         sourceName: project.filePath ? fileTitle(project.filePath) : "Untitled",
-        reportText: formatWriteReport(written.report),
+        reportText: format === "prism" ? formatWriteReport(written.report) : formatPzfxWriteReport(written.report),
         bytes: written.bytes,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "This project couldn't be written as .prism.");
+      setError(err instanceof Error ? err.message : `This project couldn't be written as .${format}.`);
     } finally {
       setProgress(null);
     }
   };
 
+  /** The extension, save-panel title and filter label for a done direction. */
+  const doneFormat = (direction: Direction): { ext: string; title: string; label: string } =>
+    direction === "prism-to-hlx"
+      ? { ext: "hlx", title: "Save Converted Project", label: "Titer Project" }
+      : direction === "hlx-to-prism"
+        ? { ext: "prism", title: "Save as Prism", label: "GraphPad Prism File" }
+        : { ext: "pzfx", title: "Save as .pzfx", label: "GraphPad Prism File" };
+
   const saveDone = async () => {
     if (!done) return;
-    const fallback = `${baseName(done.sourceName)}.${done.direction === "prism-to-hlx" ? "hlx" : "prism"}`;
+    const format = doneFormat(done.direction);
+    const fallback = `${baseName(done.sourceName)}.${format.ext}`;
     if (native.isNative) {
-      const target = await native.pickSavePath(
-        done.direction === "prism-to-hlx" ? "Save Converted Project" : "Save as Prism",
-        fallback,
-        done.direction === "prism-to-hlx" ? "Titer Project" : "GraphPad Prism File",
-        done.direction === "prism-to-hlx" ? "hlx" : "prism",
-      );
+      const target = await native.pickSavePath(format.title, fallback, format.label, format.ext);
       if (!target) return;
       try {
         await native.writeFile(
@@ -225,6 +233,7 @@ export function ConverterDialog() {
         options={[
           { value: "prism-to-hlx", label: "Prism (.prism) → Titer (.hlx)" },
           { value: "hlx-to-prism", label: "Titer (this project) → Prism (.prism)" },
+          { value: "hlx-to-pzfx", label: "Titer (this project) → Prism (.pzfx)" },
         ]}
       />
       {direction === "prism-to-hlx" ? (
@@ -232,10 +241,16 @@ export function ConverterDialog() {
           Tables and the analyses Titer offers come across. Fitted results aren&apos;t carried — Titer recomputes every
           analysis from the table when the file opens.
         </p>
+      ) : direction === "hlx-to-prism" ? (
+        <p className="text-regular text-secondary">
+          Writes this project as a Prism 10 file — the richer path for Prism 10 collaborators, since it carries analyses
+          as well as tables. For Prism 5–9, or an older workflow that needs .pzfx, use the .pzfx direction below
+          instead.
+        </p>
       ) : (
         <p className="text-regular text-secondary">
-          Writes this project as a Prism 10 file. A collaborator who needs .pzfx can open it in Prism and re-save it
-          there.
+          Writes this project as a .pzfx file for Prism 5–9 and older workflows. Tables only — analyses, graphs and
+          results are not written, so re-create them in Prism from the tables. Info sheets are written.
         </p>
       )}
       {progress && <p className="text-regular">{progress}</p>}
@@ -248,7 +263,11 @@ export function ConverterDialog() {
           {done.savedPath && <p className="text-regular text-secondary">Saved to “{done.savedPath}”.</p>}
           <div className="flex flex-wrap gap-2">
             <Button variant="accent" onClick={() => void saveDone()}>
-              {done.direction === "prism-to-hlx" ? "Save .hlx…" : "Save .prism…"}
+              {done.direction === "prism-to-hlx"
+                ? "Save .hlx…"
+                : done.direction === "hlx-to-prism"
+                  ? "Save .prism…"
+                  : "Save .pzfx…"}
             </Button>
             {done.direction === "prism-to-hlx" && <Button onClick={() => void openInTiter()}>Open in Titer</Button>}
             <Button onClick={() => void copyReport()}>{copied ? "Copied" : "Copy report"}</Button>
@@ -262,7 +281,11 @@ export function ConverterDialog() {
               Choose .prism file…
             </Button>
           ) : (
-            <Button variant="accent" disabled={progress !== null} onClick={() => void convertCurrentProject()}>
+            <Button
+              variant="accent"
+              disabled={progress !== null}
+              onClick={() => void convertCurrentProject(direction === "hlx-to-prism" ? "prism" : "pzfx")}
+            >
               Convert this project…
             </Button>
           )}
