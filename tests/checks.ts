@@ -105,7 +105,7 @@ import { deletePalette, keepPalette, loadMyPalettes } from "../src/store/my-pale
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
 import { datasetColumns, isGrouped, isNested, readTable, setColumns, splitXY, xyPoints, type Dataset } from "../src/lib/dataset";
 import { prepareFit } from "../src/stats/xy/nonlinear-fit";
-import { adjustComparisonRows, adjustPValues, incompleteRows, missingColumn } from "../src/stats/column/base";
+import { adjustComparisonRows, adjustPValues, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
 import { compareTwoGroupsSpec } from "../src/stats/column/compare-two-groups";
 import { kruskalWallisSpec } from "../src/stats/column/kruskal-wallis";
@@ -7913,6 +7913,32 @@ check("P-value adjustments pass nulls through", () => {
 });
 
 check("an analysis runs on the data sets chosen, in their order", async () => {
+// CC-m10: the full column is re-serialized as an R literal on every run —
+// measured, not capped. The cost is linear and small at realistic sizes
+// (measured 2026-11-16: 100k rows ≈ 35 ms / 1.8 MB per column on the JS
+// side; the R-side parse dominates the round-trip, 100k rows ≈ 2.8 s,
+// 250k ≈ 4.2 s), so no warning or cap was added; this pin catches a
+// superlinear blowup.
+check("serializing a column as an R literal stays linear and small (CC-m10)", async () => {
+  const values = Array.from({ length: 100_000 }, (_, i) => Math.sin(i) * 1234.5678 + i * 0.001);
+  const started = Date.now();
+  const literal = rVec(values);
+  const ms = Date.now() - started;
+  ok(ms < 2000, `100k rows serialized in ${ms}ms`);
+  // Full-precision floats run ~18 bytes each: a superlinear blowup (or a
+  // formatting change) shows up here before it shows up in the app.
+  ok(literal.length > 1_600_000 && literal.length < 2_000_000, `100k rows -> ${literal.length} chars`);
+  strictEqual(literal.slice(0, 2), "c(");
+  ok(literal.endsWith(")"));
+  // The round-trip is dominated by R parsing the literal, not the join —
+  // and still far under the 5-minute eval watchdog at this size.
+  const evalStarted = Date.now();
+  const v = await evalNamedVector(`x<-${literal};c(m=mean(x),n=length(x))`);
+  ok(Date.now() - evalStarted < 30_000, `100k-row round-trip took ${Date.now() - evalStarted}ms`);
+  strictEqual(v.n, 100_000);
+  ok(v.m !== null && Math.abs(v.m - 50.02) < 0.01, `mean ${v.m}`);
+});
+
   const column = readTable(treatments(["Control", "Drug A", "Drug B"]));
   deepStrictEqual(
     setColumns(column, ["Drug B", "Control"]).map((c) => c.name),
