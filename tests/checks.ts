@@ -12753,6 +12753,88 @@ check("the Convert dialog finishes when requestAnimationFrame never fires (FL-r3
   }
 });
 
+// ── Bug-sweep cycle 6 #1: classic-curve + two-phase-decay .prism imports ──
+// The importer's NONLINEAR_MODELS mapped only 4PL / one-phase-decay / Line /
+// quadratic, so a Prism file carrying a Gaussian, Boltzmann sigmoid,
+// Lorentzian, sine-wave or two-phase-decay fit reported the analysis "not
+// yet supported" and dropped the node. The pin clones the real demo fixture
+// in memory and rewrites only the analysis equation name + parameter list —
+// the shape a real Prism export of that fit has — then asserts the import
+// lands as the matching model and the writer re-exports the same equation
+// name, so the fit round-trips. No binary fixtures: six 200 KB copies of
+// the demo would be pure bloat for a name lookup.
+check("classic-curve and two-phase-decay .prism fits import, and re-export with the same equation name", async () => {
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const demoBytes = readFileSync(join(root, "tests/testdata/prism/prism2R-demo_dataset.prism"));
+  const cases: { name: string; exportName: string; parameters: string[]; model: string }[] = [
+    { name: "Gaussian", exportName: "Gaussian", parameters: ["Amplitude", "Mean", "SD"], model: "gaussian" },
+    { name: "Boltzmann sigmoid", exportName: "Boltzmann sigmoid", parameters: ["Bottom", "Top", "V50", "Slope"], model: "boltzmann-sigmoid" },
+    { name: "Lorentzian", exportName: "Lorentzian", parameters: ["Amplitude", "Center", "Width"], model: "lorentzian" },
+    { name: "Sine wave", exportName: "Sine wave", parameters: ["Amplitude", "Wavelength", "PhaseShift", "Baseline"], model: "sine-wave" },
+    { name: "Two phase decay", exportName: "Two phase decay", parameters: ["Plateau", "Span1", "K1", "Span2", "K2"], model: "two-phase-decay" },
+    // The hyphenated spelling imports too, but the writer emits the guide's
+    // canonical unhyphenated name — the round-trip property is the model,
+    // not the spelling.
+    { name: "Two-phase decay", exportName: "Two phase decay", parameters: ["Plateau", "Span1", "K1", "Span2", "K2"], model: "two-phase-decay" },
+  ];
+  for (const c of cases) {
+    const zip = await JSZip.loadAsync(demoBytes);
+    const paramPaths = Object.keys(zip.files).filter((p) => p.startsWith("analyses/") && p.endsWith("/parameters.json"));
+    let target = "";
+    for (const p of paramPaths) {
+      const parsed = JSON.parse((await zip.file(p)!.async("string")) as string) as {
+        content?: { model?: { equation?: { name?: string } } };
+      };
+      if (parsed.content?.model?.equation?.name) target = p;
+    }
+    ok(target !== "", `no nonlinear parameters.json found for ${c.name}`);
+    const params = JSON.parse((await zip.file(target)!.async("string")) as string) as {
+      content: { model: { equation: { name: string; parameters: string[] } } };
+    };
+    params.content.model.equation.name = c.name;
+    params.content.model.equation.parameters = c.parameters;
+    zip.file(target, JSON.stringify(params));
+    const bytes = await zip.generateAsync({ type: "uint8array" });
+    const { project, report } = await convertPrism(bytes, `${c.model}.prism`);
+    const nodes = Object.values(project.nodes).filter(
+      (n) => n.type === "analysis" && n.analysisType === "nonlinear-regression",
+    );
+    ok(
+      nodes.length === 2 &&
+        nodes.every((n) => (n.analysisParams as { model?: string }).model === c.model),
+      `${c.name} should import as ${c.model} (2 nodes), got ${nodes.map((n) => (n.analysisParams as { model?: string }).model).join(", ") || "none"}`,
+    );
+    ok(report.analysesUnsupported.length === 0, `${c.name} should not be unsupported, got [${report.analysesUnsupported.join("; ")}]`);
+    const written = await writePrism(project, "1.0.7");
+    const writtenZip = await JSZip.loadAsync(written.bytes);
+    const writtenParamPaths = Object.keys(writtenZip.files).filter(
+      (p) => p.startsWith("analyses/") && p.endsWith("/parameters.json"),
+    );
+    // The demo also carries a survival analysis, which the writer writes
+    // too — so find the one parameters.json with a model equation.
+    let writtenName = "";
+    for (const p of writtenParamPaths) {
+      const parsed = JSON.parse((await writtenZip.file(p)!.async("string")) as string) as {
+        content?: { model?: { equation?: { name?: string } } };
+      };
+      if (parsed.content?.model?.equation?.name) writtenName = parsed.content.model.equation.name;
+    }
+    ok(
+      writtenName === c.exportName,
+      `${c.model} should re-export as “${c.exportName}”, got “${writtenName}”`,
+    );
+    const back = await convertPrism(written.bytes, "round-trip.prism");
+    const backNodes = Object.values(back.project.nodes).filter(
+      (n) => n.type === "analysis" && n.analysisType === "nonlinear-regression",
+    );
+    ok(
+      backNodes.length === 2 &&
+        backNodes.every((n) => (n.analysisParams as { model?: string }).model === c.model),
+      `${c.name} round-trip should re-import as ${c.model}, got ${backNodes.map((n) => (n.analysisParams as { model?: string }).model).join(", ") || "none"}`,
+    );
+  }
+});
+
 // ── Templates (.pzt), example files, method files (plan 38) ─────────────
 
 check("a template block round-trips, and a broken one is dropped, not an error", () => {

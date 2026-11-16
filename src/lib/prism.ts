@@ -231,6 +231,22 @@ const SUBCOLUMN_SUFFIXES: Record<string, string[] | null> = {
  *    Y=(Y0-Plateau)*exp(-K*X)+Plateau, terms Y0/Plateau/K.
  *  - "Line" is Titer line (lm y~x); "Second order polynomial (quadratic)"
  *    is Titer quadratic (lm y~x+I(x^2), terms B0/B1/B2).
+ *  - The classic curves (v2, c0509ba) map by their Prism guide names, each
+ *    checked against modelSpec's formula + terms, not just the label:
+ *    "Gaussian" is Titer gaussian (Y=Amplitude*exp(-0.5*((X-Mean)/SD)^2),
+ *    terms Amplitude/Mean/SD); "Boltzmann sigmoid" is Titer
+ *    boltzmann-sigmoid (Y=Bottom+(Top-Bottom)/(1+exp((V50-X)/Slope)),
+ *    terms Bottom/Top/V50/Slope); "Lorentzian" is Titer lorentzian
+ *    (Y=Amplitude/(1+((X-Center)/Width)^2), terms Amplitude/Center/Width);
+ *    "Sine wave" is Titer sine-wave (the nonzero-baseline form,
+ *    Y=Amplitude*sin((2*pi*X/Wavelength)+PhaseShift)+Baseline, terms
+ *    Amplitude/Wavelength/PhaseShift/Baseline); "Two phase decay" is Titer
+ *    two-phase-decay (Y=Plateau+Span1*exp(-K1*X)+Span2*exp(-K2*X), terms
+ *    Plateau/Span1/K1/Span2/K2 — Prism 8's classic "Two phase exponential
+ *    decay"; Prism 10's built-in spells the spans SpanFast/SpanSlow, same
+ *    curve family). Both spellings of the decay name map: the guide's page
+ *    title is "Two phase decay" but a hyphenated "Two-phase decay" is also
+ *    seen, and the importer keys on the name alone.
  *  Anything else is unsupported, never guessed. Equation names are trimmed
  *  before lookup — Prism writes at least one with a trailing space
  *  ("Second order polynomial (quadratic) "). */
@@ -242,6 +258,12 @@ const NONLINEAR_MODELS: Record<string, NonlinearModel> = {
   "One phase decay": "one-phase-decay",
   Line: "line",
   "Second order polynomial (quadratic)": "quadratic",
+  Gaussian: "gaussian",
+  "Boltzmann sigmoid": "boltzmann-sigmoid",
+  Lorentzian: "lorentzian",
+  "Sine wave": "sine-wave",
+  "Two phase decay": "two-phase-decay",
+  "Two-phase decay": "two-phase-decay",
 };
 
 const genId = (type: string) => `${type}_${Math.random().toString(36).slice(2, 10)}`;
