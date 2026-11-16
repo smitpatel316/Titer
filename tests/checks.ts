@@ -3648,6 +3648,24 @@ check("partial multiple-t-tests params fall back to the unpaired Gaussian Holm d
   ok(out.comparisons!.every((c) => c.p !== null), "every row completes with a P value");
 });
 
+// v1.5.0 m12: a row with < 2 replicates in a group is excluded, but only
+// the "Rows compared" count showed it — the dropped row was unnamed. The
+// notes now name it, so the user can see which row never got a test.
+check("multiple t tests name the rows left out for too few replicates (v1.5.0 m12)", async () => {
+  const data: TableData = {
+    columns: ["Title", "A:1", "A:2", "A:3", "B:1", "B:2", "B:3"],
+    rows: [
+      ["Day 1", "1", "2", "3", "4", "5", "6"],
+      ["Day 2", "2", null, null, "5", "6", "7"],
+      ["Day 3", "2", "3", "4", "5", "6", "7"],
+    ],
+  };
+  const out = await runAnalysis("multiple-t-tests", data, {} as AnalysisParams);
+  if ("error" in out) throw new Error(`expected a result, got ${out.error}`);
+  strictEqual(out.stats.find((s) => s.label === "Rows compared")?.value, 2);
+  ok(out.notes.includes("“Day 2”"), `notes must name the dropped row, got: ${out.notes}`);
+});
+
 // BUG-REPORT #26, leg 2 (FL-R3-26): installBatch used to call evalNamedVector
 // with no timeout, so the 300 s EVAL_TIMEOUT_MS aborted a package install
 // before the 360 s PACKAGE_INSTALL_TIMEOUT_MS — and classifyInstallError

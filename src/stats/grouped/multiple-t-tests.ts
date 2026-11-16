@@ -53,6 +53,11 @@ export async function runMultipleTTests(
   const testable = Array.from({ length: Math.min(rowsA.length, rowsB.length) }, (_, r) => r).filter(
     (r) => rowsA[r].length > 1 && rowsB[r].length > 1,
   );
+  // The rows the ≥2-replicates rule excluded, named in the notes — the
+  // "Rows compared" count alone never said which rows never got a test.
+  const droppedRows = Array.from({ length: Math.min(rowsA.length, rowsB.length) }, (_, r) => r).filter(
+    (r) => !testable.includes(r),
+  );
   if (testable.length === 0) {
     return { error: `Each row needs at least 2 ${params.paired ? "paired " : ""}replicate values in both groups.` };
   }
@@ -117,6 +122,11 @@ pa<-p.adjust(pr,"${params.correction === "fdr" ? "BH" : params.correction}")
       ])
     ).groups,
     notes: `${testLabel} at each row, ${CORRECTION_LABEL[params.correction]} across rows.` +
+      (droppedRows.length
+        ? droppedRows.length === 1
+          ? ` Row “${rowName(titles, droppedRows[0])}” was left out — it has fewer than 2 replicate values in at least one group.`
+          : ` Rows ${droppedRows.map((r) => `“${rowName(titles, r)}”`).join(", ")} were left out — each has fewer than 2 replicate values in at least one group.`
+        : "") +
       (params.gaussian && !pooled && comparisons.some((c) => c.p == null)
         ? " A row with no variation in either group has no p-value (a t test needs variation to compare)."
         : ""),
