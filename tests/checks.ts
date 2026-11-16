@@ -11701,6 +11701,30 @@ check("frequency-distribution clamps binCount to the plan maximum of 100 (m14)",
   ok(!hundred.notes.includes("clamped"), "an in-range request says nothing about clamping");
 });
 
+// v1.5.0 F5: the bin-count question carried min 2 / max 100 as input hints
+// only — no `validate`, so 1 sailed through to a runner error after Run and
+// 101–10000 were silently accepted. The wizard now blocks both before Run.
+check("the frequency wizard validates the bin count as a whole number from 2 to 100 (F5)", () => {
+  const table = readTable({
+    columns: ["Title", "V"],
+    rows: [["", "2.1"], ["", "3.5"], ["", "5"], ["", "7.4"], ["", "9.3"]],
+  });
+  const binCount = WIZARDS["frequency-distribution"]!
+    .questions({ binMode: "count" }, table)
+    .filter(Boolean)
+    .find((q) => (q as Question).id === "binCount") as Question;
+  if (binCount.kind !== "number") throw new Error("binCount is not a number question");
+  strictEqual(binCount.min, 2);
+  strictEqual(binCount.max, 100);
+  const message = "The number of bins must be a whole number between 2 and 100.";
+  strictEqual(binCount.validate?.(1), message);
+  strictEqual(binCount.validate?.(101), message);
+  strictEqual(binCount.validate?.(500), message);
+  strictEqual(binCount.validate?.(2.5), message);
+  strictEqual(binCount.validate?.(2), undefined);
+  strictEqual(binCount.validate?.(100), undefined);
+});
+
 check("transform concentrations converts between molar units by exact powers of 1000", async () => {
   // Each molar step is ×1000, up and down the scale.
   strictEqual(concentrationFactor("µM", "nM"), 1000);
