@@ -17,6 +17,31 @@ export type RVector = Record<string, number | null>;
 let engine: Promise<WebR> | null = null;
 /** The booted R, while one is live in this window — what `interruptR` talks to. */
 let liveWebR: WebR | null = null;
+
+/** The R engine's boot state, for the UI: a failed boot used to be swallowed
+ *  (`startR().catch(() => {})` in the engine window) with nothing to show
+ *  for it until an analysis ran and failed (CC-m7). `booting` until the
+ *  first boot settles — and again after `resetR()` abandons the engine, so
+ *  the next evaluation's re-boot starts from there; `failed` carries the
+ *  boot error; `ready` once an R is live. The engine window publishes
+ *  changes to project windows (see `publishEngineBootStatus`); tests and
+ *  `npm run web` read this same state in this window. */
+export type EngineBootStatus = { state: "booting" | "ready" | "failed"; error?: string };
+let bootStatus: EngineBootStatus = { state: "booting" };
+const bootStatusListeners = new Set<(status: EngineBootStatus) => void>();
+export function getEngineBootStatus(): EngineBootStatus {
+  return bootStatus;
+}
+export function onEngineBootStatus(handler: (status: EngineBootStatus) => void): () => void {
+  bootStatusListeners.add(handler);
+  return () => {
+    bootStatusListeners.delete(handler);
+  };
+}
+function setEngineBootStatus(status: EngineBootStatus): void {
+  bootStatus = status;
+  for (const listener of bootStatusListeners) listener(status);
+}
 let remote: ((code: string) => Promise<RVector>) | null = null;
 /** Stops the in-flight remote evaluation (the app's engine window), if one is wired. */
 let remoteCancel: (() => Promise<void>) | null = null;
@@ -51,6 +76,7 @@ export function startR(baseUrl?: string, opts?: { timeoutMs?: number }): Promise
   const timeoutMs = opts?.timeoutMs ?? BOOT_TIMEOUT_MS;
   const url = baseUrl ?? bootBaseUrl ?? "/webr/";
   return (engine ??= (async () => {
+    setEngineBootStatus({ state: "booting" });
     const { WebR } = await import("webr");
     const webR = new WebR({ baseUrl: url });
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -75,10 +101,12 @@ export function startR(baseUrl?: string, opts?: { timeoutMs?: number }): Promise
     // The boot succeeded: this is the location a later bare re-boot reuses.
     bootBaseUrl = url;
     liveWebR = webR;
+    setEngineBootStatus({ state: "ready" });
     return webR;
   })().catch((err) => {
     engine = null;
     liveWebR = null;
+    setEngineBootStatus({ state: "failed", error: err instanceof Error ? err.message : String(err) });
     throw err;
   }));
 }
@@ -181,6 +209,9 @@ export function interruptR(): void {
 export function resetR(): void {
   engine = null;
   liveWebR = null;
+  // No live engine any more: the next evaluation boots a fresh R, so the
+  // boot state goes back to pending (CC-m7).
+  setEngineBootStatus({ state: "booting" });
   const installing = [...inflight.keys()];
   for (const ticket of inflight.values()) {
     ticket.cancel.current = true;

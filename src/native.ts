@@ -9,7 +9,7 @@ import { Image } from "@tauri-apps/api/image";
 import { Menu, Submenu, type MenuOptions } from "@tauri-apps/api/menu";
 import { message, save } from "@tauri-apps/plugin-dialog";
 import type { RVector } from "./stats/webr";
-import { cancelActiveEvals, interruptR, resetR } from "./stats/webr";
+import { cancelActiveEvals, interruptR, resetR, type EngineBootStatus } from "./stats/webr";
 import {
   createEvalQueue,
   setRQueueSnapshot,
@@ -288,6 +288,40 @@ export function setRecentDocuments(paths: string[]) {
 export function onCloseRequested(canClose: () => Promise<boolean>) {
   if (!isNative) return () => {};
   const off = win().onCloseRequested(async (event) => {
+/** In the engine window: publish the R boot status to every project window
+ *  (CC-m7). A failed boot is no longer silent: project windows show it in
+ *  the analysis view instead of leaving the user to discover it on the
+ *  first analysis. No-op outside the app. */
+export function publishEngineBootStatus(status: EngineBootStatus) {
+  if (!isNative) return;
+  void getCurrentWebviewWindow().emit("r-boot-status", status).catch(() => {});
+}
+
+/** In the engine window: answer a project window asking for the current
+ *  boot status (a window opened after the boot missed the publish).
+ *  No-op outside the app. Returns the unlisten function. */
+export async function onEngineBootStatusRequest(handler: () => void) {
+  if (!isNative) return () => {};
+  return getCurrentWebviewWindow().listen("r-boot-status-request", handler);
+}
+
+/** In a project window: keep this window's copy of the R engine's boot
+ *  status current (the engine window publishes "r-boot-status" whenever it
+ *  changes). The listen attaches before asking, so the answer cannot slip
+ *  past it. No-op outside the app (tests, `npm run web`) — the status
+ *  stays null there. Returns the unlisten function. */
+export async function onEngineBootStatus(handler: (status: EngineBootStatus) => void) {
+  if (!isNative) return () => {};
+  const off = await getCurrentWebviewWindow().listen<EngineBootStatus>("r-boot-status", ({ payload }) =>
+    handler(payload),
+  );
+  // Ask the engine window for its current status: a window opened after
+  // the boot missed the publish, and a retry that finally booted must
+  // clear a failure this window already showed.
+  void getCurrentWebviewWindow().emit("r-boot-status-request").catch(() => {});
+  return off;
+}
+
     if (await canClose()) return;
     event.preventDefault();
     void invoke("cancel_quit");

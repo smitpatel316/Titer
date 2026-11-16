@@ -9,7 +9,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cancelActiveEvals, EvalCancelledError, ensurePackages, evalNamedVector, packageDiagnostics, packageStatus, resetR, setPackageRepo, startR } from "../src/stats/webr";
+import { cancelActiveEvals, EvalCancelledError, ensurePackages, evalNamedVector, getEngineBootStatus, onEngineBootStatus, packageDiagnostics, packageStatus, resetR, setPackageRepo, startR, type EngineBootStatus } from "../src/stats/webr";
 import {
   createEvalQueue,
   getRQueueSnapshot,
@@ -202,6 +202,7 @@ import {
 } from "../src/lib/figure";
 import { buildPanelFigure } from "../src/views/figures/panel-figure";
 import { ensureSaveExtension } from "../src/native";
+import { engineStatusText, getEngineStatus, onEngineStatus, setEngineStatus } from "../src/stats/engine-status";
 import { buildOfficeDocument, officeExtension } from "../src/lib/office-export";
 import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
@@ -13650,6 +13651,61 @@ check("hung R boot times out and retry boots fresh", async () => {
   // evaluation that follows it proves R itself is healthy.
   await startR(fileURLToPath(new URL("../node_modules/webr/dist/", import.meta.url)));
   deepStrictEqual(await evalNamedVector("c(a=1)"), { a: 1 });
+});
+
+// CC-m7: a failed R boot is recorded as engine boot status, not swallowed.
+// `startR().catch(() => {})` in the engine window used to drop the failure
+// with nothing to show for it until an analysis ran and failed.
+check("a failed R boot is recorded as engine boot status, and a good boot clears it", async () => {
+  const seen: EngineBootStatus[] = [];
+  const off = onEngineBootStatus((s) => seen.push({ ...s }));
+  const dir = mkdtempSync(join(tmpdir(), "helix-failed-webr-"));
+  try {
+    const real = fileURLToPath(new URL("../node_modules/webr/dist/", import.meta.url));
+    for (const name of readdirSync(real)) {
+      if (name === "webr-worker.js") continue;
+      symlinkSync(join(real, name), join(dir, name));
+    }
+    writeFileSync(
+      join(dir, "webr-worker.js"),
+      "// Never responds: the worker starts but never becomes ready.\nsetInterval(() => {}, 3_600_000);\n",
+    );
+    resetR();
+    strictEqual(getEngineBootStatus().state, "booting");
+    await rejects(
+      startR(`${dir}/`, { timeoutMs: 1_000 }),
+      (err: unknown) => err instanceof Error && /took longer than 1 second to start/.test(err.message),
+    );
+    // The failure is recorded, with the reason — not swallowed.
+    strictEqual(getEngineBootStatus().state, "failed");
+    ok((getEngineBootStatus().error ?? "").includes("took longer than 1 second to start"));
+    ok(seen.some((s) => s.state === "failed"), `listener saw ${JSON.stringify(seen)}`);
+  } finally {
+    off();
+    rmSync(dir, { recursive: true, force: true });
+  }
+  // A good boot works on the same engine slot and clears the failure.
+  await startR(fileURLToPath(new URL("../node_modules/webr/dist/", import.meta.url)));
+  strictEqual(getEngineBootStatus().state, "ready");
+  deepStrictEqual(await evalNamedVector("c(a=1)"), { a: 1 });
+});
+
+check("the engine boot line shows only a failed boot, with its reason", () => {
+  strictEqual(engineStatusText(null), "");
+  strictEqual(engineStatusText({ state: "booting" }), "");
+  strictEqual(engineStatusText({ state: "ready" }), "");
+  const failed = engineStatusText({ state: "failed", error: "Cannot find module '/webr/webr-worker.js'" });
+  ok(failed.includes("failed to start") && failed.includes("Cannot find module"));
+  // The store round-trips the latest status to subscribers.
+  const seen: EngineBootStatus[] = [];
+  const off = onEngineStatus((s) => seen.push(s));
+  try {
+    setEngineStatus({ state: "failed", error: "boom" });
+    strictEqual(getEngineStatus()?.state, "failed");
+    deepStrictEqual(seen, [{ state: "failed", error: "boom" }]);
+  } finally {
+    off();
+  }
 });
 
 // ── M17: the R queue is an explicit FIFO, and the UI shows it ───────────
