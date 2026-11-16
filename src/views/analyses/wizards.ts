@@ -1519,6 +1519,10 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           kind: "number",
           label: "Bin width",
           initial: width,
+          // F6 (v1.5.0): no validation at all — 0/negative sailed through
+          // to a runner error after Run. The error blocks Next/Run before
+          // either, in the runner's own wording.
+          validate: (v) => (v > 0 ? undefined : "The bin width must be greater than 0."),
         },
         mode === "count" && {
           id: "binCount",
@@ -1528,6 +1532,13 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           initial: k,
           min: 2,
           max: 100,
+          // F5 (v1.5.0): min/max are input hints only — without `validate`,
+          // 1 sailed through to a runner error after Run and 101–10000 were
+          // silently accepted. The error blocks Next/Run before either.
+          validate: (v) =>
+            Number.isInteger(v) && v >= 2 && v <= 100
+              ? undefined
+              : "The number of bins must be a whole number between 2 and 100.",
         },
         (mode === "width" || mode === "count") && {
           id: "startAt",

@@ -99,6 +99,12 @@ function binEdges(values: number[], p: FrequencyDistributionParams): {
 } {
   const min = Math.min(...values);
   const max = Math.max(...values);
+  // m14 (v1.5.0): plan 06 caps the bin count at 100. Clamp here — inside
+  // binEdges, shared by the runner and the histogram graph — so neither can
+  // ever draw more than 100 bins from a hand-built request. The wizard
+  // blocks > 100 at entry and the file loader clamps saved values the same
+  // way; the runner states the clamp in its notes.
+  if (p.binMode === "count" && p.binCount! > 100) p = { ...p, binCount: 100 };
   if (min === max) {
     // A constant column has no range: R's pretty() expands it (hist(42) ->
     // [40, 50], hist(rep(5, 5)) -> [0, 5]) instead of binning a zero-width
@@ -225,9 +231,12 @@ export async function runFrequencyDistribution(
   if (p.binMode === "count" && (p.binCount == null || !Number.isInteger(p.binCount) || p.binCount < 2)) {
     return { error: "Number of bins must be a whole number of at least 2." };
   }
-  if (p.binMode === "count" && p.binCount! > 10000) {
-    return { error: "Number of bins must be at most 10,000." };
-  }
+  // m14 (v1.5.0): plan 06 caps the bin count at 100 — clamp, don't error:
+  // the wizard blocks > 100 at entry and the file loader clamps saved
+  // values the same way, so only a hand-built request reaches here, and it
+  // still gets a valid histogram. The clamp is stated in the notes below.
+  const requestedBins = p.binMode === "count" ? p.binCount! : undefined;
+  if (requestedBins !== undefined && requestedBins > 100) p.binCount = 100;
   const groups = dataGroups(columns);
   if (groups.length < 1) {
     return { error: "This needs at least 1 column containing numeric data." };
@@ -260,6 +269,9 @@ export async function runFrequencyDistribution(
 
   const notes = [
     "Bins are (lower, upper]; the first bin includes the minimum, so no value is dropped.",
+    ...(requestedBins !== undefined && requestedBins > 100
+      ? [`Requested ${requestedBins} bins; clamped to the plan maximum of 100.`]
+      : []),
     ...perColumn.map(({ column, bins, binWidth, requestedBins, edges, skipped }) => {
       const min = Math.min(...column.values);
       const max = Math.max(...column.values);
