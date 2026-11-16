@@ -1260,15 +1260,12 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
     questions: (a, table) => {
       const grouped = isGroupedTable(table);
       if (grouped) {
+        // Matchedness first (F10): the interaction is only meaningful for
+        // matched subjects, and asking it first meant a not-matched answer
+        // silently discarded a choice the user had just made (the fallback
+        // is ordinary two-way ANOVA). Not matched, the interaction is never
+        // asked at all — the wizard ends after this question.
         return [
-          choice(
-            "interaction",
-            "Fixed factor A is the column groups, fixed factor B is the rows (time/condition). The interaction A×B is included by default.",
-            [
-              ["yes", "Include the A×B interaction"],
-              ["no", "Main effects only — no interaction"],
-            ],
-          ),
           choice(
             "matched",
             "Subjects are the replicate columns within each group: replicate 1 in group A is the same subject as replicate 1 in group B, measured at every row. The model fits a random intercept per subject, so it uses every observed value even when some are missing.",
@@ -1277,6 +1274,15 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
               ["not-matched", "Replicates are NOT the same subjects — stop and use ordinary two-way ANOVA instead"],
             ],
           ),
+          a.matched !== "not-matched" &&
+            choice(
+              "interaction",
+              "Fixed factor A is the column groups, fixed factor B is the rows (time/condition). The interaction A×B is included by default.",
+              [
+                ["yes", "Include the A×B interaction"],
+                ["no", "Main effects only — no interaction"],
+              ],
+            ),
         ];
       }
       const rowCount = table.numeric[0]?.byRow.length ?? 0;

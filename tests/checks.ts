@@ -8315,8 +8315,10 @@ check("the mixed-effects wizard asks the layout's questions, and the menu offers
   deepStrictEqual(asked(column, { groups: "yes" }), ["sets", "matched", "groups", "groupName", "groupLevels"]);
   const setsQ = WIZARDS["mixed-effects"]!.questions({}, readTable(column))[0];
   ok(setsQ && setsQ.kind === "names" && setsQ.min === 3);
-  // A Grouped table: interaction, then matched-subjects.
-  deepStrictEqual(asked(grouped()), ["interaction", "matched"]);
+  // A Grouped table: matched-subjects, then the interaction (F10 — the
+  // interaction is only asked when matched, so a not-matched answer never
+  // discards a choice the user made).
+  deepStrictEqual(asked(grouped()), ["matched", "interaction"]);
   // The finish names the time factor from the columns' shared prefix (T0–T3 → "T").
   deepStrictEqual(
     WIZARDS["mixed-effects"]!.finish({ sets: ["T0", "T1", "T2", "T3"], matched: "matched" }, readTable(column)),
@@ -8431,6 +8433,26 @@ check("the dose-response — Special wizard asks bUnits before the B values (F9)
     "B:Y2",
   ]);
   deepStrictEqual(order({ model: "operational-partial", ys: ["Y1", "Y2"], first: "Y1" }), ["model", "ys", "first"]);
+});
+
+check("the grouped mixed-effects wizard asks matchedness before the interaction, and never asks it when not matched (F10)", () => {
+  const asked = (a: Answers = {}) =>
+    WIZARDS["mixed-effects"]!.questions(a, readTable(grouped())).flatMap((q) => (q ? [q.id] : []));
+  deepStrictEqual(asked(), ["matched", "interaction"]);
+  deepStrictEqual(asked({ matched: "matched" }), ["matched", "interaction"]);
+  // Not matched: the interaction is never asked, so no answer of the user's is
+  // discarded by the ordinary-two-way-ANOVA fallback.
+  deepStrictEqual(asked({ matched: "not-matched" }), ["matched"]);
+  deepStrictEqual(WIZARDS["mixed-effects"]!.finish({ matched: "not-matched" }, readTable(grouped())), {
+    type: "two-way-anova",
+    params: { design: "ordinary", posthoc: "none", posthocTarget: "groups" },
+  });
+  // Matched: the interaction choice is kept (default included, "no" excludes it).
+  const kept = WIZARDS["mixed-effects"]!.finish({ matched: "matched", interaction: "no" }, readTable(grouped()));
+  strictEqual(kept.type, "mixed-effects");
+  strictEqual((kept.params as { interaction?: boolean }).interaction, false);
+  const included = WIZARDS["mixed-effects"]!.finish({ matched: "matched" }, readTable(grouped()));
+  strictEqual((included.params as { interaction?: boolean }).interaction, true);
 });
 
 check("mixed-effects skips entirely empty rows in a Grouped table and reports a dropped rank-deficient term as NA", async () => {
