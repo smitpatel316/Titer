@@ -156,6 +156,27 @@ const doseLog = table(
   ],
 );
 
+/** A user-defined equation's fixture (v2 item 23): the same exponential decay the
+ *  checks.ts user-defined check fits — Y = 10·exp(−0.5·X) + 2, so a fit of
+ *  `Y = A*exp(-k*X) + C` from (A 8, k 0.3, C 1) must recover A ≈ 10, k ≈ 0.5,
+ *  C ≈ 2. The disagreements() loop runs it like every other model: without an
+ *  equation the model cannot run at all, so the loop carries one. */
+const userDefined = table(
+  ["Title", "X", "Y1"],
+  [
+    ["", "0", "12"],
+    ["", "0.5", "9.788007831"],
+    ["", "1", "8.065306597"],
+    ["", "1.5", "6.723665527"],
+    ["", "2", "5.678794412"],
+    ["", "3", "4.231301601"],
+    ["", "4", "3.353352832"],
+    ["", "5", "2.820849986"],
+    ["", "6", "2.497870684"],
+    ["", "8", "2.183156389"],
+  ],
+);
+
 /** The textbook dose-response data (Linux 4PL fix): X log10 −2..2, a
  *  near-perfect sigmoid (Bottom −1.3512, Top 101.3511, LogEC50 ≈ 0,
  *  HillSlope 0.7766, R² = 0.99926, SS = 9.1933 — verified in R and scipy).
@@ -3566,7 +3587,12 @@ async function disagreements(): Promise<string[]> {
   // two-phase/plateau/association models on their expX series, the enzyme
   // models on their enzymeS series — running them on doseLog's log-X (or
   // the wrong series) is a convergence/validation error, not a fit.
-  const curveData: Partial<Record<NonlinearModel, [TableData, string?, { ligandConcentration?: number }?]>> = {
+  const curveData: Partial<
+    Record<
+      NonlinearModel,
+      [TableData, string?, { ligandConcentration?: number; customEquation?: string; customParameters?: Record<string, number> }?]
+    >
+  > = {
     "inhibitor-3pl-logx": [doseFall],
     "two-phase-decay": [expX, "B"],
     "plateau-decay": [expX, "E"],
@@ -3581,6 +3607,14 @@ async function disagreements(): Promise<string[]> {
     "exponential-growth": [growth],
     "one-phase-decay": [decay],
     "michaelis-menten": [enzyme],
+    // The user-defined model needs its equation and starting values — without
+    // them the fit is refused by design, so it runs on its own fixture with
+    // the same equation and starts the checks.ts user-defined check uses.
+    "user-defined": [
+      userDefined,
+      "Y1",
+      { customEquation: "Y = A*exp(-k*X) + C", customParameters: { A: 8, k: 0.3, C: 1 } },
+    ],
     // Plan 28: the competition models run on their own fixtures — the
     // generic fallback (doseLog/doseRaw) is a rising one-site curve, which
     // a falling two-site curve cannot fit, and the homologous model needs
@@ -3603,7 +3637,8 @@ async function disagreements(): Promise<string[]> {
       (sum, x, i) =>
         positiveXOnly(model) && x <= 0
           ? sum
-          : sum + (pairs.y[i] - doseCurveAt(model, r.coefficients!, x, extra?.ligandConcentration)) ** 2,
+          : sum +
+            (pairs.y[i] - doseCurveAt(model, r.coefficients!, x, extra?.ligandConcentration, extra?.customEquation)) ** 2,
       0,
     );
     const rss = r.fit?.rows.find((row) => row.label === "Sum of squares")?.values?.[0];
