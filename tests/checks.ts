@@ -207,6 +207,7 @@ import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
 import { evaluate as evaluateCurve } from "../src/views/graphs/fitted-curve";
 import { parseInhibitorConcentration } from "../src/stats/xy/enzyme-inhibition";
+import { runGlobalFit } from "../src/stats/xy/global-fit";
 import {
   cumulativeIntegral,
   equallySpaced,
@@ -11842,6 +11843,45 @@ check("m20 non-finite numeric params are refused with a clean error", async () =
     if (!("error" in r) || !r.error.includes("finite"))
       throw new Error(`frequency startAt=${startAt}: ${"error" in r ? r.error : "ran"}, expected a finite-number error`);
   }
+});
+
+check("m21 per-series R² is null, not NaN, when the evaluator returns NaN", async () => {
+  // A global fit whose closed-form evaluator returns NaN (e.g. a log of a
+  // negative fitted value) made rSquared return NaN — JSON renders it as
+  // null, but the in-memory outcome carried a real NaN, which the results
+  // view would print as "NaN". The fit itself still runs; only the R² is
+  // unknowable, so it is null like the constant-Y case.
+  const g = await runGlobalFit(
+    [{ name: "S", x: [1, 2, 3, 4, 5], y: [2, 4, 6, 8, 10], covariate: 0 }],
+    {
+      formula: "a+b*x",
+      params: [
+        { name: "a", shared: true, start: () => 0 },
+        { name: "b", shared: true, start: () => 1 },
+      ],
+      evaluate: () => Math.sqrt(-1),
+    },
+  );
+  strictEqual(g.perSeries[0].rSquared, null, "R² with a NaN evaluator should be null, not NaN");
+  // And a finite evaluator still yields a real R²: the linear fit is exact.
+  const good = await runGlobalFit(
+    [{ name: "S", x: [1, 2, 3, 4, 5], y: [2, 4, 6, 8, 10], covariate: 0 }],
+    {
+      formula: "a+b*x",
+      params: [
+        { name: "a", shared: true, start: () => 0 },
+        { name: "b", shared: true, start: () => 1 },
+      ],
+      evaluate: (coefficients, _series, _i, x) => {
+        const a = coefficients.find((c) => c.term === "a")?.estimate ?? 0;
+        const b = coefficients.find((c) => c.term === "b")?.estimate ?? 0;
+        return a + b * x;
+      },
+    },
+  );
+  const goodR2 = good.perSeries[0].rSquared;
+  if (goodR2 == null || Math.abs(goodR2 - 1) > 1e-9)
+    throw new Error(`R² with an exact linear evaluator: ${goodR2}, expected 1`);
 });
 
 check("transform concentrations converts between molar units by exact powers of 1000", async () => {
