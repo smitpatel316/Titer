@@ -17,11 +17,11 @@ import { evaluate } from "../../views/graphs/fitted-curve";
 import { NONLINEAR_MODELS } from "../types";
 
 /** The equations the wizard offers, in Prism's spirit: the fitter's whole
- *  library, then the Gaussian — except a user-defined equation, which has
- *  no equation for the wizard to plot (see PlotFunctionModel). */
+ *  library (which now includes the Gaussian and the other classic curves).
+ *  A user-defined equation stays out — it has no equation for the wizard
+ *  to plot (see PlotFunctionModel). */
 export const PLOT_FUNCTION_MODELS: PlotFunctionModel[] = [
   ...NONLINEAR_MODELS.filter((m): m is Exclude<NonlinearModel, "user-defined"> => m !== "user-defined"),
-  "gaussian",
 ];
 
 /** The equation's plain-language name, as the wizard, the results and the graph note show it. */
@@ -71,6 +71,9 @@ export const PLOT_FUNCTION_DEFAULTS: Record<PlotFunctionModel, Record<string, nu
   "two-site-competition-x": { Bottom: 0, Top: 100, IC50Hi: 0.001, IC50Lo: 1, FractionHi: 0.5 },
   "homologous-competition-logx": { Bmax: 100, LogKd: -9, Bottom: 0 },
   gaussian: { Amplitude: 100, Mean: 0, SD: 1 },
+  "boltzmann-sigmoid": { Bottom: 0, Top: 100, V50: 0, Slope: 1 },
+  lorentzian: { Amplitude: 100, Center: 0, Width: 1 },
+  "sine-wave": { Amplitude: 1, Wavelength: 10, PhaseShift: 0, Baseline: 0 },
 };
 
 /** The wizard's starting X range, per model: log-X curves need X > 0, raw
