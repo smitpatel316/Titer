@@ -8209,6 +8209,68 @@ check("a constant or collinear predictor is named, not a crash, in multiple regr
   ok(!("error" in good), `clean fit should run, got ${"error" in good ? good.error : "ok"}`);
 });
 
+// #150 (Batch 2 triage): a constant DEPENDENT in multiple linear regression
+// used to fit and return null R² / adjusted R² / F / P with no message —
+// R fits it (intercept only, slopes 0) but summary() gives NULL for the
+// whole model table. The runner now names the constant dependent instead.
+// (The predictor side is R3-23 above; the dependent side had no guard.)
+check("a constant dependent in multiple linear regression is named, not a row of nulls (#150)", async () => {
+  const table: TableData = {
+    columns: ["Title", "Y", "X1", "X2"],
+    rows: [
+      ["", "5", "1", "1"],
+      ["", "5", "2", "0"],
+      ["", "5", "3", "2"],
+      ["", "5", "4", "1"],
+      ["", "5", "5", "0"],
+      ["", "5", "6", "2"],
+      ["", "5", "7", "1"],
+      ["", "5", "8", "0"],
+    ],
+  };
+  const params = { dependent: "Y", predictors: ["X1", "X2"] };
+  deepStrictEqual(await runAnalysis("multiple-regression", table, params), {
+    error:
+      "“Y” is constant — Multiple linear regression cannot fit a model when the dependent " +
+      "variable has no variation. Enter values that vary and try again.",
+  });
+  // Constant only on complete cases (the one varying row has a blank → dropped): still named.
+  const gapped: TableData = {
+    columns: ["Title", "Y", "X1", "X2"],
+    rows: [
+      ["", "5", "1", "1"],
+      ["", "9", "2", ""],
+      ["", "5", "3", "2"],
+      ["", "5", "4", "1"],
+      ["", "5", "5", "0"],
+      ["", "5", "6", "2"],
+      ["", "5", "7", "1"],
+      ["", "5", "8", "0"],
+    ],
+  };
+  deepStrictEqual(await runAnalysis("multiple-regression", gapped, params), {
+    error:
+      "“Y” is constant — Multiple linear regression cannot fit a model when the dependent " +
+      "variable has no variation. Enter values that vary and try again.",
+  });
+  // A varying dependent still fits: the guard must not fire on good data.
+  const varying: TableData = {
+    columns: ["Title", "Y", "X1", "X2"],
+    rows: [
+      ["", "3", "1", "1"],
+      ["", "5", "2", "0"],
+      ["", "4", "3", "2"],
+      ["", "6", "4", "1"],
+      ["", "7", "5", "0"],
+      ["", "5", "6", "2"],
+      ["", "8", "7", "1"],
+      ["", "6", "8", "0"],
+    ],
+  };
+  const good = await runAnalysis("multiple-regression", varying, params);
+  ok(!("error" in good), `varying dependent should fit, got ${"error" in good ? good.error : "ok"}`);
+});
+
 check("a constant or collinear predictor is named, not a crash, in multiple logistic regression (R3-23)", async () => {
   const table = (x2: string[]): TableData => ({
     columns: ["Title", "Y", "X1", "X2"],
