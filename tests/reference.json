@@ -33352,7 +33352,9 @@
      "arrowwidth": 1,
      "arrowcolor": "#111827",
      "ax": 30,
-     "ay": -30,
+     "ay": 30,
+     "xanchor": "left",
+     "yanchor": "top",
      "font": {
       "color": "#111827",
       "size": 12
