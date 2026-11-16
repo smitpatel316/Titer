@@ -88,12 +88,12 @@ export const demingRegressionSpec: ColumnTestSpec<DemingRegressionParams> = {
       `x<-${rVec(groups[0].values)};y<-${rVec(groups[1].values)};lam<-${lambda};n<-length(x);` +
       `xb<-mean(x);yb<-mean(y);sxx<-sum((x-xb)^2);syy<-sum((y-yb)^2);sxy<-sum((x-xb)*(y-yb));` +
       `d<-syy-lam*sxx;b<-(d+sqrt(d^2+4*lam*sxy^2))/(2*sxy);a<-yb-b*xb;` +
-      // Leave-one-out jackknife: refit on each n−1 subset, SE = √((k−1)·Σ(θᵢ − θ̄)²)
-      // over the k usable replicates. A subset whose X and Y do not covary
+      // Leave-one-out jackknife: refit on each n−1 subset, SE = √((k−1)/k·Σ(θᵢ − θ̄)²)
+      // (Efron's jackknife SE) over the k usable replicates. A subset whose X and Y do not covary
       // (sxy2 = 0) has no defined Deming slope, so it contributes no replicate
       // instead of a NaN one; looDropped counts the skipped subsets.
       `th<-sapply(1:n,function(i){xx<-x[-i];yy<-y[-i];xbm<-mean(xx);ybm<-mean(yy);sx<-sum((xx-xbm)^2);sy<-sum((yy-ybm)^2);sxy2<-sum((xx-xbm)*(yy-ybm));dd<-sy-lam*sx;bb<-if(is.na(sxy2)||sxy2==0)NA else (dd+sqrt(dd^2+4*lam*sxy2^2))/(2*sxy2);if(is.na(bb)||!is.finite(bb))bb<-NA;c(bb,ybm-bb*xbm)});` +
-      `k<-sum(!is.na(th[1,]));seb<-if(k<2)NA else sqrt((k-1)*sum((th[1,]-mean(th[1,],na.rm=TRUE))^2,na.rm=TRUE));sea<-if(k<2)NA else sqrt((k-1)*sum((th[2,]-mean(th[2,],na.rm=TRUE))^2,na.rm=TRUE));` +
+      `k<-sum(!is.na(th[1,]));seb<-if(k<2)NA else sqrt((k-1)/k*sum((th[1,]-mean(th[1,],na.rm=TRUE))^2,na.rm=TRUE));sea<-if(k<2)NA else sqrt((k-1)/k*sum((th[2,]-mean(th[2,],na.rm=TRUE))^2,na.rm=TRUE));` +
       `m<-lm(y~x);` +
       `c(slope=b,intercept=a,slopeSe=seb,interceptSe=sea,` +
       `slopeCiLo=b-1.96*seb,slopeCiHi=b+1.96*seb,interceptCiLo=a-1.96*sea,interceptCiHi=a+1.96*sea,` +

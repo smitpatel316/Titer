@@ -5109,11 +5109,11 @@
    },
    {
     "label": "Slope 95% CI lower",
-    "value": 0.6998148465
+    "value": 0.8889062597
    },
    {
     "label": "Slope 95% CI upper",
-    "value": 1.252897887
+    "value": 1.063806474
    },
    {
     "label": "Y-intercept",
@@ -5121,11 +5121,11 @@
    },
    {
     "label": "Intercept 95% CI lower",
-    "value": -1.331433169
+    "value": -0.2500657399
    },
    {
     "label": "Intercept 95% CI upper",
-    "value": 1.831513132
+    "value": 0.7501457031
    },
    {
     "label": "Lambda",
@@ -5175,11 +5175,11 @@
    },
    {
     "label": "Slope 95% CI lower",
-    "value": 0.7001480543
+    "value": 0.8923972522
    },
    {
     "label": "Slope 95% CI upper",
-    "value": 1.262467459
+    "value": 1.070218261
    },
    {
     "label": "Y-intercept",
@@ -5187,11 +5187,11 @@
    },
    {
     "label": "Intercept 95% CI lower",
-    "value": -1.383977006
+    "value": -0.2853024859
    },
    {
     "label": "Intercept 95% CI upper",
-    "value": 1.829591682
+    "value": 0.7309171614
    },
    {
     "label": "Lambda",
