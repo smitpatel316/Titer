@@ -7856,6 +7856,37 @@ check("a Cox covariate constant only after complete-case filtering names itself 
   );
 });
 
+// FF-F17: a missing stratify column must not error the whole Cox analysis —
+// `stratifyBy` is only read by the survival-curves graph overlay (which
+// draws unstratified when it is gone), never by the Cox runner, so the
+// missing-column gate must not include it. Same data as the R3-23 check
+// above, with a stratify column that doesn't exist: the outcome is the
+// same as without it.
+check("a missing stratify column does not error the Cox analysis (FF-F17)", async () => {
+  const data: TableData = {
+    columns: ["Title", "Time", "Status", "Trt", "Age"],
+    rows: [
+      ["", "1", "1", null, "20"],
+      ["", "2", "1", null, "30"],
+      ["", "3", "0", "1", "40"],
+      ["", "4", "1", "0", "40"],
+      ["", "5", "0", "1", "40"],
+      ["", "6", "1", "0", "40"],
+      ["", "7", "1", "1", "40"],
+      ["", "8", "0", "0", "40"],
+    ],
+  };
+  deepStrictEqual(
+    await runAnalysis("cox-proportional-hazards", data, {
+      time: "Time",
+      status: "Status",
+      covariates: ["Trt", "Age"],
+      stratifyBy: "Gone",
+    }),
+    { error: "Covariate “Age” has no variation." },
+  );
+});
+
 // R3-23: a constant or collinear predictor was aliased by R —
 // summary(m)$coefficients drops the aliased row, so co[t + 1, ] crashed
 // with "subscript out of bounds". The runners now check is.na(coef(m))
