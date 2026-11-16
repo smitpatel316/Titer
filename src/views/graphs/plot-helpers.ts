@@ -388,6 +388,18 @@ export function axesRangeInputs(graphType: GraphType): { x: boolean; y: boolean 
   return { x: true, y: true };
 }
 
+/** Whether the Format panel offers a Linear/Log10/Log2 Scale row for each
+ *  axis of this graph. An ROC curve lives on [0, 1] on both axes, where a
+ *  log scale is meaningless (#151): on a log axis the forced [0, 1] range
+ *  reads as [1, 10] in data values, so the whole curve falls outside the
+ *  window — and the (0,0)/(1,1) anchors have no log at all. Every other
+ *  graph offers both rows (the Y row is further gated by family in the
+ *  panel: heatmap and volcano have no Y scale). */
+export function logScaleOffered(graphType: GraphType): { x: boolean; y: boolean } {
+  if (graphType === "roc-curve") return { x: false, y: false };
+  return { x: true, y: true };
+}
+
 /** A point's name (`key`, see `pointKeyOf`) at `offset` px from it, joined to it by a
  *  thin line once it's moved away from a point `size` px wide. */
 export const pointName = (
