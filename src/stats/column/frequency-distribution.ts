@@ -228,6 +228,9 @@ export async function runFrequencyDistribution(
   if (p.binMode === "count" && p.binCount! > 10000) {
     return { error: "Number of bins must be at most 10,000." };
   }
+  if (p.startAt != null && !Number.isFinite(p.startAt)) {
+    return { error: "The first bin's starting value must be a finite number." };
+  }
   const groups = dataGroups(columns);
   if (groups.length < 1) {
     return { error: "This needs at least 1 column containing numeric data." };

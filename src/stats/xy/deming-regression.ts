@@ -42,7 +42,8 @@ function pickXY(columns: Column[], params: DemingRegressionParams | undefined): 
  *  has no defined slope. */
 function demingProblem(columns: Column[], params: DemingRegressionParams | undefined): string | undefined {
   const lambda = (params ?? DEFAULTS).lambda;
-  if (!(lambda > 0)) return "The error variance ratio must be greater than 0.";
+  if (!Number.isFinite(lambda) || lambda <= 0)
+    return "The error variance ratio must be a finite number greater than 0.";
   const base = xyProblem(columns, params?.y);
   if (base) return base;
   const groups = pickXY(columns, params);

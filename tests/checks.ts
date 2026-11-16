@@ -142,6 +142,7 @@ import { addForestPlot } from "../src/views/graphs/forest-plot";
 import { addEstimationPlot, estimationDiffLabel } from "../src/views/graphs/estimation-plot";
 import { addSchildPlot, schildPlotPoints } from "../src/views/graphs/schild-plot";
 import { addRegression, fitLinear } from "../src/views/graphs/regression-overlay";
+import { fitDeming } from "../src/views/graphs/deming-overlay";
 import { addObservedFitted } from "../src/views/graphs/observed-fitted";
 import { batchMatched, examplesFor, matched, type Matched } from "../src/views/graphs/match-graph";
 import type { OutlineNode } from "../src/store/use-project-store";
@@ -11788,6 +11789,59 @@ check("m19 lowess runs on tied X values", async () => {
   const r = await runAnalysis("spline-lowess", tiedX, { y: "Y", method: "lowess", f: 2 / 3 });
   if ("error" in r) throw new Error(r.error);
   strictEqual(r.fitted?.length, 10, "lowess on tied X should fit all 10 points");
+});
+
+check("m20 non-finite numeric params are refused with a clean error", async () => {
+  // All three params are wizard-validated in practice, so this is
+  // defense-in-depth for a hand-edited file: before the fix λ = ∞ reached R
+  // as the bare word "Infinity" ("object 'Infinity' not found"), a NaN AUC
+  // baseline ran and returned a null area labelled "baseline Y = NaN", and
+  // a NaN frequency startAt crashed with "Invalid array length".
+  const xy: TableData = {
+    columns: ["Title", "X", "Response"],
+    rows: [
+      [null, "1", "1.4"],
+      [null, "2", "1.9"],
+      [null, "3", "3.6"],
+      [null, "4", "3.8"],
+      [null, "5", "5.5"],
+      [null, "6", "5.7"],
+      [null, "7", "7.4"],
+      [null, "8", "7.6"],
+      [null, "9", "9.5"],
+      [null, "10", "9.8"],
+    ],
+  };
+  for (const lambda of [Infinity, -Infinity, NaN]) {
+    const r = await runAnalysis("deming-regression", xy, { y: "Response", lambda });
+    if (!("error" in r) || !r.error.includes("finite"))
+      throw new Error(`deming lambda=${lambda}: ${"error" in r ? r.error : "ran"}, expected a finite-number error`);
+  }
+  // The graph overlay's closed form shares the same guard: λ = ∞ gave a
+  // NaN slope instead of no fit.
+  strictEqual(fitDeming([1, 2, 3], [1.4, 1.9, 3.6], Infinity), null, "fitDeming with λ = ∞ should be null");
+  strictEqual(fitDeming([1, 2, 3], [1.4, 1.9, 3.6], NaN), null, "fitDeming with λ = NaN should be null");
+  for (const baseline of [NaN, Infinity]) {
+    const r = await runAnalysis("area-under-curve", xy, { baseline });
+    if (!("error" in r) || !r.error.includes("finite"))
+      throw new Error(`AUC baseline=${baseline}: ${"error" in r ? r.error : "ran"}, expected a finite-number error`);
+  }
+  const col: TableData = {
+    columns: ["Title", "A"],
+    rows: [
+      [null, "1.2"],
+      [null, "2.5"],
+      [null, "3.1"],
+      [null, "4.7"],
+      [null, "5.0"],
+      [null, "6.3"],
+    ],
+  };
+  for (const startAt of [NaN, Infinity]) {
+    const r = await runAnalysis("frequency-distribution", col, { binMode: "width", binWidth: 1, startAt });
+    if (!("error" in r) || !r.error.includes("finite"))
+      throw new Error(`frequency startAt=${startAt}: ${"error" in r ? r.error : "ran"}, expected a finite-number error`);
+  }
 });
 
 check("transform concentrations converts between molar units by exact powers of 1000", async () => {
