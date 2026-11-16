@@ -6674,10 +6674,13 @@ check("texts moved by hand stay where they were dropped", () => {
     names.map((n) => [n.name, n.ax, n.ay]),
     [
       ["A#0", -25, 15],
-      ["A#1", names[1].ax, 0],
+      // G-F4 (v1.5.0): A#1 sits on the plot's top-right corner, so its
+      // default label flips left and below the point instead of being cut:
+      // ay is labelH/2 + 2 = 9.5 (textSize 11), not the old centred 0.
+      ["A#1", names[1].ax, 9.5],
     ],
   );
-  ok(names[1].ax > 0); // right of its point
+  ok(names[1].ax < 0); // flipped left past the right edge (G-F4)
   const gene = { ...volcanoOptions, volcanoLabelCount: 5, points: { "#2": { labelOffset: { x: -30, y: 10 } } } };
   const geneNames = GRAPHS.volcano.build(readTable(genes).columns, gene, paintOf(gene, 2)).layout.annotations as {
     name: string;
