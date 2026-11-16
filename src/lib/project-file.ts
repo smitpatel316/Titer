@@ -130,7 +130,6 @@ export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeI
   // a plain `.hlx` never carries one — only the template saver passes it.
   return format({ ...fileUnknowns, app: "titer", schemaVersion: 1, savedAt: new Date().toISOString(), template, project }, "") + "\n";
 }
-}
 
 /** Indented JSON, with each list of plain values (a table row, the column names)
  *  on one line, so a table reads row by row. */
