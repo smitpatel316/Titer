@@ -96,7 +96,17 @@ export const anovaSpec: ColumnTestSpec<AnovaParams> = {
     if (!welch(p) && (p.posthoc === "games-howell" || p.posthoc === "t3")) {
       return `${p.posthoc === "games-howell" ? "Games-Howell" : "Dunnett's T3"} assumes unequal SDs (Welch's ANOVA). Create this analysis again to choose another.`;
     }
-    if (!welch(p)) return undefined;
+    if (!welch(p)) {
+      // With one value in every group there is no within-group variation:
+      // residual df = N − k = 0, so R's F and P are NaN (nulls) while eta
+      // squared misleadingly reads 1. Name it instead of silent nulls.
+      // (Welch's ANOVA is checked below — it already needs ≥ 2 values in
+      // each group, so this case can't reach it.)
+      const total = groups.reduce((s, g) => s + g.values.length, 0);
+      if (groups.length >= 3 && total === groups.length)
+        return "Each group holds only one value, so there is no within-group variation to compare against — one-way ANOVA needs at least one group with two or more values.";
+      return undefined;
+    }
     for (const g of groups) {
       if (g.values.length < 2)
         return `“${g.name}” holds ${g.values.length} value; this test needs at least 2 in each group.`;

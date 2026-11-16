@@ -1,7 +1,8 @@
 // What both survival analyses read of a Survival table: each group holding subjects, with
-// their times and codes, checked (1 = event, 0 = censored; no negative time).
+// their times and codes, checked (1 = event, 0 = censored; times must be positive).
 import type { Column } from "../types";
 import { pairUp, splitXY, xyProblem } from "../../lib/dataset";
+import { num } from "../../lib/format";
 
 interface SurvivalGroup {
   name: string;
@@ -22,7 +23,13 @@ export function survivalGroups(columns: Column[]): SurvivalGroup[] | { error: st
     const code = g.y.find((c) => c !== 0 && c !== 1);
     if (code !== undefined)
       return { error: `“${g.name}” holds ${code}: enter 1 for an event, 0 for a censored subject.` };
-    if (g.x.some((t) => t < 0)) return { error: "Times can't be negative." };
+    // Cox regression rejects time ≤ 0, and plan 27 says it is an error — the
+    // log-rank (and Cox on a Survival table, which shares this check) used to
+    // accept a time of 0 and return a p-value for it. Reject it here, in
+    // words, naming the group and the offending time.
+    const badTime = g.x.find((t) => t <= 0);
+    if (badTime !== undefined)
+      return { error: `Survival times must be positive — “${g.name}” holds ${num(badTime)}.` };
   }
   if (groups.length < 2) return { error: "This analysis compares at least 2 groups holding subjects." };
   // With no event anywhere there is nothing to compare: survfit/survdiff

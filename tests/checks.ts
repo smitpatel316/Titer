@@ -3393,6 +3393,31 @@ check("Games-Howell and Dunnett's T3 need Welch's ANOVA, and Welch needs two val
     throw new Error(`expected the missing-control error, got ${JSON.stringify(missing)}`);
 });
 
+// v1.5.0 m22: a one-way ANOVA with one value in every group has residual
+// df = N − k = 0 — R's F and P are NaN (nulls) while eta squared misleadingly
+// reads 1. The runner names the missing within-group variation instead.
+check("a one-way ANOVA with one value in every group names the missing variation", async () => {
+  const one: TableData = {
+    columns: ["Title", "A", "B", "C"],
+    rows: [["", "12.1", "14.3", "18.2"]],
+  };
+  const out = await runAnalysis("anova", one);
+  if (!("error" in out) || !out.error.includes("only one value"))
+    throw new Error(`expected the one-value-a-group error, got ${JSON.stringify(out).slice(0, 300)}`);
+  // One group holding two values is enough for a residual df: it runs.
+  const two: TableData = {
+    columns: ["Title", "A", "B", "C"],
+    rows: [
+      ["", "12.1", "14.3", "18.2"],
+      ["", "11.4", "", ""],
+    ],
+  };
+  const out2 = await runAnalysis("anova", two);
+  if ("error" in out2) throw new Error(`one group with two values should run, got ${out2.error}`);
+  const stat = (label: string) => out2.stats.find((s) => s.label === label)?.value;
+  ok(stat("F") != null && stat("P value") != null, "F and P should compute with df 1");
+});
+
 check("a two-way ANOVA of one value per cell asks nothing and runs the ordinary one", () => {
   const wizard = WIZARDS["two-way-anova"]!;
   const single = readTable({
@@ -8576,6 +8601,60 @@ check("the chi-square trend test names a constant first row or column instead of
   close(stat("P value (test for trend)"), 0.0000361, 1e-6, "trend p value");
 });
 
+// v1.5.0 m6: a row or column holding no counts makes R's chisq.test return
+// NaN (no error) — the statistic, P and Cramér's V rendered as unexplained
+// nulls. The runner names the empty row/column instead of calling R.
+check("a chi-square table with an empty row or column names it instead of returning nulls", async () => {
+  const empty = async (data: TableData) => {
+    const out = await runAnalysis("chi-square", data);
+    if (!("error" in out)) throw new Error(`expected an empty-marginal error, got ${JSON.stringify(out.stats)}`);
+    return out.error;
+  };
+  const emptyCol: TableData = {
+    columns: ["Title", "Outcome A", "Outcome B", "Outcome C"],
+    rows: [
+      ["Cat 1", "10", "5", "0"],
+      ["Cat 2", "8", "3", "0"],
+      ["Cat 3", "6", "4", "0"],
+    ],
+  };
+  const eCol = await empty(emptyCol);
+  ok(eCol.includes("Outcome C") && eCol.includes("no counts"), eCol);
+  const emptyRow: TableData = {
+    columns: ["Title", "Outcome A", "Outcome B"],
+    rows: [
+      ["Cat 1", "10", "5"],
+      ["Cat 2", "0", "0"],
+      ["Cat 3", "6", "4"],
+    ],
+  };
+  const eRow = await empty(emptyRow);
+  ok(eRow.includes("row 2") && eRow.includes("no counts"), eRow);
+  // A 2×2 with an empty column errors too: Fisher's p would be 1, but the
+  // chi-square reference and Phi are undefined.
+  const twoByTwo: TableData = {
+    columns: ["Title", "Outcome A", "Outcome B"],
+    rows: [
+      ["Drug", "15", "0"],
+      ["Placebo", "6", "0"],
+    ],
+  };
+  const e2 = await empty(twoByTwo);
+  ok(e2.includes("Outcome B") && e2.includes("no counts"), e2);
+  // A table with no empty marginal still runs.
+  const okTable: TableData = {
+    columns: ["Title", "Outcome A", "Outcome B", "Outcome C"],
+    rows: [
+      ["Cat 1", "10", "5", "3"],
+      ["Cat 2", "8", "3", "6"],
+      ["Cat 3", "6", "4", "2"],
+    ],
+  };
+  const out = await runAnalysis("chi-square", okTable);
+  if ("error" in out) throw new Error(out.error);
+  ok(out.stats.find((s) => s.label === "Chi-square")?.value != null, "chi-square should compute");
+});
+
 check("the McNemar wizard confirms paired data and defaults the correction on", () => {
   const data: TableData = {
     columns: ["Title", "Second: Yes", "Second: No"],
@@ -11537,6 +11616,49 @@ check("the survival analysis refuses bad survival data", async () => {
     if (!("error" in out) || !out.error.includes(message)) {
       throw new Error(`expected an error mentioning "${message}", got ${JSON.stringify(out)}`);
     }
+  }
+});
+
+// v1.5.0 m17: the log-rank (and Cox on a Survival table) accepted a time of
+// 0 while Cox regression rejected time ≤ 0. Survival times must be positive.
+check("the survival analysis refuses a time of 0, like Cox does", async () => {
+  const data = logRankTable(
+    ["Title", "Days", "Treated", "Placebo"],
+    [
+      ["", "0", "1", ""],
+      ["", "5", "", "1"],
+      ["", "7", "0", "1"],
+      ["", "8", "", "1"],
+      ["", "10", "1", ""],
+      ["", "12", "", "0"],
+      ["", "15", "1", "1"],
+      ["", "20", "0", ""],
+    ],
+  );
+  for (const curveTest of ["logrank", "gehan"] as const) {
+    const out = await runAnalysis("survival", data, { curveTest, correction: "holm" });
+    if (!("error" in out) || !out.error.includes("must be positive")) {
+      throw new Error(`survival/${curveTest}: expected a "must be positive" error, got ${JSON.stringify(out).slice(0, 200)}`);
+    }
+  }
+  const cox = await runAnalysis("cox", data, {});
+  if (!("error" in cox) || !cox.error.includes("must be positive")) {
+    throw new Error(`cox: expected a "must be positive" error, got ${JSON.stringify(cox).slice(0, 200)}`);
+  }
+  // A negative time errors with the same message (it used to say only
+  // "Times can't be negative.").
+  const negative = logRankTable(
+    ["Title", "Days", "Treated", "Placebo"],
+    [
+      ["", "-1", "1", ""],
+      ["", "5", "", "1"],
+      ["", "7", "0", "1"],
+      ["", "8", "", "1"],
+    ],
+  );
+  const neg = await runAnalysis("survival", negative, { curveTest: "logrank", correction: "holm" });
+  if (!("error" in neg) || !neg.error.includes("must be positive")) {
+    throw new Error(`expected a "must be positive" error for a negative time, got ${JSON.stringify(neg).slice(0, 200)}`);
   }
 });
 
