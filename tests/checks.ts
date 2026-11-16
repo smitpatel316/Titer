@@ -123,6 +123,7 @@ import {
   type Question,
 } from "../src/views/analyses/wizards";
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
+import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
 import { addNote, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, movedText, paintOf, perRowSummaryStats, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
@@ -8453,6 +8454,55 @@ check("the grouped mixed-effects wizard asks matchedness before the interaction,
   strictEqual((kept.params as { interaction?: boolean }).interaction, false);
   const included = WIZARDS["mixed-effects"]!.finish({ matched: "matched" }, readTable(grouped()));
   strictEqual((included.params as { interaction?: boolean }).interaction, true);
+});
+
+check("the Cox wizard drops a stratifyBy that is no longer among the covariates (F12)", () => {
+  const data: TableData = {
+    columns: ["Title", "Time", "Status", "Sex", "Age"],
+    rows: [
+      ["", "1", "1", "0", "20"],
+      ["", "2", "1", "1", "30"],
+      ["", "3", "0", "0", "40"],
+      ["", "4", "1", "1", "50"],
+      ["", "5", "0", "1", "60"],
+      ["", "6", "1", "0", "70"],
+    ],
+  };
+  const table = readTable(data);
+  // While Sex is a covariate it is offered as the stratifier…
+  const stratQ = WIZARDS["cox-proportional-hazards"]!
+    .questions({ time: "Time", status: "Status", covariates: ["Sex", "Age"] }, table)
+    .find((q): q is Question => q !== false && q.id === "stratifyBy");
+  ok(stratQ && stratQ.kind === "choice");
+  if (stratQ?.kind === "choice") ok(stratQ.options.some((o) => o.value === "Sex"));
+  // …but once Sex leaves the covariates, a stored stratifyBy=Sex must not
+  // survive into the params — the runner ignores it and the graph would
+  // stratify by a non-covariate column.
+  deepStrictEqual(
+    WIZARDS["cox-proportional-hazards"]!.finish(
+      { time: "Time", status: "Status", covariates: ["Age"], stratifyBy: "Sex", ties: "efron" },
+      table,
+    ),
+    {
+      type: "cox-proportional-hazards",
+      params: { time: "Time", status: "Status", covariates: ["Age"], ties: "efron" },
+    },
+  );
+  // The graph then draws one curve for all subjects, not Sex strata.
+  const cols = coxSurvivalColumns(
+    data,
+    WIZARDS["cox-proportional-hazards"]!.finish(
+      { time: "Time", status: "Status", covariates: ["Age"], stratifyBy: "Sex", ties: "efron" },
+      table,
+    ).params as never,
+  );
+  deepStrictEqual(cols?.map((c) => c.name), ["Time", "All subjects"]);
+  // A stratifyBy still among the covariates is kept.
+  const kept = WIZARDS["cox-proportional-hazards"]!.finish(
+    { time: "Time", status: "Status", covariates: ["Sex", "Age"], stratifyBy: "Sex", ties: "efron" },
+    table,
+  );
+  strictEqual((kept.params as { stratifyBy?: string }).stratifyBy, "Sex");
 });
 
 check("mixed-effects skips entirely empty rows in a Grouped table and reports a dropped rank-deficient term as NA", async () => {

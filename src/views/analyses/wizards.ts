@@ -3681,16 +3681,27 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ]),
       ];
     },
-    finish: (a) => ({
-      type: "cox-proportional-hazards",
-      params: {
-        time: a.time as string,
-        status: a.status as string,
-        covariates: a.covariates as string[],
-        ties: (a.ties as CoxPHParams["ties"] | undefined) ?? "efron",
-        ...(a.stratifyBy !== undefined && a.stratifyBy !== "none" ? { stratifyBy: a.stratifyBy as string } : {}),
-      },
-    }),
+    finish: (a) => {
+      // Re-validate stratifyBy against the final covariates (F12): the
+      // stored answer can go stale when the user goes back and changes the
+      // covariates, and the runner ignores it while the graph stratifies by
+      // whatever column it names — so a stratifier that is no longer a
+      // covariate is dropped instead of reaching the params.
+      const covariates = (a.covariates as string[] | undefined) ?? [];
+      const stratifyBy = (a.stratifyBy as string | undefined) ?? "none";
+      return {
+        type: "cox-proportional-hazards",
+        params: {
+          time: a.time as string,
+          status: a.status as string,
+          covariates: a.covariates as string[],
+          ties: (a.ties as CoxPHParams["ties"] | undefined) ?? "efron",
+          ...(stratifyBy !== "none" && covariates.includes(stratifyBy)
+            ? { stratifyBy }
+            : {}),
+        },
+      };
+    },
     checklist: () => CHECKLISTS["cox-ph"],
   },
 
