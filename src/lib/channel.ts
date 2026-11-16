@@ -3,7 +3,7 @@
 // Shape is Cricket 07's channel manifest (see UPDATE-LOOP-105.md): the
 // release script uploads the asset, then writes version.json LAST, so a
 // manifest that answers always names an asset that is already there.
-import { isNewer } from "./version";
+import { fetchWithTimeout, isNewer } from "./version";
 
 /** The channel manifest. The release pipeline publishes it before v2 ships. */
 export const CHANNEL_MANIFEST_URL = "https://titer.smitpatel.net/channel/version.json";
@@ -69,7 +69,7 @@ function isManifest(value: unknown): value is ChannelManifest {
  *  replaces the cache. */
 export async function fetchChannelManifest(): Promise<ChannelManifest | null> {
   try {
-    const response = await fetch(CHANNEL_MANIFEST_URL, { headers: { Accept: "application/json" } });
+    const response = await fetchWithTimeout(CHANNEL_MANIFEST_URL, { headers: { Accept: "application/json" } });
     if (response.ok) {
       const manifest: unknown = await response.json();
       if (isManifest(manifest)) {

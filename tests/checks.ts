@@ -176,8 +176,9 @@ import {
   convertConcentration,
 } from "../src/stats/column/transform-concentrations";
 import { makeInitialState, reducer } from "../src/store/use-project-store";
-import { isNewer, latestVersion } from "../src/lib/version";
+import { UPDATE_CHECK_TIMEOUT_MS, fetchWithTimeout, isNewer, latestVersion } from "../src/lib/version";
 import { decideUpdate, type ChannelManifest } from "../src/lib/channel";
+import { checkForUpdatesDaily } from "../src/updates";
 import { titleCase } from "../src/lib/format";
 import { loadRecents } from "../src/store/recents";
 import { largestAt, PX_PER_INCH, withDpi } from "../src/lib/image-dpi";
@@ -11731,8 +11732,90 @@ check("the update check reads main's package.json, never the GitHub API", async 
 });
 
 
-// The update check is the Tauri plugin updater now (src/updates.ts + main.rs
-// `check_update`/`install_update`): no fetch-based latestVersion to test here.
+// ── CC-m8: the update check has a timeout, and the daily key is written
+// only after the check settles ─────────────────────────────────────────
+// The launch check used to hang forever on a dead network (bare fetch, no
+// timeout) — and the once-a-day key was already written before the check
+// ran, so no re-check happened for 24 h.
+
+check("an update check that hangs aborts after its timeout instead of hanging forever", async () => {
+  strictEqual(UPDATE_CHECK_TIMEOUT_MS, 10_000);
+  const server = createServer(() => {
+    // Never answer: the hung-network case.
+  });
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const port = (server.address() as { port: number }).port;
+  const started = Date.now();
+  try {
+    await rejects(
+      fetchWithTimeout(`http://127.0.0.1:${port}/version.json`, undefined, 50),
+      (err: unknown) => err instanceof Error && err.name === "AbortError",
+    );
+    ok(Date.now() - started < 2000, `aborted in ${Date.now() - started}ms`);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  // A fetch that answers comes back untouched (status and body as-is).
+  const okServer = createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ version: "1.2.0" }));
+  });
+  await new Promise<void>((resolve) => okServer.listen(0, resolve));
+  const okPort = (okServer.address() as { port: number }).port;
+  try {
+    const response = await fetchWithTimeout(`http://127.0.0.1:${okPort}/version.json`, undefined, 1000);
+    strictEqual(response.status, 200);
+    deepStrictEqual(await response.json(), { version: "1.2.0" });
+  } finally {
+    await new Promise<void>((resolve) => okServer.close(() => resolve()));
+  }
+});
+
+check("the daily update check marks the day only after the check settles", async () => {
+  const stored: Record<string, string> = {};
+  const storage = {
+    getItem: (k: string) => stored[k] ?? null,
+    setItem: (k: string, v: string) => void (stored[k] = v),
+  };
+  Object.assign(globalThis, { localStorage: storage });
+  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+  try {
+    // While the check is still running, nothing is marked...
+    let resolveCheck!: (v: boolean) => void;
+    const pending = new Promise<boolean>((r) => (resolveCheck = r));
+    checkForUpdatesDaily(() => pending);
+    strictEqual(stored["titer.updatesCheckedAt"], undefined);
+    // ...a check that reached a decision marks the day...
+    resolveCheck(true);
+    await sleep(10);
+    ok(stored["titer.updatesCheckedAt"] !== undefined);
+    // ...a check that never got an answer leaves the key alone, so the
+    // next launch tries again.
+    delete stored["titer.updatesCheckedAt"];
+    checkForUpdatesDaily(() => Promise.resolve(false));
+    await sleep(10);
+    strictEqual(stored["titer.updatesCheckedAt"], undefined);
+    // ...and a check already done today does not run again.
+    stored["titer.updatesCheckedAt"] = String(Date.now());
+    let ran = false;
+    checkForUpdatesDaily(() => ((ran = true), Promise.resolve(true)));
+    strictEqual(ran, false);
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+});
+
+check("both update reads go through the timed fetch", () => {
+  const version = readFileSync(fileURLToPath(new URL("../src/lib/version.ts", import.meta.url)), "utf8");
+  const channel = readFileSync(fileURLToPath(new URL("../src/lib/channel.ts", import.meta.url)), "utf8");
+  ok(version.includes("await fetchWithTimeout(MAIN_PACKAGE)"));
+  ok(channel.includes("await fetchWithTimeout(CHANNEL_MANIFEST_URL"));
+  // The only bare `fetch` left is the helper's own implementation, which
+  // is what carries the timeout signal.
+  strictEqual((version.match(/await fetch\(/g) ?? []).length, 1);
+  ok(version.includes("signal: controller.signal"));
+  ok(!/await fetch\(/.test(channel), "no bare fetch left in channel.ts");
+});
 
 
 import { parsePzfx } from "../src/lib/pzfx";

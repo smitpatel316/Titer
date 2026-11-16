@@ -22,15 +22,19 @@ import { isNewer, latestVersion } from "./lib/version";
 const CHECKED_KEY = "titer.updatesCheckedAt";
 const DAY = 24 * 60 * 60 * 1000;
 
-/** `quiet`: say something only when a newer version is out (the launch check). */
-export async function checkForUpdates(quiet = false) {
-  if (!isNative) return;
+/** `quiet`: say something only when a newer version is out (the launch check).
+ *  Returns whether the check reached a decision (an offer, up-to-date, or
+ *  paused): false when it never got an answer (offline with nothing cached),
+ *  so the daily check can try again on the next launch instead of consuming
+ *  the day (CC-m8). */
+export async function checkForUpdates(quiet = false): Promise<boolean> {
+  if (!isNative) return false;
   try {
     const current = await appVersion();
     const manifest = await fetchChannelManifest();
     if (manifest) {
       await checkAgainstManifest(current, manifest, quiet);
-      return;
+      return true;
     }
     // No channel yet (or offline with nothing cached): the branch's
     // package.json, as before — an optional offer and a manual download.
@@ -40,8 +44,10 @@ export async function checkForUpdates(quiet = false) {
     } else if (!quiet) {
       await alert("Titer is up to date", `Version ${current} is the latest.`, "info");
     }
+    return true;
   } catch {
     if (!quiet) await alert("Couldn't Check for Updates", "Check your internet connection and try again.");
+    return false;
   }
 }
 
@@ -94,13 +100,29 @@ async function installUpdate(version: string, manifest: ChannelManifest, forced:
   }
 }
 
-/** The launch check, at most once a day. */
-export function checkForUpdatesDaily() {
+/** The launch check, at most once a day. The key is written only after the
+ *  check settles with a decision (CC-m8): writing it first suppressed the
+ *  re-check for 24 h even when the check hung — and with the 10 s timeout
+ *  a hung check now settles instead of hanging forever. A check that never
+ *  reached a decision leaves the key alone, so the next launch tries again.
+ *  `runCheck` is the seam the tests drive; production passes the real check. */
+export function checkForUpdatesDaily(runCheck: () => Promise<boolean> = () => checkForUpdates(true)) {
   try {
     if (Date.now() - Number(localStorage.getItem(CHECKED_KEY)) < DAY) return;
-    localStorage.setItem(CHECKED_KEY, String(Date.now()));
   } catch {
     // no storage: check anyway
   }
-  void checkForUpdates(true);
+  void runCheck().then(
+    (completed) => {
+      if (!completed) return;
+      try {
+        localStorage.setItem(CHECKED_KEY, String(Date.now()));
+      } catch {
+        // no storage: nothing to remember
+      }
+    },
+    () => {
+      // A check that threw instead of answering is no decision either.
+    },
+  );
 }
