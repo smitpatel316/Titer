@@ -39,6 +39,16 @@ esac
 ./scripts/build-webr-repo.sh
 
 for TARGET in $TARGETS; do
+  # stdio-bridge sidecar (2026-11-15): Tauri's externalBin bundles whatever
+  # binary sits in src-tauri/binaries/ (gitignored, never rebuilt by
+  # `tauri build`). A stale bridge cannot talk to the in-app MCP server —
+  # it lacks the MCP-Protocol-Version/Accept headers the server requires,
+  # so every stdio request gets HTTP 400 — which is what shipped in the
+  # 7fbeab7 batch build (Claude Code "Failed to connect"). Rebuild from
+  # current source before every tauri build, and fail hard if staging is
+  # missing (e.g. the rust target is not installed).
+  ./scripts/build-stdio-bridge.sh --target "$TARGET"
+  [ -f "src-tauri/binaries/titer-stdio-bridge-$TARGET" ] || { echo "ERROR: stdio-bridge for $TARGET not staged — rustup target add $TARGET?" >&2; exit 1; }
   echo "=== $TARGET: tauri build (DMG step may succeed or fail) ==="
   # Fail-hard guard (2026-11-14, cloud-box lane): a failed `tauri build`
   # used to fall through to the stale-DMG check below and "verify" a DMG
