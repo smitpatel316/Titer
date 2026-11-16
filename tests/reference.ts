@@ -2264,6 +2264,8 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   // Deming regression (plan 13): the reference case at λ = 1 and λ = 0.25
   // (the λ-sensitivity check lives in disagreements() below), plus the
   // error paths — λ ≤ 0, no covariation, too few pairs, constant X/Y.
+  // The CI pins were re-pinned in bug-sweep cycle 9 to Efron's jackknife SE
+  // (sqrt((k-1)/k * Σ(θᵢ−θ̄)²)); the pre-fix pins were √k too wide.
   // Cross-check against deming::deming() is a follow-up, not done here:
   // the closed form is exact for known λ and needs no package — but the
   // λ direction was verified 2026-11-10 against both packages on this

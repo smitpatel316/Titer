@@ -12630,6 +12630,57 @@ check("m9 deming jackknife skips leave-one-out replicates with no covariation", 
     throw new Error(`Deming notes do not say the CI could not be computed: ${one.notes}`);
 });
 
+check("m9 deming jackknife SE is Efron's sqrt((k-1)/k * sum((θᵢ−θ̄)²))", async () => {
+  // Bug-sweep cycle 9: the SE was sqrt((k-1) * Σ(θᵢ−θ̄)²) — the /k was
+  // missing — so all four CI bounds were √k too wide (√10 on the reference
+  // table, √12 on the cycle-9 probe) while the point estimates were right.
+  // The reference pins had been frozen from the buggy formula, so the suite
+  // only asserted the CI contains the slope. Now the CI half-width must
+  // equal 1.96 × Efron's jackknife SE, recomputed here in TS from
+  // leave-one-out refits of the overlay's closed form — not from the R code.
+  const xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  const ys = [1.4, 1.9, 3.6, 3.8, 5.5, 5.7, 7.4, 7.6, 9.5, 9.8];
+  const table: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xs.map((x, i) => [null, String(x), String(ys[i])]),
+  };
+  for (const lambda of [1, 0.25]) {
+    const r = await runAnalysis("deming-regression", table, { y: "Y", lambda });
+    if ("error" in r) throw new Error(r.error);
+    const stat = (label: string) => r.stats.find((s) => s.label === label)?.value;
+    const slopes: number[] = [];
+    const intercepts: number[] = [];
+    for (let i = 0; i < xs.length; i++) {
+      const fit = fitDeming(
+        xs.filter((_, j) => j !== i),
+        ys.filter((_, j) => j !== i),
+        lambda,
+      );
+      if (fit == null) throw new Error(`Deming λ=${lambda} LOO refit ${i} failed`);
+      slopes.push(fit.slope);
+      intercepts.push(fit.intercept);
+    }
+    const jackSe = (ts: number[]) => {
+      const m = ts.reduce((s, v) => s + v, 0) / ts.length;
+      const k = ts.length;
+      return Math.sqrt(((k - 1) / k) * ts.reduce((s, v) => s + (v - m) ** 2, 0));
+    };
+    const slope = stat("Slope") as number;
+    const intercept = stat("Y-intercept") as number;
+    const slopeSe = jackSe(slopes);
+    const intSe = jackSe(intercepts);
+    const tol = 1e-9;
+    const expect = (label: string, got: unknown, want: number) => {
+      if (got == null || Math.abs((got as number) - want) > tol)
+        throw new Error(`Deming λ=${lambda} ${label}: ${got}, expected ${want}`);
+    };
+    expect("Slope 95% CI lower", stat("Slope 95% CI lower"), slope - 1.96 * slopeSe);
+    expect("Slope 95% CI upper", stat("Slope 95% CI upper"), slope + 1.96 * slopeSe);
+    expect("Intercept 95% CI lower", stat("Intercept 95% CI lower"), intercept - 1.96 * intSe);
+    expect("Intercept 95% CI upper", stat("Intercept 95% CI upper"), intercept + 1.96 * intSe);
+  }
+});
+
 check("m19 spline df is range-checked against the distinct X values", async () => {
   // R's smooth.spline does not error on an out-of-range df — it warns and
   // silently falls back to GCV, so the user gets a fit they did not ask for
