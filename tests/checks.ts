@@ -122,7 +122,7 @@ import {
   type Answers,
   type Question,
 } from "../src/views/analyses/wizards";
-import { initialAnswer } from "../src/views/analyses/analysis-wizard";
+import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { checkNormality } from "../src/views/analyses/normality-check";
 import { addNote, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, movedText, paintOf, perRowSummaryStats, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
@@ -8384,6 +8384,23 @@ check("parseGroupLevels validates the mixed-effects per-row group list", () => {
     strictEqual(groupNameQ.parse?.("Treatment")?.error, undefined);
     ok(groupNameQ.parse?.("")?.error);
   }
+});
+
+// ── v1.5.0 wizard state (B1-5) ────────────────────────────────────────
+
+check("a multi-select below its minimum names the minimum instead of silently disabling Next (F7)", () => {
+  // Mixed-effects on a Column table: `sets` needs at least 3. Unticking below
+  // that used to disable Next with no explanation — the dialog kept showing
+  // the question, which never states the minimum.
+  const setsQ = WIZARDS["mixed-effects"]!.questions({}, readTable(treatments(["T0", "T1", "T2", "T3"])))[0];
+  ok(setsQ && setsQ.kind === "names" && setsQ.min === 3);
+  strictEqual(namesShortfall(setsQ, ["T0", "T1", "T2", "T3"]), null, "at the minimum: no hint");
+  strictEqual(namesShortfall(setsQ, ["T0", "T1"]), "Choose at least 3 — 2 chosen.");
+  strictEqual(namesShortfall(setsQ, []), "Choose at least 3 — 0 chosen.");
+  // No minimum stated, no hint: a min-1 question with one chosen is fine.
+  const oneQ: Question = { id: "x", ask: "Which?", kind: "names", options: ["A"], min: 1 };
+  strictEqual(namesShortfall(oneQ, ["A"]), null);
+  strictEqual(namesShortfall(oneQ, []), "Choose at least 1 — 0 chosen.");
 });
 
 check("mixed-effects skips entirely empty rows in a Grouped table and reports a dropped rank-deficient term as NA", async () => {
