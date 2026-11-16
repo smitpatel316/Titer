@@ -12752,6 +12752,43 @@ check("a directly-opened Prism file is pointed at Import / Convert (FF-F15)", ()
   );
 });
 
+// ── FF-F13: a graph's dangling analysis link is cleared on load, warned once ──
+// A graph whose options name an analysis that no longer exists used to warn
+// on every open and re-save the dead link forever. The load now clears the
+// link (the file opens edited, so saving keeps the repair) and warns once;
+// a second open of the repaired file warns nothing. Figure panels keep
+// their dangling refs deliberately (a visible placeholder cell) — only the
+// invisible graph→analysis links are cleared.
+check("a graph's dangling analysis link is cleared on load, warned once (FF-F13)", () => {
+  const file = JSON.parse(serializeProjectFile(payload));
+  file.project.nodes.g1.graphOptions.regAnalysisId = "no-such-analysis";
+  file.project.nodes.g1.graphOptions.kmeansAnalysisId = "also-gone";
+  const first = read(JSON.stringify(file));
+  strictEqual(first.project.nodes.g1.graphOptions!.regAnalysisId, undefined, "dangling reg link should be cleared");
+  strictEqual(first.project.nodes.g1.graphOptions!.kmeansAnalysisId, undefined, "dangling k-means link should be cleared");
+  strictEqual(first.updated, true, "clearing the link repairs the file, so it opens edited");
+  ok(
+    first.issues.some((i) => i.message.includes("referred to an analysis") && i.message.includes("removed")),
+    "the open should warn once that the link was removed",
+  );
+  // The repair persists: re-saving keeps it removed, and a second open
+  // of the repaired file warns nothing about it.
+  const resaved = JSON.parse(serializeProjectFile(first.project));
+  strictEqual(resaved.project.nodes.g1.graphOptions.regAnalysisId, undefined, "re-save should keep the link removed");
+  const second = read(JSON.stringify(resaved));
+  ok(
+    !second.issues.some((i) => i.message.includes("referred to an analysis")),
+    "a second open of the repaired file should not warn again",
+  );
+  // A link to an analysis that does exist is kept, with no warning.
+  const kept = read(serializeProjectFile(payload));
+  strictEqual(kept.project.nodes.g1.graphOptions!.regAnalysisId, "a1", "a live link should be kept");
+  ok(
+    !kept.issues.some((i) => i.message.includes("referred to an analysis")),
+    "a live link should not warn",
+  );
+});
+
 // ── FL-rebrand: the prism-format surface says Titer, never Helix ────────
 // The rebrand branch was cut before the prism-format code landed, so
 // user-visible "Helix" strings survived in the converter dialog, the save
