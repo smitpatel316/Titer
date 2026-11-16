@@ -203,6 +203,23 @@ const OPTIONAL_OPTIONS = {
   palette: "palette", series: "styles", points: "pointStyles", outlineColor: "color", pointOutlineColor: "color", errorColor: "color",
   legend: "place", note: "place",
 } as const satisfies Record<OptionalOption, keyof typeof READ_OPTION>;
+// A graph's links to its analyses (FF-F13): the graph options that name a
+// sibling analysis node — the source of an overlay (significance brackets,
+// a regression line, a Deming/Cox/t-test/Poisson/PCA/smooth/k-means/
+// Monte-Carlo overlay). Every `*AnalysisId` option, including the two the
+// old warning missed (kmeans, monte-carlo).
+const GRAPH_ANALYSIS_LINKS = [
+  "sigAnalysisId",
+  "regAnalysisId",
+  "demingAnalysisId",
+  "coxAnalysisId",
+  "ttestAnalysisId",
+  "poissonAnalysisId",
+  "pcaAnalysisId",
+  "smoothAnalysisId",
+  "kmeansAnalysisId",
+  "monteCarloAnalysisId",
+] as const;
 // The retired dose-response graph's own options (before Titer 1.0.7): no
 // longer a GraphOptions field, but still read — fitsFromDoseGraphs below
 // needs them to turn an old graph into a scatter + analysis — and stripped
@@ -314,8 +331,14 @@ const PARAMS = {
   clusters: "number", standardise: "yes/no",
   // Mixed-effects model (plan 20): the random structure and the subject
   // identity are choices; `subjectFactor` is one name + its per-row levels.
+  // (FF-F18) `slopeVariable` was dropped in v1.5.0: a dead param, accepted
+  // and stored but never read — the runner errors on randomStructure
+  // "slope" before any slope could be fit, and the wizard never sets it.
+  // Wiring it to the compare-slopes feature (#46) is a design decision,
+  // not a bug fix. An old file carrying it keeps the value verbatim as an
+  // unknown param (FF-F12 carry-through).
   randomStructure: ["intercept", "slope"], subjectId: ["row", "replicate"], interaction: "yes/no",
-  fixedFactors: "names", slopeVariable: "name", subjectFactor: "name-and-names",
+  fixedFactors: "names", subjectFactor: "name-and-names",
   // Monte Carlo simulation (plan 22): the target analysis + statistic are
   // choices; repeats/seed are numbers; the per-column simulated means/SDs
   // are numbers-by-name (the target's own options — equalVariance,
@@ -1467,19 +1490,19 @@ export function parseProjectFile(
       });
     }
     const o = node.graphOptions!;
-    if (
-      (o.sigAnalysisId && !nodeOf(o.sigAnalysisId)) ||
-      (o.regAnalysisId && !nodeOf(o.regAnalysisId)) ||
-      (o.demingAnalysisId && !nodeOf(o.demingAnalysisId)) ||
-      (o.coxAnalysisId && !nodeOf(o.coxAnalysisId)) ||
-      (o.ttestAnalysisId && !nodeOf(o.ttestAnalysisId)) ||
-      (o.poissonAnalysisId && !nodeOf(o.poissonAnalysisId)) ||
-      (o.pcaAnalysisId && !nodeOf(o.pcaAnalysisId)) ||
-      (o.smoothAnalysisId && !nodeOf(o.smoothAnalysisId))
-    ) {
+    // (FF-F13) A graph's link to an analysis that no longer exists is
+    // cleared on load, not just warned about: the link is unusable (the
+    // overlay can never render), keeping it warned on every open and
+    // re-saved the dead id forever. Clearing is the repair — the file opens
+    // edited, so saving keeps it — and the warning fires once. DECISION:
+    // clear, not keep. The figure case above deliberately keeps its dangling
+    // refs (a visible placeholder cell, not an invisible link).
+    const dangling = GRAPH_ANALYSIS_LINKS.filter((key) => o[key] && !nodeOf(o[key]));
+    if (dangling.length) {
+      for (const key of dangling) delete (o as unknown as Obj)[key];
       issues.push({
         severity: "warning",
-        message: `Graph “${node.name}” refers to an analysis that no longer exists.`,
+        message: `Graph “${node.name}” referred to an analysis that no longer exists; the link was removed.`,
       });
     }
   }

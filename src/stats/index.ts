@@ -449,8 +449,12 @@ export function runAnalysis(
   const chosen = [
     ...(Array.isArray(named?.y) ? named.y : named?.y !== undefined ? [named.y] : []),
     ...(named?.ys ?? []),
-    named?.x, named?.y2, named?.column, ...(named?.controls ?? []), named?.dependent, named?.reference, named?.control, named?.compareWith, ...(named?.predictors ?? []), ...(named?.datasets ?? []), named?.time, named?.status, ...(named?.covariates ?? []), named?.stratifyBy,
+    named?.x, named?.y2, named?.column, ...(named?.controls ?? []), named?.dependent, named?.reference, named?.control, named?.compareWith, ...(named?.predictors ?? []), ...(named?.datasets ?? []), named?.time, named?.status, ...(named?.covariates ?? []),
   ];
+  // (FF-F17) `stratifyBy` is NOT in the gate: no runner reads it — only the
+  // survival-curves graph overlay, which draws unstratified when the column
+  // is gone — so a renamed or deleted stratify column used to error the
+  // whole Cox analysis at this gate.
   const gone =
     params?.sets?.find((name) => !table.sets.some((s) => s.name === name)) ??
     chosen.find(

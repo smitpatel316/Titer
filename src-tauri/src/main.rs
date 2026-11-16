@@ -390,18 +390,36 @@ fn check_extension(path: &str, allowed: &[&str]) -> Result<(), String> {
     }
 }
 
+/// A file's text, with a leading UTF-8 BOM stripped (FF-F11): a BOM `.hlx`
+/// used to fail JSON parsing as "damaged", and a non-UTF-8 file used to fail
+/// `read_to_string` with the same bare I/O error as a missing file — so the
+/// page misreported it as "gone" and dropped it from Open Recent. The error
+/// says what went wrong instead: a missing file is "not found:", a file that
+/// exists but isn't UTF-8 is "not UTF-8:" — the page tells them apart by the
+/// prefix, and only a missing file leaves Open Recent.
+fn read_text_with_bom(path: String, allowed: &[&str]) -> Result<String, String> {
+    check_extension(&path, allowed)?;
+    let bytes = fs::read(&path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            format!("not found: {path}")
+        } else {
+            e.to_string()
+        }
+    })?;
+    let text = String::from_utf8(bytes).map_err(|_| format!("not UTF-8: {path}"))?;
+    Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
+}
+
 #[tauri::command]
 fn read_text(path: String) -> Result<String, String> {
-    check_extension(&path, &["hlx", "pzt", "pzm"])?;
-    fs::read_to_string(path).map_err(|e| e.to_string())
+    read_text_with_bom(path, &["hlx", "pzt", "pzm"])
 }
 
 /// A Prism `.pzfx` file's text, for import. Only `.pzfx` — project files
 /// (`.hlx`, `.pzt`, `.pzm`) go through `read_text`.
 #[tauri::command]
 fn read_prism_text(path: String) -> Result<String, String> {
-    check_extension(&path, &["pzfx"])?;
-    fs::read_to_string(path).map_err(|e| e.to_string())
+    read_text_with_bom(path, &["pzfx"])
 }
 
 /// A Prism `.prism` file's bytes, for import — a `.prism` file is a ZIP, so
@@ -1302,5 +1320,37 @@ mod tests {
         let err = read_prism_text(fixture("no-such-file.pzfx").to_string_lossy().into_owned())
             .expect_err("missing file should error");
         assert!(!err.contains("can't access"), "missing file is an I/O error, not a refusal: {err}");
+    }
+
+    // ── FF-F11: a non-UTF-8 / BOM `.hlx` is not "gone" ───────────────────
+    // A file that exists but can't be read as UTF-8 must report a read
+    // error, never the missing-file error — the page tells a missing file
+    // from an unreadable one by the error's prefix, and only a missing file
+    // leaves Open Recent. A UTF-8 BOM is stripped before parsing, so a
+    // BOM `.hlx` opens instead of failing as "damaged".
+    #[test]
+    fn read_text_strips_bom() {
+        let text = read_text(fixture("bom.hlx").to_string_lossy().into_owned()).expect("bom.hlx should read");
+        assert!(!text.starts_with('\u{feff}'), "BOM should be stripped: {text:?}");
+        assert!(text.starts_with('{'), "text should start at the JSON: {text:?}");
+    }
+
+    #[test]
+    fn read_text_distinguishes_missing_from_unreadable() {
+        let missing = read_text(fixture("no-such-file.hlx").to_string_lossy().into_owned())
+            .expect_err("missing file should error");
+        assert!(missing.starts_with("not found:"), "missing file must say so: {missing}");
+        let unreadable = read_text(fixture("latin1.hlx").to_string_lossy().into_owned())
+            .expect_err("non-UTF-8 file should error");
+        assert!(!unreadable.starts_with("not found:"), "unreadable file is not missing: {unreadable}");
+        assert!(unreadable.contains("UTF-8"), "unreadable file must say it isn't UTF-8: {unreadable}");
+    }
+
+    #[test]
+    fn read_prism_text_strips_bom() {
+        let text =
+            read_prism_text(fixture("bom.pzfx").to_string_lossy().into_owned()).expect("bom.pzfx should read");
+        assert!(!text.starts_with('\u{feff}'), "BOM should be stripped: {text:?}");
+        assert!(text.starts_with("<?xml"), "text should start at the XML: {text:?}");
     }
 }

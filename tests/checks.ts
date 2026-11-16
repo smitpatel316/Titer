@@ -158,7 +158,7 @@ import { loadPrismSaveChoice, nextSaveAction } from "../src/lib/prism-nudge";
 import { convertPrism } from "../src/lib/prism";
 import { yieldToPaint } from "../src/lib/yield-to-paint";
 import { fitWidths, fitZoom } from "../src/store/use-layout";
-import { prismDropSkippedMessage } from "../src/store/use-document";
+import { isGoneReadError, prismDropSkippedMessage, prismFileOpenMessage } from "../src/store/use-document";
 import { cloneGraphPlan, DEFAULT_CLONE_OPTIONS, type CloneOptions } from "../src/lib/clone-graph";
 import { computeGroupedDEG } from "../src/lib/deg";
 import { binCounts, binEdges } from "../src/lib/histogram";
@@ -8121,6 +8121,37 @@ check("a Cox covariate constant only after complete-case filtering names itself 
   );
 });
 
+// FF-F17: a missing stratify column must not error the whole Cox analysis —
+// `stratifyBy` is only read by the survival-curves graph overlay (which
+// draws unstratified when it is gone), never by the Cox runner, so the
+// missing-column gate must not include it. Same data as the R3-23 check
+// above, with a stratify column that doesn't exist: the outcome is the
+// same as without it.
+check("a missing stratify column does not error the Cox analysis (FF-F17)", async () => {
+  const data: TableData = {
+    columns: ["Title", "Time", "Status", "Trt", "Age"],
+    rows: [
+      ["", "1", "1", null, "20"],
+      ["", "2", "1", null, "30"],
+      ["", "3", "0", "1", "40"],
+      ["", "4", "1", "0", "40"],
+      ["", "5", "0", "1", "40"],
+      ["", "6", "1", "0", "40"],
+      ["", "7", "1", "1", "40"],
+      ["", "8", "0", "0", "40"],
+    ],
+  };
+  deepStrictEqual(
+    await runAnalysis("cox-proportional-hazards", data, {
+      time: "Time",
+      status: "Status",
+      covariates: ["Trt", "Age"],
+      stratifyBy: "Gone",
+    }),
+    { error: "Covariate “Age” has no variation." },
+  );
+});
+
 // R3-23: a constant or collinear predictor was aliased by R —
 // summary(m)$coefficients drops the aliased row, so co[t + 1, ] crashed
 // with "subscript out of bounds". The runners now check is.na(coef(m))
@@ -13817,6 +13848,120 @@ check("a multi-file Prism drop names the skipped files", () => {
     prismDropSkippedMessage("a.prism", ["b.prism", "c.pzfx"]),
     "Imported a.prism; b.prism, c.pzfx were not imported — drop one file at a time, or use File ▸ Convert….",
   );
+});
+
+// ── FF-F11: a read failure is only "gone" when the file is really missing ──
+// The shell prefixes a missing file with "not found:"; any other read
+// failure (not UTF-8, no permission, a refused extension) is unreadable,
+// not gone — only a gone file leaves Open Recent. Tauri rejects with the
+// plain string, so both a string and an Error are accepted.
+check("only a missing file counts as gone (FF-F11)", () => {
+  ok(isGoneReadError("not found: /tmp/no-such.hlx"), "missing file should count as gone");
+  ok(isGoneReadError(new Error("not found: /tmp/no-such.hlx")), "missing file as Error should count as gone");
+  ok(!isGoneReadError("not UTF-8: /tmp/latin1.hlx"), "a non-UTF-8 file is unreadable, not gone");
+  ok(!isGoneReadError("Titer can't access /tmp/a.prism"), "a refused extension is unreadable, not gone");
+  ok(!isGoneReadError("Permission denied (os error 13)"), "a permission failure is unreadable, not gone");
+  ok(!isGoneReadError(undefined), "no error at all is not gone");
+  // `load` only drops a really-gone file from Recents; an unreadable one
+  // stays, and says it couldn't be read.
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const useDocument = readFileSync(join(root, "src/store/use-document.ts"), "utf8");
+  ok(
+    useDocument.includes("isGoneReadError(err)") && useDocument.includes("It stays in Open Recent"),
+    "load should only drop a really-gone file from Recents; an unreadable one stays",
+  );
+});
+
+// ── FF-F15: a Prism file opened directly is told where to take it ──────────
+// Double-clicked in the Finder (or dropped on the Dock icon), a .prism file
+// used to be misreported as "gone"; the rejection now names the import and
+// the converter instead. (The multi-file drop half was already fixed on main,
+// c1fe45b, pinned by the check above.)
+check("a directly-opened Prism file is pointed at Import / Convert (FF-F15)", () => {
+  strictEqual(
+    prismFileOpenMessage("a.prism"),
+    "Titer can't open “a.prism” directly — it's a Prism file, not a Titer project. Use File ▸ Import Prism File… to open it, or File ▸ Convert… to convert it to a Titer project.",
+  );
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const useDocument = readFileSync(join(root, "src/store/use-document.ts"), "utf8");
+  ok(
+    useDocument.includes('if (isPrismFile(path))') && useDocument.includes("prismFileOpenMessage(fileName(path))"),
+    "load should route a Prism file to the Import/Convert message, not sayGone",
+  );
+});
+
+// ── FF-F13: a graph's dangling analysis link is cleared on load, warned once ──
+// A graph whose options name an analysis that no longer exists used to warn
+// on every open and re-save the dead link forever. The load now clears the
+// link (the file opens edited, so saving keeps the repair) and warns once;
+// a second open of the repaired file warns nothing. Figure panels keep
+// their dangling refs deliberately (a visible placeholder cell) — only the
+// invisible graph→analysis links are cleared.
+check("a graph's dangling analysis link is cleared on load, warned once (FF-F13)", () => {
+  const file = JSON.parse(serializeProjectFile(payload));
+  file.project.nodes.g1.graphOptions.regAnalysisId = "no-such-analysis";
+  file.project.nodes.g1.graphOptions.kmeansAnalysisId = "also-gone";
+  const first = read(JSON.stringify(file));
+  strictEqual(first.project.nodes.g1.graphOptions!.regAnalysisId, undefined, "dangling reg link should be cleared");
+  strictEqual(first.project.nodes.g1.graphOptions!.kmeansAnalysisId, undefined, "dangling k-means link should be cleared");
+  strictEqual(first.updated, true, "clearing the link repairs the file, so it opens edited");
+  ok(
+    first.issues.some((i) => i.message.includes("referred to an analysis") && i.message.includes("removed")),
+    "the open should warn once that the link was removed",
+  );
+  // The repair persists: re-saving keeps it removed, and a second open
+  // of the repaired file warns nothing about it.
+  const resaved = JSON.parse(serializeProjectFile(first.project));
+  strictEqual(resaved.project.nodes.g1.graphOptions.regAnalysisId, undefined, "re-save should keep the link removed");
+  const second = read(JSON.stringify(resaved));
+  ok(
+    !second.issues.some((i) => i.message.includes("referred to an analysis")),
+    "a second open of the repaired file should not warn again",
+  );
+  // A link to an analysis that does exist is kept, with no warning.
+  const kept = read(serializeProjectFile(payload));
+  strictEqual(kept.project.nodes.g1.graphOptions!.regAnalysisId, "a1", "a live link should be kept");
+  ok(
+    !kept.issues.some((i) => i.message.includes("referred to an analysis")),
+    "a live link should not warn",
+  );
+});
+
+// ── FF-F18: slopeVariable is dropped, not a known param ───────────────────
+// DECISION: DROP. `slopeVariable` was accepted, stored, never read — the
+// mixed-effects runner errors on `randomStructure: "slope"` before any
+// slope could be fit, and the wizard never sets it. Wiring it to the
+// compare-slopes feature (#46) is a design decision, not a bug fix, so the
+// registry and the type no longer declare it. An old file carrying it keeps
+// the value verbatim as an unknown param (FF-F12 carry-through) — nothing
+// is lost, nothing reads it.
+check("slopeVariable is dropped as a dead param, not a known one (FF-F18)", async () => {
+  const file = JSON.parse(serializeProjectFile(payload));
+  file.project.nodes.a1 = {
+    type: "analysis",
+    name: "Mixed",
+    parentId: "t1",
+    analysisType: "mixed-effects",
+    analysisParams: { randomStructure: "slope", slopeVariable: 5 },
+  };
+  // A non-string value used to be dropped by the known "name" kind; as an
+  // unknown param it is now carried verbatim.
+  const parsed = read(JSON.stringify(file));
+  deepStrictEqual(parsed.project.nodes.a1.analysisParams, { randomStructure: "slope", slopeVariable: 5 });
+  // A string value round-trips verbatim either way — dropping the param
+  // loses nothing from an old file.
+  file.project.nodes.a1.analysisParams = { randomStructure: "slope", slopeVariable: "Dose" };
+  const kept = read(JSON.stringify(file));
+  deepStrictEqual(kept.project.nodes.a1.analysisParams, { randomStructure: "slope", slopeVariable: "Dose" });
+  // The runner's answer is unchanged: it still refuses random slopes,
+  // with or without the dead param.
+  const out = await runAnalysis("mixed-effects", table.data!, {
+    randomStructure: "slope",
+    slopeVariable: "Dose",
+  } as AnalysisParams);
+  deepStrictEqual(out, {
+    error: "Random slopes are not yet supported — run the random-intercept model (random slopes arrive in v2).",
+  });
 });
 
 // ── FL-rebrand: the prism-format surface says Titer, never Helix ────────
