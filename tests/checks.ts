@@ -153,7 +153,7 @@ import { loadPrismSaveChoice, nextSaveAction } from "../src/lib/prism-nudge";
 import { convertPrism } from "../src/lib/prism";
 import { yieldToPaint } from "../src/lib/yield-to-paint";
 import { fitWidths, fitZoom } from "../src/store/use-layout";
-import { isGoneReadError, prismDropSkippedMessage } from "../src/store/use-document";
+import { isGoneReadError, prismDropSkippedMessage, prismFileOpenMessage } from "../src/store/use-document";
 import { cloneGraphPlan, DEFAULT_CLONE_OPTIONS, type CloneOptions } from "../src/lib/clone-graph";
 import { computeGroupedDEG } from "../src/lib/deg";
 import { binCounts, binEdges } from "../src/lib/histogram";
@@ -12731,6 +12731,24 @@ check("only a missing file counts as gone (FF-F11)", () => {
   ok(
     useDocument.includes("isGoneReadError(err)") && useDocument.includes("It stays in Open Recent"),
     "load should only drop a really-gone file from Recents; an unreadable one stays",
+  );
+});
+
+// ── FF-F15: a Prism file opened directly is told where to take it ──────────
+// Double-clicked in the Finder (or dropped on the Dock icon), a .prism file
+// used to be misreported as "gone"; the rejection now names the import and
+// the converter instead. (The multi-file drop half was already fixed on main,
+// c1fe45b, pinned by the check above.)
+check("a directly-opened Prism file is pointed at Import / Convert (FF-F15)", () => {
+  strictEqual(
+    prismFileOpenMessage("a.prism"),
+    "Titer can't open “a.prism” directly — it's a Prism file, not a Titer project. Use File ▸ Import Prism File… to open it, or File ▸ Convert… to convert it to a Titer project.",
+  );
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const useDocument = readFileSync(join(root, "src/store/use-document.ts"), "utf8");
+  ok(
+    useDocument.includes('if (isPrismFile(path))') && useDocument.includes("prismFileOpenMessage(fileName(path))"),
+    "load should route a Prism file to the Import/Convert message, not sayGone",
   );
 });
 

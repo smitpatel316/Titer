@@ -42,6 +42,10 @@ import {
 const UNTITLED = "Untitled";
 
 const isProjectFile = (path: string) => path.toLowerCase().endsWith(`.${PROJECT_FILE_EXTENSION}`);
+const isPrismFile = (path: string) => {
+  const lower = path.toLowerCase();
+  return lower.endsWith(".prism") || lower.endsWith(".pzfx");
+};
 
 /**
  * The window's project, from opening to saving: what the shell gives it to open (a
@@ -785,6 +789,11 @@ export function useDocument() {
         setRecents((list) => list.filter((e) => !(e.kind === "local" && e.path === path)));
         return sayGone(path);
       }
+      // A Prism file opened straight from the Finder (FF-F15): Titer can't
+      // open it as a project — point at the import / converter instead.
+      if (isPrismFile(path)) {
+        return native.alert("Couldn't Open Project", prismFileOpenMessage(fileName(path)), "error");
+      }
       return native.alert(
         "Couldn't Open Project",
         `“${fileName(path)}” couldn't be read. It may be damaged, or in an encoding Titer can't read. It stays in Open Recent.`,
@@ -1159,6 +1168,14 @@ export function prismDropSkippedMessage(firstName: string, skippedNames: string[
 export function isGoneReadError(err: unknown): boolean {
   const message = typeof err === "string" ? err : err instanceof Error ? err.message : "";
   return message.startsWith("not found:");
+}
+
+/** (FF-F15) What a Prism file opened directly — double-clicked in the Finder,
+ *  dropped on the Dock icon — is told: Titer can't open it as a project, and
+ *  where to take it instead (Import Prism File, or File ▸ Convert…). Pure,
+ *  so checks.ts pins the exact wording. */
+export function prismFileOpenMessage(name: string): string {
+  return `Titer can't open “${name}” directly — it's a Prism file, not a Titer project. Use File ▸ Import Prism File… to open it, or File ▸ Convert… to convert it to a Titer project.`;
 }
 
 export type DocumentActions = ReturnType<typeof useDocument>;
