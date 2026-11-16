@@ -6608,6 +6608,28 @@ check("a legend shown outside the plot reserves its own right margin (M13)", () 
   strictEqual((heatmapLayout({ ...options, heatmapShowScale: false }, ["A", "B"], ["R1"]).margin as { r: number }).r, 16);
 });
 
+// G-F13: "Show values" printed the raw cell value at full precision
+// (`%{z}`) — a long value overflowed its narrow cell and overlapped its
+// neighbours. The values are now formatted with the shared num() (4 sig
+// figs) before they reach Plotly, so what a cell shows is short.
+check("'Show values' prints formatted numbers on a heatmap (G-F13)", () => {
+  const options = { ...newGraphOptions("heatmap"), heatmapShowValues: true };
+  const cols = readTable({
+    columns: ["Title", "A", "B"],
+    rows: [
+      [null, "0.123456789", "1234567.89"],
+      [null, "0.3333333333", "2"],
+    ],
+  }).numeric;
+  const fig = GRAPHS.heatmap.build(cols, options, paintOf(options, 0));
+  const trace = fig.data[0] as { texttemplate?: string; text?: (string | null)[][] };
+  strictEqual(trace.texttemplate, "%{text}");
+  deepStrictEqual(trace.text, [
+    ["0.1235", "1235000"],
+    ["0.3333", "2"],
+  ]);
+});
+
 // ── Gridlines + tick controls (v2 item 30) ───────────────────────────────
 
 type Axis = Record<string, unknown> & { minor?: Record<string, unknown> };
