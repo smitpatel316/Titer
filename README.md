@@ -10,7 +10,7 @@ Three engines do the work: a fast data grid built for Titer, **R**, the referenc
 statistics (through [webR](https://github.com/r-wasm/webr), R compiled to WebAssembly), and
 **[Plotly](https://plotly.com/javascript/)** for the graphs. Everything runs on your machine.
 
-![Dose-response curves with fitted 4PL sigmoids in Titer](docs/hero-dose-response.jpg)
+![Dose-response curves with fitted 4PL sigmoids in Titer](docs/hero-dose-response.png)
 
 ## About this fork
 
@@ -128,7 +128,7 @@ Prism's own saved results and against reference values: the frozen-tip suite pas
   multiple comparisons and descriptive statistics, ready to copy
 - Analyses follow the data: rename a column and they follow it, edit a value and they run again
 
-![A 4PL dose-response fit: EC50s, 95% confidence intervals and R² for two cell lines](docs/analysis-4pl-fit.jpg)
+![A 4PL dose-response fit: EC50s, 95% confidence intervals and R² for two cell lines](docs/analysis-4pl-fit.png)
 
 ### Graphs
 
@@ -164,16 +164,16 @@ Prism's own saved results and against reference values: the frozen-tip suite pas
   printed size; or copy and paste into Keynote, PowerPoint or Word; or send a graph
   straight to Word or PowerPoint in one click
 
-![Volcano plot of RNA-seq results: log2 fold change against −log10(FDR)](docs/gallery-volcano.jpg)
+![Volcano plot of RNA-seq results: log2 fold change against −log10(FDR)](docs/gallery-volcano.png)
 
-![Kaplan-Meier survival curves with 95% confidence bands and Number at Risk](docs/gallery-kaplan-meier.jpg)
+![Kaplan-Meier survival curves with 95% confidence bands and Number at Risk](docs/gallery-kaplan-meier.png)
 
 ### Figures
 
 **Multi-panel figures:** combine several graphs into one figure with a shared legend,
 panel labels and one export — the figure for a paper, built from the same live graphs.
 
-![A multi-panel figure: dose-response curves beside tumor-volume bars](docs/figure-multipanel.jpg)
+![A multi-panel figure: dose-response curves beside tumor-volume bars](docs/figure-multipanel.png)
 
 ### Prism file compatibility
 
