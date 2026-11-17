@@ -17,9 +17,11 @@
 // dependencies injected so the node test harness can drive it without a
 // webview (see the L0 verification script in the lane dir).
 import * as React from "react";
-import { runAnalysis } from "../stats";
-import type { AnalysisResult } from "../stats/types";
+import { ANALYSES, runAnalysis } from "../stats";
+import type { AnalysisParams, AnalysisResult, AnalysisType } from "../stats/types";
 import { infoSheetsOf, resolveAnalysisParams } from "../lib/info-sheets";
+import { validateAnalysisParams } from "../lib/project-file";
+import { analysisOptionsForTable, countDataGroups, hasRowGroups } from "../views/analyses";
 import {
   defaultDocumentIo,
   executeCloseProject,
@@ -80,6 +82,12 @@ export interface JobDeps {
   publishResult?: (analysisId: string, outcome: unknown) => void;
   /** Run an analysis (default: the real `runAnalysis`). */
   run?: typeof runAnalysis;
+  /** Create an analysis node on a table (default: the real store action). */
+  createAnalysis?: (parentId: string, analysisType: AnalysisType, analysisParams?: AnalysisParams) => string;
+  /** Rename any node (default: the real store action). */
+  renameNode?: (id: string, name: string) => void;
+  /** Freeze or unfreeze an analysis node (default: the real store action). */
+  setAnalysisFrozen?: (id: string, frozen: boolean) => void;
   /** Load a project into the store (the import job replaces it). */
   loadProject?: DocumentDeps["loadProject"];
   /** Mark the project saved (the save job). */
@@ -486,6 +494,97 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
     case "noop":
       // The L0 stub: proves the Rust→frontend→Rust round-trip end to end.
       return { result: { ok: true } };
+    case "create-analysis": {
+      // L4: create the analysis node (the `titer_run_analysis` tool awaits
+      // this job — creation is synchronous store work, so param errors
+      // surface as tool errors — then enqueues `run-analysis` separately,
+      // because a run is unbounded in time (GAP-6) and returns a job_id to
+      // poll instead).
+      const args = (job.args ?? {}) as {
+        table_id?: unknown;
+        analysis_type?: unknown;
+        params?: unknown;
+        name?: unknown;
+      };
+      const tableId = reqString(args.table_id, "table_id");
+      const analysisType = reqString(args.analysis_type, "analysis_type");
+      if (analysisType === "compare-many-groups") {
+        throw new Error(
+          "“compare-many-groups” is the picker's wizard value, not an analysis — pass a concrete type: \"anova\", \"kruskal-wallis\", \"rm-anova\" or \"friedman\".",
+        );
+      }
+      if (analysisType === "interpolate") {
+        throw new Error(
+          "“interpolate” is the picker's wizard value, not an analysis — pass analysis_type \"nonlinear-regression\" with params.interpolate set.",
+        );
+      }
+      if (!Object.hasOwn(ANALYSES, analysisType)) {
+        throw new Error(
+          `Unknown analysis type “${analysisType}”. Valid analysis types: ${Object.keys(ANALYSES).join(", ")}.`,
+        );
+      }
+      const type = analysisType as AnalysisType;
+      const state = deps.getState();
+      const table = state.nodes[tableId];
+      if (!table || table.type !== "table") {
+        throw new Error(`No table with id “${tableId}” in this project.`);
+      }
+      // The picker offers each test only for the table types it makes sense
+      // on — the same gate, so an agent gets the valid list instead of a
+      // runner error on data it cannot use.
+      const data = table.data;
+      const tableType = table.tableType;
+      if (tableType === undefined) {
+        throw new Error(`Table “${tableId}” has no table type recorded.`);
+      }
+      const offered = analysisOptionsForTable(tableType, data).map((o) => o.value);
+      if (!offered.includes(type)) {
+        if (type === "three-way-anova" && !hasRowGroups(data)) {
+          throw new Error("“three-way-anova” needs a Grouped table with at least 2 row bands — this table has none.");
+        }
+        if (type === "nested-t-test" && countDataGroups(data) !== 2) {
+          throw new Error(
+            `“nested-t-test” needs a Nested table with exactly 2 data groups — this table has ${countDataGroups(data)}.`,
+          );
+        }
+        if (type === "nested-anova" && countDataGroups(data) < 3) {
+          throw new Error(
+            `“nested-anova” needs a Nested table with at least 3 data groups — this table has ${countDataGroups(data)}.`,
+          );
+        }
+        const offeredLabel = (v: string) =>
+          v === "compare-many-groups"
+            ? "compare-many-groups (→ anova, kruskal-wallis, rm-anova, friedman)"
+            : v === "interpolate"
+              ? "interpolate (→ nonlinear-regression with params.interpolate)"
+              : v;
+        throw new Error(
+          `“${type}” is not offered for ${tableType} tables. ${tableType} tables offer: ${offered.map(offeredLabel).join(", ")}.`,
+        );
+      }
+      const { errors, params } = validateAnalysisParams(type, args.params);
+      if (errors.length) throw new Error(errors.join(" "));
+      const create =
+        deps.createAnalysis ??
+        (() => {
+          throw new Error("This window can't create analyses (no createAnalysis).");
+        });
+      const id = create(tableId, type, params);
+      const name = optString(args.name, "name");
+      if (name !== undefined) {
+        if (name === "") throw new Error(`Job argument “name” must not be empty.`);
+        const rename =
+          deps.renameNode ??
+          (() => {
+            throw new Error("This window can't rename nodes (no renameNode).");
+          });
+        rename(id, name);
+      }
+      return {
+        result: { analysis_id: id, analysis_type: type, table_id: tableId },
+        created: { analysis_id: id, analysis_type: type },
+      };
+    }
     case "run-analysis": {
       const analysisId = (job.args as { analysis_id?: unknown } | null | undefined)?.analysis_id;
       if (typeof analysisId !== "string" || !analysisId) {
@@ -514,6 +613,40 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       (deps.publishResult ?? publishAnalysisResult)(analysisId, outcome);
       if (!("error" in outcome)) deps.cacheAnalysisResult(analysisId, outcome);
       return { result: outcome, created: { analysis_id: analysisId } };
+    }
+    case "freeze-analysis": {
+      // L4: `setAnalysisFrozen` — a frozen result survives later data edits;
+      // unfreezing re-runs on next read (the analysis view's behaviour, not
+      // this job's: nothing re-runs here).
+      const args = (job.args ?? {}) as { analysis_id?: unknown; frozen?: unknown };
+      const analysisId = reqString(args.analysis_id, "analysis_id");
+      if (typeof args.frozen !== "boolean") {
+        throw new Error(`Job argument “frozen” must be true or false.`);
+      }
+      const state = deps.getState();
+      const node = state.nodes[analysisId];
+      if (!node || node.type !== "analysis") {
+        throw new Error(
+          node
+            ? `“${analysisId}” is not an analysis (it is a ${node.type}).`
+            : `No analysis with id “${analysisId}” in this project.`,
+        );
+      }
+      if (node.orphaned) {
+        throw new Error(
+          `Analysis “${node.name}” is orphaned (its table was deleted) — orphaned analyses can't be frozen.`,
+        );
+      }
+      const freeze =
+        deps.setAnalysisFrozen ??
+        (() => {
+          throw new Error("This window can't freeze analyses (no setAnalysisFrozen).");
+        });
+      freeze(analysisId, args.frozen);
+      return {
+        result: { project_id: job.project_id, analysis_id: analysisId, frozen: args.frozen },
+        created: { analysis_id: analysisId },
+      };
     }
     case "save-project": {
       // L2: write the project (GAP-4 — the TS writers build the bytes, Rust
@@ -932,6 +1065,9 @@ export function useMcpJobDispatcher() {
   // the effect below mounts once and never goes stale.
   const getState = store.get;
   const cacheAnalysisResult = actions.cacheAnalysisResult;
+  const createAnalysis = actions.createAnalysis;
+  const renameNode = actions.renameNode;
+  const setAnalysisFrozen = actions.setAnalysisFrozen;
   const loadProject = actions.loadProject;
   const markSaved = actions.markProjectSaved;
   // The table branches dispatch through these actions; after a dispatch
@@ -978,6 +1114,9 @@ export function useMcpJobDispatcher() {
               const { result, created } = await executeJob(job, {
                 getState,
                 cacheAnalysisResult,
+                createAnalysis,
+                renameNode,
+                setAnalysisFrozen,
                 loadProject,
                 markSaved,
                 actions,

@@ -86,6 +86,14 @@ const HARD_MAX_ROWS: usize = 1000;
 const DEFAULT_ACTIVITY_LIMIT: u32 = 50;
 const MAX_ACTIVITY_LIMIT: u32 = 500;
 
+/// Job retention (L4, inventory §3.3): a terminal job is kept until read at
+/// least once after completion, then this long for re-reads; a terminal job
+/// never read is evicted after this long instead, so a client that never
+/// polls cannot grow the job map forever. Non-terminal jobs are never
+/// evicted by age.
+const JOB_RETAIN_AFTER_READ_SECS: u64 = 900;
+const JOB_RETAIN_UNREAD_SECS: u64 = 86_400;
+
 /// The seven table types, as the roadmap names them (§2 "Look at my data").
 fn display_table_type(table_type: &str) -> &'static str {
     match table_type {
@@ -138,6 +146,11 @@ struct McpInner {
     /// dispatched once, ever — the CC-m6 once-only discipline, the same
     /// role as `REngine`'s `sent` set in main.rs.
     dispatched: HashSet<String>,
+    /// Job ids read at least once after reaching a terminal state, with
+    /// the first-read timestamp (seconds since the epoch): the retention
+    /// rule's first half (L4) — a read job is retained briefly *after that
+    /// read* (`JOB_RETAIN_AFTER_READ_SECS`).
+    jobs_read_after_terminal: HashMap<String, u64>,
 }
 
 /// A dispatch job: one store call / analysis run the frontend must execute
@@ -440,6 +453,8 @@ impl McpState {
         args: serde_json::Value,
         created: serde_json::Value,
     ) -> Result<Job, String> {
+        // Bounded growth: expired terminal jobs go before a new one lands.
+        self.prune_jobs();
         let (job, app) = {
             let mut inner = self.lock();
             if !inner.snapshots.contains_key(project_id) {
@@ -571,20 +586,60 @@ impl McpState {
         Ok((job, sent))
     }
 
-    /// A job, by id, for `titer_read_job`.
+    /// A job, by id, for `titer_read_job`. Expired jobs are pruned first;
+    /// reading a terminal job marks it read (the retention rule's first
+    /// half, L4) and it is then retained briefly for re-reads.
     pub fn read_job(&self, job_id: &str) -> Option<Job> {
-        self.lock().jobs.get(job_id).cloned()
+        self.prune_jobs();
+        let mut inner = self.lock();
+        if let Some(job) = inner.jobs.get(job_id) {
+            if job.status.is_terminal() {
+                inner.jobs_read_after_terminal.entry(job_id.to_string()).or_insert_with(now_ts);
+            }
+        }
+        inner.jobs.get(job_id).cloned()
     }
 
     /// Jobs for a project (all of them when `project_id` is None), oldest
     /// first — active + recently finished, so a disconnected client can
-    /// recover instead of re-running.
+    /// recover instead of re-running. Expired jobs are pruned first; listing
+    /// does NOT mark jobs read (a recovering client lists first, then reads
+    /// the result it needs).
     pub fn list_jobs(&self, project_id: Option<&str>) -> Vec<Job> {
+        self.prune_jobs();
         let inner = self.lock();
         let mut jobs: Vec<Job> =
             inner.jobs.values().filter(|j| project_id.is_none_or(|p| j.project_id == p)).cloned().collect();
         jobs.sort_by_key(|j| (j.created_ts, job_seq(&j.job_id)));
         jobs
+    }
+
+    /// Evict terminal jobs whose retention has run out (L4): read ones
+    /// `JOB_RETAIN_AFTER_READ_SECS` after their first post-completion read,
+    /// unread ones `JOB_RETAIN_UNREAD_SECS` after finishing. Non-terminal
+    /// jobs are never evicted. Called on every access (enqueue/read/list),
+    /// so the map stays bounded without a background task.
+    fn prune_jobs(&self) {
+        let mut inner = self.lock();
+        let now = now_ts();
+        let evict: Vec<String> = inner
+            .jobs
+            .values()
+            .filter(|j| {
+                if !j.status.is_terminal() {
+                    return false;
+                }
+                match inner.jobs_read_after_terminal.get(&j.job_id) {
+                    Some(read_ts) => now.saturating_sub(*read_ts) > JOB_RETAIN_AFTER_READ_SECS,
+                    None => j.finished_ts.is_some_and(|f| now.saturating_sub(f) > JOB_RETAIN_UNREAD_SECS),
+                }
+            })
+            .map(|j| j.job_id.clone())
+            .collect();
+        for id in evict {
+            inner.jobs.remove(&id);
+            inner.jobs_read_after_terminal.remove(&id);
+        }
     }
 
     /// A window closed (its snapshot publish said `closed: true`): its
@@ -991,6 +1046,111 @@ async fn import_prism_in_new_window(
     }
 }
 
+// ── Analyses — run-analysis core (L4, v1.6.0) ───────────────────────────
+// `titer_run_analysis` creates the analysis node and enqueues the run;
+// `titer_freeze_analysis` flips a node's frozen flag. Both run through
+// the L0 dispatch channel (GAP-1): node creation and freezing are store
+// calls the frontend executes (`create-analysis` / `freeze-analysis` in
+// src/store/mcp-dispatch.ts), and the run itself is the existing
+// `run-analysis` action there. The run is async by design (GAP-6): the
+// tool returns a job_id immediately, and `titer_read_job` polls it.
+
+/// Every analysis type the app runs (`AnalysisType` in src/stats/types.ts
+/// × the `ANALYSES` registry in src/stats/index.ts), in the inventory's
+/// §2.1 order. The wizard values are deliberately absent:
+/// "compare-many-groups" and "interpolate" are not analyses — see
+/// `validate_analysis_type`.
+const ANALYSIS_TYPES: &[&str] = &[
+    "descriptive-statistics",
+    "frequency-distribution",
+    "fraction-of-total",
+    "transform-data",
+    "transform-concentrations",
+    "remove-baseline",
+    "normalize",
+    "transpose",
+    "prune-rows",
+    "compare-two-groups",
+    "one-sample-t",
+    "anova",
+    "kruskal-wallis",
+    "rm-anova",
+    "friedman",
+    "mixed-effects",
+    "shapiro-wilk",
+    "kolmogorov-smirnov",
+    "outliers",
+    "monte-carlo",
+    "bland-altman",
+    "roc-curve",
+    "plot-function",
+    "correlation",
+    "linear-regression",
+    "deming-regression",
+    "simple-logistic-regression",
+    "area-under-curve",
+    "row-means-totals",
+    "nonlinear-regression",
+    "dose-response-special",
+    "binding-saturation",
+    "binding-kinetics",
+    "enzyme-inhibition",
+    "spline-lowess",
+    "smooth-differentiate-integrate",
+    "two-way-anova",
+    "three-way-anova",
+    "multiple-t-tests",
+    "nested-t-test",
+    "nested-anova",
+    "correlation-matrix",
+    "multiple-regression",
+    "multiple-logistic-regression",
+    "poisson-regression",
+    "principal-component-analysis",
+    "k-means",
+    "cox-proportional-hazards",
+    "extract-rearrange",
+    "survival",
+    "cox",
+    "chi-square",
+    "mcnemar",
+];
+
+/// An analysis type, or a plain refusal naming the valid choices. The two
+/// wizard values get their own guidance: a concrete type for
+/// "compare-many-groups", `nonlinear-regression` + `params.interpolate`
+/// for "interpolate".
+fn validate_analysis_type(analysis_type: &str) -> Result<(), String> {
+    if ANALYSIS_TYPES.contains(&analysis_type) {
+        return Ok(());
+    }
+    if analysis_type == "compare-many-groups" {
+        return Err(
+            "“compare-many-groups” is the New Analysis picker's wizard value, not an analysis — pass a concrete type: \
+            \"anova\", \"kruskal-wallis\", \"rm-anova\" or \"friedman\"."
+                .into(),
+        );
+    }
+    if analysis_type == "interpolate" {
+        return Err("“interpolate” is the picker's wizard value, not an analysis — pass analysis_type \
+            \"nonlinear-regression\" with params.interpolate set."
+            .into());
+    }
+    Err(format!("Unknown analysis type “{analysis_type}”. Valid analysis types: {}.", ANALYSIS_TYPES.join(", ")))
+}
+
+/// A snapshot node of a given kind ("table", "analysis", …), or a plain
+/// refusal naming what it is instead.
+fn snapshot_node<'a>(snapshot: &'a serde_json::Value, id: &str, kind: &str) -> Result<&'a serde_json::Value, String> {
+    let node = find_node(snapshot, id)
+        .ok_or_else(|| format!("No node with id “{id}” in this project. Ask titer_list_projects for the ids."))?;
+    let actual = node.get("type").and_then(|v| v.as_str()).unwrap_or("node");
+    if actual != kind {
+        return Err(format!("“{id}” is not a {kind} (it is a {actual})."));
+    }
+    Ok(node)
+}
+
 // ── The MCP server: tools ───────────────────────────────────────────────
 // Eight read-only tools: the five Phase 1 tools, plus the three Phase 2
 // read-only additions (titer_read_figure, titer_read_info_sheet,
@@ -1237,6 +1397,39 @@ pub struct ReorderNodesArgs {
     /// (the whole root order when parent_id is omitted).
     pub order: Vec<String>,
 }
+// ── Analysis tools (L4) ──
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RunAnalysisArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The table to analyse, as shown by titer_list_tables.
+    pub table_id: String,
+    /// One of the 53 analysis types — never "compare-many-groups" or
+    /// "interpolate" (pass a concrete type instead; see the tool text).
+    pub analysis_type: String,
+    /// Params for that analysis (the AnalysisParams member for the type);
+    /// omit for the defaults.
+    #[serde(default)]
+    pub params: Option<serde_json::Value>,
+    /// Display name for the new analysis node; omit for the test's own name.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct FreezeAnalysisArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The analysis node's id, as shown by titer_list_projects.
+    pub analysis_id: String,
+    /// true freezes (the result survives later data edits), false unfreezes
+    /// (it re-runs on next read).
+    pub frozen: bool,
+}
+
 #[tool_router(router = tools, vis = "pub")]
 impl TiterMcpServer {
     /// What is open in Titer, and the tables, analyses, graphs and figures
@@ -2407,6 +2600,165 @@ impl TiterMcpServer {
             }
         }
     }
+
+    // ── Analyses — run-analysis core (L4) ────────────────────────────────
+    // `titer_run_analysis` creates the node (a `create-analysis` dispatch
+    // job, awaited — creation is synchronous store work, so a bad param
+    // surfaces here as a tool error) and enqueues the run (a `run-analysis`
+    // job, returned immediately with its job_id: GAP-6, a run can outlast
+    // the bridge's 300 s timeout). `titer_freeze_analysis` flips the
+    // frozen flag through a `freeze-analysis` job and waits for it.
+
+    /// Run an analysis on a table: creates the analysis node and enqueues
+    /// the run, returning immediately with a job_id to poll (titer_read_job).
+    /// params must match the AnalysisParams member for the analysis_type;
+    /// an unknown or out-of-range param is rejected with the valid choices,
+    /// never silently defaulted. compare-many-groups is not a type — pass a
+    /// concrete one (anova, kruskal-wallis, rm-anova, friedman);
+    /// interpolation is analysis_type nonlinear-regression with
+    /// params.interpolate.
+    #[tool(
+        name = "titer_run_analysis",
+        description = "Run an analysis on a table: creates the analysis node and enqueues the run, returning immediately with a job_id to poll (titer_read_job). params must match the AnalysisParams member for the analysis_type; an unknown or out-of-range param is rejected with the valid choices, never silently defaulted. Pass a concrete type, never compare-many-groups (use anova, kruskal-wallis, rm-anova or friedman); interpolation is analysis_type nonlinear-regression with params.interpolate.",
+        annotations(
+            title = "Run analysis",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn run_analysis(
+        &self,
+        Parameters(args): Parameters<RunAnalysisArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let run_args = serde_json::json!({
+            "project_id": args.project_id,
+            "table_id": args.table_id,
+            "analysis_type": args.analysis_type,
+            "params": args.params,
+            "name": args.name,
+        });
+        let result: Result<serde_json::Value, String> = async {
+            validate_analysis_type(&args.analysis_type)?;
+            if let Some(params) = &args.params {
+                if !params.is_object() {
+                    return Err("“params” must be an object of named parameters.".into());
+                }
+            }
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            // The table must exist before anything is created: a run with no
+            // table to run on is refused here, not after a node is made.
+            {
+                let snapshots = self.state.snapshots();
+                let snap = snapshots.get(&project_id).ok_or_else(|| {
+                    format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+                })?;
+                snapshot_node(snap, &args.table_id, "table")?;
+            }
+            let mut create_args = serde_json::json!({
+                "table_id": args.table_id,
+                "analysis_type": args.analysis_type,
+            });
+            if let Some(params) = &args.params {
+                create_args["params"] = params.clone();
+            }
+            if let Some(name) = &args.name {
+                if name.is_empty() {
+                    return Err("“name” must not be empty.".into());
+                }
+                create_args["name"] = serde_json::Value::String(name.clone());
+            }
+            let created = self.state.enqueue_job(&project_id, "create-analysis", create_args, serde_json::json!({}))?;
+            let done = self.state.await_job(&created.job_id, Duration::from_secs(30)).await?;
+            if done.status != JobStatus::Done {
+                return Err(done.error.unwrap_or_else(|| "Creating the analysis failed.".to_string()));
+            }
+            let analysis_id = done
+                .result
+                .as_ref()
+                .and_then(|r| r.get("analysis_id"))
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "The analysis was created without reporting its id.".to_string())?
+                .to_string();
+            let run = self.state.enqueue_job(
+                &project_id,
+                "run-analysis",
+                serde_json::json!({ "analysis_id": analysis_id }),
+                serde_json::json!({ "analysis_id": analysis_id, "analysis_type": args.analysis_type }),
+            )?;
+            Ok(serde_json::json!({
+                "job_id": run.job_id,
+                "status": "queued",
+                "analysis_id": analysis_id,
+                "project_id": project_id,
+            }))
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_run_analysis", run_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_run_analysis", run_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Freeze (or unfreeze) an analysis: a frozen result survives later
+    /// data edits; unfreezing re-runs on next read.
+    #[tool(
+        name = "titer_freeze_analysis",
+        description = "Freeze (or unfreeze) an analysis: a frozen result survives later data edits; unfreezing re-runs on next read.",
+        annotations(
+            title = "Freeze analysis",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn freeze_analysis(
+        &self,
+        Parameters(args): Parameters<FreezeAnalysisArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let freeze_args = serde_json::json!({ "project_id": args.project_id, "analysis_id": args.analysis_id, "frozen": args.frozen });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            {
+                let snapshots = self.state.snapshots();
+                let snap = snapshots.get(&project_id).ok_or_else(|| {
+                    format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+                })?;
+                snapshot_node(snap, &args.analysis_id, "analysis")?;
+            }
+            let job = self.state.enqueue_job(
+                &project_id,
+                "freeze-analysis",
+                serde_json::json!({ "analysis_id": args.analysis_id, "frozen": args.frozen }),
+                serde_json::json!({ "analysis_id": args.analysis_id }),
+            )?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The freeze finished without reporting.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Freezing the analysis failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_freeze_analysis", freeze_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_freeze_analysis", freeze_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
 }
 
 impl TiterMcpServer {
@@ -3557,10 +3909,26 @@ mod tests {
 
     fn job_state() -> McpState {
         let state = McpState::default();
-        state
-            .lock()
-            .snapshots
-            .insert("project-1".to_string(), json!({ "filePath": "/tmp/Dose.hlx", "revision": 1, "nodes": {} }));
+        state.lock().snapshots.insert(
+            "project-1".to_string(),
+            json!({
+                "filePath": "/tmp/Dose.hlx",
+                "revision": 1,
+                "nodes": {
+                    "t1": {
+                        "id": "t1", "type": "table", "name": "Dose", "parentId": null, "tableType": "xy",
+                        "data": {
+                            "columns": ["", "Dose [nM]", "Response"],
+                            "rows": [["1", "0.1", "12"], ["2", "1", "45"], ["3", "10", "88"]],
+                        }
+                    },
+                    "a1": {
+                        "id": "a1", "type": "analysis", "name": "Dose-response fit",
+                        "parentId": "t1", "analysisType": "nonlinear-regression"
+                    },
+                },
+            }),
+        );
         state
     }
 
@@ -3673,6 +4041,86 @@ mod tests {
         assert_eq!(read.status, JobStatus::Queued);
     }
 
+    // ── Analyses (L4) ────────────────────────────────────────────────────
+
+    #[test]
+    fn validate_analysis_type_accepts_the_53_and_refuses_wizard_values() {
+        assert_eq!(ANALYSIS_TYPES.len(), 53, "one entry per AnalysisType: {ANALYSIS_TYPES:?}");
+        for t in [
+            "descriptive-statistics",
+            "anova",
+            "kruskal-wallis",
+            "mixed-effects",
+            "nonlinear-regression",
+            "binding-saturation",
+            "chi-square",
+            "mcnemar",
+            "cox-proportional-hazards",
+        ] {
+            assert!(validate_analysis_type(t).is_ok(), "{t}");
+        }
+        let err = validate_analysis_type("compare-many-groups").expect_err("wizard value");
+        assert!(err.contains("anova"), "{err}");
+        assert!(err.contains("friedman"), "{err}");
+        let err = validate_analysis_type("interpolate").expect_err("wizard value");
+        assert!(err.contains("nonlinear-regression"), "{err}");
+        assert!(err.contains("interpolate"), "{err}");
+        let err = validate_analysis_type("no-such-test").expect_err("unknown type");
+        assert!(err.contains("Unknown analysis type"), "{err}");
+        assert!(err.contains("anova"), "{err}");
+    }
+
+    #[test]
+    fn job_created_carries_analysis_type_for_list_jobs() {
+        let state = job_state();
+        let job = state
+            .enqueue_job(
+                "project-1",
+                "run-analysis",
+                json!({ "analysis_id": "a1" }),
+                json!({ "analysis_id": "a1", "analysis_type": "anova" }),
+            )
+            .expect("enqueue");
+        assert_eq!(job.analysis_id.as_deref(), Some("a1"));
+        assert_eq!(job_summary(&job)["analysis_type"], "anova");
+    }
+
+    #[test]
+    fn job_retention_read_then_briefly_then_gone() {
+        let state = job_state();
+        // A terminal job, read once: kept, then gone once its first read is
+        // older than the retention window.
+        let job = state.enqueue_job("project-1", "noop", json!({}), json!({})).expect("enqueue");
+        state.take_jobs("project-1");
+        state
+            .complete_job("project-1", &job.job_id, JobStatus::Done, Some(json!({ "ok": true })), None, None)
+            .expect("complete");
+        assert!(state.read_job(&job.job_id).is_some(), "read once after completion");
+        assert!(state.read_job(&job.job_id).is_some(), "still there for re-reads");
+        {
+            let mut inner = state.lock();
+            inner.jobs_read_after_terminal.insert(job.job_id.clone(), now_ts() - JOB_RETAIN_AFTER_READ_SECS - 1);
+        }
+        assert!(state.read_job(&job.job_id).is_none(), "evicted after the retention window");
+        // A terminal job never read lives longer (24 h), then goes too.
+        let unread = state.enqueue_job("project-1", "noop", json!({}), json!({})).expect("enqueue");
+        state.take_jobs("project-1");
+        state.complete_job("project-1", &unread.job_id, JobStatus::Done, None, None, None).expect("complete");
+        {
+            let mut inner = state.lock();
+            inner.jobs.get_mut(&unread.job_id).unwrap().finished_ts = Some(now_ts() - JOB_RETAIN_UNREAD_SECS - 1);
+        }
+        assert!(state.read_job(&unread.job_id).is_none(), "evicted unread after 24 h");
+        // A live job is never evicted by age, however old its creation is.
+        let live = state.enqueue_job("project-1", "noop", json!({}), json!({})).expect("enqueue");
+        {
+            let mut inner = state.lock();
+            inner.jobs.get_mut(&live.job_id).unwrap().created_ts = now_ts() - JOB_RETAIN_UNREAD_SECS - 1;
+        }
+        assert_eq!(state.list_jobs(Some("project-1")).len(), 1);
+        assert_eq!(state.list_jobs(Some("project-1"))[0].job_id, live.job_id);
+    }
+
     // ── Live smoke: the real server, over real HTTP ──────────────────────
     // The same router `mcp_set_enabled` serves (same auth, same tools),
     // bound on a scratch port, driven by reqwest as an MCP client:
@@ -3781,8 +4229,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            25,
-            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools: {names:?}"
+            27,
+            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + two L4 analysis tools: {names:?}"
         );
         for name in ["titer_read_job", "titer_list_jobs", "titer_cancel_job"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -3810,6 +4258,9 @@ mod tests {
             "titer_undo",
             "titer_redo",
         ] {
+            assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
+        }
+        for name in ["titer_run_analysis", "titer_freeze_analysis"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
 
@@ -4032,7 +4483,272 @@ mod tests {
         .await;
         assert_eq!(call_text(&read_created)["status"], "done");
         assert_eq!(call_text(&read_created)["created"]["table_id"], "table_new");
+        // ── L4: run-analysis + freeze-analysis ───────────────────────────
+        // The completer stands in for the frontend dispatcher: it claims
+        // each job and completes it the way the dispatcher would
+        // (create-analysis with the new node's id, run-analysis with the
+        // AnalysisResult, freeze-analysis with the frozen flag).
 
+        // run: create first — the tool awaits the create job, so the
+        // completer answers it, then the tool returns the run's job_id.
+        let creator = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for job in creator.take_jobs("project-1") {
+                if job.action != "create-analysis" {
+                    continue;
+                }
+                let _ = creator.complete_job(
+                    "project-1",
+                    &job.job_id,
+                    JobStatus::Done,
+                    Some(json!({ "analysis_id": "a9", "analysis_type": "anova", "table_id": "t1" })),
+                    None,
+                    Some(json!({ "analysis_id": "a9", "analysis_type": "anova" })),
+                );
+            }
+        });
+        let (run, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                19,
+                "titer_run_analysis",
+                json!({ "project_id": "project-1", "table_id": "t1", "analysis_type": "anova", "params": { "posthoc": "tukey" } }),
+            ),
+        )
+        .await;
+        let run_out = call_text(&run);
+        assert_eq!(run_out["status"], "queued");
+        assert_eq!(run_out["analysis_id"], "a9");
+        assert_eq!(run_out["project_id"], "project-1");
+        let run_job_id = run_out["job_id"].as_str().expect("job id").to_string();
+
+        // The run job completes (the dispatcher publishes the result as it
+        // does — here the publish is simulated by inserting the outcome the
+        // way `mcp_publish_result` would — and the snapshot gains the new
+        // node, as the frontend's snapshot publisher would report it).
+        let outcome = json!({ "testType": "anova", "stats": [], "groups": [], "notes": "F = 4.2" });
+        let runner = state.clone();
+        let outcome_for_task = outcome.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for job in runner.take_jobs("project-1") {
+                if job.action != "run-analysis" {
+                    continue;
+                }
+                let _ = runner.complete_job(
+                    "project-1",
+                    &job.job_id,
+                    JobStatus::Done,
+                    Some(outcome_for_task.clone()),
+                    None,
+                    Some(json!({ "analysis_id": "a9" })),
+                );
+                runner.lock().results.insert(("project-1".to_string(), "a9".to_string()), outcome_for_task.clone());
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        let (read_run, _) =
+            mcp_post(&client, &url, Some(&session), tools_call(20, "titer_read_job", json!({ "job_id": run_job_id })))
+                .await;
+        assert_eq!(call_text(&read_run)["status"], "done");
+        assert_eq!(call_text(&read_run)["result"]["notes"], "F = 4.2");
+        // The completed run carries its analysis type in the job list, and
+        // the published result is served by titer_read_results too.
+        state.lock().snapshots.get_mut("project-1").and_then(|snap| {
+            snap.get_mut("nodes").and_then(|n| n.as_object_mut()).map(|nodes| {
+                nodes.insert(
+                    "a9".to_string(),
+                    json!({ "id": "a9", "type": "analysis", "name": "One-way ANOVA", "parentId": "t1", "analysisType": "anova" }),
+                );
+            })
+        });
+        let (listed2, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(21, "titer_list_jobs", json!({ "project_id": "project-1" })),
+        )
+        .await;
+        let run_listed = call_text(&listed2)["jobs"]
+            .as_array()
+            .expect("jobs")
+            .iter()
+            .find(|j| j["job_id"] == run_job_id)
+            .expect("run job listed")
+            .clone();
+        assert_eq!(run_listed["status"], "done");
+        assert_eq!(run_listed["analysis_type"], "anova");
+        let (results, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(22, "titer_read_results", json!({ "project_id": "project-1", "analysis_id": "a9" })),
+        )
+        .await;
+        assert_eq!(call_text(&results)["status"], "computed");
+        assert_eq!(call_text(&results)["result"]["notes"], "F = 4.2");
+
+        // freeze: the completer answers the freeze-analysis job; the tool
+        // returns the flag.
+        let freezer = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for job in freezer.take_jobs("project-1") {
+                if job.action != "freeze-analysis" {
+                    continue;
+                }
+                let _ = freezer.complete_job(
+                    "project-1",
+                    &job.job_id,
+                    JobStatus::Done,
+                    Some(json!({ "project_id": "project-1", "analysis_id": "a1", "frozen": true })),
+                    None,
+                    Some(json!({ "analysis_id": "a1" })),
+                );
+            }
+        });
+        let (frozen, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                23,
+                "titer_freeze_analysis",
+                json!({ "project_id": "project-1", "analysis_id": "a1", "frozen": true }),
+            ),
+        )
+        .await;
+        assert_eq!(call_text(&frozen)["frozen"], true);
+        assert_eq!(call_text(&frozen)["analysis_id"], "a1");
+        assert_eq!(call_text(&frozen)["project_id"], "project-1");
+
+        // Rejections: a wizard value, an unknown type, a missing table, a
+        // table that is not a table, non-object params, and freezing an
+        // unknown analysis — all plain errors before anything is enqueued.
+        let (wizard, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                24,
+                "titer_run_analysis",
+                json!({ "project_id": "project-1", "table_id": "t1", "analysis_type": "compare-many-groups" }),
+            ),
+        )
+        .await;
+        assert_eq!(wizard["result"]["isError"], true);
+        assert!(call_raw_text(&wizard).contains("concrete type"), "wizard: {}", call_raw_text(&wizard));
+        let (unknown, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                25,
+                "titer_run_analysis",
+                json!({ "project_id": "project-1", "table_id": "t1", "analysis_type": "no-such-test" }),
+            ),
+        )
+        .await;
+        assert_eq!(unknown["result"]["isError"], true);
+        assert!(call_raw_text(&unknown).contains("Unknown analysis type"), "unknown type: {}", call_raw_text(&unknown));
+        let (no_table, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                26,
+                "titer_run_analysis",
+                json!({ "project_id": "project-1", "table_id": "t9", "analysis_type": "anova" }),
+            ),
+        )
+        .await;
+        assert_eq!(no_table["result"]["isError"], true);
+        assert!(call_raw_text(&no_table).contains("No node with id"), "no table: {}", call_raw_text(&no_table));
+        let (not_table, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                27,
+                "titer_run_analysis",
+                json!({ "project_id": "project-1", "table_id": "a1", "analysis_type": "anova" }),
+            ),
+        )
+        .await;
+        assert_eq!(not_table["result"]["isError"], true);
+        assert!(call_raw_text(&not_table).contains("not a table"), "not a table: {}", call_raw_text(&not_table));
+        let (bad_params, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                28,
+                "titer_run_analysis",
+                json!({ "project_id": "project-1", "table_id": "t1", "analysis_type": "anova", "params": "tukey" }),
+            ),
+        )
+        .await;
+        assert_eq!(bad_params["result"]["isError"], true);
+        assert!(call_raw_text(&bad_params).contains("must be an object"), "bad params: {}", call_raw_text(&bad_params));
+        let (freeze_gone, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                29,
+                "titer_freeze_analysis",
+                json!({ "project_id": "project-1", "analysis_id": "a99", "frozen": true }),
+            ),
+        )
+        .await;
+        assert_eq!(freeze_gone["result"]["isError"], true);
+        assert!(
+            call_raw_text(&freeze_gone).contains("No node with id"),
+            "freeze unknown: {}",
+            call_raw_text(&freeze_gone)
+        );
+
+        // A create job that fails (the frontend's param validation, e.g.)
+        // surfaces its error as the tool's error — no run is enqueued.
+        let failer = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for job in failer.take_jobs("project-1") {
+                if job.action != "create-analysis" {
+                    continue;
+                }
+                let _ = failer.complete_job(
+                    "project-1",
+                    &job.job_id,
+                    JobStatus::Error,
+                    None,
+                    Some(
+                        "Unknown parameter “bogus” for “anova”. “anova” takes: posthoc, equalSd, control, sets.".into(),
+                    ),
+                    None,
+                );
+            }
+        });
+        let (create_failed, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                30,
+                "titer_run_analysis",
+                json!({ "project_id": "project-1", "table_id": "t1", "analysis_type": "anova", "params": { "bogus": 1 } }),
+            ),
+        )
+        .await;
+        assert_eq!(create_failed["result"]["isError"], true);
+        assert!(
+            call_raw_text(&create_failed).contains("Unknown parameter"),
+            "create failed: {}",
+            call_raw_text(&create_failed)
+        );
         let resp = client
             .delete(&url)
             .header("Mcp-Session-Id", &session)

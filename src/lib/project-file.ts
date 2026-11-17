@@ -787,6 +787,235 @@ function readParam(kind: ParamKind, v: unknown, report?: (dropped: number) => vo
   return Array.isArray(kind) ? oneOf(kind, v) : within(v, kind as Limits);
 }
 
+/** The parameters one analysis takes, by type — derived from the `*Params`
+ *  interfaces in `src/stats/types.ts` (plus `sets`, which every analysis
+ *  takes through the `DataSetsParam` base). Used only for error messages:
+ *  an unknown key is rejected naming these, so a caller learns what the
+ *  analysis actually takes. Keep in step with the interfaces; each key is
+ *  compiler-checked as a `ParamKey`, the per-type grouping is not — a key
+ *  listed under the wrong type is caught by the runner, not here.
+ *  `correlation` takes `XYCorrelationParams`, `correlation-matrix` takes
+ *  `CorrelationParams` (method only) — see `src/stats/index.ts`. */
+const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
+  "descriptive-statistics": ["sets"],
+  "frequency-distribution": ["binMode", "binWidth", "binCount", "startAt", "sets"],
+  "fraction-of-total": ["ys", "x", "totalBy", "format", "sets"],
+  "transform-data": ["function", "sets"],
+  "transform-concentrations": ["column", "fromUnit", "toUnit", "sets"],
+  "remove-baseline": ["ys", "x", "baselineMethod", "firstN", "controls", "constant", "constantHook", "sets"],
+  normalize: [
+    "ys", "x", "normalizeMethod", "asPercent", "controls", "constant", "constantHook", "zeroDef", "zeroConstant",
+    "zeroConstantHook", "hundredDef", "hundredConstant", "hundredConstantHook", "sets",
+  ],
+  transpose: ["sets"],
+  "prune-rows": ["ys", "x", "condition", "threshold", "low", "high", "sets"],
+  "compare-two-groups": ["paired", "gaussian", "equalVariance", "ratio", "lognormal", "tails", "sets"],
+  "one-sample-t": ["hypotheticalValue", "tails", "gaussian", "sets"],
+  anova: ["posthoc", "equalSd", "control", "sets"],
+  "kruskal-wallis": ["posthoc", "sets"],
+  "rm-anova": ["posthoc", "sphericity", "sets"],
+  friedman: ["posthoc", "sets"],
+  "mixed-effects": ["fixedFactors", "randomStructure", "subjectId", "subjectFactor", "interaction", "sets"],
+  "shapiro-wilk": ["test", "lognormal", "sets"],
+  "kolmogorov-smirnov": ["sets"],
+  outliers: ["q", "method", "alpha", "iterate", "sets"],
+  "monte-carlo": [
+    "targetAnalysis", "summaryStatistic", "repeats", "seed", "groupMeans", "groupSds", "equalVariance",
+    "hypotheticalValue", "y", "method", "sets",
+  ],
+  "bland-altman": ["sets"],
+  "roc-curve": ["truth", "score", "positive", "sets"],
+  "plot-function": ["equation", "xMin", "xMax", "segments", "curves", "extra", "ligandConcentration", "sets"],
+  correlation: ["method", "mode", "datasets", "sets"],
+  "linear-regression": ["x", "y", "ys", "forceOrigin", "weights", "sets"],
+  "deming-regression": ["y", "lambda", "sets"],
+  "simple-logistic-regression": ["y", "sets"],
+  "area-under-curve": ["baseline", "sets"],
+  "row-means-totals": ["ys", "x", "sets"],
+  "nonlinear-regression": [
+    "y", "ys", "model", "compareWith", "compare", "interpolate", "weights", "fixed", "bounds", "fixedConstants",
+    "boundsConstants", "compareModel", "globalY", "sharedParams", "ligandConcentration", "ligandKd",
+    "ligandConcentrationConstant", "ligandKdConstant", "fitKi", "rout", "q", "customEquation", "customParameters",
+    "sets",
+  ],
+  "dose-response-special": ["ys", "model", "antagonistConcentrations", "bUnits", "fixHillSlope", "sets"],
+  "binding-saturation": ["y", "model", "y2", "sets"],
+  "binding-kinetics": ["y", "model", "ligandConcentration", "koff", "hotNM", "time0", "sets"],
+  "enzyme-inhibition": [
+    "y", "model", "inhibitorConcentrations", "enzymeConcentration", "substrateConcentration", "kmForMorrison", "sets",
+  ],
+  "spline-lowess": ["y", "method", "f", "spar", "df", "sets"],
+  "smooth-differentiate-integrate": ["ys", "x", "operation", "window", "order", "smoothResults", "baseline", "startValue", "sets"],
+  "two-way-anova": ["design", "posthoc", "posthocTarget", "sphericity", "sets"],
+  "three-way-anova": ["posthoc", "posthocTerm", "sets"],
+  "multiple-t-tests": ["paired", "gaussian", "pooledSd", "correction", "sets"],
+  "nested-t-test": ["sets"],
+  "nested-anova": ["posthoc", "sets"],
+  "correlation-matrix": ["method", "sets"],
+  "multiple-regression": ["dependent", "predictors", "sets"],
+  "multiple-logistic-regression": ["dependent", "predictors", "sets"],
+  "poisson-regression": ["dependent", "predictors", "quasi", "sets"],
+  "principal-component-analysis": ["scale", "components", "sets"],
+  "k-means": ["clusters", "standardise", "sets"],
+  "cox-proportional-hazards": ["time", "status", "covariates", "ties", "stratifyBy", "sets"],
+  "extract-rearrange": [
+    "target", "x", "response", "grouping", "subject", "rowTitles", "rowFactor", "columnFactor", "rowVariable",
+    "outcome", "count", "prefixNames", "completeRows", "sets",
+  ],
+  survival: ["curveTest", "correction", "sets"],
+  cox: ["reference", "sets"],
+  "chi-square": ["trendOrdered", "sets"],
+  mcnemar: ["continuityCorrection", "sets"],
+};
+
+/** A value as an error message shows it — short, never a whole table. */
+const shortValue = (v: unknown) => {
+  const s = typeof v === "string" ? `“${v}”` : (JSON.stringify(v) ?? String(v));
+  return s.length > 60 ? `${s.slice(0, 57)}…` : s;
+};
+
+/** One param value, checked strictly against its kind (the mirror of
+ *  `readParam`, which forgives: this one rejects). A choice value matches
+ *  case-insensitively and comes back canonical, as the file reader does —
+ *  `tails: "Two-Sided"` becomes `"two-sided"`, never a silent default. */
+function checkParamValue(kind: ParamKind, key: string, v: unknown): { value: unknown } | { error: string } {
+  const bad = (want: string): { error: string } => ({ error: `“${key}” must be ${want} — got ${shortValue(v)}.` });
+  if (kind === "yes/no") return typeof v === "boolean" ? { value: v } : bad("true or false");
+  if (kind === "number") {
+    // `spar`/`df: null` is an explicit "choose automatically" (spline-lowess),
+    // not a missing value — same as the file reader.
+    if ((key === "spar" || key === "df") && v === null) return { value: null };
+    return isFiniteNumber(v) ? { value: v } : bad("a number");
+  }
+  if (isObj(kind) && isFiniteNumber(kind.min) && isFiniteNumber(kind.max)) {
+    if (!isFiniteNumber(v)) return bad("a number");
+    if (v < kind.min || v > kind.max)
+      return { error: `“${key}” must be between ${kind.min} and ${kind.max} — got ${v}.` };
+    return { value: v };
+  }
+  if (kind === "name") return typeof v === "string" ? { value: v } : bad("a column name (a string)");
+  if (kind === "name-or-number")
+    return typeof v === "string" || isFiniteNumber(v) ? { value: v } : bad("a column name or a number");
+  if (kind === "name-or-names") {
+    if (typeof v === "string") return { value: v };
+    if (Array.isArray(v) && v.length && v.every((s) => typeof s === "string")) return { value: v };
+    return bad("a column name, or a list of column names");
+  }
+  if (kind === "names") {
+    if (Array.isArray(v) && v.length && v.every((s) => typeof s === "string")) return { value: v };
+    return bad("a list of column names");
+  }
+  if (kind === "name-and-names") {
+    if (
+      isObj(v) &&
+      typeof v.name === "string" &&
+      Array.isArray(v.levels) &&
+      v.levels.length &&
+      v.levels.every((s) => typeof s === "string")
+    )
+      return { value: v };
+    return bad("an object with a name and a list of levels, e.g. { name: \"Subject\", levels: [\"S1\", \"S2\"] }");
+  }
+  if (kind === "numbers-by-name") {
+    if (isObj(v) && Object.keys(v).length && Object.values(v).every(isFiniteNumber)) return { value: v };
+    return bad("an object of numbers by name, e.g. { \"A\": 10 }");
+  }
+  if (kind === "number-pairs-by-name") {
+    if (
+      isObj(v) &&
+      Object.keys(v).length &&
+      Object.values(v).every((p) => Array.isArray(p) && p.length === 2 && p.every(isFiniteNumber))
+    )
+      return { value: v };
+    return bad("an object of [low, high] number pairs by name");
+  }
+  if (kind === "texts-by-name") {
+    if (isObj(v) && Object.keys(v).length && Object.values(v).every((s) => typeof s === "string")) return { value: v };
+    return bad("an object of text by name");
+  }
+  if (kind === "text-pairs-by-name") {
+    if (
+      isObj(v) &&
+      Object.keys(v).length &&
+      Object.values(v).every((p) => Array.isArray(p) && p.length === 2 && p.every((s) => typeof s === "string"))
+    )
+      return { value: v };
+    return bad("an object of [first, second] text pairs by name");
+  }
+  if (kind === "plot-curves") {
+    if (
+      Array.isArray(v) &&
+      v.length &&
+      v.every(
+        (c) =>
+          isObj(c) &&
+          typeof c.label === "string" &&
+          isObj(c.params) &&
+          Object.values(c.params).every(isFiniteNumber),
+      )
+    )
+      return { value: v };
+    return bad("a list of curves, each { label, params } with numeric parameter values");
+  }
+  if (Array.isArray(kind)) {
+    const found = oneOf(kind, v);
+    return found !== undefined
+      ? { value: found }
+      : { error: `“${key}” must be one of: ${kind.join(", ")} — got ${shortValue(v)}.` };
+  }
+  return bad("a usable value");
+}
+
+/** Validate MCP-supplied analysis params strictly: unknown or out-of-range
+ *  params are rejected with the valid choices, never silently defaulted.
+ *  Returns the errors (empty when valid) and the canonicalised params
+ *  (choice values in their canonical case; absent when nothing was passed).
+ *  What is NOT checked here, the runners validate themselves and the run
+ *  job reports their error: required params (e.g. a binding `model`),
+ *  named columns (`y` / `sets` / … — `runAnalysis` rejects a missing one),
+ *  and data-dependent gates (three-way ANOVA row bands, nested group
+ *  counts). A param this version doesn't know is an error here — unlike the
+ *  file reader, which keeps it (FF-F12): an agent's typo must not sail
+ *  through as a silently ignored param. */
+export function validateAnalysisParams(
+  analysisType: string,
+  params: unknown,
+): { errors: string[]; params?: AnalysisParams } {
+  const validKeys = PARAM_KEYS_BY_ANALYSIS[analysisType];
+  if (!validKeys) return { errors: [`Unknown analysis type “${analysisType}”.`] };
+  if (params === undefined || params === null) return { errors: [] };
+  if (!isObj(params))
+    return { errors: [`“params” must be an object of named parameters, not ${shortValue(params)}.`] };
+  const errors: string[] = [];
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (!isIn(PARAMS, key) || !validKeys.includes(key as ParamKey)) {
+      errors.push(
+        `Unknown parameter “${key}” for “${analysisType}”. “${analysisType}” takes: ${validKeys.join(", ")}.`,
+      );
+      continue;
+    }
+    const checked = checkParamValue(PARAMS[key as ParamKey], key, value);
+    if ("error" in checked) {
+      errors.push(checked.error);
+      continue;
+    }
+    out[key] = checked.value;
+  }
+  // Per-type choice restrictions (M7): the merged PARAMS lists admit every
+  // family's values; each analysis only offers its own.
+  const choices = PARAM_CHOICES[analysisType] ?? {};
+  for (const [key, allowed] of Object.entries(choices)) {
+    const value = out[key];
+    if (value !== undefined && typeof value === "string" && !allowed.includes(value)) {
+      errors.push(`“${key}” for “${analysisType}” must be one of: ${allowed.join(", ")} — got “${value}”.`);
+      delete out[key];
+    }
+  }
+  if (errors.length) return { errors };
+  return { errors: [], params: (Object.keys(out).length ? out : undefined) as unknown as AnalysisParams | undefined };
+}
+
 /** A saved result is only trusted when it looks like one — an object whose
  *  `testType` is this analysis, with the stats, groups and notes a result
  *  always carries. Anything else is a hand edit or a newer file's shape,
