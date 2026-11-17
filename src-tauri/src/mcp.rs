@@ -151,6 +151,31 @@ struct McpInner {
     /// rule's first half (L4) — a read job is retained briefly *after that
     /// read* (`JOB_RETAIN_AFTER_READ_SECS`).
     jobs_read_after_terminal: HashMap<String, u64>,
+    /// Remote files opened by `titer_cloud_download`, by window label: the
+    /// version the next upload is conditional on (L9). The Rust-side
+    /// equivalent of the UI's per-window remote handle in
+    /// src/store/use-document.ts — same per-window scoping, so one
+    /// window's save never learns another window's seen version. Set by
+    /// the download (and by `titer_cloud_upload_new`), advanced by a
+    /// successful upload, dropped when the window closes.
+    remote_handles: HashMap<String, RemoteHandle>,
+    /// When each window last published a snapshot: the upload tools wait
+    /// for a publish that arrives after they start (the frontend
+    /// publishes on a 500 ms debounce — see `await_settled_snapshot`).
+    last_publish: HashMap<String, std::time::Instant>,
+}
+
+/// A remote file a project window came from, as the upload tools need it:
+/// where the file lives, and the version the next save is conditional on.
+/// `version` is `None` only when the provider reported none — an upload
+/// then refuses instead of overwriting unconditionally.
+#[derive(Clone, Debug)]
+struct RemoteHandle {
+    provider: String,
+    account_id: String,
+    file_id: String,
+    name: String,
+    version: Option<String>,
 }
 
 /// A dispatch job: one store call / analysis run the frontend must execute
@@ -320,6 +345,50 @@ impl McpState {
     /// One window's published snapshot, if it has published.
     fn snapshot_for(&self, label: &str) -> Option<serde_json::Value> {
         self.lock().snapshots.get(label).cloned()
+    }
+
+    /// The remote file a window came from (L9), if it was opened from the
+    /// cloud by `titer_cloud_download` (or uploaded as new).
+    fn remote_handle_for(&self, project_id: &str) -> Option<RemoteHandle> {
+        self.lock().remote_handles.get(project_id).cloned()
+    }
+
+    /// Remember the remote file a window came from (L9).
+    fn set_remote_handle(&self, project_id: &str, handle: RemoteHandle) {
+        self.lock().remote_handles.insert(project_id.to_string(), handle);
+    }
+
+    /// A successful upload's new version becomes the next upload's
+    /// expected version (L9).
+    fn update_remote_version(&self, project_id: &str, version: String) {
+        if let Some(handle) = self.lock().remote_handles.get_mut(project_id) {
+            handle.version = Some(version);
+        }
+    }
+
+    /// Wait for a snapshot publish for `label` to arrive after this call
+    /// started (L9, the upload tools). The frontend publishes on a 500 ms
+    /// debounce, so a snapshot read immediately after an edit tool returns
+    /// can predate the edit — and an upload reading that snapshot would
+    /// upload stale bytes while the agent believes its edits went up.
+    /// Waiting up to 600 ms covers a publish pending at call time (an edit
+    /// just before the call publishes within 500 ms of it). When no edit
+    /// is pending the wait still runs its course — uploads are rare, and
+    /// stale bytes are worse than the wait. Edits landing *during* the
+    /// upload are genuinely concurrent and out of scope.
+    async fn await_settled_snapshot(&self, label: &str) -> Option<serde_json::Value> {
+        let start = std::time::Instant::now();
+        let seen = self.lock().last_publish.get(label).copied();
+        loop {
+            if self.lock().last_publish.get(label).copied() != seen {
+                break;
+            }
+            if start.elapsed() >= Duration::from_millis(600) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        self.snapshot_for(label)
     }
 
     /// The project a tool call addresses: the named window, or the most
@@ -841,6 +910,8 @@ pub fn mcp_publish_snapshot(window: tauri::WebviewWindow, state: State<McpState>
     if snapshot.get("closed").and_then(|v| v.as_bool()).unwrap_or(false) {
         inner.snapshots.remove(&label);
         inner.results.retain(|(w, _), _| *w != label);
+        inner.remote_handles.remove(&label);
+        inner.last_publish.remove(&label);
         if inner.last_published.as_deref() == Some(label.as_str()) {
             inner.last_published = inner.snapshots.keys().next().cloned();
         }
@@ -850,6 +921,7 @@ pub fn mcp_publish_snapshot(window: tauri::WebviewWindow, state: State<McpState>
         state.drop_jobs_for_window(&label);
         return;
     }
+    inner.last_publish.insert(label.clone(), std::time::Instant::now());
     inner.snapshots.insert(label.clone(), snapshot);
     inner.last_published = Some(label);
 }
@@ -1044,6 +1116,113 @@ async fn import_prism_in_new_window(
     } else {
         Err(done.error.unwrap_or_else(|| format!("Importing “{path}” failed.")))
     }
+}
+
+// ── Cloud tools (L9, v1.6.0) ────────────────────────────────────────────
+// Thin wrappers over the existing Rust cloud commands (main.rs +
+// cloud.rs / cloud_box.rs). No OAuth work (GAP-5): `cloud_connect_box`
+// stays human-only, Box BYO credentials are never tool arguments, and
+// there is no disconnect tool. The mock provider is the test provider —
+// the inventory's "only box is live" is about real providers, and §6
+// tests these nine tools against the mock.
+
+/// The plain error every cloud tool returns when no account of that
+/// provider is connected (inventory §3.6, verbatim).
+const CONNECT_BOX_MSG: &str = "Connect Box in Titer → Settings → Connected Storage first.";
+
+fn validate_cloud_provider(provider: &str) -> Result<(), String> {
+    match provider {
+        crate::cloud::PROVIDER_BOX | crate::cloud::PROVIDER_MOCK => Ok(()),
+        other => Err(format!("No {other} account is connected to Titer — only Box is live today.")),
+    }
+}
+
+/// The account the tool names, or the plain error when it isn't connected.
+/// Box accounts live in the registry (`cloud-accounts.json`); the mock
+/// needs none. An empty account id is refused outright, not looked up.
+fn require_cloud_account(app: &AppHandle, provider: &str, account_id: &str) -> Result<(), String> {
+    if account_id.is_empty() {
+        return Err("account_id is required — pass the account id from titer_cloud_status.".into());
+    }
+    if provider == crate::cloud::PROVIDER_BOX {
+        let connected = crate::load_cloud_registry(app)
+            .iter()
+            .any(|a| a.provider == crate::cloud::PROVIDER_BOX && a.id == account_id);
+        if !connected {
+            return Err(CONNECT_BOX_MSG.into());
+        }
+    }
+    Ok(())
+}
+
+/// A `CloudError` as the plain-language tool error. A conflict names the
+/// remote version the upload is conditional against, so the agent can say
+/// what changed; everything else carries its own message (never a status
+/// code or a provider body — those can echo tokens).
+fn cloud_error_message(err: &crate::cloud::CloudError) -> String {
+    match err {
+        crate::cloud::CloudError::Conflict { remote_version, remote_modified_at, message, .. } => {
+            let when = remote_modified_at.as_deref().map(|at| format!(" (changed {at})")).unwrap_or_default();
+            format!("{message} The remote version is now {remote_version}{when}. Download the latest version before uploading, or upload it as a new file.")
+        }
+        crate::cloud::CloudError::NotConfigured { message }
+        | crate::cloud::CloudError::NotAuthenticated { message }
+        | crate::cloud::CloudError::Offline { message }
+        | crate::cloud::CloudError::NotFound { message }
+        | crate::cloud::CloudError::TooLarge { message }
+        | crate::cloud::CloudError::Provider { message }
+        | crate::cloud::CloudError::Keychain { message }
+        | crate::cloud::CloudError::Cancelled { message } => message.clone(),
+    }
+}
+
+/// A remote file's project format, from its name's extension — or a plain
+/// refusal. Only project files open in a window.
+fn cloud_project_format(name: &str) -> Result<&'static str, String> {
+    let ext = std::path::Path::new(name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    match ext.as_str() {
+        "hlx" => Ok("hlx"),
+        "pzt" => Ok("pzt"),
+        "prism" => Ok("prism"),
+        "pzfx" => Ok("pzfx"),
+        _ => Err(format!(
+            "“{name}” is not a project file — download a .hlx, .pzt, .prism or .pzfx file to open it as a project."
+        )),
+    }
+}
+
+/// The mock provider behind the cloud commands (managed state, as the
+/// commands take it).
+fn mock_provider(app: &AppHandle) -> State<'_, crate::cloud::MockProvider> {
+    app.state::<crate::cloud::MockProvider>()
+}
+
+/// A folder id, or the Box root when omitted.
+fn cloud_folder_id(folder_id: &Option<String>) -> String {
+    folder_id.clone().filter(|id| !id.is_empty()).unwrap_or_else(|| "0".to_string())
+}
+
+/// The project's current on-disk bytes, for an upload: the file at the
+/// snapshot's `filePath`, or the cloud-cache copy when the project has
+/// none (a Prism-imported remote that was never saved locally — its
+/// cache copy IS its on-disk bytes while it is clean). The dirty check
+/// happens before this runs, so stale bytes can never get here.
+fn upload_project_bytes(
+    app: &AppHandle,
+    snapshot: &serde_json::Value,
+    record: &RemoteHandle,
+) -> Result<Vec<u8>, String> {
+    if let Some(path) = snapshot.get("filePath").and_then(|v| v.as_str()) {
+        return std::fs::read(path)
+            .map_err(|e| format!("Couldn't read the project's file at “{path}” ({e}) — save it first, then upload."));
+    }
+    crate::cloud::read_cache(app, &record.provider, &record.file_id, &record.name).ok_or_else(|| {
+        "This project has no file on disk yet — save it with titer_save_project first, then upload.".to_string()
+    })
 }
 
 // ── Analyses — run-analysis core (L4, v1.6.0) ───────────────────────────
@@ -1428,6 +1607,88 @@ pub struct FreezeAnalysisArgs {
     /// true freezes (the result survives later data edits), false unfreezes
     /// (it re-runs on next read).
     pub frozen: bool,
+}
+
+// ── Cloud tools (L9) ──
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CloudListArgs {
+    /// The provider: \"box\" (only Box is live today). \"mock\" is the test provider.
+    pub provider: String,
+    /// The account id, as shown by titer_cloud_status.
+    pub account_id: String,
+    /// The folder to list; omit for the root (\"0\").
+    #[serde(default)]
+    pub folder_id: Option<String>,
+}
+
+/// One remote file, by provider + account + file id.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CloudFileArgs {
+    /// The provider: \"box\" (only Box is live today). \"mock\" is the test provider.
+    pub provider: String,
+    /// The account id, as shown by titer_cloud_status.
+    pub account_id: String,
+    /// The remote file's id, as shown by titer_cloud_list.
+    pub file_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CloudUploadArgs {
+    /// The provider: \"box\" (only Box is live today). \"mock\" is the test provider.
+    pub provider: String,
+    /// The account id, as shown by titer_cloud_status.
+    pub account_id: String,
+    /// The remote file's id, as shown by titer_cloud_list.
+    pub file_id: String,
+    /// Window label of the project to upload (\"project-1\"); omit for the
+    /// front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CloudUploadNewArgs {
+    /// The provider: \"box\" (only Box is live today). \"mock\" is the test provider.
+    pub provider: String,
+    /// The account id, as shown by titer_cloud_status.
+    pub account_id: String,
+    /// The folder to upload into; omit for the root (\"0\").
+    #[serde(default)]
+    pub folder_id: Option<String>,
+    /// Window label of the project to upload (\"project-1\"); omit for the
+    /// front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The new remote file's name; omit for the project's file name.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CloudCreateFolderArgs {
+    /// The provider: \"box\" (only Box is live today). \"mock\" is the test provider.
+    pub provider: String,
+    /// The account id, as shown by titer_cloud_status.
+    pub account_id: String,
+    /// The folder to create it in; omit for the root (\"0\").
+    #[serde(default)]
+    pub folder_id: Option<String>,
+    /// The new folder's name.
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CloudMoveArgs {
+    /// The provider: \"box\" (only Box is live today). \"mock\" is the test provider.
+    pub provider: String,
+    /// The account id, as shown by titer_cloud_status.
+    pub account_id: String,
+    /// The remote file or folder's id, as shown by titer_cloud_list.
+    pub file_id: String,
+    /// The folder to move it into; omit for the root (\"0\").
+    #[serde(default)]
+    pub folder_id: Option<String>,
 }
 
 // ── Graph / figure / info-sheet tools (L6) ─────────────────────────────
@@ -3578,6 +3839,647 @@ impl TiterMcpServer {
             }
         }
     }
+    // ── Cloud tools (L9, v1.6.0) ───────────────────────────────────────
+    // Thin wrappers over the existing Rust cloud commands (main.rs +
+    // cloud.rs / cloud_box.rs). All nine touch the network by design
+    // (`open_world_hint: true`) and say so. All nine return a plain error
+    // when no account of that provider is connected — they never start a
+    // connection themselves (GAP-5: OAuth stays human-only, BYO
+    // credentials are never tool arguments, no disconnect tool). Only
+    // `titer_cloud_download`'s open step uses the L0 dispatch (the
+    // headless import-prism job for Prism remotes); the rest are
+    // Rust-side. The remote version a project saw lives in `McpState`
+    // (`remote_handles`), set by the download / upload-new and advanced
+    // by a successful upload — that is what makes an upload conditional.
+
+    /// The cloud accounts connected to Titer (Box only, today) and whether
+    /// Box credentials are saved. No tokens in the output, ever.
+    #[tool(
+        name = "titer_cloud_status",
+        description = "List the cloud accounts connected to Titer (Box only, today) and whether Box credentials are saved. No tokens are ever returned. When no account is connected, connect Box in Titer > Settings > Connected Storage first — these tools never start a sign-in themselves.",
+        annotations(
+            title = "Cloud status",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn cloud_status(&self) -> Result<Json<serde_json::Value>, String> {
+        let result: Result<serde_json::Value, String> = async {
+            let app = app_handle_or_err(&self.state)?;
+            let status = crate::cloud_status(app).await;
+            let accounts: Vec<serde_json::Value> = status
+                .accounts
+                .iter()
+                .map(|a| {
+                    serde_json::json!({
+                        "provider": a.provider,
+                        "account_id": a.id,
+                        "login": a.login,
+                        "name": a.name,
+                    })
+                })
+                .collect();
+            Ok(serde_json::json!({ "accounts": accounts, "box_has_credentials": status.box_has_credentials }))
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_cloud_status", serde_json::json!({}), true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_cloud_status", serde_json::json!({}), false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// List the files and folders in a cloud folder (the remote picker).
+    #[tool(
+        name = "titer_cloud_list",
+        description = "List the files and folders in a cloud folder (Box only, today) — the remote picker. folder_id is a folder id from a previous list; omit it for the root (\"0\").",
+        annotations(
+            title = "List cloud folder",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn cloud_list(&self, Parameters(args): Parameters<CloudListArgs>) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({
+            "provider": args.provider,
+            "account_id": args.account_id,
+            "folder_id": args.folder_id,
+        });
+        let result: Result<serde_json::Value, String> = async {
+            validate_cloud_provider(&args.provider)?;
+            let app = app_handle_or_err(&self.state)?;
+            require_cloud_account(&app, &args.provider, &args.account_id)?;
+            let entries = crate::cloud_list(
+                app.clone(),
+                mock_provider(&app),
+                args.provider.clone(),
+                args.account_id.clone(),
+                cloud_folder_id(&args.folder_id),
+            )
+            .await
+            .map_err(|e| cloud_error_message(&e))?;
+            Ok(serde_json::json!({
+                "entries": entries
+                    .iter()
+                    .map(|e| serde_json::json!({
+                        "id": e.id,
+                        "name": e.name,
+                        "path": e.path,
+                        "kind": e.kind,
+                    }))
+                    .collect::<Vec<_>>(),
+            }))
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_cloud_list", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_cloud_list", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Download a cloud file and open it in a new project window — the
+    /// same as opening it from the cloud in the UI. `.hlx` / `.prism` /
+    /// `.pzfx` remotes keep their format on save.
+    #[tool(
+        name = "titer_cloud_download",
+        description = "Download a cloud file (Box only, today) and open it in a new project window, the same as opening it from the cloud in the UI: .hlx / .prism / .pzfx remotes keep their format on save. Only project files open (.hlx, .pzt, .prism, .pzfx).",
+        annotations(
+            title = "Download from cloud",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn cloud_download(
+        &self,
+        Parameters(args): Parameters<CloudFileArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({
+            "provider": args.provider,
+            "account_id": args.account_id,
+            "file_id": args.file_id,
+        });
+        let result: Result<serde_json::Value, String> = async {
+            validate_cloud_provider(&args.provider)?;
+            let app = app_handle_or_err(&self.state)?;
+            require_cloud_account(&app, &args.provider, &args.account_id)?;
+            // Metadata first: the name (hence the format) and the display
+            // path — a non-project file is refused before any bytes move.
+            let entry = crate::cloud_metadata(
+                app.clone(),
+                mock_provider(&app),
+                args.provider.clone(),
+                args.account_id.clone(),
+                args.file_id.clone(),
+            )
+            .await
+            .map_err(|e| cloud_error_message(&e))?;
+            let format = cloud_project_format(&entry.name)?;
+            let downloaded = crate::cloud_download(
+                app.clone(),
+                mock_provider(&app),
+                args.provider.clone(),
+                args.account_id.clone(),
+                args.file_id.clone(),
+            )
+            .await
+            .map_err(|e| cloud_error_message(&e))?;
+            let cache = crate::cloud::cache_path(&app, &args.provider, &args.file_id, &downloaded.name)
+                .ok_or_else(|| "Couldn't find the app-data folder for the cloud cache.".to_string())?;
+            let cache_path = cache.to_string_lossy().into_owned();
+            // The open step (L0 dispatch only for Prism remotes): a `.hlx`
+            // opens from its cache path like any local file (L2 pattern);
+            // a `.prism` / `.pzfx` goes through the headless import-prism
+            // job — the UI's local-import path pops a modal alert, so it
+            // must not be used here.
+            let label = match format {
+                "prism" | "pzfx" => {
+                    let (label, _) = import_prism_in_new_window(&self.state, &app, &cache_path).await?;
+                    label
+                }
+                _ => {
+                    let label =
+                        crate::open(&app, None, crate::opening_for(&cache_path)).map_err(|e| e.to_string())?;
+                    let path = cache_path.clone();
+                    let loaded = self
+                        .state
+                        .await_snapshot(
+                            &label,
+                            move |snap| {
+                                snap.get("filePath").and_then(|v| v.as_str()) == Some(path.as_str())
+                                    || snap
+                                        .get("nodes")
+                                        .and_then(|n| n.as_object())
+                                        .map(|n| !n.is_empty())
+                                        .unwrap_or(false)
+                            },
+                            Duration::from_secs(15),
+                        )
+                        .await;
+                    if !loaded {
+                        return Err(format!(
+                            "Project {label} did not report the opened file within 15s — it may still be loading. Ask titer_list_projects for the open projects."
+                        ));
+                    }
+                    label
+                }
+            };
+            // The version this window saw: the next upload is conditional
+            // on it (see `titer_cloud_upload`).
+            self.state.set_remote_handle(
+                &label,
+                RemoteHandle {
+                    provider: args.provider.clone(),
+                    account_id: args.account_id.clone(),
+                    file_id: args.file_id.clone(),
+                    name: downloaded.name.clone(),
+                    version: downloaded.version.clone(),
+                },
+            );
+            Ok(serde_json::json!({ "project_id": label, "file_path": cache_path, "format": format }))
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_cloud_download", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_cloud_download", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Upload a project to its existing remote file, conditional on the
+    /// version seen when it was downloaded. A version mismatch is an
+    /// error naming the conflict, never a silent overwrite. Refuses a
+    /// dirty (unsaved) project — save first.
+    #[tool(
+        name = "titer_cloud_upload",
+        description = "Upload a project's current on-disk bytes to its existing remote file (Box only, today), conditional on the version seen when it was downloaded — a version mismatch is an error naming the conflict, never a silent overwrite. Refuses a dirty (unsaved) project: save it with titer_save_project first. The project must have been opened from that remote file with titer_cloud_download (or uploaded as new with titer_cloud_upload_new).",
+        annotations(
+            title = "Upload to cloud",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    async fn cloud_upload(
+        &self,
+        Parameters(args): Parameters<CloudUploadArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({
+            "provider": args.provider,
+            "account_id": args.account_id,
+            "file_id": args.file_id,
+            "project_id": args.project_id,
+        });
+        let result: Result<serde_json::Value, String> = async {
+            validate_cloud_provider(&args.provider)?;
+            let app = app_handle_or_err(&self.state)?;
+            require_cloud_account(&app, &args.provider, &args.account_id)?;
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            // The settle wait: the snapshot lags edits by the 500 ms
+            // publish debounce (see `await_settled_snapshot`).
+            let snapshot = self.state.await_settled_snapshot(&project_id).await.ok_or_else(|| {
+                format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+            })?;
+            if snapshot.get("isDirty").and_then(|v| v.as_bool()).unwrap_or(false) {
+                return Err(
+                    "This project has unsaved changes — save it with titer_save_project first, then upload."
+                        .into(),
+                );
+            }
+            let record = self
+                .state
+                .remote_handle_for(&project_id)
+                .filter(|r| {
+                    r.provider == args.provider && r.account_id == args.account_id && r.file_id == args.file_id
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "Project {project_id} wasn't opened from that remote file — download it with titer_cloud_download first, then upload (or upload it as a new file with titer_cloud_upload_new)."
+                    )
+                })?;
+            let expected = record.version.clone().ok_or_else(|| {
+                "The provider didn't report a version for this file — upload it as a new file with titer_cloud_upload_new instead."
+                    .to_string()
+            })?;
+            let bytes = upload_project_bytes(&app, &snapshot, &record)?;
+            let base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            let saved = crate::cloud_upload(
+                app.clone(),
+                mock_provider(&app),
+                args.provider.clone(),
+                args.account_id.clone(),
+                args.file_id.clone(),
+                record.name.clone(),
+                base64,
+                Some(expected),
+            )
+            .await
+            .map_err(|e| cloud_error_message(&e))?;
+            self.state.update_remote_version(&project_id, saved.version.clone());
+            Ok(serde_json::json!({ "provider": args.provider, "file_id": args.file_id, "version": saved.version }))
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_cloud_upload", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_cloud_upload", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Upload a project as a new remote file. The project must be saved on
+    /// disk first (its on-disk bytes are uploaded). Afterwards the project
+    /// is tied to the new remote file, so `titer_cloud_upload` can update
+    /// it.
+    #[tool(
+        name = "titer_cloud_upload_new",
+        description = "Upload a project as a new remote file (Box only, today). The project must be saved on disk first — its on-disk bytes are uploaded, and a dirty (unsaved) project is refused: save it with titer_save_project first. Afterwards the project is tied to the new remote file, so titer_cloud_upload can update it.",
+        annotations(
+            title = "Upload new to cloud",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    async fn cloud_upload_new(
+        &self,
+        Parameters(args): Parameters<CloudUploadNewArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({
+            "provider": args.provider,
+            "account_id": args.account_id,
+            "folder_id": args.folder_id,
+            "project_id": args.project_id,
+            "name": args.name,
+        });
+        let result: Result<serde_json::Value, String> = async {
+            validate_cloud_provider(&args.provider)?;
+            let app = app_handle_or_err(&self.state)?;
+            require_cloud_account(&app, &args.provider, &args.account_id)?;
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let snapshot = self.state.await_settled_snapshot(&project_id).await.ok_or_else(|| {
+                format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+            })?;
+            if snapshot.get("isDirty").and_then(|v| v.as_bool()).unwrap_or(false) {
+                return Err(
+                    "This project has unsaved changes — save it with titer_save_project first, then upload.".into()
+                );
+            }
+            let path = snapshot
+                .get("filePath")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    "This project has no file on disk yet — save it with titer_save_project first, then upload."
+                        .to_string()
+                })?
+                .to_string();
+            let bytes = std::fs::read(&path).map_err(|e| {
+                format!("Couldn't read the project's file at “{path}” ({e}) — save it first, then upload.")
+            })?;
+            let name = match &args.name {
+                Some(name) if !name.is_empty() => name.clone(),
+                _ => std::path::Path::new(&path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("Project.hlx")
+                    .to_string(),
+            };
+            let base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            let entry = crate::cloud_upload_new(
+                mock_provider(&app),
+                app.clone(),
+                args.provider.clone(),
+                args.account_id.clone(),
+                cloud_folder_id(&args.folder_id),
+                name,
+                base64,
+            )
+            .await
+            .map_err(|e| cloud_error_message(&e))?;
+            // The UI's "save a copy" choice ties the window to the new
+            // file; this does the same, so a later upload can update it.
+            self.state.set_remote_handle(
+                &project_id,
+                RemoteHandle {
+                    provider: args.provider.clone(),
+                    account_id: args.account_id.clone(),
+                    file_id: entry.id.clone(),
+                    name: entry.name.clone(),
+                    version: entry.version.clone(),
+                },
+            );
+            Ok(serde_json::json!({
+                "provider": args.provider,
+                "file_id": entry.id,
+                "name": entry.name,
+                "path": entry.path,
+            }))
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_cloud_upload_new", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_cloud_upload_new", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Create a folder in a cloud account.
+    #[tool(
+        name = "titer_cloud_create_folder",
+        description = "Create a folder in a cloud account (Box only, today). folder_id is the parent folder; omit it for the root (\"0\").",
+        annotations(
+            title = "Create cloud folder",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    async fn cloud_create_folder(
+        &self,
+        Parameters(args): Parameters<CloudCreateFolderArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({
+            "provider": args.provider,
+            "account_id": args.account_id,
+            "folder_id": args.folder_id,
+            "name": args.name,
+        });
+        let result: Result<serde_json::Value, String> = async {
+            validate_cloud_provider(&args.provider)?;
+            let app = app_handle_or_err(&self.state)?;
+            require_cloud_account(&app, &args.provider, &args.account_id)?;
+            let entry = crate::cloud_create_folder(
+                app.clone(),
+                mock_provider(&app),
+                args.provider.clone(),
+                args.account_id.clone(),
+                cloud_folder_id(&args.folder_id),
+                args.name.clone(),
+            )
+            .await
+            .map_err(|e| cloud_error_message(&e))?;
+            Ok(serde_json::json!({
+                "provider": args.provider,
+                "file_id": entry.id,
+                "name": entry.name,
+                "path": entry.path,
+            }))
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_cloud_create_folder", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_cloud_create_folder", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Move a cloud file or folder into another folder.
+    #[tool(
+        name = "titer_cloud_move",
+        description = "Move a cloud file or folder into another folder (Box only, today). folder_id is the destination folder; omit it for the root (\"0\").",
+        annotations(
+            title = "Move in cloud",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn cloud_move(&self, Parameters(args): Parameters<CloudMoveArgs>) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({
+            "provider": args.provider,
+            "account_id": args.account_id,
+            "file_id": args.file_id,
+            "folder_id": args.folder_id,
+        });
+        let result: Result<serde_json::Value, String> = async {
+            validate_cloud_provider(&args.provider)?;
+            let app = app_handle_or_err(&self.state)?;
+            require_cloud_account(&app, &args.provider, &args.account_id)?;
+            // The move command needs to know whether it moves a file or a
+            // folder; the tool takes no such arg, so read it first.
+            let entry = crate::cloud_metadata(
+                app.clone(),
+                mock_provider(&app),
+                args.provider.clone(),
+                args.account_id.clone(),
+                args.file_id.clone(),
+            )
+            .await
+            .map_err(|e| cloud_error_message(&e))?;
+            let moved = crate::cloud_move(
+                app.clone(),
+                mock_provider(&app),
+                args.provider.clone(),
+                args.account_id.clone(),
+                args.file_id.clone(),
+                cloud_folder_id(&args.folder_id),
+                entry.kind == "folder",
+            )
+            .await
+            .map_err(|e| cloud_error_message(&e))?;
+            Ok(serde_json::json!({ "provider": args.provider, "file_id": moved.id, "path": moved.path }))
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_cloud_move", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_cloud_move", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Read a cloud file's metadata: name, path, version, modified time.
+    #[tool(
+        name = "titer_cloud_metadata",
+        description = "Read a cloud file's metadata (Box only, today): name, path, version, modified time.",
+        annotations(
+            title = "Cloud metadata",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn cloud_metadata(
+        &self,
+        Parameters(args): Parameters<CloudFileArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({
+            "provider": args.provider,
+            "account_id": args.account_id,
+            "file_id": args.file_id,
+        });
+        let result: Result<serde_json::Value, String> = async {
+            validate_cloud_provider(&args.provider)?;
+            let app = app_handle_or_err(&self.state)?;
+            require_cloud_account(&app, &args.provider, &args.account_id)?;
+            let entry = crate::cloud_metadata(
+                app.clone(),
+                mock_provider(&app),
+                args.provider.clone(),
+                args.account_id.clone(),
+                args.file_id.clone(),
+            )
+            .await
+            .map_err(|e| cloud_error_message(&e))?;
+            Ok(serde_json::json!({
+                "provider": args.provider,
+                "file_id": entry.id,
+                "name": entry.name,
+                "path": entry.path,
+                "version": entry.version,
+                "modified": entry.modified_at,
+            }))
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_cloud_metadata", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_cloud_metadata", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// List a cloud file's revisions (versions).
+    #[tool(
+        name = "titer_cloud_revisions",
+        description = "List a cloud file's revisions (Box only, today): each version with its modified time.",
+        annotations(
+            title = "Cloud revisions",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn cloud_revisions(
+        &self,
+        Parameters(args): Parameters<CloudFileArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({
+            "provider": args.provider,
+            "account_id": args.account_id,
+            "file_id": args.file_id,
+        });
+        let result: Result<serde_json::Value, String> = async {
+            validate_cloud_provider(&args.provider)?;
+            let app = app_handle_or_err(&self.state)?;
+            require_cloud_account(&app, &args.provider, &args.account_id)?;
+            let revisions = crate::cloud_revisions(
+                app.clone(),
+                mock_provider(&app),
+                args.provider.clone(),
+                args.account_id.clone(),
+                args.file_id.clone(),
+            )
+            .await
+            .map_err(|e| cloud_error_message(&e))?;
+            Ok(serde_json::json!({
+                "revisions": revisions
+                    .iter()
+                    .map(|r| serde_json::json!({ "version": r.version, "modified": r.modified_at }))
+                    .collect::<Vec<_>>(),
+            }))
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_cloud_revisions", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_cloud_revisions", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
 }
 
 impl TiterMcpServer {
@@ -5055,8 +5957,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            38,
-            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + two L4 analysis tools + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools: {names:?}"
+            47,
+            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + two L4 analysis tools + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools: {names:?}"
         );
         for name in ["titer_read_job", "titer_list_jobs", "titer_cancel_job"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -5087,6 +5989,19 @@ mod tests {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
         for name in ["titer_run_analysis", "titer_freeze_analysis"] {
+            assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
+        }
+        for name in [
+            "titer_cloud_status",
+            "titer_cloud_list",
+            "titer_cloud_download",
+            "titer_cloud_upload",
+            "titer_cloud_upload_new",
+            "titer_cloud_create_folder",
+            "titer_cloud_move",
+            "titer_cloud_metadata",
+            "titer_cloud_revisions",
+        ] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
         for name in [

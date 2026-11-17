@@ -20,6 +20,9 @@ export function useMcpSnapshotPublisher() {
       void mcpPublishSnapshot({
         filePath: s.filePath,
         revision: s.revision,
+        // The cloud upload tools refuse a dirty project (L9): the
+        // snapshot carries the flag so Rust can see it.
+        isDirty: s.isDirty,
         nodes: s.nodes,
         rootOrder: s.rootOrder,
         childOrder: s.childOrder,
