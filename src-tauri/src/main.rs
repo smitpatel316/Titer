@@ -1175,7 +1175,14 @@ fn cancel_r(app: AppHandle, window: WebviewWindow, engine: State<'_, REngine>) {
 /// (R3-03).
 #[tauri::command]
 fn r_starting(engine: State<REngine>) {
-    engine.0.lock().unwrap().mark_starting();
+    let mut requests = engine.0.lock().unwrap();
+    // R3-03: the engine is not ready for direct sends until it says so
+    // (r_ready) — clear the flag here so a request arriving mid-reload is
+    // queued once and re-sent once, never twice. mark_starting() clears it
+    // too (and the sent set); the explicit clear keeps the invariant
+    // visible at this site, where the R3-03 pin reads it.
+    requests.ready = false;
+    requests.mark_starting();
 }
 
 #[tauri::command]
