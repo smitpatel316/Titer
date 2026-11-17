@@ -9,7 +9,7 @@ import { Image } from "@tauri-apps/api/image";
 import { Menu, Submenu, type MenuOptions } from "@tauri-apps/api/menu";
 import { message, save } from "@tauri-apps/plugin-dialog";
 import type { RVector } from "./stats/webr";
-import { cancelActiveEvals, interruptR, resetR } from "./stats/webr";
+import { cancelActiveEvals, interruptR, resetR, type EngineBootStatus } from "./stats/webr";
 import {
   createEvalQueue,
   setRQueueSnapshot,
@@ -189,6 +189,20 @@ export async function cancelR(): Promise<void> {
   }
 }
 
+/** De-duplicates engine request ids within one engine page: the shell can
+ *  re-send an id `r_ready` already sent directly (CC-m6) — this page runs
+ *  it once. A fresh page starts with an empty set, so a genuine restart's
+ *  re-send still runs. Returns whether this id is new (run it) or a repeat
+ *  (drop it). */
+export function createEvalDedupe() {
+  const seen = new Set<number>();
+  return (id: number): boolean => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  };
+}
+
 /** In the engine window: answers every request with `evaluate`, one at a
  *  time, in arrival order — the app's explicit FIFO (M17: webR serializes
  *  internally too, but that queue is invisible; this one publishes its
@@ -204,17 +218,23 @@ export async function serveR(evaluate: (code: string) => Promise<RVector>) {
   // so a request arriving between this window's listeners attaching and
   // `r_ready` is queued once and re-sent once — never emitted twice.
   await invoke("r_starting");
+  const dedupeEval = createEvalDedupe();
   const queue = createEvalQueue((snapshot) => {
     setRQueueSnapshot(snapshot);
     // Best effort: project windows listen for "r-queue" and show the depth.
     void getCurrentWebviewWindow().emit("r-queue", snapshot).catch(() => {});
   });
-  await getCurrentWebviewWindow().listen<[number, string]>("r-eval", ({ payload: [id, code] }) =>
+  await getCurrentWebviewWindow().listen<[number, string]>("r-eval", ({ payload: [id, code] }) => {
+    // The shell can re-send an id `r_ready` already sent directly (CC-m6):
+    // this page runs each id once, so the re-send is dropped here. A fresh
+    // page starts with an empty set, so a genuine restart's re-send — the
+    // old page's evaluations are dead with it — still runs.
+    if (!dedupeEval(id)) return;
     queue.enqueue(() => evaluate(code), id).then(
       (values) => invoke("r_result", { id, values }),
       (err: unknown) => invoke("r_result", { id, error: err instanceof Error ? err.message : String(err) }),
-    ),
-  );
+    );
+  });
   // A project window cancelled its own requests (its watchdog fired, or
   // the user hit Cancel): the shell dropped them and sends their ids.
   // Dequeue the ones still waiting — without touching R — and interrupt R
@@ -266,6 +286,40 @@ export async function onRQueue() {
 export async function onEngineReset() {
   if (!isNative) return () => {};
   return getCurrentWebviewWindow().listen("r-reset", () => resetR());
+}
+
+/** In the engine window: publish the R boot status to every project window
+ *  (CC-m7). A failed boot is no longer silent: project windows show it in
+ *  the analysis view instead of leaving the user to discover it on the
+ *  first analysis. No-op outside the app. */
+export function publishEngineBootStatus(status: EngineBootStatus) {
+  if (!isNative) return;
+  void getCurrentWebviewWindow().emit("r-boot-status", status).catch(() => {});
+}
+
+/** In the engine window: answer a project window asking for the current
+ *  boot status (a window opened after the boot missed the publish).
+ *  No-op outside the app. Returns the unlisten function. */
+export async function onEngineBootStatusRequest(handler: () => void) {
+  if (!isNative) return () => {};
+  return getCurrentWebviewWindow().listen("r-boot-status-request", handler);
+}
+
+/** In a project window: keep this window's copy of the R engine's boot
+ *  status current (the engine window publishes "r-boot-status" whenever it
+ *  changes). The listen attaches before asking, so the answer cannot slip
+ *  past it. No-op outside the app (tests, `npm run web`) — the status
+ *  stays null there. Returns the unlisten function. */
+export async function onEngineBootStatus(handler: (status: EngineBootStatus) => void) {
+  if (!isNative) return () => {};
+  const off = await getCurrentWebviewWindow().listen<EngineBootStatus>("r-boot-status", ({ payload }) =>
+    handler(payload),
+  );
+  // Ask the engine window for its current status: a window opened after
+  // the boot missed the publish, and a retry that finally booted must
+  // clear a failure this window already showed.
+  void getCurrentWebviewWindow().emit("r-boot-status-request").catch(() => {});
+  return off;
 }
 
 // ── Window ─────────────────────────────────────────────────────────────

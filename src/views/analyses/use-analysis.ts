@@ -8,7 +8,9 @@ import type { TableData } from "../../store/types";
 import { useProjectStore } from "../../store/use-project-store";
 import { infoSheetsOf, resolveAnalysisParams } from "../../lib/info-sheets";
 import { getRQueueSnapshot, onRQueueSnapshot, type RQueueSnapshot } from "../../stats/r-queue";
-import { onRQueue } from "../../native";
+import { getEngineStatus, onEngineStatus, setEngineStatus } from "../../stats/engine-status";
+import type { EngineBootStatus } from "../../stats/webr";
+import { onEngineBootStatus, onRQueue } from "../../native";
 
 /** The R queue's latest state, for a view waiting on a calculation: null
  *  until the engine has published one (tests and `npm run web` never do,
@@ -27,6 +29,26 @@ export function useRQueue(): RQueueSnapshot | null {
     };
   }, []);
   return snapshot;
+}
+
+/** The R engine's boot status, for a view: null until the engine has
+ *  published one (tests and `npm run web` never do, so the boot line stays
+ *  hidden there). A failed boot shows in the analysis view instead of
+ *  leaving the user to discover it on the first run (CC-m7). */
+export function useEngineBootStatus(): EngineBootStatus | null {
+  const [status, setStatus] = React.useState<EngineBootStatus | null>(() => getEngineStatus());
+  React.useEffect(() => {
+    let offTauri: (() => void) | undefined;
+    void onEngineBootStatus((s) => setEngineStatus(s)).then((off) => {
+      offTauri = off;
+    });
+    const offStore = onEngineStatus(setStatus);
+    return () => {
+      offStore();
+      offTauri?.();
+    };
+  }, []);
+  return status;
 }
 
 /** null while running, or when there is nothing to run. `retryKey` re-runs

@@ -9,7 +9,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cancelActiveEvals, EvalCancelledError, ensurePackages, evalNamedVector, packageDiagnostics, packageStatus, resetR, setPackageRepo, startR } from "../src/stats/webr";
+import { cancelActiveEvals, EvalCancelledError, ensurePackages, evalNamedVector, getEngineBootStatus, onEngineBootStatus, packageDiagnostics, packageStatus, resetR, setPackageRepo, startR, type EngineBootStatus } from "../src/stats/webr";
 import {
   createEvalQueue,
   getRQueueSnapshot,
@@ -105,7 +105,7 @@ import { deletePalette, keepPalette, loadMyPalettes } from "../src/store/my-pale
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
 import { datasetColumns, isGrouped, isNested, readTable, setColumns, splitXY, xyPoints, type Dataset } from "../src/lib/dataset";
 import { prepareFit } from "../src/stats/xy/nonlinear-fit";
-import { adjustComparisonRows, adjustPValues, incompleteRows, missingColumn } from "../src/stats/column/base";
+import { adjustComparisonRows, adjustPValues, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
 import { compareTwoGroupsSpec } from "../src/stats/column/compare-two-groups";
 import { kruskalWallisSpec } from "../src/stats/column/kruskal-wallis";
@@ -176,8 +176,9 @@ import {
   convertConcentration,
 } from "../src/stats/column/transform-concentrations";
 import { makeInitialState, reducer } from "../src/store/use-project-store";
-import { isNewer, latestVersion } from "../src/lib/version";
+import { UPDATE_CHECK_TIMEOUT_MS, fetchWithTimeout, isNewer, latestVersion } from "../src/lib/version";
 import { decideUpdate, type ChannelManifest } from "../src/lib/channel";
+import { checkForUpdatesDaily } from "../src/updates";
 import { titleCase } from "../src/lib/format";
 import { loadRecents } from "../src/store/recents";
 import { largestAt, PX_PER_INCH, withDpi } from "../src/lib/image-dpi";
@@ -200,7 +201,8 @@ import {
   validateFigureSize,
 } from "../src/lib/figure";
 import { buildPanelFigure } from "../src/views/figures/panel-figure";
-import { ensureSaveExtension } from "../src/native";
+import { createEvalDedupe, ensureSaveExtension } from "../src/native";
+import { engineStatusText, getEngineStatus, onEngineStatus, setEngineStatus } from "../src/stats/engine-status";
 import { buildOfficeDocument, officeExtension } from "../src/lib/office-export";
 import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
@@ -7911,6 +7913,32 @@ check("P-value adjustments pass nulls through", () => {
   );
 });
 
+// CC-m10: the full column is re-serialized as an R literal on every run —
+// measured, not capped. The cost is linear and small at realistic sizes
+// (measured 2026-11-16: 100k rows ≈ 35 ms / 1.8 MB per column on the JS
+// side; the R-side parse dominates the round-trip, 100k rows ≈ 2.8 s,
+// 250k ≈ 4.2 s), so no warning or cap was added; this pin catches a
+// superlinear blowup.
+check("serializing a column as an R literal stays linear and small (CC-m10)", async () => {
+  const values = Array.from({ length: 100_000 }, (_, i) => Math.sin(i) * 1234.5678 + i * 0.001);
+  const started = Date.now();
+  const literal = rVec(values);
+  const ms = Date.now() - started;
+  ok(ms < 2000, `100k rows serialized in ${ms}ms`);
+  // Full-precision floats run ~18 bytes each: a superlinear blowup (or a
+  // formatting change) shows up here before it shows up in the app.
+  ok(literal.length > 1_600_000 && literal.length < 2_000_000, `100k rows -> ${literal.length} chars`);
+  strictEqual(literal.slice(0, 2), "c(");
+  ok(literal.endsWith(")"));
+  // The round-trip is dominated by R parsing the literal, not the join —
+  // and still far under the 5-minute eval watchdog at this size.
+  const evalStarted = Date.now();
+  const v = await evalNamedVector(`x<-${literal};c(m=mean(x),n=length(x))`);
+  ok(Date.now() - evalStarted < 30_000, `100k-row round-trip took ${Date.now() - evalStarted}ms`);
+  strictEqual(v.n, 100_000);
+  ok(v.m !== null && Math.abs(v.m - 50.02) < 0.01, `mean ${v.m}`);
+});
+
 check("an analysis runs on the data sets chosen, in their order", async () => {
   const column = readTable(treatments(["Control", "Drug A", "Drug B"]));
   deepStrictEqual(
@@ -11731,8 +11759,90 @@ check("the update check reads main's package.json, never the GitHub API", async 
 });
 
 
-// The update check is the Tauri plugin updater now (src/updates.ts + main.rs
-// `check_update`/`install_update`): no fetch-based latestVersion to test here.
+// ── CC-m8: the update check has a timeout, and the daily key is written
+// only after the check settles ─────────────────────────────────────────
+// The launch check used to hang forever on a dead network (bare fetch, no
+// timeout) — and the once-a-day key was already written before the check
+// ran, so no re-check happened for 24 h.
+
+check("an update check that hangs aborts after its timeout instead of hanging forever", async () => {
+  strictEqual(UPDATE_CHECK_TIMEOUT_MS, 10_000);
+  const server = createServer(() => {
+    // Never answer: the hung-network case.
+  });
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const port = (server.address() as { port: number }).port;
+  const started = Date.now();
+  try {
+    await rejects(
+      fetchWithTimeout(`http://127.0.0.1:${port}/version.json`, undefined, 50),
+      (err: unknown) => err instanceof Error && err.name === "AbortError",
+    );
+    ok(Date.now() - started < 2000, `aborted in ${Date.now() - started}ms`);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  // A fetch that answers comes back untouched (status and body as-is).
+  const okServer = createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ version: "1.2.0" }));
+  });
+  await new Promise<void>((resolve) => okServer.listen(0, resolve));
+  const okPort = (okServer.address() as { port: number }).port;
+  try {
+    const response = await fetchWithTimeout(`http://127.0.0.1:${okPort}/version.json`, undefined, 1000);
+    strictEqual(response.status, 200);
+    deepStrictEqual(await response.json(), { version: "1.2.0" });
+  } finally {
+    await new Promise<void>((resolve) => okServer.close(() => resolve()));
+  }
+});
+
+check("the daily update check marks the day only after the check settles", async () => {
+  const stored: Record<string, string> = {};
+  const storage = {
+    getItem: (k: string) => stored[k] ?? null,
+    setItem: (k: string, v: string) => void (stored[k] = v),
+  };
+  Object.assign(globalThis, { localStorage: storage });
+  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+  try {
+    // While the check is still running, nothing is marked...
+    let resolveCheck!: (v: boolean) => void;
+    const pending = new Promise<boolean>((r) => (resolveCheck = r));
+    checkForUpdatesDaily(() => pending);
+    strictEqual(stored["titer.updatesCheckedAt"], undefined);
+    // ...a check that reached a decision marks the day...
+    resolveCheck(true);
+    await sleep(10);
+    ok(stored["titer.updatesCheckedAt"] !== undefined);
+    // ...a check that never got an answer leaves the key alone, so the
+    // next launch tries again.
+    delete stored["titer.updatesCheckedAt"];
+    checkForUpdatesDaily(() => Promise.resolve(false));
+    await sleep(10);
+    strictEqual(stored["titer.updatesCheckedAt"], undefined);
+    // ...and a check already done today does not run again.
+    stored["titer.updatesCheckedAt"] = String(Date.now());
+    let ran = false;
+    checkForUpdatesDaily(() => ((ran = true), Promise.resolve(true)));
+    strictEqual(ran, false);
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+});
+
+check("both update reads go through the timed fetch", () => {
+  const version = readFileSync(fileURLToPath(new URL("../src/lib/version.ts", import.meta.url)), "utf8");
+  const channel = readFileSync(fileURLToPath(new URL("../src/lib/channel.ts", import.meta.url)), "utf8");
+  ok(version.includes("await fetchWithTimeout(MAIN_PACKAGE)"));
+  ok(channel.includes("await fetchWithTimeout(CHANNEL_MANIFEST_URL"));
+  // The only bare `fetch` left is the helper's own implementation, which
+  // is what carries the timeout signal.
+  strictEqual((version.match(/await fetch\(/g) ?? []).length, 1);
+  ok(version.includes("signal: controller.signal"));
+  ok(!/await fetch\(/.test(channel), "no bare fetch left in channel.ts");
+});
 
 
 import { parsePzfx } from "../src/lib/pzfx";
@@ -13592,6 +13702,75 @@ check("hung R boot times out and retry boots fresh", async () => {
   // evaluation that follows it proves R itself is healthy.
   await startR(fileURLToPath(new URL("../node_modules/webr/dist/", import.meta.url)));
   deepStrictEqual(await evalNamedVector("c(a=1)"), { a: 1 });
+});
+
+// CC-m7: a failed R boot is recorded as engine boot status, not swallowed.
+// `startR().catch(() => {})` in the engine window used to drop the failure
+// with nothing to show for it until an analysis ran and failed.
+check("a failed R boot is recorded as engine boot status, and a good boot clears it", async () => {
+  const seen: EngineBootStatus[] = [];
+  const off = onEngineBootStatus((s) => seen.push({ ...s }));
+  const dir = mkdtempSync(join(tmpdir(), "helix-failed-webr-"));
+  try {
+    const real = fileURLToPath(new URL("../node_modules/webr/dist/", import.meta.url));
+    for (const name of readdirSync(real)) {
+      if (name === "webr-worker.js") continue;
+      symlinkSync(join(real, name), join(dir, name));
+    }
+    writeFileSync(
+      join(dir, "webr-worker.js"),
+      "// Never responds: the worker starts but never becomes ready.\nsetInterval(() => {}, 3_600_000);\n",
+    );
+    resetR();
+    strictEqual(getEngineBootStatus().state, "booting");
+    await rejects(
+      startR(`${dir}/`, { timeoutMs: 1_000 }),
+      (err: unknown) => err instanceof Error && /took longer than 1 second to start/.test(err.message),
+    );
+    // The failure is recorded, with the reason — not swallowed.
+    strictEqual(getEngineBootStatus().state, "failed");
+    ok((getEngineBootStatus().error ?? "").includes("took longer than 1 second to start"));
+    ok(seen.some((s) => s.state === "failed"), `listener saw ${JSON.stringify(seen)}`);
+  } finally {
+    off();
+    rmSync(dir, { recursive: true, force: true });
+  }
+  // A good boot works on the same engine slot and clears the failure.
+  await startR(fileURLToPath(new URL("../node_modules/webr/dist/", import.meta.url)));
+  strictEqual(getEngineBootStatus().state, "ready");
+  deepStrictEqual(await evalNamedVector("c(a=1)"), { a: 1 });
+});
+
+check("the engine boot line shows only a failed boot, with its reason", () => {
+  strictEqual(engineStatusText(null), "");
+  strictEqual(engineStatusText({ state: "booting" }), "");
+  strictEqual(engineStatusText({ state: "ready" }), "");
+  const failed = engineStatusText({ state: "failed", error: "Cannot find module '/webr/webr-worker.js'" });
+  ok(failed.includes("failed to start") && failed.includes("Cannot find module"));
+  // The store round-trips the latest status to subscribers.
+  const seen: EngineBootStatus[] = [];
+  const off = onEngineStatus((s) => seen.push(s));
+  try {
+    setEngineStatus({ state: "failed", error: "boom" });
+    strictEqual(getEngineStatus()?.state, "failed");
+    deepStrictEqual(seen, [{ state: "failed", error: "boom" }]);
+  } finally {
+    off();
+  }
+});
+
+// CC-m6 (engine-window half): a request id the shell re-sends runs once per
+// page — the receiver drops the repeat. The shell half (take_unsent) is
+// pinned by the Rust tests in src-tauri/src/main.rs.
+check("a re-sent engine request id runs once per engine page (CC-m6)", () => {
+  const isNew = createEvalDedupe();
+  ok(isNew(1));
+  ok(!isNew(1), "the same id twice is a repeat, not a second run");
+  ok(isNew(2));
+  ok(!isNew(2));
+  // A fresh page starts empty: a restart's re-send still runs.
+  const fresh = createEvalDedupe();
+  ok(fresh(1));
 });
 
 // ── M17: the R queue is an explicit FIFO, and the UI shows it ───────────

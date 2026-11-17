@@ -70,7 +70,14 @@ export async function describe(
   };
 }
 
-/** Render an R numeric vector literal from values. */
+/** Render an R numeric vector literal from values. No row-count cap or
+ *  chunking (CC-m10, measured 2026-11-16): serializing is linear and cheap
+ *  on the JS side — 100k rows ≈ 35 ms / 1.8 MB per column, 1M rows ≈ 760 ms
+ *  / 18 MB — and the R-side parse dominates the round-trip (100k rows
+ *  ≈ 2.8 s, 250k ≈ 4.2 s end to end), still far under the 5-minute eval
+ *  watchdog at realistic table sizes, so none was added. Re-measure
+ *  (tests/checks.ts, "serializing a column as an R literal stays linear
+ *  and small") before adding one. */
 export const rVec = (values: number[]) => `c(${values.join(",")})`;
 
 /** Escape a string for safe embedding in an R double-quoted literal, so a group

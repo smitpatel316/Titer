@@ -12,9 +12,10 @@ import { cancelActiveEvals } from "../../stats/webr";
 import { titleCase } from "../../lib/format";
 import { AnalysisResultsView } from "./analysis-results-view";
 import { AddFloatingNoteButton, FloatingNotesLayer } from "../../components/floating-notes";
-import { useAnalysis, useRQueue } from "./use-analysis";
+import { useAnalysis, useEngineBootStatus, useRQueue } from "./use-analysis";
 import { publishAnalysisResult } from "../../store/mcp-publish";
 import { rQueueStatusText } from "../../stats/r-queue";
+import { engineStatusText } from "../../stats/engine-status";
 
 /** "1:23" for the elapsed running time. */
 function formatElapsed(ms: number): string {
@@ -59,6 +60,8 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
   const [retryNonce, setRetryNonce] = React.useState(0);
   const outcome = useAnalysis(node.analysisType, liveData, node.analysisParams, { retryKey: retryNonce });
   const queue = useRQueue();
+  const bootStatus = useEngineBootStatus();
+  const bootFailure = engineStatusText(bootStatus);
   // v3 Phase 1: the outcome, once computed, is what `titer_read_results`
   // serves. (An analysis never opened in this session has no result — the
   // tool says so instead of inventing one.)
@@ -127,6 +130,9 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
             Orphaned — the source table “{node.sourceTableName ?? "Unknown"}” was deleted. These results are kept
             as they were; the analysis parameters cannot be changed.
           </p>
+        )}
+        {bootFailure && (
+          <p className="border-b border-separator bg-control px-8 py-2 text-regular text-secondary">{bootFailure}</p>
         )}
         {shown ? (
           <AnalysisResultsView

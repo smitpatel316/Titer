@@ -12,7 +12,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
 use serde::Serialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -1054,6 +1054,45 @@ struct Requests {
     /// what lets a cancel drop only the cancelling window's requests
     /// (FL-F14) instead of every window's.
     waiting: HashMap<u64, (String, String, Sender<RResult>)>,
+    /// Ids already sent to the current engine incarnation: a request
+    /// emitted directly by `eval_r` (or re-sent by `r_ready`) is in here
+    /// until its result arrives (`r_result`) or it is dropped
+    /// (`cancel_r`), so a second `r_ready` for the same incarnation never
+    /// sends it again (CC-m6). `r_starting` clears it: a new engine page
+    /// has none of these evaluations, so every waiting request must be
+    /// sent to it again.
+    sent: HashSet<u64>,
+}
+
+impl Requests {
+    /// The engine window (re)started and is about to listen for requests:
+    /// it is not ready for direct sends until it says so (`r_ready`), and
+    /// a new page has none of the current incarnation's evaluations, so
+    /// every waiting request must be sent to it again (CC-m6).
+    fn mark_starting(&mut self) {
+        self.ready = false;
+        self.sent.clear();
+    }
+
+    /// The waiting requests `r_ready` must (re-)send to the engine, in
+    /// arrival (id) order. Marks them sent, so a second `r_ready` for the
+    /// same incarnation re-sends nothing — an evaluation already running
+    /// in the engine is never started a second time (CC-m6). A request
+    /// sent directly by `eval_r` is already in `sent`, so it is skipped
+    /// here.
+    fn take_unsent(&mut self) -> Vec<(u64, String)> {
+        let mut ids: Vec<u64> = self.waiting.keys().copied().collect();
+        ids.sort_unstable();
+        // CC-m6: skip ids already sent — `r_ready` re-emits everything in
+        // `waiting`, including requests `eval_r` already sent directly and
+        // which are executing in the engine. Without this filter each
+        // `r_ready` started those requests a second time.
+        ids.retain(|id| !self.sent.contains(id));
+        for id in &ids {
+            self.sent.insert(*id);
+        }
+        ids.into_iter().map(|id| (id, self.waiting[&id].0.clone())).collect()
+    }
 }
 
 #[tauri::command]
@@ -1065,6 +1104,7 @@ async fn eval_r(app: AppHandle, window: WebviewWindow, engine: State<'_, REngine
         let id = requests.next_id;
         if requests.ready {
             let _ = app.emit_to("engine", "r-eval", (id, &code));
+            requests.sent.insert(id);
         }
         requests.waiting.insert(id, (code, window.label().to_string(), sender));
     }
@@ -1073,7 +1113,9 @@ async fn eval_r(app: AppHandle, window: WebviewWindow, engine: State<'_, REngine
 
 #[tauri::command]
 fn r_result(engine: State<REngine>, id: u64, values: Option<HashMap<String, Option<f64>>>, error: Option<String>) {
-    if let Some((_, _, sender)) = engine.0.lock().unwrap().waiting.remove(&id) {
+    let mut requests = engine.0.lock().unwrap();
+    if let Some((_, _, sender)) = requests.waiting.remove(&id) {
+        requests.sent.remove(&id);
         let _ = sender.try_send(values.ok_or_else(|| error.unwrap_or_default()));
     }
 }
@@ -1093,6 +1135,7 @@ fn cancel_r(app: AppHandle, window: WebviewWindow, engine: State<'_, REngine>) {
     if caller == "engine" {
         let mut requests = engine.0.lock().unwrap();
         requests.waiting.clear();
+        requests.sent.clear();
         // The engine is about to reload, so it is not ready for direct
         // sends any more (R3-03): a request arriving during the reload
         // must only be queued, and re-sent once by `r_ready` — with the
@@ -1113,6 +1156,9 @@ fn cancel_r(app: AppHandle, window: WebviewWindow, engine: State<'_, REngine>) {
                 true
             }
         });
+        for id in &dropped {
+            requests.sent.remove(id);
+        }
         dropped
     };
     if !dropped.is_empty() {
@@ -1129,7 +1175,7 @@ fn cancel_r(app: AppHandle, window: WebviewWindow, engine: State<'_, REngine>) {
 /// (R3-03).
 #[tauri::command]
 fn r_starting(engine: State<REngine>) {
-    engine.0.lock().unwrap().ready = false;
+    engine.0.lock().unwrap().mark_starting();
 }
 
 #[tauri::command]
@@ -1143,8 +1189,12 @@ fn r_ready(app: AppHandle, engine: State<REngine>) {
     // with `there is no package called '…'`. Harmless on the first boot,
     // when no window has installed anything yet.
     let _ = app.emit("r-reset", ());
-    for (id, (code, _, _)) in &requests.waiting {
-        let _ = app.emit_to("engine", "r-eval", (id, code));
+    // Only the requests this engine incarnation has never seen: one
+    // already sent directly by `eval_r` and executing in the engine is
+    // not sent again (CC-m6) — a second `r_ready` for the same
+    // incarnation re-sends nothing.
+    for (id, code) in requests.take_unsent() {
+        let _ = app.emit_to("engine", "r-eval", (id, &code));
     }
 }
 
@@ -1352,5 +1402,47 @@ mod tests {
             read_prism_text(fixture("bom.pzfx").to_string_lossy().into_owned()).expect("bom.pzfx should read");
         assert!(!text.starts_with('\u{feff}'), "BOM should be stripped: {text:?}");
         assert!(text.starts_with("<?xml"), "text should start at the XML: {text:?}");
+    }
+
+    // ── CC-m6: r_ready must not re-send an in-flight evaluation ──────────
+    // `r_ready` used to re-emit EVERY waiting request, including ones
+    // `eval_r` had already sent directly and the engine was executing —
+    // a second `r_ready` for the same engine incarnation ran the same R
+    // code twice. `take_unsent` is the re-send set: only requests this
+    // incarnation never saw.
+    fn waiting_requests(ids: &[u64]) -> Requests {
+        let mut requests = Requests::default();
+        for id in ids {
+            let (sender, _receiver) = channel(1);
+            requests.waiting.insert(*id, (format!("code{id}"), "project".to_string(), sender));
+        }
+        requests
+    }
+
+    #[test]
+    fn r_ready_resends_only_requests_never_sent() {
+        let mut requests = waiting_requests(&[1, 2, 3]);
+        // Id 1 was emitted directly by eval_r (ready was true) and is
+        // executing in the engine; 2 and 3 only queued while not ready.
+        requests.sent.insert(1);
+        let resent = requests.take_unsent();
+        assert_eq!(
+            resent,
+            vec![(2, "code2".to_string()), (3, "code3".to_string())],
+            "an in-flight request must not be re-sent: {resent:?}"
+        );
+        // A second r_ready for the same incarnation re-sends nothing.
+        assert!(requests.take_unsent().is_empty(), "second r_ready must re-send nothing");
+    }
+
+    #[test]
+    fn r_starting_clears_sent_so_a_restart_resends_everything() {
+        let mut requests = waiting_requests(&[1, 2]);
+        // Both were sent to the old engine incarnation; the new page has
+        // none of these evaluations, so both must be sent again.
+        requests.sent.insert(1);
+        requests.sent.insert(2);
+        requests.mark_starting();
+        assert_eq!(requests.take_unsent().len(), 2, "a restart must re-send every waiting request");
     }
 }
