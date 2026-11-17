@@ -21,10 +21,15 @@
 #     — are counted, not collapsed; the battery's (name, type) dict drops
 #     one). Guards the duplicate-name-merge and column-shift round-trip
 #     bugs (battery BUG-1 class).
-#   - negative_control_*: a truncated export must fail to open, and a
-#     one-cell mutation of an export must (a) be visible on reimport and
-#     (b) be flagged by the comparator — so a green round-trip cannot be a
-#     rubber stamp that ignores the file.
+#   - negative_control_*: a truncated export must fail to open — and if it
+#     opens anyway, the control snapshots what it opened and says which it
+#     is (identical = truncation damaged nothing, control too gentle;
+#     different = corrupt input silently accepted as a partial project, a
+#     real product finding, NOT a control flaw). A one-cell mutation of an
+#     export must (a) be visible on reimport and (b) be flagged by the
+#     comparator — so a green round-trip cannot be a rubber stamp. The
+#     mutation matches numbers by VALUE (the .pzfx writer formats numbers
+#     its own way: 378.0 -> "378", long floats rounded), never by string.
 #   - invalid_file_rejects: a text file and a truncated .prism must reject
 #     plainly, not open an empty project or crash.
 #
@@ -37,6 +42,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 import traceback
@@ -346,20 +352,51 @@ class Suite:
         self.pid_surv, self.snap_surv = pid2, snap2
         return detail
 
+    def snapshot_best_effort(self, pid, timeout_s=15):
+        """Snapshot whatever tables have published (no hard fail if the
+        project is the blank one — wait_tables_stable would time out on
+        [Table 1] by design). Used by the negative controls, where the
+        opened project may be blank or partial."""
+        try:
+            self.wait_tables_stable(pid, timeout_s=timeout_s)
+        except McpError:
+            pass
+        return self.snapshot_tables(pid)
+
     def c_negative_truncated(self):
         src = os.path.join(self.out_dir, "demo.hlx")
         bad = os.path.join(self.out_dir, "demo-truncated.hlx")
         data = open(src, "rb").read()
+        cut = max(1, len(data) // 2)
         with open(bad, "wb") as f:
-            f.write(data[: max(1, len(data) // 2)])
+            f.write(data[:cut])
         try:
-            re = self.mcp.tool("titer_open_project", {"path": bad})
+            re_ = self.mcp.tool("titer_open_project", {"path": bad})
         except McpError as e:
-            return f"truncated .hlx ({len(data) // 2} of {len(data)} B) rejected: {str(e)[:200]}"
-        pid = re.get("project_id")
-        if pid:
+            return f"truncated .hlx ({cut} of {len(data)} B) rejected: {str(e)[:200]}"
+        # It opened without error — what did it open? Snapshot and compare:
+        # identical means the truncation damaged nothing (control too
+        # gentle); different means corrupt input was silently accepted as
+        # a partial/blank project (a real product finding, not a control
+        # flaw). Either way the case fails, but the detail says which.
+        pid = re_.get("project_id")
+        if not pid:
+            raise AssertionError(f"open returned no error and no project_id: {str(re_)[:300]}")
+        self.open_projects.append(pid)
+        try:
+            time.sleep(2)
+            snap2 = self.snapshot_best_effort(pid)
+            ok, detail = self.compare_snapshots(self.snap_demo, snap2)
+            if ok:
+                raise AssertionError(
+                    f"truncated .hlx ({cut} of {len(data)} B) opened and is "
+                    f"cell-identical to the original — the truncation damaged "
+                    f"nothing; control too gentle")
+            raise AssertionError(
+                f"truncated .hlx ({cut} of {len(data)} B) opened WITHOUT error "
+                f"as a DIFFERENT project ({detail}) — corrupt input silently accepted")
+        finally:
             self.close(pid)
-        raise AssertionError("truncated .hlx opened without error — corrupt input accepted")
 
     def _numbers_in(self, obj):
         out = []
@@ -376,21 +413,43 @@ class Suite:
     def c_negative_mutated_pzfx(self):
         src = os.path.join(self.out_dir, "survival.pzfx")
         xml = open(src, encoding="utf-8", errors="replace").read()
+        # Match numbers by VALUE, not by string: the .pzfx writer formats
+        # numbers its own way (378.0 -> "378", long floats rounded), so a
+        # summary float's repr never appears literally in the XML. Find every
+        # number token with its span, then pick a summary float whose value
+        # occurs EXACTLY ONCE (a distinctive cell value, not a count or a
+        # repeated metadata value).
+        num_re = re.compile(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
+        matches = list(num_re.finditer(xml))
+        xml_numbers = [float(m.group(0)) for m in matches]
+
+        def close(a, b):
+            return abs(a - b) <= 1e-9 * max(1.0, abs(a), abs(b))
+
         cands = []
         for v in self._numbers_in(self.snap_surv[0]["summary"]):
-            s = repr(v)
-            if "." in s and len(s) >= 4 and s not in cands:
-                cands.append(s)
-        mutated = None
-        for s in cands[:8]:
-            if xml.count(s) >= 1:
-                new = repr(float(s) + 1.0)
-                mutated = (s, new, xml.replace(s, new, 1))
+            if isinstance(v, float) and v not in cands:
+                cands.append(v)
+        chosen = None
+        for v in cands:
+            hits = [i for i, fv in enumerate(xml_numbers) if close(fv, v)]
+            if len(hits) == 1:
+                chosen = (v, hits[0])
                 break
-        assert mutated, (
-            f"no summary float found in the exported .pzfx XML — control cannot "
-            f"mutate (candidates: {cands[:8]})")
-        old, new, xml2 = mutated
+        if chosen is None:
+            for v in cands:
+                hits = [i for i, fv in enumerate(xml_numbers) if close(fv, v)]
+                if hits:
+                    chosen = (v, hits[0])
+                    break
+        assert chosen is not None, (
+            f"no summary float found (by value) in the exported .pzfx XML — "
+            f"control cannot mutate (candidates: {cands[:8]}, "
+            f"xml number tokens: {len(xml_numbers)})")
+        old_val, idx = chosen
+        new_val = old_val + 1.0
+        m = matches[idx]
+        xml2 = xml[:m.start()] + repr(new_val) + xml[m.end():]
         bad = os.path.join(self.out_dir, "survival-mutated.pzfx")
         with open(bad, "w", encoding="utf-8") as f:
             f.write(xml2)
@@ -400,9 +459,10 @@ class Suite:
             ok, detail = self.compare_snapshots(self.snap_surv, snap2)
             assert not ok, "comparator says mutated project is IDENTICAL to the original — rubber stamp"
             nums2 = self._numbers_in(snap2[0]["summary"])
-            assert float(new) in nums2, (
-                f"mutated value {new} not visible in the reimported table — reader ignored the file")
-            return (f"cell {old} -> {new} in the XML is visible on reimport, and the "
+            assert any(close(n, new_val) for n in nums2 if isinstance(n, float)), (
+                f"mutated value {new_val} (from {old_val}) not visible in the "
+                f"reimported table — reader ignored the file")
+            return (f"cell {old_val} -> {new_val} in the XML is visible on reimport, and the "
                     f"comparator flags the difference ({detail})")
         finally:
             self.close(pid)
