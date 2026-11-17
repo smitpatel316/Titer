@@ -1955,6 +1955,70 @@ pub struct ExportGraphArgs {
     pub height_in: Option<f64>,
 }
 
+/// Export one figure as an image file, rendered offscreen from its
+/// panels (GAP-2) — the figure need not be open on screen. Same
+/// formats / resolutions / default-path rule as `titer_export_graph`.
+/// `missing` in the result counts panels whose graph could not be drawn.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ExportFigureArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The figure node's id, as shown by titer_list_projects.
+    pub figure_id: String,
+    /// "png" | "jpeg" | "svg" | "pdf" | "tiff".
+    pub format: String,
+    /// "150" | "300" | "600" | "900" | "1200". Omit for "300".
+    #[serde(default)]
+    pub dpi: Option<String>,
+    /// Where to write the file. Omit for the default path (see above).
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+/// Export one graph or figure to Word / PowerPoint — the GUI's one-click
+/// Send to Office, driven headlessly: the same PNG render at `dpi`,
+/// embedded at its physical size in a real .docx / .pptx. Exactly one
+/// of `graph_id` / `figure_id`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ExportOfficeArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The graph node's id, as shown by titer_list_projects.
+    #[serde(default)]
+    pub graph_id: Option<String>,
+    /// The figure node's id, as shown by titer_list_projects.
+    #[serde(default)]
+    pub figure_id: Option<String>,
+    /// "word" | "powerpoint".
+    pub target: String,
+    /// "150" | "300" | "600" | "900" | "1200". Omit for "300".
+    #[serde(default)]
+    pub dpi: Option<String>,
+    /// Where to write the file. Omit for the default path (see above).
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+/// Export one table's data as a file: CSV (default), XLSX or TXT
+/// (tab-separated). Excluded cells are written empty, matching what
+/// analyses see. No render is involved.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ExportTableDataArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The table's id, as shown by titer_list_tables.
+    pub table_id: String,
+    /// "csv" | "xlsx" | "txt". Omit for "csv".
+    #[serde(default)]
+    pub format: Option<String>,
+    /// Where to write the file. Omit for the default path (see above).
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
 #[tool_router(router = tools, vis = "pub")]
 impl TiterMcpServer {
     /// What is open in Titer, and the tables, analyses, graphs and figures
@@ -4594,6 +4658,186 @@ impl TiterMcpServer {
             }
         }
     }
+
+    /// Export one figure as an image file (PNG, JPEG, SVG, PDF or TIFF
+    /// at 150–1200 DPI, default 300), rendered offscreen — the figure
+    /// need not be open on screen. `missing` counts panels whose graph
+    /// could not be drawn.
+    #[tool(
+        name = "titer_export_figure",
+        description = "Export one figure as an image file: format png/jpeg/svg/pdf/tiff, dpi 150/300/600/900/1200 (default 300, ignored for SVG). Rendered offscreen — the figure need not be open on screen. path omitted = beside the project file, else <Documents>/Titer Exports. Returns the written path, pixel size, missing-panel count, and capped/reason when the export was shrunk.",
+        annotations(
+            title = "Export figure",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn export_figure(
+        &self,
+        Parameters(args): Parameters<ExportFigureArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "figure_id": args.figure_id, "format": args.format, "dpi": args.dpi, "path": args.path });
+        let result: Result<serde_json::Value, String> = async {
+            let format = args.format.as_str();
+            if !EXPORT_FORMATS.contains(&format) {
+                return Err(format!(
+                    "Unknown export format “{format}” — the formats are png, jpeg, svg, pdf, tiff."
+                ));
+            }
+            let dpi = args.dpi.as_deref().unwrap_or("300");
+            if !EXPORT_DPIS.contains(&dpi) {
+                return Err(format!(
+                    "Unknown resolution “{dpi}” — the resolutions are 150, 300, 600, 900, 1200 DPI."
+                ));
+            }
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let ext = export_extension(format);
+            let path = match &args.path {
+                Some(p) if !p.trim().is_empty() => ensure_export_extension(p, ext),
+                _ => self
+                    .default_export_path(&project_id, &args.figure_id, "figure", ext)?
+                    .to_string_lossy()
+                    .into_owned(),
+            };
+            let job_args = serde_json::json!({ "figure_id": args.figure_id, "format": format, "dpi": dpi, "path": path });
+            self.run_export_job(&project_id, "export-figure", job_args).await
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_export_figure", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_export_figure", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Export one graph or figure to Word / PowerPoint — the GUI's
+    /// one-click Send to Office, driven headlessly. Exactly one of
+    /// `graph_id` / `figure_id`.
+    #[tool(
+        name = "titer_export_office",
+        description = "Export one graph or figure to Word (.docx) or PowerPoint (.pptx): the same PNG render at dpi 150/300/600/900/1200 (default 300), embedded at its physical size — the GUI's one-click Send to Office, driven headlessly. Exactly one of graph_id / figure_id. path omitted = beside the project file, else <Documents>/Titer Exports.",
+        annotations(
+            title = "Export to Office",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn export_office(
+        &self,
+        Parameters(args): Parameters<ExportOfficeArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "graph_id": args.graph_id, "figure_id": args.figure_id, "target": args.target, "dpi": args.dpi, "path": args.path });
+        let result: Result<serde_json::Value, String> = async {
+            let target = args.target.as_str();
+            if target != "word" && target != "powerpoint" {
+                return Err(format!(
+                    "Unknown office target “{target}” — the targets are word and powerpoint."
+                ));
+            }
+            let (node_id, fallback) = match (&args.graph_id, &args.figure_id) {
+                (Some(g), None) if !g.trim().is_empty() => (g.as_str(), "graph"),
+                (None, Some(f)) if !f.trim().is_empty() => (f.as_str(), "figure"),
+                _ => {
+                    return Err(
+                        "Pass exactly one of graph_id and figure_id — one image per document, as the UI's one-click export."
+                            .to_string(),
+                    );
+                }
+            };
+            let dpi = args.dpi.as_deref().unwrap_or("300");
+            if !EXPORT_DPIS.contains(&dpi) {
+                return Err(format!(
+                    "Unknown resolution “{dpi}” — the resolutions are 150, 300, 600, 900, 1200 DPI."
+                ));
+            }
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let ext = if target == "word" { "docx" } else { "pptx" };
+            let path = match &args.path {
+                Some(p) if !p.trim().is_empty() => ensure_export_extension(p, ext),
+                _ => self
+                    .default_export_path(&project_id, node_id, fallback, ext)?
+                    .to_string_lossy()
+                    .into_owned(),
+            };
+            let mut job_args = serde_json::json!({ "target": target, "dpi": dpi, "path": path });
+            if let Some(g) = &args.graph_id {
+                job_args["graph_id"] = serde_json::Value::String(g.clone());
+            }
+            if let Some(f) = &args.figure_id {
+                job_args["figure_id"] = serde_json::Value::String(f.clone());
+            }
+            self.run_export_job(&project_id, "export-office", job_args).await
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_export_office", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_export_office", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Export one table's data as CSV (default), XLSX or TXT. Excluded
+    /// cells are written empty, matching what analyses see.
+    #[tool(
+        name = "titer_export_table_data",
+        description = "Export one table's data as a file: format csv (default), xlsx, or txt (tab-separated). Excluded cells are written empty, matching what analyses see. path omitted = beside the project file, else <Documents>/Titer Exports. Returns the written path and row count.",
+        annotations(
+            title = "Export table data",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn export_table_data(
+        &self,
+        Parameters(args): Parameters<ExportTableDataArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "table_id": args.table_id, "format": args.format, "path": args.path });
+        let result: Result<serde_json::Value, String> = async {
+            let format = args.format.as_deref().unwrap_or("csv");
+            if !TABLE_DATA_FORMATS.contains(&format) {
+                return Err(format!(
+                    "Unknown table format “{format}” — the formats are csv, xlsx, txt."
+                ));
+            }
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let path = match &args.path {
+                Some(p) if !p.trim().is_empty() => ensure_export_extension(p, format),
+                _ => self
+                    .default_export_path(&project_id, &args.table_id, "table", format)?
+                    .to_string_lossy()
+                    .into_owned(),
+            };
+            let job_args = serde_json::json!({ "table_id": args.table_id, "format": format, "path": path });
+            self.run_export_job(&project_id, "export-table-data", job_args).await
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_export_table_data", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_export_table_data", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
 }
 
 impl TiterMcpServer {
@@ -4728,6 +4972,8 @@ impl TiterMcpServer {
 /// The graph/figure export formats, and the resolutions they render at.
 const EXPORT_FORMATS: &[&str] = &["png", "jpeg", "svg", "pdf", "tiff"];
 const EXPORT_DPIS: &[&str] = &["150", "300", "600", "900", "1200"];
+/// The table-data export formats.
+const TABLE_DATA_FORMATS: &[&str] = &["csv", "xlsx", "txt"];
 
 /// A format's file extension ("jpeg" writes ".jpg", as the GUI does).
 fn export_extension(format: &str) -> &'static str {
@@ -6219,8 +6465,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            48,
-            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + two L4 analysis tools + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools + one L8 graph export tool: {names:?}"
+            51,
+            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + two L4 analysis tools + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools + four L8 export tools: {names:?}"
         );
         for name in ["titer_read_job", "titer_list_jobs", "titer_cancel_job"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -6281,6 +6527,9 @@ mod tests {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
         for name in ["titer_export_graph"] {
+            assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
+        }
+        for name in ["titer_export_figure", "titer_export_office", "titer_export_table_data"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
 

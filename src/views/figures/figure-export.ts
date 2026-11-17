@@ -207,12 +207,14 @@ export async function renderFigureRaster(
 }
 
 /** The whole figure as one SVG (vector, editable): each panel's SVG embedded
- *  at its grid offset, labels/titles/legend as SVG text. */
+ *  at its grid offset, labels/titles/legend as SVG text. `width`/`height`
+ *  are the composed SVG's size in 96-DPI px (its points × 96/72) — the
+ *  size an app places it at. */
 export async function renderFigureSvg(
   figure: ProjectNode,
   nodes: Record<string, ProjectNode>,
   dpi: Resolution,
-): Promise<{ svg: string; missing: number }> {
+): Promise<{ svg: string; missing: number; width: number; height: number }> {
   const g = geometry(figure, dpi);
   const legend =
     figure.sharedLegend === "shared" ? sharedLegendCheck(g.panels, nodes) : { ok: false as const };
@@ -224,7 +226,14 @@ export async function renderFigureSvg(
     if (image) composed.push({ panel: rect.panel, svg: await image.text() });
   }
   const { svg, missing } = composeFigureSvg(composed, figureOf(figure), legend.ok ? legend.entries : undefined);
-  return { svg, missing };
+  // The composed SVG's own size, in points (see composeFigureSvg): the
+  // figure size, plus the title strip above and the shared-legend strip
+  // below when they are drawn.
+  const titleStripPt = figure.figureTitle ? g.style.fontSizePt + 16 : 0;
+  const legendStripPt = legend.ok ? 28 : 0;
+  const width = Math.round(g.size.widthIn * PX_PER_INCH);
+  const height = Math.round(((g.size.heightIn * PT_PER_INCH + titleStripPt + legendStripPt) * PX_PER_INCH) / PT_PER_INCH);
+  return { svg, missing, width, height };
 }
 
 export async function saveFigureImage(

@@ -52,7 +52,10 @@ import {
 } from "./mcp-graphs";
 import {
   defaultExportIo,
+  executeExportFigure,
   executeExportGraph,
+  executeExportOffice,
+  executeExportTableData,
   type ExportIo,
   type ExportJobDeps,
 } from "./mcp-export";
@@ -1369,6 +1372,12 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
     // offscreen and write the file; the path is resolved by Rust.
     case "export-graph":
       return executeExportGraph(job, toExportDeps(deps));
+    case "export-figure":
+      return executeExportFigure(job, toExportDeps(deps));
+    case "export-office":
+      return executeExportOffice(job, toExportDeps(deps));
+    case "export-table-data":
+      return executeExportTableData(job, toExportDeps(deps));
     default:
       throw new Error(`Unknown job action “${job.action}”.`);
   }

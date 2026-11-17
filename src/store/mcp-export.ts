@@ -26,6 +26,7 @@
 // identically to its on-screen view; the end-pass byte-equality proof
 // records which overlay graphs differ.
 import { buildPanelFigure } from "../views/figures/panel-figure";
+import { renderFigureRaster, renderFigureSvg } from "../views/figures/figure-export";
 import { loadPlotly } from "../views/graphs/plotly";
 import { withoutSelection } from "../views/graphs/selection";
 import { vectorTraces } from "../views/graphs/plot-helpers";
@@ -37,10 +38,18 @@ import {
 import { largestAt, PX_PER_INCH, withDpi } from "../lib/image-dpi";
 import { decodePng, pdfEncode, tiffEncode } from "../lib/raster-export";
 import {
+  buildOfficeDocument,
+  officeExtension,
+  pngSize,
+  type OfficeTarget,
+} from "../lib/office-export";
+import JSZip from "jszip";
+import {
   DEFAULT_GRAPH_OPTIONS,
   GRAPH_LIMITS,
   type ProjectNode,
   type Resolution,
+  type TableData,
 } from "./types";
 import {
   ensureSaveExtension,
@@ -253,16 +262,7 @@ export async function renderGraphImage(
 export async function executeExportGraph(job: McpJob, deps: ExportJobDeps): Promise<ExportJobOutcome> {
   const args = argsOf(job);
   const graphId = reqStr(job, args, "graph_id");
-  const formatRaw = reqStr(job, args, "format");
-  if (!EXPORT_FORMATS.some((f) => f.value === formatRaw)) {
-    throw jobErr(job, `has no export format “${formatRaw}” — the formats are ${EXPORT_FORMATS.map((f) => f.value).join(", ")}.`);
-  }
-  const format = formatRaw as ExportFormat;
-  const dpiRaw = optStr(job, args, "dpi") ?? "300";
-  if (!(RESOLUTIONS as readonly string[]).includes(dpiRaw)) {
-    throw jobErr(job, `has no resolution “${dpiRaw}” — the resolutions are ${RESOLUTIONS.join(", ")} DPI.`);
-  }
-  const dpi = dpiRaw as Resolution;
+  const { format, dpi } = exportFormatDpi(job, args);
   const path = reqStr(job, args, "path");
   const widthIn = optNum(job, args, "width_in");
   const heightIn = optNum(job, args, "height_in");
@@ -285,4 +285,326 @@ export async function executeExportGraph(job: McpJob, deps: ExportJobDeps): Prom
   };
   if (out.reason) result.reason = out.reason;
   return { result };
+}
+
+/** A figure node, by id — a missing node, or a node of another kind, is
+ *  a plain error. */
+function figureNode(job: McpJob, state: ExportJobState, figureId: string): ProjectNode {
+  const node = state.nodes[figureId];
+  if (!node) throw jobErr(job, `has no figure with id “${figureId}” in this project. Ask titer_list_projects for the ids.`);
+  if (node.type !== "figure") {
+    throw jobErr(job, `“${figureId}” is not a figure (it is a ${node.type}).`);
+  }
+  return node;
+}
+
+/** A table node, by id — a missing node, or a node of another kind, is a
+ *  plain error. */
+function tableNode(job: McpJob, state: ExportJobState, tableId: string): ProjectNode {
+  const node = state.nodes[tableId];
+  if (!node) throw jobErr(job, `has no table with id “${tableId}” in this project. Ask titer_list_tables for the ids.`);
+  if (node.type !== "table") {
+    throw jobErr(job, `“${tableId}” is not a table (it is a ${node.type}).`);
+  }
+  return node;
+}
+
+/** `format` / `dpi` args, validated the same way for graph and figure
+ *  exports (Rust validates them too; the dispatcher is the authority). */
+function exportFormatDpi(job: McpJob, args: Record<string, unknown>): { format: ExportFormat; dpi: Resolution } {
+  const formatRaw = reqStr(job, args, "format");
+  if (!EXPORT_FORMATS.some((f) => f.value === formatRaw)) {
+    throw jobErr(job, `has no export format “${formatRaw}” — the formats are ${EXPORT_FORMATS.map((f) => f.value).join(", ")}.`);
+  }
+  const dpiRaw = optStr(job, args, "dpi") ?? "300";
+  if (!(RESOLUTIONS as readonly string[]).includes(dpiRaw)) {
+    throw jobErr(job, `has no resolution “${dpiRaw}” — the resolutions are ${RESOLUTIONS.join(", ")} DPI.`);
+  }
+  return { format: formatRaw as ExportFormat, dpi: dpiRaw as Resolution };
+}
+
+/** `export-figure`: render one figure offscreen and write the file —
+ *  the figure export's own `renderFigureRaster` / `renderFigureSvg`,
+ *  which already render each panel offscreen, so no new render path is
+ *  needed here. `missing` counts panels whose graph could not be drawn
+ *  (reported, not hidden); a figure with no panels is a plain error. */
+export async function executeExportFigure(job: McpJob, deps: ExportJobDeps): Promise<ExportJobOutcome> {
+  const args = argsOf(job);
+  const figureId = reqStr(job, args, "figure_id");
+  const { format, dpi } = exportFormatDpi(job, args);
+  const path = reqStr(job, args, "path");
+  const state = deps.getState();
+  const figure = figureNode(job, state, figureId);
+  if (!figure.panels?.length) {
+    throw jobErr(job, `cannot export figure “${figure.name}” — add a panel first.`);
+  }
+  const ext = EXPORT_EXTENSION[format];
+  let bytes: Uint8Array;
+  let widthPx: number;
+  let heightPx: number;
+  let missing: number;
+  let capped = false;
+  let reason: string | undefined;
+  if (format === "svg") {
+    const out = await renderFigureSvg(figure, state.nodes, dpi);
+    bytes = new TextEncoder().encode(out.svg);
+    widthPx = out.width;
+    heightPx = out.height;
+    missing = out.missing;
+  } else {
+    const out = await renderFigureRaster(figure, state.nodes, format, dpi);
+    bytes = new Uint8Array(await out.blob.arrayBuffer());
+    widthPx = out.width;
+    heightPx = out.height;
+    missing = out.missing;
+    capped = out.capped;
+    reason = out.reason;
+  }
+  const io = deps.io ?? defaultExportIo;
+  await io.writeFile(ensureSaveExtension(path, ext), bytes);
+  const result: Record<string, unknown> = {
+    project_id: job.project_id,
+    figure_id: figureId,
+    format,
+    dpi,
+    path,
+    width_px: widthPx,
+    height_px: heightPx,
+    missing,
+    capped,
+  };
+  if (reason) result.reason = reason;
+  return { result };
+}
+
+/** `export-office`: the GUI's one-click Send to Word / PowerPoint
+ *  (`sendGraphToOffice` / `sendFigureToOffice`), driven headlessly —
+ *  the same PNG render at `dpi`, embedded at its physical size in a
+ *  real .docx / .pptx by the pure `buildOfficeDocument`. Exactly one
+ *  of `graph_id` / `figure_id`. */
+export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Promise<ExportJobOutcome> {
+  const args = argsOf(job);
+  const graphId = optStr(job, args, "graph_id");
+  const figureId = optStr(job, args, "figure_id");
+  if ((graphId === undefined) === (figureId === undefined)) {
+    throw jobErr(job, "needs exactly one of graph_id and figure_id — one image per document, as the UI's one-click export.");
+  }
+  const targetRaw = reqStr(job, args, "target");
+  if (targetRaw !== "word" && targetRaw !== "powerpoint") {
+    throw jobErr(job, `has no office target “${targetRaw}” — the targets are word and powerpoint.`);
+  }
+  const target = targetRaw as OfficeTarget;
+  const dpiRaw = optStr(job, args, "dpi") ?? "300";
+  if (!(RESOLUTIONS as readonly string[]).includes(dpiRaw)) {
+    throw jobErr(job, `has no resolution “${dpiRaw}” — the resolutions are ${RESOLUTIONS.join(", ")} DPI.`);
+  }
+  const dpi = dpiRaw as Resolution;
+  const path = reqStr(job, args, "path");
+  const state = deps.getState();
+  let png: Uint8Array;
+  let title: string;
+  let widthPx: number;
+  let heightPx: number;
+  let missing = 0;
+  let capped = false;
+  let reason: string | undefined;
+  if (graphId !== undefined) {
+    const graph = graphNode(job, state, graphId);
+    const size96 = graphDrawSize(graph);
+    const out = await renderGraphImage(graph, state.nodes, "png", dpi, size96);
+    png = out.bytes;
+    title = graph.name;
+    widthPx = out.widthPx;
+    heightPx = out.heightPx;
+    capped = out.capped;
+    reason = out.reason;
+  } else {
+    const figure = figureNode(job, state, figureId!);
+    if (!figure.panels?.length) {
+      throw jobErr(job, `cannot export figure “${figure.name}” — add a panel first.`);
+    }
+    const out = await renderFigureRaster(figure, state.nodes, "png", dpi);
+    png = new Uint8Array(await out.blob.arrayBuffer());
+    title = figure.name;
+    widthPx = out.width;
+    heightPx = out.height;
+    missing = out.missing;
+    capped = out.capped;
+    reason = out.reason;
+  }
+  const dims = pngSize(png);
+  if (!dims) throw jobErr(job, "could not draw the image as a PNG image.");
+  const doc = await buildOfficeDocument(target, {
+    png,
+    title,
+    widthPx: dims.widthPx,
+    heightPx: dims.heightPx,
+    dpi: Number(dpi),
+  });
+  const ext = officeExtension(target);
+  const io = deps.io ?? defaultExportIo;
+  await io.writeFile(ensureSaveExtension(path, ext), doc);
+  const result: Record<string, unknown> = {
+    project_id: job.project_id,
+    target,
+    path,
+    extension: ext,
+    width_px: widthPx,
+    height_px: heightPx,
+    capped,
+  };
+  if (graphId !== undefined) result.graph_id = graphId;
+  else result.figure_id = figureId;
+  if (missing) result.missing = missing;
+  if (reason) result.reason = reason;
+  return { result };
+}
+
+// ── Table data (CSV / XLSX / TXT) ──────────────────────────────────────
+// No UI CSV writer exists to reuse: the serializers below are new, but
+// they follow the snapshot's rule — excluded cells are written empty,
+// matching what analyses see. Cell values are the grid's stored
+// strings; nothing is coerced to a number (an XLSX cell stays text, so
+// an ID like "0123" never becomes 123).
+
+/** The table's grid as text rows: every column (column 0 is the row
+ *  titles), every stored row (short rows padded), excluded cells empty. */
+export function tableTextRows(data: TableData): string[][] {
+  const columns = data.columns.length ? data.columns : ["Title"];
+  const excluded = new Set(data.excluded ?? []);
+  return data.rows.map((row, r) =>
+    columns.map((_, c) => {
+      if (c >= 1 && excluded.has(`${r},${c}`)) return "";
+      const cell = row[c];
+      return cell === null || cell === undefined ? "" : cell;
+    }),
+  );
+}
+
+/** One CSV field: quoted (with doubled quotes) when it holds a comma,
+ *  a quote, or a line break. */
+export function csvField(cell: string): string {
+  return /[",\n\r]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell;
+}
+
+/** One TXT field (tab-separated): quoted when it holds a tab, a quote,
+ *  or a line break. */
+export function txtField(cell: string): string {
+  return /[\t"\n\r]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell;
+}
+
+/** The table as CSV text (one row per line, CRLF-free). */
+export function tableToCsv(data: TableData): string {
+  const rows = [data.columns.length ? data.columns : ["Title"], ...tableTextRows(data)];
+  return rows.map((row) => row.map(csvField).join(",")).join("\n");
+}
+
+/** The table as TXT text (tab-separated, same grid as CSV). */
+export function tableToTxt(data: TableData): string {
+  const rows = [data.columns.length ? data.columns : ["Title"], ...tableTextRows(data)];
+  return rows.map((row) => row.map(txtField).join("\t")).join("\n");
+}
+
+const escapeXml = (text: string) =>
+  text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** A spreadsheet column letter: 0 → A, 25 → Z, 26 → AA. */
+export function colLetter(n: number): string {
+  let out = "";
+  let i = n;
+  do {
+    out = String.fromCharCode(65 + (i % 26)) + out;
+    i = Math.floor(i / 26) - 1;
+  } while (i >= 0);
+  return out;
+}
+
+/** A sheet name Excel accepts: the table name without `[]:*?/\`,
+ *  at most 31 characters. */
+export function sheetName(name: string): string {
+  const clean = name.replace(/[\[\]:*?/\\]/g, "").trim();
+  return clean ? clean.slice(0, 31) : "Table";
+}
+
+/** The table as a minimal .xlsx workbook (JSZip + inline strings, the
+ *  same hand-built pattern as `office-export.ts`): one sheet, every
+ *  cell an inline string, empty cells omitted (sparse). Opens in
+ *  Excel, LibreOffice and Sheets. */
+export async function tableToXlsx(data: TableData, name: string): Promise<Uint8Array> {
+  const rows = [data.columns.length ? data.columns : ["Title"], ...tableTextRows(data)];
+  const sheetRows = rows
+    .map((row, r) => {
+      const cells = row
+        .map((cell, c) => {
+          if (cell === "") return "";
+          const ref = `${colLetter(c)}${r + 1}`;
+          return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(cell)}</t></is></c>`;
+        })
+        .join("");
+      return `<row r="${r + 1}">${cells}</row>`;
+    })
+    .join("");
+  const sheet = sheetName(name);
+  const zip = new JSZip();
+  zip.file(
+    "[Content_Types].xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`,
+  );
+  zip.file(
+    "_rels/.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+  );
+  zip.file(
+    "xl/workbook.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${escapeXml(sheet)}" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+  );
+  zip.file(
+    "xl/_rels/workbook.xml.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
+  );
+  zip.file(
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetRows}</sheetData></worksheet>`,
+  );
+  zip.file(
+    "xl/styles.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts><font><sz val="11"/><name val="Calibri"/></font></fonts><fills><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellXfs><cellStyles><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`,
+  );
+  return zip.generateAsync({ type: "uint8array" });
+}
+
+/** The table-data export formats. */
+export const TABLE_DATA_FORMATS = ["csv", "xlsx", "txt"] as const;
+export type TableDataFormat = (typeof TABLE_DATA_FORMATS)[number];
+
+/** `export-table-data`: serialize one table (CSV / XLSX / TXT) and
+ *  write the file. No render is involved, so this runs in node too
+ *  (the verify script drives it via `executeJob` with stub IO). */
+export async function executeExportTableData(job: McpJob, deps: ExportJobDeps): Promise<ExportJobOutcome> {
+  const args = argsOf(job);
+  const tableId = reqStr(job, args, "table_id");
+  const formatRaw = optStr(job, args, "format") ?? "csv";
+  if (!(TABLE_DATA_FORMATS as readonly string[]).includes(formatRaw)) {
+    throw jobErr(job, `has no table format “${formatRaw}” — the formats are csv, xlsx, txt.`);
+  }
+  const format = formatRaw as TableDataFormat;
+  const path = reqStr(job, args, "path");
+  const state = deps.getState();
+  const table = tableNode(job, state, tableId);
+  const data = table.data ?? { columns: ["Title"], rows: [] };
+  let bytes: string | Uint8Array;
+  if (format === "csv") bytes = tableToCsv(data);
+  else if (format === "txt") bytes = tableToTxt(data);
+  else bytes = await tableToXlsx(data, table.name);
+  const io = deps.io ?? defaultExportIo;
+  await io.writeFile(ensureSaveExtension(path, format), bytes);
+  return {
+    result: {
+      project_id: job.project_id,
+      table_id: tableId,
+      format,
+      path,
+      rows: data.rows.length,
+    },
+  };
 }
