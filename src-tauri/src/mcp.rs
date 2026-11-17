@@ -4662,8 +4662,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            27,
-            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + two L4 analysis tools: {names:?}"
+            34,
+            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + two L4 analysis tools + seven L6 graph/figure/info-sheet tools: {names:?}"
         );
         for name in ["titer_read_job", "titer_list_jobs", "titer_cancel_job"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -4694,6 +4694,17 @@ mod tests {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
         for name in ["titer_run_analysis", "titer_freeze_analysis"] {
+            assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
+        }
+        for name in [
+            "titer_build_graph",
+            "titer_update_graph",
+            "titer_clone_graph",
+            "titer_create_figure",
+            "titer_update_figure",
+            "titer_create_info_sheet",
+            "titer_update_info_sheet",
+        ] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
 
