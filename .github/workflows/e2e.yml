@@ -1,0 +1,164 @@
+# E2E — the built-app gate (check/e2e-ci).
+#
+# Smit's call, Nov 17: every change triggers an automated E2E run in
+# minutes that verifies nothing broke. Home is CI on push/PR — NOT a
+# pre-commit hook (the debug build alone is ~8 min warm, far too slow to
+# block commits).
+#
+# Two layers, deliberately split:
+#   - fast-checks (parallel job, NOT on the E2E critical path): tsc +
+#     the checks.ts unit suite. Fails fast; never gates the built-app run.
+#   - e2e-linux / e2e-mac (the gate): debug build with VITE_E2E=1, then
+#     the wdio LAUNCH SMOKE (app launches, main window appears) and the
+#     MCP REGRESSION SUITE (import .prism/.pzfx → run analysis → export
+#     → reopen → verify cell-identical, with exact-value pins and
+#     negative controls). Functional coverage is MCP-driven, identical on
+#     both platforms; WebdriverIO is the smoke only, never the suite.
+#
+# Warm-run target: ~10 min cached. The build dominates: cold 20–40 min,
+# warm ~8 min with a warm cargo target cache (Swatinem/rust-cache) plus
+# the cached webr package repo. If a run lands far above 10 min, the
+# measured step times in the log are the evidence — report them honestly
+# rather than claiming the target; what would cut it further is sccache
+# or a slimmer spec set, not a quieter log.
+#
+# The debug build is unsigned and never ships (Apple Developer Program
+# skipped for now; shipped DMGs stay unsigned). The wdio plugins are
+# debug-only (cfg(debug_assertions)) and MCP is off by default in the
+# real build — the E2E build enables it on mount via the VITE_E2E hook
+# in src/components/app-shell.tsx. Nothing here changes the release build.
+name: E2E
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast checks run in parallel and never gate the E2E job — a slow unit
+  # suite must not hold up the built-app gate, and a broken build must not
+  # wait on the unit suite to be reported.
+  fast-checks:
+    name: fast checks (tsc + unit suite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+
+  e2e-linux:
+    name: e2e (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: system deps
+        run: sudo APT_UPDATE=1 bash scripts/setup-linux.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo cache (registry + debug target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: e2e-linux
+      - name: webr package repo cache
+        uses: actions/cache@v4
+        with:
+          path: webr-repo
+          key: webr-${{ hashFiles('scripts/webr-repo-manifest.json') }}
+      - run: npm ci
+      - name: bundle R packages (cached; downloads on miss)
+        run: bash scripts/build-webr-repo.sh
+      - name: stage stdio bridge sidecar (build fails without it)
+        run: bash scripts/build-stdio-bridge.sh
+      - name: debug build (VITE_E2E=1)
+        timeout-minutes: 55
+        env:
+          CARGO_BUILD_JOBS: 1
+        run: npm run e2e:build
+      - name: start Xvfb :99
+        run: |
+          Xvfb :99 -listen tcp -screen 0 1280x800x24 >/tmp/xvfb-99.log 2>&1 &
+          sleep 2
+          DISPLAY=127.0.0.1:99 xdpyinfo >/dev/null || { echo "Xvfb :99 not responding"; cat /tmp/xvfb-99.log; exit 1; }
+          echo "DISPLAY=127.0.0.1:99" >> "$GITHUB_ENV"
+      - name: wdio launch smoke
+        timeout-minutes: 10
+        run: npm run e2e
+      - name: MCP regression suite
+        timeout-minutes: 15
+        run: bash e2e/mcp/run.sh
+      - name: suite report
+        if: always()
+        run: cat e2e/out/mcp/report.json 2>/dev/null || echo "no MCP report (suite never ran)"
+      - name: upload e2e artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-linux
+          path: |
+            e2e/out/
+            e2e/logs/
+          retention-days: 7
+
+  e2e-mac:
+    name: e2e (mac)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo cache (registry + debug target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: e2e-mac
+      - name: webr package repo cache
+        uses: actions/cache@v4
+        with:
+          path: webr-repo
+          key: webr-${{ hashFiles('scripts/webr-repo-manifest.json') }}
+      - run: npm ci
+      - name: bundle R packages (cached; downloads on miss)
+        run: bash scripts/build-webr-repo.sh
+      - name: stage stdio bridge sidecar (build fails without it)
+        run: bash scripts/build-stdio-bridge.sh
+      - name: debug build (VITE_E2E=1)
+        timeout-minutes: 55
+        env:
+          CARGO_BUILD_JOBS: 1
+        run: npm run e2e:build
+      - name: wdio launch smoke
+        timeout-minutes: 10
+        run: npm run e2e
+      - name: MCP regression suite
+        timeout-minutes: 15
+        run: bash e2e/mcp/run.sh
+      - name: suite report
+        if: always()
+        run: cat e2e/out/mcp/report.json 2>/dev/null || echo "no MCP report (suite never ran)"
+      - name: upload e2e artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-mac
+          path: |
+            e2e/out/
+            e2e/logs/
+          retention-days: 7
