@@ -1277,7 +1277,9 @@ fn main() {
             mcp::mcp_claude_code_command,
             mcp::mcp_activity,
             mcp::mcp_publish_snapshot,
-            mcp::mcp_publish_result
+            mcp::mcp_publish_result,
+            mcp::mcp_take_jobs,
+            mcp::mcp_complete_job
         ])
         .build(tauri::generate_context!())
         .expect("failed to start Titer")

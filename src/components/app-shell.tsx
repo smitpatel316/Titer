@@ -11,6 +11,7 @@ import { Dialog } from "../ui/dialog";
 import { ConverterDialog } from "./converter-dialog";
 import { AiConnectionsDialog } from "./ai-connections-dialog";
 import { useMcpSnapshotPublisher } from "../store/mcp-publish";
+import { useMcpJobDispatcher } from "../store/mcp-dispatch";
 import { SavePromptDialog } from "./save-prompt-dialog";
 import { TemplateDialog } from "./template-dialog";
 import { ConflictDialog } from "./conflict-dialog";
@@ -41,6 +42,8 @@ export function AppShell() {
   useAppMenu(documentActions);
   // v3 Phase 1: this window's project goes to the MCP server on every edit.
   useMcpSnapshotPublisher();
+  // v1.6.0 L0: this window runs the MCP jobs Rust queues for it.
+  useMcpJobDispatcher();
   const { projectUpdated, dismissProjectUpdated } = documentActions;
   const { templateNotice, dismissTemplateNotice } = documentActions;
   const { sidebar } = useLayout();

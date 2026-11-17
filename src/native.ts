@@ -162,6 +162,63 @@ export function mcpPublishResult(analysisId: string, outcome: unknown) {
   return invoke("mcp_publish_result", { analysisId, outcome });
 }
 
+// ── Job queue (L0, GAP-1: the Rust→frontend dispatch channel) ───────────
+// Rust enqueues a job and wakes this window with an `mcp-run-job` event;
+// the dispatcher (src/store/mcp-dispatch.ts) claims it with `mcp_take_jobs`
+// and reports completion with `mcp_complete_job`.
+
+/** A dispatch job, as the Rust queue hands it to this window. */
+export interface McpJob {
+  job_id: string;
+  project_id: string;
+  action: string;
+  args: unknown;
+  status: string;
+}
+
+/** This window's queued jobs it has never been handed (the single claim
+ *  path — a job is dispatched once, ever). A no-op outside the app. */
+export function mcpTakeJobs(): Promise<McpJob[]> {
+  if (!isNative) return Promise.resolve([]);
+  return invoke<McpJob[]>("mcp_take_jobs");
+}
+
+/** Report a job's completion, from the window that ran it: `result` is the
+ *  outcome (`run-analysis`: the `AnalysisResult`), `created` what the job
+ *  created, if any. A no-op outside the app. */
+export function mcpCompleteJob(
+  jobId: string,
+  status: "done" | "error",
+  result?: unknown,
+  error?: string,
+  created?: unknown,
+) {
+  if (!isNative) return Promise.resolve();
+  return invoke("mcp_complete_job", {
+    jobId,
+    status,
+    result: result ?? null,
+    error: error ?? null,
+    created: created ?? null,
+  });
+}
+
+/** Calls `handler` with a job id whenever Rust wakes this window about a
+ *  queued job — the dispatcher then claims it with `mcpTakeJobs`. No-op
+ *  outside the app. Returns the unlisten function. */
+export async function onMcpRunJob(handler: (jobId: string) => void) {
+  if (!isNative) return () => {};
+  return getCurrentWebviewWindow().listen<string>("mcp-run-job", ({ payload }) => handler(payload));
+}
+
+/** Calls `handler` with a job id when Rust cancels a job this window is
+ *  running — the dispatcher stops that job's execution (`cancel_r` for a
+ *  run-analysis job). No-op outside the app. Returns the unlisten function. */
+export async function onMcpCancelJob(handler: (jobId: string) => void) {
+  if (!isNative) return () => {};
+  return getCurrentWebviewWindow().listen<string>("mcp-cancel-job", ({ payload }) => handler(payload));
+}
+
 // ── R engine ───────────────────────────────────────────────────────────
 // One R for the whole app, in the hidden "engine" window. The native shell
 // passes each request there and its answer back (see main.rs, `REngine`).

@@ -57,7 +57,7 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio_util::sync::CancellationToken;
 
 // ── Constants ────────────────────────────────────────────────────────────
@@ -109,6 +109,9 @@ struct McpInner {
     /// Set by the first command that has an AppHandle; the server task and
     /// the tool handlers only ever run after `mcp_set_enabled` set it.
     dir: Option<PathBuf>,
+    /// The app handle, remembered by the first command that has one: the
+    /// job queue needs it to emit `mcp-run-job` to a project window.
+    app: Option<AppHandle>,
     enabled: bool,
     token: Option<String>,
     server: Option<RunningServer>,
@@ -119,6 +122,74 @@ struct McpInner {
     last_published: Option<String>,
     /// Analysis outcomes computed in-session, by (window label, analysis id).
     results: HashMap<(String, String), serde_json::Value>,
+    /// Pending jobs, by id ("job-1", …): the dispatch queue (L0, GAP-1).
+    /// A job is created by a tool handler, claimed once by the target
+    /// window's frontend dispatcher (`take_jobs`), executed there, and
+    /// completed via `mcp_complete_job`.
+    jobs: HashMap<String, Job>,
+    /// Next job number: job ids are `job-{n}`, in creation order.
+    next_job: u64,
+    /// Job ids already handed to the frontend (`take_jobs`): a job is
+    /// dispatched once, ever — the CC-m6 once-only discipline, the same
+    /// role as `REngine`'s `sent` set in main.rs.
+    dispatched: HashSet<String>,
+}
+
+/// A dispatch job: one store call / analysis run the frontend must execute
+/// for an MCP tool. `args` travels to the frontend with the job
+/// (`mcp_take_jobs`) but is never echoed back in a tool output — it can
+/// hold whole tables (stripped in `titer_read_job`; `titer_list_jobs`
+/// builds its own summary).
+#[derive(Clone, Debug, Serialize)]
+pub struct Job {
+    pub job_id: String,
+    pub project_id: String,
+    pub action: String,
+    pub args: serde_json::Value,
+    pub status: JobStatus,
+    /// The analysis this job runs, if any (from `created.analysis_id`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_id: Option<String>,
+    /// What the job created, when known (L4: `{ analysis_id, table_ids? }`).
+    #[serde(skip_serializing_if = "serde_json::Value::is_null")]
+    pub created: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Seconds since the Unix epoch, like the Activity log.
+    pub created_ts: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_ts: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished_ts: Option<u64>,
+}
+
+/// A job's state (inventory §3.3). Serialized lowercase: queued, running,
+/// done, error, cancelled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum JobStatus {
+    Queued,
+    Running,
+    Done,
+    Error,
+    Cancelled,
+}
+
+impl JobStatus {
+    fn is_terminal(self) -> bool {
+        matches!(self, JobStatus::Done | JobStatus::Error | JobStatus::Cancelled)
+    }
+}
+
+fn now_ts() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// The creation-order key of a job id ("job-12" → 12).
+fn job_seq(job_id: &str) -> u64 {
+    job_id.strip_prefix("job-").and_then(|n| n.parse().ok()).unwrap_or(0)
 }
 
 struct RunningServer {
@@ -135,6 +206,12 @@ impl McpState {
     /// The <app_data>/mcp directory, created (0700 on Unix) and remembered.
     fn ensure_dir(&self, app: &AppHandle) -> Result<PathBuf, String> {
         let mut inner = self.lock();
+        // The job queue emits to project windows, so it needs the handle:
+        // remember it on every command that has one (mcp_set_enabled is
+        // the one that matters — the server only runs after it).
+        if inner.app.is_none() {
+            inner.app = Some(app.clone());
+        }
         if let Some(dir) = &inner.dir {
             return Ok(dir.clone());
         }
@@ -237,6 +314,188 @@ impl McpState {
             .map(|snap| (id.clone(), snap.clone()))
             .ok_or_else(|| "The open project has not published its state yet. Ask again in a moment.".into())
     }
+
+    // ── Job queue (L0, GAP-1) ────────────────────────────────────────────
+    // The pending-job store every mutating tool depends on: a tool handler
+    // enqueues a job, the target window's frontend dispatcher claims it
+    // once (`take_jobs`), executes it, and reports completion
+    // (`mcp_complete_job`). The dispatcher is in src/store/mcp-dispatch.ts.
+
+    /// Enqueue a job for a project window: `action` names what the frontend
+    /// dispatcher must do (`noop`, `run-analysis`, …), `args` carries its
+    /// arguments, `created` what the job is expected to create (L4:
+    /// `{ analysis_id, table_ids? }`). Refuses a window with no snapshot —
+    /// a closed window can never run a job. Wakes the window with an
+    /// `mcp-run-job` event; the reliable claim path is `take_jobs`, not
+    /// the event.
+    pub fn enqueue_job(
+        &self,
+        project_id: &str,
+        action: &str,
+        args: serde_json::Value,
+        created: serde_json::Value,
+    ) -> Result<Job, String> {
+        let (job, app) = {
+            let mut inner = self.lock();
+            if !inner.snapshots.contains_key(project_id) {
+                return Err(format!(
+                    "No open project with id “{project_id}”. Ask titer_list_projects for the open projects."
+                ));
+            }
+            inner.next_job += 1;
+            let job = Job {
+                job_id: format!("job-{}", inner.next_job),
+                project_id: project_id.to_string(),
+                action: action.to_string(),
+                args,
+                status: JobStatus::Queued,
+                analysis_id: created.get("analysis_id").and_then(|v| v.as_str()).map(str::to_string),
+                created,
+                result: None,
+                error: None,
+                created_ts: now_ts(),
+                started_ts: None,
+                finished_ts: None,
+            };
+            inner.jobs.insert(job.job_id.clone(), job.clone());
+            (job, inner.app.clone())
+        };
+        // Best-effort wake-up: a window that missed the event still gets
+        // the job from `take_jobs` (mount + every later wake-up re-takes).
+        if let Some(app) = app {
+            let _ = app.emit_to(&job.project_id, "mcp-run-job", job.job_id.clone());
+        }
+        self.log_event("job_enqueued", serde_json::json!({ "job_id": job.job_id, "action": job.action }));
+        Ok(job)
+    }
+
+    /// The single claim path (CC-m6 once-only): this window's queued jobs
+    /// it has never been handed, in creation order. Each is marked
+    /// `running` + `dispatched` here, so a second take — a re-mounted
+    /// dispatcher, a repeated wake-up — returns nothing for it. A job
+    /// cancelled meanwhile is skipped: it never executes.
+    pub fn take_jobs(&self, window_label: &str) -> Vec<Job> {
+        let mut inner = self.lock();
+        let mut jobs: Vec<Job> = inner
+            .jobs
+            .values()
+            .filter(|j| {
+                j.project_id == window_label && j.status == JobStatus::Queued && !inner.dispatched.contains(&j.job_id)
+            })
+            .cloned()
+            .collect();
+        jobs.sort_by_key(|j| (j.created_ts, job_seq(&j.job_id)));
+        let now = now_ts();
+        for job in &mut jobs {
+            job.status = JobStatus::Running;
+            job.started_ts = Some(now);
+            inner.dispatched.insert(job.job_id.clone());
+            if let Some(stored) = inner.jobs.get_mut(&job.job_id) {
+                stored.status = JobStatus::Running;
+                stored.started_ts = Some(now);
+            }
+        }
+        jobs
+    }
+
+    /// Report a job's completion, from the window that ran it. Only
+    /// queued/running jobs change: an already-terminal job (a cancel that
+    /// landed first, a late duplicate report) is left untouched, so a late
+    /// report can never resurrect it. `status` is "done" or "error" only —
+    /// cancellation comes from `titer_cancel_job`, never the frontend.
+    pub fn complete_job(
+        &self,
+        window_label: &str,
+        job_id: &str,
+        status: JobStatus,
+        result: Option<serde_json::Value>,
+        error: Option<String>,
+        created: Option<serde_json::Value>,
+    ) -> Result<Job, String> {
+        if !matches!(status, JobStatus::Done | JobStatus::Error) {
+            return Err("A job completes as “done” or “error” only — cancellation comes from titer_cancel_job.".into());
+        }
+        let mut inner = self.lock();
+        let Some(job) = inner.jobs.get_mut(job_id) else {
+            return Err(format!("No job with id “{job_id}”. Ask titer_list_jobs for the jobs."));
+        };
+        if job.project_id != window_label {
+            return Err(format!("Job “{job_id}” belongs to project {}, not {window_label}.", job.project_id));
+        }
+        if job.status.is_terminal() {
+            return Ok(job.clone());
+        }
+        job.status = status;
+        job.result = result;
+        job.error = error;
+        if let Some(created) = created {
+            job.created = created;
+        }
+        job.finished_ts = Some(now_ts());
+        Ok(job.clone())
+    }
+
+    /// Cancel a job (the `titer_cancel_job` tool). A finished job reports
+    /// its terminal status instead of erroring; a live one becomes
+    /// `cancelled`, and a running one also gets an `mcp-cancel-job` event
+    /// in its window, so the frontend stops executing it (a run-analysis
+    /// job's cancel maps to the `cancel_r` path there). Returns the job
+    /// and whether a cancel event was sent.
+    pub fn cancel_job(&self, job_id: &str) -> Result<(Job, bool), String> {
+        let (job, app, was_running) = {
+            let mut inner = self.lock();
+            let Some(job) = inner.jobs.get_mut(job_id) else {
+                return Err(format!("No job with id “{job_id}”. Ask titer_list_jobs for the jobs."));
+            };
+            if job.status.is_terminal() {
+                return Ok((job.clone(), false));
+            }
+            let was_running = job.status == JobStatus::Running;
+            job.status = JobStatus::Cancelled;
+            job.error = Some("Cancelled.".into());
+            job.finished_ts = Some(now_ts());
+            (job.clone(), inner.app.clone(), was_running)
+        };
+        let mut sent = false;
+        if was_running {
+            if let Some(app) = app {
+                sent = app.emit_to(&job.project_id, "mcp-cancel-job", job.job_id.clone()).is_ok();
+            }
+        }
+        self.log_event("job_cancelled", serde_json::json!({ "job_id": job.job_id }));
+        Ok((job, sent))
+    }
+
+    /// A job, by id, for `titer_read_job`.
+    pub fn read_job(&self, job_id: &str) -> Option<Job> {
+        self.lock().jobs.get(job_id).cloned()
+    }
+
+    /// Jobs for a project (all of them when `project_id` is None), oldest
+    /// first — active + recently finished, so a disconnected client can
+    /// recover instead of re-running.
+    pub fn list_jobs(&self, project_id: Option<&str>) -> Vec<Job> {
+        let inner = self.lock();
+        let mut jobs: Vec<Job> =
+            inner.jobs.values().filter(|j| project_id.is_none_or(|p| j.project_id == p)).cloned().collect();
+        jobs.sort_by_key(|j| (j.created_ts, job_seq(&j.job_id)));
+        jobs
+    }
+
+    /// A window closed (its snapshot publish said `closed: true`): its
+    /// queued and running jobs can never complete — the page that would
+    /// run them is gone — so they become `cancelled`, honestly, instead
+    /// of sticking in `running` for ever. A reload fires the same
+    /// cleanup; the client sees `cancelled` and re-runs.
+    fn drop_jobs_for_window(&self, label: &str) {
+        let mut inner = self.lock();
+        let now = now_ts();
+        for job in inner.jobs.values_mut().filter(|j| j.project_id == label && !j.status.is_terminal()) {
+            job.status = JobStatus::Cancelled;
+            job.error = Some("The project window closed before the job finished.".into());
+            job.finished_ts = Some(now);
+        }
+    }
 }
 
 /// Constant-time bearer comparison (same length required; a length leak
@@ -319,19 +578,7 @@ pub async fn mcp_set_enabled(app: AppHandle, state: State<'_, McpState>, enabled
     let shared = state.inner.clone();
     let server_state = McpState { inner: shared };
     let cancel = CancellationToken::new();
-    let service = StreamableHttpService::new(
-        move || Ok(TiterMcpServer::new(server_state.clone())),
-        LocalSessionManager::default().into(),
-        StreamableHttpServerConfig::default().with_cancellation_token(cancel.child_token()).with_allowed_hosts([
-            "localhost",
-            "127.0.0.1",
-            "::1",
-        ]),
-    );
-    let auth_state = state.inner.clone();
-    let router = axum::Router::new()
-        .nest_service(MCP_PATH, service)
-        .layer(axum::middleware::from_fn_with_state(McpState { inner: auth_state }, auth_middleware));
+    let router = mcp_router(server_state, cancel.child_token());
     let shutdown = cancel.clone();
     let handle = tauri::async_runtime::spawn(async move {
         let _ = axum::serve(listener, router).with_graceful_shutdown(async move { shutdown.cancelled().await }).await;
@@ -431,6 +678,10 @@ pub fn mcp_publish_snapshot(window: tauri::WebviewWindow, state: State<McpState>
         if inner.last_published.as_deref() == Some(label.as_str()) {
             inner.last_published = inner.snapshots.keys().next().cloned();
         }
+        // The page that would have run this window's jobs is gone: cancel
+        // them (L0) instead of leaving them queued/running for ever.
+        drop(inner);
+        state.drop_jobs_for_window(&label);
         return;
     }
     inner.snapshots.insert(label.clone(), snapshot);
@@ -447,6 +698,60 @@ pub fn mcp_publish_result(
     outcome: serde_json::Value,
 ) {
     state.lock().results.insert((window.label().to_string(), analysis_id), outcome);
+}
+
+// ── Job queue commands (L0, GAP-1) ───────────────────────────────────────
+// The frontend dispatcher (src/store/mcp-dispatch.ts) claims jobs through
+// these; the tools that create jobs live in the MCP server below, and the
+// tools that read them (`titer_read_job` / `titer_list_jobs` /
+// `titer_cancel_job`) are the queue's public face.
+
+/// This window's queued jobs it has never been handed (the single claim
+/// path — see `McpState::take_jobs`). Called on mount and on every
+/// `mcp-run-job` wake-up.
+#[tauri::command]
+pub fn mcp_take_jobs(window: tauri::WebviewWindow, state: State<McpState>) -> Vec<Job> {
+    state.take_jobs(window.label())
+}
+
+/// Report a job's completion, from the window that ran it. `status` is
+/// "done" or "error"; `result` is the outcome (`run-analysis`: the
+/// `AnalysisResult`), `created` what the job created, if any.
+#[tauri::command]
+pub fn mcp_complete_job(
+    window: tauri::WebviewWindow,
+    state: State<McpState>,
+    job_id: String,
+    status: String,
+    result: Option<serde_json::Value>,
+    error: Option<String>,
+    created: Option<serde_json::Value>,
+) -> Result<Job, String> {
+    let status = match status.as_str() {
+        "done" => JobStatus::Done,
+        "error" => JobStatus::Error,
+        other => return Err(format!("Unknown job status “{other}”: a job completes as “done” or “error”.")),
+    };
+    state.complete_job(window.label(), &job_id, status, result, error, created)
+}
+
+/// The MCP service + bearer-auth middleware, as one router: what
+/// `mcp_set_enabled` serves, and what the smoke test serves in-process
+/// (same construction, same auth, no Tauri app needed).
+fn mcp_router(state: McpState, cancel: CancellationToken) -> axum::Router {
+    let server_state = state.clone();
+    let service = StreamableHttpService::new(
+        move || Ok(TiterMcpServer::new(server_state.clone())),
+        LocalSessionManager::default().into(),
+        StreamableHttpServerConfig::default().with_cancellation_token(cancel).with_allowed_hosts([
+            "localhost",
+            "127.0.0.1",
+            "::1",
+        ]),
+    );
+    axum::Router::new()
+        .nest_service(MCP_PATH, service)
+        .layer(axum::middleware::from_fn_with_state(state, auth_middleware))
 }
 
 // ── HTTP auth ────────────────────────────────────────────────────────────
@@ -543,6 +848,20 @@ pub struct GraphArgs {
     pub project_id: Option<String>,
     /// The graph node's id, as shown by titer_list_projects.
     pub graph_id: String,
+}
+
+/// A job's id, as returned by the tool that queued it.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct JobArgs {
+    pub job_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ListJobsArgs {
+    /// Window label of the project ("project-1"); omit for the front
+    /// project — or for every project's jobs when no project has published.
+    #[serde(default)]
+    pub project_id: Option<String>,
 }
 
 #[tool_router(router = tools, vis = "pub")]
@@ -713,6 +1032,121 @@ impl TiterMcpServer {
             }
         }
     }
+
+    // ── Job queue tools (L0 plumbing; the tools that *create* jobs land
+    // with their groups — L4's titer_run_analysis first — but the queue
+    // lives here). ────────────────────────────────────────────────────────
+
+    /// One job's state: queued / running / done / error / cancelled, with
+    /// its result when done (a run-analysis result is the full
+    /// `AnalysisResult`) or its error when it failed or was cancelled.
+    #[tool(
+        name = "titer_read_job",
+        description = "Read one dispatch job's state: queued, running, done, error or cancelled, with its result when done or its error when it failed or was cancelled.",
+        annotations(
+            title = "Read job",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn read_job(&self, Parameters(args): Parameters<JobArgs>) -> Result<Json<serde_json::Value>, String> {
+        let job_args = serde_json::json!({ "job_id": args.job_id });
+        match self.state.read_job(&args.job_id) {
+            Some(job) => {
+                self.state.log_call("titer_read_job", job_args, true, None);
+                // The job's args stay out of tool outputs (they can hold
+                // whole tables); the frontend got them with `mcp_take_jobs`.
+                let mut value = serde_json::to_value(job).unwrap_or(serde_json::Value::Null);
+                if let Some(obj) = value.as_object_mut() {
+                    obj.remove("args");
+                }
+                Ok(Json(value))
+            }
+            None => {
+                let e = format!("No job with id “{}”. Ask titer_list_jobs for the jobs.", args.job_id);
+                self.state.log_call("titer_read_job", job_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Active + recently finished jobs, so a client that disconnected can
+    /// recover instead of re-running. Omit project_id for the front
+    /// project; with no project published at all, every project's jobs.
+    #[tool(
+        name = "titer_list_jobs",
+        description = "List dispatch jobs: active and recently finished, oldest first, so a disconnected client can recover instead of re-running. Omit project_id for the front project.",
+        annotations(
+            title = "List jobs",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn list_jobs(&self, Parameters(args): Parameters<ListJobsArgs>) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let list_args = serde_json::json!({ "project_id": args.project_id });
+        let result = (|| {
+            let project = match args.project_id.as_deref() {
+                Some(id) => Some(id.to_string()),
+                // The front project, when one has published; every project
+                // otherwise (a client recovering with nothing open yet).
+                None => last.clone(),
+            };
+            let jobs = self.state.list_jobs(project.as_deref());
+            if project.is_some() && jobs.is_empty() && !snapshots.contains_key(project.as_deref().unwrap()) {
+                return Err(format!(
+                    "No open project with id “{}”. Ask titer_list_projects for the open projects.",
+                    project.unwrap()
+                ));
+            }
+            Ok::<_, String>(serde_json::json!({
+                "jobs": jobs.iter().map(job_summary).collect::<Vec<_>>(),
+            }))
+        })();
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_list_jobs", list_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_list_jobs", list_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Cancel a dispatch job. A job already done reports `done` instead of
+    /// erroring; a running job is stopped in its window (a run-analysis
+    /// job's cancel maps to the `cancel_r` path there).
+    #[tool(
+        name = "titer_cancel_job",
+        description = "Cancel a dispatch job. A job already done reports done instead of erroring; a running job is stopped in its window.",
+        annotations(
+            title = "Cancel job",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn cancel_job(&self, Parameters(args): Parameters<JobArgs>) -> Result<Json<serde_json::Value>, String> {
+        let job_args = serde_json::json!({ "job_id": args.job_id });
+        match self.state.cancel_job(&args.job_id) {
+            Ok((job, _sent)) => {
+                self.state.log_call("titer_cancel_job", job_args, true, None);
+                Ok(Json(serde_json::json!({ "job_id": job.job_id, "status": job.status })))
+            }
+            Err(e) => {
+                self.state.log_call("titer_cancel_job", job_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
 }
 
 impl TiterMcpServer {
@@ -756,6 +1190,25 @@ impl ServerHandler for TiterMcpServer {
 }
 
 // ── Snapshot readers (pure: unit-tested below) ───────────────────────────
+
+/// A job as `titer_list_jobs` shows it: status and ids, never the args
+/// (they can hold whole tables). `analysis_type` comes from the job's
+/// `created` map when the creating tool recorded it there.
+fn job_summary(job: &Job) -> serde_json::Value {
+    let mut out = serde_json::json!({
+        "job_id": job.job_id,
+        "status": job.status,
+        "project_id": job.project_id,
+        "action": job.action,
+        "analysis_id": job.analysis_id,
+        "created_ts": job.created_ts,
+        "started_ts": job.started_ts,
+    });
+    if let Some(analysis_type) = job.created.get("analysis_type").and_then(|v| v.as_str()) {
+        out["analysis_type"] = serde_json::Value::String(analysis_type.to_string());
+    }
+    out
+}
 
 fn nodes_of(snapshot: &serde_json::Value) -> &serde_json::Map<String, serde_json::Value> {
     static EMPTY: std::sync::OnceLock<serde_json::Map<String, serde_json::Value>> = std::sync::OnceLock::new();
@@ -1320,5 +1773,264 @@ mod tests {
         assert!(tokens_equal("abc", "abc"));
         assert!(!tokens_equal("abc", "abd"));
         assert!(!tokens_equal("abc", "abcd"));
+    }
+
+    // ── Job queue (L0) ───────────────────────────────────────────────────
+    // Pure state only — no server, no files (log_event is a no-op with no
+    // dir; enqueue emits nothing with no app handle remembered).
+
+    fn job_state() -> McpState {
+        let state = McpState::default();
+        state
+            .lock()
+            .snapshots
+            .insert("project-1".to_string(), json!({ "filePath": "/tmp/Dose.hlx", "revision": 1, "nodes": {} }));
+        state
+    }
+
+    #[test]
+    fn job_enqueue_assigns_ids_and_refuses_closed_windows() {
+        let state = job_state();
+        let job = state.enqueue_job("project-1", "noop", json!({}), json!({})).expect("enqueue");
+        assert_eq!(job.job_id, "job-1");
+        assert_eq!(job.status, JobStatus::Queued);
+        let job2 = state.enqueue_job("project-1", "noop", json!({}), json!({})).expect("enqueue");
+        assert_eq!(job2.job_id, "job-2");
+        let err = state.enqueue_job("project-9", "noop", json!({}), json!({})).expect_err("closed window");
+        assert!(err.contains("No open project"), "{err}");
+    }
+
+    #[test]
+    fn job_take_claims_once_only() {
+        let state = job_state();
+        state.enqueue_job("project-1", "noop", json!({}), json!({})).expect("enqueue");
+        state
+            .enqueue_job("project-1", "run-analysis", json!({ "analysis_id": "a1" }), json!({ "analysis_id": "a1" }))
+            .expect("enqueue");
+        let taken = state.take_jobs("project-1");
+        assert_eq!(taken.len(), 2);
+        assert!(taken.iter().all(|j| j.status == JobStatus::Running));
+        assert!(taken[0].started_ts.is_some());
+        // The claim carries the args: the frontend executes from them.
+        assert_eq!(taken[1].args, json!({ "analysis_id": "a1" }));
+        // A second take — a re-mounted dispatcher, a repeated wake-up —
+        // returns nothing: each job is dispatched once, ever (CC-m6).
+        assert!(state.take_jobs("project-1").is_empty());
+        // Another window's take never sees them either.
+        assert!(state.take_jobs("project-2").is_empty());
+    }
+
+    #[test]
+    fn job_complete_stores_result_and_is_idempotent_after_terminal() {
+        let state = job_state();
+        let job = state
+            .enqueue_job("project-1", "run-analysis", json!({ "analysis_id": "a1" }), json!({ "analysis_id": "a1" }))
+            .expect("enqueue");
+        state.take_jobs("project-1");
+        let done = state
+            .complete_job("project-1", &job.job_id, JobStatus::Done, Some(json!({ "ok": true })), None, None)
+            .expect("complete");
+        assert_eq!(done.status, JobStatus::Done);
+        assert_eq!(done.result, Some(json!({ "ok": true })));
+        assert!(done.finished_ts.is_some());
+        // A late duplicate report can never resurrect or rewrite it.
+        let again = state
+            .complete_job("project-1", &job.job_id, JobStatus::Error, None, Some("late".into()), None)
+            .expect("late complete");
+        assert_eq!(again.status, JobStatus::Done);
+        assert_eq!(again.result, Some(json!({ "ok": true })));
+        assert_eq!(again.error, None);
+        // Only the owning window may complete it.
+        let err =
+            state.complete_job("project-2", &job.job_id, JobStatus::Done, None, None, None).expect_err("other window");
+        assert!(err.contains("belongs to project"), "{err}");
+    }
+
+    #[test]
+    fn job_cancel_queued_never_runs_and_done_reports_done() {
+        let state = job_state();
+        let queued = state.enqueue_job("project-1", "noop", json!({}), json!({})).expect("enqueue");
+        let (cancelled, sent) = state.cancel_job(&queued.job_id).expect("cancel");
+        assert_eq!(cancelled.status, JobStatus::Cancelled);
+        assert!(!sent, "a queued job was never dispatched: no cancel event");
+        // A cancelled job is never taken: it never executes.
+        assert!(state.take_jobs("project-1").is_empty());
+        // Cancelling again reports the terminal status, not an error.
+        let (again, _) = state.cancel_job(&queued.job_id).expect("re-cancel");
+        assert_eq!(again.status, JobStatus::Cancelled);
+        // A done job reports done instead of erroring.
+        let done = state.enqueue_job("project-1", "noop", json!({}), json!({})).expect("enqueue");
+        state.take_jobs("project-1");
+        state.complete_job("project-1", &done.job_id, JobStatus::Done, None, None, None).expect("complete");
+        let (reported, _) = state.cancel_job(&done.job_id).expect("cancel done");
+        assert_eq!(reported.status, JobStatus::Done);
+        // Unknown job: plain error.
+        assert!(state.cancel_job("job-99").is_err());
+        assert!(state.read_job("job-99").is_none());
+    }
+
+    #[test]
+    fn job_close_window_cancels_live_jobs() {
+        let state = job_state();
+        let first = state.enqueue_job("project-1", "noop", json!({}), json!({})).expect("enqueue");
+        state.take_jobs("project-1"); // first is now running
+        let second = state.enqueue_job("project-1", "noop", json!({}), json!({})).expect("enqueue");
+        state.drop_jobs_for_window("project-1");
+        assert_eq!(state.read_job(&first.job_id).unwrap().status, JobStatus::Cancelled);
+        assert_eq!(state.read_job(&second.job_id).unwrap().status, JobStatus::Cancelled);
+        // Neither is takeable after the close.
+        assert!(state.take_jobs("project-1").is_empty());
+        assert!(state.list_jobs(Some("project-1")).iter().all(|j| j.status == JobStatus::Cancelled));
+    }
+
+    #[test]
+    fn job_list_filters_by_project_and_reads_back() {
+        let state = job_state();
+        state.lock().snapshots.insert("project-2".to_string(), json!({ "nodes": {} }));
+        let a = state.enqueue_job("project-1", "noop", json!({}), json!({})).expect("enqueue");
+        state.enqueue_job("project-2", "noop", json!({}), json!({})).expect("enqueue");
+        assert_eq!(state.list_jobs(Some("project-1")).len(), 1);
+        assert_eq!(state.list_jobs(Some("project-2")).len(), 1);
+        assert_eq!(state.list_jobs(None).len(), 2);
+        let read = state.read_job(&a.job_id).expect("read");
+        assert_eq!(read.action, "noop");
+        assert_eq!(read.status, JobStatus::Queued);
+    }
+
+    // ── Live smoke: the real server, over real HTTP ──────────────────────
+    // The same router `mcp_set_enabled` serves (same auth, same tools),
+    // bound on a scratch port, driven by reqwest as an MCP client:
+    // initialize → tools/list → tools/call on the job plumbing. The job
+    // under test is created with the same `enqueue_job` primitive L4's
+    // `titer_run_analysis` will call — L0 deliberately ships no
+    // user-visible job-creation tool, so the create step lives here, in
+    // the test, not in tools/list.
+
+    const SMOKE_TOKEN: &str = "test-token-l0-smoke";
+
+    /// One JSON-RPC round-trip over Streamable HTTP. rmcp answers JSON or
+    /// SSE; both are parsed to the JSON-RPC response. Returns the response
+    /// plus the session id the server set (if any).
+    async fn mcp_post(
+        client: &reqwest::Client,
+        url: &str,
+        session: Option<&str>,
+        body: serde_json::Value,
+    ) -> (serde_json::Value, Option<String>) {
+        let mut req = client
+            .post(url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {SMOKE_TOKEN}"))
+            .header("MCP-Protocol-Version", "2025-11-25")
+            .json(&body);
+        if let Some(session) = session {
+            req = req.header("Mcp-Session-Id", session);
+        }
+        let resp = req.send().await.expect("mcp post");
+        let new_session = resp.headers().get("mcp-session-id").and_then(|v| v.to_str().ok()).map(str::to_string);
+        let is_sse = resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .contains("text/event-stream");
+        let text = resp.text().await.expect("mcp body");
+        if is_sse {
+            let data = text.lines().filter_map(|l| l.strip_prefix("data: ")).last().expect("sse data line");
+            (serde_json::from_str(data).expect("sse json"), new_session)
+        } else {
+            (serde_json::from_str(&text).unwrap_or_else(|_| json!({ "raw": text })), new_session)
+        }
+    }
+
+    fn tools_call(id: u64, name: &str, arguments: serde_json::Value) -> serde_json::Value {
+        json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call",
+                "params": { "name": name, "arguments": arguments } })
+    }
+
+    /// The tool result's text payload, parsed as JSON.
+    fn call_text(resp: &serde_json::Value) -> serde_json::Value {
+        let text = resp["result"]["content"][0]["text"].as_str().expect("tool text");
+        serde_json::from_str(text).expect("tool json")
+    }
+
+    #[tokio::test]
+    async fn mcp_smoke_job_plumbing_over_http() {
+        let state = job_state();
+        state.lock().token = Some(SMOKE_TOKEN.to_string());
+        let job = state.enqueue_job("project-1", "noop", json!({}), json!({})).expect("enqueue");
+        let cancel = CancellationToken::new();
+        let router = mcp_router(state.clone(), cancel.child_token());
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        let url = format!("http://127.0.0.1:{port}{MCP_PATH}");
+        let client = reqwest::Client::new();
+
+        let (init, session) = mcp_post(
+            &client,
+            &url,
+            None,
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": { "protocolVersion": "2025-11-25", "capabilities": {},
+                                "clientInfo": { "name": "l0-smoke", "version": "0" } } }),
+        )
+        .await;
+        assert_eq!(init["result"]["protocolVersion"], "2025-11-25");
+        let session = session.expect("session id");
+        let (notif, _) =
+            mcp_post(&client, &url, Some(&session), json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }))
+                .await;
+        assert!(notif.get("result").is_none() || notif["result"].is_null(), "notification gets no result: {notif}");
+
+        let (list, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} }),
+        )
+        .await;
+        let names: Vec<&str> =
+            list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
+        assert_eq!(names.len(), 8, "five Phase 1 tools + three job tools: {names:?}");
+        for name in ["titer_read_job", "titer_list_jobs", "titer_cancel_job"] {
+            assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
+        }
+
+        // create (via enqueue_job above) → read → list → cancel → read.
+        let (read, _) =
+            mcp_post(&client, &url, Some(&session), tools_call(3, "titer_read_job", json!({ "job_id": job.job_id })))
+                .await;
+        assert_eq!(call_text(&read)["status"], "queued");
+        // Tool outputs never echo the args (they can hold whole tables).
+        assert!(call_text(&read).get("args").is_none());
+        let (listed, _) = mcp_post(&client, &url, Some(&session), tools_call(4, "titer_list_jobs", json!({}))).await;
+        let jobs = call_text(&listed)["jobs"].as_array().expect("jobs").clone();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0]["job_id"], job.job_id);
+        let (cancelled, _) =
+            mcp_post(&client, &url, Some(&session), tools_call(5, "titer_cancel_job", json!({ "job_id": job.job_id })))
+                .await;
+        assert_eq!(call_text(&cancelled)["status"], "cancelled");
+        let (read2, _) =
+            mcp_post(&client, &url, Some(&session), tools_call(6, "titer_read_job", json!({ "job_id": job.job_id })))
+                .await;
+        assert_eq!(call_text(&read2)["status"], "cancelled");
+
+        let resp = client
+            .delete(&url)
+            .header("Mcp-Session-Id", &session)
+            .header("Authorization", format!("Bearer {SMOKE_TOKEN}"))
+            .header("MCP-Protocol-Version", "2025-11-25")
+            .header("Accept", "application/json, text/event-stream")
+            .send()
+            .await
+            .expect("delete");
+        assert!(resp.status().is_success(), "DELETE closes the session: {}", resp.status());
+        cancel.cancel();
+        server.abort();
     }
 }
