@@ -131,6 +131,77 @@ And a spreadsheet that feels like one:
 **Try it:** Help › Sample Project opens a made-up study told as a paper's figures, from cells
 to mice to patients, with every kind of table ([also here](samples/Titer%20Sample.hlx)).
 
+## Use Titer with your AI assistant (MCP)
+
+MCP lets an AI assistant you already use — Claude Code, Claude Desktop, or OpenCode — drive
+Titer directly: open projects, run analyses, build graphs, export files. The assistant talks
+to a small server that runs only on your Mac.
+
+1. **Turn it on.** In Titer, go to Settings → AI Connections and turn on "Allow AI apps to
+   connect". The server is off until you do this. Leave Titer running while you use your
+   assistant — if you quit Titer, the tools stop answering until you reopen it.
+
+2. **Connect your assistant.**
+
+   **Claude Code** — in Titer's AI Connections dialog, copy the setup command and run it once
+   in a terminal. It looks like this — but copy yours from the dialog, which fills in your
+   real address and token; don't type this line by hand:
+
+   ```sh
+   claude mcp add --transport http --scope user titer http://127.0.0.1:18741/mcp --header "Authorization: Bearer <your-token>"
+   ```
+
+   New Claude Code sessions will see the Titer tools — check with `/mcp`.
+
+   **Claude Desktop** — add the bridge that ships inside the Titer app to
+   `~/Library/Application Support/Claude/claude_desktop_config.json`, under `mcpServers`:
+
+   ```json
+   {
+     "mcpServers": {
+       "titer": {
+         "command": "/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge",
+         "args": [],
+         "env": {}
+       }
+     }
+   }
+   ```
+
+   Then fully quit Claude Desktop and reopen it. (A one-click `.mcpb` install is coming in a
+   later release.)
+
+   **OpenCode** — add this to `~/.config/opencode/opencode.json`:
+
+   ```json
+   {
+     "$schema": "https://opencode.ai/config.json",
+     "mcp": {
+       "titer": {
+         "type": "local",
+         "command": ["/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge"],
+         "enabled": true
+       }
+     }
+   }
+   ```
+
+   Check it connected with `/mcps` or `opencode mcp list`.
+
+3. **Ask it things**, for example:
+
+   - "Open my dose-response project and run a one-way ANOVA on the XY table."
+   - "Build a scatter graph from that table and export it as a 300 DPI PNG."
+   - "What analyses have I run on this table, and which are significant?"
+   - "Is my Box account connected?"
+
+**Good to know:** the server only listens on your own Mac (`127.0.0.1`) and never sends your
+data anywhere. It uses a private token — keep it private, and if you regenerate it in Settings,
+reconnect your assistant. It offers 51 tools: 14 only read, 37 can change your project (run an
+analysis, build a graph, export, save, delete) — your AI tool's own approval settings decide
+when it asks first. Box cloud tools need a Box account connected in Settings → Connected
+Storage; without one they tell you to connect first.
+
 ## Privacy
 
 Titer works entirely on your Mac: your data never leave it, and there is no
