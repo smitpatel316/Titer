@@ -4,6 +4,7 @@
 import type { AnalysisOutcome, Column, MultipleRegressionParams, RegressionCoefficient } from "../types";
 import { describe, pairedGroups, pRow, rVec } from "../column/base";
 import { droppedPredictorsNote, selectPredictors, aliasedPredictorsError } from "./predictors";
+import { sd } from "../../lib/summary";
 import { evalNamedVector } from "../webr";
 
 export async function runMultipleRegression(
@@ -22,6 +23,18 @@ export async function runMultipleRegression(
   const p = predictors.length;
   if (n <= p + 1) {
     return { error: `Not enough complete rows (${n}) to fit ${p} predictor(s). Enter more data and try again.` };
+  }
+
+  // A constant dependent has no variation to explain: R fits it (intercept
+  // only, slopes 0) but summary() returns NULL R² / adjusted R² / F / P, so
+  // the fit presents as a row of nulls with no message (#150). Checked on
+  // the complete-case values, like the R3-23 predictor check.
+  if (sd(aligned[0]) === 0) {
+    return {
+      error:
+        `“${dep.name}” is constant — Multiple linear regression cannot fit a model when the dependent ` +
+        `variable has no variation. Enter values that vary and try again.`,
+    };
   }
 
   const decls = [`y<-${rVec(aligned[0])}`, ...predictors.map((_, i) => `x${i}<-${rVec(aligned[i + 1])}`)];

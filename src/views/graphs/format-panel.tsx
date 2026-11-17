@@ -37,7 +37,7 @@ import {
   ThicknessRow,
   Toggle,
 } from "./panel-controls";
-import { axesRangeInputs, rightYDataset } from "./plot-helpers";
+import { axesRangeInputs, logScaleOffered, rightYDataset } from "./plot-helpers";
 import { dataControls, statisticsControls, styleControls, type SectionContext } from "./format-sections";
 import { VOLCANO_SERIES } from "./volcano";
 import { MatchSection } from "./match-graph";
@@ -354,7 +354,7 @@ export function FormatPanel(props: Props) {
             "tickLength",
           ])}
         >
-          {family !== "heatmap" && family !== "volcano" && (
+          {family !== "heatmap" && family !== "volcano" && logScaleOffered(graphType).y && (
             <Scale
               axis="Y"
               value={options.yScale}
@@ -376,7 +376,7 @@ export function FormatPanel(props: Props) {
               onHookChange={(yMinConstant, yMaxConstant) => set({ yMinConstant, yMaxConstant })}
             />
           )}
-          {family === "xy" && (
+          {family === "xy" && logScaleOffered(graphType).x && (
             <Scale
               axis="X"
               value={options.xScale}

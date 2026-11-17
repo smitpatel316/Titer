@@ -15,12 +15,19 @@ import { GUIDE, INK, xyLayout, type Paint } from "./plot-helpers";
 import type { GraphFigure, GraphModule } from ".";
 
 function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFigure {
-  const layout = xyLayout(options, "1 − Specificity", 1, { yName: "Sensitivity" });
+  // An ROC curve lives on [0, 1] on both axes: a log scale is meaningless
+  // there (#151) — on a log axis the forced [0, 1] range below reads as
+  // [1, 10] in data values, so the whole curve falls outside the window
+  // and the graph draws empty, and the (0,0)/(1,1) anchors have no log at
+  // all. Force linear here (the Format panel offers no Scale rows for ROC
+  // either), so a saved project with a log scale still draws.
+  const linear: GraphOptions = { ...options, xScale: "linear", yScale: "linear" };
+  const layout = xyLayout(linear, "1 − Specificity", 1, { yName: "Sensitivity" });
   const axes = {
     // Both axes are fixed 0–1 (an ROC curve has no values outside them) —
     // unless the user typed bounds, which replace the fixed range (G-F8: the
-    // inputs were silently ignored). xyLayout already applied a typed bound,
-    // in log units on a log axis, so leaving its axis alone honours it.
+    // inputs were silently ignored). The axes are always linear (see above),
+    // so the fixed range is in data values, as Plotly reads it.
     // Equal aspect is not forced: on a wider-than-tall sheet Plotly's
     // scaleanchor would stretch the X range past [0, 1] to keep it square.
     xaxis: {

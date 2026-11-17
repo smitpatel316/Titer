@@ -126,7 +126,7 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, movedText, paintOf, perRowSummaryStats, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, logScaleOffered, movedText, paintOf, perRowSummaryStats, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -8335,6 +8335,68 @@ check("a constant or collinear predictor is named, not a crash, in multiple regr
   ok(!("error" in good), `clean fit should run, got ${"error" in good ? good.error : "ok"}`);
 });
 
+// #150 (Batch 2 triage): a constant DEPENDENT in multiple linear regression
+// used to fit and return null R² / adjusted R² / F / P with no message —
+// R fits it (intercept only, slopes 0) but summary() gives NULL for the
+// whole model table. The runner now names the constant dependent instead.
+// (The predictor side is R3-23 above; the dependent side had no guard.)
+check("a constant dependent in multiple linear regression is named, not a row of nulls (#150)", async () => {
+  const table: TableData = {
+    columns: ["Title", "Y", "X1", "X2"],
+    rows: [
+      ["", "5", "1", "1"],
+      ["", "5", "2", "0"],
+      ["", "5", "3", "2"],
+      ["", "5", "4", "1"],
+      ["", "5", "5", "0"],
+      ["", "5", "6", "2"],
+      ["", "5", "7", "1"],
+      ["", "5", "8", "0"],
+    ],
+  };
+  const params = { dependent: "Y", predictors: ["X1", "X2"] };
+  deepStrictEqual(await runAnalysis("multiple-regression", table, params), {
+    error:
+      "“Y” is constant — Multiple linear regression cannot fit a model when the dependent " +
+      "variable has no variation. Enter values that vary and try again.",
+  });
+  // Constant only on complete cases (the one varying row has a blank → dropped): still named.
+  const gapped: TableData = {
+    columns: ["Title", "Y", "X1", "X2"],
+    rows: [
+      ["", "5", "1", "1"],
+      ["", "9", "2", ""],
+      ["", "5", "3", "2"],
+      ["", "5", "4", "1"],
+      ["", "5", "5", "0"],
+      ["", "5", "6", "2"],
+      ["", "5", "7", "1"],
+      ["", "5", "8", "0"],
+    ],
+  };
+  deepStrictEqual(await runAnalysis("multiple-regression", gapped, params), {
+    error:
+      "“Y” is constant — Multiple linear regression cannot fit a model when the dependent " +
+      "variable has no variation. Enter values that vary and try again.",
+  });
+  // A varying dependent still fits: the guard must not fire on good data.
+  const varying: TableData = {
+    columns: ["Title", "Y", "X1", "X2"],
+    rows: [
+      ["", "3", "1", "1"],
+      ["", "5", "2", "0"],
+      ["", "4", "3", "2"],
+      ["", "6", "4", "1"],
+      ["", "7", "5", "0"],
+      ["", "5", "6", "2"],
+      ["", "8", "7", "1"],
+      ["", "6", "8", "0"],
+    ],
+  };
+  const good = await runAnalysis("multiple-regression", varying, params);
+  ok(!("error" in good), `varying dependent should fit, got ${"error" in good ? good.error : "ok"}`);
+});
+
 check("a constant or collinear predictor is named, not a crash, in multiple logistic regression (R3-23)", async () => {
   const table = (x2: string[]): TableData => ({
     columns: ["Title", "Y", "X1", "X2"],
@@ -10175,6 +10237,48 @@ check("an ROC curve honours the Axes min/max inputs, defaulting to 0–1 (G-F8)"
   const ranged = build({ xMin: 0.2, xMax: 0.8, yMin: 0.1, yMax: 0.9 });
   deepStrictEqual((ranged.layout.xaxis as { range?: number[] }).range, [0.2, 0.8]);
   deepStrictEqual((ranged.layout.yaxis as { range?: number[] }).range, [0.1, 0.9]);
+});
+
+// #151 (Batch 2 triage): a log scale on an ROC graph is meaningless — both
+// axes live on [0, 1], so on a log axis the forced [0, 1] range reads as
+// [1, 10] in data values and the whole curve falls outside the window (and
+// the (0,0)/(1,1) anchors have no log at all). The builder forces linear
+// axes, so even a saved log scale draws; the panel offers no Scale rows.
+check("an ROC curve stays linear even when a log scale is set (#151)", () => {
+  const data: TableData = {
+    columns: ["Title", "Truth", "Score"],
+    rows: [
+      [null, "Diseased", "0.9"],
+      [null, "Diseased", "0.8"],
+      [null, "Diseased", "0.6"],
+      [null, "Healthy", "0.4"],
+      [null, "Healthy", "0.3"],
+      [null, "Healthy", "0.1"],
+    ],
+  };
+  const build = (over: Partial<GraphOptions>) => {
+    const opts = { ...newGraphOptions("roc-curve"), ...over };
+    return GRAPHS["roc-curve"].build(plotColumns(readTable(data), "roc-curve", opts, "xy"), opts, paintOf(opts, 1));
+  };
+  for (const over of [
+    { xScale: "log10" as const, yScale: "log10" as const },
+    { xScale: "log2" as const, yScale: "log2" as const },
+    { xScale: "log10" as const },
+    { yScale: "log10" as const },
+  ]) {
+    const fig = build(over);
+    strictEqual((fig.layout.xaxis as { type?: string }).type, "linear");
+    deepStrictEqual((fig.layout.xaxis as { range?: number[] }).range, [0, 1]);
+    deepStrictEqual((fig.layout.yaxis as { range?: number[] }).range, [0, 1]);
+    ok(fig.data.length > 0, "the ROC curve must still draw");
+  }
+  // The panel offers no Scale rows for ROC, but does for other xy graphs.
+  deepStrictEqual(logScaleOffered("roc-curve"), { x: false, y: false });
+  deepStrictEqual(logScaleOffered("xy-scatter"), { x: true, y: true });
+  deepStrictEqual(logScaleOffered("logistic-curve"), { x: true, y: true });
+  const panel = readFileSync("src/views/graphs/format-panel.tsx", "utf8");
+  ok(panel.includes("logScaleOffered(graphType).y"), "the panel must gate the Y scale row on logScaleOffered");
+  ok(panel.includes("logScaleOffered(graphType).x"), "the panel must gate the X scale row on logScaleOffered");
 });
 
 check("a logistic curve honours a set Y range, defaulting to the fixed 0–1 axis (G-F8)", () => {
