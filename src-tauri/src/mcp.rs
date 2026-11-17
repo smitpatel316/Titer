@@ -81,6 +81,11 @@ const ACTIVITY_FILE: &str = "activity.log";
 const DEFAULT_MAX_ROWS: usize = 100;
 const HARD_MAX_ROWS: usize = 1000;
 
+/// Activity-log lines `titer_read_activity` returns by default, and the
+/// most a caller may ask for.
+const DEFAULT_ACTIVITY_LIMIT: u32 = 50;
+const MAX_ACTIVITY_LIMIT: u32 = 500;
+
 /// The seven table types, as the roadmap names them (§2 "Look at my data").
 fn display_table_type(table_type: &str) -> &'static str {
     match table_type {
@@ -656,14 +661,20 @@ pub fn mcp_claude_code_command(app: AppHandle, state: State<McpState>) -> Result
     ))
 }
 
+/// The Activity log's last `limit` lines (newest last), as stored (JSONL).
+/// A missing log reads as no lines.
+fn activity_lines(dir: &std::path::Path, limit: usize) -> Vec<String> {
+    let text = fs::read_to_string(dir.join(ACTIVITY_FILE)).unwrap_or_default();
+    let lines: Vec<String> = text.lines().map(str::to_string).collect();
+    let skip = lines.len().saturating_sub(limit.max(1));
+    lines[skip..].to_vec()
+}
+
 /// The Activity log's last `limit` lines (newest last), for Settings to show.
 #[tauri::command]
 pub fn mcp_activity(app: AppHandle, state: State<McpState>, limit: u32) -> Result<Vec<String>, String> {
     let dir = state.ensure_dir(&app)?;
-    let text = fs::read_to_string(dir.join(ACTIVITY_FILE)).unwrap_or_default();
-    let lines: Vec<String> = text.lines().map(str::to_string).collect();
-    let skip = lines.len().saturating_sub(limit.max(1) as usize);
-    Ok(lines[skip..].to_vec())
+    Ok(activity_lines(&dir, limit.max(1) as usize))
 }
 
 /// The frontend's project, published on every revision change (see the
@@ -800,7 +811,9 @@ async fn auth_middleware(
 }
 
 // ── The MCP server: tools ───────────────────────────────────────────────
-// Five read-only tools (Phase 1). Every one is annotated read_only_hint,
+// Eight read-only tools: the five Phase 1 tools, plus the three Phase 2
+// read-only additions (titer_read_figure, titer_read_info_sheet,
+// titer_read_activity). Every one is annotated read_only_hint,
 // and every call is written to the Activity log with an args summary —
 // never full table values, never the token.
 
@@ -862,6 +875,31 @@ pub struct ListJobsArgs {
     /// project — or for every project's jobs when no project has published.
     #[serde(default)]
     pub project_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct FigureArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The figure node's id, as shown by titer_list_projects.
+    pub figure_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct InfoSheetArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The info sheet node's id, as shown by titer_list_projects.
+    pub info_sheet_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ActivityArgs {
+    /// Lines returned (default 50, at most 500), newest last.
+    #[serde(default)]
+    pub limit: Option<u32>,
 }
 
 #[tool_router(router = tools, vis = "pub")]
@@ -1147,6 +1185,99 @@ impl TiterMcpServer {
             }
         }
     }
+
+    /// What a figure lays out: its panels (which graph sits in each cell
+    /// of the grid), the grid itself, and its title — so an export can be
+    /// checked before it is made.
+    #[tool(
+        name = "titer_read_figure",
+        description = "Read a figure's layout: its panels (graph id and grid cell for each), grid and title. Omit project_id for the front project.",
+        annotations(
+            title = "Read figure",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn read_figure(&self, Parameters(args): Parameters<FigureArgs>) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let figure_args = serde_json::json!({ "project_id": args.project_id, "figure_id": args.figure_id });
+        let result = (|| {
+            let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            read_figure(&id, &snap, &args.figure_id)
+        })();
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_read_figure", figure_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_read_figure", figure_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// An info sheet's constants and notes, and the table it belongs to
+    /// (when it has one) — the values graphs hook their axes to.
+    #[tool(
+        name = "titer_read_info_sheet",
+        description = "Read an info sheet: its constants and notes, and the table it is linked to (if any). Omit project_id for the front project.",
+        annotations(
+            title = "Read info sheet",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn read_info_sheet(
+        &self,
+        Parameters(args): Parameters<InfoSheetArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let info_args = serde_json::json!({ "project_id": args.project_id, "info_sheet_id": args.info_sheet_id });
+        let result = (|| {
+            let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            read_info_sheet(&id, &snap, &args.info_sheet_id)
+        })();
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_read_info_sheet", info_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_read_info_sheet", info_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// The Activity log: what this server has done (and what failed) —
+    /// the agent's own audit trail, newest last, stored JSONL as-is.
+    #[tool(
+        name = "titer_read_activity",
+        description = "Read the Activity log (what this server has done, newest last). Lines are the stored JSONL as-is. Limit defaults to 50, at most 500.",
+        annotations(
+            title = "Read activity",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn read_activity(
+        &self,
+        Parameters(args): Parameters<ActivityArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let limit = args.limit.unwrap_or(DEFAULT_ACTIVITY_LIMIT).clamp(1, MAX_ACTIVITY_LIMIT);
+        let lines = self.state.dir().map(|dir| activity_lines(&dir, limit as usize)).unwrap_or_default();
+        self.state.log_call("titer_read_activity", serde_json::json!({ "limit": limit }), true, None);
+        Ok(Json(serde_json::json!({ "lines": lines })))
+    }
 }
 
 impl TiterMcpServer {
@@ -1235,6 +1366,7 @@ fn project_listing(snapshots: &HashMap<String, serde_json::Value>) -> serde_json
         let mut analyses = Vec::new();
         let mut graphs = Vec::new();
         let mut figures = Vec::new();
+        let mut info_sheets = Vec::new();
         let mut entries: Vec<(&String, &serde_json::Value)> = nodes_of(snap).iter().collect();
         entries.sort_by_key(|(_, n)| node_name(n));
         for (nid, node) in entries {
@@ -1250,6 +1382,7 @@ fn project_listing(snapshots: &HashMap<String, serde_json::Value>) -> serde_json
                 "analysis" => analyses.push(entry),
                 "graph" => graphs.push(entry),
                 "figure" => figures.push(entry),
+                "info" => info_sheets.push(entry),
                 _ => {}
             }
         }
@@ -1261,6 +1394,7 @@ fn project_listing(snapshots: &HashMap<String, serde_json::Value>) -> serde_json
             "analyses": analyses,
             "graphs": graphs,
             "figures": figures,
+            "info_sheets": info_sheets,
         }));
     }
     serde_json::json!({
@@ -1630,6 +1764,73 @@ fn read_graph(project_id: &str, snapshot: &serde_json::Value, graph_id: &str) ->
     }))
 }
 
+/// A figure's layout: which graph sits in each grid cell, the grid
+/// itself, and its title — the shape the stored figure node carries.
+fn read_figure(project_id: &str, snapshot: &serde_json::Value, figure_id: &str) -> Result<serde_json::Value, String> {
+    let node = find_node(snapshot, figure_id).ok_or_else(|| {
+        format!("No figure with id “{figure_id}” in project {project_id}. Ask titer_list_projects for the ids.")
+    })?;
+    if node.get("type").and_then(|v| v.as_str()) != Some("figure") {
+        return Err(format!(
+            "“{figure_id}” is not a figure (it is a {}).",
+            node.get("type").and_then(|v| v.as_str()).unwrap_or("node")
+        ));
+    }
+    let panels: Vec<serde_json::Value> = node
+        .get("panels")
+        .and_then(|p| p.as_array())
+        .map(|ps| {
+            ps.iter()
+                .map(|p| {
+                    serde_json::json!({
+                        "graph_id": p.get("graphId").and_then(|v| v.as_str()),
+                        "rect": {
+                            "row": p.get("row").and_then(|v| v.as_u64()).unwrap_or(0),
+                            "col": p.get("col").and_then(|v| v.as_u64()).unwrap_or(0),
+                            "row_span": p.get("rowSpan").and_then(|v| v.as_u64()).unwrap_or(1),
+                            "col_span": p.get("colSpan").and_then(|v| v.as_u64()).unwrap_or(1),
+                        },
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(serde_json::json!({
+        "project_id": project_id,
+        "figure_id": figure_id,
+        "name": node_name(node),
+        "panels": panels,
+        "grid": node.get("grid"),
+        "title": node.get("figureTitle").and_then(|v| v.as_str()).unwrap_or(""),
+    }))
+}
+
+/// An info sheet's constants and notes, as stored, plus the table it is
+/// linked to (null when it is project info, global to the project).
+fn read_info_sheet(
+    project_id: &str,
+    snapshot: &serde_json::Value,
+    info_sheet_id: &str,
+) -> Result<serde_json::Value, String> {
+    let node = find_node(snapshot, info_sheet_id).ok_or_else(|| {
+        format!("No info sheet with id “{info_sheet_id}” in project {project_id}. Ask titer_list_projects for the ids.")
+    })?;
+    if node.get("type").and_then(|v| v.as_str()) != Some("info") {
+        return Err(format!(
+            "“{info_sheet_id}” is not an info sheet (it is a {}).",
+            node.get("type").and_then(|v| v.as_str()).unwrap_or("node")
+        ));
+    }
+    let info = node.get("info").cloned().unwrap_or(serde_json::Value::Null);
+    Ok(serde_json::json!({
+        "project_id": project_id,
+        "info_sheet_id": info_sheet_id,
+        "name": node_name(node),
+        "linked_table_id": info.get("linkedTableId").and_then(|v| v.as_str()),
+        "info": info,
+    }))
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────
 // Pure helpers only — no server, no files. (Not yet run: no Rust toolchain
 // on this box. Run `cargo test` after v1 clears.)
@@ -1667,6 +1868,22 @@ mod tests {
                     "id": "g1", "type": "graph", "name": "Curve", "parentId": "t1",
                     "graphType": "xy-scatter",
                     "graphOptions": { "title": "Dose-response", "xLabel": "Dose", "yLabel": "Response", "regAnalysisId": "a1" }
+                },
+                "f1": {
+                    "id": "f1", "type": "figure", "name": "Dose figure", "parentId": null,
+                    "panels": [
+                        { "graphId": "g1", "graphName": "Curve", "label": "A", "title": "", "row": 0, "col": 0, "rowSpan": 1, "colSpan": 1 }
+                    ],
+                    "grid": { "rows": 1, "cols": 1 },
+                    "figureTitle": "Dose-response figure"
+                },
+                "i1": {
+                    "id": "i1", "type": "info", "name": "Plate info", "parentId": null,
+                    "info": {
+                        "constants": [{ "id": "c1", "name": "Dose", "value": "10 nM" }],
+                        "notes": "Plate 3 notes",
+                        "linkedTableId": "t1"
+                    }
                 }
             },
             "rootOrder": ["t1"],
@@ -1749,6 +1966,82 @@ mod tests {
         assert_eq!(out["source_table"]["table_type"], "XY");
         assert_eq!(out["linked_analyses"][0]["analysis_id"], "a1");
         assert_eq!(out["linked_analyses"][0]["link"], "regAnalysisId");
+    }
+
+    #[test]
+    fn project_listing_includes_info_sheets() {
+        // GAP-3 pre-fix FAIL pin: info nodes fell in the `_ => {}` arm of
+        // project_listing, so titer_list_projects never showed them.
+        let snap = snapshot();
+        let mut snapshots = HashMap::new();
+        snapshots.insert("project-1".to_string(), snap);
+        let out = project_listing(&snapshots);
+        let proj = &out["projects"][0];
+        assert_eq!(proj["info_sheets"].as_array().map(|a| a.len()), Some(1));
+        assert_eq!(proj["info_sheets"][0]["id"], "i1");
+        assert_eq!(proj["info_sheets"][0]["name"], "Plate info");
+        assert_eq!(proj["figures"].as_array().map(|a| a.len()), Some(1));
+        assert_eq!(proj["figures"][0]["id"], "f1");
+    }
+
+    #[test]
+    fn read_figure_returns_panels_grid_and_title() {
+        let snap = snapshot();
+        let out = read_figure("project-1", &snap, "f1").expect("figure");
+        assert_eq!(out["name"], "Dose figure");
+        assert_eq!(out["title"], "Dose-response figure");
+        assert_eq!(out["grid"]["rows"], 1);
+        assert_eq!(out["grid"]["cols"], 1);
+        assert_eq!(out["panels"].as_array().map(|a| a.len()), Some(1));
+        assert_eq!(out["panels"][0]["graph_id"], "g1");
+        assert_eq!(out["panels"][0]["rect"]["row"], 0);
+        assert_eq!(out["panels"][0]["rect"]["col"], 0);
+        assert_eq!(out["panels"][0]["rect"]["row_span"], 1);
+        assert_eq!(out["panels"][0]["rect"]["col_span"], 1);
+    }
+
+    #[test]
+    fn read_figure_rejects_a_non_figure_and_an_unknown_id() {
+        let snap = snapshot();
+        let err = read_figure("project-1", &snap, "t1").expect_err("a table is not a figure");
+        assert!(err.contains("not a figure"), "{err}");
+        let err = read_figure("project-1", &snap, "nope").expect_err("unknown figure");
+        assert!(err.contains("No figure with id"), "{err}");
+    }
+
+    #[test]
+    fn read_info_sheet_returns_constants_notes_and_link() {
+        let snap = snapshot();
+        let out = read_info_sheet("project-1", &snap, "i1").expect("info sheet");
+        assert_eq!(out["name"], "Plate info");
+        assert_eq!(out["linked_table_id"], "t1");
+        assert_eq!(out["info"]["notes"], "Plate 3 notes");
+        assert_eq!(out["info"]["constants"][0]["name"], "Dose");
+        assert_eq!(out["info"]["constants"][0]["value"], "10 nM");
+    }
+
+    #[test]
+    fn read_info_sheet_rejects_a_non_info_sheet_and_an_unknown_id() {
+        let snap = snapshot();
+        let err = read_info_sheet("project-1", &snap, "g1").expect_err("a graph is not an info sheet");
+        assert!(err.contains("not an info sheet"), "{err}");
+        let err = read_info_sheet("project-1", &snap, "nope").expect_err("unknown info sheet");
+        assert!(err.contains("No info sheet with id"), "{err}");
+    }
+
+    #[test]
+    fn activity_lines_returns_the_last_n_lines_newest_last() {
+        let dir = std::env::temp_dir().join(format!("titer-l1-activity-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let lines: Vec<String> = (0..5).map(|i| format!("{{\"line\":{i}}}")).collect();
+        std::fs::write(dir.join(ACTIVITY_FILE), lines.join("\n") + "\n").expect("activity log");
+        assert_eq!(activity_lines(&dir, 2), lines[3..].to_vec());
+        assert_eq!(activity_lines(&dir, 50), lines);
+        assert_eq!(activity_lines(&dir, 0), lines[4..].to_vec());
+        let _ = std::fs::remove_dir_all(&dir);
+        // A missing log reads as no lines.
+        assert!(activity_lines(&dir, 50).is_empty());
     }
 
     #[test]
