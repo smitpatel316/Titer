@@ -682,12 +682,16 @@ interface ProjectActions {
    *  skipped) for the dialog's summary. Throws when the example has nothing to copy. */
   applyWand: (exampleId: string, targetIds: string[], prefix: string) => WandReport;
   /** Clones a graph with its data table and the analyses shown on it
-   *  (src/lib/clone-graph.ts): one undoable step, opening on the clone. */
-  cloneGraph: (graphId: string, options: CloneOptions) => void;
-  /** A figure at the project root; `graphIds` (in order) start as its panels. */
-  createFigure: (graphIds?: string[]) => void;
-  /** An info sheet at the project root, optionally linked to one table. */
-  createInfoSheet: (linkedTableId?: string | null) => void;
+   *  (src/lib/clone-graph.ts): one undoable step, opening on the clone.
+   *  Returns the cloned graph's id; throws the plan's error when the
+   *  graph (or its table) isn't there to clone. */
+  cloneGraph: (graphId: string, options: CloneOptions) => string;
+  /** A figure at the project root; `graphIds` (in order) start as its panels.
+   *  Returns the new figure's id. */
+  createFigure: (graphIds?: string[]) => string;
+  /** An info sheet at the project root, optionally linked to one table.
+   *  Returns the new sheet's id. */
+  createInfoSheet: (linkedTableId?: string | null) => string;
   /** Replaces an info sheet's constants, notes and table link. */
   updateInfoSheet: (id: string, info: InfoSheetData) => void;
   updateFigure: (
@@ -883,7 +887,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       },
       cloneGraph: (graphId, options) => {
         const planned = cloneGraphPlan(latest.current, graphId, options);
-        if ("plan" in planned) dispatch({ type: "cloneGraph", plan: planned.plan });
+        if (!("plan" in planned)) throw new Error(planned.error);
+        dispatch({ type: "cloneGraph", plan: planned.plan });
+        return planned.plan.activeNodeId;
       },
       createFigure: (graphIds = []) => {
         const names: Record<string, string> = {};
@@ -892,10 +898,11 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           if (graph) names[id] = graph.name;
         }
         const { panels, grid } = newFigurePanels(graphIds, names);
+        const id = genId("figure");
         dispatch({
           type: "create",
           node: {
-            id: genId("figure"),
+            id,
             type: "figure",
             name: "Figure",
             parentId: null,
@@ -908,18 +915,22 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
             dpi: DEFAULT_FIGURE_DPI,
           },
         });
+        return id;
       },
-      createInfoSheet: (linkedTableId = null) =>
+      createInfoSheet: (linkedTableId = null) => {
+        const id = genId("info");
         dispatch({
           type: "create",
           node: {
-            id: genId("info"),
+            id,
             type: "info",
             name: "Info Sheet",
             parentId: null,
             info: { ...newInfoSheetData(), linkedTableId },
           },
-        }),
+        });
+        return id;
+      },
       updateInfoSheet: (id, info) => dispatch({ type: "updateInfoSheet", id, info, at: Date.now() }),
       updateFigure: (id, patch) => dispatch({ type: "updateFigure", id, patch, at: Date.now() }),
       applyScript: (doc) => dispatch({ type: "applyScript", ...doc }),

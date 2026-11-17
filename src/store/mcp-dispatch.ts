@@ -32,6 +32,16 @@ import {
   type DocumentState,
 } from "./mcp-document";
 import {
+  executeBuildGraph,
+  executeCloneGraph,
+  executeCreateFigure,
+  executeCreateInfoSheet,
+  executeUpdateFigure,
+  executeUpdateGraph,
+  executeUpdateInfoSheet,
+  type GraphJobDeps,
+} from "./mcp-graphs";
+import {
   cancelR,
   isNative,
   mcpCompleteJob,
@@ -96,7 +106,9 @@ export interface JobDeps {
   io?: DocumentIo;
   /** The project actions the table branches dispatch through (L3). The
    *  hook passes the real ones; a harness that drives only `noop` /
-   *  `run-analysis` may omit them, and a table job then errors plainly. */
+   *  `run-analysis` may omit them, and a table job then errors plainly.
+   *  The graph / figure / info-sheet branches (L6) ride the same object:
+   *  `renameNode` is shared, the rest are L6's. */
   actions?: {
     createTable: (tableType: TableType) => void;
     createTableWithData: (tableType: TableType, data: TableData, name: string) => void;
@@ -108,6 +120,13 @@ export interface JobDeps {
     reorderChildren: (parentId: string, order: string[]) => void;
     undo: () => void;
     redo: () => void;
+    createGraph: NonNullable<GraphJobDeps["createGraph"]>;
+    updateGraph: NonNullable<GraphJobDeps["updateGraph"]>;
+    cloneGraph: NonNullable<GraphJobDeps["cloneGraph"]>;
+    createFigure: NonNullable<GraphJobDeps["createFigure"]>;
+    updateFigure: NonNullable<GraphJobDeps["updateFigure"]>;
+    createInfoSheet: NonNullable<GraphJobDeps["createInfoSheet"]>;
+    updateInfoSheet: NonNullable<GraphJobDeps["updateInfoSheet"]>;
   };
   /** Wait for the store to settle after a dispatch, so a `getState()` read
    *  sees the dispatched change. In the app this is two macrotasks (React
@@ -131,6 +150,24 @@ function toDocumentDeps(deps: JobDeps): DocumentDeps {
         throw new Error("This window can't mark a project saved (no markSaved).");
       }),
     io: deps.io ?? defaultDocumentIo,
+  };
+}
+
+/** The graph jobs' deps, from the job deps — the graph actions ride
+ *  L3's shared `actions` object (a harness that omits it gets the
+ *  plain "no store action" error from the graph module's `need`). */
+function toGraphDeps(deps: JobDeps): GraphJobDeps {
+  const a = deps.actions;
+  return {
+    getState: deps.getState,
+    createGraph: a?.createGraph,
+    updateGraph: a?.updateGraph,
+    cloneGraph: a?.cloneGraph,
+    createFigure: a?.createFigure,
+    updateFigure: a?.updateFigure,
+    createInfoSheet: a?.createInfoSheet,
+    updateInfoSheet: a?.updateInfoSheet,
+    renameNode: a?.renameNode,
   };
 }
 
@@ -1048,7 +1085,26 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       await deps.flush?.();
       const after = deps.getState();
       return { result: { project_id: job.project_id, redone, can_undo: (after.past?.length ?? 0) > 0 } };
-    }    default:
+    }
+    // L6 — graph / figure / info-sheet tools (src/store/mcp-graphs.ts):
+    // the branches validate against live state and throw plain-language
+    // errors the awaiting tool returns as tool errors. Action names are
+    // kebab-case, one per tool; see the lane log for the table.
+    case "build-graph":
+      return executeBuildGraph(job, toGraphDeps(deps));
+    case "update-graph":
+      return executeUpdateGraph(job, toGraphDeps(deps));
+    case "clone-graph":
+      return executeCloneGraph(job, toGraphDeps(deps));
+    case "create-figure":
+      return executeCreateFigure(job, toGraphDeps(deps));
+    case "update-figure":
+      return executeUpdateFigure(job, toGraphDeps(deps));
+    case "create-info-sheet":
+      return executeCreateInfoSheet(job, toGraphDeps(deps));
+    case "update-info-sheet":
+      return executeUpdateInfoSheet(job, toGraphDeps(deps));
+    default:
       throw new Error(`Unknown job action “${job.action}”.`);
   }
 }

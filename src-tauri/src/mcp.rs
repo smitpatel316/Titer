@@ -1430,6 +1430,108 @@ pub struct FreezeAnalysisArgs {
     pub frozen: bool,
 }
 
+// ── Graph / figure / info-sheet tools (L6) ─────────────────────────────
+
+/// Build a graph on a table: the graph type, a partial GraphOptions
+/// object, and an optional display name. The frontend dispatcher
+/// validates the type against the table's offers and the options field
+/// by field (unknown keys and out-of-range values are errors; a linked
+/// analysis that isn't computed yet is a warning in the result).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct BuildGraphArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The table's id, as shown by titer_list_tables.
+    pub table_id: String,
+    /// e.g. "xy-scatter" — must be offered for the table's type.
+    pub graph_type: String,
+    /// Partial GraphOptions (titles, axis limits, linked analyses,
+    /// palette by built-in name or { name, kind, colors }). Omit for the
+    /// type's defaults.
+    #[serde(default)]
+    pub options: Option<serde_json::Value>,
+    /// Display name for the graph. Omit for the type's label.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpdateGraphArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The graph node's id, as shown by titer_list_projects.
+    pub graph_id: String,
+    /// Partial GraphOptions to merge over the graph's current options.
+    pub options: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CloneGraphArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The graph node's id, as shown by titer_list_projects.
+    pub graph_id: String,
+    /// Which data and titles the clone clears ({ clearY?, clearX?,
+    /// clearTitles? }, defaults clearY true, the rest false — Prism's
+    /// clone defaults). Omit to clear the Y values only.
+    #[serde(default)]
+    pub options: Option<serde_json::Value>,
+}
+
+/// A multi-panel figure: the graphs, and the figure's grid/title shape.
+/// `layout` is the figure's grid/title shape (grid, figureSize,
+/// labelStyle, figureTitle, sharedLegend, dpi) — the fields of the
+/// figure editor, as `titer_update_figure` takes them (panels there).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CreateFigureArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The graph ids, in panel order. Omit for all the project's graphs.
+    #[serde(default)]
+    pub graph_ids: Option<Vec<String>>,
+    /// The figure's grid/title shape. Omit for the editor's defaults.
+    #[serde(default)]
+    pub layout: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpdateFigureArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The figure node's id, as shown by titer_list_projects.
+    pub figure_id: String,
+    /// The figure fields to change (panels, grid, figureSize, labelStyle,
+    /// figureTitle, sharedLegend, dpi).
+    pub layout: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CreateInfoSheetArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The table to link the sheet to. Omit for a project-level sheet.
+    #[serde(default)]
+    pub linked_table_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpdateInfoSheetArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The info sheet node's id, as shown by titer_list_projects.
+    pub info_sheet_id: String,
+    /// The sheet's fields to change (constants, notes, linkedTableId) —
+    /// a partial InfoSheetData, merged over the current sheet.
+    pub info: serde_json::Value,
+}
+
 #[tool_router(router = tools, vis = "pub")]
 impl TiterMcpServer {
     /// What is open in Titer, and the tables, analyses, graphs and figures
@@ -2755,6 +2857,337 @@ impl TiterMcpServer {
             }
             Err(e) => {
                 self.state.log_call("titer_freeze_analysis", freeze_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    // ── Graphs, figures, info sheets (L6, inventory §3.4) ──────────
+    // Each tool enqueues a job for the target window's frontend
+    // dispatcher (`build-graph`, `update-graph`, …) and waits for its
+    // outcome — the dispatcher is the authority (it has the live store
+    // and `GRAPH_OPTIONS_BY_TABLE`), so Rust passes the free-form
+    // `options` / `layout` / `info` through as job args. The Activity
+    // log records the ids and whether those objects were given, never
+    // their contents (a title is the user's text).
+
+    /// Build a graph on a table. `graph_type` must be offered for the
+    /// table's type, or the error names the valid types. `options` is a
+    /// partial GraphOptions over the type's defaults. Synchronous — the
+    /// builders are pure TS over table data + cached results. `warnings`
+    /// says when a linked analysis is not computed yet.
+    #[tool(
+        name = "titer_build_graph",
+        description = "Build a graph on a table: graph_type must be offered for the table's type (otherwise the error names the valid types); options is a partial GraphOptions over the type's defaults (titles, axis limits, linked analyses, palette by built-in name or { name, kind, colors }); name overrides the display name. Warnings says when a linked analysis is not computed yet.",
+        annotations(
+            title = "Build graph",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn build_graph(
+        &self,
+        Parameters(args): Parameters<BuildGraphArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "table_id": args.table_id, "graph_type": args.graph_type, "options_given": args.options.is_some(), "name": args.name });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let mut job_args = serde_json::json!({ "table_id": args.table_id, "graph_type": args.graph_type });
+            if let Some(options) = &args.options {
+                job_args["options"] = options.clone();
+            }
+            if let Some(name) = &args.name {
+                job_args["name"] = serde_json::Value::String(name.clone());
+            }
+            let job = self.state.enqueue_job(&project_id, "build-graph", job_args, serde_json::json!({}))?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The graph build finished without reporting its graph.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Building the graph failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_build_graph", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_build_graph", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Change a graph's options: a partial GraphOptions merged over its
+    /// current options. Same validation as the build.
+    #[tool(
+        name = "titer_update_graph",
+        description = "Change a graph's options: a partial GraphOptions merged over its current options (titles, axis limits, linked analyses, display choices). Same validation as titer_build_graph.",
+        annotations(
+            title = "Update graph",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn update_graph(
+        &self,
+        Parameters(args): Parameters<UpdateGraphArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "graph_id": args.graph_id });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let job_args = serde_json::json!({ "graph_id": args.graph_id, "options": args.options });
+            let job = self.state.enqueue_job(&project_id, "update-graph", job_args, serde_json::json!({}))?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The graph update finished without reporting.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Updating the graph failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_update_graph", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_update_graph", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Clone a graph: Prism's clone — the graph, its data table and the
+    /// analyses shown on it. By default the Y values are cleared and the
+    /// X values and titles kept (a formatted, empty frame); pass
+    /// `options` ({ clearY?, clearX?, clearTitles? }) to change that.
+    #[tool(
+        name = "titer_clone_graph",
+        description = "Clone a graph with its data table and the analyses shown on it (Prism's Clone Graph). By default the Y values are cleared and the X values and titles kept; options { clearY?, clearX?, clearTitles? } changes that.",
+        annotations(
+            title = "Clone graph",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn clone_graph(
+        &self,
+        Parameters(args): Parameters<CloneGraphArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "graph_id": args.graph_id, "options_given": args.options.is_some() });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let mut job_args = serde_json::json!({ "graph_id": args.graph_id });
+            if let Some(options) = &args.options {
+                job_args["options"] = options.clone();
+            }
+            let job = self.state.enqueue_job(&project_id, "clone-graph", job_args, serde_json::json!({}))?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The graph clone finished without reporting its graph.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Cloning the graph failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_clone_graph", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_clone_graph", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Make a multi-panel figure over the given graphs — all the
+    /// project's graphs when `graph_ids` is omitted. `layout` is the
+    /// figure's grid/title shape (grid, figureSize, labelStyle,
+    /// figureTitle, sharedLegend, dpi).
+    #[tool(
+        name = "titer_create_figure",
+        description = "Make a multi-panel figure over the given graphs (all the project's graphs when graph_ids is omitted). layout is the figure's grid/title shape: grid, figureSize, labelStyle, figureTitle, sharedLegend, dpi.",
+        annotations(
+            title = "Create figure",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn create_figure(
+        &self,
+        Parameters(args): Parameters<CreateFigureArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "graph_ids": args.graph_ids, "layout_given": args.layout.is_some() });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let mut job_args = serde_json::json!({});
+            if let Some(graph_ids) = &args.graph_ids {
+                job_args["graph_ids"] = serde_json::json!(graph_ids);
+            }
+            if let Some(layout) = &args.layout {
+                job_args["layout"] = layout.clone();
+            }
+            let job = self.state.enqueue_job(&project_id, "create-figure", job_args, serde_json::json!({}))?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The figure finished without reporting its panels.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Creating the figure failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_create_figure", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_create_figure", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Change a figure: panels, grid, titles — `layout` is the figure
+    /// fields to change (panels, grid, figureSize, labelStyle,
+    /// figureTitle, sharedLegend, dpi).
+    #[tool(
+        name = "titer_update_figure",
+        description = "Change a figure: layout is the figure fields to change — panels, grid, figureSize, labelStyle, figureTitle, sharedLegend, dpi.",
+        annotations(
+            title = "Update figure",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn update_figure(
+        &self,
+        Parameters(args): Parameters<UpdateFigureArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "figure_id": args.figure_id });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let job_args = serde_json::json!({ "figure_id": args.figure_id, "layout": args.layout });
+            let job = self.state.enqueue_job(&project_id, "update-figure", job_args, serde_json::json!({}))?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The figure update finished without reporting.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Updating the figure failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_update_figure", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_update_figure", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Make an info sheet at the project root, optionally linked to one
+    /// table (as the UI allows). A new sheet starts with Prism's six
+    /// default constants, empty.
+    #[tool(
+        name = "titer_create_info_sheet",
+        description = "Make an info sheet at the project root, optionally linked to one table (linked_table_id). A new sheet starts with Prism's six default constants, empty.",
+        annotations(
+            title = "Create info sheet",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn create_info_sheet(
+        &self,
+        Parameters(args): Parameters<CreateInfoSheetArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "linked_table_id": args.linked_table_id });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let mut job_args = serde_json::json!({});
+            if let Some(linked_table_id) = &args.linked_table_id {
+                job_args["linked_table_id"] = serde_json::Value::String(linked_table_id.clone());
+            }
+            let job = self.state.enqueue_job(&project_id, "create-info-sheet", job_args, serde_json::json!({}))?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The info sheet finished without reporting.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Creating the info sheet failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_create_info_sheet", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_create_info_sheet", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Change an info sheet: the sheet's constants/fields — a partial
+    /// InfoSheetData (constants, notes, linkedTableId), merged over the
+    /// current sheet. Constants set here are what graphs hook axes to.
+    #[tool(
+        name = "titer_update_info_sheet",
+        description = "Change an info sheet: info is a partial InfoSheetData (constants, notes, linkedTableId) merged over the current sheet. Constants set here are what graphs hook axes to.",
+        annotations(
+            title = "Update info sheet",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn update_info_sheet(
+        &self,
+        Parameters(args): Parameters<UpdateInfoSheetArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "info_sheet_id": args.info_sheet_id });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let job_args = serde_json::json!({ "info_sheet_id": args.info_sheet_id, "info": args.info });
+            let job = self.state.enqueue_job(&project_id, "update-info-sheet", job_args, serde_json::json!({}))?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The info sheet update finished without reporting.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Updating the info sheet failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_update_info_sheet", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_update_info_sheet", call_args, false, Some(&e));
                 Err(e)
             }
         }
