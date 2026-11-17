@@ -7727,6 +7727,19 @@ check("an Office export refuses a zero size or DPI (Office)", async () => {
   await rejects(buildOfficeDocument("powerpoint", { png, title: "x", widthPx: 10, heightPx: 10, dpi: 0 }), /DPI/);
 });
 
+// The Tauri write_file allowlist, read through either source shape: the
+// v1.6.0 race fix (08fe68a) moved the inline `&[...]` list in `fn write_file`
+// into the named `WRITE_FILE_EXTENSIONS` constant, and the four pins below
+// kept regexing the inline list — all four failed on the new tip even though
+// the gate itself was unchanged (bug sweep cycle 11). Returns "" when neither
+// shape is found, so the pins fail loudly instead of passing vacuously.
+function writeFileAllowlist(main: string): string {
+  const named = /const WRITE_FILE_EXTENSIONS: &\[&str\] = &\[([\s\S]*?)\];/.exec(main)?.[1];
+  if (named !== undefined) return named;
+  const writeFile = main.slice(main.indexOf("fn write_file"));
+  return /check_extension\(&path, &\[([^\]]+)\]\)/.exec(writeFile)?.[1] ?? "";
+}
+
 // The Tauri write path must accept the extensions the Office exporters write.
 // Regression pin for Mac GUI proof #2 (Nov 15): sendGraphToOffice /
 // sendFigureToOffice end in writeFile(path, doc), but write_file's allowlist
@@ -7736,8 +7749,7 @@ check("an Office export refuses a zero size or DPI (Office)", async () => {
 // directly (same static-read shape as the figure-export pins below).
 check("the Tauri write path allows .docx and .pptx exports (Office)", () => {
   const main = readFileSync("src-tauri/src/main.rs", "utf8");
-  const writeFile = main.slice(main.indexOf("fn write_file"));
-  const allowlist = /check_extension\(&path, &\[([^\]]+)\]\)/.exec(writeFile)?.[1] ?? "";
+  const allowlist = writeFileAllowlist(main);
   ok(allowlist.includes('"docx"'), `write_file allowlist must include "docx": [${allowlist}]`);
   ok(allowlist.includes('"pptx"'), `write_file allowlist must include "pptx": [${allowlist}]`);
 });
@@ -7750,8 +7762,7 @@ check("the Tauri write path allows .docx and .pptx exports (Office)", () => {
 // as the .docx/.pptx pin above and the .pdf/.tif/.tiff pin below.
 check("the Tauri write path allows .pzfx saves (pzfx-write)", () => {
   const main = readFileSync("src-tauri/src/main.rs", "utf8");
-  const writeFile = main.slice(main.indexOf("fn write_file"));
-  const allowlist = /check_extension\(&path, &\[([^\]]+)\]\)/.exec(writeFile)?.[1] ?? "";
+  const allowlist = writeFileAllowlist(main);
   ok(allowlist.includes('"pzfx"'), `write_file allowlist must include "pzfx": [${allowlist}]`);
 });
 
@@ -8180,9 +8191,8 @@ check("the export dialogs offer PDF/TIFF and 900/1200 DPI (item 20)", () => {
 // to the unmerged prism-scripts branch and the v1.4.0 merge reconciles.
 check("export: the Tauri write path allows .pdf/.tif/.tiff graph exports", () => {
   const main = readFileSync("src-tauri/src/main.rs", "utf8");
-  const match = /fn write_file[\s\S]*?check_extension\(&path, &\[([^\]]*)\]\)/.exec(main);
-  ok(match, "write_file must gate on a check_extension allowlist");
-  const allowed = match![1];
+  const allowed = writeFileAllowlist(main);
+  ok(allowed !== "", "write_file must gate on a check_extension allowlist");
   for (const ext of ["pdf", "tif", "tiff"]) {
     ok(new RegExp(`"${ext}"`).test(allowed), `write_file allowlist must include .${ext}`);
   }
@@ -16522,9 +16532,8 @@ check("script: ExportTIF validates resolution and mode, and resolves paths throu
 // .docx/.pptx pin on its own branch.
 check("script: the Tauri write path allows .tif/.tiff/.bmp/.csv/.txt script exports", () => {
   const main = readFileSync("src-tauri/src/main.rs", "utf8");
-  const match = /fn write_file[\s\S]*?check_extension\(&path, &\[([^\]]*)\]\)/.exec(main);
-  ok(match, "write_file must gate on a check_extension allowlist");
-  const allowed = match![1];
+  const allowed = writeFileAllowlist(main);
+  ok(allowed !== "", "write_file must gate on a check_extension allowlist");
   for (const ext of ["tif", "tiff", "bmp", "csv", "txt"]) {
     ok(new RegExp(`"${ext}"`).test(allowed), `write_file allowlist must include .${ext}`);
   }
