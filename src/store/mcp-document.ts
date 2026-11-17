@@ -1,0 +1,290 @@
+// Headless project / document work for the MCP dispatcher (v1.6.0 L2,
+// GAP-4): save, Prism import and close, as the L0 dispatch jobs
+// `save-project`, `import-prism` and `close-project` execute them.
+//
+// These mirror the matching `useDocument` flows (`save`, `importPrismFile`,
+// `confirmDiscard`) minus everything a human does: no format-nudge prompt
+// (the format is explicit, or the file's own), no path picker (the path is
+// an argument), no alerts. A writer's failure is thrown with the writer's
+// own message — a project that cannot go to `.pzfx` is never silently
+// saved as `.hlx` instead.
+//
+// The close bypass: the close job settles the save question itself, so the
+// window's close-requested handler (`confirmDiscard`) must not ask again.
+// `allowMcpCloseOnce` arms a one-shot, 30-second allowance the handler
+// consumes — an allowance that outlives a failed close expires instead of
+// letting a later hand-close skip its prompt.
+import { convertPrism, type ConvertReport } from "../lib/prism";
+import { parsePzfx } from "../lib/pzfx";
+import { writePrism } from "../lib/prism-write";
+import { writePzfx } from "../lib/pzfx-write";
+import { serializeProjectFile } from "../lib/project-file";
+import { fileName, fileTitle } from "../lib/paths";
+import * as native from "../native";
+import type { ProjectNode } from "./types";
+
+/** The project as a document job sees it: the store state, nothing more. */
+export interface DocumentState {
+  nodes: Record<string, ProjectNode>;
+  rootOrder: string[];
+  childOrder: Record<string, string[]>;
+  activeNodeId: string | null;
+  projectName?: string;
+  fileUnknowns?: Record<string, unknown>;
+  projectUnknowns?: Record<string, unknown>;
+  filePath: string | null;
+  isDirty: boolean;
+  revision: number;
+}
+
+/** The native IO a document job needs, injectable so the node test harness
+ *  can drive these jobs without a webview (defaults: the real calls). */
+export interface DocumentIo {
+  writeFile: (path: string, data: string | Uint8Array) => Promise<unknown>;
+  appVersion: () => Promise<string>;
+  readPrismText: (path: string) => Promise<string>;
+  readPrismBytes: (path: string) => Promise<Uint8Array>;
+}
+
+export const defaultDocumentIo: DocumentIo = {
+  writeFile: native.writeFile,
+  appVersion: native.appVersion,
+  readPrismText: native.readPrismText,
+  readPrismBytes: native.readPrismBytes,
+};
+
+export interface DocumentDeps {
+  getState: () => DocumentState;
+  /** The store's `loadProject` (import replaces the project). */
+  loadProject: (payload: {
+    nodes: Record<string, ProjectNode>;
+    rootOrder: string[];
+    childOrder: Record<string, string[]>;
+    activeNodeId: string | null;
+    projectName?: string;
+    fileUnknowns?: Record<string, unknown>;
+    projectUnknowns?: Record<string, unknown>;
+    filePath: string | null;
+    edited?: boolean;
+  }) => void;
+  /** The store's `markProjectSaved`. */
+  markSaved: (filePath: string | null, revision: number) => void;
+  io: DocumentIo;
+}
+
+export type SaveFormat = "hlx" | "prism" | "pzfx";
+
+// ── Close bypass ─────────────────────────────────────────────────────────
+
+const CLOSE_ALLOWANCE_MS = 30_000;
+let mcpCloseAllowedUntil = 0;
+
+/** Arm the one-shot close allowance (see the module docs). */
+export function allowMcpCloseOnce() {
+  mcpCloseAllowedUntil = Date.now() + CLOSE_ALLOWANCE_MS;
+}
+
+/** Consume the allowance, if one is live — the close-requested handler's check. */
+export function consumeMcpCloseAllowance(): boolean {
+  if (Date.now() > mcpCloseAllowedUntil) return false;
+  mcpCloseAllowedUntil = 0;
+  return true;
+}
+
+// ── Save ─────────────────────────────────────────────────────────────────
+
+/** A save format the agent asked for, or a plain refusal naming the three. */
+export function parseSaveFormat(format: string): SaveFormat {
+  switch (format.toLowerCase()) {
+    case "hlx":
+      return "hlx";
+    case "prism":
+      return "prism";
+    case "pzfx":
+      return "pzfx";
+    default:
+      throw new Error(`Unknown save format “${format}” — use "hlx", "prism" or "pzfx".`);
+  }
+}
+
+function extOf(path: string): string {
+  const base = path.split(/[\\/]/).pop() ?? path;
+  const dot = base.lastIndexOf(".");
+  return dot > 0 ? base.slice(dot + 1).toLowerCase() : "";
+}
+
+/** Where a save goes, and in what format. Resolution order: an explicit
+ *  `format`, then the Save As path's extension, then the current file's
+ *  extension. A format and a path that disagree are refused — `.pzfx`
+ *  bytes never land in a `.hlx` file (or the reverse). An untitled project
+ *  has no file, so it needs a path (Save As, as the UI does on first Save). */
+export function resolveSaveTarget(
+  currentFile: string | null,
+  pathArg: string | undefined,
+  formatArg: SaveFormat | undefined,
+): { target: string; format: SaveFormat } {
+  const target = pathArg ?? currentFile;
+  if (!target) {
+    throw new Error(`This project has no file yet — pass "path" to save it (Save As).`);
+  }
+  const pathExt = extOf(target);
+  const isSaveExt = (ext: string): ext is SaveFormat => ext === "hlx" || ext === "prism" || ext === "pzfx";
+  const currentExt = currentFile ? extOf(currentFile) : "";
+  const format =
+    formatArg ?? (isSaveExt(pathExt) ? pathExt : undefined) ?? (isSaveExt(currentExt) ? currentExt : undefined);
+  if (!format) {
+    throw new Error(
+      `“${fileName(target)}” has no save format — pass "format" ("hlx", "prism" or "pzfx") or a "path" ending in one of those.`,
+    );
+  }
+  if (pathExt && pathExt !== format) {
+    throw new Error(
+      `“${fileName(target)}” ends in .${pathExt}, not .${format} — pass a "path" ending in .${format} to save as ${format}, or save with format "${pathExt}".`,
+    );
+  }
+  return { target: pathExt ? target : `${target}.${format}`, format };
+}
+
+/** The project's bytes in `format`, built by the TS writers — the same
+ *  writers the UI save uses. Throws the writer's own error (e.g. a table
+ *  mixing Y formats cannot go to `.pzfx`). */
+export async function buildSaveBytes(state: DocumentState, format: SaveFormat, version: string): Promise<Uint8Array> {
+  const payload = {
+    nodes: state.nodes,
+    rootOrder: state.rootOrder,
+    childOrder: state.childOrder,
+    activeNodeId: state.activeNodeId,
+    projectName: state.projectName,
+    fileUnknowns: state.fileUnknowns,
+    projectUnknowns: state.projectUnknowns,
+  };
+  switch (format) {
+    case "hlx":
+      return new TextEncoder().encode(serializeProjectFile(payload));
+    case "prism":
+      return (await writePrism(payload, version)).bytes;
+    case "pzfx":
+      return (await writePzfx(payload, version)).bytes;
+  }
+}
+
+/** The `save-project` job: write the project and mark it saved. Returns
+ *  the tool's output shape (`{ project_id, file_path, format, revision }`). */
+export async function executeSaveProject(
+  deps: DocumentDeps,
+  args: { path?: string; format?: string },
+  projectId: string,
+): Promise<{ result: unknown }> {
+  const formatArg = args.format === undefined ? undefined : parseSaveFormat(args.format);
+  const state = deps.getState();
+  const { target, format } = resolveSaveTarget(state.filePath, args.path, formatArg);
+  const version = await deps.io.appVersion().catch(() => "1.5.0");
+  const revision = state.revision;
+  // Read the project only now, after the format is settled: bytes are
+  // built from the state as it is at write time, as the UI save does.
+  const bytes = await buildSaveBytes(deps.getState(), format, version);
+  try {
+    await deps.io.writeFile(target, bytes);
+  } catch (err) {
+    throw new Error(
+      `“${fileName(target)}” couldn't be saved there (${err instanceof Error ? err.message : String(err)}). Try another folder.`,
+    );
+  }
+  deps.markSaved(target, revision);
+  return { result: { project_id: projectId, file_path: target, format, revision } };
+}
+
+// ── Prism import ─────────────────────────────────────────────────────────
+
+/** The import report as the tool's `warnings`: the converter's issues,
+ *  plus the things `formatReport` names that aren't issues (unsupported
+ *  analyses, untransferred graphs/layouts, ignored sheets). */
+export function importWarnings(report: ConvertReport): string[] {
+  const warnings = report.issues.map((i) => i.message);
+  if (report.analysesUnsupported.length) {
+    warnings.push(`Analyses not transferred (not yet supported in Titer): ${report.analysesUnsupported.join("; ")}`);
+  }
+  if (report.graphsNotTransferred) {
+    warnings.push(
+      `Graphs not transferred: ${report.graphsNotTransferred} — re-create in Titer (graph data is stored in a binary format Prism does not document).`,
+    );
+  }
+  if (report.layoutsNotTransferred) {
+    warnings.push(`Layouts not transferred: ${report.layoutsNotTransferred} — re-create with the figure builder.`);
+  }
+  if (report.orphanSheetsIgnored || report.unreferencedTablesIgnored) {
+    warnings.push(
+      `Ignored: ${report.orphanSheetsIgnored} orphan sheet(s) and ${report.unreferencedTablesIgnored} unreferenced table(s) that document.json doesn't list.`,
+    );
+  }
+  return warnings;
+}
+
+/** The `import-prism` job: read a Prism file and load it as this window's
+ *  (untitled, edited) project — the same as File ▸ Import Prism File, minus
+ *  the dialog. A dirty project refuses: an import replaces the project, and
+ *  the agent must save or close it first. Returns the tool's output shape
+ *  (`{ imported_tables, warnings }`). */
+export async function executeImportPrism(
+  deps: DocumentDeps,
+  args: { path: string },
+  _projectId: string,
+): Promise<{ result: unknown }> {
+  const ext = extOf(args.path);
+  if (ext !== "prism" && ext !== "pzfx") {
+    throw new Error(`“${fileName(args.path)}” is not a Prism file — import a .prism or .pzfx file.`);
+  }
+  if (deps.getState().isDirty) {
+    throw new Error(
+      "This project has unsaved changes — save it with titer_save_project, or close it, then import.",
+    );
+  }
+  if (ext === "prism") {
+    const bytes = await deps.io.readPrismBytes(args.path);
+    let converted;
+    try {
+      converted = await convertPrism(bytes, fileTitle(args.path));
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : "This file couldn't be imported.");
+    }
+    deps.loadProject({ ...converted.project, filePath: null, edited: true });
+    return { result: { imported_tables: converted.report.tables, warnings: importWarnings(converted.report) } };
+  }
+  const text = await deps.io.readPrismText(args.path);
+  const imported = parsePzfx(text);
+  if (imported.tables.length === 0) {
+    throw new Error(imported.issues.map((i) => i.message).join("\n") || "No tables in this file could be imported.");
+  }
+  deps.loadProject({ ...imported.project, filePath: null, edited: true });
+  return { result: { imported_tables: imported.tables, warnings: imported.issues.map((i) => i.message) } };
+}
+
+// ── Close ────────────────────────────────────────────────────────────────
+
+/** The `close-project` job: settle the save question, then arm the close
+ *  bypass — Rust closes the window once this job reports done. `save`
+ *  omitted on a dirty project answers `{ needs_confirm: true }` instead of
+ *  closing (the tool returns that as its output); `save: "save"` saves back
+ *  in the current format first (an untitled project has no file, so the
+ *  save throws plainly and the window stays open). */
+export async function executeCloseProject(
+  deps: DocumentDeps,
+  args: { save?: string },
+  projectId: string,
+): Promise<{ result: unknown }> {
+  const save = args.save;
+  if (save !== undefined && save !== "save" && save !== "discard") {
+    throw new Error(`Unknown save choice “${save}” — use "save" or "discard", or omit it to be asked.`);
+  }
+  const state = deps.getState();
+  if (!save && state.isDirty) {
+    return {
+      result: { project_id: projectId, closed: false, needs_confirm: true, warning: "unsaved changes" },
+    };
+  }
+  if (save === "save") {
+    await executeSaveProject(deps, {}, projectId);
+  }
+  allowMcpCloseOnce();
+  return { result: { project_id: projectId, closed: true } };
+}

@@ -296,6 +296,106 @@ impl McpState {
         self.lock().snapshots.clone()
     }
 
+    /// The app handle, remembered by the first command that had one — the
+    /// project tools need it to open and close windows. None in the
+    /// in-process smoke test (no Tauri app there): those tools fail plainly
+    /// instead of opening anything.
+    fn app_handle(&self) -> Option<AppHandle> {
+        self.lock().app.clone()
+    }
+
+    /// One window's published snapshot, if it has published.
+    fn snapshot_for(&self, label: &str) -> Option<serde_json::Value> {
+        self.lock().snapshots.get(label).cloned()
+    }
+
+    /// The project a tool call addresses: the named window, or the most
+    /// recently published one when `project_id` is omitted. A named window
+    /// with no snapshot is closed (or never opened) — a plain error, never
+    /// the front project by surprise.
+    fn resolve_project(&self, project_id: Option<&str>) -> Result<String, String> {
+        let inner = self.lock();
+        match project_id {
+            Some(id) => {
+                if inner.snapshots.contains_key(id) {
+                    Ok(id.to_string())
+                } else {
+                    Err(format!("No open project with id “{id}”. Ask titer_list_projects for the open projects."))
+                }
+            }
+            None => inner.last_published.clone().ok_or_else(|| {
+                "No project is open in Titer yet, or none has published its state. Open a project and ask again."
+                    .to_string()
+            }),
+        }
+    }
+
+    /// Wait for a job to reach a terminal state (done/error/cancelled). The
+    /// frontend runs the job; a tool that created it waits here instead of
+    /// returning a job id the client would have to poll (inventory §3.1:
+    /// these tools return their outcome, not a job). On timeout the job
+    /// keeps running — the error names it, so the client can poll
+    /// `titer_read_job` instead of re-running.
+    async fn await_job(&self, job_id: &str, timeout: Duration) -> Result<Job, String> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            match self.read_job(job_id) {
+                Some(job) if job.status.is_terminal() => return Ok(job),
+                Some(job) => {
+                    if tokio::time::Instant::now() >= deadline {
+                        return Err(format!(
+                            "Still waiting on job {job_id} (status: {:?}) — the project window may be busy. Poll titer_read_job for {job_id} instead of re-running.",
+                            job.status
+                        ));
+                    }
+                }
+                None => return Err(format!("No job with id “{job_id}”.")),
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    /// Wait for a window's snapshot to satisfy `pred` (a new window
+    /// reporting back, a file finishing its load). False on timeout.
+    async fn await_snapshot(&self, label: &str, pred: impl Fn(&serde_json::Value) -> bool, timeout: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if let Some(snap) = self.snapshot_for(label) {
+                if pred(&snap) {
+                    return true;
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    /// Close a project window now that its close job is done (the job armed
+    /// the frontend's close bypass, so no save prompt appears), and confirm
+    /// the window is gone. A window still listed after 5s did not close —
+    /// say so, don't claim it did.
+    async fn close_window(&self, label: &str) -> Result<(), String> {
+        let Some(app) = self.app_handle() else {
+            return Err("Titer's project windows aren't available to this server right now.".into());
+        };
+        let Some(window) = app.get_webview_window(label) else {
+            return Err(format!("No open project window with id “{label}”."));
+        };
+        window.close().map_err(|e| e.to_string())?;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if app.get_webview_window(label).is_none() {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(format!("Project {label} did not close — it may still be asking about unsaved changes."));
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
     /// The snapshot a tool call reads: the named project, or the most
     /// recently published one when `project_id` is omitted.
     fn pick_snapshot(
@@ -810,6 +910,87 @@ async fn auth_middleware(
     next.run(request).await
 }
 
+// ── Project tools (L2, v1.6.0) ───────────────────────────────────────────
+// The window-making half lives in the shell (crate root); the file-writing
+// half lives in the frontend dispatcher — Rust never serialises a project
+// (GAP-4). `titer_create_project` / `titer_open_project` need the app
+// handle; `titer_save_project` / `titer_import_prism` /
+// `titer_close_project` enqueue a job and wait for its outcome (see
+// `McpState::await_job`).
+
+/// A project path's format, from its extension — or a plain refusal. URLs
+/// are never local paths: a tool arg that looks like one is refused
+/// outright, not fetched.
+fn project_path_format(path: &str) -> Result<&'static str, String> {
+    if path.contains("://") || path.starts_with("http:") || path.starts_with("https:") {
+        return Err(format!("“{path}” is not a local file path — Titer opens files on this computer, not URLs."));
+    }
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    match ext.as_str() {
+        "hlx" => Ok("hlx"),
+        "pzt" => Ok("pzt"),
+        "prism" => Ok("prism"),
+        "pzfx" => Ok("pzfx"),
+        _ => Err(format!(
+            "“{path}” is not a project file — open a .hlx or .pzt project, or import a .prism or .pzfx Prism file."
+        )),
+    }
+}
+
+/// A save format the agent asked for, or a plain refusal naming the three.
+fn parse_save_format(format: &str) -> Result<&'static str, String> {
+    match format.to_ascii_lowercase().as_str() {
+        "hlx" => Ok("hlx"),
+        "prism" => Ok("prism"),
+        "pzfx" => Ok("pzfx"),
+        _ => Err(format!("Unknown save format “{format}” — use \"hlx\", \"prism\" or \"pzfx\".")),
+    }
+}
+
+/// A fresh blank project window, for the tools that open into one (create,
+/// Prism open/import): reserves its label and builds it.
+fn create_blank_window(app: &AppHandle) -> Result<String, String> {
+    let label = app.state::<crate::Projects>().0.lock().unwrap().reserve(None);
+    crate::build_window(app, label.clone()).map_err(|e| e.to_string())?;
+    Ok(label)
+}
+
+/// The app handle a window-making tool needs, or the plain error when the
+/// server has none (the in-process smoke test: no Tauri app there).
+fn app_handle_or_err(state: &McpState) -> Result<AppHandle, String> {
+    state.app_handle().ok_or_else(|| "Titer's project windows aren't available to this server right now.".to_string())
+}
+
+/// Open a Prism file in a fresh blank window via an `import-prism` dispatch
+/// job: the window's dispatcher reads the file and loads it as an untitled
+/// project. Returns the window label and the job's result
+/// (`{ imported_tables, warnings }`), or the job's error.
+async fn import_prism_in_new_window(
+    state: &McpState,
+    app: &AppHandle,
+    path: &str,
+) -> Result<(String, serde_json::Value), String> {
+    let label = create_blank_window(app)?;
+    if !state.await_snapshot(&label, |_| true, Duration::from_secs(10)).await {
+        return Err(format!(
+            "The new project window ({label}) did not report back within 10s — it may still be opening. Ask titer_list_projects for the open projects."
+        ));
+    }
+    let job = state.enqueue_job(&label, "import-prism", serde_json::json!({ "path": path }), serde_json::json!({}))?;
+    let done = state.await_job(&job.job_id, Duration::from_secs(60)).await?;
+    if done.status == JobStatus::Done {
+        done.result
+            .map(|result| (label, result))
+            .ok_or_else(|| "The import finished without reporting what it imported.".to_string())
+    } else {
+        Err(done.error.unwrap_or_else(|| format!("Importing “{path}” failed.")))
+    }
+}
+
 // ── The MCP server: tools ───────────────────────────────────────────────
 // Eight read-only tools: the five Phase 1 tools, plus the three Phase 2
 // read-only additions (titer_read_figure, titer_read_info_sheet,
@@ -900,6 +1081,35 @@ pub struct ActivityArgs {
     /// Lines returned (default 50, at most 500), newest last.
     #[serde(default)]
     pub limit: Option<u32>,
+}
+
+/// A local file path (.hlx, .pzt, .prism or .pzfx). Never a URL.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct OpenProjectArgs {
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SaveProjectArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// Save As path. Omit to save back to the project's current file.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// "hlx" | "prism" | "pzfx". Omit for the project's current format.
+    #[serde(default)]
+    pub format: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CloseProjectArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// "save" | "discard". Omit to refuse a dirty project instead of closing it.
+    #[serde(default)]
+    pub save: Option<String>,
 }
 
 #[tool_router(router = tools, vis = "pub")]
@@ -1277,6 +1487,289 @@ impl TiterMcpServer {
         let lines = self.state.dir().map(|dir| activity_lines(&dir, limit as usize)).unwrap_or_default();
         self.state.log_call("titer_read_activity", serde_json::json!({ "limit": limit }), true, None);
         Ok(Json(serde_json::json!({ "lines": lines })))
+    }
+
+    // ── Project / document tools (L2) ────────────────────────────────────
+    // Create/open are Rust-side (the shell owns windows); save/import/close
+    // run in the frontend through the L0 dispatch channel (GAP-4: the TS
+    // writers build the bytes) and wait for the job's outcome — these tools
+    // return their result, not a job id.
+
+    /// Open a new blank project window — the agent's blank page.
+    #[tool(
+        name = "titer_create_project",
+        description = "Open a new blank project window and return its project_id (the window label, for the other tools).",
+        annotations(
+            title = "Create project",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn create_project(&self) -> Result<Json<serde_json::Value>, String> {
+        let result: Result<serde_json::Value, String> = async {
+            let app = app_handle_or_err(&self.state)?;
+            let label = create_blank_window(&app)?;
+            if !self.state.await_snapshot(&label, |_| true, Duration::from_secs(10)).await {
+                return Err(format!(
+                    "The new project window ({label}) did not report back within 10s — it may still be opening. Ask titer_list_projects for the open projects."
+                ));
+            }
+            Ok(serde_json::json!({ "project_id": label, "file_path": serde_json::Value::Null, "blank": true }))
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_create_project", serde_json::json!({}), true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_create_project", serde_json::json!({}), false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Open a project file in a new window: a `.hlx` / `.pzt` project opens
+    /// as a project (a `.pzt` opens untitled); a `.prism` / `.pzfx` file is
+    /// imported as a project, as File ▸ Import Prism File does. The path
+    /// must be local — never a URL — and the file must exist.
+    #[tool(
+        name = "titer_open_project",
+        description = "Open a project file in a new window: .hlx / .pzt opens as a project (.pzt opens untitled); .prism / .pzfx is imported as a project, as File > Import Prism File does. The path must be a local file, never a URL.",
+        annotations(
+            title = "Open project",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn open_project(
+        &self,
+        Parameters(args): Parameters<OpenProjectArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let open_args = serde_json::json!({ "path": args.path });
+        let result: Result<serde_json::Value, String> = async {
+            let format = project_path_format(&args.path)?;
+            if !std::path::Path::new(&args.path).is_file() {
+                return Err(format!("No file at “{}” — check the path and ask again.", args.path));
+            }
+            let app = app_handle_or_err(&self.state)?;
+            match format {
+                "prism" | "pzfx" => {
+                    let (label, _) = import_prism_in_new_window(&self.state, &app, &args.path).await?;
+                    Ok(serde_json::json!({ "project_id": label, "file_path": args.path, "format": format }))
+                }
+                _ => {
+                    let label =
+                        crate::open(&app, None, crate::opening_for(&args.path)).map_err(|e| e.to_string())?;
+                    let path = args.path.clone();
+                    let loaded = self
+                        .state
+                        .await_snapshot(
+                            &label,
+                            move |snap| {
+                                snap.get("filePath").and_then(|v| v.as_str()) == Some(path.as_str())
+                                    || snap
+                                        .get("nodes")
+                                        .and_then(|n| n.as_object())
+                                        .map(|n| !n.is_empty())
+                                        .unwrap_or(false)
+                            },
+                            Duration::from_secs(15),
+                        )
+                        .await;
+                    if !loaded {
+                        return Err(format!(
+                            "Project {label} did not report the opened file within 15s — it may still be loading. Ask titer_list_projects for the open projects."
+                        ));
+                    }
+                    Ok(serde_json::json!({ "project_id": label, "file_path": args.path, "format": format }))
+                }
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_open_project", open_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_open_project", open_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Save a project: the frontend builds the bytes (GAP-4) and writes
+    /// them. `format` is explicit — the save-nudge prompt never appears to
+    /// an agent. Default: save back in the project's current format (`.hlx`,
+    /// or `.prism` / `.pzfx` for a project saved in one). `path` is Save As.
+    /// A writer's failure is the error (a table mixing Y formats cannot go
+    /// to `.pzfx`) — never a silent save as `.hlx`.
+    #[tool(
+        name = "titer_save_project",
+        description = "Save a project: the frontend builds the bytes and writes them. format (hlx, prism or pzfx) is explicit — the save-nudge prompt never appears to an agent; omit it to save back in the project's current format. path is Save As. A writer's failure is the error, never a silent save as .hlx.",
+        annotations(
+            title = "Save project",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn save_project(
+        &self,
+        Parameters(args): Parameters<SaveProjectArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let save_args = serde_json::json!({ "project_id": args.project_id, "path": args.path, "format": args.format });
+        let result: Result<serde_json::Value, String> = async {
+            if let Some(format) = &args.format {
+                parse_save_format(format)?;
+            }
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let mut job_args = serde_json::json!({});
+            if let Some(path) = &args.path {
+                job_args["path"] = serde_json::Value::String(path.clone());
+            }
+            if let Some(format) = &args.format {
+                job_args["format"] = serde_json::Value::String(format.clone());
+            }
+            let job = self.state.enqueue_job(&project_id, "save-project", job_args, serde_json::json!({}))?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The save finished without reporting where it saved.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "The save failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_save_project", save_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_save_project", save_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Import a Prism file (`.prism` / `.pzfx`) as a new untitled project in
+    /// a new window — the same as `titer_open_project` for a Prism path,
+    /// kept separate so the intent is explicit. `warnings` carries the
+    /// import report (what the converter skipped).
+    #[tool(
+        name = "titer_import_prism",
+        description = "Import a Prism file (.prism / .pzfx) as a new untitled project in a new window — the same as titer_open_project for a Prism path, kept separate so the intent is explicit. warnings carries the import report (what the converter skipped).",
+        annotations(
+            title = "Import Prism file",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn import_prism(
+        &self,
+        Parameters(args): Parameters<OpenProjectArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let import_args = serde_json::json!({ "path": args.path });
+        let result: Result<serde_json::Value, String> = async {
+            let format = project_path_format(&args.path)?;
+            if format != "prism" && format != "pzfx" {
+                return Err(format!(
+                    "“{}” is a Titer project file, not a Prism file — import a .prism or .pzfx file, or open it with titer_open_project.",
+                    args.path
+                ));
+            }
+            if !std::path::Path::new(&args.path).is_file() {
+                return Err(format!("No file at “{}” — check the path and ask again.", args.path));
+            }
+            let app = app_handle_or_err(&self.state)?;
+            let (label, report) = import_prism_in_new_window(&self.state, &app, &args.path).await?;
+            Ok(serde_json::json!({
+                "project_id": label,
+                "file_path": args.path,
+                "imported_tables": report.get("imported_tables").cloned().unwrap_or(serde_json::Value::Null),
+                "warnings": report.get("warnings").cloned().unwrap_or(serde_json::Value::Null),
+            }))
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_import_prism", import_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_import_prism", import_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Close a project window. `save` omitted refuses a dirty project
+    /// (`{ needs_confirm: true, warning: "unsaved changes" }`); pass
+    /// `save: "save"` to save first, or `save: "discard"` to drop the edits.
+    /// Never prompts. Closes the window; the snapshot is dropped.
+    #[tool(
+        name = "titer_close_project",
+        description = "Close a project window. save omitted refuses a dirty project ({ needs_confirm: true, warning: \"unsaved changes\" }); pass save \"save\" to save first, or \"discard\" to drop the edits. Never prompts.",
+        annotations(
+            title = "Close project",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn close_project(
+        &self,
+        Parameters(args): Parameters<CloseProjectArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let close_args = serde_json::json!({ "project_id": args.project_id, "save": args.save });
+        let result: Result<serde_json::Value, String> = async {
+            if let Some(save) = &args.save {
+                if save != "save" && save != "discard" {
+                    return Err(format!(
+                        "Unknown save choice “{save}” — use \"save\" or \"discard\", or omit it to be asked."
+                    ));
+                }
+            }
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let mut job_args = serde_json::json!({});
+            if let Some(save) = &args.save {
+                job_args["save"] = serde_json::Value::String(save.clone());
+            }
+            let job = self.state.enqueue_job(&project_id, "close-project", job_args, serde_json::json!({}))?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status != JobStatus::Done {
+                return Err(done.error.unwrap_or_else(|| "Closing the project failed.".to_string()));
+            }
+            let report = done.result.ok_or_else(|| "The close finished without reporting.".to_string())?;
+            // The job's answer is the tool's answer when it asks first
+            // (a dirty project with no `save`); otherwise the window
+            // closes now — the job armed the close bypass.
+            if report.get("needs_confirm").and_then(|v| v.as_bool()).unwrap_or(false) {
+                return Ok(report);
+            }
+            self.state.close_window(&project_id).await?;
+            Ok(serde_json::json!({ "project_id": project_id, "closed": true }))
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_close_project", close_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_close_project", close_args, false, Some(&e));
+                Err(e)
+            }
+        }
     }
 }
 
@@ -2068,6 +2561,52 @@ mod tests {
         assert!(!tokens_equal("abc", "abcd"));
     }
 
+    // ── Project tools (L2) ───────────────────────────────────────────────
+
+    #[test]
+    fn project_path_format_accepts_the_four_extensions() {
+        assert_eq!(project_path_format("/tmp/Dose.hlx").unwrap(), "hlx");
+        assert_eq!(project_path_format("/tmp/Template.PZT").unwrap(), "pzt");
+        assert_eq!(project_path_format("/tmp/Data.prism").unwrap(), "prism");
+        assert_eq!(project_path_format("/tmp/Data.PZFX").unwrap(), "pzfx");
+        let err = project_path_format("/tmp/notes.txt").expect_err("txt is not a project file");
+        assert!(err.contains("not a project file"), "{err}");
+        let err = project_path_format("/tmp/Dose").expect_err("no extension");
+        assert!(err.contains("not a project file"), "{err}");
+    }
+
+    #[test]
+    fn project_path_format_refuses_urls() {
+        for url in ["https://example.com/Dose.hlx", "http://localhost:8000/x.pzfx", "file:///tmp/Dose.hlx"] {
+            let err = project_path_format(url).expect_err(&format!("{url} is not a local path"));
+            assert!(err.contains("not a local file path"), "{err}");
+        }
+    }
+
+    #[test]
+    fn parse_save_format_accepts_three_and_names_them() {
+        assert_eq!(parse_save_format("hlx").unwrap(), "hlx");
+        assert_eq!(parse_save_format("PRISM").unwrap(), "prism");
+        assert_eq!(parse_save_format("pzfx").unwrap(), "pzfx");
+        let err = parse_save_format("txt").expect_err("txt is not a save format");
+        assert!(err.contains("hlx"), "{err}");
+        assert!(err.contains("prism"), "{err}");
+        assert!(err.contains("pzfx"), "{err}");
+    }
+
+    #[test]
+    fn resolve_project_names_or_falls_back_to_front() {
+        let state = job_state();
+        assert_eq!(state.resolve_project(Some("project-1")).unwrap(), "project-1");
+        let err = state.resolve_project(Some("project-9")).expect_err("closed window");
+        assert!(err.contains("No open project"), "{err}");
+        // Omitted with nothing published: a plain error, not a guess.
+        let err = state.resolve_project(None).expect_err("nothing published");
+        assert!(err.contains("No project is open"), "{err}");
+        state.lock().last_published = Some("project-1".to_string());
+        assert_eq!(state.resolve_project(None).unwrap(), "project-1");
+    }
+
     // ── Job queue (L0) ───────────────────────────────────────────────────
     // Pure state only — no server, no files (log_event is a no-op with no
     // dir; enqueue emits nothing with no app handle remembered).
@@ -2193,11 +2732,14 @@ mod tests {
     // ── Live smoke: the real server, over real HTTP ──────────────────────
     // The same router `mcp_set_enabled` serves (same auth, same tools),
     // bound on a scratch port, driven by reqwest as an MCP client:
-    // initialize → tools/list → tools/call on the job plumbing. The job
-    // under test is created with the same `enqueue_job` primitive L4's
-    // `titer_run_analysis` will call — L0 deliberately ships no
-    // user-visible job-creation tool, so the create step lives here, in
-    // the test, not in tools/list.
+    // initialize → tools/list → tools/call on the job plumbing and the L2
+    // project tools. The job under test is created with the same
+    // `enqueue_job` primitive L4's `titer_run_analysis` will call — L0
+    // deliberately ships no user-visible job-creation tool, so the create
+    // step lives here, in the test, not in tools/list. The L2 job tools are
+    // driven with a completer task standing in for the frontend dispatcher;
+    // the window-making tools fail plainly here (no Tauri app in-process),
+    // and the live app proves them end to end.
 
     const SMOKE_TOKEN: &str = "test-token-l0-smoke";
 
@@ -2244,8 +2786,13 @@ mod tests {
 
     /// The tool result's text payload, parsed as JSON.
     fn call_text(resp: &serde_json::Value) -> serde_json::Value {
-        let text = resp["result"]["content"][0]["text"].as_str().expect("tool text");
+        let text = call_raw_text(resp);
         serde_json::from_str(text).expect("tool json")
+    }
+
+    /// The tool result's raw text payload (an error message, or JSON text).
+    fn call_raw_text(resp: &serde_json::Value) -> &str {
+        resp["result"]["content"][0]["text"].as_str().expect("tool text")
     }
 
     #[tokio::test]
@@ -2288,8 +2835,24 @@ mod tests {
         .await;
         let names: Vec<&str> =
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
-        assert_eq!(names.len(), 8, "five Phase 1 tools + three job tools: {names:?}");
+        assert_eq!(
+            names.len(),
+            16,
+            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools: {names:?}"
+        );
         for name in ["titer_read_job", "titer_list_jobs", "titer_cancel_job"] {
+            assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
+        }
+        for name in ["titer_read_figure", "titer_read_info_sheet", "titer_read_activity"] {
+            assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
+        }
+        for name in [
+            "titer_create_project",
+            "titer_open_project",
+            "titer_save_project",
+            "titer_import_prism",
+            "titer_close_project",
+        ] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
 
@@ -2312,6 +2875,133 @@ mod tests {
             mcp_post(&client, &url, Some(&session), tools_call(6, "titer_read_job", json!({ "job_id": job.job_id })))
                 .await;
         assert_eq!(call_text(&read2)["status"], "cancelled");
+
+        // ── L2: the five project/document tools ──────────────────────────
+        // The in-process server has no Tauri app, so the window-making tools
+        // fail plainly there; the job tools are driven with a completer task
+        // standing in for the frontend dispatcher (take + complete).
+
+        // create: no app handle in-process → a plain error, not a panic.
+        let (created, _) =
+            mcp_post(&client, &url, Some(&session), tools_call(7, "titer_create_project", json!({}))).await;
+        assert_eq!(created["result"]["isError"], true);
+        assert!(
+            call_raw_text(&created).contains("aren't available"),
+            "create without an app: {}",
+            call_raw_text(&created)
+        );
+
+        // save: the tool enqueues `save-project` and waits; the completer
+        // stands in for the frontend dispatcher (take + complete with the
+        // save's result), which the tool returns as its output.
+        let saver = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for job in saver.take_jobs("project-1") {
+                let _ = saver.complete_job(
+                    "project-1",
+                    &job.job_id,
+                    JobStatus::Done,
+                    Some(json!({ "project_id": "project-1", "file_path": "/tmp/Dose.hlx", "format": "hlx", "revision": 7 })),
+                    None,
+                    None,
+                );
+            }
+        });
+        let (saved, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(8, "titer_save_project", json!({ "project_id": "project-1" })),
+        )
+        .await;
+        assert_eq!(call_text(&saved)["file_path"], "/tmp/Dose.hlx");
+        assert_eq!(call_text(&saved)["format"], "hlx");
+        assert_eq!(call_text(&saved)["revision"], 7);
+
+        // close, no `save`, on a dirty project: the job answers
+        // needs_confirm, and the tool returns it — no window is touched.
+        let closer = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for job in closer.take_jobs("project-1") {
+                let _ = closer.complete_job(
+                    "project-1",
+                    &job.job_id,
+                    JobStatus::Done,
+                    Some(json!({ "project_id": "project-1", "closed": false, "needs_confirm": true, "warning": "unsaved changes" })),
+                    None,
+                    None,
+                );
+            }
+        });
+        let (close_asked, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(9, "titer_close_project", json!({ "project_id": "project-1" })),
+        )
+        .await;
+        assert_eq!(call_text(&close_asked)["needs_confirm"], true);
+        assert_eq!(call_text(&close_asked)["warning"], "unsaved changes");
+
+        // open: a missing file fails before any window opens; a URL is refused.
+        let (open_missing, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(10, "titer_open_project", json!({ "path": "/tmp/no-such-project.hlx" })),
+        )
+        .await;
+        assert_eq!(open_missing["result"]["isError"], true);
+        assert!(call_raw_text(&open_missing).contains("No file at"), "open missing: {}", call_raw_text(&open_missing));
+        let (open_url, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(11, "titer_open_project", json!({ "path": "https://example.com/Dose.hlx" })),
+        )
+        .await;
+        assert_eq!(open_url["result"]["isError"], true);
+        assert!(call_raw_text(&open_url).contains("not a local file path"), "open url: {}", call_raw_text(&open_url));
+
+        // import: a Titer file is not a Prism file. save: an unknown format
+        // is refused before anything is enqueued, and so is a closed project.
+        let (import_hlx, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(12, "titer_import_prism", json!({ "path": "/tmp/Dose.hlx" })),
+        )
+        .await;
+        assert_eq!(import_hlx["result"]["isError"], true);
+        assert!(call_raw_text(&import_hlx).contains("not a Prism file"), "import hlx: {}", call_raw_text(&import_hlx));
+        let (save_bad_format, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(13, "titer_save_project", json!({ "project_id": "project-1", "format": "txt" })),
+        )
+        .await;
+        assert_eq!(save_bad_format["result"]["isError"], true);
+        assert!(
+            call_raw_text(&save_bad_format).contains("Unknown save format"),
+            "save bad format: {}",
+            call_raw_text(&save_bad_format)
+        );
+        let (save_gone, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(14, "titer_save_project", json!({ "project_id": "project-9" })),
+        )
+        .await;
+        assert_eq!(save_gone["result"]["isError"], true);
+        assert!(
+            call_raw_text(&save_gone).contains("No open project"),
+            "save closed project: {}",
+            call_raw_text(&save_gone)
+        );
 
         let resp = client
             .delete(&url)

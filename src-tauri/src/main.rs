@@ -162,23 +162,29 @@ fn opening_for(path: &str) -> Opening {
 }
 
 /// Opens `opening` in the window `into` if that one is blank, else as described on `Projects`.
-fn open(app: &AppHandle, into: Option<String>, opening: Opening) -> tauri::Result<()> {
+/// Returns the window's label — the MCP server's `titer_open_project` needs it
+/// (v1.6.0 L2); the UI callers ignore it.
+fn open(app: &AppHandle, into: Option<String>, opening: Opening) -> tauri::Result<String> {
     let state = app.state::<Projects>();
     let mut projects = state.0.lock().unwrap();
     let path = opening.file();
     if let Some((label, _)) = projects.documents.iter().find(|(_, d)| path.is_some() && d.path.as_ref() == path) {
         // Open already: its window comes forward, or, still being made, shows itself.
-        return app.get_webview_window(label).map_or(Ok(()), |window| window.set_focus());
+        let label = label.clone();
+        return app
+            .get_webview_window(&label)
+            .map_or(Ok(label.clone()), |window| window.set_focus().map(|()| label.clone()));
     }
     let blank = |label: &String| is_project(label) && projects.documents.get(label).is_none_or(|d| d.blank);
     let Some(label) = into.filter(blank) else {
         let label = projects.reserve(Some(opening));
         drop(projects);
-        return build_window(app, label);
+        return build_window(app, label.clone()).map(|()| label);
     };
     projects.hold(&label, opening);
     drop(projects);
-    app.emit_to(label, "opening", ())
+    app.emit_to(&label, "opening", ())?;
+    Ok(label)
 }
 
 #[tauri::command]
@@ -223,7 +229,7 @@ async fn open_projects(app: AppHandle, window: WebviewWindow, paths: Vec<String>
 async fn open_sample(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
     let path = app.path().resource_dir().map_err(|e| e.to_string())?.join("Titer Sample.hlx");
     let opening = Opening { path: path.to_string_lossy().into_owned(), untitled: true };
-    open(&app, Some(window.label().into()), opening).map_err(|e| e.to_string())
+    open(&app, Some(window.label().into()), opening).map(|_| ()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

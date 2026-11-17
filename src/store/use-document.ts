@@ -21,6 +21,7 @@ import { loadPrismSaveChoice, nextSaveAction, savePrismSaveChoice } from "../lib
 import type { SavePromptChoice } from "../components/save-prompt-dialog";
 import * as native from "../native";
 import { loadRecents, MAX_RECENTS, saveRecents, recentKey, type RecentEntry } from "./recents";
+import { consumeMcpCloseAllowance } from "./mcp-document";
 import { openProjectsOrSay, sayGone } from "../menus";
 import { fileName, fileTitle } from "../lib/paths";
 import {
@@ -708,6 +709,10 @@ export function useDocument() {
    *  (bugfix/quit-save-dialog). */
   const confirmDiscardInFlight = React.useRef<Promise<boolean> | null>(null);
   const confirmDiscard = async (): Promise<boolean> => {
+    // An MCP close already settled the save question (v1.6.0 L2): the next
+    // close request goes through without asking. One-shot, and it expires
+    // on its own — see `mcp-document.ts`.
+    if (consumeMcpCloseAllowance()) return true;
     if (confirmDiscardInFlight.current) return confirmDiscardInFlight.current;
     const asked = (async () => {
       if (!latest.current.isDirty) return true;

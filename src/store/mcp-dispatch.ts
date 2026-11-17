@@ -19,8 +19,16 @@
 import * as React from "react";
 import { runAnalysis } from "../stats";
 import type { AnalysisResult } from "../stats/types";
-import type { ProjectNode } from "./types";
 import { infoSheetsOf, resolveAnalysisParams } from "../lib/info-sheets";
+import {
+  defaultDocumentIo,
+  executeCloseProject,
+  executeImportPrism,
+  executeSaveProject,
+  type DocumentDeps,
+  type DocumentIo,
+  type DocumentState,
+} from "./mcp-document";
 import {
   cancelR,
   isNative,
@@ -43,13 +51,53 @@ export interface JobCompletion {
  *  without a webview. */
 export interface JobDeps {
   /** The project as it is now, for the job to look at. */
-  getState: () => { nodes: Record<string, ProjectNode>; rootOrder: string[] };
+  getState: () => DocumentState;
   /** Keep a successful live run on its analysis node, as the analysis view does. */
   cacheAnalysisResult: (id: string, result: AnalysisResult) => void;
   /** Publish an analysis outcome for `titer_read_results` (default: the real one). */
   publishResult?: (analysisId: string, outcome: unknown) => void;
   /** Run an analysis (default: the real `runAnalysis`). */
   run?: typeof runAnalysis;
+  /** Load a project into the store (the import job replaces it). */
+  loadProject?: DocumentDeps["loadProject"];
+  /** Mark the project saved (the save job). */
+  markSaved?: DocumentDeps["markSaved"];
+  /** Headless document IO; defaults to the real native calls. */
+  io?: DocumentIo;
+}
+
+/** The document jobs' deps, from the job deps. */
+function toDocumentDeps(deps: JobDeps): DocumentDeps {
+  return {
+    getState: deps.getState,
+    loadProject:
+      deps.loadProject ??
+      (() => {
+        throw new Error("This window can't load a project (no loadProject).");
+      }),
+    markSaved:
+      deps.markSaved ??
+      (() => {
+        throw new Error("This window can't mark a project saved (no markSaved).");
+      }),
+    io: deps.io ?? defaultDocumentIo,
+  };
+}
+
+/** A job arg that must be a string when present (null reads as omitted —
+ *  Rust sends `null` for an absent `Option`, and the dispatcher must not
+ *  mistake that for a value). */
+function optString(value: unknown, name: string): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") throw new Error(`Job argument “${name}” must be a string.`);
+  return value;
+}
+
+/** A job arg that must be a non-empty string. */
+function reqString(value: unknown, name: string): string {
+  const found = optString(value, name);
+  if (found === undefined || found === "") throw new Error(`Job argument “${name}” is required.`);
+  return found;
 }
 
 /** Execute one job. Throws with a plain-language message when the job
@@ -88,6 +136,30 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       if (!("error" in outcome)) deps.cacheAnalysisResult(analysisId, outcome);
       return { result: outcome, created: { analysis_id: analysisId } };
     }
+    case "save-project": {
+      // L2: write the project (GAP-4 — the TS writers build the bytes, Rust
+      // only ever wrote them) and mark it saved. The job's result is the
+      // tool's output.
+      const args = (job.args ?? {}) as { path?: unknown; format?: unknown };
+      return executeSaveProject(
+        toDocumentDeps(deps),
+        { path: optString(args.path, "path"), format: optString(args.format, "format") },
+        job.project_id,
+      );
+    }
+    case "import-prism": {
+      // L2: read a Prism file and load it as this window's project — the
+      // same as File ▸ Import Prism File, minus the dialog.
+      const args = (job.args ?? {}) as { path?: unknown };
+      return executeImportPrism(toDocumentDeps(deps), { path: reqString(args.path, "path") }, job.project_id);
+    }
+    case "close-project": {
+      // L2: settle the save question, then arm the close bypass — Rust
+      // closes the window once this job reports done. A dirty project with
+      // no `save` answers `needs_confirm` instead of closing.
+      const args = (job.args ?? {}) as { save?: unknown };
+      return executeCloseProject(toDocumentDeps(deps), { save: optString(args.save, "save") }, job.project_id);
+    }
     default:
       throw new Error(`Unknown job action “${job.action}”.`);
   }
@@ -105,6 +177,8 @@ export function useMcpJobDispatcher() {
   // the effect below mounts once and never goes stale.
   const getState = store.get;
   const cacheAnalysisResult = actions.cacheAnalysisResult;
+  const loadProject = actions.loadProject;
+  const markSaved = actions.markProjectSaved;
   // Jobs already handed to an execution: the frontend side of the
   // once-only discipline (Rust's `take_jobs` is the other half — a job
   // claimed there is never handed out again, and a job seen here is never
@@ -144,6 +218,8 @@ export function useMcpJobDispatcher() {
               const { result, created } = await executeJob(job, {
                 getState,
                 cacheAnalysisResult,
+                loadProject,
+                markSaved,
               });
               // A completion report is always sent; Rust ignores it for a
               // job that is already terminal (a cancel that landed first).
