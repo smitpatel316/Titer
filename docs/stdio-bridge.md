@@ -80,7 +80,7 @@ Tauri, and the match is verified at integration time.
 | A3 | Port is the server lane's choice, published in the file — the bridge is port-agnostic. No fixed port is assumed anywhere in this lane. Server tries 18741–18750. | `v3/mcp-server` lane — CONFIRMED (`PORTS` in `mcp.rs`). |
 | A4 | Spec revisions 2025-06-18 / 2025-11-25; NOT 2026-07-28 until clients adopt it. Bridge is transport-only and version-agnostic — EXCEPT it must send an `MCP-Protocol-Version` header on every request (the server's auth middleware answers 400 without one, contract §3). The bridge sends the revision the client's `initialize` named when it is a supported 2025 revision, else 2025-11-25. | Roadmap §1 + contract §3 — RECONCILED Nov 14 in `v3/claude-desktop`: the missing header was a second breaking gap; the bridge now sends it. |
 | A5 | Settings label the error message names: "AI connections" / "Allow AI apps to connect". The bridge's `SERVER_OFF_MESSAGE` uses the contract §1 canonical wording. | `v3/mcp-server` lane (Settings UI) — CONFIRMED (`ai-connections-dialog.tsx`). |
-| A6 | Tool names are the server lane's; the `.mcpb` declares no static `tools` list (`tools_generated: true`). | `docs/mcp-server-contract.md` — CONFIRMED (five tools, §5). |
+| A6 | Tool names are the server lane's; the `.mcpb` declares no static `tools` list (`tools_generated: true`). | `docs/mcp-server-contract.md` — CONFIRMED (51 tools, §§5–10). |
 | A7 | On client disconnect the bridge closes the server session with DELETE + `Mcp-Session-Id` (contract §4.5). On 401 it re-reads the discovery file once and retries once, then surfaces the contract's token-changed message. | Contract §2–§4 — ADDED Nov 14 in `v3/claude-desktop`. |
 
 ## 3. Protocol translation (stdio ↔ Streamable HTTP)
