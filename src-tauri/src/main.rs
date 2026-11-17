@@ -437,12 +437,21 @@ fn read_prism_bytes(path: String) -> Result<String, String> {
     fs::read(path).map(|bytes| BASE64.encode(bytes)).map_err(|e| e.to_string())
 }
 
+/// Extensions `write_file` may write: every format the app saves or
+/// exports, including the table-export formats the MCP tools advertise
+/// (csv/xlsx/txt). A format missing here fails at the gate before its
+/// writer runs (v1.6 BUG D: xlsx was missing, so every xlsx export failed).
+const WRITE_FILE_EXTENSIONS: &[&str] = &[
+    "hlx", "prism", "pzt", "pzm", "pzfx", "png", "jpg", "jpeg", "svg", "pdf", "tif", "tiff", "bmp", "csv", "txt", "xlsx",
+    "docx", "pptx",
+];
+
 /// Writes the raw request body to the (URL-encoded) `path` header, atomically.
 #[tauri::command]
 fn write_file(request: Request) -> Result<(), String> {
     let header = request.headers().get("path").and_then(|v| v.to_str().ok()).ok_or("missing path")?;
     let path = percent_encoding::percent_decode_str(header).decode_utf8().map_err(|e| e.to_string())?;
-    check_extension(&path, &["hlx", "prism", "pzt", "pzm", "pzfx", "png", "jpg", "jpeg", "svg", "pdf", "tif", "tiff", "bmp", "csv", "txt", "docx", "pptx"])?;
+    check_extension(&path, WRITE_FILE_EXTENSIONS)?;
     let InvokeBody::Raw(data) = request.body() else { return Err("expected raw bytes".into()) };
     write_atomically(Path::new(path.as_ref()), data)
 }
@@ -1378,6 +1387,21 @@ mod tests {
     fn read_prism_text_accepts_uppercase_pzfx() {
         // check_extension lowercases, so .PZFX is a Prism file too.
         assert!(check_extension("/tmp/x.PZFX", &["pzfx"]).is_ok());
+    }
+
+    #[test]
+    fn write_file_accepts_every_export_format() {
+        // titer_export_table_data advertises csv/xlsx/txt (mcp.rs) and the
+        // graph/figure/office exports write png/svg/pdf/docx/pptx — the
+        // write gate must accept all of them (v1.6 BUG D: xlsx was missing
+        // from the inline list, so every xlsx export failed at the gate).
+        for ext in ["csv", "xlsx", "txt", "png", "svg", "pdf", "docx", "pptx", "hlx", "pzfx"] {
+            assert!(
+                check_extension(&format!("/tmp/x.{ext}"), WRITE_FILE_EXTENSIONS).is_ok(),
+                "{ext} should be writable"
+            );
+        }
+        assert!(check_extension("/tmp/x.exe", WRITE_FILE_EXTENSIONS).is_err());
     }
 
     #[test]

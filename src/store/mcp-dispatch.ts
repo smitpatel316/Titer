@@ -68,7 +68,7 @@ import {
   onMcpRunJob,
   type McpJob,
 } from "../native";
-import { publishAnalysisResult } from "./mcp-publish";
+import { publishAnalysisResult, publishMcpSnapshotNow } from "./mcp-publish";
 import { useProjectActions, useProjectStore } from "./use-project-store";
 import type { ProjectNode, TableData, TableType } from "./types";
 import type { TableMove } from "./references";
@@ -169,6 +169,14 @@ export interface JobDeps {
    *  flushes the render + layout effects before them); a harness driving
    *  the reducer synchronously leaves it out (a no-op). */
   flush?: () => Promise<void>;
+  /** Wait for the store's monotonic `revision` to move past a pre-dispatch
+   *  value (the v1.6 race fix): the read-back branches (create-table,
+   *  duplicate-family, simulate-data, apply-wand, undo, redo) use this
+   *  instead of `flush`, so a `getState()` read after a dispatch sees the
+   *  dispatched change even when React defers the commit past two
+   *  zero-timers. A harness driving the reducer synchronously omits it
+   *  (the state is already current). */
+  flushUntilRevision?: (before: number) => Promise<void>;
 }
 
 /** The document jobs' deps, from the job deps. */
@@ -456,8 +464,12 @@ function buildTableData(
     throw jobErr(job, "needs columns to be a non-empty array of strings (column 0 is the row-title column).");
   }
   const columns: string[] = columnsIn.map((c, i) => {
-    if (typeof c !== "string" || !c) {
-      throw jobErr(job, `has a column at index ${i} that is not a non-empty string (${JSON.stringify(c)}).`);
+    // Column 0 is the row-title column and may be empty (Prism leaves it
+    // unnamed; the app's own fixtures and file loader carry "" there) —
+    // every other column must be named (v1.6 F2, mirroring Rust's
+    // `validate_table_shape`).
+    if (typeof c !== "string" || (i > 0 && !c)) {
+      throw jobErr(job, `has a column at index ${i} that is not a non-empty string — only column 0 (the row-title column) may be empty (${JSON.stringify(c)}).`);
     }
     return c;
   });
@@ -521,7 +533,10 @@ function buildTableData(
       typeof k === "string" && /^\d+,\d+$/.test(k) ? k.split(",").map(Number) : [Infinity, Infinity];
     return r < rows.length && c < columns.length && c >= 1;
   };
-  if (excludedIn !== undefined) {
+  // Rust serializes an absent Option as JSON null, so an omitted `excluded`
+  // arrives as null, not undefined — null means omitted too (the same
+  // convention as `optString`), and the base marks are preserved (v1.6 F5).
+  if (excludedIn !== undefined && excludedIn !== null) {
     if (!Array.isArray(excludedIn) || excludedIn.some((k) => typeof k !== "string")) {
       throw jobErr(job, "needs excluded to be an array of “row,col” strings.");
     }
@@ -577,6 +592,38 @@ function checkExactOrder(job: McpJob, order: string[], current: string[], what: 
   if (new Set(order).size !== order.length) {
     throw jobErr(job, `has an order listing an id twice — each child appears once.`);
   }
+}
+
+/** Wait for the store's monotonic `revision` to move past `before` (the
+ *  v1.6 race fix, frontend half): a dispatch's commit — and the layout
+ *  effects that keep `getState()` current — can land after two blind
+ *  zero-timers under load, so the read-back branches wait on the revision
+ *  instead of the clock. One macrotask per check is the yield that lets
+ *  React run the commit; bounded, so a dispatch that never lands (a
+ *  no-op, a harness that already applied it) falls through to the
+ *  read-back, which errors plainly if the id still isn't there. Returns
+ *  true when the revision moved, false on timeout. */
+export async function waitForRevision(
+  getRevision: () => number,
+  before: number,
+  timeoutMs = 2000,
+): Promise<boolean> {
+  if (getRevision() > before) return true;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    if (getRevision() > before) return true;
+    if (Date.now() >= deadline) return false;
+  }
+}
+
+/** After a dispatch, wait until the store has settled before a read-back:
+ *  the revision wait when the hook provides it, else the two-macrotask
+ *  flush (a harness driving the reducer synchronously provides neither —
+ *  its state is already current). */
+async function settleAfterDispatch(deps: JobDeps, beforeRevision: number): Promise<void> {
+  if (deps.flushUntilRevision) await deps.flushUntilRevision(beforeRevision);
+  else await deps.flush?.();
 }
 
 /** Execute one job. Throws with a plain-language message when the job
@@ -702,7 +749,10 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       const resolved = resolveAnalysisParams(node.analysisParams, type, sheets);
       if ("error" in resolved) throw new Error(resolved.error);
       const outcome = await (deps.run ?? runAnalysis)(type, data, resolved.params);
-      (deps.publishResult ?? publishAnalysisResult)(analysisId, outcome);
+      // Await the publish: the result must be in the server's map before
+      // this job reports done, or a follow-up `titer_read_results` can see
+      // "not_computed" (v1.6 F7).
+      await (deps.publishResult ?? publishAnalysisResult)(analysisId, outcome);
       if (!("error" in outcome)) deps.cacheAnalysisResult(analysisId, outcome);
       return { result: outcome, created: { analysis_id: analysisId } };
     }
@@ -771,7 +821,9 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       if (name !== undefined && !name.trim()) throw jobErr(job, "needs a non-empty name.");
       const hasColumns = (job.args as Record<string, unknown> | null | undefined)?.columns !== undefined;
       const hasRows = (job.args as Record<string, unknown> | null | undefined)?.rows !== undefined;
-      const before = new Set(deps.getState().rootOrder);
+      const preState = deps.getState();
+      const before = new Set(preState.rootOrder);
+      const beforeRevision = preState.revision;
       if (!hasColumns && !hasRows) {
         // The empty table of that type — Table ▸ New Table, with its defaults.
         if (name !== undefined) actions.createTableWithData(type, TABLES[type].defaultData(), name);
@@ -783,7 +835,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         const data = buildTableData(job, type, (job.args as Record<string, unknown>).columns, (job.args as Record<string, unknown>).rows);
         actions.createTableWithData(type, data, name ?? "Table");
       }
-      await deps.flush?.();
+      await settleAfterDispatch(deps, beforeRevision);
       const after = deps.getState();
       const createdId =
         after.activeNodeId && !before.has(after.activeNodeId) && after.nodes[after.activeNodeId]?.type === "table"
@@ -1037,8 +1089,9 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       const state = deps.getState();
       tableNode(job, state, tableId);
       const before = new Set(state.rootOrder);
+      const beforeRevision = state.revision;
       actions.duplicateFamily(tableId);
-      await deps.flush?.();
+      await settleAfterDispatch(deps, beforeRevision);
       const after = deps.getState();
       const createdId =
         after.activeNodeId && !before.has(after.activeNodeId) && after.nodes[after.activeNodeId]?.type === "table"
@@ -1124,8 +1177,11 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       if (undone === null) {
         return { result: { project_id: job.project_id, undone: null, can_redo: (state.future?.length ?? 0) > 0 } };
       }
+      const beforeRevision = state.revision;
       actions.undo();
-      await deps.flush?.();
+      // The response reads post-undo state (`future`): wait on the
+      // revision, or a deferred commit reads can_redo false (v1.6 F6).
+      await settleAfterDispatch(deps, beforeRevision);
       const after = deps.getState();
       return { result: { project_id: job.project_id, undone, can_redo: (after.future?.length ?? 0) > 0 } };
     }
@@ -1136,8 +1192,10 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       if (redone === null) {
         return { result: { project_id: job.project_id, redone: null, can_undo: (state.past?.length ?? 0) > 0 } };
       }
+      const beforeRevision = state.revision;
       actions.redo();
-      await deps.flush?.();
+      // Same read-back shape as undo (v1.6 F6).
+      await settleAfterDispatch(deps, beforeRevision);
       const after = deps.getState();
       return { result: { project_id: job.project_id, redone, can_undo: (after.past?.length ?? 0) > 0 } };
     }
@@ -1196,10 +1254,13 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       };
       const problem = validateSimulationSpec(spec);
       if (problem) throw jobErr(job, problem);
-      const before = new Set(deps.getState().rootOrder);
+      const preState = deps.getState();
+      const before = new Set(preState.rootOrder);
+      const beforeRevision = preState.revision;
       const data = await simulateTableData(spec);
       actions.createSimulatedTable(simType, data);
-      await deps.flush?.();
+      // Same read-back shape as create-table (v1.6 F3).
+      await settleAfterDispatch(deps, beforeRevision);
       const after = deps.getState();
       const createdId = after.rootOrder.find((id) => !before.has(id) && after.nodes[id]?.type === "table");
       if (!createdId) {
@@ -1298,13 +1359,16 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       tableNode(job, state, tableId);
       tableNode(job, state, exampleId);
       const before = new Set(state.childOrder?.[tableId] ?? []);
+      const beforeRevision = state.revision;
       const apply =
         deps.applyWand ??
         (() => {
           throw new Error("This window can't use the Wand (no applyWand).");
         });
       const report = apply(exampleId, [tableId], prefix);
-      await deps.flush?.();
+      // The created ids are diffed from post-dispatch state (same
+      // read-back shape as create-table).
+      await settleAfterDispatch(deps, beforeRevision);
       const after = deps.getState();
       const created = (after.childOrder?.[tableId] ?? [])
         .filter((id) => !before.has(id))
@@ -1407,7 +1471,27 @@ export function useMcpJobDispatcher() {
   // back (a created table's id, an undo label) — two macrotasks, by which
   // time React has flushed the render and the layout effects that keep
   // `latest` current.
-  const flush = () => new Promise<void>((resolve) => setTimeout(() => setTimeout(resolve, 0), 0));  // Jobs already handed to an execution: the frontend side of the
+  const flush = () => new Promise<void>((resolve) => setTimeout(() => setTimeout(resolve, 0), 0));
+  // The two read-back branches wait on the store's monotonic `revision`
+  // instead of two blind macrotasks (v1.6 race fix): under load React can
+  // defer the commit past two zero-timers, so the id read-back saw
+  // pre-dispatch state. The flush first gives the common case its usual
+  // settle; the revision wait then covers the deferred commit, bounded
+  // (2 s) — a timeout falls through to the read-back, which errors
+  // plainly if the id still isn't there. The drain's post-job publish
+  // below uses the same wait (1 s bound): a publish read from a
+  // pre-commit `getState()` hands Rust a stale snapshot, and the very
+  // next tool call — an immediate read, or a default-path export that
+  // needs the save's filePath — sees pre-job state (L10 run 2: the
+  // update_info_sheet constants read back stale, and the default-path
+  // export fell through to `document_dir()` and died on tauri
+  // `UnknownPath`). A job that never moves the revision (a read-only
+  // export, a no-op) pays at most the bound, then publishes as-is.
+  const flushUntilRevision = async (before: number, timeoutMs = 2000) => {
+    await flush();
+    await waitForRevision(() => getState().revision, before, timeoutMs);
+  };
+  // Jobs already handed to an execution: the frontend side of the
   // once-only discipline (Rust's `take_jobs` is the other half — a job
   // claimed there is never handed out again, and a job seen here is never
   // executed again).
@@ -1442,6 +1526,10 @@ export function useMcpJobDispatcher() {
             if (seenRef.current.has(job.job_id)) continue;
             seenRef.current.add(job.job_id);
             runningRef.current = { jobId: job.job_id, action: job.action };
+            // The revision before the job runs: the post-job publish waits
+            // for it to move, so the snapshot Rust gets is post-job even
+            // when React defers the commit past the flush (see above).
+            const revBefore = getState().revision;
             try {
               const { result, created } = await executeJob(job, {
                 getState,
@@ -1455,12 +1543,23 @@ export function useMcpJobDispatcher() {
                 markSaved,
                 actions,
                 flush,
+                flushUntilRevision,
               });
+              // Publish the post-job project immediately — before
+              // `mcpCompleteJob` wakes Rust — so the next tool call reads
+              // post-job state instead of the snapshot still waiting out
+              // the 500 ms debounce (v1.6 race fix). The revision wait
+              // first lets a deferred commit land; without it the publish
+              // can carry pre-job state (L10 run 2).
+              await flushUntilRevision(revBefore, 1000);
+              await publishMcpSnapshotNow(getState());
               // A completion report is always sent; Rust ignores it for a
               // job that is already terminal (a cancel that landed first).
               await mcpCompleteJob(job.job_id, "done", result, undefined, created).catch(() => {});
             } catch (err: unknown) {
               const message = err instanceof Error ? err.message : String(err);
+              await flushUntilRevision(revBefore, 1000);
+              await publishMcpSnapshotNow(getState());
               await mcpCompleteJob(job.job_id, "error", undefined, message, undefined).catch(() => {});
             } finally {
               if (runningRef.current?.jobId === job.job_id) runningRef.current = null;

@@ -177,6 +177,8 @@ import {
   convertConcentration,
 } from "../src/stats/column/transform-concentrations";
 import { makeInitialState, reducer } from "../src/store/use-project-store";
+import { executeJob, waitForRevision, type JobDeps } from "../src/store/mcp-dispatch";
+import { TABLES } from "../src/views/tables/index";
 import { UPDATE_CHECK_TIMEOUT_MS, fetchWithTimeout, isNewer, latestVersion } from "../src/lib/version";
 import { decideUpdate, type ChannelManifest } from "../src/lib/channel";
 import { checkForUpdatesDaily } from "../src/updates";
@@ -482,6 +484,206 @@ check("replacing the copy's data leaves the original family untouched", () => {
   ok(JSON.stringify(s.nodes[t1].data?.rows) !== JSON.stringify(replacement.rows), "the original keeps its own values");
   strictEqual(s.nodes[copyAnalysis].parentId, copyId);
   strictEqual(s.nodes.a1.parentId, t1);
+});
+
+// ── v1.6 MCP race fix ──────────────────────────────────────────────────────
+// Failure B: the dispatcher's create-table read the new id back from
+// `getState()` after two blind zero-timers; under load React defers the
+// commit past them and the read-back saw pre-dispatch state ("created the
+// table but its id could not be read back"). The fix waits on the store's
+// monotonic `revision` instead. These pins drive `executeJob` over the real
+// reducer with a `getState()` that lags behind the dispatch — the commit
+// landing only when the revision wait runs — and assert the created id is
+// still read back, plus the wait itself resolves promptly on a move and
+// times out boundedly on none.
+check("waitForRevision resolves when the revision moves, and times out boundedly when it doesn't", async () => {
+  let rev = 5;
+  setTimeout(() => {
+    rev = 6;
+  }, 50);
+  strictEqual(await waitForRevision(() => rev, 5), true);
+  const start = Date.now();
+  strictEqual(await waitForRevision(() => rev, 6, 100), false);
+  ok(Date.now() - start < 1000, `unbounded wait took ${Date.now() - start} ms`);
+});
+
+// A lagging MCP harness for the v1.6 race pins: drives `executeJob` over the
+// real reducer with a `getState()` that trails the reducer state until the
+// revision wait runs, as `latest.current` trails a dispatch whose commit
+// React has deferred. `withRevisionWait` selects the fix (revision wait) or
+// the old behaviour (two blind macrotasks, no commit). `sync()` advances
+// the visible state to the reducer state — the commit landing for setup
+// dispatches made outside a job.
+const mcpLaggingHarness = (withRevisionWait: boolean) => {
+  let s = makeInitialState();
+  let visible = s;
+  const dispatch = (action: Parameters<typeof reducer>[1]) => {
+    s = reducer(s, action);
+  };
+  let n = 0;
+  const genId = (t: string) => `${t}_h${++n}`;
+  const neverUnused = (): never => {
+    throw new Error("unused in this check");
+  };
+  const actions: NonNullable<JobDeps["actions"]> = {
+    createTable: (tableType) =>
+      dispatch({
+        type: "create",
+        node: { id: genId("table"), type: "table", name: "Table", parentId: null, tableType, data: TABLES[tableType].defaultData() },
+      }),
+    createTableWithData: (tableType, data, name) =>
+      dispatch({
+        type: "create",
+        node: { id: genId("table"), type: "table", name, parentId: null, tableType, data },
+      }),
+    createSimulatedTable: neverUnused,
+    updateTable: (id, data, label, move) => dispatch({ type: "updateTable", id, data, label, move }),
+    duplicateFamily: (id) => dispatch({ type: "duplicateFamily", id }),
+    renameNode: (id, name) => dispatch({ type: "rename", id, name }),
+    removeNode: (id) => dispatch({ type: "remove", id }),
+    reorderTables: (order) => dispatch({ type: "reorderRoot", order }),
+    reorderChildren: (parentId, order) => dispatch({ type: "reorderChildren", parentId, order }),
+    undo: () => dispatch({ type: "undo" }),
+    redo: () => dispatch({ type: "redo" }),
+    createGraph: neverUnused,
+    updateGraph: neverUnused,
+    cloneGraph: neverUnused,
+    createFigure: neverUnused,
+    updateFigure: neverUnused,
+    createInfoSheet: neverUnused,
+    updateInfoSheet: neverUnused,
+  };
+  const deps: JobDeps = {
+    getState: () => ({
+      nodes: visible.nodes,
+      rootOrder: visible.rootOrder,
+      activeNodeId: visible.activeNodeId,
+      childOrder: visible.childOrder,
+      filePath: visible.filePath,
+      isDirty: visible.isDirty,
+      revision: visible.revision,
+      past: visible.past,
+      future: visible.future,
+    }),
+    cacheAnalysisResult: () => {},
+    actions,
+    ...(withRevisionWait
+      ? {
+          // The commit lands when the revision wait runs: advance the
+          // visible state to the reducer state, then wait on the real
+          // helper — the revision has already moved, so it returns at once.
+          flushUntilRevision: async (before: number) => {
+            visible = s;
+            await waitForRevision(() => visible.revision, before);
+          },
+        }
+      : {
+          // The old behaviour: two blind macrotasks, no commit — the
+          // visible state never advances.
+          flush: () => new Promise<void>((resolve) => setTimeout(() => setTimeout(resolve, 0), 0)),
+        }),
+  };
+  return {
+    deps,
+    state: () => s,
+    dispatch,
+    sync: () => {
+      visible = s;
+    },
+    run: (jobId: string, action: string, args: unknown) =>
+      executeJob({ job_id: jobId, project_id: "project-1", action, args, status: "queued" }, deps),
+  };
+};
+
+check("create-table reads the new id back when getState lags the dispatch (v1.6 race fix)", async () => {
+  // Control: the old two-macrotask flush reads back pre-dispatch state and
+  // errors — the harness really reproduces the race.
+  const oldHarness = mcpLaggingHarness(false);
+  await rejects(oldHarness.run("job-old", "create-table", { table_type: "column" }), /could not be read back/);
+  // Fixed: the revision wait lets the commit land and the id reads back.
+  const harness = mcpLaggingHarness(true);
+  const done = await harness.run("job-fixed", "create-table", { table_type: "column" });
+  const createdId = (done.result as { table_id: string }).table_id;
+  ok(createdId, "a table id comes back");
+  strictEqual(harness.state().nodes[createdId]?.type, "table");
+  strictEqual((done.result as { rows: number }).rows, 0);
+  strictEqual((done.result as { data_columns: number }).data_columns, 15);
+});
+
+check("create-table accepts an empty row-title column, and refuses an empty later column (v1.6 F2)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const done = await harness.run("job-f2a", "create-table", {
+    table_type: "xy",
+    name: "Doses",
+    columns: ["", "X", "Y1"],
+    rows: [
+      ["r1", 0, 1],
+      ["r2", 1, 2],
+    ],
+  });
+  const createdId = (done.result as { table_id: string }).table_id;
+  deepStrictEqual(harness.state().nodes[createdId]?.data?.columns, ["", "X", "Y1"]);
+  await rejects(
+    harness.run("job-f2b", "create-table", { table_type: "xy", columns: ["Title", "", "Y1"], rows: [] }),
+    /index 1/,
+  );
+});
+
+check("write-table with excluded omitted (null) preserves the marks (v1.6 F5)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const created = await harness.run("job-f5a", "create-table", {
+    table_type: "xy",
+    name: "Doses",
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["r1", 0, 1],
+      ["r2", 1, 2],
+    ],
+  });
+  const tid = (created.result as { table_id: string }).table_id;
+  const data = () => harness.state().nodes[tid]?.data!;
+  const columns = ["Title", "X", "Y1"];
+  const rows = [
+    ["r1", 0, 1],
+    ["r2", 1, 2],
+  ];
+  // Set a mark, then rewrite with excluded omitted — Rust serializes an
+  // absent Option as JSON null, which used to throw here. (sync() before
+  // each write: write-table reads the node from getState(), and this
+  // lagging harness only advances it on the revision wait, which
+  // write-table doesn't use — the pin is about buildTableData, not lag.)
+  harness.sync();
+  await harness.run("job-f5b", "write-table", { table_id: tid, columns, rows, excluded: ["0,1"] });
+  deepStrictEqual(data().excluded, ["0,1"]);
+  harness.sync();
+  await harness.run("job-f5c", "write-table", { table_id: tid, columns, rows, excluded: null });
+  deepStrictEqual(data().excluded, ["0,1"]);
+  // An explicit empty list clears them.
+  harness.sync();
+  await harness.run("job-f5d", "write-table", { table_id: tid, columns, rows, excluded: [] });
+  strictEqual(data().excluded, undefined);
+});
+
+check("undo reads can_redo from post-undo state when getState lags (v1.6 F6)", async () => {
+  const setup = (harness: ReturnType<typeof mcpLaggingHarness>) => {
+    harness.dispatch({
+      type: "create",
+      node: { id: "t_extra", type: "table", name: "Extra", parentId: null, tableType: "column", data: TABLES.column.defaultData() },
+    });
+    harness.sync();
+  };
+  // Control: the old flush reads pre-undo state — undone, but can_redo false.
+  const oldHarness = mcpLaggingHarness(false);
+  setup(oldHarness);
+  const oldDone = await oldHarness.run("job-f6-old", "undo", {});
+  ok((oldDone.result as { undone: string }).undone, "the undo happened");
+  strictEqual((oldDone.result as { can_redo: boolean }).can_redo, false);
+  // Fixed: the revision wait lets the commit land and can_redo reads true.
+  const harness = mcpLaggingHarness(true);
+  setup(harness);
+  const done = await harness.run("job-f6-fixed", "undo", {});
+  ok((done.result as { undone: string }).undone, "the undo happened");
+  strictEqual((done.result as { can_redo: boolean }).can_redo, true);
 });
 
 // R3 #22b: an info sheet goes between tables and figures, carries Prism's

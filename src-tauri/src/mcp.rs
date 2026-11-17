@@ -349,6 +349,20 @@ impl McpState {
         self.lock().app.clone()
     }
 
+    /// Whether a project window is still alive (v1.6 F10). A snapshot can
+    /// outlive its window — the `closed: true` publish doesn't always land
+    /// — so snapshot presence alone can't tell a live window from a closed
+    /// one, and a job enqueued to a dead window sits queued for ever. With
+    /// an app handle the window itself is the authority (the same
+    /// `get_webview_window` `close_window` uses); without one (the
+    /// in-process smoke test) snapshot presence is the proxy, as before.
+    fn window_alive(&self, label: &str) -> bool {
+        match self.app_handle() {
+            Some(app) => app.get_webview_window(label).is_some(),
+            None => self.lock().snapshots.contains_key(label),
+        }
+    }
+
     /// One window's published snapshot, if it has published.
     fn snapshot_for(&self, label: &str) -> Option<serde_json::Value> {
         self.lock().snapshots.get(label).cloned()
@@ -398,6 +412,32 @@ impl McpState {
         self.snapshot_for(label)
     }
 
+    /// The snapshot a handler validates a node id against, retried when
+    /// the id misses (v1.6 race fix). The snapshot a handler cloned at
+    /// entry can predate an edit that just landed — the frontend publishes
+    /// on a 500 ms debounce, and immediately after each completed job — so
+    /// a `find_node` miss is retried against the live snapshot, then after
+    /// a settled wait (`await_settled_snapshot`), before the caller errors.
+    /// The GUI-edit → agent-call race is covered the same way. Only the
+    /// four mutating id-validating handlers use it; the readers serve
+    /// whatever snapshot is live and never error on a miss this way.
+    async fn snapshot_for_node(&self, id: &str, snap: serde_json::Value, node_id: &str) -> serde_json::Value {
+        if find_node(&snap, node_id).is_some() {
+            return snap;
+        }
+        // The publish may already have landed after this handler cloned
+        // its snapshot — re-read before paying for a wait.
+        if let Some(fresh) = self.snapshot_for(id) {
+            if find_node(&fresh, node_id).is_some() {
+                return fresh;
+            }
+        }
+        // Otherwise wait out the publish still in flight (up to 600 ms)
+        // and take whatever is live then; the caller errors if it still
+        // misses (a genuinely unknown id costs one bounded wait).
+        self.await_settled_snapshot(id).await.unwrap_or(snap)
+    }
+
     /// The project a tool call addresses: the named window, or the most
     /// recently published one when `project_id` is omitted. A named window
     /// with no snapshot is closed (or never opened) — a plain error, never
@@ -431,6 +471,16 @@ impl McpState {
             match self.read_job(job_id) {
                 Some(job) if job.status.is_terminal() => return Ok(job),
                 Some(job) => {
+                    // The window closed mid-wait (and its `closed: true`
+                    // publish didn't land, so the job was never cancelled):
+                    // fail fast instead of burning the timeout (v1.6 F10).
+                    if !self.window_alive(&job.project_id) {
+                        self.drop_jobs_for_window(&job.project_id);
+                        return Err(format!(
+                            "The project window for {} closed before the job finished — the job will never run. Reopen the project and ask again.",
+                            job.project_id
+                        ));
+                    }
                     if tokio::time::Instant::now() >= deadline {
                         return Err(format!(
                             "Still waiting on job {job_id} (status: {:?}) — the project window may be busy. Poll titer_read_job for {job_id} instead of re-running.",
@@ -531,6 +581,20 @@ impl McpState {
     ) -> Result<Job, String> {
         // Bounded growth: expired terminal jobs go before a new one lands.
         self.prune_jobs();
+        // A snapshot can outlive its window (the `closed: true` publish
+        // doesn't always land), so a snapshot alone can't tell a live
+        // window from a closed one — refuse a job whose window is gone
+        // instead of queueing it for ever (v1.6 F10). No app handle
+        // (the in-process smoke test): snapshot presence stays the proxy,
+        // as before — the snapshot check below still refuses those.
+        if self.app_handle().is_some()
+            && self.lock().snapshots.contains_key(project_id)
+            && !self.window_alive(project_id)
+        {
+            return Err(format!(
+                "No open project window with id “{project_id}” — it was closed. Reopen the project and ask again."
+            ));
+        }
         let (job, app) = {
             let mut inner = self.lock();
             if !inner.snapshots.contains_key(project_id) {
@@ -2497,6 +2561,7 @@ impl TiterMcpServer {
         });
         let outcome: Result<serde_json::Value, String> = async {
             let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            let snap = self.state.snapshot_for_node(&id, snap, &args.table_id).await;
             let node = find_node(&snap, &args.table_id).ok_or_else(|| {
                 format!("No table with id “{}” in project {id}. Ask titer_list_tables for the ids.", args.table_id)
             })?;
@@ -2582,6 +2647,7 @@ impl TiterMcpServer {
         });
         let outcome: Result<serde_json::Value, String> = async {
             let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            let snap = self.state.snapshot_for_node(&id, snap, &args.table_id).await;
             let node = find_node(&snap, &args.table_id).ok_or_else(|| {
                 format!("No table with id “{}” in project {id}. Ask titer_list_tables for the ids.", args.table_id)
             })?;
@@ -2685,6 +2751,7 @@ impl TiterMcpServer {
         let log_args = serde_json::json!({ "project_id": args.project_id, "table_id": args.table_id });
         let outcome: Result<serde_json::Value, String> = async {
             let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            let snap = self.state.snapshot_for_node(&id, snap, &args.table_id).await;
             let node = find_node(&snap, &args.table_id).ok_or_else(|| {
                 format!("No table with id “{}” in project {id}. Ask titer_list_tables for the ids.", args.table_id)
             })?;
@@ -2731,6 +2798,7 @@ impl TiterMcpServer {
         let log_args = serde_json::json!({ "project_id": args.project_id, "node_id": args.node_id, "name": args.name });
         let outcome: Result<serde_json::Value, String> = async {
             let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            let snap = self.state.snapshot_for_node(&id, snap, &args.node_id).await;
             if find_node(&snap, &args.node_id).is_none() {
                 return Err(format!(
                     "No node with id “{}” in project {id}. Ask titer_list_projects for the ids.",
@@ -4880,6 +4948,15 @@ impl TiterMcpServer {
                 None => return Err(format!("Job “{}” disappeared.", job.job_id)),
                 _ => {}
             }
+            // The window closed mid-wait (and its `closed: true` publish
+            // didn't land, so the job was never cancelled): fail fast
+            // instead of burning the 30 s timeout (v1.6 F10).
+            if !self.state.window_alive(project_id) {
+                self.state.drop_jobs_for_window(project_id);
+                return Err(format!(
+                    "The project window for {project_id} closed before the job finished — the job will never run. Reopen the project and ask again."
+                ));
+            }
             if std::time::Instant::now() >= deadline {
                 return Err(format!(
                     "The table job is still running after 30 seconds — check it with titer_read_job (job_id “{}”).",
@@ -4915,6 +4992,15 @@ impl TiterMcpServer {
                 }
                 None => return Err(format!("Job “{}” disappeared.", job.job_id)),
                 _ => {}
+            }
+            // The window closed mid-wait (and its `closed: true` publish
+            // didn't land, so the job was never cancelled): fail fast
+            // instead of burning the 120 s timeout (v1.6 F10).
+            if !self.state.window_alive(project_id) {
+                self.state.drop_jobs_for_window(project_id);
+                return Err(format!(
+                    "The project window for {project_id} closed before the job finished — the job will never run. Reopen the project and ask again."
+                ));
             }
             if std::time::Instant::now() >= deadline {
                 return Err(format!(
@@ -4954,9 +5040,16 @@ impl TiterMcpServer {
                 let app = self.state.app_handle().ok_or_else(|| {
                     "The project has no saved file yet — pass a path, or save the project first.".to_string()
                 })?;
-                let dir = app
-                    .path()
-                    .document_dir()
+                // `document_dir()` fails with tauri `UnknownPath` where the
+                // OS has no Documents folder configured (Linux without XDG
+                // user-dirs) — the tool docs promise `<Documents>/Titer
+                // Exports` as the fallback, so fall back to ~/Documents
+                // instead of surfacing the bare "unknown path" (L10 run 2:
+                // a default-path export died on exactly that).
+                let base = app.path().document_dir().or_else(|_| {
+                    app.path().home_dir().map(|h| h.join("Documents"))
+                });
+                let dir = base
                     .map_err(|e| e.to_string())?
                     .join("Titer Exports");
                 fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -5607,16 +5700,19 @@ fn read_info_sheet(
 const TABLE_TYPES: &[&str] = &["column", "xy", "grouped", "nested", "multiple", "contingency", "survival"];
 
 /// Columns + rows as a tool passes them: a non-empty column list of unique
-/// non-empty strings, rows of arrays no wider than the columns, cells null /
-/// string / number. The frontend dispatcher re-validates against the table
-/// type (grouped/nested shape) — this is the fast fail before enqueueing.
+/// strings — column 0 is the row-title column and may be empty (Prism
+/// leaves it unnamed; the app's own fixtures and file loader carry "" there),
+/// every other column must be named — rows of arrays no wider than the
+/// columns, cells null / string / number. The frontend dispatcher
+/// re-validates against the table type (grouped/nested shape) — this is the
+/// fast fail before enqueueing.
 fn validate_table_shape(columns: &[String], rows: &[Vec<serde_json::Value>]) -> Result<(), String> {
     if columns.is_empty() {
         return Err("columns must be a non-empty array of strings (column 0 is the row-title column).".into());
     }
     for (i, c) in columns.iter().enumerate() {
-        if c.is_empty() {
-            return Err(format!("Column {i} is empty — column names must be non-empty strings."));
+        if i > 0 && c.is_empty() {
+            return Err(format!("Column {i} is empty — only column 0 (the row-title column) may be empty."));
         }
     }
     let mut seen = HashSet::new();
@@ -6142,6 +6238,13 @@ mod tests {
         // A short row pads with blanks; an empty row list is a table with no rows.
         validate_table_shape(&cols, &[]).expect("no rows");
         validate_table_shape(&cols, &[vec![json!("r1")]]).expect("short row");
+        // Column 0 is the row-title column: it may be empty (Prism leaves
+        // it unnamed) — any other column must be named.
+        validate_table_shape(&["".to_string(), "A".to_string(), "B".to_string()], &rows)
+            .expect("empty row-title column");
+        let err = validate_table_shape(&["Title".to_string(), "".to_string(), "B".to_string()], &rows)
+            .expect_err("empty non-title column");
+        assert!(err.contains("Column 1 is empty"), "{err}");
         let err = validate_table_shape(&[], &rows).expect_err("empty columns");
         assert!(err.contains("non-empty"), "{err}");
         let err = validate_table_shape(&["Title".to_string(), "A".to_string(), "A".to_string()], &rows)

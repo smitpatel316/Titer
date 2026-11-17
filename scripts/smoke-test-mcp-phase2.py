@@ -28,6 +28,7 @@ the smoke — the mock provider covers the conflict path in the suite.
 import argparse
 import json
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -124,10 +125,15 @@ def main():
         ct = r.headers.get("content-type", "")
         if "application/json" in ct:
             return r.json()
+        # SSE: last non-empty data: line is the response — the server first
+        # sends an empty keepalive frame (`data: ` + `id: 0` + `retry: 3000`),
+        # which is not JSON and must be skipped.
         data = None
         for line in r.text.splitlines():
             if line.startswith("data:"):
-                data = json.loads(line[5:].strip())
+                payload = line[5:].strip()
+                if payload:
+                    data = json.loads(payload)
         if data is None:
             raise RuntimeError(f"no data frame in SSE response: {r.text[:200]}")
         return data
@@ -189,7 +195,9 @@ def main():
     check("create_project returns a project_id", bool(pid), pid)
     check("create_project blank, no file", proj.get("blank") is True and proj.get("file_path") is None)
 
-    # 4. tables: XY with data, Column empty then written
+    # 4. tables: XY with data, Column empty then written. Column 0 is ""
+    # on purpose (v1.6 F2: the row-title column may be empty), and the
+    # write omits `excluded` (v1.6 F5: omitted means preserve the marks).
     xy = tool("titer_create_table", {"project_id": pid, "table_type": "xy",
                                      "name": "Smoke XY",
                                      "columns": ["", "X", "Y1"],
@@ -223,8 +231,14 @@ def main():
     check("edit_table rename-column", edited.get("table_id") == tid_xy)
     renamed = tool("titer_rename_node", {"project_id": pid, "node_id": tid_col, "name": "Smoke Col"})
     check("rename_node", renamed.get("name") == "Smoke Col")
-    reord = tool("titer_reorder_nodes", {"project_id": pid, "order": [tid_col, tid_xy]})
-    check("reorder_nodes root", reord.get("order") == [tid_col, tid_xy], json.dumps(reord)[:160])
+    # A fresh project seeds a default empty "Table 1" (15 data columns,
+    # 0 rows), so the reorder must list ALL root tables, not just the two
+    # the script created — a 2-item order is correctly rejected by the app.
+    tables_now = tool("titer_list_tables", {"project_id": pid})["tables"]
+    others = [t["id"] for t in tables_now if t["id"] not in (tid_col, tid_xy)]
+    want_order = [tid_col, tid_xy] + others
+    reord = tool("titer_reorder_nodes", {"project_id": pid, "order": want_order})
+    check("reorder_nodes root", reord.get("order") == want_order, json.dumps(reord)[:160])
     undone = tool("titer_undo", {"project_id": pid})
     check("undo returns a label + can_redo",
           undone.get("undone") is not None and undone.get("can_redo") is True,
@@ -366,7 +380,13 @@ def main():
     check("export_graph default path lands beside the project file",
           os.path.dirname(default_exp.get("path", "")) == out_dir, default_exp.get("path", ""))
     check_file("default-path export exists", default_exp.get("path", ""))
-    reopened = tool("titer_open_project", {"path": hlx})
+    # open_project dedupes an already-open file (same as the GUI: a file
+    # already open isn't opened twice), so reopen a COPY — opening the
+    # same path again returns this project's own id, and the close test
+    # below would then close the smoke project itself.
+    hlx_copy = os.path.join(out_dir, "smoke-copy.hlx")
+    shutil.copyfile(hlx, hlx_copy)
+    reopened = tool("titer_open_project", {"path": hlx_copy})
     pid2 = reopened["project_id"]
     check("open_project reopens the saved file", bool(pid2) and pid2 != pid,
           json.dumps(reopened)[:200])
