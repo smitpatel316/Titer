@@ -1106,6 +1106,26 @@ check("an updated project is announced in-app, never through the native dialog",
   ok(shell.includes("projectUpdated"), "the shell reads the notice state");
 });
 
+// v1.6.0 Mac proof: the "Prism File Imported" native alert's OK button could
+// not dismiss it — the second native sheet on the window in immediate
+// succession (the askToSave sheet just dismissed), and rfd's sheet path left
+// the alert window with a button that ends nothing. Same Quirk-2 family as
+// "Project Updated": the import notice goes through the in-app dialog instead.
+// What this proves: the wiring. It cannot prove the Mac stuck sheet is gone:
+// Linux never reproduces the rfd sheet failure — the Mac re-proof (import,
+// dismiss with OK, assert no stuck window) still stands.
+check("a Prism import is announced in-app, never through the native dialog", () => {
+  const document = readFileSync("src/store/use-document.ts", "utf8");
+  ok(
+    !/native\.alert\([^;]*"Prism File Imported"/.test(document),
+    "importPrismText/importPrismBytes must not route the notice through native.alert",
+  );
+  ok(document.includes("setPrismImported("), "the import raises the in-app notice");
+  const shell = readFileSync("src/components/app-shell.tsx", "utf8");
+  ok(shell.includes('title="Prism File Imported"'), "the shell mounts the in-app notice");
+  ok(shell.includes("prismImported"), "the shell reads the notice state");
+});
+
 // Plan 28: a dose-response graph's radioligand concentration — the
 // homologous model's [L], which the graph carries in its own options — is
 // written to the file, and on read the graph becomes a scatter whose created

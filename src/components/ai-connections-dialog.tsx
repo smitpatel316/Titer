@@ -118,7 +118,7 @@ export function AiConnectionsDialog() {
       onClose={closeSelector}
       dismissLabel="Done"
       title="AI Connections"
-      description="Let an AI app you already use (Claude Code, Claude Desktop, …) read what's open in Titer — through a local server only, read-only for now."
+      description="Let an AI app you already use (Claude Code, Claude Desktop, …) work with what's open in Titer — through a local server only. It can read and change your project, not just look at it."
     >
       {!isNative ? (
         <p className="text-regular text-secondary">
@@ -144,7 +144,7 @@ export function AiConnectionsDialog() {
           </Section>
 
           {status?.enabled && token && (
-            <Section label="Local token (keep it private — it lets an app on this Mac read your open projects)">
+            <Section label="Local token (keep it private — it lets an app on this Mac read and change your open projects)">
               <div className="flex gap-2">
                 <Input
                   readOnly
@@ -183,7 +183,7 @@ export function AiConnectionsDialog() {
               </div>
               <p className="mt-1 text-small text-secondary">
                 New Claude Code sessions will see the Titer tools — check with /mcp. Claude Desktop connects through the
-                stdio bridge (coming in v3 Phase 1).
+                stdio bridge, which ships with Titer.
               </p>
             </Section>
           )}
@@ -201,9 +201,9 @@ export function AiConnectionsDialog() {
           </Section>
 
           <p className="text-small text-secondary">
-            Local only: the server binds 127.0.0.1, needs the token above, and never sends data anywhere. Phase 1 is
-            read-only — an agent can list and read tables, results and graphs, but cannot run an analysis, build a
-            graph, export, save or delete anything. It cannot change these settings.
+            Local only: the server binds 127.0.0.1, needs the token above, and never sends data anywhere. Phase 2 gives
+            an agent 51 tools — 14 read-only, and 37 that change your project: run an analysis, build a graph, export,
+            save or delete. Only switch this on for an app you trust. It cannot change these settings.
           </p>
 
           {error && <p className="text-regular text-red-600">{error}</p>}

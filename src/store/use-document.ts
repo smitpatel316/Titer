@@ -73,6 +73,14 @@ export function useDocument() {
   // native dialog's window lingered on macOS after dismissal (Quirk 2).
   const [templateNotice, setTemplateNotice] = React.useState<TemplateInfo | null>(null);
   const dismissTemplateNotice = () => setTemplateNotice(null);
+  // The "Prism File Imported" notice, shown in-app rather than as a native
+  // dialog: the native alert's OK button could not dismiss it on macOS
+  // (v1.6.0 Mac proof) — it is the second native sheet on the window in
+  // immediate succession (the askToSave sheet just dismissed), and rfd's
+  // sheet path leaves the alert window with a button that ends nothing
+  // (Quirk 2's family). The report lines, null when no notice is up.
+  const [prismImported, setPrismImported] = React.useState<string[] | null>(null);
+  const dismissPrismImported = () => setPrismImported(null);
   // The window's title while the project isn't saved anywhere.
   const [untitled, setUntitled] = React.useState(UNTITLED);
   // Other windows change the list too: this one reads it again when it comes to the front.
@@ -850,11 +858,9 @@ export function useDocument() {
       lines.push("", "Notes:", ...imported.issues.slice(0, 12).map((i) => `• ${i.message}`));
       if (imported.issues.length > 12) lines.push(`…and ${imported.issues.length - 12} more.`);
     }
-    await native.alert(
-      "Prism File Imported",
-      lines.join("\n") + "\n\nSave the project to keep it as a Titer project.",
-      imported.issues.length ? "warning" : "info",
-    );
+    // In-app, not native.alert: the native alert's OK button could not dismiss
+    // it on macOS (v1.6.0 Mac proof) — see the `prismImported` state above.
+    setPrismImported([...lines, "", "Save the project to keep it as a Titer project."]);
     return true;
   };
 
@@ -909,11 +915,13 @@ export function useDocument() {
     prompted.current = false;
     latest.current.loadProject({ ...converted.project, filePath: null, edited: true });
     setUntitled(name);
-    await native.alert(
-      "Prism File Imported",
-      formatReport(converted.report) + "\n\nSave the project to keep it as a Titer project.",
-      converted.report.issues.length ? "warning" : "info",
-    );
+    // In-app, not native.alert: the native alert's OK button could not dismiss
+    // it on macOS (v1.6.0 Mac proof) — see the `prismImported` state above.
+    setPrismImported([
+      ...formatReport(converted.report).split("\n"),
+      "",
+      "Save the project to keep it as a Titer project.",
+    ]);
     return true;
   };
 
@@ -1144,6 +1152,8 @@ export function useDocument() {
     dismissProjectUpdated,
     templateNotice,
     dismissTemplateNotice,
+    prismImported,
+    dismissPrismImported,
     resolveSavePrompt,
     remote,
     openRemotePicker,

@@ -45,6 +45,7 @@ export function AppShell() {
   // v1.6.0 L0: this window runs the MCP jobs Rust queues for it.
   useMcpJobDispatcher();
   const { projectUpdated, dismissProjectUpdated } = documentActions;
+  const { prismImported, dismissPrismImported } = documentActions;
   const { templateNotice, dismissTemplateNotice } = documentActions;
   const { sidebar } = useLayout();
   const [fullscreen, setFullscreen] = React.useState(false);
@@ -112,6 +113,29 @@ export function AppShell() {
         dismissLabel="OK"
         title="Project Updated"
         description="This project was made with an older Titer, or part of it couldn't be read as it was. Titer brought it up to date; save it to keep the update."
+      />
+
+      {/* The "Prism File Imported" notice, in-app: the native alert's OK button
+          could not dismiss it on macOS (v1.6.0 Mac proof — second native sheet
+          on the window right after the askToSave sheet; rfd's sheet path left
+          the alert window with a button that ends nothing). Same Quirk-2
+          family as "Project Updated" above. */}
+      <Dialog
+        open={prismImported !== null}
+        onClose={dismissPrismImported}
+        onReturn={dismissPrismImported}
+        dismissLabel="OK"
+        title="Prism File Imported"
+        description={
+          <>
+            {prismImported?.map((line, i) => (
+              <React.Fragment key={i}>
+                {line}
+                <br />
+              </React.Fragment>
+            ))}
+          </>
+        }
       />
 
       <ConverterDialog />
