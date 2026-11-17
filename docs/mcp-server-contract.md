@@ -74,10 +74,19 @@ written on server start, removed on server stop.
 - Header: `Authorization: Bearer <token>` (from §2). Missing, malformed
   or wrong → `401`. The bridge surfaces a 401 as: "The token changed —
   restart the bridge (or re-check Titer → Settings → AI connections)."
-- Required MCP headers on every request (the server rejects requests
-  without them with `400` — this is also what keeps browsers out):
-  - `MCP-Protocol-Version: 2025-11-25` (or `2025-06-18`)
-  - `Accept: application/json, text/event-stream`
+- MCP headers (the Accept half is also what keeps browsers out — a browser
+  sends `Accept: text/html` and gets a `400`):
+  - `MCP-Protocol-Version: 2025-11-25` (or `2025-06-18`) — required on all
+    requests AFTER `initialize` (spec 2025-11-25, "Protocol Version
+    Header"); `initialize` itself negotiates the version in its body
+    (`params.protocolVersion`), so the header is optional there and an
+    absent header is NOT a 400. A post-`initialize` request with the header
+    absent falls back to the negotiated session version, also not a 400.
+    A header naming a version the server does not speak (e.g. `2026-07-28`)
+    → `400`.
+  - `Accept: application/json, text/event-stream` — required on every
+    request; without it the server answers `400` ("Connect an MCP client,
+    not a browser").
 - The server sends **no CORS headers** and enforces a Host allowlist
   (`localhost`, `127.0.0.1`, `::1`): the bridge must send
   `Host: 127.0.0.1:<port>` (the default for the endpoint URL) and must not

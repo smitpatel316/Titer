@@ -1065,10 +1065,28 @@ fn mcp_router(state: McpState, cancel: CancellationToken) -> axum::Router {
 
 // ── HTTP auth ────────────────────────────────────────────────────────────
 // Bearer token + MCP headers, before rmcp ever sees the request. A browser
-// navigating to the endpoint sends neither (no MCP-Protocol-Version, an
-// Accept of text/html), and no CORS headers are served at all, so a web
-// page cannot call this server even if it guesses the port — on top of
-// rmcp's own Host allowlist (localhost / 127.0.0.1 / ::1).
+// navigating to the endpoint sends an Accept of text/html (no MCP Accept),
+// and no CORS headers are served at all, so a web page cannot call this
+// server even if it guesses the port — on top of rmcp's own Host allowlist
+// (localhost / 127.0.0.1 / ::1).
+//
+// The version header is deliberately NOT required here. Per the MCP spec
+// (2025-11-25, Streamable HTTP, "Protocol Version Header") the client MUST
+// send `MCP-Protocol-Version` on all requests AFTER `initialize` — and
+// `initialize` itself negotiates the version in its body
+// (`params.protocolVersion`), so stock clients (OpenCode, Claude Code, the
+// Inspector CLI) omit the header on `initialize` only. Requiring it there
+// 400'd every one of them (1.6.1). A post-`initialize` request with the
+// header absent is not a 400 either: it falls back to the negotiated
+// session version (the spec's "other way to identify the version").
+// What IS a 400: a header naming a version this server does not support
+// (spec: invalid/unsupported → 400). rmcp enforces the rest downstream
+// (an unknown header value, and an `initialize` header that disagrees
+// with `params.protocolVersion`). One deliberate boundary: a present
+// header naming a supported-but-not-negotiated revision is accepted —
+// the spec says the header SHOULD match the negotiated version, and rmcp
+// does not enforce the match for legacy sessions either; no real client
+// sends a mismatched header.
 
 async fn auth_middleware(
     axum::extract::State(state): axum::extract::State<McpState>,
@@ -1093,17 +1111,33 @@ async fn auth_middleware(
     if !tokens_equal(bearer, &token) {
         return unauthorized("A valid local bearer token is required. Copy it from Titer → Settings → AI connections.");
     }
-    // MCP Streamable HTTP clients send both of these; browsers don't.
-    let has_version = headers.contains_key("mcp-protocol-version");
+    let bad_request = |msg: String| {
+        axum::response::Response::builder()
+            .status(axum::http::StatusCode::BAD_REQUEST)
+            .body(axum::body::Body::from(msg))
+            .unwrap()
+    };
+    // MCP Streamable HTTP clients send an MCP Accept header; browsers don't.
     let accept = headers.get(axum::http::header::ACCEPT).and_then(|v| v.to_str().ok()).unwrap_or("");
     let has_mcp_accept = accept.contains("application/json") || accept.contains("text/event-stream");
-    if !has_version || !has_mcp_accept {
-        return axum::response::Response::builder()
-            .status(axum::http::StatusCode::BAD_REQUEST)
-            .body(axum::body::Body::from(
-                "This is an MCP endpoint (Streamable HTTP). Connect an MCP client, not a browser.",
-            ))
-            .unwrap();
+    if !has_mcp_accept {
+        return bad_request(
+            "This is an MCP endpoint (Streamable HTTP). Connect an MCP client, not a browser.".to_string(),
+        );
+    }
+    // A present version header must name a revision this server speaks;
+    // an absent one is fine (see the module comment above).
+    match headers.get("mcp-protocol-version").and_then(|v| v.to_str().ok()) {
+        Some(version) if SUPPORTED_PROTOCOL_VERSIONS.iter().any(|v| v.as_str() == version) => {}
+        Some(version) => {
+            return bad_request(format!(
+                "Unsupported MCP-Protocol-Version “{version}” — this server speaks 2025-11-25 and 2025-06-18."
+            ));
+        }
+        None if headers.contains_key("mcp-protocol-version") => {
+            return bad_request("Invalid MCP-Protocol-Version header (not valid UTF-8).".to_string());
+        }
+        None => {}
     }
     next.run(request).await
 }

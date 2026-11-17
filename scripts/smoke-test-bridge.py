@@ -2,8 +2,11 @@
 """Smoke-test titer-stdio-bridge against a fake Streamable HTTP server that
 implements docs/mcp-server-contract.md faithfully enough to prove the pipe:
 
-- bearer auth (401 otherwise), MCP-Protocol-Version header required (400
-  otherwise), Accept must name application/json or text/event-stream
+- bearer auth (401 otherwise), MCP-Protocol-Version header sent on every
+  POST by the bridge; the server 400s a header naming an unsupported
+  revision, and 400s a request without an MCP Accept header. An absent
+  version header is NOT a 400 (initialize negotiates in-body; later
+  requests fall back to the session version — contract §3).
 - stateful sessions: initialize issues Mcp-Session-Id; later requests must
   echo it; DELETE closes the session
 - initialize -> tools/list (JSON) -> tools/call (SSE) with the five Phase 1
@@ -67,15 +70,23 @@ class FakeMcp(http.server.BaseHTTPRequestHandler):
         ))
 
     def _auth_ok(self):
+        # Mirrors contract §3 as of fix/mcp-initialize-version-header: the
+        # version header is optional on `initialize` (negotiated in-body) and
+        # on later requests falls back to the session version; a header
+        # naming an unsupported revision is a 400. The Accept half is still
+        # required on every request. The bridge always sends the header, so
+        # the "every POST carries it" assertion below still pins bridge
+        # behaviour — this fake just no longer pins the old server rule.
         auth = self.headers.get("Authorization", "")
         if auth != f"Bearer {FakeMcp.token}":
             return False
-        if "mcp-protocol-version" not in {k.lower() for k in self.headers}:
+        version = self.headers.get("MCP-Protocol-Version")
+        if version is not None and version not in ("2025-11-25", "2025-06-18"):
             self.send_response(400)
             self.send_header("Content-Type", "text/plain")
             self.send_header("Content-Length", "60")
             self.end_headers()
-            self.wfile.write(b"This is an MCP endpoint (Streamable HTTP).")
+            self.wfile.write(b"Unsupported MCP-Protocol-Version.")
             return None  # already answered
         accept = self.headers.get("Accept", "")
         if "application/json" not in accept and "text/event-stream" not in accept:

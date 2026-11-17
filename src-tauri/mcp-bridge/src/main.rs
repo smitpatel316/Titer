@@ -20,10 +20,14 @@
 // `TITER_MCP_DISCOVERY` env vars override individual fields, for dev and for
 // Claude Code users who run the bridge by hand.
 //
-// The server REQUIRES an `MCP-Protocol-Version` header on every request
-// (its auth middleware answers 400 without one — contract §3). The bridge
-// sends it on every POST, taking the value from the client's `initialize`
-// request when it names a 2025 revision the server speaks, else 2025-11-25.
+// The bridge sends an `MCP-Protocol-Version` header on every POST (contract
+// §3): the spec requires it on all requests after `initialize`, and sending
+// it on `initialize` too — with the value the client's `initialize` named —
+// keeps one code path. The server no longer 400s an absent header (it
+// negotiates from the `initialize` body / falls back to the session version),
+// but a header naming an unsupported revision is still a 400, so the value
+// comes from the client's `initialize` request when it names a 2025 revision
+// the server speaks, else 2025-11-25.
 //
 // Failure behaviour (a requirement, not an accident):
 //   * Discovery file missing/unreadable, or no token: print a clear message
@@ -278,9 +282,9 @@ enum ForwardOutcome {
     Failed(String),
 }
 
-/// One HTTP POST to the server. The `MCP-Protocol-Version` header is
-/// REQUIRED by the server's auth middleware (contract §3): without it the
-/// server answers 400 before rmcp ever sees the request. The value is the
+/// One HTTP POST to the server. The `MCP-Protocol-Version` header is sent on
+/// every POST (contract §3 — the spec requires it after `initialize`; the
+/// server 400s a header naming an unsupported revision). The value is the
 /// revision the client's `initialize` named, else the server's advertised
 /// revision, else 2025-11-25 (see `initialize_protocol_version`).
 fn post_once(
