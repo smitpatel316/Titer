@@ -16985,6 +16985,11 @@
   ],
   "rocCurve": [
    {
+    "threshold": null,
+    "sensitivity": 0,
+    "specificity": 1
+   },
+   {
     "threshold": 0.95,
     "sensitivity": 0.1,
     "specificity": 1
@@ -17081,6 +17086,11 @@
    },
    {
     "threshold": 0.28,
+    "sensitivity": 1,
+    "specificity": 0
+   },
+   {
+    "threshold": null,
     "sensitivity": 1,
     "specificity": 0
    }
@@ -17152,6 +17162,11 @@
   ],
   "rocCurve": [
    {
+    "threshold": null,
+    "sensitivity": 0,
+    "specificity": 1
+   },
+   {
     "threshold": 0.95,
     "sensitivity": 0.1,
     "specificity": 1
@@ -17250,6 +17265,11 @@
     "threshold": 0.28,
     "sensitivity": 1,
     "specificity": 0
+   },
+   {
+    "threshold": null,
+    "sensitivity": 1,
+    "specificity": 0
    }
   ],
   "notes": "“1” is the positive class (N = 10); “0” is negative (N = 10). AUC is the Mann-Whitney U statistic divided by the product of the class sizes — identical to the trapezoidal area under the empirical ROC curve. An AUC of 0.5 is chance; 1 is perfect separation. The 95% confidence interval is DeLong's (DeLong et al. 1988), truncated to [0, 1] — the upper limit hit 1 and was truncated. The optimal cutpoint maximises Youden's J (sensitivity + specificity − 1); among tied J values the highest threshold is reported. Tied scores count 0.5 in the AUC, and a threshold equal to a tied score classifies the whole tie as positive. Uses complete pairs only; no rows were left out."
@@ -17318,6 +17338,11 @@
    }
   ],
   "rocCurve": [
+   {
+    "threshold": null,
+    "sensitivity": 0,
+    "specificity": 1
+   },
    {
     "threshold": 0.95,
     "sensitivity": 0.1,
@@ -17415,6 +17440,11 @@
    },
    {
     "threshold": 0.28,
+    "sensitivity": 1,
+    "specificity": 0
+   },
+   {
+    "threshold": null,
     "sensitivity": 1,
     "specificity": 0
    }

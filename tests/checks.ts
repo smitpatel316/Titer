@@ -104,8 +104,9 @@ import {
 import { deletePalette, keepPalette, loadMyPalettes } from "../src/store/my-palettes";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
 import { datasetColumns, isGrouped, isNested, readTable, setColumns, splitXY, xyPoints, type Dataset } from "../src/lib/dataset";
+import { nestedMeans } from "../src/stats/nested/base";
 import { prepareFit } from "../src/stats/xy/nonlinear-fit";
-import { adjustComparisonRows, adjustPValues, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
+import { adjustComparisonRows, adjustPValues, describe, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
 import { compareTwoGroupsSpec } from "../src/stats/column/compare-two-groups";
 import { kruskalWallisSpec } from "../src/stats/column/kruskal-wallis";
@@ -2280,6 +2281,52 @@ check("nestedGroupsOf splits columns into groups and subgroups, and sets scope b
   ]);
 });
 
+// v1.5.0 m16 (plan 14): the subgroup mean is PINNED to pooled — the mean
+// over every value present in the subgroup's replicate columns, blanks
+// ignored. The alternative (mean over complete rows only, i.e. rows where
+// every replicate column holds a value) differs with unbalanced
+// missingness: below, pooled is (10+20+30+40+50)/5 = 30 while
+// complete-rows-only is (10+30+40)/3 ≈ 26.67. Pooled is the Prism
+// subcolumn mean (the mean of all values in the subcolumn, blanks
+// ignored), and it is the only reading under which plan 14's "unbalanced
+// subgroups … v1 handles naturally" holds — complete-rows-only would drop
+// a whole subgroup when one replicate of one row is blank. A subgroup
+// with zero numbers is still dropped, not an error.
+check("a nested subgroup mean pools all values present (v1.5.0 m16)", () => {
+  const t = readTable({
+    columns: ["Title", "A:S1:R1", "A:S1:R2", "A:S1:R3"],
+    rows: [
+      ["r1", "10", "30", "40"],
+      ["r2", "20", null, "50"],
+    ],
+  });
+  deepStrictEqual(nestedMeans(t.columns).groups[0].means, [30]);
+});
+
+// v1.5.0 m18: describe() on an empty group used to throw a raw R error
+// ("'names' attribute [5] must be the same length as the vector [4]") —
+// rVec([]) is c(), i.e. NULL in R, and median(NULL) is NULL (length 0),
+// so setNames got 5 names for a 4-vector. An empty group now comes back
+// as nulls (n = 0): never NaN, never a throw. mean([])/median([]) in
+// lib/summary.ts still return NaN by definition, so the guard lives at
+// this boundary, where descriptives surface.
+check("describe returns nulls, not NaN or a raw R error, for an empty group (v1.5.0 m18)", async () => {
+  const { groups, diff } = await describe(
+    [
+      { name: "Empty", values: [] },
+      { name: "Full", values: [1, 2, 3] },
+    ],
+    [[0, 1]],
+  );
+  deepStrictEqual(groups[0], { name: "Empty", mean: null, sd: null, sem: null, median: null, n: 0 });
+  strictEqual(groups[1].mean, 2);
+  strictEqual(groups[1].sd, 1);
+  strictEqual(groups[1].median, 2);
+  strictEqual(groups[1].n, 3);
+  ok(groups[1].sem != null && Math.abs(groups[1].sem - 1 / Math.sqrt(3)) < 1e-12);
+  strictEqual(diff(0, 1), null);
+});
+
 check("fewer subgroups keep each value in its group and subgroup", () => {
   const t = renestTable(nested(), 2, 1, 2);
   deepStrictEqual(t.columns, ["Title", "A:S1:R1", "A:S1:R2", "B:S1:R1", "B:S1:R2"]);
@@ -2840,6 +2887,39 @@ check("G-F5: the ROC optimal-cutpoint annotation flips by quadrant (no edge clip
   ok(weak.ax > 0 && weak.ay < 0, "bottom-left optimum keeps the (30, −30) offset");
   strictEqual(weak.xanchor, "left");
   strictEqual(weak.yanchor, "bottom");
+});
+
+// v1.5.0 m15 (plan 05): the runner's ROC points are one row per threshold
+// PLUS the (0,0)/(1,1) endpoints for the graph — the graph used to add them
+// itself while the runner's table stopped at the extreme thresholds. The
+// endpoints carry no threshold (null — rendered "—" in the results table)
+// and never compete for the Youden optimum.
+check("ROC runner points include the (0,0)/(1,1) endpoints (v1.5.0 m15)", async () => {
+  const data: TableData = {
+    columns: ["Title", "Truth", "Score"],
+    rows: [
+      ["", "1", "0.9"],
+      ["", "1", "0.8"],
+      ["", "0", "0.7"],
+      ["", "0", "0.6"],
+    ],
+  };
+  const out = await runAnalysis("roc-curve", data, { truth: "Truth", score: "Score", positive: 1 });
+  if ("error" in out) throw new Error(`expected a result, got ${out.error}`);
+  const points = out.rocCurve!;
+  strictEqual(points.length, 6, `4 thresholds + 2 endpoints, got ${points.length}`);
+  deepStrictEqual(points[0], { threshold: null, sensitivity: 0, specificity: 1 });
+  deepStrictEqual(points[points.length - 1], { threshold: null, sensitivity: 1, specificity: 0 });
+  // The optimum is still a real threshold, not an endpoint.
+  strictEqual(out.stats.find((s) => s.label === "Optimal cutpoint (Youden)")?.value, 0.8);
+  // And the graph draws the runner's points as-is — no duplicated endpoints.
+  const options = newGraphOptions("roc-curve");
+  const fig = GRAPHS["roc-curve"].build(readTable(data).columns, options, paintOf(options, 1));
+  const curve = (fig.data as { mode?: string; x?: number[]; y?: number[] }[]).find(
+    (t) => t.mode === "lines+markers",
+  );
+  deepStrictEqual(curve?.x, points.map((p) => 1 - p.specificity));
+  deepStrictEqual(curve?.y, points.map((p) => p.sensitivity));
 });
 
 // ── Row groups (a grouped table's third factor, plan 03) ─────────────────
@@ -3648,6 +3728,24 @@ check("partial multiple-t-tests params fall back to the unpaired Gaussian Holm d
   if ("error" in out) throw new Error(`expected a result, got ${out.error}`);
   strictEqual(out.stats.find((s) => s.label === "Rows compared")?.value, 2);
   ok(out.comparisons!.every((c) => c.p !== null), "every row completes with a P value");
+});
+
+// v1.5.0 m12: a row with < 2 replicates in a group is excluded, but only
+// the "Rows compared" count showed it — the dropped row was unnamed. The
+// notes now name it, so the user can see which row never got a test.
+check("multiple t tests name the rows left out for too few replicates (v1.5.0 m12)", async () => {
+  const data: TableData = {
+    columns: ["Title", "A:1", "A:2", "A:3", "B:1", "B:2", "B:3"],
+    rows: [
+      ["Day 1", "1", "2", "3", "4", "5", "6"],
+      ["Day 2", "2", null, null, "5", "6", "7"],
+      ["Day 3", "2", "3", "4", "5", "6", "7"],
+    ],
+  };
+  const out = await runAnalysis("multiple-t-tests", data, {} as AnalysisParams);
+  if ("error" in out) throw new Error(`expected a result, got ${out.error}`);
+  strictEqual(out.stats.find((s) => s.label === "Rows compared")?.value, 2);
+  ok(out.notes.includes("“Day 2”"), `notes must name the dropped row, got: ${out.notes}`);
 });
 
 // BUG-REPORT #26, leg 2 (FL-R3-26): installBatch used to call evalNamedVector
@@ -8371,6 +8469,39 @@ check("a bare-string y in enzyme inhibition means one series", async () => {
   ok(!("error" in fit) && fit.coefficients, "bare-string y must run the Morrison fit");
   const kiapp = fit.coefficients!.find((c) => c.term === "Kiapp")?.estimate;
   ok(kiapp != null && Math.abs(kiapp - 2) < 0.01, `Kiapp should be ~2, got ${kiapp}`);
+});
+
+// v1.5.0 m13: the global fit's Km start is the median positive X of the
+// uninhibited (control) series — when the control series has no positive X
+// the median of [] is NaN and the fit failed with the misleading
+// "could not be fitted … non-finite start value" instead of naming the
+// control series. The runner now validates the control series up front.
+check("enzyme inhibition names the control series when it has no positive X (v1.5.0 m13)", async () => {
+  const data: TableData = {
+    columns: ["Title", "X", "Control", "Treated 10 nM"],
+    rows: [
+      ["", "0", "10", "9"],
+      ["", "0", "11", "8.5"],
+      ["", "0", "10", "8"],
+      ["", "0", "11", "7.5"],
+      ["", "1", null, "6"],
+      ["", "2", null, "5"],
+      ["", "5", null, "4"],
+      ["", "10", null, "3"],
+    ],
+  };
+  deepStrictEqual(
+    await runAnalysis("enzyme-inhibition", data, {
+      model: "competitive",
+      inhibitorConcentrations: { Control: 0, "Treated 10 nM": 10 },
+    } as AnalysisParams),
+    {
+      error:
+        "“Control” is the uninhibited series ([I] = 0) but has no positive substrate concentration — " +
+        "Km is estimated from the uninhibited series, so it cannot be fitted. " +
+        "Give the uninhibited series a positive substrate concentration.",
+    },
+  );
 });
 
 check("a wizard asks which data sets only when there is a choice", () => {

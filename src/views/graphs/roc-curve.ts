@@ -39,10 +39,11 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
   if (distinct.length !== 2) return { data: [], layout: { ...layout, ...axes } };
   const r = computeRocCurve(pairs, defaultPositive(distinct));
   const color = paint.color(scoreCol.name, 0);
-  // The empirical ROC curve: (0,0), then one vertex per threshold
-  // (descending thresholds run from low sensitivity to high), then (1,1).
-  const x = [0, ...r.points.map((p) => 1 - p.specificity), 1];
-  const y = [0, ...r.points.map((p) => p.sensitivity), 1];
+  // The empirical ROC curve: the runner's points already include the (0,0)
+  // and (1,1) endpoints (plan 05), so they are drawn as-is — no endpoint
+  // is added here (adding them again would duplicate the corners).
+  const x = r.points.map((p) => 1 - p.specificity);
+  const y = r.points.map((p) => p.sensitivity);
   const optX = 1 - r.optimum.specificity;
   const optY = r.optimum.sensitivity;
   const data: unknown[] = [
