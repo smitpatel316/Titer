@@ -156,7 +156,9 @@ describe("Convert dialog", () => {
     await switchToProjectWindow();
     await openConverter();
     // Switch direction to Titer → Prism (current project is the converted one).
-    await $("label*=Titer (this project)").click();
+    // Two directions share the "Titer (this project)" prefix since item 104
+    // (.pzfx); match the full .prism label so strict mode sees exactly one.
+    await $("label*=Titer (this project) → Prism (.prism)").click();
     await $("button*=Convert this project").click();
     // Same stall point as dir 1, other direction: on the pre-fix tip this
     // wait times out and the test fails, which is the expected pre-fix result.
