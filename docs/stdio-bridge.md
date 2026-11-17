@@ -320,3 +320,14 @@ succeeds without restarting Claude.
    against a release DMG rides the 1.4.0 release build.
    The full `npm run build:linux` run itself was not executed here
    (only the staging step + cargo test); the GUI lane owns Linux builds.
+   UPDATE 2026-11-16 (v1.6.0 P1, fix/v16-p1-bridge-staging): the manual
+   prerequisite is gone — `src-tauri/build.rs` now stages the bridge
+   itself before `tauri_build::build()` runs, so a bare `cargo check` /
+   `cargo test` / `tauri dev` / `tauri build` in a pristine checkout
+   succeeds with no manual step. It rebuilds from current bridge source
+   whenever any file under `mcp-bridge/` is newer than the staged
+   binary (a stale bridge can never silently ship), skips the rebuild
+   when the staged binary is already fresh (so the release scripts'
+   own staging still runs first and is not double-built), and fails
+   hard if the rebuild fails. `scripts/build-stdio-bridge.sh` is still
+   the staging path for release builds and `.mcpb` packing.
