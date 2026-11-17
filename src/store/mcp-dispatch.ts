@@ -20,7 +20,16 @@ import * as React from "react";
 import { ANALYSES, runAnalysis } from "../stats";
 import type { AnalysisParams, AnalysisResult, AnalysisType } from "../stats/types";
 import { infoSheetsOf, resolveAnalysisParams } from "../lib/info-sheets";
-import { validateAnalysisParams } from "../lib/project-file";
+import {
+  SIMULATION_DISTRIBUTIONS,
+  type SimulationDistribution,
+  type SimulationSpec,
+} from "../stats/types";
+import { simulateTableData, validateSimulationSpec } from "../stats/simulation/simulate";
+import { parseProjectText, validateAnalysisParams } from "../lib/project-file";
+import { extractMethod, methodForTable, remapGraphOptions } from "../lib/template";
+import { runScript } from "../lib/prism-script";
+import type { WandReport } from "../lib/wand";
 import { analysisOptionsForTable, countDataGroups, hasRowGroups } from "../views/analyses";
 import {
   defaultDocumentIo,
@@ -98,6 +107,19 @@ export interface JobDeps {
   renameNode?: (id: string, name: string) => void;
   /** Freeze or unfreeze an analysis node (default: the real store action). */
   setAnalysisFrozen?: (id: string, frozen: boolean) => void;
+  /** Copy an example table's analyses + graphs onto target tables, as one
+   *  undo step (default: the real store action). Returns the per-table
+   *  report. */
+  applyWand?: (exampleId: string, targetIds: string[], prefix: string) => WandReport;
+  /** Replace the whole project with a script run's result, as one undo
+   *  step (default: the real store action). */
+  applyScript?: (doc: {
+    nodes: Record<string, ProjectNode>;
+    rootOrder: string[];
+    childOrder: Record<string, string[]>;
+    activeNodeId: string | null;
+    projectName?: string;
+  }) => void;
   /** Load a project into the store (the import job replaces it). */
   loadProject?: DocumentDeps["loadProject"];
   /** Mark the project saved (the save job). */
@@ -112,6 +134,8 @@ export interface JobDeps {
   actions?: {
     createTable: (tableType: TableType) => void;
     createTableWithData: (tableType: TableType, data: TableData, name: string) => void;
+    /** A table of simulated values ("Simulated data", numbered). */
+    createSimulatedTable: (tableType: TableType, data: TableData) => void;
     updateTable: (id: string, data: TableData, label: string, move?: TableMove) => void;
     duplicateFamily: (id: string) => void;
     renameNode: (id: string, name: string) => void;
@@ -238,6 +262,16 @@ function argInt(job: McpJob, args: unknown, key: string, fallback?: number): num
 function argBool(job: McpJob, args: unknown, key: string): boolean {
   const value = (args as Record<string, unknown> | null | undefined)?.[key];
   if (typeof value !== "boolean") throw jobErr(job, `needs ${key} to be true or false.`);
+  return value;
+}
+
+/** One optional arg, as a finite number — present but not a number is an error. */
+function argOptNumber(job: McpJob, args: unknown, key: string): number | undefined {
+  const value = (args as Record<string, unknown> | null | undefined)?.[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw jobErr(job, `needs ${key} to be a number, not ${JSON.stringify(value)}.`);
+  }
   return value;
 }
 
@@ -1104,6 +1138,215 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       return executeCreateInfoSheet(job, toGraphDeps(deps));
     case "update-info-sheet":
       return executeUpdateInfoSheet(job, toGraphDeps(deps));
+    case "simulate-data": {
+      // L5: draw a new table of simulated values (Analysis ▸ Simulate
+      // data…) — one webR round-trip, so the tool awaits this job like the
+      // table tools. The spec is validated by the same function the dialog
+      // uses, so the rules cannot drift from the app.
+      const actions = tableActions(job, deps);
+      const type = argString(job, job.args, "table_type");
+      if (type !== "column" && type !== "grouped" && type !== "xy") {
+        throw jobErr(job, `has no simulated table type “${type}” — simulate builds column, grouped or xy tables.`);
+      }
+      const simType = type as "column" | "grouped" | "xy";
+      const distribution = argString(job, job.args, "distribution");
+      if (!(SIMULATION_DISTRIBUTIONS as string[]).includes(distribution)) {
+        throw jobErr(
+          job,
+          `has no distribution “${distribution}” — the distributions are ${SIMULATION_DISTRIBUTIONS.join(", ")}.`,
+        );
+      }
+      const spec: SimulationSpec = {
+        distribution: distribution as SimulationDistribution,
+        mean: argOptNumber(job, job.args, "mean"),
+        sd: argOptNumber(job, job.args, "sd"),
+        meanlog: argOptNumber(job, job.args, "meanlog"),
+        sdlog: argOptNumber(job, job.args, "sdlog"),
+        min: argOptNumber(job, job.args, "min"),
+        max: argOptNumber(job, job.args, "max"),
+        size: argOptNumber(job, job.args, "size"),
+        prob: argOptNumber(job, job.args, "prob"),
+        lambda: argOptNumber(job, job.args, "lambda"),
+        rate: argOptNumber(job, job.args, "rate"),
+        n: argInt(job, job.args, "n"),
+        datasets: argInt(job, job.args, "datasets"),
+        seed: argInt(job, job.args, "seed"),
+        tableType: simType,
+      };
+      const problem = validateSimulationSpec(spec);
+      if (problem) throw jobErr(job, problem);
+      const before = new Set(deps.getState().rootOrder);
+      const data = await simulateTableData(spec);
+      actions.createSimulatedTable(simType, data);
+      await deps.flush?.();
+      const after = deps.getState();
+      const createdId = after.rootOrder.find((id) => !before.has(id) && after.nodes[id]?.type === "table");
+      if (!createdId) {
+        throw jobErr(job, "simulated the data but its table's id could not be read back — ask titer_list_tables for the new table.");
+      }
+      const created = after.nodes[createdId]!;
+      return {
+        result: {
+          project_id: job.project_id,
+          table_id: createdId,
+          name: created.name,
+          table_type: TABLES[simType].label,
+          rows: created.data?.rows.length ?? 0,
+          data_columns: (created.data?.columns.length ?? 1) - 1,
+        },
+        created: { table_id: createdId },
+      };
+    }
+    case "apply-method": {
+      // L5: apply a `.pzm` method file's analyses + graphs to a table —
+      // the same path as Analysis ▸ Apply Method… (use-document.ts),
+      // minus the native alerts. The created analyses are nodes with
+      // params, not runs (as in the UI — they compute when viewed).
+      const actions = tableActions(job, deps);
+      const tableId = argString(job, job.args, "table_id");
+      const text = argString(job, job.args, "text");
+      const state = deps.getState();
+      const table = tableNode(job, state, tableId);
+      const tableType = table.tableType;
+      if (tableType === undefined) {
+        throw jobErr(job, `cannot apply a method to table “${table.name}” — it has no table type recorded.`);
+      }
+      let parsed: ReturnType<typeof parseProjectText>;
+      try {
+        parsed = parseProjectText(text);
+      } catch {
+        throw jobErr(job, "could not be read as a method file — it is not a Titer project file.");
+      }
+      if ("error" in parsed) throw jobErr(job, `could not be read as a method file — ${parsed.error}`);
+      const method = extractMethod(parsed.project);
+      if (!method || (method.analyses.length === 0 && method.graphs.length === 0)) {
+        throw jobErr(job, "has no analyses or graphs to apply.");
+      }
+      const kept = methodForTable(method, tableType, table.data);
+      if (kept.analyses.length === 0 && kept.graphs.length === 0) {
+        // Nothing fits this table: a successful no-op, with the reasons.
+        return {
+          result: {
+            project_id: job.project_id,
+            table_id: tableId,
+            created: { analyses: [], graphs: [] },
+            skipped: kept.skipped,
+          },
+        };
+      }
+      const create =
+        deps.createAnalysis ??
+        (() => {
+          throw new Error("This window can't create analyses (no createAnalysis).");
+        });
+      const idMap: Record<string, string> = {};
+      const appliedAnalyses: string[] = [];
+      for (const a of kept.analyses) {
+        idMap[a.id] = create(tableId, a.analysisType, a.analysisParams);
+        appliedAnalyses.push(idMap[a.id]);
+      }
+      const appliedGraphs: string[] = [];
+      const droppedLinks: string[] = [];
+      for (const g of kept.graphs) {
+        const { options, dropped } = remapGraphOptions(g.graphOptions, idMap);
+        appliedGraphs.push(actions.createGraph(tableId, g.graphType, options));
+        for (const key of dropped) {
+          droppedLinks.push(`${g.name} — dropped its link to an analysis that wasn't applied (${key}).`);
+        }
+      }
+      return {
+        result: {
+          project_id: job.project_id,
+          table_id: tableId,
+          created: { analyses: appliedAnalyses, graphs: appliedGraphs },
+          skipped: kept.skipped,
+          dropped_links: droppedLinks,
+        },
+        created: { table_id: tableId },
+      };
+    }
+    case "apply-wand": {
+      // L5: analyze + graph this table like another table (Analysis ▸ Use
+      // Wand…) — the store's `applyWand`, one target, one undo step. The
+      // report is the existing `WandReport`; the created ids are diffed
+      // from the table's children before/after.
+      const tableId = argString(job, job.args, "table_id");
+      const exampleId = argString(job, job.args, "example_table_id");
+      const prefix = argOptString(job, job.args, "prefix") ?? "";
+      const state = deps.getState();
+      tableNode(job, state, tableId);
+      tableNode(job, state, exampleId);
+      const before = new Set(state.childOrder?.[tableId] ?? []);
+      const apply =
+        deps.applyWand ??
+        (() => {
+          throw new Error("This window can't use the Wand (no applyWand).");
+        });
+      const report = apply(exampleId, [tableId], prefix);
+      await deps.flush?.();
+      const after = deps.getState();
+      const created = (after.childOrder?.[tableId] ?? [])
+        .filter((id) => !before.has(id))
+        .map((id) => after.nodes[id])
+        .filter((n): n is ProjectNode => n !== undefined);
+      return {
+        result: {
+          project_id: job.project_id,
+          table_id: tableId,
+          created: {
+            analyses: created.filter((n) => n.type === "analysis").map((n) => n.id),
+            graphs: created.filter((n) => n.type === "graph").map((n) => n.id),
+          },
+          report,
+        },
+        created: { table_id: tableId },
+      };
+    }
+    case "run-script": {
+      // L5: run a Prism script against the whole project (File ▸ Run
+      // Script…) — the pure engine (`lib/prism-script.ts`), one undo step
+      // ("Run Script"). A run that hits an error changes nothing, so the
+      // job errors with the log. The script's effects (file writes, graph
+      // exports, save, print) are REPORTED, not executed: graph exports
+      // need the headless render path (GAP-2, L8), and executing file
+      // writes from an agent script is the coordinator's call, not this
+      // lane's. `Import` names files the engine cannot read here, so it
+      // errors plainly instead of silently skipping.
+      const script = argString(job, job.args, "script");
+      const state = deps.getState();
+      const doc = {
+        nodes: state.nodes,
+        rootOrder: state.rootOrder,
+        childOrder: state.childOrder,
+        activeNodeId: state.activeNodeId,
+        projectName: state.projectName,
+      };
+      const result = runScript(doc, script, {});
+      if (result.stopped) {
+        throw jobErr(job, `stopped without changing anything — ${result.log.join(" ")}`);
+      }
+      const changed = JSON.stringify(result.doc) !== JSON.stringify(doc);
+      if (changed) {
+        const apply =
+          deps.applyScript ??
+          (() => {
+            throw new Error("This window can't run scripts (no applyScript).");
+          });
+        apply(result.doc);
+        await deps.flush?.();
+      }
+      return {
+        result: {
+          project_id: job.project_id,
+          replaced: changed,
+          log: result.log,
+          effects: result.effects,
+          effects_executed: false,
+          effects_note:
+            "The script's file writes, graph exports, save and print effects were reported, not executed — graph exports need the headless render path (L8), and file writes from an agent script are not wired in this lane.",
+        },
+      };
+    }
     default:
       throw new Error(`Unknown job action “${job.action}”.`);
   }
@@ -1124,6 +1367,8 @@ export function useMcpJobDispatcher() {
   const createAnalysis = actions.createAnalysis;
   const renameNode = actions.renameNode;
   const setAnalysisFrozen = actions.setAnalysisFrozen;
+  const applyWand = actions.applyWand;
+  const applyScript = actions.applyScript;
   const loadProject = actions.loadProject;
   const markSaved = actions.markProjectSaved;
   // The table branches dispatch through these actions; after a dispatch
@@ -1173,6 +1418,8 @@ export function useMcpJobDispatcher() {
                 createAnalysis,
                 renameNode,
                 setAnalysisFrozen,
+                applyWand,
+                applyScript,
                 loadProject,
                 markSaved,
                 actions,

@@ -1532,6 +1532,137 @@ pub struct UpdateInfoSheetArgs {
     pub info: serde_json::Value,
 }
 
+// ── Analysis-composite tools (L5) ────────────────────────────────────────
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SimulateDataArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The new table's shape: column, grouped or xy.
+    pub table_type: String,
+    /// gaussian, lognormal, uniform, binomial, poisson or exponential.
+    pub distribution: String,
+    /// Values per dataset (whole number, at least 2).
+    pub n: serde_json::Value,
+    /// Datasets / groups / Y series (whole number, at least 1).
+    pub datasets: serde_json::Value,
+    /// The R seed (whole number — the same seed + settings reproduce the table).
+    pub seed: serde_json::Value,
+    /// Gaussian mean.
+    #[serde(default)]
+    pub mean: Option<f64>,
+    /// Gaussian standard deviation.
+    #[serde(default)]
+    pub sd: Option<f64>,
+    /// Lognormal meanlog (mean of the LOGGED values).
+    #[serde(default)]
+    pub meanlog: Option<f64>,
+    /// Lognormal sdlog (SD of the LOGGED values).
+    #[serde(default)]
+    pub sdlog: Option<f64>,
+    /// Uniform minimum.
+    #[serde(default)]
+    pub min: Option<f64>,
+    /// Uniform maximum.
+    #[serde(default)]
+    pub max: Option<f64>,
+    /// Binomial number of trials.
+    #[serde(default)]
+    pub size: Option<f64>,
+    /// Binomial probability of success, 0–1.
+    #[serde(default)]
+    pub prob: Option<f64>,
+    /// Poisson mean (lambda).
+    #[serde(default)]
+    pub lambda: Option<f64>,
+    /// Exponential rate (mean = 1 / rate).
+    #[serde(default)]
+    pub rate: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ApplyMethodArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The table to apply the method to, as shown by titer_list_tables.
+    pub table_id: String,
+    /// Local path of the .pzm method file — never a URL.
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ApplyWandArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The table to analyse + graph, as shown by titer_list_tables.
+    pub table_id: String,
+    /// The example table to copy from, as shown by titer_list_tables.
+    pub example_table_id: String,
+    /// Prefix for the copied analyses' and graphs' names; omit for none.
+    #[serde(default)]
+    pub prefix: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RunScriptArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The Prism script text (one command per line; see the tool text).
+    pub script: String,
+    /// Pass true to carry out a run the first call warned about.
+    #[serde(default)]
+    pub confirm: bool,
+}
+
+/// The distributions "Simulate data" can draw from (`SimulationDistribution`
+/// in src/stats/types.ts × the `simulate.ts` runners).
+const SIMULATION_DISTRIBUTIONS: &[&str] = &["gaussian", "lognormal", "uniform", "binomial", "poisson", "exponential"];
+
+/// A simulate arg that must be a whole number — present, an integer, and
+/// nothing else (20.0 is not a whole number here).
+fn simulate_int(value: &serde_json::Value, name: &str) -> Result<i64, String> {
+    if let Some(n) = value.as_i64() {
+        return Ok(n);
+    }
+    if let Some(n) = value.as_u64() {
+        return Ok(i64::try_from(n).map_err(|_| format!("“{name}” is too large."))?);
+    }
+    Err(format!("“{name}” must be a whole number, not {value}."))
+}
+
+/// A `.pzm` method file's text, read Rust-side (local paths only — the same
+/// URL rejection as `project_path_format`). The frontend parses the text;
+/// Rust only reads it.
+fn read_method_file(path: &str) -> Result<String, String> {
+    if path.contains("://") || path.starts_with("http:") || path.starts_with("https:") {
+        return Err(format!(
+            "“{path}” is not a local file path — Titer applies method files on this computer, not URLs."
+        ));
+    }
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if ext != "pzm" {
+        return Err(format!("“{path}” is not a .pzm method file — apply a .pzm file."));
+    }
+    let bytes = std::fs::read(path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            format!("No file at “{path}” — check the path and ask again.")
+        } else {
+            e.to_string()
+        }
+    })?;
+    let text =
+        String::from_utf8(bytes).map_err(|_| format!("“{path}” is not UTF-8 text — a .pzm method file is text."))?;
+    Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
+}
+
 #[tool_router(router = tools, vis = "pub")]
 impl TiterMcpServer {
     /// What is open in Titer, and the tables, analyses, graphs and figures
@@ -3192,6 +3323,261 @@ impl TiterMcpServer {
             }
         }
     }
+    // ── Analysis composites (L5, v1.6.0) ────────────────────────────────
+    // Four tools on the L0 dispatch: simulate-data draws a table through
+    // webR (one round-trip, so the tool awaits the job like the table
+    // tools); apply-method / apply-wand create analysis + graph nodes (not
+    // runs, as in the UI); run-script replaces the whole project via the
+    // Prism-script engine, with the two-step confirm of `delete-node`.
+
+    /// Simulate data: draw a new table of simulated values from a
+    /// distribution (Analysis ▸ Simulate data…). distribution is gaussian
+    /// (mean, sd), lognormal (meanlog, sdlog — the LOGGED values' mean/SD),
+    /// uniform (min, max), binomial (size trials, prob 0–1), poisson
+    /// (lambda) or exponential (rate, mean 1/rate). Only the fields its
+    /// distribution needs are read. n is values per dataset, datasets how
+    /// many columns/groups/Y series, seed the R seed (same seed + settings
+    /// reproduce the table exactly). table_type is column, grouped or xy.
+    #[tool(
+        name = "titer_simulate_data",
+        description = "Simulate data: draw a new table of simulated values from a distribution (gaussian with mean/sd, lognormal with meanlog/sdlog of the LOGGED values, uniform with min/max, binomial with size trials and prob 0-1, poisson with lambda, exponential with rate). Only the fields its distribution needs are read. n is values per dataset, datasets how many columns/groups/Y series, seed the R seed (same seed + settings reproduce the table). table_type is column, grouped or xy.",
+        annotations(
+            title = "Simulate data",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn simulate_data(
+        &self,
+        Parameters(args): Parameters<SimulateDataArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let sim_args = serde_json::json!({
+            "project_id": args.project_id,
+            "table_type": args.table_type,
+            "distribution": args.distribution,
+            "n": args.n,
+            "datasets": args.datasets,
+            "seed": args.seed,
+            "mean": args.mean,
+            "sd": args.sd,
+            "meanlog": args.meanlog,
+            "sdlog": args.sdlog,
+            "min": args.min,
+            "max": args.max,
+            "size": args.size,
+            "prob": args.prob,
+            "lambda": args.lambda,
+            "rate": args.rate,
+        });
+        let result: Result<serde_json::Value, String> = async {
+            if !["column", "grouped", "xy"].contains(&args.table_type.as_str()) {
+                return Err(format!(
+                    "Unknown simulated table type “{}” — simulate builds column, grouped or xy tables.",
+                    args.table_type
+                ));
+            }
+            if !SIMULATION_DISTRIBUTIONS.contains(&args.distribution.as_str()) {
+                return Err(format!(
+                    "Unknown distribution “{}”. The distributions are {}.",
+                    args.distribution,
+                    SIMULATION_DISTRIBUTIONS.join(", ")
+                ));
+            }
+            let n = simulate_int(&args.n, "n")?;
+            let datasets = simulate_int(&args.datasets, "datasets")?;
+            let seed = simulate_int(&args.seed, "seed")?;
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            self.run_table_job(
+                &project_id,
+                "simulate-data",
+                serde_json::json!({
+                    "table_type": args.table_type,
+                    "distribution": args.distribution,
+                    "n": n,
+                    "datasets": datasets,
+                    "seed": seed,
+                    "mean": args.mean,
+                    "sd": args.sd,
+                    "meanlog": args.meanlog,
+                    "sdlog": args.sdlog,
+                    "min": args.min,
+                    "max": args.max,
+                    "size": args.size,
+                    "prob": args.prob,
+                    "lambda": args.lambda,
+                    "rate": args.rate,
+                }),
+            )
+            .await
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_simulate_data", sim_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_simulate_data", sim_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Apply a .pzm method file's analyses + graphs to a table (Analysis ▸
+    /// Apply Method…). Only what the table offers is applied; the rest is
+    /// reported under skipped with its reason, and a graph link to an
+    /// analysis that wasn't applied is dropped and named. The created
+    /// analyses are nodes with params, not runs — run them with
+    /// titer_run_analysis.
+    #[tool(
+        name = "titer_apply_method",
+        description = "Apply a .pzm method file's analyses and graphs to a table (Analysis > Apply Method). Only what the table offers is applied; the rest is reported under skipped with its reason, and a graph link to an analysis that wasn't applied is dropped and named. The created analyses are nodes with params, not runs. path must be a local .pzm file, never a URL.",
+        annotations(
+            title = "Apply method",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn apply_method(
+        &self,
+        Parameters(args): Parameters<ApplyMethodArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        // The log carries the path, never the file's text.
+        let method_args =
+            serde_json::json!({ "project_id": args.project_id, "table_id": args.table_id, "path": args.path });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            {
+                let snapshots = self.state.snapshots();
+                let snap = snapshots.get(&project_id).ok_or_else(|| {
+                    format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+                })?;
+                snapshot_node(snap, &args.table_id, "table")?;
+            }
+            let text = read_method_file(&args.path)?;
+            self.run_table_job(
+                &project_id,
+                "apply-method",
+                serde_json::json!({ "table_id": args.table_id, "text": text }),
+            )
+            .await
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_apply_method", method_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_apply_method", method_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Use the Wand: analyse + graph this table like another table
+    /// (Analysis ▸ Use Wand…). Copies the example table's analyses and
+    /// graphs that apply to this table's type, in sidebar order, as one
+    /// undo step. report is the Wand report (what was copied where, and
+    /// what was skipped with its reason). The copied analyses are nodes
+    /// with params, not runs.
+    #[tool(
+        name = "titer_apply_wand",
+        description = "Use the Wand: analyse and graph this table like another table (Analysis > Use Wand). Copies the example table's analyses and graphs that apply to this table's type, in sidebar order, as one undo step. report is the Wand report (what was copied where, and what was skipped with its reason). The copied analyses are nodes with params, not runs.",
+        annotations(
+            title = "Apply Wand",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn apply_wand(&self, Parameters(args): Parameters<ApplyWandArgs>) -> Result<Json<serde_json::Value>, String> {
+        let wand_args = serde_json::json!({ "project_id": args.project_id, "table_id": args.table_id, "example_table_id": args.example_table_id, "prefix": args.prefix });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            {
+                let snapshots = self.state.snapshots();
+                let snap = snapshots.get(&project_id).ok_or_else(|| {
+                    format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+                })?;
+                snapshot_node(snap, &args.table_id, "table")?;
+                snapshot_node(snap, &args.example_table_id, "table")?;
+            }
+            self.run_table_job(
+                &project_id,
+                "apply-wand",
+                serde_json::json!({ "table_id": args.table_id, "example_table_id": args.example_table_id, "prefix": args.prefix }),
+            )
+            .await
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_apply_wand", wand_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_apply_wand", wand_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Run a Prism script against the whole project (File ▸ Run Script…).
+    /// script is the script TEXT (Prism-script format: one command per
+    /// line, // and /* */ comments, ForEach loops, GoTo/SetInfo/InsertData/
+    /// ExportTable and the rest — no path form). The run replaces the
+    /// current project content with what the script builds, as one undo
+    /// step; a run that hits an error changes nothing. The script's file
+    /// writes, graph exports, save and print effects are reported under
+    /// effects, not executed. The first call (without confirm) returns
+    /// needs_confirm with a warning and changes nothing; repeat with
+    /// confirm true to run it.
+    #[tool(
+        name = "titer_run_script",
+        description = "Run a Prism script against the whole project (File > Run Script). script is the script TEXT (Prism-script format: one command per line, // and /* */ comments, ForEach loops). The run replaces the current project content with what the script builds, as one undo step; a run that hits an error changes nothing. The script's file writes, graph exports, save and print effects are reported under effects, not executed. The first call (without confirm) returns needs_confirm with a warning and changes nothing; repeat with confirm true to run it.",
+        annotations(
+            title = "Run script",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn run_script(&self, Parameters(args): Parameters<RunScriptArgs>) -> Result<Json<serde_json::Value>, String> {
+        // The log carries the script's length, never its text.
+        let script_args = serde_json::json!({ "project_id": args.project_id, "script_chars": args.script.chars().count(), "confirm": args.confirm });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            if args.script.trim().is_empty() {
+                return Err("“script” is empty — pass the Prism script text to run.".into());
+            }
+            if !args.confirm {
+                return Ok(serde_json::json!({
+                    "project_id": project_id,
+                    "needs_confirm": true,
+                    "warning": "Running this script replaces the current project's content — its tables, analyses, graphs and figures — with what the script builds. The current content is kept as one Undo step in Titer, but nothing is saved to disk until you save. File writes and graph exports the script asks for are reported, not run. Repeat with confirm: true to run it.",
+                }));
+            }
+            self.run_table_job(&project_id, "run-script", serde_json::json!({ "script": args.script })).await
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_run_script", script_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_run_script", script_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
 }
 
 impl TiterMcpServer {
@@ -4359,6 +4745,13 @@ mod tests {
                         "id": "a1", "type": "analysis", "name": "Dose-response fit",
                         "parentId": "t1", "analysisType": "nonlinear-regression"
                     },
+                    "t2": {
+                        "id": "t2", "type": "table", "name": "Control", "parentId": null, "tableType": "column",
+                        "data": {
+                            "columns": ["", "Control A", "Control B"],
+                            "rows": [["1", "5", "6"], ["2", "7", "8"], ["3", "9", "10"]],
+                        }
+                    },
                 },
             }),
         );
@@ -4662,8 +5055,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            34,
-            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + two L4 analysis tools + seven L6 graph/figure/info-sheet tools: {names:?}"
+            38,
+            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + two L4 analysis tools + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools: {names:?}"
         );
         for name in ["titer_read_job", "titer_list_jobs", "titer_cancel_job"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -4705,6 +5098,9 @@ mod tests {
             "titer_create_info_sheet",
             "titer_update_info_sheet",
         ] {
+            assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
+        }
+        for name in ["titer_simulate_data", "titer_apply_method", "titer_apply_wand", "titer_run_script"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
 
@@ -5193,6 +5589,293 @@ mod tests {
             "create failed: {}",
             call_raw_text(&create_failed)
         );
+        // ── L5: analysis composites ──────────────────────────────────
+        // Each tool's completer stands in for the frontend dispatcher and
+        // answers its dispatch job with a canned result; the rejections
+        // are Rust-side, before anything is enqueued.
+
+        // simulate: the completer answers the simulate-data job; the tool
+        // returns the new table.
+        let simulator = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for job in simulator.take_jobs("project-1") {
+                if job.action != "simulate-data" {
+                    continue;
+                }
+                let _ = simulator.complete_job(
+                    "project-1",
+                    &job.job_id,
+                    JobStatus::Done,
+                    Some(json!({ "project_id": "project-1", "table_id": "t5", "name": "Simulated data 1", "table_type": "Column", "rows": 20, "data_columns": 1 })),
+                    None,
+                    Some(json!({ "table_id": "t5" })),
+                );
+            }
+        });
+        let (simulated, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                31,
+                "titer_simulate_data",
+                json!({ "project_id": "project-1", "table_type": "column", "distribution": "gaussian", "n": 20, "datasets": 1, "seed": 42, "mean": 0, "sd": 1 }),
+            ),
+        )
+        .await;
+        assert_eq!(call_text(&simulated)["table_id"], "t5");
+        assert_eq!(call_text(&simulated)["name"], "Simulated data 1");
+        assert_eq!(call_text(&simulated)["rows"], 20);
+        assert_eq!(call_text(&simulated)["data_columns"], 1);
+
+        // Rejections: an unknown distribution, an unknown table type, and
+        // a fractional n — all plain errors before anything is enqueued.
+        let (bad_dist, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                32,
+                "titer_simulate_data",
+                json!({ "project_id": "project-1", "table_type": "column", "distribution": "weibull", "n": 20, "datasets": 1, "seed": 42 }),
+            ),
+        )
+        .await;
+        assert_eq!(bad_dist["result"]["isError"], true);
+        assert!(
+            call_raw_text(&bad_dist).contains("Unknown distribution"),
+            "bad distribution: {}",
+            call_raw_text(&bad_dist)
+        );
+        let (bad_type, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                33,
+                "titer_simulate_data",
+                json!({ "project_id": "project-1", "table_type": "survival", "distribution": "gaussian", "n": 20, "datasets": 1, "seed": 42 }),
+            ),
+        )
+        .await;
+        assert_eq!(bad_type["result"]["isError"], true);
+        assert!(
+            call_raw_text(&bad_type).contains("Unknown simulated table type"),
+            "bad type: {}",
+            call_raw_text(&bad_type)
+        );
+        let (frac_n, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                34,
+                "titer_simulate_data",
+                json!({ "project_id": "project-1", "table_type": "column", "distribution": "gaussian", "n": 20.5, "datasets": 1, "seed": 42 }),
+            ),
+        )
+        .await;
+        assert_eq!(frac_n["result"]["isError"], true);
+        assert!(call_raw_text(&frac_n).contains("whole number"), "fractional n: {}", call_raw_text(&frac_n));
+
+        // apply-method: the completer answers the apply-method job. The
+        // method file itself is a temp .pzm on disk (Rust reads it).
+        let method_path = std::env::temp_dir().join("titer-l5-smoke-method.pzm");
+        std::fs::write(
+            &method_path,
+            "{\"app\":\"titer\",\"project\":{\"nodes\":{},\"rootOrder\":[],\"childOrder\":{}}}",
+        )
+        .expect("write smoke method");
+        let applier = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for job in applier.take_jobs("project-1") {
+                if job.action != "apply-method" {
+                    continue;
+                }
+                let _ = applier.complete_job(
+                    "project-1",
+                    &job.job_id,
+                    JobStatus::Done,
+                    Some(json!({ "project_id": "project-1", "table_id": "t1", "created": { "analyses": ["a5"], "graphs": ["g5"] }, "skipped": [], "dropped_links": [] })),
+                    None,
+                    Some(json!({ "table_id": "t1" })),
+                );
+            }
+        });
+        let (applied, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                35,
+                "titer_apply_method",
+                json!({ "project_id": "project-1", "table_id": "t1", "path": method_path.to_string_lossy() }),
+            ),
+        )
+        .await;
+        assert_eq!(call_text(&applied)["created"]["analyses"][0], "a5");
+        assert_eq!(call_text(&applied)["created"]["graphs"][0], "g5");
+        assert_eq!(call_text(&applied)["table_id"], "t1");
+        let _ = std::fs::remove_file(&method_path);
+
+        // Rejections: a non-.pzm path, a URL, and a missing file.
+        let (not_pzm, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                36,
+                "titer_apply_method",
+                json!({ "project_id": "project-1", "table_id": "t1", "path": "/tmp/Dose.hlx" }),
+            ),
+        )
+        .await;
+        assert_eq!(not_pzm["result"]["isError"], true);
+        assert!(call_raw_text(&not_pzm).contains("not a .pzm"), "not pzm: {}", call_raw_text(&not_pzm));
+        let (method_url, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                37,
+                "titer_apply_method",
+                json!({ "project_id": "project-1", "table_id": "t1", "path": "https://example.com/Method.pzm" }),
+            ),
+        )
+        .await;
+        assert_eq!(method_url["result"]["isError"], true);
+        assert!(
+            call_raw_text(&method_url).contains("not a local file path"),
+            "method url: {}",
+            call_raw_text(&method_url)
+        );
+        let (method_gone, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                38,
+                "titer_apply_method",
+                json!({ "project_id": "project-1", "table_id": "t1", "path": "/tmp/no-such-method.pzm" }),
+            ),
+        )
+        .await;
+        assert_eq!(method_gone["result"]["isError"], true);
+        assert!(call_raw_text(&method_gone).contains("No file at"), "method gone: {}", call_raw_text(&method_gone));
+
+        // apply-wand: the completer answers the apply-wand job with the
+        // created ids and the Wand report.
+        let wander = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for job in wander.take_jobs("project-1") {
+                if job.action != "apply-wand" {
+                    continue;
+                }
+                let _ = wander.complete_job(
+                    "project-1",
+                    &job.job_id,
+                    JobStatus::Done,
+                    Some(json!({ "project_id": "project-1", "table_id": "t2", "created": { "analyses": ["a6"], "graphs": ["g6"] }, "report": { "exampleName": "Dose", "created": [{ "tableId": "t2", "tableName": "Control", "analyses": 1, "graphs": 1, "notes": [] }], "skipped": [] } })),
+                    None,
+                    Some(json!({ "table_id": "t2" })),
+                );
+            }
+        });
+        let (wanded, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                39,
+                "titer_apply_wand",
+                json!({ "project_id": "project-1", "table_id": "t2", "example_table_id": "t1" }),
+            ),
+        )
+        .await;
+        assert_eq!(call_text(&wanded)["created"]["analyses"][0], "a6");
+        assert_eq!(call_text(&wanded)["created"]["graphs"][0], "g6");
+        assert_eq!(call_text(&wanded)["report"]["exampleName"], "Dose");
+        assert_eq!(call_text(&wanded)["report"]["created"][0]["tableName"], "Control");
+
+        // Rejection: an example table that isn't a table.
+        let (wand_bad, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                40,
+                "titer_apply_wand",
+                json!({ "project_id": "project-1", "table_id": "t2", "example_table_id": "a1" }),
+            ),
+        )
+        .await;
+        assert_eq!(wand_bad["result"]["isError"], true);
+        assert!(call_raw_text(&wand_bad).contains("not a table"), "wand bad example: {}", call_raw_text(&wand_bad));
+
+        // run-script: the first call (no confirm) warns and changes
+        // nothing; the confirmed call runs, and the completer answers it.
+        let (unconfirmed, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                41,
+                "titer_run_script",
+                json!({ "project_id": "project-1", "script": "GoTo D, 1\nSetYReplicates 3" }),
+            ),
+        )
+        .await;
+        assert_eq!(call_text(&unconfirmed)["needs_confirm"], true);
+        assert!(
+            call_raw_text(&unconfirmed).contains("replaces the current project's content"),
+            "script warning: {}",
+            call_raw_text(&unconfirmed)
+        );
+        let scripter = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for job in scripter.take_jobs("project-1") {
+                if job.action != "run-script" {
+                    continue;
+                }
+                let _ = scripter.complete_job(
+                    "project-1",
+                    &job.job_id,
+                    JobStatus::Done,
+                    Some(json!({ "project_id": "project-1", "replaced": true, "log": ["Line 1: GoTo D, 1"], "effects": [], "effects_executed": false })),
+                    None,
+                    None,
+                );
+            }
+        });
+        let (scripted, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                42,
+                "titer_run_script",
+                json!({ "project_id": "project-1", "script": "GoTo D, 1\nSetYReplicates 3", "confirm": true }),
+            ),
+        )
+        .await;
+        assert_eq!(call_text(&scripted)["replaced"], true);
+        assert_eq!(call_text(&scripted)["effects_executed"], false);
+
+        // Rejection: an empty script.
+        let (empty_script, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(43, "titer_run_script", json!({ "project_id": "project-1", "script": "  ", "confirm": true })),
+        )
+        .await;
+        assert_eq!(empty_script["result"]["isError"], true);
+        assert!(call_raw_text(&empty_script).contains("empty"), "empty script: {}", call_raw_text(&empty_script));
+
         let resp = client
             .delete(&url)
             .header("Mcp-Session-Id", &session)
