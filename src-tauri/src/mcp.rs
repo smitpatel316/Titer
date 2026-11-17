@@ -1924,6 +1924,37 @@ fn read_method_file(path: &str) -> Result<String, String> {
     Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
 }
 
+// ── Export tools (L8) ────────────────────────────────────────────────
+
+/// Export one graph as an image file, rendered offscreen from its node
+/// (GAP-2) — it need not be open on screen. SVG ignores `dpi`. `path`
+/// omitted = beside the project file, else <Documents>/Titer Exports
+/// (the L8 default-path rule). `width_in` / `height_in` override the
+/// graph's saved size, in inches (one alone derives the other from the
+/// saved aspect ratio).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ExportGraphArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The graph node's id, as shown by titer_list_projects.
+    pub graph_id: String,
+    /// "png" | "jpeg" | "svg" | "pdf" | "tiff".
+    pub format: String,
+    /// "150" | "300" | "600" | "900" | "1200". Omit for "300".
+    #[serde(default)]
+    pub dpi: Option<String>,
+    /// Where to write the file. Omit for the default path (see above).
+    #[serde(default)]
+    pub path: Option<String>,
+    /// The export width in inches. Omit to use the graph's saved width.
+    #[serde(default)]
+    pub width_in: Option<f64>,
+    /// The export height in inches. Omit to use the graph's saved height.
+    #[serde(default)]
+    pub height_in: Option<f64>,
+}
+
 #[tool_router(router = tools, vis = "pub")]
 impl TiterMcpServer {
     /// What is open in Titer, and the tables, analyses, graphs and figures
@@ -4480,6 +4511,89 @@ impl TiterMcpServer {
             }
         }
     }
+
+    // ── Export (L8, inventory §3.5) ───────────────────────────────────
+    // Each tool resolves its output path (explicit, or the L8 default
+    // rule), enqueues a job for the target window's frontend dispatcher
+    // (`export-graph`, …) and waits for the render + write — the
+    // dispatcher is the authority (it has the live store and the Plotly
+    // render path), so Rust passes the resolved path and the validated
+    // format/dpi through as job args. The tool returns the job's result
+    // (path, pixel size, capped) — never the bytes.
+
+    /// Export one graph as an image file (PNG, JPEG, SVG, PDF or TIFF
+    /// at 150–1200 DPI, default 300), rendered offscreen — the graph
+    /// need not be open on screen. SVG ignores dpi. `width_in` /
+    /// `height_in` override the graph's saved size in inches.
+    #[tool(
+        name = "titer_export_graph",
+        description = "Export one graph as an image file: format png/jpeg/svg/pdf/tiff, dpi 150/300/600/900/1200 (default 300, ignored for SVG). Rendered offscreen — the graph need not be open on screen. path omitted = beside the project file, else <Documents>/Titer Exports. width_in/height_in override the graph's saved size in inches (one alone derives the other from the aspect ratio). Returns the written path, pixel size, and capped/reason when the export was shrunk to the largest image Titer draws.",
+        annotations(
+            title = "Export graph",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn export_graph(
+        &self,
+        Parameters(args): Parameters<ExportGraphArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "graph_id": args.graph_id, "format": args.format, "dpi": args.dpi, "path": args.path });
+        let result: Result<serde_json::Value, String> = async {
+            let format = args.format.as_str();
+            if !EXPORT_FORMATS.contains(&format) {
+                return Err(format!(
+                    "Unknown export format “{format}” — the formats are png, jpeg, svg, pdf, tiff."
+                ));
+            }
+            let dpi = args.dpi.as_deref().unwrap_or("300");
+            if !EXPORT_DPIS.contains(&dpi) {
+                return Err(format!(
+                    "Unknown resolution “{dpi}” — the resolutions are 150, 300, 600, 900, 1200 DPI."
+                ));
+            }
+            if let Some(w) = args.width_in {
+                if !(w > 0.0) {
+                    return Err("width_in must be greater than 0.".to_string());
+                }
+            }
+            if let Some(h) = args.height_in {
+                if !(h > 0.0) {
+                    return Err("height_in must be greater than 0.".to_string());
+                }
+            }
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let ext = export_extension(format);
+            let path = match &args.path {
+                Some(p) if !p.trim().is_empty() => ensure_export_extension(p, ext),
+                _ => self
+                    .default_export_path(&project_id, &args.graph_id, "graph", ext)?
+                    .to_string_lossy()
+                    .into_owned(),
+            };
+            let mut job_args = serde_json::json!({ "graph_id": args.graph_id, "format": format, "dpi": dpi, "path": path });
+            if let Some(w) = args.width_in {
+                job_args["width_in"] = serde_json::json!(w);
+            }
+            if let Some(h) = args.height_in {
+                job_args["height_in"] = serde_json::json!(h);
+            }
+            self.run_export_job(&project_id, "export-graph", job_args).await
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_export_graph", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_export_graph", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
 }
 
 impl TiterMcpServer {
@@ -4523,6 +4637,154 @@ impl TiterMcpServer {
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
+    }
+
+    /// Enqueue an export job and wait for the frontend to render + write
+    /// it, then return the job's result (L8). Rendering (Plotly at up to
+    /// 1200 DPI) is slower than a store dispatch, so 120 s; past it the
+    /// client polls `titer_read_job` for the job. The bridge allows 300 s.
+    async fn run_export_job(
+        &self,
+        project_id: &str,
+        action: &str,
+        args: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let job = self.state.enqueue_job(project_id, action, args, serde_json::json!({}))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
+        loop {
+            match self.state.read_job(&job.job_id) {
+                Some(j) if j.status == JobStatus::Done => {
+                    return Ok(j.result.unwrap_or(serde_json::Value::Null));
+                }
+                Some(j) if j.status == JobStatus::Error => {
+                    return Err(j.error.unwrap_or_else(|| "The export job failed.".into()));
+                }
+                Some(j) if j.status == JobStatus::Cancelled => {
+                    return Err(j.error.unwrap_or_else(|| "The export job was cancelled.".into()));
+                }
+                None => return Err(format!("Job “{}” disappeared.", job.job_id)),
+                _ => {}
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(format!(
+                    "The export job is still running after 120 seconds — check it with titer_read_job (job_id “{}”).",
+                    job.job_id
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// The output path for an export when the caller passes none (L8's
+    /// default-path rule): beside the project file when the project has
+    /// one, else <Documents>/Titer Exports (created if needed). The stem
+    /// is the node name sanitized (mirrors the frontend's
+    /// `sanitizeFileStem`); a default path that already exists gets
+    /// " (2)", " (3)", … — an agent re-export never silently overwrites
+    /// a file it did not name.
+    fn default_export_path(
+        &self,
+        project_id: &str,
+        node_id: &str,
+        fallback_stem: &str,
+        ext: &str,
+    ) -> Result<PathBuf, String> {
+        let snapshot = self.state.snapshot_for(project_id).ok_or_else(|| {
+            format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+        })?;
+        let name = find_node(&snapshot, node_id).map(node_name).unwrap_or("");
+        let stem = sanitize_export_stem(name, fallback_stem);
+        let dir = match snapshot.get("filePath").and_then(|v| v.as_str()) {
+            Some(p) => PathBuf::from(p)
+                .parent()
+                .map(|d| d.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from(".")),
+            None => {
+                let app = self.state.app_handle().ok_or_else(|| {
+                    "The project has no saved file yet — pass a path, or save the project first.".to_string()
+                })?;
+                let dir = app
+                    .path()
+                    .document_dir()
+                    .map_err(|e| e.to_string())?
+                    .join("Titer Exports");
+                fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                dir
+            }
+        };
+        let mut candidate = dir.join(format!("{stem}.{ext}"));
+        let mut n = 2;
+        while candidate.exists() {
+            if n > 100 {
+                return Err(format!("Too many exports named “{stem}” in {}", dir.display()));
+            }
+            candidate = dir.join(format!("{stem} ({n}).{ext}"));
+            n += 1;
+        }
+        Ok(candidate)
+    }
+}
+
+/// The graph/figure export formats, and the resolutions they render at.
+const EXPORT_FORMATS: &[&str] = &["png", "jpeg", "svg", "pdf", "tiff"];
+const EXPORT_DPIS: &[&str] = &["150", "300", "600", "900", "1200"];
+
+/// A format's file extension ("jpeg" writes ".jpg", as the GUI does).
+fn export_extension(format: &str) -> &'static str {
+    match format {
+        "png" => "png",
+        "jpeg" => "jpg",
+        "svg" => "svg",
+        "pdf" => "pdf",
+        "tiff" => "tiff",
+        _ => "png",
+    }
+}
+
+/// A node name as a file stem: path separators, Windows-illegal
+/// characters and control characters become `-`, whitespace runs
+/// collapse, leading/trailing dots and spaces go, over-long stems are
+/// cut. Falls back to `fallback` when nothing survives. (Mirrors the
+/// frontend's `sanitizeFileStem` — keep the two in step.)
+fn sanitize_export_stem(name: &str, fallback: &str) -> String {
+    let mapped: String = name
+        .chars()
+        .map(|c| {
+            if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let stem = mapped
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .trim_matches(|c| c == '.' || c == ' ')
+        .chars()
+        .take(200)
+        .collect::<String>();
+    if stem.is_empty() {
+        fallback.to_string()
+    } else {
+        stem
+    }
+}
+
+/// The path with the format extension ensured: an extensionless name
+/// gets `.${ext}`; a name that already has any extension is left alone
+/// (the GUI's `ensureSaveExtension` rule).
+fn ensure_export_extension(path: &str, ext: &str) -> String {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    let has_ext = base
+        .rfind('.')
+        .is_some_and(|dot| dot > 0 && dot < base.len() - 1);
+    if has_ext {
+        path.to_string()
+    } else {
+        format!("{}.{}", path.trim_end_matches('.'), ext)
     }
 }
 
@@ -5957,8 +6219,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            47,
-            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + two L4 analysis tools + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools: {names:?}"
+            48,
+            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + two L4 analysis tools + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools + one L8 graph export tool: {names:?}"
         );
         for name in ["titer_read_job", "titer_list_jobs", "titer_cancel_job"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -6016,6 +6278,9 @@ mod tests {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
         for name in ["titer_simulate_data", "titer_apply_method", "titer_apply_wand", "titer_run_script"] {
+            assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
+        }
+        for name in ["titer_export_graph"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
 

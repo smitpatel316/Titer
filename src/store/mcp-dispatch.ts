@@ -51,6 +51,12 @@ import {
   type GraphJobDeps,
 } from "./mcp-graphs";
 import {
+  defaultExportIo,
+  executeExportGraph,
+  type ExportIo,
+  type ExportJobDeps,
+} from "./mcp-export";
+import {
   cancelR,
   isNative,
   mcpCompleteJob,
@@ -126,6 +132,9 @@ export interface JobDeps {
   markSaved?: DocumentDeps["markSaved"];
   /** Headless document IO; defaults to the real native calls. */
   io?: DocumentIo;
+  /** Headless export IO; defaults to the real `write_file` call. A
+   *  harness driving the table-data jobs in node injects a stub here. */
+  exportIo?: ExportIo;
   /** The project actions the table branches dispatch through (L3). The
    *  hook passes the real ones; a harness that drives only `noop` /
    *  `run-analysis` may omit them, and a table job then errors plainly.
@@ -192,6 +201,15 @@ function toGraphDeps(deps: JobDeps): GraphJobDeps {
     createInfoSheet: a?.createInfoSheet,
     updateInfoSheet: a?.updateInfoSheet,
     renameNode: a?.renameNode,
+  };
+}
+
+/** The export jobs' deps, from the job deps — exports read state and
+ *  write a file, so they need no store actions, only the file IO. */
+function toExportDeps(deps: JobDeps): ExportJobDeps {
+  return {
+    getState: deps.getState,
+    io: deps.exportIo ?? defaultExportIo,
   };
 }
 
@@ -1347,6 +1365,10 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         },
       };
     }
+    // L8 — export tools (src/store/mcp-export.ts): the branches render
+    // offscreen and write the file; the path is resolved by Rust.
+    case "export-graph":
+      return executeExportGraph(job, toExportDeps(deps));
     default:
       throw new Error(`Unknown job action “${job.action}”.`);
   }
