@@ -1112,6 +1112,131 @@ pub struct CloseProjectArgs {
     pub save: Option<String>,
 }
 
+// ── Data-table tools (L3) ────────────────────────────────────────────────
+// Mutating tools run through the L0 dispatch: the handler validates from
+// the snapshot, enqueues a job, and awaits its terminal state (a store
+// dispatch is instant — the only wait is a busy dispatcher), then returns
+// the job's result. `titer_run_analysis` stays async (L4, GAP-6); table
+// jobs never touch R, so they answer directly.
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CreateTableArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The table type: column, xy, grouped, nested, multiple, contingency or survival.
+    pub table_type: String,
+    /// The table's name; omit for the app's default ("Table", numbered).
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The columns, column 0 first (the row-title column); omit with rows
+    /// for the empty table of that type. With rows, the whole table.
+    #[serde(default)]
+    pub columns: Option<Vec<String>>,
+    /// The rows, one array per row, each no wider than columns (short rows
+    /// pad with blanks). Cells are strings, numbers or null.
+    #[serde(default)]
+    pub rows: Option<Vec<Vec<serde_json::Value>>>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct WriteTableArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The table's id, as shown by titer_list_tables.
+    pub table_id: String,
+    /// The columns, column 0 first (the row-title column): the whole table.
+    pub columns: Vec<String>,
+    /// The rows, one array per row, each no wider than columns (short rows
+    /// pad with blanks). Cells are strings, numbers or null.
+    pub rows: Vec<Vec<serde_json::Value>>,
+    /// The Undo label for the replace ("Edit Table" when omitted).
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Excluded-cell marks ("row,col") to set: when given they replace the
+    /// table's marks; when omitted the marks are preserved.
+    #[serde(default)]
+    pub excluded: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct EditTableArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The table's id, as shown by titer_list_tables.
+    pub table_id: String,
+    /// The grid-menu op: insert-rows, delete-rows, insert-columns,
+    /// delete-columns, rename-column, rename-group, exclude-cells,
+    /// include-cells, freeze-title or convert-comma-decimals.
+    pub op: String,
+    /// insert/delete-rows, insert/delete-columns: the 0-based row or
+    /// column to act at (rows and columns are 0-based; column 0 holds the
+    /// row titles).
+    #[serde(default)]
+    pub at: Option<usize>,
+    /// insert/delete-rows, insert/delete-columns: how many (default 1).
+    #[serde(default)]
+    pub count: Option<usize>,
+    /// rename-column / rename-group: the column's index (same as `at`).
+    #[serde(default)]
+    pub column: Option<usize>,
+    /// rename-column / rename-group: the new name.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// exclude-cells / include-cells: the cells, as "row,col" strings.
+    #[serde(default)]
+    pub cells: Option<Vec<String>>,
+    /// freeze-title: whether the row-title column stays visible scrolling.
+    #[serde(default)]
+    pub frozen: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct TableArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The table's id, as shown by titer_list_tables.
+    pub table_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RenameNodeArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The node's id, as shown by titer_list_projects.
+    pub node_id: String,
+    /// The new name.
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteNodeArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The node's id, as shown by titer_list_projects.
+    pub node_id: String,
+    /// Pass true to carry out a deletion the first call warned about.
+    #[serde(default)]
+    pub confirm: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ReorderNodesArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The table whose children to reorder; omit for the project root.
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    /// The new order: exactly the current children, in the new order
+    /// (the whole root order when parent_id is omitted).
+    pub order: Vec<String>,
+}
 #[tool_router(router = tools, vis = "pub")]
 impl TiterMcpServer {
     /// What is open in Titer, and the tables, analyses, graphs and figures
@@ -1489,6 +1614,517 @@ impl TiterMcpServer {
         Ok(Json(serde_json::json!({ "lines": lines })))
     }
 
+    // ── Data-table tools (L3) ────────────────────────────────────────────
+    // Mutating tools: validate from the snapshot, enqueue a dispatch job,
+    // and await its result (see `run_table_job`). Every call is written to
+    // the Activity log with ids and counts only — never cell values.
+
+    /// Create a data table: the empty table of a type, or one filled with
+    /// the given columns and rows. Column 0 is the row-title column.
+    #[tool(
+        name = "titer_create_table",
+        description = "Create a data table: the empty table of a type (column, xy, grouped, nested, multiple, contingency, survival), or one filled with the given columns and rows. Column 0 is the row-title column.",
+        annotations(
+            title = "Create table",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn create_table(
+        &self,
+        Parameters(args): Parameters<CreateTableArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let log_args = serde_json::json!({
+            "project_id": args.project_id,
+            "table_type": args.table_type,
+            "name": args.name,
+            "columns": args.columns.as_ref().map(|c| c.len()),
+            "rows": args.rows.as_ref().map(|r| r.len()),
+        });
+        let outcome: Result<serde_json::Value, String> = async {
+            let (id, _snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            if !TABLE_TYPES.contains(&args.table_type.as_str()) {
+                return Err(format!("No table type “{}” — the types are {}.", args.table_type, TABLE_TYPES.join(", ")));
+            }
+            if let Some(name) = &args.name {
+                if name.trim().is_empty() {
+                    return Err("The table name must not be empty.".into());
+                }
+            }
+            let job_args = match (&args.columns, &args.rows) {
+                (None, None) => serde_json::json!({ "table_type": args.table_type, "name": args.name }),
+                (Some(columns), Some(rows)) => {
+                    validate_table_shape(columns, rows)?;
+                    serde_json::json!({ "table_type": args.table_type, "name": args.name, "columns": columns, "rows": rows })
+                }
+                _ => return Err("columns and rows go together — pass both, or neither for an empty table.".into()),
+            };
+            self.run_table_job(&id, "create-table", job_args).await
+        }
+        .await;
+        match outcome {
+            Ok(out) => {
+                self.state.log_call("titer_create_table", log_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_create_table", log_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Replace a table's whole data: columns and rows, validated against
+    /// the table type. Excluded-cell marks are preserved unless the call
+    /// passes `excluded`.
+    #[tool(
+        name = "titer_write_table",
+        description = "Replace a table's whole data (columns and rows), validated against the table type. Excluded-cell marks are preserved unless the call passes excluded. Column 0 is the row-title column.",
+        annotations(
+            title = "Write table",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn write_table(
+        &self,
+        Parameters(args): Parameters<WriteTableArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let log_args = serde_json::json!({
+            "project_id": args.project_id,
+            "table_id": args.table_id,
+            "columns": args.columns.len(),
+            "rows": args.rows.len(),
+            "label": args.label,
+            "excluded": args.excluded.as_ref().map(|e| e.len()),
+        });
+        let outcome: Result<serde_json::Value, String> = async {
+            let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            let node = find_node(&snap, &args.table_id).ok_or_else(|| {
+                format!("No table with id “{}” in project {id}. Ask titer_list_tables for the ids.", args.table_id)
+            })?;
+            if node.get("type").and_then(|v| v.as_str()) != Some("table") {
+                return Err(format!(
+                    "“{}” is not a table (it is a {}).",
+                    args.table_id,
+                    node.get("type").and_then(|v| v.as_str()).unwrap_or("node")
+                ));
+            }
+            validate_table_shape(&args.columns, &args.rows)?;
+            if let Some(excluded) = &args.excluded {
+                for key in excluded {
+                    let (r, c) = key
+                        .split_once(',')
+                        .and_then(|(r, c)| Some((r.parse::<usize>().ok()?, c.parse::<usize>().ok()?)))
+                        .unwrap_or((usize::MAX, usize::MAX));
+                    if r >= args.rows.len() || c >= args.columns.len() || c < 1 {
+                        return Err(format!(
+                            "Excluded cell “{key}” is outside the new table ({} rows, {} columns; column 0 is never excluded).",
+                            args.rows.len(),
+                            args.columns.len()
+                        ));
+                    }
+                }
+            }
+            self.run_table_job(
+                &id,
+                "write-table",
+                serde_json::json!({
+                    "table_id": args.table_id,
+                    "columns": args.columns,
+                    "rows": args.rows,
+                    "label": args.label,
+                    "excluded": args.excluded,
+                }),
+            )
+            .await
+        }
+        .await;
+        match outcome {
+            Ok(out) => {
+                self.state.log_call("titer_write_table", log_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_write_table", log_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// One tool for the grid-menu ops on a table: insert/delete rows and
+    /// columns, rename a column or group, exclude/include cells, freeze
+    /// the row-title column, convert decimal commas to points.
+    #[tool(
+        name = "titer_edit_table",
+        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title or convert-comma-decimals. Rows and columns are 0-based; column 0 holds the row titles.",
+        annotations(
+            title = "Edit table",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn edit_table(
+        &self,
+        Parameters(args): Parameters<EditTableArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let log_args = serde_json::json!({
+            "project_id": args.project_id,
+            "table_id": args.table_id,
+            "op": args.op,
+            "at": args.at,
+            "count": args.count,
+            "column": args.column,
+            "name": args.name,
+            "cells": args.cells.as_ref().map(|c| c.len()),
+            "frozen": args.frozen,
+        });
+        let outcome: Result<serde_json::Value, String> = async {
+            let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            let node = find_node(&snap, &args.table_id).ok_or_else(|| {
+                format!("No table with id “{}” in project {id}. Ask titer_list_tables for the ids.", args.table_id)
+            })?;
+            if node.get("type").and_then(|v| v.as_str()) != Some("table") {
+                return Err(format!(
+                    "“{}” is not a table (it is a {}).",
+                    args.table_id,
+                    node.get("type").and_then(|v| v.as_str()).unwrap_or("node")
+                ));
+            }
+            const OPS: &[&str] = &[
+                "insert-rows",
+                "delete-rows",
+                "insert-columns",
+                "delete-columns",
+                "rename-column",
+                "rename-group",
+                "exclude-cells",
+                "include-cells",
+                "freeze-title",
+                "convert-comma-decimals",
+            ];
+            if !OPS.contains(&args.op.as_str()) {
+                return Err(format!("No edit op “{}” — the ops are {}.", args.op, OPS.join(", ")));
+            }
+            // The op's own fields must be present; their values are
+            // validated against the live table by the dispatcher.
+            match args.op.as_str() {
+                "insert-rows" | "delete-rows" | "insert-columns" | "delete-columns" => {
+                    if args.at.is_none() {
+                        return Err(format!("op {} needs at (the 0-based row or column).", args.op));
+                    }
+                }
+                "rename-column" | "rename-group" => {
+                    if args.column.is_none() {
+                        return Err(format!("op {} needs column (the column's index).", args.op));
+                    }
+                    match &args.name {
+                        Some(n) if !n.trim().is_empty() => {}
+                        _ => return Err(format!("op {} needs a non-empty name.", args.op)),
+                    }
+                }
+                "exclude-cells" | "include-cells" => match &args.cells {
+                    Some(cells) if !cells.is_empty() => {}
+                    _ => return Err(format!("op {} needs cells (at least one “row,col” string).", args.op)),
+                },
+                "freeze-title" => {
+                    if args.frozen.is_none() {
+                        return Err("op freeze-title needs frozen (true or false).".into());
+                    }
+                }
+                _ => {}
+            }
+            self.run_table_job(
+                &id,
+                "edit-table",
+                serde_json::json!({
+                    "table_id": args.table_id,
+                    "op": args.op,
+                    "at": args.at,
+                    "count": args.count,
+                    "column": args.column,
+                    "name": args.name,
+                    "cells": args.cells,
+                    "frozen": args.frozen,
+                }),
+            )
+            .await
+        }
+        .await;
+        match outcome {
+            Ok(out) => {
+                self.state.log_call("titer_edit_table", log_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_edit_table", log_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Duplicate a table together with its analyses and graphs (its family).
+    #[tool(
+        name = "titer_duplicate_table_family",
+        description = "Duplicate a data table together with its analyses and graphs (its family). The copy opens after the source table.",
+        annotations(
+            title = "Duplicate table family",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn duplicate_table_family(
+        &self,
+        Parameters(args): Parameters<TableArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let log_args = serde_json::json!({ "project_id": args.project_id, "table_id": args.table_id });
+        let outcome: Result<serde_json::Value, String> = async {
+            let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            let node = find_node(&snap, &args.table_id).ok_or_else(|| {
+                format!("No table with id “{}” in project {id}. Ask titer_list_tables for the ids.", args.table_id)
+            })?;
+            if node.get("type").and_then(|v| v.as_str()) != Some("table") {
+                return Err(format!(
+                    "“{}” is not a table (it is a {}).",
+                    args.table_id,
+                    node.get("type").and_then(|v| v.as_str()).unwrap_or("node")
+                ));
+            }
+            self.run_table_job(&id, "duplicate-family", serde_json::json!({ "table_id": args.table_id })).await
+        }
+        .await;
+        match outcome {
+            Ok(out) => {
+                self.state.log_call("titer_duplicate_table_family", log_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_duplicate_table_family", log_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Rename any node: a table, analysis, graph, figure or info sheet.
+    #[tool(
+        name = "titer_rename_node",
+        description = "Rename any node: a table, analysis, graph, figure or info sheet.",
+        annotations(
+            title = "Rename node",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn rename_node(
+        &self,
+        Parameters(args): Parameters<RenameNodeArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let log_args = serde_json::json!({ "project_id": args.project_id, "node_id": args.node_id, "name": args.name });
+        let outcome: Result<serde_json::Value, String> = async {
+            let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            if find_node(&snap, &args.node_id).is_none() {
+                return Err(format!(
+                    "No node with id “{}” in project {id}. Ask titer_list_projects for the ids.",
+                    args.node_id
+                ));
+            }
+            if args.name.trim().is_empty() {
+                return Err("The new name must not be empty.".into());
+            }
+            self.run_table_job(&id, "rename-node", serde_json::json!({ "node_id": args.node_id, "name": args.name }))
+                .await
+        }
+        .await;
+        match outcome {
+            Ok(out) => {
+                self.state.log_call("titer_rename_node", log_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_rename_node", log_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Delete a node. The first call (without confirm) only warns what
+    /// goes with it and changes nothing; repeat with confirm true to
+    /// delete. The last table is refused — a project is never empty.
+    #[tool(
+        name = "titer_delete_node",
+        description = "Delete a node. The first call (without confirm) returns needs_confirm with a warning naming what goes with it and changes nothing; repeat with confirm true to delete. The last table is refused — a project is never empty.",
+        annotations(
+            title = "Delete node",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn delete_node(
+        &self,
+        Parameters(args): Parameters<DeleteNodeArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let log_args = serde_json::json!({ "project_id": args.project_id, "node_id": args.node_id, "confirm": args.confirm });
+        let outcome: Result<serde_json::Value, String> = async {
+            let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            let warning = delete_warning(&snap, &args.node_id)?;
+            if !args.confirm {
+                return Ok(serde_json::json!({
+                    "project_id": id,
+                    "node_id": args.node_id,
+                    "needs_confirm": true,
+                    "warning": warning,
+                }));
+            }
+            self.run_table_job(&id, "delete-node", serde_json::json!({ "node_id": args.node_id })).await
+        }
+        .await;
+        match outcome {
+            Ok(out) => {
+                self.state.log_call("titer_delete_node", log_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_delete_node", log_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Reorder the project root, or one table's children (its analyses
+    /// and graphs). `order` must list exactly the current children.
+    #[tool(
+        name = "titer_reorder_nodes",
+        description = "Reorder the project root (omit parent_id), or one table's children (its analyses and graphs). order must list exactly the current children, in the new order.",
+        annotations(
+            title = "Reorder nodes",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn reorder_nodes(
+        &self,
+        Parameters(args): Parameters<ReorderNodesArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let log_args = serde_json::json!({ "project_id": args.project_id, "parent_id": args.parent_id, "order": args.order.len() });
+        let outcome: Result<serde_json::Value, String> = async {
+            let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            reorder_check(&snap, args.parent_id.as_deref(), &args.order)?;
+            self.run_table_job(
+                &id,
+                "reorder-nodes",
+                serde_json::json!({ "parent_id": args.parent_id, "order": args.order }),
+            )
+            .await
+        }
+        .await;
+        match outcome {
+            Ok(out) => {
+                self.state.log_call("titer_reorder_nodes", log_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_reorder_nodes", log_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Undo the last change, returning the label of what was undone
+    /// ("Rename", "Paste", …) — null when there is nothing to undo.
+    #[tool(
+        name = "titer_undo",
+        description = "Undo the last change. Returns the label of what was undone (null when there is nothing to undo) and whether a redo is now possible.",
+        annotations(
+            title = "Undo",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn undo(&self, Parameters(args): Parameters<ProjectArgs>) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let log_args = serde_json::json!({ "project_id": args.project_id });
+        let outcome: Result<serde_json::Value, String> = async {
+            let (id, _snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            self.run_table_job(&id, "undo", serde_json::json!({})).await
+        }
+        .await;
+        match outcome {
+            Ok(out) => {
+                self.state.log_call("titer_undo", log_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_undo", log_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Redo the last undone change, returning the label of what was
+    /// redone — null when there is nothing to redo.
+    #[tool(
+        name = "titer_redo",
+        description = "Redo the last undone change. Returns the label of what was redone (null when there is nothing to redo) and whether an undo is now possible.",
+        annotations(
+            title = "Redo",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn redo(&self, Parameters(args): Parameters<ProjectArgs>) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let log_args = serde_json::json!({ "project_id": args.project_id });
+        let outcome: Result<serde_json::Value, String> = async {
+            let (id, _snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            self.run_table_job(&id, "redo", serde_json::json!({})).await
+        }
+        .await;
+        match outcome {
+            Ok(out) => {
+                self.state.log_call("titer_redo", log_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_redo", log_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
     // ── Project / document tools (L2) ────────────────────────────────────
     // Create/open are Rust-side (the shell owns windows); save/import/close
     // run in the frontend through the L0 dispatch channel (GAP-4: the TS
@@ -1776,6 +2412,44 @@ impl TiterMcpServer {
 impl TiterMcpServer {
     pub fn new(state: McpState) -> Self {
         Self { state, tool_router: Self::tools() }
+    }
+
+    /// Enqueue a table job and wait for the frontend to run it, then return
+    /// the job's result (L3). A store dispatch is instant — the only wait
+    /// is a busy dispatcher (a long run-analysis ahead of it) — so 30 s is
+    /// generous; past it the client polls `titer_read_job` for the job.
+    /// `titer_run_analysis` does NOT use this (L4, GAP-6): a run can
+    /// outlast the bridge, so it answers with a `job_id` instead.
+    async fn run_table_job(
+        &self,
+        project_id: &str,
+        action: &str,
+        args: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let job = self.state.enqueue_job(project_id, action, args, serde_json::json!({}))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            match self.state.read_job(&job.job_id) {
+                Some(j) if j.status == JobStatus::Done => {
+                    return Ok(j.result.unwrap_or(serde_json::Value::Null));
+                }
+                Some(j) if j.status == JobStatus::Error => {
+                    return Err(j.error.unwrap_or_else(|| "The table job failed.".into()));
+                }
+                Some(j) if j.status == JobStatus::Cancelled => {
+                    return Err(j.error.unwrap_or_else(|| "The table job was cancelled.".into()));
+                }
+                None => return Err(format!("Job “{}” disappeared.", job.job_id)),
+                _ => {}
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(format!(
+                    "The table job is still running after 30 seconds — check it with titer_read_job (job_id “{}”).",
+                    job.job_id
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
     }
 }
 
@@ -2324,6 +2998,185 @@ fn read_info_sheet(
     }))
 }
 
+// ── Data-table tools (L3): pure helpers ──────────────────────────────────
+
+/// The seven table types, as the tools spell them.
+const TABLE_TYPES: &[&str] = &["column", "xy", "grouped", "nested", "multiple", "contingency", "survival"];
+
+/// Columns + rows as a tool passes them: a non-empty column list of unique
+/// non-empty strings, rows of arrays no wider than the columns, cells null /
+/// string / number. The frontend dispatcher re-validates against the table
+/// type (grouped/nested shape) — this is the fast fail before enqueueing.
+fn validate_table_shape(columns: &[String], rows: &[Vec<serde_json::Value>]) -> Result<(), String> {
+    if columns.is_empty() {
+        return Err("columns must be a non-empty array of strings (column 0 is the row-title column).".into());
+    }
+    for (i, c) in columns.iter().enumerate() {
+        if c.is_empty() {
+            return Err(format!("Column {i} is empty — column names must be non-empty strings."));
+        }
+    }
+    let mut seen = HashSet::new();
+    for c in columns {
+        if !seen.insert(c) {
+            return Err(format!("Two columns are named “{c}” — column names must be unique."));
+        }
+    }
+    for (r, row) in rows.iter().enumerate() {
+        if row.len() > columns.len() {
+            return Err(format!("Row {r} has {} cells but only {} columns.", row.len(), columns.len()));
+        }
+        for (c, cell) in row.iter().enumerate() {
+            match cell {
+                serde_json::Value::Null | serde_json::Value::String(_) | serde_json::Value::Number(_) => {}
+                _ => {
+                    return Err(format!(
+                        "Cell at row {r}, column {c} is not a string, a number or null."
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// What `titer_delete_node` warns before deleting — and whether it refuses.
+/// The warning names what goes with the node: a table's analyses are kept
+/// as orphaned results while its graphs are deleted; a graph in a figure
+/// leaves a missing-graph placeholder there. The last table is refused
+/// outright: a project is never empty.
+fn delete_warning(snapshot: &serde_json::Value, node_id: &str) -> Result<String, String> {
+    let node = find_node(snapshot, node_id).ok_or_else(|| {
+        format!("No node with id “{node_id}” in this project. Ask titer_list_projects for the ids.")
+    })?;
+    let kind = node.get("type").and_then(|v| v.as_str()).unwrap_or("node");
+    let name = node_name(node);
+    if kind == "table" {
+        let tables = nodes_of(snapshot)
+            .values()
+            .filter(|n| n.get("type").and_then(|v| v.as_str()) == Some("table"))
+            .count();
+        if tables <= 1 {
+            return Err(format!(
+                "Table “{name}” is the last table in the project. A project always has at least one table, so it can't be deleted."
+            ));
+        }
+        let children: Vec<&str> = snapshot
+            .get("childOrder")
+            .and_then(|c| c.get(node_id))
+            .and_then(|c| c.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        let mut analyses = 0;
+        let mut graphs = 0;
+        for child in children {
+            match find_node(snapshot, child).and_then(|n| n.get("type")).and_then(|v| v.as_str()) {
+                Some("analysis") => analyses += 1,
+                Some("graph") => graphs += 1,
+                _ => {}
+            }
+        }
+        if analyses == 0 && graphs == 0 {
+            return Ok(format!("Delete table “{name}”?"));
+        }
+        let mut parts = Vec::new();
+        if analyses > 0 {
+            parts.push(format!("{} {}", analyses, if analyses == 1 { "analysis" } else { "analyses" }));
+        }
+        if graphs > 0 {
+            parts.push(format!("{} {}", graphs, if graphs == 1 { "graph" } else { "graphs" }));
+        }
+        return Ok(format!(
+            "Delete table “{name}” and its {}? Its analyses are kept as orphaned results, and its graphs are deleted.",
+            parts.join(" and ")
+        ));
+    }
+    if kind == "graph" {
+        let mut figures = Vec::new();
+        for (_id, n) in nodes_of(snapshot) {
+            if n.get("type").and_then(|v| v.as_str()) != Some("figure") {
+                continue;
+            }
+            let panels = n.get("panels").and_then(|p| p.as_array()).cloned().unwrap_or_default();
+            if panels.iter().any(|p| p.get("graphId").and_then(|v| v.as_str()) == Some(node_id)) {
+                figures.push(node_name(n).to_string());
+            }
+        }
+        let mut warning = format!("Delete graph “{name}”?");
+        if !figures.is_empty() {
+            warning += &format!(
+                " It also appears in figure “{}” — the figure will show a missing-graph placeholder.",
+                figures.join("”, “")
+            );
+        }
+        return Ok(warning);
+    }
+    let kind_name = match kind {
+        "analysis" => "analysis",
+        "figure" => "figure",
+        "info" => "info sheet",
+        other => other,
+    };
+    Ok(format!("Delete {kind_name} “{name}”?"))
+}
+
+/// `order` must list exactly the current children — same ids, any order —
+/// of the project root (`parent_id` omitted) or of one table's children.
+/// Names the gap (missing / unknown / doubled ids) instead of silently
+/// dropping or inventing children.
+fn reorder_check(
+    snapshot: &serde_json::Value,
+    parent_id: Option<&str>,
+    order: &[String],
+) -> Result<(), String> {
+    let (current, what): (Vec<String>, String) = match parent_id {
+        None => (
+            snapshot
+                .get("rootOrder")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str()).map(str::to_string).collect())
+                .unwrap_or_default(),
+            "the project's root items".to_string(),
+        ),
+        Some(pid) => {
+            let parent = find_node(snapshot, pid).ok_or_else(|| {
+                format!("No node with id “{pid}” in this project. Ask titer_list_projects for the ids.")
+            })?;
+            if parent.get("type").and_then(|v| v.as_str()) != Some("table") {
+                return Err(format!(
+                    "Only a table has children to reorder — “{pid}” is a {}.",
+                    parent.get("type").and_then(|v| v.as_str()).unwrap_or("node")
+                ));
+            }
+            (
+                snapshot
+                    .get("childOrder")
+                    .and_then(|c| c.get(pid))
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).map(str::to_string).collect())
+                    .unwrap_or_default(),
+                format!("the children of table “{}”", node_name(parent)),
+            )
+        }
+    };
+    let missing: Vec<&String> = current.iter().filter(|id| !order.contains(id)).collect();
+    let extra: Vec<&String> = order.iter().filter(|id| !current.contains(id)).collect();
+    if !missing.is_empty() || !extra.is_empty() {
+        let mut parts = Vec::new();
+        if !missing.is_empty() {
+            parts.push(format!("missing {}", missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")));
+        }
+        if !extra.is_empty() {
+            parts.push(format!("unknown {}", extra.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")));
+        }
+        return Err(format!("order does not list exactly {what} ({} items): {}.", current.len(), parts.join("; ")));
+    }
+    if order.iter().collect::<HashSet<_>>().len() != order.len() {
+        return Err("order lists an id twice — each child appears once.".into());
+    }
+    Ok(())
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────
 // Pure helpers only — no server, no files. (Not yet run: no Rust toolchain
 // on this box. Run `cargo test` after v1 clears.)
@@ -2607,6 +3460,97 @@ mod tests {
         assert_eq!(state.resolve_project(None).unwrap(), "project-1");
     }
 
+    // ── Data-table tools (L3): pure helpers ─────────────────────────────
+
+    fn two_table_snapshot() -> serde_json::Value {
+        json!({
+            "nodes": {
+                "t1": { "id": "t1", "type": "table", "name": "Dose-response", "parentId": null, "tableType": "xy",
+                        "data": { "columns": ["", "Dose", "Response"], "rows": [["1", "0.1", "12"]] } },
+                "t2": { "id": "t2", "type": "table", "name": "Second", "parentId": null, "tableType": "column",
+                        "data": { "columns": ["", "A"], "rows": [] } },
+                "a1": { "id": "a1", "type": "analysis", "name": "Fit", "parentId": "t1", "analysisType": "x" },
+                "g1": { "id": "g1", "type": "graph", "name": "Curve", "parentId": "t1", "graphType": "xy-scatter",
+                        "graphOptions": { "title": "", "xLabel": "", "yLabel": "" } },
+                "f1": { "id": "f1", "type": "figure", "name": "Figure 1", "parentId": null,
+                        "panels": [{ "graphId": "g1", "label": "A", "title": "", "row": 0, "col": 0, "rowSpan": 1, "colSpan": 1 }],
+                        "grid": { "rows": 1, "cols": 1 } }
+            },
+            "rootOrder": ["t1", "t2", "f1"],
+            "childOrder": { "t1": ["a1", "g1"], "t2": [] },
+            "activeNodeId": "t1"
+        })
+    }
+
+    #[test]
+    fn delete_warning_names_a_table_family() {
+        let snap = two_table_snapshot();
+        let warning = delete_warning(&snap, "t1").expect("warning");
+        assert!(warning.contains("1 analysis and 1 graph"), "{warning}");
+        assert!(warning.contains("orphaned results"), "{warning}");
+        assert!(warning.contains("graphs are deleted"), "{warning}");
+        assert_eq!(delete_warning(&snap, "t2").expect("warning"), "Delete table “Second”?");
+    }
+
+    #[test]
+    fn delete_warning_refuses_the_last_table() {
+        let snap = snapshot(); // one table only
+        let err = delete_warning(&snap, "t1").expect_err("last table");
+        assert!(err.contains("last table"), "{err}");
+        let err = delete_warning(&snap, "nope").expect_err("unknown node");
+        assert!(err.contains("No node"), "{err}");
+    }
+
+    #[test]
+    fn delete_warning_names_a_graphs_figure() {
+        let snap = two_table_snapshot();
+        let warning = delete_warning(&snap, "g1").expect("warning");
+        assert!(warning.contains("Figure 1"), "{warning}");
+        assert!(warning.contains("missing-graph placeholder"), "{warning}");
+        assert_eq!(delete_warning(&snap, "a1").expect("warning"), "Delete analysis “Fit”?");
+        assert_eq!(delete_warning(&snap, "f1").expect("warning"), "Delete figure “Figure 1”?");
+    }
+
+    #[test]
+    fn reorder_check_needs_exactly_the_current_children() {
+        let snap = two_table_snapshot();
+        reorder_check(&snap, None, &["t1".to_string(), "t2".to_string(), "f1".to_string()]).expect("root exact");
+        reorder_check(&snap, None, &["f1".to_string(), "t2".to_string(), "t1".to_string()]).expect("root reordered");
+        let err = reorder_check(&snap, None, &["t1".to_string(), "t2".to_string()]).expect_err("missing figure");
+        assert!(err.contains("missing f1"), "{err}");
+        let err = reorder_check(&snap, None, &["t1".to_string(), "t2".to_string(), "f1".to_string(), "zz".to_string()])
+            .expect_err("unknown id");
+        assert!(err.contains("unknown zz"), "{err}");
+        let err = reorder_check(&snap, None, &["t1".to_string(), "t1".to_string(), "f1".to_string()])
+            .expect_err("doubled id");
+        assert!(err.contains("twice"), "{err}");
+        reorder_check(&snap, Some("t1"), &["g1".to_string(), "a1".to_string()]).expect("children reordered");
+        let err = reorder_check(&snap, Some("a1"), &[]).expect_err("an analysis has no children");
+        assert!(err.contains("Only a table"), "{err}");
+        let err = reorder_check(&snap, Some("nope"), &[]).expect_err("unknown parent");
+        assert!(err.contains("No node"), "{err}");
+    }
+
+    #[test]
+    fn validate_table_shape_accepts_and_refuses() {
+        let cols = vec!["Title".to_string(), "A".to_string(), "B".to_string()];
+        let rows = vec![vec![json!("r1"), json!(1.5), json!(null)], vec![json!("r2"), json!("2"), json!("3")]];
+        validate_table_shape(&cols, &rows).expect("valid shape");
+        // A short row pads with blanks; an empty row list is a table with no rows.
+        validate_table_shape(&cols, &[]).expect("no rows");
+        validate_table_shape(&cols, &[vec![json!("r1")]]).expect("short row");
+        let err = validate_table_shape(&[], &rows).expect_err("empty columns");
+        assert!(err.contains("non-empty"), "{err}");
+        let err = validate_table_shape(&["Title".to_string(), "A".to_string(), "A".to_string()], &rows)
+            .expect_err("duplicate columns");
+        assert!(err.contains("Two columns are named"), "{err}");
+        let err = validate_table_shape(&cols, &[vec![json!("a"), json!("b"), json!("c"), json!("d")]])
+            .expect_err("row too wide");
+        assert!(err.contains("only 3 columns"), "{err}");
+        let err = validate_table_shape(&cols, &[vec![json!("a"), json!(true), json!(null)]]).expect_err("bool cell");
+        assert!(err.contains("not a string"), "{err}");
+    }
+
     // ── Job queue (L0) ───────────────────────────────────────────────────
     // Pure state only — no server, no files (log_event is a no-op with no
     // dir; enqueue emits nothing with no app handle remembered).
@@ -2837,8 +3781,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            16,
-            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools: {names:?}"
+            25,
+            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools: {names:?}"
         );
         for name in ["titer_read_job", "titer_list_jobs", "titer_cancel_job"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -2852,6 +3796,19 @@ mod tests {
             "titer_save_project",
             "titer_import_prism",
             "titer_close_project",
+        ] {
+            assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
+        }
+        for name in [
+            "titer_create_table",
+            "titer_write_table",
+            "titer_edit_table",
+            "titer_duplicate_table_family",
+            "titer_rename_node",
+            "titer_delete_node",
+            "titer_reorder_nodes",
+            "titer_undo",
+            "titer_redo",
         ] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
@@ -3002,6 +3959,79 @@ mod tests {
             "save closed project: {}",
             call_raw_text(&save_gone)
         );
+
+        // ── L3: table-tool validation errors + a create round trip ──
+        // L3 validation errors stay plain-language tool errors (isError),
+        // never protocol errors.
+        let (bad_type, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(15, "titer_create_table", json!({ "table_type": "nope" })),
+        )
+        .await;
+        assert_eq!(bad_type["result"]["isError"], true);
+        assert!(call_raw_text(&bad_type).contains("No table type"), "{}", bad_type);
+        let (bad_node, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(16, "titer_delete_node", json!({ "node_id": "nope" })),
+        )
+        .await;
+        assert_eq!(bad_node["result"]["isError"], true);
+        assert!(call_raw_text(&bad_node).contains("No node"), "{}", bad_node);
+        // A table tool's round trip, with the frontend simulated in-test:
+        // the tools/call blocks awaiting completion; this test takes the
+        // job (the dispatcher's claim path) and completes it, and the call
+        // returns the completion's result — the same path the live
+        // dispatcher drives, minus the Tauri event transport.
+        let create_fut = {
+            let client = client.clone();
+            let url = url.clone();
+            let session = session.clone();
+            tokio::spawn(async move {
+                mcp_post(&client, &url, Some(&session), tools_call(17, "titer_create_table", json!({ "table_type": "xy" })))
+                    .await
+            })
+        };
+        let mut taken: Vec<Job> = Vec::new();
+        for _ in 0..100 {
+            taken = state.take_jobs("project-1");
+            if !taken.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert_eq!(taken.len(), 1, "one create-table job taken");
+        assert_eq!(taken[0].action, "create-table");
+        assert_eq!(taken[0].args["table_type"], "xy");
+        let canned = json!({
+            "project_id": "project-1", "table_id": "table_new", "name": "Table 1",
+            "table_type": "XY", "rows": 0, "data_columns": 16,
+        });
+        state
+            .complete_job(
+                "project-1",
+                &taken[0].job_id,
+                JobStatus::Done,
+                Some(canned.clone()),
+                None,
+                Some(json!({ "table_id": "table_new" })),
+            )
+            .expect("complete");
+        let (created, _) = create_fut.await.expect("call task");
+        assert_eq!(call_text(&created), canned);
+        // The completion's `created` landed on the job for titer_read_job.
+        let (read_created, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(18, "titer_read_job", json!({ "job_id": taken[0].job_id })),
+        )
+        .await;
+        assert_eq!(call_text(&read_created)["status"], "done");
+        assert_eq!(call_text(&read_created)["created"]["table_id"], "table_new");
 
         let resp = client
             .delete(&url)

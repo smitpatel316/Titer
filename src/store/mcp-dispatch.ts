@@ -40,6 +40,26 @@ import {
 } from "../native";
 import { publishAnalysisResult } from "./mcp-publish";
 import { useProjectActions, useProjectStore } from "./use-project-store";
+import type { ProjectNode, TableData, TableType } from "./types";
+import type { TableMove } from "./references";
+import { isGrouped, isNested, leadOf } from "../lib/dataset";
+import { seriesKeyOf } from "../lib/columns";
+import { SUMMARY_FORMATS, summarySubcolumns, type SummaryFormat } from "../lib/summary-format";
+import {
+  convertCommaDecimals,
+  deleteColumns,
+  deleteRows,
+  growRowGroups,
+  hasCommaDecimals,
+  insertColumns,
+  insertRows,
+  renameColumn,
+  renameGroup,
+  rowsDeleted,
+  rowsInserted,
+  shiftRowGroupsForDelete,
+} from "../views/tables/table-data";
+import { TABLES } from "../views/tables/index";
 
 /** What one job's execution reports: the outcome, and what it created. */
 export interface JobCompletion {
@@ -50,8 +70,10 @@ export interface JobCompletion {
 /** What `executeJob` needs from the app, injected so tests can drive it
  *  without a webview. */
 export interface JobDeps {
-  /** The project as it is now, for the job to look at. */
-  getState: () => DocumentState;
+  /** The project as it is now, for the job to look at. The undo stacks
+   *  ride along for the L3 undo/redo branches (DocumentState has none);
+   *  the live state (store.get) already carries them. */
+  getState: () => DocumentState & { past?: { label: string }[]; future?: { label: string }[] };
   /** Keep a successful live run on its analysis node, as the analysis view does. */
   cacheAnalysisResult: (id: string, result: AnalysisResult) => void;
   /** Publish an analysis outcome for `titer_read_results` (default: the real one). */
@@ -64,6 +86,26 @@ export interface JobDeps {
   markSaved?: DocumentDeps["markSaved"];
   /** Headless document IO; defaults to the real native calls. */
   io?: DocumentIo;
+  /** The project actions the table branches dispatch through (L3). The
+   *  hook passes the real ones; a harness that drives only `noop` /
+   *  `run-analysis` may omit them, and a table job then errors plainly. */
+  actions?: {
+    createTable: (tableType: TableType) => void;
+    createTableWithData: (tableType: TableType, data: TableData, name: string) => void;
+    updateTable: (id: string, data: TableData, label: string, move?: TableMove) => void;
+    duplicateFamily: (id: string) => void;
+    renameNode: (id: string, name: string) => void;
+    removeNode: (id: string) => void;
+    reorderTables: (order: string[]) => void;
+    reorderChildren: (parentId: string, order: string[]) => void;
+    undo: () => void;
+    redo: () => void;
+  };
+  /** Wait for the store to settle after a dispatch, so a `getState()` read
+   *  sees the dispatched change. In the app this is two macrotasks (React
+   *  flushes the render + layout effects before them); a harness driving
+   *  the reducer synchronously leaves it out (a no-op). */
+  flush?: () => Promise<void>;
 }
 
 /** The document jobs' deps, from the job deps. */
@@ -98,6 +140,343 @@ function reqString(value: unknown, name: string): string {
   const found = optString(value, name);
   if (found === undefined || found === "") throw new Error(`Job argument “${name}” is required.`);
   return found;
+}
+
+// ── Data-table actions (L3) ────────────────────────────────────────────
+// The nine table tools run through the same dispatch as `run-analysis`,
+// but they execute store calls, not R. The Rust side validates the args
+// loosely from the snapshot before enqueueing; the branches below are the
+// authority — they validate against live state and throw plain-language
+// errors the awaiting tool returns as tool errors.
+
+/** The seven table types, as the tools spell them. */
+const TABLE_TYPES: TableType[] = ["column", "xy", "grouped", "nested", "multiple", "contingency", "survival"];
+
+/** `job (action)` prefix for the table branches' plain-language errors. */
+const jobErr = (job: McpJob, message: string) => new Error(`Job ${job.job_id} (${job.action}) ${message}`);
+
+/** The table branches' store actions — a job without them cannot run. */
+function tableActions(job: McpJob, deps: JobDeps): NonNullable<JobDeps["actions"]> {
+  if (!deps.actions) throw jobErr(job, "needs the project actions — this dispatcher was built without them.");
+  return deps.actions;
+}
+
+/** One arg, as a string — missing or the wrong type is a plain error. */
+function argString(job: McpJob, args: unknown, key: string): string {
+  const value = (args as Record<string, unknown> | null | undefined)?.[key];
+  if (typeof value !== "string" || !value) throw jobErr(job, `needs a ${key} string.`);
+  return value;
+}
+
+/** One optional arg, as a string — present but the wrong type is an error. */
+function argOptString(job: McpJob, args: unknown, key: string): string | undefined {
+  const value = (args as Record<string, unknown> | null | undefined)?.[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") throw jobErr(job, `needs ${key} to be a string.`);
+  return value;
+}
+
+/** One arg, as a non-negative integer — missing, fractional or negative is an error. */
+function argInt(job: McpJob, args: unknown, key: string, fallback?: number): number {
+  const value = (args as Record<string, unknown> | null | undefined)?.[key];
+  if (value === undefined || value === null) {
+    if (fallback !== undefined) return fallback;
+    throw jobErr(job, `needs a ${key} integer.`);
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw jobErr(job, `needs ${key} to be a non-negative integer, not ${JSON.stringify(value)}.`);
+  }
+  return value;
+}
+
+/** One arg, as a boolean — missing or the wrong type is an error. */
+function argBool(job: McpJob, args: unknown, key: string): boolean {
+  const value = (args as Record<string, unknown> | null | undefined)?.[key];
+  if (typeof value !== "boolean") throw jobErr(job, `needs ${key} to be true or false.`);
+  return value;
+}
+
+/** One arg, as an array of strings — missing or mistyped is an error. */
+function argStringArray(job: McpJob, args: unknown, key: string): string[] {
+  const value = (args as Record<string, unknown> | null | undefined)?.[key];
+  if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) {
+    throw jobErr(job, `needs ${key} to be an array of strings.`);
+  }
+  return value as string[];
+}
+
+/** The table type of a create-table job — one of the seven, spelled in full. */
+function argTableType(job: McpJob, args: unknown): TableType {
+  const value = argString(job, args, "table_type");
+  if (!(TABLE_TYPES as string[]).includes(value)) {
+    throw jobErr(job, `has no table type “${value}” — the types are ${TABLE_TYPES.join(", ")}.`);
+  }
+  return value as TableType;
+}
+
+/** A table node, by id — a missing node, or a node of another kind, is a plain error. */
+function tableNode(job: McpJob, state: ReturnType<JobDeps["getState"]>, tableId: string): ProjectNode {
+  const node = state.nodes[tableId];
+  if (!node) throw jobErr(job, `has no table with id “${tableId}” in this project. Ask titer_list_tables for the ids.`);
+  if (node.type !== "table") {
+    throw jobErr(job, `“${tableId}” is not a table (it is a ${node.type}).`);
+  }
+  return node;
+}
+
+/** A node of any kind, by id. */
+function anyNode(job: McpJob, state: ReturnType<JobDeps["getState"]>, nodeId: string): ProjectNode {
+  const node = state.nodes[nodeId];
+  if (!node) throw jobErr(job, `has no node with id “${nodeId}” in this project. Ask titer_list_projects for the ids.`);
+  return node;
+}
+
+const plural = (n: number, word: string) => (n > 1 ? `${n} ${word}s` : word);
+
+/** `count` empty rows, `width` columns wide. */
+const emptyRows = (count: number, width: number): (string | null)[][] =>
+  Array.from({ length: count }, () => Array<string | null>(width).fill(null));
+
+/** One cell of a tool-supplied table: null, a string, or a finite number
+ *  (written as its decimal text — the grid stores strings). An empty string
+ *  reads as blank, as the grid writes it. Anything else is a plain error. */
+function toolCell(job: McpJob, cell: unknown, where: string): string | null {
+  if (cell === null || cell === undefined) return null;
+  if (typeof cell === "string") return cell === "" ? null : cell;
+  if (typeof cell === "number" && Number.isFinite(cell)) return String(cell);
+  throw jobErr(job, `has a cell at ${where} that is not a string, a number or null (${JSON.stringify(cell)}).`);
+}
+
+/**
+ * The shape of a grouped table's columns: its groups, in order, each with
+ *  its sub-column suffixes — or the plain-language reason the columns do
+ *  not form one. A grouped table's columns are always "Group:Sub" shaped
+ *  with every group holding the same sub-columns; anything else would
+ *  break the grid's group headers, so it is an error, not a silent rebuild.
+ */
+function groupedShape(
+  columns: string[],
+  lead: number,
+): { groups: string[]; replicates: number; suffixes: string[] } | { error: string } {
+  const dataCols = columns.slice(lead);
+  if (dataCols.length === 0) return { error: "needs at least one data column after the row-title column." };
+  if (dataCols.some((n) => !n.includes(":"))) {
+    return { error: "a grouped table's columns must be “Group:Sub-column” shaped (e.g. “A:Y1”), not plain names." };
+  }
+  const groups: string[] = [];
+  const suffixesOf = new Map<string, string[]>();
+  for (const name of dataCols) {
+    const key = seriesKeyOf(name);
+    const suffix = name.slice(name.indexOf(":") + 1);
+    if (!suffix) return { error: `column “${name}” has an empty sub-column name.` };
+    if (!suffixesOf.has(key)) {
+      groups.push(key);
+      suffixesOf.set(key, []);
+    }
+    suffixesOf.get(key)!.push(suffix);
+  }
+  const first = suffixesOf.get(groups[0])!;
+  for (const group of groups.slice(1)) {
+    const suffixes = suffixesOf.get(group)!;
+    if (suffixes.length !== first.length || suffixes.some((s, i) => s !== first[i])) {
+      return { error: `every group must hold the same sub-columns — group “${group}” holds ${suffixes.join(", ")}, but group “${groups[0]}” holds ${first.join(", ")}.` };
+    }
+  }
+  return { groups, replicates: first.length, suffixes: first };
+}
+
+/**
+ * The shape of a nested table's columns — "Group:Subgroup:R1" throughout,
+ * every group holding the same subgroups and every subgroup the same
+ * replicates — or the plain-language reason they do not form one.
+ */
+function nestedShape(
+  columns: string[],
+): { groups: string[]; subgroups: number; replicates: number } | { error: string } {
+  const dataCols = columns.slice(1);
+  if (dataCols.length === 0) return { error: "needs at least one data column after the row-title column." };
+  const parts = dataCols.map((n) => n.split(":"));
+  if (parts.some((p) => p.length !== 3 || p.some((s) => !s))) {
+    return { error: "a nested table's columns must be “Group:Subgroup:R1” shaped (e.g. “A:S1:R1”)." };
+  }
+  const groups: string[] = [];
+  const subsOf = new Map<string, string[]>();
+  const repsOf = new Map<string, number>();
+  for (const [g, s] of parts) {
+    if (!subsOf.has(g)) {
+      groups.push(g);
+      subsOf.set(g, []);
+    }
+    if (!subsOf.get(g)!.includes(s)) subsOf.get(g)!.push(s);
+    repsOf.set(`${g}:${s}`, (repsOf.get(`${g}:${s}`) ?? 0) + 1);
+  }
+  const subCounts = groups.map((g) => subsOf.get(g)!.length);
+  if (subCounts.some((n) => n !== subCounts[0])) {
+    return { error: "every group must hold the same subgroups." };
+  }
+  const repCounts = [...repsOf.values()];
+  if (repCounts.some((n) => n !== repCounts[0])) {
+    return { error: "every subgroup must hold the same number of replicates." };
+  }
+  return { groups, subgroups: subCounts[0], replicates: repCounts[0] };
+}
+
+/**
+ * A grouped table's sub-column format, from its suffixes: a known summary
+ *  format when every group's suffixes are that format's sub-columns
+ *  ("Mean", "SD", "N"), replicates otherwise. Mirrors the load-time rule
+ *  (project-file.ts): a summary format survives only when it fits its columns.
+ */
+function detectSummaryFormat(suffixes: string[]): SummaryFormat | undefined {
+  for (const format of SUMMARY_FORMATS) {
+    if (format.value === "replicates") continue;
+    if (summarySubcolumns(format.value).join("\n") === suffixes.join("\n")) return format.value;
+  }
+  return undefined;
+}
+
+/**
+ * A whole table from tool-supplied columns + rows, validated against the
+ *  table type — the shape check `titer_write_table` (and
+ *  `titer_create_table` with data) promises instead of writing a broken
+ *  table. `base` is the table being replaced (write): its excluded-cell
+ *  marks, row-group bands, column widths, error format, freeze flag and
+ *  notes carry over; `excluded` replaces the marks when the call says so.
+ *  A fresh table (create) starts with none of those.
+ */
+function buildTableData(
+  job: McpJob,
+  type: TableType,
+  columnsIn: unknown,
+  rowsIn: unknown,
+  base?: TableData,
+  excludedIn?: unknown,
+): TableData {
+  if (!Array.isArray(columnsIn) || columnsIn.length === 0) {
+    throw jobErr(job, "needs columns to be a non-empty array of strings (column 0 is the row-title column).");
+  }
+  const columns: string[] = columnsIn.map((c, i) => {
+    if (typeof c !== "string" || !c) {
+      throw jobErr(job, `has a column at index ${i} that is not a non-empty string (${JSON.stringify(c)}).`);
+    }
+    return c;
+  });
+  if (new Set(columns).size !== columns.length) {
+    const dup = columns.find((c, i) => columns.indexOf(c) !== i);
+    throw jobErr(job, `has two columns named “${dup}” — column names must be unique.`);
+  }
+  if (!Array.isArray(rowsIn)) throw jobErr(job, "needs rows to be an array of arrays.");
+  const rows: (string | null)[][] = rowsIn.map((row, r) => {
+    if (!Array.isArray(row)) throw jobErr(job, `has a row at index ${r} that is not an array.`);
+    if (row.length > columns.length) {
+      throw jobErr(job, `has a row at index ${r} with ${row.length} cells but only ${columns.length} columns.`);
+    }
+    const cells = row.map((cell, c) => toolCell(job, cell, `row ${r}, column ${c}`));
+    return [...cells, ...Array<string | null>(columns.length - cells.length).fill(null)];
+  });
+
+  // The structural fields, re-derived from the new columns (never trusted
+  // from the call — a grouped table's groups are its column names).
+  let groups: number | undefined;
+  let replicates: number | undefined;
+  let subgroups: number | undefined;
+  let summaryFormat: SummaryFormat | undefined;
+  if (type === "grouped") {
+    const shape = groupedShape(columns, 1);
+    if ("error" in shape) throw jobErr(job, shape.error);
+    groups = shape.groups.length;
+    replicates = shape.replicates;
+    summaryFormat = detectSummaryFormat(shape.suffixes);
+  } else if (type === "nested") {
+    const shape = nestedShape(columns);
+    if ("error" in shape) throw jobErr(job, shape.error);
+    groups = shape.groups.length;
+    subgroups = shape.subgroups;
+    replicates = shape.replicates;
+  } else if (type === "xy") {
+    // An XY table's X stays first; the data sets after it may be grouped
+    // ("A:Y1"…) or plain ("Y1", "Y2") — the columns decide, either way.
+    const lead = columns[1]?.includes(":") ? 1 : 2;
+    if (columns.length > lead) {
+      const shape = groupedShape(columns, lead);
+      if (!("error" in shape)) {
+        groups = shape.groups.length;
+        replicates = shape.replicates;
+        summaryFormat = detectSummaryFormat(shape.suffixes);
+      }
+    }
+  }
+
+  const data: TableData = { columns, rows };
+  if (groups !== undefined) data.groups = groups;
+  if (replicates !== undefined) data.replicates = replicates;
+  if (subgroups !== undefined) data.subgroups = subgroups;
+  if (summaryFormat !== undefined) data.summaryFormat = summaryFormat;
+  if (!base) return data;
+
+  // A replace keeps what the call did not replace: the marks, the bands,
+  // the widths, the error format, the freeze flag and the notes.
+  const onCell = (k: unknown): k is string => {
+    const [r, c] =
+      typeof k === "string" && /^\d+,\d+$/.test(k) ? k.split(",").map(Number) : [Infinity, Infinity];
+    return r < rows.length && c < columns.length && c >= 1;
+  };
+  if (excludedIn !== undefined) {
+    if (!Array.isArray(excludedIn) || excludedIn.some((k) => typeof k !== "string")) {
+      throw jobErr(job, "needs excluded to be an array of “row,col” strings.");
+    }
+    for (const key of excludedIn as string[]) {
+      const [r, c] = /^\d+,\d+$/.test(key) ? key.split(",").map(Number) : [Infinity, Infinity];
+      if (r >= rows.length || c >= columns.length || c < 1) {
+        throw jobErr(job, `has an excluded cell “${key}” outside the new table (${rows.length} rows, ${columns.length} columns; column 0 is never excluded).`);
+      }
+      if (rows[r][c] === null) {
+        throw jobErr(job, `has an excluded cell “${key}” holding no value — only cells with a value can be excluded.`);
+      }
+    }
+    if ((excludedIn as string[]).length) data.excluded = [...(excludedIn as string[])];
+  } else if (base.excluded) {
+    const kept = base.excluded.filter(onCell);
+    if (kept.length) data.excluded = kept;
+  }
+  if (base.rowGroups) {
+    const oldCount = base.rows.length;
+    if (rows.length === oldCount) {
+      data.rowGroups = base.rowGroups;
+    } else if (rows.length === 0) {
+      // No rows left: the bands have nothing to tile.
+    } else if (rows.length < oldCount) {
+      data.rowGroups = shiftRowGroupsForDelete(base.rowGroups, rows.length, oldCount - rows.length);
+    } else {
+      data.rowGroups = growRowGroups(base.rowGroups, rows.length - oldCount);
+    }
+  }
+  if (base.widths) {
+    const widths = Object.fromEntries(Object.entries(base.widths).filter(([name]) => columns.includes(name)));
+    if (Object.keys(widths).length) data.widths = widths;
+  }
+  if (base.errorFormat) data.errorFormat = base.errorFormat;
+  if (base.freezeTitle) data.freezeTitle = true;
+  if (base.notes) data.notes = base.notes;
+  return data;
+}
+
+/** Whether two orders list the same ids (a reorder that moved nothing). */
+const ordersEqual = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+/** `order` must list exactly `current` — same ids, any order — or a plain error naming the gap. */
+function checkExactOrder(job: McpJob, order: string[], current: string[], what: string): void {
+  const missing = current.filter((id) => !order.includes(id));
+  const extra = order.filter((id) => !current.includes(id));
+  if (missing.length || extra.length) {
+    const parts: string[] = [];
+    if (missing.length) parts.push(`missing ${missing.slice(0, 3).join(", ")}${missing.length > 3 ? ` (+${missing.length - 3} more)` : ""}`);
+    if (extra.length) parts.push(`unknown ${extra.slice(0, 3).join(", ")}${extra.length > 3 ? ` (+${extra.length - 3} more)` : ""}`);
+    throw jobErr(job, `has an order that does not list exactly ${what} (${current.length} items): ${parts.join("; ")}.`);
+  }
+  if (new Set(order).size !== order.length) {
+    throw jobErr(job, `has an order listing an id twice — each child appears once.`);
+  }
 }
 
 /** Execute one job. Throws with a plain-language message when the job
@@ -160,7 +539,383 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       const args = (job.args ?? {}) as { save?: unknown };
       return executeCloseProject(toDocumentDeps(deps), { save: optString(args.save, "save") }, job.project_id);
     }
-    default:
+    case "create-table": {
+      const actions = tableActions(job, deps);
+      const type = argTableType(job, job.args);
+      const name = argOptString(job, job.args, "name");
+      if (name !== undefined && !name.trim()) throw jobErr(job, "needs a non-empty name.");
+      const hasColumns = (job.args as Record<string, unknown> | null | undefined)?.columns !== undefined;
+      const hasRows = (job.args as Record<string, unknown> | null | undefined)?.rows !== undefined;
+      const before = new Set(deps.getState().rootOrder);
+      if (!hasColumns && !hasRows) {
+        // The empty table of that type — Table ▸ New Table, with its defaults.
+        if (name !== undefined) actions.createTableWithData(type, TABLES[type].defaultData(), name);
+        else actions.createTable(type);
+      } else {
+        if (!hasColumns || !hasRows) {
+          throw jobErr(job, "needs columns and rows together — pass both, or neither for an empty table.");
+        }
+        const data = buildTableData(job, type, (job.args as Record<string, unknown>).columns, (job.args as Record<string, unknown>).rows);
+        actions.createTableWithData(type, data, name ?? "Table");
+      }
+      await deps.flush?.();
+      const after = deps.getState();
+      const createdId =
+        after.activeNodeId && !before.has(after.activeNodeId) && after.nodes[after.activeNodeId]?.type === "table"
+          ? after.activeNodeId
+          : after.rootOrder.find((id) => !before.has(id) && after.nodes[id]?.type === "table");
+      if (!createdId) {
+        throw jobErr(job, "created the table but its id could not be read back — ask titer_list_tables for the new table.");
+      }
+      const created = after.nodes[createdId]!;
+      const rows = created.data?.rows.length ?? 0;
+      const dataColumns = (created.data?.columns.length ?? 1) - 1;
+      return {
+        result: {
+          project_id: job.project_id,
+          table_id: createdId,
+          name: created.name,
+          table_type: TABLES[type].label,
+          rows,
+          data_columns: dataColumns,
+        },
+        created: { table_id: createdId },
+      };
+    }
+    case "write-table": {
+      const actions = tableActions(job, deps);
+      const tableId = argString(job, job.args, "table_id");
+      const node = tableNode(job, deps.getState(), tableId);
+      const type = node.tableType ?? "column";
+      const columns = (job.args as Record<string, unknown> | null | undefined)?.columns;
+      const rows = (job.args as Record<string, unknown> | null | undefined)?.rows;
+      if (columns === undefined || rows === undefined) {
+        throw jobErr(job, "needs columns and rows (the whole table).");
+      }
+      const label = argOptString(job, job.args, "label") ?? "Edit Table";
+      const excluded = (job.args as Record<string, unknown> | null | undefined)?.excluded;
+      const data = buildTableData(job, type, columns, rows, node.data, excluded);
+      if (JSON.stringify(data) === JSON.stringify(node.data)) {
+        // The same table back: no undo step, no dirty flag.
+        return {
+          result: {
+            project_id: job.project_id,
+            table_id: tableId,
+            rows: data.rows.length,
+            data_columns: data.columns.length - 1,
+          },
+        };
+      }
+      actions.updateTable(tableId, data, label);
+      await deps.flush?.();
+      return {
+        result: {
+          project_id: job.project_id,
+          table_id: tableId,
+          rows: data.rows.length,
+          data_columns: data.columns.length - 1,
+        },
+      };
+    }
+    case "edit-table": {
+      const actions = tableActions(job, deps);
+      const tableId = argString(job, job.args, "table_id");
+      const op = argString(job, job.args, "op");
+      const state = deps.getState();
+      const node = tableNode(job, state, tableId);
+      const type = node.tableType ?? "column";
+      const data = node.data ?? { columns: ["Title"], rows: [] };
+      // One grid-menu op: a new TableData via the table-data.ts helpers,
+      // the Undo label the grid uses, and the `move` that lets the table's
+      // analyses and graphs follow renames and row moves. `next === data`
+      // is a helper refusing the op — a plain error, never a silent no-op
+      // dispatch (which would still cost an undo step).
+      let next: TableData | null = null;
+      let label = "";
+      let move: TableMove | undefined;
+      switch (op) {
+        case "insert-rows": {
+          const at = argInt(job, job.args, "at");
+          const count = argInt(job, job.args, "count", 1);
+          if (count < 1) throw jobErr(job, "needs count to be at least 1.");
+          if (at > data.rows.length) {
+            throw jobErr(job, `has no row ${at} to insert above — the table holds ${data.rows.length} stored rows.`);
+          }
+          label = `Insert ${plural(count, "Row")}`;
+          move = { rows: rowsInserted(at, count) };
+          next =
+            at < data.rows.length
+              ? insertRows(data, at, count)
+              : {
+                  ...data,
+                  rows: [...data.rows, ...emptyRows(count, data.columns.length)],
+                  rowGroups: data.rowGroups ? growRowGroups(data.rowGroups, count) : undefined,
+                };
+          break;
+        }
+        case "delete-rows": {
+          const at = argInt(job, job.args, "at");
+          const count = argInt(job, job.args, "count", 1);
+          if (count < 1) throw jobErr(job, "needs count to be at least 1.");
+          if (at >= data.rows.length) {
+            throw jobErr(job, `has no row ${at} to delete — the table holds ${data.rows.length} stored rows.`);
+          }
+          const n = Math.min(count, data.rows.length - at);
+          label = `Delete ${plural(n, "Row")}`;
+          move = { rows: rowsDeleted(at, n) };
+          next = deleteRows(data, at, n);
+          break;
+        }
+        case "insert-columns": {
+          if (isGrouped(data) || isNested(data)) {
+            throw jobErr(job, "cannot insert a column into a grouped or nested table — its columns come from its groups, not from inserts.");
+          }
+          const at = argInt(job, job.args, "at");
+          const count = argInt(job, job.args, "count", 1);
+          if (count < 1) throw jobErr(job, "needs count to be at least 1.");
+          if (at < 1 || at > data.columns.length) {
+            throw jobErr(job, `has no column ${at} to insert before — columns run 1 to ${data.columns.length} (column 0 is the row titles).`);
+          }
+          label = `Insert ${plural(count, "Column")}`;
+          next = insertColumns(data, at, count, type);
+          break;
+        }
+        case "delete-columns": {
+          if (isGrouped(data) || isNested(data)) {
+            throw jobErr(job, "cannot delete a column from a grouped or nested table — its columns come from its groups, not from deletes.");
+          }
+          const at = argInt(job, job.args, "at");
+          const count = argInt(job, job.args, "count", 1);
+          if (count < 1) throw jobErr(job, "needs count to be at least 1.");
+          if (at < 1 || at >= data.columns.length) {
+            throw jobErr(job, `has no column ${at} to delete — data columns run 1 to ${data.columns.length - 1} (column 0 is the row titles).`);
+          }
+          next = deleteColumns(data, at, count);
+          if (next === data) throw jobErr(job, "cannot delete the table's last data column — a table keeps at least one.");
+          label = `Delete ${plural(data.columns.length - next.columns.length, "Column")}`;
+          break;
+        }
+        case "rename-column": {
+          const column = argInt(job, job.args, "column");
+          const name = argString(job, job.args, "name");
+          if (column >= data.columns.length) {
+            throw jobErr(job, `has no column ${column} — the table has ${data.columns.length} columns (0 is the row titles).`);
+          }
+          const old = data.columns[column];
+          if (name === old) break; // already that name: no-op success, no undo step
+          if (!name.trim()) throw jobErr(job, "needs a non-empty column name.");
+          if (data.columns.includes(name)) throw jobErr(job, `has a column named “${name}” already.`);
+          label = "Rename Column";
+          move = { renamed: { [old]: name } };
+          next = renameColumn(data, column, name);
+          if (next === data) throw jobErr(job, `cannot rename column ${column} to “${name}”.`);
+          break;
+        }
+        case "rename-group": {
+          if (!isGrouped(data) && !isNested(data)) {
+            throw jobErr(job, "cannot rename a group — only grouped and nested tables have groups.");
+          }
+          const column = argInt(job, job.args, "column");
+          const name = argString(job, job.args, "name");
+          if (column < leadOf(data) || column >= data.columns.length) {
+            throw jobErr(job, `has no group at column ${column} — the groups start at column ${leadOf(data)}.`);
+          }
+          const oldKey = seriesKeyOf(data.columns[column]);
+          if (name === oldKey) break; // already that name: no-op success
+          if (!name.trim() || name.includes(":")) {
+            throw jobErr(job, "needs a non-empty group name without a “:” in it.");
+          }
+          if (data.columns.some((n) => seriesKeyOf(n) === name)) {
+            throw jobErr(job, `has a group named “${name}” already.`);
+          }
+          label = "Rename Group";
+          move = { renamed: { [oldKey]: name } };
+          next = renameGroup(data, oldKey, name);
+          if (next === data) throw jobErr(job, `cannot rename group “${oldKey}” to “${name}”.`);
+          break;
+        }
+        case "exclude-cells":
+        case "include-cells": {
+          const include = op === "include-cells";
+          const cells = argStringArray(job, job.args, "cells");
+          if (cells.length === 0) throw jobErr(job, "needs at least one cell in cells.");
+          const keys: string[] = [];
+          for (const key of cells) {
+            const [r, c] = /^\d+,\d+$/.test(key) ? key.split(",").map(Number) : [Infinity, Infinity];
+            if (r >= data.rows.length || c >= data.columns.length || c < 1) {
+              throw jobErr(job, `has a cell “${key}” outside the table (${data.rows.length} rows, ${data.columns.length} columns; column 0 is never excluded).`);
+            }
+            if (!include && data.rows[r][c] === null) {
+              throw jobErr(job, `cannot exclude cell “${key}” — it holds no value, and an excluded empty cell would stay marked when a value is typed there later.`);
+            }
+            keys.push(`${r},${c}`);
+          }
+          label = include ? "Include in Analysis" : "Exclude from Analysis";
+          const kept = new Set(data.excluded ?? []);
+          for (const key of keys) {
+            if (include) kept.delete(key);
+            else kept.add(key);
+          }
+          const sorted = [...kept].sort((a, b) => {
+            const [ar, ac] = a.split(",").map(Number);
+            const [br, bc] = b.split(",").map(Number);
+            return ar - br || ac - bc;
+          });
+          next = { ...data, excluded: sorted.length ? sorted : undefined };
+          break;
+        }
+        case "freeze-title": {
+          const frozen = argBool(job, job.args, "frozen");
+          if ((data.freezeTitle ?? false) === frozen) break; // already that way: no-op success
+          label = "Keep Visible";
+          next = { ...data, freezeTitle: frozen ? true : undefined };
+          break;
+        }
+        case "convert-comma-decimals": {
+          if (!hasCommaDecimals(data)) break; // nothing to convert: no-op success
+          label = "Convert Decimal Commas to Points";
+          next = convertCommaDecimals(data);
+          break;
+        }
+        default:
+          throw jobErr(
+            job,
+            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals.`,
+          );
+      }
+      if (next === null) {
+        // A vacuous op (already that name, already frozen, nothing to
+        // convert): success, no dispatch, no undo step.
+        return {
+          result: {
+            project_id: job.project_id,
+            table_id: tableId,
+            rows: data.rows.length,
+            data_columns: data.columns.length - 1,
+          },
+        };
+      }
+      actions.updateTable(tableId, next, label, move);
+      await deps.flush?.();
+      return {
+        result: {
+          project_id: job.project_id,
+          table_id: tableId,
+          rows: next.rows.length,
+          data_columns: next.columns.length - 1,
+        },
+      };
+    }
+    case "duplicate-family": {
+      const actions = tableActions(job, deps);
+      const tableId = argString(job, job.args, "table_id");
+      const state = deps.getState();
+      tableNode(job, state, tableId);
+      const before = new Set(state.rootOrder);
+      actions.duplicateFamily(tableId);
+      await deps.flush?.();
+      const after = deps.getState();
+      const createdId =
+        after.activeNodeId && !before.has(after.activeNodeId) && after.nodes[after.activeNodeId]?.type === "table"
+          ? after.activeNodeId
+          : after.rootOrder.find((id) => !before.has(id) && after.nodes[id]?.type === "table");
+      if (!createdId) {
+        throw jobErr(job, "duplicated the table but its id could not be read back — ask titer_list_tables for the new table.");
+      }
+      const children = (after.childOrder?.[createdId] ?? [])
+        .map((id) => after.nodes[id])
+        .filter((n): n is ProjectNode => n !== undefined);
+      return {
+        result: {
+          project_id: job.project_id,
+          table_id: createdId,
+          children: {
+            analyses: children.filter((n) => n.type === "analysis").map((n) => n.id),
+            graphs: children.filter((n) => n.type === "graph").map((n) => n.id),
+          },
+        },
+        created: { table_id: createdId },
+      };
+    }
+    case "rename-node": {
+      const actions = tableActions(job, deps);
+      const nodeId = argString(job, job.args, "node_id");
+      const name = argString(job, job.args, "name");
+      const node = anyNode(job, deps.getState(), nodeId);
+      if (!name.trim()) throw jobErr(job, "needs a non-empty name.");
+      if (node.name !== name) {
+        actions.renameNode(nodeId, name);
+        await deps.flush?.();
+      }
+      return { result: { project_id: job.project_id, node_id: nodeId, name } };
+    }
+    case "delete-node": {
+      const actions = tableActions(job, deps);
+      const nodeId = argString(job, job.args, "node_id");
+      const state = deps.getState();
+      const node = anyNode(job, state, nodeId);
+      if (node.type === "table") {
+        const tables = state.rootOrder.filter((id) => state.nodes[id]?.type === "table");
+        if (tables.length <= 1) {
+          throw jobErr(
+            job,
+            `cannot delete table “${node.name}” — it is the last table in the project, and a project always has at least one table.`,
+          );
+        }
+      }
+      actions.removeNode(nodeId);
+      await deps.flush?.();
+      return { result: { project_id: job.project_id, node_id: nodeId, deleted: true } };
+    }
+    case "reorder-nodes": {
+      const actions = tableActions(job, deps);
+      const order = argStringArray(job, job.args, "order");
+      const parentId = argOptString(job, job.args, "parent_id");
+      const state = deps.getState();
+      if (parentId === undefined) {
+        checkExactOrder(job, order, state.rootOrder, "the project's root items");
+        if (!ordersEqual(order, state.rootOrder)) {
+          actions.reorderTables(order);
+          await deps.flush?.();
+        }
+      } else {
+        const parent = anyNode(job, state, parentId);
+        if (parent.type !== "table") {
+          throw jobErr(job, `cannot reorder the children of “${parentId}” — only a table has children to reorder (it is a ${parent.type}).`);
+        }
+        const current = state.childOrder?.[parentId] ?? [];
+        checkExactOrder(job, order, current, `the children of table “${parent.name}”`);
+        if (!ordersEqual(order, current)) {
+          actions.reorderChildren(parentId, order);
+          await deps.flush?.();
+        }
+      }
+      return { result: { project_id: job.project_id, order } };
+    }
+    case "undo": {
+      const actions = tableActions(job, deps);
+      const state = deps.getState();
+      const undone = state.past?.at(-1)?.label ?? null;
+      if (undone === null) {
+        return { result: { project_id: job.project_id, undone: null, can_redo: (state.future?.length ?? 0) > 0 } };
+      }
+      actions.undo();
+      await deps.flush?.();
+      const after = deps.getState();
+      return { result: { project_id: job.project_id, undone, can_redo: (after.future?.length ?? 0) > 0 } };
+    }
+    case "redo": {
+      const actions = tableActions(job, deps);
+      const state = deps.getState();
+      const redone = state.future?.at(-1)?.label ?? null;
+      if (redone === null) {
+        return { result: { project_id: job.project_id, redone: null, can_undo: (state.past?.length ?? 0) > 0 } };
+      }
+      actions.redo();
+      await deps.flush?.();
+      const after = deps.getState();
+      return { result: { project_id: job.project_id, redone, can_undo: (after.past?.length ?? 0) > 0 } };
+    }    default:
       throw new Error(`Unknown job action “${job.action}”.`);
   }
 }
@@ -179,7 +934,12 @@ export function useMcpJobDispatcher() {
   const cacheAnalysisResult = actions.cacheAnalysisResult;
   const loadProject = actions.loadProject;
   const markSaved = actions.markProjectSaved;
-  // Jobs already handed to an execution: the frontend side of the
+  // The table branches dispatch through these actions; after a dispatch
+  // they need the store to have settled before reading the new state
+  // back (a created table's id, an undo label) — two macrotasks, by which
+  // time React has flushed the render and the layout effects that keep
+  // `latest` current.
+  const flush = () => new Promise<void>((resolve) => setTimeout(() => setTimeout(resolve, 0), 0));  // Jobs already handed to an execution: the frontend side of the
   // once-only discipline (Rust's `take_jobs` is the other half — a job
   // claimed there is never handed out again, and a job seen here is never
   // executed again).
@@ -220,6 +980,8 @@ export function useMcpJobDispatcher() {
                 cacheAnalysisResult,
                 loadProject,
                 markSaved,
+                actions,
+                flush,
               });
               // A completion report is always sent; Rust ignores it for a
               // job that is already terminal (a cancel that landed first).
