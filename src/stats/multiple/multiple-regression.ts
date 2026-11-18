@@ -37,8 +37,6 @@ export async function runMultipleRegression(
     };
   }
 
-  const decls = [`y<-${rVec(aligned[0])}`, ...predictors.map((_, i) => `x${i}<-${rVec(aligned[i + 1])}`)];
-  const formula = `y~${predictors.map((_, i) => `x${i}`).join("+")}`;
   // Each coefficient row t (0 = intercept) pulled from summary()'s coefficient
   // matrix by explicit index → keyed names, so extraction never depends on order.
   // A constant or collinear predictor is aliased: coef(m) holds NA for it and
@@ -55,8 +53,17 @@ export async function runMultipleRegression(
       `t${t}=if(nal) NA else co[${t + 1},3],pv${t}=if(nal) NA else co[${t + 1},4]`,
   );
   const aliasAssigns = Array.from({ length: p }, (_, i) => `al${i}=as.numeric(na[${i + 2}])`);
+  // The predictors centered (upstream 1.1.0: the same fit, more precise for values
+  // far from 0 for their spread); the intercept is taken back to 0 with its exact
+  // SE (the centered intercept is uncorrelated with the slopes). Centering via
+  // `sweep` keeps coef(m)'s NA positions, so Titer's `nal`-based alias indexing
+  // below composes with it — the back-transformation only runs when no
+  // coefficient is NA (when one is, the aliased-predictor error fires first).
   const code =
-    `${decls.join(";")};m<-lm(${formula});s<-summary(m);co<-s$coefficients;na<-is.na(coef(m));nal<-any(na);f<-s$fstatistic;` +
+    `y<-${rVec(aligned[0])};X<-cbind(${predictors.map((_, i) => rVec(aligned[i + 1])).join(",")});` +
+    `mx<-colMeans(X);m<-lm(y~sweep(X,2,mx));s<-summary(m);co<-s$coefficients;na<-is.na(coef(m));nal<-any(na);f<-s$fstatistic;` +
+    `if(!nal){V<-vcov(m)[-1,-1,drop=FALSE];b0<-co[1,1]-sum(co[-1,1]*mx);se0<-sqrt(co[1,2]^2+drop(mx%*%V%*%mx));` +
+    `t0<-b0/se0;co[1,]<-c(b0,se0,t0,2*pt(-abs(t0),df.residual(m)))}` +
     `c(r2=s$r.squared,adjr2=s$adj.r.squared,fstat=if(is.null(f)) NA else unname(f[1]),n=length(y),` +
     `fp=if(is.null(f)) NA else unname(pf(f[1],f[2],f[3],lower.tail=FALSE)),` +
     `aliased=as.numeric(nal),${aliasAssigns.join(",")},${coefAssigns.join(",")})`;

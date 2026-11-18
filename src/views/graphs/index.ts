@@ -4,6 +4,7 @@
 
 import {
   DEFAULT_GRAPH_OPTIONS,
+  hasXColumn,
   type GraphType,
   type GraphOptions,
   type TableData,
@@ -47,6 +48,8 @@ import { pcaBiplot, PCA_BIPLOT_SERIES } from "./pca-biplot";
 import { kmeansScatter } from "./kmeans-scatter";
 import { histogram } from "./histogram";
 import { monteCarloHistogram, MONTE_CARLO_HISTOGRAM_SERIES } from "./monte-carlo-histogram";
+import { qqPlot } from "./qq-plot";
+import { residuals } from "./residuals";
 
 /** A Plotly figure (untyped traces/layout — built as plain objects per module). */
 export interface GraphFigure {
@@ -59,6 +62,10 @@ export interface GraphFigure {
  *  read a sibling analysis, not the columns directly — shared with plan 05's
  *  ROC work, not a one-off). */
 type GraphFamily = "column" | "xy" | "grouped" | "pie" | "heatmap" | "volcano" | "histogram" | "multiple";
+
+/** Whether a graph has a value axis to draw reference lines across (a volcano has its own
+ *  cutoffs; a pie and a heatmap have none). */
+export const hasValueAxis = (family: GraphFamily) => family !== "pie" && family !== "heatmap" && family !== "volcano";
 
 export interface GraphModule {
   label: string;
@@ -120,6 +127,8 @@ export const GRAPHS: Record<GraphType, GraphModule> = {
   "kmeans-scatter": kmeansScatter,
   histogram,
   "monte-carlo-histogram": monteCarloHistogram,
+  "qq-plot": qqPlot,
+  residuals,
 };
 
 /** The two variables a scatter of a Multiple Variables table plots, X then Y: the ones
@@ -138,24 +147,30 @@ export function variablePair<T extends { name: string }>(numeric: T[], options: 
  *  to the XY family's X-first shape: its two methods are Y columns only (see
  *  the special case below), so X is never handed to its builder as a method. */
 export function plotColumns(
-  { columns, numeric, sets, summary }: Dataset,
+  table: Dataset,
   type: GraphType,
   options: GraphOptions,
   tableType: TableType,
 ): Column[] {
   const { family } = GRAPHS[type];
+  const { columns: allColumns, numeric, sets: allSets, summary } = table;
   // The ROC curve plots a text-or-numeric truth column against its score:
   // the first two data columns, whatever they hold (the graph errors empty
   // when the truth has other than two classes or the score has no numbers).
-  if (type === "roc-curve") return columns.slice(0, 2);
+  if (type === "roc-curve") return allColumns.slice(0, 2);
   // A Bland-Altman plot compares two measurement methods, so on an XY table
   // its columns are the Y columns only: the X column is the independent
   // variable (time, dose…) — not a method — and handing it to the builder
   // as the first method plotted X against a method, the exact invalid
   // comparison the wizard guard (F8) already blocks. A column table has no
   // X, so the generic XY-family branch below hands it every column.
-  if (type === "bland-altman" && tableType === "xy") return splitXY(columns).ys.flatMap((s) => s.columns);
-  if (family === "volcano") return columns;
+  if (type === "bland-altman" && tableType === "xy") return splitXY(allColumns).ys.flatMap((s) => s.columns);
+  if (family === "volcano") return allColumns;
+  // The data sets it shows, when it chose some: their columns alone (an XY table's X too).
+  const shown = choosableSets(type, table, tableType).length ? options.sets : undefined;
+  const keep = (c: Column) => !shown || shown.includes(c.set ?? c.name);
+  const columns = allColumns.filter((c, i) => keep(c) || (hasXColumn(tableType) && i === 0));
+  const sets = allSets.filter((s) => !shown || shown.includes(s.name));
   if (family === "heatmap")
     return sets
       .filter((s) => s.columns.some((c) => c.values.length))
@@ -181,13 +196,32 @@ export function plotColumns(
     const x = variablePair(numeric, options)[0];
     return x ? [x] : [];
   }
-  if (family !== "xy") return numeric;
+  if (family !== "xy") return numeric.filter(keep);
   if (tableType === "multiple") {
     const [x, y] = variablePair(numeric, options);
     return x && y ? [x, y] : [];
   }
   const { x, ys } = splitXY(columns);
   return x ? [x, ...ys.flatMap((s) => s.columns)] : [];
+}
+
+/** The data sets a graph can show or leave out, in table order: those holding numbers, an
+ *  XY or Survival table's X aside; none where the graph picks its own columns (a volcano,
+ *  a Multiple Variables table's scatter or histogram, a ROC curve, a Bland-Altman plot,
+ *  a bubble plot). */
+export function choosableSets(type: GraphType, table: Dataset, tableType: TableType): string[] {
+  const { family } = GRAPHS[type];
+  if (
+    family === "volcano" ||
+    type === "roc-curve" ||
+    type === "bland-altman" ||
+    type === "bubble-plot" ||
+    (tableType === "multiple" && (family === "xy" || family === "histogram"))
+  )
+    return [];
+  return table.sets
+    .filter((s, i) => !(hasXColumn(tableType) && i === 0) && s.columns.some((c) => c.values.length > 0))
+    .map((s) => s.name);
 }
 
 /** The series a graph colors, in order: a volcano's "down" and "up", none for a
@@ -253,6 +287,7 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
     "mean-error",
     "estimation-plot",
     "histogram",
+    "qq-plot",
     "pie",
     "donut",
     "bland-altman",
@@ -263,6 +298,7 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
     "xy-scatter",
     "xy-bar",
     "xy-area",
+    "residuals",
     "schild-plot",
     "smooth-curve",
     "logistic-curve",
@@ -288,7 +324,7 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
   // `groupsOf`, which takes a nested column's group prefix ("A" for
   // "A:S1:R1"), so bars, scatter and lines all draw from nested columns.
   nested: optionsFor(["grouped-bars", "grouped-scatter", "grouped-lines"]),
-  multiple: optionsFor(["xy-scatter", "bubble-plot", "histogram", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "survival"]),
+  multiple: optionsFor(["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "survival"]),
   // Outcomes as series across the row categories, as Prism graphs contingency tables.
   contingency: optionsFor(["grouped-bars", "grouped-stacked", "grouped-hbars", "heatmap"]),
   survival: optionsFor(["survival"]),

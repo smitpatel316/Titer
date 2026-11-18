@@ -2,12 +2,27 @@
 // table's X, or two variables of a Multiple Variables table (`x`, `y`). Optionally forces the line through the origin (intercept = 0);
 // reports 95% confidence intervals for the slope and intercept alongside the fit.
 import type { AnalysisOutcome, Column, FitRow, LinearRegressionParams, NonlinearWeightScheme, StatRow } from "../types";
-import { describe, pRow, rVec, type ColumnTestSpec, type Group } from "../column/base";
+import { describe, identical, pRow, rVec, type ColumnTestSpec, type Group } from "../column/base";
 import { evalNamedVector } from "../webr";
 import { pairUp, splitXY, xyPoints, xyProblem } from "../../lib/dataset";
 import { num } from "../../lib/format";
 
 const DEFAULTS: LinearRegressionParams = { forceOrigin: false };
+
+/** What X and Y lack for a line, or nothing. */
+function lineProblem(x: Group, y: Group, origin: boolean): string | undefined {
+  const need = origin ? 2 : 3;
+  if (y.values.length < need) return `“${y.name}” needs at least ${need} points to be regressed on X.`;
+  // Through the origin, a line needs one X other than 0; else, two different Xs and a Y that changes.
+  if (origin) {
+    if (x.values.every((v) => v === 0)) return `“${x.name}” holds only 0s: a line through the origin needs another X.`;
+    if (y.values.every((v) => v === 0)) return `“${y.name}” holds only 0s: there is nothing to regress on “${x.name}”.`;
+    return undefined;
+  }
+  if (identical(x.values)) return `“${x.name}”'s values are all identical: a line needs X values that differ.`;
+  if (identical(y.values))
+    return `“${y.name}”'s values are all identical: there is no change in it to regress on “${x.name}”.`;
+}
 
 /** The R expression for a weighting scheme, over the `x`/`y` vectors. */
 const WEIGHT_R: Record<Exclude<NonlinearWeightScheme, "none" | "1/sd2">, string> = {
@@ -28,7 +43,7 @@ const WEIGHT_LABEL: Record<Exclude<NonlinearWeightScheme, "none" | "1/sd2">, str
 /** X and Y regressed, on the points they make: two variables named (on the rows where
  *  both have a value), else an XY table's X and the chosen Y data set (the first by
  *  default), each replicate a point. */
-function pickXY(columns: Column[], params: LinearRegressionParams | undefined): Group[] {
+export function pickXY(columns: Column[], params: LinearRegressionParams | undefined): Group[] {
   const named = (name?: string) => columns.find((c) => c.name === name);
   let points: { x: number[]; y: number[] } | undefined;
   let names: [string, string] = ["", ""];
@@ -79,6 +94,10 @@ export const linearRegressionSpec: ColumnTestSpec<LinearRegressionParams> = {
     return undefined;
   },
   parseGroups: pickXY,
+  // NOTE (upstream 1.1.0, deferred): upstream's centered `R_LINE` is NOT ported —
+  // it drops Titer's weighting (Plan 26). Only the validation is taken; a
+  // weight-aware centered fit is a follow-up.
+  checkGroups: ([x, y], params) => lineProblem(x, y, (params ?? DEFAULTS).forceOrigin),
   rCode: (groups, params) => {
     const origin = (params ?? DEFAULTS).forceOrigin;
     const formula = origin ? "y~x+0" : "y~x";
@@ -151,9 +170,11 @@ export async function runLinearRegressions(
   const lacking = params.ys.find((_, i) => !sets[i]);
   if (!x || lacking !== undefined) return { error: xyProblem(columns, lacking)! };
   const points = sets.map((s) => xyPoints(x, s!));
-  const few = sets.find((_, i) => points[i].x.length < 3);
-  if (few) return { error: `“${few.name}” needs at least 3 points to be regressed on X.` };
   const origin = params.forceOrigin;
+  for (const [i, p] of points.entries()) {
+    const problem = lineProblem({ name: x.name, values: p.x }, { name: sets[i]!.name, values: p.y }, origin);
+    if (problem) return { error: problem };
+  }
   // The multi-Y path never passes through the spec's check(), so weight
   // validity is checked here, per set on the paired points — the same
   // rules as the single-Y check, naming the set that fails them.

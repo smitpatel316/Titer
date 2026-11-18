@@ -24,6 +24,7 @@ import type {
 import { describe, missingColumn, pRow, rVec } from "../column/base";
 import { routQError } from "../types";
 import { num } from "../../lib/format";
+import { maxOf, minOf } from "../../lib/summary";
 import { pointKeyOf } from "../../lib/columns";
 import { datasetColumns, splitXY, xyProblem } from "../../lib/dataset";
 import { evalNamedVector, type RVector } from "../webr";
@@ -33,6 +34,7 @@ import {
   EXPONENTIAL_MODELS,
   CLASSIC_MODELS,
   applyFitOptions,
+  ecAnything,
   fitEntries,
   fitError,
   fitModelSpec,
@@ -238,6 +240,24 @@ export function invertModel(
       const q = y / y0;
       if (q <= 0) return null;
       return Math.log(q) / k;
+    }
+    case "logistic-growth": {
+      const y0 = c("Y0");
+      const ym = c("YM");
+      const k = c("K");
+      if (y0 == null || ym == null || k == null || k === 0 || ym === y0) return null;
+      const q = (y0 * (ym / y - 1)) / (ym - y0);
+      if (q <= 0) return null;
+      return -Math.log(q) / k;
+    }
+    case "gompertz-growth": {
+      const y0 = c("Y0");
+      const ym = c("YM");
+      const k = c("K");
+      if (y0 == null || ym == null || k == null || k === 0 || y0 === ym) return null;
+      const q = Math.log(y / ym) / Math.log(y0 / ym);
+      if (q <= 0) return null;
+      return -Math.log(q) / k;
     }
     case "michaelis-menten": {
       const vmax = c("Vmax");
@@ -476,6 +496,16 @@ function equation(
     case "exponential-growth":
       if (y0 == null || k == null) return undefined;
       return `Y = ${num(y0)}·exp(${num(k)}·X)`;
+    case "logistic-growth": {
+      const ym = coefOf(coefficients, "YM");
+      if (y0 == null || ym == null || k == null) return undefined;
+      return `Y = ${num(ym)}·${num(y0)}/((${num(ym)} − ${num(y0)})·exp(−${num(k)}·X) + ${num(y0)})`;
+    }
+    case "gompertz-growth": {
+      const ym = coefOf(coefficients, "YM");
+      if (y0 == null || ym == null || k == null) return undefined;
+      return `Y = ${num(ym)}·(${num(y0)}/${num(ym)})^exp(−${num(k)}·X)`;
+    }
     case "gaussian": {
       const amp = coefOf(coefficients, "Amplitude");
       const mean = coefOf(coefficients, "Mean");
@@ -1593,6 +1623,17 @@ export async function runNonlinearRegression(
     if (!(lo < hi)) return { error: `“${name}” bounds [${lo}, ${hi}]: the lower bound must be below the upper.` };
   for (const [name, value] of Object.entries(fixed))
     if (!Number.isFinite(value)) return { error: `Fixed “${name}” must be a finite number.` };
+  // Any ECx (upstream 1.1.0): a dose-response curve also reports its ECF
+  // (`ecx` = F, in %: EC80…), with its CI by the delta method. Not when the
+  // curves are being compared (upstream skips it there), and not when the
+  // midpoint, Hill slope or asymmetry is fixed — `dl()` reads those from
+  // the fit, and a fixed one is not in it.
+  if (params?.ecx != null && params.compareWith === undefined && spec.dose) {
+    const f = params.ecx;
+    if (!(f >= 1 && f <= 99)) return { error: "ECx must be between 1 and 99%." };
+    const ecxBlocked = [spec.dose.midpoint, "HillSlope", "S"].some((t) => fixedNames.includes(t));
+    if (!ecxBlocked) spec = { ...spec, derived: [...(spec.derived ?? []), ecAnything(model, f)] };
+  }
   const comparingModels = params?.compareModel !== undefined;
   if (comparingModels && params.compareModel === model)
     return { error: "Choose a different model to compare with." };
@@ -1875,7 +1916,7 @@ export async function runNonlinearRegression(
     return vals.reduce((s, v) => s + v, 0) / vals.length;
   });
   const logX = model.endsWith("-logx");
-  const [lo, hi] = [Math.min(...first.xs), Math.max(...first.xs)];
+  const [lo, hi] = [minOf(first.xs), maxOf(first.xs)];
   const rout = useRout ? { outliers: routOutliers, q: qPercent } : undefined;
 
   let v: RVector;
@@ -2121,10 +2162,10 @@ async function assembleResult(
     params?.compare === "all"
       ? differ
         ? "The curves differ: one curve doesn't fit both."
-        : "One curve fits both data sets."
+        : "The data don't show that the curves differ: one curve may fit both."
       : differ
         ? `The ${midpoint}s differ.`
-        : `One ${midpoint} fits both data sets.`;
+        : `The data don't show a difference between the ${midpoint}s.`;
   const interpolation = !params?.interpolate
     ? ""
     : interpolated.length === 0

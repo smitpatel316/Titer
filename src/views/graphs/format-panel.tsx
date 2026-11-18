@@ -15,17 +15,31 @@ import {
   TextTIcon,
 } from "@phosphor-icons/react";
 import { Button, Select } from "../../ui/controls";
-import { Section, Stepper } from "../../components/inspector";
+import { titleCase } from "../../lib/format";
+import { Row, Section, Stepper } from "../../components/inspector";
 import { useProjectStore } from "../../store/use-project-store";
 import { allConstantNames } from "../../lib/info-sheets";
 import { paletteColor, paletteOf, reversedPalette, savedPalette, withoutColors } from "../../lib/palettes";
-import { GRAPH_LIMITS, type GraphOptions, type PointStyle, type SeriesStyle } from "../../store/types";
-import { GRAPHS, newGraphOptions } from ".";
+import {
+  GRAPH_LIMITS,
+  MAX_REF_LINES,
+  REF_LABEL_PLACES,
+  SAME_AS_FILL,
+  type GraphOptions,
+  type GraphPalette,
+  type PointStyle,
+  type RefLine,
+  type SeriesStyle,
+} from "../../store/types";
+import { GRAPHS, hasValueAxis, newGraphOptions } from ".";
 import { EXPORT_FORMATS, RESOLUTIONS, type ExportFormat, type Resolution } from "./graph-export";
 import type { OfficeTarget } from "../../lib/office-export";
 import {
   Choice,
+  ColorRow,
   ColumnSelectRow,
+  DashRow,
+  Group,
   NumRow,
   OutlineRows,
   PercentRow,
@@ -61,6 +75,10 @@ interface Props extends SectionContext {
   canExport: boolean;
   onSave: (format: ExportFormat, dpi: Resolution) => void;
   onCopy: (dpi: Resolution) => void;
+  /** The table's series, in order: each shown one takes its place's color. */
+  allSeries: string[];
+  /** Where a new reference line goes: the middle of the value axis as drawn. */
+  newLineAt: number;
   /** One-click Send to Word / PowerPoint (v2 item 19). */
   onSendToOffice?: (target: OfficeTarget, dpi: Resolution) => void;
 }
@@ -70,6 +88,7 @@ const STYLE_OPTIONS: (keyof GraphOptions)[] = [
   "shape",
   "kind",
   "xyStyle",
+  "residualsAs",
   "groupLayout",
   "bars",
   "showPoints",
@@ -210,7 +229,7 @@ export function FormatPanel(props: Props) {
             onReverse={() => set({ palette: reversedPalette(palette), series: withoutColors(options.series) })}
           />
           {seriesNames.length > 0 && <SeriesHeader offer={offer} />}
-          {seriesNames.map((name, i) => {
+          {seriesNames.map((name) => {
             const own = options.series?.[name];
             return (
               <SeriesRow
@@ -218,7 +237,10 @@ export function FormatPanel(props: Props) {
                 label={family === "volcano" ? VOLCANO_SERIES[name] : name}
                 palette={palette}
                 style={{
-                  color: own?.color ?? paletteColor(palette, i, seriesNames.length),
+                  // Its color is its place's among the table's series (`allSeries`).
+                  color:
+                    own?.color ??
+                    paletteColor(palette, Math.max(0, props.allSeries.indexOf(name)), props.allSeries.length),
                   shape: own?.shape ?? options.pointShape,
                   dash: own?.dash ?? options.lineDash,
                   pattern: own?.pattern,
@@ -342,6 +364,7 @@ export function FormatPanel(props: Props) {
             "xScale",
             "yScale",
             "axisWidth",
+            "refLines",
             "rightYDataset",
             "y2Label",
             "y2Scale",
@@ -442,6 +465,15 @@ export function FormatPanel(props: Props) {
             limits={GRAPH_LIMITS.axisWidth}
             onChange={(axisWidth) => set({ axisWidth })}
           />
+          {hasValueAxis(family) && (
+            <RefLines
+              lines={options.refLines ?? []}
+              axis={graphType === "grouped-hbars" ? "X" : "Y"}
+              at={props.newLineAt}
+              palette={paletteOf(options)}
+              onChange={(lines) => set({ refLines: lines.length ? lines : undefined })}
+            />
+          )}
           <Choice
             label="X gridlines"
             value={options.gridX}
@@ -626,6 +658,67 @@ function HookRow({
         <Select value={value} onChange={onChange} options={constants} placeholder="None" />
       </div>
     </div>
+  );
+}
+
+/** The reference lines across the plot: for each, where (on the value axis, `axis`), its
+ *  text, dashes, thickness and color (none: the axes'); added at `at`, removed one by one. */
+function RefLines({
+  lines,
+  axis,
+  at,
+  palette,
+  onChange,
+}: {
+  lines: RefLine[];
+  axis: "X" | "Y";
+  at: number;
+  palette: GraphPalette;
+  onChange: (lines: RefLine[]) => void;
+}) {
+  const change = (i: number, line: Partial<RefLine>) =>
+    onChange(lines.map((l, k) => (k === i ? { ...l, ...line } : l)));
+  return (
+    <>
+      {lines.map((l, i) => (
+        <Group key={i} title={lines.length > 1 ? `Reference line ${i + 1}` : "Reference line"}>
+          <NumRow
+            label={`At ${axis}`}
+            value={l.value}
+            required
+            onChange={(value) => value !== undefined && change(i, { value })}
+          />
+          <TextRow label="Text" value={l.label ?? ""} onChange={(label) => change(i, { label: label || undefined })} />
+          {l.label && (
+            <Row label="Text place">
+              <Select
+                value={l.labelPlace ?? "top-right"}
+                onChange={(labelPlace) => change(i, { labelPlace })}
+                options={REF_LABEL_PLACES.map((p) => ({ value: p, label: titleCase(p.replace("-", " ")) }))}
+              />
+            </Row>
+          )}
+          <DashRow value={l.dash} onChange={(dash) => change(i, { dash })} />
+          <ThicknessRow
+            label="Thickness"
+            value={l.width}
+            limits={GRAPH_LIMITS.lineWidth}
+            onChange={(width) => change(i, { width })}
+          />
+          <ColorRow
+            label="Color"
+            palette={palette}
+            color={l.color}
+            same="Same as Axes"
+            onChange={(color) => change(i, { color: color === SAME_AS_FILL ? undefined : color })}
+          />
+          <Button onClick={() => onChange(lines.filter((_, k) => k !== i))}>Remove Line</Button>
+        </Group>
+      ))}
+      {lines.length < MAX_REF_LINES && (
+        <Button onClick={() => onChange([...lines, { value: at, dash: "dash", width: 1 }])}>Add Reference Line</Button>
+      )}
+    </>
   );
 }
 
