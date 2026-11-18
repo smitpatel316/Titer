@@ -22,6 +22,7 @@ import type { SavePromptChoice } from "../components/save-prompt-dialog";
 import * as native from "../native";
 import { loadRecents, MAX_RECENTS, saveRecents, recentKey, type RecentEntry } from "./recents";
 import { consumeMcpCloseAllowance } from "./mcp-document";
+import { publishMcpSnapshotNow } from "./mcp-publish";
 import { openProjectsOrSay, sayGone } from "../menus";
 import { fileName, fileTitle } from "../lib/paths";
 import {
@@ -746,11 +747,25 @@ export function useDocument() {
     afterLoad: () => void,
   ): Promise<boolean> => {
     try {
+      // A fresh attempt clears the last opening's outcome first, so a
+      // window that failed once doesn't report the stale failure for the
+      // next file (and the MCP server never sees it for a file that loads).
+      latest.current.setOpenError(null);
       // Read from the text, not `JSON.parse` + `parseProjectFile`: a duplicated
       // node id is last-wins in `JSON.parse`, so the text-level read (FF-F19)
       // is what keeps the later copy instead of dropping it silently.
       const parsed = parseProjectText(text);
       if ("error" in parsed) {
+        // The MCP server reads this from the snapshot: the same message the
+        // GUI shows, so `titer_open_project` errors instead of reporting
+        // the blank project this window falls back to as a success.
+        latest.current.setOpenError(parsed.error);
+        // Publish at once, before the alert: the debounced publisher does
+        // not fire for this change alone (it fires on the next content
+        // change), so without this the server would wait out its 15 s and
+        // report a timeout instead of the failure. The override carries
+        // the failure even though the store hasn't re-rendered yet.
+        await publishMcpSnapshotNow({ ...latest.current.get(), openError: parsed.error });
         report();
         await native.alert("Couldn't Open Project", parsed.error, "error");
         return false;
@@ -782,6 +797,15 @@ export function useDocument() {
       }
       return true;
     } catch {
+      // A truncated file dies in `JSON.parse` before `parseProjectText`
+      // can report it — the same failure, the same snapshot signal.
+      latest.current.setOpenError("This file is damaged or isn't a valid Titer project.");
+      // Publish at once, before the alert (see the error path above):
+      // without this the server times out instead of seeing the failure.
+      await publishMcpSnapshotNow({
+        ...latest.current.get(),
+        openError: "This file is damaged or isn't a valid Titer project.",
+      });
       report();
       await native.alert("Couldn't Open Project", "This file is damaged or isn't a valid Titer project.", "error");
       return false;
@@ -799,14 +823,29 @@ export function useDocument() {
       // that exists but can't be read — wrong encoding, no permission — stays,
       // and says what happened instead of "couldn't be found".
       if (isGoneReadError(err)) {
+        latest.current.setOpenError(`“${fileName(path)}” couldn't be found. It may have been moved or deleted.`);
+        // Publish the failure at once, before the alert (see applyProjectText).
+        await publishMcpSnapshotNow({
+          ...latest.current.get(),
+          openError: `“${fileName(path)}” couldn't be found. It may have been moved or deleted.`,
+        });
         setRecents((list) => list.filter((e) => !(e.kind === "local" && e.path === path)));
         return sayGone(path);
       }
       // A Prism file opened straight from the Finder (FF-F15): Titer can't
       // open it as a project — point at the import / converter instead.
       if (isPrismFile(path)) {
+        latest.current.setOpenError(prismFileOpenMessage(fileName(path)));
+        await publishMcpSnapshotNow({ ...latest.current.get(), openError: prismFileOpenMessage(fileName(path)) });
         return native.alert("Couldn't Open Project", prismFileOpenMessage(fileName(path)), "error");
       }
+      latest.current.setOpenError(
+        `“${fileName(path)}” couldn't be read. It may be damaged, or in an encoding Titer can't read.`,
+      );
+      await publishMcpSnapshotNow({
+        ...latest.current.get(),
+        openError: `“${fileName(path)}” couldn't be read. It may be damaged, or in an encoding Titer can't read.`,
+      });
       return native.alert(
         "Couldn't Open Project",
         `“${fileName(path)}” couldn't be read. It may be damaged, or in an encoding Titer can't read. It stays in Open Recent.`,
