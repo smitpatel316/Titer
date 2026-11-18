@@ -1,6 +1,6 @@
 {
   "name": "titer",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "Scientific data analysis, simplified — an open-source alternative to GraphPad Prism.",
   "private": true,
   "license": "GPL-3.0-or-later",

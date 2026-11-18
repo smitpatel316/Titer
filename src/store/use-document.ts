@@ -173,7 +173,7 @@ export function useDocument() {
   const saveAsPrism = async (): Promise<boolean> => {
     const s = latest.current.get();
     const revision = s.revision;
-    const version = native.isNative ? await native.appVersion().catch(() => "1.6.1") : "1.6.1";
+    const version = native.isNative ? await native.appVersion().catch(() => "1.6.2") : "1.6.2";
     let bytes: Uint8Array;
     try {
       bytes = (
@@ -219,7 +219,7 @@ export function useDocument() {
   const saveAsPzfx = async (): Promise<boolean> => {
     const s = latest.current.get();
     const revision = s.revision;
-    const version = native.isNative ? await native.appVersion().catch(() => "1.6.1") : "1.6.1";
+    const version = native.isNative ? await native.appVersion().catch(() => "1.6.2") : "1.6.2";
     let bytes: Uint8Array;
     try {
       bytes = (
@@ -573,7 +573,7 @@ export function useDocument() {
     if (!saveAs && filePath?.toLowerCase().endsWith(".prism")) {
       const s = latest.current.get();
       const revision = s.revision;
-      const version = native.isNative ? await native.appVersion().catch(() => "1.6.1") : "1.6.1";
+      const version = native.isNative ? await native.appVersion().catch(() => "1.6.2") : "1.6.2";
       try {
         const { bytes } = await writePrism(
           { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
@@ -596,7 +596,7 @@ export function useDocument() {
     if (!saveAs && filePath?.toLowerCase().endsWith(".pzfx")) {
       const s = latest.current.get();
       const revision = s.revision;
-      const version = native.isNative ? await native.appVersion().catch(() => "1.6.1") : "1.6.1";
+      const version = native.isNative ? await native.appVersion().catch(() => "1.6.2") : "1.6.2";
       try {
         const { bytes } = await writePzfx(
           { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
