@@ -504,6 +504,11 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
       "@class": "DataSheet",
       title: name,
       table: {
+        // BUG-20: real Prism's reader dispatches on table["@class"] and
+        // dereferences it unconditionally — omitting it crashes Prism
+        // 11.2.0 on open (SIGSEGV in NSDocument init). Real files write
+        // "XYDataTable" for xy/survival tables, "DataTable" otherwise.
+        "@class": isXY ? "XYDataTable" : "DataTable",
         uid: tableUid,
         format,
         dataFormat,

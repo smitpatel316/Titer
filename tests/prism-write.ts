@@ -376,6 +376,84 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
     JSON.stringify(dupTable?.data) === JSON.stringify(dupData),
     `back columns: ${JSON.stringify(dupTable?.data?.columns)}`,
   );
+  // W11 (BUG-20): every written data sheet's table carries "@class" —
+  // real Prism 11.2.0 dispatches on it and dereferences it unconditionally,
+  // so omitting it crashes Prism on open (SIGSEGV in NSDocument init).
+  // Real Prism files write "XYDataTable" for xy/survival tables and
+  // "DataTable" for column/grouped/contingency.
+  const classProject = {
+    nodes: {
+      t_col: {
+        id: "t_col",
+        type: "table",
+        name: "Col",
+        parentId: null,
+        tableType: "column",
+        data: { columns: ["Title", "A", "B"], rows: [[null, "1", "2"]] },
+      },
+      t_xy: {
+        id: "t_xy",
+        type: "table",
+        name: "XY",
+        parentId: null,
+        tableType: "xy",
+        data: { columns: ["Title", "X", "Y_1", "Y_2"], rows: [[null, "0.1", "10", "11"]] },
+      },
+      t_surv: {
+        id: "t_surv",
+        type: "table",
+        name: "Surv",
+        parentId: null,
+        tableType: "survival",
+        data: { columns: ["Title", "Time", "GrpA", "GrpB"], rows: [[null, "0", "100", "90"]] },
+      },
+      t_grouped: {
+        id: "t_grouped",
+        type: "table",
+        name: "Grouped",
+        parentId: null,
+        tableType: "grouped",
+        data: {
+          columns: ["Title", "G1:Y1", "G1:Y2", "G2:Y1", "G2:Y2"],
+          rows: [[null, "1", "2", "3", "4"]],
+        },
+      },
+      t_cont: {
+        id: "t_cont",
+        type: "table",
+        name: "Cont",
+        parentId: null,
+        tableType: "contingency",
+        data: { columns: ["Title", "A", "B"], rows: [[null, "5", "6"]] },
+      },
+    },
+    rootOrder: ["t_col", "t_xy", "t_surv", "t_grouped", "t_cont"],
+    childOrder: { t_col: [], t_xy: [], t_surv: [], t_grouped: [], t_cont: [] },
+    activeNodeId: "t_col",
+  };
+  const classWritten = await writePrism(classProject as never, "1.0.7");
+  const classZip = await JSZip.loadAsync(classWritten.bytes);
+  const classByTitle = new Map<string, unknown>();
+  for (const p of Object.keys(classZip.files)) {
+    if (!p.startsWith("data/sheets/") || !p.endsWith("sheet.json") || classZip.files[p].dir) continue;
+    const d = JSON.parse(await classZip.file(p)!.async("string")) as {
+      title?: string;
+      table?: { "@class"?: string };
+    };
+    if (d.title) classByTitle.set(d.title, d.table?.["@class"]);
+  }
+  const expectedClasses: [string, string][] = [
+    ["Col", "DataTable"],
+    ["XY", "XYDataTable"],
+    ["Surv", "XYDataTable"],
+    ["Grouped", "DataTable"],
+    ["Cont", "DataTable"],
+  ];
+  check(
+    "W11 tables carry @class (BUG-20)",
+    expectedClasses.every(([title, cls]) => classByTitle.get(title) === cls),
+    [...classByTitle.entries()].map(([t, c]) => `${t}=${String(c)}`).join(", "),
+  );
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed.`);
