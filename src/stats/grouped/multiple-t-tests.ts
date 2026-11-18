@@ -8,7 +8,7 @@
 // across every row (pooled residual variance, like a single-error-term ANOVA)
 // instead of each row estimating its own. Everything, the correction across rows too,
 // is computed by R.
-import type { AnalysisOutcome, Column, MultipleTTestsParams } from "../types";
+import type { AnalysisOutcome, Column, ComparedCell, MultipleTTestsParams } from "../types";
 import { describe, rBool, rVec } from "../column/base";
 import { evalNamedVector } from "../webr";
 import { groupRows, pairedGroupRows, rowName } from "./base";
@@ -96,6 +96,10 @@ pa<-p.adjust(pr,"${params.correction === "fdr" ? "BH" : params.correction}")
   const comparisons = testable.map((r, i) => ({
     group1: rowName(titles, r),
     group2: "",
+    cells: [
+      { group: name1, row: r },
+      { group: name2, row: r },
+    ] as [ComparedCell, ComparedCell],
     diff: v[`d_${i}`] ?? null,
     p: v[`p_${i}`] ?? null,
   }));
@@ -106,6 +110,10 @@ pa<-p.adjust(pr,"${params.correction === "fdr" ? "BH" : params.correction}")
         ? "Unpaired t test (pooled SD across rows)"
         : "Welch's t test (no equal-SD assumption)"
     : `${params.paired ? "Wilcoxon signed-rank" : "Mann-Whitney"} test`;
+  // One unified untested note: rows left out for too few replicates, and rows
+  // whose test returned no p-value (no variation to test — a t test needs it).
+  const noPValueRows = params.gaussian && !pooled ? testable.filter((_, i) => comparisons[i].p == null) : [];
+  const untestedRows = [...droppedRows, ...noPValueRows];
   return {
     testType: "multiple-t-tests",
     subtitle: params.gaussian
@@ -121,14 +129,10 @@ pa<-p.adjust(pr,"${params.correction === "fdr" ? "BH" : params.correction}")
         { name: name2, values: rowsB.flat() },
       ])
     ).groups,
-    notes: `${testLabel} at each row, ${CORRECTION_LABEL[params.correction]} across rows.` +
-      (droppedRows.length
-        ? droppedRows.length === 1
-          ? ` Row “${rowName(titles, droppedRows[0])}” was left out — it has fewer than 2 replicate values in at least one group.`
-          : ` Rows ${droppedRows.map((r) => `“${rowName(titles, r)}”`).join(", ")} were left out — each has fewer than 2 replicate values in at least one group.`
-        : "") +
-      (params.gaussian && !pooled && comparisons.some((c) => c.p == null)
-        ? " A row with no variation in either group has no p-value (a t test needs variation to compare)."
+    notes:
+      `${testLabel} at each row, ${CORRECTION_LABEL[params.correction]} across rows.` +
+      (untestedRows.length
+        ? ` Not tested: ${untestedRows.map((r) => `“${rowName(titles, r)}”`).join(", ")} (fewer than 2 values in a group, or values that don't vary).`
         : ""),
     comparisons,
     comparisonsLabel: `Per-row comparisons (${name1} vs. ${name2})`,

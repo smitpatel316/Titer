@@ -26,7 +26,7 @@ import { paletteOf } from "../../lib/palettes";
 import { computeGroupedDEG } from "../../lib/deg";
 import { useAnalysis } from "../analyses/use-analysis";
 import { infoSheetsOf, resolveGraphOptions } from "../../lib/info-sheets";
-import { GRAPHS, graphSeries, plotColumns } from ".";
+import { choosableSets, GRAPHS, graphSeries, hasValueAxis, plotColumns } from ".";
 import { addFittedCurve } from "./fitted-curve";
 import { addBindingCurve, addDoseResponseSpecialCurve, addEnzymeInhibitionCurve } from "./binding-curve";
 import { addGeneratedCurves } from "./generated-curves";
@@ -38,7 +38,7 @@ import { addEstimationPlot } from "./estimation-plot";
 import { coxSurvivalColumns } from "./survival";
 import { FormatPanel } from "./format-panel";
 import { copyGraphImage, saveGraphImage, sendGraphToOffice } from "./graph-export";
-import { addNote, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, rightYDataset, unlinkedAnalysisNote, withCaps } from "./plot-helpers";
+import { addNote, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, refLineParts, rightYDataset, unlinkedAnalysisNote, withCaps } from "./plot-helpers";
 import { addLogisticCurve as addAnalysisLogisticCurve } from "./fitted-curve";
 import { useStartAnalysis } from "../analyses/use-analysis-launcher";
 import { loadPlotly } from "./plotly";
@@ -51,7 +51,7 @@ import { addScreePlot } from "./scree-plot";
 import { addPcaBiplot } from "./pca-biplot";
 import { addKmeansScatter } from "./kmeans-scatter";
 import { addMonteCarloHistogram } from "./monte-carlo-histogram";
-import { addSignificance, deriveComparisons } from "./significance-overlay";
+import { addSignificance, deriveComparisons, GROUPED_STARS, starsFit } from "./significance-overlay";
 import {
   drawnKeys,
   drawnStyle,
@@ -122,6 +122,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
   // The margins Plotly drew, which grow for long labels and place the resize grab
   // zones on the real axes.
   const [margins, setMargins] = React.useState<Margins | null>(null);
+  const [newLineAt, setNewLineAt] = React.useState(0);
 
   // ── Data ─────────────────────────────────────────────────────────────
 
@@ -136,6 +137,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
       options.yVariable,
       options.bubbleSizeVariable,
       options.bubbleColorVariable,
+      options.sets?.join("\n"),
       parent?.tableType,
     ],
   );
@@ -199,8 +201,14 @@ export function GraphView({ node }: { node: ProjectNode }) {
     return rows.size - (volcanoColumns.find((c) => c.name === "Log2 FC")?.values.length ?? 0);
   }, [dataset, volcanoColumns, volcanoGroups?.join("\n"), options.volcanoGroupA, options.volcanoGroupB]);
 
-  // The series drawn, one row each in the Series section.
-  const seriesNames = data && parent?.tableType ? graphSeries(type, data, parent.tableType, options) : [];
+  // The table's series, whose places give their colors, and those shown (the data sets the
+  // graph chose), one row each in the Series section.
+  const choosable = dataset && parent?.tableType ? choosableSets(type, dataset, parent.tableType) : [];
+  const shownSets = choosable.length ? options.sets : undefined;
+  const allSeries = data && parent?.tableType ? graphSeries(type, data, parent.tableType, options) : [];
+  const seriesNames = shownSets ? allSeries.filter((n) => shownSets.includes(n)) : allSeries;
+  // The data sets it shows that are left in the table: none, and it says so.
+  const setsGone = shownSets && !shownSets.some((n) => choosable.includes(n));
 
   // The grouped volcano maps the computed DEG columns (P values) onto its axes; an XY
   // table's X is its X column. The options the builders draw from resolve the
@@ -261,7 +269,13 @@ export function GraphView({ node }: { node: ProjectNode }) {
     data && parent?.tableType === "grouped" && (type === "grouped-box" || family === "volcano")
       ? summaryTableProblem(data, GRAPHS[type].label)
       : undefined;
-  const lack = xyLack ?? summaryLack ?? (gone === undefined ? undefined : `The column “${gone}” is no longer in the table.`);
+  const lack =
+    xyLack ??
+    summaryLack ??
+    (gone === undefined
+      ? undefined
+      : `The column “${gone}” is no longer in the table.`) ??
+    (setsGone ? "None of the data sets this graph shows is left in the table: choose some in its Data section." : undefined);
   const hasData = !lack && (columns.some((c) => c.values.length > 0) || plotFunctionAnalysis !== undefined);
 
   // The figure's traces as last drawn, without the selection ring.
@@ -358,15 +372,18 @@ export function GraphView({ node }: { node: ProjectNode }) {
   const analyses = Object.values(nodes).filter((n) => n.type === "analysis" && n.parentId === node.parentId);
   // Significance brackets read the chosen analysis's own result (the one its view shows).
   const sigAnalysis = options.sigAnalysisId ? nodes[options.sigAnalysisId] : undefined;
+  const stars = family === "column" || GROUPED_STARS.has(type);
   const sigOutcome = useAnalysis(
-    family === "column" ? sigAnalysis?.analysisType : undefined,
+    stars ? sigAnalysis?.analysisType : undefined,
     data,
     sigAnalysis?.analysisParams,
   );
-  // None while its analysis runs (its stars come once R answers).
+  // None while its analysis runs (its stars come once R answers); none from an analysis
+  // of other data sets than those the graph shows (`starsFit`).
+  const sigFits = sigAnalysis !== undefined && starsFit(sigAnalysis, choosable, shownSets ?? choosable);
   const comparisons = React.useMemo(
-    () => (sigAnalysis && !sigOutcome ? null : deriveComparisons(sigOutcome)),
-    [sigAnalysis, sigOutcome],
+    () => (!sigFits ? [] : sigAnalysis && !sigOutcome ? null : deriveComparisons(sigOutcome)),
+    [sigFits, sigAnalysis, sigOutcome],
   );
   // An XY scatter draws a regression of its table: a linear one's line and band it computes
   // itself; a nonlinear or logistic one's curve, from its result.
@@ -622,7 +639,8 @@ export function GraphView({ node }: { node: ProjectNode }) {
         options,
         type === "kmeans-scatter" && kmeansResult?.kmeansClusters
           ? kmeansResult.kmeansClusters.length
-          : seriesNames.length,
+          : allSeries.length,
+        allSeries,
       );
       const fig = GRAPHS[type].build(coxSurvivalCols ?? volcanoColumns, buildOptions, paint, dataset?.titles, dataset?.summary);
       fig.data = withCaps(fig.data, options);
@@ -632,7 +650,8 @@ export function GraphView({ node }: { node: ProjectNode }) {
         const note = unlinkedAnalysisNote(t);
         if (note) addNote(fig, note, options);
       };
-      if (family === "column" && options.sigAnalysisId) addSignificance(fig, columns, type, options, comparisons ?? []);
+      if (stars && options.sigAnalysisId)
+        addSignificance(fig, columns, type, options, comparisons ?? [], dataset?.titles);
       if (type === "xy-scatter" && curveParams) {
         const { x, ys } = splitXY(columns);
         const fitted = curveParams.ys ?? [curveParams.y ?? ys[0]?.name ?? ""];
@@ -731,6 +750,11 @@ export function GraphView({ node }: { node: ProjectNode }) {
               y: onAxis(label.y, options.yScale),
             }));
       if (labels.length) fig.layout.annotations = [...((fig.layout.annotations as unknown[]) ?? []), ...labels];
+      if (hasValueAxis(family) && options.refLines?.length) {
+        const { shapes, annotations } = refLineParts(options, type === "grouped-hbars");
+        fig.layout.shapes = [...((fig.layout.shapes as unknown[]) ?? []), ...shapes];
+        fig.layout.annotations = [...((fig.layout.annotations as unknown[]) ?? []), ...annotations];
+      }
       const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent");
       const ring = selectionRing(fig.data, selected, accent);
       // A graph of individual points picks them by dragging; the others stay still.
@@ -751,6 +775,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
         setSelected(new Set([...selected].filter((key) => keys.has(key))));
       const resolved = (el as { _fullLayout?: PlotlyLayout })._fullLayout;
       if (resolved?._size) setMargins(resolved._size);
+      setNewLineAt(middleOf(type === "grouped-hbars" ? resolved?.xaxis : resolved?.yaxis) ?? 0);
     });
     return () => {
       current = false;
@@ -783,7 +808,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
     pcaResult,
     kmeansResult,
     mcResult,
-    seriesNames.length,
+    allSeries.join("\n"),
     selected,
     glRatio,
   ]);
@@ -865,6 +890,9 @@ export function GraphView({ node }: { node: ProjectNode }) {
       inspector={
         <FormatPanel
           graphId={node.id}
+          newLineAt={newLineAt}
+          allSeries={allSeries}
+          sets={choosable}
           graphType={type}
           tableType={parent?.tableType}
           options={options}
@@ -893,8 +921,11 @@ export function GraphView({ node }: { node: ProjectNode }) {
           numericNames={dataset?.numeric.map((c) => c.name) ?? []}
           allNames={dataset?.columns.map((c) => c.name) ?? []}
           fitError={curveOutcome && "error" in curveOutcome ? curveOutcome.error : null}
-          onNewAnalysis={(test) => {
+          onNewAnalysis={(test, _sets) => {
             if (!node.parentId) return;
+            // `_sets` pre-answers the new analysis's data-set question once the
+            // `forGraph` launch plumbing lands (use-analysis-launcher, another
+            // lane): until then the wizard/picker opens unanswered.
             if (test) startAnalysis(node.parentId, test);
             else openSelector({ kind: "new-analysis", tableId: node.parentId });
           }}
@@ -1044,4 +1075,15 @@ type PlotElement = HTMLDivElement & {
 /** The part of Plotly's resolved layout read back after drawing. */
 interface PlotlyLayout {
   _size?: Margins;
+  xaxis?: { range?: number[]; type?: string };
+  yaxis?: { range?: number[]; type?: string };
+}
+
+/** The middle of an axis as drawn, rounded to 2 significant digits (its range is in log10
+ *  on a log axis): where a new reference line goes. */
+function middleOf(axis: PlotlyLayout["xaxis"]): number | undefined {
+  const [a, b] = axis?.range ?? [];
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return undefined;
+  const mid = axis!.type === "log" ? 10 ** ((a + b) / 2) : (a + b) / 2;
+  return mid === 0 ? 0 : Number(mid.toPrecision(2));
 }
