@@ -664,6 +664,73 @@ check("write-table with excluded omitted (null) preserves the marks (v1.6 F5)", 
   strictEqual(data().excluded, undefined);
 });
 
+check("write-table sets row_groups on a grouped table, and create-table takes them (BUG-19)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const columns = ["Title", "Placebo:Y1", "Placebo:Y2", "Drug:Y1", "Drug:Y2"];
+  const rows = [
+    ["Day 1", 1, 2, 3, 4],
+    ["Day 2", 5, 6, 7, 8],
+    ["Day 1", 9, 10, 11, 12],
+    ["Day 2", 13, 14, 15, 16],
+  ];
+  const bands = [
+    { name: "WT", count: 2 },
+    { name: "KO", count: 2 },
+  ];
+  // A banded table can be built in one call.
+  const created = await harness.run("job-b19a", "create-table", {
+    table_type: "grouped",
+    name: "B19",
+    columns,
+    rows,
+    row_groups: bands,
+  });
+  const tid = (created.result as { table_id: string }).table_id;
+  const data = () => harness.state().nodes[tid]?.data!;
+  deepStrictEqual(data().rowGroups, bands);
+  // A rewrite with row_groups omitted preserves the bands.
+  harness.sync();
+  await harness.run("job-b19b", "write-table", { table_id: tid, columns, rows });
+  deepStrictEqual(data().rowGroups, bands);
+  // An explicit list replaces them; an empty list clears them.
+  harness.sync();
+  await harness.run("job-b19c", "write-table", {
+    table_id: tid,
+    columns,
+    rows,
+    row_groups: [
+      { name: "A", count: 1 },
+      { name: "B", count: 3 },
+    ],
+  });
+  deepStrictEqual(data().rowGroups, [
+    { name: "A", count: 1 },
+    { name: "B", count: 3 },
+  ]);
+  harness.sync();
+  await harness.run("job-b19d", "write-table", { table_id: tid, columns, rows, row_groups: [] });
+  strictEqual(data().rowGroups, undefined);
+  // The bands must tile the rows exactly.
+  harness.sync();
+  await rejects(
+    harness.run("job-b19e", "write-table", { table_id: tid, columns, rows, row_groups: [{ name: "WT", count: 2 }] }),
+    /tile the rows exactly/,
+  );
+  // And they only apply to grouped tables.
+  const col = await harness.run("job-b19f", "create-table", {
+    table_type: "column",
+    name: "C",
+    columns: ["Title", "A"],
+    rows: [["r1", 1]],
+  });
+  const ctid = (col.result as { table_id: string }).table_id;
+  harness.sync();
+  await rejects(
+    harness.run("job-b19g", "write-table", { table_id: ctid, columns: ["Title", "A"], rows: [["r1", 1]], row_groups: bands }),
+    /only apply to grouped tables/,
+  );
+});
+
 check("undo reads can_redo from post-undo state when getState lags (v1.6 F6)", async () => {
   const setup = (harness: ReturnType<typeof mcpLaggingHarness>) => {
     harness.dispatch({
