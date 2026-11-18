@@ -387,6 +387,17 @@ export function subcolumnNames(title: string, dataFormat: string, count: number)
   return Array.from({ length: count }, (_, i) => `${base}_${i + 1}`);
 }
 
+/**
+ * Whether a Prism dataFormat names summary subcolumns for a dataset this
+ * wide — its suffix list exists and is exactly `count` long. `y_replicates`
+ * (null) and `y_single` ([]) never fit a multi-column dataset; a summary
+ * format fits only its own width.
+ */
+const summaryFits = (dataFormat: string, count: number): boolean => {
+  const suffixes = SUBCOLUMN_SUFFIXES[dataFormat];
+  return suffixes !== undefined && suffixes !== null && suffixes.length === count;
+};
+
 const isSummaryFormat = (dataFormat: string) => {
   const s = SUBCOLUMN_SUFFIXES[dataFormat];
   return s !== undefined && s !== null && s.length > 0;
@@ -735,7 +746,26 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
           cursor += entry.count;
           continue;
         }
-        const names = subcolumnNames(plainTitle(entry.set.title), dataFormat, entry.count);
+        // Naming precedence (BUG-9): the table-level dataFormat wins when
+        // it describes this dataset (its suffix list matches the
+        // subcolumn count) — real Prism files store the specific
+        // statistic there: a y_cv_n table whose datasets say y_sd_n
+        // still means MEAN/CV/N, not MEAN/SD/N. When the table format
+        // doesn't fit (a mixed table: an xy table's "XX error" dataset
+        // is y_single beside y_sd_n Y datasets, so the table says
+        // y_single), the dataset's own format carries the meaning —
+        // Ya_MEAN/Ya_SD/Ya_N, not Ya_1/Ya_2/Ya_3. Anything else falls
+        // back to _1/_2/_3 inside subcolumnNames.
+        const setFormat = entry.set.format ?? "";
+        const names = subcolumnNames(
+          plainTitle(entry.set.title),
+          summaryFits(dataFormat, entry.count)
+            ? dataFormat
+            : summaryFits(setFormat, entry.count)
+              ? setFormat
+              : dataFormat,
+          entry.count,
+        );
         for (let i = 0; i < entry.count; i++) {
           columns.push({ name: names[i], values: csvCol(cursor) });
           cursor++;
