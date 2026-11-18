@@ -61,7 +61,14 @@ export async function waitForWindowGone(name, { timeout = 20000, interval = 500 
 }
 
 export async function activateWindow(wid) {
-  await xdotool("windowactivate", "--sync", wid);
+  // windowactivate needs a window manager (openbox runs on :99 for this
+  // lane). If the WM is gone, fall back to windowfocus, which sets input
+  // focus directly and needs no WM — keyboard input still lands.
+  try {
+    await xdotool("windowactivate", "--sync", wid);
+  } catch {
+    await xdotool("windowfocus", "--sync", wid);
+  }
 }
 
 /** Send X keys to the focused window, e.g. key("ctrl+l"), key("Return"). */

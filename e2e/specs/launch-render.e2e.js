@@ -72,19 +72,32 @@ describe("Q-71 launch renders menu bar + Table 1 grid", () => {
 
     // Row numbers are gutter divs (class tabular-nums, text = row number).
     // The grid virtualizes, so this counts the rows rendered at launch size.
-    const rows = await browser.tauri.execute(() =>
-      [...document.querySelectorAll("div.tabular-nums")]
-        .map((d) => Number(d.textContent))
-        .filter((n) => Number.isInteger(n) && n > 0),
-    );
+    // The table view mounts after the shell hook, so poll until the rows
+    // appear instead of asserting on the first paint.
+    let rows = [];
+    const deadline = Date.now() + 15000;
+    for (;;) {
+      rows = await browser.tauri.execute(() =>
+        [...document.querySelectorAll("div.tabular-nums")]
+          .map((d) => Number(d.textContent))
+          .filter((n) => Number.isInteger(n) && n > 0),
+      );
+      if (rows.length >= 25 || Date.now() > deadline) break;
+      await sleep(500);
+    }
     assert.ok(rows.includes(1), `row 1 not rendered (got ${JSON.stringify(rows.slice(0, 8))})`);
     const maxRow = Math.max(...rows);
     assert.ok(maxRow >= 25, `expected >= 25 rendered rows, got max ${maxRow} (${rows.length} row-number cells)`);
 
     // The grid's idle input sits on the active cell (row 1) and holds focus.
-    const inputLabel = await browser.tauri.execute(
-      () => document.querySelector("input[aria-label]")?.getAttribute("aria-label") ?? "",
-    );
+    // (The FIRST input[aria-label] in the DOM is the sidebar "Search
+    // project" box — match the grid input by its "<header>, row N" label.)
+    const inputLabel = await browser.tauri.execute(() => {
+      const grid = [...document.querySelectorAll("input[aria-label]")].find((i) =>
+        /, row \d+$/.test(i.getAttribute("aria-label") ?? ""),
+      );
+      return grid?.getAttribute("aria-label") ?? "";
+    });
     assert.match(inputLabel, /row 1/, `grid input not on row 1 (aria-label ${JSON.stringify(inputLabel)})`);
   });
 

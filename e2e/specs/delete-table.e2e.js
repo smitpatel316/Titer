@@ -30,9 +30,21 @@ const DELETE_TITLE = "Delete “Table 2”?";
 
 async function createTable2() {
   await x.key("ctrl+alt+t");
-  const option = await $("=Column");
-  await option.waitForExist({ timeout: 10000 });
-  await option.click();
+  // Click "Column" INSIDE the open New Table dialog. A bare `=Column`
+  // text match is ambiguous — the grid's own column header is also
+  // "Column" — so find the button in the open <dialog> and click it.
+  const clicked = await browser.tauri.execute(() => {
+    const dlg = document.querySelector("dialog[open]");
+    const btn = [...(dlg?.querySelectorAll("button") ?? [])].find(
+      (b) => b.textContent.trim() === "Column",
+    );
+    if (btn) {
+      btn.click();
+      return true;
+    }
+    return false;
+  });
+  assert.ok(clicked, "New Table dialog did not offer a Column option");
   await browser.waitUntil(
     async () => (await projectSummary()).tables.some((t) => t.name === "Table 2"),
     { timeout: 10000, timeoutMsg: "Table 2 was not created" },

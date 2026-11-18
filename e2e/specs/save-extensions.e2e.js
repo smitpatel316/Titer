@@ -137,14 +137,16 @@ describe("T-128 extensionless save names get the format extension", () => {
     graphId = await callHook("createGraph", survivalTableId, "xy-scatter");
     assert.equal(typeof graphId, "string", `createGraph did not return an id: ${JSON.stringify(graphId)}`);
     // The new graph becomes the active node; its Format panel holds the
-    // Export section. Expand it if it starts folded.
+    // Export section. Expand it if it starts folded. (isDisplayed, not
+    // isExisting: a folded section's button exists in the DOM but cannot
+    // be clicked.)
     const saveBtn = await $("button=Save…");
-    if (!(await saveBtn.isExisting().catch(() => false))) {
+    if (!(await saveBtn.isDisplayed().catch(() => false))) {
       const section = await $("=Export");
       await section.waitForExist({ timeout: 15000 });
       await section.click();
     }
-    await saveBtn.waitForExist({ timeout: 15000 });
+    await saveBtn.waitForDisplayed({ timeout: 15000 });
     await saveBtn.click();
     await saveViaChooser("Export Graph", path.join(OUT, "t128-graph"));
     assertExtended(path.join(OUT, "t128-graph"), "png");

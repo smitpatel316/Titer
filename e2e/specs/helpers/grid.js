@@ -6,7 +6,11 @@
 // Typing goes nowhere until a cell is clicked first (Q-17/Q-68) — the
 // click below is that step, not optional.
 export async function typeColumnAValues(values) {
-  const input = await $("input[aria-label]");
+  // The grid input's label is "<header>, row N". The FIRST input[aria-label]
+  // in the DOM is the sidebar "Search project" box (proved by Q-71: a plain
+  // input[aria-label] query returns it), so match the grid input by its
+  // ", row N" label suffix — typing into the search box would dirty nothing.
+  const input = await $("//input[contains(@aria-label, ', row ')]");
   await input.waitForExist({ timeout: 15000 });
   await input.click();
   // The active cell starts in the Title column; move to the first data

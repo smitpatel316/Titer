@@ -15,7 +15,7 @@
 // times out and the spec fails. If the dialog never appeared, the first
 // wait fails.
 import assert from "node:assert/strict";
-import { switchToProjectWindow, waitForHook, callHook } from "./helpers/window.js";
+import { switchToProjectWindow, waitForHook } from "./helpers/window.js";
 import { dismissUpdateDialogIfPresent } from "./helpers/window.js";
 import * as x from "./helpers/xdotool.js";
 import { sleep, waitForWindow, waitForWindowGone, activateWindow, key } from "./helpers/xdotool.js";
@@ -45,8 +45,15 @@ describe("Q-84/U-01 update dialog dismisses with Later", () => {
       window.__wdioOpenLinkCalls = [...(window.__wdioOpenLinkCalls || []), args];
     });
 
-    // Fire the real prompt; do NOT await — it blocks until dismissed.
-    void callHook("showUpdateDialog");
+    // Fire the real prompt WITHOUT returning its promise: showUpdateDialog
+    // awaits askToUpdate, and WebDriver awaits a returned promise — routing
+    // it through callHook would deadlock the execute call until the dialog
+    // is dismissed, and nothing could dismiss it. The void wrapper returns
+    // immediately; the spec polls for the dialog below, and the answer is
+    // stashed on the hook when the prompt resolves.
+    await browser.tauri.execute(() => {
+      void window.__titerE2E.showUpdateDialog();
+    });
     const wid = await waitForWindow(DIALOG_TITLE, { timeout: 20000 });
     assert.ok(wid, `update dialog ${JSON.stringify(DIALOG_TITLE)} never appeared`);
 
