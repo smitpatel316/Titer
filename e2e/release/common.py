@@ -10,6 +10,7 @@ Exit code is non-zero iff any assertion FAILED. SKIP never fails.
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import urllib.request
@@ -59,16 +60,65 @@ def sha256_file(path):
     return h.hexdigest()
 
 
+def _curl_available():
+    return shutil.which("curl") is not None
+
+
+def _curl_get(url, timeout=60, head=False):
+    """curl fallback: the egress proxy intermittently truncates urllib
+    reads from titer.smitpatel.net (IncompleteRead / closed connection);
+    curl has proven reliable on the same URLs."""
+    cmd = ["curl", "-sS", "-L", "--max-time", str(timeout)]
+    if head:
+        cmd += ["-I"]
+    cmd.append(url)
+    out = subprocess.run(cmd, capture_output=True, timeout=timeout + 30)
+    if out.returncode != 0:
+        raise RuntimeError(
+            f"curl {url} failed: {out.stderr.decode(errors='replace').strip()}")
+    return out.stdout
+
+
 def http_get(url, timeout=60):
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.status, r.read()
+    last = None
+    for _ in range(2):
+        try:
+            req = urllib.request.Request(url, headers=UA)
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.status, r.read()
+        except Exception as e:  # noqa: BLE001 - retry, then curl
+            last = e
+    if _curl_available():
+        body = _curl_get(url, timeout=timeout)
+        return 200, body
+    raise RuntimeError(f"GET {url} failed: {last}")
 
 
 def http_head(url, timeout=30):
-    req = urllib.request.Request(url, headers=UA, method="HEAD")
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.status, dict(r.headers)
+    last = None
+    for _ in range(2):
+        try:
+            req = urllib.request.Request(url, headers=UA, method="HEAD")
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.status, dict(r.headers)
+        except Exception as e:  # noqa: BLE001 - retry, then curl
+            last = e
+    if _curl_available():
+        raw = _curl_get(url, timeout=timeout, head=True).decode(
+            "iso-8859-1", "replace")
+        headers = {}
+        status = 200
+        for line in raw.splitlines():
+            if line.startswith("HTTP/"):
+                try:
+                    status = int(line.split()[1])
+                except (IndexError, ValueError):
+                    pass
+            elif ":" in line:
+                k, v = line.split(":", 1)
+                headers[k.strip()] = v.strip()
+        return status, headers
+    raise RuntimeError(f"HEAD {url} failed: {last}")
 
 
 def gh_api(path):
@@ -105,15 +155,33 @@ def download(url, dest, expect_size=None):
     if expect_size is not None and os.path.exists(dest) \
             and os.path.getsize(dest) == expect_size:
         return dest, expect_size
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=300) as r, open(dest, "wb") as f:
+    last = None
+    for _ in range(2):
+        try:
+            req = urllib.request.Request(url, headers=UA)
+            with urllib.request.urlopen(req, timeout=300) as r, \
+                    open(dest, "wb") as f:
+                size = 0
+                while True:
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    size += len(chunk)
+            break
+        except Exception as e:  # noqa: BLE001 - retry, then curl
+            last = e
+            size = 0
+    else:
         size = 0
-        while True:
-            chunk = r.read(1 << 20)
-            if not chunk:
-                break
-            f.write(chunk)
-            size += len(chunk)
+    if size == 0 and last is not None and _curl_available():
+        out = subprocess.run(
+            ["curl", "-sS", "-L", "--max-time", "600", "-o", dest, url],
+            capture_output=True, timeout=660)
+        if out.returncode != 0:
+            raise RuntimeError(
+                f"download {url} failed: {out.stderr.decode(errors='replace').strip()}")
+        size = os.path.getsize(dest)
     if expect_size is not None and size != expect_size:
         raise RuntimeError(
             f"downloaded {url}: {size} bytes, expected {expect_size}")

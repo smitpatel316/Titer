@@ -113,6 +113,10 @@ def gui_checks(c, binary, expect, timeout, cache):
     env["XDG_DATA_HOME"] = os.path.join(home, "data")
     env["XDG_CONFIG_HOME"] = os.path.join(home, "config")
     env["XDG_CACHE_HOME"] = os.path.join(home, "cache")
+    # AppImage extraction goes to TMPDIR; /tmp is a 512M tmpfs shared
+    # with other lanes, so extract under the cache instead.
+    env["TMPDIR"] = os.path.join(cache, ".tmp")
+    os.makedirs(env["TMPDIR"], exist_ok=True)
     for d in (env["XDG_DATA_HOME"], env["XDG_CONFIG_HOME"],
               env["XDG_CACHE_HOME"]):
         os.makedirs(d, exist_ok=True)

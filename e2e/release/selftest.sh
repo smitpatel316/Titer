@@ -112,7 +112,11 @@ expect_fail "T-93 static CHECKED_KEY written before decision" $PY/check_update.p
 # (the 1.6.0 AppImage is older than the live manifest, so the dialog fires).
 if [ -f "$APPIMAGE" ]; then
   if [ -z "${DISPLAY:-}" ]; then
-    DISP=$(( 180 + $$ % 9 ))
+    DISP=""
+    for d in 90 91 92 93 94 95 96 97; do
+      if [ ! -e "/tmp/.X11-unix/X$d" ]; then DISP="$d"; break; fi
+    done
+    [ -n "$DISP" ] || { echo "SELFTEST FAIL: no free X display in 90..97" >&2; exit 1; }
     Xvfb ":$DISP" -listen tcp -screen 0 1280x800x24 >>"$CACHE/xvfb-selftest.log" 2>&1 &
     XVFB_PID=$!
     export DISPLAY="127.0.0.1:$DISP"

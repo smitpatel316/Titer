@@ -58,13 +58,23 @@ APPIMAGE_VERSION="$(gh api 'repos/smitpatel316/Titer/releases?per_page=20' --jq 
 echo "latest AppImage release: $APPIMAGE_VERSION"
 
 # Xvfb for the GUI legs (own display, -listen tcp; killed at the end).
+# This Xvfb does not serve high display numbers (:197 never listens),
+# so pick the first free display in 90..97.
 XVFB_PID=""
 if [ "$SKIP_GUI" = 0 ] && [ -z "${DISPLAY:-}" ]; then
-  DISP=$(( 190 + $$ % 9 ))
+  DISP=""
+  for d in 90 91 92 93 94 95 96 97; do
+    if [ ! -e "/tmp/.X11-unix/X$d" ]; then DISP="$d"; break; fi
+  done
+  [ -n "$DISP" ] || { echo "FAIL: no free X display in 90..97" >&2; exit 1; }
   Xvfb ":$DISP" -listen tcp -screen 0 1280x800x24 >>"$OUT/xvfb.log" 2>&1 &
   XVFB_PID=$!
   export DISPLAY="127.0.0.1:$DISP"
-  sleep 2
+  for _ in $(seq 1 10); do
+    xwininfo -root -tree >/dev/null 2>&1 && break
+    sleep 1
+  done
+  xwininfo -root -tree >/dev/null 2>&1 || { echo "FAIL: Xvfb on $DISPLAY never answered" >&2; exit 1; }
   echo "started Xvfb on $DISPLAY (pid $XVFB_PID)"
 fi
 

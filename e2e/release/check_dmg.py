@@ -57,6 +57,8 @@ def main():
                     help="stamp file touched at build start; DMG mtime must be after it")
     ap.add_argument("--binary-md5", help="md5 of the fresh-built binary")
     ap.add_argument("--installed-app", default="/Applications/Titer.app")
+    ap.add_argument("--cache-dir", default=None,
+                    help="ignored; accepted so run.sh can pass it uniformly")
     args = ap.parse_args()
 
     c = Checker(f"DMG verification (T-88/S-04/S-05) {args.dmg}")

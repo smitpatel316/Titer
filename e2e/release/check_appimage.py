@@ -132,6 +132,10 @@ def main():
     env["XDG_DATA_HOME"] = os.path.join(home, "data")
     env["XDG_CONFIG_HOME"] = os.path.join(home, "config")
     env["XDG_CACHE_HOME"] = os.path.join(home, "cache")
+    # --appimage-extract-and-run extracts into TMPDIR; /tmp is a 512M
+    # tmpfs that other lanes share, so extract under the cache instead.
+    env["TMPDIR"] = os.path.join(cache, ".tmp")
+    os.makedirs(env["TMPDIR"], exist_ok=True)
     for d in (env["XDG_DATA_HOME"], env["XDG_CONFIG_HOME"],
               env["XDG_CACHE_HOME"]):
         os.makedirs(d, exist_ok=True)
