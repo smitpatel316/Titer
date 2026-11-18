@@ -14254,11 +14254,11 @@
    },
    {
     "label": "Sy.x",
-    "value": 2.643874371e-11
+    "value": 2.663742913e-11
    },
    {
     "label": "Sum of squares",
-    "value": 2.796028676e-21
+    "value": 2.838210522e-21
    },
    {
     "label": "Degrees of freedom",
@@ -14287,41 +14287,41 @@
     "n": 8
    }
   ],
-  "notes": "Binding saturation fit (\"One-site total binding\") of \"Y\" on \"X\". Starting values: Bmax = 58.95, Kd = 10, NS = 0.4636, Background = 2.",
+  "notes": "Binding saturation fit (\"One-site total binding\") of \"Y\" on \"X\". Starting values: Bmax = 58.95, Kd = 7.211, NS = 0.4636, Background = 2.",
   "coefficients": [
    {
     "term": "Bmax",
     "estimate": 100,
-    "stdError": 9.911883597e-11,
-    "t": 1008889976000,
-    "p": 5.791299469e-48,
+    "stdError": 9.986370957e-11,
+    "t": 1001364764000,
+    "p": 5.967357106e-48,
     "low": 100,
     "high": 100
    },
    {
     "term": "Kd",
     "estimate": 5,
-    "stdError": 1.160844858e-11,
-    "t": 430720777500,
-    "p": 1.743283267e-46,
+    "stdError": 1.169568536e-11,
+    "t": 427508080600,
+    "p": 1.796279602e-46,
     "low": 5,
     "high": 5
    },
    {
     "term": "NS",
     "estimate": 0.5,
-    "stdError": 1.838028454e-12,
-    "t": 272030609100,
-    "p": 1.095670968e-45,
+    "stdError": 1.851841187e-12,
+    "t": 270001555000,
+    "p": 1.128979846e-45,
     "low": 0.5,
     "high": 0.5
    },
    {
     "term": "Background",
     "estimate": 2,
-    "stdError": 2.180987314e-11,
-    "t": 91701587970,
-    "p": 8.484843284e-44,
+    "stdError": 2.197377282e-11,
+    "t": 91017597040,
+    "p": 8.742784799e-44,
     "low": 2,
     "high": 2
    }
@@ -14430,11 +14430,11 @@
    },
    {
     "label": "Sy.x",
-    "value": 1.547067898e-11
+    "value": 1.547128453e-11
    },
    {
     "label": "Sum of squares",
-    "value": 2.872102898e-21
+    "value": 2.87232774e-21
    },
    {
     "label": "Degrees of freedom",
@@ -14475,41 +14475,41 @@
     "n": 8
    }
   ],
-  "notes": "Binding saturation fit (\"One site — Total and nonspecific\") of \"Total\" (total) and \"Nonspecific\" (nonspecific) on \"X\", fitted jointly — NS and Background are shared between the two series. Starting values: Bmax = 58.95, Kd = 10, NS = 0.4636, Background = 2.",
+  "notes": "Binding saturation fit (\"One site — Total and nonspecific\") of \"Total\" (total) and \"Nonspecific\" (nonspecific) on \"X\", fitted jointly — NS and Background are shared between the two series. Starting values: Bmax = 58.95, Kd = 7.211, NS = 0.4636, Background = 2.",
   "coefficients": [
    {
     "term": "Bmax",
     "estimate": 100,
-    "stdError": 2.358741608e-11,
-    "t": 4239548735000,
-    "p": 1.997854773e-146,
+    "stdError": 2.358833869e-11,
+    "t": 4239382914000,
+    "p": 1.998792714e-146,
     "low": 100,
     "high": 100
    },
    {
     "term": "Kd",
     "estimate": 5,
-    "stdError": 3.684649117e-12,
-    "t": 1356981314000,
-    "p": 1.727878065e-140,
+    "stdError": 3.684793292e-12,
+    "t": 1356928219000,
+    "p": 1.728689551e-140,
     "low": 5,
     "high": 5
    },
    {
     "term": "NS",
     "estimate": 0.5,
-    "stdError": 3.20954893e-13,
-    "t": 1557851308000,
-    "p": 3.296760961e-141,
+    "stdError": 3.209674617e-13,
+    "t": 1557790305000,
+    "p": 3.298310518e-141,
     "low": 0.5,
     "high": 0.5
    },
    {
     "term": "Background",
     "estimate": 2,
-    "stdError": 5.896030142e-12,
-    "t": 339211291700,
-    "p": 2.902390824e-133,
+    "stdError": 5.896260944e-12,
+    "t": 339198013600,
+    "p": 2.9037545e-133,
     "low": 2,
     "high": 2
    }
