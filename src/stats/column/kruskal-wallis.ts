@@ -6,6 +6,7 @@ import {
   adjustComparisonRows,
   dunnPosthocStatements,
   groupsSetup,
+  noScatter,
   posthocOf,
   pRow,
   type ColumnTestSpec,
@@ -21,6 +22,7 @@ const dunnAdjustment = (method: KruskalWallisParams["posthoc"]) =>
 export const kruskalWallisSpec: ColumnTestSpec<KruskalWallisParams> = {
   testType: "kruskal-wallis",
   minGroups: 3,
+  checkGroups: (groups) => noScatter(groups, "Kruskal-Wallis test"),
   rCode: (groups, params) => {
     const method = (params ?? DEFAULTS).posthoc;
     const setup = `${groupsSetup(groups)};k<-kruskal.test(v,gr)`;

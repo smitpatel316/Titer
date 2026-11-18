@@ -771,7 +771,7 @@ function fitRows(derivedSets: DerivedRow[][], statsSets: StatRow[][]): FitRow[] 
 /** R: `routOf(x, y, K, q)`, the ROUT method (Motulsky & Brown, BMC Bioinformatics 2006):
  *  a robust fit of the curve, minimizing the sum of ln(1 + (residual / RSDR)²) (residuals
  *  taken as Lorentzian), RSDR = P68 × N / (N − K), P68 the 68.27th percentile of the absolute
- *  residuals, recomputed at each step (as reweighted least squares, weights 1 / (1 + (r /
+ *  residuals (interpolated linearly, R's default: what gives Prism's outliers), recomputed at each step (as reweighted least squares, weights 1 / (1 + (r /
  *  RSDR)²)); then, the points ranked by their distance to it, from the 70th percentile on:
  *  the first whose P (t = |residual| / RSDR, N − K df, two-sided) is under Q(N − (i − 1)) / N
  *  is an outlier, and every point farther. `out`: the outliers; `rsdr`, `m`: the robust fit.
@@ -782,7 +782,7 @@ function fitRows(derivedSets: DerivedRow[][], statsSets: StatRow[][]): FitRow[] 
  *  fit row. The `rout`/`q` params are already in types.) */
 export const R_ROUT_CURVE =
   `routOf<-function(x,y,K,q){n<-length(y);none<-list(out=rep(FALSE,n),rsdr=NA)\n` +
-  `rsdr<-function(m)quantile(abs(y-fitted(m)),0.6827,type=6,names=FALSE)*n/(n-K)\n` +
+  `rsdr<-function(m)quantile(abs(y-fitted(m)),0.6827,names=FALSE)*n/(n-K)\n` +
   `m<-tryCatch(fit(x,y),error=function(e)NULL);if(is.null(m)||n<=K+1)return(none)\n` +
   `for(it in 1:100){s<-rsdr(m);if(!is.finite(s)||s<=0)break;b<-coef(m)\n` +
   `m2<-tryCatch(fit(x,y,1/(1+((y-fitted(m))/s)^2)),error=function(e)NULL);if(is.null(m2))break\n` +

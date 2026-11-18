@@ -2,7 +2,7 @@
 // step, each answer choosing the next question. A wizard only declares its questions
 // and how the answers make the test's params; analysis-wizard.tsx asks them.
 // A test without an entry here runs as soon as it is picked.
-import { DOSE_MODELS, CONCENTRATION_UNITS, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, NONLINEAR_MODELS, ROUT_Q, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel } from "../../stats/types";
+import { DOSE_MODELS, CONCENTRATION_UNITS, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel } from "../../stats/types";
 import type { PlotFunctionExtra, PlotFunctionModel } from "../../stats/types";
 import {
   PLOT_FUNCTION_DEFAULTS,
@@ -17,7 +17,8 @@ import type { TableType } from "../../store/types";
 import { MODEL_LABEL, termLabel } from "../../stats/xy/nonlinear-regression";
 import { modelSpec } from "../../stats/xy/nonlinear-fit";
 import { parseCustomParameters, parseUserEquation } from "../../stats/xy/user-defined";
-import { dataGroups, pairedGroups } from "../../stats/column/base";
+import { dataGroups, incompleteRows, pairedGroups, pairIndices } from "../../stats/column/base";
+import { pairKey } from "../../lib/columns";
 import { distinctTruthValues } from "../../stats/column/roc-curve";
 
 const isDoseModel = (m: string) => (DOSE_MODELS as readonly string[]).includes(m);
@@ -404,6 +405,17 @@ const replicated = (table: Dataset) =>
 /** The data sets answered, if they were asked. */
 export const chosenSets = (a: Answers): string[] | undefined =>
   a.set1 && a.set2 ? [a.set1 as string, a.set2 as string] : (a.sets as string[] | undefined);
+
+/** Every pair of data sets, by its display label and its key (`pairKey`). */
+const pairLabels = (sets: string[]) =>
+  pairIndices(sets.length).map(([i, j]) => ({ label: `${sets[i]} vs. ${sets[j]}`, key: pairKey(sets[i], sets[j]) }));
+
+/** Whether a post-hoc compares chosen pairs (Bonferroni, Šidák, Holm-Šidák, Fisher's LSD). */
+const isPairCorrection = (posthoc: unknown) => (PAIR_CORRECTIONS as readonly unknown[]).includes(posthoc);
+
+/** Whether some subjects (rows) hold values in some of the data sets but not all. */
+const gaps = (table: Dataset, sets?: string[]) =>
+  incompleteRows(table.numeric.filter((c) => !sets || sets.includes(c.set ?? c.name))) > 0;
 
 /** `params` with the data sets answered. */
 const withSets = <P extends object>(a: Answers, params?: P) => {
@@ -1196,6 +1208,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
                   ? [["dunnett", "Yes, each group against a control — Dunnett's test"] as [string, string]]
                   : []),
               ];
+      const pairs = pairLabels(chosenSets(a) ?? setNames(table));
       return [
         ...someSets(table, 3),
         choice("paired", PAIRED, [
@@ -1212,12 +1225,31 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           true,
         ),
         anova &&
-          choice("equalSd", "Assume the groups have equal SDs?", [
-            ["yes", "Yes — ordinary one-way ANOVA"],
-            ["no", "No — Welch's ANOVA"],
+          choice("lognormal", "How should the groups be compared?", [
+            ["no", "Compare means (one-way ANOVA)"],
+            ["yes", "Compare geometric means (lognormal ANOVA) — for log-normal data"],
+          ]),
+        anova &&
+          choice(
+            "equalSd",
+            a.lognormal === "yes"
+              ? "Assume the groups' logarithms have equal SDs?"
+              : "Assume the groups have equal SDs?",
+            [
+              ["yes", a.lognormal === "yes" ? "Yes — lognormal one-way ANOVA" : "Yes — ordinary one-way ANOVA"],
+              ["no", a.lognormal === "yes" ? "No — lognormal Welch's ANOVA" : "No — Welch's ANOVA"],
+            ],
+          ),
+        paired &&
+          a.gaussian === "yes" &&
+          gaps(table, chosenSets(a)) &&
+          choice("mixed", "Some subjects lack a value in some groups. How should they be handled?", [
+            ["yes", "Fit a mixed-effects model, keeping every value (recommended)"],
+            ["no", "Leave out those subjects: repeated-measures ANOVA of the complete ones"],
           ]),
         paired &&
           a.gaussian === "yes" &&
+          !(gaps(table, chosenSets(a)) && a.mixed !== "no") &&
           choice("sphericity", "Assume sphericity (equal variability of the differences between groups)?", [
             ["no", "No — Geisser-Greenhouse correction (recommended)"],
             ["yes", "Yes — no correction"],
@@ -1225,17 +1257,35 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         choice("posthoc", paired ? "Compare the matched groups?" : "Compare the groups?", posthocs),
         a.posthoc === "dunnett" &&
           choice("control", "Which group is the control?", names(chosenSets(a) ?? setNames(table))),
+        isPairCorrection(a.posthoc) &&
+          pairs.length > 1 && {
+            id: "compared",
+            ask: "Which pairs should be compared? The fewer, the less each P value is corrected.",
+            kind: "names",
+            options: pairs.map((p) => p.label),
+            min: 1,
+          },
       ];
     },
-    finish: (a) => {
+    finish: (a, table) => {
       const paired = a.paired === "paired";
       const type = a.gaussian === "yes" ? (paired ? "rm-anova" : "anova") : paired ? "friedman" : "kruskal-wallis";
       const anova = type === "anova" && {
         equalSd: a.equalSd !== "no",
+        ...(a.lognormal === "yes" ? { lognormal: true } : {}),
         ...(a.posthoc === "dunnett" ? { control: a.control as string } : {}),
       };
-      const rm = type === "rm-anova" && { sphericity: a.sphericity === "yes" };
-      return { type, params: withSets(a, { posthoc: a.posthoc, ...anova, ...rm }) as AnalysisParams };
+      // A mixed-effects model assumes sphericity: it is asked of complete subjects alone.
+      const mixed = type === "rm-anova" && gaps(table, chosenSets(a)) && a.mixed !== "no";
+      const rm = type === "rm-anova" && (mixed ? { mixed: true } : { sphericity: a.sphericity === "yes" });
+      // The pairs ticked, by their keys, when not every pair.
+      const pairs = pairLabels(chosenSets(a) ?? setNames(table));
+      const ticked = Array.isArray(a.compared)
+        ? pairs.filter((p) => (a.compared as string[]).includes(p.label))
+        : pairs;
+      const compared = isPairCorrection(a.posthoc) &&
+        ticked.length < pairs.length && { compared: ticked.map((p) => p.key) };
+      return { type, params: withSets(a, { posthoc: a.posthoc, ...anova, ...rm, ...compared }) as AnalysisParams };
     },
     // The checklist follows the branch: which of the four tests the answers build.
     // Unanswered, the first options (unpaired, Gaussian) give the one-way ANOVA.
