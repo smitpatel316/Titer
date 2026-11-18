@@ -79,24 +79,96 @@ function quantile(sorted: number[], p: number): number {
   return sorted[lo - 1] + frac * (sorted[Math.min(lo, n - 1)] - sorted[lo - 1]);
 }
 
+/** The Kd start for a one-site saturation fit: the concentration at which
+ *  the response reaches the midpoint of its observed range, interpolated
+ *  in log-X. The old start (max(X)×0.2) sits ~6× above the true Kd when
+ *  concentrations span 3+ log units, and nls "port" false-converges
+ *  ("false convergence (8)") from up there — while the same data fits
+ *  from any start at or below the half-max point (verified in R: Kd
+ *  starts 0.03–2.8 converge to the same optimum, 6 and 10 fail). Only
+ *  positive-X points enter the interpolation (log 0 is undefined);
+ *  duplicate Y values average their log-X, as R's approx() does
+ *  (ties = "mean"); a non-finite interpolation falls back to the old
+ *  max(X)×0.2 start, and the result is clamped into [min positive X,
+ *  max X]. The R spec computes the same value inline (kd0) — keep the
+ *  two in sync, so the "Starting values" note always names what nls()
+ *  actually started from. */
+function halfMaxKd(xs: number[], ys: number[]): number {
+  const maxX = Math.max(...xs);
+  const fallback = maxX * 0.2;
+  const pts = xs.map((x, i) => [x, ys[i]] as const).filter(([x]) => x > 0);
+  if (pts.length < 2) return fallback;
+  const ysPos = pts.map(([, y]) => y);
+  const ym = (Math.min(...ysPos) + Math.max(...ysPos)) / 2;
+  const byY = new Map<number, number[]>();
+  for (const [x, y] of pts) {
+    const arr = byY.get(y) ?? [];
+    arr.push(Math.log(x));
+    byY.set(y, arr);
+  }
+  const knots = [...byY.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([y, logs]) => [y, logs.reduce((s, v) => s + v, 0) / logs.length] as const);
+  let logKd: number | undefined;
+  for (let i = 0; i < knots.length; i++) {
+    if (knots[i][0] === ym) {
+      logKd = knots[i][1];
+      break;
+    }
+    if (i + 1 < knots.length && knots[i][0] < ym && ym < knots[i + 1][0]) {
+      const f = (ym - knots[i][0]) / (knots[i + 1][0] - knots[i][0]);
+      logKd = knots[i][1] + f * (knots[i + 1][1] - knots[i][1]);
+      break;
+    }
+  }
+  if (logKd === undefined || !Number.isFinite(logKd)) return fallback;
+  const kd0 = Math.exp(logKd);
+  if (!Number.isFinite(kd0)) return fallback;
+  return Math.min(Math.max(kd0, Math.min(...pts.map(([x]) => x))), maxX);
+}
+
 const HALF_LIFE = (k: string) => ({ label: "Half-life", expr: `ifelse(cf[["${k}"]]>0,log(2)/cf[["${k}"]],NA_real_)` });
 
 /** The R spec for a single-series saturation model. Rate/Kd parameters
  *  are bounded below by 0 (nls algorithm "port" — the only algorithm base
  *  R offers bounds with); NS/Background stay unbounded. Start values are
  *  the Prism guide's rules of thumb, expressed in R so they follow the
- *  fitted points. The two-series models fit through the shared
+ *  fitted points — except the one-site Kd start, which is the half-max
+ *  interpolation (see halfMaxKd): max(X)×0.2 false-converges on
+ *  wide-range data. The two-series models fit through the shared
  *  global-fit helper instead (twoSeriesSaturationDef below) — their
  *  starts are the same rules, computed in TS. */
 function saturationSpec(model: BindingSaturationModel): ModelSpec {
   switch (model) {
-    case "one-site-total":
+    case "one-site-total": {
       // Y = Bmax·X/(Kd + X) + NS·X + Background.
+      // kd0 is the half-max interpolation (see halfMaxKd), computed in R
+      // from the fitted points so it follows them exactly. When the
+      // primary fit still fails to converge, retry from lower Kd starts
+      // (the median, then the lower quartile, of the positive
+      // concentrations): the failure mode is a start far above the true
+      // Kd, and the port optimizer false-converges from up there — the
+      // fitModelSpec retry ladder, the 4PL/substrate-inhibition pattern.
+      // The retries only run when the primary fails, so passing fits
+      // never touch them and their pinned values do not move.
+      const kd0Preamble =
+        "px<-x[x>0];py<-y[x>0];ym<-(min(py)+max(py))/2;oy<-order(py);" +
+        "kd0<-exp(approx(py[oy],log(px[oy]),xout=ym)$y);" +
+        "if(!is.finite(kd0))kd0<-max(x)*0.2;kd0<-min(max(kd0,min(px)),max(x));";
+      const fitFrom = (kdStart: string) =>
+        `m<-nls(y~Bmax*x/(Kd+x)+NS*x+Background,start=list(Bmax=max(y)*0.5,Kd=${kdStart},` +
+        `NS=0.2*(max(y)-min(y))/(max(x)-min(x)),Background=min(y)),algorithm="port",` +
+        `lower=c(0,0,-Inf,-Inf),upper=c(Inf,Inf,Inf,Inf))`;
       return {
         kind: "nls",
-        fit: 'm<-nls(y~Bmax*x/(Kd+x)+NS*x+Background,start=list(Bmax=max(y)*0.5,Kd=max(x)*0.2,NS=0.2*(max(y)-min(y))/(max(x)-min(x)),Background=min(y)),algorithm="port",lower=c(0,0,-Inf,-Inf),upper=c(Inf,Inf,Inf,Inf))',
+        fit: kd0Preamble + fitFrom("kd0"),
         terms: ["Bmax", "Kd", "NS", "Background"],
+        retryFits: [
+          { fit: fitFrom("median(x[x>0])"), method: "median Kd" },
+          { fit: fitFrom("quantile(x[x>0],0.25)"), method: "lower-quartile Kd" },
+        ],
       };
+    }
     case "two-site-specific":
       // Y = BmaxHi·X/(KdHi + X) + BmaxLo·X/(KdLo + X).
       return {
@@ -115,8 +187,17 @@ function saturationSpec(model: BindingSaturationModel): ModelSpec {
  *  spec's R rules computed in TS from the fitted points: Bmax/Kd from the
  *  total series, NS/Background likewise, and the two-site Kd starts from
  *  the quantiles of the positive X values — over the STACKED x (each value
- *  twice), matching what the R `quantile(x[x>0], …)` saw. */
-function twoSeriesSaturationDef(model: BindingSaturationModel, xs: number[], ys: number[]): GlobalModelDef {
+ *  twice), matching what the R `quantile(x[x>0], …)` saw. The one-site Kd
+ *  start is the half-max interpolation (see halfMaxKd), like the
+ *  single-series spec; `kdStart` overrides it for the runner's retry
+ *  ladder (the shared global-fit helper has no retryFits slot, so the
+ *  retries loop in runBindingSaturation instead). */
+function twoSeriesSaturationDef(
+  model: BindingSaturationModel,
+  xs: number[],
+  ys: number[],
+  kdStart?: number,
+): GlobalModelDef {
   const maxX = Math.max(...xs);
   const minX = Math.min(...xs);
   const maxY = Math.max(...ys);
@@ -130,7 +211,7 @@ function twoSeriesSaturationDef(model: BindingSaturationModel, xs: number[], ys:
       formula: "ifelse(g==1,Bmax*x/(Kd+x)+NS*x+Background,NS*x+Background)",
       params: [
         { name: "Bmax", shared: true, start: () => maxY * 0.5, lower: 0 },
-        { name: "Kd", shared: true, start: () => maxX * 0.2, lower: 0 },
+        { name: "Kd", shared: true, start: () => kdStart ?? halfMaxKd(xs, ys), lower: 0 },
         { name: "NS", shared: true, start: () => ns0 },
         { name: "Background", shared: true, start: () => minY },
       ],
@@ -378,7 +459,7 @@ function saturationStarts(model: BindingSaturationModel, xs: number[], ys: numbe
     );
   }
   return (
-    `Starting values: Bmax = ${num(maxY * 0.5)}, Kd = ${num(maxX * 0.2)}, ` +
+    `Starting values: Bmax = ${num(maxY * 0.5)}, Kd = ${num(halfMaxKd(xs, ys))}, ` +
     `NS = ${num((0.2 * (maxY - minY)) / (maxX - minX))}, Background = ${num(minY)}.`
   );
 }
@@ -506,16 +587,60 @@ export async function runBindingSaturation(
 
   try {
     // The two-series fit stacks total first, then nonspecific — the
-    // stacking lives in the shared global-fit helper, not here.
-    const { coefficients, derived, stats } = ys2
-      ? await runGlobalFit(
-          [
-            { name: yCol.name, x: xs, y: ys, covariate: 0 },
-            { name: y2Col!.name, x: xs, y: ys2, covariate: 0 },
-          ],
-          twoSeriesSaturationDef(model, xs, ys),
-        )
-      : await fitModelSpec(xs, ys, spec!);
+    // stacking lives in the shared global-fit helper, not here. When a
+    // one-site fit fails to converge, retry from lower Kd starts (the
+    // median, then the lower quartile, of the positive concentrations):
+    // the failure mode is a start far above the true Kd. The
+    // single-series retries live in the spec's retryFits ladder; the
+    // two-series retries loop here, because the shared global-fit helper
+    // builds its spec from the definition (no retryFits slot). The
+    // retries only run when the primary fails, so passing fits never
+    // touch them and their pinned values do not move.
+    const positiveX = [...xs].filter((x) => x > 0).sort((a, b) => a - b);
+    const fit = async (): Promise<{
+      coefficients: RegressionCoefficient[];
+      derived: StatRow[];
+      stats: StatRow[];
+      retried: boolean;
+      retryKd: number | null;
+    }> => {
+      if (ys2) {
+        const series = [
+          { name: yCol.name, x: xs, y: ys, covariate: 0 },
+          { name: y2Col!.name, x: xs, y: ys2, covariate: 0 },
+        ];
+        try {
+          const r = await runGlobalFit(series, twoSeriesSaturationDef(model, xs, ys));
+          return { coefficients: r.coefficients, derived: r.derived, stats: r.stats, retried: false, retryKd: null };
+        } catch (firstErr) {
+          let lastErr: unknown = firstErr;
+          for (const kd of [quantile(positiveX, 0.5), quantile(positiveX, 0.25)]) {
+            try {
+              const r = await runGlobalFit(series, twoSeriesSaturationDef(model, xs, ys, kd));
+              return { coefficients: r.coefficients, derived: r.derived, stats: r.stats, retried: true, retryKd: kd };
+            } catch (err) {
+              lastErr = err;
+            }
+          }
+          throw lastErr;
+        }
+      }
+      const single = await fitModelSpec(xs, ys, spec!);
+      const retryKd =
+        single.retried && single.retryMethod === "median Kd"
+          ? quantile(positiveX, 0.5)
+          : single.retried && single.retryMethod === "lower-quartile Kd"
+            ? quantile(positiveX, 0.25)
+            : null;
+      return {
+        coefficients: single.coefficients,
+        derived: single.derived,
+        stats: single.stats,
+        retried: !!single.retried,
+        retryKd,
+      };
+    };
+    const { coefficients, derived, stats, retried, retryKd } = await fit();
     const bmax = coefOf(coefficients, "Bmax");
     const bmaxHi = coefOf(coefficients, "BmaxHi");
     const bmaxLo = coefOf(coefficients, "BmaxLo");
@@ -530,6 +655,8 @@ export async function runBindingSaturation(
         : `Binding saturation fit ("${label}") of "${yCol.name}" on "${xCol.name}".`,
       saturationStarts(model, xs, ys),
     ];
+    if (retried && retryKd != null)
+      notes.push(`The first fit did not converge; retried with Kd = ${num(retryKd)} and converged.`);
     if (p2 && xs.length < Math.min(p1.x.length, p2.x.length))
       notes.push(
         `Dropped ${Math.min(p1.x.length, p2.x.length) - xs.length} row(s) where one series was blank; the fit uses the ${xs.length} rows complete in both series.`,
