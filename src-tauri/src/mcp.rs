@@ -828,6 +828,32 @@ impl McpState {
         }
     }
 
+    /// A project window is gone: drop everything the server holds for it
+    /// (snapshot, results, remote handle, last-publish stamp, and the
+    /// `last_published` fallback when it pointed here), and cancel its
+    /// live jobs. BUG-22: the frontend's `closed: true` publish lives in
+    /// a React unmount cleanup (`useMcpSnapshotPublisher`) that never
+    /// runs when a webview is destroyed — no unmount, no publish — so
+    /// the snapshot leaked and `titer_list_projects` listed dead
+    /// projects for ever (226 in the incident). The authoritative drop
+    /// is therefore here, called from the `Destroyed` handler in
+    /// main.rs, where the window's death is certain; the frontend
+    /// publish stays as a fast path. Idempotent: safe to call after
+    /// the frontend publish already dropped the same window.
+    pub fn drop_window(&self, label: &str) {
+        {
+            let mut inner = self.lock();
+            inner.snapshots.remove(label);
+            inner.results.retain(|(w, _), _| *w != label);
+            inner.remote_handles.remove(label);
+            inner.last_publish.remove(label);
+            if inner.last_published.as_deref() == Some(label) {
+                inner.last_published = inner.snapshots.keys().next().cloned();
+            }
+        }
+        self.drop_jobs_for_window(label);
+    }
+
     /// A window closed (its snapshot publish said `closed: true`): its
     /// queued and running jobs can never complete — the page that would
     /// run them is gone — so they become `cancelled`, honestly, instead
@@ -1023,21 +1049,14 @@ pub fn mcp_activity(app: AppHandle, state: State<McpState>, limit: u32) -> Resul
 #[tauri::command]
 pub fn mcp_publish_snapshot(window: tauri::WebviewWindow, state: State<McpState>, snapshot: serde_json::Value) {
     let label = window.label().to_string();
-    let mut inner = state.lock();
     if snapshot.get("closed").and_then(|v| v.as_bool()).unwrap_or(false) {
-        inner.snapshots.remove(&label);
-        inner.results.retain(|(w, _), _| *w != label);
-        inner.remote_handles.remove(&label);
-        inner.last_publish.remove(&label);
-        if inner.last_published.as_deref() == Some(label.as_str()) {
-            inner.last_published = inner.snapshots.keys().next().cloned();
-        }
-        // The page that would have run this window's jobs is gone: cancel
-        // them (L0) instead of leaving them queued/running for ever.
-        drop(inner);
-        state.drop_jobs_for_window(&label);
+        // One implementation for both drop paths (see `drop_window`):
+        // the frontend publish is the fast path; the `Destroyed`
+        // handler in main.rs is the authoritative one.
+        state.drop_window(&label);
         return;
     }
+    let mut inner = state.lock();
     inner.last_publish.insert(label.clone(), std::time::Instant::now());
     inner.snapshots.insert(label.clone(), snapshot);
     inner.last_published = Some(label);
@@ -6804,6 +6823,42 @@ mod tests {
         // Neither is takeable after the close.
         assert!(state.take_jobs("project-1").is_empty());
         assert!(state.list_jobs(Some("project-1")).iter().all(|j| j.status == JobStatus::Cancelled));
+    }
+
+    #[test]
+    fn drop_window_removes_snapshot_results_handle_and_jobs() {
+        // BUG-22: the `Destroyed` handler's drop must clear everything
+        // the server holds for the window — the snapshot the list
+        // serves, its results, its remote handle, its live jobs, and
+        // the `last_published` pointer when it pointed here.
+        let state = job_state();
+        state.lock().last_published = Some("project-1".to_string());
+        state.lock().snapshots.insert("project-2".to_string(), json!({ "nodes": {} }));
+        state.lock().results.insert(("project-1".to_string(), "a1".to_string()), json!({ "ok": true }));
+        state.set_remote_handle(
+            "project-1",
+            RemoteHandle {
+                provider: "box".into(),
+                account_id: "a".into(),
+                file_id: "f".into(),
+                name: "Dose.hlx".into(),
+                version: Some("1".into()),
+            },
+        );
+        let live = state.enqueue_job("project-1", "noop", json!({}), json!({})).expect("enqueue");
+        state.drop_window("project-1");
+        assert!(!state.lock().snapshots.contains_key("project-1"));
+        assert!(state.lock().snapshots.contains_key("project-2"));
+        assert!(state.snapshot_for("project-1").is_none());
+        assert!(state.lock().results.keys().all(|(w, _)| w != "project-1"));
+        assert!(state.remote_handle_for("project-1").is_none());
+        assert_eq!(state.read_job(&live.job_id).unwrap().status, JobStatus::Cancelled);
+        assert_eq!(state.lock().last_published.as_deref(), Some("project-2"));
+        // Idempotent: a second drop (frontend publish + Destroyed
+        // handler racing) is a no-op, and the other window is untouched.
+        state.drop_window("project-1");
+        assert!(state.lock().snapshots.contains_key("project-2"));
+        assert_eq!(state.lock().last_published.as_deref(), Some("project-2"));
     }
 
     #[test]
