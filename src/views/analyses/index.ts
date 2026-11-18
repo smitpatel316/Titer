@@ -2,7 +2,7 @@
 // The tests themselves (name, needs, computation) are in stats/index.ts.
 
 import { ANALYSES } from "../../stats";
-import type { AnalysisPickerValue } from "../../stats/types";
+import type { AnalysisPickerValue, AnalysisType } from "../../stats/types";
 import type { TableData, TableType } from "../../store/types";
 import type { SelectorOption } from "../../components/universal-modal";
 import { groupsOf, readTable } from "../../lib/dataset";
@@ -102,6 +102,28 @@ export function analysisOptionsForTable(tableType: TableType, data?: TableData):
     if (o.value === "nested-anova") return data === undefined || countDataGroups(data) >= 3;
     return true;
   });
+}
+
+/** The picker offers two meta entries, not tests: "compare-many-groups"
+ *  resolves (in the wizard) to one-way ANOVA, Kruskal-Wallis,
+ *  repeated-measures ANOVA or Friedman, and "interpolate" to nonlinear
+ *  regression — the same mapping `template.ts` and `wand.ts` already carry
+ *  for their own offered-checks. */
+export const META_ANALYSES: Record<string, AnalysisType[]> = {
+  "compare-many-groups": ["anova", "kruskal-wallis", "rm-anova", "friedman"],
+  interpolate: ["nonlinear-regression"],
+};
+
+/** The concrete analysis types the picker offers for a table: its options
+ *  with the meta entries expanded to the tests they resolve to. Callers
+ *  that must name a concrete test — the MCP gate in store/mcp-dispatch.ts —
+ *  check against this, because the Rust side rejects the meta entries and
+ *  the picker never lists the concrete types: without the expansion the
+ *  four compare-many-groups tests were offered on NO table type and could
+ *  never run via MCP (BUG-14). The picker/menu themselves keep offering
+ *  the meta entries — only this expansion changes. */
+export function analysisTypesOfferedForTable(tableType: TableType, data?: TableData): AnalysisType[] {
+  return analysisOptionsForTable(tableType, data).flatMap((o) => META_ANALYSES[o.value] ?? [o.value as AnalysisType]);
 }
 
 /** The key the native Analysis menu depends on for its data-dependent items:

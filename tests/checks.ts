@@ -610,6 +610,55 @@ check("create-table reads the new id back when getState lags the dispatch (v1.6 
   strictEqual((done.result as { data_columns: number }).data_columns, 15);
 });
 
+check("MCP create-analysis accepts anova / kruskal-wallis / rm-anova / friedman on a column table (BUG-14)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-b14-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B", "C", "D"],
+    rows: [
+      ["r1", 10, 14, 20, 25],
+      ["r2", 11, 15, 21, 25],
+      ["r3", 10, 14, 20, 25],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  // The gate runs before createAnalysis, so a recording stub proves the
+  // gate passed; the real store action is exercised by the live MCP pin.
+  const created: string[] = [];
+  harness.deps.createAnalysis = (_parentId, type) => {
+    created.push(type);
+    return `analysis_${type}`;
+  };
+  for (const type of ["anova", "kruskal-wallis", "rm-anova", "friedman"]) {
+    const done = await harness.run(`job-b14-${type}`, "create-analysis", {
+      table_id: tableId,
+      analysis_type: type,
+    });
+    strictEqual((done.result as { analysis_type: string }).analysis_type, type);
+  }
+  deepStrictEqual(created, ["anova", "kruskal-wallis", "rm-anova", "friedman"]);
+  // The wizard meta-entry is still refused, and anova stays unoffered on
+  // grouped tables (which offer neither it nor the meta entry).
+  await rejects(
+    harness.run("job-b14-meta", "create-analysis", { table_id: tableId, analysis_type: "compare-many-groups" }),
+    /wizard value/,
+  );
+  const grouped = await harness.run("job-b14-grouped", "create-table", {
+    table_type: "grouped",
+    columns: ["", "A:Y1", "B:Y1"],
+    rows: [["r1", 1, 2]],
+  });
+  harness.sync();
+  await rejects(
+    harness.run("job-b14-grouped-anova", "create-analysis", {
+      table_id: (grouped.result as { table_id: string }).table_id,
+      analysis_type: "anova",
+    }),
+    /not offered for grouped tables/,
+  );
+});
+
 check("create-table accepts an empty row-title column, and refuses an empty later column (v1.6 F2)", async () => {
   const harness = mcpLaggingHarness(true);
   const done = await harness.run("job-f2a", "create-table", {
