@@ -1174,7 +1174,45 @@ async fn auth_middleware(
         }
         None => {}
     }
-    next.run(request).await
+    // BUG-18: declare the charset on every MCP response (see utf8_charset).
+    let mut response = next.run(request).await;
+    if let Some(ct) = response
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+    {
+        if let Some(new_ct) = utf8_charset(&ct) {
+            if let Ok(value) = axum::http::HeaderValue::from_str(&new_ct) {
+                response.headers_mut().insert(axum::http::header::CONTENT_TYPE, value);
+            }
+        }
+    }
+    response
+}
+
+/// BUG-18: rmcp serves the Streamable HTTP responses as `text/event-stream`
+/// (and `application/json` when the client asks for plain JSON) with no
+/// charset. Per RFC 9110 §8.3.1 a `text/*` type without a charset defaults
+/// to ISO-8859-1, so generic HTTP clients (e.g. Python `requests`, which
+/// the project's own MCP test driver uses) decode the UTF-8 body as
+/// Latin-1 and every non-ASCII character comes back double-encoded:
+/// "µM" reads as "ÂµM", "×" as "Ã×", curly quotes as "â€œ…". The bytes on
+/// the wire are correct UTF-8 — only the declared charset is missing — so
+/// the corruption hits every tool that returns non-ASCII text, not just
+/// transform-concentrations. Appending `; charset=utf-8` here, the one
+/// shared path every MCP response flows through, fixes the echo for all
+/// 51 tools. Returns the new header value, or `None` when the type is
+/// already labelled or is not one of the textual MCP response types.
+fn utf8_charset(content_type: &str) -> Option<String> {
+    let lower = content_type.to_ascii_lowercase();
+    let is_textual =
+        lower.starts_with("text/event-stream") || lower.starts_with("application/json");
+    if is_textual && !lower.contains("charset=") {
+        Some(format!("{content_type}; charset=utf-8"))
+    } else {
+        None
+    }
 }
 
 // ── Project tools (L2, v1.6.0) ───────────────────────────────────────────
@@ -6108,6 +6146,26 @@ mod tests {
         let out = read_results("project-1", &snap, &results, "a1");
         assert_eq!(out["status"], "computed");
         assert_eq!(out["result"]["notes"], "EC50 = 3.2 nM");
+    }
+
+    #[test]
+    fn utf8_charset_labels_mcp_response_types() {
+        // BUG-18: rmcp's bare `text/event-stream` (no charset) makes
+        // Latin-1-default clients mojibake every non-ASCII character.
+        assert_eq!(
+            utf8_charset("text/event-stream"),
+            Some("text/event-stream; charset=utf-8".to_string())
+        );
+        assert_eq!(
+            utf8_charset("application/json"),
+            Some("application/json; charset=utf-8".to_string())
+        );
+        // Already labelled: leave alone (no double charset).
+        assert_eq!(utf8_charset("text/event-stream; charset=utf-8"), None);
+        assert_eq!(utf8_charset("application/json; charset=UTF-8"), None);
+        // Non-textual types are not MCP responses: leave alone.
+        assert_eq!(utf8_charset("text/html"), None);
+        assert_eq!(utf8_charset("application/octet-stream"), None);
     }
 
     #[test]
