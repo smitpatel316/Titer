@@ -735,6 +735,147 @@
   ],
   "notes": "Non-parametric: tests whether each column's median differs from the hypothetical value 12, with no normality assumption. Two-tailed P value."
  },
+ "one-sample-t column {\"hypotheticalValue\":12,\"tails\":\"greater\",\"gaussian\":true,\"lognormal\":true}": {
+  "testType": "one-sample-t",
+  "subtitle": "Lognormal one-sample t test (H0: geometric mean = 12)",
+  "stats": [
+   {
+    "label": "Control — t",
+    "value": 1.037126794
+   },
+   {
+    "label": "Control — df",
+    "value": 7
+   },
+   {
+    "label": "Control — P value",
+    "value": 0.1670847661,
+    "p": true
+   },
+   {
+    "label": "Control — Geometric mean",
+    "value": 13.53168056
+   },
+   {
+    "label": "Control — Geometric mean 95% CI lower",
+    "value": 10.8654803
+   },
+   {
+    "label": "Control — Geometric mean 95% CI upper",
+    "value": null
+   },
+   {
+    "label": "Low — t",
+    "value": 9.890090588
+   },
+   {
+    "label": "Low — df",
+    "value": 6
+   },
+   {
+    "label": "Low — P value",
+    "value": 0.00003084268694,
+    "p": true
+   },
+   {
+    "label": "Low — Geometric mean",
+    "value": 14.82247051
+   },
+   {
+    "label": "Low — Geometric mean 95% CI lower",
+    "value": 14.21987822
+   },
+   {
+    "label": "Low — Geometric mean 95% CI upper",
+    "value": null
+   },
+   {
+    "label": "High — t",
+    "value": 21.8381575
+   },
+   {
+    "label": "High — df",
+    "value": 5
+   },
+   {
+    "label": "High — P value",
+    "value": 0.000001868469867,
+    "p": true
+   },
+   {
+    "label": "High — Geometric mean",
+    "value": 19.5919028
+   },
+   {
+    "label": "High — Geometric mean 95% CI lower",
+    "value": 18.72545401
+   },
+   {
+    "label": "High — Geometric mean 95% CI upper",
+    "value": null
+   },
+   {
+    "label": "Sparse — t",
+    "value": -2.10812206
+   },
+   {
+    "label": "Sparse — df",
+    "value": 3
+   },
+   {
+    "label": "Sparse — P value",
+    "value": 0.9372044722,
+    "p": true
+   },
+   {
+    "label": "Sparse — Geometric mean",
+    "value": 10.56821001
+   },
+   {
+    "label": "Sparse — Geometric mean 95% CI lower",
+    "value": 9.170699518
+   },
+   {
+    "label": "Sparse — Geometric mean 95% CI upper",
+    "value": null
+   }
+  ],
+  "groups": [
+   {
+    "name": "Control",
+    "mean": 14.3375,
+    "sd": 6.372247305,
+    "sem": 2.25292964,
+    "median": 12.3,
+    "n": 8
+   },
+   {
+    "name": "Low",
+    "mean": 14.84285714,
+    "sd": 0.8443086775,
+    "sem": 0.3191186843,
+    "median": 14.9,
+    "n": 7
+   },
+   {
+    "name": "High",
+    "mean": 19.61666667,
+    "sd": 1.083358974,
+    "sem": 0.4422794491,
+    "median": 19.65,
+    "n": 6
+   },
+   {
+    "name": "Sparse",
+    "mean": 10.625,
+    "sd": 1.25,
+    "sem": 0.625,
+    "median": 10.75,
+    "n": 4
+   }
+  ],
+  "notes": "Tests whether each column's geometric mean differs from the hypothetical value 12: a t test of the logarithms against log(12). Assumes lognormally distributed data. One-tailed P value."
+ },
  "anova column {\"posthoc\":\"none\"}": {
   "testType": "anova",
   "subtitle": "One-way ANOVA",
@@ -871,37 +1012,49 @@
     "group1": "Control",
     "group2": "Low",
     "diff": -0.5053571429,
-    "p": 0.9937404641
+    "p": 0.9937404641,
+    "low": -5.949353424,
+    "high": 4.938639139
    },
    {
     "group1": "Control",
     "group2": "High",
     "diff": -5.279166667,
-    "p": 0.07457423189
+    "p": 0.07457423189,
+    "low": -10.95996802,
+    "high": 0.4016346854
    },
    {
     "group1": "Control",
     "group2": "Sparse",
     "diff": 3.7125,
-    "p": 0.3965867485
+    "p": 0.3965867485,
+    "low": -2.728923268,
+    "high": 10.15392327
    },
    {
     "group1": "Low",
     "group2": "High",
     "diff": -4.773809524,
-    "p": 0.1364465798
+    "p": 0.1364465798,
+    "low": -10.62592968,
+    "high": 1.078310636
    },
    {
     "group1": "Low",
     "group2": "Sparse",
     "diff": 4.217857143,
-    "p": 0.3088061891
+    "p": 0.3088061891,
+    "low": -2.375149765,
+    "high": 10.81086405
    },
    {
     "group1": "High",
     "group2": "Sparse",
     "diff": 8.991666667,
-    "p": 0.006855421598
+    "p": 0.006855421598,
+    "low": 2.201810367,
+    "high": 15.78152297
    }
   ],
   "comparisonsLabel": "Tukey's multiple comparisons test"
@@ -976,37 +1129,49 @@
     "group1": "Control",
     "group2": "Low",
     "diff": -0.5053571429,
-    "p": 1
+    "p": 1,
+    "low": -6.193019197,
+    "high": 5.182304912
    },
    {
     "group1": "Control",
     "group2": "High",
     "diff": -5.279166667,
-    "p": 0.1024562582
+    "p": 0.1024562582,
+    "low": -11.21423286,
+    "high": 0.6558995273
    },
    {
     "group1": "Control",
     "group2": "Sparse",
     "diff": 3.7125,
-    "p": 0.7386219929
+    "p": 0.7386219929,
+    "low": -3.017232499,
+    "high": 10.4422325
    },
    {
     "group1": "Low",
     "group2": "High",
     "diff": -4.773809524,
-    "p": 0.2015782735
+    "p": 0.2015782735,
+    "low": -10.88786252,
+    "high": 1.340243472
    },
    {
     "group1": "Low",
     "group2": "Sparse",
     "diff": 4.217857143,
-    "p": 0.534107642
+    "p": 0.534107642,
+    "low": -2.670243671,
+    "high": 11.10595796
    },
    {
     "group1": "High",
     "group2": "Sparse",
     "diff": 8.991666667,
-    "p": 0.008136882802
+    "p": 0.008136882802,
+    "low": 1.897905753,
+    "high": 16.08542758
    }
   ],
   "comparisonsLabel": "Bonferroni-corrected multiple comparisons"
@@ -1081,19 +1246,25 @@
     "group1": "Low",
     "group2": "Control",
     "diff": 0.5053571429,
-    "p": 0.9891219737
+    "p": 0.9891219737,
+    "low": -4.474124638,
+    "high": 5.484838924
    },
    {
     "group1": "High",
     "group2": "Control",
     "diff": 5.279166667,
-    "p": 0.04589486477
+    "p": 0.04589486477,
+    "low": 0.08308544782,
+    "high": 10.47524789
    },
    {
     "group1": "Sparse",
     "group2": "Control",
     "diff": -3.7125,
-    "p": 0.2913382669
+    "p": 0.2913382669,
+    "low": -9.604302299,
+    "high": 2.179302299
    }
   ],
   "comparisonsLabel": "Dunnett's multiple comparisons test (vs. Control)"
@@ -1168,37 +1339,49 @@
     "group1": "Control",
     "group2": "Low",
     "diff": -0.5053571429,
-    "p": 0.9999327713
+    "p": 0.9999327713,
+    "low": -6.174692817,
+    "high": 5.163978532
    },
    {
     "group1": "Control",
     "group2": "High",
     "diff": -5.279166667,
-    "p": 0.09818070727
+    "p": 0.09818070727,
+    "low": -11.19510931,
+    "high": 0.6367759792
    },
    {
     "group1": "Control",
     "group2": "Sparse",
     "diff": 3.7125,
-    "p": 0.545337089
+    "p": 0.545337089,
+    "low": -2.995548433,
+    "high": 10.42054843
    },
    {
     "group1": "Low",
     "group2": "High",
     "diff": -4.773809524,
-    "p": 0.1853870846
+    "p": 0.1853870846,
+    "low": -10.86816225,
+    "high": 1.320543205
    },
    {
     "group1": "Low",
     "group2": "Sparse",
     "diff": 4.217857143,
-    "p": 0.4284437924
+    "p": 0.4284437924,
+    "low": -2.648049322,
+    "high": 11.08376361
    },
    {
     "group1": "High",
     "group2": "Sparse",
     "diff": 8.991666667,
-    "p": 0.008109345609
+    "p": 0.008109345609,
+    "low": 1.920762765,
+    "high": 16.06257057
    }
   ],
   "comparisonsLabel": "Šídák-corrected multiple comparisons"
@@ -1378,40 +1561,507 @@
     "group1": "Control",
     "group2": "Low",
     "diff": -0.5053571429,
-    "p": 0.79835268
+    "p": 0.79835268,
+    "low": -4.56709927,
+    "high": 3.556384985
    },
    {
     "group1": "Control",
     "group2": "High",
     "diff": -5.279166667,
-    "p": 0.01707604303
+    "p": 0.01707604303,
+    "low": -9.517588035,
+    "high": -1.040745298
    },
    {
     "group1": "Control",
     "group2": "Sparse",
     "diff": 3.7125,
-    "p": 0.1231036655
+    "p": 0.1231036655,
+    "low": -1.093418097,
+    "high": 8.518418097
    },
    {
     "group1": "Low",
     "group2": "High",
     "diff": -4.773809524,
-    "p": 0.03359637891
+    "p": 0.03359637891,
+    "low": -9.140051116,
+    "high": -0.407567932
    },
    {
     "group1": "Low",
     "group2": "Sparse",
     "diff": 4.217857143,
-    "p": 0.08901794033
+    "p": 0.08901794033,
+    "low": -0.7011568533,
+    "high": 9.136871139
    },
    {
     "group1": "High",
     "group2": "Sparse",
     "diff": 8.991666667,
-    "p": 0.001356147134
+    "p": 0.001356147134,
+    "low": 3.925784189,
+    "high": 14.05754914
    }
   ],
   "comparisonsLabel": "Fisher's LSD test (uncorrected)"
+ },
+ "anova column {\"posthoc\":\"tukey\",\"lognormal\":true}": {
+  "testType": "anova",
+  "subtitle": "Lognormal one-way ANOVA",
+  "stats": [
+   {
+    "label": "F",
+    "value": 8.311219062
+   },
+   {
+    "label": "DFn",
+    "value": 3
+   },
+   {
+    "label": "DFd",
+    "value": 21
+   },
+   {
+    "label": "P value",
+    "value": 0.0007789034747,
+    "p": true
+   },
+   {
+    "label": "R squared (eta squared)",
+    "value": 0.5428188982
+   },
+   {
+    "label": "Cohen's f",
+    "value": 1.089640771
+   },
+   {
+    "label": "Geometric mean (Control)",
+    "value": 13.53168056
+   },
+   {
+    "label": "Geometric mean (Low)",
+    "value": 14.82247051
+   },
+   {
+    "label": "Geometric mean (High)",
+    "value": 19.5919028
+   },
+   {
+    "label": "Geometric mean (Sparse)",
+    "value": 10.56821001
+   }
+  ],
+  "groups": [
+   {
+    "name": "Control",
+    "mean": 14.3375,
+    "sd": 6.372247305,
+    "sem": 2.25292964,
+    "median": 12.3,
+    "n": 8
+   },
+   {
+    "name": "Low",
+    "mean": 14.84285714,
+    "sd": 0.8443086775,
+    "sem": 0.3191186843,
+    "median": 14.9,
+    "n": 7
+   },
+   {
+    "name": "High",
+    "mean": 19.61666667,
+    "sd": 1.083358974,
+    "sem": 0.4422794491,
+    "median": 19.65,
+    "n": 6
+   },
+   {
+    "name": "Sparse",
+    "mean": 10.625,
+    "sd": 1.25,
+    "sem": 0.625,
+    "median": 10.75,
+    "n": 4
+   }
+  ],
+  "notes": "Compares the groups' geometric means: the ANOVA runs on the logarithms, which it assumes normal with equal variances; its comparisons are ratios of geometric means.",
+  "comparisons": [
+   {
+    "group1": "Control",
+    "group2": "Low",
+    "diff": 0.9129166795,
+    "p": 0.8121084557,
+    "low": 0.685396628,
+    "high": 1.215962889
+   },
+   {
+    "group1": "Control",
+    "group2": "High",
+    "diff": 0.6906771997,
+    "p": 0.0118974098,
+    "low": 0.5121189688,
+    "high": 0.9314925306
+   },
+   {
+    "group1": "Control",
+    "group2": "Sparse",
+    "diff": 1.28041367,
+    "p": 0.2085117986,
+    "low": 0.9121215563,
+    "high": 1.797413025
+   },
+   {
+    "group1": "Low",
+    "group2": "High",
+    "diff": 0.7565610479,
+    "p": 0.08506080943,
+    "low": 0.555932587,
+    "high": 1.029593574
+   },
+   {
+    "group1": "Low",
+    "group2": "Sparse",
+    "diff": 1.402552608,
+    "p": 0.057862244,
+    "low": 0.991186271,
+    "high": 1.98464595
+   },
+   {
+    "group1": "High",
+    "group2": "Sparse",
+    "diff": 1.853852524,
+    "p": 0.0005036760866,
+    "low": 1.296611585,
+    "high": 2.650577257
+   }
+  ],
+  "comparisonsLabel": "Tukey's multiple comparisons test",
+  "comparisonsEffect": "Ratio of geometric means"
+ },
+ "anova column {\"posthoc\":\"dunnett\",\"control\":\"Control\",\"lognormal\":true}": {
+  "testType": "anova",
+  "subtitle": "Lognormal one-way ANOVA",
+  "stats": [
+   {
+    "label": "F",
+    "value": 8.311219062
+   },
+   {
+    "label": "DFn",
+    "value": 3
+   },
+   {
+    "label": "DFd",
+    "value": 21
+   },
+   {
+    "label": "P value",
+    "value": 0.0007789034747,
+    "p": true
+   },
+   {
+    "label": "R squared (eta squared)",
+    "value": 0.5428188982
+   },
+   {
+    "label": "Cohen's f",
+    "value": 1.089640771
+   },
+   {
+    "label": "Geometric mean (Control)",
+    "value": 13.53168056
+   },
+   {
+    "label": "Geometric mean (Low)",
+    "value": 14.82247051
+   },
+   {
+    "label": "Geometric mean (High)",
+    "value": 19.5919028
+   },
+   {
+    "label": "Geometric mean (Sparse)",
+    "value": 10.56821001
+   }
+  ],
+  "groups": [
+   {
+    "name": "Control",
+    "mean": 14.3375,
+    "sd": 6.372247305,
+    "sem": 2.25292964,
+    "median": 12.3,
+    "n": 8
+   },
+   {
+    "name": "Low",
+    "mean": 14.84285714,
+    "sd": 0.8443086775,
+    "sem": 0.3191186843,
+    "median": 14.9,
+    "n": 7
+   },
+   {
+    "name": "High",
+    "mean": 19.61666667,
+    "sd": 1.083358974,
+    "sem": 0.4422794491,
+    "median": 19.65,
+    "n": 6
+   },
+   {
+    "name": "Sparse",
+    "mean": 10.625,
+    "sd": 1.25,
+    "sem": 0.625,
+    "median": 10.75,
+    "n": 4
+   }
+  ],
+  "notes": "Compares the groups' geometric means: the ANOVA runs on the logarithms, which it assumes normal with equal variances; its comparisons are ratios of geometric means.",
+  "comparisons": [
+   {
+    "group1": "Low",
+    "group2": "Control",
+    "diff": 1.095390217,
+    "p": 0.726118206,
+    "low": 0.842755984,
+    "high": 1.423756996
+   },
+   {
+    "group1": "High",
+    "group2": "Control",
+    "diff": 1.447854367,
+    "p": 0.006780488523,
+    "low": 1.101297962,
+    "high": 1.90346513
+   },
+   {
+    "group1": "Sparse",
+    "group2": "Control",
+    "diff": 0.7809975977,
+    "p": 0.1397450362,
+    "low": 0.5726910963,
+    "high": 1.065071993
+   }
+  ],
+  "comparisonsLabel": "Dunnett's multiple comparisons test (vs. Control)",
+  "comparisonsEffect": "Ratio of geometric means"
+ },
+ "anova column {\"posthoc\":\"games-howell\",\"equalSd\":false,\"lognormal\":true}": {
+  "testType": "anova",
+  "subtitle": "Lognormal Welch's ANOVA",
+  "stats": [
+   {
+    "label": "F (Welch)",
+    "value": 41.1155588
+   },
+   {
+    "label": "DFn",
+    "value": 3
+   },
+   {
+    "label": "DFd",
+    "value": 9.265942704
+   },
+   {
+    "label": "P value",
+    "value": 0.00001124702322,
+    "p": true
+   },
+   {
+    "label": "Geometric mean (Control)",
+    "value": 13.53168056
+   },
+   {
+    "label": "Geometric mean (Low)",
+    "value": 14.82247051
+   },
+   {
+    "label": "Geometric mean (High)",
+    "value": 19.5919028
+   },
+   {
+    "label": "Geometric mean (Sparse)",
+    "value": 10.56821001
+   }
+  ],
+  "groups": [
+   {
+    "name": "Control",
+    "mean": 14.3375,
+    "sd": 6.372247305,
+    "sem": 2.25292964,
+    "median": 12.3,
+    "n": 8
+   },
+   {
+    "name": "Low",
+    "mean": 14.84285714,
+    "sd": 0.8443086775,
+    "sem": 0.3191186843,
+    "median": 14.9,
+    "n": 7
+   },
+   {
+    "name": "High",
+    "mean": 19.61666667,
+    "sd": 1.083358974,
+    "sem": 0.4422794491,
+    "median": 19.65,
+    "n": 6
+   },
+   {
+    "name": "Sparse",
+    "mean": 10.625,
+    "sd": 1.25,
+    "sem": 0.625,
+    "median": 10.75,
+    "n": 4
+   }
+  ],
+  "notes": "Compares the groups' geometric means: the ANOVA (Welch's, without assuming equal SDs) runs on the logarithms, which it assumes normal; its comparisons are ratios of geometric means.",
+  "comparisons": [
+   {
+    "group1": "Control",
+    "group2": "Low",
+    "diff": 0.9129166795,
+    "p": 0.8641282143,
+    "low": 0.6222177679,
+    "high": 1.339429548
+   },
+   {
+    "group1": "Control",
+    "group2": "High",
+    "diff": 0.6906771997,
+    "p": 0.05829145887,
+    "low": 0.4707144074,
+    "high": 1.013427647
+   },
+   {
+    "group1": "Control",
+    "group2": "Sparse",
+    "diff": 1.28041367,
+    "p": 0.2918646715,
+    "low": 0.8565096473,
+    "high": 1.914116403
+   },
+   {
+    "group1": "Low",
+    "group2": "High",
+    "diff": 0.7565610479,
+    "p": 0.00001223884853,
+    "low": 0.6889905344,
+    "high": 0.8307583205
+   },
+   {
+    "group1": "Low",
+    "group2": "Sparse",
+    "diff": 1.402552608,
+    "p": 0.02376054071,
+    "low": 1.072465192,
+    "high": 1.834235584
+   },
+   {
+    "group1": "High",
+    "group2": "Sparse",
+    "diff": 1.853852524,
+    "p": 0.002725746973,
+    "low": 1.419271158,
+    "high": 2.421502869
+   }
+  ],
+  "comparisonsLabel": "Games-Howell multiple comparisons test",
+  "comparisonsEffect": "Ratio of geometric means"
+ },
+ "anova column {\"posthoc\":\"sidak\",\"compared\":[\"Control\\u0000High\",\"Low\\u0000Control\"]}": {
+  "testType": "anova",
+  "subtitle": "One-way ANOVA",
+  "stats": [
+   {
+    "label": "F",
+    "value": 4.857880533
+   },
+   {
+    "label": "DFn",
+    "value": 3
+   },
+   {
+    "label": "DFd",
+    "value": 21
+   },
+   {
+    "label": "P value",
+    "value": 0.01013594077,
+    "p": true
+   },
+   {
+    "label": "R squared (eta squared)",
+    "value": 0.4096752805
+   },
+   {
+    "label": "Cohen's f",
+    "value": 0.8330563806
+   }
+  ],
+  "groups": [
+   {
+    "name": "Control",
+    "mean": 14.3375,
+    "sd": 6.372247305,
+    "sem": 2.25292964,
+    "median": 12.3,
+    "n": 8
+   },
+   {
+    "name": "Low",
+    "mean": 14.84285714,
+    "sd": 0.8443086775,
+    "sem": 0.3191186843,
+    "median": 14.9,
+    "n": 7
+   },
+   {
+    "name": "High",
+    "mean": 19.61666667,
+    "sd": 1.083358974,
+    "sem": 0.4422794491,
+    "median": 19.65,
+    "n": 6
+   },
+   {
+    "name": "Sparse",
+    "mean": 10.625,
+    "sd": 1.25,
+    "sem": 0.625,
+    "median": 10.75,
+    "n": 4
+   }
+  ],
+  "notes": "Compares means across groups; assumes normal distributions with equal variances.",
+  "comparisons": [
+   {
+    "group1": "Control",
+    "group2": "Low",
+    "diff": -0.5053571429,
+    "p": 0.9593383583,
+    "low": -5.208222543,
+    "high": 4.197508257
+   },
+   {
+    "group1": "Control",
+    "group2": "High",
+    "diff": -5.279166667,
+    "p": 0.03386049481,
+    "low": -10.18659914,
+    "high": -0.371734196
+   }
+  ],
+  "comparisonsLabel": "Šídák-corrected multiple comparisons"
  },
  "kruskal-wallis column {\"posthoc\":\"dunn-sidak\"}": {
   "testType": "kruskal-wallis",
@@ -1663,37 +2313,49 @@
     "group1": "Control",
     "group2": "Low",
     "diff": -3.1,
-    "p": 0.1696126898
+    "p": 0.1696126898,
+    "low": -8.052690358,
+    "high": 1.852690358
    },
    {
     "group1": "Control",
     "group2": "High",
     "diff": -7,
-    "p": 0.01876532269
+    "p": 0.01876532269,
+    "low": -11.95269036,
+    "high": -2.047309642
    },
    {
     "group1": "Control",
     "group2": "Sparse",
     "diff": 1.75,
-    "p": 0.5252419818
+    "p": 0.5252419818,
+    "low": -3.202690358,
+    "high": 6.702690358
    },
    {
     "group1": "Low",
     "group2": "High",
     "diff": -3.9,
-    "p": 0.09522641956
+    "p": 0.09522641956,
+    "low": -8.852690358,
+    "high": 1.052690358
    },
    {
     "group1": "Low",
     "group2": "Sparse",
     "diff": 4.85,
-    "p": 0.05297608008
+    "p": 0.05297608008,
+    "low": -0.1026903576,
+    "high": 9.802690358
    },
    {
     "group1": "High",
     "group2": "Sparse",
     "diff": 8.75,
-    "p": 0.009804276981
+    "p": 0.009804276981,
+    "low": 3.797309642,
+    "high": 13.70269036
    }
   ],
   "comparisonsLabel": "Šídák-corrected multiple comparisons"
@@ -1865,37 +2527,49 @@
     "group1": "Control",
     "group2": "Low",
     "diff": -3.1,
-    "p": 0.0305022981
+    "p": 0.0305022981,
+    "low": -5.648442118,
+    "high": -0.5515578824
    },
    {
     "group1": "Control",
     "group2": "High",
     "diff": -7,
-    "p": 0.003152291976
+    "p": 0.003152291976,
+    "low": -9.548442118,
+    "high": -4.451557882
    },
    {
     "group1": "Control",
     "group2": "Sparse",
     "diff": 1.75,
-    "p": 0.1167600224
+    "p": 0.1167600224,
+    "low": -0.7984421176,
+    "high": 4.298442118
    },
    {
     "group1": "Low",
     "group2": "High",
     "diff": -3.9,
-    "p": 0.01654011074
+    "p": 0.01654011074,
+    "low": -6.448442118,
+    "high": -1.351557882
    },
    {
     "group1": "Low",
     "group2": "Sparse",
     "diff": 4.85,
-    "p": 0.009030796429
+    "p": 0.009030796429,
+    "low": 2.301557882,
+    "high": 7.398442118
    },
    {
     "group1": "High",
     "group2": "Sparse",
     "diff": 8.75,
-    "p": 0.001640761705
+    "p": 0.001640761705,
+    "low": 6.201557882,
+    "high": 11.29844212
    }
   ],
   "comparisonsLabel": "Fisher's LSD test (uncorrected)"
@@ -2206,37 +2880,49 @@
     "group1": "Control",
     "group2": "Low",
     "diff": -0.5053571429,
-    "p": 0.9957862486
+    "p": 0.9957862486,
+    "low": -7.960619791,
+    "high": 6.949905506
    },
    {
     "group1": "Control",
     "group2": "High",
     "diff": -5.279166667,
-    "p": 0.1816107811
+    "p": 0.1816107811,
+    "low": -12.73728157,
+    "high": 2.17894824
    },
    {
     "group1": "Control",
     "group2": "Sparse",
     "diff": 3.7125,
-    "p": 0.4357968804
+    "p": 0.4357968804,
+    "low": -3.772877463,
+    "high": 11.19787746
    },
    {
     "group1": "Low",
     "group2": "High",
     "diff": -4.773809524,
-    "p": 0.00003843734807
+    "p": 0.00003843734807,
+    "low": -6.460714289,
+    "high": -3.086904758
    },
    {
     "group1": "Low",
     "group2": "Sparse",
     "diff": 4.217857143,
-    "p": 0.008789595204
+    "p": 0.008789595204,
+    "low": 1.542128461,
+    "high": 6.893585825
    },
    {
     "group1": "High",
     "group2": "Sparse",
     "diff": 8.991666667,
-    "p": 0.0001115788581
+    "p": 0.0001115788581,
+    "low": 6.323016788,
+    "high": 11.66031655
    }
   ],
   "comparisonsLabel": "Games-Howell multiple comparisons test"
@@ -2303,37 +2989,49 @@
     "group1": "Control",
     "group2": "Low",
     "diff": -0.5053571429,
-    "p": 0.9999440378
+    "p": 0.9999428432,
+    "low": -8.445160221,
+    "high": 7.434445935
    },
    {
     "group1": "Control",
     "group2": "High",
     "diff": -5.279166667,
-    "p": 0.2330004846
+    "p": 0.2276420461,
+    "low": -13.00442226,
+    "high": 2.446088927
    },
    {
     "group1": "Control",
     "group2": "Sparse",
     "diff": 3.7125,
-    "p": 0.5530673068
+    "p": 0.5531016227,
+    "low": -4.15435724,
+    "high": 11.57935724
    },
    {
     "group1": "Low",
     "group2": "High",
     "diff": -4.773809524,
-    "p": 0.00004487244755
+    "p": 0.00006061847231,
+    "low": -6.558081832,
+    "high": -2.989537216
    },
    {
     "group1": "Low",
     "group2": "Sparse",
     "diff": 4.217857143,
-    "p": 0.01101162976
+    "p": 0.008627516885,
+    "low": 1.461681481,
+    "high": 6.974032804
    },
    {
     "group1": "High",
     "group2": "Sparse",
     "diff": 8.991666667,
-    "p": 0.0001370051153
+    "p": 0.0001186698402,
+    "low": 6.185993683,
+    "high": 11.79733965
    }
   ],
   "comparisonsLabel": "Dunnett's T3 multiple comparisons test"
@@ -2558,37 +3256,49 @@
     "group1": "Control",
     "group2": "Low",
     "diff": -3.1,
-    "p": 0.08806813804
+    "p": 0.08806813804,
+    "low": -6.96430336,
+    "high": 0.7643033604
    },
    {
     "group1": "Control",
     "group2": "High",
     "diff": -7,
-    "p": 0.009557183777
+    "p": 0.009557183777,
+    "low": -10.86430336,
+    "high": -3.13569664
    },
    {
     "group1": "Control",
     "group2": "Sparse",
     "diff": 1.75,
-    "p": 0.3037790229
+    "p": 0.3037790229,
+    "low": -2.11430336,
+    "high": 5.61430336
    },
    {
     "group1": "Low",
     "group2": "High",
     "diff": -3.9,
-    "p": 0.04879656922
+    "p": 0.04879656922,
+    "low": -7.76430336,
+    "high": -0.03569663964
    },
    {
     "group1": "Low",
     "group2": "Sparse",
     "diff": 4.85,
-    "p": 0.02701098065
+    "p": 0.02701098065,
+    "low": 0.9856966396,
+    "high": 8.71430336
    },
    {
     "group1": "High",
     "group2": "Sparse",
     "diff": 8.75,
-    "p": 0.004998292382
+    "p": 0.004998292382,
+    "low": 4.88569664,
+    "high": 12.61430336
    }
   ],
   "comparisonsLabel": "Tukey's multiple comparisons test"
@@ -2659,37 +3369,49 @@
     "group1": "Control",
     "group2": "Low",
     "diff": -3.1,
-    "p": 0.1830137886
+    "p": 0.1830137886,
+    "low": -8.090100797,
+    "high": 1.890100797
    },
    {
     "group1": "Control",
     "group2": "High",
     "diff": -7,
-    "p": 0.01891375186
+    "p": 0.01891375186,
+    "low": -11.9901008,
+    "high": -2.009899203
    },
    {
     "group1": "Control",
     "group2": "Sparse",
     "diff": 1.75,
-    "p": 0.7005601346
+    "p": 0.7005601346,
+    "low": -3.240100797,
+    "high": 6.740100797
    },
    {
     "group1": "Low",
     "group2": "High",
     "diff": -3.9,
-    "p": 0.09924066445
+    "p": 0.09924066445,
+    "low": -8.890100797,
+    "high": 1.090100797
    },
    {
     "group1": "Low",
     "group2": "Sparse",
     "diff": 4.85,
-    "p": 0.05418477857
+    "p": 0.05418477857,
+    "low": -0.1401007972,
+    "high": 9.840100797
    },
    {
     "group1": "High",
     "group2": "Sparse",
     "diff": 8.75,
-    "p": 0.009844570232
+    "p": 0.009844570232,
+    "low": 3.759899203,
+    "high": 13.7401008
    }
   ],
   "comparisonsLabel": "Bonferroni-corrected multiple comparisons"
@@ -2903,19 +3625,25 @@
     "group1": "Day 0",
     "group2": "Day 7",
     "diff": -2.55,
-    "p": 0.001075874457
+    "p": 0.001075874457,
+    "low": -3.571230604,
+    "high": -1.528769396
    },
    {
     "group1": "Day 0",
     "group2": "Day 14",
     "diff": -6.466666667,
-    "p": 0.01045714095
+    "p": 0.01045714095,
+    "low": -10.77828669,
+    "high": -2.155046646
    },
    {
     "group1": "Day 7",
     "group2": "Day 14",
     "diff": -3.916666667,
-    "p": 0.02829141195
+    "p": 0.02829141195,
+    "low": -7.266158766,
+    "high": -0.5671745678
    }
   ],
   "comparisonsLabel": "Tukey's multiple comparisons test"
@@ -2982,22 +3710,310 @@
     "group1": "Day 0",
     "group2": "Day 7",
     "diff": -2.55,
-    "p": 0.001374964058
+    "p": 0.001374964058,
+    "low": -3.659170383,
+    "high": -1.440829617
    },
    {
     "group1": "Day 0",
     "group2": "Day 14",
     "diff": -6.466666667,
-    "p": 0.01365554041
+    "p": 0.01365554041,
+    "low": -11.14956709,
+    "high": -1.78376624
    },
    {
     "group1": "Day 7",
     "group2": "Day 14",
     "diff": -3.916666667,
-    "p": 0.03769606441
+    "p": 0.03769606441,
+    "low": -7.554588818,
+    "high": -0.2787445154
    }
   ],
   "comparisonsLabel": "Bonferroni-corrected multiple comparisons"
+ },
+ "rm-anova matchedGaps {\"posthoc\":\"none\",\"mixed\":true}": {
+  "testType": "rm-anova",
+  "subtitle": "Mixed-effects model (REML)",
+  "stats": [
+   {
+    "label": "F",
+    "value": 24.53815944
+   },
+   {
+    "label": "DFn",
+    "value": 2
+   },
+   {
+    "label": "DFd (Kenward-Roger)",
+    "value": 9.950440985
+   },
+   {
+    "label": "P value",
+    "value": 0.0001422743465,
+    "p": true
+   },
+   {
+    "label": "Subjects",
+    "value": 7
+   },
+   {
+    "label": "Missing values",
+    "value": 3
+   },
+   {
+    "label": "SD between subjects",
+    "value": 0.7503579244
+   },
+   {
+    "label": "SD within subjects (residual)",
+    "value": 1.326752818
+   },
+   {
+    "label": "Model mean (Day 0)",
+    "value": 10.44814325
+   },
+   {
+    "label": "Model mean (Day 7)",
+    "value": 12.94690644
+   },
+   {
+    "label": "Model mean (Day 14)",
+    "value": 16.00909257
+   }
+  ],
+  "groups": [
+   {
+    "name": "Day 0",
+    "mean": 10.31666667,
+    "sd": 0.5115336418,
+    "sem": 0.2088327348,
+    "median": 10.25,
+    "n": 6
+   },
+   {
+    "name": "Day 7",
+    "mean": 12.9,
+    "sd": 0.9252026805,
+    "sem": 0.3777124126,
+    "median": 12.9,
+    "n": 6
+   },
+   {
+    "name": "Day 14",
+    "mean": 15.96666667,
+    "sd": 2.408872489,
+    "sem": 0.9834180754,
+    "median": 15.6,
+    "n": 6
+   }
+  ],
+  "notes": "Compares means across matched groups with a mixed-effects model: each subject's own level is a random effect, fitted by REML, so every value counts (18 values of 7 subjects, 3 missing). Assumes normal distributions and sphericity. The F test and the comparisons take the Kenward-Roger degrees of freedom; the comparisons are of the model's means."
+ },
+ "rm-anova matchedGaps {\"posthoc\":\"tukey\",\"mixed\":true}": {
+  "testType": "rm-anova",
+  "subtitle": "Mixed-effects model (REML)",
+  "stats": [
+   {
+    "label": "F",
+    "value": 24.53815944
+   },
+   {
+    "label": "DFn",
+    "value": 2
+   },
+   {
+    "label": "DFd (Kenward-Roger)",
+    "value": 9.950440985
+   },
+   {
+    "label": "P value",
+    "value": 0.0001422743465,
+    "p": true
+   },
+   {
+    "label": "Subjects",
+    "value": 7
+   },
+   {
+    "label": "Missing values",
+    "value": 3
+   },
+   {
+    "label": "SD between subjects",
+    "value": 0.7503579244
+   },
+   {
+    "label": "SD within subjects (residual)",
+    "value": 1.326752818
+   },
+   {
+    "label": "Model mean (Day 0)",
+    "value": 10.44814325
+   },
+   {
+    "label": "Model mean (Day 7)",
+    "value": 12.94690644
+   },
+   {
+    "label": "Model mean (Day 14)",
+    "value": 16.00909257
+   }
+  ],
+  "groups": [
+   {
+    "name": "Day 0",
+    "mean": 10.31666667,
+    "sd": 0.5115336418,
+    "sem": 0.2088327348,
+    "median": 10.25,
+    "n": 6
+   },
+   {
+    "name": "Day 7",
+    "mean": 12.9,
+    "sd": 0.9252026805,
+    "sem": 0.3777124126,
+    "median": 12.9,
+    "n": 6
+   },
+   {
+    "name": "Day 14",
+    "mean": 15.96666667,
+    "sd": 2.408872489,
+    "sem": 0.9834180754,
+    "median": 15.6,
+    "n": 6
+   }
+  ],
+  "notes": "Compares means across matched groups with a mixed-effects model: each subject's own level is a random effect, fitted by REML, so every value counts (18 values of 7 subjects, 3 missing). Assumes normal distributions and sphericity. The F test and the comparisons take the Kenward-Roger degrees of freedom; the comparisons are of the model's means.",
+  "comparisons": [
+   {
+    "group1": "Day 0",
+    "group2": "Day 7",
+    "diff": -2.498763196,
+    "p": 0.02601693979,
+    "low": -4.680315542,
+    "high": -0.31721085
+   },
+   {
+    "group1": "Day 0",
+    "group2": "Day 14",
+    "diff": -5.560949326,
+    "p": 0.0001031881634,
+    "low": -7.742501672,
+    "high": -3.37939698
+   },
+   {
+    "group1": "Day 7",
+    "group2": "Day 14",
+    "diff": -3.06218613,
+    "p": 0.008261835183,
+    "low": -5.243738476,
+    "high": -0.8806337834
+   }
+  ],
+  "comparisonsLabel": "Tukey's multiple comparisons test"
+ },
+ "rm-anova matchedGaps {\"posthoc\":\"holm-sidak\",\"mixed\":true}": {
+  "testType": "rm-anova",
+  "subtitle": "Mixed-effects model (REML)",
+  "stats": [
+   {
+    "label": "F",
+    "value": 24.53815944
+   },
+   {
+    "label": "DFn",
+    "value": 2
+   },
+   {
+    "label": "DFd (Kenward-Roger)",
+    "value": 9.950440985
+   },
+   {
+    "label": "P value",
+    "value": 0.0001422743465,
+    "p": true
+   },
+   {
+    "label": "Subjects",
+    "value": 7
+   },
+   {
+    "label": "Missing values",
+    "value": 3
+   },
+   {
+    "label": "SD between subjects",
+    "value": 0.7503579244
+   },
+   {
+    "label": "SD within subjects (residual)",
+    "value": 1.326752818
+   },
+   {
+    "label": "Model mean (Day 0)",
+    "value": 10.44814325
+   },
+   {
+    "label": "Model mean (Day 7)",
+    "value": 12.94690644
+   },
+   {
+    "label": "Model mean (Day 14)",
+    "value": 16.00909257
+   }
+  ],
+  "groups": [
+   {
+    "name": "Day 0",
+    "mean": 10.31666667,
+    "sd": 0.5115336418,
+    "sem": 0.2088327348,
+    "median": 10.25,
+    "n": 6
+   },
+   {
+    "name": "Day 7",
+    "mean": 12.9,
+    "sd": 0.9252026805,
+    "sem": 0.3777124126,
+    "median": 12.9,
+    "n": 6
+   },
+   {
+    "name": "Day 14",
+    "mean": 15.96666667,
+    "sd": 2.408872489,
+    "sem": 0.9834180754,
+    "median": 15.6,
+    "n": 6
+   }
+  ],
+  "notes": "Compares means across matched groups with a mixed-effects model: each subject's own level is a random effect, fitted by REML, so every value counts (18 values of 7 subjects, 3 missing). Assumes normal distributions and sphericity. The F test and the comparisons take the Kenward-Roger degrees of freedom; the comparisons are of the model's means.",
+  "comparisons": [
+   {
+    "group1": "Day 0",
+    "group2": "Day 7",
+    "diff": -2.498763196,
+    "p": 0.0105279626
+   },
+   {
+    "group1": "Day 0",
+    "group2": "Day 14",
+    "diff": -5.560949326,
+    "p": 0.0001152278851
+   },
+   {
+    "group1": "Day 7",
+    "group2": "Day 14",
+    "diff": -3.06218613,
+    "p": 0.006462170553
+   }
+  ],
+  "comparisonsLabel": "Holm–Šídák multiple comparisons test"
  },
  "shapiro-wilk column {}": {
   "testType": "shapiro-wilk",
@@ -4108,31 +5124,31 @@
     "points": 8,
     "outliers": 1,
     "percent": 12.5,
-    "robustMean": 12.3
+    "robustMean": 12.14697685
    },
    {
     "group": "Low",
     "points": 7,
     "outliers": 0,
     "percent": 0,
-    "robustMean": 14.81607637
+    "robustMean": 14.7764513
    },
    {
     "group": "High",
     "points": 6,
     "outliers": 0,
     "percent": 0,
-    "robustMean": 19.55
+    "robustMean": 19.57180844
    },
    {
     "group": "Sparse",
     "points": 4,
     "outliers": 0,
     "percent": 0,
-    "robustMean": 10.66814242
+    "robustMean": 10.72946726
    }
   ],
-  "notes": "Flagged as outliers (FDR-adjusted P < Q): Control row 8 (value 30, adj. P = 0.0000). Use Edit ▸ Exclude / Include (⌘E) on those cells to leave them out of other tests and graphs. Method: each column fit independently to a robust mean (Huber M-estimator, scale from the median absolute deviation), residuals tested via a two-tailed t distribution and FDR-corrected (Benjamini-Hochberg) within that column. This mirrors the published Motulsky & Brown (2006) ROUT algorithm's logic, not GraphPad's certified implementation."
+  "notes": "Outliers: Control row 8 (value 30). Use Edit ▸ Exclude / Include (⌘E) on those cells to leave them out of other tests and graphs. ROUT (Motulsky & Brown, 2006): each column's robust mean (its scatter taken as Lorentzian), then, among the 30% of values farthest from it, those too far for a false discovery rate of Q."
  },
  "outliers column {\"q\":5}": {
   "testType": "outliers",
@@ -4199,31 +5215,31 @@
     "points": 8,
     "outliers": 1,
     "percent": 12.5,
-    "robustMean": 12.3
+    "robustMean": 12.14697685
    },
    {
     "group": "Low",
     "points": 7,
     "outliers": 0,
     "percent": 0,
-    "robustMean": 14.81607637
+    "robustMean": 14.7764513
    },
    {
     "group": "High",
     "points": 6,
     "outliers": 0,
     "percent": 0,
-    "robustMean": 19.55
+    "robustMean": 19.57180844
    },
    {
     "group": "Sparse",
     "points": 4,
     "outliers": 0,
     "percent": 0,
-    "robustMean": 10.66814242
+    "robustMean": 10.72946726
    }
   ],
-  "notes": "Flagged as outliers (FDR-adjusted P < Q): Control row 8 (value 30, adj. P = 0.0000). Use Edit ▸ Exclude / Include (⌘E) on those cells to leave them out of other tests and graphs. Method: each column fit independently to a robust mean (Huber M-estimator, scale from the median absolute deviation), residuals tested via a two-tailed t distribution and FDR-corrected (Benjamini-Hochberg) within that column. This mirrors the published Motulsky & Brown (2006) ROUT algorithm's logic, not GraphPad's certified implementation."
+  "notes": "Outliers: Control row 8 (value 30). Use Edit ▸ Exclude / Include (⌘E) on those cells to leave them out of other tests and graphs. ROUT (Motulsky & Brown, 2006): each column's robust mean (its scatter taken as Lorentzian), then, among the 30% of values farthest from it, those too far for a false discovery rate of Q."
  },
  "outliers column {\"method\":\"grubbs\"}": {
   "testType": "outliers",
@@ -23288,31 +24304,31 @@
     "points": 10,
     "outliers": 0,
     "percent": 0,
-    "robustMean": 76.25
+    "robustMean": 75.05115303
    },
    {
     "group": "Height",
     "points": 9,
     "outliers": 0,
     "percent": 0,
-    "robustMean": 175.7142857
+    "robustMean": 175.4909103
    },
    {
     "group": "Age",
     "points": 10,
     "outliers": 0,
     "percent": 0,
-    "robustMean": 39.88396972
+    "robustMean": 39.66637535
    },
    {
     "group": "Dose",
     "points": 10,
     "outliers": 0,
     "percent": 0,
-    "robustMean": 1.9
+    "robustMean": 1.833083457
    }
   ],
-  "notes": "No outliers detected at Q = 1%. Method: each column fit independently to a robust mean (Huber M-estimator, scale from the median absolute deviation), residuals tested via a two-tailed t distribution and FDR-corrected (Benjamini-Hochberg) within that column. This mirrors the published Motulsky & Brown (2006) ROUT algorithm's logic, not GraphPad's certified implementation."
+  "notes": "No outliers detected at Q = 1%. ROUT (Motulsky & Brown, 2006): each column's robust mean (its scatter taken as Lorentzian), then, among the 30% of values farthest from it, those too far for a false discovery rate of Q."
  },
  "multiple-logistic-regression multipleBinary {\"dependent\":\"Outcome\",\"predictors\":[\"Age\",\"Dose\"]}": {
   "testType": "multiple-logistic-regression",
@@ -27123,15 +28139,15 @@
    },
    {
     "label": "F (variance ratio)",
-    "value": 0.02890410497
+    "value": 34.59716193
    },
    {
     "label": "F DFn",
-    "value": 5
+    "value": 7
    },
    {
     "label": "F DFd",
-    "value": 7
+    "value": 5
    },
    {
     "label": "F test P value",
@@ -27297,19 +28313,25 @@
     "group1": "Control",
     "group2": "Low",
     "diff": -0.5053571429,
-    "p": 0.9684294961
+    "p": 0.9684294961,
+    "low": -5.847076603,
+    "high": 4.836362317
    },
    {
     "group1": "Control",
     "group2": "High",
     "diff": -5.279166667,
-    "p": 0.06515141922
+    "p": 0.06515141922,
+    "low": -10.85324232,
+    "high": 0.2949089871
    },
    {
     "group1": "Low",
     "group2": "High",
     "diff": -4.773809524,
-    "p": 0.1134113119
+    "p": 0.1134113119,
+    "low": -10.5159854,
+    "high": 0.9683663571
    }
   ],
   "comparisonsLabel": "Tukey's multiple comparisons test"

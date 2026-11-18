@@ -8,8 +8,13 @@ import { createServer } from "node:http";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runAnalysis } from "../src/stats";
+import { pairKey } from "../src/lib/columns";
+import { qnorm } from "../src/lib/normal";
+import { transformTable } from "../src/lib/transform";
+import { parseCell } from "../src/lib/numeric";
+import { runMixedModel } from "../src/stats/column/mixed-model";
 import type { AnalysisParams, AnalysisResult, AnalysisType } from "../src/stats/types";
-import type { GraphOptions, GraphType, TableData } from "../src/store/types";
+import { hasXColumn, type GraphOptions, type GraphType, type TableData, type TableType, type Transform } from "../src/store/types";
 import { GRAPHS, graphSeries, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
 import { errorOf, paintOf } from "../src/views/graphs/plot-helpers";
 import { pairUp, readTable, splitXY, xyPoints } from "../src/lib/dataset";
@@ -1457,6 +1462,20 @@ const matched = table(
   ],
 );
 
+// The same subjects, some values missing (a mixed-effects model keeps them).
+const matchedGaps = table(
+  ["Title", "Day 0", "Day 7", "Day 14"],
+  [
+    ["", "10.1", "12.0", "15.2"],
+    ["", "9.8", "", "18.1"],
+    ["", "11.2", "13.1", "14.0"],
+    ["", "10.5", "14.2", ""],
+    ["", "9.9", "11.8", "13.1"],
+    ["", "", "13.6", "19.4"],
+    ["", "10.4", "12.7", "16.0"],
+  ],
+);
+
 // Edge cases: a stored empty row, one value per cell, a falling dose-response curve, too
 // little data, a column of identical values, counts that aren't whole, a group without event.
 const groupedBlankRow: TableData = { ...grouped, rows: [...grouped.rows, grouped.columns.map(() => null)] };
@@ -2177,6 +2196,7 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ],
   ["column", column, "one-sample-t", { hypotheticalValue: 12, tails: "two-sided", gaussian: true }],
   ["column", column, "one-sample-t", { hypotheticalValue: 12, tails: "two-sided", gaussian: false }],
+  ["column", column, "one-sample-t", { hypotheticalValue: 12, tails: "greater", gaussian: true, lognormal: true }],
   ["column", column, "anova", { posthoc: "none" }],
   ["column", column, "anova", { posthoc: "tukey" }],
   ["column", column, "anova", { posthoc: "bonferroni" }],
@@ -2187,6 +2207,13 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["column", column, "anova", { posthoc: "sidak" }],
   ["column", column, "anova", { posthoc: "holm-sidak" }],
   ["column", column, "anova", { posthoc: "lsd" }],
+  // Lognormal ANOVA (upstream 1.1.0): the ANOVA of the logarithms, its
+  // comparisons' differences and CIs made ratios of geometric means.
+  ["column", column, "anova", { posthoc: "tukey", lognormal: true }],
+  ["column", column, "anova", { posthoc: "dunnett", control: "Control", lognormal: true }],
+  ["column", column, "anova", { posthoc: "games-howell", equalSd: false, lognormal: true }],
+  // A correction of chosen pairs only: Šídák over Control–High and Low–Control.
+  ["column", column, "anova", { posthoc: "sidak", compared: [pairKey("Control", "High"), pairKey("Low", "Control")] }],
   ["column", column, "kruskal-wallis", { posthoc: "dunn-sidak" }],
   ["column", column, "kruskal-wallis", { posthoc: "dunn-holm-sidak" }],
   ["column", column, "rm-anova", { posthoc: "sidak" }],
@@ -2214,6 +2241,13 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["matched", matched, "rm-anova", { posthoc: "none" }],
   ["matched", matched, "rm-anova", { posthoc: "tukey", sphericity: false }],
   ["matched", matched, "rm-anova", { posthoc: "bonferroni", sphericity: false }],
+  // Mixed-effects model (upstream 1.1.0): the rm-anova wizard's `mixed` variant —
+  // base-R REML with Kenward-Roger df, keeping subjects with missing values.
+  // (Runs through the rm-anova dispatch in src/stats/index.ts, the coordinator's
+  // wiring: until it lands, these cases run as the ordinary rm-anova.)
+  ["matchedGaps", matchedGaps, "rm-anova", { posthoc: "none", mixed: true }],
+  ["matchedGaps", matchedGaps, "rm-anova", { posthoc: "tukey", mixed: true }],
+  ["matchedGaps", matchedGaps, "rm-anova", { posthoc: "holm-sidak", mixed: true }],
   ["column", column, "shapiro-wilk"],
   // Normality tests (plan 23): all four tests on the n = 25 table (values
   // pinned in the `normality` table comment), SW + DP with lognormality,
@@ -3029,6 +3063,123 @@ async function scatterWithFittedCurve(data: TableData, y: string, model: Nonline
   const yCol = ys.find((s) => s.name === y) ?? ys[0];
   if (x && yCol) addFittedCurve(fig, x, yCol, ys, model, fit, true, opts, paintOf(opts, 1));
   return fig;
+}
+
+/** NIST's Statistical Reference Datasets (tests/nist/, public domain): Helix's results
+ *  against their certified values, to 9 significant digits (6 for the nonlinear fit, whose
+ *  convergence stops earlier): linear regression (Norris), a quadratic (Pontius), multiple
+ *  regression (Longley), a hyperbola (Misra1d: Bmax = b1, Kd = 1 / b2), one-way ANOVA
+ *  (SiRstv; AtmWtAg, two groups, by Student's t; SmLs07, 13 significant digits in common), and
+ *  the mean and SD (NumAcc3, whose values differ in the 8th digit; Michelso). */
+async function nistDisagreements(): Promise<string[]> {
+  const out: string[] = [];
+  const nist = (name: string, first: number) =>
+    readFileSync(fileURLToPath(new URL(`nist/${name}.dat`, import.meta.url)), "utf8")
+      .split("\n")
+      .slice(first - 1)
+      .filter((l) => l.trim())
+      .map((l) => l.trim().split(/\s+/));
+  const near = (what: string, got: number | null | undefined, certified: number, digits = 9) => {
+    if (got == null || Math.abs(got - certified) > Math.abs(certified) * 10 ** -digits)
+      out.push(`NIST ${what}: Helix ${got}, certified ${certified}`);
+  };
+  const stat = (r: Awaited<ReturnType<typeof runAnalysis>>, label: string) =>
+    "error" in r ? null : r.stats.find((s) => s.label === label)?.value;
+  const coef = (r: Awaited<ReturnType<typeof runAnalysis>>, term: string) =>
+    "error" in r ? undefined : r.coefficients?.find((c) => c.term === term);
+  const xyOf = (rows: string[][]) =>
+    table(
+      ["Title", "X", "Y"],
+      rows.map(([y, x]) => ["", x, y]),
+    );
+
+  // Norris: a line; each coefficient's SD from its 95% CI (t × SE, 34 df).
+  const norris = await runAnalysis("linear-regression", xyOf(nist("Norris", 61)), { forceOrigin: false });
+  near("Norris slope", stat(norris, "Slope"), 1.00211681802045);
+  near("Norris intercept", stat(norris, "Y-intercept"), -0.262323073774029);
+  near("Norris R²", stat(norris, "R squared"), 0.999993745883712);
+  const ciHalf = (lo: string, hi: string) => ((stat(norris, hi) ?? NaN) - (stat(norris, lo) ?? NaN)) / 2 / tCrit95(34);
+  near("Norris slope SD", ciHalf("Slope 95% CI lower", "Slope 95% CI upper"), 0.429796848199937e-3, 6);
+  near("Norris intercept SD", ciHalf("Intercept 95% CI lower", "Intercept 95% CI upper"), 0.232818234301152, 6);
+
+  // Pontius: a quadratic.
+  const pontius = await runAnalysis("nonlinear-regression", xyOf(nist("Pontius", 61)), { model: "quadratic" });
+  // prettier-ignore
+  for (const [term, est, sd] of [["B0", 0.673565789473684e-3, 0.107938612033077e-3], ["B1", 0.732059160401003e-6, 0.157817399981659e-9], ["B2", -0.316081871345029e-14, 0.486652849992036e-16]] as const) {
+    near(`Pontius ${term}`, coef(pontius, term)?.estimate, est);
+    near(`Pontius ${term} SD`, coef(pontius, term)?.stdError, sd);
+  }
+
+  // Longley: six predictors, much alike.
+  const longley = nist("Longley", 61);
+  const names = ["y", "x1", "x2", "x3", "x4", "x5", "x6"];
+  const multi = await runAnalysis(
+    "multiple-regression",
+    table(
+      ["Title", ...names],
+      longley.map((r) => ["", ...r]),
+    ),
+    {
+      dependent: "y",
+      predictors: names.slice(1),
+    },
+  );
+  // prettier-ignore
+  const certified = [[-3482258.63459582, 890420.383607373], [15.0618722713733, 84.9149257747669], [-0.358191792925910e-1, 0.334910077722432e-1], [-2.02022980381683, 0.488399681651699], [-1.03322686717359, 0.214274163161675], [-0.511041056535807e-1, 0.226073200069370], [1829.15146461355, 455.478499142212]];
+  ["Intercept", ...names.slice(1)].forEach((term, i) => {
+    near(`Longley ${term}`, coef(multi, term)?.estimate, certified[i][0]);
+    near(`Longley ${term} SD`, coef(multi, term)?.stdError, certified[i][1]);
+  });
+  near("Longley R²", stat(multi, "R squared"), 0.995479004577296);
+  near("Longley F", stat(multi, "F"), 330.285339234588);
+
+  // Misra1d: y = b1·b2·x / (1 + b2·x), Helix's hyperbola Bmax·x / (Kd + x) with Kd = 1 / b2.
+  const misra = await runAnalysis("nonlinear-regression", xyOf(nist("Misra1d", 61)), { model: "hyperbola" });
+  near("Misra1d Bmax (b1)", coef(misra, "Bmax")?.estimate, 4.3736970754e2, 6);
+  near("Misra1d Bmax SD", coef(misra, "Bmax")?.stdError, 3.6489174345, 6);
+  near("Misra1d 1 / Kd (b2)", 1 / (coef(misra, "Kd")?.estimate ?? NaN), 3.0227324449e-4, 6);
+  near("Misra1d Kd SD", coef(misra, "Kd")?.stdError, 2.9334354479e-6 / 3.0227324449e-4 ** 2, 5);
+
+  // One-way ANOVA: each group a column.
+  // prettier-ignore
+  for (const [name, f, r2] of [["SiRstv", 1.18046237440255, 0.190999039051129], ["AtmWtAg", 15.9467335677930, 0.257426544538321], ["SmLs07", 21.0, 0.482758620689655]] as const) {
+    const byGroup = new Map<string, string[]>();
+    for (const [g, v] of nist(name, 61)) byGroup.set(g, [...(byGroup.get(g) ?? []), v]);
+    const groups = [...byGroup.values()];
+    const height = Math.max(...groups.map((g) => g.length));
+    const data = table(["Title", ...[...byGroup.keys()].map((g) => `G${g}`)], Array.from({ length: height }, (_, r) => ["", ...groups.map((g) => g[r] ?? "")]));
+    if (groups.length === 2) {
+      // Two groups: Student's t test, whose t² is the ANOVA's F.
+      const t = await runAnalysis("compare-two-groups", data, {
+        paired: false,
+        gaussian: true,
+        equalVariance: true,
+        tails: "two-sided",
+      } as AnalysisParams);
+      near(`${name} t² (F)`, (stat(t, "t") ?? NaN) ** 2, f);
+      continue;
+    }
+    const anova = await runAnalysis("anova", data, { posthoc: "none", equalSd: true });
+    // SmLs07's values have 13 significant digits in common: a double (what every program
+    // computes with) holds each to within 0.00005, on differences of 0.1, so 4 digits are
+    // all that the data as stored allow (shifted down, R finds F = 21 to 14 digits).
+    const digits = name === "SmLs07" ? 4 : 9;
+    near(`${name} F`, stat(anova, "F"), f, digits);
+    near(`${name} R²`, stat(anova, "R squared (eta squared)"), r2, digits);
+  }
+
+  // The mean and SD.
+  for (const [name, mean, sd] of [
+    ["NumAcc3", 1000000.2, 0.1],
+    ["Michelso", 299.8524, 0.0790105478190518],
+  ] as const) {
+    const values = nist(name, 61).map(([v]) => ["", v]);
+    const desc = await runAnalysis("descriptive-statistics", table(["Title", "Y"], values));
+    const g = "error" in desc ? undefined : desc.groups[0];
+    near(`${name} mean`, g?.mean, mean);
+    near(`${name} SD`, g?.sd, sd);
+  }
+  return out;
 }
 
 /** Where TypeScript computes what R also computes, both must agree: a graph's
@@ -7694,6 +7845,227 @@ async function disagreements(): Promise<string[]> {
       out.push(
         `Monte Carlo histogram: ${total} values in bins, shapes ${JSON.stringify(shapes.map((s) => s.type))}`,
       );
+  }
+  // NIST's Statistical Reference Datasets: this lane's analyses against
+  // their certified values.
+  out.push(...(await nistDisagreements()));
+
+  // ROUT on columns finds the very outliers Prism 10 finds on the same data, at Q = 1% and
+  // 5% (run in Prism by the user, 2026-11-12): clean data, one or two outliers (masking),
+  // a skewed column, ties, three values.
+  // prettier-ignore
+  const prismColumns: Record<string, number[]> = {
+    A: [10.2, 9.8, 10.5, 9.6, 10.1, 10.4, 9.9, 10.3, 9.7, 10.0], B: [10.2, 9.8, 10.5, 9.6, 10.1, 10.4, 9.9, 10.3, 9.7, 16.5],
+    C: [20.1, 19.6, 20.4, 19.8, 20.2, 19.9, 20.3, 20.0, 19.7, 20.5, 26.8, 27.4], D: [5.1, 4.8, 5.3, 4.9, 5.2, 5.0, 4.7, 6.1],
+    E: [3.1, 3.3, 9.0], F: [1.2, 1.5, 1.1, 2.3, 1.8, 3.9, 1.4, 2.7, 1.6, 5.8, 1.3, 2.1, 1.9, 8.2, 1.7],
+    G: [7, 7, 7, 7, 8, 7, 7, 8, 7, 12],
+    H: [50.3, 48.9, 51.2, 49.5, 50.8, 49.1, 50.1, 51.6, 48.6, 50.4, 49.8, 50.9, 49.3, 50.6, 48.8, 51.1, 49.7, 50.2, 49.9, 53.9],
+    I: [100, 102, 98, 101, 99, 103, 97, 100, 140, 60], J: [0.8, 1.1, 0.9, 1.0, 1.2, 0.7, 1.05, 0.95, 1.6],
+  };
+  const prismTable = table(
+    ["Title", ...Object.keys(prismColumns)],
+    Array.from({ length: 20 }, (_, r) => [
+      "",
+      ...Object.values(prismColumns).map((c) => (c[r] == null ? "" : String(c[r]))),
+    ]),
+  );
+  const prismOutliers: Record<number, string> = {
+    1: "B 16.5, C 26.8, C 27.4, F 5.8, F 8.2, G 8, G 8, G 12, I 140, I 60",
+    5: "B 16.5, C 26.8, C 27.4, F 3.9, F 5.8, F 8.2, G 8, G 8, G 12, H 53.9, I 140, I 60",
+  };
+  for (const q of [1, 5]) {
+    const r = await runAnalysis("outliers", prismTable, { q });
+    const found =
+      "error" in r
+        ? r.error
+        : (r.notes ?? "")
+            .match(/[A-J] row \d+ \(value [\d.]+\)/g)
+            ?.map((f) => f.replace(/ row \d+ \(value ([\d.]+)\)/, " $1"))
+            .join(", ");
+    if (found !== prismOutliers[q]) out.push(`ROUT at Q = ${q}%: ${found}; Prism: ${prismOutliers[q]}`);
+  }
+
+  // The QQ plots' normal quantiles are R's qnorm(ppoints()): the TS qnorm
+  // (Wichura AS 241) must match R's to 1e-12 relative. (The QQ points and
+  // residual plots themselves are the graphs lane's.)
+  {
+    const ps = [1e-300, 1e-12, 0.001, 0.02425, 0.1, 0.3, 0.5, 0.7, 0.975, 0.999999, 1 - 1e-12];
+    const q = await evalNamedVector(`setNames(qnorm(${rVec(ps)}),paste0("q",1:${ps.length}))`);
+    ps.forEach((p, i) => {
+      if (Math.abs(qnorm(p) - q[`q${i + 1}`]!) > 1e-12 * Math.max(1, Math.abs(q[`q${i + 1}`]!)))
+        out.push(`qnorm(${p}): ${qnorm(p)}, R ${q[`q${i + 1}`]}`);
+    });
+  }
+
+  // The mixed-effects model: on complete subjects, exactly the repeated-measures ANOVA
+  // (sphericity assumed) and its Tukey comparisons; with values missing, what REML maximized
+  // over the dense covariance and Kenward-Roger written out from the paper give.
+  {
+    const [mixed, anova] = await Promise.all([
+      runAnalysis("rm-anova", matched, { posthoc: "tukey", mixed: true } as AnalysisParams),
+      runAnalysis("rm-anova", matched, { posthoc: "tukey", sphericity: true } as AnalysisParams),
+    ]);
+    if ("error" in mixed || "error" in anova) out.push("Mixed-effects model on complete subjects: an error");
+    else {
+      const near = (a: number | null | undefined, b: number | null | undefined) =>
+        a != null && b != null && Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(b));
+      mixed.stats.slice(0, 4).forEach((r, i) => {
+        if (!near(r.value, anova.stats[i].value))
+          out.push(`Mixed model, complete subjects, ${r.label}: ${r.value}, RM ANOVA ${anova.stats[i].value}`);
+      });
+      mixed.comparisons?.forEach((c, i) => {
+        const d = anova.comparisons![i];
+        if (!near(c.p, d.p) || !near(c.low, d.low) || !near(c.high, d.high) || !near(c.diff, d.diff))
+          out.push(
+            `Mixed model, complete subjects, ${c.group1} vs. ${c.group2}: ${JSON.stringify(c)} vs. ${JSON.stringify(d)}`,
+          );
+      });
+    }
+    // The engine directly: the rm-anova `mixed` dispatch lives in
+    // src/stats/index.ts (the coordinator's wiring), so runAnalysis would
+    // still run the ordinary rm-anova here; the ANALYSES cases above cover
+    // the dispatch end to end once it lands.
+    const gaps = await runMixedModel(readTable(matchedGaps).columns, { posthoc: "tukey", mixed: true });
+    const cols = readTable(matchedGaps).columns;
+    const cells = matchedGaps.rows.flatMap((_, r) =>
+      cols.flatMap((c, j) => (c.byRow[r] == null ? [] : [[c.byRow[r]!, j + 1, r + 1]])),
+    );
+    const dense = await evalNamedVector(
+      `y<-${rVec(cells.map((c) => c[0]))};g<-factor(${rVec(cells.map((c) => c[1]))});s<-factor(${rVec(cells.map((c) => c[2]))});` +
+        `X<-model.matrix(~0+g);Z<-model.matrix(~0+s);N<-length(y);p<-ncol(X);G<-list(Z%*%t(Z),diag(N))\n` +
+        `Vof<-function(t)t[1]*G[[1]]+t[2]*G[[2]]\n` +
+        `nll<-function(lt){V<-Vof(exp(lt));Vi<-solve(V);A<-t(X)%*%Vi%*%X;b<-solve(A,t(X)%*%Vi%*%y);r<-y-X%*%b;` +
+        `(as.numeric(determinant(V)$modulus)+as.numeric(determinant(A)$modulus)+drop(t(r)%*%Vi%*%r))/2}\n` +
+        `o<-optim(c(0,0),nll,method="BFGS",control=list(reltol=1e-14,maxit=1000));th<-exp(o$par)\n` +
+        `V<-Vof(th);Vi<-solve(V);Phi<-solve(t(X)%*%Vi%*%X);beta<-Phi%*%t(X)%*%Vi%*%y\n` +
+        `Pm<-Vi-Vi%*%X%*%Phi%*%t(X)%*%Vi;P<-lapply(G,function(Gi)t(X)%*%Vi%*%Gi%*%Vi%*%X)\n` +
+        `Q<-lapply(G,function(Gi)lapply(G,function(Gj)t(X)%*%Vi%*%Gi%*%Vi%*%Gj%*%Vi%*%X))\n` +
+        `I<-outer(1:2,1:2,Vectorize(function(i,j)sum(diag(Pm%*%G[[i]]%*%Pm%*%G[[j]]))/2));W<-solve(I)\n` +
+        `Lam<-Reduce("+",lapply(1:4,function(q){i<-(q-1)%/%2+1;j<-(q-1)%%2+1;W[i,j]*(Q[[i]][[j]]-P[[i]]%*%Phi%*%P[[j]])}));PhiA<-Phi+2*Phi%*%Lam%*%Phi\n` +
+        `L<-cbind(-1,diag(p-1));l<-nrow(L);Fv<-drop(t(L%*%beta)%*%solve(L%*%PhiA%*%t(L),L%*%beta))/l\n` +
+        `Th<-t(L)%*%solve(L%*%Phi%*%t(L),L);A1<-0;A2<-0\n` +
+        `for(i in 1:2)for(j in 1:2){Mi<-Th%*%Phi%*%P[[i]]%*%Phi;Mj<-Th%*%Phi%*%P[[j]]%*%Phi;A1<-A1+W[i,j]*sum(diag(Mi))*sum(diag(Mj));A2<-A2+W[i,j]*sum(diag(Mi%*%Mj))}\n` +
+        `B<-(A1+6*A2)/(2*l);g2<-((l+1)*A1-(l+4)*A2)/((l+2)*A2);d<-3*l+2*(1-g2);c1<-g2/d;c2<-(l-g2)/d;c3<-(l+2-g2)/d\n` +
+        `E<-1/(1-A2/l);Vs<-2/l*(1+c1*B)/((1-c2*B)^2*(1-c3*B));rho<-Vs/(2*E^2);m<-4+(l+2)/(l*rho-1);lam<-m/(E*(m-2))\n` +
+        `c(F=lam*Fv,df=m,sb=sqrt(th[1]),se=sqrt(th[2]),m1=beta[1])`,
+    );
+    const stat = (label: string) => ("error" in gaps ? null : gaps.stats.find((r) => r.label === label)?.value);
+    for (const [label, key] of [
+      ["F", "F"],
+      ["DFd (Kenward-Roger)", "df"],
+      ["SD between subjects", "sb"],
+      ["SD within subjects (residual)", "se"],
+      ["Model mean (Day 0)", "m1"],
+    ] as const) {
+      const [ours, theirs] = [stat(label), dense[key]];
+      if (ours == null || theirs == null || Math.abs(ours - theirs) > 1e-5 * Math.max(1, Math.abs(theirs)))
+        out.push(`Mixed model with gaps, ${label}: ${ours}, dense REML and Kenward-Roger ${theirs}`);
+    }
+  }
+
+  // A lognormal ANOVA is the ANOVA of the logarithms, its comparisons' differences and CIs
+  // made ratios; a lognormal one-sample t test, the t test of the logarithms against log(value).
+  const lnColumn = transformTable(column, "column", { from: "t", kind: "ln" });
+  for (const posthoc of ["tukey", "dunnett", "t3"] as const) {
+    const params = { posthoc, control: "Control", equalSd: posthoc !== "t3" };
+    const [log, plain] = await Promise.all([
+      runAnalysis("anova", column, { ...params, lognormal: true } as AnalysisParams),
+      runAnalysis("anova", lnColumn, params as AnalysisParams),
+    ]);
+    if ("error" in log || "error" in plain) {
+      out.push(
+        `Lognormal ANOVA (${posthoc}): ${"error" in log ? log.error : ""}${"error" in plain ? plain.error : ""}`,
+      );
+      continue;
+    }
+    const near = (a: number | null | undefined, b: number | null | undefined) =>
+      a != null && b != null && Math.abs(a - b) <= 1e-8 * Math.max(1, Math.abs(b));
+    if (!near(log.stats.find((r) => r.p)?.value, plain.stats.find((r) => r.p)?.value))
+      out.push(`Lognormal ANOVA (${posthoc}) P: not the ANOVA of the logarithms'`);
+    log.comparisons?.forEach((c, k) => {
+      const d = plain.comparisons![k];
+      if (
+        !near(c.p, d.p) ||
+        !near(Math.log(c.diff!), d.diff) ||
+        !near(Math.log(c.low!), d.low) ||
+        !near(Math.log(c.high!), d.high)
+      )
+        out.push(
+          `Lognormal ANOVA (${posthoc}), ${c.group1} vs. ${c.group2}: ${JSON.stringify(c)} vs. logs ${JSON.stringify(d)}`,
+        );
+    });
+  }
+  const [logT, plainT] = await Promise.all([
+    runAnalysis("one-sample-t", column, {
+      hypotheticalValue: 12,
+      tails: "two-sided",
+      gaussian: true,
+      lognormal: true,
+    } as AnalysisParams),
+    runAnalysis("one-sample-t", lnColumn, {
+      hypotheticalValue: Math.log(12),
+      tails: "two-sided",
+      gaussian: true,
+    } as AnalysisParams),
+  ]);
+  if (!("error" in logT) && !("error" in plainT))
+    for (const label of ["Control — P value", "Low — t"]) {
+      // The ln table holds 10 significant digits.
+      const [a, b] = [logT, plainT].map((r) => r.stats.find((x) => x.label === label)?.value ?? NaN);
+      if (!(Math.abs(a - b) <= 1e-7 * Math.max(1, Math.abs(b))))
+        out.push(`Lognormal one-sample t, ${label}: not the t test of the logarithms'`);
+    }
+
+  // A transformed table holds what R computes: logarithms, each data set normalized, a
+  // percent of the control's mean (row by row where rows match), z-scores (scale()) within
+  // a data set or a row.
+  const TRANSFORMED: [string, TableData, TableType, string][] = [
+    ["Column", column, "column", "Control"],
+    ["Grouped", grouped, "grouped", "B"],
+    ["XY", xyReps, "xy", "A"],
+    ["Multiple Variables", multiple, "multiple", "Age"],
+  ];
+  for (const [name, data, type, control] of TRANSFORMED) {
+    const t = readTable(data);
+    const cols = t.columns.slice(hasXColumn(type) ? 1 : 0);
+    const sets = [...new Set(cols.map((c) => c.set ?? c.name))];
+    const setOf = rVec(cols.map((c) => sets.indexOf(c.set ?? c.name) + 1));
+    const byRow = type === "grouped" || type === "xy";
+    const r = await evalNamedVector(
+      `M<-matrix(${rVec(cols.flatMap((c) => c.byRow.map((v) => v ?? NaN)))},nrow=${data.rows.length});M[is.nan(M)]<-NA;g<-${setOf};` +
+        `pos<-function(f)ifelse(!is.na(M)&M>0,f(pmax(M,1e-300)),NA);each<-function(f){o<-M;for(k in unique(g))o[,g==k]<-f(M[,g==k]);o};` +
+        `ct<-M[,g==${sets.indexOf(control) + 1},drop=FALSE];base<-${byRow ? "rowMeans(ct,na.rm=TRUE)" : "mean(ct,na.rm=TRUE)"};` +
+        `out<-list(log10=pos(log10),log2=pos(log2),ln=pos(log),` +
+        `normalize=each(function(x){r<-range(x,na.rm=TRUE);(x-r[1])/(r[2]-r[1])*100}),pct=M/base*100,` +
+        `zset=each(function(x)(x-mean(x,na.rm=TRUE))/sd(as.vector(x),na.rm=TRUE)),` +
+        `zrow=t(apply(M,1,function(x)if(sum(!is.na(x))>1)(x-mean(x,na.rm=TRUE))/sd(x,na.rm=TRUE) else NA*x)));` +
+        `v<-unlist(lapply(out,as.vector));v[!is.finite(v)]<-NA;setNames(v,paste0(rep(names(out),each=length(M)),"_",seq_along(M)))`,
+    );
+    const kinds: [string, Omit<Transform, "from">][] = [
+      ["log10", { kind: "log10" }],
+      ["log2", { kind: "log2" }],
+      ["ln", { kind: "ln" }],
+      ["normalize", { kind: "normalize" }],
+      ["pct", { kind: "percent-of-control", control }],
+      ["zset", { kind: "z-score", within: "set" }],
+      ["zrow", { kind: "z-score", within: "row" }],
+    ];
+    for (const [key, how] of kinds) {
+      const done = readTable(transformTable(data, type, { from: "t", ...how }));
+      const first = data.columns.length - cols.length; // its first transformed column
+      cols.forEach((c, j) =>
+        c.byRow.forEach((v, row) => {
+          if (v == null) return;
+          const ours = parseCell(done.columns[first - 1 + j].cells[row]);
+          const theirs = r[`${key}_${j * data.rows.length + row + 1}`] ?? null;
+          if (
+            (ours == null) !== (theirs == null) ||
+            (ours != null && Math.abs(ours - theirs!) > 1e-9 * Math.max(1, Math.abs(theirs!)))
+          )
+            out.push(`${name} ${key}, ${c.name} row ${row + 1}: ${ours}, R: ${theirs}`);
+        }),
+      );
+    }
   }
   return out;
 }

@@ -32,6 +32,7 @@ import {
 } from "../src/lib/template";
 import { highlightStyle, searchProject } from "../src/lib/project-search";
 import { kaplanMeier } from "../src/lib/kaplan-meier";
+import { transformTable } from "../src/lib/transform";
 import { writePrism } from "../src/lib/prism-write";
 import {
   infoSheetsOf,
@@ -211,7 +212,7 @@ import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { decodePng, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
 import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
-import type { AnalysisOutcome, AnalysisParams, AnalysisResult, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, SimulationSpec } from "../src/stats/types";
+import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnovaParams, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, SimulationSpec } from "../src/stats/types";
 import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation/simulate";
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
 import { evaluate as evaluateCurve } from "../src/views/graphs/fitted-curve";
@@ -3834,6 +3835,52 @@ check("comparing groups asks equal SDs, then offers the comparisons that fit and
     "dunn-sidak",
     "dunn-holm-sidak",
   ]);
+  // Subjects missing values: a mixed-effects model is asked (sphericity then assumed, not asked).
+  const gapped = readTable({
+    columns: ["Title", "A", "B", "C"],
+    rows: [
+      ["", "1", "2", "3"],
+      ["", "2", null, "4"],
+    ],
+  });
+  const paired = { paired: "paired", gaussian: "yes" };
+  const ids = (t: typeof table, a: Answers) => wizard.questions(a, t).flatMap((q) => (q ? [q.id] : []));
+  ok(!ids(table, paired).includes("mixed") && ids(table, paired).includes("sphericity"));
+  ok(ids(gapped, paired).includes("mixed") && !ids(gapped, paired).includes("sphericity"));
+  ok(ids(gapped, { ...paired, mixed: "no" }).includes("sphericity"));
+  deepStrictEqual(wizard.finish({ ...paired, mixed: "yes", posthoc: "none" }, gapped).params, {
+    posthoc: "none",
+    mixed: true,
+  });
+  // Geometric means are asked of an unpaired ANOVA alone, and kept only from it.
+  ok(asked(unpaired).some((q) => q.id === "lognormal"));
+  ok(!asked({ paired: "paired", gaussian: "yes" }).some((q) => q.id === "lognormal"));
+  strictEqual(
+    (wizard.finish({ ...unpaired, lognormal: "yes", equalSd: "yes", posthoc: "none" }, table).params as AnovaParams)
+      .lognormal,
+    true,
+  );
+  strictEqual(
+    (
+      wizard.finish({ paired: "paired", gaussian: "yes", lognormal: "yes", posthoc: "none" }, table)
+        .params as AnovaParams
+    ).lognormal,
+    undefined,
+  );
+  // A correction of chosen pairs asks which (all ticked), and keeps the ticked ones by key.
+  const pairsQ = asked({ ...unpaired, equalSd: "yes", posthoc: "sidak" }).find((q) => q.id === "compared");
+  deepStrictEqual(pairsQ?.kind === "names" ? pairsQ.options : [], ["A vs. B", "A vs. C", "B vs. C"]);
+  deepStrictEqual(
+    wizard.finish({ ...unpaired, equalSd: "yes", posthoc: "sidak", compared: ["A vs. C"] } as Answers, table).params,
+    { posthoc: "sidak", equalSd: true, compared: [pairKey("A", "C")] },
+  );
+  deepStrictEqual(
+    wizard.finish(
+      { ...unpaired, equalSd: "yes", posthoc: "sidak", compared: ["A vs. B", "A vs. C", "B vs. C"] } as Answers,
+      table,
+    ).params,
+    { posthoc: "sidak", equalSd: true },
+  );
   ok(!asked({ paired: "paired", gaussian: "yes" }).some((q) => q.id === "equalSd"));
   ok(asked({ paired: "paired", gaussian: "yes" }).some((q) => q.id === "sphericity"));
   ok(!asked({ ...unpaired }).some((q) => q.id === "sphericity"));
@@ -3850,6 +3897,71 @@ check("comparing groups asks equal SDs, then offers the comparisons that fit and
     posthoc: "t3",
     equalSd: false,
   });
+});
+
+// ── Tables computed from another ────────────────────────────────────────
+// (Upstream 1.1.0's transformTable checks: the recompute-on-edit and
+// file-read-safety checks live with the store wiring that owns them —
+// Lane C / follow-up — not in this lane.)
+
+const cellsOf = (data: TableData) => data.rows.map((row) => row.slice(1));
+
+check("a transformed table transforms each value, its X, titles and exclusions kept", () => {
+  const column: TableData = {
+    columns: ["Title", "Ctrl", "Drug"],
+    rows: [
+      ["a", "10", "100"],
+      ["b", "0", "text"],
+      ["c", "1000", "-1"],
+      ["d", "100", "50"],
+    ],
+    excluded: ["3,1"], // Ctrl's 100: transformed, still excluded, in no mean
+  };
+  const t = (kind: string, more = {}) =>
+    transformTable(column, "column", { from: "t", kind, ...more } as Parameters<typeof transformTable>[2]);
+  deepStrictEqual(cellsOf(t("log10")), [
+    ["1", "2"],
+    [null, null],
+    ["3", null],
+    ["2", "1.698970004"],
+  ]);
+  deepStrictEqual(
+    t("log10").rows.map((r) => r[0]),
+    ["a", "b", "c", "d"],
+  );
+  deepStrictEqual(t("log10").excluded, ["3,1"]);
+  // Ctrl: 0 to 1000 (its 100 excluded); Drug: −1 to 100.
+  deepStrictEqual(cellsOf(t("normalize")), [
+    ["1", "100"],
+    ["0", null],
+    ["100", "0"],
+    ["10", "50.4950495"],
+  ]);
+  // Of Ctrl's mean, (10 + 0 + 1000) / 3.
+  deepStrictEqual(cellsOf(t("percent-of-control", { control: "Ctrl" }))[0], ["2.97029703", "29.7029703"]);
+  const z = cellsOf(t("z-score", { within: "set" }));
+  strictEqual(z[1][0], "-0.5860318449"); // (0 − 336.67) / 574.48
+  // A row's z-scores are of its own values; one value has none.
+  deepStrictEqual(cellsOf(t("z-score", { within: "row" }))[0], ["-0.7071067812", "0.7071067812"]);
+  deepStrictEqual(cellsOf(t("z-score", { within: "row" }))[1], [null, null]);
+
+  const xy: TableData = {
+    columns: ["Title", "X", "A", "B"],
+    rows: [
+      [null, "0", "2", "4"],
+      [null, "-1", "3", "9"],
+    ],
+  };
+  const percent = transformTable(xy, "xy", { from: "t", kind: "percent-of-control", control: "A" });
+  deepStrictEqual(cellsOf(percent), [
+    ["0", "100", "200"],
+    ["-1", "100", "300"],
+  ]); // X kept, A's row by row
+  const g = grouped(); // A: a1 a2 a3, Treated: (b1 excluded) b2 b3 — none numbers
+  deepStrictEqual(cellsOf(transformTable(g, "grouped", { from: "t", kind: "log2" })), [
+    [null, null, null, null, null, null],
+  ]);
+  deepStrictEqual(transformTable(g, "grouped", { from: "t", kind: "log2" }).groups, g.groups);
 });
 
 // Analysis checklists (v2, research 16): every checklist is written from the
@@ -5089,10 +5201,16 @@ check("ROUT excludes outliers per series in a global fit, and from a line fit", 
     rout: true,
   });
   ok(!("error" in g) && g.coefficients);
-  // Only B's corrupted point is flagged; A keeps all ten.
-  deepStrictEqual(g.curveOutliers, [{ set: "B", label: "Row 7", x: 0, y: 20, key: "B#6" }]);
-  deepStrictEqual(g.fit?.rows.find((r) => r.label === "Outliers (ROUT)")?.values, [0, 1]);
-  deepStrictEqual(g.fit?.rows.find((r) => r.label === "N")?.values, [10, 9]);
+  // Both corrupted points are flagged: B's (Row 7) and A's own largest
+  // residual (Row 6, the mid-curve point) — upstream 1.1.0's ROUT takes the
+  // RSDR at R's default quantile (type 7, "what gives Prism's outliers"),
+  // whose smaller scale flags it where the old type-6 RSDR did not.
+  deepStrictEqual(g.curveOutliers, [
+    { set: "A", label: "Row 6", x: -0.5, y: 68.9, key: "A#5" },
+    { set: "B", label: "Row 7", x: 0, y: 20, key: "B#6" },
+  ]);
+  deepStrictEqual(g.fit?.rows.find((r) => r.label === "Outliers (ROUT)")?.values, [1, 1]);
+  deepStrictEqual(g.fit?.rows.find((r) => r.label === "N")?.values, [9, 9]);
   const ec50 = g.fit?.rows.find((r) => r.label === "EC50")?.values;
   ok(ec50?.length === 2 && ec50.every((v) => v != null && Math.abs(v - 0.14377) < 0.002));
   ok(g.notes.includes("Outliers found by ROUT (Q = 1%"));
