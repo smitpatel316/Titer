@@ -154,6 +154,25 @@ def main():
         except Exception as e:  # noqa: BLE001
             c.check("current version resolvable", False, str(e))
             return c.finish()
+    # The current release's DMG sha must be ON the page: without this,
+    # a stale page showing only old cards would pass every per-card
+    # check (each old card is internally consistent).
+    try:
+        rel = release_by_tag(f"v{version}")
+        dmg = next(a for a in rel["assets"]
+                   if a["name"].endswith("-aarch64.dmg"))
+        dest = os.path.join(cache, dmg["name"])
+        download(dmg["browser_download_url"], dest, expect_size=dmg["size"])
+        cur_sha = sha256_file(dest)
+        c.check(f"current DMG sha (v{version}) present on page",
+                cur_sha.encode() in stripped,
+                f"{cur_sha} must appear")
+    except StopIteration:
+        c.skip(f"current DMG sha (v{version}) present on page",
+               "current release has no aarch64 DMG")
+    except Exception as e:  # noqa: BLE001
+        c.check(f"current DMG sha (v{version}) present on page",
+                False, str(e))
     prev = args.prev_version
     if prev is None:
         try:
