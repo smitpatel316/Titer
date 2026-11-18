@@ -3149,9 +3149,12 @@ impl TiterMcpServer {
                     let label =
                         crate::open(&app, None, crate::opening_for(&args.path)).map_err(|e| e.to_string())?;
                     let path = args.path.clone();
+                    // 60 s, not 15 s: a 10 MB .hlx (capsanoicids, 12 tables)
+                    // takes ~17.6 s to report loaded on a fresh open, so 15 s
+                    // flakes under load; matches the driver's 60 s poll window.
                     match self
                         .state
-                        .await_open_outcome(&label, &path, Duration::from_secs(15))
+                        .await_open_outcome(&label, &path, Duration::from_secs(60))
                         .await
                     {
                         OpenOutcome::Loaded => Ok(serde_json::json!({
@@ -4276,9 +4279,12 @@ impl TiterMcpServer {
                     let label =
                         crate::open(&app, None, crate::opening_for(&cache_path)).map_err(|e| e.to_string())?;
                     let path = cache_path.clone();
+                    // 60 s, not 15 s: same as titer_open_project — a large
+                    // .hlx can take ~17.6 s to report loaded, so 15 s flakes
+                    // under load; matches the driver's 60 s poll window.
                     match self
                         .state
-                        .await_open_outcome(&label, &path, Duration::from_secs(15))
+                        .await_open_outcome(&label, &path, Duration::from_secs(60))
                         .await
                     {
                         OpenOutcome::Loaded => label,
