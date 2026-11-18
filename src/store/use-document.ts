@@ -1180,6 +1180,8 @@ export function useDocument() {
 
   return {
     save,
+    saveAsPrism,
+    saveAsPzfx,
     saveTemplate,
     applyMethod,
     title,
