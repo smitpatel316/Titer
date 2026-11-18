@@ -724,7 +724,18 @@ impl McpState {
         job.result = result;
         job.error = error;
         if let Some(created) = created {
-            job.created = created;
+            // A completion AUGMENTS what the job created, it never drops
+            // the enqueue-time record: the run-analysis completer reports
+            // only { analysis_id }, and replacing would lose the
+            // analysis_type the tool recorded at enqueue — titer_list_jobs
+            // would stop showing it for a completed run (the smoke test
+            // pins "the completed run carries its analysis type").
+            match (&mut job.created, created) {
+                (serde_json::Value::Object(existing), serde_json::Value::Object(incoming)) => {
+                    existing.extend(incoming);
+                }
+                (_, incoming) => job.created = incoming,
+            }
         }
         job.finished_ts = Some(now_ts());
         Ok(job.clone())
@@ -5324,37 +5335,131 @@ fn node_name(node: &serde_json::Value) -> &str {
     node.get("name").and_then(|v| v.as_str()).unwrap_or("")
 }
 
+/// The snapshot's saved order for `key` (`rootOrder`), as ids — the
+/// project's own order, which the list tools must report (BUG-13: both
+/// list tools sorted by name instead, so a reorder read back as a no-op).
+fn snapshot_order(snapshot: &serde_json::Value, key: &str) -> Vec<String> {
+    snapshot
+        .get(key)
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// The snapshot's saved child order for one parent (`childOrder[parent]`),
+/// as ids.
+fn snapshot_child_order(snapshot: &serde_json::Value, parent: &str) -> Vec<String> {
+    snapshot
+        .get("childOrder")
+        .and_then(|c| c.get(parent))
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// One node's entry in the project listing.
+fn listing_entry(nid: &str, node: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "id": nid,
+        "name": node_name(node),
+        "table_type": node.get("tableType").and_then(|v| v.as_str()),
+        "analysis_type": node.get("analysisType").and_then(|v| v.as_str()),
+        "graph_type": node.get("graphType").and_then(|v| v.as_str()),
+    })
+}
+
+/// Place one node into its bucket in the project listing, and record its
+/// id in `placed` so the leftovers pass knows it was already emitted.
+/// A free function (not a closure): the listing loop also reads `placed`
+/// for the leftovers filter, which a capturing closure cannot do (E0502).
+#[allow(clippy::too_many_arguments)]
+fn place_listing_entry(
+    nodes: &serde_json::Map<String, serde_json::Value>,
+    placed: &mut std::collections::HashSet<String>,
+    nid: &str,
+    tables: &mut Vec<serde_json::Value>,
+    analyses: &mut Vec<serde_json::Value>,
+    graphs: &mut Vec<serde_json::Value>,
+    figures: &mut Vec<serde_json::Value>,
+    info_sheets: &mut Vec<serde_json::Value>,
+) {
+    let Some(node) = nodes.get(nid) else { return };
+    let entry = listing_entry(nid, node);
+    match node.get("type").and_then(|v| v.as_str()).unwrap_or("") {
+        "table" => tables.push(entry),
+        "analysis" => analyses.push(entry),
+        "graph" => graphs.push(entry),
+        "figure" => figures.push(entry),
+        "info" => info_sheets.push(entry),
+        _ => return,
+    }
+    placed.insert(nid.to_string());
+}
+
 /// The projects open in Titer, with every node's id, name and kind — the
-/// discovery call the other tools build on.
+/// discovery call the other tools build on. Tables, figures and info sheets
+/// come in `rootOrder`; a table's analyses and graphs come in its
+/// `childOrder`. A node missing from the order lists (a snapshot that
+/// predates it, or a repair) still appears, appended in name order, so
+/// nothing is ever dropped from the listing.
 fn project_listing(snapshots: &HashMap<String, serde_json::Value>) -> serde_json::Value {
     let mut ids: Vec<&String> = snapshots.keys().collect();
     ids.sort();
     let mut projects = Vec::new();
     for id in ids {
         let snap = &snapshots[id];
+        let nodes = nodes_of(snap);
         let mut tables = Vec::new();
         let mut analyses = Vec::new();
         let mut graphs = Vec::new();
         let mut figures = Vec::new();
         let mut info_sheets = Vec::new();
-        let mut entries: Vec<(&String, &serde_json::Value)> = nodes_of(snap).iter().collect();
-        entries.sort_by_key(|(_, n)| node_name(n));
-        for (nid, node) in entries {
-            let entry = serde_json::json!({
-                "id": nid,
-                "name": node_name(node),
-                "table_type": node.get("tableType").and_then(|v| v.as_str()),
-                "analysis_type": node.get("analysisType").and_then(|v| v.as_str()),
-                "graph_type": node.get("graphType").and_then(|v| v.as_str()),
-            });
-            match node.get("type").and_then(|v| v.as_str()).unwrap_or("") {
-                "table" => tables.push(entry),
-                "analysis" => analyses.push(entry),
-                "graph" => graphs.push(entry),
-                "figure" => figures.push(entry),
-                "info" => info_sheets.push(entry),
-                _ => {}
+        let mut placed: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // Root nodes in rootOrder, then each root node's children in its
+        // childOrder (tables first: a graph's parent is its table).
+        let root_order = snapshot_order(snap, "rootOrder");
+        for nid in &root_order {
+            place_listing_entry(
+                nodes,
+                &mut placed,
+                nid,
+                &mut tables,
+                &mut analyses,
+                &mut graphs,
+                &mut figures,
+                &mut info_sheets,
+            );
+        }
+        for nid in &root_order {
+            for child in snapshot_child_order(snap, nid) {
+                place_listing_entry(
+                    nodes,
+                    &mut placed,
+                    &child,
+                    &mut tables,
+                    &mut analyses,
+                    &mut graphs,
+                    &mut figures,
+                    &mut info_sheets,
+                );
             }
+        }
+        // Leftovers, in name order (the old behaviour), so a node the order
+        // lists missed still shows up instead of vanishing.
+        let mut leftovers: Vec<(&String, &serde_json::Value)> =
+            nodes.iter().filter(|(nid, _)| !placed.contains(*nid)).collect();
+        leftovers.sort_by_key(|(_, n)| node_name(n));
+        for (nid, _) in leftovers {
+            place_listing_entry(
+                nodes,
+                &mut placed,
+                nid,
+                &mut tables,
+                &mut analyses,
+                &mut graphs,
+                &mut figures,
+                &mut info_sheets,
+            );
         }
         projects.push(serde_json::json!({
             "project_id": id,
@@ -5377,7 +5482,13 @@ fn list_tables(project_id: &str, snapshot: &serde_json::Value) -> serde_json::Va
     let mut tables = Vec::new();
     let mut entries: Vec<(&String, &serde_json::Value)> =
         nodes_of(snapshot).iter().filter(|(_, n)| n.get("type").and_then(|v| v.as_str()) == Some("table")).collect();
-    entries.sort_by_key(|(_, n)| node_name(n));
+    // Tables in rootOrder — the project's own order, as reordered — not
+    // name order (BUG-13: this sorted by name, so a reorder read back as
+    // a no-op). A table missing from rootOrder (a snapshot that predates
+    // it, or a repair) is appended in name order so nothing disappears.
+    let root_order = snapshot_order(snapshot, "rootOrder");
+    let rank = |id: &str| root_order.iter().position(|o| o == id).unwrap_or(usize::MAX);
+    entries.sort_by(|(a_id, a), (b_id, b)| rank(a_id).cmp(&rank(b_id)).then_with(|| node_name(a).cmp(node_name(b))));
     for (id, node) in entries {
         let data = node.get("data");
         let rows = data.and_then(|d| d.get("rows")).and_then(|r| r.as_array()).map(|r| r.len()).unwrap_or(0);
@@ -5965,6 +6076,13 @@ fn reorder_check(
             )
         }
     };
+    // A doubled id is reported as doubled even when the order also omits
+    // another id: the missing/extra check would otherwise mask it (the
+    // reorder_check test pins "twice" for ["t1", "t1", "f1"], which also
+    // omits "t2").
+    if order.iter().collect::<HashSet<_>>().len() != order.len() {
+        return Err("order lists an id twice — each child appears once.".into());
+    }
     let missing: Vec<&String> = current.iter().filter(|id| !order.contains(id)).collect();
     let extra: Vec<&String> = order.iter().filter(|id| !current.contains(id)).collect();
     if !missing.is_empty() || !extra.is_empty() {
@@ -5976,9 +6094,6 @@ fn reorder_check(
             parts.push(format!("unknown {}", extra.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")));
         }
         return Err(format!("order does not list exactly {what} ({} items): {}.", current.len(), parts.join("; ")));
-    }
-    if order.iter().collect::<HashSet<_>>().len() != order.len() {
-        return Err("order lists an id twice — each child appears once.".into());
     }
     Ok(())
 }
@@ -6134,6 +6249,62 @@ mod tests {
         assert_eq!(proj["info_sheets"][0]["name"], "Plate info");
         assert_eq!(proj["figures"].as_array().map(|a| a.len()), Some(1));
         assert_eq!(proj["figures"][0]["id"], "f1");
+    }
+
+    #[test]
+    fn list_tables_follows_root_order_not_name_order() {
+        // BUG-13: list_tables sorted by name, so a reorder read back as a
+        // no-op. "Dose-response" (t1) sorts before "Second" (t2) by name,
+        // so a rootOrder of [t2, t1] discriminates the two orders.
+        let mut snap = two_table_snapshot();
+        snap["rootOrder"] = json!(["t2", "t1"]);
+        let out = list_tables("project-1", &snap);
+        let ids: Vec<&str> = out["tables"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["t2", "t1"], "{out}");
+        // A table missing from rootOrder still appears, appended in name
+        // order, instead of vanishing from the listing.
+        snap["nodes"]["t3"] = json!({
+            "id": "t3", "type": "table", "name": "Aardvark", "parentId": null, "tableType": "column",
+            "data": { "columns": ["", "A"], "rows": [] }
+        });
+        let out = list_tables("project-1", &snap);
+        let ids: Vec<&str> = out["tables"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["t2", "t1", "t3"], "{out}");
+    }
+
+    #[test]
+    fn project_listing_follows_root_and_child_order() {
+        // BUG-13: project_listing sorted every bucket by name. The fixture's
+        // rootOrder [t1, t2, f1] / childOrder [a1, g1] is reversed here so
+        // name order (Dose-response, Figure 1, Second / Curve, Fit) cannot
+        // pass by coincidence.
+        let mut snap = two_table_snapshot();
+        snap["rootOrder"] = json!(["f1", "t2", "t1"]);
+        snap["childOrder"] = json!({ "t1": ["g1", "a1"], "t2": [] });
+        let mut snapshots = HashMap::new();
+        snapshots.insert("project-1".to_string(), snap);
+        let out = project_listing(&snapshots);
+        let proj = &out["projects"][0];
+        // A nested fn, not a closure: a closure's elided output lifetime is
+        // unrelated to its input's, so `|v: &Value| -> Vec<&str>` fails to
+        // compile (lifetime may not live long enough).
+        fn ids(v: &serde_json::Value) -> Vec<&str> {
+            v.as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect::<Vec<_>>()
+        }
+        assert_eq!(ids(&proj["tables"]), vec!["t2", "t1"], "{out}");
+        assert_eq!(ids(&proj["figures"]), vec!["f1"], "{out}");
+        assert_eq!(ids(&proj["graphs"]), vec!["g1"], "{out}");
+        assert_eq!(ids(&proj["analyses"]), vec!["a1"], "{out}");
     }
 
     #[test]
@@ -6583,6 +6754,35 @@ mod tests {
     }
 
     #[test]
+    fn job_complete_merges_created_instead_of_replacing_it() {
+        // The run-analysis completer reports only { analysis_id }; the
+        // analysis_type recorded at enqueue must survive completion, or
+        // titer_list_jobs stops showing it for a completed run.
+        let state = job_state();
+        let job = state
+            .enqueue_job(
+                "project-1",
+                "run-analysis",
+                json!({ "analysis_id": "a1" }),
+                json!({ "analysis_id": "a1", "analysis_type": "anova" }),
+            )
+            .expect("enqueue");
+        state.take_jobs("project-1");
+        let done = state
+            .complete_job(
+                "project-1",
+                &job.job_id,
+                JobStatus::Done,
+                Some(json!({ "ok": true })),
+                None,
+                Some(json!({ "analysis_id": "a1" })),
+            )
+            .expect("complete");
+        assert_eq!(job_summary(&done)["analysis_type"], "anova");
+        assert_eq!(done.created["analysis_id"], "a1");
+    }
+
+    #[test]
     fn job_retention_read_then_briefly_then_gone() {
         let state = job_state();
         // A terminal job, read once: kept, then gone once its first read is
@@ -6687,6 +6887,12 @@ mod tests {
     #[tokio::test]
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
+        // The fixture project is the open, front project: the calls below
+        // that omit project_id (create_table, delete_node) resolve to it.
+        // A real publish would set this; the in-process server has no
+        // frontend to do so, so without it those calls fail with
+        // "No project is open" instead of the validation error under test.
+        state.lock().last_published = Some("project-1".to_string());
         state.lock().token = Some(SMOKE_TOKEN.to_string());
         let job = state.enqueue_job("project-1", "noop", json!({}), json!({})).expect("enqueue");
         let cancel = CancellationToken::new();
