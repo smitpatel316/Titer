@@ -86,13 +86,27 @@ const GROUPED_SUMMARY_YFORMAT: Record<Exclude<SummaryFormat, "replicates">, stri
 
 const DATE_SHAPE = /^\d{1,2}-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{4}$/;
 
-const escapeXml = (s: string): string =>
-  s
+/** Escape a value for XML text. Never throws: Prism sometimes writes a
+ *  rich-text object `{ string, version, formatting }` where a string
+ *  belongs (info notes, constant values — BUG-5), and a stray object or
+ *  number must not take the whole export down. Rich text unwraps to its
+ *  plain string; other primitives take their String() form; null,
+ *  undefined and any other object become "". Never "[object Object]". */
+const escapeXml = (s: unknown): string => {
+  let text: string;
+  if (typeof s === "string") text = s;
+  else if (s === null || s === undefined) text = "";
+  else if (typeof s === "object") {
+    const rich = (s as { string?: unknown }).string;
+    text = typeof rich === "string" ? rich : "";
+  } else text = String(s);
+  return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
+};
 
 /** Split Titer Y columns into `.pzfx` datasets. Mirrors
  *  `prism-write.ts` `groupDatasets` (summary groups, then replicate groups,

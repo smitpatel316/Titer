@@ -983,9 +983,14 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
   // The trailing empty-named constant Prism writes (name "" + value "") is
   // the new-row placeholder, not a constant — it is left out.
   interface PrismInfoSheet {
-    title?: string;
-    notesText?: string;
-    constants?: { name?: string; value?: string | number }[];
+    // Prism sometimes writes the title / notes / constant values as a
+    // rich-text object `{ string, version, formatting }` instead of a
+    // plain string (real files: capsanoicids, dilution-analysis,
+    // senolytics-25hc — BUG-5). `plainTitle` unwraps those; the types
+    // say so here so the lie can't reach the writer again.
+    title?: string | { string?: string };
+    notesText?: string | { string?: string };
+    constants?: { name?: string | { string?: string }; value?: string | number | { string?: string } }[];
   }
   for (const infoUid of sheets.info ?? []) {
     const sheet = await readJson<PrismInfoSheet>(`info/${infoUid}/sheet.json`);
@@ -993,12 +998,19 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
       issues.push({ severity: "warning", message: `Info sheet “${infoUid}” has no sheet.json; it was left out.` });
       continue;
     }
-    const name = titleOf(infoUid, typeof sheet.title === "string" && sheet.title !== "" ? sheet.title : "Project info");
+    // Titles map first (as before); the sheet's own title is the fallback,
+    // unwrapped — it can also be a rich-text object.
+    const name = titleOf(infoUid, plainTitle(sheet.title) || "Project info");
     const constants = readInfoConstants(
       (sheet.constants ?? []).map((c) => ({
         id: newConstantId(),
-        name: c.name ?? "",
-        value: c.value === undefined ? "" : String(c.value),
+        name: plainTitle(c.name),
+        value:
+          c.value === undefined
+            ? ""
+            : typeof c.value === "object" && c.value !== null
+              ? plainTitle(c.value)
+              : String(c.value),
       })),
     );
     const node: ProjectNode = {
@@ -1006,7 +1018,7 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
       type: "info",
       name,
       parentId: null,
-      info: { constants, notes: sheet.notesText ?? "", linkedTableId: null },
+      info: { constants, notes: plainTitle(sheet.notesText), linkedTableId: null },
     };
     nodes[node.id] = node;
     rootOrder.push(node.id);
