@@ -2,7 +2,7 @@
 // step, each answer choosing the next question. A wizard only declares its questions
 // and how the answers make the test's params; analysis-wizard.tsx asks them.
 // A test without an entry here runs as soon as it is picked.
-import { DOSE_MODELS, CONCENTRATION_UNITS, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, NONLINEAR_MODELS, ROUT_Q, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel } from "../../stats/types";
+import { DOSE_MODELS, CONCENTRATION_UNITS, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel } from "../../stats/types";
 import type { PlotFunctionExtra, PlotFunctionModel } from "../../stats/types";
 import {
   PLOT_FUNCTION_DEFAULTS,
@@ -13,11 +13,11 @@ import {
   plotFunctionParams,
   plotFunctionXRange,
 } from "../../stats/xy/plot-function";
-import type { TableType } from "../../store/types";
+import { hasXColumn, type TableType, type Transform } from "../../store/types";
 import { MODEL_LABEL, termLabel } from "../../stats/xy/nonlinear-regression";
 import { modelSpec } from "../../stats/xy/nonlinear-fit";
 import { parseCustomParameters, parseUserEquation } from "../../stats/xy/user-defined";
-import { dataGroups, pairedGroups } from "../../stats/column/base";
+import { dataGroups, incompleteRows, pairIndices, pairedGroups } from "../../stats/column/base";
 import { distinctTruthValues } from "../../stats/column/roc-curve";
 
 const isDoseModel = (m: string) => (DOSE_MODELS as readonly string[]).includes(m);
@@ -32,6 +32,7 @@ import type {
   AnalysisType,
   BindingKineticsParams,
   BindingSaturationParams,
+  ChiSquareParams,
   CompareTwoGroupsParams,
   CorrelationParams,
   CoxPHParams,
@@ -64,6 +65,7 @@ import type {
 import { parseInhibitorConcentration } from "../../stats/xy/enzyme-inhibition";
 import { columnFactorName } from "../../stats/mixed/mixed-effects";
 import { splitXY, type Dataset } from "../../lib/dataset";
+import { pairKey } from "../../lib/columns";
 import { constantRefName, isConstantRef } from "../../lib/info-sheets";
 
 export type Answer = string | number | string[];
@@ -378,10 +380,71 @@ const someSets = (table: Dataset, min: number): Question[] => {
   return [{ id: "sets", ask, kind: "names", options: sets, min }];
 };
 
+/** The answers of the data set questions `wizard` asks first, given the data sets to analyze
+ *  (a graph's): them all to tick, or the first two as the two compared. */
+export function answersFor(wizard: Wizard, table: Dataset, tableType: TableType | undefined, sets?: string[]): Answers {
+  if (!sets) return {};
+  const asked = new Set(wizard.questions({}, table, tableType).flatMap((q) => (q ? [q.id] : [])));
+  if (asked.has("sets")) return { sets };
+  if (asked.has("set1") && sets.length >= 2) return { set1: sets[0], set2: sets[1] };
+  return {};
+}
+
+/** How a table computed from this one transforms its values (lib/transform.ts): a percent
+ *  asks of which data set, a z-score within what. An XY table's X is never one. */
+export const TRANSFORM_WIZARD = {
+  questions: (a: Answers, table: Dataset, type?: TableType): (Question | false)[] => [
+    choice("kind", "How should the values be transformed?", [
+      ["log10", "Logarithm, base 10"],
+      ["log2", "Logarithm, base 2"],
+      ["ln", "Natural logarithm (ln)"],
+      ["normalize", "Normalize each data set: its smallest value 0 %, its largest 100 %"],
+      ["percent-of-control", "Percent of a control data set's mean"],
+      ["z-score", "Z-scores: how many SDs each value lies from the mean"],
+    ]),
+    a.kind === "percent-of-control" &&
+      choice(
+        "control",
+        type === "grouped" || type === "xy"
+          ? "Which data set is the control? Each value is a percent of its mean in the same row."
+          : "Which data set is the control?",
+        names(setNames(table).filter((n) => !(type && hasXColumn(type) && n === table.sets[0]?.name))),
+      ),
+    a.kind === "z-score" &&
+      choice("within", "Z-scores within what?", [
+        ["set", "Each data set: its own mean and SD"],
+        ["row", "Each row: its own mean and SD (genes on a heatmap, say)"],
+      ]),
+  ],
+  finish: (a: Answers): Omit<Transform, "from"> => {
+    const kind = a.kind as Transform["kind"];
+    if (kind === "percent-of-control") return { kind, control: a.control as string };
+    if (kind === "z-score") return { kind, within: a.within === "row" ? "row" : "set" };
+    return { kind };
+  },
+};
+
 /** The names ticked once `name` is ticked (`on`) or not: always in `options`' order,
  *  the table's, whatever order they were clicked in. */
 export const toggled = (options: string[], ticked: string[], name: string, on: boolean) =>
   options.filter((n) => (n === name ? on : ticked.includes(n)));
+
+/** Every pair of `sets`, as a wizard lists it ("A vs. B") and as params keep it (`pairKey`). */
+const pairLabels = (sets: string[]) =>
+  pairIndices(sets.length).map(([i, j]) => ({ label: `${sets[i]} vs. ${sets[j]}`, key: pairKey(sets[i], sets[j]) }));
+
+/** Whether a post-hoc compares chosen pairs (Bonferroni, Šídák, Holm–Šídák, Fisher's LSD). */
+const isPairCorrection = (posthoc: unknown) => (PAIR_CORRECTIONS as readonly unknown[]).includes(posthoc);
+
+/** Whether some subjects (rows) hold values in some of the data sets but not all. */
+const gaps = (table: Dataset, sets?: string[]) =>
+  incompleteRows(table.numeric.filter((c) => !sets || sets.includes(c.set ?? c.name))) > 0;
+
+/** A contingency table's shape: columns, and the fewest complete rows among them. */
+const contingencyShape = (table: Dataset) => {
+  const columns = table.numeric.filter((c) => c.values.some((v) => v !== null));
+  return [columns.length, Math.min(...columns.map((c) => c.byRow.filter((v) => v !== null).length))];
+};
 
 /** A column's observed mean and (sample, n − 1) SD — a Monte Carlo wizard's
  *  starting values for the simulated mean/SD. */
@@ -1188,14 +1251,15 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             : [
                 ["none", "No — only the overall ANOVA"],
                 ["tukey", "Yes, every pair — Tukey's multiple comparisons test"],
-                ["bonferroni", "Yes, every pair — Bonferroni-corrected comparisons"],
-                ["sidak", "Yes, every pair — Šídák-corrected comparisons"],
-                ["holm-sidak", "Yes, every pair — Holm–Šídák comparisons"],
-                ["lsd", "Yes, every pair — Fisher's LSD test (uncorrected — only if the ANOVA is significant)"],
                 ...(anova
                   ? [["dunnett", "Yes, each group against a control — Dunnett's test"] as [string, string]]
                   : []),
+                ["bonferroni", "Yes, pairs I choose — Bonferroni correction"],
+                ["sidak", "Yes, pairs I choose — Šídák correction"],
+                ["holm-sidak", "Yes, pairs I choose — Holm–Šídák correction (more powerful)"],
+                ["lsd", "Yes, pairs I choose — Fisher's LSD (no correction)"],
               ];
+      const pairs = pairLabels(chosenSets(a) ?? setNames(table));
       return [
         ...someSets(table, 3),
         choice("paired", PAIRED, [
@@ -1212,12 +1276,31 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           true,
         ),
         anova &&
-          choice("equalSd", "Assume the groups have equal SDs?", [
-            ["yes", "Yes — ordinary one-way ANOVA"],
-            ["no", "No — Welch's ANOVA"],
+          choice("lognormal", "How should the groups be compared?", [
+            ["no", "Compare means (one-way ANOVA)"],
+            ["yes", "Compare geometric means (lognormal ANOVA) — for log-normal data"],
+          ]),
+        anova &&
+          choice(
+            "equalSd",
+            a.lognormal === "yes"
+              ? "Assume the groups' logarithms have equal SDs?"
+              : "Assume the groups have equal SDs?",
+            [
+              ["yes", "Yes — ordinary one-way ANOVA"],
+              ["no", "No — Welch's ANOVA"],
+            ],
+          ),
+        paired &&
+          a.gaussian === "yes" &&
+          gaps(table, chosenSets(a)) &&
+          choice("mixed", "Some subjects lack a value in some groups. How should they be handled?", [
+            ["yes", "Fit a mixed-effects model, keeping every value (recommended)"],
+            ["no", "Leave out those subjects: repeated-measures ANOVA of the complete ones"],
           ]),
         paired &&
           a.gaussian === "yes" &&
+          !(gaps(table, chosenSets(a)) && a.mixed !== "no") &&
           choice("sphericity", "Assume sphericity (equal variability of the differences between groups)?", [
             ["no", "No — Geisser-Greenhouse correction (recommended)"],
             ["yes", "Yes — no correction"],
@@ -1225,17 +1308,34 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         choice("posthoc", paired ? "Compare the matched groups?" : "Compare the groups?", posthocs),
         a.posthoc === "dunnett" &&
           choice("control", "Which group is the control?", names(chosenSets(a) ?? setNames(table))),
+        isPairCorrection(a.posthoc) &&
+          pairs.length > 1 && {
+            id: "compared",
+            ask: "Which pairs should be compared? The fewer, the less each P value is corrected.",
+            kind: "names",
+            options: pairs.map((p) => p.label),
+            min: 1,
+          },
       ];
     },
-    finish: (a) => {
+    finish: (a, table) => {
       const paired = a.paired === "paired";
       const type = a.gaussian === "yes" ? (paired ? "rm-anova" : "anova") : paired ? "friedman" : "kruskal-wallis";
       const anova = type === "anova" && {
         equalSd: a.equalSd !== "no",
+        ...(a.lognormal === "yes" ? { lognormal: true } : {}),
         ...(a.posthoc === "dunnett" ? { control: a.control as string } : {}),
       };
-      const rm = type === "rm-anova" && { sphericity: a.sphericity === "yes" };
-      return { type, params: withSets(a, { posthoc: a.posthoc, ...anova, ...rm }) as AnalysisParams };
+      const mixed = type === "rm-anova" && gaps(table, chosenSets(a)) && a.mixed !== "no";
+      const rm = type === "rm-anova" && (mixed ? { mixed: true } : { sphericity: a.sphericity === "yes" });
+      const pairs = pairLabels(chosenSets(a) ?? setNames(table));
+      const ticked = Array.isArray(a.compared)
+        ? pairs.filter((p) => (a.compared as string[]).includes(p.label))
+        : pairs;
+      const compared = isPairCorrection(a.posthoc) && ticked.length < pairs.length && {
+        compared: ticked.map((p) => p.key),
+      };
+      return { type, params: withSets(a, { posthoc: a.posthoc, ...anova, ...rm, ...compared }) as AnalysisParams };
     },
     // The checklist follows the branch: which of the four tests the answers build.
     // Unanswered, the first options (unpaired, Gaussian) give the one-way ANOVA.
@@ -1383,7 +1483,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
 
   "one-sample-t": {
     questions: (a, table) => {
-      const center = a.gaussian === "yes" ? "mean" : "median";
+      const center = a.gaussian === "yes" ? (a.lognormal === "yes" ? "geometric mean" : "mean") : "median";
       return [
         ...someSets(table, 1),
         {
@@ -1402,6 +1502,11 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ],
           true,
         ),
+        a.gaussian === "yes" &&
+          choice("lognormal", "How should the sample be compared with the hypothetical value?", [
+            ["no", "Compare means"],
+            ["yes", "Compare geometric means — for log-normal data"],
+          ]),
         choice("tails", "One-tailed or two-tailed P value?", [
           ["two-sided", "Two-tailed (recommended)"],
           ["less", `One-tailed: expect ${center} < hypothetical value`],
@@ -1414,6 +1519,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       params: withSets(a, {
         hypotheticalValue: a.value as number,
         gaussian: a.gaussian === "yes",
+        ...(a.gaussian === "yes" && a.lognormal === "yes" ? { lognormal: true } : {}),
         tails: a.tails as OneSampleTParams["tails"],
       }),
     }),
@@ -2453,6 +2559,15 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             ["ec50", `Is the ${midpoint} different between the two data sets?`],
             ["all", "Does one curve fit both data sets?"],
           ]),
+        dose &&
+          (ys.length > 1 || others.length === 0 || a.compareWith === "none") &&
+          choice("ecx", `Also report the dose giving a chosen % of the response (${midpoint} is 50%)?`, [
+            ["none", "No — the midpoint is enough"],
+            ["ec10", "EC10 (10% of the response)"],
+            ["ec20", "EC20 (20%)"],
+            ["ec80", "EC80 (80%)"],
+            ["ec90", "EC90 (90%)"],
+          ]),
         // Outliers are looked for in a curve fitted on its own, not in two compared.
         (!dose || ys.length > 1 || others.length === 0 || a.compareWith === "none") &&
           choice("rout", "Identify outliers, points too far from the curve, and leave them out of the fit?", [
@@ -2648,6 +2763,12 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ...custom,
           ...compare,
           ...(a.rout === "yes" && !compare.compareWith ? { rout: true } : {}),
+          ...(a.kind !== "other" &&
+          a.ecx !== undefined &&
+          a.ecx !== "none" &&
+          !compare.compareWith
+            ? { ecx: { ec10: 10, ec20: 20, ec80: 80, ec90: 90 }[a.ecx as string] as number }
+            : {}),
           ...weights,
           ...compareModel,
           ...global,
@@ -3198,30 +3319,30 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         a.design !== "nonparametric" &&
         choice("posthoc", "Run multiple comparisons? Only meaningful if the ANOVA is significant.", [
           ["none", "No — just the ANOVA table"],
-          ["tukey groups", "Yes — Tukey's, comparing groups within each row"],
-          ["tukey rows", "Yes — Tukey's, comparing rows within each group"],
-          ["bonferroni groups", "Yes — Bonferroni, comparing groups within each row"],
-          ["bonferroni rows", "Yes — Bonferroni, comparing rows within each group"],
-          ["sidak groups", "Yes — Šídák, comparing groups within each row"],
-          ["sidak rows", "Yes — Šídák, comparing rows within each group"],
-          ["holm-sidak groups", "Yes — Holm–Šídák, comparing groups within each row"],
-          ["holm-sidak rows", "Yes — Holm–Šídák, comparing rows within each group"],
-          ["lsd groups", "Yes — Fisher's LSD (uncorrected), comparing groups within each row"],
-          ["lsd rows", "Yes — Fisher's LSD (uncorrected), comparing rows within each group"],
+          ["tukey", "Yes — Tukey's"],
+          ["bonferroni", "Yes — Bonferroni"],
+          ["sidak", "Yes — Šídák"],
+          ["holm-sidak", "Yes — Holm–Šídák"],
+          ["lsd", "Yes — Fisher's LSD (uncorrected)"],
+        ]),
+      replicated(table) &&
+        a.design !== "nonparametric" &&
+        a.posthoc !== undefined &&
+        a.posthoc !== "none" &&
+        choice("posthocTarget", "Compare which?", [
+          ["groups", "Groups within each row"],
+          ["rows", "Rows within each group"],
         ]),
     ],
-    finish: (a) => {
-      const [posthoc, posthocTarget = "groups"] = String(a.posthoc ?? "none").split(" ");
-      return {
-        type: "two-way-anova",
-        params: withSets(a, {
-          design: (a.design ?? "ordinary") as TwoWayAnovaParams["design"],
-          posthoc: posthoc as TwoWayAnovaParams["posthoc"],
-          posthocTarget: posthocTarget as TwoWayAnovaParams["posthocTarget"],
-          ...(a.design === "repeated-measures" ? { sphericity: a.sphericity === "yes" } : {}),
-        }),
-      };
-    },
+    finish: (a) => ({
+      type: "two-way-anova",
+      params: withSets(a, {
+        design: (a.design ?? "ordinary") as TwoWayAnovaParams["design"],
+        posthoc: (a.posthoc as TwoWayAnovaParams["posthoc"] | undefined) ?? "none",
+        posthocTarget: (a.posthocTarget as TwoWayAnovaParams["posthocTarget"] | undefined) ?? "groups",
+        ...(a.design === "repeated-measures" ? { sphericity: a.sphericity === "yes" } : {}),
+      }),
+    }),
     // The checklist follows the design: ordinary, repeated-measures, or rank-based.
     checklist: (a) =>
       CHECKLISTS[
@@ -3723,7 +3844,18 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       const cols = dataGroups(table.columns).length;
       const rows = pairedGroups(table.columns)[0]?.values.length ?? 0;
       const qualifies = (cols === 2 && rows >= 3) || (rows === 2 && cols >= 3);
+      const [shapeCols, shapeRows] = contingencyShape(table);
       return [
+        // On a 2×2, which test: Fisher's, Yates' or the plain chi-square.
+        // (On larger tables the chi-square is the test; the trend question
+        // below adds the trend test for Titer's ordered tables.)
+        shapeCols === 2 &&
+          shapeRows === 2 &&
+          choice("test", "Which test should be run on this 2×2 table?", [
+            ["fisher", "Fisher's exact test — small expected counts (recommended)"],
+            ["yates", "Chi-square test with Yates' continuity correction"],
+            ["chi-square", "Chi-square test, uncorrected"],
+          ]),
         qualifies &&
           choice("trendOrdered", "Are the rows (or columns) in a natural order (age, dose, time) and equally spaced?", [
             ["no", "No — do not run the test for trend"],
@@ -3733,7 +3865,10 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
     },
     finish: (a) => ({
       type: "chi-square",
-      params: { trendOrdered: a.trendOrdered === "yes" },
+      params: {
+        ...(a.test !== undefined ? { test: a.test as ChiSquareParams["test"] } : {}),
+        trendOrdered: a.trendOrdered === "yes",
+      },
     }),
   },
 

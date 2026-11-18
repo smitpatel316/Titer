@@ -5,7 +5,7 @@ import { SnowflakeIcon } from "@phosphor-icons/react";
 import type { ProjectNode } from "../../store/types";
 import { useProjectActions, useProjectStore } from "../../store/use-project-store";
 import { Button, IconButton } from "../../ui/controls";
-import { Toolbar } from "../../ui/layout";
+import { WithInspector } from "../../components/inspector";
 import { isNative, setSpinner } from "../../native";
 import { ANALYSES } from "../../stats";
 import { cancelActiveEvals } from "../../stats/webr";
@@ -97,28 +97,28 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
   }, [running]);
 
   return (
-    <>
-      <Toolbar
-        title={node.name}
-        tag={
-          titleCase(ANALYSES[node.analysisType!].label) +
-          (node.frozen ? " · Frozen" : node.orphaned ? " · Orphaned" : "")
-        }
-        actions={
-          <>
-            {!node.orphaned && (
-              <IconButton
-                aria-label={node.frozen ? "Unfreeze results" : "Freeze results"}
-                disabled={!canFreeze}
-                onClick={() => setAnalysisFrozen(node.id, !node.frozen)}
-              >
-                <SnowflakeIcon weight={node.frozen ? "fill" : "regular"} />
-              </IconButton>
-            )}
-            <AddFloatingNoteButton node={node} />
-          </>
-        }
-      />
+    <WithInspector
+      title={node.name}
+      tag={
+        titleCase(ANALYSES[node.analysisType!].label) +
+        (node.frozen ? " · Frozen" : node.orphaned ? " · Orphaned" : "")
+      }
+      node={node}
+      actions={
+        <>
+          {!node.orphaned && (
+            <IconButton
+              aria-label={node.frozen ? "Unfreeze results" : "Freeze results"}
+              disabled={!canFreeze}
+              onClick={() => setAnalysisFrozen(node.id, !node.frozen)}
+            >
+              <SnowflakeIcon weight={node.frozen ? "fill" : "regular"} />
+            </IconButton>
+          )}
+          <AddFloatingNoteButton node={node} />
+        </>
+      }
+    >
       <div className="relative flex-1 overflow-auto">
         {node.frozen && (
           <p className="border-b border-separator bg-control px-8 py-2 text-regular text-secondary">
@@ -165,6 +165,6 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
         )}
         <FloatingNotesLayer node={node} />
       </div>
-    </>
+    </WithInspector>
   );
 }

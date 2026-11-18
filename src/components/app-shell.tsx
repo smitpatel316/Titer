@@ -88,7 +88,7 @@ export function AppShell() {
         options={analysisOptionsForTable(tableType, tableData)}
         onSelect={(type) => {
           // A test with options moves on to its wizard; otherwise the picker is done.
-          if (selector?.kind === "new-analysis" && startAnalysis(selector.tableId, type)) return;
+          if (selector?.kind === "new-analysis" && startAnalysis(selector.tableId, type, selector.forGraph)) return;
           closeSelector();
         }}
         onClose={closeSelector}

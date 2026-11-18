@@ -397,7 +397,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
   );
 
   return (
-    <WithInspector title={node.name} tag="Figure" inspector={inspector}>
+    <WithInspector title={node.name} tag="Figure" node={node} settings={inspector}>
       <div className="relative min-h-0 flex-1">
         <div ref={canvasRef} className="absolute inset-0 overflow-auto bg-desk">
           {panels.length === 0 ? (

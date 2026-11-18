@@ -861,8 +861,9 @@ export function GraphView({ node }: { node: ProjectNode }) {
     <WithInspector
       title={node.name}
       tag={titleCase(GRAPHS[type].label)}
+      node={node}
       actions={<AddFloatingNoteButton node={node} />}
-      inspector={
+      settings={
         <FormatPanel
           graphId={node.id}
           graphType={type}
