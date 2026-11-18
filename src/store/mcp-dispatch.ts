@@ -869,6 +869,16 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       if (columns === undefined || rows === undefined) {
         throw jobErr(job, "needs columns and rows (the whole table).");
       }
+      // BUG-17: a whole-data replace with zero rows would silently erase
+      // the table's data and report success. Empty tables are made with
+      // titer_create_table (omit columns and rows) and emptied with
+      // titer_edit_table delete-rows — never here.
+      if (Array.isArray(rows) && rows.length === 0) {
+        throw jobErr(
+          job,
+          "needs rows to be a non-empty array — writing zero rows would erase the table's data. To empty a table, delete its rows with titer_edit_table (delete-rows); to start a new empty table, use titer_create_table with no columns or rows.",
+        );
+      }
       const label = argOptString(job, job.args, "label") ?? "Edit Table";
       const excluded = (job.args as Record<string, unknown> | null | undefined)?.excluded;
       const data = buildTableData(job, type, columns, rows, node.data, excluded);

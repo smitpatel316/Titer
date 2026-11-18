@@ -1649,7 +1649,10 @@ pub struct WriteTableArgs {
     /// The columns, column 0 first (the row-title column): the whole table.
     pub columns: Vec<String>,
     /// The rows, one array per row, each no wider than columns (short rows
-    /// pad with blanks). Cells are strings, numbers or null.
+    /// pad with blanks). Cells are strings, numbers or null. Must be
+    /// non-empty — a write with zero rows is refused (to empty a table use
+    /// titer_edit_table delete-rows; to start an empty table use
+    /// titer_create_table with no columns or rows).
     pub rows: Vec<Vec<serde_json::Value>>,
     /// The Undo label for the replace ("Edit Table" when omitted).
     #[serde(default)]
@@ -2663,6 +2666,13 @@ impl TiterMcpServer {
                 ));
             }
             validate_table_shape(&args.columns, &args.rows)?;
+            // BUG-17: a whole-data replace with zero rows would silently
+            // erase the table's data and report success. Empty tables are
+            // made with titer_create_table (omit columns and rows) and
+            // emptied with titer_edit_table delete-rows — never here.
+            if args.rows.is_empty() {
+                return Err("rows must be a non-empty array — writing zero rows would erase the table's data. To empty a table, delete its rows with titer_edit_table (delete-rows); to start a new empty table, use titer_create_table with no columns or rows.".into());
+            }
             if let Some(excluded) = &args.excluded {
                 for key in excluded {
                     let (r, c) = key
