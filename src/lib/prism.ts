@@ -114,13 +114,25 @@ interface PrismDataSet {
    */
   title?: string | { string?: string };
   format?: string;
-  replicates?: unknown[];
+  replicates?: { cellAttributes?: PrismCellAttributes[] }[];
   /** `y_replicates` datasets carry this instead of `replicates`: a list of
    *  ranges, each covering one or more replicate subcolumns ("0~1" = two,
    *  "2" = one). */
-  "replicate ranges"?: { range?: string }[];
+  "replicate ranges"?: { range?: string; replicate?: { cellAttributes?: PrismCellAttributes[] } }[];
   /** Survival X datasets carry this: how their dates become durations. */
   dateTimeConversion?: { units?: string; zeroDate?: string };
+}
+
+/** One `cellAttributes` entry on a Prism replicate: the rows it covers
+ *  ("8", or an inclusive range "9~10") and the attributes those cells
+ *  carry. An entry whose attributes include `"EXCLUDED"` is a
+ *  struck-through cell (BUG-10) — real Prism stores exclusions here, in
+ *  the dataset JSON; `data.csv` still holds the excluded values as plain
+ *  numbers. Entries with empty attributes are formatting runs, not
+ *  exclusions. */
+interface PrismCellAttributes {
+  rows?: string;
+  attributes?: string[];
 }
 
 /**
@@ -168,6 +180,83 @@ export function replicateRangeProblems(set: PrismDataSet): string[] {
     }
   }
   return problems;
+}
+
+/**
+ * Parse a Prism `cellAttributes` `rows` value: a single row ("8") or an
+ * inclusive range ("9~10"). Null when it doesn't parse, is reversed, or
+ * spans an absurd range (a corrupt entry must never allocate a huge array).
+ */
+export function parseExcludedRows(value: string): number[] | null {
+  const m = /^(\d+)(?:~(\d+))?$/.exec(value.trim());
+  if (!m) return null;
+  const a = Number(m[1]);
+  if (m[2] === undefined) return [a];
+  const b = Number(m[2]);
+  if (b < a || b - a > 1_000_000) return null;
+  const rows: number[] = [];
+  for (let r = a; r <= b; r++) rows.push(r);
+  return rows;
+}
+
+/**
+ * A dataset's excluded (struck-through) rows, per subcolumn — real
+ * Prism's representation (BUG-10): `cellAttributes` entries whose
+ * attributes include `"EXCLUDED"`, inside `replicates[i]` (one replicate
+ * per subcolumn) or `replicate ranges[i].replicate` (one replicate per
+ * run of subcolumns). An entry applies to EVERY subcolumn its replicate
+ * covers — there is no per-subcolumn index in the entry, and Prism
+ * splits ranges where per-subcolumn exclusion patterns differ (seen in
+ * capsanoicids S7: range 3 EXCLUDED rows 9~10, range 4~5 row 10 only).
+ * `count` is the dataset's resolved subcolumn count; rows past
+ * `rowCount` can't be cells. Problems are human-readable reasons an
+ * entry couldn't be used — the caller warns about them and the cells
+ * stay live, never silently dropped.
+ */
+export function excludedRowsBySubcolumn(
+  set: PrismDataSet,
+  count: number,
+  rowCount: number,
+): { excluded: Set<number>[]; problems: string[] } {
+  const excluded = Array.from({ length: count }, () => new Set<number>());
+  const problems: string[] = [];
+  const apply = (subcolumns: number[], cellAttributes: PrismCellAttributes[] | undefined, where: string) => {
+    for (const entry of cellAttributes ?? []) {
+      if (!(entry.attributes ?? []).includes("EXCLUDED")) continue;
+      const rows = typeof entry.rows === "string" ? parseExcludedRows(entry.rows) : null;
+      if (rows === null) {
+        problems.push(
+          `excluded-cells entry “${entry.rows ?? ""}” (${where}) doesn't parse as a row or row range; those cells were left live`,
+        );
+        continue;
+      }
+      for (const r of rows) {
+        if (r >= rowCount) {
+          problems.push(
+            `excluded-cells entry row ${r} (${where}) is past the table's ${rowCount} rows; it was left out`,
+          );
+          continue;
+        }
+        for (const s of subcolumns) excluded[s]?.add(r);
+      }
+    }
+  };
+  if (Array.isArray(set.replicates) && set.replicates.length > 0) {
+    set.replicates.forEach((rep, i) => {
+      if (i < count) apply([i], rep?.cellAttributes, `subcolumn ${i + 1}`);
+    });
+  } else if (Array.isArray(set["replicate ranges"])) {
+    for (const entry of set["replicate ranges"]) {
+      const m = /^(\d+)(?:~(\d+))?$/.exec(entry.range ?? "");
+      if (!m) continue; // malformed ranges are already refused upstream
+      const a = Number(m[1]);
+      const b = m[2] === undefined ? a : Number(m[2]);
+      const subs: number[] = [];
+      for (let s = a; s <= b && s < count; s++) subs.push(s);
+      apply(subs, entry.replicate?.cellAttributes, `replicate range “${entry.range ?? ""}”`);
+    }
+  }
+  return { excluded, problems };
 }
 
 /** Subcolumns a Prism dataFormat spans when its shape is fixed — the
@@ -836,6 +925,42 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
       ]),
       ...(groups !== undefined && replicates !== undefined ? { groups, replicates } : {}),
     };
+    // Excluded cells (BUG-10): real Prism flags struck-through cells in
+    // the dataset JSON (see excludedRowsBySubcolumn); the values stay in
+    // data.csv, so the reader must restore the flag or the values come
+    // back as live data. Keys are full-grid "row,col" (col 0 = row
+    // titles, never excluded); the Titer columns are [X?] + each present
+    // dataset's subcolumns, in order — a missing dataset consumes CSV
+    // columns but becomes no Titer column, so the cursor below advances
+    // only for present datasets.
+    {
+      const excludedKeys: string[] = [];
+      const collect = (set: PrismDataSet | null, count: number, firstCol: number, label: string) => {
+        if (!set) return;
+        const { excluded, problems } = excludedRowsBySubcolumn(set, count, rowCount);
+        for (const p of problems) {
+          issues.push({ severity: "warning", message: `${displayName}: ${label} — ${p}.` });
+        }
+        excluded.forEach((rows, j) => {
+          for (const r of rows) excludedKeys.push(`${r},${firstCol + j}`);
+        });
+      };
+      if (hasXCol && xSet) collect(xSet, 1, 1, "the X dataset");
+      let colCursor = 1 + (hasXCol ? 1 : 0);
+      for (const entry of layoutSets) {
+        if (entry.set === null) continue;
+        collect(entry.set, entry.count, colCursor, `dataset “${plainTitle(entry.set.title) || "Y"}”`);
+        colCursor += entry.count;
+      }
+      if (excludedKeys.length) {
+        excludedKeys.sort((a, b) => {
+          const [ar, ac] = a.split(",").map(Number);
+          const [br, bc] = b.split(",").map(Number);
+          return ar - br || ac - bc;
+        });
+        data.excluded = excludedKeys;
+      }
+    }
     const node: ProjectNode = {
       id: genId("table"),
       type: "table",
