@@ -71,8 +71,16 @@ echo "binary: $BIN"
 echo "display: $DISPLAY_NUM  scratch: $SCRATCH"
 Xvfb "$DISPLAY_NUM" -listen tcp -screen 0 1280x800x24 >>"$OUT_DIR/xvfb.log" 2>&1 &
 XVFB_PID=$!
-sleep 2
-kill -0 "$XVFB_PID" 2>/dev/null || { echo "FAIL: Xvfb died (see $OUT_DIR/xvfb.log)" >&2; exit 1; }
+# Wait until the X server is actually ready (socket present) — launching
+# the app after a fixed 2 s sleep raced Xvfb's xkbcomp init once and the
+# app panicked with "Failed to initialize gtk backend".
+DISP_NUM="${DISPLAY_NUM#:}"
+READY=0
+for _ in $(seq 1 30); do
+  if [ -S "/tmp/.X11-unix/X$DISP_NUM" ] && kill -0 "$XVFB_PID" 2>/dev/null; then READY=1; break; fi
+  sleep 1
+done
+[ "$READY" = 1 ] || { echo "FAIL: Xvfb $DISPLAY_NUM never became ready (see $OUT_DIR/xvfb.log)" >&2; kill "$XVFB_PID" 2>/dev/null; exit 1; }
 export DISPLAY="127.0.0.1$DISPLAY_NUM"
 # NOTE: container swaps wipe apt-installed -dev packages; if the app exits
 # immediately with missing .so errors, re-run scripts/setup-linux.sh first.
