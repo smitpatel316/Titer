@@ -5,7 +5,7 @@ import { useAppMenu } from "../app-menu";
 import { useDocument } from "../store/use-document";
 import { useProjectStore } from "../store/use-project-store";
 import { useLayout } from "../store/use-layout";
-import { mcpSetEnabled, onFullscreenChange } from "../native";
+import { askToUpdate, mcpSetEnabled, onFullscreenChange } from "../native";
 import { UniversalModal } from "./universal-modal";
 import { Dialog } from "../ui/dialog";
 import { ConverterDialog } from "./converter-dialog";
@@ -51,7 +51,8 @@ export function AppShell() {
   const [fullscreen, setFullscreen] = React.useState(false);
   React.useEffect(() => onFullscreenChange(setFullscreen), []);
   const hidden = HIDDEN_SIDEBAR[fullscreen ? "fullscreen" : "window"];
-  const { nodes, selector, closeSelector, openSelector, createTable, createGraph } = useProjectStore();
+  const { nodes, selector, closeSelector, openSelector, createTable, createGraph, createFigure, activeNodeId, isDirty } =
+    useProjectStore();
   const startAnalysis = useStartAnalysis();
 
   // E2E only (VITE_E2E=1 at build time, check/e2e-ci): the WebdriverIO
@@ -62,10 +63,61 @@ export function AppShell() {
   // — so the E2E build enables it on mount and CI needs no GUI click.
   // Vite replaces import.meta.env.VITE_E2E at build time, so the branch is
   // dead-code-eliminated in production builds; MCP is never on by default.
+  //
+  // wdio lane (check/e2e-conversion): the hook also exposes the other menu
+  // actions WebDriver cannot reach. Each entry calls the exact function its
+  // menu item (or the nudge flow) calls — never a reimplementation of the
+  // flow. The native menu click itself is covered by the Mac device-route
+  // scripts in e2e/mac/; the specs below the hook assert everything
+  // downstream of the click (dialogs, files on disk, rendered state).
+  // A ref carries the latest actions: the effect installs the hook once,
+  // but the actions close over state that changes every render.
+  const latestE2E = React.useRef({
+    documentActions,
+    openSelector,
+    createGraph,
+    createFigure,
+    nodes,
+    activeNodeId,
+    isDirty,
+  });
+  latestE2E.current = { documentActions, openSelector, createGraph, createFigure, nodes, activeNodeId, isDirty };
   React.useEffect(() => {
     if ((import.meta.env as Record<string, string | undefined>).VITE_E2E) {
-      (window as unknown as { __titerE2E?: { openConverter: () => void } }).__titerE2E = {
+      (window as unknown as { __titerE2E?: Record<string, unknown> }).__titerE2E = {
         openConverter: () => openSelector({ kind: "converter" }),
+        openAiConnections: () => latestE2E.current.openSelector({ kind: "ai-connections" }),
+        importPrism: () => void latestE2E.current.documentActions.importPrism(),
+        saveProject: (saveAs = false) => void latestE2E.current.documentActions.save(saveAs),
+        saveAsPrism: () => void latestE2E.current.documentActions.saveAsPrism(),
+        saveAsPzfx: () => void latestE2E.current.documentActions.saveAsPzfx(),
+        createGraph: (parentId: string, graphType: string) =>
+          latestE2E.current.createGraph(
+            parentId,
+            graphType as Parameters<typeof latestE2E.current.createGraph>[1],
+          ),
+        createFigure: (graphIds: string[]) => latestE2E.current.createFigure(graphIds),
+        // Q-84/U-01: the real update prompt, with a fixed test version —
+        // the live check only offers when a newer release exists, which
+        // the suite cannot arrange. The answer is stashed for the spec.
+        showUpdateDialog: async () => {
+          const answer = await askToUpdate("9.9.9-test", false, false);
+          (window as unknown as { __titerE2E?: Record<string, unknown> }).__titerE2E!.lastUpdateAnswer = answer;
+          return answer;
+        },
+        // Read-only summary for spec assertions (title, active node, tables).
+        projectSummary: () => {
+          const s = latestE2E.current;
+          return {
+            title: s.documentActions.title,
+            activeNodeId: s.activeNodeId,
+            isDirty: s.isDirty,
+            tables: Object.values(s.nodes)
+              .filter((n) => n.type === "table")
+              .map((n) => ({ id: n.id, name: n.name })),
+            nodeCount: Object.keys(s.nodes).length,
+          };
+        },
       };
       void mcpSetEnabled(true).catch((e) => {
         console.warn("[e2e] mcp_set_enabled failed", e);
