@@ -1623,7 +1623,7 @@ pub struct CloseProjectArgs {
 /// factor — the `row_groups` of `titer_write_table` / `titer_create_table`.
 /// Serde enforces the shape (a name and a row count); the frontend
 /// validates the bands tile the table's rows exactly.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct RowGroup {
     /// The band's name (shown in the Groups panel); must be non-empty.
     pub name: String,
