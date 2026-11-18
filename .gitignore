@@ -28,6 +28,13 @@ webr-repo/
 qa/**
 !qa/**/
 !qa/**/*.md
+# Screenshot-test references ONLY: PNG/SVG files anywhere under a
+# qa/**/reference/ dir may be committed (inventory §4 — the allowlist is
+# deliberate, so a reference lands only when a lane puts it there).
+# Anything else non-md under qa/ stays ignored. (The trailing /**/ is
+# needed: references live one level down, qa/reference/<case>/file.png.)
+!qa/**/reference/**/*.png
+!qa/**/reference/**/*.svg
 test-corpus/
 
 # e2e (spike/tauri-e2e): temp outputs, scratch app-data dir, wdio logs.
