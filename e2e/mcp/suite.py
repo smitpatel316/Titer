@@ -319,12 +319,46 @@ class Suite:
             f"p {p} != {LOGRANK['p']} ± {LOGRANK_TOL['p']}"
         return f"log-rank chi-square {chi} (exp {LOGRANK['chi']}), df {df}, p {p} (exp {LOGRANK['p']})"
 
+    def check_export_markers(self, path, fmt):
+        """File-level pin for the BUG-20/21 writer fixes (T-132, seq 175/176).
+
+        Asserts the exported file carries the structural marker real Prism
+        11.2.0 requires — the same check pin-writer-fix.py runs standalone
+        (see e2e/prism/pin-writer-fix.py for the pre-fix FAIL demonstration
+        on the Nov 13 qa roundtrip files). A build that regresses the
+        writer fails HERE, before the reopen leg can rubber-stamp it.
+        """
+        if fmt == "prism":
+            import zipfile
+            with zipfile.ZipFile(path) as zf:
+                sheets = [n for n in zf.namelist()
+                          if n.startswith("data/sheets/") and n.endswith("/sheet.json")]
+                assert sheets, f".prism export has no data sheets: {path}"
+                for name in sheets:
+                    doc = json.loads(zf.read(name))
+                    cls = (doc.get("table") or {}).get("@class")
+                    assert cls in ("DataTable", "XYDataTable"), (
+                        f".prism export {os.path.basename(path)}: sheet "
+                        f"{doc.get('title', name)!r} lacks table[\"@class\"] "
+                        f"(got {cls!r}) — BUG-20: real Prism crashes on open")
+        elif fmt == "pzfx":
+            text = open(path, encoding="utf-8").read()
+            el = '<Template dt:dt="bin.base64" xmlns:dt="urn:schemas-microsoft-com:datatypes"></Template>'
+            assert el in text, (
+                f".pzfx export {os.path.basename(path)} lacks the empty "
+                f"<Template> element — BUG-21: real Prism shows its "
+                f"XML-compliance warning on open")
+            assert len(re.findall(r"<Template[\s>]", text)) == 1, (
+                f".pzfx export {os.path.basename(path)}: expected exactly "
+                f"one <Template> element")
+
     def _roundtrip_format(self, pid, snap, fmt, importer):
         out = os.path.join(self.out_dir, f"survival.{fmt}")
         saved = self.mcp.tool("titer_save_project", {
             "project_id": pid, "path": out, "format": fmt})
         size = os.path.getsize(out) if os.path.isfile(out) else -1
         assert size > 0, f"empty/missing .{fmt} export ({size} B): {saved}"
+        self.check_export_markers(out, fmt)
         self.close(pid)
         if importer == "open":
             re = self.mcp.tool("titer_open_project", {"path": out})
