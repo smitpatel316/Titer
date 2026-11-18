@@ -70,8 +70,11 @@ if [ "$SKIP_GUI" = 0 ] && [ -z "${DISPLAY:-}" ]; then
   Xvfb ":$DISP" -listen tcp -screen 0 1280x800x24 >>"$OUT/xvfb.log" 2>&1 &
   XVFB_PID=$!
   export DISPLAY="127.0.0.1:$DISP"
-  for _ in $(seq 1 10); do
-    xwininfo -root -tree >/dev/null 2>&1 && break
+  # Wait for the display to answer (up to 30 s): a fixed 2 s sleep races
+  # Xvfb's xkbcomp init and the app then panics with 'Failed to
+  # initialize gtk backend' (battery lane, same failure).
+  for _ in $(seq 1 30); do
+    [ -e "/tmp/.X11-unix/X$DISP" ] && xwininfo -root -tree >/dev/null 2>&1 && break
     sleep 1
   done
   xwininfo -root -tree >/dev/null 2>&1 || { echo "FAIL: Xvfb on $DISPLAY never answered" >&2; exit 1; }

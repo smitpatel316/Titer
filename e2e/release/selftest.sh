@@ -120,7 +120,10 @@ if [ -f "$APPIMAGE" ]; then
     Xvfb ":$DISP" -listen tcp -screen 0 1280x800x24 >>"$CACHE/xvfb-selftest.log" 2>&1 &
     XVFB_PID=$!
     export DISPLAY="127.0.0.1:$DISP"
-    sleep 2
+    for _ in $(seq 1 30); do
+      [ -e "/tmp/.X11-unix/X$DISP" ] && xwininfo -root -tree >/dev/null 2>&1 && break
+      sleep 1
+    done
   fi
   expect_fail "T-93 GUI expect-quiet on old AppImage" $PY/check_update.py --mode gui --binary "$APPIMAGE" --expect quiet --cache-dir "$CACHE"
   [ -n "${XVFB_PID:-}" ] && kill "$XVFB_PID" 2>/dev/null
