@@ -70,6 +70,11 @@ interface ProjectState extends Content {
    *  by the time the (async) write resolves — so an edit made mid-save is never
    *  silently marked "saved". */
   revision: number;
+  /** The last opening's failure, if this window's file failed to load —
+   *  the same message the GUI shows. Cleared by the next successful load,
+   *  so the MCP server can tell a failed open from a slow one. Not content:
+   *  never undoable, never dirtying, never saved. */
+  openError: string | null;
   /** Undo and Redo: the content before each change (newest last), and after each undo,
    *  each with the change's name for the Edit menu ("Undo Paste"). */
   past: Step[];
@@ -147,6 +152,10 @@ type Action =
     }
   | { type: "openSelector"; selector: Selector }
   | { type: "closeSelector" }
+  /** The window's file failed to open (or the record clears): the MCP
+   *  server reads it from the snapshot. Not an edit — no revision bump,
+   *  no dirty flag, no undo step. */
+  | { type: "setOpenError"; error: string | null }
   | { type: "reorderRoot"; order: string[] }
   | { type: "reorderChildren"; parentId: string; order: string[] }
   | {
@@ -205,6 +214,7 @@ export function makeInitialState(): ProjectState {
     filePath: null,
     isDirty: false,
     revision: 0,
+    openError: null,
     past: [],
     future: [],
     lastChange: null,
@@ -494,6 +504,11 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       return { ...state, selector: action.selector };
     case "closeSelector":
       return { ...state, selector: null };
+    case "setOpenError":
+      // No-op drop, like a reorder that moved nothing: a repeated failure
+      // (or a clear of an already-clear error) doesn't redraw or republish.
+      if (state.openError === action.error) return state;
+      return { ...state, openError: action.error };
     case "reorderRoot":
       if (arraysEqual(state.rootOrder, action.order)) return state; // no-op drop — don't dirty
       return { ...state, rootOrder: action.order, isDirty: true };
@@ -546,6 +561,8 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         past: [],
         future: [],
         lastChange: null,
+        // A file that loads clears the last opening's failure, if any.
+        openError: null,
       };
     case "markSaved":
       // Clear the dirty flag only if nothing changed while the write was in
@@ -736,6 +753,10 @@ interface ProjectActions {
   setSheetHighlight: (id: string, highlight: SheetHighlight | null) => void;
   openSelector: (selector: Selector) => void;
   closeSelector: () => void;
+  /** Records that this window's file failed to open (or clears the record):
+   *  the MCP server reads it from the snapshot. Not an edit — no revision
+   *  bump, no dirty flag, no undo step. */
+  setOpenError: (error: string | null) => void;
   reorderTables: (order: string[]) => void;
   reorderChildren: (parentId: string, order: string[]) => void;
   undo: () => void;
@@ -947,6 +968,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       setSheetHighlight: (id, highlight) => dispatch({ type: "setHighlight", id, highlight }),
       openSelector: (selector) => dispatch({ type: "openSelector", selector }),
       closeSelector: () => dispatch({ type: "closeSelector" }),
+      setOpenError: (error) => dispatch({ type: "setOpenError", error }),
       reorderTables: (order) => dispatch({ type: "reorderRoot", order }),
       reorderChildren: (parentId, order) => dispatch({ type: "reorderChildren", parentId, order }),
       undo: () => dispatch({ type: "undo" }),

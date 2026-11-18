@@ -248,6 +248,15 @@ struct RunningServer {
     port: u16,
 }
 
+/// What waiting for a window to open a file found: the file loaded, the
+/// frontend reported the open failed (its `openError` — the same message
+/// the GUI shows), or nothing reported in time.
+enum OpenOutcome {
+    Loaded,
+    Failed(String),
+    Timeout,
+}
+
 impl McpState {
     fn lock(&self) -> std::sync::MutexGuard<'_, McpInner> {
         self.inner.lock().unwrap()
@@ -506,6 +515,32 @@ impl McpState {
             }
             if tokio::time::Instant::now() >= deadline {
                 return false;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    /// Wait for a window to finish opening the file at `path`: loaded, or
+    /// failed with the frontend's message. Failure is checked first: a
+    /// snapshot can carry a stale `openError` beside a loaded file, and a
+    /// fresh window's blank snapshot carries neither — the check order is
+    /// what keeps a stale failure from reading as a success, and a slow
+    /// load from reading as a failure.
+    async fn await_open_outcome(&self, label: &str, path: &str, timeout: Duration) -> OpenOutcome {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if let Some(snap) = self.snapshot_for(label) {
+                if let Some(err) = snap.get("openError").and_then(|v| v.as_str()) {
+                    if !err.is_empty() {
+                        return OpenOutcome::Failed(err.to_string());
+                    }
+                }
+                if snapshot_shows_loaded_file(&snap, path) {
+                    return OpenOutcome::Loaded;
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return OpenOutcome::Timeout;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
@@ -1298,6 +1333,27 @@ fn cloud_project_format(name: &str) -> Result<&'static str, String> {
             "“{name}” is not a project file — download a .hlx, .pzt, .prism or .pzfx file to open it as a project."
         )),
     }
+}
+
+/// Whether a window's snapshot shows the file at `path` loaded: the
+/// snapshot's `filePath` names it, or its nodes are a loaded project —
+/// non-empty AND past the blank project. A new window publishes the blank
+/// project ("Table 1", revision 0) before its file loads, and a load always
+/// bumps the revision, so non-empty nodes at revision 0 is the blank, not
+/// a file — the old "any non-empty nodes" check accepted it as a load, and
+/// a truncated `.hlx` opened as a 1-table empty project with 13 of 14
+/// tables silently dropped.
+fn snapshot_shows_loaded_file(snap: &serde_json::Value, path: &str) -> bool {
+    if snap.get("filePath").and_then(|v| v.as_str()) == Some(path) {
+        return true;
+    }
+    let nodes_loaded = snap
+        .get("nodes")
+        .and_then(|n| n.as_object())
+        .map(|n| !n.is_empty())
+        .unwrap_or(false);
+    let revision = snap.get("revision").and_then(|v| v.as_u64()).unwrap_or(0);
+    nodes_loaded && revision > 0
 }
 
 /// The mock provider behind the cloud commands (managed state, as the
@@ -3093,27 +3149,26 @@ impl TiterMcpServer {
                     let label =
                         crate::open(&app, None, crate::opening_for(&args.path)).map_err(|e| e.to_string())?;
                     let path = args.path.clone();
-                    let loaded = self
+                    match self
                         .state
-                        .await_snapshot(
-                            &label,
-                            move |snap| {
-                                snap.get("filePath").and_then(|v| v.as_str()) == Some(path.as_str())
-                                    || snap
-                                        .get("nodes")
-                                        .and_then(|n| n.as_object())
-                                        .map(|n| !n.is_empty())
-                                        .unwrap_or(false)
-                            },
-                            Duration::from_secs(15),
-                        )
-                        .await;
-                    if !loaded {
-                        return Err(format!(
+                        .await_open_outcome(&label, &path, Duration::from_secs(15))
+                        .await
+                    {
+                        OpenOutcome::Loaded => Ok(serde_json::json!({
+                            "project_id": label,
+                            "file_path": args.path,
+                            "format": format
+                        })),
+                        // The frontend's own message — the same one the GUI
+                        // shows for this file — so a damaged file errors
+                        // instead of opening as a silently-truncated project.
+                        OpenOutcome::Failed(err) => {
+                            Err(format!("Couldn’t open “{}”: {}", args.path, err))
+                        }
+                        OpenOutcome::Timeout => Err(format!(
                             "Project {label} did not report the opened file within 15s — it may still be loading. Ask titer_list_projects for the open projects."
-                        ));
+                        )),
                     }
-                    Ok(serde_json::json!({ "project_id": label, "file_path": args.path, "format": format }))
                 }
             }
         }
@@ -4221,27 +4276,21 @@ impl TiterMcpServer {
                     let label =
                         crate::open(&app, None, crate::opening_for(&cache_path)).map_err(|e| e.to_string())?;
                     let path = cache_path.clone();
-                    let loaded = self
+                    match self
                         .state
-                        .await_snapshot(
-                            &label,
-                            move |snap| {
-                                snap.get("filePath").and_then(|v| v.as_str()) == Some(path.as_str())
-                                    || snap
-                                        .get("nodes")
-                                        .and_then(|n| n.as_object())
-                                        .map(|n| !n.is_empty())
-                                        .unwrap_or(false)
-                            },
-                            Duration::from_secs(15),
-                        )
-                        .await;
-                    if !loaded {
-                        return Err(format!(
-                            "Project {label} did not report the opened file within 15s — it may still be loading. Ask titer_list_projects for the open projects."
-                        ));
+                        .await_open_outcome(&label, &path, Duration::from_secs(15))
+                        .await
+                    {
+                        OpenOutcome::Loaded => label,
+                        OpenOutcome::Failed(err) => {
+                            return Err(format!("Couldn’t open “{cache_path}”: {err}"));
+                        }
+                        OpenOutcome::Timeout => {
+                            return Err(format!(
+                                "Project {label} did not report the opened file within 15s — it may still be loading. Ask titer_list_projects for the open projects."
+                            ));
+                        }
                     }
-                    label
                 }
             };
             // The version this window saw: the next upload is conditional
@@ -6167,6 +6216,35 @@ mod tests {
             let err = project_path_format(url).expect_err(&format!("{url} is not a local path"));
             assert!(err.contains("not a local file path"), "{err}");
         }
+    }
+
+    #[test]
+    fn snapshot_shows_loaded_file_needs_more_than_nodes() {
+        let path = "/tmp/Demo.hlx";
+        // The blank project a new window publishes before its file loads:
+        // non-empty nodes ("Table 1") at revision 0 — NOT a load. This is
+        // the shape a truncated `.hlx` used to open as, silently.
+        let blank = json!({
+            "filePath": null,
+            "revision": 0,
+            "nodes": { "t1": { "id": "t1", "type": "table", "name": "Table 1" } },
+        });
+        assert!(!snapshot_shows_loaded_file(&blank, path), "blank project is not a load");
+        // The same nodes after a real load: revision bumped.
+        let loaded = json!({
+            "filePath": null,
+            "revision": 1,
+            "nodes": { "t1": { "id": "t1", "type": "table", "name": "Table 1" } },
+        });
+        assert!(snapshot_shows_loaded_file(&loaded, path), "loaded nodes count");
+        // The normal case: the snapshot names the file.
+        let named = json!({ "filePath": path, "revision": 0, "nodes": {} });
+        assert!(snapshot_shows_loaded_file(&named, path), "filePath names the file");
+        // Empty and unrelated: nothing loaded.
+        let empty = json!({ "filePath": null, "revision": 0, "nodes": {} });
+        assert!(!snapshot_shows_loaded_file(&empty, path), "empty snapshot is not a load");
+        let other = json!({ "filePath": "/tmp/Other.hlx", "revision": 3, "nodes": {} });
+        assert!(!snapshot_shows_loaded_file(&other, path), "another file is not this file");
     }
 
     #[test]
