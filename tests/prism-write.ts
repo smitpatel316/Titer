@@ -454,6 +454,57 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
     expectedClasses.every(([title, cls]) => classByTitle.get(title) === cls),
     [...classByTitle.entries()].map(([t, c]) => `${t}=${String(c)}`).join(", "),
   );
+  // W12 (seq 175, regression on 1.6.2): every written info sheet carries
+  // selectedCellsRange — real Prism 11.2.0 dereferences it unconditionally
+  // on open, so omitting it crashes Prism (EXC_BAD_ACCESS / SIGSEGV,
+  // KERN_INVALID_ADDRESS at 0x0, thread 0 in NSDocument
+  // initWithContentsOfURL). Bisection (Nov 18, 24 files in real Prism):
+  // selectedCellsRange-only variant opens clean; uiState-only still
+  // crashes; experimentDate / trailing empty constant / notesText all
+  // exonerated. Value is the real-Prism default: cells (0,0)–(0,0).
+  const infoProject = {
+    nodes: {
+      t_info: {
+        id: "t_info",
+        type: "table",
+        name: "T",
+        parentId: null,
+        tableType: "column",
+        data: { columns: ["Title", "A"], rows: [[null, "1"]] },
+      },
+      i_full: {
+        id: "i_full",
+        type: "info",
+        name: "Project info 1",
+        parentId: null,
+        info: { notes: "notes\r\n", constants: [{ name: "Experiment ID", value: "E1" }] },
+      },
+      i_bare: { id: "i_bare", type: "info", name: "Project info 2", parentId: null },
+    },
+    rootOrder: ["t_info", "i_full", "i_bare"],
+    childOrder: { t_info: [], i_full: [], i_bare: [] },
+    activeNodeId: "t_info",
+  };
+  const infoWritten = await writePrism(infoProject as never, "1.0.7");
+  const infoZip = await JSZip.loadAsync(infoWritten.bytes);
+  const infoRanges: string[] = [];
+  for (const p of Object.keys(infoZip.files)) {
+    if (!p.startsWith("info/") || !p.endsWith("sheet.json") || infoZip.files[p].dir) continue;
+    const d = JSON.parse(await infoZip.file(p)!.async("string")) as {
+      title?: string;
+      selectedCellsRange?: unknown;
+    };
+    infoRanges.push(`${d.title ?? "?"}:${JSON.stringify(d.selectedCellsRange)}`);
+  }
+  const expectedRange = JSON.stringify({
+    endCell: { row: 0, column: 0 },
+    startCell: { row: 0, column: 0 },
+  });
+  check(
+    "W12 info sheets carry selectedCellsRange (seq 175)",
+    infoRanges.length === 2 && infoRanges.every((r) => r.endsWith(expectedRange)),
+    infoRanges.join("; ") || "no info sheets written",
+  );
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed.`);
