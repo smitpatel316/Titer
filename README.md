@@ -3,40 +3,51 @@
 **Scientific data analysis, simplified.**
 
 Organize, analyze and visualize scientific data, from raw numbers to publication-ready
-graphs. Titer is a free, open-source and private alternative to GraphPad Prism for macOS.
+graphs. Titer is a free, open-source and private alternative to GraphPad Prism for Mac
+and Linux.
 
 Three engines do the work: a fast data grid built for Titer, **R**, the reference for
 statistics (through [webR](https://github.com/r-wasm/webr), R compiled to WebAssembly), and
-**[Plotly](https://plotly.com/javascript/)** for the graphs. Everything runs on your Mac.
+**[Plotly](https://plotly.com/javascript/)** for the graphs. Everything runs on your machine.
 
-![Titer: a table, its analyses and a graph](docs/screenshot.png)
+![Dose-response curves with fitted 4PL sigmoids in Titer](docs/hero-dose-response.png)
 
 ## About this fork
 
 This is a modified fork of mickaphd/Helix,
 the original Helix by mickaphd (© 2026 mickaphd). On top of upstream it adds
-Prism-file import, a wider analysis catalogue, multi-panel figures, and bug
+Prism-file import and write-back, a wider analysis catalogue, multi-panel figures, and bug
 fixes — see the [release notes](https://github.com/smitpatel316/Titer/releases)
 and the git history for what changed and when. Like upstream, it is licensed
 under the [GNU General Public License](LICENSE), version 3 or later.
 
 ## Download
 
-Get the latest version from the [Releases page](https://github.com/smitpatel316/Titer/releases):
+The latest release is **v1.6.1 for Mac** (Apple Silicon) and **v1.6.0 for Linux**.
+Get them from the [Releases page](https://github.com/smitpatel316/Titer/releases):
 
-- `Titer_…_aarch64.dmg` for Macs with Apple Silicon (M1 and later)
-- `Titer_…_x64.dmg` for Macs with an Intel processor
+| Build | File | Size | SHA-256 |
+|---|---|---|---|
+| Mac — Apple Silicon (v1.6.1) | [`Titer-1.6.1-aarch64.dmg`](https://github.com/smitpatel316/Titer/releases/download/v1.6.1/Titer-1.6.1-aarch64.dmg) | 103,804,095 bytes (~99 MB) | `7ad41d28ac6754a206f798d36b5b3fc72b976d4e7228ea2ec2b0ef8bd1b81403` |
+| Linux (v1.6.0) | [`Titer-1.6.0-linux.AppImage`](https://github.com/smitpatel316/Titer/releases/download/v1.6.0/Titer-1.6.0-linux.AppImage) | 190,994,936 bytes (~191 MB) | `73872f99d44c9ac52783c6e0400121f03e0641370d2d9537d177f2d040bbc100` |
+| Mac — Intel (latest: v1.2.0) | [`Titer-1.2.0-x64.dmg`](https://github.com/smitpatel316/Titer/releases/download/v1.2.0/Titer-1.2.0-x64.dmg) | 101,712,108 bytes (~97 MB) | `d8b6fcf88ffa52044279a2a8938b00f6821ca8c4abe35ef715c951ae36889456` |
 
 Each release is cut from a tagged commit — the release notes name the exact
-commit the DMGs were built from, so the source for any download is retrievable
-from this repo. Every DMG also includes a copy of the GNU GPL (`LICENSE`) and
+commit the downloads were built from, so the source for any download is retrievable
+from this repo. Every download also includes a copy of the GNU GPL (`LICENSE`) and
 the third-party notices (`THIRD-PARTY-NOTICES.md`).
 
-Requires macOS 13.3 (Ventura) or later. Open the DMG and drag **Titer** into the
+Requires macOS 13.3 (Ventura) or later, or Ubuntu 22.04 or later for the Linux
+AppImage (which needs `libfuse2` — `libfuse.so.2` — or run it with
+`--appimage-extract-and-run`). On a Mac, open the DMG and drag **Titer** into the
 **Applications** folder. Titer is signed ad hoc (not notarized by Apple), so macOS may ask you to confirm the first time you open it.
 
-When a new version is out, Titer tells you (Titer › Check for Updates…) and installs it
-for you: it relaunches with your projects.
+No Intel DMG ships in v1.3.0 or later — v1.2.0 above is the latest Intel build, and
+it stays available for Intel Macs.
+
+When a new version is out, Titer tells you (Titer › Check for Updates…). On a Mac
+it downloads, verifies and installs the update for you, then relaunches with your
+projects. On Linux the updater stops at a manual download of the new AppImage.
 
 ## What Titer does
 
@@ -45,12 +56,13 @@ and figure that uses it updates at once.
 
 ### Tables
 
-Six table types. Each guides how data are entered, and offers every analysis and graph
+Seven table types. Each guides how data are entered, and offers every analysis and graph
 its data allow:
 
 - **Column:** groups side by side (control, doses, treatments)
 - **XY:** a response against a dose, a time or a concentration
 - **Grouped:** groups across rows (time points, genes), with replicates
+- **Nested:** clustered data, for nested t tests and nested ANOVA
 - **Multiple Variables:** one row per subject, one column per variable
 - **Contingency:** counts of outcomes
 - **Survival:** one subject per row, its time, and whether the event happened
@@ -61,62 +73,152 @@ And a spreadsheet that feels like one:
   visible as you scroll
 - Name each row (a mouse, a patient, a gene): the names follow into results and graphs
 - Exclude a value from the analyses without deleting it
+- Enter pre-calculated values as summary subcolumns (mean with SD, SEM or N), and change a
+  table's error format between SD and SEM
+- Extract and rearrange Multiple Variables tables; row means and totals with SD, SEM, %CV
+  or confidence intervals
 
 ### Analyses
 
+**53 analyses**, covering all 56 analyses in GraphPad Prism 10's catalogue. That
+"56" is a catalogue mapping — every Prism 10 analysis has a Titer equivalent listed
+below — not a single test-suite score. The numbers themselves are checked against
+Prism's own saved results and against reference values: the frozen-tip suite passed
+512/512 at v1.6.0 (see [VALIDATION.md](VALIDATION.md)).
+
 - **Guided:** an assistant asks which data sets to analyze, whether they are
-  paired and whether they follow a normal distribution (or checks it for you with
-  Shapiro-Wilk), then runs the right test
-- **Every number comes from R**, the reference for statistics — except the
-  log-rank test, which is computed directly in TypeScript and checked against
-  independently computed reference values
+  paired and whether they follow a normal distribution (or checks it for you), then
+  runs the right test
+- **Every number comes from R**, the reference for statistics (webR, R 4.6.0)
+- **Before you test:** normality and lognormality tests (Shapiro-Wilk, D'Agostino–Pearson,
+  Anderson–Darling, Kolmogorov–Smirnov) that say in plain words which tests suit your
+  data; outliers found by ROUT or Grubbs; descriptive statistics (including sum, skewness
+  and kurtosis); frequency distributions
 - **Two groups:** unpaired, Welch, paired, ratio and lognormal t tests, with Cohen's d and
-  Hedges' g; Mann-Whitney, Wilcoxon
+  Hedges' g; Mann-Whitney, Wilcoxon matched-pairs, two-sample Kolmogorov–Smirnov
 - **More groups:** one-way ANOVA (or Welch's, without equal SDs), repeated-measures ANOVA with
-  the Geisser-Greenhouse correction, Kruskal-Wallis, Friedman; then every pair (Tukey,
-  Bonferroni, Games-Howell, Dunnett's T3, Dunn) or each group against a control (Dunnett)
-- **Grouped data:** two-way ANOVA (ordinary, repeated measures with the Geisser-Greenhouse
-  correction, Scheirer-Ray-Hare) and multiple t tests with Holm or FDR correction
-- **Curves:** dose-response (4PL, 3PL, 5PL) with the EC50 or IC50 and every parameter's 95% CI,
-  several data sets at once or two curves compared, outliers left out by ROUT; standard
-  curves read for your unknowns (ELISA); exponential growth and decay (doubling time,
-  half-life), Michaelis-Menten, lines and polynomials; replicates taken as they are
-- **Before you test:** a normality and lognormality test that says in plain words which
-  tests suit your data; outliers found by ROUT or Grubbs
+  the Geisser-Greenhouse correction, Kruskal-Wallis, Friedman; two-way ANOVA (ordinary,
+  repeated measures with the Geisser-Greenhouse correction, Scheirer-Ray-Hare);
+  three-way ANOVA; mixed-effects models; nested t test and nested one-way ANOVA; then
+  every pair (Tukey, Bonferroni, Šídák, Holm–Šídák, LSD, Dunnett, Games-Howell,
+  Dunnett's T3, Dunn) or each group against a control (Dunnett); multiple t tests with
+  Holm or FDR correction
 - **Counts:** Fisher's exact and chi-square tests, with the odds ratio, the relative risk,
-  Phi and Cramér's V
-- **Two variables:** a regression line through any two variables of a table, with its
-  equation, r, R² and P; a logistic regression for a yes/no outcome, with its odds ratio
+  Phi and Cramér's V; chi-square test for trend (Cochran–Armitage); McNemar's test
+- **Curves and regression:** dose-response (4PL, 3PL, 5PL) with the EC50 or IC50 and every
+  parameter's 95% CI, several data sets at once or two curves compared, outliers left out
+  by ROUT; dose-response special (EC50 shift, Schild pA2, operational model); nonlinear
+  regression with compare-model F test and AICc, global/shared-parameter fits, weighting,
+  parameter bounds and user-defined equations; standard curves read for your unknowns
+  (ELISA); exponential growth and decay (doubling time, half-life), Michaelis-Menten,
+  enzyme inhibition (including Morrison Ki), binding saturation, competition
+  (Cheng–Prusoff Ki) and kinetics; spline and Lowess; simple and multiple linear
+  regression; simple and multiple logistic regression; Poisson regression; Deming
+  regression; correlation (Pearson, Spearman) and correlation matrices; area under the
+  curve; plot a function; smooth, differentiate and integrate
 - **Survival:** Kaplan-Meier with median survival, log-rank, trend and Gehan-Breslow-Wilcoxon
-  tests, hazard ratios, and Cox regression
+  tests, hazard ratios, and Cox regression; Number at Risk shown under the curve
+- **Multivariate and simulation:** principal component analysis (with scree plot and biplot),
+  K-means clustering, ROC curves, Bland–Altman, Monte Carlo simulation
+- **Data operations** (not analyses, but shipped): transform data, transform concentrations,
+  remove baseline, normalize, transpose, prune rows, fraction of total
+- **Beyond Prism:** K-means clustering, plot-a-function, and row means/totals have no Prism
+  equivalent
 - **Clear results:** the exact test that ran, whether it is significant, every statistic,
   multiple comparisons and descriptive statistics, ready to copy
 - Analyses follow the data: rename a column and they follow it, edit a value and they run again
 
+![A 4PL dose-response fit: EC50s, 95% confidence intervals and R² for two cell lines](docs/analysis-4pl-fit.png)
+
 ### Graphs
+
+**33 graph types**, all drawn from your tables and analyses:
+
+- **Column and grouped data:** dot plots, before-and-after plots, box and violin plots,
+  mean-with-error plots, grouped bars, grouped scatter, grouped before-and-after,
+  grouped lines, grouped stacked bars, grouped horizontal bars, grouped box plots
+- **XY data:** scatter, bubble plots, bars, area, smooth curves, logistic curves
+- **Specialized:** heatmaps, volcano plots, survival (Kaplan–Meier) curves, forest plots,
+  estimation plots, Bland–Altman plots, ROC curves, Schild plots, observed-vs-fitted
+  plots, pie and donut charts, histograms, scree plots, PCA biplots, K-means scatter
+  plots, Monte Carlo histograms
 
 - **Ready for a paper by default**
 - **Statistics on the graph:** significance stars or P values from your analyses, regression
   lines with their confidence band and equation, any fitted curve with its best-fit values,
   Kaplan-Meier curves with their confidence band
-- **Every kind of figure:** dot plots, bars, box and violin, histograms, lines, heatmaps, volcano plots
-  (from your own results, or computed by Titer from replicates), survival curves
 - **Colors that work:** 15 palettes from the scientific literature (Okabe-Ito, Paul Tol,
   Viridis, Batlow…), colorblind-friendly ones first, each reversible; or make your own,
-  kept on your Mac
+  kept on your machine
 - **Style every series:** color, point shape, dashed lines, fill patterns; and the whole graph:
   fill opacity, outlines, error bars (thickness, caps, color, direction)
 - **Style single points:** click or drag over them to change their color, shape or size, or
   show their name; on a volcano plot, find genes by name
-- **Match:** give a graph the look of another one, choosing what it takes
+- **A second Y axis:** plot a second data set on the right axis, linear, log10 or log2
+- **Match:** give a graph the look of another one, choosing what it takes; **Batch Magic**
+  applies that Match formatting to many graphs at once; **Clone** copies a graph
 - **Lay it out:** move the legend and notes, resize by dragging an axis or typing a size, set
-  each axis's range and step, white or transparent background
-- **Export** as PNG or JPG at 150, 300 or 600 DPI, at their true printed size, or as SVG; or
-  copy and paste into Keynote, PowerPoint or Word
+  each axis's range and step, gridlines (none, major, or major + minor, per axis) and tick
+  direction, length and interval, white or transparent background
+- **Export** as PNG, JPG, SVG, PDF or TIFF at 150, 300, 600, 900 or 1200 DPI, at their true
+  printed size; or copy and paste into Keynote, PowerPoint or Word; or send a graph
+  straight to Word or PowerPoint in one click
+
+![Volcano plot of RNA-seq results: log2 fold change against −log10(FDR)](docs/gallery-volcano.png)
+
+![Kaplan-Meier survival curves with 95% confidence bands and Number at Risk](docs/gallery-kaplan-meier.png)
+
+### Figures
+
+**Multi-panel figures:** combine several graphs into one figure with a shared legend,
+panel labels and one export — the figure for a paper, built from the same live graphs.
+
+![A multi-panel figure: dose-response curves beside tumor-volume bars](docs/figure-multipanel.png)
+
+### Prism file compatibility
+
+Titer reads and writes GraphPad Prism files, so existing Prism projects move over
+without retyping data.
+
+- **Open Prism files:** File › Import Prism File… opens `.pzfx` (Prism 5–9) and
+  `.prism` (Prism 10). A `.prism` file brings in its data tables, analysis parameters
+  and info sheets; graphs and layouts are not transferred, and results are recomputed
+  from the data on open.
+- **Save back to Prism:** the save prompt offers Save as `.prism` (Prism 10) or Save as
+  `.pzfx` (Prism 5–9). The writers cover data tables, analysis parameters and info
+  sheets (`.prism`) or data tables and info sheets (`.pzfx`) — never graphs, layouts or
+  results. Nested and Multiple Variables tables refuse the write with a named error
+  rather than silently dropping data.
+- **Checked by round-trip:** `.pzfx` → Titer → `.pzfx` → Titer comes back cell-identical
+  on all 10 test fixtures (values, row titles, column names and order, excluded cells,
+  date X, X error, summary subcolumns), and `.prism` round-trips cell-identical on the
+  demo file with identical analysis parameters. Every written `.pzfx` file validates
+  against the Prism 8 XSD.
+- **One thing not yet proven:** whether Prism itself opens a file Titer wrote has not
+  been tested — the round-trips above go through Titer's own importer, not through
+  Prism. Don't take "Prism opens Titer files" as given until that check is done.
+- **Titer's own format** is plain JSON (`.hlx`), described in
+  [FILE-FORMAT.md](FILE-FORMAT.md), so your data are never locked in. Open methods: how
+  each analysis is computed and checked is in [METHODS.md](METHODS.md).
+
+### Automation and organization
+
+- **Prism scripts:** automate Titer without programming, using Prism-script commands
+  (ExportTIF/BMP/CSV/TXT are supported; Windows-only and legacy Prism commands are
+  documented as unsupported)
+- **Info sheets:** hold project constants that analyses and fits read live — edit a
+  constant and the fit re-runs
+- **Templates:** save a project or a method as a reusable template (`.pzt` / `.pzm`),
+  from File › Save As Template / Example / Method
+- **Magic Wand:** describe the analysis or graph you want and it plans the steps
+- **Project search** with highlighting, **floating notes** pinned to sheets,
+  **frozen results** (keep a result as it was), **duplicate a family**
+- **Try it:** Help › Sample Project opens a made-up study told as a paper's figures, from cells
+  to mice to patients, with every kind of table ([also here](samples/Titer%20Sample.hlx)).
 
 ### Projects
 
-- A native Mac app: real menus and shortcuts, light and dark mode, your accent color,
+- A native desktop app: real menus and shortcuts, light and dark mode, your accent color,
   resizable sidebar and inspector
 - Undo and redo everything, across the whole project
 - Several projects at once, each in its own window; the ones still open when you quit come
@@ -124,18 +226,23 @@ And a spreadsheet that feels like one:
 - Open projects: a Titer file (`.hlx`) is plain JSON, described in
   [FILE-FORMAT.md](FILE-FORMAT.md), so your data are never locked in
 - Open methods: how each analysis is computed and checked is in [METHODS.md](METHODS.md)
-- Import a GraphPad Prism file (`.pzfx`): File › Import Prism File… brings in its
-  data tables (analyses and graphs aren't stored in the file, so they don't come
-  over). The newer `.prism` format isn't supported yet
 
-**Try it:** Help › Sample Project opens a made-up study told as a paper's figures, from cells
-to mice to patients, with every kind of table ([also here](samples/Titer%20Sample.hlx)).
+### Cloud storage — Box
+
+Titer can open, edit and save `.hlx` and `.prism` files in Box, from Settings →
+Connected Storage. It detects conflicts and never silently overwrites, and tokens live
+in your operating system's keychain, never in a file.
+
+Connect with **your own Box app** (your client id and secret — there is a toggle,
+"Always use my own Box app"). The shared Titer Box app for one-click connect is not
+live yet, so bring-your-own is the working path for now. Dropbox, OneDrive and Google
+Drive are not connected yet.
 
 ## Use Titer with your AI assistant (MCP)
 
 MCP lets an AI assistant you already use — Claude Code, Claude Desktop, or OpenCode — drive
 Titer directly: open projects, run analyses, build graphs, export files. The assistant talks
-to a small server that runs only on your Mac.
+to a small server that runs only on your machine.
 
 1. **Turn it on.** In Titer, go to Settings → AI Connections and turn on "Allow AI apps to
    connect". The server is off until you do this. Leave Titer running while you use your
@@ -188,6 +295,9 @@ to a small server that runs only on your Mac.
 
    Check it connected with `/mcps` or `opencode mcp list`.
 
+   **Codex and Google Antigravity** also connect — see [docs/codex.md](docs/codex.md) and
+   [docs/antigravity.md](docs/antigravity.md) for their setup.
+
 3. **Ask it things**, for example:
 
    - "Open my dose-response project and run a one-way ANOVA on the XY table."
@@ -195,7 +305,7 @@ to a small server that runs only on your Mac.
    - "What analyses have I run on this table, and which are significant?"
    - "Is my Box account connected?"
 
-**Good to know:** the server only listens on your own Mac (`127.0.0.1`) and never sends your
+**Good to know:** the server only listens on your own machine (`127.0.0.1`) and never sends your
 data anywhere. It uses a private token — keep it private, and if you regenerate it in Settings,
 reconnect your assistant. It offers 51 tools: 14 only read, 37 can change your project (run an
 analysis, build a graph, export, save, delete) — your AI tool's own approval settings decide
@@ -204,8 +314,10 @@ Storage; without one they tell you to connect first.
 
 ## Privacy
 
-Titer works entirely on your Mac: your data never leave it, and there is no
-telemetry in the app. Its only connection is a daily check on GitHub for a newer version.
+Titer works entirely on your machine: your data never leave it, and there is no
+telemetry in the app. Its only connections are a daily check on GitHub for a newer version,
+and Box traffic when a Box account is connected. The MCP server listens on your own
+machine only (`127.0.0.1`) and makes no outbound connection.
 
 ## Building from source
 
@@ -216,24 +328,24 @@ Xcode Command Line Tools (`xcode-select --install`).
 npm ci            # install
 npm run dev       # run Titer with live reload
 npm test          # check every analysis and graph against their reference results
-npm run build     # build the two DMGs
+npm run build     # build the Mac DMGs (only Apple Silicon is published since 1.3.0)
 ```
 
-Building the two DMGs needs both Mac targets for Rust, once:
+Building the Mac DMGs needs both Mac targets for Rust, once:
 `rustup target add aarch64-apple-darwin x86_64-apple-darwin`.
 
 ## Clean-room note
 
-Titer's GraphPad Prism file support (`.pzfx` import and `.prism` import) was
-built clean-room: by studying the files Prism writes, together with public
-documentation and the open-source readers for those formats (R's `pzfx`
-package and Python's `pypzfx`), and implementing the importers independently
+Titer's GraphPad Prism file support (`.pzfx` import, `.prism` import, and `.prism` /
+`.pzfx` write-back) was built clean-room: by studying the files Prism writes, together
+with public documentation and the open-source readers for those formats (R's `pzfx`
+package and Python's `pypzfx`), and implementing the importers and writers independently
 from those observations. No part of it involved decompiling, disassembling,
 or otherwise reverse-engineering Prism's program, and no cracked or pirated
 Prism source was used. Where the internal structure of a file was unclear,
 it was probed by changing one thing at a time in a Prism-written file and
 observing what changed inside the file — never by touching the program. The
-importers are independent implementations and contain no Prism code.
+importers and writers are independent implementations and contain no Prism code.
 
 ## License
 
