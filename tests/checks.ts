@@ -713,6 +713,39 @@ check("write-table with excluded omitted (null) preserves the marks (v1.6 F5)", 
   strictEqual(data().excluded, undefined);
 });
 
+check("write-table with zero rows is refused and leaves the table untouched (BUG-17)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const created = await harness.run("job-b17a", "create-table", {
+    table_type: "column",
+    name: "Bug17",
+    columns: ["Title", "X"],
+    rows: [
+      ["r1", 1],
+      ["r2", 2],
+    ],
+  });
+  const tid = (created.result as { table_id: string }).table_id;
+  const data = () => harness.state().nodes[tid]?.data!;
+  harness.sync();
+  await rejects(
+    harness.run("job-b17b", "write-table", { table_id: tid, columns: ["Title", "X"], rows: [] }),
+    /non-empty/,
+  );
+  // Refused, not written: the two rows are still there (cells are stored
+  // as strings by the dispatcher).
+  strictEqual(data().rows.length, 2);
+  deepStrictEqual(data().rows[0], ["r1", "1"]);
+  // A real write still works after the refusal.
+  harness.sync();
+  const done = await harness.run("job-b17c", "write-table", {
+    table_id: tid,
+    columns: ["Title", "X"],
+    rows: [["r1", 9]],
+  });
+  strictEqual((done.result as { rows: number }).rows, 1);
+  deepStrictEqual(data().rows[0], ["r1", "9"]);
+});
+
 check("undo reads can_redo from post-undo state when getState lags (v1.6 F6)", async () => {
   const setup = (harness: ReturnType<typeof mcpLaggingHarness>) => {
     harness.dispatch({
