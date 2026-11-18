@@ -1327,6 +1327,13 @@ fn main() {
                     projects.quit_closing = None;
                 }
                 drop(projects);
+                // BUG-22: the MCP snapshot registry is Rust-side state too —
+                // drop the destroyed window's snapshot here, where the
+                // window's death is certain. The frontend's `closed: true`
+                // publish never runs when a webview is destroyed (no React
+                // unmount), so without this the snapshot leaked and
+                // `titer_list_projects` listed dead projects for ever.
+                app.state::<mcp::McpState>().drop_window(&label);
                 if !app.webview_windows().keys().any(|l| is_project(l) && *l != label) {
                     if quitting {
                         app.exit(0);

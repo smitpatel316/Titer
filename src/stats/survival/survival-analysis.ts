@@ -25,6 +25,9 @@ const CORRECTION_NAMES: Record<SurvivalParams["correction"], string> = {
   none: "uncorrected",
 };
 
+/** The wizard's defaults (log-rank, Holm). */
+const DEFAULTS: SurvivalParams = { curveTest: "logrank", correction: "holm" };
+
 /** R: `chi`, the chi-square comparing groups 1…k of subjects `t`, `s`, `g` by `test`
  *  (`gehan` sums each group's O − E and their covariance, every event time weighted by
  *  the number at risk); `hr`, the log-rank hazard ratio of the first group to the second. */
@@ -40,12 +43,16 @@ if(test=="trend"){x<-1:k;return(sum(x*(d$obs-d$exp))^2/drop(x%*%d$var%*%x))}
 d$chisq}
 hr<-function(t,s,g){d<-survival::survdiff(survival::Surv(t,s)~factor(g,levels=1:2));d$obs[1]/d$exp[1]/(d$obs[2]/d$exp[2])}`;
 
-export async function runSurvival(columns: Column[], params: SurvivalParams): Promise<AnalysisOutcome> {
+export async function runSurvival(columns: Column[], params: SurvivalParams | undefined): Promise<AnalysisOutcome> {
+  // The wizard's defaults (log-rank, Holm): a run with no params — MCP with
+  // no `params`, or a file whose values were dropped on load — runs these
+  // instead of crashing on `params.curveTest` (BUG-15).
+  const p = { ...DEFAULTS, ...params };
   const groups = survivalGroups(columns);
   if (!Array.isArray(groups)) return groups;
 
   const k = groups.length;
-  const test = params.curveTest === "trend" && k < 3 ? "logrank" : params.curveTest;
+  const test = p.curveTest === "trend" && k < 3 ? "logrank" : p.curveTest;
   const pairs = k > 2 ? pairIndices(k) : [];
   // Each pair is compared by the same test, the trend's by the log-rank test.
   const pairTest = test === "gehan" ? "gehan" : "logrank";
@@ -69,7 +76,7 @@ ${groups.map((_, i) => `sub_${i}=sum(g==${i + 1}),ev_${i}=sum(s[g==${i + 1}])`).
             .map(([i, j]) => `${pair(i, j)};pchisq(tryCatch(chi(t[w],s[w],pg,2,"${pairTest}"),error=function(e) NA_real_),1,lower.tail=FALSE)}`)
             .join(
               ",",
-            )}),"${CORRECTION_METHOD[params.correction]}"),c(${pairs.map(([i, j]) => `"p_${i}_${j}"`).join(",")}))` +
+            )}),"${CORRECTION_METHOD[p.correction]}"),c(${pairs.map(([i, j]) => `"p_${i}_${j}"`).join(",")}))` +
           pairs.map(([i, j]) => `,hr_${i}_${j}=${pair(i, j)};tryCatch(hr(t[w],s[w],pg),error=function(e) NA_real_)}`).join("")
         : ""
     })`,
@@ -116,7 +123,7 @@ ${groups.map((_, i) => `sub_${i}=sum(g==${i + 1}),ev_${i}=sum(s[g==${i + 1}])`).
     groups: [],
     survivalGroups: summaries,
     comparisons,
-    comparisonsLabel: `Pairwise comparisons (${TEST_NAMES[pairTest]}, ${CORRECTION_NAMES[params.correction]})`,
+    comparisonsLabel: `Pairwise comparisons (${TEST_NAMES[pairTest]}, ${CORRECTION_NAMES[p.correction]})`,
     comparisonsEffect: "Hazard ratio",
     notes:
       "Kaplan-Meier curves (R's survival package). A median survival is the time the curve falls to 50%; " +

@@ -80,7 +80,7 @@ import { GRAPHS, GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
 import { ANALYSES } from "../stats";
 import { isGrouped, isNested } from "./dataset";
 import { isSummaryFormatValue, summarySubcolumns } from "./summary-format";
-import { seriesKeyOf } from "./columns";
+import { groupRuns } from "./columns";
 import { regroupDropped, regroupTable, renestDropped, renestTable } from "../views/tables/table-data";
 import {
   assignLabels,
@@ -591,11 +591,17 @@ function readData(
     if (!fits) data = defined({ ...data, summaryFormat: undefined });
   }
   if (isGrouped(data) && columns.length > lead) {
-    const groups = [...new Set(columns.slice(lead).map(seriesKeyOf))];
-    const replicates = Math.max(...groups.map((g) => columns.slice(lead).filter((c) => seriesKeyOf(c) === g).length));
-    if (groups.length !== data.groups || replicates !== data.replicates) {
-      regroupDroppedNames.push(...regroupDropped(data, groups.length, replicates, kind));
-      data = defined(regroupTable(data, groups.length, replicates, kind));
+    // Groups are runs, not names: two same-named groups ("Group:Y1"… twice)
+    // are two groups, and counting unique names would rebuild the table as
+    // one merged group and move the second group's values into the first's
+    // columns. Rebuild only when the run-based counts disagree with the
+    // stored ones (a ragged or hand-edited file).
+    const runs = groupRuns(columns.slice(lead));
+    const groups = runs.length;
+    const replicates = Math.max(...runs.map((r) => r.columns.length));
+    if (groups !== data.groups || replicates !== data.replicates) {
+      regroupDroppedNames.push(...regroupDropped(data, groups, replicates, kind));
+      data = defined(regroupTable(data, groups, replicates, kind));
     }
   }
   if (isNested(data) && columns.length > 1) {
@@ -668,7 +674,7 @@ function readOptions(raw: unknown, label: string, issues: ProjectIssue[]): Graph
  *  key (`??` in the runner) or spread-merge their defaults (one-sample-t,
  *  one-way ANOVA, frequency-distribution). Mirrors each runner's DEFAULTS —
  *  compare-two-groups, kruskal-wallis, friedman, nested-anova,
- *  deming-regression — and the multiple-t-tests wizard default (Holm). */
+ *  deming-regression, survival — and the multiple-t-tests wizard default (Holm). */
 const PARAM_DEFAULTS: Record<string, Record<string, unknown>> = {
   "compare-two-groups": { paired: false, gaussian: true, equalVariance: true, ratio: false, tails: "two-sided" },
   "kruskal-wallis": { posthoc: "none" },
@@ -676,6 +682,7 @@ const PARAM_DEFAULTS: Record<string, Record<string, unknown>> = {
   "nested-anova": { posthoc: "none" },
   "deming-regression": { lambda: 1 },
   "multiple-t-tests": { paired: false, gaussian: true, pooledSd: false, correction: "holm" },
+  survival: { curveTest: "logrank", correction: "holm" },
   // M7 fallbacks: a cross-family choice left out below lands on these.
   anova: { posthoc: "none" },
   correlation: { method: "pearson" },

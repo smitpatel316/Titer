@@ -114,13 +114,25 @@ interface PrismDataSet {
    */
   title?: string | { string?: string };
   format?: string;
-  replicates?: unknown[];
+  replicates?: { cellAttributes?: PrismCellAttributes[] }[];
   /** `y_replicates` datasets carry this instead of `replicates`: a list of
    *  ranges, each covering one or more replicate subcolumns ("0~1" = two,
    *  "2" = one). */
-  "replicate ranges"?: { range?: string }[];
+  "replicate ranges"?: { range?: string; replicate?: { cellAttributes?: PrismCellAttributes[] } }[];
   /** Survival X datasets carry this: how their dates become durations. */
   dateTimeConversion?: { units?: string; zeroDate?: string };
+}
+
+/** One `cellAttributes` entry on a Prism replicate: the rows it covers
+ *  ("8", or an inclusive range "9~10") and the attributes those cells
+ *  carry. An entry whose attributes include `"EXCLUDED"` is a
+ *  struck-through cell (BUG-10) — real Prism stores exclusions here, in
+ *  the dataset JSON; `data.csv` still holds the excluded values as plain
+ *  numbers. Entries with empty attributes are formatting runs, not
+ *  exclusions. */
+interface PrismCellAttributes {
+  rows?: string;
+  attributes?: string[];
 }
 
 /**
@@ -168,6 +180,83 @@ export function replicateRangeProblems(set: PrismDataSet): string[] {
     }
   }
   return problems;
+}
+
+/**
+ * Parse a Prism `cellAttributes` `rows` value: a single row ("8") or an
+ * inclusive range ("9~10"). Null when it doesn't parse, is reversed, or
+ * spans an absurd range (a corrupt entry must never allocate a huge array).
+ */
+export function parseExcludedRows(value: string): number[] | null {
+  const m = /^(\d+)(?:~(\d+))?$/.exec(value.trim());
+  if (!m) return null;
+  const a = Number(m[1]);
+  if (m[2] === undefined) return [a];
+  const b = Number(m[2]);
+  if (b < a || b - a > 1_000_000) return null;
+  const rows: number[] = [];
+  for (let r = a; r <= b; r++) rows.push(r);
+  return rows;
+}
+
+/**
+ * A dataset's excluded (struck-through) rows, per subcolumn — real
+ * Prism's representation (BUG-10): `cellAttributes` entries whose
+ * attributes include `"EXCLUDED"`, inside `replicates[i]` (one replicate
+ * per subcolumn) or `replicate ranges[i].replicate` (one replicate per
+ * run of subcolumns). An entry applies to EVERY subcolumn its replicate
+ * covers — there is no per-subcolumn index in the entry, and Prism
+ * splits ranges where per-subcolumn exclusion patterns differ (seen in
+ * capsanoicids S7: range 3 EXCLUDED rows 9~10, range 4~5 row 10 only).
+ * `count` is the dataset's resolved subcolumn count; rows past
+ * `rowCount` can't be cells. Problems are human-readable reasons an
+ * entry couldn't be used — the caller warns about them and the cells
+ * stay live, never silently dropped.
+ */
+export function excludedRowsBySubcolumn(
+  set: PrismDataSet,
+  count: number,
+  rowCount: number,
+): { excluded: Set<number>[]; problems: string[] } {
+  const excluded = Array.from({ length: count }, () => new Set<number>());
+  const problems: string[] = [];
+  const apply = (subcolumns: number[], cellAttributes: PrismCellAttributes[] | undefined, where: string) => {
+    for (const entry of cellAttributes ?? []) {
+      if (!(entry.attributes ?? []).includes("EXCLUDED")) continue;
+      const rows = typeof entry.rows === "string" ? parseExcludedRows(entry.rows) : null;
+      if (rows === null) {
+        problems.push(
+          `excluded-cells entry “${entry.rows ?? ""}” (${where}) doesn't parse as a row or row range; those cells were left live`,
+        );
+        continue;
+      }
+      for (const r of rows) {
+        if (r >= rowCount) {
+          problems.push(
+            `excluded-cells entry row ${r} (${where}) is past the table's ${rowCount} rows; it was left out`,
+          );
+          continue;
+        }
+        for (const s of subcolumns) excluded[s]?.add(r);
+      }
+    }
+  };
+  if (Array.isArray(set.replicates) && set.replicates.length > 0) {
+    set.replicates.forEach((rep, i) => {
+      if (i < count) apply([i], rep?.cellAttributes, `subcolumn ${i + 1}`);
+    });
+  } else if (Array.isArray(set["replicate ranges"])) {
+    for (const entry of set["replicate ranges"]) {
+      const m = /^(\d+)(?:~(\d+))?$/.exec(entry.range ?? "");
+      if (!m) continue; // malformed ranges are already refused upstream
+      const a = Number(m[1]);
+      const b = m[2] === undefined ? a : Number(m[2]);
+      const subs: number[] = [];
+      for (let s = a; s <= b && s < count; s++) subs.push(s);
+      apply(subs, entry.replicate?.cellAttributes, `replicate range “${entry.range ?? ""}”`);
+    }
+  }
+  return { excluded, problems };
 }
 
 /** Subcolumns a Prism dataFormat spans when its shape is fixed — the
@@ -386,6 +475,17 @@ export function subcolumnNames(title: string, dataFormat: string, count: number)
   if (suffixes === null) return Array.from({ length: count }, (_, i) => `${base}_${i + 1}`);
   return Array.from({ length: count }, (_, i) => `${base}_${i + 1}`);
 }
+
+/**
+ * Whether a Prism dataFormat names summary subcolumns for a dataset this
+ * wide — its suffix list exists and is exactly `count` long. `y_replicates`
+ * (null) and `y_single` ([]) never fit a multi-column dataset; a summary
+ * format fits only its own width.
+ */
+const summaryFits = (dataFormat: string, count: number): boolean => {
+  const suffixes = SUBCOLUMN_SUFFIXES[dataFormat];
+  return suffixes !== undefined && suffixes !== null && suffixes.length === count;
+};
 
 const isSummaryFormat = (dataFormat: string) => {
   const s = SUBCOLUMN_SUFFIXES[dataFormat];
@@ -735,7 +835,26 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
           cursor += entry.count;
           continue;
         }
-        const names = subcolumnNames(plainTitle(entry.set.title), dataFormat, entry.count);
+        // Naming precedence (BUG-9): the table-level dataFormat wins when
+        // it describes this dataset (its suffix list matches the
+        // subcolumn count) — real Prism files store the specific
+        // statistic there: a y_cv_n table whose datasets say y_sd_n
+        // still means MEAN/CV/N, not MEAN/SD/N. When the table format
+        // doesn't fit (a mixed table: an xy table's "XX error" dataset
+        // is y_single beside y_sd_n Y datasets, so the table says
+        // y_single), the dataset's own format carries the meaning —
+        // Ya_MEAN/Ya_SD/Ya_N, not Ya_1/Ya_2/Ya_3. Anything else falls
+        // back to _1/_2/_3 inside subcolumnNames.
+        const setFormat = entry.set.format ?? "";
+        const names = subcolumnNames(
+          plainTitle(entry.set.title),
+          summaryFits(dataFormat, entry.count)
+            ? dataFormat
+            : summaryFits(setFormat, entry.count)
+              ? setFormat
+              : dataFormat,
+          entry.count,
+        );
         for (let i = 0; i < entry.count; i++) {
           columns.push({ name: names[i], values: csvCol(cursor) });
           cursor++;
@@ -806,6 +925,42 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
       ]),
       ...(groups !== undefined && replicates !== undefined ? { groups, replicates } : {}),
     };
+    // Excluded cells (BUG-10): real Prism flags struck-through cells in
+    // the dataset JSON (see excludedRowsBySubcolumn); the values stay in
+    // data.csv, so the reader must restore the flag or the values come
+    // back as live data. Keys are full-grid "row,col" (col 0 = row
+    // titles, never excluded); the Titer columns are [X?] + each present
+    // dataset's subcolumns, in order — a missing dataset consumes CSV
+    // columns but becomes no Titer column, so the cursor below advances
+    // only for present datasets.
+    {
+      const excludedKeys: string[] = [];
+      const collect = (set: PrismDataSet | null, count: number, firstCol: number, label: string) => {
+        if (!set) return;
+        const { excluded, problems } = excludedRowsBySubcolumn(set, count, rowCount);
+        for (const p of problems) {
+          issues.push({ severity: "warning", message: `${displayName}: ${label} — ${p}.` });
+        }
+        excluded.forEach((rows, j) => {
+          for (const r of rows) excludedKeys.push(`${r},${firstCol + j}`);
+        });
+      };
+      if (hasXCol && xSet) collect(xSet, 1, 1, "the X dataset");
+      let colCursor = 1 + (hasXCol ? 1 : 0);
+      for (const entry of layoutSets) {
+        if (entry.set === null) continue;
+        collect(entry.set, entry.count, colCursor, `dataset “${plainTitle(entry.set.title) || "Y"}”`);
+        colCursor += entry.count;
+      }
+      if (excludedKeys.length) {
+        excludedKeys.sort((a, b) => {
+          const [ar, ac] = a.split(",").map(Number);
+          const [br, bc] = b.split(",").map(Number);
+          return ar - br || ac - bc;
+        });
+        data.excluded = excludedKeys;
+      }
+    }
     const node: ProjectNode = {
       id: genId("table"),
       type: "table",
@@ -828,9 +983,14 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
   // The trailing empty-named constant Prism writes (name "" + value "") is
   // the new-row placeholder, not a constant — it is left out.
   interface PrismInfoSheet {
-    title?: string;
-    notesText?: string;
-    constants?: { name?: string; value?: string | number }[];
+    // Prism sometimes writes the title / notes / constant values as a
+    // rich-text object `{ string, version, formatting }` instead of a
+    // plain string (real files: capsanoicids, dilution-analysis,
+    // senolytics-25hc — BUG-5). `plainTitle` unwraps those; the types
+    // say so here so the lie can't reach the writer again.
+    title?: string | { string?: string };
+    notesText?: string | { string?: string };
+    constants?: { name?: string | { string?: string }; value?: string | number | { string?: string } }[];
   }
   for (const infoUid of sheets.info ?? []) {
     const sheet = await readJson<PrismInfoSheet>(`info/${infoUid}/sheet.json`);
@@ -838,12 +998,19 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
       issues.push({ severity: "warning", message: `Info sheet “${infoUid}” has no sheet.json; it was left out.` });
       continue;
     }
-    const name = titleOf(infoUid, typeof sheet.title === "string" && sheet.title !== "" ? sheet.title : "Project info");
+    // Titles map first (as before); the sheet's own title is the fallback,
+    // unwrapped — it can also be a rich-text object.
+    const name = titleOf(infoUid, plainTitle(sheet.title) || "Project info");
     const constants = readInfoConstants(
       (sheet.constants ?? []).map((c) => ({
         id: newConstantId(),
-        name: c.name ?? "",
-        value: c.value === undefined ? "" : String(c.value),
+        name: plainTitle(c.name),
+        value:
+          c.value === undefined
+            ? ""
+            : typeof c.value === "object" && c.value !== null
+              ? plainTitle(c.value)
+              : String(c.value),
       })),
     );
     const node: ProjectNode = {
@@ -851,7 +1018,7 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
       type: "info",
       name,
       parentId: null,
-      info: { constants, notes: sheet.notesText ?? "", linkedTableId: null },
+      info: { constants, notes: plainTitle(sheet.notesText), linkedTableId: null },
     };
     nodes[node.id] = node;
     rootOrder.push(node.id);

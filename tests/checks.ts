@@ -89,7 +89,7 @@ import { analysisOptionsForTable, analysisOptionsKey } from "../src/views/analys
 import { followTable } from "../src/store/references";
 import { isSummaryFormatValue, summaryFormatOf, summaryTableProblem } from "../src/lib/summary-format";
 import { tCrit95 } from "../src/lib/student-t";
-import { pairKey } from "../src/lib/columns";
+import { groupRuns, pairKey } from "../src/lib/columns";
 import {
   NAMED_COLORS,
   PALETTES,
@@ -610,6 +610,55 @@ check("create-table reads the new id back when getState lags the dispatch (v1.6 
   strictEqual((done.result as { data_columns: number }).data_columns, 15);
 });
 
+check("MCP create-analysis accepts anova / kruskal-wallis / rm-anova / friedman on a column table (BUG-14)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-b14-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B", "C", "D"],
+    rows: [
+      ["r1", 10, 14, 20, 25],
+      ["r2", 11, 15, 21, 25],
+      ["r3", 10, 14, 20, 25],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  // The gate runs before createAnalysis, so a recording stub proves the
+  // gate passed; the real store action is exercised by the live MCP pin.
+  const created: string[] = [];
+  harness.deps.createAnalysis = (_parentId, type) => {
+    created.push(type);
+    return `analysis_${type}`;
+  };
+  for (const type of ["anova", "kruskal-wallis", "rm-anova", "friedman"]) {
+    const done = await harness.run(`job-b14-${type}`, "create-analysis", {
+      table_id: tableId,
+      analysis_type: type,
+    });
+    strictEqual((done.result as { analysis_type: string }).analysis_type, type);
+  }
+  deepStrictEqual(created, ["anova", "kruskal-wallis", "rm-anova", "friedman"]);
+  // The wizard meta-entry is still refused, and anova stays unoffered on
+  // grouped tables (which offer neither it nor the meta entry).
+  await rejects(
+    harness.run("job-b14-meta", "create-analysis", { table_id: tableId, analysis_type: "compare-many-groups" }),
+    /wizard value/,
+  );
+  const grouped = await harness.run("job-b14-grouped", "create-table", {
+    table_type: "grouped",
+    columns: ["", "A:Y1", "B:Y1"],
+    rows: [["r1", 1, 2]],
+  });
+  harness.sync();
+  await rejects(
+    harness.run("job-b14-grouped-anova", "create-analysis", {
+      table_id: (grouped.result as { table_id: string }).table_id,
+      analysis_type: "anova",
+    }),
+    /not offered for grouped tables/,
+  );
+});
+
 check("create-table accepts an empty row-title column, and refuses an empty later column (v1.6 F2)", async () => {
   const harness = mcpLaggingHarness(true);
   const done = await harness.run("job-f2a", "create-table", {
@@ -662,6 +711,106 @@ check("write-table with excluded omitted (null) preserves the marks (v1.6 F5)", 
   harness.sync();
   await harness.run("job-f5d", "write-table", { table_id: tid, columns, rows, excluded: [] });
   strictEqual(data().excluded, undefined);
+});
+
+check("write-table with zero rows is refused and leaves the table untouched (BUG-17)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const created = await harness.run("job-b17a", "create-table", {
+    table_type: "column",
+    name: "Bug17",
+    columns: ["Title", "X"],
+    rows: [
+      ["r1", 1],
+      ["r2", 2],
+    ],
+  });
+  const tid = (created.result as { table_id: string }).table_id;
+  const data = () => harness.state().nodes[tid]?.data!;
+  harness.sync();
+  await rejects(
+    harness.run("job-b17b", "write-table", { table_id: tid, columns: ["Title", "X"], rows: [] }),
+    /non-empty/,
+  );
+  // Refused, not written: the two rows are still there (cells are stored
+  // as strings by the dispatcher).
+  strictEqual(data().rows.length, 2);
+  deepStrictEqual(data().rows[0], ["r1", "1"]);
+  // A real write still works after the refusal.
+  harness.sync();
+  const done = await harness.run("job-b17c", "write-table", {
+    table_id: tid,
+    columns: ["Title", "X"],
+    rows: [["r1", 9]],
+  });
+  strictEqual((done.result as { rows: number }).rows, 1);
+  deepStrictEqual(data().rows[0], ["r1", "9"]);
+});
+
+check("write-table sets row_groups on a grouped table, and create-table takes them (BUG-19)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const columns = ["Title", "Placebo:Y1", "Placebo:Y2", "Drug:Y1", "Drug:Y2"];
+  const rows = [
+    ["Day 1", 1, 2, 3, 4],
+    ["Day 2", 5, 6, 7, 8],
+    ["Day 1", 9, 10, 11, 12],
+    ["Day 2", 13, 14, 15, 16],
+  ];
+  const bands = [
+    { name: "WT", count: 2 },
+    { name: "KO", count: 2 },
+  ];
+  // A banded table can be built in one call.
+  const created = await harness.run("job-b19a", "create-table", {
+    table_type: "grouped",
+    name: "B19",
+    columns,
+    rows,
+    row_groups: bands,
+  });
+  const tid = (created.result as { table_id: string }).table_id;
+  const data = () => harness.state().nodes[tid]?.data!;
+  deepStrictEqual(data().rowGroups, bands);
+  // A rewrite with row_groups omitted preserves the bands.
+  harness.sync();
+  await harness.run("job-b19b", "write-table", { table_id: tid, columns, rows });
+  deepStrictEqual(data().rowGroups, bands);
+  // An explicit list replaces them; an empty list clears them.
+  harness.sync();
+  await harness.run("job-b19c", "write-table", {
+    table_id: tid,
+    columns,
+    rows,
+    row_groups: [
+      { name: "A", count: 1 },
+      { name: "B", count: 3 },
+    ],
+  });
+  deepStrictEqual(data().rowGroups, [
+    { name: "A", count: 1 },
+    { name: "B", count: 3 },
+  ]);
+  harness.sync();
+  await harness.run("job-b19d", "write-table", { table_id: tid, columns, rows, row_groups: [] });
+  strictEqual(data().rowGroups, undefined);
+  // The bands must tile the rows exactly.
+  harness.sync();
+  await rejects(
+    harness.run("job-b19e", "write-table", { table_id: tid, columns, rows, row_groups: [{ name: "WT", count: 2 }] }),
+    /tile the rows exactly/,
+  );
+  // And they only apply to grouped tables.
+  const col = await harness.run("job-b19f", "create-table", {
+    table_type: "column",
+    name: "C",
+    columns: ["Title", "A"],
+    rows: [["r1", 1]],
+  });
+  const ctid = (col.result as { table_id: string }).table_id;
+  harness.sync();
+  await rejects(
+    harness.run("job-b19g", "write-table", { table_id: ctid, columns: ["Title", "A"], rows: [["r1", 1]], row_groups: bands }),
+    /only apply to grouped tables/,
+  );
 });
 
 check("undo reads can_redo from post-undo state when getState lags (v1.6 F6)", async () => {
@@ -2125,6 +2274,65 @@ check("fewer sub-columns keep each value in its group", () => {
   deepStrictEqual(t.columns, ["Title", "A:Y1", "A:Y2", "Treated:Y1", "Treated:Y2"]);
   deepStrictEqual(t.rows[0], ["r1", "a1", "a2", "b1", "b2"]);
   deepStrictEqual(t.excluded, ["0,3"]);
+});
+
+// ── Duplicate group names (BUG-1/BUG-3) ──────────────────────────────────
+// Two same-named groups are two groups: grouping is by RUNS, not by name,
+// so a second "Group:Y1…" set never merges into the first (values shifting
+// columns on .pzfx/.prism write and on .hlx open).
+
+check("groupRuns keeps duplicate group names as separate runs", () => {
+  deepStrictEqual(groupRuns(["A:Y1", "A:Y2", "A:Y1", "A:Y2"]), [
+    { name: "A", columns: [0, 1] },
+    { name: "A", columns: [2, 3] },
+  ]);
+  // Interleaved columns stay open across other groups' columns.
+  deepStrictEqual(groupRuns(["A:Y1", "B:Y1", "A:Y2"]), [
+    { name: "A", columns: [0, 2] },
+    { name: "B", columns: [1] },
+  ]);
+});
+
+check("duplicate group names keep their own values on regroup", () => {
+  const dup: TableData = {
+    columns: ["Title", "Group:Y1", "Group:Y2", "Group:Y1", "Group:Y2"],
+    rows: [["r1", "1", "2", "3", "4"]],
+    groups: 2,
+    replicates: 2,
+  };
+  const t = regroupTable(dup, 2, 2);
+  deepStrictEqual(t.columns, ["Title", "Group:Y1", "Group:Y2", "Group:Y1", "Group:Y2"]);
+  deepStrictEqual(t.rows[0], ["r1", "1", "2", "3", "4"]);
+});
+
+check("a grouped table with duplicate group names opens unchanged", () => {
+  const dupPayload: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "Dup",
+        parentId: null,
+        tableType: "grouped",
+        data: {
+          columns: ["Title", "Group:Y1", "Group:Y2", "Group:Y1", "Group:Y2"],
+          rows: [["1 ", "1", "2", "3", "4"]],
+          groups: 2,
+          replicates: 2,
+        },
+      },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const loaded = read(serializeProjectFile(dupPayload));
+  strictEqual(loaded.updated, false);
+  const data = loaded.project.nodes.t1.data!;
+  strictEqual(data.groups, 2);
+  strictEqual(data.replicates, 2);
+  deepStrictEqual(data.columns, ["Title", "Group:Y1", "Group:Y2", "Group:Y1", "Group:Y2"]);
+  deepStrictEqual(data.rows[0], ["1 ", "1", "2", "3", "4"]);
 });
 
 // ── Summary sub-columns (v2 item 8) ───────────────────────────────────────
@@ -12650,10 +12858,15 @@ check(".pzfx import reads '1,000' as 1000 in a dot-decimal file — and keeps a 
   ]);
 });
 
-check(".pzfx import dedupes duplicate column names so the second keeps its own data", () => {
+check(".pzfx import preserves duplicate column names exactly (BUG-4)", () => {
   // Two Y columns both titled "Control", plus a third already titled
-  // "Control 2" and a third "Control" — the rename must skip names that
-  // are already taken, and each column must keep its own values.
+  // "Control 2" and a third "Control" — the reader keeps every title
+  // verbatim, exactly as the .prism import does and as the file holds
+  // them. Renaming the second duplicate ("Control" → "Control 2") used
+  // to change analysis labels and re-run hashes after a .pzfx
+  // round-trip (BUG-4: `MitoFactory` → `MitoFactory 2`), even though
+  // all values were identical. Each column still keeps its own values,
+  // positionally — the values never depended on the rename.
   const text = `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">
 <Table ID="Table0" XFormat="none" TableType="OneWay">
 <Title>Data 1</Title>
@@ -12667,16 +12880,42 @@ check(".pzfx import dedupes duplicate column names so the second keeps its own d
   strictEqual(imported.tables.length, 1);
   const node = imported.project.nodes[imported.project.rootOrder[0]];
   if (!node || node.type !== "table") throw new Error("no table node");
-  deepStrictEqual(node.data!.columns, ["Title", "Control", "Control 2", "Control 3", "Control 4"]);
-  // The renamed columns still carry their own data: a lookup by name
-  // (data.columns.indexOf) now lands on the intended column, not the first.
+  deepStrictEqual(node.data!.columns, ["Title", "Control", "Control", "Control 2", "Control"]);
+  // Every column keeps its own data, by position: the second "Control"
+  // holds 10./20., the third "Control" holds 1000./2000.
   deepStrictEqual(node.data!.rows, [
     [null, "1.", "10.", "100.", "1000."],
     [null, "2.", "20.", "200.", "2000."],
   ]);
-  const renamed = node.data!.columns.indexOf("Control 2");
-  strictEqual(node.data!.rows[0][renamed], "10.");
-  ok(imported.issues.some((i) => i.message.includes("duplicate column names were renamed")), "warns about the rename");
+  strictEqual(node.data!.rows[0][2], "10.");
+  strictEqual(node.data!.rows[0][4], "1000.");
+  ok(!imported.issues.some((i) => i.message.includes("duplicate column names were renamed")), "no rename warning");
+});
+
+check(".pzfx import preserves trailing spaces in table, column and row titles (BUG-4/BUG-7)", () => {
+  // A table titled `XY␣`, Y columns `0nM␣` (twice), and a row titled
+  // `Control␣`: the reader used to trim all three, so the table went
+  // missing under its real name, the columns were deduped to
+  // `0nM`/`0nM 2`, and the row title changed value. The file holds the
+  // spaces verbatim; the import must too.
+  const text = `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">
+<Table ID="Table0" XFormat="none" TableType="OneWay">
+<Title>XY </Title>
+<RowTitlesColumn Width="89"><Subcolumn><d>Control </d><d>Sorbitol</d></Subcolumn></RowTitlesColumn>
+<YColumn Width="89" Decimals="0" Subcolumns="1"><Title>0nM </Title><Subcolumn><d>1.</d><d>2.</d></Subcolumn></YColumn>
+<YColumn Width="89" Decimals="0" Subcolumns="1"><Title>0nM </Title><Subcolumn><d>10.</d><d>20.</d></Subcolumn></YColumn>
+</Table>
+</GraphPadPrismFile>`;
+  const imported = parsePzfx(text);
+  deepStrictEqual(imported.tables, ["XY "]);
+  const node = imported.project.nodes[imported.project.rootOrder[0]];
+  if (!node || node.type !== "table") throw new Error("no table node");
+  strictEqual(node.name, "XY ");
+  deepStrictEqual(node.data!.columns, ["Title", "0nM ", "0nM "]);
+  deepStrictEqual(node.data!.rows, [
+    ["Control ", "1.", "10."],
+    ["Sorbitol", "2.", "20."],
+  ]);
 });
 
 check(".pzfx import keeps untitled, colon-titled and ragged TwoWay replicate groups through a save/reload round-trip", () => {
@@ -12685,7 +12924,9 @@ check(".pzfx import keeps untitled, colon-titled and ragged TwoWay replicate gro
   // untitled groups merged into "Group" (FF-F9 renamed the duplicate to
   // "Group:Y1 2", which the reload's regroupTable then dropped), "1:10:Y1"
   // split at the first ":" into group "1", and the ragged group was short
-  // a subcolumn.
+  // a subcolumn. Since BUG-1/BUG-3, duplicate group names are PRESERVED —
+  // the two untitled columns are two groups both named "Group" (grouping is
+  // by runs, not by name), and no rename warning is issued for them.
   const text = `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">
 <Table ID="Table0" XFormat="none" TableType="TwoWay" YFormat="replicates">
 <Title>TwoWay reps</Title>
@@ -12707,8 +12948,8 @@ check(".pzfx import keeps untitled, colon-titled and ragged TwoWay replicate gro
     "Title",
     "Group:Y1",
     "Group:Y2",
-    "Group 2:Y1",
-    "Group 2:Y2",
+    "Group:Y1",
+    "Group:Y2",
     "1-10:Y1",
     "1-10:Y2",
     "Ragged:Y1",
@@ -12718,7 +12959,7 @@ check(".pzfx import keeps untitled, colon-titled and ragged TwoWay replicate gro
     ["Low", "1.", "3.", "10.", "30.", "100.", "300.", "1000.", null],
     ["High", "2.", "4.", "20.", "40.", "200.", "400.", "2000.", null],
   ]);
-  ok(imported.issues.some((i) => i.message.includes("group names must be unique")), "warns about the renames");
+  ok(!imported.issues.some((i) => i.message.includes("group names must be unique")), "no rename warning for duplicates");
   // The round-trip is the point: save as .hlx, reload, every value still there.
   const { project } = read(serializeProjectFile(imported.project));
   const reloaded = project.nodes[imported.project.rootOrder[0]];
@@ -12727,6 +12968,88 @@ check(".pzfx import keeps untitled, colon-titled and ragged TwoWay replicate gro
   deepStrictEqual(reloaded.data!.rows, node.data!.rows);
   strictEqual(reloaded.data!.groups, 4);
   strictEqual(reloaded.data!.replicates, 2);
+});
+
+check(".pzfx import reads a HugeTable as a Grouped table with all 53 replicates (BUG-8)", () => {
+  // pypzfx-column_hugetable.pzfx is the pypzfx fixture: one table, TwoWay,
+  // YFormat replicates, 53 subcolumns — past Prism's 52-subcolumn line, so
+  // Prism writes it as <HugeTable> instead of <Table>. Before the fix the
+  // importer refused it outright ("a HugeTable, which Titer can't import
+  // yet") and the whole file failed; a HugeTable is the same shape as a
+  // Table, so it imports through the same path. The subcolumns alternate
+  // 1,2,3 / 3,2,1 down the replicates, so every row is pinned exactly.
+  const { imported, table } = importedTable("pypzfx-column_hugetable");
+  strictEqual(table.name, "Data 1");
+  strictEqual(table.tableType, "grouped");
+  strictEqual(table.data!.groups, 1);
+  strictEqual(table.data!.replicates, 53);
+  strictEqual(table.data!.columns.length, 54);
+  strictEqual(table.data!.columns[1], "Y:Y1");
+  strictEqual(table.data!.columns[53], "Y:Y53");
+  const row = (odd: string, even: string) => [
+    null,
+    ...Array.from({ length: 53 }, (_, i) => (i % 2 === 0 ? odd : even)),
+  ];
+  deepStrictEqual(table.data!.rows, [row("1.", "3."), row("2.", "2."), row("3.", "1.")]);
+  ok(
+    imported.issues.some((i) => i.message.includes("was a HugeTable in Prism (53 subcolumns per data set)")),
+    "says the table was a HugeTable, with its size",
+  );
+  ok(imported.issues.every((i) => i.severity !== "error"), "no error — the file imports");
+  // The round-trip is the point: 53 replicates is past Titer's
+  // 20-replicate creation cap, so a save/reload must keep them all.
+  const { project } = read(serializeProjectFile(imported.project));
+  const reloaded = project.nodes[imported.project.rootOrder[0]];
+  if (!reloaded || reloaded.type !== "table") throw new Error("no reloaded table node");
+  deepStrictEqual(reloaded.data!.columns, table.data!.columns);
+  deepStrictEqual(reloaded.data!.rows, table.data!.rows);
+  strictEqual(reloaded.data!.groups, 1);
+  strictEqual(reloaded.data!.replicates, 53);
+});
+
+check(".pzfx import reads an XY HugeTable through the same path (BUG-8)", () => {
+  // The tag is the only difference — an XY HugeTable (60 replicates in the
+  // real zenodo-15477782 files) must not need a TwoWay-shaped fixture to
+  // prove it. Small inline file: X + 2 Y sets × 2 replicates.
+  const text = `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">
+<HugeTable ID="Table0" XFormat="numbers" YFormat="replicates" Replicates="2" TableType="XY" EVFormat="AsteriskAfterNumber">
+<Title>XY huge</Title>
+<XColumn Width="89" Decimals="0" Subcolumns="1"><Title>X</Title><Subcolumn><d>1.</d><d>2.</d></Subcolumn></XColumn>
+<YColumn Width="89" Decimals="0" Subcolumns="2"><Title>A</Title><Subcolumn><d>10.</d><d>20.</d></Subcolumn><Subcolumn><d>11.</d><d>21.</d></Subcolumn></YColumn>
+<YColumn Width="89" Decimals="0" Subcolumns="2"><Title>B</Title><Subcolumn><d>100.</d><d>200.</d></Subcolumn><Subcolumn><d>101.</d><d>201.</d></Subcolumn></YColumn>
+</HugeTable>
+</GraphPadPrismFile>`;
+  const imported = parsePzfx(text);
+  strictEqual(imported.tables.length, 1);
+  const node = imported.project.nodes[imported.project.rootOrder[0]];
+  if (!node || node.type !== "table") throw new Error("no table node");
+  strictEqual(node.tableType, "xy");
+  deepStrictEqual(node.data!.columns, ["Title", "X", "A_1", "A_2", "B_1", "B_2"]);
+  deepStrictEqual(node.data!.rows, [
+    [null, "1.", "10.", "11.", "100.", "101."],
+    [null, "2.", "20.", "21.", "200.", "201."],
+  ]);
+  ok(
+    imported.issues.some((i) => i.message.includes("was a HugeTable in Prism (2 subcolumns per data set)")),
+    "says the table was a HugeTable",
+  );
+});
+
+check(".pzfx import still rejects a table with no data columns (pypzfx-empty)", () => {
+  // The second BUG-8 instance, different judgment: the file's only table
+  // carries no data columns, so there is nothing to import — the clean
+  // rejection stays correct, and the fix must not turn it into an empty
+  // table or a crash.
+  const imported = parsePzfx(readFileSync(new URL("./testdata/pypzfx-empty.pzfx", import.meta.url), "utf8"));
+  strictEqual(imported.tables.length, 0);
+  ok(
+    imported.issues.some((i) => i.severity === "error" && i.message.includes("No tables in this file could be imported")),
+    "errors that no tables could be imported",
+  );
+  ok(
+    imported.issues.some((i) => i.message.includes("holds no data columns")),
+    "says plainly why the table was left out",
+  );
 });
 
 check(".pzfx import refuses files that aren't .pzfx", () => {

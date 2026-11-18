@@ -35,6 +35,10 @@ export interface DocumentState {
   filePath: string | null;
   isDirty: boolean;
   revision: number;
+  /** The last opening's failure, if this window's file failed to load — the
+   *  same message the GUI shows. Null once a file loads. The test harness's
+   *  hand-built states omit it, so it stays optional here. */
+  openError?: string | null;
 }
 
 /** The native IO a document job needs, injectable so the node test harness

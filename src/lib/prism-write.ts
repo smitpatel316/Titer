@@ -28,6 +28,7 @@
 import JSZip from "jszip";
 import type { ProjectFilePayload } from "./project-file";
 import type { NonlinearModel } from "../stats/types";
+import { groupRuns } from "./columns";
 import { summaryFormatDef } from "./summary-format";
 
 export interface PrismWriteIssue {
@@ -216,7 +217,31 @@ function groupDatasets(columns: WriteColumn[]): WriteSet[] {
   return sets;
 }
 
-const replicateEntry = (lastRow: number) => ({
+/** Excluded rows as Prism `cellAttributes` entries: maximal runs of
+ *  consecutive rows, "N" or "N~M", each flagged EXCLUDED — the
+ *  representation real Prism writes (BUG-10). Empty when nothing is
+ *  excluded, so the key is omitted entirely. */
+const excludedCellAttributes = (rows: Set<number> | undefined): { rows: string; attributes: string[] }[] => {
+  if (!rows || rows.size === 0) return [];
+  const sorted = [...rows].sort((a, b) => a - b);
+  const entries: { rows: string; attributes: string[] }[] = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+  const flush = () =>
+    entries.push({ rows: start === prev ? String(start) : `${start}~${prev}`, attributes: ["EXCLUDED"] });
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] === prev + 1) {
+      prev = sorted[i];
+      continue;
+    }
+    flush();
+    start = prev = sorted[i];
+  }
+  flush();
+  return entries;
+};
+
+const replicateEntry = (lastRow: number, cellAttributes?: { rows: string; attributes: string[] }[]) => ({
   "@class": "DriverReplicate",
   valueType: "real",
   commonAttributes: ["NUMERIC"],
@@ -224,6 +249,7 @@ const replicateEntry = (lastRow: number) => ({
   significantDigitsCount: 7,
   lastRow,
   firstRow: 0,
+  ...(cellAttributes && cellAttributes.length ? { cellAttributes } : {}),
 });
 
 export async function writePrism(project: ProjectFilePayload, appVersion: string): Promise<PrismWriteResult> {
@@ -279,6 +305,23 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
     const isXY = tableType === "xy" || tableType === "survival";
     const xColumn = isXY ? allColumns[0] : null;
     const yColumns = isXY ? allColumns.slice(1) : allColumns;
+    // A yColumn's index in allColumns (the X column sits first for xy /
+    // survival) — used to look up that column's excluded rows below.
+    const yColToAll = (i: number) => (isXY ? i + 1 : i);
+    // Excluded cells (BUG-10): data.excluded keys are "row,col" full-grid
+    // coords (col 0 = row titles, never excluded); allColumns[i] is full
+    // col i+1. Rows past the table are dropped — they can't be cells.
+    const excludedByColumn = new Map<number, Set<number>>();
+    for (const key of data.excluded ?? []) {
+      const m = /^(\d+),(\d+)$/.exec(key);
+      if (!m) continue;
+      const col = Number(m[2]) - 1;
+      const row = Number(m[1]);
+      if (col < 0 || col >= allColumns.length || row >= rowCount) continue;
+      const rows = excludedByColumn.get(col) ?? new Set<number>();
+      rows.add(row);
+      excludedByColumn.set(col, rows);
+    }
 
     // CSV column order: [row titles?] + [X subcolumns] + [dataset subcolumns…].
     // The writer emits one subcolumn per dataset, except y_replicates
@@ -290,22 +333,27 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
     if (tableType === "grouped") {
       format = "grouped";
       // Columns are "Group:Mean"… or "Group:Y1"… — regroup by the part before
-      // the last ":". A summary table emits one dataset per group in its
-      // matching dataFormat (y_sd_n, y_se_n, …); a replicates table one
-      // y_replicates dataset per group, as before.
-      const groups = new Map<string, number[]>();
-      yColumns.forEach((c, i) => {
-        const group = c.name.includes(":") ? c.name.slice(0, c.name.lastIndexOf(":")) : c.name;
-        const list = groups.get(group) ?? [];
-        list.push(i);
-        groups.set(group, list);
-      });
+      // the last ":". Groups are RUNS (src/lib/columns.ts `groupRuns`, split
+      // at the last ":"): two same-named groups ("Group:Y1"… twice) are two
+      // datasets, and merging them by name would write one 20-replicate
+      // dataset whose values shift columns on read-back. A summary table
+      // emits one dataset per group in its matching dataFormat (y_sd_n,
+      // y_se_n, …); a replicates table one y_replicates dataset per group,
+      // as before.
+      const splitLast = (name: string): [string, string] => {
+        const sep = name.lastIndexOf(":");
+        return sep >= 0 ? [name.slice(0, sep), name.slice(sep + 1)] : [name, name];
+      };
+      const groups = groupRuns(
+        yColumns.map((c) => c.name),
+        splitLast,
+      ).map((r) => ({ title: r.name, columns: r.columns }));
       const def =
         data.summaryFormat && data.summaryFormat !== "replicates" ? summaryFormatDef(data.summaryFormat) : null;
       // A summary dataFormat only when the columns actually hold it (the
       // first group's suffixes, in order) — a mismatched table writes as
       // replicates instead of claiming a format its columns don't hold.
-      const firstGroup = [...groups.values()][0] ?? [];
+      const firstGroup = groups[0]?.columns ?? [];
       const suffixesMatch =
         def !== null &&
         firstGroup.length === def.subcolumns.length &&
@@ -313,7 +361,7 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
           (ci, k) => yColumns[ci].name.slice(yColumns[ci].name.lastIndexOf(":") + 1) === def.subcolumns[k],
         );
       const summaryDataFormat = suffixesMatch ? (def!.dataFormat ?? "y_replicates") : "y_replicates";
-      sets = [...groups.entries()].map(([title, cols]) => ({
+      sets = groups.map(({ title, columns: cols }) => ({
         title,
         columns: cols,
         dataFormat: summaryDataFormat,
@@ -370,7 +418,12 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         format: "y_single",
         title: xColumn.name,
         attributes: ["DS_ATTR_X"],
-        replicates: [{ ...replicateEntry(rowCount - 1), commonAttributes: ["NUMERIC", "NOTCONV"] }],
+        replicates: [
+          {
+            ...replicateEntry(rowCount - 1, excludedCellAttributes(excludedByColumn.get(0))),
+            commonAttributes: ["NUMERIC", "NOTCONV"],
+          },
+        ],
       });
       csvCols.push(xColumn.values);
     }
@@ -381,18 +434,32 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
       datasetUidByTitle.set(set.title, setUid);
       const lastRow = rowCount - 1;
       if (set.dataFormat === "y_replicates") {
+        // One replicate range per maximal run of consecutive subcolumns
+        // sharing the same excluded-row set — Prism stores one replicate
+        // (with its cellAttributes) per run, and a run's EXCLUDED rows
+        // apply to every subcolumn it covers, so subcolumns with
+        // different exclusions must not share a run (BUG-10: Ya_1+Ya_2
+        // excluded at row 1, Yb_1 excluded but Yb_2 live, must not become
+        // one "0~1" range with EXCLUDED row 1).
+        const keyOf = (rows: Set<number>) => [...rows].sort((a, b) => a - b).join(",");
+        const runs: { start: number; end: number; key: string; rows: Set<number> }[] = [];
+        for (let k = 0; k < set.columns.length; k++) {
+          const rows = excludedByColumn.get(yColToAll(set.columns[k])) ?? new Set<number>();
+          const key = keyOf(rows);
+          const last = runs[runs.length - 1];
+          if (last && last.key === key) last.end = k;
+          else runs.push({ start: k, end: k, key, rows });
+        }
         setJson(`data/sets/${setUid}.json`, {
           "@class": "DataSet",
           uid: setUid,
           format: "y_replicates",
           title: set.title,
           attributes: ["DS_ATTR_Y"],
-          "replicate ranges": [
-            {
-              range: set.columns.length === 1 ? "0" : `0~${set.columns.length - 1}`,
-              replicate: replicateEntry(lastRow),
-            },
-          ],
+          "replicate ranges": runs.map(({ start, end, rows }) => ({
+            range: start === end ? String(start) : `${start}~${end}`,
+            replicate: replicateEntry(lastRow, excludedCellAttributes(rows)),
+          })),
         });
       } else {
         setJson(`data/sets/${setUid}.json`, {
@@ -401,7 +468,9 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
           format: set.dataFormat,
           title: set.title,
           attributes: ["DS_ATTR_Y"],
-          replicates: set.columns.map(() => replicateEntry(lastRow)),
+          replicates: set.columns.map((colIdx) =>
+            replicateEntry(lastRow, excludedCellAttributes(excludedByColumn.get(yColToAll(colIdx)))),
+          ),
         });
       }
       for (const colIdx of set.columns) csvCols.push(yColumns[colIdx].values);
@@ -435,6 +504,11 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
       "@class": "DataSheet",
       title: name,
       table: {
+        // BUG-20: real Prism's reader dispatches on table["@class"] and
+        // dereferences it unconditionally — omitting it crashes Prism
+        // 11.2.0 on open (SIGSEGV in NSDocument init). Real files write
+        // "XYDataTable" for xy/survival tables, "DataTable" otherwise.
+        "@class": isXY ? "XYDataTable" : "DataTable",
         uid: tableUid,
         format,
         dataFormat,

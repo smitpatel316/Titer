@@ -248,6 +248,15 @@ struct RunningServer {
     port: u16,
 }
 
+/// What waiting for a window to open a file found: the file loaded, the
+/// frontend reported the open failed (its `openError` — the same message
+/// the GUI shows), or nothing reported in time.
+enum OpenOutcome {
+    Loaded,
+    Failed(String),
+    Timeout,
+}
+
 impl McpState {
     fn lock(&self) -> std::sync::MutexGuard<'_, McpInner> {
         self.inner.lock().unwrap()
@@ -511,6 +520,32 @@ impl McpState {
         }
     }
 
+    /// Wait for a window to finish opening the file at `path`: loaded, or
+    /// failed with the frontend's message. Failure is checked first: a
+    /// snapshot can carry a stale `openError` beside a loaded file, and a
+    /// fresh window's blank snapshot carries neither — the check order is
+    /// what keeps a stale failure from reading as a success, and a slow
+    /// load from reading as a failure.
+    async fn await_open_outcome(&self, label: &str, path: &str, timeout: Duration) -> OpenOutcome {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if let Some(snap) = self.snapshot_for(label) {
+                if let Some(err) = snap.get("openError").and_then(|v| v.as_str()) {
+                    if !err.is_empty() {
+                        return OpenOutcome::Failed(err.to_string());
+                    }
+                }
+                if snapshot_shows_loaded_file(&snap, path) {
+                    return OpenOutcome::Loaded;
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return OpenOutcome::Timeout;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
     /// Close a project window now that its close job is done (the job armed
     /// the frontend's close bypass, so no save prompt appears), and confirm
     /// the window is gone. A window still listed after 5s did not close —
@@ -689,7 +724,18 @@ impl McpState {
         job.result = result;
         job.error = error;
         if let Some(created) = created {
-            job.created = created;
+            // A completion AUGMENTS what the job created, it never drops
+            // the enqueue-time record: the run-analysis completer reports
+            // only { analysis_id }, and replacing would lose the
+            // analysis_type the tool recorded at enqueue — titer_list_jobs
+            // would stop showing it for a completed run (the smoke test
+            // pins "the completed run carries its analysis type").
+            match (&mut job.created, created) {
+                (serde_json::Value::Object(existing), serde_json::Value::Object(incoming)) => {
+                    existing.extend(incoming);
+                }
+                (_, incoming) => job.created = incoming,
+            }
         }
         job.finished_ts = Some(now_ts());
         Ok(job.clone())
@@ -780,6 +826,32 @@ impl McpState {
             inner.jobs.remove(&id);
             inner.jobs_read_after_terminal.remove(&id);
         }
+    }
+
+    /// A project window is gone: drop everything the server holds for it
+    /// (snapshot, results, remote handle, last-publish stamp, and the
+    /// `last_published` fallback when it pointed here), and cancel its
+    /// live jobs. BUG-22: the frontend's `closed: true` publish lives in
+    /// a React unmount cleanup (`useMcpSnapshotPublisher`) that never
+    /// runs when a webview is destroyed — no unmount, no publish — so
+    /// the snapshot leaked and `titer_list_projects` listed dead
+    /// projects for ever (226 in the incident). The authoritative drop
+    /// is therefore here, called from the `Destroyed` handler in
+    /// main.rs, where the window's death is certain; the frontend
+    /// publish stays as a fast path. Idempotent: safe to call after
+    /// the frontend publish already dropped the same window.
+    pub fn drop_window(&self, label: &str) {
+        {
+            let mut inner = self.lock();
+            inner.snapshots.remove(label);
+            inner.results.retain(|(w, _), _| *w != label);
+            inner.remote_handles.remove(label);
+            inner.last_publish.remove(label);
+            if inner.last_published.as_deref() == Some(label) {
+                inner.last_published = inner.snapshots.keys().next().cloned();
+            }
+        }
+        self.drop_jobs_for_window(label);
     }
 
     /// A window closed (its snapshot publish said `closed: true`): its
@@ -977,21 +1049,14 @@ pub fn mcp_activity(app: AppHandle, state: State<McpState>, limit: u32) -> Resul
 #[tauri::command]
 pub fn mcp_publish_snapshot(window: tauri::WebviewWindow, state: State<McpState>, snapshot: serde_json::Value) {
     let label = window.label().to_string();
-    let mut inner = state.lock();
     if snapshot.get("closed").and_then(|v| v.as_bool()).unwrap_or(false) {
-        inner.snapshots.remove(&label);
-        inner.results.retain(|(w, _), _| *w != label);
-        inner.remote_handles.remove(&label);
-        inner.last_publish.remove(&label);
-        if inner.last_published.as_deref() == Some(label.as_str()) {
-            inner.last_published = inner.snapshots.keys().next().cloned();
-        }
-        // The page that would have run this window's jobs is gone: cancel
-        // them (L0) instead of leaving them queued/running for ever.
-        drop(inner);
-        state.drop_jobs_for_window(&label);
+        // One implementation for both drop paths (see `drop_window`):
+        // the frontend publish is the fast path; the `Destroyed`
+        // handler in main.rs is the authoritative one.
+        state.drop_window(&label);
         return;
     }
+    let mut inner = state.lock();
     inner.last_publish.insert(label.clone(), std::time::Instant::now());
     inner.snapshots.insert(label.clone(), snapshot);
     inner.last_published = Some(label);
@@ -1139,7 +1204,45 @@ async fn auth_middleware(
         }
         None => {}
     }
-    next.run(request).await
+    // BUG-18: declare the charset on every MCP response (see utf8_charset).
+    let mut response = next.run(request).await;
+    if let Some(ct) = response
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+    {
+        if let Some(new_ct) = utf8_charset(&ct) {
+            if let Ok(value) = axum::http::HeaderValue::from_str(&new_ct) {
+                response.headers_mut().insert(axum::http::header::CONTENT_TYPE, value);
+            }
+        }
+    }
+    response
+}
+
+/// BUG-18: rmcp serves the Streamable HTTP responses as `text/event-stream`
+/// (and `application/json` when the client asks for plain JSON) with no
+/// charset. Per RFC 9110 §8.3.1 a `text/*` type without a charset defaults
+/// to ISO-8859-1, so generic HTTP clients (e.g. Python `requests`, which
+/// the project's own MCP test driver uses) decode the UTF-8 body as
+/// Latin-1 and every non-ASCII character comes back double-encoded:
+/// "µM" reads as "ÂµM", "×" as "Ã×", curly quotes as "â€œ…". The bytes on
+/// the wire are correct UTF-8 — only the declared charset is missing — so
+/// the corruption hits every tool that returns non-ASCII text, not just
+/// transform-concentrations. Appending `; charset=utf-8` here, the one
+/// shared path every MCP response flows through, fixes the echo for all
+/// 51 tools. Returns the new header value, or `None` when the type is
+/// already labelled or is not one of the textual MCP response types.
+fn utf8_charset(content_type: &str) -> Option<String> {
+    let lower = content_type.to_ascii_lowercase();
+    let is_textual =
+        lower.starts_with("text/event-stream") || lower.starts_with("application/json");
+    if is_textual && !lower.contains("charset=") {
+        Some(format!("{content_type}; charset=utf-8"))
+    } else {
+        None
+    }
 }
 
 // ── Project tools (L2, v1.6.0) ───────────────────────────────────────────
@@ -1298,6 +1401,27 @@ fn cloud_project_format(name: &str) -> Result<&'static str, String> {
             "“{name}” is not a project file — download a .hlx, .pzt, .prism or .pzfx file to open it as a project."
         )),
     }
+}
+
+/// Whether a window's snapshot shows the file at `path` loaded: the
+/// snapshot's `filePath` names it, or its nodes are a loaded project —
+/// non-empty AND past the blank project. A new window publishes the blank
+/// project ("Table 1", revision 0) before its file loads, and a load always
+/// bumps the revision, so non-empty nodes at revision 0 is the blank, not
+/// a file — the old "any non-empty nodes" check accepted it as a load, and
+/// a truncated `.hlx` opened as a 1-table empty project with 13 of 14
+/// tables silently dropped.
+fn snapshot_shows_loaded_file(snap: &serde_json::Value, path: &str) -> bool {
+    if snap.get("filePath").and_then(|v| v.as_str()) == Some(path) {
+        return true;
+    }
+    let nodes_loaded = snap
+        .get("nodes")
+        .and_then(|n| n.as_object())
+        .map(|n| !n.is_empty())
+        .unwrap_or(false);
+    let revision = snap.get("revision").and_then(|v| v.as_u64()).unwrap_or(0);
+    nodes_loaded && revision > 0
 }
 
 /// The mock provider behind the cloud commands (managed state, as the
@@ -1563,6 +1687,18 @@ pub struct CloseProjectArgs {
 // the job's result. `titer_run_analysis` stays async (L4, GAP-6); table
 // jobs never touch R, so they answer directly.
 
+/// One band of a grouped table's rows, carrying one level of a third
+/// factor — the `row_groups` of `titer_write_table` / `titer_create_table`.
+/// Serde enforces the shape (a name and a row count); the frontend
+/// validates the bands tile the table's rows exactly.
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct RowGroup {
+    /// The band's name (shown in the Groups panel); must be non-empty.
+    pub name: String,
+    /// How many consecutive rows the band covers; must be at least 1.
+    pub count: usize,
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CreateTableArgs {
     /// Window label of the project ("project-1"); omit for the front project.
@@ -1581,6 +1717,11 @@ pub struct CreateTableArgs {
     /// pad with blanks). Cells are strings, numbers or null.
     #[serde(default)]
     pub rows: Option<Vec<Vec<serde_json::Value>>>,
+    /// Grouped tables only: the row bands (factor-C levels), each a
+    /// {"name", "count"} pair; the counts must tile the rows exactly.
+    /// Omit for no third factor.
+    #[serde(default)]
+    pub row_groups: Option<Vec<RowGroup>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -1593,7 +1734,10 @@ pub struct WriteTableArgs {
     /// The columns, column 0 first (the row-title column): the whole table.
     pub columns: Vec<String>,
     /// The rows, one array per row, each no wider than columns (short rows
-    /// pad with blanks). Cells are strings, numbers or null.
+    /// pad with blanks). Cells are strings, numbers or null. Must be
+    /// non-empty — a write with zero rows is refused (to empty a table use
+    /// titer_edit_table delete-rows; to start an empty table use
+    /// titer_create_table with no columns or rows).
     pub rows: Vec<Vec<serde_json::Value>>,
     /// The Undo label for the replace ("Edit Table" when omitted).
     #[serde(default)]
@@ -1602,6 +1746,12 @@ pub struct WriteTableArgs {
     /// table's marks; when omitted the marks are preserved.
     #[serde(default)]
     pub excluded: Option<Vec<String>>,
+    /// Grouped tables only: the row bands (factor-C levels), each a
+    /// {"name", "count"} pair; the counts must tile the rows exactly.
+    /// When given they replace the table's bands (an empty list clears
+    /// them); when omitted the bands are preserved.
+    #[serde(default)]
+    pub row_groups: Option<Vec<RowGroup>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -2246,7 +2396,7 @@ impl TiterMcpServer {
         let result = (|| {
             let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
             let results = self.state.lock().results.clone();
-            Ok::<_, String>(read_results(&id, &snap, &results, &args.analysis_id))
+            read_results(&id, &snap, &results, &args.analysis_id)
         })();
         match result {
             Ok(out) => {
@@ -2510,7 +2660,7 @@ impl TiterMcpServer {
     /// the given columns and rows. Column 0 is the row-title column.
     #[tool(
         name = "titer_create_table",
-        description = "Create a data table: the empty table of a type (column, xy, grouped, nested, multiple, contingency, survival), or one filled with the given columns and rows. Column 0 is the row-title column.",
+        description = "Create a data table: the empty table of a type (column, xy, grouped, nested, multiple, contingency, survival), or one filled with the given columns and rows. Grouped tables only: row_groups sets the row bands (factor-C levels) as {\"name\", \"count\"} pairs tiling the rows exactly. Column 0 is the row-title column.",
         annotations(
             title = "Create table",
             read_only_hint = false,
@@ -2542,11 +2692,14 @@ impl TiterMcpServer {
                     return Err("The table name must not be empty.".into());
                 }
             }
+            if args.row_groups.is_some() && (args.columns.is_none() || args.rows.is_none()) {
+                return Err("row_groups needs columns and rows — pass them together.".into());
+            }
             let job_args = match (&args.columns, &args.rows) {
                 (None, None) => serde_json::json!({ "table_type": args.table_type, "name": args.name }),
                 (Some(columns), Some(rows)) => {
                     validate_table_shape(columns, rows)?;
-                    serde_json::json!({ "table_type": args.table_type, "name": args.name, "columns": columns, "rows": rows })
+                    serde_json::json!({ "table_type": args.table_type, "name": args.name, "columns": columns, "rows": rows, "row_groups": args.row_groups })
                 }
                 _ => return Err("columns and rows go together — pass both, or neither for an empty table.".into()),
             };
@@ -2570,7 +2723,7 @@ impl TiterMcpServer {
     /// passes `excluded`.
     #[tool(
         name = "titer_write_table",
-        description = "Replace a table's whole data (columns and rows), validated against the table type. Excluded-cell marks are preserved unless the call passes excluded. Column 0 is the row-title column.",
+        description = "Replace a table's whole data (columns and rows), validated against the table type. Excluded-cell marks are preserved unless the call passes excluded. Grouped tables only: row_groups sets the row bands (factor-C levels) as {\"name\", \"count\"} pairs tiling the rows exactly; an empty list clears them, omitting preserves them. Column 0 is the row-title column.",
         annotations(
             title = "Write table",
             read_only_hint = false,
@@ -2592,6 +2745,7 @@ impl TiterMcpServer {
             "rows": args.rows.len(),
             "label": args.label,
             "excluded": args.excluded.as_ref().map(|e| e.len()),
+            "row_groups": args.row_groups.as_ref().map(|g| g.len()),
         });
         let outcome: Result<serde_json::Value, String> = async {
             let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
@@ -2607,6 +2761,13 @@ impl TiterMcpServer {
                 ));
             }
             validate_table_shape(&args.columns, &args.rows)?;
+            // BUG-17: a whole-data replace with zero rows would silently
+            // erase the table's data and report success. Empty tables are
+            // made with titer_create_table (omit columns and rows) and
+            // emptied with titer_edit_table delete-rows — never here.
+            if args.rows.is_empty() {
+                return Err("rows must be a non-empty array — writing zero rows would erase the table's data. To empty a table, delete its rows with titer_edit_table (delete-rows); to start a new empty table, use titer_create_table with no columns or rows.".into());
+            }
             if let Some(excluded) = &args.excluded {
                 for key in excluded {
                     let (r, c) = key
@@ -2631,6 +2792,7 @@ impl TiterMcpServer {
                     "rows": args.rows,
                     "label": args.label,
                     "excluded": args.excluded,
+                    "row_groups": args.row_groups,
                 }),
             )
             .await
@@ -3093,27 +3255,29 @@ impl TiterMcpServer {
                     let label =
                         crate::open(&app, None, crate::opening_for(&args.path)).map_err(|e| e.to_string())?;
                     let path = args.path.clone();
-                    let loaded = self
+                    // 60 s, not 15 s: a 10 MB .hlx (capsanoicids, 12 tables)
+                    // takes ~17.6 s to report loaded on a fresh open, so 15 s
+                    // flakes under load; matches the driver's 60 s poll window.
+                    match self
                         .state
-                        .await_snapshot(
-                            &label,
-                            move |snap| {
-                                snap.get("filePath").and_then(|v| v.as_str()) == Some(path.as_str())
-                                    || snap
-                                        .get("nodes")
-                                        .and_then(|n| n.as_object())
-                                        .map(|n| !n.is_empty())
-                                        .unwrap_or(false)
-                            },
-                            Duration::from_secs(15),
-                        )
-                        .await;
-                    if !loaded {
-                        return Err(format!(
+                        .await_open_outcome(&label, &path, Duration::from_secs(60))
+                        .await
+                    {
+                        OpenOutcome::Loaded => Ok(serde_json::json!({
+                            "project_id": label,
+                            "file_path": args.path,
+                            "format": format
+                        })),
+                        // The frontend's own message — the same one the GUI
+                        // shows for this file — so a damaged file errors
+                        // instead of opening as a silently-truncated project.
+                        OpenOutcome::Failed(err) => {
+                            Err(format!("Couldn’t open “{}”: {}", args.path, err))
+                        }
+                        OpenOutcome::Timeout => Err(format!(
                             "Project {label} did not report the opened file within 15s — it may still be loading. Ask titer_list_projects for the open projects."
-                        ));
+                        )),
                     }
-                    Ok(serde_json::json!({ "project_id": label, "file_path": args.path, "format": format }))
                 }
             }
         }
@@ -4221,27 +4385,24 @@ impl TiterMcpServer {
                     let label =
                         crate::open(&app, None, crate::opening_for(&cache_path)).map_err(|e| e.to_string())?;
                     let path = cache_path.clone();
-                    let loaded = self
+                    // 60 s, not 15 s: same as titer_open_project — a large
+                    // .hlx can take ~17.6 s to report loaded, so 15 s flakes
+                    // under load; matches the driver's 60 s poll window.
+                    match self
                         .state
-                        .await_snapshot(
-                            &label,
-                            move |snap| {
-                                snap.get("filePath").and_then(|v| v.as_str()) == Some(path.as_str())
-                                    || snap
-                                        .get("nodes")
-                                        .and_then(|n| n.as_object())
-                                        .map(|n| !n.is_empty())
-                                        .unwrap_or(false)
-                            },
-                            Duration::from_secs(15),
-                        )
-                        .await;
-                    if !loaded {
-                        return Err(format!(
-                            "Project {label} did not report the opened file within 15s — it may still be loading. Ask titer_list_projects for the open projects."
-                        ));
+                        .await_open_outcome(&label, &path, Duration::from_secs(60))
+                        .await
+                    {
+                        OpenOutcome::Loaded => label,
+                        OpenOutcome::Failed(err) => {
+                            return Err(format!("Couldn’t open “{cache_path}”: {err}"));
+                        }
+                        OpenOutcome::Timeout => {
+                            return Err(format!(
+                                "Project {label} did not report the opened file within 15s — it may still be loading. Ask titer_list_projects for the open projects."
+                            ));
+                        }
                     }
-                    label
                 }
             };
             // The version this window saw: the next upload is conditional
@@ -4951,7 +5112,25 @@ impl TiterMcpServer {
 
 impl TiterMcpServer {
     pub fn new(state: McpState) -> Self {
-        Self { state, tool_router: Self::tools() }
+        let mut tool_router = Self::tools();
+        // Inspector 2.13.0 discards tools whose outputSchema has no `type`
+        // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
+        // returns, so `tools/list` prints `{"tools": []}` even though the
+        // server returns all 51. Every tool returns a JSON object, so stamp
+        // `type: "object"` on all 51 output schemas here — the single choke
+        // point — instead of touching each tool. `Arc::make_mut`
+        // clone-on-writes: rmcp caches the `Value` schema in a thread-local
+        // cache shared by all tools, so the cached Arc must never be
+        // mutated in place.
+        for route in tool_router.map.values_mut() {
+            let schema = route
+                .attr
+                .output_schema
+                .get_or_insert_with(|| std::sync::Arc::new(serde_json::Map::new()));
+            std::sync::Arc::make_mut(schema)
+                .insert("type".to_string(), serde_json::json!("object"));
+        }
+        Self { state, tool_router }
     }
 
     /// Enqueue a table job and wait for the frontend to run it, then return
@@ -5251,37 +5430,131 @@ fn node_name(node: &serde_json::Value) -> &str {
     node.get("name").and_then(|v| v.as_str()).unwrap_or("")
 }
 
+/// The snapshot's saved order for `key` (`rootOrder`), as ids — the
+/// project's own order, which the list tools must report (BUG-13: both
+/// list tools sorted by name instead, so a reorder read back as a no-op).
+fn snapshot_order(snapshot: &serde_json::Value, key: &str) -> Vec<String> {
+    snapshot
+        .get(key)
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// The snapshot's saved child order for one parent (`childOrder[parent]`),
+/// as ids.
+fn snapshot_child_order(snapshot: &serde_json::Value, parent: &str) -> Vec<String> {
+    snapshot
+        .get("childOrder")
+        .and_then(|c| c.get(parent))
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// One node's entry in the project listing.
+fn listing_entry(nid: &str, node: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "id": nid,
+        "name": node_name(node),
+        "table_type": node.get("tableType").and_then(|v| v.as_str()),
+        "analysis_type": node.get("analysisType").and_then(|v| v.as_str()),
+        "graph_type": node.get("graphType").and_then(|v| v.as_str()),
+    })
+}
+
+/// Place one node into its bucket in the project listing, and record its
+/// id in `placed` so the leftovers pass knows it was already emitted.
+/// A free function (not a closure): the listing loop also reads `placed`
+/// for the leftovers filter, which a capturing closure cannot do (E0502).
+#[allow(clippy::too_many_arguments)]
+fn place_listing_entry(
+    nodes: &serde_json::Map<String, serde_json::Value>,
+    placed: &mut std::collections::HashSet<String>,
+    nid: &str,
+    tables: &mut Vec<serde_json::Value>,
+    analyses: &mut Vec<serde_json::Value>,
+    graphs: &mut Vec<serde_json::Value>,
+    figures: &mut Vec<serde_json::Value>,
+    info_sheets: &mut Vec<serde_json::Value>,
+) {
+    let Some(node) = nodes.get(nid) else { return };
+    let entry = listing_entry(nid, node);
+    match node.get("type").and_then(|v| v.as_str()).unwrap_or("") {
+        "table" => tables.push(entry),
+        "analysis" => analyses.push(entry),
+        "graph" => graphs.push(entry),
+        "figure" => figures.push(entry),
+        "info" => info_sheets.push(entry),
+        _ => return,
+    }
+    placed.insert(nid.to_string());
+}
+
 /// The projects open in Titer, with every node's id, name and kind — the
-/// discovery call the other tools build on.
+/// discovery call the other tools build on. Tables, figures and info sheets
+/// come in `rootOrder`; a table's analyses and graphs come in its
+/// `childOrder`. A node missing from the order lists (a snapshot that
+/// predates it, or a repair) still appears, appended in name order, so
+/// nothing is ever dropped from the listing.
 fn project_listing(snapshots: &HashMap<String, serde_json::Value>) -> serde_json::Value {
     let mut ids: Vec<&String> = snapshots.keys().collect();
     ids.sort();
     let mut projects = Vec::new();
     for id in ids {
         let snap = &snapshots[id];
+        let nodes = nodes_of(snap);
         let mut tables = Vec::new();
         let mut analyses = Vec::new();
         let mut graphs = Vec::new();
         let mut figures = Vec::new();
         let mut info_sheets = Vec::new();
-        let mut entries: Vec<(&String, &serde_json::Value)> = nodes_of(snap).iter().collect();
-        entries.sort_by_key(|(_, n)| node_name(n));
-        for (nid, node) in entries {
-            let entry = serde_json::json!({
-                "id": nid,
-                "name": node_name(node),
-                "table_type": node.get("tableType").and_then(|v| v.as_str()),
-                "analysis_type": node.get("analysisType").and_then(|v| v.as_str()),
-                "graph_type": node.get("graphType").and_then(|v| v.as_str()),
-            });
-            match node.get("type").and_then(|v| v.as_str()).unwrap_or("") {
-                "table" => tables.push(entry),
-                "analysis" => analyses.push(entry),
-                "graph" => graphs.push(entry),
-                "figure" => figures.push(entry),
-                "info" => info_sheets.push(entry),
-                _ => {}
+        let mut placed: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // Root nodes in rootOrder, then each root node's children in its
+        // childOrder (tables first: a graph's parent is its table).
+        let root_order = snapshot_order(snap, "rootOrder");
+        for nid in &root_order {
+            place_listing_entry(
+                nodes,
+                &mut placed,
+                nid,
+                &mut tables,
+                &mut analyses,
+                &mut graphs,
+                &mut figures,
+                &mut info_sheets,
+            );
+        }
+        for nid in &root_order {
+            for child in snapshot_child_order(snap, nid) {
+                place_listing_entry(
+                    nodes,
+                    &mut placed,
+                    &child,
+                    &mut tables,
+                    &mut analyses,
+                    &mut graphs,
+                    &mut figures,
+                    &mut info_sheets,
+                );
             }
+        }
+        // Leftovers, in name order (the old behaviour), so a node the order
+        // lists missed still shows up instead of vanishing.
+        let mut leftovers: Vec<(&String, &serde_json::Value)> =
+            nodes.iter().filter(|(nid, _)| !placed.contains(*nid)).collect();
+        leftovers.sort_by_key(|(_, n)| node_name(n));
+        for (nid, _) in leftovers {
+            place_listing_entry(
+                nodes,
+                &mut placed,
+                nid,
+                &mut tables,
+                &mut analyses,
+                &mut graphs,
+                &mut figures,
+                &mut info_sheets,
+            );
         }
         projects.push(serde_json::json!({
             "project_id": id,
@@ -5304,7 +5577,13 @@ fn list_tables(project_id: &str, snapshot: &serde_json::Value) -> serde_json::Va
     let mut tables = Vec::new();
     let mut entries: Vec<(&String, &serde_json::Value)> =
         nodes_of(snapshot).iter().filter(|(_, n)| n.get("type").and_then(|v| v.as_str()) == Some("table")).collect();
-    entries.sort_by_key(|(_, n)| node_name(n));
+    // Tables in rootOrder — the project's own order, as reordered — not
+    // name order (BUG-13: this sorted by name, so a reorder read back as
+    // a no-op). A table missing from rootOrder (a snapshot that predates
+    // it, or a repair) is appended in name order so nothing disappears.
+    let root_order = snapshot_order(snapshot, "rootOrder");
+    let rank = |id: &str| root_order.iter().position(|o| o == id).unwrap_or(usize::MAX);
+    entries.sort_by(|(a_id, a), (b_id, b)| rank(a_id).cmp(&rank(b_id)).then_with(|| node_name(a).cmp(node_name(b))));
     for (id, node) in entries {
         let data = node.get("data");
         let rows = data.and_then(|d| d.get("rows")).and_then(|r| r.as_array()).map(|r| r.len()).unwrap_or(0);
@@ -5537,35 +5816,30 @@ fn table_summary(
     Ok(out)
 }
 
+/// Returns `Err` (a tool error) when the id names no analysis at all —
+/// unknown id, or an id that belongs to a non-analysis node — so MCP
+/// clients never mistake a failed lookup for a successful read. The
+/// `not_computed` / `error` / `computed` outcomes stay success envelopes:
+/// the analysis exists, only its result is pending, failed, or ready.
 fn read_results(
     project_id: &str,
     snapshot: &serde_json::Value,
     results: &HashMap<(String, String), serde_json::Value>,
     analysis_id: &str,
-) -> serde_json::Value {
+) -> Result<serde_json::Value, String> {
     let node = find_node(snapshot, analysis_id);
     let (name, analysis_type) = match node {
         Some(n) if n.get("type").and_then(|v| v.as_str()) == Some("analysis") => {
             (node_name(n).to_string(), n.get("analysisType").and_then(|v| v.as_str()).unwrap_or("").to_string())
         }
         Some(_) => {
-            return serde_json::json!({
-                "status": "not_an_analysis",
-                "project_id": project_id,
-                "analysis_id": analysis_id,
-                "message": format!("“{analysis_id}” is not an analysis node. Ask titer_list_projects for the analysis ids."),
-            });
+            return Err(format!("“{analysis_id}” is not an analysis node. Ask titer_list_projects for the analysis ids."));
         }
         None => {
-            return serde_json::json!({
-                "status": "unknown_analysis",
-                "project_id": project_id,
-                "analysis_id": analysis_id,
-                "message": format!("No analysis with id “{analysis_id}” in project {project_id}. Ask titer_list_projects for the ids."),
-            });
+            return Err(format!("No analysis with id “{analysis_id}” in project {project_id}. Ask titer_list_projects for the ids."));
         }
     };
-    match results.get(&(project_id.to_string(), analysis_id.to_string())) {
+    Ok(match results.get(&(project_id.to_string(), analysis_id.to_string())) {
         None => serde_json::json!({
             "status": "not_computed",
             "project_id": project_id,
@@ -5595,7 +5869,7 @@ fn read_results(
                 })
             }
         }
-    }
+    })
 }
 
 fn read_graph(project_id: &str, snapshot: &serde_json::Value, graph_id: &str) -> Result<serde_json::Value, String> {
@@ -5892,6 +6166,13 @@ fn reorder_check(
             )
         }
     };
+    // A doubled id is reported as doubled even when the order also omits
+    // another id: the missing/extra check would otherwise mask it (the
+    // reorder_check test pins "twice" for ["t1", "t1", "f1"], which also
+    // omits "t2").
+    if order.iter().collect::<HashSet<_>>().len() != order.len() {
+        return Err("order lists an id twice — each child appears once.".into());
+    }
     let missing: Vec<&String> = current.iter().filter(|id| !order.contains(id)).collect();
     let extra: Vec<&String> = order.iter().filter(|id| !current.contains(id)).collect();
     if !missing.is_empty() || !extra.is_empty() {
@@ -5903,9 +6184,6 @@ fn reorder_check(
             parts.push(format!("unknown {}", extra.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")));
         }
         return Err(format!("order does not list exactly {what} ({} items): {}.", current.len(), parts.join("; ")));
-    }
-    if order.iter().collect::<HashSet<_>>().len() != order.len() {
-        return Err("order lists an id twice — each child appears once.".into());
     }
     Ok(())
 }
@@ -6019,7 +6297,7 @@ mod tests {
     fn read_results_reports_not_computed() {
         let snap = snapshot();
         let results = HashMap::new();
-        let out = read_results("project-1", &snap, &results, "a1");
+        let out = read_results("project-1", &snap, &results, "a1").expect("not_computed");
         assert_eq!(out["status"], "not_computed");
         assert_eq!(out["analysis_type"], "dose-response-4pl");
     }
@@ -6032,9 +6310,49 @@ mod tests {
             ("project-1".to_string(), "a1".to_string()),
             json!({ "testType": "dose-response-4pl", "stats": [], "groups": [], "notes": "EC50 = 3.2 nM" }),
         );
-        let out = read_results("project-1", &snap, &results, "a1");
+        let out = read_results("project-1", &snap, &results, "a1").expect("computed");
         assert_eq!(out["status"], "computed");
         assert_eq!(out["result"]["notes"], "EC50 = 3.2 nM");
+    }
+
+    #[test]
+    fn read_results_errors_on_an_unknown_analysis_id() {
+        // BUG-16: an unknown id used to return a success envelope with
+        // status "unknown_analysis"; it must be a tool error instead.
+        let snap = snapshot();
+        let results = HashMap::new();
+        let err = read_results("project-1", &snap, &results, "nope").expect_err("unknown id is an error");
+        assert!(err.contains("No analysis with id"), "{err}");
+        assert!(err.contains("nope"), "{err}");
+    }
+
+    #[test]
+    fn read_results_errors_on_a_non_analysis_node() {
+        // Same class as BUG-16: "t1" exists but is a table, not an analysis.
+        let snap = snapshot();
+        let results = HashMap::new();
+        let err = read_results("project-1", &snap, &results, "t1").expect_err("a table is not an analysis");
+        assert!(err.contains("not an analysis node"), "{err}");
+    }
+
+    #[test]
+    fn utf8_charset_labels_mcp_response_types() {
+        // BUG-18: rmcp's bare `text/event-stream` (no charset) makes
+        // Latin-1-default clients mojibake every non-ASCII character.
+        assert_eq!(
+            utf8_charset("text/event-stream"),
+            Some("text/event-stream; charset=utf-8".to_string())
+        );
+        assert_eq!(
+            utf8_charset("application/json"),
+            Some("application/json; charset=utf-8".to_string())
+        );
+        // Already labelled: leave alone (no double charset).
+        assert_eq!(utf8_charset("text/event-stream; charset=utf-8"), None);
+        assert_eq!(utf8_charset("application/json; charset=UTF-8"), None);
+        // Non-textual types are not MCP responses: leave alone.
+        assert_eq!(utf8_charset("text/html"), None);
+        assert_eq!(utf8_charset("application/octet-stream"), None);
     }
 
     #[test]
@@ -6061,6 +6379,62 @@ mod tests {
         assert_eq!(proj["info_sheets"][0]["name"], "Plate info");
         assert_eq!(proj["figures"].as_array().map(|a| a.len()), Some(1));
         assert_eq!(proj["figures"][0]["id"], "f1");
+    }
+
+    #[test]
+    fn list_tables_follows_root_order_not_name_order() {
+        // BUG-13: list_tables sorted by name, so a reorder read back as a
+        // no-op. "Dose-response" (t1) sorts before "Second" (t2) by name,
+        // so a rootOrder of [t2, t1] discriminates the two orders.
+        let mut snap = two_table_snapshot();
+        snap["rootOrder"] = json!(["t2", "t1"]);
+        let out = list_tables("project-1", &snap);
+        let ids: Vec<&str> = out["tables"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["t2", "t1"], "{out}");
+        // A table missing from rootOrder still appears, appended in name
+        // order, instead of vanishing from the listing.
+        snap["nodes"]["t3"] = json!({
+            "id": "t3", "type": "table", "name": "Aardvark", "parentId": null, "tableType": "column",
+            "data": { "columns": ["", "A"], "rows": [] }
+        });
+        let out = list_tables("project-1", &snap);
+        let ids: Vec<&str> = out["tables"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["t2", "t1", "t3"], "{out}");
+    }
+
+    #[test]
+    fn project_listing_follows_root_and_child_order() {
+        // BUG-13: project_listing sorted every bucket by name. The fixture's
+        // rootOrder [t1, t2, f1] / childOrder [a1, g1] is reversed here so
+        // name order (Dose-response, Figure 1, Second / Curve, Fit) cannot
+        // pass by coincidence.
+        let mut snap = two_table_snapshot();
+        snap["rootOrder"] = json!(["f1", "t2", "t1"]);
+        snap["childOrder"] = json!({ "t1": ["g1", "a1"], "t2": [] });
+        let mut snapshots = HashMap::new();
+        snapshots.insert("project-1".to_string(), snap);
+        let out = project_listing(&snapshots);
+        let proj = &out["projects"][0];
+        // A nested fn, not a closure: a closure's elided output lifetime is
+        // unrelated to its input's, so `|v: &Value| -> Vec<&str>` fails to
+        // compile (lifetime may not live long enough).
+        fn ids(v: &serde_json::Value) -> Vec<&str> {
+            v.as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect::<Vec<_>>()
+        }
+        assert_eq!(ids(&proj["tables"]), vec!["t2", "t1"], "{out}");
+        assert_eq!(ids(&proj["figures"]), vec!["f1"], "{out}");
+        assert_eq!(ids(&proj["graphs"]), vec!["g1"], "{out}");
+        assert_eq!(ids(&proj["analyses"]), vec!["a1"], "{out}");
     }
 
     #[test]
@@ -6167,6 +6541,35 @@ mod tests {
             let err = project_path_format(url).expect_err(&format!("{url} is not a local path"));
             assert!(err.contains("not a local file path"), "{err}");
         }
+    }
+
+    #[test]
+    fn snapshot_shows_loaded_file_needs_more_than_nodes() {
+        let path = "/tmp/Demo.hlx";
+        // The blank project a new window publishes before its file loads:
+        // non-empty nodes ("Table 1") at revision 0 — NOT a load. This is
+        // the shape a truncated `.hlx` used to open as, silently.
+        let blank = json!({
+            "filePath": null,
+            "revision": 0,
+            "nodes": { "t1": { "id": "t1", "type": "table", "name": "Table 1" } },
+        });
+        assert!(!snapshot_shows_loaded_file(&blank, path), "blank project is not a load");
+        // The same nodes after a real load: revision bumped.
+        let loaded = json!({
+            "filePath": null,
+            "revision": 1,
+            "nodes": { "t1": { "id": "t1", "type": "table", "name": "Table 1" } },
+        });
+        assert!(snapshot_shows_loaded_file(&loaded, path), "loaded nodes count");
+        // The normal case: the snapshot names the file.
+        let named = json!({ "filePath": path, "revision": 0, "nodes": {} });
+        assert!(snapshot_shows_loaded_file(&named, path), "filePath names the file");
+        // Empty and unrelated: nothing loaded.
+        let empty = json!({ "filePath": null, "revision": 0, "nodes": {} });
+        assert!(!snapshot_shows_loaded_file(&empty, path), "empty snapshot is not a load");
+        let other = json!({ "filePath": "/tmp/Other.hlx", "revision": 3, "nodes": {} });
+        assert!(!snapshot_shows_loaded_file(&other, path), "another file is not this file");
     }
 
     #[test]
@@ -6423,6 +6826,42 @@ mod tests {
     }
 
     #[test]
+    fn drop_window_removes_snapshot_results_handle_and_jobs() {
+        // BUG-22: the `Destroyed` handler's drop must clear everything
+        // the server holds for the window — the snapshot the list
+        // serves, its results, its remote handle, its live jobs, and
+        // the `last_published` pointer when it pointed here.
+        let state = job_state();
+        state.lock().last_published = Some("project-1".to_string());
+        state.lock().snapshots.insert("project-2".to_string(), json!({ "nodes": {} }));
+        state.lock().results.insert(("project-1".to_string(), "a1".to_string()), json!({ "ok": true }));
+        state.set_remote_handle(
+            "project-1",
+            RemoteHandle {
+                provider: "box".into(),
+                account_id: "a".into(),
+                file_id: "f".into(),
+                name: "Dose.hlx".into(),
+                version: Some("1".into()),
+            },
+        );
+        let live = state.enqueue_job("project-1", "noop", json!({}), json!({})).expect("enqueue");
+        state.drop_window("project-1");
+        assert!(!state.lock().snapshots.contains_key("project-1"));
+        assert!(state.lock().snapshots.contains_key("project-2"));
+        assert!(state.snapshot_for("project-1").is_none());
+        assert!(state.lock().results.keys().all(|(w, _)| w != "project-1"));
+        assert!(state.remote_handle_for("project-1").is_none());
+        assert_eq!(state.read_job(&live.job_id).unwrap().status, JobStatus::Cancelled);
+        assert_eq!(state.lock().last_published.as_deref(), Some("project-2"));
+        // Idempotent: a second drop (frontend publish + Destroyed
+        // handler racing) is a no-op, and the other window is untouched.
+        state.drop_window("project-1");
+        assert!(state.lock().snapshots.contains_key("project-2"));
+        assert_eq!(state.lock().last_published.as_deref(), Some("project-2"));
+    }
+
+    #[test]
     fn job_list_filters_by_project_and_reads_back() {
         let state = job_state();
         state.lock().snapshots.insert("project-2".to_string(), json!({ "nodes": {} }));
@@ -6478,6 +6917,35 @@ mod tests {
             .expect("enqueue");
         assert_eq!(job.analysis_id.as_deref(), Some("a1"));
         assert_eq!(job_summary(&job)["analysis_type"], "anova");
+    }
+
+    #[test]
+    fn job_complete_merges_created_instead_of_replacing_it() {
+        // The run-analysis completer reports only { analysis_id }; the
+        // analysis_type recorded at enqueue must survive completion, or
+        // titer_list_jobs stops showing it for a completed run.
+        let state = job_state();
+        let job = state
+            .enqueue_job(
+                "project-1",
+                "run-analysis",
+                json!({ "analysis_id": "a1" }),
+                json!({ "analysis_id": "a1", "analysis_type": "anova" }),
+            )
+            .expect("enqueue");
+        state.take_jobs("project-1");
+        let done = state
+            .complete_job(
+                "project-1",
+                &job.job_id,
+                JobStatus::Done,
+                Some(json!({ "ok": true })),
+                None,
+                Some(json!({ "analysis_id": "a1" })),
+            )
+            .expect("complete");
+        assert_eq!(job_summary(&done)["analysis_type"], "anova");
+        assert_eq!(done.created["analysis_id"], "a1");
     }
 
     #[test]
@@ -6585,6 +7053,12 @@ mod tests {
     #[tokio::test]
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
+        // The fixture project is the open, front project: the calls below
+        // that omit project_id (create_table, delete_node) resolve to it.
+        // A real publish would set this; the in-process server has no
+        // frontend to do so, so without it those calls fail with
+        // "No project is open" instead of the validation error under test.
+        state.lock().last_published = Some("project-1".to_string());
         state.lock().token = Some(SMOKE_TOKEN.to_string());
         let job = state.enqueue_job("project-1", "noop", json!({}), json!({})).expect("enqueue");
         let cancel = CancellationToken::new();
@@ -7476,5 +7950,29 @@ mod tests {
         assert!(resp.status().is_success(), "DELETE closes the session: {}", resp.status());
         cancel.cancel();
         server.abort();
+    }
+
+    #[test]
+    fn all_tools_output_schema_is_typed_object() {
+        // Inspector 2.13.0 drops tools whose outputSchema lacks `type`
+        // (rmcp emits a bare `{"$schema": ...}` for `Json<Value>` returns),
+        // so `tools/list` prints `{"tools": []}`. `TiterMcpServer::new`
+        // stamps `type: "object"` on every route's output schema; this pins
+        // that (and the tool count) at the choke point.
+        let server = TiterMcpServer::new(job_state());
+        let tools = server.tool_router.list_all();
+        assert_eq!(tools.len(), 51, "tool count changed — update this pin");
+        for t in &tools {
+            let schema = t
+                .output_schema
+                .as_ref()
+                .unwrap_or_else(|| panic!("{} has no outputSchema", t.name));
+            assert_eq!(
+                schema.get("type"),
+                Some(&json!("object")),
+                "tool {}",
+                t.name
+            );
+        }
     }
 }

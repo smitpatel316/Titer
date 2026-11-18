@@ -34,6 +34,21 @@
 //                 OneWay/replicates to nested on a heuristic, a plain
 //                 replicates Column table is far more common than a nested one.
 //                 If a distinct marker is ever verified, map it here directly.
+//   HugeTable → the same as Table: Prism writes a table as `<HugeTable>`
+//                 instead of `<Table>` once it passes 52 subcolumns in a
+//                 data set or 104 data sets (R pzfx 0.2.0 NEWS; pypzfx
+//                 reads both tags the same way), and the children are
+//                 identical (Title, RowTitlesColumn, XColumn,
+//                 XAdvancedColumn, YColumn…), so a HugeTable imports
+//                 through the same path as a Table — no new table model.
+//                 A grouped table that arrives this way can hold more
+//                 than Titer's 20-replicate creation cap (GROUPED_LIMITS):
+//                 that cap is enforced only when creating tables
+//                 (extract-and-rearrange, SetYReplicates), never on
+//                 imported data, so the replicates are kept as Prism
+//                 wrote them. The import warns that the table was a
+//                 HugeTable, with its subcolumn count, so the size is
+//                 visible rather than silent.
 // A struck-through value (`<d Excluded="1">`) becomes a Titer excluded cell.
 // A `.prism` file (Prism 10's newer format) is not `.pzfx` and is not imported.
 
@@ -175,12 +190,22 @@ function parseXml(text: string): XmlNode {
 }
 
 /** An element's text, including any formatting children it wraps (`<Title>` may
- *  hold a `<TextAlign>`). */
-const childText = (node: XmlNode): string => {
+ *  hold a `<TextAlign>`). Titles keep their EXACT text — Prism titles can
+ *  carry meaningful trailing spaces (`XY `, `0nM `) and duplicate names, and
+ *  the reader must not trim or rename them (BUG-4/BUG-7): the .prism import
+ *  preserves them, and the exported .pzfx file holds them verbatim, so a
+ *  .pzfx round-trip that renames them changes analysis labels and hashes.
+ *  No `<Title>` in any known .pzfx file (testdata + corpus) holds a newline,
+ *  so exact text needs no whitespace handling. Data `<d>` values keep the
+ *  trimmed read below: the number normalizer's anchored regexes need clean
+ *  values, and only the RowTitlesColumn's `<d>` values are titles. */
+const rawChildText = (node: XmlNode): string => {
   let out = node.text;
-  for (const child of node.children) out += childText(child);
-  return out.trim();
+  for (const child of node.children) out += rawChildText(child);
+  return out;
 };
+
+const childText = (node: XmlNode): string => rawChildText(node).trim();
 
 const childrenNamed = (node: XmlNode, tag: string) => node.children.filter((c) => c.tag === tag);
 const firstChild = (node: XmlNode, tag: string) => childrenNamed(node, tag)[0];
@@ -193,11 +218,11 @@ interface Subcolumn {
   excluded: Set<number>;
 }
 
-function readSubcolumn(node: XmlNode): Subcolumn {
+function readSubcolumn(node: XmlNode, raw = false): Subcolumn {
   const values: (string | null)[] = [];
   const excluded = new Set<number>();
   for (const d of childrenNamed(node, "d")) {
-    const value = childText(d);
+    const value = raw ? rawChildText(d) : childText(d);
     values.push(value === "" ? null : value);
     if (d.attrs["Excluded"] === "1") excluded.add(values.length - 1);
   }
@@ -210,11 +235,11 @@ interface PzfxColumn {
   subcolumns: Subcolumn[];
 }
 
-function readColumn(node: XmlNode): PzfxColumn {
+function readColumn(node: XmlNode, rawValues = false): PzfxColumn {
   const titleNode = firstChild(node, "Title");
   return {
-    title: titleNode ? childText(titleNode) : "",
-    subcolumns: childrenNamed(node, "Subcolumn").map(readSubcolumn),
+    title: titleNode ? rawChildText(titleNode) : "",
+    subcolumns: childrenNamed(node, "Subcolumn").map((s) => readSubcolumn(s, rawValues)),
   };
 }
 
@@ -287,6 +312,16 @@ function normalizeNumber(value: string | null, groupingSeparators: boolean): str
   return value;
 }
 
+// Loop-based max over a width-scaled collection: Math.max(...arr) spreads
+// the array onto the call stack and throws RangeError once it passes ~100k
+// elements (BUG-11: a 288k-subcolumn .pzfx blew the stack in importTable).
+// Never spread a width-scaled array into Math.max/Math.min.
+function maxOf(values: Iterable<number>, floor = 0): number {
+  let m = floor;
+  for (const v of values) if (v > m) m = v;
+  return m;
+}
+
 function subcolumnNames(title: string, format: string, count: number): string[] {
   const base = title === "" ? "Y" : title;
   if (count === 1) return [base];
@@ -307,27 +342,19 @@ const genId = (type: string) => `${type}_${Math.random().toString(36).slice(2, 1
 function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: boolean): ImportedTable | null {
   const warnings: string[] = [];
   const titleNode = firstChild(table, "Title");
-  const name = titleNode ? childText(titleNode) : "";
+  const name = titleNode ? rawChildText(titleNode) : "";
   const tableType = table.attrs["TableType"] ?? "";
   const xFormat = table.attrs["XFormat"] ?? "";
   const yFormat = table.attrs["YFormat"] ?? "";
   const displayName = name === "" ? "Untitled table" : `“${name}”`;
 
-  if (table.tag === "HugeTable") {
-    issues.push({
-      severity: "warning",
-      message: `${displayName} is a HugeTable, which Titer can't import yet. It was left out.`,
-    });
-    return null;
-  }
-
   const rowTitles = firstChild(table, "RowTitlesColumn");
-  const rowTitleValues = rowTitles ? readColumn(rowTitles).subcolumns[0]?.values ?? [] : [];
+  const rowTitleValues = rowTitles ? readColumn(rowTitles, true).subcolumns[0]?.values ?? [] : [];
   let hasRowTitles = rowTitleValues.some((v) => v !== null && v !== "");
 
-  const xColumns = childrenNamed(table, "XColumn").map(readColumn);
+  const xColumns = childrenNamed(table, "XColumn").map((c) => readColumn(c));
   const xAdvanced = firstChild(table, "XAdvancedColumn");
-  const yColumns = childrenNamed(table, "YColumn").map(readColumn);
+  const yColumns = childrenNamed(table, "YColumn").map((c) => readColumn(c));
   if (yColumns.length === 0) {
     issues.push({ severity: "warning", message: `${displayName} holds no data columns. It was left out.` });
     return null;
@@ -437,41 +464,28 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
     titerType = "grouped";
     const counts = yColumns.map((y) => y.subcolumns.length);
     groups = yColumns.length;
-    replicates = Math.max(...counts);
+    replicates = maxOf(counts);
     // A grouped table's columns are "Group:Y1"…, so a group name must be
-    // unique and colon-free — seriesKeyOf splits at the first ":" and
-    // regroupTable rebuilds exactly "Group:Y1"…"Group:Y<replicates>" on
-    // reload. Before this fix untitled Y columns all became "Group"
-    // (duplicate "Group:Y1" columns, renamed "Group:Y1 2" by FF-F9 but
-    // still dropped on reload), a title like "1:10" became "1:10:Y1"
-    // (group "1", its data wiped on reload), and a ragged Y column left
-    // its group short of subcolumns. So: sanitize ":", dedupe the group
-    // names, and pad every group to `replicates` subcolumns.
-    const usedGroups = new Set<string>();
-    const renamedGroups: string[] = [];
-    const rowLen = Math.max(
-      0,
-      ...yColumns.flatMap((y) => y.subcolumns.map((s) => s.values.length)),
-      rowTitleValues.length,
-    );
+    // colon-free — seriesKeyOf splits at the first ":" and a title like
+    // "1:10" would become "1:10:Y1" (group "1", its data wiped on reload) —
+    // and a ragged Y column leaves its group short of subcolumns. So:
+    // sanitize ":", and pad every group to `replicates` subcolumns. A group
+    // name may REPEAT, though: two Y columns titled "Group" are two groups,
+    // and renaming the second would break the round-trip — the .prism import
+    // keeps the duplicate, and the loader keeps it too (groups are runs,
+    // not names).
+    // Loop, not Math.max(...flatMap(...)): the spread blows the stack on
+    // very wide files (BUG-11) and the flatMap builds a throwaway array.
+    let rowLen = rowTitleValues.length;
+    for (const y of yColumns) for (const s of y.subcolumns) if (s.values.length > rowLen) rowLen = s.values.length;
     const emptySubcolumn = (): Subcolumn => ({ values: Array<string | null>(rowLen).fill(null), excluded: new Set() });
     const reps = replicates;
     yColumns.forEach((y) => {
-      const raw = y.title === "" ? "Group" : y.title;
-      const base = raw.replace(/:/g, "-");
-      let group = base;
-      for (let n = 2; usedGroups.has(group); n++) group = `${base} ${n}`;
-      usedGroups.add(group);
-      if (group !== raw) renamedGroups.push(`“${raw}” → “${group}”`);
+      const group = (y.title === "" ? "Group" : y.title).replace(/:/g, "-");
       const subs = [...y.subcolumns];
       while (subs.length < reps) subs.push(emptySubcolumn());
       subs.forEach((sub, i) => pushColumn(`${group}:Y${i + 1}`, sub));
     });
-    if (renamedGroups.length > 0) {
-      warnings.push(
-        `${displayName}: group names must be unique and can't contain “:”, so they were renamed (${renamedGroups.join(", ")}) — the data itself is unchanged.`,
-      );
-    }
   } else if (tableType === "TwoWay") {
     // Summary values (mean, SD, N…) — not raw replicates. Keep them, named, and
     // say so: running a group comparison on them as if they were replicates
@@ -517,6 +531,27 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
     warnings.push(`${displayName}: table type “${tableType}” isn't one Titer knows; it was imported as a Column table.`);
   }
 
+  if (table.tag === "HugeTable") {
+    // Prism's tag for a table past 52 subcolumns per data set / 104 data
+    // sets: the same shape as a Table, so it imported through the same
+    // path — say so, with the table type it became, rather than silently
+    // treating it as an ordinary table.
+    const subcolumns = maxOf(yColumns.map((y) => y.subcolumns.length));
+    const typeName =
+      titerType === "grouped"
+        ? "Grouped"
+        : titerType === "xy"
+          ? "XY"
+          : titerType === "survival"
+            ? "Survival"
+            : titerType === "contingency"
+              ? "Contingency"
+              : "Column";
+    warnings.push(
+      `${displayName} was a HugeTable in Prism (${subcolumns} subcolumns per data set) — imported as a ${typeName} table with all values kept.`,
+    );
+  }
+
   if (dateColumn) {
     // Next to X for XY/Survival (after X and its error, if any); first among
     // the data columns otherwise, since those types drop X entirely.
@@ -529,39 +564,16 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
     columns.splice(at, 0, { ...dateColumn, name });
   }
 
-  // FF-F9: Prism lets two Y columns share a title (and an X title can match
-  // a Y title), but Titer resolves a column by name with
-  // `data.columns.indexOf(name)` — the first match wins, so an analysis
-  // naming the second duplicate silently ran on the first column's data.
-  // Rename later duplicates ("A" → "A 2", "A 3", …) so every imported
-  // column has a distinct name and each keeps its own data. A duplicate
-  // that already ends in " N" renumbers from its stem ("Control 2" →
-  // "Control 3"), so renames never stack into "Control 2 2".
-  const seenNames = new Set<string>(["Title"]);
-  const renamed: string[] = [];
-  for (const column of columns) {
-    if (!seenNames.has(column.name)) {
-      seenNames.add(column.name);
-      continue;
-    }
-    const stem = column.name.replace(/ \d+$/, "");
-    let n = 2;
-    let renamedName = `${stem} ${n}`;
-    while (seenNames.has(renamedName)) {
-      n++;
-      renamedName = `${stem} ${n}`;
-    }
-    renamed.push(`“${column.name}” → “${renamedName}”`);
-    column.name = renamedName;
-    seenNames.add(renamedName);
-  }
-  if (renamed.length > 0) {
-    warnings.push(
-      `${displayName}: duplicate column names were renamed so each column keeps its own data (${renamed.join(', ')}).`,
-    );
-  }
+  // No dedup here, deliberately: Prism lets two Y columns share a title
+  // (and an X title can match a Y title), and the .prism import preserves
+  // those duplicates — the table model holds them, analyses run on them,
+  // and renaming them on read changes analysis labels and hashes
+  // (BUG-4: `MitoFactory` → `MitoFactory 2`). The one place uniqueness
+  // is structural is grouped GROUP names (deduped above, where the group
+  // name is the column-name prefix); plain column duplicates stay exact.
+  // (The old FF-F9 rename lived here; it was the bug.)
 
-  const rowCount = Math.max(0, ...columns.map((c) => c.values.length), rowTitleValues.length);
+  const rowCount = maxOf(columns.map((c) => c.values.length), rowTitleValues.length);
   if (rowCount === 0 || columns.length === 0) {
     issues.push({ severity: "warning", message: `${displayName} holds no data. It was left out.` });
     return null;
@@ -623,7 +635,8 @@ export function parsePzfx(text: string): PzfxImport {
   const nodes: Record<string, ProjectNode> = {};
   const rootOrder: string[] = [];
   const childOrder: Record<string, string[]> = {};
-  // Tables live under the root (TableSequence only lists them); HugeTables too.
+  // Tables live under the root (TableSequence only lists them) — a
+  // HugeTable is the same shape as a Table, so importTable handles both.
   const groupingSeparators = usesGroupingSeparators(root);
   const tableNodes = root.children.filter((c) => c.tag === "Table" || c.tag === "HugeTable");
   for (const tableNode of tableNodes) {

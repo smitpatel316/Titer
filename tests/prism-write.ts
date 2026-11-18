@@ -179,6 +179,281 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
       err instanceof Error ? err.message.slice(0, 120) : String(err),
     );
   }
+  // W7 (BUG-9): a mixed-format xy table round-trips with its MEAN/SD/N
+  // names intact. The writer groups Ya/Yb into y_sd_n datasets but the
+  // "XX error" column is y_single, so the table-level dataFormat is
+  // y_single — the reader must name subcolumns from each dataset's own
+  // format, or Ya_MEAN/Ya_SD/Ya_N come back as Ya_1/Ya_2/Ya_3.
+  const sdnColumns = ["Title", "XX", "XX error", "Ya_MEAN", "Ya_SD", "Ya_N", "Yb_MEAN", "Yb_SD", "Yb_N"];
+  const sdnWritten = await writePrism(
+    {
+      nodes: {
+        table_1: {
+          id: "table_1",
+          type: "table",
+          name: "Data 1",
+          parentId: null,
+          tableType: "xy",
+          data: {
+            columns: sdnColumns,
+            rows: [
+              ["A", "1", "2", "100", "50", "5", "1", "10", "4"],
+              ["B", "2", "3", "90", "60", "6", "2", "9", "3"],
+              ["C", "3", "4", "80", "70", "7", "3", "8", "2"],
+            ],
+          },
+        },
+      },
+      rootOrder: ["table_1"],
+      childOrder: { table_1: [] },
+      activeNodeId: "table_1",
+    },
+    "1.0.7",
+  );
+  const sdnBack = await convertPrism(sdnWritten.bytes, "sdn-round-trip.prism");
+  const sdnTable = Object.values(sdnBack.project.nodes).find((n) => n?.type === "table" && n.name === "Data 1");
+  check(
+    "W7 mixed-format MEAN/SD/N round-trip",
+    JSON.stringify(sdnTable?.data?.columns) === JSON.stringify(sdnColumns),
+    `back: ${JSON.stringify(sdnTable?.data?.columns)}`,
+  );
+  // W8 (BUG-10): excluded cells survive a .prism round-trip, written in
+  // real Prism's own representation — `cellAttributes` EXCLUDED entries
+  // on the replicate — with `y_replicates` ranges split where
+  // per-subcolumn exclusion patterns differ (Ya_1+Ya_2 excluded at row
+  // 1, Yb_1 excluded but Yb_2 live: Yb must become ranges "0" and "1",
+  // not one "0~1" range with EXCLUDED row 1). The column table covers
+  // the non-replicates (`replicates` array) branch.
+  const bug10Project = {
+    nodes: {
+      table_1: {
+        id: "table_1",
+        type: "table",
+        name: "Data 1",
+        parentId: null,
+        tableType: "xy",
+        data: {
+          columns: ["Title", "XX", "Ya_1", "Ya_2", "Yb_1", "Yb_2"],
+          rows: [
+            ["A", "1.", "80.", "50.", "1.", "8."],
+            ["B", "2.", "90.", "60.", "2.", "9."],
+            ["C", "3.", "70.", "40.", "3.", "7."],
+          ],
+          excluded: ["1,2", "1,3", "1,4"],
+        },
+      },
+      table_2: {
+        id: "table_2",
+        type: "table",
+        name: "Col",
+        parentId: null,
+        tableType: "column",
+        data: {
+          columns: ["Title", "C"],
+          rows: [
+            [null, "5"],
+            [null, "6"],
+          ],
+          excluded: ["1,1"],
+        },
+      },
+    },
+    rootOrder: ["table_1", "table_2"],
+    childOrder: { table_1: [], table_2: [] },
+    activeNodeId: "table_1",
+  };
+  const bug10Written = await writePrism(bug10Project as never, "1.0.7");
+  const bug10Zip = await JSZip.loadAsync(bug10Written.bytes);
+  const setsByTitle = new Map<string, Record<string, unknown>>();
+  for (const p of Object.keys(bug10Zip.files)) {
+    if (!p.startsWith("data/sets/") || bug10Zip.files[p].dir) continue;
+    const d = JSON.parse(await bug10Zip.file(p)!.async("string")) as Record<string, unknown>;
+    setsByTitle.set(String(d.title), d);
+  }
+  const ya = setsByTitle.get("Ya") as {
+    "replicate ranges"?: { range?: string; replicate?: { cellAttributes?: unknown[] } }[];
+  };
+  const yb = setsByTitle.get("Yb") as {
+    "replicate ranges"?: { range?: string; replicate?: { cellAttributes?: unknown[] } }[];
+  };
+  const cset = setsByTitle.get("C") as { replicates?: { cellAttributes?: unknown[] }[] };
+  check(
+    "W8 writer emits Prism EXCLUDED cellAttributes",
+    JSON.stringify(ya?.["replicate ranges"]) ===
+      JSON.stringify([
+        {
+          range: "0~1",
+          replicate: {
+            "@class": "DriverReplicate",
+            valueType: "real",
+            commonAttributes: ["NUMERIC"],
+            decimalsLength: 1,
+            significantDigitsCount: 7,
+            lastRow: 2,
+            firstRow: 0,
+            cellAttributes: [{ rows: "1", attributes: ["EXCLUDED"] }],
+          },
+        },
+      ]) &&
+      (yb?.["replicate ranges"]?.length ?? 0) === 2 &&
+      yb?.["replicate ranges"]?.[0]?.range === "0" &&
+      (yb?.["replicate ranges"]?.[0]?.replicate?.cellAttributes?.length ?? 0) === 1 &&
+      yb?.["replicate ranges"]?.[1]?.range === "1" &&
+      (yb?.["replicate ranges"]?.[1]?.replicate?.cellAttributes?.length ?? 0) === 0 &&
+      JSON.stringify(cset?.replicates?.[0]?.cellAttributes) ===
+        JSON.stringify([{ rows: "1", attributes: ["EXCLUDED"] }]),
+    `Ya ${JSON.stringify(ya?.["replicate ranges"])}; Yb ${JSON.stringify(yb?.["replicate ranges"])}; C ${JSON.stringify(cset?.replicates)}`,
+  );
+  const bug10Back = await convertPrism(bug10Written.bytes, "bug10-round-trip.prism");
+  const bug10BackTables = bug10Back.project.rootOrder
+    .map((id) => bug10Back.project.nodes[id])
+    .filter((n) => n?.type === "table");
+  const backExcluded = (name: string) => bug10BackTables.find((t) => t.name === name)?.data?.excluded ?? [];
+  check(
+    "W8 .prism round-trip preserves exclusions",
+    JSON.stringify(backExcluded("Data 1")) === JSON.stringify(["1,2", "1,3", "1,4"]) &&
+      JSON.stringify(backExcluded("Col")) === JSON.stringify(["1,1"]),
+    `Data 1 ${JSON.stringify(backExcluded("Data 1"))}; Col ${JSON.stringify(backExcluded("Col"))}`,
+  );
+  // W9: a project with no exclusions writes no cellAttributes anywhere —
+  // the common case keeps its exact previous output shape.
+  const cleanWritten = await writePrism(
+    {
+      nodes: {
+        table_1: {
+          id: "table_1",
+          type: "table",
+          name: "Clean",
+          parentId: null,
+          tableType: "column",
+          data: { columns: ["Title", "A", "B_1", "B_2"], rows: [[null, "1", "2", "3"]] },
+        },
+      },
+      rootOrder: ["table_1"],
+      childOrder: { table_1: [] },
+      activeNodeId: "table_1",
+    },
+    "1.0.7",
+  );
+  const cleanZip = await JSZip.loadAsync(cleanWritten.bytes);
+  let cellAttrs = 0;
+  for (const p of Object.keys(cleanZip.files)) {
+    if (!p.endsWith(".json") || cleanZip.files[p].dir) continue;
+    if ((await cleanZip.file(p)!.async("string")).includes("cellAttributes")) cellAttrs++;
+  }
+  check("W9 no exclusions, no cellAttributes", cellAttrs === 0, `${cellAttrs} file(s) mention cellAttributes`);
+  // W10: duplicate group names stay two datasets (BUG-1/BUG-3) — the writer
+  // groups by runs, not by name, so the second "Group" set isn't merged
+  // into the first with its values shifted.
+  const dupData = {
+    columns: ["Title", "Group:Y1", "Group:Y2", "Group:Y1", "Group:Y2"],
+    rows: [["r1", "1", "2", "3", "4"]],
+    groups: 2,
+    replicates: 2,
+  };
+  const dupWritten = await writePrism(
+    {
+      nodes: {
+        table_1: {
+          id: "table_1",
+          type: "table",
+          name: "Dup groups",
+          parentId: null,
+          tableType: "grouped",
+          data: dupData,
+        },
+      },
+      rootOrder: ["table_1"],
+      childOrder: { table_1: [] },
+      activeNodeId: "table_1",
+    },
+    "1.0.7",
+  );
+  const dupBack = await convertPrism(dupWritten.bytes, "dup-groups.prism");
+  const dupTable = Object.values(dupBack.project.nodes).find((n) => n?.type === "table");
+  check(
+    "W10 duplicate groups round-trip",
+    JSON.stringify(dupTable?.data) === JSON.stringify(dupData),
+    `back columns: ${JSON.stringify(dupTable?.data?.columns)}`,
+  );
+  // W11 (BUG-20): every written data sheet's table carries "@class" —
+  // real Prism 11.2.0 dispatches on it and dereferences it unconditionally,
+  // so omitting it crashes Prism on open (SIGSEGV in NSDocument init).
+  // Real Prism files write "XYDataTable" for xy/survival tables and
+  // "DataTable" for column/grouped/contingency.
+  const classProject = {
+    nodes: {
+      t_col: {
+        id: "t_col",
+        type: "table",
+        name: "Col",
+        parentId: null,
+        tableType: "column",
+        data: { columns: ["Title", "A", "B"], rows: [[null, "1", "2"]] },
+      },
+      t_xy: {
+        id: "t_xy",
+        type: "table",
+        name: "XY",
+        parentId: null,
+        tableType: "xy",
+        data: { columns: ["Title", "X", "Y_1", "Y_2"], rows: [[null, "0.1", "10", "11"]] },
+      },
+      t_surv: {
+        id: "t_surv",
+        type: "table",
+        name: "Surv",
+        parentId: null,
+        tableType: "survival",
+        data: { columns: ["Title", "Time", "GrpA", "GrpB"], rows: [[null, "0", "100", "90"]] },
+      },
+      t_grouped: {
+        id: "t_grouped",
+        type: "table",
+        name: "Grouped",
+        parentId: null,
+        tableType: "grouped",
+        data: {
+          columns: ["Title", "G1:Y1", "G1:Y2", "G2:Y1", "G2:Y2"],
+          rows: [[null, "1", "2", "3", "4"]],
+        },
+      },
+      t_cont: {
+        id: "t_cont",
+        type: "table",
+        name: "Cont",
+        parentId: null,
+        tableType: "contingency",
+        data: { columns: ["Title", "A", "B"], rows: [[null, "5", "6"]] },
+      },
+    },
+    rootOrder: ["t_col", "t_xy", "t_surv", "t_grouped", "t_cont"],
+    childOrder: { t_col: [], t_xy: [], t_surv: [], t_grouped: [], t_cont: [] },
+    activeNodeId: "t_col",
+  };
+  const classWritten = await writePrism(classProject as never, "1.0.7");
+  const classZip = await JSZip.loadAsync(classWritten.bytes);
+  const classByTitle = new Map<string, unknown>();
+  for (const p of Object.keys(classZip.files)) {
+    if (!p.startsWith("data/sheets/") || !p.endsWith("sheet.json") || classZip.files[p].dir) continue;
+    const d = JSON.parse(await classZip.file(p)!.async("string")) as {
+      title?: string;
+      table?: { "@class"?: string };
+    };
+    if (d.title) classByTitle.set(d.title, d.table?.["@class"]);
+  }
+  const expectedClasses: [string, string][] = [
+    ["Col", "DataTable"],
+    ["XY", "XYDataTable"],
+    ["Surv", "XYDataTable"],
+    ["Grouped", "DataTable"],
+    ["Cont", "DataTable"],
+  ];
+  check(
+    "W11 tables carry @class (BUG-20)",
+    expectedClasses.every(([title, cls]) => classByTitle.get(title) === cls),
+    [...classByTitle.entries()].map(([t, c]) => `${t}=${String(c)}`).join(", "),
+  );
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed.`);

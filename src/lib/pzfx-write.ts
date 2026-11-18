@@ -3,10 +3,17 @@
 // Builds a GraphPad Prism `.pzfx` file (XML) from a Titer project: data
 // tables with their values, and info sheets. Analyses, graphs and layouts
 // are NEVER written — a `.pzfx` file never contains analysis results (they
-// live in the `<Template>` blob, which Titer doesn't write), and Prism
-// recomputes them when it opens the file. Whether Prism opens a
-// Titer-written file with no warnings is unknown until a Prism/Viewer
-// read-back (test C-07, still open).
+// live in the `<Template>` blob), and Prism recomputes them when it opens
+// the file. Titer writes an EMPTY `<Template>` element (no blob): Prism
+// 11.2.0 shows its XML-compliance dialog for any file whose
+// CreatedByProgram isn't "GraphPad Prism" UNLESS a <Template> element is
+// present (BUG-21, real-Prism ablation Nov 17, 2026 — 26 files: the dialog
+// fires iff Program != GraphPad Prism AND no Template; a non-empty minimal
+// blob is WORSE — an unnamed error dialog and no open at all). The empty
+// element is XSD-valid, round-trips identically through Titer's own
+// importer, and opens in real Prism 11.2.0 with no dialog, titled with
+// the filename. A canned blob from another project is NOT used: the blob
+// encodes that project's table titles and printer name.
 //
 // The spec is the vault note `Research/.pzfx write spec.md` — this file
 // implements it. Anything the spec marks unknown is left out, never
@@ -26,12 +33,15 @@
 //   nested / multiple → the write FAILS with a plain-language error naming
 //                 the table: silently dropping a table would be data loss,
 //                 and Prism has no counterpart for them.
+//   A table past 52 subcolumns in a data set (or 104 data sets) writes as
+//   <HugeTable>, as Prism writes it — the reader takes either tag.
 // A table whose datasets mix formats (one replicates, one SDN) cannot be
 // expressed in one table-level YFormat, so the whole write FAILS naming
 // the table — never silently rewritten as something else.
 
 import type { ProjectFilePayload } from "./project-file";
 import type { PrismWriteReport } from "./prism-write";
+import { groupRuns } from "./columns";
 import { summaryFormatDef, type SummaryFormat } from "./summary-format";
 
 export interface PzfxWriteResult {
@@ -84,13 +94,27 @@ const GROUPED_SUMMARY_YFORMAT: Record<Exclude<SummaryFormat, "replicates">, stri
 
 const DATE_SHAPE = /^\d{1,2}-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{4}$/;
 
-const escapeXml = (s: string): string =>
-  s
+/** Escape a value for XML text. Never throws: Prism sometimes writes a
+ *  rich-text object `{ string, version, formatting }` where a string
+ *  belongs (info notes, constant values — BUG-5), and a stray object or
+ *  number must not take the whole export down. Rich text unwraps to its
+ *  plain string; other primitives take their String() form; null,
+ *  undefined and any other object become "". Never "[object Object]". */
+const escapeXml = (s: unknown): string => {
+  let text: string;
+  if (typeof s === "string") text = s;
+  else if (s === null || s === undefined) text = "";
+  else if (typeof s === "object") {
+    const rich = (s as { string?: unknown }).string;
+    text = typeof rich === "string" ? rich : "";
+  } else text = String(s);
+  return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
+};
 
 /** Split Titer Y columns into `.pzfx` datasets. Mirrors
  *  `prism-write.ts` `groupDatasets` (summary groups, then replicate groups,
@@ -151,6 +175,14 @@ function tableYFormat(sets: WriteSet[], displayName: string): string | null {
   }
   return implied[0] ?? null;
 }
+
+/** The tag a table is written under: Prism writes `<HugeTable>` instead of
+ *  `<Table>` once a table passes 52 subcolumns in a data set or 104 data
+ *  sets (R pzfx 0.2.0 NEWS) — the XSD allows either tag in the table list,
+ *  and the reader takes both, so a table Titer writes past that size reads
+ *  back in Prism the way Prism's own huge tables do. */
+const tableTag = (datasets: number, maxSubcolumns: number): "Table" | "HugeTable" =>
+  datasets > 104 || maxSubcolumns > 52 ? "HugeTable" : "Table";
 
 export function writePzfx(project: ProjectFilePayload, appVersion: string): PzfxWriteResult {
   const report: PrismWriteReport = { tables: [], analyses: [], analysesNotWritten: [], infoSheets: [], issues: [] };
@@ -251,14 +283,12 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
       prismTableType = "TwoWay";
       xFormat = "none";
       // Regroup by the part before the first ":" (the importer's split);
-      // the subcolumn label is the part after the last ":".
-      const groups = new Map<string, number[]>();
-      yColumns.forEach((c, i) => {
-        const group = c.name.includes(":") ? c.name.slice(0, c.name.indexOf(":")) : c.name;
-        const list = groups.get(group) ?? [];
-        list.push(i);
-        groups.set(group, list);
-      });
+      // the subcolumn label is the part after the last ":". Groups are RUNS
+      // (src/lib/columns.ts `groupRuns`): two same-named groups
+      // ("Group:Y1"… twice) are two groups, and merging them by name would
+      // write one 20-replicate YColumn whose values shift columns on
+      // read-back.
+      const groups = groupRuns(yColumns.map((c) => c.name)).map((r) => ({ title: r.name, columns: r.columns }));
       const sublabel = (c: WriteColumn) =>
         c.name.includes(":") ? c.name.slice(c.name.lastIndexOf(":") + 1) : c.name;
       // The groups' format: the declared summaryFormat when its subcolumns
@@ -274,7 +304,7 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
         }
         return null;
       };
-      const groupLabels = [...groups.values()].map((cols) => cols.map((ci) => sublabel(yColumns[ci])));
+      const groupLabels = groups.map((g) => g.columns.map((ci) => sublabel(yColumns[ci])));
       const declared =
         data.summaryFormat && data.summaryFormat !== "replicates" ? summaryFormatDef(data.summaryFormat) : null;
       const matchesDeclared = (labels: string[]) =>
@@ -306,15 +336,15 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
         });
       } else {
         yFormat = "replicates";
-        const maxGroup = Math.max(...[...groups.values()].map((cols) => cols.length));
+        const maxGroup = Math.max(...groups.map((g) => g.columns.length));
         replicates = Math.max(data.replicates ?? 0, maxGroup);
       }
       // One YColumn per group, in group order; replicate groups are padded
       // to `replicates` subcolumns with empty <d>s, as the importer pads
       // on read. A Y dataset at yColumns[j] sits at data-column index
       // yStart + j + 1 (data column 0 holds the row titles).
-      const yXml = [...groups.entries()]
-        .map(([title, cols]) => {
+      const yXml = groups
+        .map(({ title, columns: cols }) => {
           const subCols = [...cols];
           while (yFormat === "replicates" && subCols.length < (replicates ?? 0)) subCols.push(-1);
           const width = 89 * Math.max(1, subCols.length);
@@ -330,8 +360,17 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
         .join("");
       const id = `Table${tableIds.length}`;
       tableIds.push(id);
+      // A table past Prism's huge size writes as <HugeTable>, not <Table>.
+      // (Merge fix: `groups` is an array of {title, columns} runs since
+      // lane A — lane E's Map-era `.values()`/`.size` no longer typecheck.
+      // Same shape as the sets call site below: count + max columns.)
+      const maxSubcolumns =
+        yFormat === "replicates"
+          ? (replicates ?? 0)
+          : Math.max(0, ...groups.map((g) => g.columns.length));
+      const tag = tableTag(groups.length, maxSubcolumns);
       tableXml.push(
-        `<Table ID="${id}" XFormat="${xFormat}"${yFormat ? ` YFormat="${yFormat}"` : ""}${replicates !== undefined && yFormat === "replicates" ? ` Replicates="${replicates}"` : ""} TableType="${prismTableType}" EVFormat="AsteriskAfterNumber"><Title>${escapeXml(name)}</Title>${emitRowTitles ? `<RowTitlesColumn Width="39"><Subcolumn>${Array.from({ length: rowCount }, (_, r) => { const v = rowTitles[r]; return v === null ? `<d/>` : `<d>${escapeXml(v)}</d>`; }).join("")}</Subcolumn></RowTitlesColumn>` : ""}${yXml}</Table>`,
+        `<${tag} ID="${id}" XFormat="${xFormat}"${yFormat ? ` YFormat="${yFormat}"` : ""}${replicates !== undefined && yFormat === "replicates" ? ` Replicates="${replicates}"` : ""} TableType="${prismTableType}" EVFormat="AsteriskAfterNumber"><Title>${escapeXml(name)}</Title>${emitRowTitles ? `<RowTitlesColumn Width="39"><Subcolumn>${Array.from({ length: rowCount }, (_, r) => { const v = rowTitles[r]; return v === null ? `<d/>` : `<d>${escapeXml(v)}</d>`; }).join("")}</Subcolumn></RowTitlesColumn>` : ""}${yXml}</${tag}>`,
       );
       report.tables.push(name);
       continue;
@@ -402,8 +441,10 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
         : `<XColumn Width="${xFormat === "date" ? 114 : 89}" Decimals="${xFormat === "date" ? 14 : 0}" Subcolumns="${xError ? 2 : 1}"><Title>${escapeXml(xColumn.name)}</Title><Subcolumn>${dElements(1)}</Subcolumn>${xError ? `<Subcolumn>${dElements(allColumns.indexOf(xError) + 1)}</Subcolumn>` : ""}</XColumn>`;
     const id = `Table${tableIds.length}`;
     tableIds.push(id);
+    // A table past Prism's huge size writes as <HugeTable>, not <Table>.
+    const tag = tableTag(sets.length, Math.max(0, ...sets.map((s) => s.columns.length)));
     tableXml.push(
-      `<Table ID="${id}" XFormat="${xFormat}"${yFormat ? ` YFormat="${yFormat}"` : ""}${replicates !== undefined ? ` Replicates="${replicates}"` : ""} TableType="${prismTableType}" EVFormat="AsteriskAfterNumber"><Title>${escapeXml(name)}</Title>${emitRowTitles ? `<RowTitlesColumn Width="39"><Subcolumn>${Array.from({ length: rowCount }, (_, r) => { const v = rowTitles[r]; return v === null ? `<d/>` : `<d>${escapeXml(v)}</d>`; }).join("")}</Subcolumn></RowTitlesColumn>` : ""}${xXml}${xAdvanced ?? ""}${yXml}</Table>`,
+      `<${tag} ID="${id}" XFormat="${xFormat}"${yFormat ? ` YFormat="${yFormat}"` : ""}${replicates !== undefined ? ` Replicates="${replicates}"` : ""} TableType="${prismTableType}" EVFormat="AsteriskAfterNumber"><Title>${escapeXml(name)}</Title>${emitRowTitles ? `<RowTitlesColumn Width="39"><Subcolumn>${Array.from({ length: rowCount }, (_, r) => { const v = rowTitles[r]; return v === null ? `<d/>` : `<d>${escapeXml(v)}</d>`; }).join("")}</Subcolumn></RowTitlesColumn>` : ""}${xXml}${xAdvanced ?? ""}${yXml}</${tag}>`,
     );
     report.tables.push(name);
   }
@@ -425,7 +466,7 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
   issues.push({
     severity: "warning",
     message:
-      "Graphs and layouts are not written — they live only in the .pzfx <Template> blob, which Titer doesn't write. Re-create them in Prism from the tables.",
+      "Graphs and layouts are not written — the .pzfx <Template> is empty (Titer writes no analyses, graphs or layouts). Re-create them in Prism from the tables.",
   });
 
   // Info sheets: one <Info> per info node (title, notes, name/value
@@ -473,7 +514,13 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
       ? `<InfoSequence>${infoIds.map((id, i) => `<Ref ID="${id}"${i === 0 ? ' Selected="1"' : ""}/>`).join("")}</InfoSequence>\n${infoXml.join("\n")}\n`
       : "") +
     `<TableSequence Selected="1">${tableIds.map((id, i) => `<Ref ID="${id}"${i === 0 ? ' Selected="1"' : ""}/>`).join("")}</TableSequence>\n` +
-    `${tableXml.join("\n")}\n</GraphPadPrismFile>\n`;
+    `${tableXml.join("\n")}\n` +
+    // BUG-21: an EMPTY <Template> element, last child of the root. Prism
+    // 11.2.0 demands a <Template> element on any file not created by
+    // GraphPad Prism, but never decodes an empty one — a canned or minimal
+    // non-empty blob is worse (error dialog, no open) or leaks another
+    // project's data. Exact bytes match the U1 ablation file.
+    `<Template dt:dt="bin.base64" xmlns:dt="urn:schemas-microsoft-com:datatypes"></Template>\n</GraphPadPrismFile>\n`;
 
   return { bytes: new TextEncoder().encode(xml), report };
 }

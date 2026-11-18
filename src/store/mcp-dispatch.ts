@@ -30,7 +30,7 @@ import { parseProjectText, validateAnalysisParams } from "../lib/project-file";
 import { extractMethod, methodForTable, remapGraphOptions } from "../lib/template";
 import { runScript } from "../lib/prism-script";
 import type { WandReport } from "../lib/wand";
-import { analysisOptionsForTable, countDataGroups, hasRowGroups } from "../views/analyses";
+import { analysisOptionsForTable, analysisTypesOfferedForTable, countDataGroups, hasRowGroups } from "../views/analyses";
 import {
   defaultDocumentIo,
   executeCloseProject,
@@ -70,7 +70,7 @@ import {
 } from "../native";
 import { publishAnalysisResult, publishMcpSnapshotNow } from "./mcp-publish";
 import { useProjectActions, useProjectStore } from "./use-project-store";
-import type { ProjectNode, TableData, TableType } from "./types";
+import type { ProjectNode, RowGroup, TableData, TableType } from "./types";
 import type { TableMove } from "./references";
 import { isGrouped, isNested, leadOf } from "../lib/dataset";
 import { seriesKeyOf } from "../lib/columns";
@@ -449,8 +449,9 @@ function detectSummaryFormat(suffixes: string[]): SummaryFormat | undefined {
  *  `titer_create_table` with data) promises instead of writing a broken
  *  table. `base` is the table being replaced (write): its excluded-cell
  *  marks, row-group bands, column widths, error format, freeze flag and
- *  notes carry over; `excluded` replaces the marks when the call says so.
- *  A fresh table (create) starts with none of those.
+ *  notes carry over; `excluded` replaces the marks when the call says so,
+ *  `rowGroupsIn` replaces the bands when the call says so (an empty list
+ *  clears them). A fresh table (create) starts with none of those.
  */
 function buildTableData(
   job: McpJob,
@@ -459,6 +460,7 @@ function buildTableData(
   rowsIn: unknown,
   base?: TableData,
   excludedIn?: unknown,
+  rowGroupsIn?: unknown,
 ): TableData {
   if (!Array.isArray(columnsIn) || columnsIn.length === 0) {
     throw jobErr(job, "needs columns to be a non-empty array of strings (column 0 is the row-title column).");
@@ -524,6 +526,46 @@ function buildTableData(
   if (replicates !== undefined) data.replicates = replicates;
   if (subgroups !== undefined) data.subgroups = subgroups;
   if (summaryFormat !== undefined) data.summaryFormat = summaryFormat;
+
+  // Row bands (factor-C levels), when the call passes them: grouped tables
+  // only, names non-empty + distinct, counts whole and ≥ 1, and the bands
+  // must tile the new rows exactly. An explicit list replaces the base
+  // bands (an empty list clears them); omitted, the base bands carry over
+  // (see below). Rust serializes an absent Option as JSON null, so null
+  // means omitted too (the same convention as `excluded`).
+  let rowGroupsGiven = false;
+  if (rowGroupsIn !== undefined && rowGroupsIn !== null) {
+    rowGroupsGiven = true;
+    if (!Array.isArray(rowGroupsIn)) {
+      throw jobErr(job, "needs row_groups to be an array of {“name”, “count”} pairs.");
+    }
+    if (type !== "grouped") {
+      throw jobErr(job, `has row_groups but is a ${type} table — row bands only apply to grouped tables.`);
+    }
+    const bands: RowGroup[] = rowGroupsIn.map((band, i) => {
+      if (typeof band !== "object" || band === null || Array.isArray(band)) {
+        throw jobErr(job, `has a row group at index ${i} that is not a {“name”, “count”} pair (${JSON.stringify(band)}).`);
+      }
+      const { name, count } = band as Record<string, unknown>;
+      if (typeof name !== "string" || !name) {
+        throw jobErr(job, `has a row group at index ${i} with no name — every band needs a non-empty name.`);
+      }
+      if (typeof count !== "number" || !Number.isInteger(count) || count < 1) {
+        throw jobErr(job, `has a row group “${name}” with count ${JSON.stringify(count)} — every band needs a whole number of rows, at least 1.`);
+      }
+      return { name, count };
+    });
+    const names = bands.map((b) => b.name);
+    if (new Set(names).size !== names.length) {
+      const dup = names.find((n, i) => names.indexOf(n) !== i);
+      throw jobErr(job, `has two row groups named “${dup}” — band names must be distinct.`);
+    }
+    const total = bands.reduce((sum, b) => sum + b.count, 0);
+    if (bands.length && total !== rows.length) {
+      throw jobErr(job, `has row_groups covering ${total} rows but the table has ${rows.length} rows — the bands must tile the rows exactly.`);
+    }
+    if (bands.length) data.rowGroups = bands;
+  }
   if (!base) return data;
 
   // A replace keeps what the call did not replace: the marks, the bands,
@@ -554,7 +596,7 @@ function buildTableData(
     const kept = base.excluded.filter(onCell);
     if (kept.length) data.excluded = kept;
   }
-  if (base.rowGroups) {
+  if (!rowGroupsGiven && base.rowGroups) {
     const oldCount = base.rows.length;
     if (rows.length === oldCount) {
       data.rowGroups = base.rowGroups;
@@ -670,13 +712,20 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       }
       // The picker offers each test only for the table types it makes sense
       // on — the same gate, so an agent gets the valid list instead of a
-      // runner error on data it cannot use.
+      // runner error on data it cannot use. The gate checks the CONCRETE
+      // types the picker offers (analysisTypesOfferedForTable expands the
+      // "compare-many-groups" meta entry to anova / kruskal-wallis /
+      // rm-anova / friedman): the picker lists only the meta entry, the
+      // Rust side rejects it, so checking the raw picker values left
+      // those four tests offered on NO table type (BUG-14). The error
+      // below still lists the picker values, meta entry included.
       const data = table.data;
       const tableType = table.tableType;
       if (tableType === undefined) {
         throw new Error(`Table “${tableId}” has no table type recorded.`);
       }
-      const offered = analysisOptionsForTable(tableType, data).map((o) => o.value);
+      const offered = analysisTypesOfferedForTable(tableType, data);
+      const pickerOffered = analysisOptionsForTable(tableType, data).map((o) => o.value);
       if (!offered.includes(type)) {
         if (type === "three-way-anova" && !hasRowGroups(data)) {
           throw new Error("“three-way-anova” needs a Grouped table with at least 2 row bands — this table has none.");
@@ -698,7 +747,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
               ? "interpolate (→ nonlinear-regression with params.interpolate)"
               : v;
         throw new Error(
-          `“${type}” is not offered for ${tableType} tables. ${tableType} tables offer: ${offered.map(offeredLabel).join(", ")}.`,
+          `“${type}” is not offered for ${tableType} tables. ${tableType} tables offer: ${pickerOffered.map(offeredLabel).join(", ")}.`,
         );
       }
       const { errors, params } = validateAnalysisParams(type, args.params);
@@ -832,7 +881,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         if (!hasColumns || !hasRows) {
           throw jobErr(job, "needs columns and rows together — pass both, or neither for an empty table.");
         }
-        const data = buildTableData(job, type, (job.args as Record<string, unknown>).columns, (job.args as Record<string, unknown>).rows);
+        const data = buildTableData(job, type, (job.args as Record<string, unknown>).columns, (job.args as Record<string, unknown>).rows, undefined, undefined, (job.args as Record<string, unknown>).row_groups);
         actions.createTableWithData(type, data, name ?? "Table");
       }
       await settleAfterDispatch(deps, beforeRevision);
@@ -869,9 +918,20 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       if (columns === undefined || rows === undefined) {
         throw jobErr(job, "needs columns and rows (the whole table).");
       }
+      // BUG-17: a whole-data replace with zero rows would silently erase
+      // the table's data and report success. Empty tables are made with
+      // titer_create_table (omit columns and rows) and emptied with
+      // titer_edit_table delete-rows — never here.
+      if (Array.isArray(rows) && rows.length === 0) {
+        throw jobErr(
+          job,
+          "needs rows to be a non-empty array — writing zero rows would erase the table's data. To empty a table, delete its rows with titer_edit_table (delete-rows); to start a new empty table, use titer_create_table with no columns or rows.",
+        );
+      }
       const label = argOptString(job, job.args, "label") ?? "Edit Table";
       const excluded = (job.args as Record<string, unknown> | null | undefined)?.excluded;
-      const data = buildTableData(job, type, columns, rows, node.data, excluded);
+      const rowGroups = (job.args as Record<string, unknown> | null | undefined)?.row_groups;
+      const data = buildTableData(job, type, columns, rows, node.data, excluded, rowGroups);
       if (JSON.stringify(data) === JSON.stringify(node.data)) {
         // The same table back: no undo step, no dirty flag.
         return {
