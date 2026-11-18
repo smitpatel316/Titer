@@ -491,10 +491,12 @@ def _c_q67_table_types(suite):
                 f"{name}: table_type {summ.get('table_type')!r} != {want_type!r}"
             _assert_numbers_present(summ, want_values, name)
         tables = suite.mcp.tool("titer_list_tables", {"project_id": pid})["tables"]
-        got_types = sorted(t.get("table_type") for t in tables)
-        assert got_types == sorted(["Column", "XY", "Grouped",
-                                    "Multiple variables", "Contingency"]), \
-            f"table types mismatch: {got_types}"
+        by_name = {t.get("name"): t.get("table_type") for t in tables}
+        assert by_name.get("Col") == "Column" and by_name.get("XY") == "XY" \
+            and by_name.get("Grouped") == "Grouped" \
+            and by_name.get("Multi") == "Multiple variables" \
+            and by_name.get("Cont") == "Contingency", \
+            f"table types mismatch (seeded 'Table 1' aside): {by_name}"
         return ("5/5 table types created with data read back (Column, XY, "
                 "Grouped, Multiple variables, Contingency).")
     finally:
@@ -986,6 +988,7 @@ def _c_t100_duplicate_family(suite):
     duplicated family (label "Duplicate Family")."""
     pid = _new_project(suite)
     try:
+        baseline = _node_count(suite, pid)  # the seeded "Table 1"
         tid = suite.mcp.tool("titer_create_table", {
             "project_id": pid, "table_type": "column", "name": "Cox data"})["table_id"]
         _write_table(suite, pid, tid, COLUMN_COLS, COLUMN_ROWS,
@@ -996,19 +999,19 @@ def _c_t100_duplicate_family(suite):
         suite.mcp.tool("titer_build_graph", {
             "project_id": pid, "table_id": tid, "graph_type": "mean-error",
             "name": "Cox graph"})
-        assert _node_count(suite, pid) == 3, \
-            f"expected 3 nodes before duplicate, got {_node_count(suite, pid)}"
+        assert _node_count(suite, pid) == baseline + 3, \
+            f"expected {baseline + 3} nodes before duplicate, got {_node_count(suite, pid)}"
         tables_before = suite.mcp.tool("titer_list_tables", {"project_id": pid})["tables"]
         dup = suite.mcp.tool("titer_duplicate_table_family", {
             "project_id": pid, "table_id": tid})
         copy_tid = dup["table_id"]
         assert dup.get("children", {}).get("analyses") and dup.get("children", {}).get("graphs"), \
             f"duplicate returned no cloned children: {dup}"
-        assert _node_count(suite, pid) == 6, \
-            f"expected 6 nodes after duplicate, got {_node_count(suite, pid)}"
+        assert _node_count(suite, pid) == baseline + 6, \
+            f"expected {baseline + 6} nodes after duplicate, got {_node_count(suite, pid)}"
         tables_after = suite.mcp.tool("titer_list_tables", {"project_id": pid})["tables"]
         names = [t.get("name") for t in tables_after]
-        assert names == ["Cox data", "Cox data copy"], \
+        assert names == ["Table 1", "Cox data", "Cox data copy"], \
             f"copy not right after source: {names}"
         assert dup["children"]["analyses"] != [aid], \
             "cloned analysis kept the source analysis id"
@@ -1035,23 +1038,31 @@ def _c_t100_duplicate_family(suite):
         assert _group_mean(res_orig["result"], "Control") == mean_orig, \
             "original analysis result moved when the copy was edited"
         # S3: a second duplicate + one undo removes the whole family.
+        # (S2's fresh run added one analysis node, so the count here is
+        # baseline+7 before the second duplicate, not baseline+6.)
+        assert _node_count(suite, pid) == baseline + 7, \
+            f"expected {baseline + 7} nodes before the second duplicate, got {_node_count(suite, pid)}"
         dup2 = suite.mcp.tool("titer_duplicate_table_family", {
             "project_id": pid, "table_id": tid})
-        assert _node_count(suite, pid) == 9
+        assert _node_count(suite, pid) == baseline + 10, \
+            f"expected {baseline + 10} nodes after the second duplicate, got {_node_count(suite, pid)}"
         tables2 = suite.mcp.tool("titer_list_tables", {"project_id": pid})["tables"]
+        # The copy is inserted right after its source in rootOrder, so the
+        # SECOND duplicate of the same source lands between the source and
+        # the first copy ("copy 2" before "copy").
         assert [t.get("name") for t in tables2] == [
-            "Cox data", "Cox data copy", "Cox data copy 2"], \
+            "Table 1", "Cox data", "Cox data copy 2", "Cox data copy"], \
             f"second duplicate names: {[t.get('name') for t in tables2]}"
         undone = suite.mcp.tool("titer_undo", {"project_id": pid})
         assert undone.get("undone") == "Duplicate Family", \
             f"undo label {undone.get('undone')!r} != 'Duplicate Family'"
-        assert _node_count(suite, pid) == 6, \
-            f"one undo should remove the whole family (6 nodes), got {_node_count(suite, pid)}"
-        return (f"duplicate 'Cox data copy' right after source (3 -> 6 nodes, "
-                f"fresh child ids); copy edit left the original cell-identical "
-                f"while its recompute moved Control mean {mean_orig} -> "
-                f"{mean_copy}; second duplicate + one 'Duplicate Family' undo "
-                "removed the whole family.")
+        assert _node_count(suite, pid) == baseline + 7, \
+            f"one undo should remove the whole family ({baseline + 7} nodes), got {_node_count(suite, pid)}"
+        return (f"duplicate 'Cox data copy' right after source (baseline+3 "
+                f"-> baseline+6 nodes, fresh child ids); copy edit left the "
+                f"original cell-identical while its recompute moved Control "
+                f"mean {mean_orig} -> {mean_copy}; second duplicate + one "
+                "'Duplicate Family' undo removed the whole family.")
     finally:
         _close(suite, pid)
 
@@ -1085,7 +1096,7 @@ def _c_t103_clone_graph(suite):
         new_gid = clone["graph_id"]
         tables = suite.mcp.tool("titer_list_tables", {"project_id": pid})["tables"]
         assert [t.get("name") for t in tables] == [
-            "Cell viability (%)", "Cell viability (%) 2"], \
+            "Table 1", "Cell viability (%)", "Cell viability (%) 2"], \
             f"clone table names/order: {[t.get('name') for t in tables]}"
         new_tid = [t["id"] for t in tables if t.get("name") == "Cell viability (%) 2"][0]
         summ = _summary(suite, pid, new_tid)
@@ -1134,7 +1145,7 @@ def _c_t103_clone_graph(suite):
         assert undone.get("undone") == "Clone Graph", \
             f"undo label {undone.get('undone')!r} != 'Clone Graph'"
         tables2 = suite.mcp.tool("titer_list_tables", {"project_id": pid})["tables"]
-        assert [t.get("name") for t in tables2] == ["Cell viability (%)"], \
+        assert [t.get("name") for t in tables2] == ["Table 1", "Cell viability (%)"], \
             f"tables after undo: {[t.get('name') for t in tables2]}"
         post_undo_path = os.path.join(suite.out_dir, "t103-undone.hlx")
         _save(suite, pid, post_undo_path)
