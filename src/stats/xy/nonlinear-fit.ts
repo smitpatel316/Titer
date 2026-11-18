@@ -33,6 +33,8 @@ export const MODEL_LABEL: Record<NonlinearModel, string> = {
   quartic: "Fourth order polynomial (quartic)",
   quintic: "Fifth order polynomial (quintic)",
   "exponential-growth": "Exponential growth",
+  "logistic-growth": "Logistic growth",
+  "gompertz-growth": "Gompertz growth",
   "one-phase-decay": "One-phase decay",
   "michaelis-menten": "Michaelis-Menten",
   // Prism's "Exponential" family (plan 08).
@@ -145,6 +147,29 @@ const kiFromLinear = (label: string, p: string, d: number): Derived => ({
   low: `pci("${p}")[1]/${d}`,
   high: `pci("${p}")[2]/${d}`,
 });
+/** A dose-response curve's ECF (F in %): where it has risen F % of the way from Bottom to
+ *  Top (an inhibitor's ICF: F % inhibition), from its log midpoint, Hill slope and asymmetry
+ *  (`dl`: its 95% CI by the delta method, the fit's covariance carried to it; at the fit,
+ *  what refitting with log ECF as a parameter gives). On the log scale, then raised. */
+export function ecAnything(model: NonlinearModel, f: number): Derived {
+  const logX = model.endsWith("-logx");
+  const [log, raise] = logX ? ["log10", (e: string) => `10^(${e})`] : ["log", (e: string) => `exp(${e})`];
+  const mid = model.startsWith("inhibitor") ? "LogIC50" : logX ? "LogEC50" : "EC50";
+  const at = logX ? `b[["${mid}"]]` : `log(b[["EC50"]])`;
+  const hill = model.includes("3pl") ? "1" : `b[["HillSlope"]]`;
+  // Its shift from the midpoint: log(F / (100 − F)) / Hill slope; a 5PL's asymmetry moves it.
+  const shift = model.startsWith("asymmetric")
+    ? `(${log}(2^(1/b[["S"]])-1)-${log}(${f / 100}^(-1/b[["S"]])-1))/${hill}`
+    : `${log}(${f}/${100 - f})/${hill}`;
+  const d = `dl(function(b)${at}+${shift})`;
+  return {
+    label: `${model.startsWith("inhibitor") ? "IC" : "EC"}${f}`,
+    expr: raise(`${d}[1]`),
+    low: raise(`${d}[2]`),
+    high: raise(`${d}[3]`),
+  };
+}
+
 /** `c` / K (a half-life, a doubling time, tau), its CI `c` over K's: none when K's
  *  includes 0, the time then unbounded. The value is null when the fitted K ≤ 0. */
 const overK = (label: string, c: string, k = "K"): Derived => {
@@ -549,6 +574,26 @@ export function modelSpec(
         terms: ["Y0", "K"],
         derived: [overK("Doubling time", "log(2)"), overK("Tau", "1")],
         curveFn: 'g<-function(xv,p) p[["Y0"]]*exp(p[["K"]]*xv)',
+      };
+    case "logistic-growth":
+      // Y = YM·Y0 / ((YM − Y0)·exp(−K·X) + Y0); it starts from the logit's line.
+      // Upstream 1.1.0; Titer's exponential-family "port" fitter, like its siblings
+      // (the default Gauss-Newton stalls on (near-)noiseless growth fits in WebR).
+      return {
+        kind: "nls",
+        fit: `m<-nls(y~YM*Y0/((YM-Y0)*exp(-K*x)+Y0),start=local({M<-max(y)*1.05;k<-y>0&y<M;c0<-coef(lm(log(y[k]/(M-y[k]))~x[k]));list(Y0=M*plogis(c0[[1]]),YM=M,K=c0[[2]])}),algorithm="port",control=nls.control(maxiter=200))`,
+        terms: ["Y0", "YM", "K"],
+        derived: [overK("Doubling time", "log(2)")],
+        curveFn:
+          'g<-function(xv,p) p[["YM"]]*p[["Y0"]]/((p[["YM"]]-p[["Y0"]])*exp(-p[["K"]]*xv)+p[["Y0"]])',
+      };
+    case "gompertz-growth":
+      // Y = YM·(Y0/YM)^exp(−K·X); it starts from log(−log(Y / YM))'s line.
+      return {
+        kind: "nls",
+        fit: `m<-nls(y~YM*(Y0/YM)^exp(-K*x),start=local({M<-max(y)*1.05;k<-y>0&y<M;c0<-coef(lm(log(-log(y[k]/M))~x[k]));list(Y0=M*exp(-exp(c0[[1]])),YM=M,K=-c0[[2]])}),algorithm="port",control=nls.control(maxiter=200))`,
+        terms: ["Y0", "YM", "K"],
+        curveFn: 'g<-function(xv,p) p[["YM"]]*(p[["Y0"]]/p[["YM"]])^exp(-p[["K"]]*xv)',
       };
     // ── Other classic curves (v2) ───────────────────────────────────────
     // Prism's Gaussian, Boltzmann sigmoid, Lorentzian and sine-wave
@@ -1272,7 +1317,10 @@ export function fitSummaryStatements(spec: ModelSpec, weighted = false): string 
   return (
     `s<-summary(m);co<-s$coefficients;cf<-coef(m);` +
     `df<-df.residual(m);ss<-${ss};sst<-${sst};r2<-${r2};syx<-sqrt(ss/df);` +
-    `V<-vcov(m);q<-qt(0.975,df);pci<-function(p)cf[[p]]+c(-1,1)*q*sqrt(V[p,p]);`
+    `V<-vcov(m);q<-qt(0.975,df);pci<-function(p)cf[[p]]+c(-1,1)*q*sqrt(V[p,p]);` +
+    // A function of the coefficients and its CI by the delta method (central differences).
+    `dl<-function(f){e<-f(cf);g<-sapply(names(cf),function(p){h<-1e-6*max(1,abs(cf[[p]]));a<-cf;b<-cf;a[[p]]<-a[[p]]+h;b[[p]]<-b[[p]]-h;(f(a)-f(b))/(2*h)});` +
+    `s<-sqrt(drop(t(g)%*%V[names(cf),names(cf)]%*%g));c(e,e-q*s,e+q*s)};`
   );
 }
 

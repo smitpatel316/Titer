@@ -11,6 +11,19 @@ import { pairedGroups } from "../column/base";
 import { evalNamedVector } from "../webr";
 import { num } from "../../lib/format";
 
+type Test = NonNullable<ChiSquareParams["test"]>;
+
+const SUBTITLES: Record<Test, string> = {
+  fisher: "Fisher's exact test",
+  yates: "Chi-square test with Yates' correction",
+  "chi-square": "Pearson's chi-square test",
+  trend: "Chi-square test for trend",
+};
+
+/** R: `wil(x, n)`, the Wilson score 95% CI of the proportion x / n. */
+const R_WILSON =
+  "wil<-function(x,n){z<-qnorm(0.975);p<-x/n;c0<-(p+z^2/(2*n))/(1+z^2/n);h<-z*sqrt(p*(1-p)/n+z^2/(4*n^2))/(1+z^2/n);c(c0-h,c0+h)}";
+
 export async function runChiSquare(columns: Column[], params?: ChiSquareParams): Promise<AnalysisOutcome> {
   const built = buildContingencyMatrix(columns);
   if ("error" in built) return built;
@@ -18,6 +31,15 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
   const groups = pairedGroups(columns);
   const flat = matrix.flat();
   const is2x2 = rows === 2 && cols === 2;
+  const test: Test = params?.test ?? (is2x2 ? "fisher" : "chi-square");
+  if ((test === "fisher" || test === "yates") && !is2x2)
+    return { error: `${SUBTITLES[test]} is for a 2 × 2 table; this one is ${rows} × ${cols}.` };
+  // Fisher's exact test sums the probability of every table with these margins: beyond
+  // ten million subjects, more than R can hold. (fisher.test runs for the odds ratio
+  // even when the chi-square is the chosen P source, so the cap applies either way.)
+  const total = flat.reduce((a, v) => a + v, 0);
+  if (is2x2 && total > 1e7)
+    return { error: `Fisher's exact test takes up to 10,000,000 subjects in all; this table holds ${num(total)}.` };
 
   // The trend test has one direction: 2 columns × ≥3 rows trends across rows
   // on the first column's proportion; ≥3 columns × 2 rows trends across
@@ -26,6 +48,13 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
   const trendAcrossRows = !is2x2 && cols === 2 && rows >= 3;
   const trendAcrossCols = !is2x2 && rows === 2 && cols >= 3;
   const trendShape = trendAcrossRows || trendAcrossCols;
+  // `test: "trend"` asks for the trend test: it needs a qualifying shape; the
+  // ordering confirmation (`trendOrdered`) still gates it, per Titer's rule
+  // that a meaningless trend is never silently reported.
+  if (test === "trend" && !trendShape)
+    return {
+      error: `The chi-square test for trend needs 2 columns and 3 rows or more, or 2 rows and 3 columns or more; this table is ${rows} × ${cols}.`,
+    };
   // Prism always computes the trend on a qualifying table; Titer only does
   // when the user confirms the ordering, so a meaningless trend is never
   // silently reported.
@@ -76,12 +105,19 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
 
   // as.numeric() drops R's own names ("X-squared", "df"…): the keys are only ours.
   const rCode = is2x2
-    ? `m<-matrix(c(${flat.join(",")}),nrow=2,byrow=TRUE);ft<-fisher.test(m);ct<-suppressWarnings(chisq.test(m, correct=FALSE));` +
-      // The first column's risk in row 1 over row 2, its CI on the log (Katz); Phi, signed.
-      `rr<-(m[1,1]/sum(m[1,]))/(m[2,1]/sum(m[2,]));z<-qnorm(0.975)*sqrt(1/m[1,1]-1/sum(m[1,])+1/m[2,1]-1/sum(m[2,]));` +
-      `c(p=ft$p.value,odds=as.numeric(ft$estimate),oddsLo=ft$conf.int[1],oddsHi=ft$conf.int[2],` +
+    ? `${R_WILSON};m<-matrix(c(${flat.join(",")}),nrow=2,byrow=TRUE);ft<-fisher.test(m);ct<-suppressWarnings(chisq.test(m,correct=${test !== "chi-square" ? "TRUE" : "FALSE"}));` +
+      // The first column's risk in row 1 over row 2, its CI on the log (Katz); Phi, signed;
+      // the two risks' difference, its CI Newcombe's (Wilson's of each risk combined).
+      `n1<-sum(m[1,]);n2<-sum(m[2,]);p1<-m[1,1]/n1;p2<-m[2,1]/n2;rr<-p1/p2;` +
+      `z<-qnorm(0.975)*sqrt(1/m[1,1]-1/n1+1/m[2,1]-1/n2);w1<-wil(m[1,1],n1);w2<-wil(m[2,1],n2);d<-p1-p2;` +
+      `dlo<-d-sqrt((p1-w1[1])^2+(w2[2]-p2)^2);dhi<-d+sqrt((w1[2]-p1)^2+(p2-w2[1])^2);` +
+      `se<-wil(m[1,1],sum(m[,1]));sp<-wil(m[2,2],sum(m[,2]));pp<-wil(m[1,1],n1);np<-wil(m[2,2],n2);` +
+      `c(p=${test === "fisher" ? "ft$p.value" : "ct$p.value"},odds=as.numeric(ft$estimate),oddsLo=ft$conf.int[1],oddsHi=ft$conf.int[2],` +
       `chisq=as.numeric(ct$statistic),df=as.numeric(ct$parameter),minexp=min(ct$expected),n=sum(m),` +
-      `rr=rr,rrLo=rr*exp(-z),rrHi=rr*exp(z),phi=(m[1,1]*m[2,2]-m[1,2]*m[2,1])/sqrt(prod(rowSums(m),colSums(m))))`
+      `rr=rr,rrLo=rr*exp(-z),rrHi=rr*exp(z),phi=(m[1,1]*m[2,2]-m[1,2]*m[2,1])/sqrt(prod(rowSums(m),colSums(m))),` +
+      `d=d,dLo=dlo,dHi=dhi,nnt=1/abs(d),nntLo=if(dlo>0||dhi<0)1/max(abs(c(dlo,dhi))) else NA,nntHi=if(dlo>0||dhi<0)1/min(abs(c(dlo,dhi))) else NA,` +
+      `sens=m[1,1]/sum(m[,1]),sensLo=se[1],sensHi=se[2],spec=m[2,2]/sum(m[,2]),specLo=sp[1],specHi=sp[2],` +
+      `ppv=p1,ppvLo=pp[1],ppvHi=pp[2],npv=m[2,2]/n2,npvLo=np[1],npvHi=np[2])`
     : `m<-matrix(c(${flat.join(",")}),nrow=${rows},byrow=TRUE);ct<-suppressWarnings(chisq.test(m));` +
       (trend ? `tt<-prop.trend.test(c(${trendX.join(",")}),c(${trendN.join(",")}));` : "") +
       `c(chisq=as.numeric(ct$statistic),df=as.numeric(ct$parameter),p=ct$p.value,minexp=min(ct$expected),n=sum(m)` +
@@ -89,18 +125,35 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
       `,cramer=sqrt(as.numeric(ct$statistic)/(sum(m)*(min(dim(m))-1))))`;
 
   const v = await evalNamedVector(rCode);
+  const row = (label: string, key: string, p = false): StatRow => ({
+    label,
+    value: v[key] ?? null,
+    ...(p ? { p } : {}),
+  });
+  /** A measure and its 95% CI's bounds, each a row. */
+  const withCi = (label: string, key: string, ci = "95% CI") => [
+    row(label, key),
+    row(`${label.replace(/ \(.*\)$/, "")} ${ci} lower`, `${key}Lo`),
+    row(`${label.replace(/ \(.*\)$/, "")} ${ci} upper`, `${key}Hi`),
+  ];
   const stats: StatRow[] = [];
   if (is2x2) {
-    stats.push({ label: "P value (Fisher's exact test)", value: v.p ?? null, p: true });
-    stats.push({ label: "Odds ratio (conditional estimate)", value: v.odds ?? null });
-    stats.push({ label: "Odds ratio 95% CI lower", value: v.oddsLo ?? null });
-    stats.push({ label: "Odds ratio 95% CI upper", value: v.oddsHi ?? null });
-    stats.push({ label: `Relative risk (${groups[0].name})`, value: v.rr ?? null });
-    stats.push({ label: "Relative risk 95% CI lower", value: v.rrLo ?? null });
-    stats.push({ label: "Relative risk 95% CI upper", value: v.rrHi ?? null });
-    stats.push({ label: "Phi", value: v.phi ?? null });
-    stats.push({ label: "Chi-square (for reference)", value: v.chisq ?? null });
-    stats.push({ label: "df", value: v.df ?? null });
+    stats.push(
+      test === "fisher" ? row("P value (Fisher's exact test)", "p", true) : row("P value", "p", true),
+      ...(test === "fisher"
+        ? []
+        : [row(`Chi-square${test === "yates" ? " (Yates' correction)" : ""}`, "chisq"), row("df", "df")]),
+      ...withCi("Odds ratio (conditional estimate)", "odds"),
+      ...withCi(`Relative risk (${groups[0].name})`, "rr"),
+      ...withCi(`Difference of risks (${groups[0].name})`, "d"),
+      ...withCi("Number needed to treat", "nnt"),
+      row("Phi", "phi"),
+      ...withCi("Sensitivity", "sens"),
+      ...withCi("Specificity", "spec"),
+      ...withCi("Positive predictive value", "ppv"),
+      ...withCi("Negative predictive value", "npv"),
+      ...(test === "fisher" ? [row("Chi-square (Yates' correction, for reference)", "chisq"), row("df", "df")] : []),
+    );
   } else {
     stats.push({ label: "Chi-square", value: v.chisq ?? null });
     stats.push({ label: "df", value: v.df ?? null });
@@ -112,14 +165,18 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
     stats.push({ label: "Cramér's V", value: v.cramer ?? null });
   }
 
-  const lowExpected = !is2x2 && v.minexp != null && v.minexp < 5;
+  const first = groups[0].name;
+  const lowExpected = test !== "fisher" && v.minexp != null && v.minexp < 5;
   const notes =
-    `Contingency table ${rows}×${cols}, N = ${num(v.n ?? null)}. ` +
+    `Contingency table ${rows}×${cols}, N = ${num(v.n ?? null)}. ${is2x2 ? SUBTITLES[test] : "Pearson's chi-square test"}. ` +
     (is2x2
-      ? `Fisher's exact test (2×2). The odds ratio is for the table as entered (rows × columns): the test's ` +
-        `conditional estimate, close to but not a·d / b·c. The relative risk is the first row's share of ` +
-        `“${groups[0].name}” over the second row's.`
-      : `Pearson's chi-square test.`) +
+      ? `The odds ratio is for the table as entered (rows × columns): Fisher's conditional estimate, close to ` +
+        `but not a·d / b·c. The relative risk and the difference of risks compare the first row's share of ` +
+        `“${first}” with the second row's; the number needed to treat is one over that difference` +
+        (v.nntLo == null ? ", its CI running through infinity as the difference's runs through 0" : "") +
+        `. Sensitivity, specificity and predictive values read the rows as a test's results (positive first) ` +
+        `and the columns as the condition (present first).`
+      : "") +
     (trend
       ? ` Chi-square test for trend (Cochran–Armitage, 1 df): tests for a linear trend in the proportion in the first ` +
         `${trendAcrossRows ? "column across ordered, equally spaced rows." : "row across ordered, equally spaced columns."}`
@@ -133,7 +190,7 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
 
   return {
     testType: "chi-square",
-    subtitle: is2x2 ? "Fisher's exact test" : "Pearson's chi-square test",
+    subtitle: is2x2 ? SUBTITLES[test] : "Pearson's chi-square test",
     stats,
     groups: [],
     notes,

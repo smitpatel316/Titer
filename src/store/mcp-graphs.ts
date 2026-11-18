@@ -36,6 +36,7 @@ import {
   GRAPH_CHOICES,
   GRAPH_LIMITS,
   PALETTE_KINDS,
+  REF_LABEL_PLACES,
   type FigureGrid,
   type FigureLabelStyle,
   type FigurePanel,
@@ -46,6 +47,7 @@ import {
   type InfoSheetData,
   type LabelPosition,
   type ProjectNode,
+  type RefLine,
   type Resolution,
   type SharedLegend,
   type TableType,
@@ -157,6 +159,8 @@ const CHOICE_FIELDS: Record<string, keyof typeof GRAPH_CHOICES> = {
   groupLayout: "groupLayout",
   stackAs: "stackAs",
   sigDisplay: "sigDisplay",
+  regBand: "regBand",
+  residualsAs: "residualsAs",
   survivalMode: "survivalMode",
   volcanoEffect: "volcanoEffect",
   volcanoSignificance: "volcanoSignificance",
@@ -259,6 +263,8 @@ const GRAPH_OPTION_KEYS = [
   ...LINK_FIELDS,
   ...CONSTANT_HOOK_FIELDS,
   "sigPairs",
+  "sets",
+  "refLines",
   "palette",
   "series",
   "points",
@@ -363,6 +369,37 @@ function validatedPlace(job: McpJob, name: string, value: unknown): { x: number;
   return { x: value.x, y: value.y };
 }
 
+/** Reference lines as the tool spells them: `{ value }` each, with the
+ *  panel's defaults (`dash`, width 1) where left out. */
+function validatedRefLines(job: McpJob, value: unknown): RefLine[] {
+  if (!Array.isArray(value)) throw jobErr(job, `“refLines” must be a list of { value, dash?, width?, color?, label?, labelPlace? }.`);
+  return value.map((line, i) => {
+    if (!isPlainObject(line) || !isFiniteNumber(line.value))
+      throw jobErr(job, `“refLines[${i}].value” must be a number (the value on the value axis).`);
+    if (line.dash !== undefined && !((GRAPH_CHOICES.lineDash as readonly string[]).includes(line.dash as string)))
+      throw jobErr(job, `“refLines[${i}].dash” must be one of: ${GRAPH_CHOICES.lineDash.join(", ")}.`);
+    if (
+      line.width !== undefined &&
+      (!isFiniteNumber(line.width) || line.width < GRAPH_LIMITS.lineWidth.min || line.width > GRAPH_LIMITS.lineWidth.max)
+    )
+      throw jobErr(
+        job,
+        `“refLines[${i}].width” must be between ${GRAPH_LIMITS.lineWidth.min} and ${GRAPH_LIMITS.lineWidth.max}.`,
+      );
+    if (line.color !== undefined && typeof line.color !== "string")
+      throw jobErr(job, `“refLines[${i}].color” must be a color string.`);
+    if (line.label !== undefined && typeof line.label !== "string")
+      throw jobErr(job, `“refLines[${i}].label” must be a string.`);
+    if (line.labelPlace !== undefined && !((REF_LABEL_PLACES as readonly string[]).includes(line.labelPlace as string)))
+      throw jobErr(job, `“refLines[${i}].labelPlace” must be one of: ${REF_LABEL_PLACES.join(", ")}.`);
+    const out: RefLine = { value: line.value, dash: (line.dash as RefLine["dash"]) ?? "dash", width: line.width ?? 1 };
+    if (line.color !== undefined) out.color = line.color as string;
+    if (line.label !== undefined) out.label = line.label as string;
+    if (line.labelPlace !== undefined) out.labelPlace = line.labelPlace as RefLine["labelPlace"];
+    return out;
+  });
+}
+
 /**
  * A partial `GraphOptions` as the tool spells it, validated field by
  * field. Unknown keys are rejected (the error names the valid fields);
@@ -440,6 +477,12 @@ function validateGraphOptions(
       if (!Array.isArray(value) || !value.every((v) => typeof v === "string"))
         throw jobErr(job, `option “sigPairs” must be a list of comparison keys (strings).`);
       options[key] = value;
+    } else if (key === "sets") {
+      if (!Array.isArray(value) || !value.every((v) => typeof v === "string" && v))
+        throw jobErr(job, `option “sets” must be a list of data-set names (strings).`);
+      options[key] = value;
+    } else if (key === "refLines") {
+      options[key] = validatedRefLines(job, value);
     } else if (key === "palette") {
       options[key] = validatedPalette(job, value);
     } else if (key === "series") {

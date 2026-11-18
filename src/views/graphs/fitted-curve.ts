@@ -72,6 +72,10 @@ export function evaluate(
       return c("B0") + c("B1") * x + c("B2") * Math.max(x - c("X0"), 0);
     case "exponential-growth":
       return c("Y0") * Math.exp(c("K") * x);
+    case "logistic-growth":
+      return (c("YM") * c("Y0")) / ((c("YM") - c("Y0")) * Math.exp(-c("K") * x) + c("Y0"));
+    case "gompertz-growth":
+      return c("YM") * (c("Y0") / c("YM")) ** Math.exp(-c("K") * x);
     case "one-phase-decay":
       return (c("Y0") - c("Plateau")) * Math.exp(-c("K") * x) + c("Plateau");
     case "two-phase-decay":

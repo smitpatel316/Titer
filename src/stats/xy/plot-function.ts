@@ -60,6 +60,8 @@ export const PLOT_FUNCTION_DEFAULTS: Record<PlotFunctionModel, Record<string, nu
   "asymmetric-5pl-logx": { Bottom: 0, Top: 100, LogEC50: 0, HillSlope: 1, S: 1 },
   "asymmetric-5pl-x": { Bottom: 0, Top: 100, EC50: 1, HillSlope: 1, S: 1 },
   "exponential-growth": { Y0: 1, K: 0.1 },
+  "logistic-growth": { Y0: 1, YM: 100, K: 0.1 },
+  "gompertz-growth": { Y0: 1, YM: 100, K: 0.1 },
   "one-phase-decay": { Y0: 100, Plateau: 0, K: 0.1 },
   "two-phase-decay": { Plateau: 0, Span1: 50, K1: 1, Span2: 50, K2: 0.1 },
   "plateau-decay": { X0: 5, Y0: 100, Plateau: 0, K: 0.1 },
