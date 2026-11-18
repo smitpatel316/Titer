@@ -49,6 +49,10 @@ import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from client import Mcp, McpError  # noqa: E402
+from cases_numeric import register_numeric_cases  # noqa: E402
+from cases_state import register_state_cases  # noqa: E402
+from cases_plotly_determinism import (  # noqa: E402
+    c_plotly_svg_ids_deterministic, c_plotly_figure_svg_deterministic)
 
 # Exact (name, type, rows) multiset for tests/testdata/prism/prism2R-demo_dataset.prism,
 # recorded by the readiness battery (slice 2, demo_dataset.pzfx — the byte-identical
@@ -81,6 +85,9 @@ NEEDED_TOOLS = [
     "titer_list_tables", "titer_read_table_summary", "titer_list_jobs",
     "titer_run_analysis", "titer_read_job", "titer_read_results",
     "titer_save_project",
+    # Plotly-determinism pins (cases_plotly_determinism.py, seq 189).
+    "titer_build_graph", "titer_export_graph",
+    "titer_create_figure", "titer_export_figure",
 ]
 
 VOLATILE_KEYS = {"id", "table_id", "project_id"}
@@ -540,6 +547,16 @@ class Suite:
         self.case("negative_control_truncated", self.c_negative_truncated)
         self.case("negative_control_mutated_pzfx", self.c_negative_mutated_pzfx)
         self.case("invalid_file_rejects", self.c_invalid_file_rejects)
+        # Conversion lanes (check/e2e-conversion): numeric pins (seq 182),
+        # state/dialog pins (seq 183), Plotly determinism pins (seq 189).
+        # The plotly cases run after the survival import above (they reuse
+        # self.pid_surv via _survival_table_id's fallback if needed).
+        register_numeric_cases(self)
+        register_state_cases(self)
+        self.case("plotly_svg_ids_deterministic",
+                  lambda: c_plotly_svg_ids_deterministic(self))
+        self.case("plotly_figure_svg_deterministic",
+                  lambda: c_plotly_figure_svg_deterministic(self))
         self.close_all()
         passed = sum(1 for r in self.results if r["ok"])
         total = len(self.results)
