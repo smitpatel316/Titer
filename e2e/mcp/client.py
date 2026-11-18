@@ -15,6 +15,39 @@ import urllib.request
 PROTOCOL_VERSION = "2025-11-25"
 
 
+def parse_sse_payload(raw):
+    """Parse the JSON body out of one Streamable-HTTP SSE response.
+
+    PIN (battery Q-94 / T-131): the original battery driver did
+    ``r.text.splitlines()`` on the response. Two bugs in one line:
+
+    1. ``requests`` decodes ``text/event-stream`` with no charset as
+       ISO-8859-1, so UTF-8 bytes arrive as latin-1 characters.
+    2. ``str.splitlines()`` splits on ``\\x85`` (NEL) as well as ``\\n`` —
+       and 0x85 is the trailing byte of UTF-8 multi-byte characters such
+       as U+2085 (subscript-five in the column title "ΔOD₅₉₅ (µM)") and
+       U+0445 (Cyrillic "х"). The SSE ``data:`` line is chopped mid-JSON
+       and ``json.loads`` fails with "Unterminated string". Three files
+       failed the whole 233-file battery this way (FAIL-SNAPSHOT):
+       syn-edge-cases.prism, syn-edge-cases.pzfx,
+       zenodo-18255034-regression-and-correlations.pzfx.
+
+    The fix: decode the raw bytes as UTF-8 explicitly and split on
+    ``'\\n'`` ONLY. ``e2e/battery/test_sse_decode.py`` pins it: the old
+    algorithm fails on the exact failing payload, this one parses it.
+    """
+    text = raw.decode("utf-8")
+    data = None
+    for line in text.split("\n"):
+        if line.startswith("data:"):
+            payload = line[5:].strip()
+            if payload:
+                data = json.loads(payload)
+    if data is None:
+        raise McpError(f"no data frame in SSE response: {text[:200]}")
+    return data
+
+
 class McpError(RuntimeError):
     pass
 
@@ -49,7 +82,7 @@ class Mcp:
         )
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
-                raw = resp.read().decode()
+                raw = resp.read()
                 sid = resp.headers.get("mcp-session-id")
                 ctype = resp.headers.get("content-type", "")
         except urllib.error.HTTPError as e:
@@ -59,16 +92,8 @@ class Mcp:
         if sid:
             self.sid = sid
         if "application/json" in ctype:
-            return json.loads(raw)
-        data = None
-        for line in raw.splitlines():
-            if line.startswith("data:"):
-                payload = line[5:].strip()
-                if payload:
-                    data = json.loads(payload)
-        if data is None:
-            raise McpError(f"{method}: no data frame in SSE response: {raw[:200]}")
-        return data
+            return json.loads(raw.decode("utf-8"))
+        return parse_sse_payload(raw)
 
     def tool_raw(self, name, arguments=None):
         out = self.rpc("tools/call", {"name": name, "arguments": arguments or {}})
