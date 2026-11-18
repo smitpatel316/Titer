@@ -37,6 +37,7 @@ import type {
   CoxParams,
   PoissonRegressionParams,
   PrincipalComponentAnalysisParams,
+  RmAnovaParams,
   RocParams,
   ShapiroWilkParams,
   SplineLowessParams,
@@ -53,6 +54,8 @@ import { oneSampleTSpec } from "./column/one-sample-t";
 import { anovaSpec } from "./column/anova";
 import { kruskalWallisSpec } from "./column/kruskal-wallis";
 import { rmAnovaSpec } from "./column/rm-anova";
+import { runMixedModel } from "./column/mixed-model";
+import { withReport } from "./report";
 import { friedmanSpec } from "./column/friedman";
 import { shapiroWilkSpec } from "./column/shapiro-wilk";
 import { kolmogorovSmirnovSpec } from "./column/kolmogorov-smirnov";
@@ -120,6 +123,8 @@ interface Analysis {
   label: string;
   /** The exact test these params run ("Welch's t test"), to name a new analysis. */
   name?: (params: AnalysisParams | undefined) => string;
+  /** What the toolbar's pill says it is, when its params make it another kind (a mixed model). */
+  kind?: (params: AnalysisParams | undefined) => string;
   /** Data columns (holding numbers) the test needs; checked before it is created. */
   minColumns: number;
   /** R packages the test needs (plan 00 registry names). `runAnalysis` installs
@@ -159,7 +164,17 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
   "one-sample-t": spec("Compare one group to a value", oneSampleTSpec),
   anova: spec("One-way ANOVA", anovaSpec),
   "kruskal-wallis": spec("Kruskal-Wallis test", kruskalWallisSpec),
-  "rm-anova": spec("Repeated-measures ANOVA", rmAnovaSpec),
+  "rm-anova": (() => {
+    // A mixed-effects model keeps the subjects missing values; else the ANOVA of complete ones.
+    const anova = spec("Repeated-measures ANOVA", rmAnovaSpec);
+    const mixed = (p: AnalysisParams | undefined) => (p as RmAnovaParams | undefined)?.mixed === true;
+    return {
+      ...anova,
+      name: (p) => (mixed(p) ? "Mixed-effects model" : anova.name!(p)),
+      kind: (p) => (mixed(p) ? "Mixed-effects model" : anova.label),
+      run: (c, p, t) => (mixed(p) ? runMixedModel(c, p as RmAnovaParams) : anova.run(c, p, t)),
+    };
+  })(),
   friedman: spec("Friedman test", friedmanSpec),
   // Only Anderson–Darling needs a package (`nortest`); the other three
   // normality tests are base R (or TypeScript, for D'Agostino–Pearson) —
@@ -421,6 +436,16 @@ export function packageGate(type: AnalysisType, params?: AnalysisParams): {
 // An edit makes a new TableData, which starts a fresh set of results.
 const results = new WeakMap<TableData, Map<string, Promise<AnalysisOutcome>>>();
 
+// A P value that came back empty, on data no check foresaw, is said, never left a bare "—".
+function sayBlanks(outcome: AnalysisOutcome): AnalysisOutcome {
+  if ("error" in outcome) return outcome;
+  const blank =
+    outcome.stats.some((s) => s.p && s.value == null) || (outcome.comparisons ?? []).some((c) => c.p == null);
+  return blank
+    ? { ...outcome, notes: `${outcome.notes ?? ""} A P value shown “—” can't be computed on these data.`.trim() }
+    : outcome;
+}
+
 export function runAnalysis(
   testType: AnalysisType,
   data: TableData,
@@ -494,8 +519,16 @@ export function runAnalysis(
         // returned an error outcome (a bad fit, a timeout, a cancel): asking
         // again runs it for real instead of replaying the stale error.
         // Without this, the Retry button after a timeout/cancel was a no-op.
-        if ("error" in outcome) byTest.delete(key);
-        return outcome;
+        if ("error" in outcome) {
+          byTest.delete(key);
+          return outcome;
+        }
+        // Every result opens with a report (data analyzed, plain-words
+        // summary, assumption checks); a report part that fails is left
+        // out, never the result — so a report failure falls back to the
+        // bare result instead of failing the run.
+        const reported = await withReport(testType, params, data, columns, outcome).catch(() => outcome);
+        return sayBlanks(reported);
       } catch (err: unknown) {
         // A failure (an R error, R not starting) is shown, not kept: asking again retries.
         byTest.delete(key);

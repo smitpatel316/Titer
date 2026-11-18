@@ -18,6 +18,7 @@ import { MODEL_LABEL, termLabel } from "../../stats/xy/nonlinear-regression";
 import { modelSpec } from "../../stats/xy/nonlinear-fit";
 import { parseCustomParameters, parseUserEquation } from "../../stats/xy/user-defined";
 import { dataGroups, incompleteRows, pairedGroups, pairIndices } from "../../stats/column/base";
+import { rowName } from "../../stats/grouped/base";
 import { pairKey } from "../../lib/columns";
 import { distinctTruthValues } from "../../stats/column/roc-curve";
 
@@ -397,6 +398,10 @@ const meanSd = (values: number[]) => {
 
 /** 6 significant digits — a readable starting value for a simulated mean/SD. */
 const round6 = (v: number) => Number(v.toPrecision(6));
+
+/** A grouped table's rows holding data, by the names results give them. */
+const dataRows = (table: Dataset) =>
+  table.titles.flatMap((_, r) => (table.numeric.some((c) => c.byRow[r] != null) ? [rowName(table.titles, r)] : []));
 
 /** Whether a grouped table holds replicates: a group with 2 values or more at a row. */
 const replicated = (table: Dataset) =>
@@ -3248,30 +3253,41 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         a.design !== "nonparametric" &&
         choice("posthoc", "Run multiple comparisons? Only meaningful if the ANOVA is significant.", [
           ["none", "No — just the ANOVA table"],
-          ["tukey groups", "Yes — Tukey's, comparing groups within each row"],
-          ["tukey rows", "Yes — Tukey's, comparing rows within each group"],
-          ["bonferroni groups", "Yes — Bonferroni, comparing groups within each row"],
-          ["bonferroni rows", "Yes — Bonferroni, comparing rows within each group"],
-          ["sidak groups", "Yes — Šídák, comparing groups within each row"],
-          ["sidak rows", "Yes — Šídák, comparing rows within each group"],
-          ["holm-sidak groups", "Yes — Holm–Šídák, comparing groups within each row"],
-          ["holm-sidak rows", "Yes — Holm–Šídák, comparing rows within each group"],
-          ["lsd groups", "Yes — Fisher's LSD (uncorrected), comparing groups within each row"],
-          ["lsd rows", "Yes — Fisher's LSD (uncorrected), comparing rows within each group"],
+          ["tukey", "Yes — Tukey's"],
+          ...(a.design === "repeated-measures"
+            ? []
+            : ([["dunnett", "Yes, each against a control — Dunnett's test"]] as [string, string][])),
+          ["bonferroni", "Yes — Bonferroni"],
+          ["sidak", "Yes — Šídák"],
+          ["holm-sidak", "Yes — Holm–Šídák"],
+          ["lsd", "Yes — Fisher's LSD (uncorrected)"],
+          ...(a.design === "repeated-measures"
+            ? []
+            : ([["games-howell", "Yes — Games-Howell test (without assuming equal SDs)"]] as [string, string][])),
         ]),
+      replicated(table) &&
+        a.design !== "nonparametric" &&
+        a.posthoc !== undefined &&
+        a.posthoc !== "none" &&
+        choice("posthocTarget", "Compare which?", [
+          ["groups", "Groups within each row"],
+          ["rows", "Rows within each group"],
+        ]),
+      a.posthoc === "dunnett" &&
+        (a.posthocTarget === "rows"
+          ? choice("control", "Which row is the control?", names(dataRows(table)))
+          : choice("control", "Which group is the control?", names(chosenSets(a) ?? setNames(table)))),
     ],
-    finish: (a) => {
-      const [posthoc, posthocTarget = "groups"] = String(a.posthoc ?? "none").split(" ");
-      return {
-        type: "two-way-anova",
-        params: withSets(a, {
-          design: (a.design ?? "ordinary") as TwoWayAnovaParams["design"],
-          posthoc: posthoc as TwoWayAnovaParams["posthoc"],
-          posthocTarget: posthocTarget as TwoWayAnovaParams["posthocTarget"],
-          ...(a.design === "repeated-measures" ? { sphericity: a.sphericity === "yes" } : {}),
-        }),
-      };
-    },
+    finish: (a) => ({
+      type: "two-way-anova",
+      params: withSets(a, {
+        design: (a.design ?? "ordinary") as TwoWayAnovaParams["design"],
+        posthoc: (a.posthoc as TwoWayAnovaParams["posthoc"] | undefined) ?? "none",
+        posthocTarget: (a.posthocTarget as TwoWayAnovaParams["posthocTarget"] | undefined) ?? "groups",
+        ...(a.design === "repeated-measures" ? { sphericity: a.sphericity === "yes" } : {}),
+        ...(a.posthoc === "dunnett" ? { control: a.control as string } : {}),
+      }),
+    }),
     // The checklist follows the design: ordinary, repeated-measures, or rank-based.
     checklist: (a) =>
       CHECKLISTS[

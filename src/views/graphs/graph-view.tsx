@@ -922,13 +922,13 @@ export function GraphView({ node }: { node: ProjectNode }) {
           numericNames={dataset?.numeric.map((c) => c.name) ?? []}
           allNames={dataset?.columns.map((c) => c.name) ?? []}
           fitError={curveOutcome && "error" in curveOutcome ? curveOutcome.error : null}
-          onNewAnalysis={(test, _sets) => {
+          onNewAnalysis={(test, sets) => {
             if (!node.parentId) return;
-            // `_sets` pre-answers the new analysis's data-set question once the
-            // `forGraph` launch plumbing lands (use-analysis-launcher, another
-            // lane): until then the wizard/picker opens unanswered.
-            if (test) startAnalysis(node.parentId, test);
-            else openSelector({ kind: "new-analysis", tableId: node.parentId });
+            // The new analysis is made for this graph: pre-answered with the
+            // data sets the graph shows, and linked as its stars source.
+            const forGraph = { id: node.id, sets: sets ?? [] };
+            if (test) startAnalysis(node.parentId, test, forGraph);
+            else openSelector({ kind: "new-analysis", tableId: node.parentId, forGraph });
           }}
           canExport={hasData}
           onSave={(format, dpi) =>

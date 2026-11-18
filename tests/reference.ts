@@ -2202,7 +2202,7 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["column", column, "anova", { posthoc: "bonferroni" }],
   ["column", column, "anova", { posthoc: "dunnett", control: "Control" }],
   // Multiple comparisons completion (plan 25): Šídák, Holm–Šídák and Fisher's
-  // LSD on the same table — raw P from pairwise.t.test, adjusted in TS
+  // LSD on the same table — raw P from pairwise.t.test, adjusted in R
   // (see disagreements() below); Dunn–Šídák / Dunn–Holm–Šídák likewise.
   ["column", column, "anova", { posthoc: "sidak" }],
   ["column", column, "anova", { posthoc: "holm-sidak" }],
