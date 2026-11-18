@@ -312,6 +312,16 @@ function normalizeNumber(value: string | null, groupingSeparators: boolean): str
   return value;
 }
 
+// Loop-based max over a width-scaled collection: Math.max(...arr) spreads
+// the array onto the call stack and throws RangeError once it passes ~100k
+// elements (BUG-11: a 288k-subcolumn .pzfx blew the stack in importTable).
+// Never spread a width-scaled array into Math.max/Math.min.
+function maxOf(values: Iterable<number>, floor = 0): number {
+  let m = floor;
+  for (const v of values) if (v > m) m = v;
+  return m;
+}
+
 function subcolumnNames(title: string, format: string, count: number): string[] {
   const base = title === "" ? "Y" : title;
   if (count === 1) return [base];
@@ -454,7 +464,7 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
     titerType = "grouped";
     const counts = yColumns.map((y) => y.subcolumns.length);
     groups = yColumns.length;
-    replicates = Math.max(...counts);
+    replicates = maxOf(counts);
     // A grouped table's columns are "Group:Y1"…, so a group name must be
     // colon-free — seriesKeyOf splits at the first ":" and a title like
     // "1:10" would become "1:10:Y1" (group "1", its data wiped on reload) —
@@ -464,11 +474,10 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
     // and renaming the second would break the round-trip — the .prism import
     // keeps the duplicate, and the loader keeps it too (groups are runs,
     // not names).
-    const rowLen = Math.max(
-      0,
-      ...yColumns.flatMap((y) => y.subcolumns.map((s) => s.values.length)),
-      rowTitleValues.length,
-    );
+    // Loop, not Math.max(...flatMap(...)): the spread blows the stack on
+    // very wide files (BUG-11) and the flatMap builds a throwaway array.
+    let rowLen = rowTitleValues.length;
+    for (const y of yColumns) for (const s of y.subcolumns) if (s.values.length > rowLen) rowLen = s.values.length;
     const emptySubcolumn = (): Subcolumn => ({ values: Array<string | null>(rowLen).fill(null), excluded: new Set() });
     const reps = replicates;
     yColumns.forEach((y) => {
@@ -527,7 +536,7 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
     // sets: the same shape as a Table, so it imported through the same
     // path — say so, with the table type it became, rather than silently
     // treating it as an ordinary table.
-    const subcolumns = Math.max(0, ...yColumns.map((y) => y.subcolumns.length));
+    const subcolumns = maxOf(yColumns.map((y) => y.subcolumns.length));
     const typeName =
       titerType === "grouped"
         ? "Grouped"
@@ -564,7 +573,7 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
   // name is the column-name prefix); plain column duplicates stay exact.
   // (The old FF-F9 rename lived here; it was the bug.)
 
-  const rowCount = Math.max(0, ...columns.map((c) => c.values.length), rowTitleValues.length);
+  const rowCount = maxOf(columns.map((c) => c.values.length), rowTitleValues.length);
   if (rowCount === 0 || columns.length === 0) {
     issues.push({ severity: "warning", message: `${displayName} holds no data. It was left out.` });
     return null;
