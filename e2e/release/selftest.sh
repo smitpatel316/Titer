@@ -30,6 +30,32 @@ expect_fail() {
   fi
 }
 
+# Like expect_fail, but retries up to 3 times: the T-93 GUI pin depends
+# on the app's own update-check fetch succeeding at startup, and the
+# egress proxy sometimes drops both its fetches (manifest + fallback),
+# leaving it quiet once. One quiet run is a network flake, not a
+# broken check — the pin only fails if the dialog never fires in 3 tries.
+expect_fail_retry() {
+  local name="$1"; shift
+  echo "--- pin: $name (must FAIL; up to 3 attempts) ---"
+  local attempt rc=0
+  for attempt in 1 2 3; do
+    "$@" >/tmp/release-selftest.log 2>&1
+    rc=$?
+    [ "$rc" != 0 ] && break
+    echo "  attempt $attempt exited 0 (no dialog — possible fetch flake), retrying"
+    sleep 2
+  done
+  if [ "$rc" = 0 ]; then
+    echo "SELFTEST FAIL: $name exited 0 on broken input (3 attempts)"
+    tail -5 /tmp/release-selftest.log
+    FAIL=1
+  else
+    echo "SELFTEST PASS: $name failed as expected (exit $rc, attempt $attempt)"
+    grep -m1 "^FAIL:" /tmp/release-selftest.log || true
+  fi
+}
+
 # Fixtures: the cached 1.6.1 DMG (run.sh downloads it) + the 1.6.0 AppImage.
 DMG="$CACHE/Titer-1.6.1-aarch64.dmg"
 APPIMAGE="$CACHE/Titer-1.6.0-linux.AppImage"
@@ -125,7 +151,7 @@ if [ -f "$APPIMAGE" ]; then
       sleep 1
     done
   fi
-  expect_fail "T-93 GUI expect-quiet on old AppImage" $PY/check_update.py --mode gui --binary "$APPIMAGE" --expect quiet --cache-dir "$CACHE"
+  expect_fail_retry "T-93 GUI expect-quiet on old AppImage" $PY/check_update.py --mode gui --binary "$APPIMAGE" --expect quiet --cache-dir "$CACHE"
   [ -n "${XVFB_PID:-}" ] && kill "$XVFB_PID" 2>/dev/null
 else
   echo "SELFTEST SKIP: T-93 GUI pin needs the cached AppImage — run run.sh first"
