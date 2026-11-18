@@ -23,13 +23,13 @@ under the [GNU General Public License](LICENSE), version 3 or later.
 
 ## Download
 
-The latest release is **v1.6.1 for Mac** (Apple Silicon) and **v1.6.0 for Linux**.
+The latest release is **v1.6.2 for Mac** (Apple Silicon) and **v1.6.2 for Linux**.
 Get them from the [Releases page](https://github.com/smitpatel316/Titer/releases):
 
 | Build | File | Size | SHA-256 |
 |---|---|---|---|
-| Mac — Apple Silicon (v1.6.1) | [`Titer-1.6.1-aarch64.dmg`](https://github.com/smitpatel316/Titer/releases/download/v1.6.1/Titer-1.6.1-aarch64.dmg) | 103,804,095 bytes (~99 MB) | `7ad41d28ac6754a206f798d36b5b3fc72b976d4e7228ea2ec2b0ef8bd1b81403` |
-| Linux (v1.6.0) | [`Titer-1.6.0-linux.AppImage`](https://github.com/smitpatel316/Titer/releases/download/v1.6.0/Titer-1.6.0-linux.AppImage) | 190,994,936 bytes (~191 MB) | `73872f99d44c9ac52783c6e0400121f03e0641370d2d9537d177f2d040bbc100` |
+| Mac — Apple Silicon (v1.6.2) | [`Titer-1.6.2-aarch64.dmg`](https://github.com/smitpatel316/Titer/releases/download/v1.6.2/Titer-1.6.2-aarch64.dmg) | 103,842,225 bytes (~99 MB) | `6c38bdee248cef4bcdbbba16cc0945b3a6dccac8072890e77e190ebbb62a5651` |
+| Linux (v1.6.2) | [`Titer-1.6.2-linux.AppImage`](https://github.com/smitpatel316/Titer/releases/download/v1.6.2/Titer-1.6.2-linux.AppImage) | 173,140,472 bytes (~165 MB) | `de78b6b726dc6ff61c675e6db209b82566f6c7ad5215cc73242586b2f985ef37` |
 | Mac — Intel (latest: v1.2.0) | [`Titer-1.2.0-x64.dmg`](https://github.com/smitpatel316/Titer/releases/download/v1.2.0/Titer-1.2.0-x64.dmg) | 101,712,108 bytes (~97 MB) | `d8b6fcf88ffa52044279a2a8938b00f6821ca8c4abe35ef715c951ae36889456` |
 
 Each release is cut from a tagged commit — the release notes name the exact
@@ -84,7 +84,7 @@ And a spreadsheet that feels like one:
 "56" is a catalogue mapping — every Prism 10 analysis has a Titer equivalent listed
 below — not a single test-suite score. The numbers themselves are checked against
 Prism's own saved results and against reference values: the frozen-tip suite passed
-512/512 at v1.6.0 (see [VALIDATION.md](VALIDATION.md)).
+527/527 at v1.6.2 (see [VALIDATION.md](VALIDATION.md)).
 
 - **Guided:** an assistant asks which data sets to analyze, whether they are
   paired and whether they follow a normal distribution (or checks it for you), then
@@ -194,9 +194,11 @@ without retyping data.
   date X, X error, summary subcolumns), and `.prism` round-trips cell-identical on the
   demo file with identical analysis parameters. Every written `.pzfx` file validates
   against the Prism 8 XSD.
-- **One thing not yet proven:** whether Prism itself opens a file Titer wrote has not
-  been tested — the round-trips above go through Titer's own importer, not through
-  Prism. Don't take "Prism opens Titer files" as given until that check is done.
+- **One thing not yet proven:** v1.6.2 fixed the two known ways real Prism rejected
+  files Titer wrote (a `.prism` open crash, a `.pzfx` XML-compliance warning), but
+  whether Prism itself opens a file Titer wrote is still being verified — the round-trips
+  above go through Titer's own importer, not through Prism, and the real-Prism check is
+  running now. Don't take "Prism opens Titer files" as given until that check is done.
 - **Titer's own format** is plain JSON (`.hlx`), described in
   [FILE-FORMAT.md](FILE-FORMAT.md), so your data are never locked in. Open methods: how
   each analysis is computed and checked is in [METHODS.md](METHODS.md).
