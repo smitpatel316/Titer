@@ -179,6 +179,44 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
       err instanceof Error ? err.message.slice(0, 120) : String(err),
     );
   }
+  // W7 (BUG-9): a mixed-format xy table round-trips with its MEAN/SD/N
+  // names intact. The writer groups Ya/Yb into y_sd_n datasets but the
+  // "XX error" column is y_single, so the table-level dataFormat is
+  // y_single — the reader must name subcolumns from each dataset's own
+  // format, or Ya_MEAN/Ya_SD/Ya_N come back as Ya_1/Ya_2/Ya_3.
+  const sdnColumns = ["Title", "XX", "XX error", "Ya_MEAN", "Ya_SD", "Ya_N", "Yb_MEAN", "Yb_SD", "Yb_N"];
+  const sdnWritten = await writePrism(
+    {
+      nodes: {
+        table_1: {
+          id: "table_1",
+          type: "table",
+          name: "Data 1",
+          parentId: null,
+          tableType: "xy",
+          data: {
+            columns: sdnColumns,
+            rows: [
+              ["A", "1", "2", "100", "50", "5", "1", "10", "4"],
+              ["B", "2", "3", "90", "60", "6", "2", "9", "3"],
+              ["C", "3", "4", "80", "70", "7", "3", "8", "2"],
+            ],
+          },
+        },
+      },
+      rootOrder: ["table_1"],
+      childOrder: { table_1: [] },
+      activeNodeId: "table_1",
+    },
+    "1.0.7",
+  );
+  const sdnBack = await convertPrism(sdnWritten.bytes, "sdn-round-trip.prism");
+  const sdnTable = Object.values(sdnBack.project.nodes).find((n) => n?.type === "table" && n.name === "Data 1");
+  check(
+    "W7 mixed-format MEAN/SD/N round-trip",
+    JSON.stringify(sdnTable?.data?.columns) === JSON.stringify(sdnColumns),
+    `back: ${JSON.stringify(sdnTable?.data?.columns)}`,
+  );
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed.`);
