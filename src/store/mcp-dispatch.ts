@@ -30,7 +30,7 @@ import { parseProjectText, validateAnalysisParams } from "../lib/project-file";
 import { extractMethod, methodForTable, remapGraphOptions } from "../lib/template";
 import { runScript } from "../lib/prism-script";
 import type { WandReport } from "../lib/wand";
-import { analysisOptionsForTable, countDataGroups, hasRowGroups } from "../views/analyses";
+import { analysisOptionsForTable, analysisTypesOfferedForTable, countDataGroups, hasRowGroups } from "../views/analyses";
 import {
   defaultDocumentIo,
   executeCloseProject,
@@ -670,13 +670,20 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       }
       // The picker offers each test only for the table types it makes sense
       // on — the same gate, so an agent gets the valid list instead of a
-      // runner error on data it cannot use.
+      // runner error on data it cannot use. The gate checks the CONCRETE
+      // types the picker offers (analysisTypesOfferedForTable expands the
+      // "compare-many-groups" meta entry to anova / kruskal-wallis /
+      // rm-anova / friedman): the picker lists only the meta entry, the
+      // Rust side rejects it, so checking the raw picker values left
+      // those four tests offered on NO table type (BUG-14). The error
+      // below still lists the picker values, meta entry included.
       const data = table.data;
       const tableType = table.tableType;
       if (tableType === undefined) {
         throw new Error(`Table “${tableId}” has no table type recorded.`);
       }
-      const offered = analysisOptionsForTable(tableType, data).map((o) => o.value);
+      const offered = analysisTypesOfferedForTable(tableType, data);
+      const pickerOffered = analysisOptionsForTable(tableType, data).map((o) => o.value);
       if (!offered.includes(type)) {
         if (type === "three-way-anova" && !hasRowGroups(data)) {
           throw new Error("“three-way-anova” needs a Grouped table with at least 2 row bands — this table has none.");
@@ -698,7 +705,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
               ? "interpolate (→ nonlinear-regression with params.interpolate)"
               : v;
         throw new Error(
-          `“${type}” is not offered for ${tableType} tables. ${tableType} tables offer: ${offered.map(offeredLabel).join(", ")}.`,
+          `“${type}” is not offered for ${tableType} tables. ${tableType} tables offer: ${pickerOffered.map(offeredLabel).join(", ")}.`,
         );
       }
       const { errors, params } = validateAnalysisParams(type, args.params);

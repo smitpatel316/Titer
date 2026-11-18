@@ -4,7 +4,7 @@
 // file, with three differences"). Pure: no React, no native calls, so
 // checks.ts pins it without a window.
 
-import { analysisOptionsForTable } from "../views/analyses";
+import { analysisOptionsForTable, META_ANALYSES } from "../views/analyses";
 import { GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
 import { TABLES } from "../views/tables";
 import type { AnalysisParams, AnalysisType } from "../stats/types";
@@ -141,10 +141,9 @@ export interface MethodApplication {
 // resolves (in the wizard) to one-way ANOVA, Kruskal-Wallis,
 // repeated-measures ANOVA or Friedman, and "interpolate" to nonlinear
 // regression — so a saved analysis of any of those counts as offered.
-const META_ANALYSES: Record<string, AnalysisType[]> = {
-  "compare-many-groups": ["anova", "kruskal-wallis", "rm-anova", "friedman"],
-  interpolate: ["nonlinear-regression"],
-};
+// The mapping lives in views/analyses (META_ANALYSES, next to the picker
+// it describes); the MCP gate in store/mcp-dispatch.ts uses the same
+// mapping via analysisTypesOfferedForTable (BUG-14).
 
 /** The analysis types the Analysis menu offers for a table (its picker
  *  values, with the meta entries expanded to the tests they resolve to). */
