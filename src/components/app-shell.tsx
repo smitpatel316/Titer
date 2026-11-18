@@ -5,7 +5,7 @@ import { useAppMenu } from "../app-menu";
 import { useDocument } from "../store/use-document";
 import { useProjectStore } from "../store/use-project-store";
 import { useLayout } from "../store/use-layout";
-import { onFullscreenChange } from "../native";
+import { mcpSetEnabled, onFullscreenChange } from "../native";
 import { UniversalModal } from "./universal-modal";
 import { Dialog } from "../ui/dialog";
 import { ConverterDialog } from "./converter-dialog";
@@ -51,8 +51,27 @@ export function AppShell() {
   const [fullscreen, setFullscreen] = React.useState(false);
   React.useEffect(() => onFullscreenChange(setFullscreen), []);
   const hidden = HIDDEN_SIDEBAR[fullscreen ? "fullscreen" : "window"];
-  const { nodes, selector, closeSelector, createTable, createGraph } = useProjectStore();
+  const { nodes, selector, closeSelector, openSelector, createTable, createGraph } = useProjectStore();
   const startAnalysis = useStartAnalysis();
+
+  // E2E only (VITE_E2E=1 at build time, check/e2e-ci): the WebdriverIO
+  // launch smoke opens the Convert dialog through this hook (native menus
+  // are not WebDriver-drivable; the menu chrome stays a manual Mac-proof
+  // item), and the MCP regression suite (e2e/mcp/) needs the in-process
+  // MCP server, which is OFF by default behind Settings → AI Connections
+  // — so the E2E build enables it on mount and CI needs no GUI click.
+  // Vite replaces import.meta.env.VITE_E2E at build time, so the branch is
+  // dead-code-eliminated in production builds; MCP is never on by default.
+  React.useEffect(() => {
+    if ((import.meta.env as Record<string, string | undefined>).VITE_E2E) {
+      (window as unknown as { __titerE2E?: { openConverter: () => void } }).__titerE2E = {
+        openConverter: () => openSelector({ kind: "converter" }),
+      };
+      void mcpSetEnabled(true).catch((e) => {
+        console.warn("[e2e] mcp_set_enabled failed", e);
+      });
+    }
+  }, [openSelector]);
   // The New Analysis / New Graph pickers list what fits the target table's type.
   const tableType = selector && "tableId" in selector ? (nodes[selector.tableId]?.tableType ?? "column") : "column";
   const tableData = selector && "tableId" in selector ? nodes[selector.tableId]?.data : undefined;
