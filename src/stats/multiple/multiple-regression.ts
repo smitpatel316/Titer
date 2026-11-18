@@ -63,7 +63,7 @@ export async function runMultipleRegression(
     `y<-${rVec(aligned[0])};X<-cbind(${predictors.map((_, i) => rVec(aligned[i + 1])).join(",")});` +
     `mx<-colMeans(X);m<-lm(y~sweep(X,2,mx));s<-summary(m);co<-s$coefficients;na<-is.na(coef(m));nal<-any(na);f<-s$fstatistic;` +
     `if(!nal){V<-vcov(m)[-1,-1,drop=FALSE];b0<-co[1,1]-sum(co[-1,1]*mx);se0<-sqrt(co[1,2]^2+drop(mx%*%V%*%mx));` +
-    `t0<-b0/se0;co[1,]<-c(b0,se0,t0,2*pt(-abs(t0),df.residual(m)))}` +
+    `t0<-b0/se0;co[1,]<-c(b0,se0,t0,2*pt(-abs(t0),df.residual(m)))};` +
     `c(r2=s$r.squared,adjr2=s$adj.r.squared,fstat=if(is.null(f)) NA else unname(f[1]),n=length(y),` +
     `fp=if(is.null(f)) NA else unname(pf(f[1],f[2],f[3],lower.tail=FALSE)),` +
     `aliased=as.numeric(nal),${aliasAssigns.join(",")},${coefAssigns.join(",")})`;

@@ -105,7 +105,7 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
 
   // as.numeric() drops R's own names ("X-squared", "df"…): the keys are only ours.
   const rCode = is2x2
-    ? `${R_WILSON};m<-matrix(c(${flat.join(",")}),nrow=2,byrow=TRUE);ft<-fisher.test(m);ct<-suppressWarnings(chisq.test(m,correct=${test !== "chi-square" ? "TRUE" : "FALSE"}));` +
+    ? `${R_WILSON};m<-matrix(c(${flat.join(",")}),nrow=2,byrow=TRUE);ft<-fisher.test(m);ct<-suppressWarnings(chisq.test(m,correct=${test !== "chi-square" ? "TRUE" : "FALSE"}));cu<-suppressWarnings(chisq.test(m,correct=FALSE));` +
       // The first column's risk in row 1 over row 2, its CI on the log (Katz); Phi, signed;
       // the two risks' difference, its CI Newcombe's (Wilson's of each risk combined).
       `n1<-sum(m[1,]);n2<-sum(m[2,]);p1<-m[1,1]/n1;p2<-m[2,1]/n2;rr<-p1/p2;` +
@@ -114,6 +114,7 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
       `se<-wil(m[1,1],sum(m[,1]));sp<-wil(m[2,2],sum(m[,2]));pp<-wil(m[1,1],n1);np<-wil(m[2,2],n2);` +
       `c(p=${test === "fisher" ? "ft$p.value" : "ct$p.value"},odds=as.numeric(ft$estimate),oddsLo=ft$conf.int[1],oddsHi=ft$conf.int[2],` +
       `chisq=as.numeric(ct$statistic),df=as.numeric(ct$parameter),minexp=min(ct$expected),n=sum(m),` +
+      `chisqU=as.numeric(cu$statistic),` +
       `rr=rr,rrLo=rr*exp(-z),rrHi=rr*exp(z),phi=(m[1,1]*m[2,2]-m[1,2]*m[2,1])/sqrt(prod(rowSums(m),colSums(m))),` +
       `d=d,dLo=dlo,dHi=dhi,nnt=1/abs(d),nntLo=if(dlo>0||dhi<0)1/max(abs(c(dlo,dhi))) else NA,nntHi=if(dlo>0||dhi<0)1/min(abs(c(dlo,dhi))) else NA,` +
       `sens=m[1,1]/sum(m[,1]),sensLo=se[1],sensHi=se[2],spec=m[2,2]/sum(m[,2]),specLo=sp[1],specHi=sp[2],` +
@@ -152,7 +153,10 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
       ...withCi("Specificity", "spec"),
       ...withCi("Positive predictive value", "ppv"),
       ...withCi("Negative predictive value", "npv"),
-      ...(test === "fisher" ? [row("Chi-square (Yates' correction, for reference)", "chisq"), row("df", "df")] : []),
+      // QAB-4: the chi-square shown for reference is the UNCORRECTED Pearson
+      // statistic (Prism's default), not the Yates-corrected one — so it is
+      // computed separately (`cu`), whatever test was chosen for the P value.
+      ...(test === "fisher" ? [row("Chi-square (for reference)", "chisqU"), row("df", "df")] : []),
     );
   } else {
     stats.push({ label: "Chi-square", value: v.chisq ?? null });

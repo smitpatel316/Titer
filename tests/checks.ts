@@ -3597,12 +3597,13 @@ check("the three-way ANOVA is offered only with at least 2 row bands", () => {
     ],
   };
   const values = (data?: TableData) => analysisOptionsForTable("grouped", data).map((o) => o.value);
-  deepStrictEqual(values(withBands), ["two-way-anova", "mixed-effects", "three-way-anova", "multiple-t-tests", "row-means-totals", "plot-function"]);
+  deepStrictEqual(values(withBands), ["two-way-anova", "mixed-effects", "three-way-anova", "multiple-t-tests", "row-means-totals", "transform", "plot-function"]);
   deepStrictEqual(values({ ...withBands, rowGroups: [{ name: "All rows", count: 2 }] }), [
     "two-way-anova",
     "mixed-effects",
     "multiple-t-tests",
     "row-means-totals",
+    "transform",
     "plot-function",
   ]);
   deepStrictEqual(values({ ...withBands, rowGroups: undefined }), [
@@ -3610,9 +3611,10 @@ check("the three-way ANOVA is offered only with at least 2 row bands", () => {
     "mixed-effects",
     "multiple-t-tests",
     "row-means-totals",
+    "transform",
     "plot-function",
   ]);
-  deepStrictEqual(values(), ["two-way-anova", "mixed-effects", "multiple-t-tests", "row-means-totals", "plot-function"]);
+  deepStrictEqual(values(), ["two-way-anova", "mixed-effects", "multiple-t-tests", "row-means-totals", "transform", "plot-function"]);
 });
 
 // The native Analysis menu's effect depends on this key, not on the table data
@@ -3814,11 +3816,11 @@ check("comparing groups asks equal SDs, then offers the comparisons that fit and
   deepStrictEqual(offered({ ...unpaired, equalSd: "yes" }), [
     "none",
     "tukey",
+    "dunnett",
     "bonferroni",
     "sidak",
     "holm-sidak",
     "lsd",
-    "dunnett",
   ]);
   deepStrictEqual(offered({ ...unpaired, equalSd: "no" }), ["none", "games-howell", "t3"]);
   deepStrictEqual(offered({ paired: "paired", gaussian: "yes" }), [
@@ -4210,7 +4212,7 @@ check("a repeated-measures two-way ANOVA survives a group with one complete subj
     replicates: 2,
   };
   const refused = await runAnalysis("two-way-anova", allSingle, params);
-  if (!("error" in refused) || !refused.error.includes("more complete subjects than column groups"))
+  if (!("error" in refused) || !refused.error.includes("needs at least one group with 2 replicate columns"))
     throw new Error(`expected the too-few-subjects error, got ${JSON.stringify(refused)}`);
 });
 
@@ -9293,7 +9295,7 @@ check("the ROC wizard asks truth, score and positive class, defaulting to the la
     analysisOptionsForTable("xy")
       .map((o) => o.value)
       .slice(-3),
-    ["interpolate", "roc-curve", "plot-function"],
+    ["roc-curve", "transform", "plot-function"],
   );
 });
 
@@ -9645,9 +9647,11 @@ check("the chi-square wizard asks about ordering only on a 2×k / k×2 table, de
   };
   deepStrictEqual(asked(trend2x4), ["trendOrdered"]);
   deepStrictEqual(asked(trend4x2), ["trendOrdered"]);
-  deepStrictEqual(asked(twoByTwo), []);
+  deepStrictEqual(asked(twoByTwo), ["test"]);
   deepStrictEqual(asked(threeByThree), []);
-  const q = WIZARDS["chi-square"]!.questions({}, readTable(trend2x4))[0];
+  // The 2×2 chooser precedes the trend question and is `false` on a 2×4
+  // table, so the trend question is found by id, not by index.
+  const q = WIZARDS["chi-square"]!.questions({}, readTable(trend2x4)).find((x) => x && x.id === "trendOrdered");
   ok(q && q.kind === "choice");
   // "No" comes first: the wizard pre-selects the first option, so the trend
   // does not run unless the user confirms the ordering.
@@ -9923,15 +9927,16 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
       "poisson-regression",
       "cox-proportional-hazards",
       "extract-rearrange",
+      "transform",
       "plot-function",
     ],
   );
   // Multiple Variables tables offer the scatter plot, the histogram, the
-  // forest plot, the observed-vs-fitted graph, the scree plot, the scores
+  // QQ plot, the forest plot, the observed-vs-fitted graph, the scree plot, the scores
   // biplot, the cluster scatter, the bubble plot, and survival curves.
   deepStrictEqual(
     GRAPH_OPTIONS_BY_TABLE["multiple"].map((o) => o.value),
-    ["xy-scatter", "bubble-plot", "histogram", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "survival"],
+    ["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "survival"],
   );
   // Renaming a column follows the Cox analysis's params.
   const renamed = followTable(
@@ -10343,7 +10348,7 @@ check("the estimation plot's Statistics controls come before the column-family c
   const src = readFileSync("src/views/graphs/format-sections.tsx", "utf8");
   const fn = src.slice(src.indexOf("export function statisticsControls"));
   const estimation = fn.indexOf('if (graphType === "estimation-plot")');
-  const column = fn.indexOf('if (GRAPHS[graphType].family === "column")');
+  const column = fn.indexOf('GRAPHS[graphType].family === "column"');
   ok(estimation !== -1, "statisticsControls must have an estimation-plot branch");
   ok(column !== -1, "statisticsControls must have a column-family catch-all");
   ok(
@@ -11571,12 +11576,13 @@ check("row-means-totals wizard asks for the data sets, and finishes with its par
     params: { ys: ["A"] },
   });
   // The menu offers it after Fraction of total on XY tables, and after
-  // Multiple t tests on grouped tables (Plot a function follows it there).
+  // Multiple t tests on grouped tables (Transform follows it there; Plot a
+  // function is last).
   const xyOrder = analysisOptionsForTable("xy").map((o) => o.value);
   strictEqual(xyOrder[xyOrder.indexOf("row-means-totals") - 1], "fraction-of-total");
   const groupedOrder = analysisOptionsForTable("grouped").map((o) => o.value);
   strictEqual(groupedOrder[groupedOrder.indexOf("row-means-totals") - 1], "multiple-t-tests");
-  strictEqual(groupedOrder[groupedOrder.indexOf("row-means-totals") + 1], "plot-function");
+  strictEqual(groupedOrder[groupedOrder.indexOf("row-means-totals") + 1], "transform");
   // Not offered on column tables: per-column descriptives already cover them.
   ok(!analysisOptionsForTable("column").some((o) => o.value === "row-means-totals"));
 });
