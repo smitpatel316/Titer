@@ -4,7 +4,7 @@
 // (SVG, staying vector). The figure is never rebuilt as a single Plotly
 // subplot figure — the per-graph renderers are not subplot-compatible.
 import { alert, pickSavePath, writeFile } from "../../native";
-import { loadPlotly } from "../graphs/plotly";
+import { loadPlotly, normalizePlotlySvg } from "../graphs/plotly";
 import { withoutSelection } from "../graphs/selection";
 import { vectorTraces } from "../graphs/plot-helpers";
 import { PX_PER_INCH, withDpi } from "../../lib/image-dpi";
@@ -219,11 +219,15 @@ export async function renderFigureSvg(
   const legend =
     figure.sharedLegend === "shared" ? sharedLegendCheck(g.panels, nodes) : { ok: false as const };
   const composed: { panel: FigurePanel; svg: string }[] = [];
-  for (const rect of g.rects) {
+  for (const [i, rect] of g.rects.entries()) {
     const graph = nodes[rect.panel.graphId];
     if (!graph) continue;
     const image = await panelImage(graph, nodes, { width: rect.width, height: rect.height }, "svg", dpi, legend.ok);
-    if (image) composed.push({ panel: rect.panel, svg: await image.text() });
+    // Each panel gets its own id scope (`p0`, `p1`, …): the panels are
+    // composed into ONE svg, so normalizing every panel to the same token
+    // would make `url(#clip…)` resolve to the first panel's clip. The
+    // scope is the panel's grid position — deterministic for the figure.
+    if (image) composed.push({ panel: rect.panel, svg: normalizePlotlySvg(await image.text(), `p${i}`) });
   }
   const { svg, missing } = composeFigureSvg(composed, figureOf(figure), legend.ok ? legend.entries : undefined);
   // The composed SVG's own size, in points (see composeFigureSvg): the
