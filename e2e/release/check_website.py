@@ -160,7 +160,10 @@ def main():
             rels = gh_api("releases?per_page=10")
             tags = [r["tag_name"].lstrip("vV") for r in rels
                     if not r.get("draft") and not r.get("prerelease")]
-            prev = next(t for t in tags if t != version)
+            # The release immediately BEFORE the checked version (not
+            # merely "latest != version" — after a new release ships, the
+            # newest tag is newer than the checked one, not previous).
+            prev = tags[tags.index(version) + 1] if version in tags else None
         except Exception as e:  # noqa: BLE001
             print(f"INFO: could not resolve previous release ({e})")
             prev = None

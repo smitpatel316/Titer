@@ -34,17 +34,32 @@ a private display when `DISPLAY` is unset.
 
 ## Reference versions (verified 2026-11-18)
 
-- Latest live release: **v1.6.1** (Mac-only: DMG + zip). v1.6.2 is in
-  `package.json` and staged locally (`~/workspace/helix-release/v1.6.2/`)
-  but has **no GitHub release yet** — T-89 against v1.6.2 correctly FAILS
-  until it ships.
+- Latest live release: **v1.6.2** (shipped during this lane's first run:
+  DMG + zip + AppImage + AppImage.sha256). The lane was written when
+  v1.6.1 was latest — T-89 against an unreleased version correctly
+  FAILS until it ships.
 - Channel manifest: version **1.6.1**, build **10**; mac latest 1.6.1/build
-  10; linux latest **1.6.0**/build 9 (carried over verbatim).
-- Latest AppImage release: **v1.6.0** (190,994,936 B).
+  10; linux latest **1.6.0**/build 9 (carried over verbatim). NOTE: after
+  v1.6.2 shipped, the manifest + website still serve 1.6.1 — T-90's
+  linux-latest check FAILS until the channel is flipped to 1.6.2. That
+  is the check working, not a script bug.
+- Latest AppImage release: **v1.6.2** (173,140,472 B); previous 1.6.0
+  (190,994,936 B).
 - Website: served page is byte-identical to
   `~/workspace/your_files/titer-homepage/titer-homepage.html` after
   stripping Cloudflare's two injections (hidden `cdn-cgi` anchor, 304 B,
   + `__CF$cv$params` challenge script, 1114 B).
+
+## The update-dialog GUI leg, precisely
+
+`check_update.py --mode gui --expect auto` derives the expectation from
+the binary's version against the newest available version, defined as
+max(channel manifest, main-branch package.json) — the app reads the
+manifest first and falls back to the package.json when the manifest
+does not answer (observed: in this sandbox the 1.6.0 AppImage's dialog
+says "Titer 1.6.2 is available", i.e. the fallback answered). The leg
+watches windows by ID (titles repeat across apps on a shared display)
+and asserts the main window appears too, so a hung check cannot pass.
 
 ## Pins (pre-fix FAIL / post-fix PASS)
 
@@ -62,8 +77,7 @@ ship.
   (mounted + installed), installed binary md5 == DMG binary md5,
   installed-app version (Info.plist read — the automatable form of the
   About-dialog check).
-- T-93 GUI quiet leg: launch a binary NEWER than the live manifest and
-  assert no update dialog appears (needs a current binary; none exists
-  on Hatch — v1.6.2 is staged but not built here). The dialog leg
-  (old binary → dialog appears) runs green on Hatch via the 1.6.0
-  AppImage.
+- T-93 GUI legs with a Mac binary (same script, `--binary <Mac app
+  bundle executable>`): dialog leg needs an older Mac build, quiet leg
+  a current one. Both legs run green on Hatch via AppImages (previous
+  release → dialog, latest release → quiet).

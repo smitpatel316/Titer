@@ -96,12 +96,20 @@ else
 fi
 
 if [ "$SKIP_GUI" = 0 ]; then
-  APPIMAGE="$CACHE/Titer-$APPIMAGE_VERSION-linux.AppImage"
-  if [ -f "$APPIMAGE" ]; then
-    run_leg "T-93 update dialog (GUI, AppImage older than manifest)" check_update.py --mode gui --binary "$APPIMAGE" --expect dialog
-  else
-    echo "---- T-93 update dialog: SKIP (no AppImage in cache) ----"
-  fi
+  # Dialog leg: the PREVIOUS AppImage release is older than the newest
+  # available version, so the update dialog must appear. Quiet leg: the
+  # LATEST AppImage release is current, so no dialog must appear. Both
+  # use --expect auto (binary version vs newest available).
+  PREV_APPIMAGE_VERSION="$(gh api 'repos/smitpatel316/Titer/releases?per_page=20' --jq '[.[] | select(.assets[]?.name | test("\\.AppImage$"))][1].tag_name' | sed 's/^v//')"
+  echo "previous AppImage release: $PREV_APPIMAGE_VERSION"
+  for leg in "$PREV_APPIMAGE_VERSION" "$APPIMAGE_VERSION"; do
+    APPIMAGE="$CACHE/Titer-$leg-linux.AppImage"
+    if [ -f "$APPIMAGE" ]; then
+      run_leg "T-93 update GUI (AppImage $leg)" check_update.py --mode gui --binary "$APPIMAGE" --expect auto
+    else
+      echo "---- T-93 update GUI ($leg): SKIP (no AppImage in cache) ----"
+    fi
+  done
 else
   echo "---- GUI legs skipped (--skip-gui) ----"
 fi
@@ -116,8 +124,7 @@ echo "MAC-OWED (run on the Mac / CI e2e-mac for the full gate):"
 echo "  - T-88: hdiutil verify, mounted binary size/md5, codesign (mounted +"
 echo "    installed), installed binary md5 == DMG binary md5, About version"
 echo "    (Info.plist read)"
-echo "OWED (needs a binary newer than the live manifest; none on Hatch):"
-echo "  - T-93 GUI quiet leg: launch a current binary, assert NO update dialog"
-echo "    (run check_update.py --mode gui --binary <current> --expect quiet)"
+echo "  - T-93 GUI legs with a Mac binary (same script, --binary <Mac app>):"
+echo "    dialog leg needs an older Mac build, quiet leg a current one"
 if [ "$FAIL" != 0 ]; then echo "RESULT: FAIL"; else echo "RESULT: PASS"; fi
 exit "$FAIL"

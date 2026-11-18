@@ -87,15 +87,45 @@ def static_checks(c, repo):
     return c.finish()
 
 
-def window_titles():
+def windows():
+    """(id, title) pairs for all top-level windows on this display."""
     out = subprocess.run(["xwininfo", "-root", "-tree"],
                          capture_output=True, text=True, timeout=30)
-    titles = []
+    found = []
     for line in out.stdout.splitlines():
-        m = re.search(r'"([^"]*)"', line)
-        if m and m.group(1):
-            titles.append(m.group(1))
-    return titles
+        m = re.search(r"(0x[0-9a-f]+)\s+\"([^\"]*)\"", line)
+        if m and m.group(2):
+            found.append((m.group(1), m.group(2)))
+    return found
+
+
+def window_titles():
+    return [t for _, t in windows()]
+
+
+def newest_available():
+    """The newest version the app can learn about: max of the channel
+    manifest and the main-branch package.json fallback (src/lib/version.ts:
+    the manifest is the authority when it answers; otherwise the fallback
+    decides). Returns a version string like '1.6.2'."""
+    import json
+
+    from common import fetch_manifest, http_get, parse_version
+    newest = "0.0.0"
+    try:
+        m = fetch_manifest()
+        newest = m.get("version", newest)
+    except Exception as e:  # noqa: BLE001
+        print(f"INFO: manifest unreadable ({e}); fallback only")
+    try:
+        _, body = http_get(
+            "https://raw.githubusercontent.com/smitpatel316/Titer/main/package.json")
+        main_ver = json.loads(body).get("version", "0.0.0")
+        if parse_version(main_ver) > parse_version(newest):
+            newest = main_ver
+    except Exception as e:  # noqa: BLE001
+        print(f"INFO: main package.json unreadable ({e})")
+    return newest
 
 
 def gui_checks(c, binary, expect, timeout, cache):
@@ -106,6 +136,20 @@ def gui_checks(c, binary, expect, timeout, cache):
     if not os.path.isfile(binary):
         c.check("binary exists", False, binary)
         return c.finish()
+    if expect == "auto":
+        m = re.search(r"Titer-(\d+\.\d+\.\d+)", os.path.basename(binary))
+        if not m:
+            c.check("--expect auto needs a versioned binary filename", False,
+                    f"cannot parse a version from {os.path.basename(binary)}; "
+                    "pass --expect dialog|quiet explicitly")
+            return c.finish()
+        from common import parse_version
+        binary_ver = m.group(1)
+        newest = newest_available()
+        expect = ("dialog" if parse_version(binary_ver) < parse_version(newest)
+                  else "quiet")
+        print(f"INFO: binary {binary_ver} vs newest available {newest} "
+              f"-> expect {expect}")
     if not os.access(binary, os.X_OK):
         os.chmod(binary, 0o755)
     home = os.path.join(cache, ".e2e-home-update")
@@ -120,7 +164,7 @@ def gui_checks(c, binary, expect, timeout, cache):
     for d in (env["XDG_DATA_HOME"], env["XDG_CONFIG_HOME"],
               env["XDG_CACHE_HOME"]):
         os.makedirs(d, exist_ok=True)
-    before = set(window_titles())
+    before = {wid for wid, _ in windows()}
     cmd = [binary]
     if binary.endswith(".AppImage"):
         cmd.append("--appimage-extract-and-run")
@@ -133,14 +177,17 @@ def gui_checks(c, binary, expect, timeout, cache):
         deadline = time.time() + timeout
         dialog_seen = None
         main_seen = False
+        seen_titles = []
         while time.time() < deadline:
             if proc.poll() is not None:
                 break
             try:
-                new = [t for t in window_titles() if t not in before]
+                new = [(wid, t) for wid, t in windows() if wid not in before]
             except Exception:  # noqa: BLE001 - xwininfo hiccup: retry
                 new = []
-            for t in new:
+            for _, t in new:
+                if t not in seen_titles:
+                    seen_titles.append(t)
                 if re.match(r"Titer \S+ is available$", t):
                     dialog_seen = t
                 if t in ("Untitled", "Titer"):
@@ -152,7 +199,7 @@ def gui_checks(c, binary, expect, timeout, cache):
                 proc.poll() is None,
                 f"exit code {proc.poll()}" if proc.poll() is not None else "running")
         c.check("main window appears (launch did not hang on the check)",
-                main_seen, f"new windows seen: {[t for t in window_titles() if t not in before]}")
+                main_seen, f"new windows seen: {seen_titles}")
         if expect == "dialog":
             c.check("update dialog appears when a newer version exists",
                     dialog_seen is not None,
@@ -177,8 +224,10 @@ def main():
     ap.add_argument("--repo", default=None,
                     help="repo root for --mode static (default: this repo)")
     ap.add_argument("--binary", help="app binary or AppImage for --mode gui")
-    ap.add_argument("--expect", choices=["dialog", "quiet"],
-                    help="--mode gui: which outcome to assert")
+    ap.add_argument("--expect", choices=["dialog", "quiet", "auto"],
+                    default="auto",
+                    help="--mode gui: which outcome to assert (default: auto — "
+                    "derive from the binary version vs the newest available)")
     ap.add_argument("--timeout", type=int, default=60)
     ap.add_argument("--cache-dir", default=None)
     args = ap.parse_args()
