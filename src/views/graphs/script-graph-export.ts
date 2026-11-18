@@ -10,7 +10,7 @@ import { largestAt, PX_PER_INCH, withDpi } from "../../lib/image-dpi";
 import { encodeBmp, encodeTiff } from "../../lib/tiff";
 import { buildPanelFigure } from "../figures/panel-figure";
 import { renderFigureRaster, renderFigureSvg } from "../figures/figure-export";
-import { loadPlotly } from "./plotly";
+import { loadPlotly, normalizePlotlySvg } from "./plotly";
 import { withoutSelection } from "./selection";
 import { vectorTraces } from "./plot-helpers";
 import type { ExportFormat } from "../../lib/prism-script";
@@ -85,7 +85,11 @@ async function renderGraph(
     const scale = format === "svg" ? 1 : dpi / PX_PER_INCH;
     if (format === "svg") {
       const url = await Plotly.toImage(figure, { format, ...size, scale });
-      return new Uint8Array(await (await fetch(url)).arrayBuffer());
+      // Plotly draws fresh random ids per render, and its root-tag
+      // attribute order flips run to run — normalize both in the exporter
+      // so the same graph exported twice is byte-identical
+      // (normalizePlotlySvg). Raster bytes carry no ids.
+      return new TextEncoder().encode(normalizePlotlySvg(await (await fetch(url)).text()));
     }
     const url = await Plotly.toImage(figure, {
       format: format === "tif" || format === "bmp" ? "png" : format,

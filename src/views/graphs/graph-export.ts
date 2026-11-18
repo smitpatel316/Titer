@@ -1,7 +1,7 @@
 // Saving a graph as an image file, or copying it to the clipboard.
 import { alert, pickSavePath, writeFile } from "../../native";
 import { buildOfficeDocument, officeDialogTitle, officeExtension, pngSize, type OfficeTarget } from "../../lib/office-export";
-import { loadPlotly } from "./plotly";
+import { loadPlotly, normalizePlotlySvg } from "./plotly";
 import { withoutSelection } from "./selection";
 import { vectorTraces } from "./plot-helpers";
 import { largestAt, PX_PER_INCH, withDpi } from "../../lib/image-dpi";
@@ -51,7 +51,11 @@ async function toImage(el: HTMLElement, size: Size, format: ExportFormat, dpi: R
   const scale = format === "svg" ? 1 : Number(dpi) / PX_PER_INCH;
   const url = await (await loadPlotly()).toImage(figure, { format: drawnFormat, ...size, scale });
   const image = await (await fetch(url)).blob();
-  if (format === "svg") return image;
+  // SVG only: Plotly draws fresh random ids per render, and its root-tag
+  // attribute order flips run to run — normalize both in the exporter so
+  // the same graph exported twice is byte-identical (normalizePlotlySvg).
+  // Raster bytes carry no ids, so PNG/JPEG/PDF/TIFF pass through untouched.
+  if (format === "svg") return new Blob([normalizePlotlySvg(await image.text())], { type: "image/svg+xml" });
   const png = new Uint8Array(await image.arrayBuffer());
   if (format === "pdf") return new Blob([pdfEncode(decodePng(png), Number(dpi)) as BlobPart], { type: "application/pdf" });
   if (format === "tiff") return new Blob([tiffEncode(decodePng(png), Number(dpi)) as BlobPart], { type: "image/tiff" });

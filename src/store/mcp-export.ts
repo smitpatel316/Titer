@@ -27,7 +27,7 @@
 // records which overlay graphs differ.
 import { buildPanelFigure } from "../views/figures/panel-figure";
 import { renderFigureRaster, renderFigureSvg } from "../views/figures/figure-export";
-import { loadPlotly } from "../views/graphs/plotly";
+import { loadPlotly, normalizePlotlySvg } from "../views/graphs/plotly";
 import { withoutSelection } from "../views/graphs/selection";
 import { vectorTraces } from "../views/graphs/plot-helpers";
 import {
@@ -243,7 +243,11 @@ export async function renderGraphImage(
     const url = await Plotly.toImage(figure, { format: drawnFormat, ...draw96, scale });
     const image = await (await fetch(url)).blob();
     if (format === "svg") {
-      return { bytes: new TextEncoder().encode(await image.text()), ...dims };
+      // Plotly draws fresh random ids per render, and its root-tag
+      // attribute order flips run to run — normalize both in the exporter
+      // so the same graph exported twice is byte-identical
+      // (normalizePlotlySvg). Raster bytes carry no ids.
+      return { bytes: new TextEncoder().encode(normalizePlotlySvg(await image.text())), ...dims };
     }
     const png = new Uint8Array(await image.arrayBuffer());
     if (format === "pdf") return { bytes: pdfEncode(decodePng(png), Number(dpi)), ...dims };
