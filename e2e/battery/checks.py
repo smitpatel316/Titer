@@ -232,6 +232,11 @@ def q92_expected_reject(mcp, corpus_dir):
     plain-language error (PASS-REJECT), not imported and not crashed."""
     if mcp is None:
         return _res("Q-92", None, "no live MCP connection — pass --discovery")
+    try:
+        names = mcp.initialize()
+        assert len(names) == 51, f"expected 51 tools, got {len(names)}"
+    except Exception as e:
+        return _res("Q-92", False, f"MCP initialize failed, cannot test rejection: {e}")
     results = []
     problems = []
     for f in REJECT_FILES:
@@ -251,6 +256,12 @@ def q92_expected_reject(mcp, corpus_dir):
             results.append(f"{f}: NOT REJECTED")
         except Exception as e:
             msg = str(e)
+            # A transport/protocol failure (HTTP 400, connection refused)
+            # is NOT an app rejection — the check cannot pass on it.
+            if "HTTP" in msg or "Connection refused" in msg or "urlopen error" in msg:
+                problems.append(f"{f}: transport error, not an app rejection: {msg[:150]}")
+                results.append(f"{f}: TRANSPORT ERROR")
+                continue
             # Plain-language: the error names the file/problem in words a
             # researcher understands, not a stack trace or bare code.
             plain = len(msg) > 10 and "Traceback" not in msg
@@ -267,7 +278,7 @@ def q99_triage_audit(run_dir):
     per_file = os.path.join(run_dir, "per-file")
     if not os.path.isdir(per_file):
         return _res("Q-99", None, f"no per-file JSONL dir in run dir {run_dir}")
-    problems, checked, not_run = 0, 0, 0
+    problems, missing_verdict, missing_error, checked, not_run = 0, 0, 0, 0, 0
     for fn in sorted(os.listdir(per_file)):
         if not fn.endswith(".jsonl"):
             continue
@@ -275,6 +286,7 @@ def q99_triage_audit(run_dir):
         verdicts = [r for r in recs if r.get("event") == "verdict"]
         analyses = [r for r in recs if r.get("event") == "analysis"]
         if not verdicts:
+            missing_verdict += 1
             problems += 1
             continue
         for r in analyses:
@@ -284,10 +296,12 @@ def q99_triage_audit(run_dir):
             if not res.get("ok"):
                 not_run += 1
                 if not res.get("error"):
+                    missing_error += 1
                     problems += 1
     detail = (f"{checked} variant outcomes audited across {len(os.listdir(per_file))} files, "
               f"{not_run} not-run (each carries the app's reason); "
-              f"{problems} records missing an outcome/verdict")
+              f"{missing_verdict} files missing a verdict event, "
+              f"{missing_error} not-run variants missing a reason")
     return _res("Q-99", problems == 0, detail)
 
 

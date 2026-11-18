@@ -460,6 +460,12 @@ class Runner:
                 verdict["analyses"][variant] = {"ok": True, **ran}
                 verdict["triage"][variant] = {"outcome": "ran", "offered_types": offered_types}
             else:
+                if not cands:
+                    # No table of an applicable type at all — record the
+                    # reason as the error, never None (Q-99 audit requires
+                    # every not-run variant to carry the app's reason).
+                    last_err = (f"no table of an applicable type for {base} "
+                                f"(applicable: {APPLICABLE.get(base, [])})")
                 verdict["analyses"][variant] = {"ok": False, "error": last_err,
                                                 "candidates": len(cands)}
                 reason = "not-offered" if skipped_types else (
