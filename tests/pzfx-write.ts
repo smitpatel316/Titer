@@ -342,6 +342,55 @@ check("W2 fixtures without <Info> write no <Info>", () => {
   }
 });
 
+// BUG-5: Prism writes info-sheet notes (and constant values) as rich-text
+// objects `{ string, version, formatting }` in real files (capsanoicids,
+// dilution-analysis, senolytics-25hc) — the converter unwraps them, but a
+// non-string reaching the writer must never crash the whole export. The
+// writer unwraps rich text to its plain string and never emits
+// "[object Object]".
+check("W2 rich-text object notes / constant values write as plain text", () => {
+  const richNotes = { string: "Mean of non-inhibited values & controls", version: 1, formatting: [] };
+  const project = syntheticProject(
+    {
+      table_1: {
+        id: "table_1",
+        type: "table",
+        name: "Data",
+        parentId: null,
+        tableType: "column",
+        data: {
+          columns: ["Title", "A"],
+          rows: [
+            [null, "1"],
+            [null, "2"],
+          ],
+        },
+      },
+      info_1: {
+        id: "info_1",
+        type: "info",
+        name: "Project info",
+        parentId: null,
+        info: {
+          constants: [{ id: "c1", name: "Lot", value: { string: "L-42", version: 1 } as unknown as string }],
+          // Deliberately a rich-text object, as the converter used to store
+          // it verbatim — the writer must unwrap, not throw.
+          notes: richNotes as unknown as string,
+          linkedTableId: null,
+        },
+      },
+    },
+    ["table_1", "info_1"],
+  );
+  const written = writePzfx(project, APP_VERSION);
+  const xml = xmlOf(written);
+  ok(xml.includes("<Notes>Mean of non-inhibited values &amp; controls</Notes>"), "notes unwrap to plain text, escaped");
+  ok(xml.includes("<Value>L-42</Value>"), "rich-text constant value unwraps");
+  ok(!xml.includes("[object Object]"), "no [object Object] anywhere");
+  const back = parsePzfx(xml);
+  strictEqual(infosOf(back.project)[0]?.info?.notes, "Mean of non-inhibited values & controls", "notes round-trip");
+});
+
 // ── W3 — the written file is honestly Titer's ──────────────────────────
 
 check("W3 written file identity (all fixtures)", () => {
