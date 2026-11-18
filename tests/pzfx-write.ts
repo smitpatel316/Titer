@@ -288,6 +288,35 @@ check("W1 a >52-subcolumn table writes <HugeTable>, and reads back identical (BU
   strictEqual(JSON.stringify(tablesOf(back.project)[0].data), JSON.stringify(tablesOf(source.project)[0].data));
 });
 
+check("W1 duplicate group names round-trip, not merged (BUG-1/BUG-3)", () => {
+  const project = syntheticProject(
+    {
+      table_1: {
+        id: "table_1",
+        type: "table",
+        name: "Dup groups",
+        parentId: null,
+        tableType: "grouped",
+        data: {
+          columns: ["Title", "Group:Y1", "Group:Y2", "Group:Y1", "Group:Y2"],
+          rows: [["1 ", "1", "2", "3", "4"]],
+          groups: 2,
+          replicates: 2,
+        },
+      },
+    },
+    ["table_1"],
+  );
+  const written = writePzfx(project, APP_VERSION);
+  const xml = xmlOf(written);
+  ok(xml.includes('TableType="TwoWay"'), "TwoWay");
+  ok(xml.includes('Replicates="2"'), "Replicates=2, not merged to 4");
+  strictEqual((xml.match(/<YColumn/g) ?? []).length, 2, "one YColumn per run");
+  const back = parsePzfx(xml);
+  strictEqual(tablesOf(back.project)[0].tableType, "grouped", "reads back grouped");
+  strictEqual(JSON.stringify(tablesOf(back.project)[0].data), JSON.stringify(project.nodes.table_1.data));
+});
+
 check("W1 synthetic XY summary round-trips", () => {
   const project = syntheticProject(
     {

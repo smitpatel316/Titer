@@ -11,7 +11,7 @@
 // store/references.ts.)
 import type { RowGroup, TableData, TableErrorFormat, TableType } from "../../store/types";
 import { tableErrorFormat } from "../../store/types";
-import { seriesKeyOf } from "../../lib/columns";
+import { seriesKeyOf, groupRuns } from "../../lib/columns";
 import { isGrouped, isNested } from "../../lib/dataset";
 import {
   summaryFormatOf,
@@ -348,12 +348,19 @@ export function changeErrorFormat(data: TableData, format: TableErrorFormat): Ta
   return { ...data, errorFormat: format, columns };
 }
 
+/** A grouped table's group names, in run order (duplicates kept). */
+export function groupRunKeys(columns: string[], lead: number): string[] {
+  return groupRuns(columns.slice(lead)).map((r) => r.name);
+}
+
 /** Changes how many groups and sub-columns a grouped table has. Every value stays
  *  in its group and sub-column (with its exclusion); groups keep their
  *  names; only groups or sub-columns beyond the new counts are dropped.
  *  Format-aware: a summary table's sub-columns keep their summary names
  *  ("A:Mean"…), so a load-time rebuild or a group-count change never renames
- *  them back to "A:Y1" (the name-based mapping then still finds them). */
+ *  them back to "A:Y1" (the name-based mapping then still finds them).
+ *  Run-aware: the mapping is by (name, occurrence), so two same-named groups
+ *  keep their own values instead of both reading the first group's. */
 export function regroupTable(
   data: TableData,
   groups: number,
@@ -362,12 +369,26 @@ export function regroupTable(
 ): TableData {
   // An XY table's X stays before its data sets.
   const lead = type === "xy" ? 2 : 1;
-  const keys = [...new Set(data.columns.slice(lead).map(seriesKeyOf))].slice(0, groups);
+  const keys = groupRunKeys(data.columns, lead).slice(0, groups);
   // A new group takes the letter of its place (C for the third), or the next free one.
   for (let i = keys.length; keys.length < groups; i++) if (!keys.includes(columnLetter(i))) keys.push(columnLetter(i));
   const columns = [...data.columns.slice(0, lead), ...subColumns(keys, replicates, summaryFormatOf(data))];
-  const from = columns.map((name, c) => (c < lead ? c : data.columns.indexOf(name)));
-  const to = (c: number) => (c < lead ? c : columns.indexOf(data.columns[c]));
+  // Occurrence-aware mapping: the n-th column of a name maps to the n-th
+  // column of that name in the old table (and back), so duplicate-named
+  // groups keep their own values instead of both reading the first group's.
+  const from = columns.map((name, c) => {
+    if (c < lead) return c;
+    const occurrence = columns.slice(0, c).filter((n) => n === name).length;
+    let seen = -1;
+    return data.columns.findIndex((n) => n === name && ++seen === occurrence);
+  });
+  const to = (c: number): number => {
+    if (c < lead) return c;
+    const name = data.columns[c];
+    const occurrence = data.columns.slice(0, c).filter((n) => n === name).length;
+    let seen = -1;
+    return columns.findIndex((n) => n === name && ++seen === occurrence);
+  };
   return {
     ...data,
     columns,
@@ -397,7 +418,7 @@ export function applySummaryFormat(data: TableData, format: SummaryFormat): Tabl
   const groups = data.groups!;
   const oldWidth = data.replicates!;
   const newWidth = format === "replicates" ? oldWidth : summarySubcolumns(format).length;
-  const keys = [...new Set(data.columns.slice(1).map(seriesKeyOf))].slice(0, groups);
+  const keys = groupRunKeys(data.columns, 1).slice(0, groups);
   for (let i = keys.length; keys.length < groups; i++) if (!keys.includes(columnLetter(i))) keys.push(columnLetter(i));
   const columns = ["Title", ...subColumns(keys, newWidth, format)];
   // Slot (group, position within the group) of a column, in the old width and

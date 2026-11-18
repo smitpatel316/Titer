@@ -28,6 +28,7 @@
 import JSZip from "jszip";
 import type { ProjectFilePayload } from "./project-file";
 import type { NonlinearModel } from "../stats/types";
+import { groupRuns } from "./columns";
 import { summaryFormatDef } from "./summary-format";
 
 export interface PrismWriteIssue {
@@ -332,22 +333,27 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
     if (tableType === "grouped") {
       format = "grouped";
       // Columns are "Group:Mean"… or "Group:Y1"… — regroup by the part before
-      // the last ":". A summary table emits one dataset per group in its
-      // matching dataFormat (y_sd_n, y_se_n, …); a replicates table one
-      // y_replicates dataset per group, as before.
-      const groups = new Map<string, number[]>();
-      yColumns.forEach((c, i) => {
-        const group = c.name.includes(":") ? c.name.slice(0, c.name.lastIndexOf(":")) : c.name;
-        const list = groups.get(group) ?? [];
-        list.push(i);
-        groups.set(group, list);
-      });
+      // the last ":". Groups are RUNS (src/lib/columns.ts `groupRuns`, split
+      // at the last ":"): two same-named groups ("Group:Y1"… twice) are two
+      // datasets, and merging them by name would write one 20-replicate
+      // dataset whose values shift columns on read-back. A summary table
+      // emits one dataset per group in its matching dataFormat (y_sd_n,
+      // y_se_n, …); a replicates table one y_replicates dataset per group,
+      // as before.
+      const splitLast = (name: string): [string, string] => {
+        const sep = name.lastIndexOf(":");
+        return sep >= 0 ? [name.slice(0, sep), name.slice(sep + 1)] : [name, name];
+      };
+      const groups = groupRuns(
+        yColumns.map((c) => c.name),
+        splitLast,
+      ).map((r) => ({ title: r.name, columns: r.columns }));
       const def =
         data.summaryFormat && data.summaryFormat !== "replicates" ? summaryFormatDef(data.summaryFormat) : null;
       // A summary dataFormat only when the columns actually hold it (the
       // first group's suffixes, in order) — a mismatched table writes as
       // replicates instead of claiming a format its columns don't hold.
-      const firstGroup = [...groups.values()][0] ?? [];
+      const firstGroup = groups[0]?.columns ?? [];
       const suffixesMatch =
         def !== null &&
         firstGroup.length === def.subcolumns.length &&
@@ -355,7 +361,7 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
           (ci, k) => yColumns[ci].name.slice(yColumns[ci].name.lastIndexOf(":") + 1) === def.subcolumns[k],
         );
       const summaryDataFormat = suffixesMatch ? (def!.dataFormat ?? "y_replicates") : "y_replicates";
-      sets = [...groups.entries()].map(([title, cols]) => ({
+      sets = groups.map(({ title, columns: cols }) => ({
         title,
         columns: cols,
         dataFormat: summaryDataFormat,

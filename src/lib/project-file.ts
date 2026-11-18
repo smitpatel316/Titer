@@ -80,7 +80,7 @@ import { GRAPHS, GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
 import { ANALYSES } from "../stats";
 import { isGrouped, isNested } from "./dataset";
 import { isSummaryFormatValue, summarySubcolumns } from "./summary-format";
-import { seriesKeyOf } from "./columns";
+import { groupRuns } from "./columns";
 import { regroupDropped, regroupTable, renestDropped, renestTable } from "../views/tables/table-data";
 import {
   assignLabels,
@@ -591,11 +591,17 @@ function readData(
     if (!fits) data = defined({ ...data, summaryFormat: undefined });
   }
   if (isGrouped(data) && columns.length > lead) {
-    const groups = [...new Set(columns.slice(lead).map(seriesKeyOf))];
-    const replicates = Math.max(...groups.map((g) => columns.slice(lead).filter((c) => seriesKeyOf(c) === g).length));
-    if (groups.length !== data.groups || replicates !== data.replicates) {
-      regroupDroppedNames.push(...regroupDropped(data, groups.length, replicates, kind));
-      data = defined(regroupTable(data, groups.length, replicates, kind));
+    // Groups are runs, not names: two same-named groups ("Group:Y1"… twice)
+    // are two groups, and counting unique names would rebuild the table as
+    // one merged group and move the second group's values into the first's
+    // columns. Rebuild only when the run-based counts disagree with the
+    // stored ones (a ragged or hand-edited file).
+    const runs = groupRuns(columns.slice(lead));
+    const groups = runs.length;
+    const replicates = Math.max(...runs.map((r) => r.columns.length));
+    if (groups !== data.groups || replicates !== data.replicates) {
+      regroupDroppedNames.push(...regroupDropped(data, groups, replicates, kind));
+      data = defined(regroupTable(data, groups, replicates, kind));
     }
   }
   if (isNested(data) && columns.length > 1) {
