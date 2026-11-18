@@ -19,7 +19,6 @@ import { modelSpec } from "../../stats/xy/nonlinear-fit";
 import { parseCustomParameters, parseUserEquation } from "../../stats/xy/user-defined";
 import { dataGroups, incompleteRows, pairedGroups, pairIndices } from "../../stats/column/base";
 import { rowName } from "../../stats/grouped/base";
-import { pairKey } from "../../lib/columns";
 import { distinctTruthValues } from "../../stats/column/roc-curve";
 
 const isDoseModel = (m: string) => (DOSE_MODELS as readonly string[]).includes(m);
