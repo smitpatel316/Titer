@@ -104,7 +104,13 @@ fi
 run_leg "T-89 GitHub release" check_github_release.py --version "$VERSION" "${STAGED_SHA_ARGS[@]}"
 run_leg "T-90 channel manifest" check_channel_manifest.py --version "$VERSION" --verify-asset-sha
 run_leg "T-91 website" check_website.py --version "$VERSION"
-run_leg "T-92 Linux AppImage" check_appimage.py --version "$APPIMAGE_VERSION"
+# Extra lib dir for the GUI legs: post-swap containers can miss system
+# GL libs (libEGL.so.1) until scripts/setup-linux.sh is re-run. Set
+# TITER_EXTRA_LIB_DIR to a dir of extracted .deb libs (see README) and
+# run.sh passes it through to the app launches.
+EXTRA_LIB_ARGS=()
+[ -n "${TITER_EXTRA_LIB_DIR:-}" ] && EXTRA_LIB_ARGS=(--extra-lib-dir "$TITER_EXTRA_LIB_DIR")
+run_leg "T-92 Linux AppImage" check_appimage.py --version "$APPIMAGE_VERSION" "${EXTRA_LIB_ARGS[@]}"
 run_leg "T-93 update-check (static)" check_update.py --mode static --repo "$REPO"
 
 # T-88 portable legs: the release DMG is already in the cache (T-89
@@ -134,7 +140,7 @@ if [ "$SKIP_GUI" = 0 ]; then
   for leg in "$PREV_APPIMAGE_VERSION" "$APPIMAGE_VERSION"; do
     APPIMAGE="$CACHE/Titer-$leg-linux.AppImage"
     if [ -f "$APPIMAGE" ]; then
-      run_leg "T-93 update GUI (AppImage $leg)" check_update.py --mode gui --binary "$APPIMAGE" --expect auto
+      run_leg "T-93 update GUI (AppImage $leg)" check_update.py --mode gui --binary "$APPIMAGE" --expect auto "${EXTRA_LIB_ARGS[@]}"
     else
       echo "---- T-93 update GUI ($leg): SKIP (no AppImage in cache) ----"
     fi

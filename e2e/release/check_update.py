@@ -134,7 +134,7 @@ def newest_available():
     return newest
 
 
-def gui_checks(c, binary, expect, timeout, cache):
+def gui_checks(c, binary, expect, timeout, cache, extra_lib_dir=""):
     if not os.environ.get("DISPLAY"):
         c.check("DISPLAY is set (Xvfb running)", False,
                 "start Xvfb first — the GUI leg needs a display")
@@ -172,6 +172,12 @@ def gui_checks(c, binary, expect, timeout, cache):
     # with other lanes, so extract under the cache instead.
     env["TMPDIR"] = os.path.join(cache, ".tmp")
     os.makedirs(env["TMPDIR"], exist_ok=True)
+    # Post-swap containers can miss system GL libs (libEGL.so.1):
+    # --extra-lib-dir prepends extracted .deb libs to LD_LIBRARY_PATH.
+    # The real fix is scripts/setup-linux.sh (AGENTS.md).
+    if extra_lib_dir:
+        env["LD_LIBRARY_PATH"] = (extra_lib_dir + ":"
+                                  + env.get("LD_LIBRARY_PATH", ""))
     for d in (env["XDG_DATA_HOME"], env["XDG_CONFIG_HOME"],
               env["XDG_CACHE_HOME"]):
         os.makedirs(d, exist_ok=True)
@@ -241,6 +247,10 @@ def main():
                     "derive from the binary version vs the newest available)")
     ap.add_argument("--timeout", type=int, default=60)
     ap.add_argument("--cache-dir", default=None)
+    ap.add_argument("--extra-lib-dir", default="",
+                    help="directory prepended to LD_LIBRARY_PATH when "
+                    "launching the app (extracted system libs, e.g. "
+                    "libEGL.so.1 missing after a container swap)")
     args = ap.parse_args()
 
     repo = args.repo or os.path.abspath(os.path.join(
@@ -255,7 +265,8 @@ def main():
     if not args.binary or not args.expect:
         c.check("--mode gui needs --binary and --expect", False, "")
         return c.finish()
-    return gui_checks(c, args.binary, args.expect, args.timeout, cache)
+    return gui_checks(c, args.binary, args.expect, args.timeout, cache,
+                      args.extra_lib_dir)
 
 
 if __name__ == "__main__":

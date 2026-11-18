@@ -62,6 +62,10 @@ def main():
     ap.add_argument("--file", help="use a local AppImage instead of downloading")
     ap.add_argument("--cache-dir", default=None)
     ap.add_argument("--smoke-timeout", type=int, default=60)
+    ap.add_argument("--extra-lib-dir", default="",
+                    help="directory prepended to LD_LIBRARY_PATH when "
+                    "launching the app (extracted system libs, e.g. "
+                    "libEGL.so.1 missing after a container swap)")
     args = ap.parse_args()
 
     cache = args.cache_dir or os.path.join(
@@ -146,6 +150,12 @@ def main():
     # tmpfs that other lanes share, so extract under the cache instead.
     env["TMPDIR"] = os.path.join(cache, ".tmp")
     os.makedirs(env["TMPDIR"], exist_ok=True)
+    # Post-swap containers can miss system GL libs (libEGL.so.1):
+    # --extra-lib-dir prepends extracted .deb libs to LD_LIBRARY_PATH.
+    # The real fix is scripts/setup-linux.sh (AGENTS.md).
+    if args.extra_lib_dir:
+        env["LD_LIBRARY_PATH"] = (args.extra_lib_dir + ":"
+                                  + env.get("LD_LIBRARY_PATH", ""))
     for d in (env["XDG_DATA_HOME"], env["XDG_CONFIG_HOME"],
               env["XDG_CACHE_HOME"]):
         os.makedirs(d, exist_ok=True)

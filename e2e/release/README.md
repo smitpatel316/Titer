@@ -32,16 +32,42 @@ resolve upstream mickaphd/Helix). Downloads land in `e2e/out/release/`
 (gitignored) and are reused across legs. `run.sh` starts its own Xvfb on
 a private display when `DISPLAY` is unset.
 
+## Prerequisites (Linux GUI legs)
+
+The GUI legs (T-92 smoke, T-93 dialog/quiet) need, beyond the app:
+
+- `xwininfo` (package `x11-utils`) — run.sh fails loudly if it is
+  missing instead of misreporting "Xvfb never answered".
+- `libEGL.so.1` (package `libegl1`) — without it the AppImage binary
+  dies with exit 127 "error while loading shared libraries".
+
+Container swaps wipe both. The real fix after a swap is
+`scripts/setup-linux.sh` (repo AGENTS.md: run it first after every
+replacement) or `apt-get update && apt-get install -y x11-utils
+xdotool libegl1`. Bridge if apt is slow: extract the debs straight
+from the Ubuntu mirror into a scratch dir and point the runner at
+them — `x11-utils`'s `usr/bin` on `PATH`, and the lib dir as
+`TITER_EXTRA_LIB_DIR` (run.sh passes it as `--extra-lib-dir` to the
+GUI legs, which prepend it to `LD_LIBRARY_PATH` when launching the
+app):
+
+```sh
+# x11-utils 7.7+6build2; libegl1 1.7.0-1build1, libegl-mesa0 24.0.5-1ubuntu1,
+# libglapi-mesa 24.0.5-1ubuntu1, libxcb-dri2-0 1.15-1ubuntu2 (noble amd64)
+export PATH="$SCRATCH/x11-utils/usr/bin:$PATH"
+export TITER_EXTRA_LIB_DIR="$SCRATCH/syslibs/usr/lib/x86_64-linux-gnu"
+```
+
 ## Reference versions (verified 2026-11-18)
 
 - Latest live release: **v1.6.2** (shipped during this lane's first run:
   DMG + zip + AppImage + AppImage.sha256). The lane was written when
   v1.6.1 was latest — T-89 against an unreleased version correctly
   FAILS until it ships.
-- Channel manifest: version **1.6.1**, build **10**; mac latest 1.6.1/build
-  10; linux latest **1.6.0**/build 9 (carried over verbatim). NOTE: after
-  v1.6.2 shipped, the manifest + website still serve 1.6.1 — T-90's
-  linux-latest check FAILS until the channel is flipped to 1.6.2. That
+- Channel manifest: version **1.6.2** since the v1.6.2 channel flip
+  (was 1.6.1/build 10 with linux latest **1.6.0**/build 9 carried over
+  verbatim before the flip). NOTE: while a release is shipped but the
+  channel is not yet flipped, T-90's linux-latest check FAILS — that
   is the check working, not a script bug.
 - Latest AppImage release: **v1.6.2** (173,140,472 B); previous 1.6.0
   (190,994,936 B).
