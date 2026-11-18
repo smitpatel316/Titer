@@ -355,5 +355,149 @@ if (corpusDir) {
   console.log("P14 corpus sweep — PRISM_TEST_CORPUS_PRISM10 not set, skipped");
 }
 
+// P15 (BUG-10): excluded (struck-through) cells in a real Prism file —
+// `cellAttributes` entries with "EXCLUDED" in the dataset JSON — restore
+// as Titer excluded cells. Synthetic fixture, built here: an xy table
+// whose A dataset is y_replicates with two ranges (range "0" excludes
+// row 1, range "1" does not), whose B dataset is y_single excluding rows
+// 0 and 2~3 (plus one malformed entry, which warns and leaves the cell
+// live), and whose X dataset excludes row 2.
+{
+  const z = new JSZip();
+  const sheetUid = "11111111-1111-1111-1111-111111111111";
+  const tableUid = "22222222-2222-2222-2222-222222222222";
+  const xUid = "33333333-3333-3333-3333-333333333333";
+  const aUid = "44444444-4444-4444-4444-444444444444";
+  const bUid = "55555555-5555-5555-5555-555555555555";
+  const rtUid = "66666666-6666-6666-6666-666666666666";
+  z.file(
+    "document.json",
+    JSON.stringify({
+      "@class": "Document",
+      createdBy: { name: "Prism", version: "10.3.0" },
+      formatVersion: "1-4-1",
+      sheets: { graphs: [], layouts: [], analyses: [], info: [], data: [sheetUid] },
+      sheetAttributesMap: { [sheetUid]: { title: "Data 1" } },
+    }),
+  );
+  z.file(
+    `data/sheets/${sheetUid}/sheet.json`,
+    JSON.stringify({
+      "@class": "DataSheet",
+      title: "Data 1",
+      table: {
+        uid: tableUid,
+        format: "xy",
+        dataFormat: "y_replicates",
+        dataSets: [aUid, bUid],
+        xDataSet: xUid,
+        rowTitlesDataSet: rtUid,
+      },
+    }),
+  );
+  z.file(`data/tables/${tableUid}/content.json`, JSON.stringify({ numberOfColumns: 5, numberOfRows: 4, version: 1 }));
+  z.file(`data/tables/${tableUid}/data.csv`, "R1,1,10,20,100\nR2,2,11,21,101\nR3,3,12,22,102\nR4,4,13,23,103\n");
+  const rep = (cellAttributes?: unknown[]) => ({
+    "@class": "DriverReplicate",
+    valueType: "real",
+    commonAttributes: ["NUMERIC"],
+    decimalsLength: 1,
+    significantDigitsCount: 7,
+    lastRow: 3,
+    firstRow: 0,
+    ...(cellAttributes ? { cellAttributes } : {}),
+  });
+  z.file(
+    `data/sets/${xUid}.json`,
+    JSON.stringify({
+      "@class": "DataSet",
+      uid: xUid,
+      format: "y_single",
+      title: "X",
+      attributes: ["DS_ATTR_X"],
+      replicates: [rep([{ rows: "2", attributes: ["EXCLUDED"] }])],
+    }),
+  );
+  z.file(
+    `data/sets/${aUid}.json`,
+    JSON.stringify({
+      "@class": "DataSet",
+      uid: aUid,
+      format: "y_replicates",
+      title: "A",
+      attributes: ["DS_ATTR_Y"],
+      "replicate ranges": [
+        { range: "0", replicate: rep([{ rows: "1", attributes: ["EXCLUDED"] }]) },
+        { range: "1", replicate: rep() },
+      ],
+    }),
+  );
+  z.file(
+    `data/sets/${bUid}.json`,
+    JSON.stringify({
+      "@class": "DataSet",
+      uid: bUid,
+      format: "y_single",
+      title: "B",
+      attributes: ["DS_ATTR_Y"],
+      replicates: [
+        rep([
+          { rows: "0", attributes: ["EXCLUDED"] },
+          { rows: "2~3", attributes: ["EXCLUDED"] },
+          { rows: "bogus", attributes: ["EXCLUDED"] },
+        ]),
+      ],
+    }),
+  );
+  z.file(
+    `data/sets/${rtUid}.json`,
+    JSON.stringify({
+      "@class": "DataSet",
+      uid: rtUid,
+      format: "text",
+      title: "Row titles",
+      attributes: ["DS_ATTR_RT"],
+      replicates: [],
+    }),
+  );
+  const bytes = new Uint8Array(await z.generateAsync({ type: "uint8array" }));
+  const { project, report } = await convertPrism(bytes, "excluded-synthetic.prism");
+  const table = project.rootOrder
+    .map((id) => project.nodes[id])
+    .find((n) => n?.type === "table" && n.name === "Data 1");
+  // Full-grid cols: Title 0, X 1, A_1 2, A_2 3, B 4.
+  const want = ["0,4", "1,2", "2,1", "2,4", "3,4"];
+  check(
+    "P15 excluded cells restored",
+    JSON.stringify(table?.data?.excluded ?? []) === JSON.stringify(want),
+    `excluded ${JSON.stringify(table?.data?.excluded ?? [])} (want ${JSON.stringify(want)})`,
+  );
+  check(
+    "P15 malformed exclusion warns, cell stays live",
+    report.issues.some((i) => i.message.includes("bogus")) && (table?.data?.rows?.[0]?.[4] ?? null) === "100",
+    report.issues.map((i) => i.message).join(" | ") || "no issues",
+  );
+}
+
+// P16 (BUG-10): real corpus files with EXCLUDED markers restore them —
+// counts from an independent Python scan of the dataset JSONs (rows ×
+// subcolumns per replicate range). Only when the corpus dir is set.
+if (corpusDir) {
+  const files = (await readdir(corpusDir)).filter((f) => f.endsWith(".prism"));
+  const pins: [string, string, number][] = [
+    ["sirna-pai-1-manuscript-data-zenodo-21038547.prism", "Cytokine data endpoint", 1],
+    ["capsanoicids-241121-pn-zenodo-14204350.prism", "extracts peak relative", 29],
+  ];
+  for (const [file, tableName, want] of pins) {
+    if (!files.includes(file)) continue;
+    const { project } = await convertPrism(new Uint8Array(await readFile(join(corpusDir, file))), file);
+    const table = project.rootOrder
+      .map((id) => project.nodes[id])
+      .find((n) => n?.type === "table" && n.name === tableName);
+    const got = table?.data?.excluded?.length ?? 0;
+    check(`P16 excluded cells in ${file} / ${tableName}`, got === want, `${got} excluded (want ${want})`);
+  }
+}
+
 console.log(`\n${checks - failures}/${checks} checks passed.`);
 process.exit(failures ? 1 : 0);

@@ -179,6 +179,131 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
       err instanceof Error ? err.message.slice(0, 120) : String(err),
     );
   }
+  // W6 (BUG-10): excluded cells survive a .prism round-trip, written in
+  // real Prism's own representation — `cellAttributes` EXCLUDED entries
+  // on the replicate — with `y_replicates` ranges split where
+  // per-subcolumn exclusion patterns differ (Ya_1+Ya_2 excluded at row
+  // 1, Yb_1 excluded but Yb_2 live: Yb must become ranges "0" and "1",
+  // not one "0~1" range with EXCLUDED row 1). The column table covers
+  // the non-replicates (`replicates` array) branch.
+  const bug10Project = {
+    nodes: {
+      table_1: {
+        id: "table_1",
+        type: "table",
+        name: "Data 1",
+        parentId: null,
+        tableType: "xy",
+        data: {
+          columns: ["Title", "XX", "Ya_1", "Ya_2", "Yb_1", "Yb_2"],
+          rows: [
+            ["A", "1.", "80.", "50.", "1.", "8."],
+            ["B", "2.", "90.", "60.", "2.", "9."],
+            ["C", "3.", "70.", "40.", "3.", "7."],
+          ],
+          excluded: ["1,2", "1,3", "1,4"],
+        },
+      },
+      table_2: {
+        id: "table_2",
+        type: "table",
+        name: "Col",
+        parentId: null,
+        tableType: "column",
+        data: {
+          columns: ["Title", "C"],
+          rows: [
+            [null, "5"],
+            [null, "6"],
+          ],
+          excluded: ["1,1"],
+        },
+      },
+    },
+    rootOrder: ["table_1", "table_2"],
+    childOrder: { table_1: [], table_2: [] },
+    activeNodeId: "table_1",
+  };
+  const bug10Written = await writePrism(bug10Project as never, "1.0.7");
+  const bug10Zip = await JSZip.loadAsync(bug10Written.bytes);
+  const setsByTitle = new Map<string, Record<string, unknown>>();
+  for (const p of Object.keys(bug10Zip.files)) {
+    if (!p.startsWith("data/sets/") || bug10Zip.files[p].dir) continue;
+    const d = JSON.parse(await bug10Zip.file(p)!.async("string")) as Record<string, unknown>;
+    setsByTitle.set(String(d.title), d);
+  }
+  const ya = setsByTitle.get("Ya") as {
+    "replicate ranges"?: { range?: string; replicate?: { cellAttributes?: unknown[] } }[];
+  };
+  const yb = setsByTitle.get("Yb") as {
+    "replicate ranges"?: { range?: string; replicate?: { cellAttributes?: unknown[] } }[];
+  };
+  const cset = setsByTitle.get("C") as { replicates?: { cellAttributes?: unknown[] }[] };
+  check(
+    "W6 writer emits Prism EXCLUDED cellAttributes",
+    JSON.stringify(ya?.["replicate ranges"]) ===
+      JSON.stringify([
+        {
+          range: "0~1",
+          replicate: {
+            "@class": "DriverReplicate",
+            valueType: "real",
+            commonAttributes: ["NUMERIC"],
+            decimalsLength: 1,
+            significantDigitsCount: 7,
+            lastRow: 2,
+            firstRow: 0,
+            cellAttributes: [{ rows: "1", attributes: ["EXCLUDED"] }],
+          },
+        },
+      ]) &&
+      (yb?.["replicate ranges"]?.length ?? 0) === 2 &&
+      yb?.["replicate ranges"]?.[0]?.range === "0" &&
+      (yb?.["replicate ranges"]?.[0]?.replicate?.cellAttributes?.length ?? 0) === 1 &&
+      yb?.["replicate ranges"]?.[1]?.range === "1" &&
+      (yb?.["replicate ranges"]?.[1]?.replicate?.cellAttributes?.length ?? 0) === 0 &&
+      JSON.stringify(cset?.replicates?.[0]?.cellAttributes) ===
+        JSON.stringify([{ rows: "1", attributes: ["EXCLUDED"] }]),
+    `Ya ${JSON.stringify(ya?.["replicate ranges"])}; Yb ${JSON.stringify(yb?.["replicate ranges"])}; C ${JSON.stringify(cset?.replicates)}`,
+  );
+  const bug10Back = await convertPrism(bug10Written.bytes, "bug10-round-trip.prism");
+  const bug10BackTables = bug10Back.project.rootOrder
+    .map((id) => bug10Back.project.nodes[id])
+    .filter((n) => n?.type === "table");
+  const backExcluded = (name: string) => bug10BackTables.find((t) => t.name === name)?.data?.excluded ?? [];
+  check(
+    "W6 .prism round-trip preserves exclusions",
+    JSON.stringify(backExcluded("Data 1")) === JSON.stringify(["1,2", "1,3", "1,4"]) &&
+      JSON.stringify(backExcluded("Col")) === JSON.stringify(["1,1"]),
+    `Data 1 ${JSON.stringify(backExcluded("Data 1"))}; Col ${JSON.stringify(backExcluded("Col"))}`,
+  );
+  // W7: a project with no exclusions writes no cellAttributes anywhere —
+  // the common case keeps its exact previous output shape.
+  const cleanWritten = await writePrism(
+    {
+      nodes: {
+        table_1: {
+          id: "table_1",
+          type: "table",
+          name: "Clean",
+          parentId: null,
+          tableType: "column",
+          data: { columns: ["Title", "A", "B_1", "B_2"], rows: [[null, "1", "2", "3"]] },
+        },
+      },
+      rootOrder: ["table_1"],
+      childOrder: { table_1: [] },
+      activeNodeId: "table_1",
+    },
+    "1.0.7",
+  );
+  const cleanZip = await JSZip.loadAsync(cleanWritten.bytes);
+  let cellAttrs = 0;
+  for (const p of Object.keys(cleanZip.files)) {
+    if (!p.endsWith(".json") || cleanZip.files[p].dir) continue;
+    if ((await cleanZip.file(p)!.async("string")).includes("cellAttributes")) cellAttrs++;
+  }
+  check("W7 no exclusions, no cellAttributes", cellAttrs === 0, `${cellAttrs} file(s) mention cellAttributes`);
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed.`);

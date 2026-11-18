@@ -216,7 +216,31 @@ function groupDatasets(columns: WriteColumn[]): WriteSet[] {
   return sets;
 }
 
-const replicateEntry = (lastRow: number) => ({
+/** Excluded rows as Prism `cellAttributes` entries: maximal runs of
+ *  consecutive rows, "N" or "N~M", each flagged EXCLUDED — the
+ *  representation real Prism writes (BUG-10). Empty when nothing is
+ *  excluded, so the key is omitted entirely. */
+const excludedCellAttributes = (rows: Set<number> | undefined): { rows: string; attributes: string[] }[] => {
+  if (!rows || rows.size === 0) return [];
+  const sorted = [...rows].sort((a, b) => a - b);
+  const entries: { rows: string; attributes: string[] }[] = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+  const flush = () =>
+    entries.push({ rows: start === prev ? String(start) : `${start}~${prev}`, attributes: ["EXCLUDED"] });
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] === prev + 1) {
+      prev = sorted[i];
+      continue;
+    }
+    flush();
+    start = prev = sorted[i];
+  }
+  flush();
+  return entries;
+};
+
+const replicateEntry = (lastRow: number, cellAttributes?: { rows: string; attributes: string[] }[]) => ({
   "@class": "DriverReplicate",
   valueType: "real",
   commonAttributes: ["NUMERIC"],
@@ -224,6 +248,7 @@ const replicateEntry = (lastRow: number) => ({
   significantDigitsCount: 7,
   lastRow,
   firstRow: 0,
+  ...(cellAttributes && cellAttributes.length ? { cellAttributes } : {}),
 });
 
 export async function writePrism(project: ProjectFilePayload, appVersion: string): Promise<PrismWriteResult> {
@@ -279,6 +304,23 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
     const isXY = tableType === "xy" || tableType === "survival";
     const xColumn = isXY ? allColumns[0] : null;
     const yColumns = isXY ? allColumns.slice(1) : allColumns;
+    // A yColumn's index in allColumns (the X column sits first for xy /
+    // survival) — used to look up that column's excluded rows below.
+    const yColToAll = (i: number) => (isXY ? i + 1 : i);
+    // Excluded cells (BUG-10): data.excluded keys are "row,col" full-grid
+    // coords (col 0 = row titles, never excluded); allColumns[i] is full
+    // col i+1. Rows past the table are dropped — they can't be cells.
+    const excludedByColumn = new Map<number, Set<number>>();
+    for (const key of data.excluded ?? []) {
+      const m = /^(\d+),(\d+)$/.exec(key);
+      if (!m) continue;
+      const col = Number(m[2]) - 1;
+      const row = Number(m[1]);
+      if (col < 0 || col >= allColumns.length || row >= rowCount) continue;
+      const rows = excludedByColumn.get(col) ?? new Set<number>();
+      rows.add(row);
+      excludedByColumn.set(col, rows);
+    }
 
     // CSV column order: [row titles?] + [X subcolumns] + [dataset subcolumns…].
     // The writer emits one subcolumn per dataset, except y_replicates
@@ -370,7 +412,12 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         format: "y_single",
         title: xColumn.name,
         attributes: ["DS_ATTR_X"],
-        replicates: [{ ...replicateEntry(rowCount - 1), commonAttributes: ["NUMERIC", "NOTCONV"] }],
+        replicates: [
+          {
+            ...replicateEntry(rowCount - 1, excludedCellAttributes(excludedByColumn.get(0))),
+            commonAttributes: ["NUMERIC", "NOTCONV"],
+          },
+        ],
       });
       csvCols.push(xColumn.values);
     }
@@ -381,18 +428,32 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
       datasetUidByTitle.set(set.title, setUid);
       const lastRow = rowCount - 1;
       if (set.dataFormat === "y_replicates") {
+        // One replicate range per maximal run of consecutive subcolumns
+        // sharing the same excluded-row set — Prism stores one replicate
+        // (with its cellAttributes) per run, and a run's EXCLUDED rows
+        // apply to every subcolumn it covers, so subcolumns with
+        // different exclusions must not share a run (BUG-10: Ya_1+Ya_2
+        // excluded at row 1, Yb_1 excluded but Yb_2 live, must not become
+        // one "0~1" range with EXCLUDED row 1).
+        const keyOf = (rows: Set<number>) => [...rows].sort((a, b) => a - b).join(",");
+        const runs: { start: number; end: number; key: string; rows: Set<number> }[] = [];
+        for (let k = 0; k < set.columns.length; k++) {
+          const rows = excludedByColumn.get(yColToAll(set.columns[k])) ?? new Set<number>();
+          const key = keyOf(rows);
+          const last = runs[runs.length - 1];
+          if (last && last.key === key) last.end = k;
+          else runs.push({ start: k, end: k, key, rows });
+        }
         setJson(`data/sets/${setUid}.json`, {
           "@class": "DataSet",
           uid: setUid,
           format: "y_replicates",
           title: set.title,
           attributes: ["DS_ATTR_Y"],
-          "replicate ranges": [
-            {
-              range: set.columns.length === 1 ? "0" : `0~${set.columns.length - 1}`,
-              replicate: replicateEntry(lastRow),
-            },
-          ],
+          "replicate ranges": runs.map(({ start, end, rows }) => ({
+            range: start === end ? String(start) : `${start}~${end}`,
+            replicate: replicateEntry(lastRow, excludedCellAttributes(rows)),
+          })),
         });
       } else {
         setJson(`data/sets/${setUid}.json`, {
@@ -401,7 +462,9 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
           format: set.dataFormat,
           title: set.title,
           attributes: ["DS_ATTR_Y"],
-          replicates: set.columns.map(() => replicateEntry(lastRow)),
+          replicates: set.columns.map((colIdx) =>
+            replicateEntry(lastRow, excludedCellAttributes(excludedByColumn.get(yColToAll(colIdx)))),
+          ),
         });
       }
       for (const colIdx of set.columns) csvCols.push(yColumns[colIdx].values);
