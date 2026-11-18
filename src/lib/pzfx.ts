@@ -34,6 +34,21 @@
 //                 OneWay/replicates to nested on a heuristic, a plain
 //                 replicates Column table is far more common than a nested one.
 //                 If a distinct marker is ever verified, map it here directly.
+//   HugeTable → the same as Table: Prism writes a table as `<HugeTable>`
+//                 instead of `<Table>` once it passes 52 subcolumns in a
+//                 data set or 104 data sets (R pzfx 0.2.0 NEWS; pypzfx
+//                 reads both tags the same way), and the children are
+//                 identical (Title, RowTitlesColumn, XColumn,
+//                 XAdvancedColumn, YColumn…), so a HugeTable imports
+//                 through the same path as a Table — no new table model.
+//                 A grouped table that arrives this way can hold more
+//                 than Titer's 20-replicate creation cap (GROUPED_LIMITS):
+//                 that cap is enforced only when creating tables
+//                 (extract-and-rearrange, SetYReplicates), never on
+//                 imported data, so the replicates are kept as Prism
+//                 wrote them. The import warns that the table was a
+//                 HugeTable, with its subcolumn count, so the size is
+//                 visible rather than silent.
 // A struck-through value (`<d Excluded="1">`) becomes a Titer excluded cell.
 // A `.prism` file (Prism 10's newer format) is not `.pzfx` and is not imported.
 
@@ -323,14 +338,6 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
   const yFormat = table.attrs["YFormat"] ?? "";
   const displayName = name === "" ? "Untitled table" : `“${name}”`;
 
-  if (table.tag === "HugeTable") {
-    issues.push({
-      severity: "warning",
-      message: `${displayName} is a HugeTable, which Titer can't import yet. It was left out.`,
-    });
-    return null;
-  }
-
   const rowTitles = firstChild(table, "RowTitlesColumn");
   const rowTitleValues = rowTitles ? readColumn(rowTitles, true).subcolumns[0]?.values ?? [] : [];
   let hasRowTitles = rowTitleValues.some((v) => v !== null && v !== "");
@@ -529,6 +536,27 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
     warnings.push(`${displayName}: table type “${tableType}” isn't one Titer knows; it was imported as a Column table.`);
   }
 
+  if (table.tag === "HugeTable") {
+    // Prism's tag for a table past 52 subcolumns per data set / 104 data
+    // sets: the same shape as a Table, so it imported through the same
+    // path — say so, with the table type it became, rather than silently
+    // treating it as an ordinary table.
+    const subcolumns = Math.max(0, ...yColumns.map((y) => y.subcolumns.length));
+    const typeName =
+      titerType === "grouped"
+        ? "Grouped"
+        : titerType === "xy"
+          ? "XY"
+          : titerType === "survival"
+            ? "Survival"
+            : titerType === "contingency"
+              ? "Contingency"
+              : "Column";
+    warnings.push(
+      `${displayName} was a HugeTable in Prism (${subcolumns} subcolumns per data set) — imported as a ${typeName} table with all values kept.`,
+    );
+  }
+
   if (dateColumn) {
     // Next to X for XY/Survival (after X and its error, if any); first among
     // the data columns otherwise, since those types drop X entirely.
@@ -612,7 +640,8 @@ export function parsePzfx(text: string): PzfxImport {
   const nodes: Record<string, ProjectNode> = {};
   const rootOrder: string[] = [];
   const childOrder: Record<string, string[]> = {};
-  // Tables live under the root (TableSequence only lists them); HugeTables too.
+  // Tables live under the root (TableSequence only lists them) — a
+  // HugeTable is the same shape as a Table, so importTable handles both.
   const groupingSeparators = usesGroupingSeparators(root);
   const tableNodes = root.children.filter((c) => c.tag === "Table" || c.tag === "HugeTable");
   for (const tableNode of tableNodes) {
