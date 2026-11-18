@@ -61,12 +61,15 @@ export type AnalysisType =
 /** What the New Analysis picker offers: a test, or "Compare more than two groups",
  *  which its wizard resolves to one-way ANOVA, Kruskal-Wallis, repeated-measures ANOVA
  *  or Friedman (as Prism does). */
-export type AnalysisPickerValue = AnalysisType | "compare-many-groups" | "interpolate";
+export type AnalysisPickerValue = AnalysisType | "compare-many-groups" | "interpolate" | "transform";
 
 // The choices of the params, one list each: wizards ask among them, the types come from
 // them, and a file's value outside them is left out (the test takes its default).
 export const TAILS = ["two-sided", "less", "greater"] as const;
 const POSTHOCS = ["none", "tukey", "bonferroni", "sidak", "holm-sidak", "lsd"] as const;
+/** The corrections that compare chosen pairs, each pair's own P adjusted for them alone.
+ *  Upstream Helix calls the uncorrected one `fisher`; Titer's existing name is `lsd`. */
+export const PAIR_CORRECTIONS = ["bonferroni", "sidak", "holm-sidak", "lsd"] as const;
 /** A one-way ANOVA's comparisons: every pair (Tukey, Bonferroni, Šídák, Holm–Šídák,
  *  Fisher's LSD; with unequal SDs Games-Howell, Dunnett's T3), or each group against
  *  a control (Dunnett). */
@@ -90,7 +93,15 @@ export const DOSE_MODELS = [
   "homologous-competition-logx",
 ] as const;
 /** Curves of growth, decay and enzyme kinetics: not standard curves to interpolate. */
-export const KINETIC_MODELS = ["exponential-growth", "one-phase-decay", "michaelis-menten"] as const;
+export const KINETIC_MODELS = [
+  "exponential-growth",
+  "logistic-growth",
+  "gompertz-growth",
+  "one-phase-decay",
+  "michaelis-menten",
+] as const;
+/** The other effective concentrations a dose-response curve can report, in % (EC80…). */
+export const EC_ANYTHING = { min: 1, max: 99 };
 export const NONLINEAR_MODELS = [
   ...DOSE_MODELS,
   "line",
@@ -174,10 +185,16 @@ export const DOSE_RESPONSE_SPECIAL_MODELS = ["ec50-shift", "schild", "schild-slo
 export const CORRELATION_MODES = ["x-vs-every-y", "two-datasets", "matrix"] as const;
 export const TWO_WAY_DESIGNS = ["ordinary", "repeated-measures", "nonparametric"] as const;
 export const POSTHOC_TARGETS = ["groups", "rows"] as const;
+/** A two-way ANOVA's comparisons: those of a repeated-measures one, and on the ordinary one
+ *  each against a control (Dunnett) or every pair without equal SDs (Games-Howell). */
+const TWO_WAY_POSTHOCS = [...POSTHOCS, "dunnett", "games-howell"] as const;
 /** The terms a three-way ANOVA's post-hoc can follow up (one term only). */
 export const THREE_WAY_TERMS = ["A", "B", "C", "A:B", "A:C", "B:C", "A:B:C"] as const;
 export const CORRECTIONS = ["holm", "fdr", "none"] as const;
 export const CURVE_TESTS = ["logrank", "trend", "gehan"] as const;
+/** A contingency table's test: Fisher's exact test or the chi-square (Yates' or not) on a
+ *  2 × 2, the chi-square or its test for trend (rows in order) on 2 columns. */
+export const CONTINGENCY_TESTS = ["fisher", "yates", "chi-square", "trend"] as const;
 export const BIN_MODES = ["auto", "width", "count"] as const;
 /** ROUT's Q, in percent. */
 export const ROUT_Q = { min: 0.01, max: 50 };
@@ -214,6 +231,8 @@ export interface OneSampleTParams {
   hypotheticalValue: number;
   tails: (typeof TAILS)[number];
   gaussian: boolean;
+  /** The geometric mean tested: a t test of the logarithms against the value's. */
+  lognormal?: boolean;
 }
 
 /** Params for "anova": optional post-hoc pairwise comparisons between groups. */
@@ -223,6 +242,10 @@ export interface AnovaParams {
   equalSd?: boolean;
   /** Dunnett's control group, by name. */
   control?: string;
+  /** The pairs compared (`pairKey`), when not every pair: Bonferroni, Šídák, Holm-Šídák, Fisher's. */
+  compared?: string[];
+  /** The groups' geometric means compared: the ANOVA and its comparisons run on the logarithms. */
+  lognormal?: boolean;
 }
 
 /** Params for "rm-anova": Tukey, Bonferroni, Šídák, Holm–Šídák or Fisher's LSD
@@ -231,6 +254,10 @@ export interface RmAnovaParams {
   posthoc: (typeof POSTHOCS)[number];
   /** false: not assumed, the Geisser-Greenhouse correction applies; absent or true, assumed. */
   sphericity?: boolean;
+  /** The pairs compared (`pairKey`), when not every pair. */
+  compared?: string[];
+  /** A mixed-effects model (REML, Kenward-Roger), every value kept: subjects may miss some. */
+  mixed?: boolean;
 }
 
 /** Params for "kruskal-wallis": optional Dunn's post-hoc pairwise comparisons between groups
@@ -417,6 +444,8 @@ export interface NonlinearRegressionParams {
   /** Find each data set's outliers by ROUT (at `q`, in %) and leave them out of its fit. */
   rout?: boolean;
   q?: number;
+  /** A dose-response curve also reports its ECF (`ecx` = F, in %: EC80…), with its CI. */
+  ecx?: number;
   /** User-defined equation (v2 item 23, model "user-defined" only): the equation as the
    *  user typed it (`Y = A*exp(-k*X) + C`, or just the right-hand side), and each named
    *  parameter's starting value. The fitter fits the parameters from those starts. */
@@ -544,7 +573,9 @@ export interface ExtractRearrangeParams {
  *  Holm–Šídák-corrected, or uncorrected (Fisher's LSD). */
 export interface TwoWayAnovaParams {
   design: (typeof TWO_WAY_DESIGNS)[number];
-  posthoc: (typeof POSTHOCS)[number];
+  posthoc: (typeof TWO_WAY_POSTHOCS)[number];
+  /** Dunnett's control: a group (groups compared within each row) or a row, by its name. */
+  control?: string;
   posthocTarget: (typeof POSTHOC_TARGETS)[number];
   /** Repeated measures: false (new analyses) corrects the row and interaction effects by the
    *  Geisser-Greenhouse epsilon, and compares on each comparison's own error; absent (older
@@ -722,6 +753,8 @@ export interface SmoothDifferentiateIntegrateParams {
  *  ordered and equally spaced, so the chi-square test for trend
  *  (Cochran–Armitage) runs on a qualifying 2×k / k×2 table. */
 export interface ChiSquareParams {
+  /** The test to run (absent: Fisher's on a 2 × 2, else the chi-square). */
+  test?: (typeof CONTINGENCY_TESTS)[number];
   trendOrdered?: boolean;
 }
 
@@ -1238,9 +1271,21 @@ export interface StatRow {
 export interface ComparisonRow {
   group1: string;
   group2: string;
+  /** A grouped table's comparison: the two cells it compares (a group at a table row),
+   *  where a graph draws its bracket. */
+  cells?: [ComparedCell, ComparedCell];
   /** Mean of group1 minus mean of group2. */
   diff: number | null;
+  /** Its 95% CI, adjusted for the comparisons of its family as its P is (none for ranks). */
+  low?: number | null;
+  high?: number | null;
   p: number | null;
+}
+
+/** A group at a row of a grouped table (`row`: its index in the table). */
+export interface ComparedCell {
+  group: string;
+  row: number;
 }
 
 /** A square correlation matrix: `r[i][j]` is the coefficient between variable i
@@ -1329,6 +1374,9 @@ export interface CorrelationRow {
   variable: string;
   r: number | null;
   p: number | null;
+  /** r's 95% CI. */
+  low?: number | null;
+  high?: number | null;
 }
 
 /** One baseline-subtracted value ("remove-baseline"): the original value,
@@ -1665,12 +1713,35 @@ export interface DifferenceResult {
   label: string;
 }
 
+/** The data an analysis ran on, shown first (`report/analyzed.ts`). */
+export interface Analyzed {
+  /** The data sets, in order, each with its count when it has one (values, subjects…). */
+  sets: { name: string; n?: number }[];
+  /** How they are read: two compared ("A vs. B"), matched ("A → B"), each against the
+   *  first (a control, a reference), or a list. */
+  how: "vs" | "paired" | "control" | "list";
+  /** What else it ran on: "8 pairs", "on “Dose”", "5 rows"… */
+  detail?: string;
+  /** The table's data sets it left out. */
+  left: string[];
+}
+
+/** One condition of a test, checked by R: whether it holds, and what that means. */
+export interface Check {
+  ok: boolean;
+  text: string;
+}
+
 export interface AnalysisResult {
   testType: AnalysisType;
   /** Resolved test name when params pick a specific variant, e.g. "Welch's t test". */
   subtitle?: string;
+  /** The data it ran on (added to every result by `report`). */
+  analyzed?: Analyzed;
   /** What the results mean, in plain words, under the heading. */
   summary?: string;
+  /** Its conditions, checked by R (normality, equal SDs…). */
+  checks?: Check[];
   /** Optional per-data-set normality table ("shapiro-wilk"). */
   normality?: NormalityRow[];
   /** Human-readable fitted-model equation, e.g. "Y = 2.927*X − 0.3322" (regressions). */
