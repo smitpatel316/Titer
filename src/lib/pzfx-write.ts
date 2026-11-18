@@ -3,10 +3,17 @@
 // Builds a GraphPad Prism `.pzfx` file (XML) from a Titer project: data
 // tables with their values, and info sheets. Analyses, graphs and layouts
 // are NEVER written — a `.pzfx` file never contains analysis results (they
-// live in the `<Template>` blob, which Titer doesn't write), and Prism
-// recomputes them when it opens the file. Whether Prism opens a
-// Titer-written file with no warnings is unknown until a Prism/Viewer
-// read-back (test C-07, still open).
+// live in the `<Template>` blob), and Prism recomputes them when it opens
+// the file. Titer writes an EMPTY `<Template>` element (no blob): Prism
+// 11.2.0 shows its XML-compliance dialog for any file whose
+// CreatedByProgram isn't "GraphPad Prism" UNLESS a <Template> element is
+// present (BUG-21, real-Prism ablation Nov 17, 2026 — 26 files: the dialog
+// fires iff Program != GraphPad Prism AND no Template; a non-empty minimal
+// blob is WORSE — an unnamed error dialog and no open at all). The empty
+// element is XSD-valid, round-trips identically through Titer's own
+// importer, and opens in real Prism 11.2.0 with no dialog, titled with
+// the filename. A canned blob from another project is NOT used: the blob
+// encodes that project's table titles and printer name.
 //
 // The spec is the vault note `Research/.pzfx write spec.md` — this file
 // implements it. Anything the spec marks unknown is left out, never
@@ -459,7 +466,7 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
   issues.push({
     severity: "warning",
     message:
-      "Graphs and layouts are not written — they live only in the .pzfx <Template> blob, which Titer doesn't write. Re-create them in Prism from the tables.",
+      "Graphs and layouts are not written — the .pzfx <Template> is empty (Titer writes no analyses, graphs or layouts). Re-create them in Prism from the tables.",
   });
 
   // Info sheets: one <Info> per info node (title, notes, name/value
@@ -507,7 +514,13 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
       ? `<InfoSequence>${infoIds.map((id, i) => `<Ref ID="${id}"${i === 0 ? ' Selected="1"' : ""}/>`).join("")}</InfoSequence>\n${infoXml.join("\n")}\n`
       : "") +
     `<TableSequence Selected="1">${tableIds.map((id, i) => `<Ref ID="${id}"${i === 0 ? ' Selected="1"' : ""}/>`).join("")}</TableSequence>\n` +
-    `${tableXml.join("\n")}\n</GraphPadPrismFile>\n`;
+    `${tableXml.join("\n")}\n` +
+    // BUG-21: an EMPTY <Template> element, last child of the root. Prism
+    // 11.2.0 demands a <Template> element on any file not created by
+    // GraphPad Prism, but never decodes an empty one — a canned or minimal
+    // non-empty blob is worse (error dialog, no open) or leaks another
+    // project's data. Exact bytes match the U1 ablation file.
+    `<Template dt:dt="bin.base64" xmlns:dt="urn:schemas-microsoft-com:datatypes"></Template>\n</GraphPadPrismFile>\n`;
 
   return { bytes: new TextEncoder().encode(xml), report };
 }
