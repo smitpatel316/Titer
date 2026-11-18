@@ -115,6 +115,19 @@ def main():
             continue
         c.check(f"re-downloaded size == API size: {name}",
                 size == a["size"], f"{size} == {a['size']}")
+        if name.endswith(".sha256"):
+            # A .sha256 sidecar's own hash is published nowhere; its
+            # CONTENT is the expected hash for its sibling asset. Assert
+            # it parses and names the sibling — the sibling's sha check
+            # (above, via the sidecar) is the real verification.
+            with open(dest) as f:
+                parts = f.read().split()
+            ok = (len(parts) >= 2 and len(parts[0]) == 64
+                  and all(ch in "0123456789abcdef" for ch in parts[0].lower())
+                  and parts[1] == name[:-len(".sha256")])
+            c.check(f"sidecar content parses: {name}", ok,
+                    f"{parts[0][:16]}... names {parts[1] if len(parts) > 1 else '?'}")
+            continue
         expected = overrides.get(name)
         if expected is None and manifest.get("version") == version:
             if name == f"Titer-{version}-aarch64.dmg":

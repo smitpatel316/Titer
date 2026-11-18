@@ -128,6 +128,10 @@ def main():
     if not os.access(appimage, os.X_OK):
         os.chmod(appimage, 0o755)
     home = os.path.join(cache, ".e2e-home-appimage")
+    # Fresh profile EVERY run (see check_update.py: a reused profile's
+    # once-a-day CHECKED_KEY suppresses the launch update check).
+    import shutil
+    shutil.rmtree(home, ignore_errors=True)
     env = dict(os.environ)
     env["XDG_DATA_HOME"] = os.path.join(home, "data")
     env["XDG_CONFIG_HOME"] = os.path.join(home, "config")

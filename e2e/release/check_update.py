@@ -153,6 +153,11 @@ def gui_checks(c, binary, expect, timeout, cache):
     if not os.access(binary, os.X_OK):
         os.chmod(binary, 0o755)
     home = os.path.join(cache, ".e2e-home-update")
+    # Fresh profile EVERY run: the once-a-day CHECKED_KEY in a reused
+    # profile suppresses the launch check for 24 h — a stale profile
+    # makes the dialog leg fail with no dialog even when one is due.
+    import shutil
+    shutil.rmtree(home, ignore_errors=True)
     env = dict(os.environ)
     env["XDG_DATA_HOME"] = os.path.join(home, "data")
     env["XDG_CONFIG_HOME"] = os.path.join(home, "config")
