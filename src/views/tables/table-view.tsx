@@ -14,7 +14,6 @@ import { Row, Section, Stepper, WithInspector } from "../../components/inspector
 import { Button, Input, RadioList, Select } from "../../ui/controls";
 import { useLayout } from "../../store/use-layout";
 import { ColumnsIcon, MinusIcon, PlusIcon } from "@phosphor-icons/react";
-import { Toolbar } from "../../ui/layout";
 import { Grid } from "./grid";
 import {
   addRowGroup,
@@ -73,7 +72,8 @@ export function TableView({ node }: { node: ProjectNode }) {
       <WithInspector
         title={node.name}
         tag={tag}
-        inspector={
+        node={node}
+        settings={
           <>
             <ReplicatesPanel data={data} update={update} />
             <FormatPanel data={data} update={update} />
@@ -90,7 +90,8 @@ export function TableView({ node }: { node: ProjectNode }) {
       <WithInspector
         title={node.name}
         tag={tag}
-        inspector={<FormatPanel data={data} update={update} />}
+        node={node}
+        settings={<FormatPanel data={data} update={update} />}
         actions={<AddFloatingNoteButton node={node} />}
       >
         {sheet}
@@ -98,18 +99,19 @@ export function TableView({ node }: { node: ProjectNode }) {
     );
   }
   if (!isGrouped(data) && !isNested(data)) {
+    // No settings of its own: the right panel shows the table's note only.
     return (
-      <>
-        <Toolbar title={node.name} tag={tag} actions={<AddFloatingNoteButton node={node} />} />
+      <WithInspector title={node.name} tag={tag} node={node} actions={<AddFloatingNoteButton node={node} />}>
         {sheet}
-      </>
+      </WithInspector>
     );
   }
   return (
     <WithInspector
       title={node.name}
       tag={tag}
-      inspector={
+      node={node}
+      settings={
         <>
           <GroupsPanel data={data} update={update} />
           <FormatPanel data={data} update={update} />

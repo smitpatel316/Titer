@@ -13,6 +13,8 @@ import {
   FILL_PATTERNS,
   GRAPH_CHOICES,
   GRAPH_LIMITS,
+  MAX_REF_LINES,
+  REF_LABEL_PLACES,
   clamp,
   type FigurePanel,
   FLOATING_NOTE_COLORS,
@@ -29,12 +31,18 @@ import {
   type Place,
   type PointStyle,
   type ProjectNode,
+  type RefLine,
   type RowGroup,
   SAME_AS_FILL,
   type SeriesStyle,
   SHEET_HIGHLIGHTS,
   type SheetHighlight,
   type TableData,
+  TAG_COLORS,
+  type TagColor,
+  type Transform,
+  TRANSFORMS,
+  Z_WITHIN,
 } from "../store/types";
 import {
   type AnalysisParams,
@@ -44,6 +52,7 @@ import {
   BINDING_SATURATION_MODELS,
   BIN_MODES,
   CONCENTRATION_UNITS,
+  CONTINGENCY_TESTS,
   CORRECTIONS,
   CURVE_COMPARISONS,
   CORRELATION_METHODS,
@@ -51,6 +60,7 @@ import {
   CURVE_TESTS,
   DOSE_MODELS,
   DOSE_RESPONSE_SPECIAL_MODELS,
+  EC_ANYTHING,
   ENZYME_INHIBITION_MODELS,
   EXTRACT_REARRANGE_TARGETS,
   FRACTION_OF_TOTAL_FORMATS,
@@ -82,6 +92,7 @@ import { isGrouped, isNested } from "./dataset";
 import { isSummaryFormatValue, summarySubcolumns } from "./summary-format";
 import { groupRuns } from "./columns";
 import { regroupDropped, regroupTable, renestDropped, renestTable } from "../views/tables/table-data";
+import { transformTable } from "./transform";
 import {
   assignLabels,
   clampPanel,
@@ -179,7 +190,7 @@ const FILE_KEYS = ["app", "schemaVersion", "savedAt", "template", "project"];
 const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId", "projectName"] satisfies (keyof ProjectFilePayload)[];
 // prettier-ignore
 const NODE_KEYS = Object.keys({
-  id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, highlight: 1, tableType: 1, data: 1,
+  id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, highlight: 1, tableType: 1, data: 1, transform: 1, notes: 1, tags: 1,
   analysisType: 1, analysisParams: 1, cachedResult: 1, frozen: 1, orphaned: 1, sourceTableName: 1, graphType: 1, graphOptions: 1,
   panels: 1, grid: 1, figureSize: 1, labelStyle: 1, figureTitle: 1, sharedLegend: 1, dpi: 1,
   info: 1,
@@ -201,7 +212,7 @@ const OPTIONAL_OPTIONS = {
   sigAnalysisId: "text", sigPairs: "texts", regAnalysisId: "text", demingAnalysisId: "text", coxAnalysisId: "text", ttestAnalysisId: "text", poissonAnalysisId: "text", smoothAnalysisId: "text", pcaAnalysisId: "text", kmeansAnalysisId: "text", monteCarloAnalysisId: "text", xVariable: "text", yVariable: "text", bubbleSizeVariable: "text", bubbleColorVariable: "text",
   volcanoX: "text", volcanoY: "text", volcanoLabel: "text", volcanoGroupA: "text", volcanoGroupB: "text", rightYDataset: "text", y2Label: "text",
   palette: "palette", series: "styles", points: "pointStyles", outlineColor: "color", pointOutlineColor: "color", errorColor: "color",
-  legend: "place", note: "place",
+  legend: "place", note: "place", refLines: "refLines", sets: "texts",
 } as const satisfies Record<OptionalOption, keyof typeof READ_OPTION>;
 // A graph's links to its analyses (FF-F13): the graph options that name a
 // sibling analysis node — the source of an overlay (significance brackets,
@@ -258,7 +269,7 @@ type ParamKind =
 // prettier-ignore
 const PARAMS = {
   paired: "yes/no", gaussian: "yes/no", equalVariance: "yes/no", ratio: "yes/no", forceOrigin: "yes/no", pooledSd: "yes/no", quasi: "yes/no", fixHillSlope: "yes/no", trendOrdered: "yes/no", continuityCorrection: "yes/no",
-  equalSd: "yes/no", sphericity: "yes/no", interpolate: "yes/no", tails: TAILS, posthoc: [...ANOVA_POSTHOCS, ...RANK_POSTHOCS],
+  equalSd: "yes/no", sphericity: "yes/no", interpolate: "yes/no", tails: TAILS, posthoc: [...ANOVA_POSTHOCS, ...RANK_POSTHOCS], mixed: "yes/no",
   // `model` is shared by nonlinear-regression and the binding runners:
   // the reader only sanitizes, each runner validates its own.
   model: [...NONLINEAR_MODELS, ...BINDING_SATURATION_MODELS, ...BINDING_KINETICS_MODELS, ...ENZYME_INHIBITION_MODELS, ...DOSE_RESPONSE_SPECIAL_MODELS],
@@ -289,7 +300,7 @@ const PARAMS = {
   // parameters' starting values (numbers by name).
   customEquation: "name",
   customParameters: "numbers-by-name",
-  hypotheticalValue: "number", baseline: "number", q: ROUT_Q, lambda: "number",
+  hypotheticalValue: "number", baseline: "number", q: ROUT_Q, lambda: "number", ecx: EC_ANYTHING,
   // Remove baseline (v2): how the baseline is defined, and the values it needs.
   baselineMethod: REMOVE_BASELINE_METHODS, firstN: "number", controls: "names", constant: "number",
   // Normalize (v2): how each value is rescaled, and the values it needs.
@@ -306,7 +317,7 @@ const PARAMS = {
   // choice; window/order are numbers the runner validates (5/9/13, 2/3);
   // `baseline` already has an entry above.
   operation: SMOOTH_DIFF_INT_OPERATIONS, window: "number", order: "number", smoothResults: "yes/no", startValue: "number",
-  y: "name-or-names", y2: "name", ys: "names", dependent: "name", reference: "name", control: "name", compareWith: "name", datasets: "names", predictors: "names", sets: "names",
+  y: "name-or-names", y2: "name", ys: "names", dependent: "name", reference: "name", control: "name", compareWith: "name", datasets: "names", predictors: "names", sets: "names", compared: "names",
   // Transform concentrations (v2): the column to convert, and the units
   // it is in now vs. the units it is converted to.
   column: "name", fromUnit: CONCENTRATION_UNITS, toUnit: CONCENTRATION_UNITS,
@@ -320,8 +331,10 @@ const PARAMS = {
   truth: "name", score: "name", positive: "name-or-number",
   time: "name", status: "name", covariates: "names", stratifyBy: "name", ties: ["efron", "breslow"],
   // Normality tests (plan 23): which of the four tests, and whether to
-  // also test the log-transformed values.
-  test: ["shapiro-wilk", "dagostino-pearson", "anderson-darling", "kolmogorov-smirnov"],
+  // also test the log-transformed values. `test` is shared with chi-square's
+  // test choice (fisher/yates/chi-square/trend): the reader only sanitizes,
+  // each runner validates its own.
+  test: ["shapiro-wilk", "dagostino-pearson", "anderson-darling", "kolmogorov-smirnov", ...CONTINGENCY_TESTS],
   lognormal: "yes/no",
   // Principal component analysis (plan 21): the matrix, and how many
   // components to report (0 = all).
@@ -434,6 +447,28 @@ function readStyles(v: unknown): Record<string, SeriesStyle> | undefined {
 const readPlace = (v: unknown): Place | undefined =>
   isObj(v) && isFiniteNumber(v.x) && isFiniteNumber(v.y) ? { x: v.x, y: v.y } : undefined;
 
+/** Reference lines: each at a finite value, its dashes one of the list (else dashed), its
+ *  thickness within the lines' limits, a color or none, a text or none; ten at most. */
+function readRefLines(v: unknown): RefLine[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out = v
+    .filter((l): l is Obj => isObj(l) && isFiniteNumber(l.value))
+    .slice(0, MAX_REF_LINES)
+    .map((raw) => {
+      const l = canonical(raw, ["value", "dash", "width", "color", "label", "labelPlace"]);
+      return defined({
+        ...l,
+        value: l.value as number,
+        dash: oneOf(GRAPH_CHOICES.lineDash, l.dash) ?? "dash",
+        width: within(l.width, GRAPH_LIMITS.lineWidth) ?? 1,
+        color: isHex(l.color) ? l.color : undefined,
+        label: typeof l.label === "string" && l.label ? l.label : undefined,
+        labelPlace: oneOf(REF_LABEL_PLACES, l.labelPlace),
+      }) as RefLine;
+    });
+  return out.length ? out : undefined;
+}
+
 /** Each point's style, keeping what this version doesn't know of it. */
 function readPointStyles(v: unknown): Record<string, PointStyle> | undefined {
   if (!isObj(v)) return undefined;
@@ -473,6 +508,7 @@ const READ_OPTION = {
   styles: readStyles,
   pointStyles: readPointStyles,
   place: readPlace,
+  refLines: readRefLines,
   color: (v: unknown) => (isHex(v) ? v : undefined),
 };
 
@@ -817,10 +853,10 @@ const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   transpose: ["sets"],
   "prune-rows": ["ys", "x", "condition", "threshold", "low", "high", "sets"],
   "compare-two-groups": ["paired", "gaussian", "equalVariance", "ratio", "lognormal", "tails", "sets"],
-  "one-sample-t": ["hypotheticalValue", "tails", "gaussian", "sets"],
-  anova: ["posthoc", "equalSd", "control", "sets"],
+  "one-sample-t": ["hypotheticalValue", "tails", "gaussian", "lognormal", "sets"],
+  anova: ["posthoc", "equalSd", "control", "compared", "lognormal", "sets"],
   "kruskal-wallis": ["posthoc", "sets"],
-  "rm-anova": ["posthoc", "sphericity", "sets"],
+  "rm-anova": ["posthoc", "sphericity", "compared", "mixed", "sets"],
   friedman: ["posthoc", "sets"],
   "mixed-effects": ["fixedFactors", "randomStructure", "subjectId", "subjectFactor", "interaction", "sets"],
   "shapiro-wilk": ["test", "lognormal", "sets"],
@@ -842,7 +878,7 @@ const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "nonlinear-regression": [
     "y", "ys", "model", "compareWith", "compare", "interpolate", "weights", "fixed", "bounds", "fixedConstants",
     "boundsConstants", "compareModel", "globalY", "sharedParams", "ligandConcentration", "ligandKd",
-    "ligandConcentrationConstant", "ligandKdConstant", "fitKi", "rout", "q", "customEquation", "customParameters",
+    "ligandConcentrationConstant", "ligandKdConstant", "fitKi", "rout", "q", "ecx", "customEquation", "customParameters",
     "sets",
   ],
   "dose-response-special": ["ys", "model", "antagonistConcentrations", "bUnits", "fixHillSlope", "sets"],
@@ -871,7 +907,7 @@ const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   ],
   survival: ["curveTest", "correction", "sets"],
   cox: ["reference", "sets"],
-  "chi-square": ["trendOrdered", "sets"],
+  "chi-square": ["test", "trendOrdered", "sets"],
   mcnemar: ["continuityCorrection", "sets"],
 };
 
@@ -1054,6 +1090,20 @@ function readParams(
 ): AnalysisParams | undefined {
   if (!isObj(raw)) return undefined;
   const p = canonical(raw, Object.keys(PARAMS));
+  // A two-way ANOVA's posthoc used to be one combined string ("tukey groups"):
+  // split it into the posthoc and its target, so an old file keeps its
+  // comparisons instead of silently falling back to none.
+  if (analysisType === "two-way-anova" && typeof p.posthoc === "string") {
+    const [posthoc, target] = p.posthoc.split(" ");
+    if (
+      target !== undefined &&
+      oneOf([...ANOVA_POSTHOCS, ...RANK_POSTHOCS], posthoc) !== undefined &&
+      oneOf(POSTHOC_TARGETS, target) !== undefined
+    ) {
+      p.posthoc = posthoc;
+      if (p.posthocTarget === undefined) p.posthocTarget = target;
+    }
+  }
   // A param this version doesn't know is kept verbatim — any JSON value, in its
   // own case (FF-F12): it belongs to a newer Titer (or a hand edit), and this
   // version's runners only ever read the params they know by name, so keeping
@@ -1139,6 +1189,21 @@ function readParams(
   // Strip the left-out values first, so a dropped key falls back to its
   // default instead of shadowing it with `undefined`.
   return defined({ ...fill, ...defined(sanitized) }) as unknown as AnalysisParams;
+}
+
+const TRANSFORM_KEYS = ["from", "kind", "control", "within"] satisfies (keyof Transform)[];
+
+/** How a table is computed from another: a known kind, of a table (checked once every
+ *  item is read), with the control a percent needs. */
+function readTransform(raw: unknown): Transform | undefined {
+  if (!isObj(raw)) return undefined;
+  const t = canonical(raw, TRANSFORM_KEYS);
+  const kind = oneOf(TRANSFORMS, t.kind);
+  const control = cellText(t.control);
+  if (typeof t.from !== "string" || !kind || (kind === "percent-of-control" && control == null)) return undefined;
+  if (kind === "percent-of-control") return { from: t.from, kind, control: control! };
+  if (kind === "z-score") return { from: t.from, kind, within: oneOf(Z_WITHIN, t.within) ?? "set" };
+  return { from: t.from, kind };
 }
 
 /** A sheet's floating notes as a file holds them, forgivingly: a note with no
@@ -1291,6 +1356,14 @@ function readNode(
         message: `Sheet “${node.name}” had a highlight color that couldn't be read; it was left out.`,
       });
   }
+  // A note is text, never empty.
+  if (typeof n.notes === "string" && n.notes) node.notes = n.notes;
+  else delete node.notes;
+  // Tags: the known colors it names, once each, in their order.
+  const named = Array.isArray(n.tags) ? n.tags.map(lower) : [];
+  const tags = (Object.keys(TAG_COLORS) as TagColor[]).filter((c) => named.includes(c));
+  if (tags.length) node.tags = tags;
+  else delete node.tags;
 
   if (type === "table") {
     const read = isObj(n.data) ? readData(n.data, lower(n.tableType)) : null;
@@ -1319,6 +1392,8 @@ function readNode(
       });
     }
     node.parentId = null;
+    node.transform = readTransform(n.transform);
+    if (!node.transform) delete node.transform;
     node.tableType = lower(n.tableType) as ProjectNode["tableType"];
     if (!isIn(TABLES, node.tableType)) {
       issues.push({
@@ -1358,6 +1433,7 @@ function readNode(
       issues.push({ severity: "error", message: `Graph “${node.name}” uses a chart this version doesn't know.` });
     }
   }
+  if (type !== "table") delete node.transform; // a table's alone
   if (type !== "analysis") {
     // Frozen / orphaned results belong to analyses only: a hand-edited file
     // can't freeze a table or orphan a graph.
@@ -1641,6 +1717,20 @@ export function parseProjectFile(
       message: `${skipped} unreadable item${skipped === 1 ? " was" : "s were"} left out.`,
     });
   }
+
+  // A table computed from another of the file is computed again from it, never from itself
+  // (even through others); without its table, it keeps its values, which can then be typed.
+  const computed = new Set<string>();
+  const compute = (node: ProjectNode, seen: string[]) => {
+    if (!node.transform || computed.has(node.id)) return;
+    const source = nodeOf(node.transform.from);
+    if (source?.type !== "table" || seen.includes(source.id)) return void delete node.transform;
+    compute(source, [...seen, source.id]);
+    node.tableType = source.tableType;
+    node.data = transformTable(source.data!, source.tableType!, node.transform, node.data);
+    computed.add(node.id);
+  };
+  for (const node of Object.values(nodes)) compute(node, [node.id]);
 
   const fits = fitsFromDoseGraphs(nodes);
   // The retired graph's options, on any graph that still carries them, go:

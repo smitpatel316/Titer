@@ -15,7 +15,9 @@ export const analysisLabel = (value: AnalysisPickerValue) =>
       ? "Compare more than two groups"
       : value === "interpolate"
         ? "Interpolate a standard curve"
-        : ANALYSES[value].label,
+        : value === "transform"
+          ? "Transform or normalize"
+          : ANALYSES[value].label,
   );
 
 const optionsFor = (order: AnalysisPickerValue[]): SelectorOption<AnalysisPickerValue>[] =>
@@ -27,7 +29,8 @@ const optionsFor = (order: AnalysisPickerValue[]): SelectorOption<AnalysisPicker
  *  logical order rather than sorted by label. ANOVA/Kruskal-Wallis and Repeated-measures
  *  ANOVA/Friedman aren't listed individually — Prism-style, one meta entry cascades to whichever
  *  the wizard's Paired?/Gaussian? answers resolve to. Shapiro-Wilk is its own entry, and is
- *  offered as "Not sure?" on every Gaussian? question too (see `normality-check.ts`). */
+ *  offered as "Not sure?" on every Gaussian? question too (see `normality-check.ts`). Transform
+ *  or Normalize makes a table computed from this one (lib/transform.ts), not an analysis. */
 export const ANALYSIS_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<AnalysisPickerValue>[]> = {
   column: optionsFor([
     "descriptive-statistics",
@@ -46,6 +49,7 @@ export const ANALYSIS_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<Analysi
     "shapiro-wilk",
     "kolmogorov-smirnov",
     "outliers",
+    "transform",
     "monte-carlo",
     "bland-altman",
     "roc-curve",
@@ -77,10 +81,11 @@ export const ANALYSIS_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<Analysi
     "interpolate",
     "roc-curve",
     "plot-function",
+    "transform",
   ]),
-  grouped: optionsFor(["two-way-anova", "mixed-effects", "three-way-anova", "multiple-t-tests", "row-means-totals", "plot-function"]),
+  grouped: optionsFor(["two-way-anova", "mixed-effects", "three-way-anova", "multiple-t-tests", "row-means-totals", "plot-function", "transform"]),
   nested: optionsFor(["nested-t-test", "nested-anova", "plot-function"]),
-  multiple: optionsFor(["descriptive-statistics", "shapiro-wilk", "correlation-matrix", "linear-regression", "multiple-regression", "principal-component-analysis", "k-means", "outliers", "multiple-logistic-regression", "poisson-regression", "cox-proportional-hazards", "extract-rearrange", "plot-function"]),
+  multiple: optionsFor(["descriptive-statistics", "shapiro-wilk", "correlation-matrix", "linear-regression", "multiple-regression", "principal-component-analysis", "k-means", "outliers", "multiple-logistic-regression", "poisson-regression", "cox-proportional-hazards", "extract-rearrange", "plot-function", "transform"]),
   survival: optionsFor(["survival", "cox", "plot-function"]),
   contingency: [...optionsFor(["chi-square", "plot-function"]), { value: "mcnemar", label: "McNemar's test (paired proportions)" }],
 };
@@ -123,7 +128,10 @@ export const META_ANALYSES: Record<string, AnalysisType[]> = {
  *  never run via MCP (BUG-14). The picker/menu themselves keep offering
  *  the meta entries — only this expansion changes. */
 export function analysisTypesOfferedForTable(tableType: TableType, data?: TableData): AnalysisType[] {
-  return analysisOptionsForTable(tableType, data).flatMap((o) => META_ANALYSES[o.value] ?? [o.value as AnalysisType]);
+  return analysisOptionsForTable(tableType, data).flatMap((o) =>
+    // "transform" makes a computed table, not an analysis: it never reaches the MCP gate.
+    o.value === "transform" ? [] : (META_ANALYSES[o.value] ?? [o.value as AnalysisType]),
+  );
 }
 
 /** The key the native Analysis menu depends on for its data-dependent items:
