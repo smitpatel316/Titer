@@ -182,6 +182,15 @@ const childText = (node: XmlNode): string => {
   return out.trim();
 };
 
+/** An element's text exactly as written — no trim. `<d>` values keep their
+ *  spaces ("1 " stays "1 "): trimming them would change a row title on every
+ *  .pzfx round-trip. Numeric use is unaffected (`parseCell` trims). */
+const rawText = (node: XmlNode): string => {
+  let out = node.text;
+  for (const child of node.children) out += rawText(child);
+  return out;
+};
+
 const childrenNamed = (node: XmlNode, tag: string) => node.children.filter((c) => c.tag === tag);
 const firstChild = (node: XmlNode, tag: string) => childrenNamed(node, tag)[0];
 
@@ -197,7 +206,7 @@ function readSubcolumn(node: XmlNode): Subcolumn {
   const values: (string | null)[] = [];
   const excluded = new Set<number>();
   for (const d of childrenNamed(node, "d")) {
-    const value = childText(d);
+    const value = rawText(d);
     values.push(value === "" ? null : value);
     if (d.attrs["Excluded"] === "1") excluded.add(values.length - 1);
   }
@@ -439,16 +448,14 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
     groups = yColumns.length;
     replicates = Math.max(...counts);
     // A grouped table's columns are "Group:Y1"…, so a group name must be
-    // unique and colon-free — seriesKeyOf splits at the first ":" and
-    // regroupTable rebuilds exactly "Group:Y1"…"Group:Y<replicates>" on
-    // reload. Before this fix untitled Y columns all became "Group"
-    // (duplicate "Group:Y1" columns, renamed "Group:Y1 2" by FF-F9 but
-    // still dropped on reload), a title like "1:10" became "1:10:Y1"
-    // (group "1", its data wiped on reload), and a ragged Y column left
-    // its group short of subcolumns. So: sanitize ":", dedupe the group
-    // names, and pad every group to `replicates` subcolumns.
-    const usedGroups = new Set<string>();
-    const renamedGroups: string[] = [];
+    // colon-free — seriesKeyOf splits at the first ":" and a title like
+    // "1:10" would become "1:10:Y1" (group "1", its data wiped on reload) —
+    // and a ragged Y column leaves its group short of subcolumns. So:
+    // sanitize ":", and pad every group to `replicates` subcolumns. A group
+    // name may REPEAT, though: two Y columns titled "Group" are two groups,
+    // and renaming the second would break the round-trip — the .prism import
+    // keeps the duplicate, and the loader keeps it too (groups are runs,
+    // not names).
     const rowLen = Math.max(
       0,
       ...yColumns.flatMap((y) => y.subcolumns.map((s) => s.values.length)),
@@ -457,21 +464,11 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
     const emptySubcolumn = (): Subcolumn => ({ values: Array<string | null>(rowLen).fill(null), excluded: new Set() });
     const reps = replicates;
     yColumns.forEach((y) => {
-      const raw = y.title === "" ? "Group" : y.title;
-      const base = raw.replace(/:/g, "-");
-      let group = base;
-      for (let n = 2; usedGroups.has(group); n++) group = `${base} ${n}`;
-      usedGroups.add(group);
-      if (group !== raw) renamedGroups.push(`“${raw}” → “${group}”`);
+      const group = (y.title === "" ? "Group" : y.title).replace(/:/g, "-");
       const subs = [...y.subcolumns];
       while (subs.length < reps) subs.push(emptySubcolumn());
       subs.forEach((sub, i) => pushColumn(`${group}:Y${i + 1}`, sub));
     });
-    if (renamedGroups.length > 0) {
-      warnings.push(
-        `${displayName}: group names must be unique and can't contain “:”, so they were renamed (${renamedGroups.join(", ")}) — the data itself is unchanged.`,
-      );
-    }
   } else if (tableType === "TwoWay") {
     // Summary values (mean, SD, N…) — not raw replicates. Keep them, named, and
     // say so: running a group comparison on them as if they were replicates
@@ -537,28 +534,35 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
   // column has a distinct name and each keeps its own data. A duplicate
   // that already ends in " N" renumbers from its stem ("Control 2" →
   // "Control 3"), so renames never stack into "Control 2 2".
-  const seenNames = new Set<string>(["Title"]);
-  const renamed: string[] = [];
-  for (const column of columns) {
-    if (!seenNames.has(column.name)) {
-      seenNames.add(column.name);
-      continue;
+  // Grouped tables are exempt: their sub-columns are "Group:Y1"… by
+  // construction, and two same-named groups legitimately repeat those names
+  // — the loader and regroupTable keep the runs distinct, and renaming the
+  // second run's sub-columns would break the round-trip (the .prism import
+  // keeps the duplicate names).
+  if (titerType !== "grouped") {
+    const seenNames = new Set<string>(["Title"]);
+    const renamed: string[] = [];
+    for (const column of columns) {
+      if (!seenNames.has(column.name)) {
+        seenNames.add(column.name);
+        continue;
+      }
+      const stem = column.name.replace(/ \d+$/, "");
+      let n = 2;
+      let renamedName = `${stem} ${n}`;
+      while (seenNames.has(renamedName)) {
+        n++;
+        renamedName = `${stem} ${n}`;
+      }
+      renamed.push(`“${column.name}” → “${renamedName}”`);
+      column.name = renamedName;
+      seenNames.add(renamedName);
     }
-    const stem = column.name.replace(/ \d+$/, "");
-    let n = 2;
-    let renamedName = `${stem} ${n}`;
-    while (seenNames.has(renamedName)) {
-      n++;
-      renamedName = `${stem} ${n}`;
+    if (renamed.length > 0) {
+      warnings.push(
+        `${displayName}: duplicate column names were renamed so each column keeps its own data (${renamed.join(', ')}).`,
+      );
     }
-    renamed.push(`“${column.name}” → “${renamedName}”`);
-    column.name = renamedName;
-    seenNames.add(renamedName);
-  }
-  if (renamed.length > 0) {
-    warnings.push(
-      `${displayName}: duplicate column names were renamed so each column keeps its own data (${renamed.join(', ')}).`,
-    );
   }
 
   const rowCount = Math.max(0, ...columns.map((c) => c.values.length), rowTitleValues.length);

@@ -179,6 +179,40 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
       err instanceof Error ? err.message.slice(0, 120) : String(err),
     );
   }
+  // W7: duplicate group names stay two datasets (BUG-1/BUG-3) — the writer
+  // groups by runs, not by name, so the second "Group" set isn't merged
+  // into the first with its values shifted.
+  const dupData = {
+    columns: ["Title", "Group:Y1", "Group:Y2", "Group:Y1", "Group:Y2"],
+    rows: [["r1", "1", "2", "3", "4"]],
+    groups: 2,
+    replicates: 2,
+  };
+  const dupWritten = await writePrism(
+    {
+      nodes: {
+        table_1: {
+          id: "table_1",
+          type: "table",
+          name: "Dup groups",
+          parentId: null,
+          tableType: "grouped",
+          data: dupData,
+        },
+      },
+      rootOrder: ["table_1"],
+      childOrder: { table_1: [] },
+      activeNodeId: "table_1",
+    },
+    "1.0.7",
+  );
+  const dupBack = await convertPrism(dupWritten.bytes, "dup-groups.prism");
+  const dupTable = Object.values(dupBack.project.nodes).find((n) => n?.type === "table");
+  check(
+    "W7 duplicate groups round-trip",
+    JSON.stringify(dupTable?.data) === JSON.stringify(dupData),
+    `back columns: ${JSON.stringify(dupTable?.data?.columns)}`,
+  );
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed.`);

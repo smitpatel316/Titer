@@ -89,7 +89,7 @@ import { analysisOptionsForTable, analysisOptionsKey } from "../src/views/analys
 import { followTable } from "../src/store/references";
 import { isSummaryFormatValue, summaryFormatOf, summaryTableProblem } from "../src/lib/summary-format";
 import { tCrit95 } from "../src/lib/student-t";
-import { pairKey } from "../src/lib/columns";
+import { groupRuns, pairKey } from "../src/lib/columns";
 import {
   NAMED_COLORS,
   PALETTES,
@@ -2125,6 +2125,65 @@ check("fewer sub-columns keep each value in its group", () => {
   deepStrictEqual(t.columns, ["Title", "A:Y1", "A:Y2", "Treated:Y1", "Treated:Y2"]);
   deepStrictEqual(t.rows[0], ["r1", "a1", "a2", "b1", "b2"]);
   deepStrictEqual(t.excluded, ["0,3"]);
+});
+
+// ── Duplicate group names (BUG-1/BUG-3) ──────────────────────────────────
+// Two same-named groups are two groups: grouping is by RUNS, not by name,
+// so a second "Group:Y1…" set never merges into the first (values shifting
+// columns on .pzfx/.prism write and on .hlx open).
+
+check("groupRuns keeps duplicate group names as separate runs", () => {
+  deepStrictEqual(groupRuns(["A:Y1", "A:Y2", "A:Y1", "A:Y2"]), [
+    { name: "A", columns: [0, 1] },
+    { name: "A", columns: [2, 3] },
+  ]);
+  // Interleaved columns stay open across other groups' columns.
+  deepStrictEqual(groupRuns(["A:Y1", "B:Y1", "A:Y2"]), [
+    { name: "A", columns: [0, 2] },
+    { name: "B", columns: [1] },
+  ]);
+});
+
+check("duplicate group names keep their own values on regroup", () => {
+  const dup: TableData = {
+    columns: ["Title", "Group:Y1", "Group:Y2", "Group:Y1", "Group:Y2"],
+    rows: [["r1", "1", "2", "3", "4"]],
+    groups: 2,
+    replicates: 2,
+  };
+  const t = regroupTable(dup, 2, 2);
+  deepStrictEqual(t.columns, ["Title", "Group:Y1", "Group:Y2", "Group:Y1", "Group:Y2"]);
+  deepStrictEqual(t.rows[0], ["r1", "1", "2", "3", "4"]);
+});
+
+check("a grouped table with duplicate group names opens unchanged", () => {
+  const dupPayload: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "Dup",
+        parentId: null,
+        tableType: "grouped",
+        data: {
+          columns: ["Title", "Group:Y1", "Group:Y2", "Group:Y1", "Group:Y2"],
+          rows: [["1 ", "1", "2", "3", "4"]],
+          groups: 2,
+          replicates: 2,
+        },
+      },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const loaded = read(serializeProjectFile(dupPayload));
+  strictEqual(loaded.updated, false);
+  const data = loaded.project.nodes.t1.data!;
+  strictEqual(data.groups, 2);
+  strictEqual(data.replicates, 2);
+  deepStrictEqual(data.columns, ["Title", "Group:Y1", "Group:Y2", "Group:Y1", "Group:Y2"]);
+  deepStrictEqual(data.rows[0], ["1 ", "1", "2", "3", "4"]);
 });
 
 // ── Summary sub-columns (v2 item 8) ───────────────────────────────────────
@@ -12685,7 +12744,9 @@ check(".pzfx import keeps untitled, colon-titled and ragged TwoWay replicate gro
   // untitled groups merged into "Group" (FF-F9 renamed the duplicate to
   // "Group:Y1 2", which the reload's regroupTable then dropped), "1:10:Y1"
   // split at the first ":" into group "1", and the ragged group was short
-  // a subcolumn.
+  // a subcolumn. Since BUG-1/BUG-3, duplicate group names are PRESERVED —
+  // the two untitled columns are two groups both named "Group" (grouping is
+  // by runs, not by name), and no rename warning is issued for them.
   const text = `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">
 <Table ID="Table0" XFormat="none" TableType="TwoWay" YFormat="replicates">
 <Title>TwoWay reps</Title>
@@ -12707,8 +12768,8 @@ check(".pzfx import keeps untitled, colon-titled and ragged TwoWay replicate gro
     "Title",
     "Group:Y1",
     "Group:Y2",
-    "Group 2:Y1",
-    "Group 2:Y2",
+    "Group:Y1",
+    "Group:Y2",
     "1-10:Y1",
     "1-10:Y2",
     "Ragged:Y1",
@@ -12718,7 +12779,7 @@ check(".pzfx import keeps untitled, colon-titled and ragged TwoWay replicate gro
     ["Low", "1.", "3.", "10.", "30.", "100.", "300.", "1000.", null],
     ["High", "2.", "4.", "20.", "40.", "200.", "400.", "2000.", null],
   ]);
-  ok(imported.issues.some((i) => i.message.includes("group names must be unique")), "warns about the renames");
+  ok(!imported.issues.some((i) => i.message.includes("group names must be unique")), "no rename warning for duplicates");
   // The round-trip is the point: save as .hlx, reload, every value still there.
   const { project } = read(serializeProjectFile(imported.project));
   const reloaded = project.nodes[imported.project.rootOrder[0]];

@@ -32,6 +32,7 @@
 
 import type { ProjectFilePayload } from "./project-file";
 import type { PrismWriteReport } from "./prism-write";
+import { groupRuns } from "./columns";
 import { summaryFormatDef, type SummaryFormat } from "./summary-format";
 
 export interface PzfxWriteResult {
@@ -251,14 +252,12 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
       prismTableType = "TwoWay";
       xFormat = "none";
       // Regroup by the part before the first ":" (the importer's split);
-      // the subcolumn label is the part after the last ":".
-      const groups = new Map<string, number[]>();
-      yColumns.forEach((c, i) => {
-        const group = c.name.includes(":") ? c.name.slice(0, c.name.indexOf(":")) : c.name;
-        const list = groups.get(group) ?? [];
-        list.push(i);
-        groups.set(group, list);
-      });
+      // the subcolumn label is the part after the last ":". Groups are RUNS
+      // (src/lib/columns.ts `groupRuns`): two same-named groups
+      // ("Group:Y1"… twice) are two groups, and merging them by name would
+      // write one 20-replicate YColumn whose values shift columns on
+      // read-back.
+      const groups = groupRuns(yColumns.map((c) => c.name)).map((r) => ({ title: r.name, columns: r.columns }));
       const sublabel = (c: WriteColumn) =>
         c.name.includes(":") ? c.name.slice(c.name.lastIndexOf(":") + 1) : c.name;
       // The groups' format: the declared summaryFormat when its subcolumns
@@ -274,7 +273,7 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
         }
         return null;
       };
-      const groupLabels = [...groups.values()].map((cols) => cols.map((ci) => sublabel(yColumns[ci])));
+      const groupLabels = groups.map((g) => g.columns.map((ci) => sublabel(yColumns[ci])));
       const declared =
         data.summaryFormat && data.summaryFormat !== "replicates" ? summaryFormatDef(data.summaryFormat) : null;
       const matchesDeclared = (labels: string[]) =>
@@ -306,15 +305,15 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
         });
       } else {
         yFormat = "replicates";
-        const maxGroup = Math.max(...[...groups.values()].map((cols) => cols.length));
+        const maxGroup = Math.max(...groups.map((g) => g.columns.length));
         replicates = Math.max(data.replicates ?? 0, maxGroup);
       }
       // One YColumn per group, in group order; replicate groups are padded
       // to `replicates` subcolumns with empty <d>s, as the importer pads
       // on read. A Y dataset at yColumns[j] sits at data-column index
       // yStart + j + 1 (data column 0 holds the row titles).
-      const yXml = [...groups.entries()]
-        .map(([title, cols]) => {
+      const yXml = groups
+        .map(({ title, columns: cols }) => {
           const subCols = [...cols];
           while (yFormat === "replicates" && subCols.length < (replicates ?? 0)) subCols.push(-1);
           const width = 89 * Math.max(1, subCols.length);
