@@ -4951,7 +4951,25 @@ impl TiterMcpServer {
 
 impl TiterMcpServer {
     pub fn new(state: McpState) -> Self {
-        Self { state, tool_router: Self::tools() }
+        let mut tool_router = Self::tools();
+        // Inspector 2.13.0 discards tools whose outputSchema has no `type`
+        // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
+        // returns, so `tools/list` prints `{"tools": []}` even though the
+        // server returns all 51. Every tool returns a JSON object, so stamp
+        // `type: "object"` on all 51 output schemas here — the single choke
+        // point — instead of touching each tool. `Arc::make_mut`
+        // clone-on-writes: rmcp caches the `Value` schema in a thread-local
+        // cache shared by all tools, so the cached Arc must never be
+        // mutated in place.
+        for route in tool_router.map.values_mut() {
+            let schema = route
+                .attr
+                .output_schema
+                .get_or_insert_with(|| std::sync::Arc::new(serde_json::Map::new()));
+            std::sync::Arc::make_mut(schema)
+                .insert("type".to_string(), serde_json::json!("object"));
+        }
+        Self { state, tool_router }
     }
 
     /// Enqueue a table job and wait for the frontend to run it, then return
@@ -7476,5 +7494,29 @@ mod tests {
         assert!(resp.status().is_success(), "DELETE closes the session: {}", resp.status());
         cancel.cancel();
         server.abort();
+    }
+
+    #[test]
+    fn all_tools_output_schema_is_typed_object() {
+        // Inspector 2.13.0 drops tools whose outputSchema lacks `type`
+        // (rmcp emits a bare `{"$schema": ...}` for `Json<Value>` returns),
+        // so `tools/list` prints `{"tools": []}`. `TiterMcpServer::new`
+        // stamps `type: "object"` on every route's output schema; this pins
+        // that (and the tool count) at the choke point.
+        let server = TiterMcpServer::new(job_state());
+        let tools = server.tool_router.list_all();
+        assert_eq!(tools.len(), 51, "tool count changed — update this pin");
+        for t in &tools {
+            let schema = t
+                .output_schema
+                .as_ref()
+                .unwrap_or_else(|| panic!("{} has no outputSchema", t.name));
+            assert_eq!(
+                schema.get("type"),
+                Some(&json!("object")),
+                "tool {}",
+                t.name
+            );
+        }
     }
 }
