@@ -439,10 +439,16 @@ def _c_q35_cancel_paths(suite):
     finally:
         _close(suite, pid2)
     # (d) named save, then a silent save-back after a further edit.
+    # NOTE (live-run fix): root-level tables are numbered by the reducer
+    # (nextName: the requested name is the BASE — "Named" lands as
+    # "Named 1"), so the case reads the actual name back from the
+    # create result instead of assuming the requested name verbatim.
     pid3 = _new_project(suite)
     try:
-        tid3 = suite.mcp.tool("titer_create_table", {
-            "project_id": pid3, "table_type": "column", "name": "Named"})["table_id"]
+        created3 = suite.mcp.tool("titer_create_table", {
+            "project_id": pid3, "table_type": "column", "name": "Named"})
+        tid3 = created3["table_id"]
+        name3 = created3["name"]
         _write_table(suite, pid3, tid3, ["", "A"], [["", 1]])
         path3 = os.path.join(suite.out_dir, "q35-named.hlx")
         saved = _save(suite, pid3, path3)
@@ -451,7 +457,7 @@ def _c_q35_cancel_paths(suite):
         _write_table(suite, pid3, tid3, ["", "A"], [["", 7]])
         suite.mcp.tool("titer_save_project", {"project_id": pid3})
         hlx = _read_hlx(path3)
-        node = _hlx_node(hlx, "Named", "table")
+        node = _hlx_node(hlx, name3, "table")
         assert node["data"]["rows"][0][1] in (7, "7"), \
             f"silent save-back did not persist the edit: {node['data']['rows']}"
     finally:
@@ -482,21 +488,27 @@ def _c_q67_table_types(suite):
             ("contingency", "Cont", ["", "Group A", "Group B"],
              [["Yes", 8, 3], ["No", 2, 7]], "Contingency", [8, 3, 2, 7]),
         ]
+        # NOTE (live-run fix): root-level tables are numbered by the
+        # reducer (nextName — the requested name is the base, so "Col"
+        # lands as "Col 1"). The per-type pins use the table id; the
+        # final type map is keyed by the ACTUAL names read back from
+        # the create results, not the requested bases.
+        actual = []
         for slug, name, cols, rows, want_type, want_values in specs:
-            tid = suite.mcp.tool("titer_create_table", {
+            created = suite.mcp.tool("titer_create_table", {
                 "project_id": pid, "table_type": slug, "name": name,
-                "columns": cols, "rows": rows})["table_id"]
+                "columns": cols, "rows": rows})
+            tid = created["table_id"]
+            actual.append((created["name"], want_type))
             summ = _summary(suite, pid, tid)
             assert summ.get("table_type") == want_type, \
                 f"{name}: table_type {summ.get('table_type')!r} != {want_type!r}"
             _assert_numbers_present(summ, want_values, name)
         tables = suite.mcp.tool("titer_list_tables", {"project_id": pid})["tables"]
         by_name = {t.get("name"): t.get("table_type") for t in tables}
-        assert by_name.get("Col") == "Column" and by_name.get("XY") == "XY" \
-            and by_name.get("Grouped") == "Grouped" \
-            and by_name.get("Multi") == "Multiple variables" \
-            and by_name.get("Cont") == "Contingency", \
-            f"table types mismatch (seeded 'Table 1' aside): {by_name}"
+        for got_name, want_type in actual:
+            assert by_name.get(got_name) == want_type, \
+                f"table types mismatch (seeded 'Table 1' aside): {by_name}"
         return ("5/5 table types created with data read back (Column, XY, "
                 "Grouped, Multiple variables, Contingency).")
     finally:
@@ -508,7 +520,13 @@ def _c_q42_clean_quit(suite):
     project list empties. Pin: close-all of saved projects leaves zero open
     projects. Harness remainder (coordinator/run.sh): the process itself
     must be gone after the kill (pgrep) and the scratch app-data dir
-    removed — the suite cannot observe its own process death."""
+    removed — the suite cannot observe its own process death.
+    NOTE (live-run fix): the suite shares ONE app session, so earlier
+    cases leave projects open — closing only this case's own two cannot
+    empty the list. The case therefore closes EVERY listed project
+    (close-all semantics, the pin as written) and resets suite.pid_surv
+    so the later Plotly cases re-import the survival fixture via their
+    existing fallback instead of addressing a closed id."""
     pids = []
     try:
         for i in range(2):
@@ -523,11 +541,16 @@ def _c_q42_clean_quit(suite):
             closed = suite.mcp.tool("titer_close_project", {"project_id": pid})
             assert closed.get("closed") is True, \
                 f"clean close of saved project {pid} failed: {closed}"
+        # Close-all: every project the session still holds (this case's
+        # own are already closed; earlier cases' leftovers close here).
+        for proj in suite.mcp.tool("titer_list_projects", {})["projects"]:
+            suite.close(proj["project_id"])
+        suite.pid_surv = None
         remaining = suite.mcp.tool("titer_list_projects", {})["projects"]
         assert remaining == [], f"projects still open after clean quit: {remaining}"
-        return ("2 saved projects closed with no prompt; project list empty. "
-                "Harness remainder: process-gone (pgrep) + scratch-dir removal "
-                "after run.sh kills the app — coordinator.")
+        return ("2 saved projects closed with no prompt; close-all left the "
+                "project list empty. Harness remainder: process-gone (pgrep) "
+                "+ scratch-dir removal after run.sh kills the app — coordinator.")
     finally:
         for pid in pids:
             _close(suite, pid)
@@ -666,7 +689,11 @@ def _c_m11_closed_window_jobs(suite):
         run = suite.mcp.tool("titer_run_analysis", {
             "project_id": pid, "table_id": tid, "analysis_type": "monte-carlo",
             "params": {"targetAnalysis": "descriptive-statistics",
-                       "summaryStatistic": "Mean", "repeats": 20000, "seed": 42}})
+                       "summaryStatistic": "Mean", "repeats": 10000, "seed": 42}})
+        # NOTE (live-run fix): repeats must be 10..10000 — the case
+        # previously passed 20000, which fails validation at once (the
+        # job ends "done" with an error result before the window even
+        # closes, so the close-mid-run path was never exercised).
         job_id = run["job_id"]
         closed = suite.mcp.tool("titer_close_project", {
             "project_id": pid, "save": "discard"})
@@ -693,10 +720,17 @@ def _c_m11_closed_window_jobs(suite):
 
 def _c_d02_import_notice(suite):
     """D-02: import-notice report for survival.pzfx. Pin: imported_tables is
-    exactly ["Three groups"] and warnings is empty (a clean import), and the
-    file's info sheet ("Project info 1") comes across — the data the
-    "Prism File Imported" dialog renders. Pre-fix FAIL: a dropped table, a
-    spurious warning, or a lost info sheet.
+    exactly ["Three groups"], warnings is EXACTLY the survival notice the
+    importer reports for this file (the "Prism File Imported" dialog's
+    content — it is the import report, not a spurious warning), and the
+    file's info sheet ("Project info 1") comes across. Pre-fix FAIL: a
+    dropped table, a spurious warning, or a lost info sheet.
+    NOTE (live-run fix): the case previously asserted warnings == [].
+    Both importers deliberately report the survival notice in `warnings`
+    (pzfx.ts / prism.ts — the import-report channel the MCP tool doc
+    describes), so a survival import is never warning-free; pinning the
+    exact notice keeps the discrimination (any extra/missing warning
+    still fails) without contradicting the app's contract.
     GUI remainder (wdio lane): the dialog itself — exact lines
     'Imported 1 table from "survival":' / '• Three groups' /
     'Imported 1 info sheet:' / '• Project info 1' / '' /
@@ -712,14 +746,19 @@ def _c_d02_import_notice(suite):
         assert imp.get("imported_tables") == ["Three groups"], \
             f"imported_tables: {imp.get('imported_tables')}"
         warnings = imp.get("warnings")
-        assert isinstance(warnings, list) and warnings == [], \
-            f"clean import should carry no warnings, got: {warnings}"
+        expected_notice = (
+            "“Three groups”: imported as a Survival table (time in X, event "
+            "codes 1 = event, 0 = censored in each group) — the survival "
+            "analysis and graph apply to it.")
+        assert isinstance(warnings, list) and warnings == [expected_notice], \
+            f"import warnings should be exactly the survival notice, got: {warnings}"
         projects = suite.mcp.tool("titer_list_projects", {})["projects"]
         proj = [p for p in projects if p.get("project_id") == pid][0]
         infos = [s.get("name") for s in proj.get("info_sheets", [])]
         assert infos == ["Project info 1"], \
             f"info sheets after import: {infos}"
-        return ("import report exact: 1 table 'Three groups', no warnings, "
+        return ("import report exact: 1 table 'Three groups', warnings "
+                "exactly the survival notice, "
                 "info sheet 'Project info 1' transferred. GUI remainder: the "
                 "dialog lines + OK dismiss — wdio-only.")
     finally:
@@ -989,8 +1028,15 @@ def _c_t100_duplicate_family(suite):
     pid = _new_project(suite)
     try:
         baseline = _node_count(suite, pid)  # the seeded "Table 1"
-        tid = suite.mcp.tool("titer_create_table", {
-            "project_id": pid, "table_type": "column", "name": "Cox data"})["table_id"]
+        # NOTE (live-run fix): root-level tables are numbered by the
+        # reducer (nextName — the requested name is the base, so
+        # "Cox data" lands as "Cox data 1"). Every name below is derived
+        # from the ACTUAL name read back from the create result.
+        created = suite.mcp.tool("titer_create_table", {
+            "project_id": pid, "table_type": "column", "name": "Cox data"})
+        tid = created["table_id"]
+        src_name = created["name"]
+        copy_name = src_name + " copy"
         _write_table(suite, pid, tid, COLUMN_COLS, COLUMN_ROWS,
                      excluded=COLUMN_EXCLUDED)
         aid, res = suite.run_analysis_sync(pid, tid, "descriptive-statistics", None)
@@ -1011,20 +1057,20 @@ def _c_t100_duplicate_family(suite):
             f"expected {baseline + 6} nodes after duplicate, got {_node_count(suite, pid)}"
         tables_after = suite.mcp.tool("titer_list_tables", {"project_id": pid})["tables"]
         names = [t.get("name") for t in tables_after]
-        assert names == ["Table 1", "Cox data", "Cox data copy"], \
+        assert names == ["Table 1", src_name, copy_name], \
             f"copy not right after source: {names}"
         assert dup["children"]["analyses"] != [aid], \
             "cloned analysis kept the source analysis id"
         # S2: replace data on the copy only.
         snap_orig = suite.snapshot_tables(pid)
-        orig_rows = [r for r in snap_orig if r["name"] == "Cox data"]
+        orig_rows = [r for r in snap_orig if r["name"] == src_name]
         assert len(orig_rows) == 1
         changed = [list(r) for r in COLUMN_ROWS]
         changed[0][1] = 50.0
         _write_table(suite, pid, copy_tid, COLUMN_COLS, changed,
                      excluded=COLUMN_EXCLUDED)
         snap_now = suite.snapshot_tables(pid)
-        orig_now = [r for r in snap_now if r["name"] == "Cox data"]
+        orig_now = [r for r in snap_now if r["name"] == src_name]
         ok, detail = suite.compare_snapshots(orig_rows, orig_now)
         assert ok, f"original table moved when the copy was edited: {detail}"
         # The cloned analysis is params-only until run; a fresh run on the
@@ -1051,14 +1097,14 @@ def _c_t100_duplicate_family(suite):
         # SECOND duplicate of the same source lands between the source and
         # the first copy ("copy 2" before "copy").
         assert [t.get("name") for t in tables2] == [
-            "Table 1", "Cox data", "Cox data copy 2", "Cox data copy"], \
+            "Table 1", src_name, copy_name + " 2", copy_name], \
             f"second duplicate names: {[t.get('name') for t in tables2]}"
         undone = suite.mcp.tool("titer_undo", {"project_id": pid})
         assert undone.get("undone") == "Duplicate Family", \
             f"undo label {undone.get('undone')!r} != 'Duplicate Family'"
         assert _node_count(suite, pid) == baseline + 7, \
             f"one undo should remove the whole family ({baseline + 7} nodes), got {_node_count(suite, pid)}"
-        return (f"duplicate 'Cox data copy' right after source (baseline+3 "
+        return (f"duplicate '{copy_name}' right after source (baseline+3 "
                 f"-> baseline+6 nodes, fresh child ids); copy edit left the "
                 f"original cell-identical while its recompute moved Control "
                 f"mean {mean_orig} -> {mean_copy}; second duplicate + one "
@@ -1076,9 +1122,16 @@ def _c_t103_clone_graph(suite):
     defaults (Delete Y checked, X/titles unchecked, X row present)."""
     pid = _new_project(suite)
     try:
-        tid = suite.mcp.tool("titer_create_table", {
+        # NOTE (live-run fix): root-level tables are numbered by the
+        # reducer (nextName — the requested name is the base, so
+        # "Cell viability (%)" lands as "Cell viability (%) 1"). Every
+        # name below is derived from the ACTUAL name read back.
+        created = suite.mcp.tool("titer_create_table", {
             "project_id": pid, "table_type": "xy",
-            "name": "Cell viability (%)"})["table_id"]
+            "name": "Cell viability (%)"})
+        tid = created["table_id"]
+        src_name = created["name"]
+        clone_name = src_name + " 2"
         _write_table(suite, pid, tid, XY_COLS, XY_ROWS)
         aid, res = suite.run_analysis_sync(
             pid, tid, "linear-regression", {"forceOrigin": False})
@@ -1096,9 +1149,9 @@ def _c_t103_clone_graph(suite):
         new_gid = clone["graph_id"]
         tables = suite.mcp.tool("titer_list_tables", {"project_id": pid})["tables"]
         assert [t.get("name") for t in tables] == [
-            "Table 1", "Cell viability (%)", "Cell viability (%) 2"], \
+            "Table 1", src_name, clone_name], \
             f"clone table names/order: {[t.get('name') for t in tables]}"
-        new_tid = [t["id"] for t in tables if t.get("name") == "Cell viability (%) 2"][0]
+        new_tid = [t["id"] for t in tables if t.get("name") == clone_name][0]
         summ = _summary(suite, pid, new_tid)
         rows = summ.get("values", {}).get("rows", [])
         assert len(rows) == len(XY_ROWS), \
@@ -1139,13 +1192,13 @@ def _c_t103_clone_graph(suite):
         assert cloned_node.get("analysisType") == "linear-regression"
         snap_pre = suite.snapshot_tables(pid)
         # Original table byte-identical (cell-identical; savedAt differs).
-        orig_now = [s for s in snap_pre if s["name"] == "Cell viability (%)"]
+        orig_now = [s for s in snap_pre if s["name"] == src_name]
         assert len(orig_now) == 1
         undone = suite.mcp.tool("titer_undo", {"project_id": pid})
         assert undone.get("undone") == "Clone Graph", \
             f"undo label {undone.get('undone')!r} != 'Clone Graph'"
         tables2 = suite.mcp.tool("titer_list_tables", {"project_id": pid})["tables"]
-        assert [t.get("name") for t in tables2] == ["Table 1", "Cell viability (%)"], \
+        assert [t.get("name") for t in tables2] == ["Table 1", src_name], \
             f"tables after undo: {[t.get('name') for t in tables2]}"
         post_undo_path = os.path.join(suite.out_dir, "t103-undone.hlx")
         _save(suite, pid, post_undo_path)
@@ -1153,7 +1206,7 @@ def _c_t103_clone_graph(suite):
         for key in ("nodes", "rootOrder", "childOrder"):
             assert _canon(undone_hlx["project"][key]) == _canon(pre_hlx["project"][key]), \
                 f"project {key} differs after undo vs pre-clone"
-        return ("clone defaults: 'Cell viability (%) 2' right after source, "
+        return (f"clone defaults: '{clone_name}' right after source, "
                 "X kept, all Y null, title kept, regAnalysisId re-pointed at "
                 "a cloned linear-regression; one 'Clone Graph' undo removed "
                 "it and the project content is identical to pre-clone.")
@@ -1173,17 +1226,22 @@ def _c_t104_summary_subcolumns(suite):
     pid = _new_project(suite)
     pid2 = None
     try:
-        tid = suite.mcp.tool("titer_create_table", {
-            "project_id": pid, "table_type": "grouped", "name": "Summary"})["table_id"]
+        # NOTE (live-run fix): root-level tables are numbered by the
+        # reducer (nextName — "Summary" lands as "Summary 1"). All
+        # lookups below use the actual name read back from create.
+        created = suite.mcp.tool("titer_create_table", {
+            "project_id": pid, "table_type": "grouped", "name": "Summary"})
+        tid = created["table_id"]
+        tbl_name = created["name"]
         _write_table(suite, pid, tid, SUMMARY_SD_COLS, SUMMARY_ROWS)
         path = os.path.join(suite.out_dir, "t104.hlx")
         _save(suite, pid, path)
-        node = _hlx_node(_read_hlx(path), "Summary", "table")
+        node = _hlx_node(_read_hlx(path), tbl_name, "table")
         assert node.get("data", {}).get("summaryFormat") == "mean-sd-n", \
             f"summaryFormat {node.get('data', {}).get('summaryFormat')!r} != 'mean-sd-n'"
         _write_table(suite, pid, tid, SUMMARY_SEM_COLS, SUMMARY_ROWS)
         _save(suite, pid, path)
-        node = _hlx_node(_read_hlx(path), "Summary", "table")
+        node = _hlx_node(_read_hlx(path), tbl_name, "table")
         assert node.get("data", {}).get("summaryFormat") == "mean-sem-n", \
             f"summaryFormat {node.get('data', {}).get('summaryFormat')!r} != 'mean-sem-n'"
         _close(suite, pid)
@@ -1192,17 +1250,17 @@ def _c_t104_summary_subcolumns(suite):
         suite.open_projects.append(pid2)
         time.sleep(1)
         suite.wait_tables_stable(pid2)
-        tid2 = _table_id(suite, pid2, "Summary")
+        tid2 = _table_id(suite, pid2, tbl_name)
         summ = _summary(suite, pid2, tid2)
         assert [c.get("name") for c in summ.get("columns", [])] == [
             "A:Mean", "A:SEM", "A:N", "B:Mean", "B:SEM", "B:N"], \
             f"SEM columns did not survive reload: {summ.get('columns')}"
         _assert_numbers_present(summ, [10, 1, 5, 20, 2, 5], "reloaded summary")
-        node = _hlx_node(_read_hlx(path), "Summary", "table")
+        node = _hlx_node(_read_hlx(path), tbl_name, "table")
         assert node.get("data", {}).get("summaryFormat") == "mean-sem-n"
         _write_table(suite, pid2, tid2, SUMMARY_PM_COLS, SUMMARY_ROWS)
         _save(suite, pid2, path)
-        node = _hlx_node(_read_hlx(path), "Summary", "table")
+        node = _hlx_node(_read_hlx(path), tbl_name, "table")
         assert node.get("data", {}).get("summaryFormat") == "mean-plus-minus", \
             f"summaryFormat {node.get('data', {}).get('summaryFormat')!r} != 'mean-plus-minus'"
         graph = suite.mcp.tool("titer_build_graph", {
@@ -1235,14 +1293,19 @@ def _c_t107_error_format(suite):
     GUI remainder (wdio lane): the Format-inspector radio + click (S1/S2)."""
     pid = _new_project(suite)
     try:
-        tid = suite.mcp.tool("titer_create_table", {
-            "project_id": pid, "table_type": "column", "name": "Errors"})["table_id"]
+        # NOTE (live-run fix): root-level tables are numbered by the
+        # reducer (nextName — "Errors" lands as "Errors 1"). All
+        # lookups below use the actual name read back from create.
+        created = suite.mcp.tool("titer_create_table", {
+            "project_id": pid, "table_type": "column", "name": "Errors"})
+        tid = created["table_id"]
+        tbl_name = created["name"]
         rows = [["", 1.0, 2.0], ["", 1.5, 2.5], ["", 2.0, 3.0]]
         _write_table(suite, pid, tid, ["", "A_SEM", "B_SEM"], rows)
         base_path = os.path.join(suite.out_dir, "t107-sem.hlx")
         _save(suite, pid, base_path)
         hlx = _read_hlx(base_path)
-        node = _hlx_node(hlx, "Errors", "table")
+        node = _hlx_node(hlx, tbl_name, "table")
         node["data"]["columns"] = ["", "A_SD", "B_SD"]
         node["data"]["errorFormat"] = "sd"
         sd_path = os.path.join(suite.out_dir, "t107-sd.hlx")
@@ -1256,14 +1319,14 @@ def _c_t107_error_format(suite):
     try:
         time.sleep(1)
         suite.wait_tables_stable(pid2)
-        tid2 = _table_id(suite, pid2, "Errors")
+        tid2 = _table_id(suite, pid2, tbl_name)
         summ = _summary(suite, pid2, tid2)
         assert [c.get("name") for c in summ.get("columns", [])] == ["A_SD", "B_SD"], \
             f"renamed columns did not load: {summ.get('columns')}"
         _assert_numbers_present(summ, [1.0, 2.0, 1.5, 2.5, 3.0], "SD table")
         out2 = os.path.join(suite.out_dir, "t107-sd2.hlx")
         _save(suite, pid2, out2)
-        node2 = _hlx_node(_read_hlx(out2), "Errors", "table")
+        node2 = _hlx_node(_read_hlx(out2), tbl_name, "table")
         assert node2.get("data", {}).get("errorFormat") == "sd", \
             "errorFormat 'sd' did not survive save/reload"
         graph = suite.mcp.tool("titer_build_graph", {
@@ -1362,8 +1425,13 @@ def _c_t99_search_highlight(suite):
     Pin: the highlight round-trips through the loader/saver."""
     pid = _new_project(suite)
     try:
-        tid = suite.mcp.tool("titer_create_table", {
-            "project_id": pid, "table_type": "column", "name": "Frequency"})["table_id"]
+        # NOTE (live-run fix): root-level tables are numbered by the
+        # reducer (nextName — "Frequency" lands as "Frequency 1"). All
+        # lookups below use the actual name read back from create.
+        created = suite.mcp.tool("titer_create_table", {
+            "project_id": pid, "table_type": "column", "name": "Frequency"})
+        tid = created["table_id"]
+        tbl_name = created["name"]
         _write_table(suite, pid, tid, ["", "A"], [["", 1], ["", 2]])
         base = os.path.join(suite.out_dir, "t99-base.hlx")
         _save(suite, pid, base)
@@ -1372,7 +1440,7 @@ def _c_t99_search_highlight(suite):
     seen = []
     for colour in ("red", "blue", None):
         hlx = _read_hlx(base)
-        node = _hlx_node(hlx, "Frequency", "table")
+        node = _hlx_node(hlx, tbl_name, "table")
         if colour is None:
             node.pop("highlight", None)
         else:
@@ -1388,7 +1456,7 @@ def _c_t99_search_highlight(suite):
             suite.wait_tables_stable(pid2)
             out = os.path.join(suite.out_dir, f"t99-{colour or 'none'}-saved.hlx")
             _save(suite, pid2, out)
-            got = _hlx_node(_read_hlx(out), "Frequency", "table").get("highlight")
+            got = _hlx_node(_read_hlx(out), tbl_name, "table").get("highlight")
             assert got == colour, \
                 f"highlight {colour!r} did not round-trip (got {got!r})"
             seen.append(f"{colour or 'none'}->{got or 'none'}")

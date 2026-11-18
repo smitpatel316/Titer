@@ -95,7 +95,13 @@ def c_plotly_svg_ids_deterministic(self):
             svgs.append(f.read())
     ids1, ids2 = _extract_ids(svgs[0]), _extract_ids(svgs[1])
     assert ids1 == ids2, f"SVG ids differ between exports:\n  1: {ids1}\n  2: {ids2}"
-    assert ids1 == _FIXED_IDS, f"ids are equal but not the fixed normalized ones: {ids1}"
+    # NOTE (live-run fix): _extract_ids returns sorted LISTS per family
+    # while _FIXED_IDS holds SETS — a list never equals a set, so the
+    # comparison below always failed even when the ids were exactly the
+    # fixed ones. Compare as sets (this also unblocks the byte-equality
+    # assertion that follows).
+    assert {k: set(v) for k, v in ids1.items()} == _FIXED_IDS, \
+        f"ids are equal but not the fixed normalized ones: {ids1}"
     assert svgs[0] == svgs[1], (
         f"SVG bytes differ after id fix ({len(svgs[0])} vs {len(svgs[1])} B) — "
         f"ids match, so this is the root-tag attribute-order flip or a new "
