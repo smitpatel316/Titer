@@ -100,7 +100,7 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
     <WithInspector
       title={node.name}
       tag={
-        titleCase(ANALYSES[node.analysisType!].label) +
+        titleCase(ANALYSES[node.analysisType!].kind?.(node.analysisParams) ?? ANALYSES[node.analysisType!].label) +
         (node.frozen ? " · Frozen" : node.orphaned ? " · Orphaned" : "")
       }
       node={node}

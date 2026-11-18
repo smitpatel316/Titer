@@ -18,6 +18,7 @@ import { MODEL_LABEL, termLabel } from "../../stats/xy/nonlinear-regression";
 import { modelSpec } from "../../stats/xy/nonlinear-fit";
 import { parseCustomParameters, parseUserEquation } from "../../stats/xy/user-defined";
 import { dataGroups, incompleteRows, pairedGroups, pairIndices } from "../../stats/column/base";
+import { rowName } from "../../stats/grouped/base";
 import { pairKey } from "../../lib/columns";
 import { distinctTruthValues } from "../../stats/column/roc-curve";
 
@@ -460,6 +461,10 @@ const meanSd = (values: number[]) => {
 
 /** 6 significant digits — a readable starting value for a simulated mean/SD. */
 const round6 = (v: number) => Number(v.toPrecision(6));
+
+/** A grouped table's rows holding data, by the names results give them. */
+const dataRows = (table: Dataset) =>
+  table.titles.flatMap((_, r) => (table.numeric.some((c) => c.byRow[r] != null) ? [rowName(table.titles, r)] : []));
 
 /** Whether a grouped table holds replicates: a group with 2 values or more at a row. */
 const replicated = (table: Dataset) =>
@@ -3322,10 +3327,16 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         choice("posthoc", "Run multiple comparisons? Only meaningful if the ANOVA is significant.", [
           ["none", "No — just the ANOVA table"],
           ["tukey", "Yes — Tukey's"],
+          ...(a.design === "repeated-measures"
+            ? []
+            : ([["dunnett", "Yes, each against a control — Dunnett's test"]] as [string, string][])),
           ["bonferroni", "Yes — Bonferroni"],
           ["sidak", "Yes — Šídák"],
           ["holm-sidak", "Yes — Holm–Šídák"],
           ["lsd", "Yes — Fisher's LSD (uncorrected)"],
+          ...(a.design === "repeated-measures"
+            ? []
+            : ([["games-howell", "Yes — Games-Howell test (without assuming equal SDs)"]] as [string, string][])),
         ]),
       replicated(table) &&
         a.design !== "nonparametric" &&
@@ -3335,6 +3346,10 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ["groups", "Groups within each row"],
           ["rows", "Rows within each group"],
         ]),
+      a.posthoc === "dunnett" &&
+        (a.posthocTarget === "rows"
+          ? choice("control", "Which row is the control?", names(dataRows(table)))
+          : choice("control", "Which group is the control?", names(chosenSets(a) ?? setNames(table)))),
     ],
     finish: (a) => ({
       type: "two-way-anova",
@@ -3343,6 +3358,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         posthoc: (a.posthoc as TwoWayAnovaParams["posthoc"] | undefined) ?? "none",
         posthocTarget: (a.posthocTarget as TwoWayAnovaParams["posthocTarget"] | undefined) ?? "groups",
         ...(a.design === "repeated-measures" ? { sphericity: a.sphericity === "yes" } : {}),
+        ...(a.posthoc === "dunnett" ? { control: a.control as string } : {}),
       }),
     }),
     // The checklist follows the design: ordinary, repeated-measures, or rank-based.
