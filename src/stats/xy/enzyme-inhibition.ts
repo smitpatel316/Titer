@@ -186,12 +186,24 @@ function globalModelDef(
 }
 
 /** The R spec for the Morrison Ki fit. X is the total inhibitor
- *  concentration It; Et is assigned by the runner before the fit. */
-function morrisonSpec(starts: { v0: number; kiapp: number }): ModelSpec {
+ *  concentration It; Et is assigned by the runner before the fit.
+ *  `retries` are alternate Kiapp starts (each with a method label naming
+ *  it) tried in order when the primary fit fails to converge — the
+ *  fitModelSpec retry ladder, the single-series pattern (binding's
+ *  one-site Kd retries). */
+function morrisonSpec(
+  starts: { v0: number; kiapp: number },
+  retries: { kiapp: number; method: string }[] = [],
+): ModelSpec {
+  const fitFrom = (kiappStart: string) =>
+    `m<-nls(y~v0*(1-((Et+x+Kiapp)-sqrt((Et+x+Kiapp)^2-4*Et*x))/(2*Et)),start=list(v0=${starts.v0},Kiapp=${kiappStart}),algorithm="port",lower=c(0,0),upper=c(Inf,Inf))`;
   return {
     kind: "nls",
-    fit: `m<-nls(y~v0*(1-((Et+x+Kiapp)-sqrt((Et+x+Kiapp)^2-4*Et*x))/(2*Et)),start=list(v0=${starts.v0},Kiapp=${starts.kiapp}),algorithm="port",lower=c(0,0),upper=c(Inf,Inf))`,
+    fit: fitFrom(String(starts.kiapp)),
     terms: ["v0", "Kiapp"],
+    ...(retries.length
+      ? { retryFits: retries.map((r) => ({ fit: fitFrom(String(r.kiapp)), method: r.method })) }
+      : {}),
   };
 }
 
@@ -364,11 +376,49 @@ export async function runEnzymeInhibition(
     series.filter((s) => s.I !== 0),
   );
   const def = globalModelDef(model, starts);
+  const fitSeries = series.map((s) => ({ name: s.col.name, x: s.x, y: s.y, covariate: s.I }));
   try {
-    const { coefficients, derived, stats } = await runGlobalFit(
-      series.map((s) => ({ name: s.col.name, x: s.x, y: s.y, covariate: s.I })),
-      def,
-    );
+    // When the primary fit fails to converge, retry from lower Ki starts
+    // (the median, then the smallest, non-zero [I]): the failure mode is
+    // a Ki start far above the true Ki. The half-velocity rule accepts
+    // any [I] within 0.25 of half the control velocity, so on data like
+    // the cycle-14 probe ([I] = 5 at 67%, [I] = 20 at 34% of control) it
+    // can pick an [I] 4x the true Ki, and the port optimizer then fails
+    // with "Missing value or an infinity" (verified in R: Ki = 20 fails,
+    // Ki = 12.5 and Ki = 8 converge). Same failure class as the cycle-13
+    // binding bug (Kd start 6x the true Kd); same remedy shape — the
+    // two-series binding retries loop in the runner because the shared
+    // global-fit helper has no retryFits slot. The retries only run when
+    // the primary fails, so passing fits never touch them and their
+    // pinned values do not move.
+    const fit = async (): Promise<{
+      coefficients: RegressionCoefficient[];
+      derived: StatRow[];
+      stats: StatRow[];
+      retried: boolean;
+      retryKi: number | null;
+    }> => {
+      try {
+        const r = await runGlobalFit(fitSeries, def);
+        return { coefficients: r.coefficients, derived: r.derived, stats: r.stats, retried: false, retryKi: null };
+      } catch (firstErr) {
+        let lastErr: unknown = firstErr;
+        const nonzeroIs = [...new Set(series.filter((s) => s.I !== 0).map((s) => s.I))].sort((a, b) => a - b);
+        const retries = [median(nonzeroIs), nonzeroIs[0]].filter(
+          (ki, i, arr) => ki !== starts.ki && arr.indexOf(ki) === i,
+        );
+        for (const ki of retries) {
+          try {
+            const r = await runGlobalFit(fitSeries, globalModelDef(model, { ...starts, ki }));
+            return { coefficients: r.coefficients, derived: r.derived, stats: r.stats, retried: true, retryKi: ki };
+          } catch (err) {
+            lastErr = err;
+          }
+        }
+        throw lastErr;
+      }
+    };
+    const { coefficients, derived, stats, retried, retryKi } = await fit();
     const vmax = coefOf(coefficients, "Vmax");
     const km = coefOf(coefficients, "Km");
     const ki = coefOf(coefficients, "Ki");
@@ -385,6 +435,8 @@ export async function runEnzymeInhibition(
       `Inhibitor concentrations: ${series.map((s) => `“${s.col.name}” [I] = ${s.I}`).join(", ")} (same units for every series; Ki is reported in these units).`,
       `Starting values: Vmax = ${num(starts.vmax)}, Km = ${num(starts.km)}, Ki = ${num(starts.ki)}${model === "mixed" ? ", Alpha = 1" : ""}.`,
     ];
+    if (retried && retryKi != null)
+      notes.push(`The first fit did not converge; retried with Ki = ${num(retryKi)} and converged.`);
     const thin = series.filter((s) => s.x.length < 5);
     if (thin.length)
       notes.push(
@@ -465,10 +517,23 @@ async function runMorrison(
     }
   });
   if (bestIt != null && bestIt > 0) kiapp0 = bestIt;
+  // Retry ladder for Kiapp — same failure class as the global Ki ladder
+  // above: the closest-to-half start can sit far above the true Kiapp
+  // (cycle-14 probe: Kiapp = 8 is 4x the true ≈ 2, and the port
+  // optimizer false-converges from there; Kiapp = 4 and 0.5 converge
+  // in R). Median, then smallest, positive It; values equal to the
+  // primary start are skipped, so a fit that already starts there never
+  // repeats it.
+  const sortedPositiveIt = [...positiveIt].sort((a, b) => a - b);
+  const morrisonRetries = [
+    { kiapp: median(sortedPositiveIt), method: "median Kiapp" },
+    { kiapp: sortedPositiveIt[0], method: "smallest Kiapp" },
+  ].filter((r, i, arr) => r.kiapp !== kiapp0 && arr.findIndex((o) => o.kiapp === r.kiapp) === i);
 
-  const spec = morrisonSpec({ v0: v00, kiapp: kiapp0 });
+  const spec = morrisonSpec({ v0: v00, kiapp: kiapp0 }, morrisonRetries);
   try {
-    const { coefficients, stats } = await fitModelSpec(xs, ys, spec, `Et<-${et};`);
+    const { coefficients, stats, retried, retryMethod } = await fitModelSpec(xs, ys, spec, `Et<-${et};`);
+    const retryKiapp = retried ? (morrisonRetries.find((r) => r.method === retryMethod)?.kiapp ?? null) : null;
     const v0 = coefOf(coefficients, "v0");
     const kiapp = coefOf(coefficients, "Kiapp");
     if (v0 != null && v0 <= 0) return { error: "Fitted v0 ≤ 0 — the data do not support the Morrison Ki model." };
@@ -496,6 +561,8 @@ async function runMorrison(
       `Total enzyme concentration Et = ${num(et)} is a constrained constant, not a fitted parameter.`,
       `Starting values: v0 = ${num(v00)}, Kiapp = ${num(kiapp0)}.`,
     ];
+    if (retried && retryKiapp != null)
+      notes.push(`The first fit did not converge; retried with Kiapp = ${num(retryKiapp)} and converged.`);
     if (ki != null && kiapp != null)
       notes.push(`Ki = Kiapp/(1 + [S]/Km) = ${num(kiapp)}/(1 + ${num(s!)}/${num(km!)}) = ${num(ki)}.`);
     else notes.push("Ki needs [S] and Km — supply both to convert Kiapp to Ki; Kiapp is reported on its own.");
