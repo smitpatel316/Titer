@@ -8,9 +8,12 @@
 //       replicates, XY summary, date X restored from row titles)
 //   W2  info sheets identical on the 8 fixtures that carry <Info>
 //   W3  the written file is honestly Titer's: CreatedByProgram Titer +
-//       app version, fresh sequential Table0…/Info0… IDs, no <Template>,
-//       no MostRecentVersion/Login, never YFormat=""
+//       app version, fresh sequential Table0…/Info0… IDs, exactly one
+//       EMPTY <Template> element (BUG-21: Prism 11.2.0 shows its
+//       compliance dialog for non-Prism files without one), no
+//       MostRecentVersion/Login, never YFormat=""
 //   W4  a minimal one-table project writes exactly the required elements
+//       (including the empty <Template>)
 //   W5  refusals: Nested / Multiple / mixed-format tables and a project
 //       with no tables refuse the whole write, naming the table
 //   W6  every written file validates against the Prism 8 Mac XSD
@@ -30,8 +33,13 @@
 // (element order, enum membership, no YFormat="", ID/Ref consistency,
 // Subcolumns counts) instead of the XSD itself.
 //
-// C-07 stays OPEN — this leg proves round-trip through Titer's own importer
-// + XSD validation, NOT Prism acceptance.
+// BUG-21 (Nov 17, 2026, real Prism 11.2.0 ablation, 26 files): Prism shows
+// its XML-compliance dialog iff CreatedByProgram != "GraphPad Prism" AND
+// the file carries no <Template>; an empty <Template> element opens with no
+// dialog, titled with the filename, while any non-empty minimal blob fails
+// to open at all. This leg proves round-trip through Titer's own importer
+// + XSD validation; Prism acceptance of the empty Template is pinned by
+// the W3 check below and was verified live against Prism 11.2.0.
 //
 // `npm test` runs this after tests/prism-write.ts.
 /// <reference types="node" />
@@ -109,7 +117,7 @@ function structuralCheck(xml: string): { ok: boolean; detail: string } {
   const fail = (why: string) => ({ ok: false, detail: why });
   if (!xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>')) return fail("missing XML declaration");
   if (!xml.includes('<GraphPadPrismFile PrismXMLVersion="5.00">')) return fail("missing root / PrismXMLVersion");
-  const order = ["<Created>", "<InfoSequence>", "<Info ", "<TableSequence>", "<Table "] as const;
+  const order = ["<Created>", "<InfoSequence>", "<Info ", "<TableSequence>", "<Table ", "<Template"] as const;
   let last = -1;
   for (const tag of order) {
     // A <HugeTable> sits where a <Table> would: take the earlier of the two.
@@ -126,7 +134,12 @@ function structuralCheck(xml: string): { ok: boolean; detail: string } {
     if (at < last) return fail(`element order: ${tag} out of place`);
     last = at;
   }
-  if (xml.includes("<Template")) return fail("contains <Template>");
+  // BUG-21: exactly one <Template>, and it must be the EMPTY element —
+  // a non-empty blob Titer cannot generate honestly, and Prism 11.2.0
+  // refuses to open a file carrying a minimal/corrupt one.
+  const templateEl = '<Template dt:dt="bin.base64" xmlns:dt="urn:schemas-microsoft-com:datatypes"></Template>';
+  if (!xml.includes(templateEl)) return fail("missing the empty <Template> element (BUG-21)");
+  if ((xml.match(/<Template/g) ?? []).length !== 1) return fail("more than one <Template>");
   if (xml.includes('YFormat=""')) return fail('contains YFormat=""');
   if (xml.includes("MostRecentVersion") || xml.includes("Login=")) return fail("contains MostRecentVersion/Login");
   const xFormats = [...xml.matchAll(/ XFormat="([^"]*)"/g)].map((m) => m[1]);
@@ -456,7 +469,10 @@ check("W3 written file identity (all fixtures)", () => {
     ok(xml.includes('CreatedByProgram="Titer"'), `${name}: CreatedByProgram Titer`);
     ok(xml.includes(`CreatedByVersion="${APP_VERSION}"`), `${name}: CreatedByVersion ${APP_VERSION}`);
     ok(!xml.includes("GraphPad Prism"), `${name}: never claims GraphPad Prism`);
-    ok(!xml.includes("<Template"), `${name}: no <Template>`);
+    // BUG-21: exactly one <Template>, and it is the EMPTY element.
+    const templateEl = '<Template dt:dt="bin.base64" xmlns:dt="urn:schemas-microsoft-com:datatypes"></Template>';
+    ok(xml.includes(templateEl), `${name}: empty <Template> element present`);
+    strictEqual((xml.match(/<Template/g) ?? []).length, 1, `${name}: exactly one <Template>`);
     ok(!xml.includes("MostRecentVersion"), `${name}: no MostRecentVersion`);
     ok(!xml.includes("Login="), `${name}: no Login`);
     const tableIds = [...xml.matchAll(/<(?:Table|HugeTable) ID="(Table\d+)"/g)].map((m) => m[1]);
@@ -526,10 +542,10 @@ const minimalProject = syntheticProject(
 check("W4 minimal file writes exactly the required elements", () => {
   const written = writePzfx(minimalProject, APP_VERSION);
   const xml = xmlOf(written);
-  for (const el of ['<?xml version="1.0" encoding="UTF-8"?>', "<Created>", "<TableSequence", '<Table ID="Table0"']) {
+  for (const el of ['<?xml version="1.0" encoding="UTF-8"?>', "<Created>", "<TableSequence", '<Table ID="Table0"', '<Template dt:dt="bin.base64"']) {
     ok(xml.includes(el), `contains ${el}`);
   }
-  for (const el of ["<InfoSequence", "<Info ", "<Template", "<Script", "<RowTitlesColumn", "<XColumn", "<XAdvancedColumn"]) {
+  for (const el of ["<InfoSequence", "<Info ", "<Script", "<RowTitlesColumn", "<XColumn", "<XAdvancedColumn"]) {
     ok(!xml.includes(el), `omits ${el}`);
   }
   strictEqual((xml.match(/<Table /g) ?? []).length, 1, "exactly one Table");
@@ -537,6 +553,16 @@ check("W4 minimal file writes exactly the required elements", () => {
   const back = parsePzfx(xml);
   strictEqual(JSON.stringify(tablesOf(back.project)[0].data), JSON.stringify(minimalProject.nodes.table_1.data));
   ok(formatPzfxWriteReport(written.report).includes("Tables written: 1 — Minimal"), "report formats");
+});
+
+check("W4 BUG-21: empty <Template> is the last child, carrying no blob", () => {
+  const xml = xmlOf(writePzfx(minimalProject, APP_VERSION));
+  const templateEl = '<Template dt:dt="bin.base64" xmlns:dt="urn:schemas-microsoft-com:datatypes"></Template>';
+  const at = xml.indexOf(templateEl);
+  ok(at > 0, "empty <Template> present");
+  ok(xml.lastIndexOf("</Table>", at) > 0, "Template comes after the tables");
+  strictEqual(xml.slice(at + templateEl.length).trim(), "</GraphPadPrismFile>", "Template is the last child before the close");
+  ok(!/<Template[^>]*>[^<]+<\/Template>/.test(xml), "Template carries no blob content");
 });
 
 // ── W5 — refusals ──────────────────────────────────────────────────────
