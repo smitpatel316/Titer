@@ -394,12 +394,50 @@ export function setRecentDocuments(paths: string[]) {
   if (isNative) void invoke("set_recent_documents", { paths });
 }
 
+/** How long the page gets to go quiet before the window is destroyed (BUG-12). */
+const CLOSE_QUIESCE_MS = 250;
+
+/** Quiets the page before the window is destroyed (BUG-12): Titer 1.6.1 crashed on
+ *  close (EXC_BAD_ACCESS in WebKit's RemoteLayerTreeDrawingAreaProxy::commitLayerTree)
+ *  because the live, actively-committing WKWebView was destroyed in the same runloop
+ *  turn as the close approval, while layer-tree commit IPC was still queued. Hiding
+ *  the window detaches the display link — the commit pump behind both the Nov 17
+ *  commitLayerTree crashes and the Nov 15 didRefreshDisplay crash; stopping loads
+ *  and clearing the document stop content-change commits (timers, animations,
+ *  ResizeObserver re-renders); the drain lets already-queued IPC dispatch while the
+ *  drawing-area proxy still exists. The window is already hidden, so the close still
+ *  feels instant. Best-effort throughout: a failure here must never leave a window
+ *  unclosable. Runs only once the save question is settled (see onCloseRequested). */
+async function quiesceBeforeClose(): Promise<void> {
+  try {
+    await win().hide();
+  } catch {
+    // A window that won't hide still closes; the drain below still helps.
+  }
+  try {
+    window.stop();
+  } catch {
+    // Nothing was loading; nothing to stop.
+  }
+  try {
+    document.body?.replaceChildren();
+  } catch {
+    // The document is already gone; nothing to clear.
+  }
+  await new Promise<void>((resolve) => setTimeout(resolve, CLOSE_QUIESCE_MS));
+}
+
 /** Run `canClose` whenever the window is about to close (red button, ⌘W, ⌘Q). A window
- *  that stays open while Titer quits stops the quitting. */
+ *  that stays open while Titer quits stops the quitting. Once `canClose` says the
+ *  window may go, the page is quieted first (quiesceBeforeClose, BUG-12) and only
+ *  then is the window destroyed. */
 export function onCloseRequested(canClose: () => Promise<boolean>) {
   if (!isNative) return () => {};
   const off = win().onCloseRequested(async (event) => {
-    if (await canClose()) return;
+    if (await canClose()) {
+      await quiesceBeforeClose();
+      return;
+    }
     event.preventDefault();
     void invoke("cancel_quit");
   });
