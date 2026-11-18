@@ -1657,6 +1657,18 @@ pub struct CloseProjectArgs {
 // the job's result. `titer_run_analysis` stays async (L4, GAP-6); table
 // jobs never touch R, so they answer directly.
 
+/// One band of a grouped table's rows, carrying one level of a third
+/// factor — the `row_groups` of `titer_write_table` / `titer_create_table`.
+/// Serde enforces the shape (a name and a row count); the frontend
+/// validates the bands tile the table's rows exactly.
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct RowGroup {
+    /// The band's name (shown in the Groups panel); must be non-empty.
+    pub name: String,
+    /// How many consecutive rows the band covers; must be at least 1.
+    pub count: usize,
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CreateTableArgs {
     /// Window label of the project ("project-1"); omit for the front project.
@@ -1675,6 +1687,11 @@ pub struct CreateTableArgs {
     /// pad with blanks). Cells are strings, numbers or null.
     #[serde(default)]
     pub rows: Option<Vec<Vec<serde_json::Value>>>,
+    /// Grouped tables only: the row bands (factor-C levels), each a
+    /// {"name", "count"} pair; the counts must tile the rows exactly.
+    /// Omit for no third factor.
+    #[serde(default)]
+    pub row_groups: Option<Vec<RowGroup>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -1699,6 +1716,12 @@ pub struct WriteTableArgs {
     /// table's marks; when omitted the marks are preserved.
     #[serde(default)]
     pub excluded: Option<Vec<String>>,
+    /// Grouped tables only: the row bands (factor-C levels), each a
+    /// {"name", "count"} pair; the counts must tile the rows exactly.
+    /// When given they replace the table's bands (an empty list clears
+    /// them); when omitted the bands are preserved.
+    #[serde(default)]
+    pub row_groups: Option<Vec<RowGroup>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -2607,7 +2630,7 @@ impl TiterMcpServer {
     /// the given columns and rows. Column 0 is the row-title column.
     #[tool(
         name = "titer_create_table",
-        description = "Create a data table: the empty table of a type (column, xy, grouped, nested, multiple, contingency, survival), or one filled with the given columns and rows. Column 0 is the row-title column.",
+        description = "Create a data table: the empty table of a type (column, xy, grouped, nested, multiple, contingency, survival), or one filled with the given columns and rows. Grouped tables only: row_groups sets the row bands (factor-C levels) as {\"name\", \"count\"} pairs tiling the rows exactly. Column 0 is the row-title column.",
         annotations(
             title = "Create table",
             read_only_hint = false,
@@ -2639,11 +2662,14 @@ impl TiterMcpServer {
                     return Err("The table name must not be empty.".into());
                 }
             }
+            if args.row_groups.is_some() && (args.columns.is_none() || args.rows.is_none()) {
+                return Err("row_groups needs columns and rows — pass them together.".into());
+            }
             let job_args = match (&args.columns, &args.rows) {
                 (None, None) => serde_json::json!({ "table_type": args.table_type, "name": args.name }),
                 (Some(columns), Some(rows)) => {
                     validate_table_shape(columns, rows)?;
-                    serde_json::json!({ "table_type": args.table_type, "name": args.name, "columns": columns, "rows": rows })
+                    serde_json::json!({ "table_type": args.table_type, "name": args.name, "columns": columns, "rows": rows, "row_groups": args.row_groups })
                 }
                 _ => return Err("columns and rows go together — pass both, or neither for an empty table.".into()),
             };
@@ -2667,7 +2693,7 @@ impl TiterMcpServer {
     /// passes `excluded`.
     #[tool(
         name = "titer_write_table",
-        description = "Replace a table's whole data (columns and rows), validated against the table type. Excluded-cell marks are preserved unless the call passes excluded. Column 0 is the row-title column.",
+        description = "Replace a table's whole data (columns and rows), validated against the table type. Excluded-cell marks are preserved unless the call passes excluded. Grouped tables only: row_groups sets the row bands (factor-C levels) as {\"name\", \"count\"} pairs tiling the rows exactly; an empty list clears them, omitting preserves them. Column 0 is the row-title column.",
         annotations(
             title = "Write table",
             read_only_hint = false,
@@ -2689,6 +2715,7 @@ impl TiterMcpServer {
             "rows": args.rows.len(),
             "label": args.label,
             "excluded": args.excluded.as_ref().map(|e| e.len()),
+            "row_groups": args.row_groups.as_ref().map(|g| g.len()),
         });
         let outcome: Result<serde_json::Value, String> = async {
             let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
@@ -2735,6 +2762,7 @@ impl TiterMcpServer {
                     "rows": args.rows,
                     "label": args.label,
                     "excluded": args.excluded,
+                    "row_groups": args.row_groups,
                 }),
             )
             .await
