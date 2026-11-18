@@ -32,8 +32,12 @@ while [ $# -gt 0 ]; do
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
-BIN="$HOME/workspace/.helix-owed-items/battery-full-loop/work/appimage/squashfs-root/usr/bin/titer"
-[ -x "$BIN" ] || BIN="$HOME/workspace/helix-release/v1.6-linux/squashfs-root/usr/bin/titer"
+BIN="$HOME/workspace/.helix-owed-items/battery-full-loop/work/appimage/squashfs-root/AppRun"
+[ -x "$BIN" ] || BIN="$HOME/workspace/helix-release/v1.6-linux/squashfs-root/AppRun"
+# NOTE: run AppRun, NOT usr/bin/titer directly — the bare binary fails to
+# spawn WebKitNetworkProcess (its helper path resolves through the AppRun
+# environment). Verified 2026-11-18: direct usr/bin/titer dies with
+# "Unable to spawn a new child process ... WebKitNetworkProcess".
 [ -x "$BIN" ] || { echo "FAIL: no runnable shipped 1.6.0 binary found" >&2; exit 1; }
 SCRATCH="$OUT_DIR/.e2e-home-battery"
 export XDG_DATA_HOME="$SCRATCH/data" XDG_CONFIG_HOME="$SCRATCH/config" XDG_CACHE_HOME="$SCRATCH/cache"
