@@ -50,7 +50,9 @@ export type GraphType =
   | "kmeans-scatter"
   | "monte-carlo-histogram"
   | "bubble-plot"
-  | "histogram";
+  | "histogram"
+  | "qq-plot"
+  | "residuals";
 
 /** The choices of a graph's options, one list each: the types come from them, and a
  *  file's value outside them is read as the option's default. */
@@ -67,7 +69,9 @@ export const GRAPH_CHOICES = {
   xyReplicates: ["mean", "each"],
   pieValue: ["sum", "mean"],
   groupLayout: ["interleaved", "separated"],
-  sigDisplay: ["stars", "pvalue"],
+  sigDisplay: ["stars", "pvalue", "letters"],
+  regBand: ["confidence", "prediction"],
+  residualsAs: ["x", "qq"],
   survivalMode: ["codes", "counts"],
   volcanoEffect: ["log2ratio", "difference"],
   volcanoSignificance: ["pvalue", "fdr"],
@@ -185,10 +189,10 @@ export interface GraphOptions {
   xMaxConstant?: string;
   // A histogram's bin width, in the values' units; omitted (or 0 and under), R's own bins.
   binWidth?: number;
-  // Significance annotations (Column family only): read a sibling analysis's
+  // Significance annotations (Column and grouped graphs): read a sibling analysis's
   // pairwise comparisons and draw brackets. `sigAnalysisId` is the source analysis
   // node; `sigPairs` are the comparison keys (see significance-overlay) to draw;
-  // `sigDisplay` toggles star marks vs. raw P values.
+  // `sigDisplay`: star marks, raw P values, or letters over every group (no brackets).
   sigAnalysisId?: string;
   sigPairs?: string[];
   sigDisplay: Choice<"sigDisplay">;
@@ -198,6 +202,10 @@ export interface GraphOptions {
   regAnalysisId?: string;
   regShowLine: boolean;
   regShowBand: boolean;
+  // The band's kind: where the line lies (confidence), or where a new point would (prediction).
+  regBand: Choice<"regBand">;
+  // A residual plot: residuals against X, or their QQ plot.
+  residualsAs: Choice<"residualsAs">;
   regShowEquation: boolean;
   // Deming-regression overlay (XY scatter only): draw a sibling "Deming regression"
   // analysis's fit line (solid) plus the OLS line (dashed) for comparison, both
@@ -326,6 +334,12 @@ export interface GraphOptions {
   // Every series line's thickness (px) and dashes; a series' dashes win.
   lineWidth: number;
   lineDash: LineDash;
+  // The data sets it shows (columns, a grouped table's groups, an XY table's Y data sets),
+  // by name; none: all of them. One table, many graphs of some of its data sets.
+  sets?: string[];
+  // Lines across the plot at values of the value axis (Y; X on horizontal bars): a sham
+  // group's level, a threshold… (`refLineParts` draws them).
+  refLines?: RefLine[];
   // Texts moved by hand: the legend (or a heatmap's color legend), as a fraction of
   // the plot area; the note (a fit's equation), in px from its corner. None: in place.
   legend?: Place;
@@ -376,6 +390,8 @@ export const DEFAULT_GRAPH_OPTIONS: GraphOptions = {
   sigDisplay: "stars",
   regShowLine: true,
   regShowBand: true,
+  regBand: "confidence",
+  residualsAs: "x",
   regShowEquation: true,
   demingShowLine: true,
   demingShowOls: true,
@@ -486,6 +502,25 @@ export interface PointStyle {
 }
 
 /** A position: of a text on the graph, or of a name from its point. */
+/** A reference line: where (in the value axis's units), its dashes, thickness (px) and
+ *  color (none: the axes'), and the text at its end. */
+export interface RefLine {
+  value: number;
+  dash: LineDash;
+  width: number;
+  color?: string;
+  label?: string;
+  /** Where its text sits (none: top right): above or below a horizontal line, at its right
+   *  or left end; at the top or bottom of a vertical one, right or left of it. */
+  labelPlace?: RefLabelPlace;
+}
+
+export const REF_LABEL_PLACES = ["top-right", "top-left", "bottom-right", "bottom-left"] as const;
+export type RefLabelPlace = (typeof REF_LABEL_PLACES)[number];
+
+/** How many reference lines a graph holds at most. */
+export const MAX_REF_LINES = 10;
+
 export interface Place {
   x: number;
   y: number;
@@ -601,6 +636,32 @@ export interface TableData {
   notes?: string;
 }
 
+/** How a table computed from another transforms its values (lib/transform.ts). */
+export const TRANSFORMS = ["log10", "log2", "ln", "normalize", "percent-of-control", "z-score"] as const;
+/** What a z-score is taken within: each data set, or each row. */
+export const Z_WITHIN = ["set", "row"] as const;
+
+/** A table computed from another (`from`, a table's id): its values transformed, kept in
+ *  step with that table's. `control`: the data set a percent is of; `within`: a z-score's. */
+export interface Transform {
+  from: string;
+  kind: (typeof TRANSFORMS)[number];
+  control?: string;
+  within?: (typeof Z_WITHIN)[number];
+}
+
+/** The Finder's tag colors, in its order, as an item's `tags` name them. */
+export const TAG_COLORS = {
+  red: "#FF3B30",
+  orange: "#FF9500",
+  yellow: "#FFCC00",
+  green: "#34C759",
+  blue: "#007AFF",
+  purple: "#AF52DE",
+  gray: "#8E8E93",
+} as const;
+export type TagColor = keyof typeof TAG_COLORS;
+
 /** One row of an info sheet's structured table: a name and a string value,
  *  as Prism stores it ("2018-07-23", "0.5", ""). Numeric when a hook needs it.
  *  `notes` is a script-only appendage (a script's SetInfo position 2) — the
@@ -634,6 +695,12 @@ export interface ProjectNode {
   highlight?: SheetHighlight;
   tableType?: TableType;
   data?: TableData;
+  /** Tables computed from another only: how (their `data` is computed, never typed). */
+  transform?: Transform;
+  /** The user's note on the item (none: empty), in the right panel's Notes. */
+  notes?: string;
+  /** Its tags, as the Finder's: colors in `TAG_COLORS`' order, shown in the sidebar. */
+  tags?: TagColor[];
   /** Analysis nodes only: which statistical test this node runs. */
   analysisType?: AnalysisType;
   /** Analysis nodes only: wizard-chosen params for the test, when it has any. */

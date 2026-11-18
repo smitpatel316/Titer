@@ -3,6 +3,8 @@
 // resulting numbers. Every number an analysis shows comes from R, its groups'
 // descriptives too (`describe`): the same for every test.
 
+import { maxOf } from "../../lib/summary";
+import { pairKey } from "../../lib/columns";
 import type { TAILS, AnalysisType, AnalysisOutcome, Column, ComparisonRow, DifferenceResult, GroupDescriptives, NormalityRow, StatRow } from "../types";
 import { evalNamedVector } from "../webr";
 
@@ -50,6 +52,10 @@ export const R_DESCRIBE =
   "unlist(lapply(seq_along(G),function(i){x<-G[[i]];if(is.null(x))x<-numeric(0);n<-length(x);s<-if(n>1)sd(x) else NA;" +
   'setNames(c(n,mean(x),s,s/sqrt(n),median(x)),paste0(c("n_","m_","s_","e_","md_"),i-1))}))';
 
+// NaN is not null: R's mean of an empty group is NaN, and `?? null` would
+// let it through as a value.
+const num = (x: number | null | undefined): number | null => (x == null || Number.isNaN(x) ? null : x);
+
 /** Each group's descriptives, computed by R, and the difference of means of each of
  *  `pairs` (`diff(i, j)`). An empty group comes back as nulls (n = 0), never
  *  NaN: R's `mean(numeric(0))` is NaN, and `?? null` does not catch NaN, so
@@ -65,21 +71,19 @@ export async function describe(
       `G<-lapply(G,function(x)if(is.null(x))numeric(0) else x);` +
       `c(${R_DESCRIBE}${pairs.map(([i, j]) => `,d_${i}_${j}=mean(G[[${i + 1}]])-mean(G[[${j + 1}]])`).join("")})`,
   );
-  // NaN is not null: R's mean of an empty group is NaN, and `?? null` would
-  // let it through as a value. The same guard covers the difference of means.
-  const num = (x: number | null | undefined): number | null => (x == null || Number.isNaN(x) ? null : x);
-  return {
-    groups: groups.map((g, i) => ({
-      name: g.name,
-      mean: num(v[`m_${i}`]),
-      sd: num(v[`s_${i}`]),
-      sem: num(v[`e_${i}`]),
-      median: num(v[`md_${i}`]),
-      n: v[`n_${i}`] ?? 0,
-    })),
-    diff: (i, j) => num(v[`d_${i}_${j}`]),
-  };
+  return { groups: describedBy(v, groups), diff: (i, j) => num(v[`d_${i}_${j}`]) };
 }
+
+/** Each group's descriptives as `R_DESCRIBE` names them in `v`. */
+export const describedBy = (v: Record<string, number | null>, groups: { name: string }[]): GroupDescriptives[] =>
+  groups.map((g, i) => ({
+    name: g.name,
+    mean: num(v[`m_${i}`]),
+    sd: num(v[`s_${i}`]),
+    sem: num(v[`e_${i}`]),
+    median: num(v[`md_${i}`]),
+    n: v[`n_${i}`] ?? 0,
+  }));
 
 /** Render an R numeric vector literal from values. No row-count cap or
  *  chunking (CC-m10, measured 2026-11-16): serializing is linear and cheap
@@ -93,7 +97,11 @@ export const rVec = (values: number[]) => `c(${values.join(",")})`;
 
 /** Escape a string for safe embedding in an R double-quoted literal, so a group
  *  or column name containing `"` or `\` can't break (or inject into) the R code. */
-export const rStr = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+export const rStr = (s: string) =>
+  `"${s
+    .replace(/\0/g, "") // R's strings can't hold a NUL
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')}"`;
 
 /** Declare each group as an R variable `g0`, `g1`, … for use in a test's rCode. */
 export const declareGroups = (groups: Group[]) => groups.map((g, i) => `g${i}<-${rVec(g.values)}`).join(";");
@@ -135,6 +143,48 @@ export function pairIndices(k: number): [number, number][] {
   }
   return pairs;
 }
+
+/** R: `ptk(q, k, df)`, the studentized range's upper tail. R's `ptukey` needs 2 df or more;
+ *  below (Games-Howell on duplicates, a paired comparison of 2 subjects), its exact integral
+ *  over the SD's distribution, checked against Tukey's tables at 1 df and the t at k = 2. */
+export const R_PTUKEY =
+  "ptk<-function(q,k,df)if(is.na(q)||is.na(df))NA else if(df>=2)ptukey(q,k,df,lower.tail=FALSE) else " +
+  "integrate(function(s)ptukey(q*s,k,Inf,lower.tail=FALSE)*2*df*s*dchisq(df*s^2,df),0,Inf,rel.tol=1e-10)$value";
+
+/** R: P values corrected for the `m` pairs of a family (`adj`, from each pair's raw P), and a
+ *  pair's corrected P from its |t| (`pa`), by `how`: Bonferroni, Šidák, Holm-Šidák (step-down:
+ *  the smallest P against m pairs, the next against m − 1…, never below an earlier one) or
+ *  Fisher's LSD (none). Holm-Šidák's step-down gives no CI (`pa` NA). */
+export const R_ADJUST = `adj<-function(p,how){m<-length(p);if(how=="fisher")return(p);if(how=="bonferroni")return(pmin(1,m*p))
+if(how=="sidak")return(1-(1-p)^m);o<-order(p);a<-cummax(1-(1-p[o])^(m-seq_len(m)+1));r<-numeric(m);r[o]<-pmin(1,a);r}
+pa<-function(t,df,how,m){p<-2*pt(-abs(t),df);switch(how,fisher=p,bonferroni=pmin(1,m*p),sidak=1-(1-p)^m,NA)}`;
+
+/** The pairs a test compares: every pair, or those `compared` names (`pairKey`, either way
+ *  round), in the order of every pair. */
+export function comparedPairs(groups: { name: string }[], compared: string[] | undefined): [number, number][] {
+  const all = pairIndices(groups.length);
+  if (!compared?.length) return all;
+  const chosen = new Set(compared);
+  return all.filter(
+    ([i, j]) =>
+      chosen.has(pairKey(groups[i].name, groups[j].name)) || chosen.has(pairKey(groups[j].name, groups[i].name)),
+  );
+}
+
+/** R: `crit(f)`, the statistic at which a comparison's adjusted P (`f`, falling as the
+ *  statistic grows) is 0.05: its multiplicity-adjusted 95% CI is its difference ± that many
+ *  standard errors, so the CI leaves out 0 exactly when P < 0.05. */
+export const R_CRIT =
+  'crit<-function(f,from=c(0.01,50))tryCatch(uniroot(function(x)f(x)-0.05,from,extendInt="downX",tol=1e-10)$root,error=function(e)NA)';
+
+/** R: a comparison's 95% CI as `lo_<key>` and `hi_<key>`: `diff` ± `crit(function(x) f)`
+ *  standard errors (`se`). */
+export const ciOf = (key: string, diff: string, se: string, f: string) => ciAt(key, diff, se, `crit(function(x)${f})`);
+
+/** R: the same CI from a critical value `h` found once for a whole family (one Dunnett's or
+ *  Tukey's: the same distribution for every comparison, its search done once). */
+export const ciAt = (key: string, diff: string, se: string, h: string) =>
+  `setNames({d<-${diff};h<-(${h})*(${se});c(d-h,d+h)},c("lo_${key}","hi_${key}"))`;
 
 /** R's `c()` only names an element from an explicit `name = value` tag — a bare
  *  variable reference like `c(p_0_1)` comes back unnamed, so `evalNamedVector`
@@ -234,18 +284,20 @@ export function adjustComparisonRows(rows: ComparisonRow[], method: PAdjustment)
   return rows.map((r, i) => ({ ...r, p: adjusted[i] }));
 }
 
-/** The comparisons table: each pair's names, its difference of means and its P value. */
+/** The comparisons table: each pair's names, its difference of means and its P value,
+ *  and its 95% CI (`lo_i_j`/`hi_i_j`) when the test computed one. */
 function buildComparisons(
   groups: Group[],
   pairs: [number, number][],
   diff: (i: number, j: number) => number | null,
-  pValueFor: (i: number, j: number) => number | null,
+  v: Record<string, number | null>,
 ): ComparisonRow[] {
   return pairs.map(([i, j]) => ({
     group1: groups[i].name,
     group2: groups[j].name,
     diff: diff(i, j),
-    p: pValueFor(i, j),
+    p: v[`p_${i}_${j}`] ?? null,
+    ...(`lo_${i}_${j}` in v ? { low: v[`lo_${i}_${j}`], high: v[`hi_${i}_${j}`] ?? null } : {}),
   }));
 }
 
@@ -256,6 +308,7 @@ const POSTHOC_LABELS: Record<string, string> = {
   sidak: "Šídák-corrected multiple comparisons",
   "holm-sidak": "Holm–Šídák multiple comparisons test",
   lsd: "Fisher's LSD test (uncorrected)",
+  fisher: "Fisher's LSD test, uncorrected",
   dunn: "Dunn's multiple comparisons test (Bonferroni-corrected)",
   "dunn-sidak": "Dunn's multiple comparisons test (Šídák-corrected)",
   "dunn-holm-sidak": "Dunn's multiple comparisons test (Holm–Šídák-corrected)",
@@ -283,6 +336,9 @@ export interface ColumnTestSpec<P = unknown> {
   matched?: (params: P | undefined) => boolean;
   /** An error to show instead of running (e.g. a chosen column is gone). */
   check?: (columns: Column[], params: P | undefined) => string | undefined;
+  /** What the groups it runs on lack for this test, said before R runs (values all
+   *  identical…), once each holds the values it needs. */
+  checkGroups?: (groups: Group[], params: P | undefined) => string | undefined;
   /** How to turn raw columns into groups; defaults to `dataGroups` (independent
    *  per-column filtering). Override for e.g. paired tests that need row alignment. */
   parseGroups?: (columns: Column[], params: P | undefined) => Group[];
@@ -313,6 +369,8 @@ export interface ColumnTestSpec<P = unknown> {
   adjustComparisons?: (rows: ComparisonRow[], params: P | undefined) => ComparisonRow[];
   /** The pairs it compares, group1 first (every pair by default: `pairIndices`). */
   pairs?: (groups: Group[], params: P | undefined) => [number, number][];
+  /** Its comparisons are ratios of geometric means, R's `r_i_j` (a lognormal test). */
+  ratios?: (params: P | undefined) => boolean;
   /** Static notes, or resolved from params (e.g. which t-test variant ran) — also given
    *  the parsed groups and raw columns, for notes that depend on data shape (e.g. how
    *  many rows were dropped for missing data). */
@@ -360,12 +418,16 @@ export async function runColumnTest<P>(
         : `“${few.name}” holds ${n} value${n === 1 ? "" : "s"}; this test needs at least ${need} in each group.`,
     };
   }
+  const lack = spec.checkGroups?.(groups, params);
+  if (lack) return { error: lack };
   const v = await evalNamedVector(spec.rCode(groups, params));
   // A post-hoc that ran gives every pair's P value as `p_i_j` (`pairIndices`).
   const posthoc = spec.posthoc?.(params);
   const pairs = posthoc ? (spec.pairs?.(groups, params) ?? pairIndices(groups.length)) : [];
   const { groups: described, diff } = await describe(groups, pairs);
-  const raw = posthoc ? buildComparisons(groups, pairs, diff, (i, j) => v[`p_${i}_${j}`] ?? null) : undefined;
+  const raw = posthoc
+    ? buildComparisons(groups, pairs, spec.ratios?.(params) ? (i, j) => v[`r_${i}_${j}`] ?? null : diff, v)
+    : undefined;
   const comparisons = raw ? (spec.adjustComparisons?.(raw, params) ?? raw) : undefined;
   const baseNotes = typeof spec.notes === "function" ? spec.notes(params, groups, columns) : spec.notes;
   const extraNotes = spec.valueNotes?.(v, described, params);
@@ -380,8 +442,65 @@ export async function runColumnTest<P>(
     notes: extraNotes ? `${baseNotes} ${extraNotes}` : baseNotes,
     comparisons,
     comparisonsLabel: posthoc,
+    ...(posthoc && spec.ratios?.(params) ? { comparisonsEffect: "Ratio of geometric means" } : {}),
   };
 }
+
+/** A 95% CI as shown: a one-tailed test's is open on one side (R gives ±Inf, which crosses
+ *  into JS as null): ∞ there. `zero`: the CI of a ratio, whose lower end is then 0. */
+export function ciRows(tails: string, lo: number | null, hi: number | null, prefix = "", zero = false): StatRow[] {
+  return [
+    { label: `${prefix}95% CI lower`, value: tails === "less" ? (zero ? 0 : -Infinity) : lo },
+    { label: `${prefix}95% CI upper`, value: tails === "greater" ? Infinity : hi },
+  ];
+}
+
+/** Whether the values are all the same: no scatter to test. */
+export const identical = (values: number[]) => values.every((v) => v === values[0]);
+
+/** Two results equal as typed: a computer's subtractions err by a few 1e-16 of the values'
+ *  scale; 1e-13 of it is far above that, and below the 13th significant digit, beyond any
+ *  measurement's (`R_DIFF` takes the same). */
+const TYPED = 1e-13;
+const scaleOf = (values: number[]) => maxOf(values.map(Math.abs));
+
+/** Whether the paired differences `a − b` are all the same (as typed)… */
+export function sameDifferences(a: number[], b: number[]): boolean {
+  const tolerance = TYPED * scaleOf([...a, ...b]);
+  return a.every((x, i) => Math.abs(x - b[i] - (a[0] - b[0])) <= tolerance);
+}
+
+/** …and all 0: every pair holds the same value twice. */
+export const noDifference = (a: number[], b: number[]) =>
+  sameDifferences(a, b) && Math.abs(a[0] - b[0]) <= TYPED * scaleOf([...a, ...b]);
+
+/** Whether matched groups (a subject per row) leave no residual scatter: each value is its
+ *  subject's level plus its group's, exactly (as typed). */
+export function matchedFit(groups: Group[]): boolean {
+  const k = groups.length;
+  const n = groups[0].values.length;
+  const all = groups.flatMap((g) => g.values);
+  const tolerance = TYPED * scaleOf(all);
+  const grand = all.reduce((a, v) => a + v, 0) / all.length;
+  const col = groups.map((g) => g.values.reduce((a, v) => a + v, 0) / n);
+  const row = groups[0].values.map((_, r) => groups.reduce((a, g) => a + g.values[r], 0) / k);
+  return groups.every((g, j) => g.values.every((v, r) => Math.abs(v - row[r] - col[j] + grand) <= tolerance));
+}
+
+/** The error for groups whose values are all the same, or none. */
+export function noScatter(groups: Group[], test: string): string | undefined {
+  if (identical(groups.flatMap((g) => g.values)))
+    return `All the values are identical: the ${test} has nothing to compare.`;
+}
+
+/** R: `a − b` as the decimals typed give it. A computer's 13.2 − 12.5 is 0.69999999999999929
+ *  and its 1.3 − 0.6 is 0.70000000000000007: the signed-rank test would rank them apart. So
+ *  sizes within 1e-13 of the values' scale of the next smaller one are made one (a tie), and
+ *  differences within it of 0 are 0; grouped, not rounded, so no two land either side of a
+ *  rounding edge. */
+export const R_DIFF =
+  "dif<-function(a,b){d<-a-b;t<-1e-13*max(abs(c(a,b)));d[abs(d)<=t]<-0;m<-abs(d);o<-order(m);" +
+  "k<-cumsum(c(TRUE,diff(m[o])>t));m[o]<-m[o][match(k,k)];sign(d)*m}";
 
 /** R: Hedges' correction of a Cohen's d with `df` degrees of freedom, exact (none under 2 df). */
 export const R_HEDGES = "J<-function(df)if(df<2)NA else exp(lgamma(df/2)-lgamma((df-1)/2))/sqrt(df/2)";
