@@ -57,6 +57,16 @@ if [ "$PROBE_ONLY" = 1 ]; then
   exit 0
 fi
 rm -f "$DISC"
+# Xvfb writes its pid lock to /tmp — a full /tmp (orphaned AppImage
+# extractions fill the 512M tmpfs) makes Xvfb fail with "Could not write
+# pid to lock file". Fail early with a clear message instead of a
+# confusing Xvfb death.
+TMP_AVAIL_KB="$(df -k /tmp 2>/dev/null | awk 'NR==2 {print $4}')"
+if [ -n "$TMP_AVAIL_KB" ] && [ "$TMP_AVAIL_KB" -lt 51200 ]; then
+  echo "FAIL: /tmp has only ${TMP_AVAIL_KB} KB free (<50 MB) — Xvfb cannot write its lock file." >&2
+  echo "  Check for orphaned /tmp/appimage_extracted_* dirs (lsof +D <dir> must show no live user) and remove them." >&2
+  exit 1
+fi
 echo "binary: $BIN"
 echo "display: $DISPLAY_NUM  scratch: $SCRATCH"
 Xvfb "$DISPLAY_NUM" -listen tcp -screen 0 1280x800x24 >>"$OUT_DIR/xvfb.log" 2>&1 &
