@@ -2,6 +2,7 @@
 // the app's, not a window's) and set again when what it shows changes (active table
 // type, selection, unsaved state, recent files, theme) or another window comes to
 // the front. Its project-free parts are in menus.ts.
+import { WIZARDS } from "./views/analyses/wizards";
 import * as React from "react";
 import { isNative, onFocusChange, setTheme, type Theme } from "./native";
 import { projectItems, separator as sep, setMenuBar } from "./menus";
@@ -51,7 +52,16 @@ function edit(command: EditCommand) {
 export function useAppMenu(doc: DocumentActions) {
   const store = useProjectStore();
   const startAnalysis = useStartAnalysis();
-  const { sidebar, inspector, inspectorHere, setLayout, setOpenSections, setFoldedTables } = useLayout();
+  const { sidebar, inspector, panel, inspectorHere, settingsHere, setLayout, setOpenSections, setFoldedTables } =
+    useLayout();
+  // What the right panel shows, if shown: the note, or the settings where there are some.
+  const shown = !inspector ? null : panel === "settings" && settingsHere ? "settings" : "notes";
+  const panelItem = (view: "notes" | "settings", label: string, accelerator: string, enabled: boolean) => ({
+    text: `${shown === view ? "Hide" : "Show"} ${label}`,
+    accelerator,
+    enabled,
+    action: () => setLayout(shown === view ? { inspector: false } : { inspector: true, panel: view }),
+  });
   const [theme, setThemeState] = React.useState(savedTheme);
 
   // Menu actions run long after the menu was built: read everything through this ref.
@@ -115,7 +125,7 @@ export function useAppMenu(doc: DocumentActions) {
   );
 
   // A graph's Format panel shown, whose sections the View menu folds.
-  const formatShown = activeNode?.type === "graph" && inspector;
+  const formatShown = activeNode?.type === "graph" && shown === "settings";
 
   React.useEffect(() => {
     if (!isNative || !focused) return;
@@ -300,7 +310,8 @@ export function useAppMenu(doc: DocumentActions) {
             ? analysisOptionsForTable(tableType, activeTableId ? nodes[activeTableId]?.data : undefined)
             : []
           ).map((o) => ({
-            text: o.label,
+            // A test with questions asks before running: "…".
+            text: o.value === "transform" || WIZARDS[o.value] ? `${o.label}…` : o.label,
             action: run((l, id) => l.startAnalysis(id, o.value)),
           })),
           sep,
@@ -368,12 +379,8 @@ export function useAppMenu(doc: DocumentActions) {
             accelerator: "CmdOrCtrl+B",
             action: () => setLayout({ sidebar: !sidebar }),
           },
-          {
-            text: inspector ? "Hide Inspector" : "Show Inspector",
-            accelerator: "CmdOrCtrl+Alt+I",
-            enabled: inspectorHere,
-            action: () => setLayout({ inspector: !inspector }),
-          },
+          panelItem("notes", "Notes", "CmdOrCtrl+Alt+N", inspectorHere),
+          panelItem("settings", "Inspector", "CmdOrCtrl+Alt+I", settingsHere),
           sep,
           // Every table, or every section of a graph's Format panel, at once (⌥ on a triangle too).
           { text: "Expand All Tables", enabled: tableCount > 0, action: () => setFoldedTables(new Set()) },
@@ -412,6 +419,8 @@ export function useAppMenu(doc: DocumentActions) {
     tableCount,
     formatShown,
     inspectorHere,
+    settingsHere,
+    shown,
     isDirty,
     doc.recents,
     theme,

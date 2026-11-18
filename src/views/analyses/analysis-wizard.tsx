@@ -1,22 +1,23 @@
 // Asks an analysis's questions (wizards.ts) like a macOS assistant: one question at
-// a time, Cancel, Back, then Next — or Run on the last one. A "Not sure" answer
-// runs Shapiro-Wilk and answers for the user. Mounts fresh for each analysis.
+// a time, Cancel, Back, then Next — or Run on the last one (Create for a transformed
+// table). A "Not sure" answer runs Shapiro-Wilk and answers for the user. Mounts fresh for each analysis.
 import * as React from "react";
 import { Button, Checkbox, Field, Input, NumberInput, RadioList } from "../../ui/controls";
 import { Dialog } from "../../ui/dialog";
 import { readTable } from "../../lib/dataset";
-import type { AnalysisParams, AnalysisType } from "../../stats/types";
 import type { TableData, TableType } from "../../store/types";
-import { useProjectStore } from "../../store/use-project-store";
+import { useProjectActions, useProjectStore } from "../../store/use-project-store";
 import { checkNormality } from "./normality-check";
 import { useAnalysisLauncher } from "./use-analysis-launcher";
 import { analysisLabel } from ".";
 import { packageGate } from "../../stats";
 import { ensurePackages } from "../../stats/webr";
 import {
+  answersFor,
   chosenSets,
   parseUnknowns,
   toggled,
+  TRANSFORM_WIZARD,
   WIZARDS,
   type Answer,
   type Answers,
@@ -28,20 +29,38 @@ const NOT_SURE = { value: "check", label: "Not sure — check for normality firs
 
 export function AnalysisWizard() {
   const { nodes, selector, closeSelector } = useProjectStore();
+  const { createTransformed } = useProjectActions();
   const launch = useAnalysisLauncher();
   if (selector?.kind !== "analysis-params") return null;
   const { data, tableType } = nodes[selector.tableId] ?? {};
+  if (!data) return null;
+  const table = readTable(data);
+  const steps = { title: analysisLabel(selector.testType), data, tableType, onClose: closeSelector };
+  if (selector.testType === "transform")
+    return (
+      <Steps
+        {...steps}
+        wizard={TRANSFORM_WIZARD}
+        initial={{}}
+        done="Create"
+        onDone={(a) => {
+          createTransformed(selector.tableId, TRANSFORM_WIZARD.finish(a));
+          closeSelector();
+        }}
+      />
+    );
   const wizard = WIZARDS[selector.testType];
-  if (!data || !wizard) return null;
+  if (!wizard) return null;
   return (
     <Steps
-      title={analysisLabel(selector.testType)}
+      {...steps}
       wizard={wizard}
-      data={data}
-      tableType={tableType}
-      onClose={closeSelector}
-      onDone={(type, params) => {
-        launch(selector.tableId, type, params);
+      initial={answersFor(wizard, table, tableType, selector.forGraph?.sets)}
+      done="Run"
+      finish={wizard.finish}
+      onDone={(a) => {
+        const { type, params } = wizard.finish(a, table, tableType);
+        launch(selector.tableId, type, params, selector.forGraph);
         closeSelector();
       }}
     />
@@ -74,18 +93,28 @@ function Steps({
   wizard,
   data,
   tableType,
+  initial,
+  done,
+  finish,
   onDone,
   onClose,
 }: {
   title: string;
-  wizard: Wizard;
+  wizard: Pick<Wizard, "questions" | "checklist">;
   data: TableData;
   tableType?: TableType;
-  onDone: (type: AnalysisType, params?: AnalysisParams) => void;
+  /** Answers given beforehand (a graph's data sets), each question starting from its own. */
+  initial: Answers;
+  /** The last step's button: Run, Create. */
+  done: string;
+  /** The test the answers make, for the package gate (a transformed table has none). */
+  finish?: Wizard["finish"];
+  /** Every question answered. */
+  onDone: (answers: Answers) => void;
   onClose: () => void;
 }) {
   const table = readTable(data);
-  const [answers, setAnswers] = React.useState<Answers>({});
+  const [answers, setAnswers] = React.useState<Answers>(initial);
   const [step, setStep] = React.useState(0);
   const [checking, setChecking] = React.useState(false);
   const [retrying, setRetrying] = React.useState(false);
@@ -105,7 +134,7 @@ function Steps({
   const emptyChoice = q.kind === "choice" && q.options.length === 0;
   const emptyMessage =
     "There's nothing to choose here — the table doesn't have the data this question needs. Go back and pick a different option, or add data to the table first.";
-  const [value, setValue] = React.useState<Answer | null>(() => initialAnswer(q, undefined));
+  const [value, setValue] = React.useState<Answer | null>(() => initialAnswer(q, initial[q.id]));
   // The checklist for the test being built, following the answers so far
   // (the current step's answer counts too, so the checklist switches branch
   // as soon as the user picks parametric vs non-parametric).
@@ -123,7 +152,9 @@ function Steps({
   // blocks Run before it is pressed — with Retry. A package that merely
   // is not loaded yet does not block: the analysis installs it on first run.
   const finished =
-    last && value !== null ? wizard.finish({ ...answers, [q.id]: value ?? undefined }, table, tableType) : null;
+    last && value !== null && finish
+      ? finish({ ...answers, [q.id]: value ?? undefined }, table, tableType)
+      : null;
   const gate = finished
     ? packageGate(finished.type, finished.params)
     : { blocked: false, message: null, packages: [] as string[] };
@@ -157,9 +188,11 @@ function Steps({
     const a = { ...answers, [q.id]: answer };
     if (asked(a).length > step + 1) go(step + 1, a);
     else {
-      const { type, params } = wizard.finish(a, table, tableType);
-      if (packageGate(type, params).blocked) return; // re-checked: Run was disabled, but status can change
-      onDone(type, params);
+      if (finish) {
+        const { type, params } = finish(a, table, tableType);
+        if (packageGate(type, params).blocked) return; // re-checked: Run was disabled, but status can change
+      }
+      onDone(a);
     }
   };
 
@@ -212,7 +245,7 @@ function Steps({
               </Button>
             )}
             <Button variant="accent" disabled={!ready || gate.blocked} onClick={() => void next()}>
-              {last ? "Run" : "Next"}
+              {last ? done : "Next"}
             </Button>
           </>
         )
