@@ -12729,6 +12729,88 @@ check(".pzfx import keeps untitled, colon-titled and ragged TwoWay replicate gro
   strictEqual(reloaded.data!.replicates, 2);
 });
 
+check(".pzfx import reads a HugeTable as a Grouped table with all 53 replicates (BUG-8)", () => {
+  // pypzfx-column_hugetable.pzfx is the pypzfx fixture: one table, TwoWay,
+  // YFormat replicates, 53 subcolumns — past Prism's 52-subcolumn line, so
+  // Prism writes it as <HugeTable> instead of <Table>. Before the fix the
+  // importer refused it outright ("a HugeTable, which Titer can't import
+  // yet") and the whole file failed; a HugeTable is the same shape as a
+  // Table, so it imports through the same path. The subcolumns alternate
+  // 1,2,3 / 3,2,1 down the replicates, so every row is pinned exactly.
+  const { imported, table } = importedTable("pypzfx-column_hugetable");
+  strictEqual(table.name, "Data 1");
+  strictEqual(table.tableType, "grouped");
+  strictEqual(table.data!.groups, 1);
+  strictEqual(table.data!.replicates, 53);
+  strictEqual(table.data!.columns.length, 54);
+  strictEqual(table.data!.columns[1], "Y:Y1");
+  strictEqual(table.data!.columns[53], "Y:Y53");
+  const row = (odd: string, even: string) => [
+    null,
+    ...Array.from({ length: 53 }, (_, i) => (i % 2 === 0 ? odd : even)),
+  ];
+  deepStrictEqual(table.data!.rows, [row("1.", "3."), row("2.", "2."), row("3.", "1.")]);
+  ok(
+    imported.issues.some((i) => i.message.includes("was a HugeTable in Prism (53 subcolumns per data set)")),
+    "says the table was a HugeTable, with its size",
+  );
+  ok(imported.issues.every((i) => i.severity !== "error"), "no error — the file imports");
+  // The round-trip is the point: 53 replicates is past Titer's
+  // 20-replicate creation cap, so a save/reload must keep them all.
+  const { project } = read(serializeProjectFile(imported.project));
+  const reloaded = project.nodes[imported.project.rootOrder[0]];
+  if (!reloaded || reloaded.type !== "table") throw new Error("no reloaded table node");
+  deepStrictEqual(reloaded.data!.columns, table.data!.columns);
+  deepStrictEqual(reloaded.data!.rows, table.data!.rows);
+  strictEqual(reloaded.data!.groups, 1);
+  strictEqual(reloaded.data!.replicates, 53);
+});
+
+check(".pzfx import reads an XY HugeTable through the same path (BUG-8)", () => {
+  // The tag is the only difference — an XY HugeTable (60 replicates in the
+  // real zenodo-15477782 files) must not need a TwoWay-shaped fixture to
+  // prove it. Small inline file: X + 2 Y sets × 2 replicates.
+  const text = `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">
+<HugeTable ID="Table0" XFormat="numbers" YFormat="replicates" Replicates="2" TableType="XY" EVFormat="AsteriskAfterNumber">
+<Title>XY huge</Title>
+<XColumn Width="89" Decimals="0" Subcolumns="1"><Title>X</Title><Subcolumn><d>1.</d><d>2.</d></Subcolumn></XColumn>
+<YColumn Width="89" Decimals="0" Subcolumns="2"><Title>A</Title><Subcolumn><d>10.</d><d>20.</d></Subcolumn><Subcolumn><d>11.</d><d>21.</d></Subcolumn></YColumn>
+<YColumn Width="89" Decimals="0" Subcolumns="2"><Title>B</Title><Subcolumn><d>100.</d><d>200.</d></Subcolumn><Subcolumn><d>101.</d><d>201.</d></Subcolumn></YColumn>
+</HugeTable>
+</GraphPadPrismFile>`;
+  const imported = parsePzfx(text);
+  strictEqual(imported.tables.length, 1);
+  const node = imported.project.nodes[imported.project.rootOrder[0]];
+  if (!node || node.type !== "table") throw new Error("no table node");
+  strictEqual(node.tableType, "xy");
+  deepStrictEqual(node.data!.columns, ["Title", "X", "A_1", "A_2", "B_1", "B_2"]);
+  deepStrictEqual(node.data!.rows, [
+    [null, "1.", "10.", "11.", "100.", "101."],
+    [null, "2.", "20.", "21.", "200.", "201."],
+  ]);
+  ok(
+    imported.issues.some((i) => i.message.includes("was a HugeTable in Prism (2 subcolumns per data set)")),
+    "says the table was a HugeTable",
+  );
+});
+
+check(".pzfx import still rejects a table with no data columns (pypzfx-empty)", () => {
+  // The second BUG-8 instance, different judgment: the file's only table
+  // carries no data columns, so there is nothing to import — the clean
+  // rejection stays correct, and the fix must not turn it into an empty
+  // table or a crash.
+  const imported = parsePzfx(readFileSync(new URL("./testdata/pypzfx-empty.pzfx", import.meta.url), "utf8"));
+  strictEqual(imported.tables.length, 0);
+  ok(
+    imported.issues.some((i) => i.severity === "error" && i.message.includes("No tables in this file could be imported")),
+    "errors that no tables could be imported",
+  );
+  ok(
+    imported.issues.some((i) => i.message.includes("holds no data columns")),
+    "says plainly why the table was left out",
+  );
+});
+
 check(".pzfx import refuses files that aren't .pzfx", () => {
   for (const text of ["hello", "<GraphPadPrismFile></GraphPadPrismFile>", "<Other><Table/></Other>"]) {
     const imported = parsePzfx(text);

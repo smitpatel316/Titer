@@ -26,6 +26,8 @@
 //   nested / multiple → the write FAILS with a plain-language error naming
 //                 the table: silently dropping a table would be data loss,
 //                 and Prism has no counterpart for them.
+//   A table past 52 subcolumns in a data set (or 104 data sets) writes as
+//   <HugeTable>, as Prism writes it — the reader takes either tag.
 // A table whose datasets mix formats (one replicates, one SDN) cannot be
 // expressed in one table-level YFormat, so the whole write FAILS naming
 // the table — never silently rewritten as something else.
@@ -151,6 +153,14 @@ function tableYFormat(sets: WriteSet[], displayName: string): string | null {
   }
   return implied[0] ?? null;
 }
+
+/** The tag a table is written under: Prism writes `<HugeTable>` instead of
+ *  `<Table>` once a table passes 52 subcolumns in a data set or 104 data
+ *  sets (R pzfx 0.2.0 NEWS) — the XSD allows either tag in the table list,
+ *  and the reader takes both, so a table Titer writes past that size reads
+ *  back in Prism the way Prism's own huge tables do. */
+const tableTag = (datasets: number, maxSubcolumns: number): "Table" | "HugeTable" =>
+  datasets > 104 || maxSubcolumns > 52 ? "HugeTable" : "Table";
 
 export function writePzfx(project: ProjectFilePayload, appVersion: string): PzfxWriteResult {
   const report: PrismWriteReport = { tables: [], analyses: [], analysesNotWritten: [], infoSheets: [], issues: [] };
@@ -330,8 +340,14 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
         .join("");
       const id = `Table${tableIds.length}`;
       tableIds.push(id);
+      // A table past Prism's huge size writes as <HugeTable>, not <Table>.
+      const maxSubcolumns =
+        yFormat === "replicates"
+          ? (replicates ?? 0)
+          : Math.max(0, ...[...groups.values()].map((cols) => cols.length));
+      const tag = tableTag(groups.size, maxSubcolumns);
       tableXml.push(
-        `<Table ID="${id}" XFormat="${xFormat}"${yFormat ? ` YFormat="${yFormat}"` : ""}${replicates !== undefined && yFormat === "replicates" ? ` Replicates="${replicates}"` : ""} TableType="${prismTableType}" EVFormat="AsteriskAfterNumber"><Title>${escapeXml(name)}</Title>${emitRowTitles ? `<RowTitlesColumn Width="39"><Subcolumn>${Array.from({ length: rowCount }, (_, r) => { const v = rowTitles[r]; return v === null ? `<d/>` : `<d>${escapeXml(v)}</d>`; }).join("")}</Subcolumn></RowTitlesColumn>` : ""}${yXml}</Table>`,
+        `<${tag} ID="${id}" XFormat="${xFormat}"${yFormat ? ` YFormat="${yFormat}"` : ""}${replicates !== undefined && yFormat === "replicates" ? ` Replicates="${replicates}"` : ""} TableType="${prismTableType}" EVFormat="AsteriskAfterNumber"><Title>${escapeXml(name)}</Title>${emitRowTitles ? `<RowTitlesColumn Width="39"><Subcolumn>${Array.from({ length: rowCount }, (_, r) => { const v = rowTitles[r]; return v === null ? `<d/>` : `<d>${escapeXml(v)}</d>`; }).join("")}</Subcolumn></RowTitlesColumn>` : ""}${yXml}</${tag}>`,
       );
       report.tables.push(name);
       continue;
@@ -402,8 +418,10 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
         : `<XColumn Width="${xFormat === "date" ? 114 : 89}" Decimals="${xFormat === "date" ? 14 : 0}" Subcolumns="${xError ? 2 : 1}"><Title>${escapeXml(xColumn.name)}</Title><Subcolumn>${dElements(1)}</Subcolumn>${xError ? `<Subcolumn>${dElements(allColumns.indexOf(xError) + 1)}</Subcolumn>` : ""}</XColumn>`;
     const id = `Table${tableIds.length}`;
     tableIds.push(id);
+    // A table past Prism's huge size writes as <HugeTable>, not <Table>.
+    const tag = tableTag(sets.length, Math.max(0, ...sets.map((s) => s.columns.length)));
     tableXml.push(
-      `<Table ID="${id}" XFormat="${xFormat}"${yFormat ? ` YFormat="${yFormat}"` : ""}${replicates !== undefined ? ` Replicates="${replicates}"` : ""} TableType="${prismTableType}" EVFormat="AsteriskAfterNumber"><Title>${escapeXml(name)}</Title>${emitRowTitles ? `<RowTitlesColumn Width="39"><Subcolumn>${Array.from({ length: rowCount }, (_, r) => { const v = rowTitles[r]; return v === null ? `<d/>` : `<d>${escapeXml(v)}</d>`; }).join("")}</Subcolumn></RowTitlesColumn>` : ""}${xXml}${xAdvanced ?? ""}${yXml}</Table>`,
+      `<${tag} ID="${id}" XFormat="${xFormat}"${yFormat ? ` YFormat="${yFormat}"` : ""}${replicates !== undefined ? ` Replicates="${replicates}"` : ""} TableType="${prismTableType}" EVFormat="AsteriskAfterNumber"><Title>${escapeXml(name)}</Title>${emitRowTitles ? `<RowTitlesColumn Width="39"><Subcolumn>${Array.from({ length: rowCount }, (_, r) => { const v = rowTitles[r]; return v === null ? `<d/>` : `<d>${escapeXml(v)}</d>`; }).join("")}</Subcolumn></RowTitlesColumn>` : ""}${xXml}${xAdvanced ?? ""}${yXml}</${tag}>`,
     );
     report.tables.push(name);
   }

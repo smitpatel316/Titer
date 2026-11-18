@@ -61,6 +61,7 @@ const FIXTURES = [
   "x_date_row_titles",
   "x_y_rep",
   "x_y_with_strike",
+  "pypzfx-column_hugetable",
 ] as const;
 const INFO_FIXTURES = [
   "column",
@@ -71,6 +72,7 @@ const INFO_FIXTURES = [
   "x_date",
   "x_y_rep",
   "x_y_with_strike",
+  "pypzfx-column_hugetable",
 ] as const;
 
 let failures = 0;
@@ -107,11 +109,20 @@ function structuralCheck(xml: string): { ok: boolean; detail: string } {
   const fail = (why: string) => ({ ok: false, detail: why });
   if (!xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>')) return fail("missing XML declaration");
   if (!xml.includes('<GraphPadPrismFile PrismXMLVersion="5.00">')) return fail("missing root / PrismXMLVersion");
-  const order = ["<Created>", "<InfoSequence>", "<Info ", "<TableSequence>", "<Table "];
+  const order = ["<Created>", "<InfoSequence>", "<Info ", "<TableSequence>", "<Table "] as const;
   let last = -1;
   for (const tag of order) {
-    const at = xml.indexOf(tag);
-    if (at < 0) continue;
+    // A <HugeTable> sits where a <Table> would: take the earlier of the two.
+    const at =
+      tag === "<Table "
+        ? Math.min(
+            ...["<Table ", "<HugeTable "].map((t) => {
+              const i = xml.indexOf(t);
+              return i < 0 ? Number.POSITIVE_INFINITY : i;
+            }),
+          )
+        : xml.indexOf(tag);
+    if (at === Number.POSITIVE_INFINITY) continue;
     if (at < last) return fail(`element order: ${tag} out of place`);
     last = at;
   }
@@ -127,7 +138,7 @@ function structuralCheck(xml: string): { ok: boolean; detail: string } {
   if (!xFormats.every((f) => xOk.includes(f))) return fail(`bad XFormat: ${xFormats.join(",")}`);
   if (!yFormats.every((f) => yOk.includes(f))) return fail(`bad YFormat: ${yFormats.join(",")}`);
   if (!tableTypes.every((f) => tOk.includes(f))) return fail(`bad TableType: ${tableTypes.join(",")}`);
-  const tableIds = [...xml.matchAll(/<Table ID="(Table\d+)"/g)].map((m) => m[1]);
+  const tableIds = [...xml.matchAll(/<(?:Table|HugeTable) ID="(Table\d+)"/g)].map((m) => m[1]);
   const refs = [...xml.matchAll(/<Ref ID="(Table\d+|Info\d+)"( Selected="1")?\/>/g)];
   if (!tableIds.every((id, i) => id === `Table${i}`)) return fail(`Table IDs not sequential: ${tableIds.join(",")}`);
   const tableRefs = refs.filter((r) => r[1].startsWith("Table"));
@@ -261,6 +272,22 @@ check("W1 synthetic grouped replicates round-trips", () => {
   strictEqual(JSON.stringify(tablesOf(back.project)[0].data), JSON.stringify(project.nodes.table_1.data));
 });
 
+check("W1 a >52-subcolumn table writes <HugeTable>, and reads back identical (BUG-8)", () => {
+  // The imported pypzfx HugeTable fixture (53 replicates) must round-trip
+  // as a HugeTable again: Prism writes the tag past 52 subcolumns, so
+  // Titer's own write does the same — a plain <Table> with 53 subcolumns
+  // is not how Prism writes such a table.
+  const source = parsePzfx(fixtureXml("pypzfx-column_hugetable"));
+  const written = writePzfx(source.project, APP_VERSION);
+  const xml = xmlOf(written);
+  ok(xml.includes('<HugeTable ID="Table0"'), "writes <HugeTable>");
+  ok(!xml.includes('<Table ID="Table0"'), "no plain <Table> for this table");
+  ok(xml.includes('Replicates="53"'), "Replicates=53");
+  const back = parsePzfx(xml);
+  strictEqual(tablesOf(back.project)[0].tableType, "grouped", "reads back grouped");
+  strictEqual(JSON.stringify(tablesOf(back.project)[0].data), JSON.stringify(tablesOf(source.project)[0].data));
+});
+
 check("W1 synthetic XY summary round-trips", () => {
   const project = syntheticProject(
     {
@@ -354,7 +381,7 @@ check("W3 written file identity (all fixtures)", () => {
     ok(!xml.includes("<Template"), `${name}: no <Template>`);
     ok(!xml.includes("MostRecentVersion"), `${name}: no MostRecentVersion`);
     ok(!xml.includes("Login="), `${name}: no Login`);
-    const tableIds = [...xml.matchAll(/<Table ID="(Table\d+)"/g)].map((m) => m[1]);
+    const tableIds = [...xml.matchAll(/<(?:Table|HugeTable) ID="(Table\d+)"/g)].map((m) => m[1]);
     ok(tableIds.length > 0 && tableIds.every((id, i) => id === `Table${i}`), `${name}: fresh sequential ${tableIds.join(",")}`);
     const refs = [...xml.matchAll(/<Ref ID="Table\d+"( Selected="1")?\/>/g)];
     strictEqual(refs.length, tableIds.length, `${name}: one TableSequence ref per table`);
