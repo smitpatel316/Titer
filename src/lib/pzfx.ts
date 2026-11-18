@@ -175,12 +175,22 @@ function parseXml(text: string): XmlNode {
 }
 
 /** An element's text, including any formatting children it wraps (`<Title>` may
- *  hold a `<TextAlign>`). */
-const childText = (node: XmlNode): string => {
+ *  hold a `<TextAlign>`). Titles keep their EXACT text — Prism titles can
+ *  carry meaningful trailing spaces (`XY `, `0nM `) and duplicate names, and
+ *  the reader must not trim or rename them (BUG-4/BUG-7): the .prism import
+ *  preserves them, and the exported .pzfx file holds them verbatim, so a
+ *  .pzfx round-trip that renames them changes analysis labels and hashes.
+ *  No `<Title>` in any known .pzfx file (testdata + corpus) holds a newline,
+ *  so exact text needs no whitespace handling. Data `<d>` values keep the
+ *  trimmed read below: the number normalizer's anchored regexes need clean
+ *  values, and only the RowTitlesColumn's `<d>` values are titles. */
+const rawChildText = (node: XmlNode): string => {
   let out = node.text;
-  for (const child of node.children) out += childText(child);
-  return out.trim();
+  for (const child of node.children) out += rawChildText(child);
+  return out;
 };
+
+const childText = (node: XmlNode): string => rawChildText(node).trim();
 
 const childrenNamed = (node: XmlNode, tag: string) => node.children.filter((c) => c.tag === tag);
 const firstChild = (node: XmlNode, tag: string) => childrenNamed(node, tag)[0];
@@ -193,11 +203,11 @@ interface Subcolumn {
   excluded: Set<number>;
 }
 
-function readSubcolumn(node: XmlNode): Subcolumn {
+function readSubcolumn(node: XmlNode, raw = false): Subcolumn {
   const values: (string | null)[] = [];
   const excluded = new Set<number>();
   for (const d of childrenNamed(node, "d")) {
-    const value = childText(d);
+    const value = raw ? rawChildText(d) : childText(d);
     values.push(value === "" ? null : value);
     if (d.attrs["Excluded"] === "1") excluded.add(values.length - 1);
   }
@@ -210,11 +220,11 @@ interface PzfxColumn {
   subcolumns: Subcolumn[];
 }
 
-function readColumn(node: XmlNode): PzfxColumn {
+function readColumn(node: XmlNode, rawValues = false): PzfxColumn {
   const titleNode = firstChild(node, "Title");
   return {
-    title: titleNode ? childText(titleNode) : "",
-    subcolumns: childrenNamed(node, "Subcolumn").map(readSubcolumn),
+    title: titleNode ? rawChildText(titleNode) : "",
+    subcolumns: childrenNamed(node, "Subcolumn").map((s) => readSubcolumn(s, rawValues)),
   };
 }
 
@@ -307,7 +317,7 @@ const genId = (type: string) => `${type}_${Math.random().toString(36).slice(2, 1
 function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: boolean): ImportedTable | null {
   const warnings: string[] = [];
   const titleNode = firstChild(table, "Title");
-  const name = titleNode ? childText(titleNode) : "";
+  const name = titleNode ? rawChildText(titleNode) : "";
   const tableType = table.attrs["TableType"] ?? "";
   const xFormat = table.attrs["XFormat"] ?? "";
   const yFormat = table.attrs["YFormat"] ?? "";
@@ -322,12 +332,12 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
   }
 
   const rowTitles = firstChild(table, "RowTitlesColumn");
-  const rowTitleValues = rowTitles ? readColumn(rowTitles).subcolumns[0]?.values ?? [] : [];
+  const rowTitleValues = rowTitles ? readColumn(rowTitles, true).subcolumns[0]?.values ?? [] : [];
   let hasRowTitles = rowTitleValues.some((v) => v !== null && v !== "");
 
-  const xColumns = childrenNamed(table, "XColumn").map(readColumn);
+  const xColumns = childrenNamed(table, "XColumn").map((c) => readColumn(c));
   const xAdvanced = firstChild(table, "XAdvancedColumn");
-  const yColumns = childrenNamed(table, "YColumn").map(readColumn);
+  const yColumns = childrenNamed(table, "YColumn").map((c) => readColumn(c));
   if (yColumns.length === 0) {
     issues.push({ severity: "warning", message: `${displayName} holds no data columns. It was left out.` });
     return null;
@@ -441,12 +451,14 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
     // A grouped table's columns are "Group:Y1"…, so a group name must be
     // unique and colon-free — seriesKeyOf splits at the first ":" and
     // regroupTable rebuilds exactly "Group:Y1"…"Group:Y<replicates>" on
-    // reload. Before this fix untitled Y columns all became "Group"
-    // (duplicate "Group:Y1" columns, renamed "Group:Y1 2" by FF-F9 but
-    // still dropped on reload), a title like "1:10" became "1:10:Y1"
-    // (group "1", its data wiped on reload), and a ragged Y column left
-    // its group short of subcolumns. So: sanitize ":", dedupe the group
-    // names, and pad every group to `replicates` subcolumns.
+    // reload, mapping by name: two groups sharing a name would collapse
+    // into one on load, the second group's values silently replaced by
+    // the first's. So this branch — and only this branch — still dedupes
+    // group names (and sanitizes ":"). The names are otherwise exact: a
+    // trailing space survives (`NRBP1 WT␣` stays `NRBP1 WT␣`, BUG-4).
+    // Untitled Y columns all become "Group" (then deduped), a title like
+    // "1:10" becomes "1-10", and a ragged Y column is padded to
+    // `replicates` subcolumns.
     const usedGroups = new Set<string>();
     const renamedGroups: string[] = [];
     const rowLen = Math.max(
@@ -529,37 +541,14 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
     columns.splice(at, 0, { ...dateColumn, name });
   }
 
-  // FF-F9: Prism lets two Y columns share a title (and an X title can match
-  // a Y title), but Titer resolves a column by name with
-  // `data.columns.indexOf(name)` — the first match wins, so an analysis
-  // naming the second duplicate silently ran on the first column's data.
-  // Rename later duplicates ("A" → "A 2", "A 3", …) so every imported
-  // column has a distinct name and each keeps its own data. A duplicate
-  // that already ends in " N" renumbers from its stem ("Control 2" →
-  // "Control 3"), so renames never stack into "Control 2 2".
-  const seenNames = new Set<string>(["Title"]);
-  const renamed: string[] = [];
-  for (const column of columns) {
-    if (!seenNames.has(column.name)) {
-      seenNames.add(column.name);
-      continue;
-    }
-    const stem = column.name.replace(/ \d+$/, "");
-    let n = 2;
-    let renamedName = `${stem} ${n}`;
-    while (seenNames.has(renamedName)) {
-      n++;
-      renamedName = `${stem} ${n}`;
-    }
-    renamed.push(`“${column.name}” → “${renamedName}”`);
-    column.name = renamedName;
-    seenNames.add(renamedName);
-  }
-  if (renamed.length > 0) {
-    warnings.push(
-      `${displayName}: duplicate column names were renamed so each column keeps its own data (${renamed.join(', ')}).`,
-    );
-  }
+  // No dedup here, deliberately: Prism lets two Y columns share a title
+  // (and an X title can match a Y title), and the .prism import preserves
+  // those duplicates — the table model holds them, analyses run on them,
+  // and renaming them on read changes analysis labels and hashes
+  // (BUG-4: `MitoFactory` → `MitoFactory 2`). The one place uniqueness
+  // is structural is grouped GROUP names (deduped above, where the group
+  // name is the column-name prefix); plain column duplicates stay exact.
+  // (The old FF-F9 rename lived here; it was the bug.)
 
   const rowCount = Math.max(0, ...columns.map((c) => c.values.length), rowTitleValues.length);
   if (rowCount === 0 || columns.length === 0) {

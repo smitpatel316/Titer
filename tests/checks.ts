@@ -12650,10 +12650,15 @@ check(".pzfx import reads '1,000' as 1000 in a dot-decimal file — and keeps a 
   ]);
 });
 
-check(".pzfx import dedupes duplicate column names so the second keeps its own data", () => {
+check(".pzfx import preserves duplicate column names exactly (BUG-4)", () => {
   // Two Y columns both titled "Control", plus a third already titled
-  // "Control 2" and a third "Control" — the rename must skip names that
-  // are already taken, and each column must keep its own values.
+  // "Control 2" and a third "Control" — the reader keeps every title
+  // verbatim, exactly as the .prism import does and as the file holds
+  // them. Renaming the second duplicate ("Control" → "Control 2") used
+  // to change analysis labels and re-run hashes after a .pzfx
+  // round-trip (BUG-4: `MitoFactory` → `MitoFactory 2`), even though
+  // all values were identical. Each column still keeps its own values,
+  // positionally — the values never depended on the rename.
   const text = `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">
 <Table ID="Table0" XFormat="none" TableType="OneWay">
 <Title>Data 1</Title>
@@ -12667,16 +12672,42 @@ check(".pzfx import dedupes duplicate column names so the second keeps its own d
   strictEqual(imported.tables.length, 1);
   const node = imported.project.nodes[imported.project.rootOrder[0]];
   if (!node || node.type !== "table") throw new Error("no table node");
-  deepStrictEqual(node.data!.columns, ["Title", "Control", "Control 2", "Control 3", "Control 4"]);
-  // The renamed columns still carry their own data: a lookup by name
-  // (data.columns.indexOf) now lands on the intended column, not the first.
+  deepStrictEqual(node.data!.columns, ["Title", "Control", "Control", "Control 2", "Control"]);
+  // Every column keeps its own data, by position: the second "Control"
+  // holds 10./20., the third "Control" holds 1000./2000.
   deepStrictEqual(node.data!.rows, [
     [null, "1.", "10.", "100.", "1000."],
     [null, "2.", "20.", "200.", "2000."],
   ]);
-  const renamed = node.data!.columns.indexOf("Control 2");
-  strictEqual(node.data!.rows[0][renamed], "10.");
-  ok(imported.issues.some((i) => i.message.includes("duplicate column names were renamed")), "warns about the rename");
+  strictEqual(node.data!.rows[0][2], "10.");
+  strictEqual(node.data!.rows[0][4], "1000.");
+  ok(!imported.issues.some((i) => i.message.includes("duplicate column names were renamed")), "no rename warning");
+});
+
+check(".pzfx import preserves trailing spaces in table, column and row titles (BUG-4/BUG-7)", () => {
+  // A table titled `XY␣`, Y columns `0nM␣` (twice), and a row titled
+  // `Control␣`: the reader used to trim all three, so the table went
+  // missing under its real name, the columns were deduped to
+  // `0nM`/`0nM 2`, and the row title changed value. The file holds the
+  // spaces verbatim; the import must too.
+  const text = `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">
+<Table ID="Table0" XFormat="none" TableType="OneWay">
+<Title>XY </Title>
+<RowTitlesColumn Width="89"><Subcolumn><d>Control </d><d>Sorbitol</d></Subcolumn></RowTitlesColumn>
+<YColumn Width="89" Decimals="0" Subcolumns="1"><Title>0nM </Title><Subcolumn><d>1.</d><d>2.</d></Subcolumn></YColumn>
+<YColumn Width="89" Decimals="0" Subcolumns="1"><Title>0nM </Title><Subcolumn><d>10.</d><d>20.</d></Subcolumn></YColumn>
+</Table>
+</GraphPadPrismFile>`;
+  const imported = parsePzfx(text);
+  deepStrictEqual(imported.tables, ["XY "]);
+  const node = imported.project.nodes[imported.project.rootOrder[0]];
+  if (!node || node.type !== "table") throw new Error("no table node");
+  strictEqual(node.name, "XY ");
+  deepStrictEqual(node.data!.columns, ["Title", "0nM ", "0nM "]);
+  deepStrictEqual(node.data!.rows, [
+    ["Control ", "1.", "10."],
+    ["Sorbitol", "2.", "20."],
+  ]);
 });
 
 check(".pzfx import keeps untitled, colon-titled and ragged TwoWay replicate groups through a save/reload round-trip", () => {
