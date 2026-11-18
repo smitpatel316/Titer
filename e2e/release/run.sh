@@ -78,7 +78,22 @@ if [ "$SKIP_GUI" = 0 ] && [ -z "${DISPLAY:-}" ]; then
   echo "started Xvfb on $DISPLAY (pid $XVFB_PID)"
 fi
 
-run_leg "T-89 GitHub release" check_github_release.py --version "$VERSION"
+# Expected SHAs for the DMG/zip come from the channel manifest when it is
+# current; when the manifest still points at the previous release, fall
+# back to the staged build artifacts (~/workspace/helix-release/vX.Y.Z/)
+# — the files the release lane published — so the check verifies the
+# published asset == the built artifact instead of failing for want of
+# a hash source.
+STAGE_DIR="$HOME/workspace/helix-release/v$VERSION"
+STAGED_SHA_ARGS=()
+MANIFEST_VER="$(curl -s https://titer.smitpatel.net/channel/version.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])' 2>/dev/null)"
+if [ "$MANIFEST_VER" != "$VERSION" ] && [ -d "$STAGE_DIR" ]; then
+  for f in "$STAGE_DIR"/Titer-"$VERSION"-aarch64.dmg "$STAGE_DIR"/Titer-"$VERSION".zip; do
+    [ -f "$f" ] && STAGED_SHA_ARGS+=(--expected-sha "$(basename "$f")=$(sha256sum "$f" | cut -d' ' -f1)")
+  done
+  [ "${#STAGED_SHA_ARGS[@]}" -gt 0 ] && echo "manifest still at $MANIFEST_VER; staged-artifact SHAs as fallback: ${STAGED_SHA_ARGS[*]}"
+fi
+run_leg "T-89 GitHub release" check_github_release.py --version "$VERSION" "${STAGED_SHA_ARGS[@]}"
 run_leg "T-90 channel manifest" check_channel_manifest.py --version "$VERSION" --verify-asset-sha
 run_leg "T-91 website" check_website.py --version "$VERSION"
 run_leg "T-92 Linux AppImage" check_appimage.py --version "$APPIMAGE_VERSION"
@@ -88,8 +103,14 @@ run_leg "T-93 update-check (static)" check_update.py --mode static --repo "$REPO
 # downloaded it); verify size + sha against the channel manifest.
 DMG="$CACHE/Titer-$VERSION-aarch64.dmg"
 if [ -f "$DMG" ]; then
-  MANIFEST_SHA="$(curl -s https://titer.smitpatel.net/channel/version.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["full"]["sha256"])')"
-  MANIFEST_SIZE="$(curl -s https://titer.smitpatel.net/channel/version.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["full"]["size"])')"
+  if [ "$MANIFEST_VER" != "$VERSION" ] && [ -f "$STAGE_DIR/Titer-$VERSION-aarch64.dmg" ]; then
+    MANIFEST_SHA="$(sha256sum "$STAGE_DIR/Titer-$VERSION-aarch64.dmg" | cut -d' ' -f1)"
+    MANIFEST_SIZE="$(stat -c%s "$STAGE_DIR/Titer-$VERSION-aarch64.dmg")"
+    echo "T-88 expected sha/size from staged artifact"
+  else
+    MANIFEST_SHA="$(curl -s https://titer.smitpatel.net/channel/version.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["full"]["sha256"])')"
+    MANIFEST_SIZE="$(curl -s https://titer.smitpatel.net/channel/version.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["full"]["size"])')"
+  fi
   run_leg "T-88 Mac DMG (portable legs)" check_dmg.py --dmg "$DMG" --version "$VERSION" --expected-sha "$MANIFEST_SHA" --expected-size "$MANIFEST_SIZE"
 else
   echo "---- T-88 Mac DMG: SKIP (no DMG in cache; T-89 did not download one) ----"
