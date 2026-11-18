@@ -229,6 +229,20 @@ FIXTURES = {'bindAssocThenDissoc': {'type': 'xy', 'columns': ['Title', 'X', 'Y']
 
 
 
+# Fixture adjustments (applied after the generated FIXTURES literal):
+# - qa_col_abc: the QA log's Q-11..Q-14 values predate the D column (added
+#   later for ROUT); the A/B/C-only table reproduces them exactly.
+# - rocTable is a 2-data-column table: roc-curve is offered for column
+#   tables, not multiple tables (MCP error verified live).
+FIXTURES["qa_col_abc"] = {
+    "type": "column",
+    "columns": ["Title", "A", "B", "C"],
+    "rows": [[None, "1", "2", "5"], [None, "2", "4", "5"], [None, "3", "6", "6"],
+             [None, "4", "8", "6"], [None, "5", "10", "7"]],
+    "extra": {},
+}
+FIXTURES["rocTable"]["type"] = "column"
+
 # ---------------------------------------------------------------------------
 # QA family — QA datasets vs scipy values (QA-LOG.md, QA-LOG-LINUX.md).
 # QA-log pins are quoted to 4-5 significant digits: rel tolerance 2e-3
@@ -376,7 +390,7 @@ def c_q11_anova_eta2(suite):
     """Q-11 one-way ANOVA + eta^2 (QA datasets)."""
     pid = _new_project(suite)
     try:
-        tid = _make_table(suite, pid, "qa_col")
+        tid = _make_table(suite, pid, "qa_col_abc")
         r = _run(suite, pid, tid, "anova", {"posthoc": "none"})
         _check_stat(r, "F", 3.197, rel=2e-3)
         _check_stat(r, "DFn", 2, rel=2e-3)
@@ -392,7 +406,7 @@ def c_q12_kruskal_wallis(suite):
     """Q-12 Kruskal-Wallis (QA datasets)."""
     pid = _new_project(suite)
     try:
-        tid = _make_table(suite, pid, "qa_col")
+        tid = _make_table(suite, pid, "qa_col_abc")
         r = _run(suite, pid, tid, "kruskal-wallis", {"posthoc": "none"})
         _check_stat(r, "Kruskal-Wallis H", 5.559, rel=2e-3)
         _check_stat(r, "df", 2, rel=2e-3)
@@ -406,7 +420,7 @@ def c_q13_rm_anova(suite):
     """Q-13 RM ANOVA vs hand-computed SS (QA datasets)."""
     pid = _new_project(suite)
     try:
-        tid = _make_table(suite, pid, "qa_col")
+        tid = _make_table(suite, pid, "qa_col_abc")
         r = _run(suite, pid, tid, "rm-anova", {"posthoc": "none"})
         _check_stat(r, "F", 9.483, rel=2e-3)
         _check_stat(r, "DFn", 2, rel=2e-3)
@@ -422,15 +436,25 @@ def c_q13_rm_anova(suite):
 
 
 def c_q14_friedman(suite):
-    """Q-14 Friedman (QA datasets)."""
+    """Q-14 Friedman (QA datasets).
+
+    The QA log's Q=7.895 is A/B/C only (D was added later for ROUT); the
+    MCP run on the 4-column table gives Q=13.636 (tie-corrected, hand-verified
+    from the rank sums 7.5/17.5/17.5/7.5). Both are pinned here.
+    """
     pid = _new_project(suite)
     try:
-        tid = _make_table(suite, pid, "qa_col")
+        tid = _make_table(suite, pid, "qa_col_abc")
         r = _run(suite, pid, tid, "friedman", {"posthoc": "none"})
         _check_stat(r, "Friedman statistic (Q)", 7.895, rel=2e-3)
         _check_stat(r, "df", 2, rel=2e-3)
         _check_p(r, "P value", 0.01931, rel=4e-3)
-        return "Friedman Q=7.895 df=2 P=0.01931"
+        tid2 = _make_table(suite, pid, "qa_col")
+        r2 = _run(suite, pid, tid2, "friedman", {"posthoc": "none"})
+        _check_stat(r2, "Friedman statistic (Q)", 13.6364, rel=2e-3)
+        _check_stat(r2, "df", 3, rel=2e-3)
+        _check_p(r2, "P value", 0.00344433, rel=4e-3)
+        return "Friedman A/B/C Q=7.895 df=2 P=0.01931; 4-group Q=13.636 df=3 P=0.00344"
     finally:
         suite.close(pid)
 
@@ -1409,7 +1433,6 @@ def c_t32_dose_special(suite):
         _check_stat(r, "R squared", 1)
         _check_stat(r, "Degrees of freedom", 22)
         _check_stat(r, "N", 27)
-        _check_coef(r, "Bottom", estimate=0, low=None, high=None)
         assert abs(_coef(r, "Bottom")["estimate"]) < 1e-7, "Schild Bottom ~0"
         _check_coef(r, "Top", estimate=100)
         _check_coef(r, "LogEC50", estimate=-6)
@@ -1426,7 +1449,6 @@ def c_t32_dose_special(suite):
         tid3 = _make_table(suite, pid, "operational")
         r3 = _run(suite, pid, tid3, "dose-response-special",
                   {"model": "operational-partial"})
-        _check_coef(r3, "Basal", estimate=0)
         assert abs(_coef(r3, "Basal")["estimate"]) < 1e-6, "operational Basal ~0"
         _check_coef(r3, "Effectmax", estimate=100)
         _check_coef(r3, "LogEC50", estimate=-7)
