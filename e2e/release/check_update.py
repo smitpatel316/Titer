@@ -37,6 +37,7 @@ Usage:
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -89,6 +90,11 @@ def static_checks(c, repo):
 
 def windows():
     """(id, title) pairs for all top-level windows on this display."""
+    if shutil.which("xwininfo") is None:
+        raise RuntimeError(
+            "xwininfo not found — install x11-utils first "
+            "(container swaps wipe it: apt-get update && "
+            "apt-get install -y x11-utils xdotool)")
     out = subprocess.run(["xwininfo", "-root", "-tree"],
                          capture_output=True, text=True, timeout=30)
     found = []

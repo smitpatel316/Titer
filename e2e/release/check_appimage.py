@@ -19,6 +19,7 @@ Usage:
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -39,6 +40,11 @@ def latest_appimage_release():
 
 
 def window_titles():
+    if shutil.which("xwininfo") is None:
+        raise RuntimeError(
+            "xwininfo not found — install x11-utils first "
+            "(container swaps wipe it: apt-get update && "
+            "apt-get install -y x11-utils xdotool)")
     out = subprocess.run(["xwininfo", "-root", "-tree"],
                          capture_output=True, text=True, timeout=30)
     titles = []

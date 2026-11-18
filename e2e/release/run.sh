@@ -62,6 +62,11 @@ echo "latest AppImage release: $APPIMAGE_VERSION"
 # so pick the first free display in 90..97.
 XVFB_PID=""
 if [ "$SKIP_GUI" = 0 ] && [ -z "${DISPLAY:-}" ]; then
+  command -v xwininfo >/dev/null 2>&1 || {
+    echo "FAIL: xwininfo not found — install x11-utils first (container swaps wipe it:" >&2
+    echo "  apt-get update && apt-get install -y x11-utils xdotool)" >&2
+    exit 1
+  }
   DISP=""
   for d in 90 91 92 93 94 95 96 97; do
     if [ ! -e "/tmp/.X11-unix/X$d" ]; then DISP="$d"; break; fi
