@@ -2302,7 +2302,7 @@ impl TiterMcpServer {
         let result = (|| {
             let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
             let results = self.state.lock().results.clone();
-            Ok::<_, String>(read_results(&id, &snap, &results, &args.analysis_id))
+            read_results(&id, &snap, &results, &args.analysis_id)
         })();
         match result {
             Ok(out) => {
@@ -5610,35 +5610,30 @@ fn table_summary(
     Ok(out)
 }
 
+/// Returns `Err` (a tool error) when the id names no analysis at all —
+/// unknown id, or an id that belongs to a non-analysis node — so MCP
+/// clients never mistake a failed lookup for a successful read. The
+/// `not_computed` / `error` / `computed` outcomes stay success envelopes:
+/// the analysis exists, only its result is pending, failed, or ready.
 fn read_results(
     project_id: &str,
     snapshot: &serde_json::Value,
     results: &HashMap<(String, String), serde_json::Value>,
     analysis_id: &str,
-) -> serde_json::Value {
+) -> Result<serde_json::Value, String> {
     let node = find_node(snapshot, analysis_id);
     let (name, analysis_type) = match node {
         Some(n) if n.get("type").and_then(|v| v.as_str()) == Some("analysis") => {
             (node_name(n).to_string(), n.get("analysisType").and_then(|v| v.as_str()).unwrap_or("").to_string())
         }
         Some(_) => {
-            return serde_json::json!({
-                "status": "not_an_analysis",
-                "project_id": project_id,
-                "analysis_id": analysis_id,
-                "message": format!("“{analysis_id}” is not an analysis node. Ask titer_list_projects for the analysis ids."),
-            });
+            return Err(format!("“{analysis_id}” is not an analysis node. Ask titer_list_projects for the analysis ids."));
         }
         None => {
-            return serde_json::json!({
-                "status": "unknown_analysis",
-                "project_id": project_id,
-                "analysis_id": analysis_id,
-                "message": format!("No analysis with id “{analysis_id}” in project {project_id}. Ask titer_list_projects for the ids."),
-            });
+            return Err(format!("No analysis with id “{analysis_id}” in project {project_id}. Ask titer_list_projects for the ids."));
         }
     };
-    match results.get(&(project_id.to_string(), analysis_id.to_string())) {
+    Ok(match results.get(&(project_id.to_string(), analysis_id.to_string())) {
         None => serde_json::json!({
             "status": "not_computed",
             "project_id": project_id,
@@ -5668,7 +5663,7 @@ fn read_results(
                 })
             }
         }
-    }
+    })
 }
 
 fn read_graph(project_id: &str, snapshot: &serde_json::Value, graph_id: &str) -> Result<serde_json::Value, String> {
@@ -6092,7 +6087,7 @@ mod tests {
     fn read_results_reports_not_computed() {
         let snap = snapshot();
         let results = HashMap::new();
-        let out = read_results("project-1", &snap, &results, "a1");
+        let out = read_results("project-1", &snap, &results, "a1").expect("not_computed");
         assert_eq!(out["status"], "not_computed");
         assert_eq!(out["analysis_type"], "dose-response-4pl");
     }
@@ -6105,9 +6100,29 @@ mod tests {
             ("project-1".to_string(), "a1".to_string()),
             json!({ "testType": "dose-response-4pl", "stats": [], "groups": [], "notes": "EC50 = 3.2 nM" }),
         );
-        let out = read_results("project-1", &snap, &results, "a1");
+        let out = read_results("project-1", &snap, &results, "a1").expect("computed");
         assert_eq!(out["status"], "computed");
         assert_eq!(out["result"]["notes"], "EC50 = 3.2 nM");
+    }
+
+    #[test]
+    fn read_results_errors_on_an_unknown_analysis_id() {
+        // BUG-16: an unknown id used to return a success envelope with
+        // status "unknown_analysis"; it must be a tool error instead.
+        let snap = snapshot();
+        let results = HashMap::new();
+        let err = read_results("project-1", &snap, &results, "nope").expect_err("unknown id is an error");
+        assert!(err.contains("No analysis with id"), "{err}");
+        assert!(err.contains("nope"), "{err}");
+    }
+
+    #[test]
+    fn read_results_errors_on_a_non_analysis_node() {
+        // Same class as BUG-16: "t1" exists but is a table, not an analysis.
+        let snap = snapshot();
+        let results = HashMap::new();
+        let err = read_results("project-1", &snap, &results, "t1").expect_err("a table is not an analysis");
+        assert!(err.contains("not an analysis node"), "{err}");
     }
 
     #[test]
