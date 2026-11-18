@@ -674,7 +674,7 @@ function readOptions(raw: unknown, label: string, issues: ProjectIssue[]): Graph
  *  key (`??` in the runner) or spread-merge their defaults (one-sample-t,
  *  one-way ANOVA, frequency-distribution). Mirrors each runner's DEFAULTS —
  *  compare-two-groups, kruskal-wallis, friedman, nested-anova,
- *  deming-regression — and the multiple-t-tests wizard default (Holm). */
+ *  deming-regression, survival — and the multiple-t-tests wizard default (Holm). */
 const PARAM_DEFAULTS: Record<string, Record<string, unknown>> = {
   "compare-two-groups": { paired: false, gaussian: true, equalVariance: true, ratio: false, tails: "two-sided" },
   "kruskal-wallis": { posthoc: "none" },
@@ -682,6 +682,7 @@ const PARAM_DEFAULTS: Record<string, Record<string, unknown>> = {
   "nested-anova": { posthoc: "none" },
   "deming-regression": { lambda: 1 },
   "multiple-t-tests": { paired: false, gaussian: true, pooledSd: false, correction: "holm" },
+  survival: { curveTest: "logrank", correction: "holm" },
   // M7 fallbacks: a cross-family choice left out below lands on these.
   anova: { posthoc: "none" },
   correlation: { method: "pearson" },
