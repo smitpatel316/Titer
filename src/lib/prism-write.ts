@@ -70,56 +70,127 @@ export interface PrismWriteResult {
  *  SpanFast/SpanSlow, same curve family). The written name is the guide's
  *  — "Two phase decay", unhyphenated — and the importer accepts the
  *  hyphenated spelling too, so either round-trips. */
-const PRISM_EQUATION: Partial<Record<NonlinearModel, { name: string; definition: string; parameters: string[] }>> = {
+const PRISM_EQUATION: Partial<
+  Record<
+    NonlinearModel,
+    {
+      name: string;
+      definition: string;
+      parameters: string[];
+      /** One initial-value rule per parameter — Prism REQUIRES these on
+       *  every equation (seq 247, P2): an equation block without
+       *  initialValueRules fails open with "Cannot open file… structure
+       *  has been corrupted". The 4PL rules are verbatim from the real
+       *  demo file; the others use the same *YMIN/*YMAX rule atoms,
+       *  which P2 proved load clean for one-phase decay. */
+      initialValueRules: Record<string, { value: number; rule: string }>;
+    }
+  >
+> = {
   "sigmoidal-4pl-x": {
     name: "Sigmoidal, 4PL, X is concentration",
     definition: "Y=Bottom + (Top-Bottom)/(1+(IC50/X)^HillSlope)",
     parameters: ["Bottom", "Top", "IC50", "HillSlope"],
+    initialValueRules: {
+      Bottom: { value: 1.0, rule: "*YMIN" },
+      HillSlope: { value: 1.0, rule: "SIGN(YatXMax - YatXMin)" },
+      IC50: { value: 1.0, rule: "X_AT_YMID" },
+      Top: { value: 1.0, rule: "*YMAX" },
+    },
   },
   "sigmoidal-4pl-logx": {
     name: "Sigmoidal, 4PL, X is log(concentration)",
     definition: "Y=Bottom + (Top-Bottom)/(1+10^((LogEC50-X)*HillSlope))",
     parameters: ["Bottom", "Top", "LogEC50", "HillSlope"],
+    initialValueRules: {
+      Bottom: { value: 1.0, rule: "*YMIN" },
+      HillSlope: { value: 1.0, rule: "SIGN(YatXMax - YatXMin)" },
+      LogEC50: { value: 1.0, rule: "X_AT_YMID" },
+      Top: { value: 1.0, rule: "*YMAX" },
+    },
   },
   "one-phase-decay": {
     name: "One phase decay",
     definition: "Y=(Y0-Plateau)*exp(-K*X)+Plateau",
     parameters: ["Y0", "Plateau", "K"],
+    initialValueRules: {
+      Y0: { value: 1.0, rule: "*YMAX" },
+      Plateau: { value: 1.0, rule: "*YMIN" },
+      K: { value: 1.0, rule: "*YMAX" },
+    },
   },
   line: {
     name: "Line",
     definition: "Y=YIntercept+X*Slope",
     parameters: ["YIntercept", "Slope"],
+    initialValueRules: {
+      YIntercept: { value: 1.0, rule: "*YMIN" },
+      Slope: { value: 1.0, rule: "*YMAX" },
+    },
   },
   quadratic: {
     name: "Second order polynomial (quadratic)",
     definition: "Y=B0+B1*X+B2*X^2",
     parameters: ["B0", "B1", "B2"],
+    initialValueRules: {
+      B0: { value: 1.0, rule: "*YMIN" },
+      B1: { value: 1.0, rule: "*YMAX" },
+      B2: { value: 1.0, rule: "*YMAX" },
+    },
   },
   gaussian: {
     name: "Gaussian",
     definition: "Y=Amplitude*exp(-0.5*((X-Mean)/SD)^2)",
     parameters: ["Amplitude", "Mean", "SD"],
+    initialValueRules: {
+      Amplitude: { value: 1.0, rule: "*YMAX" },
+      Mean: { value: 1.0, rule: "*YMAX" },
+      SD: { value: 1.0, rule: "*YMAX" },
+    },
   },
   "boltzmann-sigmoid": {
     name: "Boltzmann sigmoid",
     definition: "Y=Bottom+(Top-Bottom)/(1+exp((V50-X)/Slope))",
     parameters: ["Bottom", "Top", "V50", "Slope"],
+    initialValueRules: {
+      Bottom: { value: 1.0, rule: "*YMIN" },
+      Top: { value: 1.0, rule: "*YMAX" },
+      V50: { value: 1.0, rule: "X_AT_YMID" },
+      Slope: { value: 1.0, rule: "*YMAX" },
+    },
   },
   lorentzian: {
     name: "Lorentzian",
     definition: "Y=Amplitude/(1+((X-Center)/Width)^2)",
     parameters: ["Amplitude", "Center", "Width"],
+    initialValueRules: {
+      Amplitude: { value: 1.0, rule: "*YMAX" },
+      Center: { value: 1.0, rule: "*YMAX" },
+      Width: { value: 1.0, rule: "*YMAX" },
+    },
   },
   "sine-wave": {
     name: "Sine wave",
     definition: "Y=Amplitude*sin((2*pi*X/Wavelength)+PhaseShift)+Baseline",
     parameters: ["Amplitude", "Wavelength", "PhaseShift", "Baseline"],
+    initialValueRules: {
+      Amplitude: { value: 1.0, rule: "*YMAX" },
+      Wavelength: { value: 1.0, rule: "*YMAX" },
+      PhaseShift: { value: 1.0, rule: "*YMAX" },
+      Baseline: { value: 1.0, rule: "*YMIN" },
+    },
   },
   "two-phase-decay": {
     name: "Two phase decay",
     definition: "Y=Plateau+Span1*exp(-K1*X)+Span2*exp(-K2*X)",
     parameters: ["Plateau", "Span1", "K1", "Span2", "K2"],
+    initialValueRules: {
+      Plateau: { value: 1.0, rule: "*YMIN" },
+      Span1: { value: 1.0, rule: "*YMAX" },
+      K1: { value: 1.0, rule: "*YMAX" },
+      Span2: { value: 1.0, rule: "*YMAX" },
+      K2: { value: 1.0, rule: "*YMAX" },
+    },
   },
 };
 
@@ -261,10 +332,14 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
   const dataSheetUids: string[] = [];
   const analysisUids: string[] = [];
   const titles: Record<string, { title: string }> = {};
-  // Table node id → { sheetUid, tableUid, datasetUidByTitle, datasetTitles }.
+  // Table node id → { sheetUid, tableUid, datasetUidByTitle, datasetTitles, datasetUids }.
+  // datasetUids is parallel to datasetTitles (positional) — the title-keyed
+  // map collapses duplicate titles to ONE uid, and Prism then sees
+  // repeated input uids (seq 247: F0's three "Y" datasets share uid
+  // 02BD7CFB). Inputs are matched to datasets by position, never by title.
   const tableInfo = new Map<
     string,
-    { sheetUid: string; tableUid: string; datasetUidByTitle: Map<string, string>; datasetTitles: string[] }
+    { sheetUid: string; tableUid: string; datasetUidByTitle: Map<string, string>; datasetTitles: string[]; datasetUids: string[] }
   >();
 
   const tables = project.rootOrder.map((id) => project.nodes[id]).filter((n) => n?.type === "table");
@@ -518,7 +593,7 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         ...(rowTitlesUid ? { rowTitlesDataSet: rowTitlesUid } : {}),
       },
     });
-    tableInfo.set(table.id, { sheetUid, tableUid, datasetUidByTitle, datasetTitles });
+    tableInfo.set(table.id, { sheetUid, tableUid, datasetUidByTitle, datasetTitles, datasetUids: setUids });
     report.tables.push(name);
   }
 
@@ -556,19 +631,32 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         const baseName =
           yTitle && node.name.endsWith(` (${yTitle})`) ? node.name.slice(0, -(yTitle.length + 3)) : node.name;
         titles[analysisUid] = { title: baseName };
-        const yDatasetUid = yTitle ? info.datasetUidByTitle.get(yTitle) : undefined;
+        // Input `idx` is a LETTER (A, B, C… by position), never a number:
+        // real Prism 11.2.0 rejects a numeric idx with "damaged or
+        // truncated" (seq 247, J6). Input uids are positional too — the
+        // title-keyed map collapses duplicate titles to one uid.
+        const letterIdx = (i: number) => String.fromCharCode(65 + i);
+        const yPos = yTitle ? info.datasetTitles.indexOf(yTitle) : -1;
         const inputDataSets =
-          yDatasetUid && yTitle
-            ? [{ uid: yDatasetUid, title: yTitle, idx: info.datasetTitles.indexOf(yTitle) }]
-            : info.datasetTitles.map((title, idx) => ({
-                uid: info.datasetUidByTitle.get(title) ?? "",
+          yTitle && yPos >= 0
+            ? [{ uid: info.datasetUids[yPos] ?? "", title: yTitle, idx: "A" }]
+            : info.datasetTitles.map((title, i) => ({
+                uid: info.datasetUids[i] ?? "",
                 title,
-                idx,
+                idx: letterIdx(i),
               }));
         const is4PLx = model === "sigmoidal-4pl-x";
         setJson(`analyses/${analysisUid}/sheet.json`, {
           "@class": "AnalysisSheet",
           analysisClass: "NONLINEAR_REGRESSION",
+          // Identity fields Prism requires on an analysis sheet (seq 247,
+          // L1/L2): without uid/fenID/$id/minRequiredVersion the file
+          // SIGSEGVs on load. Values are verbatim from a real NLREG sheet
+          // (fenID 0, MRV 8.2.0.0).
+          uid: analysisUid,
+          fenID: 0,
+          $id: "analyses/sheet.schema.json",
+          minRequiredVersion: { major: 8, minor: 2, subminor: 0, build: 0 },
           title: baseName,
           inputSheets: [{ uid: info.sheetUid, title: table.name }],
           inputDataSets,
@@ -578,6 +666,8 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         setJson(`analyses/${analysisUid}/parameters.json`, {
           "@class": "AnalysisParameters",
           analysisClass: "NONLINEAR_REGRESSION",
+          $id: "analyses/nonlinear_regression/parameters.schema.json",
+          version: "0.0.0",
           content: {
             data: {
               handleReplicatesAs: "INDIVIDUAL",
@@ -592,18 +682,14 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
                 definition: equation.definition,
                 parameters: equation.parameters,
                 intermediateVariables: [],
-                // Initial-value rules and transforms are emitted only where
-                // they were seen in a real file (the demo's 4PL); other
-                // equations omit them — Titer's runner sets its own
-                // starting values.
+                // Initial-value rules are REQUIRED on every equation
+                // (seq 247, P2) — omitting them fails open with
+                // "Cannot open file… structure has been corrupted".
+                // Transforms are 4PL-x only (real file); other equations
+                // never had them and O1 proved they load without.
+                initialValueRules: equation.initialValueRules,
                 ...(is4PLx
                   ? {
-                      initialValueRules: {
-                        Bottom: { value: 1.0, rule: "*YMIN" },
-                        HillSlope: { value: 1.0, rule: "SIGN(YatXMax - YatXMin)" },
-                        IC50: { value: 1.0, rule: "X_AT_YMID" },
-                        Top: { value: 1.0, rule: "*YMAX" },
-                      },
                       transforms: [
                         { name: "logIC50", definition: "log(IC50)", ciMethod: "ASYMMETRICAL" },
                         { name: "Span", definition: "Top-Bottom", ciMethod: "SYMMETRICAL" },
@@ -616,7 +702,7 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
             },
           },
         });
-        setJson(`analyses/${analysisUid}/constants.json`, { "@class": "AnalysisConstants", version: 1 });
+        setJson(`analyses/${analysisUid}/constants.json`, { "@class": "AnalysisConstants", version: "0.0.0" });
         report.analyses.push(node.name);
       } else if (node.analysisType === "survival") {
         const analysisUid = crypto.randomUUID().toUpperCase();
@@ -625,12 +711,18 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         setJson(`analyses/${analysisUid}/sheet.json`, {
           "@class": "AnalysisSheet",
           analysisClass: "SURVIVAL",
+          // Identity fields, verbatim from a real survival sheet
+          // (fenID 2, MRV 0.0.0.0) — see the NLREG note above (seq 247).
+          uid: analysisUid,
+          fenID: 2,
+          $id: "analyses/sheet.schema.json",
+          minRequiredVersion: { major: 0, minor: 0, subminor: 0, build: 0 },
           title: node.name,
           inputSheets: [{ uid: info.sheetUid, title: table.name }],
-          inputDataSets: info.datasetTitles.map((title, idx) => ({
-            uid: info.datasetUidByTitle.get(title) ?? "",
+          inputDataSets: info.datasetTitles.map((title, i) => ({
+            uid: info.datasetUids[i] ?? "",
             title,
-            idx,
+            idx: String.fromCharCode(65 + i),
           })),
           resultSheets: [],
           isCalculated: false,
@@ -638,6 +730,8 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         setJson(`analyses/${analysisUid}/parameters.json`, {
           "@class": "AnalysisParameters",
           analysisClass: "SURVIVAL",
+          $id: "analyses/survival/parameters.schema.json",
+          version: "0.0.0",
           content: {
             data: { eventCode: 1, censorCode: 0 },
             calc: {
@@ -659,7 +753,7 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
             },
           },
         });
-        setJson(`analyses/${analysisUid}/constants.json`, { "@class": "AnalysisConstants", version: 1 });
+        setJson(`analyses/${analysisUid}/constants.json`, { "@class": "AnalysisConstants", version: "0.0.0" });
         report.analyses.push(node.name);
       } else {
         report.analysesNotWritten.push(`${node.name} (${node.analysisType} — not yet supported in Prism)`);

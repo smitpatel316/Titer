@@ -505,6 +505,157 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
     infoRanges.length === 2 && infoRanges.every((r) => r.endsWith(expectedRange)),
     infoRanges.join("; ") || "no info sheets written",
   );
+  // W13 (seq 247): every written analysis sheet loads in real Prism 11.2.0.
+  // Proven by bisection in real Prism (Nov 18): numeric input idx →
+  // "damaged or truncated" (J6); missing sheet identity → SIGSEGV on load
+  // (L1/L2); constants version 1 (number) → "damaged or truncated" (L3);
+  // missing initialValueRules → "Cannot open file… structure has been
+  // corrupted" (M1/P2). Pre-fix FAIL: the old writer emitted numeric idx,
+  // title-keyed (colliding) uids, no sheet identity, version 1, and rules
+  // only for 4PL-x.
+  const w13Written = await writePrism(project, "1.0.7");
+  const w13Zip = await JSZip.loadAsync(w13Written.bytes);
+  const dataSetUids = new Set<string>();
+  for (const p of Object.keys(w13Zip.files)) {
+    if (!p.startsWith("data/sets/") || !p.endsWith(".json") || w13Zip.files[p].dir) continue;
+    const d = JSON.parse(await w13Zip.file(p)!.async("string")) as { uid?: string };
+    if (d.uid) dataSetUids.add(d.uid);
+  }
+  const w13Problems: string[] = [];
+  let w13Nlreg = 0;
+  let w13Survival = 0;
+  for (const p of Object.keys(w13Zip.files)) {
+    if (!p.startsWith("analyses/") || !p.endsWith("/sheet.json") || w13Zip.files[p].dir) continue;
+    const dirUid = p.split("/")[1];
+    const sheet = JSON.parse(await w13Zip.file(p)!.async("string")) as {
+      uid?: string;
+      fenID?: number;
+      $id?: string;
+      minRequiredVersion?: { major?: number; minor?: number; subminor?: number; build?: number };
+      analysisClass?: string;
+      inputDataSets?: { uid?: string; idx?: unknown }[];
+    };
+    const params = JSON.parse(
+      await w13Zip.file(`analyses/${dirUid}/parameters.json`)!.async("string"),
+    ) as {
+      $id?: string;
+      version?: unknown;
+      content?: { model?: { equation?: { parameters?: string[]; initialValueRules?: Record<string, { value: number; rule: string }> } } };
+    };
+    const constants = JSON.parse(
+      await w13Zip.file(`analyses/${dirUid}/constants.json`)!.async("string"),
+    ) as { version?: unknown };
+    const isNlreg = sheet.analysisClass === "NONLINEAR_REGRESSION";
+    if (isNlreg) w13Nlreg++;
+    else if (sheet.analysisClass === "SURVIVAL") w13Survival++;
+    if (sheet.uid !== dirUid) w13Problems.push(`${dirUid}: sheet uid ${sheet.uid ?? "?"} != dir`);
+    if (sheet.fenID !== (isNlreg ? 0 : 2)) w13Problems.push(`${dirUid}: fenID ${sheet.fenID ?? "?"}`);
+    if (sheet.$id !== "analyses/sheet.schema.json") w13Problems.push(`${dirUid}: sheet $id ${sheet.$id ?? "?"}`);
+    const mrv = sheet.minRequiredVersion;
+    const wantMrv = isNlreg ? "8.2.0.0" : "0.0.0.0";
+    if (`${mrv?.major}.${mrv?.minor}.${mrv?.subminor}.${mrv?.build}` !== wantMrv)
+      w13Problems.push(`${dirUid}: MRV ${JSON.stringify(mrv)}`);
+    const expectedParamsId = isNlreg
+      ? "analyses/nonlinear_regression/parameters.schema.json"
+      : "analyses/survival/parameters.schema.json";
+    if (params.$id !== expectedParamsId) w13Problems.push(`${dirUid}: params $id ${params.$id ?? "?"}`);
+    if (params.version !== "0.0.0") w13Problems.push(`${dirUid}: params version ${JSON.stringify(params.version)}`);
+    if (constants.version !== "0.0.0") w13Problems.push(`${dirUid}: constants version ${JSON.stringify(constants.version)}`);
+    const inputs = sheet.inputDataSets ?? [];
+    const seenUids = new Set<string>();
+    inputs.forEach((inp, i) => {
+      if (typeof inp.idx !== "string" || inp.idx !== String.fromCharCode(65 + i))
+        w13Problems.push(`${dirUid}: input ${i} idx ${JSON.stringify(inp.idx)}`);
+      if (!inp.uid || !dataSetUids.has(inp.uid)) w13Problems.push(`${dirUid}: input ${i} uid not a dataset`);
+      if (inp.uid && seenUids.has(inp.uid)) w13Problems.push(`${dirUid}: duplicate input uid ${inp.uid}`);
+      if (inp.uid) seenUids.add(inp.uid);
+    });
+    if (isNlreg) {
+      const eq = params.content?.model?.equation;
+      const rules = eq?.initialValueRules ?? {};
+      const ruleKeys = Object.keys(rules).sort();
+      const paramKeys = [...(eq?.parameters ?? [])].sort();
+      if (JSON.stringify(ruleKeys) !== JSON.stringify(paramKeys))
+        w13Problems.push(`${dirUid}: rules ${ruleKeys.join(",")} != params ${paramKeys.join(",")}`);
+      if (dirUid && eq?.parameters?.includes("IC50")) {
+        // 4PL-x rules are verbatim from the real demo file.
+        if (rules.Bottom?.rule !== "*YMIN" || rules.Top?.rule !== "*YMAX" || rules.IC50?.rule !== "X_AT_YMID")
+          w13Problems.push(`${dirUid}: 4PL-x rules not the real values`);
+      }
+    }
+  }
+  check(
+    "W13a analysis sheets carry Prism identity (seq 247)",
+    w13Problems.length === 0 && w13Nlreg >= 1 && w13Survival >= 1,
+    `${w13Nlreg} NLREG + ${w13Survival} survival; ${w13Problems.join("; ") || "all identity fields exact"}`,
+  );
+  // W13b: duplicate titles stay distinct inputs — an xy table with two "Y"
+  // columns (the seq 247 F0 case: three "Y" datasets collapsed to one uid
+  // by the title-keyed map) writes two inputs with distinct positional
+  // uids and letter idx A/B, and the one-phase-decay equation carries
+  // initialValueRules (P2-proven: Y0 *YMAX, Plateau *YMIN, K *YMAX).
+  const dupXYWritten = await writePrism(
+    {
+      nodes: {
+        t_xy: {
+          id: "t_xy",
+          type: "table",
+          name: "XY dup",
+          parentId: null,
+          tableType: "xy",
+          data: { columns: ["Title", "X", "Y", "Y"], rows: [["r1", "0", "1", "2"], ["r2", "1", "3", "4"]] },
+        },
+        a_opd: {
+          id: "a_opd",
+          type: "analysis",
+          name: "One phase decay",
+          parentId: "t_xy",
+          analysisType: "nonlinear-regression",
+          analysisParams: { model: "one-phase-decay" },
+        },
+      },
+      rootOrder: ["t_xy"],
+      childOrder: { t_xy: ["a_opd"], a_opd: [] },
+      activeNodeId: "t_xy",
+    },
+    "1.0.7",
+  );
+  const dupXYZip = await JSZip.loadAsync(dupXYWritten.bytes);
+  const dupXYProblems: string[] = [];
+  const dupXYSetUids = new Set<string>();
+  for (const p of Object.keys(dupXYZip.files)) {
+    if (!p.startsWith("data/sets/") || !p.endsWith(".json") || dupXYZip.files[p].dir) continue;
+    const d = JSON.parse(await dupXYZip.file(p)!.async("string")) as { uid?: string };
+    if (d.uid) dupXYSetUids.add(d.uid);
+  }
+  let dupXYInputs: { uid?: string; title?: string; idx?: unknown }[] = [];
+  let dupXYRules: Record<string, { value: number; rule: string }> = {};
+  for (const p of Object.keys(dupXYZip.files)) {
+    if (!p.startsWith("analyses/") || !p.endsWith("/sheet.json") || dupXYZip.files[p].dir) continue;
+    const dirUid = p.split("/")[1];
+    const sheet = JSON.parse(await dupXYZip.file(p)!.async("string")) as {
+      inputDataSets?: { uid?: string; title?: string; idx?: unknown }[];
+    };
+    dupXYInputs = sheet.inputDataSets ?? [];
+    const params = JSON.parse(
+      await dupXYZip.file(`analyses/${dirUid}/parameters.json`)!.async("string"),
+    ) as { content?: { model?: { equation?: { initialValueRules?: Record<string, { value: number; rule: string }> } } } };
+    dupXYRules = params.content?.model?.equation?.initialValueRules ?? {};
+  }
+  if (dupXYInputs.length !== 2) dupXYProblems.push(`${dupXYInputs.length} inputs, want 2`);
+  if (dupXYInputs[0]?.idx !== "A" || dupXYInputs[1]?.idx !== "B")
+    dupXYProblems.push(`idx ${JSON.stringify(dupXYInputs.map((i) => i.idx))}`);
+  if (dupXYInputs[0]?.uid === dupXYInputs[1]?.uid) dupXYProblems.push("inputs share one uid");
+  if (!dupXYInputs.every((i) => i.uid && dupXYSetUids.has(i.uid))) dupXYProblems.push("input uid not a dataset");
+  if (Object.keys(dupXYRules).sort().join(",") !== "K,Plateau,Y0")
+    dupXYProblems.push(`rules ${Object.keys(dupXYRules).join(",")}`);
+  if (dupXYRules.Y0?.rule !== "*YMAX" || dupXYRules.Plateau?.rule !== "*YMIN" || dupXYRules.K?.rule !== "*YMAX")
+    dupXYProblems.push("one-phase-decay rules not the P2-proven values");
+  check(
+    "W13b duplicate-title inputs stay distinct with letter idx (seq 247)",
+    dupXYProblems.length === 0,
+    dupXYProblems.join("; ") || "2 inputs A/B, distinct dataset uids, Y0/Plateau/K rules exact",
+  );
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed.`);
