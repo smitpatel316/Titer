@@ -460,7 +460,7 @@ export const identical = (values: number[]) => values.every((v) => v === values[
 
 /** Two results equal as typed: a computer's subtractions err by a few 1e-16 of the values'
  *  scale; 1e-13 of it is far above that, and below the 13th significant digit, beyond any
- *  measurement's (`R_DIFF` takes the same). */
+ *  measurement's. */
 const TYPED = 1e-13;
 const scaleOf = (values: number[]) => maxOf(values.map(Math.abs));
 
@@ -492,15 +492,6 @@ export function noScatter(groups: Group[], test: string): string | undefined {
   if (identical(groups.flatMap((g) => g.values)))
     return `All the values are identical: the ${test} has nothing to compare.`;
 }
-
-/** R: `a − b` as the decimals typed give it. A computer's 13.2 − 12.5 is 0.69999999999999929
- *  and its 1.3 − 0.6 is 0.70000000000000007: the signed-rank test would rank them apart. So
- *  sizes within 1e-13 of the values' scale of the next smaller one are made one (a tie), and
- *  differences within it of 0 are 0; grouped, not rounded, so no two land either side of a
- *  rounding edge. */
-export const R_DIFF =
-  "dif<-function(a,b){d<-a-b;t<-1e-13*max(abs(c(a,b)));d[abs(d)<=t]<-0;m<-abs(d);o<-order(m);" +
-  "k<-cumsum(c(TRUE,diff(m[o])>t));m[o]<-m[o][match(k,k)];sign(d)*m}";
 
 /** R: Hedges' correction of a Cohen's d with `df` degrees of freedom, exact (none under 2 df). */
 export const R_HEDGES = "J<-function(df)if(df<2)NA else exp(lgamma(df/2)-lgamma((df-1)/2))/sqrt(df/2)";

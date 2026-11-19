@@ -3,7 +3,7 @@
 // lognormal form (the geometric mean: a t test of the logarithms against the value's),
 // or a Wilcoxon signed-rank test (non-parametric), Prism-wizard style.
 import type { OneSampleTParams } from "../types";
-import { ciRows, declareGroups, identical, pRow, R_DIFF, R_HEDGES, rAlt, type ColumnTestSpec } from "./base";
+import { ciRows, declareGroups, identical, pRow, R_HEDGES, rAlt, type ColumnTestSpec } from "./base";
 
 const DEFAULTS: OneSampleTParams = { hypotheticalValue: 0, tails: "two-sided", gaussian: true };
 
@@ -34,12 +34,12 @@ export const oneSampleTSpec: ColumnTestSpec<OneSampleTParams> = {
     const decl = declareGroups(groups);
     if (!p.gaussian) {
       const stmts = groups.map(
-        (_, i) => `wt${i}<-suppressWarnings(wilcox.test(dif(g${i},${p.hypotheticalValue}),alternative="${alt}"))`,
+        (_, i) => `wt${i}<-suppressWarnings(wilcox.test(g${i},mu=${p.hypotheticalValue},alternative="${alt}"))`,
       );
       const vals = groups.map(
         (_, i) => `V${i}=unname(wt${i}$statistic),p${i}=wt${i}$p.value,mh${i}=median(g${i})-${p.hypotheticalValue}`,
       );
-      return `${decl};${R_DIFF};${stmts.join(";")};c(${vals.join(",")})`;
+      return `${decl};${stmts.join(";")};c(${vals.join(",")})`;
     }
     if (p.lognormal) {
       const stmts = groups.map(
