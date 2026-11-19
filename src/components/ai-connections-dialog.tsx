@@ -9,10 +9,13 @@ import {
   isNative,
   mcpActivity,
   mcpClaudeCodeCommand,
+  mcpFeedback,
   mcpRegenerateToken,
   mcpSetEnabled,
   mcpStatus,
   mcpToken,
+  openGithubIssue,
+  type FeedbackEntry,
   type McpStatus,
 } from "../native";
 import { useProjectStore } from "../store/use-project-store";
@@ -42,6 +45,36 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
+/** The context lines of a feedback entry, as plain text (kind first). */
+function feedbackIssueBody(entry: FeedbackEntry): string {
+  const meta = [
+    `Kind: ${entry.kind}`,
+    entry.context.app_version
+      ? `App: Titer ${entry.context.app_version} on ${entry.context.os ?? "unknown OS"}`
+      : null,
+    entry.context.project_file ? `Project file: ${entry.context.project_file}` : null,
+    entry.context.failed_tool ? `Failed tool/step: ${entry.context.failed_tool}` : null,
+    entry.context.recent_activity?.length
+      ? `Recent activity: ${entry.context.recent_activity
+          .map((a) => `${a.tool}${a.ok === undefined ? "" : a.ok ? " ✓" : " ✗"}`)
+          .join(", ")}`
+      : null,
+  ].filter((l): l is string => l !== null);
+  return [...meta, "", "Details:", entry.details].join("\n");
+}
+
+/** The whole entry as plain text, for Copy. */
+function feedbackText(entry: FeedbackEntry): string {
+  return `[${entry.kind}] ${entry.summary}\n${new Date(entry.ts * 1000).toLocaleString()}\n\n${feedbackIssueBody(entry)}`;
+}
+
+/** The pre-filled GitHub issue URL for one entry. The user reviews and
+ *  submits it in the browser — nothing is sent from here. */
+function feedbackIssueUrl(entry: FeedbackEntry): string {
+  const title = `[feedback] ${entry.summary}`;
+  return `https://github.com/smitpatel316/Titer/issues/new?title=${encodeURIComponent(title)}&body=${encodeURIComponent(feedbackIssueBody(entry))}`;
+}
+
 export function AiConnectionsDialog() {
   const { selector, closeSelector } = useProjectStore();
   const open = selector?.kind === "ai-connections";
@@ -50,6 +83,8 @@ export function AiConnectionsDialog() {
   const [showToken, setShowToken] = React.useState(false);
   const [command, setCommand] = React.useState<string | null>(null);
   const [activity, setActivity] = React.useState<string[]>([]);
+  const [feedback, setFeedback] = React.useState<FeedbackEntry[]>([]);
+  const [copiedFeedback, setCopiedFeedback] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
   const [copied, setCopied] = React.useState<"token" | "command" | "antigravity" | "prompt" | null>(null);
@@ -69,6 +104,7 @@ export function AiConnectionsDialog() {
       if (next.has_token) setToken(await mcpToken());
       setCommand(next.running ? await mcpClaudeCodeCommand() : null);
       setActivity(await mcpActivity(10));
+      setFeedback(await mcpFeedback());
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -79,6 +115,7 @@ export function AiConnectionsDialog() {
     setShowToken(false);
     setConfirmRegen(false);
     setCopied(null);
+    setCopiedFeedback(null);
     void refresh();
   }, [open, refresh]);
 
@@ -86,6 +123,20 @@ export function AiConnectionsDialog() {
     await navigator.clipboard.writeText(text);
     setCopied(what);
     setTimeout(() => setCopied((c) => (c === what ? null : c)), 2000);
+  };
+
+  const copyFeedback = async (entry: FeedbackEntry) => {
+    await navigator.clipboard.writeText(feedbackText(entry));
+    setCopiedFeedback(entry.feedback_id);
+    setTimeout(() => setCopiedFeedback((c) => (c === entry.feedback_id ? null : c)), 2000);
+  };
+
+  const sendFeedbackToGithub = async (entry: FeedbackEntry) => {
+    try {
+      await openGithubIssue(feedbackIssueUrl(entry));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   const toggle = async (enabled: boolean) => {
@@ -234,9 +285,39 @@ export function AiConnectionsDialog() {
             )}
           </Section>
 
+          <Section label="Feedback from your AI">
+            {feedback.length === 0 ? (
+              <p className="text-regular text-secondary">
+                No feedback yet — your AI can report a missing feature or a bug with titer_send_feedback, and it will
+                show up here for you to review.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {feedback.map((entry) => (
+                  <div key={entry.feedback_id} className="flex flex-col gap-1">
+                    <p className="text-regular text-primary">
+                      [{entry.kind}] {entry.summary} — {new Date(entry.ts * 1000).toLocaleString()}
+                    </p>
+                    <p className="text-small text-secondary">{entry.details}</p>
+                    <div className="flex gap-2">
+                      <Button onClick={() => void copyFeedback(entry)}>
+                        {copiedFeedback === entry.feedback_id ? "Copied" : "Copy"}
+                      </Button>
+                      <Button onClick={() => void sendFeedbackToGithub(entry)}>Send to GitHub</Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="mt-1 text-small text-secondary">
+              Nothing is sent anywhere until you click “Send to GitHub” — that opens a pre-filled issue in your
+              browser for you to review and submit.
+            </p>
+          </Section>
+
           <p className="text-small text-secondary">
             Local only: the server binds 127.0.0.1, needs the token above, and never sends data anywhere. Phase 2 gives
-            an agent 51 tools — 14 read-only, and 37 that change your project: run an analysis, build a graph, export,
+            an agent 52 tools — 15 read-only, and 37 that change your project: run an analysis, build a graph, export,
             save or delete. Only switch this on for an app you trust. It cannot change these settings.
           </p>
 
