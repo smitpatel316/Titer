@@ -27,8 +27,15 @@ export async function xdotool(...args) {
 
 /** Window ids whose title contains `name` (substring match). */
 export async function searchWindows(name) {
+  // --onlyvisible: plain `search` matches UNMAPPED windows too, and GTK
+  // native dialogs (rfd file choosers / save prompts) unmap on close but
+  // leave their X window object lingering unmapped for 30+ s (measured
+  // 2026-11-18: chooser IsUnMapped from ~0.7 s after close, window still
+  // present at 32 s). Without this flag waitForWindowGone never fires and
+  // countWindows double-counts a dialog from a previous test. "Open" here
+  // means mapped/visible, which is what every caller wants.
   try {
-    const { stdout } = await xdotool("search", "--name", name);
+    const { stdout } = await xdotool("search", "--onlyvisible", "--name", name);
     return stdout.trim().split("\n").map((s) => s.trim()).filter(Boolean);
   } catch {
     return [];
