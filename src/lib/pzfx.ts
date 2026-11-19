@@ -195,14 +195,30 @@ function parseXml(text: string): XmlNode {
  *  the reader must not trim or rename them (BUG-4/BUG-7): the .prism import
  *  preserves them, and the exported .pzfx file holds them verbatim, so a
  *  .pzfx round-trip that renames them changes analysis labels and hashes.
- *  No `<Title>` in any known .pzfx file (testdata + corpus) holds a newline,
- *  so exact text needs no whitespace handling. Data `<d>` values keep the
- *  trimmed read below: the number normalizer's anchored regexes need clean
- *  values, and only the RowTitlesColumn's `<d>` values are titles. */
+ *  Data `<d>` values keep the trimmed read below: the number normalizer's
+ *  anchored regexes need clean values, and only the RowTitlesColumn's `<d>`
+ *  values are titles. */
 const rawChildText = (node: XmlNode): string => {
   let out = node.text;
   for (const child of node.children) out += rawChildText(child);
   return out;
+};
+
+/**
+ * A title as Titer stores it — the same rule the `.prism` reader applies
+ * (`cleanText` in src/lib/prism.ts), so the two importers agree and a
+ * `.prism` export→reimport is identical. Prism writes multi-line labels
+ * with a carriage return as the line break (real files: `"+Barb\r\n+Oxy"`,
+ * `"Proton\r\nLeak"` — the old comment here claimed no `<Title>` holds a
+ * newline, which the battery corpus disproves); Titer labels are
+ * single-line, so the break becomes one space. A title that is only
+ * whitespace becomes "" — the caller's fallback applies ("X", "Y",
+ * "Group"). Trailing spaces are PRESERVED (BUG-4/BUG-7): only line breaks
+ * collapse, nothing is trimmed.
+ */
+const cleanTitle = (value: string): string => {
+  const collapsed = value.replace(/\s*(\r\n|\r|\n)\s*/g, " ");
+  return collapsed.trim() === "" ? "" : collapsed;
 };
 
 const childText = (node: XmlNode): string => rawChildText(node).trim();
@@ -238,7 +254,7 @@ interface PzfxColumn {
 function readColumn(node: XmlNode, rawValues = false): PzfxColumn {
   const titleNode = firstChild(node, "Title");
   return {
-    title: titleNode ? rawChildText(titleNode) : "",
+    title: titleNode ? cleanTitle(rawChildText(titleNode)) : "",
     subcolumns: childrenNamed(node, "Subcolumn").map((s) => readSubcolumn(s, rawValues)),
   };
 }
@@ -342,14 +358,25 @@ const genId = (type: string) => `${type}_${Math.random().toString(36).slice(2, 1
 function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: boolean): ImportedTable | null {
   const warnings: string[] = [];
   const titleNode = firstChild(table, "Title");
-  const name = titleNode ? rawChildText(titleNode) : "";
+  const name = titleNode ? cleanTitle(rawChildText(titleNode)) : "";
   const tableType = table.attrs["TableType"] ?? "";
   const xFormat = table.attrs["XFormat"] ?? "";
   const yFormat = table.attrs["YFormat"] ?? "";
   const displayName = name === "" ? "Untitled table" : `“${name}”`;
 
   const rowTitles = firstChild(table, "RowTitlesColumn");
-  const rowTitleValues = rowTitles ? readColumn(rowTitles, true).subcolumns[0]?.values ?? [] : [];
+  // Row titles go through the same single-line rule as the `.prism` reader
+  // (cleanText on its rowTitles): a multi-line row title collapses, and a
+  // whitespace-only one becomes null, so a `.prism` export→reimport reads
+  // the same titles back. Numeric-looking titles (e.g. `0,0003663697194`)
+  // are untouched — only line breaks collapse, no number normalization.
+  const rowTitleValues = rowTitles
+    ? (readColumn(rowTitles, true).subcolumns[0]?.values ?? []).map((v) => {
+        if (v === null) return null;
+        const cleaned = cleanTitle(v);
+        return cleaned === "" ? null : cleaned;
+      })
+    : [];
   let hasRowTitles = rowTitleValues.some((v) => v !== null && v !== "");
 
   const xColumns = childrenNamed(table, "XColumn").map((c) => readColumn(c));

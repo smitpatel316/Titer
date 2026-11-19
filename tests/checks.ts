@@ -13042,6 +13042,86 @@ check(".pzfx import preserves trailing spaces in table, column and row titles (B
   ]);
 });
 
+check(".pzfx import collapses multi-line column titles like the .prism reader, so a .prism round-trip is identical (battery FAIL#1)", async () => {
+  // Real battery file zenodo-15082902-cpz-qpcr…: every table's sixth Y
+  // column is titled "+Barb\r\n+Oxy". The .pzfx import kept the raw line
+  // break, but the .prism reader collapses it to "+Barb +Oxy" (cleanText),
+  // so the export→reimport comparison saw DIFFERS on all 16 tables even
+  // though every value was identical. The importer now applies the same
+  // single-line rule, and the full .prism cycle is identical.
+  const text = `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">
+<Table ID="Table0" XFormat="none" TableType="OneWay">
+<Title>Data 1</Title>
+<YColumn Width="89" Decimals="9" Subcolumns="1"><Title>Ctrl</Title><Subcolumn><d>0,0000875644</d><d>0,000110714</d></Subcolumn></YColumn>
+<YColumn Width="89" Decimals="9" Subcolumns="1"><Title>+Barb\r\n+Oxy</Title><Subcolumn><d>0,000180773</d><d>0,0001674</d></Subcolumn></YColumn>
+</Table>
+</GraphPadPrismFile>`;
+  const imported = parsePzfx(text);
+  const node = imported.project.nodes[imported.project.rootOrder[0]];
+  if (!node || node.type !== "table") throw new Error("no table node");
+  deepStrictEqual(node.data!.columns, ["Title", "Ctrl", "+Barb +Oxy"]);
+  const written = await writePrism(imported.project, "1.7.0");
+  const back = await convertPrism(written.bytes, "round-trip.prism");
+  const backNode = Object.values(back.project.nodes).find((n) => n.type === "table");
+  if (!backNode || backNode.type !== "table") throw new Error("no table node after round-trip");
+  deepStrictEqual(backNode.data!.columns, node.data!.columns);
+  deepStrictEqual(backNode.data!.rows, node.data!.rows);
+});
+
+check(".pzfx import falls back to X for a whitespace-only X title, like the .prism reader (battery FAIL#2)", async () => {
+  // Real battery file zenodo-18255034-employment-status.pzfx: the X
+  // column's title is a single space. The .pzfx import kept " " while the
+  // .prism reader falls back to "X" (plainTitle("") → fallback), so the
+  // reimport comparison saw DIFFERS on the one table. The importer now
+  // maps a whitespace-only title to "" before the fallback, and the full
+  // .prism cycle is identical.
+  const text = `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">
+<Table ID="Table0" XFormat="none" TableType="XY">
+<Title>Data 1</Title>
+<XColumn Width="89" Decimals="0"><Title> </Title><Subcolumn><d>1.</d><d>2.</d></Subcolumn></XColumn>
+<YColumn Width="89" Decimals="0" Subcolumns="1"><Title>Y</Title><Subcolumn><d>10.</d><d>20.</d></Subcolumn></YColumn>
+</Table>
+</GraphPadPrismFile>`;
+  const imported = parsePzfx(text);
+  const node = imported.project.nodes[imported.project.rootOrder[0]];
+  if (!node || node.type !== "table") throw new Error("no table node");
+  deepStrictEqual(node.data!.columns, ["Title", "X", "Y"]);
+  const written = await writePrism(imported.project, "1.7.0");
+  const back = await convertPrism(written.bytes, "round-trip.prism");
+  const backNode = Object.values(back.project.nodes).find((n) => n.type === "table");
+  if (!backNode || backNode.type !== "table") throw new Error("no table node after round-trip");
+  deepStrictEqual(backNode.data!.columns, node.data!.columns);
+  deepStrictEqual(backNode.data!.rows, node.data!.rows);
+});
+
+check(".pzfx import collapses multi-line row titles like the .prism reader, so a .prism round-trip is identical (battery FAIL#3)", async () => {
+  // Real battery file zenodo-22863198-fig6b…: the "Relative Metabolic
+  // Activity" table's row titles are "Proton\r\nLeak" and friends. The
+  // .pzfx import kept the raw line breaks, but the .prism reader
+  // collapses them (cleanText on row titles), so the reimport comparison
+  // saw DIFFERS on that table even though every value was identical.
+  const text = `<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile PrismXMLVersion="5.00">
+<Table ID="Table0" XFormat="none" TableType="OneWay">
+<Title>Data 1</Title>
+<RowTitlesColumn Width="89"><Subcolumn><d>Proton\r\nLeak</d><d>ATP</d></Subcolumn></RowTitlesColumn>
+<YColumn Width="89" Decimals="0" Subcolumns="1"><Title>Y</Title><Subcolumn><d>1.</d><d>2.</d></Subcolumn></YColumn>
+</Table>
+</GraphPadPrismFile>`;
+  const imported = parsePzfx(text);
+  const node = imported.project.nodes[imported.project.rootOrder[0]];
+  if (!node || node.type !== "table") throw new Error("no table node");
+  deepStrictEqual(node.data!.rows, [
+    ["Proton Leak", "1."],
+    ["ATP", "2."],
+  ]);
+  const written = await writePrism(imported.project, "1.7.0");
+  const back = await convertPrism(written.bytes, "round-trip.prism");
+  const backNode = Object.values(back.project.nodes).find((n) => n.type === "table");
+  if (!backNode || backNode.type !== "table") throw new Error("no table node after round-trip");
+  deepStrictEqual(backNode.data!.columns, node.data!.columns);
+  deepStrictEqual(backNode.data!.rows, node.data!.rows);
+});
+
 check(".pzfx import keeps untitled, colon-titled and ragged TwoWay replicate groups through a save/reload round-trip", () => {
   // Two untitled Y columns, one titled "1:10", one ragged (1 of 2
   // subcolumns). Before the fix all three legs lost data on reload: the
