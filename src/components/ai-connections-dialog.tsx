@@ -10,8 +10,10 @@ import {
   mcpActivity,
   mcpClaudeCodeCommand,
   mcpFeedback,
+  mcpFeedbackConsent,
   mcpRegenerateToken,
   mcpSetEnabled,
+  mcpSetFeedbackConsent,
   mcpStatus,
   mcpToken,
   openGithubIssue,
@@ -84,6 +86,7 @@ export function AiConnectionsDialog() {
   const [command, setCommand] = React.useState<string | null>(null);
   const [activity, setActivity] = React.useState<string[]>([]);
   const [feedback, setFeedback] = React.useState<FeedbackEntry[]>([]);
+  const [feedbackSharing, setFeedbackSharing] = React.useState<boolean | null>(null);
   const [copiedFeedback, setCopiedFeedback] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
@@ -105,6 +108,7 @@ export function AiConnectionsDialog() {
       setCommand(next.running ? await mcpClaudeCodeCommand() : null);
       setActivity(await mcpActivity(10));
       setFeedback(await mcpFeedback());
+      setFeedbackSharing(await mcpFeedbackConsent());
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -144,6 +148,19 @@ export function AiConnectionsDialog() {
     try {
       await mcpSetEnabled(enabled);
       await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** The feedback-sharing choice (first-run prompt, or this toggle): what
+   *  `titer_send_feedback` does with a report once it is saved locally. */
+  const toggleSharing = async (sharing: boolean) => {
+    setBusy(true);
+    try {
+      setFeedbackSharing(await mcpSetFeedbackConsent(sharing));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -286,6 +303,19 @@ export function AiConnectionsDialog() {
           </Section>
 
           <Section label="Feedback from your AI">
+            <div className="flex items-center gap-3">
+              <Switch checked={feedbackSharing ?? false} disabled={busy} onChange={(v) => void toggleSharing(v)} />
+              <span className="text-regular text-secondary">
+                {feedbackSharing === null
+                  ? "Not asked yet — reports stay on this Mac until you choose."
+                  : feedbackSharing
+                    ? "On — reports your AI sends are also sent to the Titer team."
+                    : "Off — reports stay on this Mac only."}
+              </span>
+            </div>
+            <p className="text-small text-secondary">
+              Only the feedback text is ever shared — no project data, no file contents, no personal information.
+            </p>
             {feedback.length === 0 ? (
               <p className="text-regular text-secondary">
                 No feedback yet — your AI can report a missing feature or a bug with titer_send_feedback, and it will
@@ -310,15 +340,17 @@ export function AiConnectionsDialog() {
               </div>
             )}
             <p className="mt-1 text-small text-secondary">
-              Nothing is sent anywhere until you click “Send to GitHub” — that opens a pre-filled issue in your
-              browser for you to review and submit.
+              Reports are always saved on this Mac first. With sharing on, a report is also sent to the Titer team
+              when your AI sends one; with sharing off, nothing leaves this Mac — use “Send to GitHub” to share one
+              yourself, which opens a pre-filled issue in your browser for you to review and submit.
             </p>
           </Section>
 
           <p className="text-small text-secondary">
-            Local only: the server binds 127.0.0.1, needs the token above, and never sends data anywhere. Phase 2 gives
-            an agent 52 tools — 15 read-only, and 37 that change your project: run an analysis, build a graph, export,
-            save or delete. Only switch this on for an app you trust. It cannot change these settings.
+            Local only: the server binds 127.0.0.1, needs the token above, and never sends data anywhere — except
+            feedback reports, and only when you turn sharing on above. Phase 2 gives an agent 52 tools — 15
+            read-only, and 37 that change your project: run an analysis, build a graph, export, save or delete. Only
+            switch this on for an app you trust. It cannot change these settings.
           </p>
 
           {error && <p className="text-regular text-red-600">{error}</p>}

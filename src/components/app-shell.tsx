@@ -10,6 +10,7 @@ import { UniversalModal } from "./universal-modal";
 import { Dialog } from "../ui/dialog";
 import { ConverterDialog } from "./converter-dialog";
 import { AiConnectionsDialog } from "./ai-connections-dialog";
+import { FeedbackConsentDialog } from "./feedback-consent-dialog";
 import { useMcpSnapshotPublisher } from "../store/mcp-publish";
 import { useMcpJobDispatcher } from "../store/mcp-dispatch";
 import { SavePromptDialog } from "./save-prompt-dialog";
@@ -141,6 +142,8 @@ export function AppShell() {
       <ConverterDialog />
 
       <AiConnectionsDialog />
+
+      <FeedbackConsentDialog />
 
       <SavePromptDialog onChoose={(choice, remember) => documentActions.resolveSavePrompt(choice, remember)} />
 
