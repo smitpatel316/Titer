@@ -1412,6 +1412,8 @@ fn main() {
             mcp::mcp_claude_code_command,
             mcp::mcp_activity,
             mcp::mcp_feedback,
+            mcp::mcp_feedback_consent,
+            mcp::mcp_set_feedback_consent,
             mcp::mcp_publish_snapshot,
             mcp::mcp_publish_result,
             mcp::mcp_take_jobs,

@@ -267,7 +267,7 @@ false`, `idempotent_hint: true`, `open_world_hint: false`.
 | `titer_read_figure` | `project_id?`, `figure_id` | `{ project_id, figure_id, name, panels: [{ graph_id, rect }], grid, title }`. Phase 1 had no figure reader; needed to verify a figure before exporting it. Shape follows the stored figure node. |
 | `titer_read_info_sheet` | `project_id?`, `info_sheet_id` | `{ project_id, info_sheet_id, name, linked_table_id?, info }`. Pairs with the `info_sheets` array in `titer_list_projects`. |
 | `titer_read_activity` | `limit?` (default 50, max 500) | `{ lines: string[] }` (newest last) — the agent's own audit trail (what it did, what failed). Lines are the stored JSONL as-is (§10). |
-| `titer_send_feedback` | `kind` (`"bug"` \| `"missing-feature"` \| `"other"`), `summary` (short, required, at most 200 characters), `details` (required, at most 4000 characters — what was tried, what happened, what was expected), `failed_tool?` (the tool or step that failed, if any) | `{ feedback_id, received: true }`. Reports a missing feature or a bug to the Titer team — **read-only wrt the project**: it never touches a snapshot, a job, or a project file. The tool itself sends nothing anywhere: it appends one JSONL entry to `<app_data>/mcp/feedback.jsonl` (same 0700 directory as the token, §10) and the user reviews the entries in Settings → AI Connections, sending one to GitHub only by clicking "Send to GitHub" there. The bridge auto-attaches minimal context only: app version, OS, the failed tool/step if any, and the last few Activity lines (tool names + ok flags only). **No table data values, no file paths beyond the project file name.** An unknown `kind`, an empty `summary`/`details`, or an over-long one is a plain-language tool error naming the valid choices. |
+| `titer_send_feedback` | `kind` (`"bug"` \| `"missing-feature"` \| `"other"`), `summary` (short, required, at most 200 characters), `details` (required, at most 4000 characters — what was tried, what happened, what was expected), `failed_tool?` (the tool or step that failed, if any) | `{ feedback_id, received: true, sent: true/false, ... }`. Reports a missing feature or a bug to the Titer team — **read-only wrt the project**: it never touches a snapshot, a job, or a project file. The report is always saved on this Mac first: one JSONL entry appended to `<app_data>/mcp/feedback.jsonl` (same 0700 directory as the token, §10), and the user reviews the entries in Settings → AI Connections, sending one to GitHub only by clicking "Send to GitHub" there. **Consent gate:** the entry is also POSTed to the feedback server (`POST https://feedback.smitpatel.net/api/v1/feedback`, 10 s timeout) only when the user has turned on feedback sharing — first-run prompt (Share / Don't share, default off) or the Settings toggle, recorded in `<app_data>/mcp/feedback-consent.json`. Sharing off → `{ feedback_id, received: true, sent: false, sharing: "disabled", note: "…" }` and no POST is attempted (the tool says sharing is disabled, never silently stays local). Sharing on + server 201 → `{ feedback_id, received: true, sent: true, issue_url: "…" }`. Sharing on + server unreachable / timeout / non-2xx → `{ feedback_id, received: true, sent: false, sharing: "enabled", error: "…" }` — the entry stays saved locally and the tool call still succeeds. The bridge auto-attaches minimal context only: app version, OS, the failed tool/step if any, and the last few Activity lines (tool names + ok flags only). **No table data values, no file paths beyond the project file name.** An unknown `kind`, an empty `summary`/`details`, or an over-long one is a plain-language tool error naming the valid choices. |
 
 ## 7. Analyses (53 types) — run, freeze, simulate, method, wand, script
 
@@ -502,9 +502,17 @@ way, to `<app_data_dir>/mcp/feedback.jsonl` — one JSON object per line
 (`feedback_id`, `ts`, `kind`, `summary`, `details`, `context` with the
 app version, OS, failed tool/step if any, the project file name only,
 and the last few Activity lines as tool names + ok flags). The dialog
-lists them (newest first) via the `mcp_feedback` app command; the file
-is never sent anywhere by the server — only the user's explicit
-"Send to GitHub" click opens a pre-filled issue in the browser.
+lists them (newest first) via the `mcp_feedback` app command. The file
+is the record: the server copy is gated on the user's sharing choice
+(`<app_data_dir>/mcp/feedback-consent.json`, `{"sharing": true|false}` —
+missing means off), set by the first-run prompt or the Settings toggle
+(`mcp_feedback_consent` / `mcp_set_feedback_consent` app commands).
+Sharing off → no POST is attempted and the tool answer says so;
+sharing on → the entry JSON is POSTed to
+`https://feedback.smitpatel.net/api/v1/feedback` (10 s timeout), and a
+201 returns the Plane issue URL in the tool answer. A failed POST never
+fails the tool call — the local entry is the fallback. The user's
+explicit "Send to GitHub" click opens a pre-filled issue in the browser.
 
 ### 10.3 Tool-count rollup
 
@@ -578,7 +586,14 @@ fixture for the Prism-import step:
     `<app_data>/mcp/feedback.jsonl` must gain exactly one entry with
     the right shape (`feedback_id`, `kind`, `summary`, `details`,
     `context` with app version + OS, no file path beyond the project
-    file name). The project itself must be unchanged by the calls.
+    file name). With sharing off (the default — no consent record) the
+    report's answer must be `{ received: true, sent: false, sharing:
+    "disabled" }` and no POST may leave the machine; with sharing on
+    and the mock endpoint up, the answer must be `{ received: true,
+    sent: true, issue_url: "…" }`; with sharing on and the endpoint
+    down, the answer must still succeed as `{ received: true, sent:
+    false, sharing: "enabled", error: "…" }` with the entry saved
+    locally. The project itself must be unchanged by the calls.
 11. Delete the duplicate table through the two-step confirm; stop the
     server in Settings: the endpoint refuses connections and the
     discovery file is gone. Start it again: a new run works with no

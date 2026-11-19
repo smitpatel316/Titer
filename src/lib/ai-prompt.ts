@@ -34,9 +34,11 @@ export const AI_STARTER_PROMPT_SECTIONS: string[] = [
     "- The MCP server speaks Streamable HTTP with a Bearer token; it accepts protocol versions 2025-11-25 and 2025-06-18. If the connection drops, tell me to check that Titer is running and that \"Allow AI apps to connect\" is still on — it switches off every time Titer restarts.",
   ].join("\n"),
 
-  // Appended by the feedback feature (seq 276): the tool only saves the
-  // report on this Mac for the user to review; it never sends anything.
-  "Report gaps: `titer_send_feedback` — if something is missing or broken, report it (see ground rules). It only saves the report on this Mac for me to review; it never sends anything anywhere by itself.",
+  // Appended by the feedback feature (seq 276): the tool always saves the
+  // report on this Mac for the user to review, and only sends it to the
+  // Titer team when the user has turned on feedback sharing in
+  // Settings → AI Connections (first-run prompt, default off).
+  "Report gaps: `titer_send_feedback` — if something is missing or broken, report it (see ground rules). It always saves the report on this Mac for me to review; it only sends it to the Titer team if I have turned on feedback sharing in Settings → AI Connections.",
 ];
 
 /** The full starter prompt, paragraphs separated by a blank line. */

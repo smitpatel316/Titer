@@ -167,6 +167,17 @@ export interface FeedbackEntry {
 /** The saved feedback entries (newest first). */
 export const mcpFeedback = () => invoke<FeedbackEntry[]>("mcp_feedback");
 
+/** The user's feedback-sharing choice, if they have made one: `true` Share,
+ *  `false` Don't share, `null` never asked (fresh install or upgrade — the
+ *  first-run prompt shows). Lives in the app-data `mcp/` folder, so it
+ *  survives restarts and the MCP server reads the same record. */
+export const mcpFeedbackConsent = () => invoke<boolean | null>("mcp_feedback_consent");
+
+/** Records the user's feedback-sharing choice (first-run prompt, or the
+ *  Settings toggle). Returns the choice now in effect. */
+export const mcpSetFeedbackConsent = (sharing: boolean) =>
+  invoke<boolean | null>("mcp_set_feedback_consent", { sharing });
+
 /** This window's project, for the MCP server to serve. Published on every
  *  revision change (debounced, see store/mcp-publish.ts). A no-op where
  *  there is no native shell (web preview, tests). */
