@@ -27,7 +27,7 @@ import {
   typePathIntoChooser,
   waitForProcessGone,
 } from "./helpers/xdotool.js";
-import { SAVE_PROMPT, APP_PATTERN, dirtyCurrentWindow } from "./helpers/quit.js";
+import { SAVE_PROMPT, APP_PATTERN, dirtyCurrentWindow, quitApp } from "./helpers/quit.js";
 
 const OUT = specOutDir("quit-cq03");
 const STEM = path.join(OUT, "cq03-save");
@@ -42,7 +42,7 @@ describe("CQ-03 Save on quit writes the file, quit continues", () => {
 
   it("Save writes the file and the quit completes", async () => {
     await dirtyCurrentWindow("4242");
-    await x.key("ctrl+q");
+    await quitApp();
     const wid = await waitForWindow(SAVE_PROMPT, { timeout: 20000 });
     assert.ok(wid, "save prompt never appeared on quit");
     // First button is Save (focused by default): Space activates it.

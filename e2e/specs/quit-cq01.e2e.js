@@ -29,7 +29,7 @@ import {
   answerNativeDialog,
   waitForProcessGone,
 } from "./helpers/xdotool.js";
-import { SAVE_PROMPT, APP_PATTERN, dirtyAllWindows } from "./helpers/quit.js";
+import { SAVE_PROMPT, APP_PATTERN, dirtyAllWindows, focusProjectWindow, quitApp } from "./helpers/quit.js";
 
 describe("CQ-01 quit with 3 dirty windows, one sheet at a time", () => {
   before(async () => {
@@ -39,7 +39,9 @@ describe("CQ-01 quit with 3 dirty windows, one sheet at a time", () => {
   });
 
   it("shows exactly one save sheet at a time; Don't Save x3 exits cleanly", async () => {
-    // Three dirty windows: the launch window + two new ones.
+    // Three dirty windows: the launch window + two new ones. (Ctrl+N is
+    // an xdotool key: it needs an X-focused window first, same as Ctrl+Q.)
+    await focusProjectWindow();
     await x.key("ctrl+n");
     await sleep(1500);
     await x.key("ctrl+n");
@@ -47,10 +49,11 @@ describe("CQ-01 quit with 3 dirty windows, one sheet at a time", () => {
     const handles = await dirtyAllWindows(x);
     assert.equal(handles.length, 3, `expected 3 project windows, got ${handles.length}`);
 
-    // Focus any window and quit the app (Titer > Quit).
+    // Focus any window and quit the app (quit_app invoke — see
+    // helpers/quit.js; the Linux menu Quit item is disabled).
     await switchToHandle(handles[0]);
     await sleep(500);
-    await x.key("ctrl+q");
+    await quitApp();
 
     // Three sheets, strictly sequential: exactly one native dialog at a
     // time, each answered Don't Save, the next appearing only after.

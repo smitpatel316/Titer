@@ -23,7 +23,7 @@ import {
   pidsFor,
   answerNativeDialog,
 } from "./helpers/xdotool.js";
-import { SAVE_PROMPT, APP_PATTERN, dirtyCurrentWindow } from "./helpers/quit.js";
+import { SAVE_PROMPT, APP_PATTERN, dirtyCurrentWindow, quitApp } from "./helpers/quit.js";
 
 describe("CQ-02 Cancel aborts the quit", () => {
   before(async () => {
@@ -34,7 +34,7 @@ describe("CQ-02 Cancel aborts the quit", () => {
 
   it("Cancel aborts the quit: app alive, window present, project intact", async () => {
     await dirtyCurrentWindow();
-    await x.key("ctrl+q");
+    await quitApp();
     const wid = await waitForWindow(SAVE_PROMPT, { timeout: 20000 });
     assert.ok(wid, "save prompt never appeared on quit");
     await answerNativeDialog(SAVE_PROMPT, "escape");

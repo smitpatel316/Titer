@@ -22,7 +22,7 @@ import {
   answerNativeDialog,
   waitForProcessGone,
 } from "./helpers/xdotool.js";
-import { SAVE_PROMPT, APP_PATTERN, dirtyCurrentWindow } from "./helpers/quit.js";
+import { SAVE_PROMPT, APP_PATTERN, dirtyCurrentWindow, quitApp } from "./helpers/quit.js";
 
 describe("CQ-04 single dirty window quit", () => {
   before(async () => {
@@ -33,7 +33,7 @@ describe("CQ-04 single dirty window quit", () => {
 
   it("one sheet, Don't Save, clean exit", async () => {
     await dirtyCurrentWindow();
-    await x.key("ctrl+q");
+    await quitApp();
     const wid = await waitForWindow(SAVE_PROMPT, { timeout: 20000 });
     assert.ok(wid, "save prompt never appeared on quit (silent discard?)");
     assert.equal(
