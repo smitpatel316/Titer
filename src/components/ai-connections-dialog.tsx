@@ -16,6 +16,7 @@ import {
   type McpStatus,
 } from "../native";
 import { useProjectStore } from "../store/use-project-store";
+import { AI_STARTER_PROMPT, buildAntigravityConfig } from "../lib/ai-prompt";
 
 /** One Activity-log line, read for a person: "14:02 titer_read_tables ✓". */
 function activityLine(line: string): string {
@@ -51,8 +52,13 @@ export function AiConnectionsDialog() {
   const [activity, setActivity] = React.useState<string[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
-  const [copied, setCopied] = React.useState<"token" | "command" | null>(null);
+  const [copied, setCopied] = React.useState<"token" | "command" | "antigravity" | "prompt" | null>(null);
   const [confirmRegen, setConfirmRegen] = React.useState(false);
+
+  // Live Antigravity config (endpoint + token filled in, no placeholders);
+  // null unless the server is running with a known endpoint and token.
+  const antigravityConfig =
+    status?.running && status.endpoint && token ? buildAntigravityConfig(status.endpoint, token) : null;
 
   const refresh = React.useCallback(async () => {
     if (!isNative) return;
@@ -76,7 +82,7 @@ export function AiConnectionsDialog() {
     void refresh();
   }, [open, refresh]);
 
-  const copy = async (what: "token" | "command", text: string) => {
+  const copy = async (what: "token" | "command" | "antigravity" | "prompt", text: string) => {
     await navigator.clipboard.writeText(text);
     setCopied(what);
     setTimeout(() => setCopied((c) => (c === what ? null : c)), 2000);
@@ -118,7 +124,7 @@ export function AiConnectionsDialog() {
       onClose={closeSelector}
       dismissLabel="Done"
       title="AI Connections"
-      description="Let an AI app you already use (Claude Code, Claude Desktop, …) work with what's open in Titer — through a local server only. It can read and change your project, not just look at it."
+      description="Let an AI app you already use (Claude Code, Claude Desktop, Antigravity / Gemini, …) work with what's open in Titer — through a local server only. It can read and change your project, not just look at it."
     >
       {!isNative ? (
         <p className="text-regular text-secondary">
@@ -187,6 +193,34 @@ export function AiConnectionsDialog() {
               </p>
             </Section>
           )}
+
+          {antigravityConfig && (
+            <Section label="Antigravity (Gemini) — paste into `~/.gemini/config/mcp_config.json`">
+              <pre className="max-h-64 overflow-auto rounded-md bg-control p-3 text-small whitespace-pre-wrap">
+                {antigravityConfig}
+              </pre>
+              <div className="flex gap-2">
+                <Button onClick={() => void copy("antigravity", antigravityConfig)}>
+                  {copied === "antigravity" ? "Copied" : "Copy"}
+                </Button>
+              </div>
+              <p className="mt-1 text-small text-secondary">
+                Use the global file, never a repo&apos;s `.agents/mcp_config.json` — the token is a live secret and must
+                never be committed to a repo. Restart Antigravity (or open the MCP manager with `/mcp`) after editing.
+              </p>
+            </Section>
+          )}
+
+          <Section label="What to tell your AI — paste into Gemini (or any AI app)">
+            <pre className="max-h-64 overflow-auto rounded-md bg-control p-3 text-small whitespace-pre-wrap">
+              {AI_STARTER_PROMPT}
+            </pre>
+            <div className="flex gap-2">
+              <Button onClick={() => void copy("prompt", AI_STARTER_PROMPT)}>
+                {copied === "prompt" ? "Copied" : "Copy"}
+              </Button>
+            </div>
+          </Section>
 
           <Section label="Recent agent activity">
             {activity.length === 0 ? (
