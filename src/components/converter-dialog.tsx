@@ -128,7 +128,7 @@ export function ConverterDialog() {
     setProgress(`Writing ${project.rootOrder.length} tables as .${format}…`);
     await paint();
     try {
-      const version = native.isNative ? await native.appVersion().catch(() => "1.7.0") : "1.7.0";
+      const version = native.isNative ? await native.appVersion().catch(() => "1.7.1") : "1.7.1";
       const payload = {
         nodes: project.nodes,
         rootOrder: project.rootOrder,
