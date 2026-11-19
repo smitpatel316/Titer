@@ -991,6 +991,27 @@ fn open_link(link: String) {
     }
 }
 
+/// A pre-filled GitHub issue for one saved feedback entry, in the
+/// default browser. The address is fixed (github.com/smitpatel316/Titer
+/// issues/new) — only the title/body query varies, and it is built by
+/// the dialog from the entry the user chose to send. Anything else is
+/// refused, so the page can't open an arbitrary URL.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn open_github_issue(url: String) {
+    const PREFIX: &str = "https://github.com/smitpatel316/Titer/issues/new?";
+    if !url.starts_with(PREFIX) {
+        return;
+    }
+    unsafe {
+        let Ok(text) = std::ffi::CString::new(url) else { return };
+        let url_obj: *mut AnyObject = objc2::msg_send![objc2::class!(NSString), stringWithUTF8String: text.as_ptr()];
+        let url_obj: *mut AnyObject = objc2::msg_send![objc2::class!(NSURL), URLWithString: url_obj];
+        let workspace: *mut AnyObject = objc2::msg_send![objc2::class!(NSWorkspace), sharedWorkspace];
+        let _: bool = objc2::msg_send![workspace, openURL: url_obj];
+    }
+}
+
 /// Quitting (Titer ▸ Quit, the Dock, the app switcher, logout) asks the app delegate
 /// `applicationShouldTerminate:`, which tao doesn't answer, so Titer would quit
 /// without asking to save. This answers "not now" and closes the project windows
@@ -1124,6 +1145,18 @@ fn open_link(link: String) {
         "coffee" => "https://www.buymeacoffee.com/smitpatel316",
         _ => return,
     };
+    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+}
+
+/// Linux: the same fixed GitHub-issue address as on macOS, opened with
+/// xdg-open. Only the title/body query varies; anything else is refused.
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn open_github_issue(url: String) {
+    const PREFIX: &str = "https://github.com/smitpatel316/Titer/issues/new?";
+    if !url.starts_with(PREFIX) {
+        return;
+    }
     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
 }
 
@@ -1348,6 +1381,7 @@ fn main() {
             set_recent_documents,
             accent_color,
             open_link,
+            open_github_issue,
             set_spinner,
             open_url,
             cloud_status,
@@ -1377,6 +1411,7 @@ fn main() {
             mcp::mcp_regenerate_token,
             mcp::mcp_claude_code_command,
             mcp::mcp_activity,
+            mcp::mcp_feedback,
             mcp::mcp_publish_snapshot,
             mcp::mcp_publish_result,
             mcp::mcp_take_jobs,

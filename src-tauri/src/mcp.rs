@@ -2,8 +2,8 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 51 tools: 14 read-only (list/read/job/
-// activity/cloud reads) and 37 mutating, via the L0 Rust→frontend
+// Settings → AI connections. 52 tools: 15 read-only (list/read/job/
+// activity/cloud reads + feedback) and 37 mutating, via the L0 Rust→frontend
 // dispatch + job queue — run-analysis, build-graph, export and cloud
 // tools included (Phase 2).
 //
@@ -43,7 +43,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 51 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 52 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -82,6 +82,7 @@ const MCP_PATH: &str = "/mcp";
 const TOKEN_FILE: &str = "token";
 const DISCOVERY_FILE: &str = "discovery.json";
 const ACTIVITY_FILE: &str = "activity.log";
+const FEEDBACK_FILE: &str = "feedback.jsonl";
 
 /// A table dump is a summary unless asked: at most this many rows, and only
 /// when the caller says `include_values`.
@@ -92,6 +93,16 @@ const HARD_MAX_ROWS: usize = 1000;
 /// most a caller may ask for.
 const DEFAULT_ACTIVITY_LIMIT: u32 = 50;
 const MAX_ACTIVITY_LIMIT: u32 = 500;
+
+/// Activity lines `titer_send_feedback` auto-attaches as context (tool
+/// names + ok flags only — never args, never values).
+const FEEDBACK_CONTEXT_LINES: usize = 5;
+
+/// Length caps on a feedback report, so one call cannot grow the
+/// feedback file without bound. Over-long args are an error, never a
+/// silent truncation (see docs/mcp-server-contract.md §4).
+const MAX_FEEDBACK_SUMMARY_CHARS: usize = 200;
+const MAX_FEEDBACK_DETAILS_CHARS: usize = 4000;
 
 /// Job retention (L4, inventory §3.3): a terminal job is kept until read at
 /// least once after completion, then this long for re-reads; a terminal job
@@ -375,6 +386,16 @@ impl McpState {
     /// One window's published snapshot, if it has published.
     fn snapshot_for(&self, label: &str) -> Option<serde_json::Value> {
         self.lock().snapshots.get(label).cloned()
+    }
+
+    /// The front project's file NAME only (never a path) — the one
+    /// context field `titer_send_feedback` may attach. None when no
+    /// project is open or the open project has no file on disk yet.
+    fn front_project_file_name(&self) -> Option<String> {
+        let id = self.resolve_project(None).ok()?;
+        let snap = self.snapshot_for(&id)?;
+        let path = snap.get("filePath")?.as_str()?;
+        std::path::Path::new(path).file_name()?.to_str().map(str::to_string)
     }
 
     /// The remote file a window came from (L9), if it was opened from the
@@ -1037,6 +1058,77 @@ fn activity_lines(dir: &std::path::Path, limit: usize) -> Vec<String> {
     lines[skip..].to_vec()
 }
 
+/// A feedback entry's id: "fb-" + unix time + 4 random bytes as hex.
+/// Randomness (not a counter) so two reports in the same second — or
+/// after the file was cleared — never collide.
+fn new_feedback_id() -> String {
+    let mut bytes = [0u8; 4];
+    let random = fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut bytes)).is_ok();
+    if random {
+        format!("fb-{}-{}", now_ts(), bytes.iter().map(|b| format!("{b:02x}")).collect::<String>())
+    } else {
+        format!("fb-{}-00000000", now_ts())
+    }
+}
+
+/// The last few Activity lines, reduced to tool names + ok flags, for a
+/// feedback entry's context. Args are dropped here (a summary only in
+/// the log, and still not the feedback entry's business), and a line
+/// that doesn't parse is skipped, not surfaced.
+fn recent_activity_context(dir: &std::path::Path) -> Vec<serde_json::Value> {
+    activity_lines(dir, FEEDBACK_CONTEXT_LINES)
+        .iter()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter_map(|v| {
+            let tool = v.get("tool")?.as_str()?.to_string();
+            let mut item = serde_json::json!({ "tool": tool });
+            if let Some(ts) = v.get("ts").and_then(|t| t.as_u64()) {
+                item["ts"] = serde_json::Value::from(ts);
+            }
+            if let Some(ok) = v.get("ok").and_then(|o| o.as_bool()) {
+                item["ok"] = serde_json::Value::Bool(ok);
+            }
+            Some(item)
+        })
+        .collect()
+}
+
+/// One saved feedback entry, as Settings lists it (newest first).
+#[derive(Serialize)]
+pub struct FeedbackEntry {
+    pub feedback_id: String,
+    pub ts: u64,
+    pub kind: String,
+    pub summary: String,
+    pub details: String,
+    pub context: serde_json::Value,
+}
+
+/// The saved feedback entries (newest first), for Settings to show.
+/// Malformed lines are skipped, not surfaced — a hand-edited file must
+/// not break the dialog.
+#[tauri::command]
+pub fn mcp_feedback(app: AppHandle, state: State<McpState>) -> Result<Vec<FeedbackEntry>, String> {
+    let dir = state.ensure_dir(&app)?;
+    let text = fs::read_to_string(dir.join(FEEDBACK_FILE)).unwrap_or_default();
+    let mut entries: Vec<FeedbackEntry> = text
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter_map(|v| {
+            Some(FeedbackEntry {
+                feedback_id: v.get("feedback_id")?.as_str()?.to_string(),
+                ts: v.get("ts")?.as_u64()?,
+                kind: v.get("kind")?.as_str()?.to_string(),
+                summary: v.get("summary")?.as_str()?.to_string(),
+                details: v.get("details")?.as_str()?.to_string(),
+                context: v.get("context").cloned().unwrap_or(serde_json::Value::Null),
+            })
+        })
+        .collect();
+    entries.sort_by(|a, b| b.ts.cmp(&a.ts));
+    Ok(entries)
+}
+
 /// The Activity log's last `limit` lines (newest last), for Settings to show.
 #[tauri::command]
 pub fn mcp_activity(app: AppHandle, state: State<McpState>, limit: u32) -> Result<Vec<String>, String> {
@@ -1232,7 +1324,7 @@ async fn auth_middleware(
 /// the corruption hits every tool that returns non-ASCII text, not just
 /// transform-concentrations. Appending `; charset=utf-8` here, the one
 /// shared path every MCP response flows through, fixes the echo for all
-/// 51 tools. Returns the new header value, or `None` when the type is
+/// 52 tools. Returns the new header value, or `None` when the type is
 /// already labelled or is not one of the textual MCP response types.
 fn utf8_charset(content_type: &str) -> Option<String> {
     let lower = content_type.to_ascii_lowercase();
@@ -1560,11 +1652,13 @@ fn snapshot_node<'a>(snapshot: &'a serde_json::Value, id: &str, kind: &str) -> R
 }
 
 // ── The MCP server: tools ───────────────────────────────────────────────
-// Eight read-only tools: the five Phase 1 tools, plus the three Phase 2
+// Nine read-only tools: the five Phase 1 tools, plus the four Phase 2
 // read-only additions (titer_read_figure, titer_read_info_sheet,
-// titer_read_activity). Every one is annotated read_only_hint,
-// and every call is written to the Activity log with an args summary —
-// never full table values, never the token.
+// titer_read_activity, titer_send_feedback). Every one is annotated
+// read_only_hint, and every call is written to the Activity log with an
+// args summary — never full table values, never the token.
+// (`titer_send_feedback` logs kind + feedback_id only: its details are
+// the agent's words, not a summary, and may quote what it saw.)
 
 #[derive(Clone)]
 pub struct TiterMcpServer {
@@ -1649,6 +1743,23 @@ pub struct ActivityArgs {
     /// Lines returned (default 50, at most 500), newest last.
     #[serde(default)]
     pub limit: Option<u32>,
+}
+
+/// A feedback report for the Titer team, from the AI app: what is
+/// missing or broken, in the agent's own words. No table data values —
+/// only the tool or step that failed.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct FeedbackArgs {
+    /// "bug" | "missing-feature" | "other".
+    pub kind: String,
+    /// Short summary of the gap (one line, at most 200 characters).
+    pub summary: String,
+    /// What was tried, what happened, what was expected (at most 4000
+    /// characters). No table data values.
+    pub details: String,
+    /// The tool or step that failed, if any.
+    #[serde(default)]
+    pub failed_tool: Option<String>,
 }
 
 /// A local file path (.hlx, .pzt, .prism or .pzfx). Never a URL.
@@ -2649,6 +2760,108 @@ impl TiterMcpServer {
         let lines = self.state.dir().map(|dir| activity_lines(&dir, limit as usize)).unwrap_or_default();
         self.state.log_call("titer_read_activity", serde_json::json!({ "limit": limit }), true, None);
         Ok(Json(serde_json::json!({ "lines": lines })))
+    }
+
+    /// Report a missing feature or a bug to the Titer team — in the
+    /// agent's own words, saved on this machine only. The tool itself
+    /// sends nothing anywhere: it appends one JSONL entry to
+    /// <app_data>/mcp/feedback.jsonl (the same 0700 directory as the
+    /// token) and returns `{ feedback_id, received: true }`. The user
+    /// reviews the entries in Settings → AI Connections and sends one
+    /// to GitHub only by clicking "Send to GitHub" there.
+    ///
+    /// Context is auto-attached and minimal: app version, OS, the
+    /// tool/step that failed if any, and the last few Activity lines
+    /// (tool names + ok flags only). No table data values, no file
+    /// paths beyond the project file name. Read-only wrt the project:
+    /// it never touches a snapshot, a job, or a file the project owns.
+    #[tool(
+        name = "titer_send_feedback",
+        description = "Report a missing feature or a bug to the Titer team (kind: \"bug\" | \"missing-feature\" | \"other\"; summary: one short line; details: what was tried, what happened, what was expected — no table data values). The report is only saved on this Mac for the user to review in Settings → AI Connections; it is never sent anywhere by itself. Returns { feedback_id, received: true }.",
+        annotations(
+            title = "Send feedback",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn send_feedback(
+        &self,
+        Parameters(args): Parameters<FeedbackArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let kind = args.kind.trim();
+        if !matches!(kind, "bug" | "missing-feature" | "other") {
+            return Err("kind must be one of \"bug\", \"missing-feature\", \"other\".".into());
+        }
+        let summary = args.summary.trim();
+        if summary.is_empty() {
+            return Err("summary is required — one short line saying what is missing or broken.".into());
+        }
+        if summary.chars().count() > MAX_FEEDBACK_SUMMARY_CHARS {
+            return Err(format!(
+                "summary is too long ({0} characters) — keep it to {1} characters or fewer.",
+                summary.chars().count(),
+                MAX_FEEDBACK_SUMMARY_CHARS
+            ));
+        }
+        let details = args.details.trim();
+        if details.is_empty() {
+            return Err("details is required — say what was tried, what happened, and what was expected.".into());
+        }
+        if details.chars().count() > MAX_FEEDBACK_DETAILS_CHARS {
+            return Err(format!(
+                "details is too long ({0} characters) — keep it to {1} characters or fewer.",
+                details.chars().count(),
+                MAX_FEEDBACK_DETAILS_CHARS
+            ));
+        }
+        let Some(dir) = self.state.dir() else {
+            return Err(
+                "Feedback couldn't be saved — the MCP directory isn't available. Turn the server off and on again in Settings → AI Connections."
+                    .into(),
+            );
+        };
+        let failed_tool = args.failed_tool.as_deref().map(str::trim).filter(|t| !t.is_empty());
+        let mut context = serde_json::json!({
+            "app_version": env!("CARGO_PKG_VERSION"),
+            "os": std::env::consts::OS,
+        });
+        if let Some(failed) = failed_tool {
+            context["failed_tool"] = serde_json::Value::String(failed.to_string());
+        }
+        if let Some(file) = self.state.front_project_file_name() {
+            context["project_file"] = serde_json::Value::String(file);
+        }
+        context["recent_activity"] = serde_json::Value::Array(recent_activity_context(&dir));
+        let feedback_id = new_feedback_id();
+        let entry = serde_json::json!({
+            "feedback_id": feedback_id,
+            "ts": now_ts(),
+            "kind": kind,
+            "summary": summary,
+            "details": details,
+            "context": context,
+        });
+        let line = serde_json::to_string(&entry).map_err(|e| format!("Couldn't record the feedback ({e})."))?;
+        {
+            use std::io::Write;
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join(FEEDBACK_FILE))
+                .map_err(|e| format!("Couldn't save the feedback ({e})."))?;
+            writeln!(file, "{line}").map_err(|e| format!("Couldn't save the feedback ({e})."))?;
+        }
+        // Log kind + id only — the details are the agent's words, not a
+        // summary, and may quote what it saw.
+        self.state.log_call(
+            "titer_send_feedback",
+            serde_json::json!({ "kind": kind, "feedback_id": feedback_id }),
+            true,
+            None,
+        );
+        Ok(Json(serde_json::json!({ "feedback_id": feedback_id, "received": true })))
     }
 
     // ── Data-table tools (L3) ────────────────────────────────────────────
@@ -5116,8 +5329,8 @@ impl TiterMcpServer {
         // Inspector 2.13.0 discards tools whose outputSchema has no `type`
         // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
         // returns, so `tools/list` prints `{"tools": []}` even though the
-        // server returns all 51. Every tool returns a JSON object, so stamp
-        // `type: "object"` on all 51 output schemas here — the single choke
+        // server returns all 52. Every tool returns a JSON object, so stamp
+        // `type: "object"` on all 52 output schemas here — the single choke
         // point — instead of touching each tool. `Arc::make_mut`
         // clone-on-writes: rmcp caches the `Value` schema in a thread-local
         // cache shared by all tools, so the cached Arc must never be
@@ -5354,11 +5567,13 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes 51 tools: 14 read-only and 37 that change the open project. \
+                It exposes 52 tools: 15 read-only and 37 that change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_list_tables, titer_read_table_summary (columns, row count, ranges, units; cell values \
                 only when include_values asks), titer_read_results (statistics, p-values, confidence \
                 intervals), titer_read_graph, titer_read_figure, titer_read_info_sheet, titer_read_activity, \
+                titer_send_feedback (report a missing feature or a bug — it only saves the report on this \
+                Mac for the user to review, it never sends anything anywhere), \
                 titer_read_job, titer_list_jobs, and the cloud reads titer_cloud_status, titer_cloud_list, \
                 titer_cloud_metadata, titer_cloud_revisions. \
                 Mutating tools change the project: create/open/save/import/close projects, create/write/edit/ \
@@ -7098,13 +7313,13 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            51,
-            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + two L4 analysis tools + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools + four L8 export tools: {names:?}"
+            52,
+            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + two L4 analysis tools + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools + four L8 export tools + one feedback tool: {names:?}"
         );
         for name in ["titer_read_job", "titer_list_jobs", "titer_cancel_job"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
-        for name in ["titer_read_figure", "titer_read_info_sheet", "titer_read_activity"] {
+        for name in ["titer_read_figure", "titer_read_info_sheet", "titer_read_activity", "titer_send_feedback"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
         for name in [
@@ -7961,7 +8176,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 51, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 52, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema

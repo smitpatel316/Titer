@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Phase 2 live MCP smoke: initialize -> tools/list -> tools/call across
-all 51 tools against a running Titer MCP server.
+all 52 tools against a running Titer MCP server.
 
 Reads endpoint + token from <app_data>/mcp/discovery.json (argv[1]).
 Speaks Streamable HTTP directly (no bridge, no Claude Desktop sign-in):
@@ -41,6 +41,7 @@ EXPECTED_TOOLS = [
     "titer_read_results", "titer_read_graph",
     "titer_read_job", "titer_list_jobs", "titer_cancel_job",
     "titer_read_figure", "titer_read_info_sheet", "titer_read_activity",
+    "titer_send_feedback",
     # L2 project (5)
     "titer_create_project", "titer_open_project", "titer_save_project",
     "titer_import_prism", "titer_close_project",
@@ -66,7 +67,7 @@ EXPECTED_TOOLS = [
     "titer_export_graph", "titer_export_figure", "titer_export_office",
     "titer_export_table_data",
 ]
-assert len(EXPECTED_TOOLS) == 51, len(EXPECTED_TOOLS)
+assert len(EXPECTED_TOOLS) == 52, len(EXPECTED_TOOLS)
 
 
 def main():
@@ -175,15 +176,15 @@ def main():
     check("initialize negotiates 2025-11-25",
           init["result"]["protocolVersion"] == "2025-11-25",
           init["result"]["protocolVersion"])
-    check("initialize instructions name 51 tools",
-          "51 tools" in init["result"].get("instructions", ""),
+    check("initialize instructions name 52 tools",
+          "52 tools" in init["result"].get("instructions", ""),
           init["result"].get("instructions", "")[:80])
     rpc("notifications/initialized", notif=True)
 
-    # 2. tools/list shows all 51 tools, one page
+    # 2. tools/list shows all 52 tools, one page
     lst = rpc("tools/list")
     names = [t["name"] for t in lst["result"]["tools"]]
-    check("tools/list returns 51 tools", len(names) == 51, f"{len(names)}")
+    check("tools/list returns 52 tools", len(names) == 52, f"{len(names)}")
     check("tools/list has no nextCursor", "nextCursor" not in lst["result"])
     for want in EXPECTED_TOOLS:
         check(f"tools/list has {want}", want in names)
@@ -468,6 +469,57 @@ def main():
                 check(f"read_activity includes {want}", want in tools_seen)
         except json.JSONDecodeError:
             check("read_activity lines parse as JSON", False, lines[-1][:160])
+
+    # 13b. feedback: one report is saved locally, nothing is sent, the
+    # project is untouched, and bad args fail plainly.
+    mcp_dir = os.path.dirname(os.path.abspath(args.discovery))
+    feedback_path = os.path.join(mcp_dir, "feedback.jsonl")
+    def feedback_lines():
+        if not os.path.isfile(feedback_path):
+            return []
+        with open(feedback_path) as f:
+            return [l for l in f.read().splitlines() if l.strip()]
+    before = tool("titer_list_projects")["projects"]
+    rev_before = {p["project_id"]: p.get("revision") for p in before}
+    n_before = len(feedback_lines())
+    fb = tool("titer_send_feedback", {
+        "kind": "missing-feature",
+        "summary": "Smoke-test feedback report",
+        "details": "Tried: calling titer_send_feedback from the Phase 2 smoke. Happened: the report was saved. Expected: one JSONL entry, nothing sent anywhere.",
+        "failed_tool": "titer_send_feedback",
+    })
+    check("send_feedback returns received + id",
+          fb.get("received") is True and bool(fb.get("feedback_id")),
+          json.dumps(fb)[:160])
+    after_lines = feedback_lines()
+    check("send_feedback appends exactly one entry",
+          len(after_lines) == n_before + 1, f"{len(after_lines)} vs {n_before}")
+    if len(after_lines) == n_before + 1:
+        entry = json.loads(after_lines[-1])
+        check("feedback entry has the right shape",
+              entry.get("feedback_id") == fb.get("feedback_id")
+              and entry.get("kind") == "missing-feature"
+              and entry.get("summary") == "Smoke-test feedback report"
+              and isinstance(entry.get("context"), dict)
+              and entry["context"].get("app_version")
+              and entry["context"].get("os")
+              and "recent_activity" in entry["context"],
+              json.dumps(entry)[:300])
+        pf = entry["context"].get("project_file")
+        check("feedback entry has no file path beyond the file name",
+              pf is None or ("/" not in pf and "\\" not in pf),
+              json.dumps(entry["context"])[:200])
+    rev_after = {p["project_id"]: p.get("revision")
+                 for p in tool("titer_list_projects")["projects"]}
+    check("send_feedback does not mutate the project", rev_after == rev_before,
+          json.dumps(rev_after)[:160])
+    err = tool_error_text("titer_send_feedback",
+                          {"kind": "nope", "summary": "x", "details": "y"})
+    check("send_feedback bad kind names the valid choices",
+          "bug" in err and "missing-feature" in err and "other" in err, err[:160])
+    err = tool_error_text("titer_send_feedback",
+                          {"kind": "bug", "summary": "  ", "details": "y"})
+    check("send_feedback empty summary errors", "summary" in err.lower(), err[:160])
 
     # 14. error paths stay plain-language tool errors (never protocol errors)
     err = tool_error_text("titer_read_table_summary",

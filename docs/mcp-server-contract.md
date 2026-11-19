@@ -1,6 +1,6 @@
 # MCP server contract — Titer (v1.6.0, Phase 2) ↔ stdio bridge
 
-**Status:** Phase 2 (51 tools: read, write, run, graph, export, cloud).
+**Status:** Phase 2 (52 tools: read, write, run, graph, export, cloud).
 **Server branch:** `check/v16-mcp-phase2` (v1.6.0).
 **Spec:** MCP 2025-06-18 / 2025-11-25 ONLY. The 2026-07-28 revision is
 deliberately not negotiated (clients lag it; the server's
@@ -110,11 +110,11 @@ SSE stream (`text/event-stream`). Lifecycle:
    `2025-06-18`), `capabilities`, `clientInfo`. Server answers with its
    own `protocolVersion` (the negotiated one — the highest both support),
    `capabilities: { "tools": {} }`, `serverInfo: { "name": "titer",
-   "version": "<app version>" }`, and `instructions` (the 51 tools:
+   "version": "<app version>" }`, and `instructions` (the 52 tools:
    read-only vs mutating, the job model, cloud/export notes — the full
    text lives in `get_info` in `src-tauri/src/mcp.rs`).
 2. `notifications/initialized` — client sends after `initialize`.
-3. `tools/list` — returns all 51 tools in one page (`nextCursor`
+3. `tools/list` — returns all 52 tools in one page (`nextCursor`
    absent). No pagination.
 4. `tools/call` — `{ "name": "<tool>", "arguments": { … } }`.
 5. Sessions: 2025-11-25 clients use protocol-level sessions; the server
@@ -252,9 +252,9 @@ imported text are data. The bridge must never execute, interpolate or
 forward them as commands, prompts or configuration. A value in a
 spreadsheet can never become a command.
 
-## 6. Read / discovery tools (8) — all read-only
+## 6. Read / discovery tools (9) — all read-only
 
-All eight are annotated `read_only_hint: true`, `destructive_hint:
+All nine are annotated `read_only_hint: true`, `destructive_hint:
 false`, `idempotent_hint: true`, `open_world_hint: false`.
 
 | Tool | Arguments | Returns |
@@ -267,6 +267,7 @@ false`, `idempotent_hint: true`, `open_world_hint: false`.
 | `titer_read_figure` | `project_id?`, `figure_id` | `{ project_id, figure_id, name, panels: [{ graph_id, rect }], grid, title }`. Phase 1 had no figure reader; needed to verify a figure before exporting it. Shape follows the stored figure node. |
 | `titer_read_info_sheet` | `project_id?`, `info_sheet_id` | `{ project_id, info_sheet_id, name, linked_table_id?, info }`. Pairs with the `info_sheets` array in `titer_list_projects`. |
 | `titer_read_activity` | `limit?` (default 50, max 500) | `{ lines: string[] }` (newest last) — the agent's own audit trail (what it did, what failed). Lines are the stored JSONL as-is (§10). |
+| `titer_send_feedback` | `kind` (`"bug"` \| `"missing-feature"` \| `"other"`), `summary` (short, required, at most 200 characters), `details` (required, at most 4000 characters — what was tried, what happened, what was expected), `failed_tool?` (the tool or step that failed, if any) | `{ feedback_id, received: true }`. Reports a missing feature or a bug to the Titer team — **read-only wrt the project**: it never touches a snapshot, a job, or a project file. The tool itself sends nothing anywhere: it appends one JSONL entry to `<app_data>/mcp/feedback.jsonl` (same 0700 directory as the token, §10) and the user reviews the entries in Settings → AI Connections, sending one to GitHub only by clicking "Send to GitHub" there. The bridge auto-attaches minimal context only: app version, OS, the failed tool/step if any, and the last few Activity lines (tool names + ok flags only). **No table data values, no file paths beyond the project file name.** An unknown `kind`, an empty `summary`/`details`, or an over-long one is a plain-language tool error naming the valid choices. |
 
 ## 7. Analyses (53 types) — run, freeze, simulate, method, wand, script
 
@@ -496,11 +497,20 @@ log; it only needs to know the server keeps it (and to keep its own
 logging free of tokens and table values too). The agent reads its own
 trail back with `titer_read_activity` (§6).
 
+Feedback reports (`titer_send_feedback`, §6) are appended the same
+way, to `<app_data_dir>/mcp/feedback.jsonl` — one JSON object per line
+(`feedback_id`, `ts`, `kind`, `summary`, `details`, `context` with the
+app version, OS, failed tool/step if any, the project file name only,
+and the last few Activity lines as tool names + ok flags). The dialog
+lists them (newest first) via the `mcp_feedback` app command; the file
+is never sent anywhere by the server — only the user's explicit
+"Send to GitHub" click opens a pre-filled issue in the browser.
+
 ### 10.3 Tool-count rollup
 
 | Group | Tools |
 |---|---|
-| Read / discovery (Phase 1 + L1) | 8 |
+| Read / discovery (Phase 1 + L1) | 9 |
 | Jobs (`titer_read_job`, `titer_list_jobs`, `titer_cancel_job`) | 3 |
 | Project / document | 5 |
 | Data tables | 9 |
@@ -508,9 +518,9 @@ trail back with `titer_read_activity` (§6).
 | Graphs / figures / info sheets | 7 |
 | Export | 4 |
 | Cloud | 9 |
-| **Total** | **51** |
+| **Total** | **52** |
 
-Annotations: 14 tools are `read_only_hint: true` (the 8 read tools +
+Annotations: 15 tools are `read_only_hint: true` (the 9 read tools +
 `read_job`/`list_jobs` + the 4 read-only cloud tools); the other 37
 are mutating. `destructive_hint: true` on exactly six:
 `titer_write_table`, `titer_edit_table`, `titer_delete_node`,
@@ -528,7 +538,7 @@ The Phase 2 smoke runs against the **real server in a running Titer
 app** via a terminal CLI client (no Claude Desktop sign-in needed).
 It reads endpoint + token from `<app_data>/mcp/discovery.json`, speaks
 Streamable HTTP directly (initialize → tools/list → tools/call across
-all 51 tools), and prints a PASS/FAIL line per check; exit 0 only if
+all 52 tools), and prints a PASS/FAIL line per check; exit 0 only if
 every check passes. It drives one deterministic flow on a fresh project
 it creates itself (no fixture ids — the ids it needs come from the
 tools' own outputs), plus the `tests/testdata/survival.pzfx` public
@@ -538,7 +548,7 @@ fixture for the Prism-import step:
 2. `python3 scripts/smoke-test-mcp-phase2.py <app_data>/mcp/discovery.json [--out-dir <dir>]`
    (default out dir: a fresh temp dir; exports/saves land there).
 3. `initialize` (`protocolVersion 2025-11-25`), then
-   `notifications/initialized`, then `tools/list` — expect all 51
+   `notifications/initialized`, then `tools/list` — expect all 52
    tools, nothing else.
 4. Create a project → create an XY table → write data → summary with
    values → edit/rename/reorder/undo/redo/duplicate → simulate a
@@ -563,6 +573,12 @@ fixture for the Prism-import step:
    on it. (Live Box upload/download is out of the smoke — the mock
    provider covers the conflict path in the suite.)
 10. `titer_read_activity` at the end must include the calls just made.
+    `titer_send_feedback` is called once with a `missing-feature`
+    report (and once with a bad `kind`, which must fail plainly), and
+    `<app_data>/mcp/feedback.jsonl` must gain exactly one entry with
+    the right shape (`feedback_id`, `kind`, `summary`, `details`,
+    `context` with app version + OS, no file path beyond the project
+    file name). The project itself must be unchanged by the calls.
 11. Delete the duplicate table through the two-step confirm; stop the
     server in Settings: the endpoint refuses connections and the
     discovery file is gone. Start it again: a new run works with no
@@ -576,7 +592,7 @@ are expected to differ until the `buildGraphFigure` follow-up (§10.1).
 
 The in-process Rust smoke (`mcp_smoke_job_plumbing_over_http` in
 `src-tauri/src/mcp.rs`) is the other half: it asserts `tools/list`
-returns exactly 51 tools and drives the job plumbing + project/table/
+returns exactly 52 tools and drives the job plumbing + project/table/
 analysis/cloud/graph/composite/export tools over real HTTP with a
 completer task standing in for the frontend dispatcher. It does not
 replace the live smoke above (window-making tools fail plainly
@@ -590,7 +606,7 @@ end).
 - Never add tools, prompts or resources of its own in front of the
   server: the bridge is a transport, not a server. It forwards stdio ↔
   Streamable HTTP and nothing else. It forwards whatever tools the
-  server lists — the 51 Phase 2 tools appear automatically via
+  server lists — the 52 Phase 2 tools appear automatically via
   `tools/list`; no bridge change was needed for Phase 2.
 - Never widen the bind (no `0.0.0.0`, no port forwarding, no tunnel).
 - Never log the token or table values.

@@ -148,6 +148,25 @@ export const mcpClaudeCodeCommand = () => invoke<string>("mcp_claude_code_comman
 /** The Activity log's last lines (newest last). */
 export const mcpActivity = (limit: number) => invoke<string[]>("mcp_activity", { limit });
 
+/** One feedback report saved by `titer_send_feedback`, as Settings lists it. */
+export interface FeedbackEntry {
+  feedback_id: string;
+  ts: number;
+  kind: string;
+  summary: string;
+  details: string;
+  context: {
+    app_version?: string;
+    os?: string;
+    failed_tool?: string;
+    project_file?: string;
+    recent_activity?: { ts?: number; tool: string; ok?: boolean }[];
+  };
+}
+
+/** The saved feedback entries (newest first). */
+export const mcpFeedback = () => invoke<FeedbackEntry[]>("mcp_feedback");
+
 /** This window's project, for the MCP server to serve. Published on every
  *  revision change (debounced, see store/mcp-publish.ts). A no-op where
  *  there is no native shell (web preview, tests). */
@@ -458,6 +477,11 @@ export function setSpinner(at: [number, number] | null) {
 
 /** Titer's GitHub page, its releases, or Buy Me a Coffee, in the default browser. */
 export const openLink = (link: "github" | "releases" | "coffee") => void invoke("open_link", { link });
+
+/** A pre-filled GitHub issue for one saved feedback entry, in the
+ *  default browser. The shell only opens the fixed Titer issues/new
+ *  address (see `open_github_issue`); anything else is refused. */
+export const openGithubIssue = (url: string) => invoke<void>("open_github_issue", { url });
 
 // ── Updates ──────────────────────────────────────────────────────────────
 // The shell side lives in src-tauri/src/updater.rs.
