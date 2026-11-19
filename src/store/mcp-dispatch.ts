@@ -72,7 +72,7 @@ import { publishAnalysisResult, publishMcpSnapshotNow } from "./mcp-publish";
 import { useProjectActions, useProjectStore } from "./use-project-store";
 import type { ProjectNode, RowGroup, TableData, TableType } from "./types";
 import type { TableMove } from "./references";
-import { isGrouped, isNested, leadOf } from "../lib/dataset";
+import { groupsOf, isGrouped, isNested, leadOf, readTable, setColumns } from "../lib/dataset";
 import { seriesKeyOf } from "../lib/columns";
 import { SUMMARY_FORMATS, summarySubcolumns, type SummaryFormat } from "../lib/summary-format";
 import {
@@ -726,6 +726,33 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       }
       const offered = analysisTypesOfferedForTable(tableType, data);
       const pickerOffered = analysisOptionsForTable(tableType, data).map((o) => o.value);
+      // A nested t test compares exactly two groups: the `sets` the caller
+      // chose, or the whole table when none were chosen (seq 246 — the gate
+      // used to count the whole table even when `sets` named two groups on
+      // a 3+ group table). This runs before the offered check: the picker
+      // offers the test on ≥2-group tables now that the wizard asks which
+      // two, so the offered check alone would let a wrong-sized selection
+      // through to fail only at run time. A malformed `sets` falls back to
+      // the whole-table count, so `validateAnalysisParams` below still
+      // reports it properly.
+      if (type === "nested-t-test" && tableType === "nested") {
+        const rawSets = (args.params as { sets?: unknown } | null | undefined)?.sets;
+        const selected =
+          Array.isArray(rawSets) && rawSets.every((s) => typeof s === "string")
+            ? (rawSets as string[])
+            : undefined;
+        const count =
+          selected?.length && data
+            ? groupsOf(setColumns(readTable(data), selected)).length
+            : countDataGroups(data);
+        if (count !== 2) {
+          throw new Error(
+            selected?.length
+              ? `“nested-t-test” needs exactly 2 data groups — sets [${selected.map((s) => `“${s}”`).join(", ")}] select ${count} data group${count === 1 ? "" : "s"} on this table.`
+              : `“nested-t-test” needs a Nested table with exactly 2 data groups — this table has ${countDataGroups(data)}.`,
+          );
+        }
+      }
       if (!offered.includes(type)) {
         if (type === "three-way-anova" && !hasRowGroups(data)) {
           throw new Error("“three-way-anova” needs a Grouped table with at least 2 row bands — this table has none.");
