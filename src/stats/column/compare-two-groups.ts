@@ -13,7 +13,6 @@ import {
   matchedRowsNote,
   pairedGroups,
   pRow,
-  R_DIFF,
   R_HEDGES,
   rAlt,
   sameDifferences,
@@ -74,7 +73,7 @@ function rCode(groups: Group[], p: CompareTwoGroupsParams): string {
   const alt = `alternative="${rAlt(p.tails)}"`;
   if (!p.gaussian) {
     return (
-      `${decl};${R_DIFF};w<-suppressWarnings(${p.paired ? "wilcox.test(dif(g0,g1)" : "wilcox.test(g0,g1"},${alt},conf.int=TRUE));` +
+      `${decl};w<-suppressWarnings(${p.paired ? "wilcox.test(g0,g1,paired=TRUE" : "wilcox.test(g0,g1"},${alt},conf.int=TRUE));` +
       (p.paired
         ? `c(W=unname(w$statistic),p=w$p.value,hl=unname(w$estimate),mdn=median(g0)-median(g1))`
         : `ra<-rank(c(g0,g1));sa<-sum(ra[seq_along(g0)]);` +
