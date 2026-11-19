@@ -1068,7 +1068,7 @@ mod tests {
     async fn never_logs_feedback_text_or_api_key() {
         let calls = Arc::new(AtomicUsize::new(0));
         let (base, mock) = mock_plane_server(calls.clone()).await;
-        let (state, logs) = test_state(base);
+        let (state, logs, _) = test_state(base);
         let (addr, server) = serve_app(state).await;
         let c = client();
         // Sentinel values: if any of these ever appears in a log line, the test fails.
