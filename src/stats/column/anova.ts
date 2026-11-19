@@ -105,10 +105,12 @@ function comparisons(groups: Group[], p: AnovaParams): { setup: string; values: 
     };
   }
   // Games-Howell and Dunnett's T3: each pair's Welch t and df; the first against the
-  // studentized range, the second against the largest of all the pairs' t, its df rounded
-  // to the nearest whole number as Prism does (Dunnett's tables were for whole df).
+  // studentized range, the second against the largest of all the pairs' t, on the exact
+  // fractional Welch df — Prism 6+ computes the P value on the fractional df (GraphPad
+  // FAQ 1883: "Prism 6 can compute the P value using a df that is fractional"), as R
+  // does; rounding to whole df is Prism 5-era only.
   const test = (t: string, df: string) =>
-    p.posthoc === "games-howell" ? `ptk(abs(${t})*sqrt(2),${k},${df})` : `smm(${t},${pairs.length},floor(${df}+0.5))`;
+    p.posthoc === "games-howell" ? `ptk(abs(${t})*sqrt(2),${k},${df})` : `smm(${t},${pairs.length},${df})`;
   return {
     setup:
       `${p.posthoc === "t3" ? R_MAXIMUM_T : R_PTUKEY}\n${R_CRIT};` +
