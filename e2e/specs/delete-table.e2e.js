@@ -52,7 +52,12 @@ async function createTable2() {
 }
 
 async function focusTable2InSidebar() {
-  const row = await $("=Table 2");
+  // XPath, not wdio's `=Table 2` text selector: the tauri driver never
+  // matches bare `=`/`*=` text selectors (proven 2026-11-18: the span
+  // <span class="truncate" title="Table 2">Table 2</span> is in the DOM
+  // and visible, `=Table 2` returns isExisting=false, the XPath matches).
+  // `button=` selectors DO work under this driver (import-picker is green).
+  const row = await $("//span[@title='Table 2']");
   await row.waitForExist({ timeout: 10000 });
   await row.click();
   await sleep(400);

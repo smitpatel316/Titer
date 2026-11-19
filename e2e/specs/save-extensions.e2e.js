@@ -111,7 +111,9 @@ describe("T-128 extensionless save names get the format extension", () => {
       timeout: 10000,
       timeoutMsg: "Convert dialog never opened",
     });
-    const radio = await $("=Titer (this project) → Prism (.prism)");
+    // XPath, not wdio's `=…` text selector: the tauri driver never matches
+    // bare `=`/`*=` text selectors (proven 2026-11-18 in delete-table).
+    const radio = await $("//*[normalize-space()='Titer (this project) → Prism (.prism)']");
     await radio.waitForExist({ timeout: 10000 });
     await radio.click();
     const convertBtn = await $("button=Convert this project…");
@@ -142,7 +144,9 @@ describe("T-128 extensionless save names get the format extension", () => {
     // be clicked.)
     const saveBtn = await $("button=Save…");
     if (!(await saveBtn.isDisplayed().catch(() => false))) {
-      const section = await $("=Export");
+      // XPath, not wdio's `=Export`: bare `=` text selectors never match
+      // under the tauri driver (proven 2026-11-18 in delete-table).
+      const section = await $("//*[normalize-space()='Export']");
       await section.waitForExist({ timeout: 15000 });
       await section.click();
     }
@@ -173,7 +177,9 @@ describe("T-128 extensionless save names get the format extension", () => {
     });
     const graphName = names.find((n) => /scatter/i.test(n));
     assert.ok(graphName, `no scatter graph entry in sidebar: ${JSON.stringify(names)}`);
-    const entry = await $(`=${graphName}`);
+    // XPath, not wdio's `=…`: bare `=` text selectors never match under
+    // the tauri driver (proven 2026-11-18 in delete-table).
+    const entry = await $(`//span[@title='${graphName}']`);
     await entry.click();
     const saveBtn = await $("button=Save…");
     await saveBtn.waitForExist({ timeout: 15000 });
