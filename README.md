@@ -93,35 +93,40 @@ Prism's own saved results and against reference values: the frozen-tip suite pas
 - **Before you test:** normality and lognormality tests (Shapiro-Wilk, D'Agostino–Pearson,
   Anderson–Darling, Kolmogorov–Smirnov) that say in plain words which tests suit your
   data; outliers found by ROUT or Grubbs; descriptive statistics (including sum, skewness
-  and kurtosis); frequency distributions
-- **Two groups:** unpaired, Welch, paired, ratio and lognormal t tests, with Cohen's d and
+  and kurtosis); frequency distributions; QQ plots of your data sets and residual plots
+  of a regression to check the assumptions
+- **Two groups:** one group against a value (one-sample t test, including lognormal),
+  unpaired, Welch, paired, ratio and lognormal t tests, with Cohen's d and
   Hedges' g; Mann-Whitney, Wilcoxon matched-pairs, two-sample Kolmogorov–Smirnov
-- **More groups:** one-way ANOVA (or Welch's, without equal SDs), repeated-measures ANOVA with
-  the Geisser-Greenhouse correction, Kruskal-Wallis, Friedman; two-way ANOVA (ordinary,
-  repeated measures with the Geisser-Greenhouse correction, Scheirer-Ray-Hare);
-  three-way ANOVA; mixed-effects models; nested t test and nested one-way ANOVA; then
-  every pair (Tukey, Bonferroni, Šídák, Holm–Šídák, LSD, Dunnett, Games-Howell,
-  Dunnett's T3, Dunn) or each group against a control (Dunnett); multiple t tests with
-  Holm or FDR correction
+- **More groups:** one-way ANOVA (or Welch's, without equal SDs; of geometric means:
+  lognormal), repeated-measures ANOVA with the Geisser-Greenhouse correction,
+  Kruskal-Wallis, Friedman; two-way ANOVA (ordinary, with Dunnett, Games-Howell or
+  corrected pairs; repeated measures with the Geisser-Greenhouse correction,
+  Scheirer-Ray-Hare); three-way ANOVA; mixed-effects models (REML, Kenward-Roger);
+  nested t test and nested one-way ANOVA; then every pair (Tukey, Bonferroni, Šídák,
+  Holm–Šídák, LSD, Dunnett, Games-Howell, Dunnett's T3, Dunn) or each group against a
+  control (Dunnett); multiple t tests with Holm or FDR correction
 - **Counts:** Fisher's exact and chi-square tests, with the odds ratio, the relative risk,
   Phi and Cramér's V; chi-square test for trend (Cochran–Armitage); McNemar's test
-- **Curves and regression:** dose-response (4PL, 3PL, 5PL) with the EC50 or IC50 and every
-  parameter's 95% CI, several data sets at once or two curves compared, outliers left out
-  by ROUT; dose-response special (EC50 shift, Schild pA2, operational model); nonlinear
-  regression with compare-model F test and AICc, global/shared-parameter fits, weighting,
-  parameter bounds and user-defined equations; standard curves read for your unknowns
-  (ELISA); exponential growth and decay (doubling time, half-life), Michaelis-Menten,
-  enzyme inhibition (including Morrison Ki), binding saturation, competition
-  (Cheng–Prusoff Ki) and kinetics; spline and Lowess; simple and multiple linear
-  regression; simple and multiple logistic regression; Poisson regression; Deming
-  regression; correlation (Pearson, Spearman) and correlation matrices; area under the
-  curve; plot a function; smooth, differentiate and integrate
+- **Curves and regression:** dose-response (4PL, 3PL, 5PL) with the EC50 or IC50 (and the
+  EC10, EC20, EC80 or EC90) and every parameter's 95% CI, several data sets at once or
+  two curves compared, outliers left out by ROUT; dose-response special (EC50 shift,
+  Schild pA2, operational model); nonlinear regression with compare-model F test and
+  AICc, global/shared-parameter fits, weighting, parameter bounds and user-defined
+  equations; standard curves read for your unknowns (ELISA); exponential, logistic and
+  Gompertz growth, one- and two-phase decay (doubling time, half-lives),
+  Michaelis-Menten, enzyme inhibition (including Morrison Ki), binding saturation,
+  competition (Cheng–Prusoff Ki) and kinetics; spline and Lowess; simple and multiple
+  linear regression; simple and multiple logistic regression; Poisson regression; Deming
+  regression; correlation (Pearson, Spearman) with 95% CIs, and correlation matrices;
+  area under the curve; plot a function; smooth, differentiate and integrate
 - **Survival:** Kaplan-Meier with median survival, log-rank, trend and Gehan-Breslow-Wilcoxon
   tests, hazard ratios, and Cox regression; Number at Risk shown under the curve
 - **Multivariate and simulation:** principal component analysis (with scree plot and biplot),
   K-means clustering, ROC curves, Bland–Altman, Monte Carlo simulation
 - **Data operations** (not analyses, but shipped): transform data, transform concentrations,
-  remove baseline, normalize, transpose, prune rows, fraction of total
+  remove baseline, normalize — as live computed tables that follow their source and can
+  be analyzed and graphed — transpose, prune rows, fraction of total
 - **Beyond Prism:** K-means clustering, plot-a-function, and row means/totals have no Prism
   equivalent
 - **Clear results:** the exact test that ran, whether it is significant, every statistic,
@@ -144,9 +149,14 @@ Prism's own saved results and against reference values: the frozen-tip suite pas
   plots, Monte Carlo histograms
 
 - **Ready for a paper by default**
-- **Statistics on the graph:** significance stars or P values from your analyses, regression
-  lines with their confidence band and equation, any fitted curve with its best-fit values,
-  Kaplan-Meier curves with their confidence band
+- **Statistics on the graph:** significance stars, P values or group letters from your
+  analyses, regression lines with their confidence or prediction band and equation, any
+  fitted curve with its best-fit values, Kaplan-Meier curves with their confidence band
+  and the number at risk
+- **Notes and tags on everything:** a note on each table, analysis and graph, and the
+  Finder's color tags to find them in a busy project, saved in the project
+- **One table, many figures:** a graph shows all of a table's data sets or only those you
+  tick, each in the same color everywhere; its stars come from an analysis of them
 - **Colors that work:** 15 palettes from the scientific literature (Okabe-Ito, Paul Tol,
   Viridis, Batlow…), colorblind-friendly ones first, each reversible; or make your own,
   kept on your machine
@@ -158,7 +168,8 @@ Prism's own saved results and against reference values: the frozen-tip suite pas
 - **Match:** give a graph the look of another one, choosing what it takes; **Batch Magic**
   applies that Match formatting to many graphs at once; **Clone** copies a graph
 - **Lay it out:** move the legend and notes, resize by dragging an axis or typing a size, set
-  each axis's range and step, gridlines (none, major, or major + minor, per axis) and tick
+  each axis's range and step, draw reference lines (a control's level, a threshold) with
+  their text, gridlines (none, major, or major + minor, per axis) and tick
   direction, length and interval, white or transparent background
 - **Export** as PNG, JPG, SVG, PDF or TIFF at 150, 300, 600, 900 or 1200 DPI, at their true
   printed size; or copy and paste into Keynote, PowerPoint or Word; or send a graph
