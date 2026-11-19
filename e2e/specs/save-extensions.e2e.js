@@ -127,11 +127,24 @@ describe("T-128 extensionless save names get the format extension", () => {
     // The dialog reports the saved path — the write really happened.
     const text = await dialogText("Convert");
     assert.match(text, /Saved to .*t128-conv\.prism/, `converter did not report the save: ${JSON.stringify(text.slice(0, 400))}`);
-    const done = await $("button=Done");
-    await done.click();
+    // The Convert dialog has no "Done" button — the generic Dialog's
+    // dismiss button is "Cancel" (ui/dialog.tsx). Click it inside the open
+    // dialog (a bare `button=Cancel` could match another dialog's button).
+    const closed = await browser.tauri.execute(() => {
+      const dlg = document.querySelector("dialog[open]");
+      const btn = [...(dlg?.querySelectorAll("button") ?? [])].find(
+        (b) => b.textContent.trim() === "Cancel",
+      );
+      if (btn) {
+        btn.click();
+        return true;
+      }
+      return false;
+    });
+    assert.ok(closed, "Convert dialog offered no Cancel button");
     await browser.waitUntil(async () => !(await isDialogOpen("Convert")), {
       timeout: 10000,
-      timeoutMsg: "Convert dialog did not close on Done",
+      timeoutMsg: "Convert dialog did not close on Cancel",
     });
   });
 
@@ -146,7 +159,10 @@ describe("T-128 extensionless save names get the format extension", () => {
     if (!(await saveBtn.isDisplayed().catch(() => false))) {
       // XPath, not wdio's `=Export`: bare `=` text selectors never match
       // under the tauri driver (proven 2026-11-18 in delete-table).
-      const section = await $("//*[normalize-space()='Export']");
+      // Button only: `//*` matched 3 elements (the header button, its
+      // parent div and the section div all normalize to "Export" while
+      // the section is folded) and strict mode rejects that.
+      const section = await $("//button[normalize-space()='Export']");
       await section.waitForExist({ timeout: 15000 });
       await section.click();
     }
@@ -159,7 +175,9 @@ describe("T-128 extensionless save names get the format extension", () => {
   it("Figure export: extensionless name lands as .png", async () => {
     const figureId = await callHook("createFigure", [graphId]);
     assert.equal(typeof figureId, "string", `createFigure did not return an id: ${JSON.stringify(figureId)}`);
-    const exportBtn = await $("button=Export Figure (300 DPI)");
+    // 600 DPI, not 300: DEFAULT_FIGURE_DPI is "600" (lib/figure.ts), so
+    // that is the button's label on a fresh figure.
+    const exportBtn = await $("button=Export Figure (600 DPI)");
     await exportBtn.waitForExist({ timeout: 15000 });
     await exportBtn.click();
     await saveViaChooser("Export Figure", path.join(OUT, "t128-fig"));
