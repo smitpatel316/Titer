@@ -403,6 +403,9 @@ fn check_extension(path: &str, allowed: &[&str]) -> Result<(), String> {
 /// says what went wrong instead: a missing file is "not found:", a file that
 /// exists but isn't UTF-8 is "not UTF-8:" — the page tells them apart by the
 /// prefix, and only a missing file leaves Open Recent.
+//
+// Sync helper: the `read_text` / `read_prism_text` commands below run it on
+// a blocking-pool thread (seq 248), so the tests call this directly.
 fn read_text_with_bom(path: String, allowed: &[&str]) -> Result<String, String> {
     check_extension(&path, allowed)?;
     let bytes = fs::read(&path).map_err(|e| {
@@ -416,25 +419,43 @@ fn read_text_with_bom(path: String, allowed: &[&str]) -> Result<String, String> 
     Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
 }
 
+/// Reads a project file's text off the main thread (seq 248): a sync
+/// command runs on macOS's main thread via the WKWebView URL-scheme
+/// handler, and the first read of a file under ~/Documents (or
+/// ~/Desktop, ~/Downloads) blocks in `open()` on a TCC consent prompt
+/// until the user answers — parking the main thread and wedging the whole
+/// app (no windows, no job claims, 0% CPU). `spawn_blocking` parks a
+/// blocking-pool thread instead; the app stays responsive.
 #[tauri::command]
-fn read_text(path: String) -> Result<String, String> {
-    read_text_with_bom(path, &["hlx", "pzt", "pzm"])
+async fn read_text(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || read_text_with_bom(path, &["hlx", "pzt", "pzm"]))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// A Prism `.pzfx` file's text, for import. Only `.pzfx` — project files
-/// (`.hlx`, `.pzt`, `.pzm`) go through `read_text`.
+/// (`.hlx`, `.pzt`, `.pzm`) go through `read_text`. Async, like
+/// `read_text` (seq 248): a TCC-blocked read must never park the main thread.
 #[tauri::command]
-fn read_prism_text(path: String) -> Result<String, String> {
-    read_text_with_bom(path, &["pzfx"])
+async fn read_prism_text(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || read_text_with_bom(path, &["pzfx"]))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// A Prism `.prism` file's bytes, for import — a `.prism` file is a ZIP, so
 /// text won't do. Base64, not a JSON number array: a 40 MB file would be a
 /// 40 M-number array the webview would have to parse one number at a time.
+/// Async, like `read_text` (seq 248): a TCC-blocked read must never park
+/// the main thread.
 #[tauri::command]
-fn read_prism_bytes(path: String) -> Result<String, String> {
-    check_extension(&path, &["prism"])?;
-    fs::read(path).map(|bytes| BASE64.encode(bytes)).map_err(|e| e.to_string())
+async fn read_prism_bytes(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        check_extension(&path, &["prism"])?;
+        fs::read(path).map(|bytes| BASE64.encode(bytes)).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Extensions `write_file` may write: every format the app saves or
@@ -447,13 +468,20 @@ const WRITE_FILE_EXTENSIONS: &[&str] = &[
 ];
 
 /// Writes the raw request body to the (URL-encoded) `path` header, atomically.
+/// Async (seq 248): a save into ~/Documents, ~/Desktop or ~/Downloads can
+/// block in `open()` on a macOS TCC consent prompt, which would park the
+/// main thread if this were a sync command — so the write runs on a
+/// blocking-pool thread. Only the header/body are read here (no I/O).
 #[tauri::command]
-fn write_file(request: Request) -> Result<(), String> {
+async fn write_file(request: Request<'_>) -> Result<(), String> {
     let header = request.headers().get("path").and_then(|v| v.to_str().ok()).ok_or("missing path")?;
-    let path = percent_encoding::percent_decode_str(header).decode_utf8().map_err(|e| e.to_string())?;
+    let path = percent_encoding::percent_decode_str(header).decode_utf8().map_err(|e| e.to_string())?.into_owned();
     check_extension(&path, WRITE_FILE_EXTENSIONS)?;
     let InvokeBody::Raw(data) = request.body() else { return Err("expected raw bytes".into()) };
-    write_atomically(Path::new(path.as_ref()), data)
+    let data = data.clone();
+    tokio::task::spawn_blocking(move || write_atomically(Path::new(&path), &data))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// A temp file renamed over `path`, so a save is never left half-written.
@@ -472,17 +500,28 @@ fn write_atomically(path: &Path, data: &[u8]) -> Result<(), String> {
 
 const PALETTES_FILE: &str = "palettes.json";
 
-/// The file's text, empty before the first palette.
+/// The file's text, empty before the first palette. Async (seq 248):
+/// same class as `read_text` — no blocking disk I/O on the main thread,
+/// even though this file lives in the app-data folder.
 #[tauri::command]
-fn read_my_palettes(app: AppHandle) -> String {
-    app.path().app_data_dir().ok().and_then(|dir| fs::read_to_string(dir.join(PALETTES_FILE)).ok()).unwrap_or_default()
+async fn read_my_palettes(app: AppHandle) -> String {
+    let Some(file) = app.path().app_data_dir().ok().map(|dir| dir.join(PALETTES_FILE)) else {
+        return String::new();
+    };
+    tokio::task::spawn_blocking(move || fs::read_to_string(file).unwrap_or_default())
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]
-fn write_my_palettes(app: AppHandle, text: String) -> Result<(), String> {
+async fn write_my_palettes(app: AppHandle, text: String) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    write_atomically(&dir.join(PALETTES_FILE), text.as_bytes())
+    tokio::task::spawn_blocking(move || {
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        write_atomically(&dir.join(PALETTES_FILE), text.as_bytes())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ── Cloud storage (v2 item 75, Box first) ─────────────────────────────────
@@ -601,10 +640,14 @@ async fn cloud_status(app: AppHandle) -> CloudStatus {
 }
 
 /// Sets the persisted "Always use my own Box app" preference for Box
-/// sign-in (skips the Titer broker; see `load_box_prefer_byo`).
+/// sign-in (skips the Titer broker; see `load_box_prefer_byo`). Async
+/// (seq 248): the preference file is written on a blocking-pool thread,
+/// like every other file-IO command.
 #[tauri::command]
-fn cloud_set_box_prefer_byo(app: AppHandle, prefer_byo: bool) -> Result<(), cloud::CloudError> {
-    save_box_prefer_byo(&app, prefer_byo)
+async fn cloud_set_box_prefer_byo(app: AppHandle, prefer_byo: bool) -> Result<(), cloud::CloudError> {
+    tokio::task::spawn_blocking(move || save_box_prefer_byo(&app, prefer_byo))
+        .await
+        .map_err(|e| cloud::CloudError::provider(e.to_string()))?
 }
 
 /// Saves the user's own Box app credentials (client id + secret) to the OS
@@ -690,16 +733,22 @@ async fn cloud_download(
 /// The cache copy of a remote file, for opening while offline. The version
 /// is unknown from the cache alone — the in-memory handle keeps the version
 /// from the original download, and saving while offline is refused anyway.
+/// Async (seq 248): the cache read runs on a blocking-pool thread, like
+/// every other file-IO command.
 #[tauri::command]
-fn cloud_read_cache(
+async fn cloud_read_cache(
     app: AppHandle,
     provider: String,
     file_id: String,
     name: String,
 ) -> Result<cloud::RemoteDownload, cloud::CloudError> {
-    let bytes = cloud::read_cache(&app, &provider, &file_id, &name).ok_or_else(|| cloud::CloudError::NotFound {
-        message: "No saved copy of that file is on this computer.".into(),
-    })?;
+    let cache_name = name.clone();
+    let bytes = tokio::task::spawn_blocking(move || cloud::read_cache(&app, &provider, &file_id, &cache_name))
+        .await
+        .map_err(|e| cloud::CloudError::provider(e.to_string()))?
+        .ok_or_else(|| cloud::CloudError::NotFound {
+            message: "No saved copy of that file is on this computer.".into(),
+        })?;
     Ok(cloud::RemoteDownload { base64: BASE64.encode(&bytes), name, version: None, sha1: None, modified_at: None })
 }
 
@@ -1376,7 +1425,7 @@ mod tests {
     #[test]
     fn read_prism_text_reads_a_pzfx_fixture() {
         let path = fixture("column.pzfx");
-        let text = read_prism_text(path.to_string_lossy().into_owned()).expect("column.pzfx should read");
+        let text = read_text_with_bom(path.to_string_lossy().into_owned(), &["pzfx"]).expect("column.pzfx should read");
         assert!(text.contains("GraphPadPrismFile"), "fixture should be a Prism file");
         assert!(text.contains("Data 1"), "fixture should contain the Data 1 table");
     }
@@ -1384,7 +1433,7 @@ mod tests {
     #[test]
     fn read_prism_text_rejects_other_extensions() {
         for bad in ["column.txt", "column.hlx", "column.pzfx.bak", "column"] {
-            let err = read_prism_text(fixture(bad).to_string_lossy().into_owned())
+            let err = read_text_with_bom(fixture(bad).to_string_lossy().into_owned(), &["pzfx"])
                 .expect_err(&format!("{bad} should be rejected"));
             assert!(err.contains("can't access"), "error should name the refusal: {err}");
         }
@@ -1413,7 +1462,7 @@ mod tests {
 
     #[test]
     fn read_prism_text_reports_a_missing_file() {
-        let err = read_prism_text(fixture("no-such-file.pzfx").to_string_lossy().into_owned())
+        let err = read_text_with_bom(fixture("no-such-file.pzfx").to_string_lossy().into_owned(), &["pzfx"])
             .expect_err("missing file should error");
         assert!(!err.contains("can't access"), "missing file is an I/O error, not a refusal: {err}");
     }
@@ -1426,17 +1475,17 @@ mod tests {
     // BOM `.hlx` opens instead of failing as "damaged".
     #[test]
     fn read_text_strips_bom() {
-        let text = read_text(fixture("bom.hlx").to_string_lossy().into_owned()).expect("bom.hlx should read");
+        let text = read_text_with_bom(fixture("bom.hlx").to_string_lossy().into_owned(), &["hlx", "pzt", "pzm"]).expect("bom.hlx should read");
         assert!(!text.starts_with('\u{feff}'), "BOM should be stripped: {text:?}");
         assert!(text.starts_with('{'), "text should start at the JSON: {text:?}");
     }
 
     #[test]
     fn read_text_distinguishes_missing_from_unreadable() {
-        let missing = read_text(fixture("no-such-file.hlx").to_string_lossy().into_owned())
+        let missing = read_text_with_bom(fixture("no-such-file.hlx").to_string_lossy().into_owned(), &["hlx", "pzt", "pzm"])
             .expect_err("missing file should error");
         assert!(missing.starts_with("not found:"), "missing file must say so: {missing}");
-        let unreadable = read_text(fixture("latin1.hlx").to_string_lossy().into_owned())
+        let unreadable = read_text_with_bom(fixture("latin1.hlx").to_string_lossy().into_owned(), &["hlx", "pzt", "pzm"])
             .expect_err("non-UTF-8 file should error");
         assert!(!unreadable.starts_with("not found:"), "unreadable file is not missing: {unreadable}");
         assert!(unreadable.contains("UTF-8"), "unreadable file must say it isn't UTF-8: {unreadable}");
@@ -1444,10 +1493,25 @@ mod tests {
 
     #[test]
     fn read_prism_text_strips_bom() {
-        let text =
-            read_prism_text(fixture("bom.pzfx").to_string_lossy().into_owned()).expect("bom.pzfx should read");
+        let text = read_text_with_bom(fixture("bom.pzfx").to_string_lossy().into_owned(), &["pzfx"])
+            .expect("bom.pzfx should read");
         assert!(!text.starts_with('\u{feff}'), "BOM should be stripped: {text:?}");
         assert!(text.starts_with("<?xml"), "text should start at the XML: {text:?}");
+    }
+
+    // ── seq 248: the async file-IO commands (off the main thread) ───────
+    // `read_prism_bytes` is an async command whose blocking read runs on a
+    // blocking-pool thread, so a TCC-blocked `open()` parks that thread,
+    // never the main thread. This pins the async path itself (not just the
+    // sync helper above): a real `.prism` fixture must come back as
+    // base64 that decodes to the ZIP magic.
+    #[tokio::test]
+    async fn read_prism_bytes_async_reads_a_prism_fixture() {
+        let path = fixture("prism").join("prism2R-demo_dataset.prism");
+        let base64 = read_prism_bytes(path.to_string_lossy().into_owned()).await.expect("fixture should read");
+        let bytes = BASE64.decode(base64).expect("command returns base64");
+        assert!(bytes.starts_with(b"PK"), "a .prism file is a ZIP: {bytes:?}");
+        assert!(!bytes.is_empty(), "fixture should have content");
     }
 
     // ── CC-m6: r_ready must not re-send an in-flight evaluation ──────────
