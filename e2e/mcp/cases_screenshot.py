@@ -72,11 +72,16 @@ COLUMN_ROWS = [
 # XY dose fixture for Q-31: FOUR points with X > 0 — one short of the 5 a
 # 4PL log-X fit needs, so the fit errors and no curve draws (the QA-LOG T27
 # limitation, current wording in src/stats/xy/nonlinear-fit.ts).
+# XY fixture for Q-31. X is log10(concentration): the 4PL model is
+# "sigmoidal-4pl-logx" (X is ALREADY log-dose, cf. doseLog/doseTextbook
+# fixtures) — raw concentrations as X fail with 'singular gradient'
+# (probe 2026-11-18: raw-X errors, log-X computes), so the case data
+# uses log X. Same Y values as the original raw-concentration draft.
 DOSE_FEW_COLS = ["", "X", "Y"]
-DOSE_FEW_ROWS = [["1", 0.001, 5], ["2", 0.01, 20], ["3", 0.1, 60], ["4", 1, 95]]
-DOSE_MANY_ROWS = [["1", 0.001, 5], ["2", 0.003, 12], ["3", 0.01, 20],
-                  ["4", 0.03, 38], ["5", 0.1, 60], ["6", 0.3, 78],
-                  ["7", 1, 95], ["8", 3, 99]]
+DOSE_FEW_ROWS = [["1", -3, 5], ["2", -2, 20], ["3", -1, 60], ["4", 0, 95]]
+DOSE_MANY_ROWS = [["1", -3, 5], ["2", -2.5229, 12], ["3", -2, 20],
+                  ["4", -1.5229, 38], ["5", -1, 60], ["6", -0.5229, 78],
+                  ["7", 0, 95], ["8", 0.4771, 99]]
 # XY fixture for Q-39.
 XY_COLS = ["", "X", "Y"]
 XY_ROWS = [["1", 1, 2], ["2", 2, 3], ["3", 3, 5], ["4", 4, 4],
@@ -448,10 +453,12 @@ class Shots:
                         "bracket check is GUI/device-route only")
 
     def c_q31_dose_response(self):
-        """Q-31: dose-response points plot, but a 4PL log-X fit on 4 positive-X
-        points errors so NO curve draws. Live pin: the 4-point fit errors
+        """Q-31: dose-response points plot, but a 4PL log-X fit on 4 points
+        errors so NO curve draws. Live pin: the 4-point fit errors
         while the 8-point fit computes, and the 4-point export shows
-        points only.
+        points only. X is log10(concentration) throughout (the model is
+        "sigmoidal-4pl-logx", X already log-dose — raw concentrations
+        as X fail with 'singular gradient', probe 2026-11-18).
 
         NOTE on the error shape: the app reports the guard failure as a
         DONE job carrying an error result ('Not enough complete points
@@ -500,7 +507,7 @@ class Shots:
             self.assert_nonblank(png2, "q31-many")
             status, sim = self.similarity("q31", png, svg)
             self.capture_ref("q31", png, svg,
-                             "xy-scatter, 4 positive-X dose points, no curve")
+                             "xy-scatter, 4 log-X dose points, no curve")
             detail = (f"4-point fit errors as expected ({err_msg[:120]}); "
                       f"points-only columns-with-ink "
                       f"{frac:.2f}; 8-point fit computes; "

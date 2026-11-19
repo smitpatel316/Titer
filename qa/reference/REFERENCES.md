@@ -39,3 +39,5 @@ bracket runs, curve-vs-points coverage are asserted from the live export's
 own pixels), so an owed reference costs only the similarity half, never the
 whole case.
 - q39-scatter: Linux-captured 2026-11-18 (PNG sha e3a6c824ab832391…; xy-scatter on q39 fixture); Mac reference owed.
+- q20: Linux-captured 2026-11-19 (PNG sha d539de6dd37bc4b0…; mean-error on ABCD fixture, 300 DPI PNG + SVG); Mac reference owed.
+- q38-box: Linux-captured 2026-11-19 (PNG sha d3eba5c1f6e68833…; box-violin on q38 fixture); Mac reference owed.
