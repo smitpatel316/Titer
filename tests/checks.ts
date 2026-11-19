@@ -12631,16 +12631,35 @@ check("the daily update check marks the day only after the check settles", async
   }
 });
 
-check("both update reads go through the timed fetch", () => {
+check("the channel manifest is fetched through the shell, the GitHub fallback through the timed fetch", () => {
   const version = readFileSync(fileURLToPath(new URL("../src/lib/version.ts", import.meta.url)), "utf8");
   const channel = readFileSync(fileURLToPath(new URL("../src/lib/channel.ts", import.meta.url)), "utf8");
+  const native = readFileSync(fileURLToPath(new URL("../src/native.ts", import.meta.url)), "utf8");
+  const main = readFileSync(fileURLToPath(new URL("../src-tauri/src/main.rs", import.meta.url)), "utf8");
+  // The GitHub fallback still goes through the timed webview fetch (that
+  // host sends Access-Control-Allow-Origin, so the webview fetch works).
   ok(version.includes("await fetchWithTimeout(MAIN_PACKAGE)"));
-  ok(channel.includes("await fetchWithTimeout(CHANNEL_MANIFEST_URL"));
   // The only bare `fetch` left is the helper's own implementation, which
   // is what carries the timeout signal.
   strictEqual((version.match(/await fetch\(/g) ?? []).length, 1);
   ok(version.includes("signal: controller.signal"));
-  ok(!/await fetch\(/.test(channel), "no bare fetch left in channel.ts");
+  // The channel manifest goes through the shell's curl instead: the
+  // webview enforces CORS and the channel host sends no
+  // Access-Control-Allow-Origin, so the in-page fetch failed fast while
+  // curl answered 200 (P0, Nov 19 2026). No fetch at all is left in
+  // channel.ts, and the shell command is registered.
+  ok(channel.includes("fetchChannelManifestText(CHANNEL_MANIFEST_URL)"));
+  ok(!/await fetch\(/.test(channel), "no fetch left in channel.ts");
+  ok(native.includes('invoke<string>("fetch_channel_manifest"'));
+  ok(main.includes("updater::fetch_channel_manifest"), "the command is registered");
+});
+
+check("a failed update check names the reason instead of only blaming the connection", () => {
+  const updates = readFileSync(fileURLToPath(new URL("../src/updates.ts", import.meta.url)), "utf8");
+  ok(updates.includes("lastChannelFetchError()"), "the check reads the channel failure reason");
+  ok(updates.includes("Couldn't Check for Updates"));
+  // The old bare text never appears on its own any more: the reason comes first.
+  ok(!updates.includes('"Check your internet connection and try again."'));
 });
 
 
