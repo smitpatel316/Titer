@@ -30,6 +30,12 @@ const DELETE_TITLE = "Delete “Table 2”?";
 
 async function createTable2() {
   await x.key("ctrl+alt+t");
+  // The dialog takes a moment to map: querying its buttons immediately
+  // after the keypress races React's render (lost once, 2026-11-18).
+  await browser.waitUntil(
+    async () => browser.tauri.execute(() => !!document.querySelector("dialog[open]")),
+    { timeout: 10000, timeoutMsg: "New Table dialog never opened" },
+  );
   // Click "Column" INSIDE the open New Table dialog. A bare `=Column`
   // text match is ambiguous — the grid's own column header is also
   // "Column" — so find the button in the open <dialog> and click it.

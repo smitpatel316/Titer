@@ -27,16 +27,42 @@ export async function xdotool(...args) {
 
 /** Window ids whose title contains `name` (substring match). */
 export async function searchWindows(name) {
-  // --onlyvisible: plain `search` matches UNMAPPED windows too, and GTK
-  // native dialogs (rfd file choosers / save prompts) unmap on close but
-  // leave their X window object lingering unmapped for 30+ s (measured
-  // 2026-11-18: chooser IsUnMapped from ~0.7 s after close, window still
-  // present at 32 s). Without this flag waitForWindowGone never fires and
-  // countWindows double-counts a dialog from a previous test. "Open" here
-  // means mapped/visible, which is what every caller wants.
+  // Fast path: `search --name` matches WM_NAME. It works for the GTK file
+  // choosers (Save/Open Project) and any window that sets WM_NAME.
   try {
     const { stdout } = await xdotool("search", "--onlyvisible", "--name", name);
-    return stdout.trim().split("\n").map((s) => s.trim()).filter(Boolean);
+    const found = stdout.trim().split("\n").map((s) => s.trim()).filter(Boolean);
+    if (found.length > 0) return found;
+  } catch {
+    // No match — fall through to the _NET_WM_NAME scan below.
+  }
+  // Fallback: plugin-dialog `message` dialogs (the Delete confirm, the quit
+  // save prompt, the update prompt) set ONLY _NET_WM_NAME, never WM_NAME —
+  // proven 2026-11-18 by xprop on the Delete dialog (WM_CLASS "titer",
+  // _NET_WM_NAME "Delete “Table 2”?", no WM_NAME line at all) — so
+  // `search --name` can never match them, not even on an ASCII substring.
+  // `getwindowname` reads _NET_WM_NAME, so scan the visible top-level
+  // windows and match in JS. The intersection matters: `--onlyvisible`
+  // excludes the unmapped-but-lingering chooser windows (which must stay
+  // gone for waitForWindowGone), and _NET_CLIENT_LIST excludes the ~60
+  // WebKit child windows, keeping the scan to a handful of getwindowname
+  // calls per poll.
+  try {
+    const { stdout: vis } = await xdotool("search", "--onlyvisible", "--name", "");
+    const visible = new Set(vis.trim().split("\n").map((s) => s.trim()).filter(Boolean));
+    const { stdout: list } = await execFileAsync("xprop", ["-root", "_NET_CLIENT_LIST"], { env });
+    const ids = [...list.matchAll(/0x[0-9a-f]+/gi)].map((m) => String(parseInt(m[0], 16)));
+    const out = [];
+    for (const id of ids) {
+      if (!visible.has(id)) continue;
+      try {
+        const { stdout: title } = await xdotool("getwindowname", id);
+        if (title.includes(name)) out.push(id);
+      } catch {
+        // A window that closed mid-scan; skip it.
+      }
+    }
+    return out;
   } catch {
     return [];
   }
