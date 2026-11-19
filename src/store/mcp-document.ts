@@ -224,6 +224,40 @@ export function importWarnings(report: ConvertReport): string[] {
   return warnings;
 }
 
+/** How long a Prism file read may take before the import job fails instead
+ *  of hanging (seq 248): a local read is well under this, even for a large
+ *  `.prism` — a longer wait means the read is blocked, not slow. */
+export const PRISM_READ_TIMEOUT_MS = 60_000;
+
+/** Reads a Prism file, or fails after `PRISM_READ_TIMEOUT_MS` with the
+ *  likely cause (seq 248): on macOS the first read of a file in
+ *  Documents, Desktop or Downloads pops a permission prompt ("Titer would
+ *  like to access…") and the read waits until it is answered — so an
+ *  unanswered prompt used to wedge the whole app. The shell read is async
+ *  now, so the app stays responsive; this timeout ends the job in ERROR
+ *  instead of leaving it wedged in the serial job drain. */
+export async function readPrismWithTimeout<T>(read: () => Promise<T>, path: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      read(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `“${fileName(path)}” couldn't be read in time — macOS may be waiting on a permission prompt for Documents, Desktop or Downloads. Answer the prompt (Allow), or move the file out of the protected folder and retry.`,
+              ),
+            ),
+          PRISM_READ_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** The `import-prism` job: read a Prism file and load it as this window's
  *  (untitled, edited) project — the same as File ▸ Import Prism File, minus
  *  the dialog. A dirty project refuses: an import replaces the project, and
@@ -244,7 +278,7 @@ export async function executeImportPrism(
     );
   }
   if (ext === "prism") {
-    const bytes = await deps.io.readPrismBytes(args.path);
+    const bytes = await readPrismWithTimeout(() => deps.io.readPrismBytes(args.path), args.path);
     let converted;
     try {
       converted = await convertPrism(bytes, fileTitle(args.path));
@@ -254,7 +288,7 @@ export async function executeImportPrism(
     deps.loadProject({ ...converted.project, filePath: null, edited: true });
     return { result: { imported_tables: converted.report.tables, warnings: importWarnings(converted.report) } };
   }
-  const text = await deps.io.readPrismText(args.path);
+  const text = await readPrismWithTimeout(() => deps.io.readPrismText(args.path), args.path);
   const imported = parsePzfx(text);
   if (imported.tables.length === 0) {
     throw new Error(imported.issues.map((i) => i.message).join("\n") || "No tables in this file could be imported.");
