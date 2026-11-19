@@ -86,9 +86,19 @@ describe("Q-66 Save chooser appends .hlx", () => {
     await typePathIntoChooser("Open Project", COPY);
     assert.ok(await waitForWindowGone("Open Project", { timeout: 10000 }), "Open Project chooser did not close");
 
-    // Open lands in a new window (the current one is not blank).
-    const handles = await projectWindowHandles();
-    assert.ok(handles.length >= 2, `expected a second project window after open, got ${handles.length}`);
+    // Open lands in a new window (the current one is not blank). The new
+    // window takes a moment to register with the driver — a single probe
+    // right after the chooser closes still sees 1 (proven 2026-11-18:
+    // handles were [project-1] ~0.6 s after Return, [project-1, project-2]
+    // ~2 s later) — so poll instead of asserting once.
+    let handles;
+    await browser.waitUntil(
+      async () => {
+        handles = await projectWindowHandles();
+        return handles.length >= 2;
+      },
+      { timeout: 15000, timeoutMsg: "expected a second project window after open" },
+    );
     // The reopened window is the new handle. (Its document.title is the
     // project's stored name, "q66-proj", not the copy's filename — title
     // alone can't tell the two windows apart.)
