@@ -610,6 +610,9 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
 
 // ── The file ─────────────────────────────────────────────────────────────
 
+/** The XML namespace a real GraphPad Prism file declares. */
+const PRISM_XML_NS = "http://graphpad.com/prism/Prism.htm";
+
 export function parsePzfx(text: string): PzfxImport {
   let root: XmlNode;
   try {
@@ -622,15 +625,34 @@ export function parsePzfx(text: string): PzfxImport {
       issues: [{ severity: "error", message: err instanceof Error ? err.message : "Not a valid .pzfx file." }],
     };
   }
+  // Prism 8 writes some .pzfx files wrapped in its own XSL stylesheet: the
+  // root is <xsl:stylesheet> and the real file is the nested
+  // <GraphPadPrismFile> child. Descend into that child (a direct child
+  // only — the xsl:template elements hold rendering rules, never data).
+  // A nested element in another namespace is not a Prism file.
+  let wrapped = false;
   if (root.tag !== "GraphPadPrismFile") {
-    return {
-      project: { nodes: {}, rootOrder: [], childOrder: {}, activeNodeId: null },
-      tables: [],
-      infoSheets: [],
-      issues: [{ severity: "error", message: "This file isn't a GraphPad Prism .pzfx file." }],
-    };
+    const nested = root.children.find(
+      (c) => c.tag === "GraphPadPrismFile" && (!c.attrs.xmlns || c.attrs.xmlns === PRISM_XML_NS),
+    );
+    if (!nested) {
+      return {
+        project: { nodes: {}, rootOrder: [], childOrder: {}, activeNodeId: null },
+        tables: [],
+        infoSheets: [],
+        issues: [{ severity: "error", message: "This file isn't a GraphPad Prism .pzfx file." }],
+      };
+    }
+    root = nested;
+    wrapped = true;
   }
   const issues: PzfxIssue[] = [];
+  if (wrapped) {
+    issues.push({
+      severity: "warning",
+      message: "This file wraps its GraphPad Prism data in an XSL stylesheet; the nested Prism file was imported.",
+    });
+  }
   const tables: string[] = [];
   const nodes: Record<string, ProjectNode> = {};
   const rootOrder: string[] = [];

@@ -12677,6 +12677,61 @@ check(".pzfx import reads a Column table", () => {
   ]);
 });
 
+check(".pzfx import descends into a Prism 8 XSL stylesheet wrapper", () => {
+  // Prism 8 writes some .pzfx files wrapped in its own XSL stylesheet: the
+  // root is <xsl:stylesheet> and the real file is the nested
+  // <GraphPadPrismFile> child (real-world case: a Zenodo qPCR file whose
+  // import failed as "not a Prism file"). The xsl:template elements hold
+  // rendering rules, never data — only the direct GraphPadPrismFile child
+  // is read.
+  const text = `<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="#"?>
+<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:ps="http://graphpad.com/prism/Prism.htm" version="1.0">
+<xsl:output method="html" version="4.0" omit-xml-declaration="yes"/>
+<GraphPadPrismFile xmlns="http://graphpad.com/prism/Prism.htm" PrismXMLVersion="5.00">
+<Table ID="Table1" XFormat="none" TableType="OneWay" YFormat="replicates">
+<Title>Wrapped</Title>
+<RowTitlesColumn Width="81"><Subcolumn><d>R1</d><d>R2</d></Subcolumn></RowTitlesColumn>
+<YColumn Width="24" Decimals="0" Subcolumns="1"><Title>A</Title><Subcolumn><d>1</d><d>2</d></Subcolumn></YColumn>
+<YColumn Width="24" Decimals="0" Subcolumns="1"><Title>B</Title><Subcolumn><d>3</d><d>4</d></Subcolumn></YColumn>
+</Table>
+</GraphPadPrismFile>
+<xsl:template match="ps:Title"><b>template, not data</b></xsl:template>
+</xsl:stylesheet>`;
+  const imported = parsePzfx(text);
+  strictEqual(imported.tables.length, 1, "one table");
+  ok(!imported.issues.some((i) => i.severity === "error"), "no errors");
+  ok(imported.issues.some((i) => i.message.includes("XSL stylesheet")), "says the file was wrapped");
+  const node = imported.project.nodes[imported.project.rootOrder[0]];
+  if (!node || node.type !== "table") throw new Error("no table node");
+  strictEqual(node.name, "Wrapped");
+  strictEqual(node.tableType, "column");
+  deepStrictEqual(node.data!.columns, ["Title", "A", "B"]);
+  deepStrictEqual(node.data!.rows, [
+    ["R1", "1", "3"],
+    ["R2", "2", "4"],
+  ]);
+});
+
+check(".pzfx import still rejects a wrapper with no Prism file inside", () => {
+  // A stylesheet with only templates, and one whose nested element is in
+  // the wrong namespace, are not Prism files.
+  const noPrism = `<?xml version="1.0" encoding="UTF-8"?>
+<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+<xsl:template match="/"><b>nothing here</b></xsl:template>
+</xsl:stylesheet>`;
+  const rejected = parsePzfx(noPrism);
+  strictEqual(rejected.tables.length, 0);
+  ok(rejected.issues.some((i) => i.severity === "error" && i.message.includes("isn't a GraphPad Prism")));
+  const wrongNs = `<?xml version="1.0" encoding="UTF-8"?>
+<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+<GraphPadPrismFile xmlns="http://example.com/not-prism" PrismXMLVersion="5.00"></GraphPadPrismFile>
+</xsl:stylesheet>`;
+  const rejectedNs = parsePzfx(wrongNs);
+  strictEqual(rejectedNs.tables.length, 0);
+  ok(rejectedNs.issues.some((i) => i.severity === "error" && i.message.includes("isn't a GraphPad Prism")));
+});
+
 check(".pzfx import reads an XY table with replicates", () => {
   const { table } = importedTable("x_y_rep");
   strictEqual(table.tableType, "xy");
