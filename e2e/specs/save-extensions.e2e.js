@@ -23,7 +23,7 @@
 // same pickSavePath and are covered by the same code path; they are not
 // separate legs (their trigger is the template dialog, a different case).
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -61,6 +61,12 @@ describe("T-128 extensionless save names get the format extension", () => {
   let graphId;
 
   before(async () => {
+    // Start clean: a leftover output file from a previous run makes the
+    // Save chooser stop on GTK's overwrite confirmation instead of closing
+    // (bit the 2026-11-18 re-run: all 8 legs failed on the stale t128-*).
+    // Same rule as save-chooser's before-hook; this spec owns OUT outright.
+    rmSync(OUT, { recursive: true, force: true });
+    mkdirSync(OUT, { recursive: true });
     await switchToProjectWindow();
     await waitForHook();
     await dismissUpdateDialogIfPresent(x);
