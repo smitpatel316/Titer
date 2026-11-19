@@ -10,11 +10,19 @@ import { describe, pRow, rVec } from "../column/base";
 import { evalNamedVector } from "../webr";
 import { droppedStatement, meansStatement, nestedMeans } from "./base";
 
-export async function runNestedTTest(columns: Column[], _params: AnalysisParams | undefined): Promise<AnalysisOutcome> {
-  const { groups, dropped } = nestedMeans(columns);
+export async function runNestedTTest(columns: Column[], params: AnalysisParams | undefined): Promise<AnalysisOutcome> {
+  // `sets` names the two groups to compare (seq 246): on a 3+ group table
+  // the caller — MCP or the wizard — picks two, and the test runs on those
+  // alone. `runAnalysis` already filters the columns by `sets` before
+  // calling, so this is the same filter for direct callers.
+  const sets = params?.sets;
+  const selected = sets?.length ? columns.filter((c) => sets.includes(c.name.split(":")[0])) : columns;
+  const { groups, dropped } = nestedMeans(selected);
   if (groups.length !== 2) {
     return {
-      error: `Nested t test needs exactly two groups — this table has ${groups.length}.`,
+      error: sets?.length
+        ? `Nested t test needs exactly two groups — sets [${sets.map((s) => `“${s}”`).join(", ")}] select ${groups.length} on this table.`
+        : `Nested t test needs exactly two groups — this table has ${groups.length}.`,
     };
   }
   const empty = groups.filter((g) => g.means.length === 0);

@@ -106,6 +106,7 @@ import { deletePalette, keepPalette, loadMyPalettes } from "../src/store/my-pale
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
 import { datasetColumns, isGrouped, isNested, readTable, setColumns, splitXY, xyPoints, type Dataset } from "../src/lib/dataset";
 import { nestedMeans } from "../src/stats/nested/base";
+import { runNestedTTest } from "../src/stats/nested/nested-t-test";
 import { prepareFit } from "../src/stats/xy/nonlinear-fit";
 import { adjustComparisonRows, adjustPValues, describe, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
@@ -658,6 +659,57 @@ check("MCP create-analysis accepts anova / kruskal-wallis / rm-anova / friedman 
     }),
     /not offered for grouped tables/,
   );
+});
+
+// seq 246: on a Nested table with 3+ groups, the create-analysis gate
+// used to count the whole table and refuse a nested t test even when
+// `sets` named two groups. The gate now counts the selected sets — two
+// selected pass, none or three are refused.
+check("MCP create-analysis runs a nested t test on two sets of a 3-group nested table (seq 246)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-246-table", "create-table", {
+    table_type: "nested",
+    columns: [
+      "",
+      "A:S1:R1", "A:S1:R2", "A:S2:R1", "A:S2:R2",
+      "B:S1:R1", "B:S1:R2", "B:S2:R1", "B:S2:R2",
+      "C:S1:R1", "C:S1:R2", "C:S2:R1", "C:S2:R2",
+    ],
+    rows: [
+      ["r1", 10, 11, 12, 13, 20, 21, 22, 23, 30, 31, 32, 33],
+      ["r2", 10, 11, 12, 13, 20, 21, 22, 23, 30, 31, 32, 33],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  // The gate runs before createAnalysis, so a recording stub proves the
+  // gate passed; the real store action is exercised by the live MCP pin.
+  const created: string[] = [];
+  harness.deps.createAnalysis = (_parentId, type) => {
+    created.push(type);
+    return `analysis_${type}`;
+  };
+  // Two selected groups pass the gate…
+  const done = await harness.run("job-246-two", "create-analysis", {
+    table_id: tableId,
+    analysis_type: "nested-t-test",
+    params: { sets: ["A", "B"] },
+  });
+  strictEqual((done.result as { analysis_type: string }).analysis_type, "nested-t-test");
+  // …but no sets (the whole 3-group table) and three sets are refused.
+  await rejects(
+    harness.run("job-246-none", "create-analysis", { table_id: tableId, analysis_type: "nested-t-test" }),
+    /needs a Nested table with exactly 2 data groups/,
+  );
+  await rejects(
+    harness.run("job-246-three", "create-analysis", {
+      table_id: tableId,
+      analysis_type: "nested-t-test",
+      params: { sets: ["A", "B", "C"] },
+    }),
+    /sets \[“A”, “B”, “C”\] select 3 data groups/,
+  );
+  deepStrictEqual(created, ["nested-t-test"]);
 });
 
 check("create-table accepts an empty row-title column, and refuses an empty later column (v1.6 F2)", async () => {
@@ -2906,7 +2958,9 @@ check("nested tests are offered only for their group count", () => {
   );
   deepStrictEqual(
     analysisOptionsForTable("nested", three).map((o) => o.value),
-    ["nested-anova", "plot-function"],
+    // seq 246: the t test is offered on 3+ group tables too — the wizard
+    // asks which two to compare, so offering it is no longer a dead end.
+    ["nested-t-test", "nested-anova", "plot-function"],
   );
 });
 
@@ -2925,6 +2979,37 @@ check("the nested ANOVA wizard asks only for a post-hoc choice", () => {
     type: "nested-anova",
     params: { posthoc: "tukey" },
   });
+});
+
+// seq 246: on a 3-group nested table the nested t test wizard asks which
+// two data sets to compare, and its finish carries them as `sets`; on a
+// two-group table it asks nothing and runs on the whole table.
+check("the nested t test wizard asks which two data sets to compare on a 3-group table (seq 246)", () => {
+  const three = readTable({
+    columns: ["Title", "A:S1:R1", "A:S2:R1", "B:S1:R1", "B:S2:R1", "C:S1:R1", "C:S2:R1"],
+    rows: [[null, "1", "2", "3", "4", "5", "6"]],
+    groups: 3,
+    subgroups: 2,
+    replicates: 1,
+  });
+  const wizard = WIZARDS["nested-t-test"]!;
+  const questions = wizard.questions({}, three).filter(Boolean) as Question[];
+  deepStrictEqual(questions.map((q) => q.id), ["set1", "set2"]);
+  deepStrictEqual(wizard.finish({ set1: "A", set2: "C" }, three), {
+    type: "nested-t-test",
+    params: { sets: ["A", "C"] },
+  });
+  const two = readTable({
+    columns: ["Title", "A:S1:R1", "A:S2:R1", "B:S1:R1", "B:S2:R1"],
+    rows: [[null, "1", "2", "3", "4"]],
+    groups: 2,
+    subgroups: 2,
+    replicates: 1,
+  });
+  deepStrictEqual(wizard.questions({}, two).filter(Boolean), []);
+  const done = wizard.finish({}, two);
+  strictEqual(done.type, "nested-t-test");
+  strictEqual(done.params, undefined);
 });
 
 // Round 2 M18: a choice question with zero options used to throw `TypeError`
@@ -3658,10 +3743,11 @@ check("the native Analysis menu key follows the data-dependent tests (R3-16)", (
     subgroups: 1,
     replicates: 1,
   };
-  // A third data group swaps the nested t-test for the nested ANOVA.
+  // A third data group adds the nested ANOVA — the t test stays offered,
+  // the wizard asks which two (seq 246).
   ok(analysisOptionsKey("nested", nestedTwo) !== analysisOptionsKey("nested", nestedThree));
   strictEqual(analysisOptionsKey("nested", nestedTwo), "nested-t-test,plot-function");
-  strictEqual(analysisOptionsKey("nested", nestedThree), "nested-anova,plot-function");
+  strictEqual(analysisOptionsKey("nested", nestedThree), "nested-t-test,nested-anova,plot-function");
   strictEqual(analysisOptionsKey(undefined, nestedTwo), "");
 });
 
@@ -4242,6 +4328,41 @@ check("partial nested-anova params fall back to no post-hoc (FL-R3-26)", async (
   const out = await runAnalysis("nested-anova", table, {} as AnalysisParams);
   if ("error" in out) throw new Error(`expected a result, got ${out.error}`);
   strictEqual(out.stats.find((s) => s.label === "Groups")?.value, 3);
+});
+
+// seq 246: a nested t test runs on two chosen sets of a 3-group table —
+// the runner honors `sets` instead of refusing the whole table — and
+// without `sets` it still refuses the 3-group table.
+check("a nested t test runs on two sets of a 3-group nested table (seq 246)", async () => {
+  const table: TableData = {
+    columns: [
+      "Title",
+      "A:S1:R1", "A:S1:R2", "A:S2:R1", "A:S2:R2",
+      "B:S1:R1", "B:S1:R2", "B:S2:R1", "B:S2:R2",
+      "C:S1:R1", "C:S1:R2", "C:S2:R1", "C:S2:R2",
+    ],
+    rows: [
+      [null, "10", "11", "12", "13", "20", "21", "22", "23", "30", "31", "32", "33"],
+      [null, "10", "11", "12", "13", "20", "21", "22", "23", "30", "31", "32", "33"],
+    ],
+    groups: 3,
+    subgroups: 2,
+    replicates: 2,
+  };
+  const out = await runAnalysis("nested-t-test", table, { sets: ["A", "B"] } as AnalysisParams);
+  if ("error" in out) throw new Error(`expected a result, got ${out.error}`);
+  // The test compared A with B only: C's values never enter the result.
+  ok(out.notes.includes("“A”") && out.notes.includes("“B”"), `notes name A and B: ${out.notes}`);
+  ok(!out.notes.includes("“C”"), `notes must not name C: ${out.notes}`);
+  ok(out.stats.some((s) => s.label === "P value" && typeof s.value === "number"));
+  // Without `sets` the 3-group table is still refused.
+  const refused = await runAnalysis("nested-t-test", table, {} as AnalysisParams);
+  ok("error" in refused && refused.error.includes("exactly two groups"));
+  // And the runner honors `sets` on its own, called directly.
+  const direct = await runNestedTTest(readTable(table).columns, { sets: ["B", "C"] } as AnalysisParams);
+  if ("error" in direct) throw new Error(`expected a result, got ${direct.error}`);
+  ok(direct.notes.includes("“B”") && direct.notes.includes("“C”"), `direct notes name B and C: ${direct.notes}`);
+  ok(!direct.notes.includes("“A”"), `direct notes must not name A: ${direct.notes}`);
 });
 
 check("partial two-way-anova params fall back to the ordinary design (FL-R3-26)", async () => {
