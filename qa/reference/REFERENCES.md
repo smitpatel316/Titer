@@ -38,3 +38,4 @@ The geometry half of every case above runs with NO reference (bar bands,
 bracket runs, curve-vs-points coverage are asserted from the live export's
 own pixels), so an owed reference costs only the similarity half, never the
 whole case.
+- q39-scatter: Linux-captured 2026-11-18 (PNG sha e3a6c824ab832391…; xy-scatter on q39 fixture); Mac reference owed.

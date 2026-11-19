@@ -529,25 +529,46 @@ def svg_canvas_size(svg_path):
 
 
 def plot_area_from_svg(svg_path):
-    """Best-effort plot area (x0, y0, x1, y1) in SVG pixels from the first
-    clipPath rect, else the whole canvas. Returns None if unreadable."""
+    """Best-effort plot area (x0, y0, x1, y1) in SVG pixels from the
+    axes clipPath rect, else the first clipPath rect, else the whole
+    canvas. Returns None if unreadable.
+
+    NOTE (live-run fix): Plotly exports carry several clipPaths — the
+    FIRST is the whole-figure clip (xyplot, rect = full canvas), which
+    made every geometry assertion see the y-axis labels/title as extra
+    ink bands. The axes box is the clipPath with class "axesclip"
+    (id ...xy), strictly inside the canvas — that is the plot area.
+    """
     try:
         with open(svg_path, encoding="utf-8", errors="replace") as f:
             text = normalize_svg_ids(f.read())
         root = ET.fromstring(text)
     except (OSError, ET.ParseError):
         return None
+    first_rect = None
+    axes_rects = []
     for el in root.iter():
         if _local(el.tag) == "clipPath":
             for r in el.iter():
                 if _local(r.tag) == "rect":
                     try:
-                        return (float(r.get("x", 0)), float(r.get("y", 0)),
+                        rect = (float(r.get("x", 0)), float(r.get("y", 0)),
                                 float(r.get("x", 0)) + float(r.get("width", 0)),
                                 float(r.get("y", 0)) + float(r.get("height", 0)))
                     except (TypeError, ValueError):
                         return None
-    return None
+                    if first_rect is None:
+                        first_rect = rect
+                    # The axes clip is the plot area; the whole-figure
+                    # clip (class "plotclip") is not. Plotly exports
+                    # THREE axesclip rects (x, y, xy) — the xy one is
+                    # the intersection, i.e. the smallest area.
+                    if "axesclip" in (el.get("class") or ""):
+                        axes_rects.append(rect)
+    if axes_rects:
+        return min(axes_rects,
+                   key=lambda r: (r[2] - r[0]) * (r[3] - r[1]))
+    return first_rect
 
 
 def svg_texts(svg_path):
