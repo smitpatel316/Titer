@@ -18,7 +18,7 @@
 // / graph") described that session's project, not a reproducible fixture;
 // the reopen leg here uses this spec's own typed values instead.
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, copyFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import {
   switchToProjectWindow,
@@ -36,10 +36,16 @@ import { typeColumnAValues, pageTextContains } from "./helpers/grid.js";
 const OUT = specOutDir("save-chooser");
 const NAME = path.join(OUT, "q66-proj");
 const WITH_EXT = `${NAME}.hlx`;
+const COPY = path.join(OUT, "q66-proj-copy.hlx");
 const VALUES = ["101", "202", "303"];
 
 describe("Q-66 Save chooser appends .hlx", () => {
   before(async () => {
+    // Start clean: a leftover q66-proj.hlx from a previous run makes the
+    // Save chooser stop on GTK's overwrite confirmation instead of closing.
+    rmSync(WITH_EXT, { force: true });
+    rmSync(COPY, { force: true });
+    rmSync(NAME, { force: true });
     await switchToProjectWindow();
     await waitForHook();
     await dismissUpdateDialogIfPresent(x);
@@ -72,20 +78,22 @@ describe("Q-66 Save chooser appends .hlx", () => {
   });
 
   it("reopens the saved file with its values (Ctrl+O chooser)", async () => {
+    // Reopen a COPY: opening the same path that's already open just brings
+    // its window forward (open() in main.rs, by design — no second window).
+    copyFileSync(WITH_EXT, COPY);
+    const beforeHandles = await projectWindowHandles();
     await x.key("ctrl+o");
-    await typePathIntoChooser("Open Project", WITH_EXT);
+    await typePathIntoChooser("Open Project", COPY);
     assert.ok(await waitForWindowGone("Open Project", { timeout: 10000 }), "Open Project chooser did not close");
 
     // Open lands in a new window (the current one is not blank).
     const handles = await projectWindowHandles();
     assert.ok(handles.length >= 2, `expected a second project window after open, got ${handles.length}`);
-    let opened = null;
-    for (const handle of handles) {
-      await switchToHandle(handle);
-      const title = await browser.tauri.execute(() => document.title);
-      if (title.includes("q66-proj")) opened = handle;
-    }
-    assert.ok(opened, "no window titled q66-proj after reopen");
+    // The reopened window is the new handle. (Its document.title is the
+    // project's stored name, "q66-proj", not the copy's filename — title
+    // alone can't tell the two windows apart.)
+    const opened = handles.find((h) => !beforeHandles.includes(h));
+    assert.ok(opened, "no new window handle after reopen");
     await switchToHandle(opened);
     assert.ok(await pageTextContains(...VALUES), `reopened project lacks typed values: ${VALUES.join(",")}`);
     const summary = await projectSummary();
