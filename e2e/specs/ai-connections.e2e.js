@@ -82,7 +82,7 @@ describe("S-06 AI Connections dialog", () => {
     // E2E build auto-enables MCP on mount: the dialog opens ON. (The
     // OFF-by-default leg lives in the Mac device-route script, M-01.)
     assert.equal(state.checked, true, `switch not ON on open in the E2E build (checked=${state.checked})`);
-    assert.match(state.text, /On — listening on 127\.0\.0\.1:\d+\/mcp/, `no listening text while ON: ${JSON.stringify(state.text.slice(0, 300))}`);
+    assert.match(state.text, /On — listening on http:\/\/127\.0\.0\.1:\d+\/mcp/, `no listening text while ON: ${JSON.stringify(state.text.slice(0, 300))}`);
 
     // Toggle OFF: the server stops, the text flips, the token/command
     // sections go away (they render only when enabled/running).
@@ -102,7 +102,7 @@ describe("S-06 AI Connections dialog", () => {
       { timeout: 15000, timeoutMsg: "switch did not turn back ON" },
     );
     state = await switchState();
-    assert.match(state.text, /On — listening on 127\.0\.0\.1:\d+\/mcp/, `no listening text after toggle ON: ${JSON.stringify(state.text.slice(0, 300))}`);
+    assert.match(state.text, /On — listening on http:\/\/127\.0\.0\.1:\d+\/mcp/, `no listening text after toggle ON: ${JSON.stringify(state.text.slice(0, 300))}`);
     assert.match(state.text, /Local token/, "token section missing while ON");
     assert.match(state.text, /Claude Code/, "Claude Code command section missing while running");
 
