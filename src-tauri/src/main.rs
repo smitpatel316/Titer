@@ -370,6 +370,34 @@ fn save_session(app: &AppHandle) {
     }
 }
 
+/// The `.hlx` project files among the command-line arguments (`titer
+/// file.hlx`): flags and anything that isn't an existing `.hlx` file are
+/// skipped, and paths are canonicalized so the window's stored path is
+/// absolute. The first argument is the program itself and is skipped.
+fn cli_project_files(args: impl Iterator<Item = String>) -> Vec<String> {
+    args.skip(1)
+        .filter(|arg| !arg.starts_with('-'))
+        .filter_map(|arg| {
+            let path = fs::canonicalize(&arg).ok()?;
+            let hlx =
+                path.extension().and_then(|ext| ext.to_str()).map(str::to_ascii_lowercase);
+            (hlx.as_deref() == Some("hlx") && path.is_file())
+                .then(|| path.to_string_lossy().into_owned())
+        })
+        .collect()
+}
+
+/// Opens the `.hlx` files passed on the command line, like the Finder's
+/// Opened event on macOS (which has no Linux twin — the argv was silently
+/// ignored, Q-77). Before restore_session, so a file the last session also
+/// held is opened once (`open` dedupes by path) and no blank window is made
+/// when a file was given.
+fn open_cli_args(app: &AppHandle) {
+    for path in cli_project_files(std::env::args()) {
+        let _ = open(app, None, Opening { path, untitled: false });
+    }
+}
+
 /// Reopens the last session's projects that are still there, else a blank project. Like the
 /// Finder's, each goes through `open`: a file already opened (Titer launched by opening it)
 /// isn't opened twice. A project that can't be reopened never stops Titer.
@@ -1294,6 +1322,7 @@ fn main() {
         .setup(|app| {
             ask_before_quitting(app.handle());
             show_menu_pictures();
+            open_cli_args(app.handle());
             restore_session(app.handle());
             Ok(())
         })
@@ -1562,5 +1591,35 @@ mod tests {
         requests.sent.insert(2);
         requests.mark_starting();
         assert_eq!(requests.take_unsent().len(), 2, "a restart must re-send every waiting request");
+    }
+
+    // ── Q-77: files passed on the command line ───────────────────────────
+    #[test]
+    fn cli_project_files_picks_hlx_and_canonicalizes() {
+        let hlx = fixture("bom.hlx");
+        let found = cli_project_files(["titer".into(), hlx.to_string_lossy().into_owned()].into_iter());
+        assert_eq!(found.len(), 1, "one .hlx arg should be picked: {found:?}");
+        assert_eq!(found[0], fs::canonicalize(&hlx).unwrap().to_string_lossy(), "path should be absolute");
+    }
+
+    #[test]
+    fn cli_project_files_skips_flags_non_hlx_and_missing() {
+        let hlx = fixture("bom.hlx").to_string_lossy().into_owned();
+        let pzfx = fixture("column.pzfx").to_string_lossy().into_owned();
+        let missing = fixture("no-such-file.hlx").to_string_lossy().into_owned();
+        let found = cli_project_files(
+            ["titer".into(), "--verbose".into(), "-x".into(), pzfx, missing, hlx].into_iter(),
+        );
+        assert_eq!(found.len(), 1, "only the existing .hlx should survive: {found:?}");
+    }
+
+    #[test]
+    fn cli_project_files_accepts_uppercase_hlx() {
+        let hlx = fixture("bom.hlx");
+        let upper = hlx.with_extension("HLX");
+        let _ = fs::copy(&hlx, &upper);
+        let found = cli_project_files(["titer".into(), upper.to_string_lossy().into_owned()].into_iter());
+        let _ = fs::remove_file(&upper);
+        assert_eq!(found.len(), 1, ".HLX should be accepted: {found:?}");
     }
 }
