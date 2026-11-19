@@ -70,7 +70,7 @@ type LayoutValue = Layout & {
   setFoldedTables: (folded: ReadonlySet<string>) => void;
   setLayout: (patch: Partial<Layout>) => void;
   /** Whether the view shown has a right panel (every item), and settings in it (a graph, a
-   *  grouped or XY table), as it says while shown (`WithInspector`). */
+   *  grouped or XY table) — plus the always-available Auto-save section (`WithInspector`). */
   inspectorHere: boolean;
   setInspectorHere: (here: boolean) => void;
   settingsHere: boolean;
