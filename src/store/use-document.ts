@@ -18,6 +18,7 @@ import { writePzfx } from "../lib/pzfx-write";
 import { convertPrism, formatReport } from "../lib/prism";
 import { writePrism } from "../lib/prism-write";
 import { loadPrismSaveChoice, nextSaveAction, savePrismSaveChoice } from "../lib/prism-nudge";
+import { AUTOSAVE_DEBOUNCE_MS, isAutosaveEnabled } from "../lib/autosave";
 import type { SavePromptChoice } from "../components/save-prompt-dialog";
 import * as native from "../native";
 import { loadRecents, MAX_RECENTS, saveRecents, recentKey, type RecentEntry } from "./recents";
@@ -133,7 +134,7 @@ export function useDocument() {
   // failed for lack of network. Either way the document is never discarded.
   const [offlineNotice, setOfflineNotice] = React.useState<{ mode: "open" | "save" } | null>(null);
 
-  const { filePath, isDirty } = store;
+  const { filePath, isDirty, revision } = store;
   const title = filePath ? fileTitle(filePath) : remote ? fileTitle(remote.path) : untitled;
   const blank = !filePath && !remote && !isDirty && untitled === UNTITLED;
   // Told again when an opening fails, so the shell doesn't keep the file it expected here.
@@ -671,6 +672,123 @@ export function useDocument() {
     }
   };
 
+  // ── Autosave (Plane seq 281) ───────────────────────────────────────────
+  // Debounced save, 10 s after the last edit; save on sheet switch; save on
+  // quit (see confirmDiscardWithAutosave below). All three go through the
+  // existing save() above — no saveAs, no dialogs of their own — and only
+  // when the project already has a target (a local path or a remote
+  // handle). Untitled work is never autosaved (crash recovery for it is
+  // Plane seq 226, separate). A failed save is never retried in a loop:
+  // save() already alerted, and the timer only re-arms on the next edit. A
+  // remote conflict pending skips the cycle entirely — autosave never
+  // overwrites over a conflict and never calls resolveConflict's
+  // "overwrite".
+  const autosaveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autosaveInFlight = React.useRef(false);
+  const autosaveRearmPending = React.useRef(false);
+  // save() and conflict are re-created every render; the timer and the
+  // close handler reach the current ones through these refs (same pattern
+  // as `latest` and `handlers`).
+  const saveRef = React.useRef(save);
+  const conflictRef = React.useRef(conflict);
+  React.useEffect(() => {
+    saveRef.current = save;
+    conflictRef.current = conflict;
+  });
+
+  const clearAutosaveTimer = () => {
+    if (autosaveTimer.current !== null) {
+      clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = null;
+    }
+  };
+  const armAutosaveTimer = () => {
+    clearAutosaveTimer();
+    autosaveTimer.current = setTimeout(() => {
+      autosaveTimer.current = null;
+      void attemptAutosave();
+    }, AUTOSAVE_DEBOUNCE_MS);
+  };
+  // The window unmounts with the timer cleared, never firing into a dead
+  // window.
+  React.useEffect(() => clearAutosaveTimer, []);
+
+  /** True when save() would open the format prompt for a Prism-origin
+   *  project with no remembered choice — autosave must never prompt, so
+   *  that cycle is skipped and the manual Save asks instead. */
+  const autosaveWouldPrompt = () =>
+    nextSaveAction({
+      prismOrigin: prismOrigin.current,
+      prompted: prompted.current,
+      remembered: loadPrismSaveChoice(),
+    }) === "prompt";
+
+  /** One autosave attempt through the existing save(). Returns whether the
+   *  save succeeded. While a save is already in flight (manual or auto),
+   *  no second one starts; the attempt is deferred once, and re-armed
+   *  after the flight ends only if that save succeeded and the project is
+   *  still dirty — a failed save waits for the next edit. */
+  const attemptAutosave = async (): Promise<boolean> => {
+    if (!isAutosaveEnabled()) return false;
+    if (autosaveInFlight.current) {
+      autosaveRearmPending.current = true;
+      return false;
+    }
+    const s = latest.current;
+    if (!s.isDirty) return false;
+    if (!s.filePath && !remoteRef.current) return false;
+    if (conflictRef.current) return false;
+    if (autosaveWouldPrompt()) return false;
+    autosaveInFlight.current = true;
+    let ok = false;
+    try {
+      ok = await saveRef.current();
+    } finally {
+      autosaveInFlight.current = false;
+      if (autosaveRearmPending.current) {
+        autosaveRearmPending.current = false;
+        if (ok && latest.current.isDirty) armAutosaveTimer();
+      }
+    }
+    return ok;
+  };
+
+  // Debounce: every edit restarts the 10 s timer (revision bumps on every
+  // mutating action); a clean project, a disabled toggle, an untitled
+  // project, or a pending conflict clears it instead. A failed save leaves
+  // the project dirty but does not re-arm here — the next edit does.
+  React.useEffect(() => {
+    if (!isDirty) {
+      clearAutosaveTimer();
+      return;
+    }
+    if (!isAutosaveEnabled()) return;
+    if (!filePath && !remote) return;
+    if (conflict) return;
+    armAutosaveTimer();
+    return clearAutosaveTimer;
+  }, [isDirty, revision, filePath, remote, conflict]);
+
+  // Save on sheet switch: the switch already happened in the store (a pure
+  // activeNodeId change — no isDirty, no revision bump), so the save below
+  // writes the project with the new sheet active, and a failed save can
+  // never block or undo the switch. The pending debounce timer is cleared
+  // first, so a failed switch-save doesn't retry until the next edit.
+  const prevActiveNodeId = React.useRef<string | null>(null);
+  const activeNodeSeen = React.useRef(false);
+  React.useEffect(() => {
+    const id = store.activeNodeId;
+    if (!activeNodeSeen.current) {
+      activeNodeSeen.current = true;
+      prevActiveNodeId.current = id;
+      return;
+    }
+    if (id === prevActiveNodeId.current) return;
+    prevActiveNodeId.current = id;
+    clearAutosaveTimer();
+    void attemptAutosave();
+  }, [store.activeNodeId]);
+
   /** File ▸ Save As Template / Example / Method (plan 38): writes the current
    *  project JSON + a `template` envelope block to a `.pzt`/`.pzm` path from
    *  the native save panel (a download in the web build). The current project
@@ -733,6 +851,35 @@ export function useDocument() {
       return await asked;
     } finally {
       confirmDiscardInFlight.current = null;
+    }
+  };
+
+  /** Close with autosave: one save attempt first (only when the toggle is
+   *  on, the project is dirty, and it has a target), then the existing
+   *  discard prompt — which only appears if the project is still dirty
+   *  afterwards, so a successful autosave closes silently. A failing save
+   *  never blocks quitting forever: the prompt decides. Two close
+   *  requests at once share the one attempt, like confirmDiscard itself. */
+  const quitSaveInFlight = React.useRef<Promise<boolean> | null>(null);
+  const confirmDiscardWithAutosave = async (): Promise<boolean> => {
+    if (quitSaveInFlight.current) return quitSaveInFlight.current;
+    const asked = (async () => {
+      if (
+        isAutosaveEnabled() &&
+        latest.current.isDirty &&
+        (latest.current.filePath || remoteRef.current) &&
+        !conflictRef.current &&
+        !autosaveWouldPrompt()
+      ) {
+        await saveRef.current();
+      }
+      return confirmDiscard();
+    })();
+    quitSaveInFlight.current = asked;
+    try {
+      return await asked;
+    } finally {
+      quitSaveInFlight.current = null;
     }
   };
 
@@ -1170,11 +1317,11 @@ export function useDocument() {
   };
 
   // Subscribed once; the handlers reach the current versions through this ref.
-  const handlers = React.useRef({ confirmDiscard, load, openPaths });
+  const handlers = React.useRef({ confirmDiscard, confirmDiscardWithAutosave, load, openPaths });
   React.useEffect(() => {
-    handlers.current = { confirmDiscard, load, openPaths };
+    handlers.current = { confirmDiscard, confirmDiscardWithAutosave, load, openPaths };
   });
-  React.useEffect(() => native.onCloseRequested(() => handlers.current.confirmDiscard()), []);
+  React.useEffect(() => native.onCloseRequested(() => handlers.current.confirmDiscardWithAutosave()), []);
   React.useEffect(() => native.onDrop((paths) => handlers.current.openPaths(paths)), []);
   React.useEffect(() => native.onOpening(({ path, untitled }) => void handlers.current.load(path, untitled)), []);
 
