@@ -41,3 +41,14 @@ whole case.
 - q39-scatter: Linux-captured 2026-11-18 (PNG sha e3a6c824ab832391…; xy-scatter on q39 fixture); Mac reference owed.
 - q20: Linux-captured 2026-11-19 (PNG sha d539de6dd37bc4b0…; mean-error on ABCD fixture, 300 DPI PNG + SVG); Mac reference owed.
 - q38-box: Linux-captured 2026-11-19 (PNG sha d3eba5c1f6e68833…; box-violin on q38 fixture); Mac reference owed.
+- q20: Linux-captured 2026-11-19 (PNG sha d539de6dd37bc4b0…; mean-error on ABCD fixture, 300 DPI PNG + SVG); Mac reference owed.
+- q31: Linux-captured 2026-11-19 (PNG sha 5afc6518156627c5…; xy-scatter, 4 log-X dose points, no curve); Mac reference owed.
+- q38-box: Linux-captured 2026-11-19 (PNG sha d3eba5c1f6e68833…; box-violin on q38 fixture); Mac reference owed.
+- q38-violin: Linux-captured 2026-11-19 (PNG sha 77411400c78b78fc…; box-violin on q38 fixture); Mac reference owed.
+- q38-individual: Linux-captured 2026-11-19 (PNG sha 7d18660aa9c8e160…; individual on q38 fixture); Mac reference owed.
+- q38-pie: Linux-captured 2026-11-19 (PNG sha 3ea7784bd0de640c…; pie on q38 fixture); Mac reference owed.
+- q38-donut: Linux-captured 2026-11-19 (PNG sha 0b066f323486453f…; donut on q38 fixture); Mac reference owed.
+- q39-scatter: Linux-captured 2026-11-19 (PNG sha e3a6c824ab832391…; xy-scatter on q39 fixture); Mac reference owed.
+- q39-bar: Linux-captured 2026-11-19 (PNG sha c1c4990cc97f874b…; xy-bar on q39 fixture); Mac reference owed.
+- q39-area: Linux-captured 2026-11-19 (PNG sha ef724fa05f300ccc…; xy-area on q39 fixture); Mac reference owed.
+- q61: Linux-captured 2026-11-19 (PNG sha 7d18660aa9c8e160…; individual-values on ABCD); Mac reference owed.
