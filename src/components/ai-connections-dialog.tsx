@@ -9,13 +9,21 @@ import {
   isNative,
   mcpActivity,
   mcpClaudeCodeCommand,
+  mcpConnectAntigravity,
+  mcpFeedback,
+  mcpFeedbackConsent,
+  mcpOpenAntigravity,
   mcpRegenerateToken,
   mcpSetEnabled,
+  mcpSetFeedbackConsent,
   mcpStatus,
   mcpToken,
+  openGithubIssue,
+  type FeedbackEntry,
   type McpStatus,
 } from "../native";
 import { useProjectStore } from "../store/use-project-store";
+import { AI_STARTER_PROMPT, buildAntigravityConfig } from "../lib/ai-prompt";
 
 /** One Activity-log line, read for a person: "14:02 titer_read_tables ✓". */
 function activityLine(line: string): string {
@@ -41,6 +49,36 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
+/** The context lines of a feedback entry, as plain text (kind first). */
+function feedbackIssueBody(entry: FeedbackEntry): string {
+  const meta = [
+    `Kind: ${entry.kind}`,
+    entry.context.app_version
+      ? `App: Titer ${entry.context.app_version} on ${entry.context.os ?? "unknown OS"}`
+      : null,
+    entry.context.project_file ? `Project file: ${entry.context.project_file}` : null,
+    entry.context.failed_tool ? `Failed tool/step: ${entry.context.failed_tool}` : null,
+    entry.context.recent_activity?.length
+      ? `Recent activity: ${entry.context.recent_activity
+          .map((a) => `${a.tool}${a.ok === undefined ? "" : a.ok ? " ✓" : " ✗"}`)
+          .join(", ")}`
+      : null,
+  ].filter((l): l is string => l !== null);
+  return [...meta, "", "Details:", entry.details].join("\n");
+}
+
+/** The whole entry as plain text, for Copy. */
+function feedbackText(entry: FeedbackEntry): string {
+  return `[${entry.kind}] ${entry.summary}\n${new Date(entry.ts * 1000).toLocaleString()}\n\n${feedbackIssueBody(entry)}`;
+}
+
+/** The pre-filled GitHub issue URL for one entry. The user reviews and
+ *  submits it in the browser — nothing is sent from here. */
+function feedbackIssueUrl(entry: FeedbackEntry): string {
+  const title = `[feedback] ${entry.summary}`;
+  return `https://github.com/smitpatel316/Titer/issues/new?title=${encodeURIComponent(title)}&body=${encodeURIComponent(feedbackIssueBody(entry))}`;
+}
+
 export function AiConnectionsDialog() {
   const { selector, closeSelector } = useProjectStore();
   const open = selector?.kind === "ai-connections";
@@ -49,10 +87,20 @@ export function AiConnectionsDialog() {
   const [showToken, setShowToken] = React.useState(false);
   const [command, setCommand] = React.useState<string | null>(null);
   const [activity, setActivity] = React.useState<string[]>([]);
+  const [feedback, setFeedback] = React.useState<FeedbackEntry[]>([]);
+  const [feedbackSharing, setFeedbackSharing] = React.useState<boolean | null>(null);
+  const [copiedFeedback, setCopiedFeedback] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
-  const [copied, setCopied] = React.useState<"token" | "command" | null>(null);
+  const [copied, setCopied] = React.useState<"token" | "command" | "antigravity" | "prompt" | null>(null);
   const [confirmRegen, setConfirmRegen] = React.useState(false);
+  const [antigravityConsent, setAntigravityConsent] = React.useState(false);
+  const [antigravityMessage, setAntigravityMessage] = React.useState("");
+
+  // Live Antigravity config (endpoint + token filled in, no placeholders);
+  // null unless the server is running with a known endpoint and token.
+  const antigravityConfig =
+    status?.running && status.endpoint && token ? buildAntigravityConfig(status.endpoint, token) : null;
 
   const refresh = React.useCallback(async () => {
     if (!isNative) return;
@@ -63,6 +111,8 @@ export function AiConnectionsDialog() {
       if (next.has_token) setToken(await mcpToken());
       setCommand(next.running ? await mcpClaudeCodeCommand() : null);
       setActivity(await mcpActivity(10));
+      setFeedback(await mcpFeedback());
+      setFeedbackSharing(await mcpFeedbackConsent());
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -73,13 +123,30 @@ export function AiConnectionsDialog() {
     setShowToken(false);
     setConfirmRegen(false);
     setCopied(null);
+    setCopiedFeedback(null);
+    setAntigravityConsent(false);
+    setAntigravityMessage("");
     void refresh();
   }, [open, refresh]);
 
-  const copy = async (what: "token" | "command", text: string) => {
+  const copy = async (what: "token" | "command" | "antigravity" | "prompt", text: string) => {
     await navigator.clipboard.writeText(text);
     setCopied(what);
     setTimeout(() => setCopied((c) => (c === what ? null : c)), 2000);
+  };
+
+  const copyFeedback = async (entry: FeedbackEntry) => {
+    await navigator.clipboard.writeText(feedbackText(entry));
+    setCopiedFeedback(entry.feedback_id);
+    setTimeout(() => setCopiedFeedback((c) => (c === entry.feedback_id ? null : c)), 2000);
+  };
+
+  const sendFeedbackToGithub = async (entry: FeedbackEntry) => {
+    try {
+      await openGithubIssue(feedbackIssueUrl(entry));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   const toggle = async (enabled: boolean) => {
@@ -87,6 +154,19 @@ export function AiConnectionsDialog() {
     try {
       await mcpSetEnabled(enabled);
       await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** The feedback-sharing choice (first-run prompt, or this toggle): what
+   *  `titer_send_feedback` does with a report once it is saved locally. */
+  const toggleSharing = async (sharing: boolean) => {
+    setBusy(true);
+    try {
+      setFeedbackSharing(await mcpSetFeedbackConsent(sharing));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -112,13 +192,43 @@ export function AiConnectionsDialog() {
     }
   };
 
+  /** One-click Antigravity setup, after the consent panel: turns the server
+   *  on (persisted opt-in) and writes the stdio `titer` entry into
+   *  Antigravity's config — no token anywhere. */
+  const connectAntigravity = async () => {
+    setBusy(true);
+    try {
+      const result = await mcpConnectAntigravity();
+      setAntigravityConsent(false);
+      setAntigravityMessage(
+        result.outcome === "already_connected"
+          ? "Already connected — Titer is already in Antigravity's MCP config."
+          : "Connected — open Antigravity and click Refresh under Installed MCP Servers.",
+      );
+      setError("");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openAntigravity = async () => {
+    try {
+      await mcpOpenAntigravity();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   return (
     <Dialog
       open={open}
       onClose={closeSelector}
       dismissLabel="Done"
       title="AI Connections"
-      description="Let an AI app you already use (Claude Code, Claude Desktop, …) work with what's open in Titer — through a local server only. It can read and change your project, not just look at it."
+      description="Let an AI app you already use (Claude Code, Claude Desktop, Antigravity / Gemini, …) work with what's open in Titer — through a local server only. It can read and change your project, not just look at it."
     >
       {!isNative ? (
         <p className="text-regular text-secondary">
@@ -140,6 +250,53 @@ export function AiConnectionsDialog() {
                     ? `On — listening on ${status.endpoint}`
                     : "Off — no AI app can reach Titer."}
               </span>
+            </div>
+            <div className="mt-2 flex flex-col gap-2">
+              <div className="flex gap-2">
+                <Button
+                  disabled={busy}
+                  onClick={() => {
+                    setAntigravityMessage("");
+                    setAntigravityConsent(true);
+                  }}
+                >
+                  Connect to Antigravity
+                </Button>
+              </div>
+              <p className="text-small text-secondary">
+                One-click setup for Antigravity (Gemini) — no token to copy: Titer adds itself to
+                Antigravity&apos;s MCP config, and turns “Allow AI apps to connect” on if it isn&apos;t
+                already.
+              </p>
+              {antigravityConsent && (
+                <div className="flex flex-col gap-2 rounded-md bg-control p-3">
+                  <p className="text-regular text-primary">
+                    Titer will add itself to Antigravity&apos;s MCP config
+                    (~/.gemini/config/mcp_config.json). Nothing else in that file changes. You can remove it
+                    anytime from Antigravity&apos;s Installed MCP Servers.
+                  </p>
+                  <p className="text-small text-secondary">
+                    This also turns on “Allow AI apps to connect” above, so the local server keeps running
+                    after restarts.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button disabled={busy} onClick={() => void connectAntigravity()}>
+                      Connect
+                    </Button>
+                    <Button disabled={busy} onClick={() => setAntigravityConsent(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {antigravityMessage && (
+                <div className="flex flex-col gap-2">
+                  <p className="text-regular text-primary">{antigravityMessage}</p>
+                  <div className="flex gap-2">
+                    <Button onClick={() => void openAntigravity()}>Open Antigravity</Button>
+                  </div>
+                </div>
+              )}
             </div>
           </Section>
 
@@ -188,6 +345,34 @@ export function AiConnectionsDialog() {
             </Section>
           )}
 
+          {antigravityConfig && (
+            <Section label="Antigravity (Gemini) — paste into `~/.gemini/config/mcp_config.json`">
+              <pre className="max-h-64 overflow-auto rounded-md bg-control p-3 text-small whitespace-pre-wrap">
+                {antigravityConfig}
+              </pre>
+              <div className="flex gap-2">
+                <Button onClick={() => void copy("antigravity", antigravityConfig)}>
+                  {copied === "antigravity" ? "Copied" : "Copy"}
+                </Button>
+              </div>
+              <p className="mt-1 text-small text-secondary">
+                Use the global file, never a repo&apos;s `.agents/mcp_config.json` — the token is a live secret and must
+                never be committed to a repo. Restart Antigravity (or open the MCP manager with `/mcp`) after editing.
+              </p>
+            </Section>
+          )}
+
+          <Section label="What to tell your AI — paste into Gemini (or any AI app)">
+            <pre className="max-h-64 overflow-auto rounded-md bg-control p-3 text-small whitespace-pre-wrap">
+              {AI_STARTER_PROMPT}
+            </pre>
+            <div className="flex gap-2">
+              <Button onClick={() => void copy("prompt", AI_STARTER_PROMPT)}>
+                {copied === "prompt" ? "Copied" : "Copy"}
+              </Button>
+            </div>
+          </Section>
+
           <Section label="Recent agent activity">
             {activity.length === 0 ? (
               <p className="text-regular text-secondary">No agent activity yet.</p>
@@ -200,10 +385,55 @@ export function AiConnectionsDialog() {
             )}
           </Section>
 
+          <Section label="Feedback from your AI">
+            <div className="flex items-center gap-3">
+              <Switch checked={feedbackSharing ?? false} disabled={busy} onChange={(v) => void toggleSharing(v)} />
+              <span className="text-regular text-secondary">
+                {feedbackSharing === null
+                  ? "Not asked yet — reports stay on this Mac until you choose."
+                  : feedbackSharing
+                    ? "On — reports your AI sends are also sent to the Titer team."
+                    : "Off — reports stay on this Mac only."}
+              </span>
+            </div>
+            <p className="text-small text-secondary">
+              Only the feedback text is ever shared — no project data, no file contents, no personal information.
+            </p>
+            {feedback.length === 0 ? (
+              <p className="text-regular text-secondary">
+                No feedback yet — your AI can report a missing feature or a bug with titer_send_feedback, and it will
+                show up here for you to review.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {feedback.map((entry) => (
+                  <div key={entry.feedback_id} className="flex flex-col gap-1">
+                    <p className="text-regular text-primary">
+                      [{entry.kind}] {entry.summary} — {new Date(entry.ts * 1000).toLocaleString()}
+                    </p>
+                    <p className="text-small text-secondary">{entry.details}</p>
+                    <div className="flex gap-2">
+                      <Button onClick={() => void copyFeedback(entry)}>
+                        {copiedFeedback === entry.feedback_id ? "Copied" : "Copy"}
+                      </Button>
+                      <Button onClick={() => void sendFeedbackToGithub(entry)}>Send to GitHub</Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="mt-1 text-small text-secondary">
+              Reports are always saved on this Mac first. With sharing on, a report is also sent to the Titer team
+              when your AI sends one; with sharing off, nothing leaves this Mac — use “Send to GitHub” to share one
+              yourself, which opens a pre-filled issue in your browser for you to review and submit.
+            </p>
+          </Section>
+
           <p className="text-small text-secondary">
-            Local only: the server binds 127.0.0.1, needs the token above, and never sends data anywhere. Phase 2 gives
-            an agent 51 tools — 14 read-only, and 37 that change your project: run an analysis, build a graph, export,
-            save or delete. Only switch this on for an app you trust. It cannot change these settings.
+            Local only: the server binds 127.0.0.1, needs the token above, and never sends data anywhere — except
+            feedback reports, and only when you turn sharing on above. Phase 2 gives an agent 52 tools — 15
+            read-only, and 37 that change your project: run an analysis, build a graph, export, save or delete. Only
+            switch this on for an app you trust. It cannot change these settings.
           </p>
 
           {error && <p className="text-regular text-red-600">{error}</p>}

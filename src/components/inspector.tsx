@@ -1,7 +1,8 @@
 // The right panel: each item's note, or a graph's or a grouped table's settings (Format,
-// Groups), full height like the sidebar, and the building blocks its sections share.
+// Groups) plus the app-wide Auto-save setting, full height like the sidebar, and the
+// building blocks its sections share.
 import * as React from "react";
-import { Button, cn, IconButton } from "../ui/controls";
+import { Button, cn, IconButton, Switch } from "../ui/controls";
 import {
   CaretRightIcon,
   MinusIcon,
@@ -14,13 +15,14 @@ import { SidePanel, Toolbar } from "../ui/layout";
 import { clampWidth, INSPECTOR_WIDTH, useLayout } from "../store/use-layout";
 import { clamp, type ProjectNode } from "../store/types";
 import { useProjectActions } from "../store/use-project-store";
+import { AUTOSAVE_DEBOUNCE_MS, isAutosaveEnabled, setAutosaveEnabled } from "../lib/autosave";
 
 type View = "notes" | "settings";
 
 /** A view with the right panel: its toolbar and content on the left, the panel on the right,
- *  showing the item's note or its `settings` (where it has some). The panel's two buttons,
- *  Notes then Settings, stay at the window's top right: in the panel when it's shown, in the
- *  toolbar when it's hidden. */
+ *  showing the item's note or its `settings` (where it has some) plus the app-wide
+ *  Auto-save setting. The panel's two buttons, Notes then Settings, stay at the window's
+ *  top right: in the panel when it's shown, in the toolbar when it's hidden. */
 export function WithInspector({
   title,
   tag,
@@ -39,7 +41,14 @@ export function WithInspector({
   children: React.ReactNode;
 }) {
   const { inspector: open, panel, inspectorWidth, setLayout, setInspectorHere, setSettingsHere } = useLayout();
-  const hasSettings = settings !== undefined;
+  // The Settings view always has content — the Auto-save section below — even
+  // for items with no settings of their own (a plain table, an analysis, an
+  // info sheet). Auto-save is app-wide, not per-item, so confining it to the
+  // per-item settings (a graph's Format, a grouped table's Groups) would hide
+  // it for most selections; the item's own settings still render above it
+  // where they exist. The Settings button and View ▸ Inspector are therefore
+  // always enabled now, where they used to be only for items with settings.
+  const hasSettings = true;
   // While shown, the window keeps room for the panel in its layout (`fitWidths`), and the
   // View menu offers the settings where there are some.
   React.useLayoutEffect(() => {
@@ -75,7 +84,14 @@ export function WithInspector({
         onResize={(width, open) => setLayout({ inspector: open, inspectorWidth: clampWidth(width, INSPECTOR_WIDTH) })}
         header={buttons}
       >
-        {shown === "settings" ? settings : <Notes node={node} />}
+        {shown === "settings" ? (
+          <>
+            {settings}
+            <AutosaveSection />
+          </>
+        ) : (
+          <Notes node={node} />
+        )}
       </SidePanel>
     </div>
   );
@@ -116,6 +132,31 @@ function Notes({ node }: { node: ProjectNode }) {
       placeholder="Write a note…"
       className="block h-full w-full resize-none bg-transparent px-3 py-2 text-regular outline-none placeholder:text-secondary"
     />
+  );
+}
+
+/** App-wide auto-save (1.7.3): one on/off toggle, on by default, read and written
+ *  through the autosave module — the interval is fixed, not user-adjustable, so it
+ *  is shown as text. The engine itself (Lane A) lives in src/lib/autosave.ts. */
+function AutosaveSection() {
+  const [enabled, setEnabled] = React.useState(() => isAutosaveEnabled());
+  return (
+    <Section title="Auto-save">
+      <label className="flex items-center gap-3">
+        <Switch
+          checked={enabled}
+          onChange={(v) => {
+            setAutosaveEnabled(v);
+            setEnabled(v);
+          }}
+        />
+        <span className="text-regular text-primary">Auto-save {enabled ? "on" : "off"}</span>
+      </label>
+      <p className="text-small text-secondary">
+        Saves {AUTOSAVE_DEBOUNCE_MS / 1000} seconds after your last edit, when you switch sheets, and when you quit —
+        only for projects that already have a file or cloud location.
+      </p>
+    </Section>
   );
 }
 
