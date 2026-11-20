@@ -478,6 +478,9 @@ const NONLINEAR_MODELS: Record<string, NonlinearModel> = {
   "Two phase exponential decay": "two-phase-decay",
   "One phase exponential association": "one-phase-association",
   "Two phase exponential association": "two-phase-association",
+  // B6 Classic #14: the first-order polynomial under its Classic-equations
+  // name (the Second/Third/Fourth Order twins are keyed just below).
+  "Polynomial: First Order (straight line)": "line",
   "Polynomial: Second Order (Y=A + B*X + C*X^2)": "quadratic",
   "Polynomial: Third Order (Y=A + B*X + C*X^2 + D*X^3)": "cubic",
   "Polynomial: Fourth Order (Y=A + B*X + C*X^2 + D*X^3 + E*X^4)": "quartic",
