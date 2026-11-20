@@ -3310,6 +3310,40 @@ pub struct ExportTableDataArgs {
     pub path: Option<String>,
 }
 
+/// Export every graph and figure (layout) in the project, one image file
+/// each, into one folder (seq 179, Prism's File > Export All Graphs).
+/// `folder` omitted = beside the project file, else <Documents>/Titer
+/// Exports. Figures with no panels are skipped and reported, not failed;
+/// a graph that fails to render is reported per item in `failed` while
+/// the rest of the batch still writes.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ExportAllGraphsArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// "png" | "jpeg" | "svg" | "pdf" | "tiff".
+    pub format: String,
+    /// "150" | "300" | "600" | "900" | "1200". Omit for "300".
+    #[serde(default)]
+    pub dpi: Option<String>,
+    /// The folder to write into. Omit for the default folder (see above).
+    #[serde(default)]
+    pub folder: Option<String>,
+    /// Export graphs (default true).
+    #[serde(default)]
+    pub include_graphs: Option<bool>,
+    /// Export figures / layouts (default true).
+    #[serde(default)]
+    pub include_figures: Option<bool>,
+    /// Export exactly these graph ids (default: all). When either list is
+    /// given, only the listed items export.
+    #[serde(default)]
+    pub graph_ids: Option<Vec<String>>,
+    /// Export exactly these figure ids (default: all).
+    #[serde(default)]
+    pub figure_ids: Option<Vec<String>>,
+}
+
 #[tool_router(router = tools, vis = "pub")]
 impl TiterMcpServer {
     /// What is open in Titer, and the tables, analyses, graphs and figures
@@ -6574,6 +6608,79 @@ impl TiterMcpServer {
             }
             Err(e) => {
                 self.state.log_call("titer_export_table_data", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Export every graph and figure (layout) in the project, one image
+    /// file each, into one folder (PNG, JPEG, SVG, PDF or TIFF at
+    /// 150–1200 DPI, default 300), rendered offscreen. `folder` omitted
+    /// = beside the project file, else <Documents>/Titer Exports.
+    /// Returns the folder, per-item paths, and the skipped / failed lists
+    /// (a figure with no panels is skipped; a failed render never stops
+    /// the batch). A big project can outrun the 120 s job wait — the
+    /// error then names the job id to check with titer_read_job.
+    #[tool(
+        name = "titer_export_all_graphs",
+        description = "Export every graph and figure (layout) in the project, one image file each, into one folder: format png/jpeg/svg/pdf/tiff, dpi 150/300/600/900/1200 (default 300, ignored for SVG). Rendered offscreen — nothing need be open on screen. folder omitted = beside the project file, else <Documents>/Titer Exports. include_graphs/include_figures default true; graph_ids/figure_ids export exactly those (when either list is given, only the listed items export). Returns the folder, per-item paths, and skipped/failed lists — a figure with no panels is skipped, a failed render is reported per item and never stops the batch.",
+        annotations(
+            title = "Export all graphs",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn export_all_graphs(
+        &self,
+        Parameters(args): Parameters<ExportAllGraphsArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "format": args.format, "dpi": args.dpi, "folder": args.folder, "include_graphs": args.include_graphs, "include_figures": args.include_figures, "graph_ids": args.graph_ids, "figure_ids": args.figure_ids });
+        let result: Result<serde_json::Value, String> = async {
+            let format = args.format.as_str();
+            if !EXPORT_FORMATS.contains(&format) {
+                return Err(format!(
+                    "Unknown export format “{format}” — the formats are png, jpeg, svg, pdf, tiff."
+                ));
+            }
+            let dpi = args.dpi.as_deref().unwrap_or("300");
+            if !EXPORT_DPIS.contains(&dpi) {
+                return Err(format!(
+                    "Unknown resolution “{dpi}” — the resolutions are 150, 300, 600, 900, 1200 DPI."
+                ));
+            }
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let folder = match &args.folder {
+                Some(f) if !f.trim().is_empty() => f.trim().to_string(),
+                _ => self
+                    .default_export_dir(&project_id)?
+                    .to_string_lossy()
+                    .into_owned(),
+            };
+            let mut job_args = serde_json::json!({ "folder": folder, "format": format, "dpi": dpi });
+            if let Some(v) = args.include_graphs {
+                job_args["include_graphs"] = serde_json::json!(v);
+            }
+            if let Some(v) = args.include_figures {
+                job_args["include_figures"] = serde_json::json!(v);
+            }
+            if let Some(v) = &args.graph_ids {
+                job_args["graph_ids"] = serde_json::json!(v);
+            }
+            if let Some(v) = &args.figure_ids {
+                job_args["figure_ids"] = serde_json::json!(v);
+            }
+            self.run_export_job(&project_id, "export-all-graphs", job_args).await
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_export_all_graphs", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_export_all_graphs", call_args, false, Some(&e));
                 Err(e)
             }
         }

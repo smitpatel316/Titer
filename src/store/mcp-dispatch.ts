@@ -52,6 +52,7 @@ import {
 } from "./mcp-graphs";
 import {
   defaultExportIo,
+  executeExportAllGraphs,
   executeExportFigure,
   executeExportGraph,
   executeExportOffice,
@@ -1598,6 +1599,8 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       return executeExportGraph(job, toExportDeps(deps));
     case "export-figure":
       return executeExportFigure(job, toExportDeps(deps));
+    case "export-all-graphs":
+      return executeExportAllGraphs(job, toExportDeps(deps));
     case "export-office":
       return executeExportOffice(job, toExportDeps(deps));
     case "export-table-data":
