@@ -21,6 +21,19 @@ import {
 import { PARAM_KEYS_BY_ANALYSIS, parseProjectFile, parseProjectText, readPalette, serializeProjectFile, validateAnalysisParams, type ProjectFilePayload } from "../src/lib/project-file";
 import { applyWand, wandExamples, wandReportMessage } from "../src/lib/wand";
 import {
+  TEMPLATES,
+  WELCOME_KEY,
+  blankTemplateFor,
+  graphPortfolio,
+  parseWelcomeSetting,
+  planTemplateApply,
+  pristineBlankTableId,
+  shouldShowWelcome,
+  templateById,
+  templateForGraph,
+  type BuiltInTemplate,
+} from "../src/lib/templates";
+import {
   extractMethod,
   formatMethodReport,
   isMethodPath,
@@ -569,7 +582,21 @@ const mcpLaggingHarness = (withRevisionWait: boolean) => {
     reorderChildren: (parentId, order) => dispatch({ type: "reorderChildren", parentId, order }),
     undo: () => dispatch({ type: "undo" }),
     redo: () => dispatch({ type: "redo" }),
-    createGraph: neverUnused,
+    createGraph: (parentId, graphType, graphOptions) => {
+      const id = genId("graph");
+      dispatch({
+        type: "create",
+        node: {
+          id,
+          type: "graph",
+          name: GRAPHS[graphType].label,
+          parentId,
+          graphType,
+          graphOptions: graphOptions ?? newGraphOptions(graphType),
+        },
+      });
+      return id;
+    },
     updateGraph: neverUnused,
     cloneGraph: neverUnused,
     createFigure: neverUnused,
@@ -16828,6 +16855,155 @@ check("the method report names what was applied and what was skipped", () => {
     skipped: [],
   });
   ok(!noneSkipped.includes("Skipped:"));
+});
+
+// ── Template gallery / Welcome dialog (seq 167) ──────────────────────────
+// Prism's Welcome dialog lists templates and its Graph Portfolio; Titer had
+// the files (.pzt, plan 38) but no in-app gallery — a new project always
+// started as one blank Column table. The gallery is the built-in templates
+// in src/lib/templates.ts; the Welcome dialog and the MCP `template` param
+// both ride this list, never a second one.
+
+check("the gallery holds one blank template per table type, plus worked examples", () => {
+  const blanks = TEMPLATES.filter((t) => t.kind === "blank");
+  strictEqual(blanks.length, 7, `want 7 blank templates, got ${blanks.length}`);
+  for (const type of Object.keys(TABLES) as TableType[]) {
+    const b = blankTemplateFor(type);
+    strictEqual(b.kind, "blank");
+    strictEqual(b.tableType, type);
+    strictEqual(b.id, `blank-${type}`);
+    strictEqual(b.data, undefined, "a blank template carries no data");
+    strictEqual(b.graphs, undefined, "a blank template opens with no graphs");
+  }
+  const ids = TEMPLATES.map((t) => t.id);
+  strictEqual(new Set(ids).size, ids.length, "template ids are unique");
+  const examples = TEMPLATES.filter((t) => t.kind === "example");
+  strictEqual(examples.length, 4, `want 4 example templates, got ${examples.length}`);
+  for (const e of examples) {
+    ok((e.data?.rows.length ?? 0) > 0, `${e.id} has sample data`);
+    ok((e.graphs?.length ?? 0) > 0, `${e.id} opens with a graph`);
+    // Every example graph is one its table offers (the New Graph picker lists it).
+    const offered = new Set(GRAPH_OPTIONS_BY_TABLE[e.tableType].map((o) => o.value));
+    for (const g of e.graphs ?? []) {
+      ok(offered.has(g.graphType), `${e.id}'s ${g.graphType} is offered for a ${e.tableType} table`);
+    }
+  }
+  // templateById: known ids resolve, unknown ones don't.
+  strictEqual(templateById("blank-column")?.tableType, "column");
+  strictEqual(templateById("example-dose-response")?.kind, "example");
+  strictEqual(templateById("no-such-template"), undefined);
+});
+
+check("every example template's graphs draw from its sample data", () => {
+  for (const template of TEMPLATES.filter((t) => t.kind === "example")) {
+    const data = template.data!;
+    for (const g of template.graphs ?? []) {
+      const opts = newGraphOptions(g.graphType);
+      const columns = plotColumns(readTable(data), g.graphType, opts, template.tableType);
+      const fig = GRAPHS[g.graphType].build(columns, opts, paintOf(opts, columns.length), readTable(data).titles);
+      const traces = fig.data as { x?: unknown[]; y?: unknown[] }[];
+      ok(traces.length > 0, `${template.id}'s ${g.graphType} draws at least one trace`);
+      ok(
+        traces.some((t) => (Array.isArray(t.x) && t.x.length > 0) || (Array.isArray(t.y) && t.y.length > 0)),
+        `${template.id}'s ${g.graphType} draws points (no trace carries data)`,
+      );
+    }
+  }
+});
+
+check("the Graph Portfolio showcases one example template per graph type", () => {
+  const types = graphPortfolio.map((e) => e.graphType);
+  strictEqual(new Set(types).size, types.length, "portfolio graph types are unique");
+  for (const entry of graphPortfolio) {
+    const template = templateById(entry.templateId);
+    ok(template, `portfolio entry ${entry.graphType} names a template that exists`);
+    strictEqual(template?.kind, "example", "the portfolio showcases examples, not blanks");
+    ok(template?.graphs?.some((g) => g.graphType === entry.graphType), `${entry.templateId} shows ${entry.graphType}`);
+    strictEqual(templateForGraph(entry.graphType)?.id, entry.templateId);
+  }
+  // A graph with no portfolio entry has no template (only showcased graphs are listed).
+  strictEqual(templateForGraph("heatmap"), undefined);
+  strictEqual(templateForGraph("pie"), undefined);
+});
+
+check("the Welcome setting defaults to show, and only an explicit off hides it", () => {
+  strictEqual(WELCOME_KEY, "titer.show-welcome");
+  strictEqual(parseWelcomeSetting("false"), false);
+  strictEqual(parseWelcomeSetting(false), false);
+  strictEqual(parseWelcomeSetting("true"), true);
+  strictEqual(parseWelcomeSetting(true), true);
+  strictEqual(parseWelcomeSetting(null), true, "no stored setting shows the dialog");
+  strictEqual(parseWelcomeSetting(undefined), true);
+  strictEqual(parseWelcomeSetting("banana"), true, "a garbled setting shows the dialog, never hides it");
+  strictEqual(parseWelcomeSetting(""), true);
+  // The dialog shows on a fresh window that says show — never on a window a file opened into.
+  strictEqual(shouldShowWelcome(null, false), true);
+  strictEqual(shouldShowWelcome("true", false), true);
+  strictEqual(shouldShowWelcome("false", false), false);
+  strictEqual(shouldShowWelcome(null, true), false);
+  strictEqual(shouldShowWelcome("false", true), false);
+});
+
+check("a template replaces the fresh window's untouched table, and only that one", () => {
+  const fresh = makeInitialState();
+  const pristineId = fresh.rootOrder[0];
+  strictEqual(pristineBlankTableId(fresh), pristineId);
+  // A blank XY template on a fresh window replaces the Column table.
+  const blankXy = planTemplateApply(blankTemplateFor("xy"), fresh);
+  strictEqual(blankXy.replaceTableId, pristineId);
+  strictEqual(blankXy.table.tableType, "xy");
+  deepStrictEqual(blankXy.graphs, []);
+  // An example on a fresh window replaces it too, with its data and graphs.
+  const dose = planTemplateApply(templateById("example-dose-response")!, fresh);
+  strictEqual(dose.replaceTableId, pristineId);
+  strictEqual(dose.table.tableType, "xy");
+  strictEqual(dose.table.data.rows.length, 8);
+  deepStrictEqual(
+    dose.graphs.map((g) => g.graphType),
+    ["xy-scatter"],
+  );
+  // A second table ends the pristine state: the template adds, nothing is lost.
+  const touched = reducer(fresh, {
+    type: "create",
+    node: { id: "t2", type: "table", name: "Table", parentId: null, tableType: "xy", data: TABLES.xy.defaultData() },
+  });
+  strictEqual(pristineBlankTableId(touched), null);
+  strictEqual(planTemplateApply(blankTemplateFor("grouped"), touched).replaceTableId, null);
+  // Typing into the fresh table ends it too.
+  const typed = reducer(fresh, {
+    type: "updateTable",
+    id: pristineId,
+    data: { ...fresh.nodes[pristineId].data!, rows: [[null, "1"]] },
+    label: "type",
+  });
+  strictEqual(pristineBlankTableId(typed), null);
+  // Renaming the fresh table ends it too (a named table is the user's, not the default).
+  const renamed = reducer(fresh, { type: "rename", id: pristineId, name: "My data" });
+  strictEqual(pristineBlankTableId(renamed), null);
+});
+
+check("MCP apply-template replaces the pristine table, adds on a worked project, and rejects unknown ids", async () => {
+  const harness = mcpLaggingHarness(true);
+  // A blank XY template on the fresh harness project: one table, now XY.
+  const blanked = await harness.run("job-tpl-blank", "apply-template", { template_id: "blank-xy" });
+  const blankedResult = blanked.result as { table_id: string; table_type: string; rows: number; graphs: string[] };
+  strictEqual(blankedResult.table_type, "XY");
+  strictEqual(blankedResult.rows, 0);
+  deepStrictEqual(blankedResult.graphs, []);
+  strictEqual(harness.state().rootOrder.length, 1, "the pristine table was replaced, not left behind");
+  strictEqual(harness.state().nodes[blankedResult.table_id]?.tableType, "xy");
+  // An example on the now-worked project adds a table with its graph.
+  const dosed = await harness.run("job-tpl-dose", "apply-template", { template_id: "example-dose-response" });
+  const dosedResult = dosed.result as { table_id: string; table_type: string; rows: number; graphs: string[] };
+  strictEqual(dosedResult.table_type, "XY");
+  strictEqual(dosedResult.rows, 8);
+  strictEqual(dosedResult.graphs.length, 1);
+  strictEqual(harness.state().rootOrder.length, 2, "a worked project keeps its table and gains the template's");
+  const children = harness.state().childOrder[dosedResult.table_id] ?? [];
+  strictEqual(children.length, 1);
+  strictEqual(harness.state().nodes[children[0]]?.graphType, "xy-scatter");
+  // An unknown id errors and names the templates that exist.
+  await rejects(harness.run("job-tpl-bad", "apply-template", { template_id: "nope" }), /has no template “nope”/);
 });
 
 // ── R3-01: the release pipeline ships the vendored webR repo ─────────────

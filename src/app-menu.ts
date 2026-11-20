@@ -177,6 +177,10 @@ export function useAppMenu(doc: DocumentActions) {
             () => latest.current.doc.clearRecents(),
             (entry) => latest.current.doc.openRemoteEntry(entry),
           ),
+          // The Welcome dialog (seq 167): the template gallery + Graph
+          // Portfolio + recents. It auto-shows on a fresh first window; this
+          // opens it on demand (also the only way back after "don't show").
+          { text: "Welcome…", action: () => latest.current.doc.openWelcome() },
           { text: "Open from Cloud…", action: () => latest.current.doc.openRemotePicker() },
           {
             text: "Connected Storage…",

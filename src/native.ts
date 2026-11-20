@@ -770,6 +770,17 @@ export function onNoWindows(handler: () => void) {
   return () => void off.then((f) => f());
 }
 
+/** This window's label ("project-1", "project-2"…), or null outside the
+ *  shell. The Welcome dialog auto-shows only on the first project window. */
+export function windowLabel(): string | null {
+  if (!isNative) return null;
+  try {
+    return getCurrentWebviewWindow().label;
+  } catch {
+    return null;
+  }
+}
+
 /** Calls `handler` with what this window should open: once its page is ready, and
  *  whenever the shell gives it more (⌘O, Open Recent, the Finder, the Dock). */
 export function onOpening(handler: (opening: Opening) => void) {

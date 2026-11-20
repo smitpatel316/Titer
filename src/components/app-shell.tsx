@@ -15,6 +15,8 @@ import { useMcpSnapshotPublisher } from "../store/mcp-publish";
 import { useMcpJobDispatcher } from "../store/mcp-dispatch";
 import { SavePromptDialog } from "./save-prompt-dialog";
 import { TemplateDialog } from "./template-dialog";
+import { WelcomeDialog } from "./welcome-dialog";
+import { openProjectsOrSay } from "../menus";
 import { ConflictDialog } from "./conflict-dialog";
 import { RemotePickerDialog } from "./remote-picker";
 import { CloudSettingsDialog } from "./cloud-settings";
@@ -196,6 +198,23 @@ export function AppShell() {
       <TemplateDialog
         defaultName={documentActions.title}
         onSave={(kind, info) => void documentActions.saveTemplate(kind, info)}
+      />
+
+      {/* The Welcome dialog (seq 167): the gallery + Graph Portfolio + recents
+          on a fresh window (use-document decides when it auto-shows); File ▸
+          Welcome… opens it on demand. */}
+      <WelcomeDialog
+        open={documentActions.welcomeOpen}
+        onClose={documentActions.closeWelcome}
+        onApplyTemplate={(templateId) => documentActions.applyTemplate(templateId)}
+        recents={documentActions.recents}
+        onOpenRecent={(entry) =>
+          entry.kind === "local"
+            ? openProjectsOrSay([entry.path], (gone) =>
+                documentActions.forgetRecent({ kind: "local", path: gone }),
+              )
+            : documentActions.openRemoteEntry(entry)
+        }
       />
 
       {/* A template's instructions on open (plan 38): Prism's popup, in-app

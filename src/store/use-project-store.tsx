@@ -772,8 +772,9 @@ interface ProjectActions {
   createSimulatedTable: (tableType: TableType, data: TableData) => void;
   /** A table created with its data already filled (extract-and-rearrange's
    *  new table): `name` is the base the reducer numbers ("Extracted data 1",
-   *  "Extracted data 2"… — root tables are numbered from 1). */
-  createTableWithData: (tableType: TableType, data: TableData, name: string) => void;
+   *  "Extracted data 2"… — root tables are numbered from 1). Returns the new
+   *  table's id, so a caller can open graphs under it (a template apply). */
+  createTableWithData: (tableType: TableType, data: TableData, name: string) => string;
   /** A table computed from `from`'s values (Transform or Normalize). */
   createTransformed: (from: string, transform: Omit<Transform, "from">) => void;
   createAnalysis: (parentId: string, analysisType: AnalysisType, analysisParams?: AnalysisParams) => string;
@@ -930,11 +931,12 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   });
 
   const actions = React.useMemo<ProjectActions>(() => {
-    const createTableWithData = (tableType: TableType, data: TableData, name: string) =>
+    const createTableWithData = (tableType: TableType, data: TableData, name: string) => {
+      const id = genId("table");
       dispatch({
         type: "create",
         node: {
-          id: genId("table"),
+          id,
           type: "table",
           name,
           parentId: null,
@@ -942,6 +944,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           data,
         },
       });
+      return id;
+    };
     return {
       get: () => latest.current,
       createTable: (tableType) =>
