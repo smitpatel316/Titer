@@ -1139,7 +1139,9 @@
           "one-sample-t",
           "descriptive-statistics",
           "linear-regression",
-          "correlation"
+          "correlation",
+          "paired-t",
+          "one-way-anova"
         ],
         "required": true
       },
@@ -1152,7 +1154,8 @@
           "Mean",
           "Slope",
           "Y-intercept",
-          "r"
+          "r",
+          "F"
         ],
         "required": false
       },
@@ -1209,6 +1212,45 @@
         "required": false
       },
       {
+        "name": "tails",
+        "type": "string",
+        "enum": [
+          "two-sided",
+          "less",
+          "greater"
+        ],
+        "required": false,
+        "description": "P-value tails for the t-test targets (seq 204); two-sided by default."
+      },
+      {
+        "name": "simulationDistribution",
+        "type": "string",
+        "enum": [
+          "gaussian",
+          "t"
+        ],
+        "required": false,
+        "description": "What distribution the simulated values come from (seq 204)."
+      },
+      {
+        "name": "simulationDf",
+        "type": "number",
+        "required": false,
+        "description": "Degrees of freedom for a t simulation (seq 204); must exceed 2."
+      },
+      {
+        "name": "differenceMean",
+        "type": "number",
+        "required": false,
+        "description": "Paired-t only (seq 204): the mean difference to simulate — the differences' observed mean when omitted."
+      },
+      {
+        "name": "differenceSd",
+        "type": "number",
+        "required": false,
+        "description": "Paired-t only (seq 204): the SD of the differences to simulate — the differences' observed SD when omitted."
+      },
+      {
         "name": "sets",
         "type": "string[]",
         "required": false,
@@ -1216,7 +1258,7 @@
       }
     ],
     "gates": [
-      "targetAnalysis is one of compare-two-groups, one-sample-t, descriptive-statistics, linear-regression, correlation"
+      "targetAnalysis is one of compare-two-groups, one-sample-t, descriptive-statistics, linear-regression, correlation, paired-t, one-way-anova"
     ]
   },
   "multifactor-anova": {
@@ -2058,7 +2100,12 @@
           "boltzmann-sigmoid",
           "lorentzian",
           "sine-wave",
-          "gaussian"
+          "normal-distribution",
+          "t-distribution",
+          "f-distribution",
+          "chi-square-distribution",
+          "binomial-distribution",
+          "poisson-distribution"
         ],
         "required": true
       },
@@ -2260,7 +2307,8 @@
           "constant"
         ],
         "default": "first-value",
-        "required": false
+        "required": false,
+        "description": "Omitted in column-math mode (the operation names the columns instead), and defaulted to \"first-value\" by the runner when missing."
       },
       {
         "name": "firstN",
@@ -2285,6 +2333,28 @@
         "type": "string",
         "required": false,
         "description": "Info-constant hook for the baseline (the constant's name): resolved live in useAnalysis, so editing the constant re-runs the transform."
+      },
+      {
+        "name": "columnMathOperation",
+        "type": "string",
+        "enum": [
+          "subtract",
+          "divide",
+          "multiply",
+          "add"
+        ],
+        "required": false,
+        "description": "Column math (Prism's \"Remove baseline and column math\"): when set, the analysis combines two columns row by row instead of removing a baseline — `columnMathOperation` says how, `columnMathA`/`columnMathB` name the two columns. `baselineMethod` is ignored in this mode."
+      },
+      {
+        "name": "columnMathA",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "columnMathB",
+        "type": "string",
+        "required": false
       },
       {
         "name": "sets",
@@ -2786,10 +2856,22 @@
           "sqrt",
           "reciprocal",
           "exp",
-          "square"
+          "square",
+          "y-plus-k",
+          "y-minus-k",
+          "y-times-k",
+          "y-divided-by-k",
+          "k-minus-y",
+          "k-divided-by-y"
         ],
         "default": "log10",
         "required": false
+      },
+      {
+        "name": "constant",
+        "type": "number",
+        "required": false,
+        "description": "The constant K for the arithmetic functions (seq 205)."
       },
       {
         "name": "sets",

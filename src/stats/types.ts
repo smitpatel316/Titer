@@ -221,9 +221,37 @@ export const NONLINEAR_MODELS = [
 export const CURVE_COMPARISONS = ["ec50", "all"] as const;
 export const CORRELATION_METHODS = ["pearson", "spearman"] as const;
 /** The Transform functions (Prism's documented standard set — Prism 8 User
- *  Guide, "Transform data"): log10, ln, log2, sqrt, reciprocal, exp, square. */
-export const TRANSFORM_FUNCTIONS = ["log10", "ln", "log2", "sqrt", "reciprocal", "exp", "square"] as const;
+ *  Guide, "Transform data"): log10, ln, log2, sqrt, reciprocal, exp, square —
+ *  plus Prism's arithmetic transforms (seq 205), which apply a constant K to
+ *  every value: Y+K, Y−K, Y×K, Y/K, K−Y, K/Y. The arithmetic functions read
+ *  the constant from TransformDataParams.constant. */
+export const TRANSFORM_FUNCTIONS = [
+  "log10",
+  "ln",
+  "log2",
+  "sqrt",
+  "reciprocal",
+  "exp",
+  "square",
+  "y-plus-k",
+  "y-minus-k",
+  "y-times-k",
+  "y-divided-by-k",
+  "k-minus-y",
+  "k-divided-by-y",
+] as const;
 export type TransformFunction = (typeof TRANSFORM_FUNCTIONS)[number];
+/** The arithmetic Transform functions — the ones that need a constant K
+ *  (TransformDataParams.constant). */
+export const TRANSFORM_ARITHMETIC_FUNCTIONS = [
+  "y-plus-k",
+  "y-minus-k",
+  "y-times-k",
+  "y-divided-by-k",
+  "k-minus-y",
+  "k-divided-by-y",
+] as const;
+export type TransformArithmeticFunction = (typeof TRANSFORM_ARITHMETIC_FUNCTIONS)[number];
 /** Binding — Saturation models (plan 16): one-site total, two-site
  *  specific, and the two-series total+nonspecific fits (NS/Background shared). */
 export const BINDING_SATURATION_MODELS = [
@@ -528,6 +556,12 @@ export interface AreaUnderCurveParams {
 export const REMOVE_BASELINE_METHODS = ["first-value", "mean-first-n", "mean-of-controls", "constant"] as const;
 export type RemoveBaselineMethod = (typeof REMOVE_BASELINE_METHODS)[number];
 
+/** The column-math operations "remove-baseline" offers (Prism's Remove
+ *  baseline and column math): combine two columns row by row. Divide by
+ *  zero leaves that row blank rather than inventing a value. */
+export const COLUMN_MATH_OPERATIONS = ["subtract", "divide", "multiply", "add"] as const;
+export type ColumnMathOperation = (typeof COLUMN_MATH_OPERATIONS)[number];
+
 /** Params for "remove-baseline": which columns to subtract from (`ys`),
  *  how the baseline is defined, and — for XY tables — the X column whose
  *  values label the result rows. */
@@ -536,7 +570,9 @@ export interface RemoveBaselineParams {
   ys?: string[];
   /** XY tables only: the X column, for the result rows' X values. */
   x?: string;
-  baselineMethod: RemoveBaselineMethod;
+  /** Omitted in column-math mode (the operation names the columns instead),
+   *  and defaulted to "first-value" by the runner when missing. */
+  baselineMethod?: RemoveBaselineMethod;
   /** Mean of the first N values (method "mean-first-n"). */
   firstN?: number;
   /** Control columns whose values are averaged (method "mean-of-controls"). */
@@ -546,6 +582,13 @@ export interface RemoveBaselineParams {
   /** Info-constant hook for the baseline (the constant's name): resolved live
    *  in useAnalysis, so editing the constant re-runs the transform. */
   constantHook?: string;
+  /** Column math (Prism's "Remove baseline and column math"): when set,
+   *  the analysis combines two columns row by row instead of removing a
+   *  baseline — `columnMathOperation` says how, `columnMathA`/`columnMathB`
+   *  name the two columns. `baselineMethod` is ignored in this mode. */
+  columnMathOperation?: ColumnMathOperation;
+  columnMathA?: string;
+  columnMathB?: string;
 }
 
 export const PRUNE_ROWS_CONDITIONS = ["empty", "below", "above", "outside"] as const;
@@ -1129,9 +1172,13 @@ export interface FrequencyDistributionParams {
 }
 
 /** Params for "transform-data": which function to apply to the values. The
- *  wizard always sets it; the runner defaults to log10 when it is absent. */
+ *  wizard always sets it; the runner defaults to log10 when it is absent.
+ *  `constant` is the K of the arithmetic functions (Y±K, Y×K, Y/K, K−Y, K/Y)
+ *  — required for those, ignored by the rest. */
 export interface TransformDataParams {
   function: TransformFunction;
+  /** The constant K for the arithmetic functions (seq 205). */
+  constant?: number;
 }
 /** Molar concentration units (Prism's set), in descending magnitude: each
  *  step is a factor of 1000. µ is U+00B5 MICRO SIGN, matching the bUnits in
@@ -1336,24 +1383,31 @@ export interface SimulationSpec {
  *  10,000 (the wizard's max; a 10,000-repeat t-test power run is ~15–25 s). */
 export const MONTE_CARLO_REPEATS = { min: 10, max: 10_000 };
 
-/** The analyses a Monte Carlo run can repeat in v1 (plan 22, sub-task b):
- *  the ones whose per-repeat statistic has a one-call in-R `replicate()`
- *  form (see simulation/monte-carlo.ts). Grouped-table targets (two-way
- *  ANOVA…) are a follow-on — the wizard offers only these. */
+/** The analyses a Monte Carlo run can repeat (plan 22, sub-task b, extended
+ *  seq 204): the ones whose per-repeat statistic has a one-call in-R
+ *  `replicate()` form (see simulation/monte-carlo.ts). Paired-t repeats the
+ *  t test on the paired differences; one-way ANOVA repeats the F test on
+ *  the stacked groups. Grouped-table targets (two-way ANOVA…) are a
+ *  follow-on — the wizard offers only these. Prism repeats any analysis;
+ *  the rest of that gap (nonlinear regression, ANOVA on grouped tables…)
+ *  stays open — each needs its own in-R repeat form. */
 export const MONTE_CARLO_TARGETS = [
   "compare-two-groups",
   "one-sample-t",
   "descriptive-statistics",
   "linear-regression",
   "correlation",
+  "paired-t",
+  "one-way-anova",
 ] as const;
 export type MonteCarloTarget = (typeof MONTE_CARLO_TARGETS)[number];
 
 /** The statistics a Monte Carlo run can summarise, per target: "P value" and
- *  "Mean difference" (compare-two-groups), "P value" and "Mean"
+ *  "Mean difference" (compare-two-groups, paired-t), "P value" and "Mean"
  *  (one-sample-t), "Mean" (descriptive-statistics), "Slope" and
- *  "Y-intercept" (linear-regression), "r" (correlation). */
-export const MONTE_CARLO_STATISTICS = ["P value", "Mean difference", "Mean", "Slope", "Y-intercept", "r"] as const;
+ *  "Y-intercept" (linear-regression), "r" (correlation), "P value" and "F"
+ *  (one-way-anova). */
+export const MONTE_CARLO_STATISTICS = ["P value", "Mean difference", "Mean", "Slope", "Y-intercept", "r", "F"] as const;
 export type MonteCarloStatistic = (typeof MONTE_CARLO_STATISTICS)[number];
 /** Which statistic each target offers, in wizard order. */
 export const MONTE_CARLO_TARGET_STATISTICS: Record<MonteCarloTarget, MonteCarloStatistic[]> = {
@@ -1362,18 +1416,33 @@ export const MONTE_CARLO_TARGET_STATISTICS: Record<MonteCarloTarget, MonteCarloS
   "descriptive-statistics": ["Mean"],
   "linear-regression": ["Slope", "Y-intercept"],
   correlation: ["r"],
+  "paired-t": ["P value", "Mean difference"],
+  "one-way-anova": ["P value", "F"],
 };
+
+/** What distribution the simulated values come from (seq 204): Gaussian
+ *  (the usual bell curve) or Student's t (Prism's Simulate offers a t with
+ *  any df — wider scatter, more outliers). A t draw is scaled so the
+ *  simulated values have the SD the wizard asked for (df > 2, where the t
+ *  has a finite SD); Poisson / binomial simulation stays open. */
+export const MONTE_CARLO_SIMULATION_DISTRIBUTIONS = ["gaussian", "t"] as const;
+export type MonteCarloSimulationDistribution = (typeof MONTE_CARLO_SIMULATION_DISTRIBUTIONS)[number];
 
 /** Params for "monte-carlo" (plan 22, sub-task b): repeat `targetAnalysis`
  *  `repeats` times on simulated data and summarise `summaryStatistic`.
- *  The simulation is Gaussian per data column, with each column's mean/SD
- *  taken from `groupMeans`/`groupSds` when given, else from the column's
- *  observed mean/SD (a parametric bootstrap). The target's own options are
- *  flattened here (not nested as `targetParams`) so the .hlx reader already
- *  knows every key: `equalVariance` (compare-two-groups: Student vs Welch),
- *  `hypotheticalValue` (one-sample-t), `y` (descriptive-statistics /
- *  linear-regression: which column), `method` (correlation: Pearson /
- *  Spearman). Tails are two-sided in v1. */
+ *  The simulation is Gaussian per data column by default, or Student's t
+ *  with `simulationDf` degrees of freedom (seq 204), with each column's
+ *  mean/SD taken from `groupMeans`/`groupSds` when given, else from the
+ *  column's observed mean/SD (a parametric bootstrap). The target's own
+ *  options are flattened here (not nested as `targetParams`) so the .hlx
+ *  reader already knows every key: `equalVariance` (compare-two-groups:
+ *  Student vs Welch), `hypotheticalValue` (one-sample-t, and paired-t's
+ *  mean difference — the wizard leaves it at 0), `y`
+ *  (descriptive-statistics / linear-regression: which column), `method`
+ *  (correlation: Pearson / Spearman). `tails` is the P-value tails for the
+ *  t-test targets (compare-two-groups, one-sample-t, paired-t) — two-sided
+ *  by default, "less"/"greater" one-sided, following R's t.test
+ *  alternative on (first vs second) group; other targets ignore it. */
 export interface MonteCarloParams {
   targetAnalysis: MonteCarloTarget;
   summaryStatistic?: MonteCarloStatistic;
@@ -1388,6 +1457,18 @@ export interface MonteCarloParams {
   /** Which column (descriptive-statistics / linear-regression). */
   y?: string;
   method?: (typeof CORRELATION_METHODS)[number];
+  /** P-value tails for the t-test targets (seq 204); two-sided by default. */
+  tails?: (typeof TAILS)[number];
+  /** What distribution the simulated values come from (seq 204). */
+  simulationDistribution?: MonteCarloSimulationDistribution;
+  /** Degrees of freedom for a t simulation (seq 204); must exceed 2. */
+  simulationDf?: number;
+  /** Paired-t only (seq 204): the mean difference to simulate — the
+   *  differences' observed mean when omitted. */
+  differenceMean?: number;
+  /** Paired-t only (seq 204): the SD of the differences to simulate — the
+   *  differences' observed SD when omitted. */
+  differenceSd?: number;
 }
 
 /** One ROC point: at this threshold (a score value), predict positive iff
@@ -1409,8 +1490,28 @@ export interface RocPoint {
  *  canonical example (mean 0, SD 1, amplitude 100 over X −3..3), which the
  *  fitter does not offer, so it lives here only. A user-defined equation is
  *  NOT plottable: the wizard has no equation input, and its spec can't be
- *  built without one (modelSpec throws), so it is excluded here. */
-export type PlotFunctionModel = Exclude<NonlinearModel, "user-defined"> | "gaussian";
+ *  built without one (modelSpec throws), so it is excluded here.
+ *  Seq 203: the statistical distributions Prism's Plot a function also
+ *  plots (FAQ 1578) — the normal (z), Student's t, F and chi-square
+ *  densities, and the binomial + Poisson mass functions. */
+export type PlotFunctionModel = Exclude<NonlinearModel, "user-defined"> | PlotFunctionDistribution;
+
+/** The statistical distributions "plot-function" can plot (Prism's Plot a
+ *  function, FAQ 1578): the normal (z), Student's t, F and chi-square
+ *  densities, and the binomial + Poisson mass functions. */
+export const PLOT_FUNCTION_DISTRIBUTIONS = [
+  "normal-distribution",
+  "t-distribution",
+  "f-distribution",
+  "chi-square-distribution",
+  "binomial-distribution",
+  "poisson-distribution",
+] as const;
+export type PlotFunctionDistribution = (typeof PLOT_FUNCTION_DISTRIBUTIONS)[number];
+/** The discrete distributions (binomial, Poisson): their X grid is the
+ *  whole numbers in the range, one point each — the line-segments setting
+ *  does not apply to them. */
+export const PLOT_FUNCTION_DISCRETE_DISTRIBUTIONS = ["binomial-distribution", "poisson-distribution"] as const;
 
 /** What "plot-function" plots alongside the function itself (Prism's Options
  *  tab): its first derivative, its second derivative, or its integral — one
@@ -1737,6 +1838,28 @@ export interface BaselineRemovedColumn {
   baseline: number;
   method: string;
   rows: BaselineRemovedRow[];
+}
+
+/** One row of a column-math result ("remove-baseline"): the row title (or
+ *  row number), the X value at that row (XY tables only), the two values
+ *  combined, and the result — `null` when the operation could not produce
+ *  one (dividing by zero). Only rows holding a value in both columns are
+ *  listed. */
+export interface ColumnMathRow {
+  row: string;
+  x?: number | null;
+  a: number;
+  b: number;
+  result: number | null;
+}
+
+/** A column-math result ("remove-baseline"): the two columns combined, the
+ *  operation, and the row-matched rows. */
+export interface ColumnMathResult {
+  a: string;
+  b: string;
+  operation: ColumnMathOperation;
+  rows: ColumnMathRow[];
 }
 /** One kept or pruned row ("prune-rows"): the row title (or row number),
  *  the X value at that row (XY tables only), and the value held in each
@@ -2227,6 +2350,9 @@ export interface AnalysisResult {
   /** Optional per-column baseline-subtracted values ("remove-baseline"):
    *  one table per column, each with the baseline used recorded. */
   baselineRemoved?: BaselineRemovedColumn[];
+  /** Optional column-math result ("remove-baseline", column-math mode):
+   *  the two columns combined row by row, with the operation recorded. */
+  columnMath?: ColumnMathResult;
   /** Optional kept and pruned rows ("prune-rows"): the kept rows, then
    *  the pruned rows listed so what was dropped stays visible. */
   prunedRows?: PrunedRowsResult;

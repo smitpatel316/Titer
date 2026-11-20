@@ -2,7 +2,7 @@
 // step, each answer choosing the next question. A wizard only declares its questions
 // and how the answers make the test's params; analysis-wizard.tsx asks them.
 // A test without an entry here runs as soon as it is picked.
-import { DOSE_MODELS, CONCENTRATION_UNITS, GOF_EXPECTED_MODES, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, MULTIFACTOR_MAX_FACTORS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, fdrQError, isFdrPValueMethod, pValueAlphaError, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel, type PValueStackParams } from "../../stats/types";
+import { DOSE_MODELS, CONCENTRATION_UNITS, GOF_EXPECTED_MODES, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, MULTIFACTOR_MAX_FACTORS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, fdrQError, isFdrPValueMethod, pValueAlphaError, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloParams, type MonteCarloSimulationDistribution, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel, type PValueStackParams } from "../../stats/types";
 import type { PlotFunctionExtra, PlotFunctionModel } from "../../stats/types";
 import {
   PLOT_FUNCTION_DEFAULTS,
@@ -17,6 +17,8 @@ import { hasXColumn, type RowGroup, type TableType, type Transform } from "../..
 import { MODEL_LABEL, termLabel } from "../../stats/xy/nonlinear-regression";
 import { modelSpec } from "../../stats/xy/nonlinear-fit";
 import { parseCustomParameters, parseUserEquation } from "../../stats/xy/user-defined";
+import { isArithmeticTransform } from "../../stats/column/transform-data";
+import { pairedDifferences } from "../../stats/simulation/monte-carlo";
 import { dataGroups, incompleteRows, pairedGroups, pairIndices } from "../../stats/column/base";
 import { flattenThreeWay, groupRows, rowGroupBands, rowName, threeWayTermCells } from "../../stats/grouped/base";
 import { distinctTruthValues } from "../../stats/column/roc-curve";
@@ -2123,7 +2125,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
   // exp, square); a value the function is undefined for is left blank in
   // the results sheet, never NaN — the runner states the reason in its notes.
   "transform-data": {
-    questions: (_, table) => [
+    questions: (a, table) => [
       ...someSets(table, 1),
       choice("function", "Which function should be applied to the values?", [
         ["log10", "log10(Y) — logarithm, base 10"],
@@ -2133,11 +2135,33 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ["reciprocal", "1/Y — reciprocal"],
         ["exp", "exp(Y) — e to the power of Y"],
         ["square", "Y² — square"],
+        ["y-plus-k", "Y+K — add a constant to every value"],
+        ["y-minus-k", "Y−K — subtract a constant from every value"],
+        ["y-times-k", "Y×K — multiply every value by a constant"],
+        ["y-divided-by-k", "Y/K — divide every value by a constant"],
+        ["k-minus-y", "K−Y — subtract every value from a constant"],
+        ["k-divided-by-y", "K/Y — divide a constant by every value"],
       ]),
+      isArithmeticTransform((a.function as TransformFunction | undefined) ?? "log10") && {
+        id: "constant",
+        ask: "What is the constant K to apply?",
+        kind: "number",
+        label: "Constant K",
+        initial: 1,
+        validate: (v) =>
+          a.function === "y-divided-by-k" && v === 0
+            ? "K must not be 0 for Y/K — dividing by 0 is undefined."
+            : undefined,
+      },
     ],
     finish: (a) => ({
       type: "transform-data",
-      params: withSets(a, { function: (a.function as TransformFunction | undefined) ?? "log10" }),
+      params: withSets(a, {
+        function: (a.function as TransformFunction | undefined) ?? "log10",
+        ...(isArithmeticTransform((a.function as TransformFunction | undefined) ?? "log10")
+          ? { constant: a.constant as number }
+          : {}),
+      }),
     }),
   },
   // Transform concentrations (v2): one numeric column (an XY table's X
@@ -2273,54 +2297,114 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             ["compare-two-groups", "Compare two groups (repeat its t test)"],
             ["one-sample-t", "Compare one group to a value (repeat its t test)"],
             ["descriptive-statistics", "Descriptive statistics (repeat its mean)"],
+            ["paired-t", "Paired t test (repeat its t test on the paired differences)"],
+            ["one-way-anova", "One-way ANOVA (repeat its F test)"],
           ];
       const target = (a.target as MonteCarloTarget | undefined) ?? (targets[0][0] as MonteCarloTarget);
       const statistics = MONTE_CARLO_TARGET_STATISTICS[target];
-      // The data sets the repeats simulate: compare-two-groups takes the two
-      // chosen (or first two) columns; one-sample-t / descriptive-statistics
-      // the one chosen column; the XY targets the chosen Y series.
+      const statistic = (a.statistic as MonteCarloStatistic | undefined) ?? statistics[0];
+      const isTTarget =
+        target === "compare-two-groups" || target === "one-sample-t" || target === "paired-t";
+      // The data sets the repeats simulate: compare-two-groups / paired-t
+      // take the two chosen (or first two) columns; one-way ANOVA takes
+      // every chosen column; one-sample-t / descriptive-statistics the one
+      // chosen column; the XY targets the chosen Y series.
       const dataCols = dataNames(table);
       const yCols = yNames(table);
       const groupNames: string[] =
-        target === "compare-two-groups"
+        target === "compare-two-groups" || target === "paired-t"
           ? (chosenSets(a) ?? dataCols.slice(0, 2))
-          : target === "one-sample-t" || target === "descriptive-statistics"
-            ? [(a.group as string | undefined) ?? dataCols[0]].filter((n): n is string => n !== undefined)
-            : [(a.y as string | undefined) ?? yCols[0]].filter((n): n is string => n !== undefined);
-      const simQuestions = groupNames.flatMap((name): (Question | false)[] => {
-        const column = table.numeric.find((c) => c.name === name);
-        const { mean, sd } = meanSd(column?.values ?? []);
-        const observed = column ? ` (observed ${round6(mean)} ± ${round6(sd)})` : "";
-        return [
-          {
-            id: `mean:${name}`,
-            ask: `Mean to simulate for “${name}”${observed}? Set it to the effect you want to test.`,
-            kind: "number",
-            label: `Mean for “${name}”`,
-            initial: round6(mean),
-          },
-          {
-            id: `sd:${name}`,
-            ask: `SD to simulate for “${name}”${observed}?`,
-            kind: "number",
-            label: `SD for “${name}”`,
-            initial: round6(sd),
-            validate: (v) => (v > 0 ? undefined : "The SD must be greater than 0."),
-          },
-        ];
-      });
+          : target === "one-way-anova"
+            ? (chosenSets(a) ?? dataCols)
+            : target === "one-sample-t" || target === "descriptive-statistics"
+              ? [(a.group as string | undefined) ?? dataCols[0]].filter((n): n is string => n !== undefined)
+              : [(a.y as string | undefined) ?? yCols[0]].filter((n): n is string => n !== undefined);
+      // Paired-t simulates the differences, not the two columns — so it
+      // asks for the difference mean/SD (observed values as the start),
+      // where the other targets ask per-column.
+      const pairedDiff =
+        target === "paired-t"
+          ? pairedDifferences(
+              table.numeric.find((c) => c.name === groupNames[0]) ?? { byRow: [] },
+              table.numeric.find((c) => c.name === groupNames[1]) ?? { byRow: [] },
+            )
+          : [];
+      const { mean: diffMean, sd: diffSd } = meanSd(pairedDiff);
+      const simQuestions =
+        target === "paired-t"
+          ? [
+              {
+                id: "differenceMean",
+                ask: `Mean difference to simulate (observed ${round6(diffMean)})? Set it to the effect you want to test.`,
+                kind: "number",
+                label: "Mean difference",
+                initial: round6(diffMean),
+              },
+              {
+                id: "differenceSd",
+                ask: `SD of the differences to simulate (observed ${round6(diffSd)})?`,
+                kind: "number",
+                label: "SD of the differences",
+                initial: round6(diffSd),
+                validate: (v) => (v > 0 ? undefined : "The SD must be greater than 0."),
+              },
+            ]
+          : groupNames.flatMap((name): (Question | false)[] => {
+              const column = table.numeric.find((c) => c.name === name);
+              const { mean, sd } = meanSd(column?.values ?? []);
+              const observed = column ? ` (observed ${round6(mean)} ± ${round6(sd)})` : "";
+              return [
+                {
+                  id: `mean:${name}`,
+                  ask: `Mean to simulate for “${name}”${observed}? Set it to the effect you want to test.`,
+                  kind: "number",
+                  label: `Mean for “${name}”`,
+                  initial: round6(mean),
+                },
+                {
+                  id: `sd:${name}`,
+                  ask: `SD to simulate for “${name}”${observed}?`,
+                  kind: "number",
+                  label: `SD for “${name}”`,
+                  initial: round6(sd),
+                  validate: (v) => (v > 0 ? undefined : "The SD must be greater than 0."),
+                },
+              ];
+            });
       return [
         choice(
           "target",
-          "Which analysis should be repeated? Each repeat draws new Gaussian data for the data sets below and runs the analysis on it.",
+          "Which analysis should be repeated? Each repeat draws new simulated data for the data sets below and runs the analysis on it.",
           targets,
         ),
+        choice("simulationDistribution", "What distribution should the simulated values come from?", [
+          ["gaussian", "Gaussian — the usual bell curve"],
+          ["t", "Student's t — wider scatter, more outliers"],
+        ]),
+        a.simulationDistribution === "t" && {
+          id: "simulationDf",
+          ask: "Degrees of freedom for the t simulation? Lower df means wider scatter (5 is a good middle ground).",
+          kind: "number",
+          label: "Degrees of freedom",
+          initial: 5,
+          validate: (v) =>
+            v > 2
+              ? undefined
+              : "Degrees of freedom must be greater than 2 — at df ≤ 2 the t distribution has no finite SD to simulate from.",
+        },
         statistics.length > 1 &&
           choice(
             "statistic",
             "Which result should be summarised across the repeats?",
             statistics.map((s): [string, string] => [s, s]),
           ),
+        isTTarget &&
+          statistic === "P value" &&
+          choice("tails", "One- or two-sided P value?", [
+            ["two-sided", "Two-sided"],
+            ["less", "One-sided — the first group (or mean) is less"],
+            ["greater", "One-sided — the first group (or mean) is greater"],
+          ]),
         ...(target === "compare-two-groups"
           ? [
               ...twoSets(a, table),
@@ -2330,6 +2414,8 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
               ]),
             ]
           : []),
+        ...(target === "paired-t" ? [...twoSets(a, table)] : []),
+        ...(target === "one-way-anova" ? someSets(table, 2) : []),
         (target === "one-sample-t" || target === "descriptive-statistics") &&
           dataCols.length > 1 &&
           choice("group", "Which data set should be repeated?", names(dataCols)),
@@ -2379,20 +2465,30 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         (isXY ? "linear-regression" : "compare-two-groups");
       const statistics = MONTE_CARLO_TARGET_STATISTICS[target];
       const statistic = (a.statistic as MonteCarloStatistic | undefined) ?? statistics[0];
+      const isTTarget =
+        target === "compare-two-groups" || target === "one-sample-t" || target === "paired-t";
       const dataCols = dataNames(table);
       const yCols = yNames(table);
       const groupNames: string[] =
-        target === "compare-two-groups"
+        target === "compare-two-groups" || target === "paired-t"
           ? (chosenSets(a) ?? dataCols.slice(0, 2))
-          : target === "one-sample-t" || target === "descriptive-statistics"
-            ? [(a.group as string | undefined) ?? dataCols[0]]
-            : [(a.y as string | undefined) ?? yCols[0]];
+          : target === "one-way-anova"
+            ? (chosenSets(a) ?? dataCols)
+            : target === "one-sample-t" || target === "descriptive-statistics"
+              ? [(a.group as string | undefined) ?? dataCols[0]]
+              : [(a.y as string | undefined) ?? yCols[0]];
       const groupMeans: Record<string, number> = {};
       const groupSds: Record<string, number> = {};
-      for (const name of groupNames) {
-        if (typeof a[`mean:${name}`] === "number") groupMeans[name] = a[`mean:${name}`] as number;
-        if (typeof a[`sd:${name}`] === "number") groupSds[name] = a[`sd:${name}`] as number;
+      // Paired-t simulates the differences, so its overrides are the
+      // difference mean/SD — not per-column groupMeans/groupSds.
+      if (target !== "paired-t") {
+        for (const name of groupNames) {
+          if (typeof a[`mean:${name}`] === "number") groupMeans[name] = a[`mean:${name}`] as number;
+          if (typeof a[`sd:${name}`] === "number") groupSds[name] = a[`sd:${name}`] as number;
+        }
       }
+      const simulationDistribution =
+        (a.simulationDistribution as MonteCarloSimulationDistribution | undefined) ?? "gaussian";
       return {
         type: "monte-carlo",
         params: withSets(a, {
@@ -2402,8 +2498,19 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           seed: a.seed as number,
           groupMeans,
           groupSds,
+          simulationDistribution,
+          ...(simulationDistribution === "t" ? { simulationDf: a.simulationDf as number } : {}),
+          ...(isTTarget && statistic === "P value"
+            ? { tails: (a.tails as MonteCarloParams["tails"] | undefined) ?? "two-sided" }
+            : {}),
           ...(target === "compare-two-groups" ? { equalVariance: a.equalVariance !== "no" } : {}),
           ...(target === "one-sample-t" ? { hypotheticalValue: a.hypotheticalValue as number } : {}),
+          ...(target === "paired-t"
+            ? {
+                differenceMean: a.differenceMean as number,
+                differenceSd: a.differenceSd as number,
+              }
+            : {}),
           ...(target === "one-sample-t" || target === "descriptive-statistics"
             ? { sets: groupNames }
             : {}),
@@ -2532,8 +2639,29 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
     questions: (a, table, tableType) => {
       const targets = tableType === "xy" ? yNames(table) : dataNames(table);
       if (!targets.length) return [];
+      const mode = (a.mode as string | undefined) ?? "remove-baseline";
+      const modeQuestion = choice("mode", "What should this analysis do?", [
+        ["remove-baseline", "Remove a baseline — subtract a baseline from each value"],
+        ["column-math", "Combine two columns — add, subtract, multiply or divide two data sets row by row"],
+      ]);
+      // Column math (seq 206, Prism's "Remove baseline and column math"):
+      // two columns combined row by row, instead of a baseline removed.
+      if (mode === "column-math") {
+        return [
+          modeQuestion,
+          choice("columnMathA", "Which is the first column?", names(targets)),
+          choice("columnMathB", "Which is the second column?", names(targets)),
+          choice("columnMathOperation", "How should the two columns be combined?", [
+            ["subtract", "Subtract — first minus second"],
+            ["divide", "Divide — first divided by second"],
+            ["multiply", "Multiply — first times second"],
+            ["add", "Add — first plus second"],
+          ]),
+        ];
+      }
       const method = a.baselineMethod as string | undefined;
       return [
+        modeQuestion,
         {
           id: "ys",
           ask: "Which data sets should have the baseline removed?",
@@ -2574,17 +2702,30 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         },
       ];
     },
-    finish: (a, table, tableType) => ({
-      type: "remove-baseline",
-      params: {
-        ys: a.ys as string[],
-        ...(tableType === "xy" ? { x: table.columns[0]?.name } : {}),
-        baselineMethod: a.baselineMethod as RemoveBaselineParams["baselineMethod"],
-        ...(a.baselineMethod === "mean-first-n" ? { firstN: a.firstN as number } : {}),
-        ...(a.baselineMethod === "mean-of-controls" ? { controls: a.controls as string[] } : {}),
-        ...(a.baselineMethod === "constant" ? constantParam(a.constant) : {}),
-      },
-    }),
+    finish: (a, table, tableType) => {
+      if (a.mode === "column-math") {
+        return {
+          type: "remove-baseline",
+          params: {
+            columnMathOperation: a.columnMathOperation as RemoveBaselineParams["columnMathOperation"],
+            columnMathA: a.columnMathA as string,
+            columnMathB: a.columnMathB as string,
+            ...(tableType === "xy" ? { x: table.columns[0]?.name } : {}),
+          },
+        };
+      }
+      return {
+        type: "remove-baseline",
+        params: {
+          ys: a.ys as string[],
+          ...(tableType === "xy" ? { x: table.columns[0]?.name } : {}),
+          baselineMethod: a.baselineMethod as RemoveBaselineParams["baselineMethod"],
+          ...(a.baselineMethod === "mean-first-n" ? { firstN: a.firstN as number } : {}),
+          ...(a.baselineMethod === "mean-of-controls" ? { controls: a.controls as string[] } : {}),
+          ...(a.baselineMethod === "constant" ? constantParam(a.constant) : {}),
+        },
+      };
+    },
   },
 
   "prune-rows": {

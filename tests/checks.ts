@@ -202,6 +202,7 @@ import {
   sturgesCount,
 } from "../src/stats/column/frequency-distribution";
 import { transformValue } from "../src/stats/column/transform-data";
+import { binomialPmf, chiSquarePdf, fPdf, normalPdf, poissonPmf, tPdf } from "../src/stats/distributions";
 import {
   concentrationFactor,
   convertConcentration,
@@ -254,7 +255,7 @@ import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { decodePng, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
 import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
-import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnovaParams, ChiSquareGofParams, ComparedCell, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, SimulationSpec, ThreeWayAnovaParams } from "../src/stats/types";
+import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnovaParams, ChiSquareGofParams, ComparedCell, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, RemoveBaselineParams, SimulationSpec, ThreeWayAnovaParams } from "../src/stats/types";
 import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation/simulate";
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
 import { evaluate as evaluateCurve } from "../src/views/graphs/fitted-curve";
@@ -6778,11 +6779,11 @@ check("remove-baseline wizard asks for the baseline and finishes with its params
   // The follow-up question depends on the method answered.
   deepStrictEqual(
     wizard.questions({ baselineMethod: "mean-first-n", ys: ["Y1"] }, table, "xy").filter(Boolean).map((q) => (q as Question).id),
-    ["ys", "baselineMethod", "firstN"],
+    ["mode", "ys", "baselineMethod", "firstN"],
   );
   deepStrictEqual(
     wizard.questions({ baselineMethod: "mean-of-controls", ys: ["Y1"] }, table, "xy").filter(Boolean).map((q) => (q as Question).id),
-    ["ys", "baselineMethod", "controls"],
+    ["mode", "ys", "baselineMethod", "controls"],
   );
   deepStrictEqual(wizard.finish({ ys: ["Y1", "Y2"], baselineMethod: "first-value" }, table, "xy"), {
     type: "remove-baseline",
@@ -6800,6 +6801,202 @@ check("remove-baseline wizard asks for the baseline and finishes with its params
     type: "remove-baseline",
     params: { ys: ["Y1"], baselineMethod: "constant", constant: 3 },
   });
+});
+
+check("remove-baseline combines two columns row by row (seq 206)", async () => {
+  const table: TableData = {
+    columns: ["Title", "Time", "Y1", "Y2"],
+    rows: [
+      ["", "0", "10", "5"],
+      ["", "1", "12", "7"],
+      ["", "2", "14", "0"],
+      ["", "3", "16", "8"],
+    ],
+  };
+  // Subtract: Y1 − Y2 = 5, 5, 14, 8.
+  const sub = await runAnalysis("remove-baseline", table, {
+    columnMathOperation: "subtract",
+    columnMathA: "Y1",
+    columnMathB: "Y2",
+    x: "Time",
+  });
+  if ("error" in sub) throw new Error(sub.error);
+  strictEqual(sub.testType, "remove-baseline");
+  deepStrictEqual(sub.columnMath, {
+    a: "Y1",
+    b: "Y2",
+    operation: "subtract",
+    rows: [
+      { row: "Row 1", x: 0, a: 10, b: 5, result: 5 },
+      { row: "Row 2", x: 1, a: 12, b: 7, result: 5 },
+      { row: "Row 3", x: 2, a: 14, b: 0, result: 14 },
+      { row: "Row 4", x: 3, a: 16, b: 8, result: 8 },
+    ],
+  });
+  deepStrictEqual(
+    sub.stats.map((s) => [s.label, s.value]),
+    [["Y1 − Y2 — N", 4]],
+  );
+  // The descriptives are of the combined values, not the originals.
+  deepStrictEqual(
+    sub.groups.map((g) => [g.name, g.mean, g.n]),
+    [["Y1 − Y2", 8, 4]],
+  );
+  ok(sub.notes.includes("Subtracted"));
+  ok(!sub.notes.includes("blank"));
+  // Divide: 10/5, 12/7, 14/0 (blank), 16/8 — the zero row stays listed, blank.
+  const div = await runAnalysis("remove-baseline", table, {
+    columnMathOperation: "divide",
+    columnMathA: "Y1",
+    columnMathB: "Y2",
+    x: "Time",
+  });
+  if ("error" in div) throw new Error(div.error);
+  deepStrictEqual(
+    div.columnMath?.rows.map((r) => r.result),
+    [2, 12 / 7, null, 2],
+  );
+  deepStrictEqual(
+    div.stats.map((s) => [s.label, s.value]),
+    [
+      ["Y1 / Y2 — N", 3],
+      ["Y1 / Y2 — blank (divide by zero)", 1],
+    ],
+  );
+  const divMean = div.groups.find((g) => g.name === "Y1 / Y2")?.mean;
+  ok(divMean != null && Math.abs(divMean - (2 + 12 / 7 + 2) / 3) < 1e-12);
+  ok(div.notes.includes("blank"));
+  // Multiply and add use the same rows.
+  const mul = await runAnalysis("remove-baseline", table, {
+    columnMathOperation: "multiply",
+    columnMathA: "Y1",
+    columnMathB: "Y2",
+    x: "Time",
+  });
+  if ("error" in mul) throw new Error(mul.error);
+  deepStrictEqual(
+    mul.columnMath?.rows.map((r) => r.result),
+    [50, 84, 0, 128],
+  );
+  const add = await runAnalysis("remove-baseline", table, {
+    columnMathOperation: "add",
+    columnMathA: "Y1",
+    columnMathB: "Y2",
+    x: "Time",
+  });
+  if ("error" in add) throw new Error(add.error);
+  deepStrictEqual(
+    add.columnMath?.rows.map((r) => r.result),
+    [15, 19, 14, 24],
+  );
+  // Rows holding a value in only one column are skipped, not listed.
+  const gappy: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["", "1", "10"],
+      ["", "2", ""],
+      ["", "3", "30"],
+    ],
+  };
+  const gap = await runAnalysis("remove-baseline", gappy, {
+    columnMathOperation: "subtract",
+    columnMathA: "A",
+    columnMathB: "B",
+  });
+  if ("error" in gap) throw new Error(gap.error);
+  deepStrictEqual(
+    gap.columnMath?.rows.map((r) => [r.row, r.result]),
+    [
+      ["Row 1", -9],
+      ["Row 3", -27],
+    ],
+  );
+  ok(gap.notes.includes("1 row was skipped"));
+  // Errors name the problem instead of combining something wrong.
+  deepStrictEqual(
+    await runAnalysis("remove-baseline", table, {
+      columnMathOperation: "subtract",
+      columnMathA: "Y1",
+      x: "Time",
+    }),
+    { error: "Choose two columns to combine." },
+  );
+  deepStrictEqual(
+    await runAnalysis("remove-baseline", table, {
+      columnMathOperation: "sideways",
+      columnMathA: "Y1",
+      columnMathB: "Y2",
+      x: "Time",
+    } as unknown as RemoveBaselineParams),
+    { error: "Unknown column math operation: “sideways”." },
+  );
+  deepStrictEqual(
+    await runAnalysis("remove-baseline", table, {
+      columnMathOperation: "add",
+      columnMathA: "Nope",
+      columnMathB: "Y2",
+      x: "Time",
+    }),
+    { error: "The column “Nope” is no longer in the table. Create this analysis again to choose another." },
+  );
+  deepStrictEqual(
+    await runAnalysis(
+      "remove-baseline",
+      {
+        columns: ["Title", "A", "B"],
+        rows: [
+          ["", "1", ""],
+          ["", "", "2"],
+        ],
+      },
+      { columnMathOperation: "add", columnMathA: "A", columnMathB: "B" },
+    ),
+    { error: "“A” and “B” share no row holding a value in both." },
+  );
+});
+
+check("remove-baseline wizard asks for the column math first, then its two columns (seq 206)", () => {
+  const data: TableData = {
+    columns: ["Title", "Time", "Y1", "Y2"],
+    rows: [
+      ["", "0", "10", "5"],
+      ["", "1", "12", "7"],
+    ],
+  };
+  const table = readTable(data);
+  const wizard = WIZARDS["remove-baseline"]!;
+  deepStrictEqual(
+    wizard.questions({ mode: "column-math" }, table, "xy").filter(Boolean).map((q) => (q as Question).id),
+    ["mode", "columnMathA", "columnMathB", "columnMathOperation"],
+  );
+  deepStrictEqual(
+    wizard.finish(
+      { mode: "column-math", columnMathOperation: "divide", columnMathA: "Y1", columnMathB: "Y2" },
+      table,
+      "xy",
+    ),
+    {
+      type: "remove-baseline",
+      params: { columnMathOperation: "divide", columnMathA: "Y1", columnMathB: "Y2", x: "Time" },
+    },
+  );
+  // A Column table has no X column to carry into the result rows.
+  deepStrictEqual(
+    wizard.finish(
+      { mode: "column-math", columnMathOperation: "subtract", columnMathA: "Y1", columnMathB: "Y2" },
+      table,
+      "column",
+    ),
+    {
+      type: "remove-baseline",
+      params: { columnMathOperation: "subtract", columnMathA: "Y1", columnMathB: "Y2" },
+    },
+  );
+  // No mode answered yet means remove-baseline, as before.
+  deepStrictEqual(
+    wizard.questions({}, table, "xy").filter(Boolean).map((q) => (q as Question).id),
+    ["mode", "ys", "baselineMethod"],
+  );
 });
 
 // R3-10: standard-curve interpolation on enzyme models. Their formulas
@@ -15253,6 +15450,249 @@ check("plot a function params survive a .hlx round-trip; a bogus equation is dro
   );
 });
 
+// ── Plot-a-function distributions (v1.8, seq 203) ───────────────────────
+// Prism's Plot a function plots the normal (z), Student's t, F and
+// chi-square densities and the binomial + Poisson mass functions (FAQ 1578).
+// The densities are pinned against Python's math.lgamma-derived values,
+// plus the normalisation sums (a wrong log-gamma breaks those).
+
+check("the distribution densities and masses match reference values (seq 203)", () => {
+  const close = (got: number, want: number) => Math.abs(got - want) < 1e-12;
+  ok(close(normalPdf(0, 0, 1), 0.3989422804014327));
+  ok(close(normalPdf(2, 1, 2), 0.17603266338214976));
+  ok(close(normalPdf(1, 0, 1), 0.24197072451914337));
+  ok(close(tPdf(0, 10), 0.3891083839660314));
+  ok(close(tPdf(1, 10), 0.23036198922913875));
+  ok(close(tPdf(2, 3), 0.06750966066389294));
+  ok(close(chiSquarePdf(1, 2), 0.3032653298563167));
+  ok(close(chiSquarePdf(3, 5), 0.15418032980376922));
+  ok(close(fPdf(1, 5, 10), 0.4954797834866393));
+  ok(close(fPdf(0.5, 5, 10), 0.6876070027706241));
+  ok(close(fPdf(3, 2, 20), 0.055798577143389094));
+  ok(close(binomialPmf(10, 20, 0.5), 0.17619705200195354));
+  ok(close(binomialPmf(0, 20, 0.5), 9.5367431640625e-07));
+  ok(close(binomialPmf(3, 10, 0.3), 0.26682793199999943));
+  ok(close(poissonPmf(3, 5), 0.14037389581428045));
+  ok(close(poissonPmf(0, 5), 0.006737946999085467));
+  ok(close(poissonPmf(10, 5), 0.018132788707821885));
+  // The masses sum to 1 (binomial exactly, Poisson to its tail).
+  const binomSum = Array.from({ length: 21 }, (_, k) => binomialPmf(k, 20, 0.5)).reduce((s, v) => s + v, 0);
+  ok(close(binomSum, 1));
+  const poisSum = Array.from({ length: 31 }, (_, k) => poissonPmf(k, 5)).reduce((s, v) => s + v, 0);
+  ok(Math.abs(poisSum - 1) < 1e-9);
+  // Out-of-domain inputs are NaN, never a made-up number — except the
+  // F / chi-square density at 0, which is 0 (df > 2), 1/2 (chi-square
+  // df = 2), or diverges (df < 2: Infinity, plotted as a blank).
+  strictEqual(normalPdf(0, 0, 0), NaN);
+  strictEqual(tPdf(0, 0), NaN);
+  strictEqual(chiSquarePdf(-1, 5), NaN);
+  strictEqual(chiSquarePdf(0, 5), 0);
+  strictEqual(chiSquarePdf(0, 2), 0.5);
+  strictEqual(chiSquarePdf(0, 1), Infinity);
+  strictEqual(fPdf(-1, 5, 10), NaN);
+  strictEqual(fPdf(0, 5, 10), 0);
+  strictEqual(fPdf(0, 1, 10), Infinity);
+  strictEqual(binomialPmf(21, 20, 0.5), NaN);
+  strictEqual(binomialPmf(10.5, 20, 0.5), NaN);
+  strictEqual(binomialPmf(1, 10, 1), NaN);
+  strictEqual(poissonPmf(-1, 5), NaN);
+  strictEqual(poissonPmf(1, 0), NaN);
+});
+
+check("plot a function plots Prism's statistical distributions (seq 203)", async () => {
+  const empty: TableData = { columns: ["Title", "X", "Y1"], rows: [] };
+  const close = (got: (number | null)[], want: number[]) =>
+    got.length === want.length &&
+    got.every((g, i) => g != null && Math.abs(g - want[i]) < 1e-12);
+  // The standard normal over −4..4: the peak is 1/√(2π), the tails ~0.
+  const normal = await runAnalysis("plot-function", empty, {
+    equation: "normal-distribution",
+    xMin: -4,
+    xMax: 4,
+    segments: 10,
+    curves: [{ label: "z", params: { Mean: 0, SD: 1 } }],
+  });
+  if ("error" in normal) throw new Error(normal.error);
+  deepStrictEqual(
+    normal.generatedCurves!.x,
+    Array.from({ length: 11 }, (_, i) => -4 + (8 * i) / 10),
+  );
+  const ny = normal.generatedCurves!.curves[0].y;
+  ok(close(ny, normal.generatedCurves!.x.map((v) => normalPdf(v, 0, 1))));
+  ok(ny[5] != null && Math.abs(ny[5] - 0.3989422804014327) < 1e-15);
+  ok(ny[0] != null && ny[0] < 0.001);
+  ok(normal.summary.includes("from the Normal distribution,"));
+  ok(normal.notes.includes("probability density"));
+  // A t with 10 df peaks a touch lower than the normal at 0.
+  const t = await runAnalysis("plot-function", empty, {
+    equation: "t-distribution",
+    xMin: 0,
+    xMax: 0,
+    segments: 10,
+    curves: [{ label: "t10", params: { DF: 10 } }],
+  });
+  if (!("error" in t) || !t.error.includes("must be below"))
+    throw new Error(`expected the empty-range error, got ${JSON.stringify(t)}`);
+  const t2 = await runAnalysis("plot-function", empty, {
+    equation: "t-distribution",
+    xMin: -2,
+    xMax: 2,
+    segments: 10,
+    curves: [{ label: "t10", params: { DF: 10 } }],
+  });
+  if ("error" in t2) throw new Error(t2.error);
+  ok(close(t2.generatedCurves!.curves[0].y, t2.generatedCurves!.x.map((v) => tPdf(v, 10))));
+  ok(t2.generatedCurves!.curves[0].y[5] != null && Math.abs(t2.generatedCurves!.curves[0].y[5]! - 0.3891083839660314) < 1e-15);
+  // The binomial is discrete: one point per whole number, and the masses
+  // sum to 1 — the line-segments setting does not apply to it.
+  const binom = await runAnalysis("plot-function", empty, {
+    equation: "binomial-distribution",
+    xMin: 0,
+    xMax: 20,
+    segments: 150,
+    curves: [{ label: "B(20, 0.5)", params: { N: 20, P: 0.5 } }],
+  });
+  if ("error" in binom) throw new Error(binom.error);
+  deepStrictEqual(binom.generatedCurves!.x, Array.from({ length: 21 }, (_, i) => i));
+  strictEqual(binom.generatedCurves!.curves[0].y[10], binomialPmf(10, 20, 0.5));
+  const mass = binom.generatedCurves!.curves[0].y.reduce((s, v) => s + (v ?? 0), 0);
+  ok(Math.abs(mass - 1) < 1e-12);
+  deepStrictEqual(
+    binom.stats.map((s) => [s.label, s.value]),
+    [
+      ["X values", 21],
+      ["Curves", 1],
+    ],
+  );
+  ok(binom.notes.includes("probability of exactly that many successes"));
+  // The Poisson over 0..20 carries all but ~1e-9 of its mass at λ = 5.
+  const pois = await runAnalysis("plot-function", empty, {
+    equation: "poisson-distribution",
+    xMin: 0,
+    xMax: 20,
+    segments: 150,
+    curves: [{ label: "Pois(5)", params: { Lambda: 5 } }],
+  });
+  if ("error" in pois) throw new Error(pois.error);
+  strictEqual(pois.generatedCurves!.curves[0].y[3], poissonPmf(3, 5));
+  const poisMass = pois.generatedCurves!.curves[0].y.reduce((s, v) => s + (v ?? 0), 0);
+  ok(Math.abs(poisMass - 0.999999918907495) < 1e-12);
+  // Validation names the bad parameter instead of plotting nonsense.
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, {
+      equation: "binomial-distribution",
+      xMin: 0,
+      xMax: 20,
+      curves: [{ label: "B", params: { N: 0, P: 0.5 } }],
+    }),
+    { error: "“B”: the binomial's number of trials N must be a whole number of 1 or more." },
+  );
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, {
+      equation: "binomial-distribution",
+      xMin: 0,
+      xMax: 20,
+      curves: [{ label: "B", params: { N: 20, P: 1.5 } }],
+    }),
+    { error: "“B”: the binomial's probability P must be between 0 and 1." },
+  );
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, {
+      equation: "t-distribution",
+      xMin: -4,
+      xMax: 4,
+      curves: [{ label: "t", params: { DF: 0 } }],
+    }),
+    { error: "“t”: the t distribution's degrees of freedom must be greater than 0." },
+  );
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, {
+      equation: "normal-distribution",
+      xMin: -4,
+      xMax: 4,
+      curves: [{ label: "z", params: { Mean: 0, SD: 0 } }],
+    }),
+    { error: "“z”: the normal distribution's SD must be greater than 0." },
+  );
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, {
+      equation: "poisson-distribution",
+      xMin: 0.2,
+      xMax: 0.8,
+      curves: [{ label: "P", params: { Lambda: 5 } }],
+    }),
+    { error: "A discrete distribution needs an X range holding at least 2 whole numbers — 0.2 to 0.8 holds 0." },
+  );
+});
+
+check("plot a function wizard offers the distributions with their parameters (seq 203)", () => {
+  const empty: TableData = { columns: ["Title", "X", "Y1"], rows: [] };
+  const table = readTable(empty);
+  const wizard = WIZARDS["plot-function"]!;
+  const first = wizard.questions({}, table).filter(Boolean)[0] as Question & {
+    options: { value: string }[];
+  };
+  for (const d of [
+    "normal-distribution",
+    "t-distribution",
+    "f-distribution",
+    "chi-square-distribution",
+    "binomial-distribution",
+    "poisson-distribution",
+  ])
+    ok(first.options.some((o) => o.value === d), `equation choice misses ${d}`);
+  const asked = (a: Record<string, string | number> = {}) =>
+    wizard.questions(a, table).flatMap((q) => (q ? [q.id] : []));
+  deepStrictEqual(asked({ equation: "t-distribution" }), [
+    "equation",
+    "xMin",
+    "xMax",
+    "segments",
+    "extra",
+    "curves",
+    "curve1_label",
+    "curve1_DF",
+  ]);
+  deepStrictEqual(asked({ equation: "binomial-distribution" }), [
+    "equation",
+    "xMin",
+    "xMax",
+    "segments",
+    "extra",
+    "curves",
+    "curve1_label",
+    "curve1_N",
+    "curve1_P",
+  ]);
+  deepStrictEqual(
+    wizard.finish(
+      {
+        equation: "f-distribution",
+        xMin: 0,
+        xMax: 5,
+        segments: 150,
+        extra: "none",
+        curves: 1,
+        curve1_label: "F",
+        curve1_DF1: 5,
+        curve1_DF2: 10,
+      },
+      table,
+    ),
+    {
+      type: "plot-function",
+      params: {
+        equation: "f-distribution",
+        xMin: 0,
+        xMax: 5,
+        segments: 150,
+        curves: [{ label: "F", params: { DF1: 5, DF2: 10 } }],
+        extra: "none",
+      },
+    },
+  );
+});
+
 check("the generated-curves overlay draws each curve and its dashed extra series", () => {
   const result: AnalysisResult = {
     testType: "plot-function",
@@ -17638,6 +18078,78 @@ check("transform-data returns log10 values as a results sheet and never touches 
     throw new Error(`expected the no-data error, got ${JSON.stringify(few)}`);
 });
 
+// ── Transform arithmetic (v1.8, seq 205) ─────────────────────────────────
+// Prism's arithmetic transforms (Y±K, Y×K, Y/K, K−Y, K/Y): a constant K
+// applied to every value. The constant is required for these, ignored by
+// the unary functions, and recorded in the notes so the run is auditable.
+
+check("transformValue applies Prism's arithmetic transforms with a constant K", () => {
+  strictEqual(transformValue("y-plus-k", 5, 3), 8);
+  strictEqual(transformValue("y-minus-k", 5, 3), 2);
+  strictEqual(transformValue("y-times-k", 5, 3), 15);
+  strictEqual(transformValue("y-divided-by-k", 6, 3), 2);
+  strictEqual(transformValue("k-minus-y", 5, 10), 5);
+  strictEqual(transformValue("k-divided-by-y", 5, 10), 2);
+  // An arithmetic function without its constant has nothing to apply —
+  // blank, never NaN; K/Y is undefined for a value of 0; overflow blanks.
+  strictEqual(transformValue("y-plus-k", 5), null);
+  strictEqual(transformValue("y-times-k", 5, undefined), null);
+  strictEqual(transformValue("k-divided-by-y", 0, 10), null);
+  strictEqual(transformValue("y-times-k", 1e200, 1e200), null);
+  // The unary functions ignore a constant when one is passed anyway.
+  strictEqual(transformValue("square", 3, 99), 9);
+});
+
+check("transform-data applies an arithmetic transform and records its K", async () => {
+  const table = (values: (number | string)[]): TableData => ({
+    columns: ["Title", "V"],
+    rows: values.map((v) => [null, String(v)]),
+  });
+  const out = await runAnalysis("transform-data", table([1, 2, 3]), { function: "y-times-k", constant: 10 });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(out.transformed?.[0].values, [10, 20, 30]);
+  strictEqual(out.subtitle, "Transform data — Y×K");
+  if (!out.notes.includes("Applied with the constant K = 10."))
+    throw new Error(`expected the K in the notes, got ${JSON.stringify(out.notes)}`);
+  const divided = await runAnalysis("transform-data", table([2, 5, 10]), { function: "k-divided-by-y", constant: 10 });
+  if ("error" in divided) throw new Error(divided.error);
+  deepStrictEqual(divided.transformed?.[0].values, [5, 2, 1]);
+  // K/Y leaves a 0 blank and counts it, with the reason in the notes.
+  const zero = await runAnalysis("transform-data", table([0, 2]), { function: "k-divided-by-y", constant: 10 });
+  if ("error" in zero) throw new Error(zero.error);
+  deepStrictEqual(zero.transformed?.[0].values, [null, 5]);
+  strictEqual(zero.transformed?.[0].excluded, 1);
+  if (!zero.notes.includes("K/Y is undefined for values of 0"))
+    throw new Error(`expected the exclusion reason in the notes, got ${JSON.stringify(zero.notes)}`);
+  // Errors name the problem instead of transforming with a missing or
+  // unusable K.
+  deepStrictEqual(await runAnalysis("transform-data", table([1, 2]), { function: "y-plus-k" }), {
+    error: "“Y+K” needs a constant K — enter one and try again.",
+  });
+  deepStrictEqual(await runAnalysis("transform-data", table([1, 2]), { function: "y-divided-by-k", constant: 0 }), {
+    error: "“Y/K” needs a constant K other than 0 — dividing by 0 is undefined.",
+  });
+});
+
+check("transform-data wizard asks for K only for the arithmetic functions", () => {
+  const table = readTable({ columns: ["Title", "V"], rows: [["", "1"], ["", "2"]] });
+  const wizard = WIZARDS["transform-data"]!;
+  const ids = (a: Record<string, string | number>) =>
+    wizard.questions(a, table).filter(Boolean).map((q) => (q as Question).id);
+  // A unary function asks no constant question; an arithmetic one does.
+  deepStrictEqual(ids({ function: "log10" }), ["function"]);
+  deepStrictEqual(ids({ function: "y-times-k" }), ["function", "constant"]);
+  deepStrictEqual(ids({ function: "k-divided-by-y" }), ["function", "constant"]);
+  deepStrictEqual(wizard.finish({ function: "y-times-k", constant: 3 }, table), {
+    type: "transform-data",
+    params: { function: "y-times-k", constant: 3 },
+  });
+  deepStrictEqual(wizard.finish({ function: "log10" }, table), {
+    type: "transform-data",
+    params: { function: "log10" },
+  });
+});
+
 // ── Calculated Variables (v1.8, seq 156) ──────────────────────────────────
 // Prism 11's in-table formulas for Multiple Variables tables: type `=` in an
 // empty variable; the whole column computes live from the table's other
@@ -18042,6 +18554,80 @@ check("monteCarloRCode repeats the target inside R and returns the observed valu
     }),
     'set.seed(42);x<-c(1,2,3,4);v<-replicate(100,cor(x,rnorm(4,5,2),method="spearman"));o<-cor(x,c(2,4,6,8),method="spearman");c(o,v)',
   );
+  // Seq 204: paired-t repeats the t test on the simulated differences —
+  // the same R form as one-sample-t, with the differences as its one group.
+  strictEqual(
+    monteCarloRCode({
+      target: "paired-t",
+      statistic: "P value",
+      repeats: 1000,
+      seed: 42,
+      groups: [{ n: 3, mean: 0, sd: 1, observed: [-1, -1, -2] }],
+      hypotheticalValue: 0,
+    }),
+    "set.seed(42);v<-replicate(1000,t.test(rnorm(3,0,1),mu=0)$p.value);o<-t.test(c(-1,-1,-2),mu=0)$p.value;c(o,v)",
+  );
+  strictEqual(
+    monteCarloRCode({
+      target: "paired-t",
+      statistic: "Mean difference",
+      repeats: 1000,
+      seed: 42,
+      groups: [{ n: 3, mean: 0, sd: 1, observed: [-1, -1, -2] }],
+    }),
+    "set.seed(42);v<-replicate(1000,mean(rnorm(3,0,1)));o<-mean(c(-1,-1,-2));c(o,v)",
+  );
+  // Seq 204: one-way ANOVA stacks its groups into one vector + a factor
+  // and runs oneway.test on it — the repeat and the observed both need
+  // the braced block, whose last value is the statistic.
+  strictEqual(
+    monteCarloRCode({
+      target: "one-way-anova",
+      statistic: "P value",
+      repeats: 100,
+      seed: 42,
+      groups: [
+        { n: 3, mean: 2, sd: 1, observed: [1, 2, 3] },
+        { n: 3, mean: 5, sd: 1, observed: [4, 5, 6] },
+        { n: 3, mean: 8, sd: 1, observed: [7, 8, 9] },
+      ],
+    }),
+    "set.seed(42);v<-replicate(100,{v<-c(rnorm(3,2,1),rnorm(3,5,1),rnorm(3,8,1));grp<-factor(rep(1:3,c(3,3,3)));oneway.test(v~grp,var.equal=TRUE)$p.value});o<-{ov<-c(c(1,2,3),c(4,5,6),c(7,8,9));ogrp<-factor(rep(1:3,c(3,3,3)));oneway.test(ov~ogrp,var.equal=TRUE)$p.value};c(o,v)",
+  );
+  strictEqual(
+    monteCarloRCode({
+      target: "one-way-anova",
+      statistic: "F",
+      repeats: 100,
+      seed: 42,
+      groups: [
+        { n: 3, mean: 2, sd: 1, observed: [1, 2, 3] },
+        { n: 3, mean: 5, sd: 1, observed: [4, 5, 6] },
+        { n: 3, mean: 8, sd: 1, observed: [7, 8, 9] },
+      ],
+    }),
+    "set.seed(42);v<-replicate(100,{v<-c(rnorm(3,2,1),rnorm(3,5,1),rnorm(3,8,1));grp<-factor(rep(1:3,c(3,3,3)));oneway.test(v~grp,var.equal=TRUE)$statistic});o<-{ov<-c(c(1,2,3),c(4,5,6),c(7,8,9));ogrp<-factor(rep(1:3,c(3,3,3)));oneway.test(ov~ogrp,var.equal=TRUE)$statistic};c(o,v)",
+  );
+  // Seq 204: one-sided tails pass R's alternative through to both the
+  // repeats and the observed value.
+  strictEqual(
+    monteCarloRCode({ ...twoGroups, alternative: "less" }),
+    'set.seed(42);v<-replicate(1000,t.test(rnorm(3,0,1),rnorm(3,0.5,1),var.equal=TRUE,alternative="less")$p.value);o<-t.test(c(1,2,3),c(4,5,6),var.equal=TRUE,alternative="less")$p.value;c(o,v)',
+  );
+  // Seq 204: a t simulation draws mean + sd/√(df/(df−2)) · rt(n, df), so
+  // the simulated values carry the SD asked for (here 2/√(5/3)).
+  strictEqual(
+    monteCarloRCode({
+      target: "one-sample-t",
+      statistic: "Mean",
+      repeats: 100,
+      seed: 42,
+      groups: [{ n: 3, mean: 5, sd: 2, observed: [1, 2, 3] }],
+      simulationDistribution: "t",
+      simulationDf: 5,
+    }),
+    "set.seed(42);v<-replicate(100,mean(5+1.54919333848*rt(3,5)));o<-mean(c(1,2,3));c(o,v)",
+  );
 });
 
 check("percentile interpolates R-style (type 7)", () => {
@@ -18064,21 +18650,21 @@ check("the Monte Carlo wizard asks for the target, the simulation and the repeat
   const wizard = WIZARDS["monte-carlo"]!;
   deepStrictEqual(
     wizard.questions({}, table, "column").filter(Boolean).map((q) => (q as Question).id),
-    ["target", "statistic", "equalVariance", "mean:A", "sd:A", "mean:B", "sd:B", "repeats", "seed"],
+    ["target", "simulationDistribution", "statistic", "tails", "equalVariance", "mean:A", "sd:A", "mean:B", "sd:B", "repeats", "seed"],
   );
   deepStrictEqual(
     wizard
       .questions({ target: "compare-two-groups" }, table, "column")
       .filter(Boolean)
       .map((q) => (q as Question).id),
-    ["target", "statistic", "equalVariance", "mean:A", "sd:A", "mean:B", "sd:B", "repeats", "seed"],
+    ["target", "simulationDistribution", "statistic", "tails", "equalVariance", "mean:A", "sd:A", "mean:B", "sd:B", "repeats", "seed"],
   );
   deepStrictEqual(
     wizard
       .questions({ target: "descriptive-statistics" }, table, "column")
       .filter(Boolean)
       .map((q) => (q as Question).id),
-    ["target", "group", "mean:A", "sd:A", "repeats", "seed"],
+    ["target", "simulationDistribution", "group", "mean:A", "sd:A", "repeats", "seed"],
   );
   deepStrictEqual(
     wizard.finish(
@@ -18105,6 +18691,8 @@ check("the Monte Carlo wizard asks for the target, the simulation and the repeat
         seed: 42,
         groupMeans: { A: 0, B: 0.5 },
         groupSds: { A: 1, B: 1 },
+        simulationDistribution: "gaussian",
+        tails: "two-sided",
         equalVariance: true,
       },
     },
@@ -18121,7 +18709,7 @@ check("the Monte Carlo wizard asks for the target, the simulation and the repeat
   });
   deepStrictEqual(
     wizard.questions({}, xy, "xy").filter(Boolean).map((q) => (q as Question).id),
-    ["target", "statistic", "y", "mean:Y1", "sd:Y1", "repeats", "seed"],
+    ["target", "simulationDistribution", "statistic", "y", "mean:Y1", "sd:Y1", "repeats", "seed"],
   );
   deepStrictEqual(
     wizard.finish(
@@ -18138,8 +18726,287 @@ check("the Monte Carlo wizard asks for the target, the simulation and the repeat
         seed: 7,
         groupMeans: { Y1: 5 },
         groupSds: { Y1: 2 },
+        simulationDistribution: "gaussian",
         y: "Y1",
       },
+    },
+  );
+});
+
+check("the Monte Carlo wizard asks for the new targets, tails and t simulation (seq 204)", () => {
+  const table = readTable({
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["", "1", "2"],
+      ["", "2", "3"],
+      ["", "3", "5"],
+    ],
+  });
+  const wizard = WIZARDS["monte-carlo"]!;
+  const ids = (a: Record<string, string | number>, t: TableData | undefined = undefined) =>
+    wizard
+      .questions(a, t ? readTable(t) : table, "column")
+      .filter(Boolean)
+      .map((q) => (q as Question).id);
+  // Paired-t asks for the difference mean/SD (observed −1.33 ± 0.58), not
+  // per-column values — the repeats simulate the differences.
+  deepStrictEqual(ids({ target: "paired-t" }), [
+    "target",
+    "simulationDistribution",
+    "statistic",
+    "tails",
+    "differenceMean",
+    "differenceSd",
+    "repeats",
+    "seed",
+  ]);
+  deepStrictEqual(
+    wizard.finish(
+      {
+        target: "paired-t",
+        statistic: "P value",
+        tails: "less",
+        differenceMean: -1,
+        differenceSd: 0.5,
+        repeats: 1000,
+        seed: 42,
+      },
+      table,
+      "column",
+    ),
+    {
+      type: "monte-carlo",
+      params: {
+        targetAnalysis: "paired-t",
+        summaryStatistic: "P value",
+        repeats: 1000,
+        seed: 42,
+        groupMeans: {},
+        groupSds: {},
+        simulationDistribution: "gaussian",
+        tails: "less",
+        differenceMean: -1,
+        differenceSd: 0.5,
+      },
+    },
+  );
+  // A t simulation asks for its degrees of freedom, right after the
+  // distribution choice.
+  deepStrictEqual(ids({ target: "compare-two-groups", simulationDistribution: "t" }), [
+    "target",
+    "simulationDistribution",
+    "simulationDf",
+    "statistic",
+    "tails",
+    "equalVariance",
+    "mean:A",
+    "sd:A",
+    "mean:B",
+    "sd:B",
+    "repeats",
+    "seed",
+  ]);
+  // One-way ANOVA asks which data sets to repeat (3 columns: the sets
+  // question shows) and a mean/SD per group; no tails — the F test has none.
+  deepStrictEqual(
+    ids(
+      { target: "one-way-anova" },
+      {
+        columns: ["Title", "A", "B", "C"],
+        rows: [
+          ["", "1", "4", "7"],
+          ["", "2", "5", "8"],
+          ["", "3", "6", "9"],
+        ],
+      },
+    ),
+    [
+      "target",
+      "simulationDistribution",
+      "statistic",
+      "sets",
+      "mean:A",
+      "sd:A",
+      "mean:B",
+      "sd:B",
+      "mean:C",
+      "sd:C",
+      "repeats",
+      "seed",
+    ],
+  );
+  deepStrictEqual(
+    wizard.finish(
+      {
+        target: "one-way-anova",
+        statistic: "F",
+        sets: ["A", "B", "C"],
+        "mean:A": 2,
+        "sd:A": 1,
+        "mean:B": 5,
+        "sd:B": 1,
+        "mean:C": 8,
+        "sd:C": 1,
+        repeats: 100,
+        seed: 42,
+      },
+      readTable({
+        columns: ["Title", "A", "B", "C"],
+        rows: [
+          ["", "1", "4", "7"],
+          ["", "2", "5", "8"],
+          ["", "3", "6", "9"],
+        ],
+      }),
+      "column",
+    ),
+    {
+      type: "monte-carlo",
+      params: {
+        targetAnalysis: "one-way-anova",
+        summaryStatistic: "F",
+        repeats: 100,
+        seed: 42,
+        groupMeans: { A: 2, B: 5, C: 8 },
+        groupSds: { A: 1, B: 1, C: 1 },
+        simulationDistribution: "gaussian",
+        sets: ["A", "B", "C"],
+      },
+    },
+  );
+});
+
+check("Monte Carlo repeats a paired t test and a one-way ANOVA (seq 204)", async () => {
+  const paired: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["", "1", "2"],
+      ["", "2", "3"],
+      ["", "3", "5"],
+    ],
+  };
+  const pt = await runAnalysis("monte-carlo", paired, {
+    targetAnalysis: "paired-t",
+    summaryStatistic: "Mean difference",
+    repeats: 10,
+    seed: 42,
+  });
+  if ("error" in pt) throw new Error(pt.error);
+  strictEqual(pt.testType, "monte-carlo");
+  // The observed mean difference is the mean of A − B = (−1, −1, −2).
+  const observed = pt.stats.find((s) => s.label === "Observed (real data)")?.value;
+  ok(typeof observed === "number" && Math.abs(observed - -4 / 3) < 1e-12);
+  ok(!pt.stats.some((s) => s.label.startsWith("Power")));
+  ok(pt.notes.includes("Paired t test"));
+  // One-way ANOVA: groups 1–3, 4–6, 7–9 have F = 27 exactly.
+  const anova: TableData = {
+    columns: ["Title", "A", "B", "C"],
+    rows: [
+      ["", "1", "4", "7"],
+      ["", "2", "5", "8"],
+      ["", "3", "6", "9"],
+    ],
+  };
+  const av = await runAnalysis("monte-carlo", anova, {
+    targetAnalysis: "one-way-anova",
+    summaryStatistic: "F",
+    repeats: 10,
+    seed: 42,
+  });
+  if ("error" in av) throw new Error(av.error);
+  const fObserved = av.stats.find((s) => s.label === "Observed (real data)")?.value;
+  ok(typeof fObserved === "number" && Math.abs(fObserved - 27) < 1e-9);
+  ok(av.notes.includes("One-way ANOVA"));
+  // A P-value run reports power; a t simulation and one-sided tails are
+  // named in the notes.
+  const pv = await runAnalysis("monte-carlo", anova, {
+    targetAnalysis: "one-way-anova",
+    summaryStatistic: "P value",
+    repeats: 10,
+    seed: 42,
+  });
+  if ("error" in pv) throw new Error(pv.error);
+  ok(pv.stats.some((s) => s.label === "Power (% P < 0.05)"));
+  const tSim = await runAnalysis("monte-carlo", paired, {
+    targetAnalysis: "compare-two-groups",
+    summaryStatistic: "P value",
+    repeats: 10,
+    seed: 42,
+    simulationDistribution: "t",
+    simulationDf: 5,
+  });
+  if ("error" in tSim) throw new Error(tSim.error);
+  ok(tSim.notes.includes("Student's t with 5 degrees of freedom"));
+  const oneSided = await runAnalysis("monte-carlo", paired, {
+    targetAnalysis: "compare-two-groups",
+    summaryStatistic: "P value",
+    repeats: 10,
+    seed: 42,
+    tails: "less",
+  });
+  if ("error" in oneSided) throw new Error(oneSided.error);
+  ok(oneSided.notes.includes("one-sided (less)"));
+  // Errors name the problem instead of simulating something wrong.
+  deepStrictEqual(
+    await runAnalysis(
+      "monte-carlo",
+      { columns: ["Title", "A"], rows: [["", "1"], ["", "2"]] },
+      { targetAnalysis: "one-way-anova", repeats: 10, seed: 42 },
+    ),
+    { error: "Monte Carlo needs at least 2 data sets with values to repeat a one-way ANOVA." },
+  );
+  deepStrictEqual(
+    await runAnalysis(
+      "monte-carlo",
+      {
+        columns: ["Title", "A", "B"],
+        rows: [
+          ["", "5", "7"],
+          ["", "5", "7"],
+          ["", "5", "7"],
+        ],
+      },
+      { targetAnalysis: "one-way-anova", repeats: 10, seed: 42 },
+    ),
+    { error: "Each group's values are identical: there is no scatter within the groups to compare them on." },
+  );
+  deepStrictEqual(
+    await runAnalysis("monte-carlo", paired, {
+      targetAnalysis: "compare-two-groups",
+      repeats: 10,
+      seed: 42,
+      tails: "sideways",
+    } as unknown as MonteCarloParams),
+    { error: "“sideways” is not a tails choice — use “two-sided”, “less” or “greater”." },
+  );
+  deepStrictEqual(
+    await runAnalysis("monte-carlo", paired, {
+      targetAnalysis: "compare-two-groups",
+      repeats: 10,
+      seed: 42,
+      simulationDistribution: "t",
+      simulationDf: 2,
+    }),
+    {
+      error:
+        "The t simulation needs degrees of freedom greater than 2 — at df ≤ 2 the t distribution has no finite SD to simulate from.",
+    },
+  );
+  deepStrictEqual(
+    await runAnalysis(
+      "monte-carlo",
+      {
+        columns: ["Title", "A", "B"],
+        rows: [
+          ["", "1", "2"],
+          ["", "2", ""],
+        ],
+      },
+      { targetAnalysis: "paired-t", repeats: 10, seed: 42 },
+    ),
+    {
+      error:
+        "Monte Carlo needs at least 2 paired rows — rows where both data sets hold a value — to repeat a paired t test.",
     },
   );
 });

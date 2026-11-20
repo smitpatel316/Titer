@@ -132,9 +132,12 @@ ENUM_OVERRIDES = {
     # Linear regression never sees replicate columns, so 1/sd2 is not
     # offered (types.ts LinearRegressionParams.weights).
     ("linear-regression", "weights"): ["none", "1/y", "1/y2", "1/x", "1/x2"],
-    # Plot a function cannot plot a user-defined equation (types.ts).
+    # Plot a function cannot plot a user-defined equation (types.ts);
+    # the distributions (seq 203) are appended after the models. The
+    # "gaussian" is already in NONLINEAR_MODELS — do not append it again
+    # (the old override did, and the schema carried it twice).
     ("plot-function", "equation"): [m for m in ARRAYS["NONLINEAR_MODELS"]
-                                     if m != "user-defined"] + ["gaussian"],
+                                     if m != "user-defined"] + ARRAYS["PLOT_FUNCTION_DISTRIBUTIONS"],
     ("plot-function", "extra"): ["none", "first-derivative",
                                  "second-derivative", "integral"],
 }
@@ -155,7 +158,7 @@ GATES = {
     "nested-anova": ["Nested table with at least 3 data groups"],
     "enzyme-inhibition": ["Global models need X + at least 2 Y series (including an uninhibited one); Morrison needs X + 1 Y series and enzymeConcentration"],
     "dose-response-special": ["Every model needs X + at least 2 Y series (control + at least 1 shifted curve; full agonist + at least 1 partial agonist)"],
-    "monte-carlo": ["targetAnalysis is one of compare-two-groups, one-sample-t, descriptive-statistics, linear-regression, correlation"],
+    "monte-carlo": ["targetAnalysis is one of compare-two-groups, one-sample-t, descriptive-statistics, linear-regression, correlation, paired-t, one-way-anova"],
 }
 
 # ── *Params interfaces: fields, required/optional, doc comments ──────

@@ -993,6 +993,33 @@ export function AnalysisResultsView({
         );
       })}
 
+      {result.columnMath &&
+        (() => {
+          const math = result.columnMath!;
+          const symbol = { subtract: "−", divide: "/", multiply: "×", add: "+" }[math.operation];
+          const label = `${math.a} ${symbol} ${math.b}`;
+          const hasX = math.rows.some((r) => r.x !== undefined);
+          return (
+            <Table
+              title={`Column math — ${label}`}
+              columns={[
+                { label: "Row" },
+                ...(hasX ? [{ label: "X", numeric: true }] : []),
+                { label: math.a, numeric: true },
+                { label: math.b, numeric: true },
+                { label, numeric: true },
+              ]}
+              rows={math.rows.map((r) => [
+                r.row,
+                ...(hasX ? [num(r.x)] : []),
+                num(r.a),
+                num(r.b),
+                num(r.result),
+              ])}
+            />
+          );
+        })()}
+
       {result.frequencyBins &&
         result.frequencyBins.map((f) => (
           <Table
