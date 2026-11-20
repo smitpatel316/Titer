@@ -55,6 +55,9 @@ export function followTable(node: ProjectNode, { renamed = {}, rows }: TableMove
 
   const renamePair = (key: string) => {
     const [a, b] = pairOf(key);
+    // A bare group name (no NUL: a hand-set sigPairs entry like "WT") renames
+    // as itself — splitting it as a pair would append an "undefined" half.
+    if (b === undefined) return to(a);
     return pairKey(to(a), to(b));
   };
   if (node.analysisParams) {

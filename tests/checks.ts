@@ -165,7 +165,13 @@ import { addObservedFitted } from "../src/views/graphs/observed-fitted";
 import { asMatched, batchMatched, examplesFor, matched, type Matched } from "../src/views/graphs/match-graph";
 import { previewFigure } from "../src/views/graphs/match-preview";
 import type { OutlineNode } from "../src/store/use-project-store";
-import { addSignificance, deriveComparisons } from "../src/views/graphs/significance-overlay";
+import {
+  addSignificance,
+  deriveComparisons,
+  expandSigPairs,
+  sigPairSelected,
+  type SigComparison,
+} from "../src/views/graphs/significance-overlay";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AnalysisResultsView, headline } from "../src/views/analyses/analysis-results-view";
@@ -236,7 +242,7 @@ import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { decodePng, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
 import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
-import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnovaParams, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, SimulationSpec } from "../src/stats/types";
+import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnovaParams, ComparedCell, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, SimulationSpec } from "../src/stats/types";
 import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation/simulate";
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
 import { evaluate as evaluateCurve } from "../src/views/graphs/fitted-curve";
@@ -6537,6 +6543,20 @@ check("graphs follow renamed columns, groups, compared pairs and colors", () => 
   strictEqual(o.title, "Y1"); // the user's text is left alone
 });
 
+check("a bare group name in sigPairs renames as itself, not as a pair", () => {
+  // A hand-set sigPairs like ["WT", "SKG"] has no NUL: splitting it as a pair
+  // would append an "undefined" half and the brackets would silently vanish.
+  const node: ProjectNode = {
+    ...graph,
+    graphOptions: {
+      ...DEFAULT_GRAPH_OPTIONS,
+      sigPairs: ["WT", "SKG", pairKey("WT", "SKG"), pairKey("r0", "")],
+    },
+  };
+  const o = followTable(node, { renamed: { WT: "Wild" } }, ["Title", "Wild:Y1", "SKG:Y1"]).graphOptions!;
+  deepStrictEqual(o.sigPairs, ["Wild", "SKG", pairKey("Wild", "SKG"), pairKey("r0", "")]);
+});
+
 check("styled points follow moved rows, renamed columns and groups, and leave with their column", () => {
   const styled = (
     points: Record<string, { size: number }>,
@@ -6938,6 +6958,114 @@ check("on a log axis, the stars' brackets take values and their labels log10 val
   const [label] = fig.layout.annotations as { y: number }[];
   ok(bracket.y0 > 4, "the bracket sits above the highest value, 4");
   ok(Math.abs(label.y - Math.log10(bracket.y0)) < 0.05, "its label at the log10 of the bracket");
+});
+
+check("a grouped-bars graph draws multiple-t-tests brackets when sigPairs names the pair (Mansi P0 #5)", () => {
+  // Her graph set sigPairs: ["WT", "SKG"] — the two groups, not the per-row
+  // comparison keys — and no bracket rendered. The pair's per-row comparisons
+  // (cells) must be selected by the group names, by their pairKey, and by the
+  // per-row key alike.
+  const data: TableData = {
+    columns: ["Title", "WT:Y1", "WT:Y2", "WT:Y3", "SKG:Y1", "SKG:Y2", "SKG:Y3"],
+    rows: [
+      ["r0", "1", "2", "3", "4", "5", "6"],
+      ["r1", "2", "3", "4", "7", "8", "9"],
+      ["r2", "1", "3", "2", "5", "6", "8"],
+    ],
+  };
+  const comparisons: SigComparison[] = [0, 1, 2].map((r) => ({
+    key: pairKey(`r${r}`, ""),
+    group1: `r${r}`,
+    group2: "",
+    p: [0.01, 0.4, 0.00001][r]!,
+    cells: [
+      { group: "WT", row: r },
+      { group: "SKG", row: r },
+    ] as [ComparedCell, ComparedCell],
+  }));
+  const columns = readTable(data).columns;
+  const draw = (sigPairs: string[]) => {
+    const fig: GraphFigure = { data: [], layout: {} };
+    addSignificance(
+      fig,
+      columns,
+      "grouped-bars",
+      { ...newGraphOptions("grouped-bars"), sigDisplay: "pvalue", sigPairs },
+      comparisons,
+    );
+    return fig;
+  };
+  // The reported spelling: the two group names.
+  const byNames = draw(["WT", "SKG"]);
+  strictEqual((byNames.layout.shapes as unknown[]).length, 9, "three brackets, three lines each");
+  deepStrictEqual(
+    (byNames.layout.annotations as { text: string }[]).map((a) => a.text),
+    ["P = 0.01", "P = 0.4", "P < 0.0001"],
+  );
+  // The pairKey spelling selects the same three brackets.
+  strictEqual((draw([pairKey("WT", "SKG")]).layout.shapes as unknown[]).length, 9);
+  // A per-row key selects only that row's bracket.
+  const oneRow = draw([pairKey("r0", "")]);
+  strictEqual((oneRow.layout.shapes as unknown[]).length, 3);
+  deepStrictEqual(
+    (oneRow.layout.annotations as { text: string }[]).map((a) => a.text),
+    ["P = 0.01"],
+  );
+  // One group name alone names no pair: nothing draws.
+  strictEqual((draw(["WT"]).layout.shapes as unknown[] | undefined)?.length ?? 0, 0);
+});
+
+check("sigDisplay pvalue-eq labels brackets p=0.03, and a multiple-t-tests run draws them end to end", async () => {
+  const data: TableData = {
+    columns: ["Title", "WT:Y1", "WT:Y2", "WT:Y3", "SKG:Y1", "SKG:Y2", "SKG:Y3"],
+    rows: [
+      ["r0", "1", "2", "3", "4", "5", "6"],
+      ["r1", "2", "3", "4", "7", "8", "9"],
+      ["r2", "1", "3", "2", "5", "6", "8"],
+    ],
+  };
+  const out = await runAnalysis("multiple-t-tests", data, {
+    gaussian: true,
+    pooledSd: false,
+    paired: false,
+    correction: "holm",
+  });
+  if ("error" in out) throw new Error(out.error);
+  const comparisons = deriveComparisons(out);
+  strictEqual(comparisons.length, 3, "one comparison per row");
+  ok(comparisons.every((c) => c.cells?.[0].group === "WT" && c.cells?.[1].group === "SKG"));
+  const fig: GraphFigure = { data: [], layout: {} };
+  addSignificance(
+    fig,
+    readTable(data).columns,
+    "grouped-bars",
+    { ...newGraphOptions("grouped-bars"), sigDisplay: "pvalue-eq", sigPairs: ["WT", "SKG"] },
+    comparisons,
+  );
+  strictEqual((fig.layout.shapes as unknown[]).length, 9, "three brackets from the run's own comparisons");
+  const texts = (fig.layout.annotations as { text: string }[]).map((a) => a.text);
+  strictEqual(texts.length, 3);
+  ok(texts.every((t) => /^p(=|<)0/.test(t)), `p= labels, got ${texts.join(", ")}`);
+});
+
+check("a group-pair sigPairs selection expands to per-row keys for the Format panel", () => {
+  const comparisons: SigComparison[] = [0, 1].map((r) => ({
+    key: pairKey(`r${r}`, ""),
+    group1: `r${r}`,
+    group2: "",
+    p: 0.01,
+    cells: [
+      { group: "WT", row: r },
+      { group: "SKG", row: r },
+    ] as [ComparedCell, ComparedCell],
+  }));
+  ok(sigPairSelected(comparisons[0]!, ["WT", "SKG"]), "bare group names select the pair");
+  ok(sigPairSelected(comparisons[0]!, [pairKey("WT", "SKG")]), "the pairKey selects the pair");
+  ok(sigPairSelected(comparisons[0]!, [pairKey("r0", "")]), "the per-row key selects its row");
+  ok(!sigPairSelected(comparisons[0]!, ["WT"]), "one group alone selects nothing");
+  ok(!sigPairSelected(comparisons[0]!, [pairKey("WT", "Other")]), "another pair selects nothing");
+  deepStrictEqual(expandSigPairs(comparisons, ["WT", "SKG"]), [pairKey("r0", ""), pairKey("r1", "")]);
+  deepStrictEqual(expandSigPairs(comparisons, [pairKey("r1", "")]), [pairKey("r1", "")]);
 });
 
 check("100 % stacked bars: each row's segments make 100", () => {

@@ -17,7 +17,7 @@ import {
 } from "../../store/types";
 import { isSignificant, pStars } from "../../lib/format";
 import { GRAPHS, variablePair } from ".";
-import { GROUPED_STARS, lettersFit, ranOn, starsFit, type SigComparison } from "./significance-overlay";
+import { expandSigPairs, GROUPED_STARS, lettersFit, ranOn, sigPairSelected, starsFit, type SigComparison } from "./significance-overlay";
 import { cutoffAsP, cutoffOfP, volcanoAxes, volcanoPair } from "./volcano";
 import { paletteOf } from "../../lib/palettes";
 import { MAX_BINS } from "../../lib/histogram";
@@ -589,8 +589,12 @@ function SignificanceControls({
   set: SetOptions;
 }) {
   const selected = options.sigPairs ?? [];
-  const togglePair = (key: string, on: boolean) =>
-    set({ sigPairs: on ? [...selected, key] : selected.filter((k) => k !== key) });
+  const togglePair = (key: string, on: boolean) => {
+    // A group-pair spelling can't lose one row: expand it to per-row keys
+    // first, then add or drop this row's key.
+    const expanded = expandSigPairs(comparisons ?? [], selected);
+    set({ sigPairs: on ? [...expanded, key] : expanded.filter((k) => k !== key) });
+  };
 
   return (
     <>
@@ -609,6 +613,7 @@ function SignificanceControls({
             items={[
               { value: "stars", label: "Stars" },
               { value: "pvalue", label: "P value" },
+              { value: "pvalue-eq", label: "P value (p=)" },
               { value: "letters", label: "Letters" },
             ]}
           />
@@ -625,7 +630,7 @@ function SignificanceControls({
               <div className="flex flex-col gap-1.5">
                 {comparisons.map((c) => (
                   <label key={c.key} className="flex items-center gap-2">
-                    <Checkbox checked={selected.includes(c.key)} onChange={(checked) => togglePair(c.key, checked)} />
+                    <Checkbox checked={sigPairSelected(c, selected)} onChange={(checked) => togglePair(c.key, checked)} />
                     <span className="flex-1 truncate text-small">
                       {c.group2 ? `${c.group1} vs. ${c.group2}` : c.group1}
                     </span>

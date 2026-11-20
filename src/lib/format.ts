@@ -15,6 +15,9 @@ export const pValue = (p: number | null | undefined) => (p != null && p < 0.0001
 /** "P = 0.0123", or "P < 0.0001", for notes on a graph. */
 export const pText = (p: number | null | undefined) => (p != null && p < 0.0001 ? "P < 0.0001" : `P = ${num(p)}`);
 
+/** "p=0.0123", or "p<0.0001": the bracket label that names the P value plainly. */
+export const pEquals = (p: number | null | undefined) => (p != null && p < 0.0001 ? "p<0.0001" : `p=${num(p)}`);
+
 export const isSignificant = (p: number | null | undefined): p is number => p != null && !Number.isNaN(p) && p < 0.05;
 
 /** Prism's summary of a P value: "****" (below 0.0001) to "*" (below 0.05), else

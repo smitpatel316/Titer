@@ -73,7 +73,7 @@ export const GRAPH_CHOICES = {
   xyReplicates: ["mean", "each"],
   pieValue: ["sum", "mean"],
   groupLayout: ["interleaved", "separated"],
-  sigDisplay: ["stars", "pvalue", "letters"],
+  sigDisplay: ["stars", "pvalue", "pvalue-eq", "letters"],
   regBand: ["confidence", "prediction"],
   residualsAs: ["x", "qq"],
   survivalMode: ["codes", "counts"],
@@ -195,8 +195,10 @@ export interface GraphOptions {
   binWidth?: number;
   // Significance annotations (Column and grouped graphs): read a sibling analysis's
   // pairwise comparisons and draw brackets. `sigAnalysisId` is the source analysis
-  // node; `sigPairs` are the comparison keys (see significance-overlay) to draw;
-  // `sigDisplay`: star marks, raw P values, or letters over every group (no brackets).
+  // node; `sigPairs` are the comparisons to draw — a comparison's own key, the
+  // pairKey of its two groups, or both group names named bare (see
+  // significance-overlay); `sigDisplay`: star marks, raw P values ("P = …" or
+  // "p=…"), or letters over every group (no brackets).
   sigAnalysisId?: string;
   sigPairs?: string[];
   sigDisplay: Choice<"sigDisplay">;
