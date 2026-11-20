@@ -33,6 +33,24 @@ export const MODEL_LABEL: Record<NonlinearModel, string> = {
   "inhibitor-4pl-normalized-logx": "log(inhibitor) vs. normalized response -- Variable slope",
   "inhibitor-3pl-normalized-x": "[Inhibitor] vs. normalized response",
   "inhibitor-4pl-normalized-x": "[Inhibitor] vs. normalized response -- Variable slope",
+  // 1.8 classic-curves completion (B6 §Dose-response Special, §Standard,
+  // §Growth, §Linear quadratic, §Classic).
+  "biphasic-logx": "Biphasic, X is log(concentration)",
+  "biphasic-x": "Biphasic, X is concentration",
+  "bell-shaped-logx": "Bell-shaped, X is log(concentration)",
+  "bell-shaped-x": "Bell-shaped, X is concentration",
+  "absolute-ic50-logx": "Absolute IC50, X is log(concentration)",
+  "absolute-ic50-x": "Absolute IC50, X is concentration",
+  "pade-11": "Pade (1,1) approximant",
+  "power-series": "Power series",
+  "exponential-plateau": "Exponential plateau",
+  "beta-growth-decay": "Beta growth then decay",
+  "lq-fraction-surviving": "Linear quadratic cell death (Y is fraction of cells surviving)",
+  "lq-percent-surviving": "Linear quadratic survival (Y is percentage)",
+  "lq-fraction-dead": "Linear quadratic cell death (Y is fraction of dead cells)",
+  "lq-percent-dead": "Linear quadratic survival (Y is percentage cells dead)",
+  "lq-count-alive": "Linear quadratic survival (Y is # alive cells)",
+  "lq-count-dead": "Linear quadratic survival (Y is # dead cells)",
   "asymmetric-5pl-logx": "Asymmetric sigmoidal, 5PL, X is log(concentration)",
   "asymmetric-5pl-x": "Asymmetric sigmoidal, 5PL, X is concentration",
   "semilog-line": "Semilog line",
@@ -187,6 +205,18 @@ const span = difference("Top", "Bottom");
 /** Span for a normalized curve: Bottom=0, Top=100 by construction, so the
  *  span is the constant 100 (a derived row with no CI, like "X center"). */
 const span100: Derived = { label: "Span", expr: "100" };
+/** Absolute IC50: the X where the 4PL reads 50 in absolute units (not 50%
+ *  of the span) — valid only when Top > 50 > Bottom, else NA. The logx
+ *  form solves 10^((LogEC50−X)·H) = (Top−50)/(50−Bottom); the x form
+ *  solves (EC50/X)^H = (Top−50)/(50−Bottom). */
+const absoluteIC50Logx: Derived = {
+  label: "Absolute IC50",
+  expr: `ifelse(cf[["Top"]]>50 & 50>cf[["Bottom"]],cf[["LogEC50"]]-log10((cf[["Top"]]-50)/(50-cf[["Bottom"]]))/cf[["HillSlope"]],NA_real_)`,
+};
+const absoluteIC50X: Derived = {
+  label: "Absolute IC50",
+  expr: `ifelse(cf[["Top"]]>50 & 50>cf[["Bottom"]],cf[["EC50"]]*((50-cf[["Bottom"]])/(cf[["Top"]]-50))^(1/cf[["HillSlope"]]),NA_real_)`,
+};
 /** Ki from a log midpoint: Ki = 10^LogIC50 / D, where D = 1 + [L]/Kd is a
  *  constant the wizard supplies — so log Ki's SE is logIC50's SE, and the
  *  Ki CI is 10^ the logIC50 CI, over D. (Cheng–Prusoff; plan 28.) */
@@ -735,6 +765,264 @@ export function modelSpec(
         curveFn:
           'g<-function(xv,p) ifelse(xv==0,0,100/(1+(xv/p[["IC50"]])^p[["HillSlope"]]))',
         dose: { expr, midpoint: "IC50" },
+      };
+    }
+    case "biphasic-logx": {
+      // B6 Special logx #2: two agonist phases on log X — Y=Bottom +
+      // Span·Frac/(1+10^((LogEC50_1−X)·nH1)) + Span·(1−Frac)/(1+10^((LogEC50_2−X)·nH2)).
+      // Two midpoints, so no dose field (comparison/ECanything need one).
+      const expr =
+        "Bottom+(Top-Bottom)*Frac/(1+10^((LogEC50_1-x)*nH1))+(Top-Bottom)*(1-Frac)/(1+10^((LogEC50_2-x)*nH2))";
+      const starts = "list(Bottom=min(y),Top=max(y),LogEC50_1=log10(median(x))-1,LogEC50_2=log10(median(x))+1,nH1=1,nH2=1,Frac=0.5)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, starts)}`,
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+        ],
+        terms: ["Bottom", "Top", "LogEC50_1", "LogEC50_2", "nH1", "nH2", "Frac"],
+        derived: [tenTo("EC50_1", "LogEC50_1"), tenTo("EC50_2", "LogEC50_2"), span],
+        curveFn:
+          'g<-function(xv,p) p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])*p[["Frac"]]/(1+10^((p[["LogEC50_1"]]-xv)*p[["nH1"]]))+(p[["Top"]]-p[["Bottom"]])*(1-p[["Frac"]])/(1+10^((p[["LogEC50_2"]]-xv)*p[["nH2"]]))',
+      };
+    }
+    case "biphasic-x": {
+      // B6 Special X #2: the raw-concentration twin — Y=Bottom +
+      // Span·Frac/(1+(EC50_1/X)^nH1) + Span·(1−Frac)/(1+(EC50_2/X)^nH2).
+      // At X = 0 both sections vanish, so the curve is its Bottom there.
+      const expr =
+        "ifelse(x==0,Bottom,Bottom+(Top-Bottom)*Frac/(1+(EC50_1/x)^nH1)+(Top-Bottom)*(1-Frac)/(1+(EC50_2/x)^nH2))";
+      const starts = "list(Bottom=min(y),Top=max(y),EC50_1=median(x[x>0])/10,EC50_2=median(x[x>0])*10,nH1=1,nH2=1,Frac=0.5)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, starts)}`,
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+        ],
+        terms: ["Bottom", "Top", "EC50_1", "EC50_2", "nH1", "nH2", "Frac"],
+        derived: [span],
+        nonNegativeX: true,
+        curveFn:
+          'g<-function(xv,p) ifelse(xv==0,p[["Bottom"]],p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])*p[["Frac"]]/(1+(p[["EC50_1"]]/xv)^p[["nH1"]])+(p[["Top"]]-p[["Bottom"]])*(1-p[["Frac"]])/(1+(p[["EC50_2"]]/xv)^p[["nH2"]]))',
+      };
+    }
+    case "bell-shaped-logx": {
+      // B6 Special logx #3: up then down — Y=Dip + Span1/(1+10^((LogEC50_1−X)·nH1))
+      // + Span2/(1+10^((X−LogEC50_2)·nH2)), Span1=Plateau1−Dip, Span2=Plateau2−Dip.
+      const expr =
+        "Dip+(Plateau1-Dip)/(1+10^((LogEC50_1-x)*nH1))+(Plateau2-Dip)/(1+10^((x-LogEC50_2)*nH2))";
+      const starts = "list(Plateau1=max(y),Plateau2=max(y),Dip=min(y),LogEC50_1=log10(median(x))-1,LogEC50_2=log10(median(x))+1,nH1=1,nH2=1)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, starts)}`,
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+        ],
+        terms: ["Plateau1", "Plateau2", "Dip", "LogEC50_1", "LogEC50_2", "nH1", "nH2"],
+        derived: [
+          tenTo("EC50_1", "LogEC50_1"),
+          tenTo("EC50_2", "LogEC50_2"),
+          difference("Plateau1", "Dip", "Span1"),
+          difference("Plateau2", "Dip", "Span2"),
+        ],
+        curveFn:
+          'g<-function(xv,p) p[["Dip"]]+(p[["Plateau1"]]-p[["Dip"]])/(1+10^((p[["LogEC50_1"]]-xv)*p[["nH1"]]))+(p[["Plateau2"]]-p[["Dip"]])/(1+10^((xv-p[["LogEC50_2"]])*p[["nH2"]]))',
+      };
+    }
+    case "bell-shaped-x": {
+      // B6 Special X #3: the raw-concentration twin — at X = 0 the first
+      // section vanishes and the second is whole, so the curve is Plateau2.
+      const expr =
+        "ifelse(x==0,Plateau2,Dip+(Plateau1-Dip)/(1+(EC50_1/x)^nH1)+(Plateau2-Dip)/(1+(x/EC50_2)^nH2))";
+      const starts = "list(Plateau1=max(y),Plateau2=max(y),Dip=min(y),EC50_1=median(x[x>0])/10,EC50_2=median(x[x>0])*10,nH1=1,nH2=1)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, starts)}`,
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+        ],
+        terms: ["Plateau1", "Plateau2", "Dip", "EC50_1", "EC50_2", "nH1", "nH2"],
+        derived: [difference("Plateau1", "Dip", "Span1"), difference("Plateau2", "Dip", "Span2")],
+        nonNegativeX: true,
+        curveFn:
+          'g<-function(xv,p) ifelse(xv==0,p[["Plateau2"]],p[["Dip"]]+(p[["Plateau1"]]-p[["Dip"]])/(1+(p[["EC50_1"]]/xv)^p[["nH1"]])+(p[["Plateau2"]]-p[["Dip"]])/(1+(xv/p[["EC50_2"]])^p[["nH2"]]))',
+      };
+    }
+    case "absolute-ic50-logx": {
+      // B6 Special logx #11: the 4PL fit (same as sigmoidal-4pl-logx),
+      // reporting the X where Y = 50 in absolute units as well.
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(FOUR_LOG, `list(Bottom=min(y),Top=max(y),LogEC50=median(x),HillSlope=${SIGN})`)}`,
+        retryFits: [
+          {
+            fit: `m<-nls(y~${FOUR_LOG},start=list(Bottom=min(y),Top=max(y),LogEC50=median(x),HillSlope=${SIGN}),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(FOUR_LOG, `list(Bottom=min(y),Top=max(y),LogEC50=median(x),HillSlope=${SIGN})`)}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["Bottom", "Top", "LogEC50", "HillSlope"],
+        derived: [tenTo("EC50", "LogEC50"), span, absoluteIC50Logx],
+        curveFn:
+          'g<-function(xv,p) p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+10^((p[["LogEC50"]]-xv)*p[["HillSlope"]]))',
+        asymptotes: ["Bottom", "Top"],
+        dose: { expr: FOUR_LOG, midpoint: "LogEC50" },
+      };
+    }
+    case "absolute-ic50-x": {
+      // B6 Special X #11: the raw-concentration twin.
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(FOUR_X, `list(Bottom=min(y),Top=max(y),EC50=median(x[x>0]),HillSlope=${SIGN})`)}`,
+        retryFits: [
+          {
+            fit: `m<-nls(y~${FOUR_X},start=list(Bottom=min(y),Top=max(y),EC50=median(x[x>0]),HillSlope=${SIGN}),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(FOUR_X, `list(Bottom=min(y),Top=max(y),EC50=median(x[x>0]),HillSlope=${SIGN})`)}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["Bottom", "Top", "EC50", "HillSlope"],
+        derived: [span, absoluteIC50X],
+        nonNegativeX: true,
+        curveFn:
+          'g<-function(xv,p) ifelse(xv==0,p[["Bottom"]],p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+(p[["EC50"]]/xv)^p[["HillSlope"]]))',
+        asymptotes: ["Bottom", "Top"],
+        dose: { expr: FOUR_X, midpoint: "EC50" },
+      };
+    }
+    case "pade-11": {
+      // B6 Standard #10: Y=(A0+A1·X)/(1+B1·X) — Prism's standard curve
+      // for interpolating when the curve plateaus at large concentrations.
+      // The guide's starts are all 1.0.
+      const expr = "(A0+A1*x)/(1+B1*x)";
+      const starts = "list(A0=1,A1=1,B1=1)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, starts)}`,
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+        ],
+        terms: ["A0", "A1", "B1"],
+        nonNegativeX: true,
+        curveFn: 'g<-function(xv,p) (p[["A0"]]+p[["A1"]]*xv)/(1+p[["B1"]]*xv)',
+      };
+    }
+    case "power-series": {
+      // B6 Classic #13: Y=A·X^B + C·X^D. The starts scale the two terms
+      // to half the max Y at the max X, so neither starts orders of
+      // magnitude off the data (max(y)/2 each would be, for B=1/D=2).
+      const expr = "A*x^B+C*x^D";
+      const starts = "list(A=max(y)/(2*max(x)),B=1,C=max(y)/(2*max(x)^2),D=2)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, starts)}`,
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+        ],
+        terms: ["A", "B", "C", "D"],
+        nonNegativeX: true,
+        curveFn: 'g<-function(xv,p) p[["A"]]*xv^p[["B"]]+p[["C"]]*xv^p[["D"]]',
+      };
+    }
+    case "exponential-plateau": {
+      // B6 Growth #3: Y=YM−(YM−Y0)·exp(−K·X) — the same shape as
+      // one-phase association, a separate entry by the codebase's
+      // precedent (different Prism parameter names).
+      const expr = "YM-(YM-Y0)*exp(-K*x)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(Y0=y[which.min(x)],YM=max(y),K=0.5)")}`,
+        terms: ["Y0", "YM", "K"],
+        derived: [overK("Half-life", "log(2)", "K"), difference("YM", "Y0")],
+        curveFn: 'g<-function(xv,p) p[["YM"]]-(p[["YM"]]-p[["Y0"]])*exp(-p[["K"]]*xv)',
+      };
+    }
+    case "beta-growth-decay": {
+      // B6 Growth #6: Yin et al. 2003 — Y=Wmax·(1+(Te−X)/(Te−Tm))·(X/Te)^(Te/(Te−Tm)).
+      // The weight decays and reaches zero again at 2·Te−Tm.
+      const expr = "Wmax*(1+(Te-x)/(Te-Tm))*(x/Te)^(Te/(Te-Tm))";
+      const starts = "list(Wmax=max(y),Te=x[which.max(y)],Tm=x[which.max(y)]/2)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, starts)}`,
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+        ],
+        terms: ["Wmax", "Te", "Tm"],
+        nonNegativeX: true,
+        curveFn:
+          'g<-function(xv,p) p[["Wmax"]]*(1+(p[["Te"]]-xv)/(p[["Te"]]-p[["Tm"]]))*(xv/p[["Te"]])^(p[["Te"]]/(p[["Te"]]-p[["Tm"]]))',
+      };
+    }
+    case "lq-fraction-surviving":
+    case "lq-percent-surviving":
+    case "lq-fraction-dead":
+    case "lq-percent-dead":
+    case "lq-count-alive":
+    case "lq-count-dead": {
+      // B6 §Linear quadratic: Y = exp(−(A·X+B·X²)), scaled to percent or
+      // counts, surviving or dead. "Total" (the count variants' N) is a
+      // fitted parameter — the guide's form for "# alive/dead cells" was
+      // not fetched, so the name is Titer's.
+      const form =
+        model === "lq-fraction-surviving"
+          ? "exp(-(A*x+B*x^2))"
+          : model === "lq-percent-surviving"
+            ? "100*exp(-(A*x+B*x^2))"
+            : model === "lq-fraction-dead"
+              ? "1-exp(-(A*x+B*x^2))"
+              : model === "lq-percent-dead"
+                ? "100*(1-exp(-(A*x+B*x^2)))"
+                : model === "lq-count-alive"
+                  ? "Total*exp(-(A*x+B*x^2))"
+                  : "Total*(1-exp(-(A*x+B*x^2)))";
+      const isCount = model === "lq-count-alive" || model === "lq-count-dead";
+      const starts = isCount ? "list(A=0.1,B=0.01,Total=max(y))" : "list(A=0.1,B=0.01)";
+      const gForm =
+        model === "lq-fraction-surviving"
+          ? "exp(-(p[[\"A\"]]*xv+p[[\"B\"]]*xv^2))"
+          : model === "lq-percent-surviving"
+            ? "100*exp(-(p[[\"A\"]]*xv+p[[\"B\"]]*xv^2))"
+            : model === "lq-fraction-dead"
+              ? "1-exp(-(p[[\"A\"]]*xv+p[[\"B\"]]*xv^2))"
+              : model === "lq-percent-dead"
+                ? "100*(1-exp(-(p[[\"A\"]]*xv+p[[\"B\"]]*xv^2)))"
+                : model === "lq-count-alive"
+                  ? "p[[\"Total\"]]*exp(-(p[[\"A\"]]*xv+p[[\"B\"]]*xv^2))"
+                  : "p[[\"Total\"]]*(1-exp(-(p[[\"A\"]]*xv+p[[\"B\"]]*xv^2)))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(form, starts)}`,
+        terms: isCount ? ["A", "B", "Total"] : ["A", "B"],
+        nonNegativeX: true,
+        curveFn: `g<-function(xv,p) ${gForm}`,
       };
     }
     case "asymmetric-5pl-logx": {

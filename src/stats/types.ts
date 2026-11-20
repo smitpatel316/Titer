@@ -97,6 +97,10 @@ export const DOSE_MODELS = [
   "inhibitor-4pl-normalized-logx",
   "inhibitor-3pl-normalized-x",
   "inhibitor-4pl-normalized-x",
+  // 1.8 classic-curves completion (B6 §Dose-response Special): the
+  // absolute-IC50 models are 4PLs (one midpoint), so they are dose models.
+  "absolute-ic50-logx",
+  "absolute-ic50-x",
   // Binding — Competition (plan 28): the one-site Fit logIC50 is the
   // inhibitor 3PL above; the two-site and homologous competition curves
   // are dose-response curves too, so they live here (wizard dose list,
@@ -143,6 +147,23 @@ export const NONLINEAR_MODELS = [
   "centered-fourth",
   "centered-fifth",
   "centered-sixth",
+  // 1.8 classic-curves completion (B6 §Dose-response Special, §Standard,
+  // §Growth, §Linear quadratic, §Classic): two midpoints, so NOT dose
+  // models (curve comparison and ECanything need a single midpoint).
+  "biphasic-logx",
+  "biphasic-x",
+  "bell-shaped-logx",
+  "bell-shaped-x",
+  "pade-11",
+  "power-series",
+  "exponential-plateau",
+  "beta-growth-decay",
+  "lq-fraction-surviving",
+  "lq-percent-surviving",
+  "lq-fraction-dead",
+  "lq-percent-dead",
+  "lq-count-alive",
+  "lq-count-dead",
   ...KINETIC_MODELS,
   // 1.8 classic-curves completion (B6 §Growth #2): the log-population
   // growth curve — the log-Y twin of exponential-growth.

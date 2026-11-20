@@ -6037,6 +6037,7 @@ check("classic curves interpolate: the interpolate wizard offers all four classi
     "boltzmann-sigmoid",
     "lorentzian",
     "sine-wave",
+    "pade-11",
   ]);
 });
 

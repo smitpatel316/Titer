@@ -114,6 +114,21 @@ export const invertMethod = (model: NonlinearModel): InvertMethod =>
   model === "centered-fourth" ||
   model === "centered-fifth" ||
   model === "centered-sixth" ||
+  // 1.8 classic-curves completion (B6 §Dose-response Special, §Classic,
+  // §Growth, §Linear quadratic): two midpoints / no closed form — invert
+  // numerically (uniroot on the fitted curve).
+  model === "biphasic-logx" ||
+  model === "biphasic-x" ||
+  model === "bell-shaped-logx" ||
+  model === "bell-shaped-x" ||
+  model === "power-series" ||
+  model === "beta-growth-decay" ||
+  model === "lq-fraction-surviving" ||
+  model === "lq-percent-surviving" ||
+  model === "lq-fraction-dead" ||
+  model === "lq-percent-dead" ||
+  model === "lq-count-alive" ||
+  model === "lq-count-dead" ||
   // v2 item 23: a user equation has no closed-form inverse — the interpolation path
   // inverts it numerically (uniroot on the fitted curve), as for the polynomials.
   model === "user-defined" ||
@@ -312,6 +327,45 @@ export function invertModel(
       if (r == null || ic50 == null || h == null || h === 0) return null;
       const x = ic50 * r ** (1 / h);
       return x > 0 ? x : null;
+    }
+    case "absolute-ic50-logx": {
+      // B6 Special logx #11: the 4PL inverse (same as sigmoidal-4pl-logx).
+      const r = ratio();
+      const mid = c("LogEC50");
+      const h = c("HillSlope");
+      if (r == null || mid == null || h == null || h === 0) return null;
+      return mid - Math.log10(r) / h;
+    }
+    case "absolute-ic50-x": {
+      // B6 Special X #11: the 4PL inverse (same as sigmoidal-4pl-x).
+      const r = ratio();
+      const ec50 = c("EC50");
+      const h = c("HillSlope");
+      if (r == null || ec50 == null || h == null || h === 0) return null;
+      const x = ec50 / r ** (1 / h);
+      return x > 0 ? x : null;
+    }
+    case "pade-11": {
+      // B6 Standard #10: Y=(A0+A1·X)/(1+B1·X), so X = (A0−Y)/(Y·B1−A1).
+      const a0 = c("A0");
+      const a1 = c("A1");
+      const b1 = c("B1");
+      if (a0 == null || a1 == null || b1 == null) return null;
+      const denom = y * b1 - a1;
+      if (denom === 0) return null;
+      const x = (a0 - y) / denom;
+      return x >= 0 ? x : null;
+    }
+    case "exponential-plateau": {
+      // B6 Growth #3: Y=YM−(YM−Y0)·exp(−K·X), so
+      // X = −ln((YM−Y)/(YM−Y0))/K.
+      const y0 = c("Y0");
+      const ym = c("YM");
+      const k = c("K");
+      if (y0 == null || ym == null || k == null || k === 0 || ym === y0) return null;
+      const q = (ym - y) / (ym - y0);
+      if (q <= 0) return null;
+      return -Math.log(q) / k;
     }
     case "asymmetric-5pl-logx": {
       const r = ratio();

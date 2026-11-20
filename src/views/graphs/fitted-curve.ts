@@ -91,6 +91,79 @@ export function evaluate(
     case "inhibitor-4pl-normalized-x":
       // B6 Inhib #8: the (x/IC50) form falls with HillSlope > 0.
       return 100 / (1 + (x / c("IC50")) ** hill);
+    case "biphasic-logx": {
+      // B6 Special logx #2.
+      const span = c("Top") - c("Bottom");
+      return (
+        c("Bottom") +
+        (span * c("Frac")) / (1 + 10 ** ((c("LogEC50_1") - x) * c("nH1"))) +
+        (span * (1 - c("Frac"))) / (1 + 10 ** ((c("LogEC50_2") - x) * c("nH2")))
+      );
+    }
+    case "biphasic-x": {
+      // B6 Special X #2.
+      const span = c("Top") - c("Bottom");
+      return (
+        c("Bottom") +
+        (span * c("Frac")) / (1 + (c("EC50_1") / x) ** c("nH1")) +
+        (span * (1 - c("Frac"))) / (1 + (c("EC50_2") / x) ** c("nH2"))
+      );
+    }
+    case "bell-shaped-logx": {
+      // B6 Special logx #3.
+      return (
+        c("Dip") +
+        (c("Plateau1") - c("Dip")) / (1 + 10 ** ((c("LogEC50_1") - x) * c("nH1"))) +
+        (c("Plateau2") - c("Dip")) / (1 + 10 ** ((x - c("LogEC50_2")) * c("nH2")))
+      );
+    }
+    case "bell-shaped-x": {
+      // B6 Special X #3.
+      return (
+        c("Dip") +
+        (c("Plateau1") - c("Dip")) / (1 + (c("EC50_1") / x) ** c("nH1")) +
+        (c("Plateau2") - c("Dip")) / (1 + (x / c("EC50_2")) ** c("nH2"))
+      );
+    }
+    case "absolute-ic50-logx":
+      // B6 Special logx #11: the 4PL fit.
+      return bottom + rise / (1 + 10 ** ((c("LogEC50") - x) * hill));
+    case "absolute-ic50-x":
+      // B6 Special X #11: the 4PL fit.
+      return bottom + rise / (1 + (c("EC50") / x) ** hill);
+    case "pade-11":
+      // B6 Standard #10: Y=(A0+A1·X)/(1+B1·X).
+      return (c("A0") + c("A1") * x) / (1 + c("B1") * x);
+    case "power-series":
+      // B6 Classic #13: Y=A·X^B + C·X^D.
+      return c("A") * x ** c("B") + c("C") * x ** c("D");
+    case "exponential-plateau":
+      // B6 Growth #3: Y=YM−(YM−Y0)·exp(−K·X).
+      return c("YM") - (c("YM") - c("Y0")) * Math.exp(-c("K") * x);
+    case "beta-growth-decay": {
+      // B6 Growth #6: Yin et al. 2003.
+      const te = c("Te");
+      const tm = c("Tm");
+      return c("Wmax") * (1 + (te - x) / (te - tm)) * (x / te) ** (te / (te - tm));
+    }
+    case "lq-fraction-surviving":
+      // B6 §Linear quadratic #1.
+      return Math.exp(-(c("A") * x + c("B") * x ** 2));
+    case "lq-percent-surviving":
+      // B6 §Linear quadratic #2.
+      return 100 * Math.exp(-(c("A") * x + c("B") * x ** 2));
+    case "lq-fraction-dead":
+      // B6 §Linear quadratic #4.
+      return 1 - Math.exp(-(c("A") * x + c("B") * x ** 2));
+    case "lq-percent-dead":
+      // B6 §Linear quadratic #5.
+      return 100 * (1 - Math.exp(-(c("A") * x + c("B") * x ** 2)));
+    case "lq-count-alive":
+      // B6 §Linear quadratic #3.
+      return c("Total") * Math.exp(-(c("A") * x + c("B") * x ** 2));
+    case "lq-count-dead":
+      // B6 §Linear quadratic #6.
+      return c("Total") * (1 - Math.exp(-(c("A") * x + c("B") * x ** 2)));
     case "asymmetric-5pl-logx":
       return bottom + rise / (1 + 10 ** ((c("LogEC50") + Math.log10(2 ** (1 / s) - 1) / hill - x) * hill)) ** s;
     case "asymmetric-5pl-x":

@@ -417,6 +417,24 @@ const NONLINEAR_MODELS: Record<string, NonlinearModel> = {
   "log(inhibitor) vs. normalized response -- Variable slope": "inhibitor-4pl-normalized-logx",
   "[Inhibitor] vs. normalized response": "inhibitor-3pl-normalized-x",
   "[Inhibitor] vs. normalized response -- Variable slope": "inhibitor-4pl-normalized-x",
+  // 1.8 classic-curves completion (B6 §Dose-response Special, §Standard,
+  // §Growth, §Linear quadratic, §Classic): verbatim Model-tab names.
+  "Biphasic, X is concentration": "biphasic-x",
+  "Biphasic, X is log(concentration)": "biphasic-logx",
+  "Bell-shaped, X is concentration": "bell-shaped-x",
+  "Bell-shaped, X is log(concentration)": "bell-shaped-logx",
+  "Absolute IC50, X is concentration": "absolute-ic50-x",
+  "Absolute IC50, X is log(concentration)": "absolute-ic50-logx",
+  "Pade (1,1) approximant": "pade-11",
+  "Power series: Y=A*X^B + C*X^D": "power-series",
+  "Exponential plateau": "exponential-plateau",
+  "Beta growth then decay": "beta-growth-decay",
+  "Linear quadratic cell death (Y is fraction of cells surviving)": "lq-fraction-surviving",
+  "Linear quadratic survival (Y is percentage)": "lq-percent-surviving",
+  "Linear quadratic survival (Y is # alive cells)": "lq-count-alive",
+  "Linear quadratic cell death (Y is fraction of dead cells)": "lq-fraction-dead",
+  "Linear quadratic survival (Y is percentage cells dead)": "lq-percent-dead",
+  "Linear quadratic survival (Y is # dead cells)": "lq-count-dead",
 };
 
 const genId = (type: string) => `${type}_${Math.random().toString(36).slice(2, 10)}`;
