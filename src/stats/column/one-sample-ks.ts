@@ -184,8 +184,9 @@ export const oneSampleKsSpec: ColumnTestSpec<OneSampleKsParams> = {
   notes: (params, groups) => {
     const p = resolveOneSampleKsParams(params);
     const tail = p.tails === "two-sided" ? "Two-tailed P value." : "One-tailed P value.";
+    const article = p.distribution === "exponential" ? "an" : "a";
     const parts = [
-      `Compares each column's cumulative distribution with a ${DIST_LABEL[p.distribution]} distribution ` +
+      `Compares each column's cumulative distribution with ${article} ${DIST_LABEL[p.distribution]} distribution ` +
         `(${p.paramsFrom === "estimated" ? "parameters estimated from the sample" : "parameters as entered"}). ` +
         `D is the largest absolute difference between the two cumulative distributions. ${tail}`,
     ];

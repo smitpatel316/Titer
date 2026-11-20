@@ -9937,6 +9937,119 @@ check("the normality-tests wizard asks for the test and lognormality, and D'Agos
   );
 });
 
+check("the one-sample KS wizard asks for the distribution and its parameters (seq 170)", () => {
+  const data = treatments(["A", "B"]);
+  const asked = (a: Record<string, string | string[]> = {}) =>
+    WIZARDS["one-sample-ks"]!.questions(a, readTable(data)).flatMap((q) => (q ? [q.id] : []));
+  // Defaults (estimated parameters): no parameter questions at all.
+  deepStrictEqual(asked(), ["sets", "distribution", "paramsFrom", "tails"]);
+  deepStrictEqual(
+    WIZARDS["one-sample-ks"]!.questions({}, readTable(treatments(["A"]))).flatMap((q) => (q ? [q.id] : [])),
+    ["distribution", "paramsFrom", "tails"],
+  );
+  const distQ = WIZARDS["one-sample-ks"]!.questions({}, readTable(data))[1];
+  ok(distQ && distQ.kind === "choice");
+  deepStrictEqual(
+    distQ.options.map((o) => o.value),
+    ["normal", "lognormal", "exponential", "uniform"],
+  );
+  // Specified parameters: only the chosen distribution's are asked.
+  deepStrictEqual(asked({ distribution: "normal", paramsFrom: "specified" }), [
+    "sets",
+    "distribution",
+    "paramsFrom",
+    "mean",
+    "sd",
+    "tails",
+  ]);
+  deepStrictEqual(asked({ distribution: "lognormal", paramsFrom: "specified" }), [
+    "sets",
+    "distribution",
+    "paramsFrom",
+    "meanlog",
+    "sdlog",
+    "tails",
+  ]);
+  deepStrictEqual(asked({ distribution: "exponential", paramsFrom: "specified" }), [
+    "sets",
+    "distribution",
+    "paramsFrom",
+    "rate",
+    "tails",
+  ]);
+  deepStrictEqual(asked({ distribution: "uniform", paramsFrom: "specified" }), [
+    "sets",
+    "distribution",
+    "paramsFrom",
+    "min",
+    "max",
+    "tails",
+  ]);
+  // The SD question refuses 0 or less (the runner refuses it too).
+  const sdQ = WIZARDS["one-sample-ks"]!.questions({ distribution: "normal", paramsFrom: "specified" }, readTable(data))[4];
+  ok(sdQ && sdQ.kind === "number" && sdQ.validate?.(0) !== undefined && sdQ.validate?.(1) === undefined);
+  deepStrictEqual(
+    WIZARDS["one-sample-ks"]!.finish(
+      { distribution: "normal", paramsFrom: "specified", mean: 0, sd: 1, tails: "two-sided" },
+      readTable(data),
+    ),
+    {
+      type: "one-sample-ks",
+      params: { distribution: "normal", paramsFrom: "specified", mean: 0, sd: 1, tails: "two-sided" },
+    },
+  );
+  deepStrictEqual(
+    WIZARDS["one-sample-ks"]!.finish(
+      { distribution: "uniform", paramsFrom: "specified", min: 0, max: 10, tails: "greater" },
+      readTable(data),
+    ).params,
+    { distribution: "uniform", paramsFrom: "specified", min: 0, max: 10, tails: "greater" },
+  );
+  // Unanswered: the standard Normal, estimated, two-tailed.
+  deepStrictEqual(WIZARDS["one-sample-ks"]!.finish({}, readTable(data)), {
+    type: "one-sample-ks",
+    params: { distribution: "normal", paramsFrom: "estimated", tails: "two-sided" },
+  });
+  strictEqual(
+    WIZARDS["one-sample-ks"]!.checklist?.({}, readTable(data))?.title,
+    "One-sample Kolmogorov–Smirnov test — checklist",
+  );
+  // The menu offers it right after the two-sample Kolmogorov-Smirnov test
+  // on column tables.
+  const columnOrder = analysisOptionsForTable("column").map((o) => o.value);
+  strictEqual(columnOrder[columnOrder.indexOf("one-sample-ks") - 1], "kolmogorov-smirnov");
+  // The params survive a .hlx round-trip; a bogus distribution is dropped
+  // by the reader (the runner takes its default).
+  const withAnalysis: ProjectFilePayload = {
+    ...payload,
+    nodes: {
+      ...payload.nodes,
+      a1: {
+        id: "a1",
+        type: "analysis",
+        name: "A",
+        parentId: "t1",
+        analysisType: "one-sample-ks",
+        analysisParams: { distribution: "exponential", paramsFrom: "specified", rate: 2, tails: "greater" },
+      },
+    },
+    childOrder: { t1: ["a1"] },
+  };
+  deepStrictEqual(read(serializeProjectFile(withAnalysis)).project.nodes.a1.analysisParams, {
+    distribution: "exponential",
+    paramsFrom: "specified",
+    rate: 2,
+    tails: "greater",
+  });
+  const bogus = JSON.parse(serializeProjectFile(withAnalysis));
+  bogus.project.nodes.a1.analysisParams.distribution = "weibull";
+  strictEqual(
+    (read(JSON.stringify(bogus)).project.nodes.a1.analysisParams as { distribution?: string } | undefined)
+      ?.distribution,
+    undefined,
+  );
+});
+
 check("the mixed-effects wizard asks the layout's questions, and the menu offers it next to the analysis it replaces", () => {
   const asked = (data: TableData, a: Record<string, string | string[]> = {}) =>
     WIZARDS["mixed-effects"]!.questions(a, readTable(data)).flatMap((q) => (q ? [q.id] : []));

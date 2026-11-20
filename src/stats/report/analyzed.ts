@@ -54,7 +54,8 @@ export function analyzedOf(
         { normal: "Normal", lognormal: "Lognormal", exponential: "Exponential", uniform: "Uniform" }[
           (p?.distribution as string | undefined) ?? "normal"
         ] ?? "Normal";
-      return make(described, "list", `each against a ${dist} distribution`);
+      const article = dist === "Exponential" ? "an" : "a";
+      return make(described, "list", `each against ${article} ${dist} distribution`);
     }
     case "anova":
     case "kruskal-wallis": {

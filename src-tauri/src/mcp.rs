@@ -2820,7 +2820,7 @@ pub struct RunAnalysisArgs {
     pub project_id: Option<String>,
     /// The table to analyse, as shown by titer_list_tables.
     pub table_id: String,
-    /// One of the 54 analysis types — never "compare-many-groups" or
+    /// One of the 55 analysis types — never "compare-many-groups" or
     /// "interpolate" (pass a concrete type instead; see the tool text).
     pub analysis_type: String,
     /// Params for that analysis (the AnalysisParams member for the type);
@@ -8645,8 +8645,8 @@ mod tests {
     // ── Analyses (L4) ────────────────────────────────────────────────────
 
     #[test]
-    fn validate_analysis_type_accepts_the_54_and_refuses_wizard_values() {
-        assert_eq!(ANALYSIS_TYPES.len(), 54, "one entry per AnalysisType: {ANALYSIS_TYPES:?}");
+    fn validate_analysis_type_accepts_the_55_and_refuses_wizard_values() {
+        assert_eq!(ANALYSIS_TYPES.len(), 55, "one entry per AnalysisType: {ANALYSIS_TYPES:?}");
         for t in [
             "descriptive-statistics",
             "anova",
@@ -8658,6 +8658,7 @@ mod tests {
             "chi-square",
             "mcnemar",
             "cox-proportional-hazards",
+            "one-sample-ks",
         ] {
             assert!(validate_analysis_type(t).is_ok(), "{t}");
         }
