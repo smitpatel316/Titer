@@ -310,7 +310,8 @@ to a small server that runs only on your machine.
    Check it connected with `/mcps` or `opencode mcp list`.
 
    **Codex and Google Antigravity** also connect — see [docs/codex.md](docs/codex.md) and
-   [docs/antigravity.md](docs/antigravity.md) for their setup.
+   [docs/antigravity-setup.md](docs/antigravity-setup.md) for their setup
+   (deep reference: [docs/antigravity.md](docs/antigravity.md)).
 
 3. **Ask it things**, for example:
 
