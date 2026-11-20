@@ -8982,6 +8982,72 @@ check("grouped-scatter multi-sig: letters come from the first analysis only", ()
   deepStrictEqual(lettersComparisons(deriveComparisons(outcome)).length, 1);
 });
 
+check("grouped-scatter multi-sig: two copy tables' p= brackets both draw, stacked", () => {
+  // A grouped table, two groups × two rows; each copy table's multiple t tests
+  // compares A vs. B at row 1 (its cells), with its own P value.
+  const data = writeBlock(newGroupedTable(2, 2), 0, 0, [
+    ["r1", "1", "2", "3", "4"],
+    ["r2", "5", "6", "7", "8"],
+  ], "grouped");
+  const outcomeFor = (p: number) =>
+    ({
+      comparisons: [{ group1: "r2", group2: "", cells: [{ group: "A", row: 1 }, { group: "B", row: 1 }], p }],
+    }) as unknown as AnalysisOutcome;
+  const [fromA] = deriveComparisons(outcomeFor(0.03), "a1");
+  const [fromB] = deriveComparisons(outcomeFor(0.004), "a2");
+  const options = {
+    ...newGraphOptions("grouped-scatter"),
+    sigDisplay: "pvalue" as const,
+    sigAnalysisIds: ["a1", "a2"],
+    sigPairs: [sigPairKey(fromA), sigPairKey(fromB)],
+  };
+  const fig: GraphFigure = { data: [], layout: {} };
+  addSignificance(fig, readTable(data).columns, "grouped-scatter", options, [fromA, fromB]);
+  // One bracket per analysis: 3 lines each, one p= label each.
+  strictEqual((fig.layout.shapes as unknown[]).length, 6);
+  const labels = fig.layout.annotations as { text: string }[];
+  deepStrictEqual(
+    labels.map((a) => a.text),
+    ["P = 0.03", "P = 0.004"],
+  );
+  // The same pair from two analyses shares its X span, so the second bracket
+  // stacks above the first instead of overwriting it.
+  const brackets = fig.layout.shapes as { y0: number }[];
+  ok(brackets[3].y0 > brackets[0].y0, "the second copy's bracket sits higher");
+  // Ticking only the first analysis's pair draws only its bracket.
+  const oneFig: GraphFigure = { data: [], layout: {} };
+  addSignificance(
+    oneFig,
+    readTable(data).columns,
+    "grouped-scatter",
+    { ...options, sigPairs: [sigPairKey(fromA)] },
+    [fromA, fromB],
+  );
+  strictEqual((oneFig.layout.shapes as unknown[]).length, 3);
+  deepStrictEqual((oneFig.layout.annotations as { text: string }[]).map((a) => a.text), ["P = 0.03"]);
+});
+
+check("grouped-scatter multi-sig: a legacy single sigAnalysisId still draws its bracket", () => {
+  const data = writeBlock(newGroupedTable(2, 2), 0, 0, [
+    ["r1", "1", "2", "3", "4"],
+    ["r2", "5", "6", "7", "8"],
+  ], "grouped");
+  const outcome = {
+    comparisons: [{ group1: "r2", group2: "", cells: [{ group: "A", row: 1 }, { group: "B", row: 1 }], p: 0.03 }],
+  } as unknown as AnalysisOutcome;
+  const [comparison] = deriveComparisons(outcome);
+  const options = {
+    ...newGraphOptions("grouped-scatter"),
+    sigDisplay: "pvalue" as const,
+    sigAnalysisId: "a1",
+    sigPairs: [comparison.key],
+  };
+  const fig: GraphFigure = { data: [], layout: {} };
+  addSignificance(fig, readTable(data).columns, "grouped-scatter", options, [comparison]);
+  strictEqual((fig.layout.shapes as unknown[]).length, 3);
+  deepStrictEqual((fig.layout.annotations as { text: string }[]).map((a) => a.text), ["P = 0.03"]);
+});
+
 check("a cloned graph remaps the multi-sig list per entry (remapGraphOptions)", () => {
   const options = { ...newGraphOptions("grouped-scatter"), sigAnalysisIds: ["a1", "a9"] };
   const both = remapGraphOptions(options, { a1: "n1", a9: "n2" });
