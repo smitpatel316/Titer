@@ -2764,6 +2764,207 @@ check("summary subcolumns: interleaved scatter on a summary table draws centers,
   ok(!traces.some((t) => t.mode === "markers" && (t.name === "A" || t.name === "B")));
 });
 
+// ── Seq 209: the eight Prism 11.1 Multiple Variables graph kinds ──────────
+// Prism 11.1 added 8 Pro-gated MV kinds (Smit, Nov 18: in scope, "everything
+// Prism covers even the pro gated features"). Each reuses the existing builder
+// for the same shape with Prism's name and defaults (mean + SD error bars).
+// Fixture: three variables, four subjects each — means 5.5 / 6.5 / 7.5, every
+// SD sqrt(15).
+const mv209Table = (): TableData => ({
+  columns: ["Title", "A", "B", "C"],
+  rows: [
+    ["", "1", "2", "3"],
+    ["", "4", "5", "6"],
+    ["", "7", "8", "9"],
+    ["", "10", "11", "12"],
+  ],
+});
+
+type Mv209Trace = {
+  type?: string;
+  mode?: string;
+  x?: unknown;
+  y?: unknown;
+  error_y?: { array?: number[] };
+  median?: number[];
+};
+
+check("seq 209: the eight Prism 11.1 MV graph kinds are offered on Multiple Variables tables", () => {
+  const offered = GRAPH_OPTIONS_BY_TABLE.multiple.map((o) => o.value as string);
+  for (const kind of [
+    "mv-strip-plot",
+    "mv-summary-symbol",
+    "mv-bar-strip",
+    "mv-before-after-bar-strip",
+    "mv-before-after-strip",
+    "mv-box-whisker",
+    "mv-violin",
+    "mv-bar-chart",
+  ]) {
+    ok(offered.includes(kind), `MV picker should offer ${kind}, got: ${offered.join(", ")}`);
+  }
+});
+
+check("seq 209: strip plot draws each variable's values as points", () => {
+  const dataset = readTable(mv209Table());
+  const fig = GRAPHS["mv-strip-plot"].build(
+    dataset.numeric,
+    newGraphOptions("mv-strip-plot"),
+    paintOf(newGraphOptions("mv-strip-plot"), 3),
+    dataset.titles,
+  );
+  const traces = fig.data as Mv209Trace[];
+  // One points trace per variable (mode markers, one y per subject) — the
+  // center-line and error traces carry one y each, not four.
+  const points = traces.filter((t) => t.mode === "markers" && Array.isArray(t.y) && t.y.length === 4);
+  deepStrictEqual(points.map((t) => t.y), [
+    [1, 4, 7, 10],
+    [2, 5, 8, 11],
+    [3, 6, 9, 12],
+  ]);
+});
+
+check("seq 209: summary symbol plot draws the mean with SD error bars as points", () => {
+  const dataset = readTable(mv209Table());
+  const fig = GRAPHS["mv-summary-symbol"].build(
+    dataset.numeric,
+    newGraphOptions("mv-summary-symbol"),
+    paintOf(newGraphOptions("mv-summary-symbol"), 3),
+    dataset.titles,
+  );
+  const traces = fig.data as Mv209Trace[];
+  strictEqual(traces.length, 3);
+  deepStrictEqual(
+    traces.map((t) => t.y),
+    [[5.5], [6.5], [7.5]],
+  );
+  const sd = Math.sqrt(15);
+  for (const t of traces) {
+    strictEqual(t.mode, "markers");
+    ok(t.error_y?.array != null && Math.abs(t.error_y.array[0] - sd) < 1e-9, JSON.stringify(t.error_y));
+  }
+});
+
+check("seq 209: bar and strip plot draws bars at the mean with the values over them", () => {
+  const dataset = readTable(mv209Table());
+  const fig = GRAPHS["mv-bar-strip"].build(
+    dataset.numeric,
+    newGraphOptions("mv-bar-strip"),
+    paintOf(newGraphOptions("mv-bar-strip"), 3),
+    dataset.titles,
+  );
+  const traces = fig.data as Mv209Trace[];
+  const bars = traces.filter((t) => t.type === "bar");
+  deepStrictEqual(
+    bars.map((t) => t.y),
+    [[5.5], [6.5], [7.5]],
+  );
+  const points = traces.filter((t) => t.mode === "markers" && Array.isArray(t.y) && t.y.length === 4);
+  deepStrictEqual(points.map((t) => t.y), [
+    [1, 4, 7, 10],
+    [2, 5, 8, 11],
+    [3, 6, 9, 12],
+  ]);
+});
+
+check("seq 209: before-after bar and strip plot draws bars plus one line per subject", () => {
+  const dataset = readTable(mv209Table());
+  const fig = GRAPHS["mv-before-after-bar-strip"].build(
+    dataset.numeric,
+    newGraphOptions("mv-before-after-bar-strip"),
+    paintOf(newGraphOptions("mv-before-after-bar-strip"), 3),
+    dataset.titles,
+  );
+  const traces = fig.data as Mv209Trace[];
+  const bars = traces.filter((t) => t.type === "bar");
+  deepStrictEqual(
+    bars.map((t) => t.y),
+    [[5.5], [6.5], [7.5]],
+  );
+  const subjects = traces.filter((t) => t.mode === "lines+markers");
+  deepStrictEqual(subjects.map((t) => t.y), [
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 8, 9],
+    [10, 11, 12],
+  ]);
+});
+
+check("seq 209: before-after strip plot draws one line per subject", () => {
+  const dataset = readTable(mv209Table());
+  const fig = GRAPHS["mv-before-after-strip"].build(
+    dataset.numeric,
+    newGraphOptions("mv-before-after-strip"),
+    paintOf(newGraphOptions("mv-before-after-strip"), 3),
+    dataset.titles,
+  );
+  const traces = fig.data as Mv209Trace[];
+  const subjects = traces.filter((t) => t.mode === "lines+markers");
+  strictEqual(subjects.length, 4);
+  deepStrictEqual(subjects.map((t) => t.y), [
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 8, 9],
+    [10, 11, 12],
+  ]);
+});
+
+check("seq 209: box and whisker chart draws a box per variable", () => {
+  const dataset = readTable(mv209Table());
+  const fig = GRAPHS["mv-box-whisker"].build(
+    dataset.numeric,
+    newGraphOptions("mv-box-whisker"),
+    paintOf(newGraphOptions("mv-box-whisker"), 3),
+    dataset.titles,
+  );
+  const traces = fig.data as Mv209Trace[];
+  const boxes = traces.filter((t) => t.type === "box");
+  strictEqual(boxes.length, 3);
+  deepStrictEqual(
+    boxes.map((t) => t.median),
+    [[5.5], [6.5], [7.5]],
+  );
+});
+
+check("seq 209: violin plot draws a violin per variable", () => {
+  const dataset = readTable(mv209Table());
+  const fig = GRAPHS["mv-violin"].build(
+    dataset.numeric,
+    newGraphOptions("mv-violin"),
+    paintOf(newGraphOptions("mv-violin"), 3),
+    dataset.titles,
+  );
+  const traces = fig.data as Mv209Trace[];
+  const violins = traces.filter((t) => t.type === "violin");
+  strictEqual(violins.length, 3);
+  deepStrictEqual(violins.map((t) => t.y), [
+    [1, 4, 7, 10],
+    [2, 5, 8, 11],
+    [3, 6, 9, 12],
+  ]);
+});
+
+check("seq 209: bar chart draws the mean with SD error bars as bars", () => {
+  const dataset = readTable(mv209Table());
+  const fig = GRAPHS["mv-bar-chart"].build(
+    dataset.numeric,
+    newGraphOptions("mv-bar-chart"),
+    paintOf(newGraphOptions("mv-bar-chart"), 3),
+    dataset.titles,
+  );
+  const traces = fig.data as Mv209Trace[];
+  const bars = traces.filter((t) => t.type === "bar");
+  strictEqual(bars.length, 3);
+  deepStrictEqual(
+    bars.map((t) => t.y),
+    [[5.5], [6.5], [7.5]],
+  );
+  const sd = Math.sqrt(15);
+  for (const t of bars) {
+    ok(t.error_y?.array != null && Math.abs(t.error_y.array[0] - sd) < 1e-9, JSON.stringify(t.error_y));
+  }
+});
+
 check("summary subcolumns: the heatmap plots the Mean column, not the mean of Mean/SD/N", () => {
   const dataset = readTable(summaryTable());
   const cols = plotColumns(dataset, "heatmap", newGraphOptions("heatmap"), "grouped");
@@ -9448,6 +9649,306 @@ check("a constant or collinear predictor is named, not a crash, in multiple regr
   // A clean fit still fits: the aliasing guard must not fire on good data.
   const good = await runAnalysis("multiple-regression", table(["1", "0", "2", "1", "0", "2", "1", "0"]), params);
   ok(!("error" in good), `clean fit should run, got ${"error" in good ? good.error : "ok"}`);
+});
+
+// ── Seq 224: categorical (text) predictors, dummy-coded ───────────────────
+// Prism dummy-codes a text predictor: k levels → k − 1 dummies, the first
+// level in the table the reference, coefficients named Variable[Level]
+// (GraphPad Prism 11 Curve Fitting Guide, "Parameter values from multiple
+// regression"). Each check pins the runner against R's own factor() fit, so
+// the dummy coding — not just the plumbing — is verified.
+const close224 = (got: number | null | undefined, want: number, tol = 1e-9) =>
+  got != null && Math.abs(got - want) < tol;
+
+check("seq 224: a text predictor is dummy-coded in multiple regression (first level the reference)", async () => {
+  const data: TableData = {
+    columns: ["Title", "Y", "X", "Trt"],
+    rows: [
+      ["", "12", "1", "Control"],
+      ["", "15", "2", "Control"],
+      ["", "13", "3", "Drug"],
+      ["", "18", "4", "Drug"],
+      ["", "22", "5", "Placebo"],
+      ["", "20", "6", "Placebo"],
+      ["", "25", "7", "Control"],
+      ["", "23", "8", "Drug"],
+      ["", "27", "9", "Placebo"],
+      ["", "30", "10", "Control"],
+      ["", "28", "11", "Drug"],
+      ["", "33", "12", "Placebo"],
+    ],
+  };
+  const out = await runAnalysis("multiple-regression", data, { dependent: "Y", predictors: ["X", "Trt"] });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(
+    (out.coefficients ?? []).map((c) => c.term),
+    ["Intercept", "X", "Trt[Drug]", "Trt[Placebo]"],
+  );
+  strictEqual(out.stats.find((s) => s.label === "Predictors")?.value, 3);
+  strictEqual(out.stats.find((s) => s.label === "Complete rows (n)")?.value, 12);
+  ok(out.notes?.includes("dummy-coded with “Control” as the reference"), out.notes);
+  // R's own factor() fit, same reference: the runner's dummy coding must
+  // reproduce lm() with treatment contrasts exactly.
+  const ref = await evalNamedVector(
+    `y<-${rVec([12, 15, 13, 18, 22, 20, 25, 23, 27, 30, 28, 33])};` +
+      `x<-${rVec([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])};` +
+      `g<-factor(c("Control","Control","Drug","Drug","Placebo","Placebo","Control","Drug","Placebo","Control","Drug","Placebo"),levels=c("Control","Drug","Placebo"));` +
+      `m<-lm(y~x+g);s<-summary(m);c(b0=coef(m)[1],bx=coef(m)[2],bd=coef(m)[3],bp=coef(m)[4],r2=s$r.squared)`,
+  );
+  const byTerm = new Map((out.coefficients ?? []).map((c) => [c.term, c.estimate]));
+  ok(close224(byTerm.get("Intercept"), ref.b0!), JSON.stringify(out.coefficients));
+  ok(close224(byTerm.get("X"), ref.bx!), JSON.stringify(out.coefficients));
+  ok(close224(byTerm.get("Trt[Drug]"), ref.bd!), JSON.stringify(out.coefficients));
+  ok(close224(byTerm.get("Trt[Placebo]"), ref.bp!), JSON.stringify(out.coefficients));
+  ok(close224(out.stats.find((s) => s.label === "R squared")?.value, ref.r2!), JSON.stringify(out.stats));
+});
+
+check("seq 224: a text predictor is dummy-coded in multiple logistic regression", async () => {
+  const data: TableData = {
+    columns: ["Title", "Y", "X", "Trt"],
+    rows: [
+      ["", "0", "1", "Control"],
+      ["", "0", "2", "Drug"],
+      ["", "1", "3", "Control"],
+      ["", "0", "4", "Drug"],
+      ["", "1", "5", "Control"],
+      ["", "1", "6", "Drug"],
+      ["", "0", "7", "Control"],
+      ["", "1", "8", "Drug"],
+      ["", "1", "9", "Control"],
+      ["", "0", "10", "Drug"],
+      ["", "1", "11", "Control"],
+      ["", "1", "12", "Drug"],
+    ],
+  };
+  const out = await runAnalysis("multiple-logistic-regression", data, { dependent: "Y", predictors: ["X", "Trt"] });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(
+    (out.coefficients ?? []).map((c) => c.term),
+    ["Intercept", "X", "Trt[Drug]"],
+  );
+  ok(out.notes?.includes("dummy-coded with “Control” as the reference"), out.notes);
+  const ref = await evalNamedVector(
+    `y<-${rVec([0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1])};` +
+      `x<-${rVec([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])};` +
+      `g<-factor(c("Control","Drug","Control","Drug","Control","Drug","Control","Drug","Control","Drug","Control","Drug"),levels=c("Control","Drug"));` +
+      `m<-glm(y~x+g,family=binomial);c(b0=coef(m)[1],bx=coef(m)[2],bd=coef(m)[3])`,
+  );
+  const byTerm = new Map((out.coefficients ?? []).map((c) => [c.term, c.estimate]));
+  ok(close224(byTerm.get("X"), ref.bx!, 1e-6), JSON.stringify(out.coefficients));
+  ok(close224(byTerm.get("Trt[Drug]"), ref.bd!, 1e-6), JSON.stringify(out.coefficients));
+  const or = out.stats.find((s) => s.label === "Odds ratio (Trt[Drug])")?.value;
+  ok(close224(or, Math.exp(ref.bd!), 1e-6), JSON.stringify(out.stats));
+});
+
+check("seq 224: a text predictor is dummy-coded in Poisson regression", async () => {
+  const data: TableData = {
+    columns: ["Title", "Y", "X", "Trt"],
+    rows: [
+      ["", "2", "1", "Control"],
+      ["", "3", "2", "Drug"],
+      ["", "1", "3", "Control"],
+      ["", "4", "4", "Drug"],
+      ["", "5", "5", "Control"],
+      ["", "3", "6", "Drug"],
+      ["", "6", "7", "Control"],
+      ["", "4", "8", "Drug"],
+      ["", "7", "9", "Control"],
+      ["", "5", "10", "Drug"],
+      ["", "8", "11", "Control"],
+      ["", "6", "12", "Drug"],
+    ],
+  };
+  const out = await runAnalysis("poisson-regression", data, { dependent: "Y", predictors: ["X", "Trt"] });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(
+    (out.coefficients ?? []).map((c) => c.term),
+    ["Intercept", "X", "Trt[Drug]"],
+  );
+  const ref = await evalNamedVector(
+    `y<-${rVec([2, 3, 1, 4, 5, 3, 6, 4, 7, 5, 8, 6])};` +
+      `x<-${rVec([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])};` +
+      `g<-factor(c("Control","Drug","Control","Drug","Control","Drug","Control","Drug","Control","Drug","Control","Drug"),levels=c("Control","Drug"));` +
+      `m<-glm(y~x+g,family=poisson);c(b0=coef(m)[1],bx=coef(m)[2],bd=coef(m)[3])`,
+  );
+  const byTerm = new Map((out.coefficients ?? []).map((c) => [c.term, c.estimate]));
+  ok(close224(byTerm.get("X"), ref.bx!, 1e-6), JSON.stringify(out.coefficients));
+  ok(close224(byTerm.get("Trt[Drug]"), ref.bd!, 1e-6), JSON.stringify(out.coefficients));
+  const rr = out.stats.find((s) => s.label === "Rate ratio (Trt[Drug])")?.value;
+  ok(close224(rr, Math.exp(ref.bd!), 1e-6), JSON.stringify(out.stats));
+});
+
+check("seq 224: a text covariate is dummy-coded in Cox proportional-hazards regression", async () => {
+  const data: TableData = {
+    columns: ["Title", "Time", "Status", "Trt", "Age"],
+    rows: [
+      ["", "5", "1", "Control", "45"],
+      ["", "8", "1", "Drug", "52"],
+      ["", "12", "0", "Placebo", "38"],
+      ["", "6", "1", "Control", "61"],
+      ["", "10", "1", "Drug", "49"],
+      ["", "15", "0", "Placebo", "55"],
+      ["", "9", "1", "Control", "42"],
+      ["", "14", "1", "Drug", "58"],
+      ["", "20", "0", "Placebo", "47"],
+      ["", "7", "1", "Control", "63"],
+      ["", "18", "0", "Drug", "50"],
+      ["", "22", "1", "Placebo", "44"],
+    ],
+  };
+  const out = await runAnalysis("cox-proportional-hazards", data, {
+    time: "Time",
+    status: "Status",
+    covariates: ["Trt", "Age"],
+  });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(
+    (out.coefficients ?? []).map((c) => c.term),
+    ["Trt[Drug]", "Trt[Placebo]", "Age"],
+  );
+  ok(out.notes?.includes("dummy-coded with “Control” as the reference"), out.notes);
+  // R's own coxph with a factor covariate, same reference — the hazard
+  // ratios must match (the runner installs `survival` first, so the
+  // package is loaded by the time this direct fit runs).
+  const ref = await evalNamedVector(
+    `time<-${rVec([5, 8, 12, 6, 10, 15, 9, 14, 20, 7, 18, 22])};` +
+      `status<-${rVec([1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1])};` +
+      `g<-factor(c("Control","Drug","Placebo","Control","Drug","Placebo","Control","Drug","Placebo","Control","Drug","Placebo"),levels=c("Control","Drug","Placebo"));` +
+      `age<-${rVec([45, 52, 38, 61, 49, 55, 42, 58, 47, 63, 50, 44])};` +
+      `m<-survival::coxph(survival::Surv(time,status)~g+age,ties="efron");` +
+      `c(hrd=exp(coef(m)[1]),hrp=exp(coef(m)[2]),hra=exp(coef(m)[3]))`,
+  );
+  const byTerm = new Map((out.coefficients ?? []).map((c) => [c.term, c.hazardRatio]));
+  ok(close224(byTerm.get("Trt[Drug]"), ref.hrd!, 1e-6), JSON.stringify(out.coefficients));
+  ok(close224(byTerm.get("Trt[Placebo]"), ref.hrp!, 1e-6), JSON.stringify(out.coefficients));
+  ok(close224(byTerm.get("Age"), ref.hra!, 1e-6), JSON.stringify(out.coefficients));
+});
+
+check("seq 224: an explicitly chosen single-level text predictor is refused, not silently skipped", async () => {
+  const data: TableData = {
+    columns: ["Title", "Y", "X", "Trt"],
+    rows: [
+      ["", "12", "1", "Control"],
+      ["", "15", "2", "Control"],
+      ["", "13", "3", "Control"],
+      ["", "18", "4", "Control"],
+      ["", "22", "5", "Control"],
+      ["", "20", "6", "Control"],
+      ["", "25", "7", "Control"],
+      ["", "23", "8", "Control"],
+    ],
+  };
+  deepStrictEqual(await runAnalysis("multiple-regression", data, { dependent: "Y", predictors: ["X", "Trt"] }), {
+    error:
+      "“Trt” has only one level (“Control”) on the complete rows — a categorical predictor needs at least two levels.",
+  });
+  deepStrictEqual(
+    await runAnalysis("cox-proportional-hazards", {
+      columns: ["Title", "Time", "Status", "Trt"],
+      rows: [
+        ["", "5", "1", "Control"],
+        ["", "8", "1", "Control"],
+        ["", "12", "0", "Control"],
+        ["", "6", "1", "Control"],
+        ["", "10", "1", "Control"],
+        ["", "15", "0", "Control"],
+        ["", "9", "1", "Control"],
+        ["", "14", "1", "Control"],
+      ],
+    }, { time: "Time", status: "Status", covariates: ["Trt"] }),
+    {
+      error:
+        "“Trt” has only one level (“Control”) on the complete rows — a categorical covariate needs at least two levels.",
+    },
+  );
+});
+
+check("seq 224: a text predictor with no values on the complete rows is named, not silently dropped", async () => {
+  // Trt holds "Drug" only on the two rows where Y is blank; on the eight
+  // complete rows it is blank, so the fit runs on X alone and names Trt.
+  const data: TableData = {
+    columns: ["Title", "Y", "X", "Trt"],
+    rows: [
+      [null, "12", "1", null],
+      [null, "15", "2", null],
+      [null, "13", "3", null],
+      [null, "18", "4", null],
+      [null, "22", "5", null],
+      [null, "20", "6", null],
+      [null, "25", "7", null],
+      [null, "23", "8", null],
+      [null, null, "9", "Drug"],
+      [null, null, "10", "Drug"],
+    ],
+  };
+  const out = await runAnalysis("multiple-regression", data, { dependent: "Y", predictors: ["X", "Trt"] });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(
+    (out.coefficients ?? []).map((c) => c.term),
+    ["Intercept", "X"],
+  );
+  ok(out.notes?.includes("“Trt” has no values on the complete rows"), out.notes);
+});
+
+check("seq 224: the default (unchosen) predictors include a text column", async () => {
+  const data: TableData = {
+    columns: ["Title", "Y", "X", "Trt"],
+    rows: [
+      ["", "12", "1", "Control"],
+      ["", "15", "2", "Control"],
+      ["", "13", "3", "Drug"],
+      ["", "18", "4", "Drug"],
+      ["", "22", "5", "Placebo"],
+      ["", "20", "6", "Placebo"],
+      ["", "25", "7", "Control"],
+      ["", "23", "8", "Drug"],
+      ["", "27", "9", "Placebo"],
+      ["", "30", "10", "Control"],
+      ["", "28", "11", "Drug"],
+      ["", "33", "12", "Placebo"],
+    ],
+  };
+  const out = await runAnalysis("multiple-regression", data, { dependent: "Y" });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(
+    (out.coefficients ?? []).map((c) => c.term),
+    ["Intercept", "X", "Trt[Drug]", "Trt[Placebo]"],
+  );
+});
+
+check("seq 224: the regression wizards offer text columns as predictors, and the Cox wizard as covariates", () => {
+  const table = readTable({
+    columns: ["Title", "Y", "X", "Trt"],
+    rows: [
+      ["", "1", "2", "Control"],
+      ["", "3", "4", "Drug"],
+    ],
+  });
+  const reg = WIZARDS["multiple-regression"]!;
+  const regQuestions = reg.questions({ dependent: "Y" }, table).filter(Boolean) as Question[];
+  const predictors = regQuestions.find((q) => q.id === "predictors");
+  ok(predictors && "options" in predictors && (predictors.options as string[]).includes("Trt"),
+    `multiple-regression wizard should offer Trt as a predictor, got: ${JSON.stringify(predictors)}`);
+  const cox = WIZARDS["cox-proportional-hazards"]!;
+  const coxQuestions = cox.questions({ time: "Y", status: "X" }, table).filter(Boolean) as Question[];
+  const covariates = coxQuestions.find((q) => q.id === "covariates");
+  ok(covariates && "options" in covariates && (covariates.options as string[]).includes("Trt"),
+    `Cox wizard should offer Trt as a covariate, got: ${JSON.stringify(covariates)}`);
+});
+
+check("seq 224: the MCP analysis-params schema says the four params accept categorical (text) columns", () => {
+  const schema = JSON.parse(
+    readFileSync(new URL("../src-tauri/src/analysis-params-schema.json", import.meta.url), "utf8"),
+  ) as Record<string, { params: { name: string; description?: string }[] }>;
+  for (const [type, param] of [
+    ["multiple-regression", "predictors"],
+    ["multiple-logistic-regression", "predictors"],
+    ["poisson-regression", "predictors"],
+    ["cox-proportional-hazards", "covariates"],
+  ] as const) {
+    const entry = schema[type]?.params.find((p) => p.name === param);
+    ok(entry?.description?.includes("categorical"), `${type}.${param} should say it accepts text columns, got: ${entry?.description}`);
+  }
 });
 
 // #150 (Batch 2 triage): a constant DEPENDENT in multiple linear regression

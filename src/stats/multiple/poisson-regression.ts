@@ -6,8 +6,15 @@
 // Mirrors multiple-logistic-regression.ts, with glm(family = poisson /
 // quasipoisson) in place of glm(family = binomial).
 import type { AnalysisOutcome, Column, PoissonRegressionParams, RegressionCoefficient, StatRow } from "../types";
-import { describe, pairedGroups, rVec } from "../column/base";
-import { droppedPredictorsNote, selectPredictors, aliasedPredictorsError } from "./predictors";
+import { describe, rVec } from "../column/base";
+import {
+  alignedGroups,
+  categoricalPredictorsNote,
+  droppedNoCompleteNote,
+  droppedPredictorsNote,
+  selectPredictors,
+  aliasedPredictorsError,
+} from "./predictors";
 import { evalNamedVector } from "../webr";
 import { num } from "../../lib/format";
 
@@ -22,18 +29,20 @@ export async function runPoissonRegression(
   columns: Column[],
   params: PoissonRegressionParams | undefined,
 ): Promise<AnalysisOutcome> {
-  const { dep, predictors, dropped } = selectPredictors(columns, params);
-  if (!dep || predictors.length < 1) {
+  const sel = selectPredictors(columns, params);
+  if (sel.error) return { error: sel.error };
+  const { dep, design, dropped } = sel;
+  if (!dep || design.length < 1) {
     return {
       error: "Poisson regression needs a dependent variable and at least one other variable with data.",
     };
   }
 
-  // Complete cases: the rows where every variable used has a value.
-  const used = [dep, ...predictors];
-  const aligned = pairedGroups(used).map((g) => g.values);
+  // Complete cases: the rows where every variable used has a value — the
+  // design carries the aligned values (see multiple-regression.ts).
+  const aligned = [sel.depValues, ...design.map((d) => d.values)];
   const n = aligned[0].length;
-  const p = predictors.length;
+  const p = design.length;
 
   // The outcome must hold whole-number counts (blanks are already dropped as
   // incomplete rows). R's glm would accept non-integers with a warning, but
@@ -52,8 +61,8 @@ export async function runPoissonRegression(
   }
 
   const quasi = params?.quasi ?? false;
-  const decls = [`y<-${rVec(aligned[0])}`, ...predictors.map((_, i) => `x${i}<-${rVec(aligned[i + 1])}`)];
-  const formula = `y~${predictors.map((_, i) => `x${i}`).join("+")}`;
+  const decls = [`y<-${rVec(aligned[0])}`, ...design.map((_, i) => `x${i}<-${rVec(aligned[i + 1])}`)];
+  const formula = `y~${design.map((_, i) => `x${i}`).join("+")}`;
   // Each coefficient row t (0 = intercept) pulled from summary()'s coefficient
   // matrix by explicit index → keyed names, so extraction never depends on order.
   // Column 3 of a glm coefficient matrix is the z value, not a t value. Rate
@@ -91,15 +100,14 @@ export async function runPoissonRegression(
     return {
       error:
         aliasedPredictorsError(
-          predictors,
-          aligned.slice(1),
-          predictors.map((_, i) => v[`al${i}`]),
+          design,
+          design.map((_, i) => v[`al${i}`]),
           "Poisson regression",
         ) ??
         "The fit could not estimate a separate coefficient for every predictor — two or more predictors carry the same information. Drop one of the collinear predictors and try again.",
     };
   }
-  const terms = ["Intercept", ...predictors.map((c) => c.name)];
+  const terms = ["Intercept", ...design.map((d) => d.term)];
   const coefficients: RegressionCoefficient[] = terms.map((term, t) => ({
     term,
     estimate: v[`b${t}`] ?? null,
@@ -123,12 +131,12 @@ export async function runPoissonRegression(
   const phiPearson = pearson != null && residDf != null && residDf !== 0 ? pearson / residDf : null;
   const phiDeviance = v.dev != null && residDf != null && residDf !== 0 ? v.dev / residDf : null;
   const stats: StatRow[] = [
-    ...predictors.flatMap((c, i) => {
+    ...design.flatMap((d, i) => {
       const t = i + 1;
       return [
-        { label: `Rate ratio (${c.name})`, value: v[`rr${t}`] ?? null },
-        { label: `Rate ratio 95% CI lower (${c.name})`, value: v[`rrLo${t}`] ?? null },
-        { label: `Rate ratio 95% CI upper (${c.name})`, value: v[`rrHi${t}`] ?? null },
+        { label: `Rate ratio (${d.term})`, value: v[`rr${t}`] ?? null },
+        { label: `Rate ratio 95% CI lower (${d.term})`, value: v[`rrLo${t}`] ?? null },
+        { label: `Rate ratio 95% CI upper (${d.term})`, value: v[`rrHi${t}`] ?? null },
       ];
     }),
     { label: "Residual deviance", value: v.dev ?? null },
@@ -143,16 +151,16 @@ export async function runPoissonRegression(
     { label: "Predictors", value: p },
   ];
 
-  const described = (await describe(pairedGroups(used))).groups;
+  const described = (await describe(alignedGroups(dep, sel.depValues, design))).groups;
   // log(count) = b0 + b1·X1 + b2·X2 + …
   const b0 = v.b0;
   const equation =
     b0 == null
       ? undefined
-      : `log(${dep.name}) = ${num(b0)} ${predictors
-          .map((c, i) => {
+      : `log(${dep.name}) = ${num(b0)} ${design
+          .map((d, i) => {
             const b = v[`b${i + 1}`];
-            return b == null ? null : `${b < 0 ? "−" : "+"} ${num(Math.abs(b))}·${c.name}`;
+            return b == null ? null : `${b < 0 ? "−" : "+"} ${num(Math.abs(b))}·${d.term}`;
           })
           .filter((s): s is string => s !== null)
           .join(" ")}`;
@@ -183,7 +191,9 @@ export async function runPoissonRegression(
       `Poisson regression of “${dep.name}” on ${p} predictor(s), fit on ${n} complete rows. ` +
       "The rate ratios are per one-unit increase in each predictor, with Wald 95% confidence intervals (a normal approximation). " +
       "Each predictor's P value tests whether its coefficient differs from zero, holding the others fixed." +
-      droppedPredictorsNote(dropped),
+      categoricalPredictorsNote(sel.categorical, sel.singleLevel) +
+      droppedPredictorsNote(dropped) +
+      droppedNoCompleteNote(sel.droppedNoComplete),
     coefficients,
     // The coefficients table's statistic is a z, not a t.
     statisticLabel: "z",
