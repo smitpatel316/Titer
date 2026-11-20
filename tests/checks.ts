@@ -139,7 +139,7 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, logScaleOffered, movedText, paintOf, perRowSummaryStats, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, jitter, legendRightMargin, legendWidthPx, logScaleOffered, movedText, paintOf, perRowSummaryStats, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -2699,6 +2699,81 @@ check("summary subcolumns: grouped bars draw the mean with the stored error (SEM
   deepStrictEqual(traces[0].error_y?.array, [1, 1.5]);
   deepStrictEqual(traces[1].y, [20, 22]);
   deepStrictEqual(traces[1].error_y?.array, [4 / 3, 2]);
+});
+
+check("grouped bars overlay the individual points when showPoints is set (Mansi P0 #4)", () => {
+  const close = (a: number | undefined, b: number) => a !== undefined && Math.abs(a - b) < 1e-9;
+  const table = {
+    columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+    rows: [
+      [null, "1", "3", "2", "6"],
+      [null, "4", "2", "5", "1"],
+    ],
+  };
+  const columns = readTable(table).columns;
+  type Trace = {
+    type?: string;
+    mode?: string;
+    name?: string;
+    x?: (number | string)[];
+    y?: (number | null)[];
+    error_y?: { array: number[] };
+    error_x?: { array: number[] };
+    showlegend?: boolean;
+    marker?: { size?: number | number[] };
+    customdata?: string[];
+  };
+  // Off by default: bars + error bars only, exactly as before.
+  const plain = GRAPHS["grouped-bars"].build(columns, newGraphOptions("grouped-bars"), paintOf(newGraphOptions("grouped-bars"), 2))
+    .data as Trace[];
+  strictEqual(plain.length, 2);
+  ok(plain.every((t) => t.type === "bar"));
+  // On: one points trace per group, after the bars, with the replicates' values.
+  const options: GraphOptions = { ...newGraphOptions("grouped-bars"), showPoints: true, pointSize: 5 };
+  const fig = GRAPHS["grouped-bars"].build(columns, options, paintOf(options, 2));
+  const traces = fig.data as Trace[];
+  strictEqual(traces.length, 4);
+  deepStrictEqual(traces.map((t) => t.type), ["bar", "bar", "scatter", "scatter"]);
+  const [barA, barB, ptsA, ptsB] = traces;
+  // The bars keep their error bars; the points carry no legend entry of their own.
+  ok(barA.error_y && barA.error_y.array.length === 2);
+  ok(barB.error_y && barB.error_y.array.length === 2);
+  strictEqual(ptsA.showlegend, false);
+  strictEqual(ptsB.showlegend, false);
+  deepStrictEqual(ptsA.y, [1, 3, 4, 2]);
+  deepStrictEqual(ptsB.y, [2, 6, 5, 1]);
+  // Each point sits on its own bar: group A's bar center in row 1 is −0.28, row 2 is 0.72
+  // (groupOffset), within the jitter's ±0.06 — and the bars sit at those same centers.
+  ok(ptsA.x!.every((x, k) => close(x as number, (k < 2 ? -0.28 : 0.72) + jitter(0, (k < 2 ? 0 : 10) + (k % 2)) * 0.4)));
+  ok(ptsB.x!.every((x, k) => close(x as number, (k < 2 ? 0.28 : 1.28) + jitter(1, (k < 2 ? 0 : 10) + (k % 2)) * 0.4)));
+  ok(close(barA.x![0] as number, -0.28) && close(barA.x![1] as number, 0.72));
+  ok(close(barB.x![0] as number, 0.28) && close(barB.x![1] as number, 1.28));
+  // The axis still ticks the row labels at the row slots.
+  const xaxis = fig.layout.xaxis as { tickvals?: number[]; ticktext?: string[]; range?: [number, number] };
+  deepStrictEqual(xaxis.tickvals, [0, 1]);
+  deepStrictEqual(xaxis.ticktext, ["1", "2"]);
+  deepStrictEqual(xaxis.range, [-0.5, 1.5]);
+  // pointSize is honoured, and each point keeps its key for picking/styling.
+  ok((ptsA.marker?.size as number[]).every((s) => s === 5));
+  ok((ptsB.marker?.size as number[]).every((s) => s === 5));
+  deepStrictEqual(ptsA.customdata, ["A:Y1#0", "A:Y2#0", "A:Y1#1", "A:Y2#1"]);
+  // Separated bars put the points in their own blocks too.
+  const sep: GraphOptions = { ...options, groupLayout: "separated" };
+  const sepTraces = GRAPHS["grouped-bars"].build(columns, sep, paintOf(sep, 2)).data as Trace[];
+  strictEqual(sepTraces.length, 4);
+  ok(sepTraces[2].x!.every((x, k) => close(x as number, (k < 2 ? 0 : 1) + jitter(0, (k < 2 ? 0 : 10) + (k % 2)) * 0.4)));
+  ok(sepTraces[3].x!.every((x, k) => close(x as number, (k < 2 ? 3 : 4) + jitter(1, (k < 2 ? 0 : 10) + (k % 2)) * 0.4)));
+  // Horizontal bars transpose the points: values on X, places on Y.
+  const hFig = GRAPHS["grouped-hbars"].build(columns, options, paintOf(options, 2));
+  const hTraces = hFig.data as Trace[];
+  strictEqual(hTraces.length, 4);
+  deepStrictEqual(hTraces[2].x, [1, 3, 4, 2]);
+  ok(hTraces[2].y!.every((y, k) => close(y as number, (k < 2 ? -0.28 : 0.72) + jitter(0, (k < 2 ? 0 : 10) + (k % 2)) * 0.4)));
+  // No points where there are no individual values: a summary table, or stacked bars.
+  const summary = readTable(summaryTable());
+  const sumFig = GRAPHS["grouped-bars"].build(summary.numeric, options, paintOf(options, 2), summary.titles, "mean-sd-n");
+  strictEqual(sumFig.data.length, 2);
+  strictEqual(GRAPHS["grouped-stacked"].build(columns, options, paintOf(options, 2)).data.length, 2);
 });
 
 check("summary subcolumns: interleaved scatter on a summary table draws centers, not points", () => {

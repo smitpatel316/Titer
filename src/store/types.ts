@@ -139,7 +139,7 @@ export interface GraphOptions {
   shape: Choice<"shape">;
   // Box & violin
   kind: Choice<"kind">;
-  showPoints: boolean; // overlay individual points on box/violin
+  showPoints: boolean; // overlay individual points on box/violin and grouped bars
   // Estimation plot: draw violins behind the raw points (else a scatterplot).
   estimationViolin: boolean;
   // XY scatter: markers only, connecting line only, or both
