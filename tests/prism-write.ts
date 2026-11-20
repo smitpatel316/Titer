@@ -524,6 +524,7 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
   const w13Problems: string[] = [];
   let w13Nlreg = 0;
   let w13Survival = 0;
+  let w13Mtt = 0;
   for (const p of Object.keys(w13Zip.files)) {
     if (!p.startsWith("analyses/") || !p.endsWith("/sheet.json") || w13Zip.files[p].dir) continue;
     const dirUid = p.split("/")[1];
@@ -546,18 +547,22 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
       await w13Zip.file(`analyses/${dirUid}/constants.json`)!.async("string"),
     ) as { version?: unknown };
     const isNlreg = sheet.analysisClass === "NONLINEAR_REGRESSION";
+    const isMtt = sheet.analysisClass === "MULTIPLE_TWO_SAMPLE_TESTS";
     if (isNlreg) w13Nlreg++;
     else if (sheet.analysisClass === "SURVIVAL") w13Survival++;
+    else if (isMtt) w13Mtt++;
     if (sheet.uid !== dirUid) w13Problems.push(`${dirUid}: sheet uid ${sheet.uid ?? "?"} != dir`);
-    if (sheet.fenID !== (isNlreg ? 0 : 2)) w13Problems.push(`${dirUid}: fenID ${sheet.fenID ?? "?"}`);
+    if (sheet.fenID !== (isNlreg || isMtt ? 0 : 2)) w13Problems.push(`${dirUid}: fenID ${sheet.fenID ?? "?"}`);
     if (sheet.$id !== "analyses/sheet.schema.json") w13Problems.push(`${dirUid}: sheet $id ${sheet.$id ?? "?"}`);
     const mrv = sheet.minRequiredVersion;
-    const wantMrv = isNlreg ? "8.2.0.0" : "0.0.0.0";
+    const wantMrv = isNlreg ? "8.2.0.0" : isMtt ? "10.0.0.0" : "0.0.0.0";
     if (`${mrv?.major}.${mrv?.minor}.${mrv?.subminor}.${mrv?.build}` !== wantMrv)
       w13Problems.push(`${dirUid}: MRV ${JSON.stringify(mrv)}`);
     const expectedParamsId = isNlreg
       ? "analyses/nonlinear_regression/parameters.schema.json"
-      : "analyses/survival/parameters.schema.json";
+      : isMtt
+        ? "analyses/multiple_two_sample_tests/parameters.schema.json"
+        : "analyses/survival/parameters.schema.json";
     if (params.$id !== expectedParamsId) w13Problems.push(`${dirUid}: params $id ${params.$id ?? "?"}`);
     if (params.version !== "0.0.0") w13Problems.push(`${dirUid}: params version ${JSON.stringify(params.version)}`);
     if (constants.version !== "0.0.0") w13Problems.push(`${dirUid}: constants version ${JSON.stringify(constants.version)}`);
@@ -587,7 +592,7 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
   check(
     "W13a analysis sheets carry Prism identity (seq 247)",
     w13Problems.length === 0 && w13Nlreg >= 1 && w13Survival >= 1,
-    `${w13Nlreg} NLREG + ${w13Survival} survival; ${w13Problems.join("; ") || "all identity fields exact"}`,
+    `${w13Nlreg} NLREG + ${w13Survival} survival + ${w13Mtt} MTT; ${w13Problems.join("; ") || "all identity fields exact"}`,
   );
   // W13b: duplicate titles stay distinct inputs — an xy table with two "Y"
   // columns (the seq 247 F0 case: three "Y" datasets collapsed to one uid
@@ -655,6 +660,255 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
     "W13b duplicate-title inputs stay distinct with letter idx (seq 247)",
     dupXYProblems.length === 0,
     dupXYProblems.join("; ") || "2 inputs A/B, distinct dataset uids, Y0/Plateau/K rules exact",
+  );
+}
+
+// W14 (seq 289, 1.8 M1): multiple-t-tests analyses write as
+// MULTIPLE_TWO_SAMPLE_TESTS, params-only like NLREG/survival — the test
+// enum + correction Prism recomputes per row (t, df, p) on open. Fixtures
+// are generated, never Mansi's files. The grouped table mirrors her shape
+// (two groups, unequal replicates per row are a data-table matter, not an
+// analysis one). Expected: Welch + Holm (defaults) → EQUAL_SD + STATISTICAL/
+// HOLM_SIDAK; paired + FDR → PAIRED + FDR/BKY; non-parametric → WILCOXON /
+// MANN_WHITNEY; pooled SD and no-correction are registered, not written;
+// a 3-group table with sets [G1, G3] writes inputs A and C (positional
+// letters, skipping B — the real-file pattern).
+{
+  const mttProject = {
+    nodes: {
+      t_panel: {
+        id: "t_panel",
+        type: "table",
+        name: "Panel",
+        parentId: null,
+        tableType: "grouped",
+        data: {
+          columns: ["Title", "WT:Y1", "WT:Y2", "WT:Y3", "SKG:Y1", "SKG:Y2", "SKG:Y3"],
+          rows: [
+            ["Row1", "1.2", "1.1", "1.3", "2.1", "2.0", "2.2"],
+            ["Row2", "0.8", "0.9", "0.7", "1.5", "1.6", "1.4"],
+            ["Row3", "3.0", "3.1", "2.9", "3.2", "3.3", "3.1"],
+          ],
+          groups: 2,
+          replicates: 3,
+        },
+      },
+      t_three: {
+        id: "t_three",
+        type: "table",
+        name: "Three groups",
+        parentId: null,
+        tableType: "grouped",
+        data: {
+          columns: ["Title", "G1:Y1", "G1:Y2", "G2:Y1", "G2:Y2", "G3:Y1", "G3:Y2"],
+          rows: [["r1", "1", "2", "3", "4", "5", "6"]],
+          groups: 3,
+          replicates: 2,
+        },
+      },
+      a_welch: {
+        id: "a_welch",
+        type: "analysis",
+        name: "WT unpaired t-test",
+        parentId: "t_panel",
+        analysisType: "multiple-t-tests",
+        analysisParams: {},
+      },
+      a_paired_fdr: {
+        id: "a_paired_fdr",
+        type: "analysis",
+        name: "WT paired t-test",
+        parentId: "t_panel",
+        analysisType: "multiple-t-tests",
+        analysisParams: { paired: true, correction: "fdr" },
+      },
+      a_mw: {
+        id: "a_mw",
+        type: "analysis",
+        name: "MW test",
+        parentId: "t_panel",
+        analysisType: "multiple-t-tests",
+        analysisParams: { gaussian: false },
+      },
+      a_wilcox: {
+        id: "a_wilcox",
+        type: "analysis",
+        name: "Wilcoxon test",
+        parentId: "t_panel",
+        analysisType: "multiple-t-tests",
+        analysisParams: { gaussian: false, paired: true },
+      },
+      a_pooled: {
+        id: "a_pooled",
+        type: "analysis",
+        name: "Pooled test",
+        parentId: "t_panel",
+        analysisType: "multiple-t-tests",
+        analysisParams: { pooledSd: true },
+      },
+      a_none: {
+        id: "a_none",
+        type: "analysis",
+        name: "No correction test",
+        parentId: "t_panel",
+        analysisType: "multiple-t-tests",
+        analysisParams: { correction: "none" },
+      },
+      a_sets: {
+        id: "a_sets",
+        type: "analysis",
+        name: "G1 vs G3 test",
+        parentId: "t_three",
+        analysisType: "multiple-t-tests",
+        analysisParams: { sets: ["G1", "G3"] },
+      },
+    },
+    rootOrder: ["t_panel", "t_three"],
+    childOrder: {
+      t_panel: ["a_welch", "a_paired_fdr", "a_mw", "a_wilcox", "a_pooled", "a_none"],
+      t_three: ["a_sets"],
+    },
+    activeNodeId: "t_panel",
+  };
+  const mttWritten = await writePrism(mttProject as never, "1.0.7");
+  const mttZip = await JSZip.loadAsync(mttWritten.bytes);
+  const mttPaths = Object.keys(mttZip.files);
+  const setUidByTitle = new Map<string, string>();
+  for (const p of mttPaths) {
+    if (!p.startsWith("data/sets/") || !p.endsWith(".json") || mttZip.files[p].dir) continue;
+    const d = JSON.parse(await mttZip.file(p)!.async("string")) as { uid?: string; title?: string };
+    if (d.uid && d.title) setUidByTitle.set(`${d.title}`, d.uid);
+  }
+  type MttSheet = {
+    uid?: string;
+    fenID?: number;
+    $id?: string;
+    minRequiredVersion?: { major?: number; minor?: number; subminor?: number; build?: number };
+    analysisClass?: string;
+    title?: string;
+    inputDataSets?: { uid?: string; title?: string; idx?: string }[];
+    resultSheets?: unknown[];
+    isCalculated?: boolean;
+  };
+  type MttParams = {
+    $id?: string;
+    version?: unknown;
+    content?: {
+      test?: string;
+      multipleComparisons?: {
+        type?: string;
+        statistical?: { test?: string; options?: { significanceLevel?: number } };
+        fdr?: { test?: string; options?: { discoveryLevel?: number } };
+        noCorrection?: { options?: { significanceLevel?: number } };
+      };
+    };
+  };
+  const mttByTitle = new Map<
+    string,
+    { dirUid: string; sheet: MttSheet; params: MttParams; constants: { version?: unknown } }
+  >();
+  for (const p of mttPaths) {
+    if (!p.startsWith("analyses/") || !p.endsWith("/sheet.json") || mttZip.files[p].dir) continue;
+    const dirUid = p.split("/")[1];
+    const sheet = JSON.parse(await mttZip.file(p)!.async("string")) as MttSheet;
+    const params = JSON.parse(await mttZip.file(`analyses/${dirUid}/parameters.json`)!.async("string")) as MttParams;
+    const constants = JSON.parse(await mttZip.file(`analyses/${dirUid}/constants.json`)!.async("string")) as {
+      version?: unknown;
+    };
+    if (sheet.title) mttByTitle.set(sheet.title, { dirUid, sheet, params, constants });
+  }
+  const mttProblems: string[] = [];
+  const expectMtt = (
+    name: string,
+    test: string,
+    mcType: string,
+    mcTest: string,
+    inputs: [string, string][],
+  ) => {
+    const got = mttByTitle.get(name);
+    if (!got) {
+      mttProblems.push(`${name}: not written`);
+      return;
+    }
+    const { dirUid, sheet, params, constants } = got;
+    if (sheet.uid !== dirUid) mttProblems.push(`${name}: sheet uid ${sheet.uid ?? "?"} != dir ${dirUid}`);
+    if (sheet.analysisClass !== "MULTIPLE_TWO_SAMPLE_TESTS")
+      mttProblems.push(`${name}: class ${sheet.analysisClass ?? "?"}`);
+    if (sheet.fenID !== 0) mttProblems.push(`${name}: fenID ${sheet.fenID ?? "?"}`);
+    if (sheet.$id !== "analyses/sheet.schema.json") mttProblems.push(`${name}: sheet $id ${sheet.$id ?? "?"}`);
+    const mrv = sheet.minRequiredVersion;
+    if (`${mrv?.major}.${mrv?.minor}.${mrv?.subminor}.${mrv?.build}` !== "10.0.0.0")
+      mttProblems.push(`${name}: MRV ${JSON.stringify(mrv)}`);
+    if (sheet.isCalculated !== false) mttProblems.push(`${name}: isCalculated ${String(sheet.isCalculated)}`);
+    if ((sheet.resultSheets ?? []).length !== 0) mttProblems.push(`${name}: resultSheets not empty`);
+    if (params.$id !== "analyses/multiple_two_sample_tests/parameters.schema.json")
+      mttProblems.push(`${name}: params $id ${params.$id ?? "?"}`);
+    if (params.version !== "0.0.0") mttProblems.push(`${name}: params version ${JSON.stringify(params.version)}`);
+    if (constants.version !== "0.0.0")
+      mttProblems.push(`${name}: constants version ${JSON.stringify(constants.version)}`);
+    if (params.content?.test !== test) mttProblems.push(`${name}: test ${params.content?.test ?? "?"}`);
+    const mc = params.content?.multipleComparisons;
+    if (mc?.type !== mcType) mttProblems.push(`${name}: mc type ${mc?.type ?? "?"}`);
+    const mcTestGot = mcType === "STATISTICAL" ? mc?.statistical?.test : mc?.fdr?.test;
+    if (mcTestGot !== mcTest) mttProblems.push(`${name}: mc test ${mcTestGot ?? "?"}`);
+    const gotInputs = (sheet.inputDataSets ?? []).map((i) => [i.title ?? "?", i.idx ?? "?"]);
+    if (JSON.stringify(gotInputs) !== JSON.stringify(inputs))
+      mttProblems.push(`${name}: inputs ${JSON.stringify(gotInputs)}`);
+    for (const inp of sheet.inputDataSets ?? []) {
+      if (!inp.uid || setUidByTitle.get(inp.title ?? "") !== inp.uid)
+        mttProblems.push(`${name}: input ${inp.title ?? "?"} uid not a dataset`);
+    }
+  };
+  expectMtt("WT unpaired t-test", "MULTIPLE_UNPAIRED_TWO_SAMPLE_EQUAL_SD_TESTS", "STATISTICAL", "HOLM_SIDAK", [
+    ["WT", "A"],
+    ["SKG", "B"],
+  ]);
+  expectMtt("WT paired t-test", "MULTIPLE_PAIRED_TWO_SAMPLE_TESTS", "FDR", "BENJAMINI_KRIEGER_YEKUTIELI", [
+    ["WT", "A"],
+    ["SKG", "B"],
+  ]);
+  expectMtt("MW test", "MULTIPLE_MANN_WHITNEY_TESTS", "STATISTICAL", "HOLM_SIDAK", [
+    ["WT", "A"],
+    ["SKG", "B"],
+  ]);
+  expectMtt("Wilcoxon test", "MULTIPLE_WILCOXON_TESTS", "STATISTICAL", "HOLM_SIDAK", [
+    ["WT", "A"],
+    ["SKG", "B"],
+  ]);
+  expectMtt("G1 vs G3 test", "MULTIPLE_UNPAIRED_TWO_SAMPLE_EQUAL_SD_TESTS", "STATISTICAL", "HOLM_SIDAK", [
+    ["G1", "A"],
+    ["G3", "C"],
+  ]);
+  check(
+    "W14a multiple-t-tests write MULTIPLE_TWO_SAMPLE_TESTS (seq 289)",
+    mttProblems.length === 0 && mttByTitle.size === 5,
+    mttProblems.join("; ") || "5 written: Welch/paired/MW/Wilcoxon + G1-vs-G3 (A/C)",
+  );
+  const notWritten = mttWritten.report.analysesNotWritten;
+  check(
+    "W14b pooled SD + no correction are registered, not written (seq 289)",
+    notWritten.length === 2 &&
+      notWritten.some((s) => s.startsWith("Pooled test") && s.includes("pooled SD across rows")) &&
+      notWritten.some((s) => s.startsWith("No correction test") && s.includes("no correction")) &&
+      !mttByTitle.has("Pooled test") &&
+      !mttByTitle.has("No correction test"),
+    notWritten.join(" | "),
+  );
+  const mttReportText = [
+    ...mttWritten.report.analyses,
+    ...mttWritten.report.issues.map((i) => i.message),
+  ].join("\n");
+  check(
+    "W14c correction substitutions are disclosed in the report (seq 289)",
+    mttWritten.report.analyses.length === 5 &&
+      mttReportText.includes("Holm-Šídák") &&
+      mttReportText.includes("Benjamini-Krieger-Yekutieli"),
+    `written: ${mttWritten.report.analyses.join(", ")}`,
+  );
+  check(
+    "W14d multiple-t-tests write no results.json (params only, W3)",
+    !mttPaths.some((p) => p.endsWith("results.json")),
+    `${mttPaths.filter((p) => p.startsWith("analyses/")).length} analysis entries, none results.json`,
   );
 }
 
