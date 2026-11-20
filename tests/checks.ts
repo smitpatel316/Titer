@@ -765,7 +765,7 @@ const rerunHarness = async () => {
   const seen: unknown[] = [];
   harness.deps.run = async (_type, _data, params) => {
     seen.push(params);
-    return { stats: [], groups: [], notes: "" };
+    return { testType: _type, stats: [], groups: [], notes: "" };
   };
   harness.deps.publishResult = () => {};
   harness.deps.setAnalysisParams = (id, params) =>
