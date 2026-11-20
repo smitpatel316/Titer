@@ -3595,7 +3595,7 @@ impl TiterMcpServer {
     /// labels, the analyses it draws from, and the figures it belongs to.
     #[tool(
         name = "titer_read_graph",
-        description = "Read what a graph shows: its type, source table, titles and labels, the analyses it draws from, and the figures it belongs to.",
+        description = "Read what a graph shows: its type, source table plus any extra source tables it also plots, titles and labels, the analyses it draws from, and the figures it belongs to.",
         annotations(
             title = "Read graph",
             read_only_hint = true,
@@ -7587,12 +7587,37 @@ fn read_graph(project_id: &str, snapshot: &serde_json::Value, graph_id: &str) ->
         }),
         None => ("".to_string(), None, None),
     };
+    // Extra source tables (#48): the tables beyond the primary this graph
+    // also plots, in order. A dangling id still lists (name/type null),
+    // so the caller sees the reference instead of silently losing it.
+    let extra_source_tables: Vec<serde_json::Value> = node
+        .get("sourceTableIds")
+        .and_then(|v| v.as_array())
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|v| v.as_str())
+                .map(|id| {
+                    find_node(snapshot, id).map_or(
+                        serde_json::json!({ "id": id, "name": null, "table_type": null }),
+                        |n| {
+                            serde_json::json!({
+                                "id": id,
+                                "name": node_name(n),
+                                "table_type": n.get("tableType").and_then(|v| v.as_str()).map(display_table_type),
+                            })
+                        },
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(serde_json::json!({
         "project_id": project_id,
         "graph_id": graph_id,
         "name": node_name(node),
         "graph_type": node.get("graphType").and_then(|v| v.as_str()),
         "source_table": { "id": source_id, "name": source_name, "table_type": source_type },
+        "extra_source_tables": extra_source_tables,
         "title": options.get("title").and_then(|v| v.as_str()).unwrap_or(""),
         "x_label": options.get("xLabel").and_then(|v| v.as_str()).unwrap_or(""),
         "y_label": options.get("yLabel").and_then(|v| v.as_str()).unwrap_or(""),
@@ -8030,6 +8055,24 @@ mod tests {
         assert_eq!(out["source_table"]["table_type"], "XY");
         assert_eq!(out["linked_analyses"][0]["analysis_id"], "a1");
         assert_eq!(out["linked_analyses"][0]["link"], "regAnalysisId");
+    }
+
+    #[test]
+    fn read_graph_lists_extra_source_tables() {
+        // #48: a graph plotting a second table must say so — otherwise an
+        // agent can build a multi-table graph and never read back what it
+        // plots. Pre-fix FAIL pin: read_graph had no extra_source_tables key.
+        let mut snap = two_table_snapshot();
+        snap["nodes"]["g1"]["sourceTableIds"] = json!(["t2"]);
+        let out = read_graph("project-1", &snap, "g1").expect("graph");
+        assert_eq!(out["extra_source_tables"].as_array().map(|a| a.len()), Some(1), "{out}");
+        assert_eq!(out["extra_source_tables"][0]["id"], "t2");
+        assert_eq!(out["extra_source_tables"][0]["name"], "Second");
+        assert_eq!(out["extra_source_tables"][0]["table_type"], "Column");
+        // A single-table graph reports an empty list, not a missing key.
+        let snap = two_table_snapshot();
+        let out = read_graph("project-1", &snap, "g1").expect("graph");
+        assert_eq!(out["extra_source_tables"].as_array().map(|a| a.len()), Some(0), "{out}");
     }
 
     #[test]
