@@ -251,6 +251,9 @@ import {
 } from "../src/stats/xy/smooth-differentiate-integrate";
 import { evaluateUserEquation, parseCustomParameters, parseUserEquation } from "../src/stats/xy/user-defined";
 import { monteCarloRCode, percentile } from "../src/stats/simulation/monte-carlo";
+import { applyResimulation } from "../src/stats/simulation/simulate";
+import { goToSheetEntries, linkedSheetIds, pingPongTarget, pushHistory } from "../src/lib/sheet-navigation";
+import { repointCandidates } from "../src/lib/repoint-analysis";
 import { addMonteCarloHistogram } from "../src/views/graphs/monte-carlo-histogram";
 import { addGeneratedCurves } from "../src/views/graphs/generated-curves";
 
@@ -508,6 +511,235 @@ check("replacing the copy's data leaves the original family untouched", () => {
   ok(JSON.stringify(s.nodes[t1].data?.rows) !== JSON.stringify(replacement.rows), "the original keeps its own values");
   strictEqual(s.nodes[copyAnalysis].parentId, copyId);
   strictEqual(s.nodes.a1.parentId, t1);
+});
+
+// ── seq 240–244 (menus batch C) ──────────────────────────────────────────
+
+// seq 240 (keyboard navigation): the history behind Ping-Pong — repeats
+// don't stack, the walk back skips the sheet in front, and nothing is
+// remembered past the cap.
+check("seq 240: sheet history de-duplicates repeats and ping-pong skips the current sheet", () => {
+  let history: string[] = [];
+  history = pushHistory(history, "t1");
+  history = pushHistory(history, "t1");
+  history = pushHistory(history, "a1");
+  history = pushHistory(history, "g1");
+  deepStrictEqual(history, ["t1", "a1", "g1"]);
+  strictEqual(pingPongTarget(history, "g1"), "a1");
+  strictEqual(pingPongTarget(history, "a1"), "g1");
+  strictEqual(pingPongTarget(["t1"], "t1"), null);
+  strictEqual(pingPongTarget([], "t1"), null);
+  const capped = Array.from({ length: 60 }, (_, i) => `s${i}`).reduce(pushHistory, [] as string[]);
+  strictEqual(capped.length, 50);
+  strictEqual(capped[0], "s10");
+});
+
+// seq 240: a graph's linked sheets are its table first, then its siblings;
+// a table's are its children, then the info sheets tied to it.
+check("seq 240: linked sheets are the parent, siblings and linked info sheets", () => {
+  const nodes = {
+    t1: { id: "t1", type: "table", name: "Doses", parentId: null },
+    a1: { id: "a1", type: "analysis", name: "Fit", parentId: "t1" },
+    g1: { id: "g1", type: "graph", name: "Plot", parentId: "t1" },
+    i1: { id: "i1", type: "info", name: "Notes", parentId: null, info: { linkedTableId: "t1" } },
+  } as unknown as Record<string, ProjectNode>;
+  deepStrictEqual(linkedSheetIds(nodes.g1, nodes, { t1: ["a1", "g1"] }), ["t1", "a1"]);
+  deepStrictEqual(linkedSheetIds(nodes.t1, nodes, { t1: ["a1", "g1"] }), ["a1", "g1", "i1"]);
+  deepStrictEqual(linkedSheetIds(nodes.i1, nodes, { t1: ["a1", "g1"] }), ["t1"]);
+});
+
+// seq 240: Go to Sheet lists every sheet in outline order, grouped by section.
+check("seq 240: go-to-sheet entries walk the outline in order", () => {
+  const nodes = {
+    t1: { id: "t1", type: "table", name: "Doses", parentId: null },
+    a1: { id: "a1", type: "analysis", name: "Fit", parentId: "t1" },
+    g1: { id: "g1", type: "graph", name: "Plot", parentId: "t1" },
+    f1: { id: "f1", type: "figure", name: "Figure", parentId: null },
+  } as unknown as Record<string, ProjectNode>;
+  deepStrictEqual(
+    goToSheetEntries(nodes, ["t1", "f1"], { t1: ["a1", "g1"] }).map((e) => `${e.section}:${e.label}`),
+    ["Data:Doses", "Results:Fit", "Graphs:Plot", "Layouts:Figure"],
+  );
+});
+
+// seq 240: the store remembers where it has been, so Previous Sheet can
+// walk back — and the menu carries the three navigation items.
+check("seq 240: setActive tracks recent sheets; the View menu offers Go to Sheet, Go to Linked Sheet, Previous Sheet", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  s = reducer(s, { type: "setActive", id: t1 });
+  s = reducer(s, { type: "create", node: { id: "a1", type: "analysis", name: "Stats", parentId: t1, analysisType: "descriptive-statistics" } });
+  s = reducer(s, { type: "setActive", id: t1 });
+  strictEqual(pingPongTarget(s.recentNodeIds, s.activeNodeId), "a1");
+  const menu = readFileSync("src/app-menu.ts", "utf8");
+  ok(/Go to Sheet…/.test(menu) && /CmdOrCtrl\+J/.test(menu), "View menu lacks Go to Sheet… (CmdOrCtrl+J)");
+  ok(/Go to Linked Sheet/.test(menu) && /CmdOrCtrl\+L/.test(menu), "View menu lacks Go to Linked Sheet (CmdOrCtrl+L)");
+  ok(/Previous Sheet/.test(menu) && /CmdOrCtrl\+Alt\+Z/.test(menu), "View menu lacks Previous Sheet (CmdOrCtrl+Alt+Z)");
+  const shell = readFileSync("src/components/app-shell.tsx", "utf8");
+  ok(/go-to-sheet/.test(shell), "app-shell doesn't render the Go to Sheet dialog");
+});
+
+// seq 241 (Help → User Guide): the Help menu opens the guide, and the
+// shell only opens the fixed guide address.
+check("seq 241: Help offers the User Guide (F1) and the shell opens only the fixed guide address", () => {
+  const menus = readFileSync("src/menus.ts", "utf8");
+  ok(/Titer User Guide/.test(menus), "Help menu lacks Titer User Guide");
+  ok(/F1/.test(menus), "User Guide lacks the F1 shortcut");
+  const native = readFileSync("src/native.ts", "utf8");
+  ok(/"github" \| "releases" \| "coffee" \| "guide"/.test(native), "openLink doesn't take a guide link");
+  const shell = readFileSync("src-tauri/src/main.rs", "utf8");
+  const guideUrls = shell.match(/"https:\/\/github\.com\/smitpatel316\/Titer"/g) ?? [];
+  ok(guideUrls.length >= 4, `open_link's guide arm is missing (exact repo URL appears ${guideUrls.length}×, want 4: github + guide in both cfgs)`);
+  ok(/"guide" =>/.test(shell), "open_link has no guide arm");
+});
+
+// seq 242 (re-point orphaned analysis): only tables that offer the test
+// are candidates — a descriptive-statistics orphan can't move to an XY table.
+check("seq 242: re-point candidates are only tables offering the orphaned test", () => {
+  const nodes = {
+    t1: { id: "t1", type: "table", name: "Groups", parentId: null, tableType: "column" },
+    t2: { id: "t2", type: "table", name: "Doses", parentId: null, tableType: "xy" },
+    a1: { id: "a1", type: "analysis", name: "Stats", parentId: null, orphaned: true, analysisType: "descriptive-statistics" },
+  } as unknown as Record<string, ProjectNode>;
+  deepStrictEqual(
+    repointCandidates(nodes.a1, nodes).map((t) => t.id),
+    ["t1"],
+  );
+  strictEqual(repointCandidates(nodes.t1, nodes).length, 0);
+});
+
+// seq 242: re-pointing moves the orphan under the new table, clears the
+// orphan flag and keeps its saved results; one Undo puts it back.
+check("seq 242: re-pointing an orphaned analysis re-parents it and un-orphans it; Undo restores it", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  s = reducer(s, {
+    type: "create",
+    node: { id: "a1", type: "analysis", name: "Stats", parentId: t1, analysisType: "descriptive-statistics", cachedResult: { kind: "descriptive-statistics" } as unknown as AnalysisResult },
+  });
+  s = reducer(s, { type: "remove", id: t1 });
+  ok(s.nodes.a1.orphaned, "deleting the table should orphan its analysis");
+  s = reducer(s, { type: "create", node: { id: "t2", type: "table", name: "Groups", parentId: null, tableType: "column", data: { columns: ["Title", "A"], rows: [[null, "1"]] } } });
+  const before = s;
+  s = reducer(s, { type: "repointAnalysis", id: "a1", tableId: "t2" });
+  strictEqual(s.nodes.a1.parentId, "t2");
+  strictEqual(s.nodes.a1.orphaned, false);
+  strictEqual(s.nodes.a1.sourceTableName, undefined);
+  ok(s.nodes.a1.cachedResult, "re-pointing keeps the saved results until the re-run lands");
+  deepStrictEqual(s.childOrder.t2, ["a1"]);
+  ok(!s.rootOrder.includes("a1"), "the re-pointed analysis leaves the project root");
+  strictEqual(s.activeNodeId, "a1");
+  // A table that doesn't offer the test, or a live analysis, refuses.
+  strictEqual(reducer(s, { type: "repointAnalysis", id: "a1", tableId: "t2" }), s);
+  s = reducer(s, { type: "undo" });
+  deepStrictEqual(s.nodes, before.nodes);
+  deepStrictEqual(s.childOrder, before.childOrder);
+  // The banner offers the re-point.
+  const view = readFileSync("src/views/analyses/analysis-view.tsx", "utf8");
+  ok(/Re-point/.test(view), "the orphaned banner offers no re-point");
+});
+
+// seq 243 (re-run simulation from graph): re-simulating swaps the values
+// but keeps the table's shape — its titles, X column and column names.
+check("seq 243: re-simulation swaps values, not the table's shape", () => {
+  const oldData: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["ctrl", "1", "2.5"],
+      ["dose", "2", "3.5"],
+    ],
+    notes: "Simulated data: Gaussian (mean 0, SD 1), n = 2 × 1 Y series, seed 7",
+    simulation: { distribution: "gaussian", mean: 0, sd: 1, n: 2, datasets: 1, seed: 7, tableType: "xy" },
+  };
+  const fresh: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      [null, "1", "9.1"],
+      [null, "2", "8.2"],
+    ],
+    notes: "Simulated data: Gaussian (mean 0, SD 1), n = 2 × 1 Y series, seed 8",
+    simulation: { distribution: "gaussian", mean: 0, sd: 1, n: 2, datasets: 1, seed: 8, tableType: "xy" },
+  };
+  const next = applyResimulation(oldData, fresh);
+  deepStrictEqual(next.columns, ["Title", "X", "Y1"]);
+  deepStrictEqual(
+    next.rows.map((r) => r[0]),
+    ["ctrl", "dose"],
+  );
+  deepStrictEqual(
+    next.rows.map((r) => r[1]),
+    ["1", "2"],
+  );
+  deepStrictEqual(
+    next.rows.map((r) => r[2]),
+    ["9.1", "8.2"],
+  );
+  strictEqual(next.simulation?.seed, 8);
+  // A fresh table of a different shape replaces the old one outright.
+  const reshaped = applyResimulation(oldData, { ...fresh, columns: ["Title", "X", "Y1", "Y2"], rows: [[null, "1", "1", "2"]] });
+  deepStrictEqual(reshaped.columns, ["Title", "X", "Y1", "Y2"]);
+  // The menu carries Simulate Again (F9).
+  const menu = readFileSync("src/app-menu.ts", "utf8");
+  ok(/Simulate Again/.test(menu) && /F9/.test(menu), "Graph menu lacks Simulate Again (F9)");
+});
+
+// seq 243: the simulation spec survives a save/load round-trip, so a
+// simulated table can be re-run after reopening — and a hand-edited spec
+// that isn't valid is dropped on load instead of trusted.
+check("seq 243: a simulation spec round-trips through the file; an invalid one is dropped", () => {
+  const spec = { distribution: "gaussian", mean: 0, sd: 1, n: 3, datasets: 2, seed: 7, tableType: "column" } as const;
+  const simTable: ProjectNode = {
+    id: "s1",
+    type: "table",
+    name: "Simulated data",
+    parentId: null,
+    tableType: "column",
+    data: {
+      columns: ["Title", "Simulated 1", "Simulated 2"],
+      rows: [
+        [null, "0.1", "0.2"],
+        [null, "0.3", "0.4"],
+        [null, "0.5", "0.6"],
+      ],
+      simulation: { ...spec },
+    },
+  };
+  const filePayload: ProjectFilePayload = { nodes: { s1: simTable }, rootOrder: ["s1"], childOrder: { s1: [] }, activeNodeId: "s1" };
+  const roundTripped = read(serializeProjectFile(filePayload));
+  strictEqual(roundTripped.updated, false);
+  deepStrictEqual(roundTripped.nodes.s1.data?.simulation, { ...spec });
+  const tampered = JSON.parse(serializeProjectFile(filePayload)) as { project: { nodes: Record<string, { data: Record<string, unknown> }> } };
+  (tampered.project.nodes.s1.data.simulation as Record<string, unknown>).distribution = "bogus";
+  deepStrictEqual(read(JSON.stringify(tampered)).nodes.s1.data?.simulation, undefined);
+});
+
+// seq 244 (change graph type): switching keeps the titles and the size,
+// takes the new type's defaults, and renames the graph; a type the table
+// doesn't offer is refused, and Undo restores the old type.
+check("seq 244: changing a graph's type keeps its titles, resets its options and renames it; Undo restores it", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  // The initial table is a column table: switch its graph to a grouped type
+  // is refused, so first move to an XY table for a real switch.
+  s = reducer(s, { type: "create", node: { id: "t2", type: "table", name: "Doses", parentId: null, tableType: "xy", data: { columns: ["Title", "X", "Y1"], rows: [[null, "1", "2"]] } } });
+  s = reducer(s, {
+    type: "create",
+    node: { id: "g1", type: "graph", name: "Scatter", parentId: "t2", graphType: "xy-scatter", graphOptions: { ...newGraphOptions("xy-scatter"), title: "My Title", yMax: 10 } },
+  });
+  const before = s;
+  s = reducer(s, { type: "changeGraphType", id: "g1", graphType: "xy-bar" });
+  strictEqual(s.nodes.g1.graphType, "xy-bar");
+  strictEqual(s.nodes.g1.name, GRAPHS["xy-bar"].label);
+  strictEqual(s.nodes.g1.graphOptions?.title, "My Title");
+  strictEqual(s.nodes.g1.graphOptions?.yMax, undefined);
+  strictEqual(s.nodes.g1.graphOptions?.width, before.nodes.g1.graphOptions?.width);
+  strictEqual(reducer(s, { type: "changeGraphType", id: "g1", graphType: "individual" }), s);
+  strictEqual(reducer(s, { type: "changeGraphType", id: "nope", graphType: "xy-bar" }), s);
+  s = reducer(s, { type: "undo" });
+  strictEqual(s.nodes.g1.graphType, "xy-scatter");
+  strictEqual(s.nodes.g1.name, "Scatter");
+  const menu = readFileSync("src/app-menu.ts", "utf8");
+  ok(/Change Graph Type/.test(menu), "Graph menu lacks Change Graph Type");
 });
 
 // ── v1.6 MCP race fix ──────────────────────────────────────────────────────
