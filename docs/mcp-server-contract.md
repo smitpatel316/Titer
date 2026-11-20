@@ -36,6 +36,14 @@ the 46 Phase 2 tools (§§6–10), and the Phase 2 smoke (§11).
   'Allow AI apps to connect' in Titer → Settings → AI connections, then
   try again." (The bridge must not start the server itself — starting it
   is a human action in Titer's Settings, never an agent action.)
+- **Persisted opt-in:** turning the toggle on records the choice in
+  `<app_data_dir>/mcp/mcp-opt-in.json` (`{"enabled": true, ...}`);
+  turning it off records `false`. On launch Titer auto-starts the server
+  when the record says `enabled: true` — no user action needed — so the
+  toggle still shows ON after a restart. A missing or malformed record
+  means off (fresh installs stay off). The record holds a boolean only,
+  no secret. Re-enabling reuses the stored token (rotation is only via
+  Regenerate in Settings, while the server is stopped).
 
 ## 2. Discovery — how the bridge finds the server
 

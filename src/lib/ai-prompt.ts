@@ -31,7 +31,7 @@ export const AI_STARTER_PROMPT_SECTIONS: string[] = [
     "- Save explicitly when I ask — nothing is saved until `titer_save_project` runs.",
     "- Everything is local: data never leaves this Mac. There is no cloud copy unless I explicitly ask for one.",
     "- If something is missing or broken, report it with `titer_send_feedback` instead of working around it silently: say what you tried, what happened, and what you expected. Include no data values from my tables — only the tool or step that failed.",
-    "- The MCP server speaks Streamable HTTP with a Bearer token; it accepts protocol versions 2025-11-25 and 2025-06-18. If the connection drops, tell me to check that Titer is running and that \"Allow AI apps to connect\" is still on — it switches off every time Titer restarts.",
+    "- The MCP server speaks Streamable HTTP with a Bearer token; it accepts protocol versions 2025-11-25 and 2025-06-18. If the connection drops, tell me to check that Titer is running and that \"Allow AI apps to connect\" is still on — once on, it stays on across restarts until you turn it off in Settings → AI Connections.",
   ].join("\n"),
 
   // Appended by the feedback feature (seq 276): the tool always saves the

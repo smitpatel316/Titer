@@ -139,6 +139,21 @@ export interface McpStatus {
 
 export const mcpStatus = () => invoke<McpStatus>("mcp_status");
 export const mcpSetEnabled = (enabled: boolean) => invoke<McpStatus>("mcp_set_enabled", { enabled });
+
+/** What connecting to Antigravity did: `connected` (entry written) or
+ *  `already_connected` (the entry was already there — nothing touched). */
+export interface McpAntigravityConnect {
+  outcome: "connected" | "already_connected";
+  command: string;
+  config_path: string;
+}
+
+/** One-click Antigravity setup: turns the MCP server on (persisted opt-in)
+ *  and writes the stdio `titer` entry into ~/.gemini/config/mcp_config.json.
+ *  No token anywhere — the bridge reads it from Titer's own connection file. */
+export const mcpConnectAntigravity = () => invoke<McpAntigravityConnect>("mcp_connect_antigravity");
+/** Brings Antigravity forward (macOS) so the user can Refresh its MCP servers. */
+export const mcpOpenAntigravity = () => invoke<void>("mcp_open_antigravity");
 /** The local bearer token, for Settings to show (never for an agent). */
 export const mcpToken = () => invoke<string>("mcp_token");
 /** Rotates the token; only while the server is stopped. */

@@ -8,7 +8,8 @@ Reads the discovery file Titer writes when AI connections are enabled
 
 Codex calls this helper per connection and refreshes after a 401/403, so
 unlike `bearer_token_env_var` it survives Titer's token rotation (a fresh
-token is generated every time AI connections are re-enabled). Stdlib only.
+token is generated only by Regenerate in Settings, while the server is
+stopped; re-enabling reuses the stored token). Stdlib only.
 
 Usage (see docs/codex.md):
 
