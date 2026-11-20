@@ -1526,6 +1526,11 @@ function ownStyle(context: SectionContext): React.ReactNode {
         <>
           {groups}
           {graphType === "grouped-scatter" ? points : shapes("Bars", options.groupLayout === "interleaved" && gap)}
+          {(graphType === "grouped-bars" || graphType === "grouped-hbars") &&
+            pointsGroup(
+              context,
+              <Toggle label="Show points" checked={options.showPoints} onChange={(showPoints) => set({ showPoints })} />,
+            )}
         </>
       );
     case "grouped-lines":

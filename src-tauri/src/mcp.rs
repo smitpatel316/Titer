@@ -1379,7 +1379,7 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
     AllowlistGroup {
         id: "analyses",
         label: "Run analyses",
-        description: "Run and freeze analyses, simulate data, apply methods and the wand; check job status.",
+        description: "Run, re-run and freeze analyses, simulate data, apply methods and the wand; check job status.",
         tools: &[
             "titer_run_analysis",
             "titer_rerun_analysis",
@@ -9884,6 +9884,9 @@ mod tests {
         // The inventory pin: every tool in exactly one group, 56 total.
         // A lane that adds a tool must assign it a group here, or this
         // fails — an ungrouped tool would otherwise be silently hidden.
+        // The count alone did not catch that (four tools shipped ungrouped
+        // while this still said 52), so the router cross-check below is
+        // the part that actually catches it.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
         assert_eq!(all.len(), 56, "tool inventory changed — assign the new tool a group: {all:?}");
@@ -9891,6 +9894,12 @@ mod tests {
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
         assert!(all.iter().all(|t| t.starts_with("titer_")), "all tools are titer_*");
+        // Every tool the router advertises must be in exactly one group.
+        let listed = TiterMcpServer::new(job_state()).tool_router.list_all();
+        let mut routed: Vec<String> = listed.iter().map(|t| t.name.to_string()).collect();
+        routed.sort_unstable();
+        let grouped: Vec<String> = all.iter().map(|t| t.to_string()).collect();
+        assert_eq!(routed, grouped, "router tools and allowlist groups disagree — an ungrouped tool is silently hidden");
     }
 
     #[test]
