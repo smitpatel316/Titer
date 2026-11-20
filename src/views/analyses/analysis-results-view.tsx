@@ -188,6 +188,9 @@ export function AnalysisResultsView({
   // A Cox regression (plan 10) also carries a hazard ratio per coefficient —
   // its CI above is on the hazard-ratio scale.
   const showHr = (result.coefficients ?? []).some((c) => c.hazardRatio != null);
+  // The denominator DF comes from the mixed-effects runner (seq 181) —
+  // other runners leave it undefined, so the "DF" column only fills then.
+  const showDf = (result.coefficients ?? []).some((c) => c.df != null);
   const showRange = groups.some((g) => g.min != null || g.max != null || g.range != null);
   const matrix = result.matrix;
 
@@ -684,6 +687,7 @@ export function AnalysisResultsView({
             { label: "Estimate", numeric: true },
             { label: "Std. error", numeric: true },
             { label: result.statisticLabel ?? "t", numeric: true },
+            ...(showDf ? [{ label: "DF", numeric: true }] : []),
             { label: "P value", numeric: true },
             { label: "95% CI", numeric: true },
             ...(showHr ? [{ label: "Hazard ratio", numeric: true }] : []),
@@ -695,6 +699,7 @@ export function AnalysisResultsView({
             num(c.estimate),
             num(c.stdError),
             num(c.t),
+            ...(showDf ? [num(c.df)] : []),
             <P p={c.p} />,
             c.low == null && c.high == null ? "—" : `${num(c.low)} to ${num(c.high)}`,
             ...(showHr ? [num(c.hazardRatio)] : []),

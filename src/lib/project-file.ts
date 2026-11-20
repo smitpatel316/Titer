@@ -360,6 +360,9 @@ const PARAMS = {
   // unknown param (FF-F12 carry-through).
   randomStructure: ["intercept", "slope"], subjectId: ["row", "replicate"], interaction: "yes/no",
   fixedFactors: "names", subjectFactor: "name-and-names",
+  // Denominator DF behind the mixed-effects P values (seq 181): which of
+  // Prism's three methods — Legacy, Satterthwaite, Kenward-Roger.
+  dfMethod: ["legacy", "satterthwaite", "kenward-roger"],
   // Monte Carlo simulation (plan 22): the target analysis + statistic are
   // choices; repeats/seed are numbers; the per-column simulated means/SDs
   // are numbers-by-name (the target's own options — equalVariance,
@@ -873,7 +876,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "kruskal-wallis": ["posthoc", "sets"],
   "rm-anova": ["posthoc", "sphericity", "compared", "mixed", "sets"],
   friedman: ["posthoc", "sets"],
-  "mixed-effects": ["fixedFactors", "randomStructure", "subjectId", "subjectFactor", "interaction", "sets"],
+  "mixed-effects": ["fixedFactors", "randomStructure", "subjectId", "subjectFactor", "interaction", "dfMethod", "sets"],
   "shapiro-wilk": ["test", "lognormal", "sets"],
   "kolmogorov-smirnov": ["sets"],
   outliers: ["q", "method", "alpha", "iterate", "sets"],

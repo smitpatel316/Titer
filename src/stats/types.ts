@@ -932,8 +932,26 @@ export interface NormalizeParams {
   hundredConstantHook?: string;
 }
 
+/** How the denominator degrees of freedom are calculated for a
+ *  mixed-effects fit (Prism 11, "Denominator degrees of freedom in the
+ *  mixed model" — the fit itself never changes, only the reference
+ *  distribution behind the P values):
+ *  - "legacy": each test gets the DF of the matching repeated-measures
+ *    ANOVA error term, worked out from the design — exact when the data
+ *    are complete and balanced, not reliable otherwise (Prism warns when
+ *    values are missing).
+ *  - "satterthwaite": an effective DF per test from the uncertainty in
+ *    the estimated variance components (lmerTest) — the large improvement
+ *    over Legacy on incomplete or unbalanced data.
+ *  - "kenward-roger": Satterthwaite plus a correction of the fixed-effect
+ *    covariance matrix for the bias from estimating the variance
+ *    components (pbkrtest) — the most accurate, and Prism's default. */
+export type MixedEffectsDfMethod = "legacy" | "satterthwaite" | "kenward-roger";
+
 /** Params for "mixed-effects" (Column or Grouped table): a repeated-measures
- *  model fit with lme4::lmer + lmerTest Satterthwaite p-values (plan 20).
+ *  model fit with lme4::lmer (plan 20). The denominator DF behind the
+ *  P values follows `dfMethod` (seq 181) — Satterthwaite via lmerTest
+ *  when omitted, Kenward-Roger via pbkrtest, or the Legacy design DF.
  *  `subjectId` says what a subject is — a table row (Column tables) or a
  *  replicate column within each group (Grouped tables) — and so selects the
  *  layout; the wizard always sets it, the runner auto-detects when it is absent.
@@ -958,6 +976,13 @@ export interface MixedEffectsParams {
   /** Include the subject-factor × column-factor interaction (default false;
    *  Grouped tables default it on — see the wizard). */
   interaction?: boolean;
+  /** How the denominator degrees of freedom behind the P values are
+   *  calculated (seq 181 — Prism offers all three; Titer previously
+   *  offered none and always used Satterthwaite). Omitted keeps
+   *  "satterthwaite", so saved analyses and the reference pins don't
+   *  move; the wizard always sets it, defaulting to "kenward-roger"
+   *  (Prism's default). */
+  dfMethod?: MixedEffectsDfMethod;
 }
 
 /** Params for "cox-proportional-hazards" (Multiple Variables table): which
@@ -1370,6 +1395,9 @@ export interface RegressionCoefficient {
   stdError: number | null;
   t: number | null;
   p: number | null;
+  /** Denominator degrees of freedom behind `p` (mixed-effects only):
+   *  Satterthwaite / Kenward-Roger are usually fractional, Legacy whole. */
+  df?: number | null;
   /** Its 95% confidence interval (asymptotic for a nonlinear fit). */
   low?: number | null;
   high?: number | null;

@@ -41,6 +41,7 @@ import type {
   EnzymeInhibitionParams,
   ExtractRearrangeParams,
   FrequencyDistributionParams,
+  MixedEffectsDfMethod,
   MultipleTTestsParams,
   NestedAnovaParams,
   NonlinearRegressionParams,
@@ -344,6 +345,26 @@ const choice = (
   normality,
   ...(emptyMessage ? { emptyMessage } : {}),
 });
+
+/** The denominator-DF choice for the mixed-effects wizard (seq 181):
+ *  Kenward-Roger first — a choice's first option is the wizard's default,
+ *  and Kenward-Roger is Prism's default. */
+const dfMethodChoice = () =>
+  choice(
+    "dfMethod",
+    "How should the denominator degrees of freedom be calculated? The fit itself does not change — only the P values. Kenward-Roger is Prism's default and the most accurate; Satterthwaite matches R's lmerTest; Legacy is exact only when the data are complete and balanced.",
+    [
+      ["kenward-roger", "Kenward-Roger — most accurate (Prism's default)"],
+      ["satterthwaite", "Satterthwaite — matches R lmerTest and emmeans"],
+      ["legacy", "Legacy — earlier Prism versions; exact only for complete, balanced data"],
+    ],
+  );
+
+/** The wizard's DF answer as a MixedEffectsDfMethod — anything unrecognised
+ *  (including an answer predating the choice) falls back to Kenward-Roger,
+ *  the wizard's default. */
+const dfMethodOf = (a: Answers): MixedEffectsDfMethod =>
+  a.dfMethod === "legacy" || a.dfMethod === "satterthwaite" ? a.dfMethod : "kenward-roger";
 
 const names = (list: string[]) => list.map((n): [string, string] => [n, n]);
 
@@ -1456,6 +1477,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
                 ["no", "Main effects only — no interaction"],
               ],
             ),
+          a.matched !== "not-matched" && dfMethodChoice(),
         ];
       }
       const rowCount = table.numeric[0]?.byRow.length ?? 0;
@@ -1475,6 +1497,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             ["not-matched", "Rows are NOT matched subjects — stop and use one-way ANOVA instead"],
           ],
         ),
+        dfMethodChoice(),
         choice(
           "groups",
           "Do the subjects (rows) fall into groups — for example a treatment arm? A between-subject factor adds one fixed effect per group; without one, the model fits the repeated-measure factor only.",
@@ -1521,6 +1544,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             randomStructure: "intercept",
             fixedFactors: ["Group", "Row"],
             interaction: a.interaction !== "no",
+            dfMethod: dfMethodOf(a),
           },
         };
       }
@@ -1540,6 +1564,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             randomStructure: "intercept",
             fixedFactors: [name, timeName],
             subjectFactor: { name, levels },
+            dfMethod: dfMethodOf(a),
           }) as AnalysisParams,
         };
       }
@@ -1549,6 +1574,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           subjectId: "row",
           randomStructure: "intercept",
           fixedFactors: [timeName],
+          dfMethod: dfMethodOf(a),
         }) as AnalysisParams,
       };
     },
