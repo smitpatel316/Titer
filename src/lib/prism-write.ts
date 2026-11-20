@@ -312,14 +312,26 @@ const excludedCellAttributes = (rows: Set<number> | undefined): { rows: string; 
   return entries;
 };
 
-const replicateEntry = (lastRow: number, cellAttributes?: { rows: string; attributes: string[] }[]) => ({
+// seq 289: firstRow is a real parameter now, not a hardcoded 0 — a
+// replicate range's [firstRow, lastRow] is exactly the rows where its
+// subcolumns hold values, and a wholly-blank run gets the sentinel
+// firstRow -1, lastRow -1 (real Prism's rule; copy_2 violated it in 32
+// of 58 grouped ranges and Prism 11 refuses the file). The string
+// variant is the row-titles replicate: real files carry exactly one
+// DriverReplicate there (valueType "string", decimalsLength 15).
+const replicateEntry = (
+  firstRow: number,
+  lastRow: number,
+  cellAttributes?: { rows: string; attributes: string[] }[],
+  valueType: "real" | "string" = "real",
+) => ({
   "@class": "DriverReplicate",
-  valueType: "real",
+  valueType,
   commonAttributes: ["NUMERIC"],
-  decimalsLength: 1,
+  decimalsLength: valueType === "string" ? 15 : 1,
   significantDigitsCount: 7,
   lastRow,
-  firstRow: 0,
+  firstRow,
   ...(cellAttributes && cellAttributes.length ? { cellAttributes } : {}),
 });
 
@@ -495,7 +507,7 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         attributes: ["DS_ATTR_X"],
         replicates: [
           {
-            ...replicateEntry(rowCount - 1, excludedCellAttributes(excludedByColumn.get(0))),
+            ...replicateEntry(0, rowCount - 1, excludedCellAttributes(excludedByColumn.get(0))),
             commonAttributes: ["NUMERIC", "NOTCONV"],
           },
         ],
@@ -516,14 +528,30 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         // different exclusions must not share a run (BUG-10: Ya_1+Ya_2
         // excluded at row 1, Yb_1 excluded but Yb_2 live, must not become
         // one "0~1" range with EXCLUDED row 1).
+        //
+        // The run ALSO breaks where the row-occupancy pattern changes
+        // (seq 289): a range's [firstRow, lastRow] is exactly the rows
+        // where its subcolumns hold values, so consecutive subcolumns
+        // sharing the same occupied-row set form one range with
+        // firstRow/lastRow = min/max of that set, and a wholly-blank set
+        // gets the sentinel firstRow -1, lastRow -1. The old writer
+        // emitted one range spanning all rows for every dataset, claiming
+        // rows that hold no data — Prism 11 refuses the file. The two
+        // splits compose (a run breaks where either pattern changes),
+        // neither replaces the other.
+        const isBlank = (v: string | null) => v === null || v.trim() === "";
         const keyOf = (rows: Set<number>) => [...rows].sort((a, b) => a - b).join(",");
-        const runs: { start: number; end: number; key: string; rows: Set<number> }[] = [];
+        const runs: { start: number; end: number; key: string; rows: Set<number>; occupied: Set<number> }[] = [];
         for (let k = 0; k < set.columns.length; k++) {
           const rows = excludedByColumn.get(yColToAll(set.columns[k])) ?? new Set<number>();
-          const key = keyOf(rows);
+          const occupied = new Set<number>();
+          for (let r = 0; r < rowCount; r++) {
+            if (!isBlank(yColumns[set.columns[k]].values[r])) occupied.add(r);
+          }
+          const key = `${keyOf(rows)}|${keyOf(occupied)}`;
           const last = runs[runs.length - 1];
           if (last && last.key === key) last.end = k;
-          else runs.push({ start: k, end: k, key, rows });
+          else runs.push({ start: k, end: k, key, rows, occupied });
         }
         setJson(`data/sets/${setUid}.json`, {
           "@class": "DataSet",
@@ -531,9 +559,13 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
           format: "y_replicates",
           title: set.title,
           attributes: ["DS_ATTR_Y"],
-          "replicate ranges": runs.map(({ start, end, rows }) => ({
+          "replicate ranges": runs.map(({ start, end, rows, occupied }) => ({
             range: start === end ? String(start) : `${start}~${end}`,
-            replicate: replicateEntry(lastRow, excludedCellAttributes(rows)),
+            replicate: replicateEntry(
+              occupied.size === 0 ? -1 : Math.min(...occupied),
+              occupied.size === 0 ? -1 : Math.max(...occupied),
+              excludedCellAttributes(rows),
+            ),
           })),
         });
       } else {
@@ -544,7 +576,7 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
           title: set.title,
           attributes: ["DS_ATTR_Y"],
           replicates: set.columns.map((colIdx) =>
-            replicateEntry(lastRow, excludedCellAttributes(excludedByColumn.get(yColToAll(colIdx)))),
+            replicateEntry(0, lastRow, excludedCellAttributes(excludedByColumn.get(yColToAll(colIdx)))),
           ),
         });
       }
@@ -559,7 +591,12 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         format: "text",
         title: "Row titles",
         attributes: ["DS_ATTR_RT"],
-        replicates: [],
+        // seq 289: real Prism files carry exactly one string
+        // DriverReplicate here (firstRow 0, lastRow <last> — the
+        // original's 38/38, corpus 95/95); the empty array Titer wrote
+        // is a plausible unconditional-deref crash, same family as
+        // BUG-20 / seq 175.
+        replicates: [replicateEntry(0, rowCount - 1, undefined, "string")],
       });
     }
 
@@ -787,7 +824,8 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
   // alone is sufficient: a selectedCellsRange-only variant opens clean,
   // while uiState-only still crashes. Value is the real-Prism default.
   const infoUids: string[] = [];
-  for (const infoNode of project.rootOrder.map((id) => project.nodes[id]).filter((n) => n?.type === "info")) {
+  const infoNodes = project.rootOrder.map((id) => project.nodes[id]).filter((n) => n?.type === "info");
+  for (const [infoIdx, infoNode] of infoNodes.entries()) {
     const infoUid = crypto.randomUUID().toUpperCase();
     infoUids.push(infoUid);
     titles[infoUid] = { title: infoNode.name };
@@ -795,7 +833,10 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
       "@class": "InfoSheet",
       $id: "sheets/info_sheet/info_sheet.schema.json",
       uid: infoUid,
-      fenID: 0,
+      // seq 289: info sheets get distinct fenIDs (0, 2, … — the
+      // original's pattern: "Project info 1" 0, "*Project info 1" 2);
+      // the hardcoded 0 on every info sheet duplicated the id.
+      fenID: infoIdx * 2,
       title: infoNode.name,
       notesText: infoNode.info?.notes ?? "",
       selectedCellsRange: {

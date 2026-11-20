@@ -206,6 +206,7 @@ INTERFACE_TO_TYPE = {
     "PoissonRegression": "poisson-regression",
     "PrincipalComponentAnalysis": "principal-component-analysis",
     "KMeans": "k-means",
+    "Hclust": "hierarchical-clustering",
     "ExtractRearrange": "extract-rearrange",
     "TwoWayAnova": "two-way-anova",
     "ThreeWayAnova": "three-way-anova",
@@ -378,6 +379,9 @@ for f in (ROOT / "src/stats").rglob("*.ts"):
 #  area-under-curve.ts: `params?.baseline ?? 0`
 #  fraction-of-total.ts: `?? "column"` / `?? "fraction"`
 #  k-means.ts: `params?.clusters ?? 2`, `standardise !== false`
+#  hierarchical-clustering.ts: `params?.clusters ?? 2`,
+#    linkage falls through to "complete", distance to "euclidean",
+#    `standardise !== false`
 #  normalize.ts: `?? "percent-of-largest"`; prune-rows.ts: `?? "empty"`
 #  remove-baseline.ts: `?? "first-value"`; smooth-...ts: `?? "smooth"`
 #  spline-lowess.ts: `?? "lowess"`, `?? 2/3`; transform-data.ts: `?? "log10"`
@@ -399,6 +403,10 @@ RUNNER_FALLBACKS = {
     ("fraction-of-total", "format"): "fraction",
     ("k-means", "clusters"): 2,
     ("k-means", "standardise"): True,
+    ("hierarchical-clustering", "clusters"): 2,
+    ("hierarchical-clustering", "linkage"): "complete",
+    ("hierarchical-clustering", "distance"): "euclidean",
+    ("hierarchical-clustering", "standardise"): True,
     ("normalize", "normalizeMethod"): "percent-of-largest",
     ("prune-rows", "condition"): "empty",
     ("remove-baseline", "baselineMethod"): "first-value",
@@ -538,8 +546,8 @@ for typ, keys in sorted(KEYS_BY_TYPE.items()):
         out["gates"] = GATES[typ]
     schema[typ] = out
 
-# Sanity: 53 types, every key accounted for, offered_on non-empty.
-assert len(schema) == 53, f"{len(schema)} types, expected 53"
+# Sanity: 54 types, every key accounted for, offered_on non-empty.
+assert len(schema) == 54, f"{len(schema)} types, expected 54"
 for typ, entry in schema.items():
     assert entry["offered_on"], f"{typ} offered on no table type"
     assert entry["min_columns"] is not None, f"{typ} has no min_columns"

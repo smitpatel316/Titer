@@ -765,7 +765,10 @@ const rerunHarness = async () => {
   const seen: unknown[] = [];
   harness.deps.run = async (_type, _data, params) => {
     seen.push(params);
-    return { stats: [], groups: [], notes: "" };
+    // Pre-existing base failure (check/v18): the AnalysisResult mock
+    // omitted the required testType, so tsc was red before this lane;
+    // one field restores the gate, no behaviour change.
+    return { testType: _type, stats: [], groups: [], notes: "" };
   };
   harness.deps.publishResult = () => {};
   harness.deps.setAnalysisParams = (id, params) =>

@@ -651,6 +651,143 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
     dupXYProblems.push(`rules ${Object.keys(dupXYRules).join(",")}`);
   if (dupXYRules.Y0?.rule !== "*YMAX" || dupXYRules.Plateau?.rule !== "*YMIN" || dupXYRules.K?.rule !== "*YMAX")
     dupXYProblems.push("one-phase-decay rules not the P2-proven values");
+  // W14 (seq 289): grouped tables with unequal replicates per row write
+  // replicate ranges by row occupancy, not one range spanning all rows.
+  // "Paired" mirrors copy_2's paired tables (WT 3 replicates, SKG 7,
+  // plus a wholly-blank row): subcols 0–2 are occupied in rows 0–1, so
+  // range "0~2" gets firstRow 0, lastRow 1; subcols 3–6 only in row 1,
+  // so "3~6" gets firstRow 1, lastRow 1 — the blank row must NOT extend
+  // the span. "WT-only" mirrors the WT-only copies (SKG row entirely
+  // blank): "0~2" gets [0, 0] and the wholly-blank "3~6" gets the
+  // sentinel firstRow -1, lastRow -1. The old writer emitted one "0~6"
+  // [0, lastRow] range for both — 32 of 58 grouped ranges in copy_2
+  // violated Prism's invariant and Prism 11 refuses the file. Also pins
+  // the row-titles replicate (one string DriverReplicate, firstRow 0,
+  // lastRow <last>) and distinct info fenIDs (0, 2 — the original's
+  // pattern), both fixed in the same pass. Generated fixtures only —
+  // Mansi's files are repro-only, never test material.
+  const seq289Project = {
+    nodes: {
+      t_paired: {
+        id: "t_paired",
+        type: "table",
+        name: "Paired",
+        parentId: null,
+        tableType: "grouped",
+        data: {
+          columns: ["Title", "Cond:Y1", "Cond:Y2", "Cond:Y3", "Cond:Y4", "Cond:Y5", "Cond:Y6", "Cond:Y7"],
+          rows: [
+            ["WT", "1.23", "0.8", "0.57", null, null, null, null],
+            ["SKG", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7"],
+            [null, null, null, null, null, null, null, null],
+          ],
+        },
+      },
+      t_wtonly: {
+        id: "t_wtonly",
+        type: "table",
+        name: "WT-only",
+        parentId: null,
+        tableType: "grouped",
+        data: {
+          columns: ["Title", "Cond:Y1", "Cond:Y2", "Cond:Y3", "Cond:Y4", "Cond:Y5", "Cond:Y6", "Cond:Y7"],
+          rows: [
+            ["WT", "1.23", "0.8", "0.57", null, null, null, null],
+            ["SKG", null, null, null, null, null, null, null],
+          ],
+        },
+      },
+      i_1: { id: "i_1", type: "info", name: "Project info 1", parentId: null },
+      i_2: { id: "i_2", type: "info", name: "*Project info 1", parentId: null },
+    },
+    rootOrder: ["t_paired", "t_wtonly", "i_1", "i_2"],
+    childOrder: { t_paired: [], t_wtonly: [], i_1: [], i_2: [] },
+    activeNodeId: "t_paired",
+  };
+  const seq289Written = await writePrism(seq289Project as never, "1.0.7");
+  const seq289Zip = await JSZip.loadAsync(seq289Written.bytes);
+  const seq289Problems: string[] = [];
+  const seq289Sets = new Map<string, Record<string, unknown>>();
+  for (const p of Object.keys(seq289Zip.files)) {
+    if (!p.startsWith("data/sets/") || !p.endsWith(".json") || seq289Zip.files[p].dir) continue;
+    const d = JSON.parse(await seq289Zip.file(p)!.async("string")) as Record<string, unknown>;
+    seq289Sets.set(String(d.uid), d);
+  }
+  const seq289Ranges = async (title: string) => {
+    for (const p of Object.keys(seq289Zip.files)) {
+      if (!p.startsWith("data/sheets/") || !p.endsWith("sheet.json") || seq289Zip.files[p].dir) continue;
+      const sheet = JSON.parse(await seq289Zip.file(p)!.async("string")) as {
+        title?: string;
+        table?: { dataSets?: string[]; rowTitlesDataSet?: string };
+      };
+      if (sheet.title !== title) continue;
+      const dsUid = sheet.table?.dataSets?.[0];
+      const rtUid = sheet.table?.rowTitlesDataSet;
+      return {
+        ranges: (seq289Sets.get(dsUid ?? "") as { "replicate ranges"?: unknown } | undefined)?.[
+          "replicate ranges"
+        ],
+        rowTitles: seq289Sets.get(rtUid ?? "") as { replicates?: unknown[] } | undefined,
+      };
+    }
+    return { ranges: undefined, rowTitles: undefined };
+  };
+  const paired = await seq289Ranges("Paired");
+  const wtOnly = await seq289Ranges("WT-only");
+  const rangeShape = (ranges: unknown) =>
+    JSON.stringify(
+      (ranges as { range?: string; replicate?: { firstRow?: number; lastRow?: number } }[] | undefined)?.map(
+        (r) => `${r.range ?? "?"}:[${r.replicate?.firstRow ?? "?"}..${r.replicate?.lastRow ?? "?"}]`,
+      ),
+    );
+  if (rangeShape(paired.ranges) !== JSON.stringify(["0~2:[0..1]", "3~6:[1..1]"]))
+    seq289Problems.push(`Paired ranges ${rangeShape(paired.ranges)}, want ["0~2:[0..1]","3~6:[1..1]"]`);
+  if (rangeShape(wtOnly.ranges) !== JSON.stringify(["0~2:[0..0]", "3~6:[-1..-1]"]))
+    seq289Problems.push(`WT-only ranges ${rangeShape(wtOnly.ranges)}, want ["0~2:[0..0]","3~6:[-1..-1]"]`);
+  const rtShape = (rt: { replicates?: unknown[] } | undefined) => {
+    const reps = (rt?.replicates ?? []) as { valueType?: string; firstRow?: number; lastRow?: number }[];
+    return reps.length === 1
+      ? `${reps[0].valueType ?? "?"}:[${reps[0].firstRow ?? "?"}..${reps[0].lastRow ?? "?"}]`
+      : `${reps.length} replicates`;
+  };
+  if (rtShape(paired.rowTitles) !== "string:[0..2]")
+    seq289Problems.push(`Paired row titles ${rtShape(paired.rowTitles)}, want string:[0..2]`);
+  if (rtShape(wtOnly.rowTitles) !== "string:[0..1]")
+    seq289Problems.push(`WT-only row titles ${rtShape(wtOnly.rowTitles)}, want string:[0..1]`);
+  const seq289FenIDs: string[] = [];
+  for (const p of Object.keys(seq289Zip.files)) {
+    if (!p.startsWith("info/") || !p.endsWith("sheet.json") || seq289Zip.files[p].dir) continue;
+    const d = JSON.parse(await seq289Zip.file(p)!.async("string")) as { title?: string; fenID?: number };
+    seq289FenIDs.push(`${d.title ?? "?"}:${d.fenID ?? "?"}`);
+  }
+  if (JSON.stringify(seq289FenIDs.sort()) !== JSON.stringify(["*Project info 1:2", "Project info 1:0"]))
+    seq289Problems.push(`info fenIDs ${seq289FenIDs.join(", ")}, want Project info 1:0, *Project info 1:2`);
+  check(
+    "W14 grouped ranges split by row occupancy (seq 289)",
+    seq289Problems.length === 0,
+    seq289Problems.join("; ") ||
+      `Paired ${rangeShape(paired.ranges)}, WT-only ${rangeShape(wtOnly.ranges)}, row titles ${rtShape(paired.rowTitles)} / ${rtShape(wtOnly.rowTitles)}, info ${seq289FenIDs.sort().join(", ")}`,
+  );
+  const seq289Back = await convertPrism(seq289Written.bytes, "seq289-round-trip.prism");
+  const seq289BackTables = seq289Back.project.rootOrder
+    .map((id) => seq289Back.project.nodes[id])
+    .filter((n) => n?.type === "table");
+  const seq289Source = [seq289Project.nodes.t_paired, seq289Project.nodes.t_wtonly];
+  // Compare columns + rows only: the importer derives groups/replicates
+  // on grouped tables, so the re-imported data object carries fields the
+  // fixture doesn't — the cell-identity question is columns and rows.
+  const seq289RoundTrip =
+    seq289BackTables.length === 2 &&
+    seq289BackTables.every(
+      (t, i) =>
+        JSON.stringify(t.data?.columns) === JSON.stringify(seq289Source[i].data.columns) &&
+        JSON.stringify(t.data?.rows) === JSON.stringify(seq289Source[i].data.rows),
+    );
+  check(
+    "W14 .prism round-trip stays cell-identical (seq 289)",
+    seq289RoundTrip,
+    seq289BackTables.map((t) => `${t.name}: ${JSON.stringify(t.data?.rows)}`).join("; "),
+  );
   check(
     "W13b duplicate-title inputs stay distinct with letter idx (seq 247)",
     dupXYProblems.length === 0,
