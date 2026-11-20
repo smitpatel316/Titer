@@ -2400,7 +2400,7 @@
  },
  "anova column {\"posthoc\":\"games-howell\",\"equalSd\":false,\"lognormal\":true}": {
   "testType": "anova",
-  "subtitle": "Lognormal Welch's ANOVA",
+  "subtitle": "Lognormal Welch's and Brown-Forsythe ANOVAs",
   "stats": [
    {
     "label": "F (Welch)",
@@ -2417,6 +2417,23 @@
    {
     "label": "P value",
     "value": 0.00001124702322,
+    "p": true
+   },
+   {
+    "label": "F (Brown-Forsythe)",
+    "value": 10.9648265
+   },
+   {
+    "label": "DFn (Brown-Forsythe)",
+    "value": 3
+   },
+   {
+    "label": "DFd (Brown-Forsythe)",
+    "value": 9.921399728
+   },
+   {
+    "label": "P value (Brown-Forsythe)",
+    "value": 0.001714723538,
     "p": true
    },
    {
@@ -2470,7 +2487,7 @@
     "n": 4
    }
   ],
-  "notes": "Compares the groups' geometric means: the ANOVA (Welch's, without assuming equal SDs) runs on the logarithms, which it assumes normal; its comparisons are ratios of geometric means.",
+  "notes": "Compares the groups' geometric means: the ANOVA (Welch's and Brown-Forsythe, without assuming equal SDs) runs on the logarithms, which it assumes normal; its comparisons are ratios of geometric means.",
   "comparisons": [
    {
     "group1": "Control",
@@ -3558,7 +3575,7 @@
  },
  "anova column {\"posthoc\":\"none\",\"equalSd\":false}": {
   "testType": "anova",
-  "subtitle": "Welch's ANOVA",
+  "subtitle": "Welch's and Brown-Forsythe ANOVAs",
   "stats": [
    {
     "label": "F (Welch)",
@@ -3575,6 +3592,23 @@
    {
     "label": "P value",
     "value": 0.000005757840605,
+    "p": true
+   },
+   {
+    "label": "F (Brown-Forsythe)",
+    "value": 6.843192879
+   },
+   {
+    "label": "DFn (Brown-Forsythe)",
+    "value": 3
+   },
+   {
+    "label": "DFd (Brown-Forsythe)",
+    "value": 8.385949043
+   },
+   {
+    "label": "P value (Brown-Forsythe)",
+    "value": 0.01223340847,
     "p": true
    }
   ],
@@ -3612,7 +3646,7 @@
     "n": 4
    }
   ],
-  "notes": "Compares means across groups without assuming equal SDs (Welch's ANOVA); assumes normal distributions.",
+  "notes": "Compares means across groups without assuming equal SDs: Welch's ANOVA and the Brown-Forsythe ANOVA are both reported; each assumes normal distributions.",
   "analyzed": {
    "sets": [
     {
@@ -3649,7 +3683,7 @@
  },
  "anova column {\"posthoc\":\"games-howell\",\"equalSd\":false}": {
   "testType": "anova",
-  "subtitle": "Welch's ANOVA",
+  "subtitle": "Welch's and Brown-Forsythe ANOVAs",
   "stats": [
    {
     "label": "F (Welch)",
@@ -3666,6 +3700,23 @@
    {
     "label": "P value",
     "value": 0.000005757840605,
+    "p": true
+   },
+   {
+    "label": "F (Brown-Forsythe)",
+    "value": 6.843192879
+   },
+   {
+    "label": "DFn (Brown-Forsythe)",
+    "value": 3
+   },
+   {
+    "label": "DFd (Brown-Forsythe)",
+    "value": 8.385949043
+   },
+   {
+    "label": "P value (Brown-Forsythe)",
+    "value": 0.01223340847,
     "p": true
    }
   ],
@@ -3703,7 +3754,7 @@
     "n": 4
    }
   ],
-  "notes": "Compares means across groups without assuming equal SDs (Welch's ANOVA); assumes normal distributions.",
+  "notes": "Compares means across groups without assuming equal SDs: Welch's ANOVA and the Brown-Forsythe ANOVA are both reported; each assumes normal distributions.",
   "comparisons": [
    {
     "group1": "Control",
@@ -3791,7 +3842,7 @@
  },
  "anova column {\"posthoc\":\"t3\",\"equalSd\":false}": {
   "testType": "anova",
-  "subtitle": "Welch's ANOVA",
+  "subtitle": "Welch's and Brown-Forsythe ANOVAs",
   "stats": [
    {
     "label": "F (Welch)",
@@ -3808,6 +3859,23 @@
    {
     "label": "P value",
     "value": 0.000005757840605,
+    "p": true
+   },
+   {
+    "label": "F (Brown-Forsythe)",
+    "value": 6.843192879
+   },
+   {
+    "label": "DFn (Brown-Forsythe)",
+    "value": 3
+   },
+   {
+    "label": "DFd (Brown-Forsythe)",
+    "value": 8.385949043
+   },
+   {
+    "label": "P value (Brown-Forsythe)",
+    "value": 0.01223340847,
     "p": true
    }
   ],
@@ -3845,7 +3913,7 @@
     "n": 4
    }
   ],
-  "notes": "Compares means across groups without assuming equal SDs (Welch's ANOVA); assumes normal distributions.",
+  "notes": "Compares means across groups without assuming equal SDs: Welch's ANOVA and the Brown-Forsythe ANOVA are both reported; each assumes normal distributions.",
   "comparisons": [
    {
     "group1": "Control",
@@ -3928,6 +3996,649 @@
    {
     "ok": true,
     "text": "Equal SDs (Brown-Forsythe P = 0.6203, Bartlett's P < 0.0001): not needed, Welch's ANOVA doesn't assume them."
+   }
+  ]
+ },
+ "anova column {\"posthoc\":\"fdr\"}": {
+  "testType": "anova",
+  "subtitle": "One-way ANOVA",
+  "stats": [
+   {
+    "label": "F",
+    "value": 4.857880533
+   },
+   {
+    "label": "DFn",
+    "value": 3
+   },
+   {
+    "label": "DFd",
+    "value": 21
+   },
+   {
+    "label": "P value",
+    "value": 0.01013594077,
+    "p": true
+   },
+   {
+    "label": "R squared (eta squared)",
+    "value": 0.4096752805
+   },
+   {
+    "label": "Cohen's f",
+    "value": 0.8330563806
+   }
+  ],
+  "groups": [
+   {
+    "name": "Control",
+    "mean": 14.3375,
+    "sd": 6.372247305,
+    "sem": 2.25292964,
+    "median": 12.3,
+    "n": 8
+   },
+   {
+    "name": "Low",
+    "mean": 14.84285714,
+    "sd": 0.8443086775,
+    "sem": 0.3191186843,
+    "median": 14.9,
+    "n": 7
+   },
+   {
+    "name": "High",
+    "mean": 19.61666667,
+    "sd": 1.083358974,
+    "sem": 0.4422794491,
+    "median": 19.65,
+    "n": 6
+   },
+   {
+    "name": "Sparse",
+    "mean": 10.625,
+    "sd": 1.25,
+    "sem": 0.625,
+    "median": 10.75,
+    "n": 4
+   }
+  ],
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. The False Discovery Rate (Benjamini-Hochberg) controls the expected share of false discoveries among the comparisons called significant, rather than the chance of any false positive; no confidence intervals are reported for it.",
+  "comparisons": [
+   {
+    "group1": "Control",
+    "group2": "Low",
+    "diff": -0.5053571429,
+    "p": 0.79835268
+   },
+   {
+    "group1": "Control",
+    "group2": "High",
+    "diff": -5.279166667,
+    "p": 0.05122812908
+   },
+   {
+    "group1": "Control",
+    "group2": "Sparse",
+    "diff": 3.7125,
+    "p": 0.1477243986
+   },
+   {
+    "group1": "Low",
+    "group2": "High",
+    "diff": -4.773809524,
+    "p": 0.06719275783
+   },
+   {
+    "group1": "Low",
+    "group2": "Sparse",
+    "diff": 4.217857143,
+    "p": 0.1335269105
+   },
+   {
+    "group1": "High",
+    "group2": "Sparse",
+    "diff": 8.991666667,
+    "p": 0.008136882802
+   }
+  ],
+  "comparisonsLabel": "False Discovery Rate (Benjamini-Hochberg) multiple comparisons",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "Control",
+     "n": 8
+    },
+    {
+     "name": "Low",
+     "n": 7
+    },
+    {
+     "name": "High",
+     "n": 6
+    },
+    {
+     "name": "Sparse",
+     "n": 4
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P = 0.01014). The differences between the groups account for 40.97% of all the variation in the values (R²). 1 of 6 pairs differ significantly in the comparisons: “High” vs. “Sparse”.",
+  "checks": [
+   {
+    "ok": false,
+    "text": "Normality of each group (Shapiro-Wilk): “Control” may not be normal (P < 0.0001). The Kruskal-Wallis test doesn't assume it. With few values the test rarely flags a departure; with many, even a slight one."
+   },
+   {
+    "ok": false,
+    "text": "Equal SDs (Brown-Forsythe P = 0.6203, Bartlett's P < 0.0001): the SDs may differ. Welch's ANOVA doesn't assume they are equal."
+   }
+  ]
+ },
+ "anova column {\"posthoc\":\"fdr\",\"equalSd\":false}": {
+  "testType": "anova",
+  "subtitle": "Welch's and Brown-Forsythe ANOVAs",
+  "stats": [
+   {
+    "label": "F (Welch)",
+    "value": 44.45757269
+   },
+   {
+    "label": "DFn",
+    "value": 3
+   },
+   {
+    "label": "DFd",
+    "value": 9.659745383
+   },
+   {
+    "label": "P value",
+    "value": 0.000005757840605,
+    "p": true
+   },
+   {
+    "label": "F (Brown-Forsythe)",
+    "value": 6.843192879
+   },
+   {
+    "label": "DFn (Brown-Forsythe)",
+    "value": 3
+   },
+   {
+    "label": "DFd (Brown-Forsythe)",
+    "value": 8.385949043
+   },
+   {
+    "label": "P value (Brown-Forsythe)",
+    "value": 0.01223340847,
+    "p": true
+   }
+  ],
+  "groups": [
+   {
+    "name": "Control",
+    "mean": 14.3375,
+    "sd": 6.372247305,
+    "sem": 2.25292964,
+    "median": 12.3,
+    "n": 8
+   },
+   {
+    "name": "Low",
+    "mean": 14.84285714,
+    "sd": 0.8443086775,
+    "sem": 0.3191186843,
+    "median": 14.9,
+    "n": 7
+   },
+   {
+    "name": "High",
+    "mean": 19.61666667,
+    "sd": 1.083358974,
+    "sem": 0.4422794491,
+    "median": 19.65,
+    "n": 6
+   },
+   {
+    "name": "Sparse",
+    "mean": 10.625,
+    "sd": 1.25,
+    "sem": 0.625,
+    "median": 10.75,
+    "n": 4
+   }
+  ],
+  "notes": "Compares means across groups without assuming equal SDs: Welch's ANOVA and the Brown-Forsythe ANOVA are both reported; each assumes normal distributions. The False Discovery Rate (Benjamini-Hochberg) controls the expected share of false discoveries among the comparisons called significant, rather than the chance of any false positive; no confidence intervals are reported for it.",
+  "comparisons": [
+   {
+    "group1": "Control",
+    "group2": "Low",
+    "diff": -0.5053571429,
+    "p": 0.8303427966
+   },
+   {
+    "group1": "Control",
+    "group2": "High",
+    "diff": -5.279166667,
+    "p": 0.07870617267
+   },
+   {
+    "group1": "Control",
+    "group2": "Sparse",
+    "diff": 3.7125,
+    "p": 0.1811230884
+   },
+   {
+    "group1": "Low",
+    "group2": "High",
+    "diff": -4.773809524,
+    "p": 0.00004722754646
+   },
+   {
+    "group1": "Low",
+    "group2": "Sparse",
+    "diff": 4.217857143,
+    "p": 0.004831903377
+   },
+   {
+    "group1": "High",
+    "group2": "Sparse",
+    "diff": 8.991666667,
+    "p": 0.00008025459798
+   }
+  ],
+  "comparisonsLabel": "False Discovery Rate (Benjamini-Hochberg) multiple comparisons",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "Control",
+     "n": 8
+    },
+    {
+     "name": "Low",
+     "n": 7
+    },
+    {
+     "name": "High",
+     "n": 6
+    },
+    {
+     "name": "Sparse",
+     "n": 4
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P < 0.0001). 3 of 6 pairs differ significantly in the comparisons: “Low” vs. “High”, “Low” vs. “Sparse”, “High” vs. “Sparse”.",
+  "checks": [
+   {
+    "ok": false,
+    "text": "Normality of each group (Shapiro-Wilk): “Control” may not be normal (P < 0.0001). The Kruskal-Wallis test doesn't assume it. With few values the test rarely flags a departure; with many, even a slight one."
+   },
+   {
+    "ok": true,
+    "text": "Equal SDs (Brown-Forsythe P = 0.6203, Bartlett's P < 0.0001): not needed, Welch's ANOVA doesn't assume them."
+   }
+  ]
+ },
+ "anova column {\"posthoc\":\"fdr\",\"compared\":[\"Control\\u0000High\",\"Low\\u0000Sparse\"]}": {
+  "testType": "anova",
+  "subtitle": "One-way ANOVA",
+  "stats": [
+   {
+    "label": "F",
+    "value": 4.857880533
+   },
+   {
+    "label": "DFn",
+    "value": 3
+   },
+   {
+    "label": "DFd",
+    "value": 21
+   },
+   {
+    "label": "P value",
+    "value": 0.01013594077,
+    "p": true
+   },
+   {
+    "label": "R squared (eta squared)",
+    "value": 0.4096752805
+   },
+   {
+    "label": "Cohen's f",
+    "value": 0.8330563806
+   }
+  ],
+  "groups": [
+   {
+    "name": "Control",
+    "mean": 14.3375,
+    "sd": 6.372247305,
+    "sem": 2.25292964,
+    "median": 12.3,
+    "n": 8
+   },
+   {
+    "name": "Low",
+    "mean": 14.84285714,
+    "sd": 0.8443086775,
+    "sem": 0.3191186843,
+    "median": 14.9,
+    "n": 7
+   },
+   {
+    "name": "High",
+    "mean": 19.61666667,
+    "sd": 1.083358974,
+    "sem": 0.4422794491,
+    "median": 19.65,
+    "n": 6
+   },
+   {
+    "name": "Sparse",
+    "mean": 10.625,
+    "sd": 1.25,
+    "sem": 0.625,
+    "median": 10.75,
+    "n": 4
+   }
+  ],
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. The False Discovery Rate (Benjamini-Hochberg) controls the expected share of false discoveries among the comparisons called significant, rather than the chance of any false positive; no confidence intervals are reported for it.",
+  "comparisons": [
+   {
+    "group1": "Control",
+    "group2": "High",
+    "diff": -5.279166667,
+    "p": 0.03415208605
+   },
+   {
+    "group1": "Low",
+    "group2": "Sparse",
+    "diff": 4.217857143,
+    "p": 0.08901794033
+   }
+  ],
+  "comparisonsLabel": "False Discovery Rate (Benjamini-Hochberg) multiple comparisons",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "Control",
+     "n": 8
+    },
+    {
+     "name": "Low",
+     "n": 7
+    },
+    {
+     "name": "High",
+     "n": 6
+    },
+    {
+     "name": "Sparse",
+     "n": 4
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P = 0.01014). The differences between the groups account for 40.97% of all the variation in the values (R²). 1 of 2 pairs differ significantly in the comparisons: “Control” vs. “High”.",
+  "checks": [
+   {
+    "ok": false,
+    "text": "Normality of each group (Shapiro-Wilk): “Control” may not be normal (P < 0.0001). The Kruskal-Wallis test doesn't assume it. With few values the test rarely flags a departure; with many, even a slight one."
+   },
+   {
+    "ok": false,
+    "text": "Equal SDs (Brown-Forsythe P = 0.6203, Bartlett's P < 0.0001): the SDs may differ. Welch's ANOVA doesn't assume they are equal."
+   }
+  ]
+ },
+ "anova column {\"posthoc\":\"fdr\",\"equalSd\":false,\"compared\":[\"Control\\u0000High\",\"Low\\u0000Sparse\"]}": {
+  "testType": "anova",
+  "subtitle": "Welch's and Brown-Forsythe ANOVAs",
+  "stats": [
+   {
+    "label": "F (Welch)",
+    "value": 44.45757269
+   },
+   {
+    "label": "DFn",
+    "value": 3
+   },
+   {
+    "label": "DFd",
+    "value": 9.659745383
+   },
+   {
+    "label": "P value",
+    "value": 0.000005757840605,
+    "p": true
+   },
+   {
+    "label": "F (Brown-Forsythe)",
+    "value": 6.843192879
+   },
+   {
+    "label": "DFn (Brown-Forsythe)",
+    "value": 3
+   },
+   {
+    "label": "DFd (Brown-Forsythe)",
+    "value": 8.385949043
+   },
+   {
+    "label": "P value (Brown-Forsythe)",
+    "value": 0.01223340847,
+    "p": true
+   }
+  ],
+  "groups": [
+   {
+    "name": "Control",
+    "mean": 14.3375,
+    "sd": 6.372247305,
+    "sem": 2.25292964,
+    "median": 12.3,
+    "n": 8
+   },
+   {
+    "name": "Low",
+    "mean": 14.84285714,
+    "sd": 0.8443086775,
+    "sem": 0.3191186843,
+    "median": 14.9,
+    "n": 7
+   },
+   {
+    "name": "High",
+    "mean": 19.61666667,
+    "sd": 1.083358974,
+    "sem": 0.4422794491,
+    "median": 19.65,
+    "n": 6
+   },
+   {
+    "name": "Sparse",
+    "mean": 10.625,
+    "sd": 1.25,
+    "sem": 0.625,
+    "median": 10.75,
+    "n": 4
+   }
+  ],
+  "notes": "Compares means across groups without assuming equal SDs: Welch's ANOVA and the Brown-Forsythe ANOVA are both reported; each assumes normal distributions. The False Discovery Rate (Benjamini-Hochberg) controls the expected share of false discoveries among the comparisons called significant, rather than the chance of any false positive; no confidence intervals are reported for it.",
+  "comparisons": [
+   {
+    "group1": "Control",
+    "group2": "High",
+    "diff": -5.279166667,
+    "p": 0.05247078178
+   },
+   {
+    "group1": "Low",
+    "group2": "Sparse",
+    "diff": 4.217857143,
+    "p": 0.004831903377
+   }
+  ],
+  "comparisonsLabel": "False Discovery Rate (Benjamini-Hochberg) multiple comparisons",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "Control",
+     "n": 8
+    },
+    {
+     "name": "Low",
+     "n": 7
+    },
+    {
+     "name": "High",
+     "n": 6
+    },
+    {
+     "name": "Sparse",
+     "n": 4
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P < 0.0001). 1 of 2 pairs differ significantly in the comparisons: “Low” vs. “Sparse”.",
+  "checks": [
+   {
+    "ok": false,
+    "text": "Normality of each group (Shapiro-Wilk): “Control” may not be normal (P < 0.0001). The Kruskal-Wallis test doesn't assume it. With few values the test rarely flags a departure; with many, even a slight one."
+   },
+   {
+    "ok": true,
+    "text": "Equal SDs (Brown-Forsythe P = 0.6203, Bartlett's P < 0.0001): not needed, Welch's ANOVA doesn't assume them."
+   }
+  ]
+ },
+ "anova column {\"posthoc\":\"none\",\"trend\":true}": {
+  "testType": "anova",
+  "subtitle": "One-way ANOVA",
+  "stats": [
+   {
+    "label": "F",
+    "value": 4.857880533
+   },
+   {
+    "label": "DFn",
+    "value": 3
+   },
+   {
+    "label": "DFd",
+    "value": 21
+   },
+   {
+    "label": "P value",
+    "value": 0.01013594077,
+    "p": true
+   },
+   {
+    "label": "R squared (eta squared)",
+    "value": 0.4096752805
+   },
+   {
+    "label": "Cohen's f",
+    "value": 0.8330563806
+   },
+   {
+    "label": "Slope (test for linear trend)",
+    "value": -0.6363690476
+   },
+   {
+    "label": "R squared (linear trend, effect size)",
+    "value": 0.02169463463
+   },
+   {
+    "label": "R squared (linear trend, alerting)",
+    "value": 0.05295568385
+   },
+   {
+    "label": "P value (linear trend)",
+    "value": 0.3896152218,
+    "p": true
+   },
+   {
+    "label": "P value (nonlinear trend)",
+    "value": 0.004971341621,
+    "p": true
+   }
+  ],
+  "groups": [
+   {
+    "name": "Control",
+    "mean": 14.3375,
+    "sd": 6.372247305,
+    "sem": 2.25292964,
+    "median": 12.3,
+    "n": 8
+   },
+   {
+    "name": "Low",
+    "mean": 14.84285714,
+    "sd": 0.8443086775,
+    "sem": 0.3191186843,
+    "median": 14.9,
+    "n": 7
+   },
+   {
+    "name": "High",
+    "mean": 19.61666667,
+    "sd": 1.083358974,
+    "sem": 0.4422794491,
+    "median": 19.65,
+    "n": 6
+   },
+   {
+    "name": "Sparse",
+    "mean": 10.625,
+    "sd": 1.25,
+    "sem": 0.625,
+    "median": 10.75,
+    "n": 4
+   }
+  ],
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. The test for linear trend fits the group means against column order (1, 2, 3, …) — the columns must be in a natural order and equally spaced — and tests the linear trend against the ordinary ANOVA's residual mean square; the nonlinear trend is the rest of the between-group variation.",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "Control",
+     "n": 8
+    },
+    {
+     "name": "Low",
+     "n": 7
+    },
+    {
+     "name": "High",
+     "n": 6
+    },
+    {
+     "name": "Sparse",
+     "n": 4
+    }
+   ],
+   "how": "list",
+   "left": []
+  },
+  "summary": "At least one group's mean differs from the others (P = 0.01014). The differences between the groups account for 40.97% of all the variation in the values (R²).",
+  "checks": [
+   {
+    "ok": false,
+    "text": "Normality of each group (Shapiro-Wilk): “Control” may not be normal (P < 0.0001). The Kruskal-Wallis test doesn't assume it. With few values the test rarely flags a departure; with many, even a slight one."
+   },
+   {
+    "ok": false,
+    "text": "Equal SDs (Brown-Forsythe P = 0.6203, Bartlett's P < 0.0001): the SDs may differ. Welch's ANOVA doesn't assume they are equal."
    }
   ]
  },
