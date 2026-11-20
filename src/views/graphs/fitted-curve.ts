@@ -67,8 +67,22 @@ export function evaluate(
       return bottom + rise / (1 + ((c("EC50") * (2 ** (1 / s) - 1) ** (1 / hill)) / x) ** hill) ** s;
     case "line":
       return c("Intercept") + c("Slope") * x;
+    case "line-through-origin":
+      // B6 §Lines #3: Y = Slope·X, no intercept.
+      return c("Slope") * x;
+    case "horizontal-line":
+      // B6 §Lines #4: Y = Mean.
+      return c("Mean");
     case "semilog-line":
       return c("Intercept") + c("Slope") * Math.log(x);
+    case "semilog-y-log":
+    case "exponential-growth-log":
+      // B6 §Lines #6 / §Growth #2: log(Y) = Intercept + Slope·X, so
+      // Y = exp(Intercept + Slope·X) on the raw scale.
+      return Math.exp(c("Intercept") + c("Slope") * x);
+    case "log-log-line":
+      // B6 §Lines #7: log(Y) = Intercept + Slope·log(X), a power law.
+      return Math.exp(c("Intercept")) * x ** c("Slope");
     case "hyperbola":
       return (c("Bmax") * x) / (c("Kd") + x);
     case "quadratic":
@@ -82,6 +96,31 @@ export function evaluate(
       return (
         c("B0") + c("B1") * x + c("B2") * x ** 2 + c("B3") * x ** 3 + c("B4") * x ** 4 + c("B5") * x ** 5
       );
+    case "sextic":
+      // B6 §Polynomial #11: one degree higher again.
+      return (
+        c("B0") + c("B1") * x + c("B2") * x ** 2 + c("B3") * x ** 3 + c("B4") * x ** 4 + c("B5") * x ** 5 + c("B6") * x ** 6
+      );
+    case "centered-first":
+    case "centered-second":
+    case "centered-third":
+    case "centered-fourth":
+    case "centered-fifth":
+    case "centered-sixth": {
+      // B6 §Polynomial #2,4,6,8,10,12: fitted on X − XCenter (the
+      // coefficient row the runner appends for the derived X center).
+      const xc = c("XCenter");
+      const d = x - xc;
+      let y = c("B0") + c("B1") * d;
+      if (model !== "centered-first") y += c("B2") * d ** 2;
+      if (model === "centered-third" || model === "centered-fourth" || model === "centered-fifth" || model === "centered-sixth")
+        y += c("B3") * d ** 3;
+      if (model === "centered-fourth" || model === "centered-fifth" || model === "centered-sixth")
+        y += c("B4") * d ** 4;
+      if (model === "centered-fifth" || model === "centered-sixth") y += c("B5") * d ** 5;
+      if (model === "centered-sixth") y += c("B6") * d ** 6;
+      return y;
+    }
     case "segmental-linear":
       // Plan 29: the continuous hinge (X0 is the coefficient row the
       // runner appends for the profiled breakpoint) — one unbroken line,

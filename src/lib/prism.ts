@@ -378,6 +378,32 @@ const NONLINEAR_MODELS: Record<string, NonlinearModel> = {
   "Two-phase association": "two-phase-association",
   "One phase association": "one-phase-association",
   "One-phase association": "one-phase-association",
+  // 1.8 classic-curves completion (B6 §Lines, §Polynomial, §Growth):
+  // verbatim Model-tab names. "Third order polynomial" carries a double
+  // space in B6 (line 140) — both spellings map; the semilog log-Y line
+  // likewise (B6 line 127, double space before "Y is log").
+  "Straight line": "line",
+  "Line through origin": "line-through-origin",
+  "Horizontal line": "horizontal-line",
+  "Semilog line -- X is log, Y is linear": "semilog-line",
+  "Semilog line -- X is linear,  Y is log": "semilog-y-log",
+  "Log-log line -- X and Y both log": "log-log-line",
+  "Segmental linear regression": "segmental-linear",
+  "Two intersecting lines. Fit the crossing point.": "segmental-linear",
+  "First order polynomial (straight line)": "line",
+  "Centered first order polynomial (straight line)": "centered-first",
+  "Centered second order polynomial (quadratic)": "centered-second",
+  "Third order polynomial  (cubic)": "cubic",
+  "Third order polynomial (cubic)": "cubic",
+  "Centered third order polynomial  (cubic)": "centered-third",
+  "Centered third order polynomial (cubic)": "centered-third",
+  "Fourth order polynomial": "quartic",
+  "Centered fourth order polynomial": "centered-fourth",
+  "Fifth order polynomial": "quintic",
+  "Centered fifth order polynomial": "centered-fifth",
+  "Sixth order polynomial": "sextic",
+  "Centered sixth order polynomial": "centered-sixth",
+  "Exponential growth with log(population)": "exponential-growth-log",
 };
 
 const genId = (type: string) => `${type}_${Math.random().toString(36).slice(2, 10)}`;

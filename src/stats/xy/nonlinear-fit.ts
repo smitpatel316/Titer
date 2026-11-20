@@ -32,7 +32,21 @@ export const MODEL_LABEL: Record<NonlinearModel, string> = {
   "segmental-linear": "Segmental linear regression (two segments)",
   quartic: "Fourth order polynomial (quartic)",
   quintic: "Fifth order polynomial (quintic)",
+  // 1.8 classic-curves completion (B6 §Lines, §Polynomial): the remaining
+  // line forms and the sixth-order / centered polynomials.
+  "line-through-origin": "Line through origin",
+  "horizontal-line": "Horizontal line",
+  "semilog-y-log": "Semilog line — X is linear, Y is log",
+  "log-log-line": "Log-log line — X and Y both log",
+  sextic: "Sixth order polynomial",
+  "centered-first": "Centered first order polynomial (straight line)",
+  "centered-second": "Centered second order polynomial (quadratic)",
+  "centered-third": "Centered third order polynomial (cubic)",
+  "centered-fourth": "Centered fourth order polynomial",
+  "centered-fifth": "Centered fifth order polynomial",
+  "centered-sixth": "Centered sixth order polynomial",
   "exponential-growth": "Exponential growth",
+  "exponential-growth-log": "Exponential growth with log(population)",
   "logistic-growth": "Logistic growth",
   "gompertz-growth": "Gompertz growth",
   "one-phase-decay": "One-phase decay",
@@ -239,6 +253,15 @@ export interface ModelSpec {
    *  where allosteric-sigmoidal is NaN and Michaelis-Menten has its pole);
    *  their negative-X error still lives in prepareFit. */
   nonNegativeX?: boolean;
+  /** Log-Y curves (1.8, B6 §Lines #6–7, §Growth #2): log(Y) is undefined
+   *  at Y ≤ 0, so the fit drops those points (prepareFit, like the X
+   *  flags) — and the fit is on the log scale, so interpolation is
+   *  refused (the runner's lm predict() would return log-scale values). */
+  positiveY?: boolean;
+  /** True when the response is fitted on the log scale (log(Y) ~ …):
+   *  the curve on the raw scale is exp() of the lm fit, so the lm
+   *  predict() path (interpolation band inversion) must not run. */
+  logY?: boolean;
   /** nls models only: R defining `g<-function(xv,p)` — the curve evaluated at
    *  X `xv` with parameter vector `p` (named, as `coef(m)` reports them).
    *  Used for the confidence band (delta method) and inverse prediction. */
@@ -321,6 +344,33 @@ export function modelSpec(
   switch (model) {
     case "line":
       return { kind: "lm", fit: "m<-lm(y~x)", terms: ["Intercept", "Slope"] };
+    case "line-through-origin":
+      // B6 §Lines #3: Y = Slope·X, no intercept — lm without one.
+      return { kind: "lm", fit: "m<-lm(y~x-1)", terms: ["Slope"] };
+    case "horizontal-line":
+      // B6 §Lines #4: Y = Mean — lm on the intercept alone.
+      return { kind: "lm", fit: "m<-lm(y~1)", terms: ["Mean"] };
+    case "semilog-y-log":
+      // B6 §Lines #6: log(Y) = Intercept + Slope·X — the log-Y twin of
+      // semilog-line (which logs X, not Y). Y ≤ 0 points are dropped.
+      return { kind: "lm", fit: "m<-lm(log(y)~x)", terms: ["Intercept", "Slope"], positiveY: true, logY: true };
+    case "log-log-line":
+      // B6 §Lines #7: log(Y) = Intercept + Slope·log(X) — a power law
+      // Y = exp(Intercept)·X^Slope on the raw scale.
+      return {
+        kind: "lm",
+        fit: "m<-lm(log(y)~log(x))",
+        terms: ["Intercept", "Slope"],
+        positiveX: true,
+        positiveY: true,
+        logY: true,
+      };
+    case "exponential-growth-log":
+      // B6 §Growth #2: "Exponential growth with log(population)" — the
+      // same log(Y) ~ X fit as semilog-y-log, a separate entry because
+      // Prism lists it under Growth curves, not Lines (the
+      // Michaelis-Menten/hyperbola precedent: one equation, two names).
+      return { kind: "lm", fit: "m<-lm(log(y)~x)", terms: ["Intercept", "Slope"], positiveY: true, logY: true };
     case "quadratic":
       return { kind: "lm", fit: "m<-lm(y~x+I(x^2))", terms: ["B0", "B1", "B2"] };
     case "cubic":
@@ -336,6 +386,50 @@ export function modelSpec(
         fit: "m<-lm(y~x+I(x^2)+I(x^3)+I(x^4)+I(x^5))",
         terms: ["B0", "B1", "B2", "B3", "B4", "B5"],
       };
+    case "sextic":
+      // B6 §Polynomial #11: 6th order polynomial — one degree higher
+      // again, same lm pattern.
+      return {
+        kind: "lm",
+        fit: "m<-lm(y~x+I(x^2)+I(x^3)+I(x^4)+I(x^5)+I(x^6))",
+        terms: ["B0", "B1", "B2", "B3", "B4", "B5", "B6"],
+      };
+    case "centered-first":
+    case "centered-second":
+    case "centered-third":
+    case "centered-fourth":
+    case "centered-fifth":
+    case "centered-sixth": {
+      // B6 §Polynomial #2,4,6,8,10,12: the centered polynomials — same
+      // curve as the uncentered same degree, but fitted on X − mean(X),
+      // so B0 is Y at the X mean (not at X = 0) and the coefficients are
+      // far less collinear. `xc` is assigned in the fit string, then the
+      // lm formula reads it from the formula environment — never
+      // `I(x-mean(x))` directly, which would break predict() on newdata
+      // (the mean of a single new X is itself). The X center is a derived
+      // value, reported as a coefficient row like the segmental X0.
+      const degree =
+        model === "centered-first"
+          ? 1
+          : model === "centered-second"
+            ? 2
+            : model === "centered-third"
+              ? 3
+              : model === "centered-fourth"
+                ? 4
+                : model === "centered-fifth"
+                  ? 5
+                  : 6;
+      const powers = Array.from({ length: degree }, (_, i) =>
+        i === 0 ? "I(x-xc)" : `I((x-xc)^${i + 1})`,
+      ).join("+");
+      return {
+        kind: "lm",
+        fit: `xc<-mean(x);m<-lm(y~${powers})`,
+        terms: Array.from({ length: degree + 1 }, (_, i) => `B${i}`),
+        derived: [{ label: "X center", expr: "xc" }],
+      };
+    }
     case "segmental-linear":
       // Plan 29: continuous two-segment line (hinge), Y = B0 + B1·X +
       // B2·max(X − X0, 0): slope B1 below the breakpoint X0, B1+B2 above.
@@ -1456,6 +1550,8 @@ export function prepareFit(
   // undefined); a raw-concentration ratio curve keeps it — at X = 0 the
   // curve is its Bottom, so the vehicle point anchors Bottom (Prism fits
   // it too) — and drops only X < 0, where a fractional power is NaN in R.
+  // A log-Y curve drops its Y ≤ 0 points the same way (log(Y) is
+  // undefined there).
   let xs = complete.x;
   let ys = complete.y;
   if (spec.positiveX || spec.nonNegativeX) {
@@ -1469,10 +1565,17 @@ export function prepareFit(
       }
     });
   }
+  if (spec.positiveY) {
+    const kept = ys.filter((y) => y > 0);
+    const keptXs = xs.filter((_, i) => ys[i] > 0);
+    xs = keptXs;
+    ys = kept;
+  }
   if (xs.length < nParams + 1) {
     const scope = spec.positiveX ? " with X > 0" : spec.nonNegativeX ? " with X ≥ 0" : "";
+    const yScope = spec.positiveY ? " with Y > 0" : "";
     return {
-      error: `Not enough complete points${scope} (${xs.length}) to fit this curve; need at least ${nParams + 1}.`,
+      error: `Not enough complete points${scope}${yScope} (${xs.length}) to fit this curve; need at least ${nParams + 1}.`,
     };
   }
   if (ENZYME_MODELS.includes(model)) {
@@ -1507,11 +1610,16 @@ export function prepareFit(
   // The fitted points' rows, in fit order (plan 26: 1/SD² weights need the
   // row's replicate values, not just the fitted pair) — and, per point, the
   // Y column it came from (ROUT's outlier records name it exactly).
+  // The row filter mirrors the drops above: X by the X flag, Y by positiveY.
   const rows = complete.rows.filter(
-    (_, i) => (!spec.positiveX && !spec.nonNegativeX) || (spec.positiveX ? complete.x[i] > 0 : complete.x[i] >= 0),
+    (_, i) =>
+      ((!spec.positiveX && !spec.nonNegativeX) || (spec.positiveX ? complete.x[i] > 0 : complete.x[i] >= 0)) &&
+      (!spec.positiveY || complete.y[i] > 0),
   );
   const pointColumns = complete.columns.filter(
-    (_, i) => (!spec.positiveX && !spec.nonNegativeX) || (spec.positiveX ? complete.x[i] > 0 : complete.x[i] >= 0),
+    (_, i) =>
+      ((!spec.positiveX && !spec.nonNegativeX) || (spec.positiveX ? complete.x[i] > 0 : complete.x[i] >= 0)) &&
+      (!spec.positiveY || complete.y[i] > 0),
   );
   return { xCol, yCol, xs, ys, rows, columns: pointColumns };
 }

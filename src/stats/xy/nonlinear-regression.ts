@@ -103,6 +103,17 @@ export const invertMethod = (model: NonlinearModel): InvertMethod =>
   model === "quartic" ||
   model === "quintic" ||
   model === "segmental-linear" ||
+  // 1.8 classic-curves completion (B6 §Lines, §Polynomial): the
+  // horizontal line has no inverse at all, and the sixth-order /
+  // centered polynomials have none in closed form.
+  model === "horizontal-line" ||
+  model === "sextic" ||
+  model === "centered-first" ||
+  model === "centered-second" ||
+  model === "centered-third" ||
+  model === "centered-fourth" ||
+  model === "centered-fifth" ||
+  model === "centered-sixth" ||
   // v2 item 23: a user equation has no closed-form inverse — the interpolation path
   // inverts it numerically (uniroot on the fitted curve), as for the polynomials.
   model === "user-defined" ||
@@ -158,11 +169,35 @@ export function invertModel(
       if (b == null || s == null || s === 0) return null;
       return (y - b) / s;
     }
+    case "line-through-origin": {
+      // B6 §Lines #3: Y = Slope·X, so X = Y/Slope.
+      const s = c("Slope");
+      if (s == null || s === 0) return null;
+      return y / s;
+    }
     case "semilog-line": {
       const b = c("Intercept");
       const s = c("Slope");
       if (b == null || s == null || s === 0) return null;
       const x = Math.exp((y - b) / s);
+      return x > 0 ? x : null;
+    }
+    case "semilog-y-log":
+    case "exponential-growth-log": {
+      // B6 §Lines #6 / §Growth #2: Y = exp(Intercept + Slope·X), so
+      // X = (ln Y − Intercept)/Slope (Y must be > 0).
+      const b = c("Intercept");
+      const s = c("Slope");
+      if (b == null || s == null || s === 0 || y <= 0) return null;
+      return (Math.log(y) - b) / s;
+    }
+    case "log-log-line": {
+      // B6 §Lines #7: Y = exp(Intercept)·X^Slope, so
+      // X = exp((ln Y − Intercept)/Slope) (Y must be > 0).
+      const b = c("Intercept");
+      const s = c("Slope");
+      if (b == null || s == null || s === 0 || y <= 0) return null;
+      const x = Math.exp((Math.log(y) - b) / s);
       return x > 0 ? x : null;
     }
     case "sigmoidal-4pl-logx": {
@@ -1816,6 +1851,11 @@ export async function runNonlinearRegression(
     return { error: "A global fit can't be combined with comparing two data sets — the global fit already fits them together." };
   if (global && params?.interpolate)
     return { error: "Interpolation can't be combined with a global fit — fit one curve first, then interpolate from it." };
+  if (params?.interpolate && spec.logY)
+    return {
+      error:
+        "Interpolation isn't supported for a log-Y curve — its fit is on log(Y), so the interpolated X would be read off the wrong scale. Fit the curve, then read X off the fitted line.",
+    };
   if (global && weightsScheme !== "none")
     return { error: "Weighting can't be combined with a global fit yet." };
   if (global && spec.kind === "lm")
@@ -2297,6 +2337,32 @@ async function assembleResult(
       });
     });
   }
+  // 1.8 (B6 §Polynomial): a centered polynomial's X center is a derived
+  // value, not a fitted coefficient — report it as a coefficient row with
+  // no standard error (the segmental precedent above), so the overlay can
+  // draw the curve from the coefficients alone.
+  if (
+    model === "centered-first" ||
+    model === "centered-second" ||
+    model === "centered-third" ||
+    model === "centered-fourth" ||
+    model === "centered-fifth" ||
+    model === "centered-sixth"
+  ) {
+    parsed.forEach((p, i) => {
+      const xc = p.derived.find((d) => d.label === "X center")?.value ?? null;
+      const prefix = p.coefficients[0]?.term.startsWith(`${sets[i].name} — `) ? `${sets[i].name} — ` : "";
+      p.coefficients.push({
+        term: `${prefix}XCenter`,
+        estimate: xc,
+        stdError: null,
+        t: null,
+        p: null,
+        low: null,
+        high: null,
+      });
+    });
+  }
   const coefficients = parsed.flatMap((p) => p.coefficients);
   const fit = { sets: sets.map((s) => s.name), rows: fitRows(parsed.map((p) => p.derived), parsed.map((p) => p.stats)) };
   // ROUT's row (upstream 1.0.9): one count per data set, 0 when it found
@@ -2419,9 +2485,13 @@ async function assembleResult(
         extraNotes.push("The breakpoint is at the edge of the data — the fit is effectively a single line.");
     }
   }
-  if (model === "quartic" || model === "quintic")
+  if (model === "quartic" || model === "quintic" || model === "sextic")
     extraNotes.push(
-      `A ${model === "quartic" ? "fourth" : "fifth"} order polynomial can overfit — it follows the noise as well as the trend, so prefer a lower order unless the extra terms are justified.`,
+      `A ${model === "quartic" ? "fourth" : model === "quintic" ? "fifth" : "sixth"} order polynomial can overfit — it follows the noise as well as the trend, so prefer a lower order unless the extra terms are justified.`,
+    );
+  if (model === "centered-fourth" || model === "centered-fifth" || model === "centered-sixth")
+    extraNotes.push(
+      `A ${model === "centered-fourth" ? "fourth" : model === "centered-fifth" ? "fifth" : "sixth"} order polynomial can overfit — it follows the noise as well as the trend, so prefer a lower order unless the extra terms are justified.`,
     );
   if (isExponential(model) || isEnzyme(model) || isClassic(model)) {
     extraNotes.push(startingValues(model, first.xs, first.ys));

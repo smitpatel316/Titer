@@ -34,11 +34,14 @@ const GAUSSIAN_PARAMS = ["Amplitude", "Mean", "SD"] as const;
 /** The parameter names the wizard asks for, in order: the model's terms —
  *  plus "X0" for the segmental-linear hinge, which the fitter derives from
  *  the data (a breakpoint) instead of fitting, so the plotter asks for it
- *  outright. */
+ *  outright — and "XCenter" for the centered polynomials, derived the
+ *  same way (the mean of X). */
 export function plotFunctionParams(model: PlotFunctionModel): string[] {
   if (model === "gaussian") return [...GAUSSIAN_PARAMS];
   const terms = modelSpec(model).terms;
-  return model === "segmental-linear" ? [...terms, "X0"] : terms;
+  if (model === "segmental-linear") return [...terms, "X0"];
+  if (model.startsWith("centered-")) return [...terms, "XCenter"];
+  return terms;
 }
 
 /** The wizard's starting parameter values, per model: Prism's usual
@@ -47,11 +50,23 @@ export function plotFunctionParams(model: PlotFunctionModel): string[] {
 export const PLOT_FUNCTION_DEFAULTS: Record<PlotFunctionModel, Record<string, number>> = {
   line: { Intercept: 0, Slope: 1 },
   "semilog-line": { Intercept: 0, Slope: 1 },
+  "line-through-origin": { Slope: 1 },
+  "horizontal-line": { Mean: 0 },
+  "semilog-y-log": { Intercept: 0, Slope: 1 },
+  "log-log-line": { Intercept: 0, Slope: 1 },
+  "exponential-growth-log": { Intercept: 0, Slope: 1 },
   hyperbola: { Bmax: 100, Kd: 10 },
   quadratic: { B0: 0, B1: 1, B2: 0 },
   cubic: { B0: 0, B1: 1, B2: 0, B3: 0 },
   quartic: { B0: 0, B1: 1, B2: 0, B3: 0, B4: 0 },
   quintic: { B0: 0, B1: 1, B2: 0, B3: 0, B4: 0, B5: 0 },
+  sextic: { B0: 0, B1: 1, B2: 0, B3: 0, B4: 0, B5: 0, B6: 0 },
+  "centered-first": { B0: 0, B1: 1, XCenter: 0 },
+  "centered-second": { B0: 0, B1: 1, B2: 0, XCenter: 0 },
+  "centered-third": { B0: 0, B1: 1, B2: 0, B3: 0, XCenter: 0 },
+  "centered-fourth": { B0: 0, B1: 1, B2: 0, B3: 0, B4: 0, XCenter: 0 },
+  "centered-fifth": { B0: 0, B1: 1, B2: 0, B3: 0, B4: 0, B5: 0, XCenter: 0 },
+  "centered-sixth": { B0: 0, B1: 1, B2: 0, B3: 0, B4: 0, B5: 0, B6: 0, XCenter: 0 },
   "segmental-linear": { B0: 0, B1: 1, B2: 0, X0: 0 },
   "sigmoidal-4pl-logx": { Bottom: 0, Top: 100, LogEC50: 0, HillSlope: 1 },
   "sigmoidal-4pl-x": { Bottom: 0, Top: 100, EC50: 1, HillSlope: 1 },

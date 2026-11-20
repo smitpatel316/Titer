@@ -107,6 +107,12 @@ export const NONLINEAR_MODELS = [
   ...DOSE_MODELS,
   "line",
   "semilog-line",
+  // 1.8 classic-curves completion (B6 §Lines): the remaining line forms —
+  // through the origin, horizontal, and the two log-Y lines.
+  "line-through-origin",
+  "horizontal-line",
+  "semilog-y-log",
+  "log-log-line",
   "hyperbola",
   "quadratic",
   "cubic",
@@ -115,7 +121,20 @@ export const NONLINEAR_MODELS = [
   "segmental-linear",
   "quartic",
   "quintic",
+  // 1.8 classic-curves completion (B6 §Polynomial): the sixth order
+  // polynomial and the centered polynomials (B0 is Y at the X mean, not
+  // at X = 0 — same curve as the uncentered same degree).
+  "sextic",
+  "centered-first",
+  "centered-second",
+  "centered-third",
+  "centered-fourth",
+  "centered-fifth",
+  "centered-sixth",
   ...KINETIC_MODELS,
+  // 1.8 classic-curves completion (B6 §Growth #2): the log-population
+  // growth curve — the log-Y twin of exponential-growth.
+  "exponential-growth-log",
   // Exponential family (plan 08, 1/2: decay first; one-phase-decay is already in KINETIC_MODELS).
   "two-phase-decay",
   "three-phase-decay",
