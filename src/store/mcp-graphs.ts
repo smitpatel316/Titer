@@ -263,6 +263,7 @@ const GRAPH_OPTION_KEYS = [
   ...STRING_FIELDS,
   ...LINK_FIELDS,
   ...CONSTANT_HOOK_FIELDS,
+  "sigAnalysisIds",
   "sigPairs",
   "sets",
   "refLines",
@@ -401,6 +402,33 @@ function validatedRefLines(job: McpJob, value: unknown): RefLine[] {
   });
 }
 
+/** One linked analysis id, checked: a missing id, or one naming a non-analysis, is an
+ *  error; one from another table, or not computed yet, is a warning (the graph still
+ *  builds — it shows the link as missing until the analysis is run). */
+function checkLink(
+  job: McpJob,
+  key: string,
+  value: string,
+  state: GraphJobState,
+  tableId: string | undefined,
+  warnings: string[],
+): void {
+  const linked = state.nodes[value];
+  if (!linked) throw jobErr(job, `no analysis with id “${value}” for option “${key}” — run titer_list_projects to see the analyses.`);
+  if (linked.type !== "analysis")
+    throw jobErr(job, `“${value}” for option “${key}” is a ${linked.type}, not an analysis.`);
+  // Not for `sigAnalysisIds`: a multi-source significance list names copy
+  // tables by design, so another table is the normal case, not a warning.
+  if (key !== "sigAnalysisIds" && tableId && linked.parentId !== tableId)
+    warnings.push(
+      `Linked analysis “${linked.name}” (${key}) belongs to another table — the graph reads its cached result as-is.`,
+    );
+  if (!linked.cachedResult)
+    warnings.push(
+      `Linked analysis “${linked.name}” (${key}) has not been computed yet — the graph will show it as missing until it is run (titer_run_analysis).`,
+    );
+}
+
 /**
  * A partial `GraphOptions` as the tool spells it, validated field by
  * field. Unknown keys are rejected (the error names the valid fields);
@@ -456,19 +484,13 @@ function validateGraphOptions(
       options[key] = value;
     } else if (LINK_FIELDS.includes(key)) {
       if (typeof value !== "string" || !value) throw jobErr(job, `option “${key}” must be an analysis id.`);
-      const linked = state.nodes[value];
-      if (!linked) throw jobErr(job, `no analysis with id “${value}” for option “${key}” — run titer_list_projects to see the analyses.`);
-      if (linked.type !== "analysis")
-        throw jobErr(job, `“${value}” for option “${key}” is a ${linked.type}, not an analysis.`);
-      if (tableId && linked.parentId !== tableId)
-        warnings.push(
-          `Linked analysis “${linked.name}” (${key}) belongs to another table — the graph reads its cached result as-is.`,
-        );
-      if (!linked.cachedResult)
-        warnings.push(
-          `Linked analysis “${linked.name}” (${key}) has not been computed yet — the graph will show it as missing until it is run (titer_run_analysis).`,
-        );
+      checkLink(job, key, value, state, tableId, warnings);
       options[key] = value;
+    } else if (key === "sigAnalysisIds") {
+      if (!Array.isArray(value) || !value.every((v) => typeof v === "string" && v))
+        throw jobErr(job, `option “sigAnalysisIds” must be a list of analysis ids (strings).`);
+      for (const id of value) checkLink(job, key, id, state, tableId, warnings);
+      options[key] = [...new Set(value)];
     } else if (CONSTANT_HOOK_FIELDS.includes(key)) {
       if (typeof value !== "string" || !value) throw jobErr(job, `option “${key}” must be an info constant's name.`);
       if (!knownConstants.has(value))

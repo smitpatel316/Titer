@@ -289,6 +289,16 @@ export function remapGraphOptions(
       dropped.push(key);
     }
   }
+  // The multi-source list: each entry remaps through the same map, and one
+  // with no new id drops out; an emptied list goes with it, as a link does.
+  if (Array.isArray(next.sigAnalysisIds)) {
+    const remapped = next.sigAnalysisIds.flatMap((id) => (typeof id === "string" && idMap[id] ? [idMap[id]] : []));
+    if (remapped.length) next.sigAnalysisIds = remapped;
+    else {
+      delete next.sigAnalysisIds;
+      dropped.push("sigAnalysisIds");
+    }
+  }
   return { options: next, dropped };
 }
 

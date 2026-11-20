@@ -193,11 +193,14 @@ export interface GraphOptions {
   xMaxConstant?: string;
   // A histogram's bin width, in the values' units; omitted (or 0 and under), R's own bins.
   binWidth?: number;
-  // Significance annotations (Column and grouped graphs): read a sibling analysis's
-  // pairwise comparisons and draw brackets. `sigAnalysisId` is the source analysis
-  // node; `sigPairs` are the comparison keys (see significance-overlay) to draw;
-  // `sigDisplay`: star marks, raw P values, or letters over every group (no brackets).
+  // Significance annotations (Column and grouped graphs): read sibling analyses'
+  // pairwise comparisons and draw brackets. `sigAnalysisId` is the (legacy) single
+  // source analysis node; `sigAnalysisIds` names several — a grouped-scatter's
+  // multiple t tests, one per copy table — and wins when non-empty. `sigPairs` are
+  // the comparison keys (see significance-overlay) to draw; `sigDisplay`: star marks,
+  // raw P values, or letters over every group (no brackets).
   sigAnalysisId?: string;
+  sigAnalysisIds?: string[];
   sigPairs?: string[];
   sigDisplay: Choice<"sigDisplay">;
   // A regression of the table drawn on an XY scatter: a linear one's line and 95% band,

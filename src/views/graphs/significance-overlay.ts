@@ -38,7 +38,10 @@ export const starsFit = (analysis: ProjectNode, all: string[], shown: string[]) 
   return ran.length === shown.length && ran.every((n) => shown.includes(n));
 };
 
-/** One pairwise comparison offered to the graph, keyed stably for persistence. */
+/** One pairwise comparison offered to the graph, keyed stably for persistence.
+ *  `analysisId` is the source analysis node, so the same pair from two
+ *  analyses (two copy tables' multiple t tests on the same rows) stays
+ *  distinct; absent, the legacy single source, whose bare `key` selects it. */
 export interface SigComparison {
   key: string;
   group1: string;
@@ -46,14 +49,33 @@ export interface SigComparison {
   p: number | null;
   /** A grouped table's two cells (`ComparisonRow.cells`). */
   cells?: [ComparedCell, ComparedCell];
+  analysisId?: string;
 }
+
+/** The source analyses a graph draws significance from: `sigAnalysisIds`
+ *  when non-empty, else the legacy single `sigAnalysisId`. Deduped, in
+ *  order — the first is the primary (the letters display's source). */
+export function sigAnalysisIdsOf(options: GraphOptions): string[] {
+  const list = (options.sigAnalysisIds ?? []).filter((id) => typeof id === "string" && id);
+  if (list.length) return [...new Set(list)];
+  return options.sigAnalysisId ? [options.sigAnalysisId] : [];
+}
+
+/** A comparison's selection key: scoped to its source analysis, so two
+ *  analyses' same pair are ticked apart. */
+export const sigPairKey = (c: SigComparison) => (c.analysisId ? `${c.analysisId}\u0001${c.key}` : c.key);
+
+/** Whether a comparison is selected: its scoped key, or — for a graph saved
+ *  before multi-source — its bare key, which still draws it. */
+export const sigPairSelected = (pairs: string[] | undefined, c: SigComparison) =>
+  (pairs ?? []).includes(sigPairKey(c)) || (pairs ?? []).includes(c.key);
 
 /** Pull the drawable pairwise comparisons out of an analysis outcome. Post-hoc
  *  tests (ANOVA/Kruskal-Wallis) expose a `comparisons` table directly; a plain
  *  two-group test has its own P value (`headline`, beside its F test), the one
  *  comparison between the two groups it compared. Everything else (descriptives,
  *  one-sample, an ANOVA with no post-hoc) yields nothing to annotate. */
-export function deriveComparisons(outcome: AnalysisOutcome | null): SigComparison[] {
+export function deriveComparisons(outcome: AnalysisOutcome | null, analysisId?: string): SigComparison[] {
   if (!outcome || "error" in outcome) return [];
   if (outcome.comparisons?.length) {
     // A pair of columns, or of a grouped table's cells (a per-row test's group2 is blank:
@@ -66,11 +88,20 @@ export function deriveComparisons(outcome: AnalysisOutcome | null): SigCompariso
         group2: c.group2,
         p: c.p,
         ...(c.cells ? { cells: c.cells } : {}),
+        ...(analysisId ? { analysisId } : {}),
       }));
   }
   if (outcome.testType === "compare-two-groups" && outcome.groups.length === 2) {
     const [group1, group2] = outcome.groups.map((g) => g.name);
-    return [{ key: pairKey(group1, group2), group1, group2, p: headline(outcome.stats) }];
+    return [
+      {
+        key: pairKey(group1, group2),
+        group1,
+        group2,
+        p: headline(outcome.stats),
+        ...(analysisId ? { analysisId } : {}),
+      },
+    ];
   }
   return [];
 }
@@ -233,8 +264,13 @@ function familiesOf(comparisons: SigComparison[]): Map<string, SigComparison[]> 
   return families;
 }
 
-/** Whether every family compares every pair of its members: letters need all of them
- *  (not Dunnett's comparisons with a control, nor pairs chosen). */
+/** The comparisons letters are drawn from: every pair of ONE analysis — with
+ *  several sources, only the first one's (a second analysis's pairs are a
+ *  different family, and mixing them would letter the wrong groups). */
+export function lettersComparisons(all: SigComparison[]): SigComparison[] {
+  const primary = all.find((c) => c.analysisId)?.analysisId;
+  return primary ? all.filter((c) => !c.analysisId || c.analysisId === primary) : all;
+}
 export function lettersFit(comparisons: SigComparison[]): boolean {
   if (!comparisons.length) return false;
   return [...familiesOf(comparisons).values()].every((family) => {
@@ -350,7 +386,10 @@ export function addSignificance(
   titles?: (string | null)[],
 ) {
   const letters = options.sigDisplay === "letters";
-  const selected = letters ? comparisons : comparisons.filter((c) => (options.sigPairs ?? []).includes(c.key));
+  // Letters need every pair of ONE analysis (see lettersFit): with several
+  // sources, only the first one's comparisons letter the graph — the rest
+  // still draw their brackets, below.
+  const selected = letters ? lettersComparisons(comparisons) : comparisons.filter((c) => sigPairSelected(options.sigPairs, c));
   if (!selected.length) return;
   const grouped = GROUPED_STARS.has(graphType);
   const middle = centers(columns, options.center);

@@ -4,6 +4,7 @@
 // every entry point behaves the same.
 import { alert } from "../../native";
 import { useProjectActions, type ForGraph } from "../../store/use-project-store";
+import type { GraphOptions } from "../../store/types";
 import { ANALYSES } from "../../stats";
 import type { AnalysisParams, AnalysisPickerValue, AnalysisType } from "../../stats/types";
 import { countDataColumns, countDataGroups, hasRowGroups } from ".";
@@ -74,7 +75,13 @@ export function useAnalysisLauncher() {
     // Made for a graph's stars: chosen for it, which stays in front (its pairs to tick).
     const graph = forGraph && get().nodes[forGraph.id];
     if (graph?.graphOptions) {
-      updateGraph(graph.id, { ...graph.graphOptions, sigAnalysisId: id, sigPairs: [] });
+      // A graph already drawing from several analyses gains this one (its
+      // pairs start unticked); a single-source graph switches to it, as before.
+      const list = graph.graphOptions.sigAnalysisIds;
+      const patch: Partial<GraphOptions> = { sigAnalysisId: id };
+      if (list?.length) patch.sigAnalysisIds = [...new Set([...list, id])];
+      else patch.sigPairs = [];
+      updateGraph(graph.id, { ...graph.graphOptions, ...patch });
       setActiveNode(graph.id);
     }
   };

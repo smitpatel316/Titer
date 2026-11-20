@@ -210,7 +210,7 @@ type OptionalOption = {
 const OPTIONAL_OPTIONS = {
   yMin: "number", yMax: "number", yStep: "number", xMin: "number", xMax: "number", xStep: "number", y2Min: "number", y2Max: "number", y2Step: "number", binWidth: "number",
   yMinConstant: "text", yMaxConstant: "text", xMinConstant: "text", xMaxConstant: "text",
-  sigAnalysisId: "text", sigPairs: "texts", regAnalysisId: "text", demingAnalysisId: "text", coxAnalysisId: "text", ttestAnalysisId: "text", poissonAnalysisId: "text", smoothAnalysisId: "text", pcaAnalysisId: "text", kmeansAnalysisId: "text", hclustAnalysisId: "text", monteCarloAnalysisId: "text", xVariable: "text", yVariable: "text", bubbleSizeVariable: "text", bubbleColorVariable: "text",
+  sigAnalysisId: "text", sigAnalysisIds: "texts", sigPairs: "texts", regAnalysisId: "text", demingAnalysisId: "text", coxAnalysisId: "text", ttestAnalysisId: "text", poissonAnalysisId: "text", smoothAnalysisId: "text", pcaAnalysisId: "text", kmeansAnalysisId: "text", hclustAnalysisId: "text", monteCarloAnalysisId: "text", xVariable: "text", yVariable: "text", bubbleSizeVariable: "text", bubbleColorVariable: "text",
   volcanoX: "text", volcanoY: "text", volcanoLabel: "text", volcanoGroupA: "text", volcanoGroupB: "text", rightYDataset: "text", y2Label: "text",
   palette: "palette", series: "styles", points: "pointStyles", outlineColor: "color", pointOutlineColor: "color", errorColor: "color",
   legend: "place", note: "place", refLines: "refLines", sets: "texts",
@@ -1850,6 +1850,19 @@ export function parseProjectFile(
         severity: "warning",
         message: `Graph “${node.name}” referred to an analysis that no longer exists; the link was removed.`,
       });
+    }
+    // The multi-source list, same repair per entry: a dead id drops out of
+    // the list, and an emptied list goes with it.
+    if (Array.isArray(o.sigAnalysisIds)) {
+      const kept = o.sigAnalysisIds.filter((id) => typeof id === "string" && nodeOf(id));
+      if (kept.length !== o.sigAnalysisIds.length) {
+        if (kept.length) o.sigAnalysisIds = kept;
+        else delete o.sigAnalysisIds;
+        issues.push({
+          severity: "warning",
+          message: `Graph “${node.name}” referred to an analysis that no longer exists; the link was removed.`,
+        });
+      }
     }
   }
 
