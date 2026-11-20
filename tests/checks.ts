@@ -41,7 +41,7 @@ import {
   renameVariableInFormula,
   setCalculatedFormula,
 } from "../src/lib/calcvars";
-import { writePrism } from "../src/lib/prism-write";
+import { writePrism, type PrismWriteReport } from "../src/lib/prism-write";
 import {
   infoSheetsOf,
   newInfoSheetData,
@@ -172,7 +172,7 @@ import { loadPrismSaveChoice, nextSaveAction } from "../src/lib/prism-nudge";
 import { convertPrism } from "../src/lib/prism";
 import { yieldToPaint } from "../src/lib/yield-to-paint";
 import { fitWidths, fitZoom } from "../src/store/use-layout";
-import { isGoneReadError, prismDropSkippedMessage, prismFileOpenMessage } from "../src/store/use-document";
+import { isGoneReadError, prismDropSkippedMessage, prismFileOpenMessage, prismSaveReportLines } from "../src/store/use-document";
 import { cloneGraphPlan, DEFAULT_CLONE_OPTIONS, type CloneOptions } from "../src/lib/clone-graph";
 import { computeGroupedDEG } from "../src/lib/deg";
 import { binCounts, binEdges } from "../src/lib/histogram";
@@ -765,7 +765,7 @@ const rerunHarness = async () => {
   const seen: unknown[] = [];
   harness.deps.run = async (_type, _data, params) => {
     seen.push(params);
-    return { stats: [], groups: [], notes: "" };
+    return { testType: _type, stats: [], groups: [], notes: "" };
   };
   harness.deps.publishResult = () => {};
   harness.deps.setAnalysisParams = (id, params) =>
@@ -16021,6 +16021,87 @@ check("a directly-opened Prism file is pointed at Import / Convert (FF-F15)", ()
   ok(
     useDocument.includes('if (isPrismFile(path))') && useDocument.includes("prismFileOpenMessage(fileName(path))"),
     "load should route a Prism file to the Import/Convert message, not sayGone",
+  );
+});
+
+// ── Mansi P0 #3: a .prism save shows the write report, never drops it silently ──
+// The report used to be computed by writePrism and thrown away at every save
+// path — 29 dropped multiple-t-tests and the graphs warning never reached
+// the user. A manual .prism save now surfaces it in-app ("Saved as Prism");
+// autosave and the quit-save stay silent, so a background save never pops
+// a dialog (every 10 s, or one that holds the window open on quit).
+check("a .prism save shows the write report (Mansi P0 #3)", () => {
+  // The verbatim shape from her 1.7.0 report (item 6): tables written with
+  // names, analyses written (0 here), info sheets, dropped analyses with
+  // reasons, the graphs warning, then the file it was saved as. The report
+  // content itself is formatWriteReport's, untouched.
+  const report: PrismWriteReport = {
+    tables: ["Table A", "Table B"],
+    analyses: [],
+    analysesNotWritten: ["T-test (multiple-t-tests — not yet supported in Prism)"],
+    infoSheets: ["Project info 1"],
+    issues: [
+      {
+        severity: "warning",
+        message:
+          "Graphs and layouts are not written — Prism stores them in a binary format it does not document. Re-create them in Prism from the tables.",
+      },
+    ],
+  };
+  strictEqual(
+    prismSaveReportLines(report, "copy_2.prism").join("\n"),
+    "Tables written: 2 — Table A, Table B\n" +
+      "Analyses written: 0\n" +
+      "Info sheets written: 1 — Project info 1\n" +
+      "Analyses not written (not yet supported in Prism): T-test (multiple-t-tests — not yet supported in Prism)\n" +
+      "Warning: Graphs and layouts are not written — Prism stores them in a binary format it does not document. Re-create them in Prism from the tables.\n" +
+      "\n" +
+      "Saved as “copy_2.prism”.",
+  );
+  // A clean save — everything written, nothing dropped — still says so,
+  // and the info-sheets line is omitted when there are none.
+  const clean: PrismWriteReport = {
+    tables: ["Table A"],
+    analyses: ["Fit"],
+    analysesNotWritten: [],
+    infoSheets: [],
+    issues: [
+      {
+        severity: "warning",
+        message:
+          "Graphs and layouts are not written — Prism stores them in a binary format it does not document. Re-create them in Prism from the tables.",
+      },
+    ],
+  };
+  strictEqual(
+    prismSaveReportLines(clean, "out.prism").join("\n"),
+    "Tables written: 1 — Table A\n" +
+      "Analyses written: 1 — Fit\n" +
+      "Warning: Graphs and layouts are not written — Prism stores them in a binary format it does not document. Re-create them in Prism from the tables.\n" +
+      "\n" +
+      "Saved as “out.prism”.",
+  );
+  // Wiring: every .prism save path surfaces the report, and only a manual
+  // save does — the background paths pass silent.
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const useDocument = readFileSync(join(root, "src/store/use-document.ts"), "utf8");
+  ok(useDocument.includes("setPrismSavedReport(prismSaveReportLines(report, fileName(target)))"), "saveAsPrism doesn't show the write report");
+  ok(
+    useDocument.includes("if (!options?.silent) setPrismSavedReport(prismSaveReportLines(report, fileName(filePath)))"),
+    "the .prism save-back branch doesn't show the write report on a manual save",
+  );
+  ok(
+    useDocument.includes("if (!silent && prismReport) setPrismSavedReport(prismSaveReportLines(prismReport, fileName(handle.path)))"),
+    "a remote .prism save doesn't show the write report",
+  );
+  ok(
+    useDocument.includes("saveRef.current(false, { silent: true })"),
+    "autosave / quit-save should save silently, never popping the report dialog",
+  );
+  const shell = readFileSync(join(root, "src/components/app-shell.tsx"), "utf8");
+  ok(
+    shell.includes('title="Saved as Prism"') && shell.includes("prismSavedReport"),
+    "app-shell doesn't render the Saved as Prism report dialog",
   );
 });
 
