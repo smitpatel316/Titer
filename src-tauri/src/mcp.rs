@@ -9850,7 +9850,7 @@ mod tests {
         state.lock().dir = Some(dir.clone());
         let session2 = mcp_initialize(&client, &url).await;
         let names2 = mcp_list_tool_names(&client, &url, &session2).await;
-        assert_eq!(names2.len(), 7, "five reads + two destructive tools: {names2:?}");
+        assert_eq!(names2.len(), 11, "five reads + six destructive tools: {names2:?}");
         assert!(names2.contains(&"titer_delete_node".to_string()), "delete appears: {names2:?}");
         assert!(names2.contains(&"titer_run_script".to_string()), "script appears: {names2:?}");
 
