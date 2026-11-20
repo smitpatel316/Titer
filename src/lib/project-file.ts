@@ -270,7 +270,7 @@ type ParamKind =
   | Limits;
 // prettier-ignore
 const PARAMS = {
-  paired: "yes/no", gaussian: "yes/no", equalVariance: "yes/no", ratio: "yes/no", forceOrigin: "yes/no", pooledSd: "yes/no", quasi: "yes/no", fixHillSlope: "yes/no", trendOrdered: "yes/no", continuityCorrection: "yes/no",
+  paired: "yes/no", gaussian: "yes/no", equalVariance: "yes/no", ratio: "yes/no", forceOrigin: "yes/no", compareSlopes: "yes/no", pooledSd: "yes/no", quasi: "yes/no", fixHillSlope: "yes/no", trendOrdered: "yes/no", continuityCorrection: "yes/no",
   equalSd: "yes/no", sphericity: "yes/no", interpolate: "yes/no", tails: TAILS, posthoc: [...ANOVA_POSTHOCS, ...RANK_POSTHOCS], mixed: "yes/no",
   // `model` is shared by nonlinear-regression and the binding runners:
   // the reader only sanitizes, each runner validates its own.
@@ -885,7 +885,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "roc-curve": ["truth", "score", "positive", "sets"],
   "plot-function": ["equation", "xMin", "xMax", "segments", "curves", "extra", "ligandConcentration", "sets"],
   correlation: ["method", "mode", "datasets", "sets"],
-  "linear-regression": ["x", "y", "ys", "forceOrigin", "weights", "sets"],
+  "linear-regression": ["x", "y", "ys", "forceOrigin", "compareSlopes", "weights", "sets"],
   "compare-slopes": ["ys", "sets"],
   "deming-regression": ["y", "lambda", "sets"],
   "simple-logistic-regression": ["y", "sets"],

@@ -982,6 +982,12 @@
         "required": false
       },
       {
+        "name": "compareSlopes",
+        "type": "boolean",
+        "required": false,
+        "description": "Compare the slopes and intercepts of the Y data sets' lines (≥ 2 sets) instead of fitting each on its own."
+      },
+      {
         "name": "weights",
         "type": "string",
         "enum": [

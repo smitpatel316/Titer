@@ -120,9 +120,24 @@ export async function runCompareSlopes(
     { label: "N", values: of("n") },
   ];
   const names = sets.map((s) => `“${s}”`).join(", ");
+  // The plain-words verdict (Prism's "Are lines different?" tab) is set
+  // here, on the result — the report layer keeps a runner-set summary, so
+  // the same verdict shows whether the comparison ran as its own analysis
+  // or as linear-regression's `compareSlopes` option (whose report routes
+  // through the linear-regression conclusion, not this type's).
+  const listed =
+    sets.length > 1
+      ? `${sets.slice(0, -1).map((s) => `“${s}”`).join(", ")} and “${sets.at(-1)}”`
+      : `“${sets[0]}”`;
+  const summary = slopesDiffer
+    ? `The slopes of ${listed} differ significantly (P = ${num(pSlopes)}): the lines are not parallel, so their intercepts are not compared.`
+    : pIdentical != null && pIdentical < 0.05
+      ? `The slopes of ${listed} do not differ significantly (P = ${num(pSlopes)}), but the lines are not identical (P = ${num(pIdentical)}): they are parallel lines with different intercepts.`
+      : `The data don't show that the lines of ${listed} differ: neither the slopes (P = ${num(pSlopes)}) nor the lines as a whole (P = ${num(pIdentical)}) differ significantly, so one line may describe them all.`;
   return {
     testType: "compare-slopes",
     subtitle: "Compare slopes and intercepts",
+    summary,
     stats,
     fit: { sets, rows },
     groups: (await describe([x!, ...groups.map((s) => ({ name: s.name, values: s.columns.flatMap((c) => c.values) }))]))

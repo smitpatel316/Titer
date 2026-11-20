@@ -2128,11 +2128,24 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ["no", "No — fit both slope and Y-intercept (recommended)"],
         ["yes", "Yes — assume Y = 0 when X = 0"],
       ]),
+      // Prism's "Test whether the slopes and intercepts are significantly
+      // different" (#46): only when ≥ 2 Y data sets are fitted and the line
+      // is not forced through the origin (Prism disables it then).
+      ...(type === "xy" && yNames(table).length >= 2 && a.origin !== "yes"
+        ? [
+            choice("compare", "Test whether the slopes and intercepts are significantly different?", [
+              ["no", "No — fit each line on its own"],
+              ["yes", "Yes — compare the lines (are the slopes different? are the lines identical?)"],
+            ]),
+          ]
+        : []),
       // Plan 26: weighting (1/SD² needs the replicate columns this runner
       // never sees, so it is not offered here). Only an XY table's regression
       // on X is weighted — a Multiple Variables table regresses two named
-      // columns, and asks no weighting question.
-      ...(type === "xy"
+      // columns, and asks no weighting question. No weighting with the
+      // comparison: its F tests pool one residual variance, so the runner
+      // refuses a weighting scheme rather than ignoring it.
+      ...(type === "xy" && a.compare !== "yes"
         ? [
             choice("weights", "Weight the points?", [
               ["none", "No weighting (recommended unless scatter grows with Y)"],
@@ -2148,13 +2161,16 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       type: "linear-regression",
       params: {
         ...(a.x === undefined ? { ...fittedYs(a) } : { x: a.x as string, y: a.y as string }),
-        forceOrigin: a.origin === "yes",
-        ...(a.weights !== undefined && a.weights !== "none"
+        // A comparison is never forced through the origin, even when the
+        // origin answer was given before the comparison was picked.
+        forceOrigin: a.origin === "yes" && a.compare !== "yes",
+        ...(a.compare === "yes" ? { compareSlopes: true } : {}),
+        ...(a.weights !== undefined && a.weights !== "none" && a.compare !== "yes"
           ? { weights: a.weights as LinearRegressionParams["weights"] }
           : {}),
       },
     }),
-    checklist: () => CHECKLISTS["linear-regression"],
+    checklist: (a) => CHECKLISTS[a.compare === "yes" ? "compare-slopes" : "linear-regression"],
   },
 
   "compare-slopes": {

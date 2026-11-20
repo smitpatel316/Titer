@@ -282,7 +282,13 @@ export interface FriedmanParams {
 }
 
 /** Params for "linear-regression": which Y series to regress on X, and whether to
- *  force the line through the origin (intercept = 0). */
+ *  force the line through the origin (intercept = 0). `compareSlopes` is Prism's
+ *  "Test whether the slopes and intercepts are significantly different" checkbox
+ *  (#46, MCP audit seq 292): with two or more Y data sets it runs the
+ *  slope/intercept comparison ("compare-slopes") instead of fitting each line
+ *  on its own. It needs an XY table (not Multiple Variables `x`/`y`), it is
+ *  not available forced through the origin (Prism disables the option then),
+ *  and the comparison is unweighted, so it refuses a weighting scheme. */
 export interface LinearRegressionParams {
   /** The X variable of a Multiple Variables table; omitted, X is the first data column (XY). */
   x?: string;
@@ -291,6 +297,9 @@ export interface LinearRegressionParams {
   /** An XY table's Y data sets, each regressed on its own (`y` then unused). */
   ys?: string[];
   forceOrigin: boolean;
+  /** Compare the slopes and intercepts of the Y data sets' lines (≥ 2 sets)
+   *  instead of fitting each on its own. */
+  compareSlopes?: boolean;
   /** Weighting (plan 26, same schemes as nonlinear regression except 1/SD²,
    *  which needs the replicate columns this runner never sees). */
   weights?: Exclude<NonlinearWeightScheme, "1/sd2">;
