@@ -708,7 +708,7 @@ export const CHECKLISTS: Record<ChecklistKey, AnalysisChecklist> = {
       {
         assumption: "The groups have similar spread — the ANOVA pools their variances.",
         ifNot:
-          "When the spreads clearly differ, use Welch's ANOVA (answer “No” to the equal-SDs question); it does not pool the variances.",
+          "When the spreads clearly differ, answer “No” to the equal-SDs question: Welch's and Brown-Forsythe ANOVAs are reported instead, and they do not pool the variances.",
       },
       {
         assumption: "No single value dominates any group — check for extreme outliers before trusting the means.",
@@ -1250,9 +1250,10 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             ]
           : anova && a.equalSd === "no"
             ? [
-                ["none", "No — only the overall Welch's ANOVA"],
+                ["none", "No — only the overall Welch's and Brown-Forsythe ANOVAs"],
                 ["games-howell", "Yes, every pair — Games-Howell test"],
                 ["t3", "Yes, every pair — Dunnett's T3 test (fewer than 50 values per group)"],
+                ["fdr", "Yes — False Discovery Rate (Benjamini-Hochberg)"],
               ]
             : [
                 ["none", "No — only the overall ANOVA"],
@@ -1263,6 +1264,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
                 ["bonferroni", "Yes, pairs I choose — Bonferroni correction"],
                 ["sidak", "Yes, pairs I choose — Šídák correction"],
                 ["holm-sidak", "Yes, pairs I choose — Holm–Šídák correction (more powerful)"],
+                ["fdr", "Yes, pairs I choose — False Discovery Rate (Benjamini-Hochberg) correction"],
                 ["lsd", "Yes, pairs I choose — Fisher's LSD (no correction)"],
               ];
       const pairs = pairLabels(chosenSets(a) ?? setNames(table));
@@ -1294,7 +1296,12 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
               : "Assume the groups have equal SDs?",
             [
               ["yes", a.lognormal === "yes" ? "Yes — lognormal one-way ANOVA" : "Yes — ordinary one-way ANOVA"],
-              ["no", a.lognormal === "yes" ? "No — lognormal Welch's ANOVA" : "No — Welch's ANOVA"],
+              [
+                "no",
+                a.lognormal === "yes"
+                  ? "No — lognormal Welch's and Brown-Forsythe ANOVAs"
+                  : "No — Welch's and Brown-Forsythe ANOVAs",
+              ],
             ],
           ),
         paired &&
@@ -1322,6 +1329,15 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             options: pairs.map((p) => p.label),
             min: 1,
           },
+        // The test for linear trend is Prism's alternative to multiple comparisons (one
+        // comparison, not a family): offered only with the ordinary ANOVA and no post-hoc.
+        anova &&
+          a.equalSd !== "no" &&
+          a.posthoc === "none" &&
+          choice("trend", "Test for linear trend between the column means and their left-to-right order?", [
+            ["no", "No — only the overall ANOVA"],
+            ["yes", "Yes — test for linear trend (columns in a natural order, equally spaced)"],
+          ]),
       ];
     },
     finish: (a, table) => {
@@ -1331,6 +1347,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         equalSd: a.equalSd !== "no",
         ...(a.lognormal === "yes" ? { lognormal: true } : {}),
         ...(a.posthoc === "dunnett" ? { control: a.control as string } : {}),
+        ...(a.trend === "yes" && a.posthoc === "none" ? { trend: true } : {}),
       };
       // A mixed-effects model assumes sphericity: it is asked of complete subjects alone.
       const mixed = type === "rm-anova" && gaps(table, chosenSets(a)) && a.mixed !== "no";
@@ -1350,7 +1367,23 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       const paired = a.paired === "paired";
       const key: ChecklistKey =
         a.gaussian !== "no" ? (paired ? "rm-anova" : "anova") : paired ? "friedman" : "kruskal-wallis";
-      return CHECKLISTS[key];
+      const list = CHECKLISTS[key];
+      // The trend test adds one assumption of its own: the columns are ordered
+      // and equally spaced, so the means read left to right.
+      return key === "anova" && a.trend === "yes"
+        ? {
+            ...list,
+            items: [
+              ...list.items,
+              {
+                assumption:
+                  "The columns are in a natural order (dose, time, age) and equally spaced — the trend test reads the means left to right, one column at a time.",
+                ifNot:
+                  "With unordered or unevenly spaced columns the trend test has no meaning; use the pairwise comparisons instead.",
+              },
+            ],
+          }
+        : list;
     },
   },
 

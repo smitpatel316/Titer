@@ -153,10 +153,13 @@ export const R_PTUKEY =
 
 /** R: P values corrected for the `m` pairs of a family (`adj`, from each pair's raw P), and a
  *  pair's corrected P from its |t| (`pa`), by `how`: Bonferroni, Šidák, Holm-Šidák (step-down:
- *  the smallest P against m pairs, the next against m − 1…, never below an earlier one) or
- *  Fisher's LSD (none). Holm-Šidák's step-down gives no CI (`pa` NA). */
+ *  the smallest P against m pairs, the next against m − 1…, never below an earlier one),
+ *  the False Discovery Rate (Benjamini-Hochberg step-up: the i-th smallest P against m/i
+ *  pairs, never below a larger one), or Fisher's LSD (none). Holm-Šidák's step-down and
+ *  the FDR's step-up give no CI (`pa` NA): no single critical value covers the family. */
 export const R_ADJUST = `adj<-function(p,how){m<-length(p);if(how=="fisher")return(p);if(how=="bonferroni")return(pmin(1,m*p))
-if(how=="sidak")return(1-(1-p)^m);o<-order(p);a<-cummax(1-(1-p[o])^(m-seq_len(m)+1));r<-numeric(m);r[o]<-pmin(1,a);r}
+if(how=="sidak")return(1-(1-p)^m);o<-order(p);if(how=="fdr"){a<-rev(cummin(rev(m/seq_len(m)*p[o])));r<-numeric(m);r[o]<-pmin(1,a);return(r)}
+a<-cummax(1-(1-p[o])^(m-seq_len(m)+1));r<-numeric(m);r[o]<-pmin(1,a);r}
 pa<-function(t,df,how,m){p<-2*pt(-abs(t),df);switch(how,fisher=p,bonferroni=pmin(1,m*p),sidak=1-(1-p)^m,NA)}`;
 
 /** The pairs a test compares: every pair, or those `compared` names (`pairKey`, either way
@@ -307,6 +310,7 @@ const POSTHOC_LABELS: Record<string, string> = {
   bonferroni: "Bonferroni-corrected multiple comparisons",
   sidak: "Šídák-corrected multiple comparisons",
   "holm-sidak": "Holm–Šídák multiple comparisons test",
+  fdr: "False Discovery Rate (Benjamini-Hochberg) multiple comparisons",
   lsd: "Fisher's LSD test (uncorrected)",
   fisher: "Fisher's LSD test, uncorrected",
   dunn: "Dunn's multiple comparisons test (Bonferroni-corrected)",

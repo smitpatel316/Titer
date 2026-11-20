@@ -1,7 +1,11 @@
 // One-way ANOVA — compares the means of three or more groups: the ordinary ANOVA (equal SDs:
-// F, and R² as eta squared) or Welch's (unequal SDs: `oneway.test`). Optionally followed by
-// comparisons of every pair (Tukey, Bonferroni; with unequal SDs Games-Howell or Dunnett's T3)
-// or of each group with a control (Dunnett). Dunnett's and T3's P values are exact: the
+// F, and R² as eta squared), Welch's (unequal SDs: `oneway.test`) together with the
+// Brown-Forsythe ANOVA (unequal SDs: F*, Brown and Forsythe 1974 — Prism reports both),
+// or the lognormal ANOVA (on the logarithms). Optionally followed by comparisons of every
+// pair (Tukey, Bonferroni; with unequal SDs Games-Howell or Dunnett's T3), of chosen pairs
+// (Bonferroni, Šídák, Holm–Šídák, Fisher's LSD, or the False Discovery Rate), or of each
+// group with a control (Dunnett) — or by the test for linear trend between the column
+// means and their left-to-right order. Dunnett's and T3's P values are exact: the
 // distribution of the largest of the t statistics compared, integrated in R.
 import { PAIR_CORRECTIONS, type AnovaParams } from "../types";
 import {
@@ -29,6 +33,7 @@ const DEFAULTS: AnovaParams = { posthoc: "none" };
 
 const welch = (p: AnovaParams | undefined) => p?.equalSd === false;
 const lognormal = (p: AnovaParams | undefined) => p?.lognormal === true;
+const trend = (p: AnovaParams | undefined) => p?.trend === true;
 
 /** R: where √(χ²/df) has its mass (`lims`), and its density (`ds`); `smm`, the P of a t
  *  statistic at `df` as the largest of `mc` independent ones (the studentized maximum
@@ -84,7 +89,9 @@ function comparisons(groups: Group[], p: AnovaParams): { setup: string; values: 
       values: chosen
         .flatMap(([i, j], q) => [
           `p_${i}_${j}=ps[${q + 1}]`,
-          ...(how === "holm-sidak" ? [] : [ciAt(`${i}_${j}`, diff(i, j), pooled(i, j), "cv")]),
+          // Holm–Šídák's step-down and the FDR's step-up give no single
+          // critical value, so no multiplicity-adjusted CI (`pa` is NA).
+          ...(how === "holm-sidak" || how === "fdr" ? [] : [ciAt(`${i}_${j}`, diff(i, j), pooled(i, j), "cv")]),
         ])
         .join(","),
     };
@@ -102,6 +109,20 @@ function comparisons(groups: Group[], p: AnovaParams): { setup: string; values: 
       values: others
         .flatMap((i) => [`p_${i}_${c}=dun(${t(i)},l,dfe)`, ciAt(`${i}_${c}`, diff(i, c), pooled(i, c), "cv")])
         .join(","),
+    };
+  }
+  // The False Discovery Rate after Welch's ANOVA (Prism: the raw P of each pair is the
+  // Welch t test's, then Benjamini-Hochberg across the chosen family — no CI, as with
+  // the ordinary ANOVA's FDR above).
+  if (p.posthoc === "fdr") {
+    const chosen = comparedPairs(groups, p.compared);
+    const raw = ([i, j]: [number, number]) => `{w<-wt(${at(i)},${at(j)});2*pt(-abs(w[1]),w[2])}`;
+    return {
+      setup:
+        `${R_ADJUST};` +
+        `wt<-function(i,j){e<-s2[i]/n[i]+s2[j]/n[j];c((m[i]-m[j])/sqrt(e),e^2/((s2[i]/n[i])^2/(n[i]-1)+(s2[j]/n[j])^2/(n[j]-1)),sqrt(e))};` +
+        `ps<-adj(c(${chosen.map(raw).join(",")}),"fdr")`,
+      values: chosen.map(([i, j], q) => `p_${i}_${j}=ps[${q + 1}]`).join(","),
     };
   }
   // Games-Howell and Dunnett's T3: each pair's Welch t and df; the first against the
@@ -174,21 +195,49 @@ export const anovaSpec: ColumnTestSpec<AnovaParams> = {
   // and each comparison's ratio of geometric means, its CI's bounds made ratios too.
   rCode: (groups, params) => {
     const p = { ...DEFAULTS, ...params };
+    const k = groups.length;
     const g = groups.map((_, i) => `g${i}`);
     const logs = lognormal(p) ? `;${g.map((x) => `${x}<-log(${x})`).join(";")};v<-log(v)` : "";
     const setup =
       `${groupsSetup(groups)}${logs};G<-list(${g.join(",")});` +
       `n<-lengths(G);m<-sapply(G,mean);s2<-sapply(G,var);a<-summary(aov(v~gr))[[1]]`;
+    // Brown-Forsythe's F* (Brown and Forsythe, 1974): the between-group sum of squares
+    // over Σ(1 − n_i/N)·s_i², its denominator df from the weights c_i =
+    // (1 − n_i/N)·s_i² / Σ(1 − n_j/N)·s_j² — the second unequal-variance ANOVA Prism
+    // reports beside Welch's. (Not the Brown-Forsythe test of equal variances, which
+    // is an ANOVA of absolute deviations from the median.) Computed before `main`,
+    // which reads it.
+    const bf = welch(p)
+      ? `;bfw<-(1-n/sum(n))*s2;bfF<-sum(n*(m-sum(n*m)/sum(n))^2)/sum(bfw);` +
+        `bfc<-bfw/sum(bfw);bfDf2<-1/sum(bfc^2/(n-1));bfP<-pf(bfF,${k - 1},bfDf2,lower.tail=FALSE)`
+      : "";
     const main = welch(p)
-      ? `w<-oneway.test(v~gr,var.equal=FALSE);r<-c(F=unname(w$statistic),dfn=unname(w$parameter[1]),dfd=unname(w$parameter[2]),p=w$p.value)`
+      ? `w<-oneway.test(v~gr,var.equal=FALSE);r<-c(F=unname(w$statistic),dfn=unname(w$parameter[1]),dfd=unname(w$parameter[2]),p=w$p.value,bfF=bfF,bfDfn=${k - 1},bfDfd=bfDf2,bfP=bfP)`
       : `r<-c(F=a$"F value"[1],dfn=a$Df[1],dfd=a$Df[2],p=a$"Pr(>F)"[1],eta2=a$"Sum Sq"[1]/sum(a$"Sum Sq"));r["f"]<-sqrt(r["eta2"]/(1-r["eta2"]))`;
+    // The test for linear trend (Prism's post test for trend; Sheskin, Altman): the
+    // columns are X = 1…k, equally spaced, and only the group means are fitted — a
+    // column with more values gets no more weight. Its linear component is the
+    // 1-df contrast SS_lin = (Σc_i·m_i)²/Σ(c_i²/n_i) on c_i = X_i − X̄, tested
+    // against the ordinary ANOVA's residual mean square; the slope is the
+    // unweighted least-squares slope of the means on X. The effect-size R² is
+    // SS_lin over the total sum of squares, the alerting R² over the between-group
+    // one; with four or more groups the rest of the between-group sum of squares
+    // tests the nonlinear trend.
+    const tr = trend(p)
+      ? `;cc<-(1:${k})-mean(1:${k});ssl<-(sum(cc*m))^2/sum(cc^2/n);mse<-a$"Sum Sq"[2]/a$Df[2];` +
+        `ssb<-a$"Sum Sq"[1];sst<-sum(a$"Sum Sq");` +
+        `tr<-c(trSlope=sum(cc*(m-mean(m)))/sum(cc^2),trR2eff=ssl/sst,` +
+        `trR2alert=if(ssb>0)ssl/ssb else NA,` +
+        `trPlin=pf(ssl/mse,1,a$Df[2],lower.tail=FALSE),` +
+        `trPnonlin=${k >= 4 ? `pf((max(0,ssb-ssl)/${k - 2})/mse,${k - 2},a$Df[2],lower.tail=FALSE)` : "NA"})`
+      : "";
     const geometric = lognormal(p) ? `;r<-c(r,setNames(exp(m),paste0("gm",0:${groups.length - 1})))` : "";
-    if (p.posthoc === "none") return `${setup};${main}${geometric};r`;
+    if (p.posthoc === "none") return `${setup}${bf};${main}${tr}${geometric};${trend(p) ? "c(r,tr)" : "r"}`;
     const ph = comparisons(groups, p);
-    if (!lognormal(p)) return `${setup};${main}\n${ph.setup}\nc(r,${ph.values})`;
+    if (!lognormal(p)) return `${setup}${bf};${main}${tr}\n${ph.setup}\nc(r,${ph.values}${trend(p) ? ",tr" : ""})`;
     const ratios = anovaSpec.pairs!(groups, p).map(([i, j]) => `r_${i}_${j}=exp(m[${i + 1}]-m[${j + 1}])`);
     return (
-      `${setup};${main}${geometric}\n${ph.setup}\nout<-c(r,${ph.values},${ratios.join(",")});` +
+      `${setup}${bf};${main}${tr}${geometric}\n${ph.setup}\nout<-c(r,${ph.values},${ratios.join(",")}${trend(p) ? ",tr" : ""});` +
       `ci<-grep("^(lo|hi)_",names(out));out[ci]<-exp(out[ci]);out`
     );
   },
@@ -199,6 +248,12 @@ export const anovaSpec: ColumnTestSpec<AnovaParams> = {
           { label: "DFn", value: v.dfn },
           { label: "DFd", value: v.dfd },
           pRow("P value", v.p),
+          // The Brown-Forsythe ANOVA beside Welch's: same null, another F
+          // and denominator df for unequal variances (Prism reports both).
+          { label: "F (Brown-Forsythe)", value: v.bfF },
+          { label: "DFn (Brown-Forsythe)", value: v.bfDfn },
+          { label: "DFd (Brown-Forsythe)", value: v.bfDfd },
+          pRow("P value (Brown-Forsythe)", v.bfP),
         ]
       : [
           { label: "F", value: v.F },
@@ -209,6 +264,15 @@ export const anovaSpec: ColumnTestSpec<AnovaParams> = {
           { label: "Cohen's f", value: v.f },
         ]),
     ...(lognormal(params) ? groups.map((g, i) => ({ label: `Geometric mean (${g.name})`, value: v[`gm${i}`] })) : []),
+    ...(trend(params)
+      ? [
+          { label: "Slope (test for linear trend)", value: v.trSlope },
+          { label: "R squared (linear trend, effect size)", value: v.trR2eff },
+          { label: "R squared (linear trend, alerting)", value: v.trR2alert },
+          pRow("P value (linear trend)", v.trPlin),
+          ...(groups.length >= 4 ? [pRow("P value (nonlinear trend)", v.trPnonlin)] : []),
+        ]
+      : []),
   ],
   ratios: lognormal,
   posthoc: posthocOf,
@@ -219,14 +283,20 @@ export const anovaSpec: ColumnTestSpec<AnovaParams> = {
     return groups.flatMap((_, i): [number, number][] => (i === c ? [] : [[i, c]]));
   },
   notes: (params) =>
-    lognormal(params)
-      ? `Compares the groups' geometric means: the ANOVA${welch(params) ? " (Welch's, without assuming equal SDs)" : ""} runs on the logarithms, which it assumes normal${welch(params) ? "" : " with equal variances"}; its comparisons are ratios of geometric means.`
-      : (welch(params)
-          ? "Compares means across groups without assuming equal SDs (Welch's ANOVA); assumes normal distributions."
-          : "Compares means across groups; assumes normal distributions with equal variances.") +
-        (params?.posthoc === "lsd"
-          ? " Fisher's LSD is uncorrected — only interpretable when the overall ANOVA was significant."
-          : ""),
+    (lognormal(params)
+      ? `Compares the groups' geometric means: the ANOVA${welch(params) ? " (Welch's and Brown-Forsythe, without assuming equal SDs)" : ""} runs on the logarithms, which it assumes normal${welch(params) ? "" : " with equal variances"}; its comparisons are ratios of geometric means.`
+      : welch(params)
+        ? "Compares means across groups without assuming equal SDs: Welch's ANOVA and the Brown-Forsythe ANOVA are both reported; each assumes normal distributions."
+        : "Compares means across groups; assumes normal distributions with equal variances.") +
+    (params?.posthoc === "lsd"
+      ? " Fisher's LSD is uncorrected — only interpretable when the overall ANOVA was significant."
+      : "") +
+    (params?.posthoc === "fdr"
+      ? " The False Discovery Rate (Benjamini-Hochberg) controls the expected share of false discoveries among the comparisons called significant, rather than the chance of any false positive; no confidence intervals are reported for it."
+      : "") +
+    (trend(params)
+      ? " The test for linear trend fits the group means against column order (1, 2, 3, …) — the columns must be in a natural order and equally spaced — and tests the linear trend against the ordinary ANOVA's residual mean square; the nonlinear trend is the rest of the between-group variation."
+      : ""),
   subtitle: (params) =>
-    `${lognormal(params) ? "Lognormal " : ""}${welch(params) ? "Welch's ANOVA" : `${lognormal(params) ? "o" : "O"}ne-way ANOVA`}`,
+    `${lognormal(params) ? "Lognormal " : ""}${welch(params) ? "Welch's and Brown-Forsythe ANOVAs" : `${lognormal(params) ? "o" : "O"}ne-way ANOVA`}`,
 };
