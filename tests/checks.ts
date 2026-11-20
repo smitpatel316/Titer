@@ -4410,6 +4410,162 @@ check("a one-way ANOVA with one value in every group names the missing variation
   ok(stat("F") != null && stat("P value") != null, "F and P should compute with df 1");
 });
 
+// seq 161 (effect-size completion) + seq 199 residual (correlation-matrix
+// CIs): partial eta squared, Glass's Δ, and the effect-size 95% CIs, pinned
+// against values computed independently in Python/scipy (noncentral F / t /
+// chi-square CDF inversion, Fisher's z) — NOT against the R code itself, so
+// a wrong inversion fails here. On the pre-fix code the fields don't exist
+// at all (effectSizes undefined, no CI rows), so this check fails there.
+check("effect sizes (seq 161): partial eta squared, Glass's delta and the CIs", async () => {
+  const close = (got: number | null | undefined, want: number, tol: number, label: string) => {
+    if (got == null || Math.abs(got - want) > tol) throw new Error(`${label}: got ${got}, expected ${want}`);
+  };
+  const stat = (out: { stats: { label: string; value: number | null }[] }, label: string) =>
+    out.stats.find((s) => s.label === label)?.value;
+  const anovaTable: TableData = {
+    columns: ["Title", "A", "B", "C"],
+    rows: [
+      ["", "12.1", "14.3", "18.2"],
+      ["", "11.4", "15.1", "19.9"],
+      ["", "13.2", "13.8", "17.5"],
+      ["", "12.8", "16.2", "21.3"],
+      ["", "10.9", "14.9", "18.8"],
+    ],
+  };
+  // One-way ANOVA: one factor, so partial eta squared is eta squared
+  // (F = 47.874338, SSb/SSt = 0.888630); its 95% CI is the noncentral-F
+  // inversion, λ/(λ + N) with N = 15.
+  const anova = await runAnalysis("anova", anovaTable);
+  if ("error" in anova) throw new Error(`ANOVA should run, got ${anova.error}`);
+  const [row] = anova.effectSizes ?? [];
+  if (!row) throw new Error("expected an effect-size table on the one-way ANOVA");
+  strictEqual(row.effect, "Between groups");
+  close(row.eta2, 0.88863, 1e-6, "ANOVA eta squared");
+  close(row.partialEta2, 0.88863, 1e-6, "ANOVA partial eta squared");
+  close(row.cohensF, 2.824722, 1e-6, "ANOVA Cohen's f");
+  close(row.partialEta2Lo, 0.654094, 1e-4, "ANOVA partial eta squared 95% CI lower");
+  close(row.partialEta2Hi, 0.929293, 1e-4, "ANOVA partial eta squared 95% CI upper");
+  // Welch's ANOVA has no sums of squares, so it reports no effect-size table.
+  const welch = await runAnalysis("anova", anovaTable, { equalSd: false } as AnalysisParams);
+  if ("error" in welch) throw new Error(`Welch ANOVA should run, got ${welch.error}`);
+  strictEqual(welch.effectSizes, undefined, "Welch's ANOVA reports no effect-size table");
+  // effectSizes: false omits the table.
+  const off = await runAnalysis("anova", anovaTable, { effectSizes: false } as AnalysisParams);
+  if ("error" in off) throw new Error(`ANOVA should run, got ${off.error}`);
+  strictEqual(off.effectSizes, undefined, "effectSizes false omits the ANOVA table");
+
+  // Unpaired t test (A vs B): Glass's Δ standardises by the second group's
+  // SD; the d / g / Δ CIs are the noncentral-t inversion, scaled by
+  // √(1/n0 + 1/n1), Hedges' J, and the pooled-to-control SD ratio.
+  const tTable: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["", "12.1", "14.3"],
+      ["", "11.4", "15.1"],
+      ["", "13.2", "13.8"],
+      ["", "12.8", "16.2"],
+      ["", "10.9", "14.9"],
+    ],
+  };
+  const t = await runAnalysis("compare-two-groups", tTable, {
+    paired: false,
+    gaussian: true,
+    equalVariance: true,
+    tails: "two-sided",
+  } as AnalysisParams);
+  if ("error" in t) throw new Error(`t test should run, got ${t.error}`);
+  close(stat(t, "Cohen's d"), -2.989075, 1e-6, "Cohen's d");
+  close(stat(t, "Cohen's d 95% CI lower"), -4.850184, 1e-4, "Cohen's d 95% CI lower");
+  close(stat(t, "Cohen's d 95% CI upper"), -1.053308, 1e-4, "Cohen's d 95% CI upper");
+  close(stat(t, "Hedges' g"), -2.698248, 1e-6, "Hedges' g");
+  close(stat(t, "Hedges' g 95% CI lower"), -4.378278, 1e-4, "Hedges' g 95% CI lower");
+  close(stat(t, "Hedges' g 95% CI upper"), -0.950825, 1e-4, "Hedges' g 95% CI upper");
+  close(stat(t, "Glass's Δ (second group's SD)"), -3.064396, 1e-6, "Glass's delta");
+  close(stat(t, "Glass's Δ 95% CI lower"), -4.972404, 1e-4, "Glass's delta 95% CI lower");
+  close(stat(t, "Glass's Δ 95% CI upper"), -1.07985, 1e-4, "Glass's delta 95% CI upper");
+  const tOff = await runAnalysis("compare-two-groups", tTable, {
+    paired: false,
+    gaussian: true,
+    equalVariance: true,
+    tails: "two-sided",
+    effectSizes: false,
+  } as AnalysisParams);
+  if ("error" in tOff) throw new Error(`t test should run, got ${tOff.error}`);
+  strictEqual(stat(tOff, "Cohen's d"), undefined, "effectSizes false drops Cohen's d");
+
+  // One-sample t test (A vs 10): d and g with their noncentral-t CIs.
+  const one = await runAnalysis(
+    "one-sample-t",
+    { columns: ["Title", "A"], rows: [["", "12.1"], ["", "11.4"], ["", "13.2"], ["", "12.8"], ["", "10.9"]] },
+    { hypotheticalValue: 10, tails: "two-sided", gaussian: true } as AnalysisParams,
+  );
+  if ("error" in one) throw new Error(`one-sample t test should run, got ${one.error}`);
+  close(stat(one, "A — Cohen's d"), 2.184035, 1e-6, "one-sample Cohen's d");
+  close(stat(one, "A — Cohen's d 95% CI lower"), 0.465696, 1e-4, "one-sample d 95% CI lower");
+  close(stat(one, "A — Cohen's d 95% CI upper"), 3.857307, 1e-4, "one-sample d 95% CI upper");
+  close(stat(one, "A — Hedges' g"), 1.742608, 1e-6, "one-sample Hedges' g");
+  close(stat(one, "A — Hedges' g 95% CI lower"), 0.371571, 1e-4, "one-sample g 95% CI lower");
+  close(stat(one, "A — Hedges' g 95% CI upper"), 3.077686, 1e-4, "one-sample g 95% CI upper");
+
+  // Correlation matrix (seq 199 residual): each r carries its 95% CI
+  // (Fisher's z); effectSizes false reports r and P only.
+  const matrixTable: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      ["", "1", "2"],
+      ["", "2", "5"],
+      ["", "3", "3"],
+      ["", "4", "8"],
+      ["", "5", "6"],
+      ["", "6", "9"],
+      ["", "7", "7"],
+      ["", "8", "12"],
+      ["", "9", "10"],
+      ["", "10", "13"],
+    ],
+  };
+  const matrix = await runAnalysis("correlation-matrix", matrixTable, { method: "pearson" });
+  if ("error" in matrix) throw new Error(`correlation matrix should run, got ${matrix.error}`);
+  close(matrix.matrix?.r[0][1] ?? null, 0.905184, 1e-6, "matrix r");
+  close(matrix.matrix?.lo?.[0][1] ?? null, 0.640724, 1e-4, "matrix r 95% CI lower");
+  close(matrix.matrix?.hi?.[0][1] ?? null, 0.977631, 1e-4, "matrix r 95% CI upper");
+  const matrixOff = await runAnalysis("correlation-matrix", matrixTable, { method: "pearson", effectSizes: false });
+  if ("error" in matrixOff) throw new Error(`correlation matrix should run, got ${matrixOff.error}`);
+  strictEqual(matrixOff.matrix?.lo, undefined, "effectSizes false drops the matrix CIs");
+
+  // Chi-square: Phi's 95% CI by noncentral-chi-square inversion on the
+  // uncorrected statistic (small χ², so the lower bound is 0), and
+  // Cramér's V's the same way on a 3 × 2 table.
+  const twoByTwo: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["", "12", "8"],
+      ["", "7", "13"],
+    ],
+  };
+  const chi = await runAnalysis("chi-square", twoByTwo, { test: "chi-square" } as AnalysisParams);
+  if ("error" in chi) throw new Error(`chi-square should run, got ${chi.error}`);
+  close(stat(chi, "Phi"), 0.250313, 1e-6, "Phi");
+  close(stat(chi, "Phi 95% CI lower"), 0, 1e-9, "Phi 95% CI lower");
+  close(stat(chi, "Phi 95% CI upper"), 0.56021, 1e-4, "Phi 95% CI upper");
+  const chiOff = await runAnalysis("chi-square", twoByTwo, { test: "chi-square", effectSizes: false } as AnalysisParams);
+  if ("error" in chiOff) throw new Error(`chi-square should run, got ${chiOff.error}`);
+  strictEqual(stat(chiOff, "Phi 95% CI lower"), undefined, "effectSizes false drops Phi's CI");
+  const threeByTwo: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["", "12", "8"],
+      ["", "7", "13"],
+      ["", "9", "6"],
+    ],
+  };
+  const chi3 = await runAnalysis("chi-square", threeByTwo);
+  if ("error" in chi3) throw new Error(`chi-square should run, got ${chi3.error}`);
+  close(stat(chi3, "Cramér's V"), 0.240563, 1e-6, "Cramér's V");
+  close(stat(chi3, "Cramér's V 95% CI lower"), 0, 1e-9, "Cramér's V 95% CI lower");
+  close(stat(chi3, "Cramér's V 95% CI upper"), 0.477728, 1e-4, "Cramér's V 95% CI upper");
+});
+
 check("a two-way ANOVA of one value per cell asks nothing and runs the ordinary one", () => {
   const wizard = WIZARDS["two-way-anova"]!;
   const single = readTable({
