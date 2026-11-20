@@ -27,6 +27,8 @@ import {
 } from "../stats/types";
 import { simulateTableData, validateSimulationSpec } from "../stats/simulation/simulate";
 import { parseProjectText, validateAnalysisParams } from "../lib/project-file";
+import { fileName, fileTitle } from "../lib/paths";
+import { importTabularFile } from "../lib/tabular-import";
 import { extractMethod, methodForTable, remapGraphOptions } from "../lib/template";
 import { runScript } from "../lib/prism-script";
 import type { WandReport } from "../lib/wand";
@@ -36,6 +38,7 @@ import {
   executeCloseProject,
   executeImportPrism,
   executeSaveProject,
+  readFileWithTimeout,
   type DocumentDeps,
   type DocumentIo,
   type DocumentState,
@@ -933,6 +936,63 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       // same as File ▸ Import Prism File, minus the dialog.
       const args = (job.args ?? {}) as { path?: unknown };
       return executeImportPrism(toDocumentDeps(deps), { path: reqString(args.path, "path") }, job.project_id);
+    }
+    case "import-data-file": {
+      // seq 155 MCP coverage: import a data file (.csv / .tsv / .txt /
+      // .xlsx) as a NEW table in this project — the same parsers as
+      // File ▸ Import Data File…, minus the dialog. Unlike the UI, it
+      // never appends to the active table: MCP never prompts, so the
+      // append choice can't be asked — the import always makes a table.
+      const actions = tableActions(job, deps);
+      const path = argString(job, job.args, "path");
+      const name = argOptString(job, job.args, "name");
+      if (name !== undefined && !name.trim()) throw jobErr(job, "needs a non-empty name.");
+      const ext = path.split(/[\\/]/).pop()?.split(".").pop()?.toLowerCase() ?? "";
+      if (ext !== "csv" && ext !== "tsv" && ext !== "txt" && ext !== "xlsx") {
+        throw jobErr(
+          job,
+          `“${fileName(path)}” is not a data file — import a .csv, .tsv, .txt or .xlsx file.`,
+        );
+      }
+      const io = deps.io ?? defaultDocumentIo;
+      let table;
+      try {
+        const content =
+          ext === "xlsx"
+            ? await readFileWithTimeout(() => io.readDataBytes(path), path)
+            : await readFileWithTimeout(() => io.readDataText(path), path);
+        table = await importTabularFile(path, content);
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("couldn't be read in time")) throw err;
+        throw new Error(err instanceof Error ? err.message : String(err));
+      }
+      const tableName = name?.trim() ? name.trim() : fileTitle(path);
+      const preState = deps.getState();
+      const before = new Set(preState.rootOrder);
+      const beforeRevision = preState.revision;
+      actions.createTableWithData(table.tableType, table.data, tableName);
+      await settleAfterDispatch(deps, beforeRevision);
+      const after = deps.getState();
+      const createdId =
+        after.activeNodeId && !before.has(after.activeNodeId) && after.nodes[after.activeNodeId]?.type === "table"
+          ? after.activeNodeId
+          : after.rootOrder.find((id) => !before.has(id) && after.nodes[id]?.type === "table");
+      if (!createdId) {
+        throw jobErr(job, "imported the file but its table id could not be read back — ask titer_list_tables for the new table.");
+      }
+      const created = after.nodes[createdId]!;
+      return {
+        result: {
+          project_id: job.project_id,
+          table_id: createdId,
+          name: created.name,
+          table_type: TABLES[table.tableType].label,
+          rows: created.data?.rows.length ?? 0,
+          data_columns: (created.data?.columns.length ?? 1) - 1,
+          notes: table.notes,
+        },
+        created: { table_id: createdId },
+      };
     }
     case "close-project": {
       // L2: settle the save question, then arm the close bypass — Rust

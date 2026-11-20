@@ -22562,6 +22562,109 @@ check("import-155: the menu, picker, reader and drop route the new file types", 
   ok(!isDataFilePath("lab.pzfx") && !isDataFilePath("lab.hlx"), "extension match takes a non-data file");
 });
 
+// ── seq 155 MCP coverage (titer_import_data_file) ────────────────────────
+// The 155 parsers existed but no MCP tool could import a data file —
+// titer_import_prism is .prism/.pzfx only. These pins drive the new
+// `import-data-file` dispatch job over the lagging harness, with the
+// file reads stubbed through JobDeps.io (the real reads are the native
+// read_data_text / read_data_bytes commands).
+const mcpImportDataHarness = (files: Record<string, string | Uint8Array>) => {
+  const harness = mcpLaggingHarness(true);
+  harness.deps.io = {
+    writeFile: async () => {},
+    appVersion: async () => "1.8.0",
+    readPrismText: async () => {
+      throw new Error("unused in this check");
+    },
+    readPrismBytes: async () => {
+      throw new Error("unused in this check");
+    },
+    readDataText: async (path: string) => {
+      const found = files[path];
+      if (typeof found !== "string") throw new Error(`“${path}” couldn't be read.`);
+      return found;
+    },
+    readDataBytes: async (path: string) => {
+      const found = files[path];
+      if (!(found instanceof Uint8Array)) throw new Error(`“${path}” couldn't be read.`);
+      return found;
+    },
+  };
+  return harness;
+};
+
+check("mcp import-data-file: a CSV imports as a new table named for the file, with its rows and notes", async () => {
+  const harness = mcpImportDataHarness({
+    "/tmp/Dose.csv": "Sample,Control,Treated\nS1,1.5,2.5\nS2,1.7,2.9\n",
+  });
+  const done = await harness.run("job-mcp-csv", "import-data-file", { path: "/tmp/Dose.csv" });
+  const result = done.result as { table_id: string; name: string; table_type: string; rows: number; data_columns: number; notes: string[] };
+  strictEqual(result.project_id, "project-1");
+  // Root tables are numbered by the store ("Dose 1"), as the UI import
+  // does — the tool returns the name the table actually got.
+  strictEqual(result.name, "Dose 1");
+  strictEqual(result.table_type, "Column");
+  strictEqual(result.rows, 2);
+  strictEqual(result.data_columns, 2);
+  ok(result.notes.some((n) => n.includes("first row was read as column names")), "header note missing");
+  const created = harness.state().nodes[result.table_id];
+  strictEqual(created?.type, "table");
+  deepStrictEqual(created?.data?.columns, ["Title", "Control", "Treated"]);
+  deepStrictEqual(created?.data?.rows, [
+    ["S1", "1.5", "2.5"],
+    ["S2", "1.7", "2.9"],
+  ]);
+});
+
+check("mcp import-data-file: an .xlsx imports from bytes, and name overrides the file title", async () => {
+  const bytes = await tableToXlsx(
+    { columns: ["Title", "X", "Response"], rows: [[null, "0", "1.1"], [null, "1", "2.2"]] },
+    "Sheet1",
+  );
+  const harness = mcpImportDataHarness({ "/tmp/dose.xlsx": bytes });
+  const done = await harness.run("job-mcp-xlsx", "import-data-file", { path: "/tmp/dose.xlsx", name: "Assay 1" });
+  const result = done.result as { table_id: string; name: string; table_type: string; rows: number };
+  // The store numbers the name ("Assay 1 1"), as it does for a UI import.
+  strictEqual(result.name, "Assay 1 1");
+  strictEqual(result.table_type, "XY");
+  strictEqual(result.rows, 2);
+  strictEqual(harness.state().nodes[result.table_id]?.data?.rows.length, 2);
+  deepStrictEqual(harness.state().nodes[result.table_id]?.data?.columns, ["Title", "X", "Response"]);
+});
+
+check("mcp import-data-file: a matching active table still gets a new table, never an append", async () => {
+  const harness = mcpImportDataHarness({
+    "/tmp/more.csv": "Sample,A,B\ns2,3,4\n",
+  });
+  const made = await harness.run("job-mcp-first", "create-table", {
+    table_type: "column",
+    columns: ["Title", "A", "B"],
+    rows: [["s1", "1", "2"]],
+  });
+  harness.sync();
+  // The harness starts with one table ("Table 1"); the created table
+  // makes two, and it is the active one — its shape matches the import.
+  strictEqual(harness.state().rootOrder.length, 2);
+  const done = await harness.run("job-mcp-append", "import-data-file", { path: "/tmp/more.csv" });
+  const result = done.result as { table_id: string };
+  // A third table, not rows appended to the active one — MCP never prompts,
+  // so it never appends.
+  strictEqual(harness.state().rootOrder.length, 3);
+  strictEqual(result.table_id !== (made.result as { table_id: string }).table_id, true);
+  strictEqual(harness.state().nodes[(made.result as { table_id: string }).table_id]?.data?.rows.length, 1);
+});
+
+check("mcp import-data-file: a non-data file, a missing path and an empty file are refused", async () => {
+  const harness = mcpImportDataHarness({ "/tmp/empty.csv": "" });
+  await rejects(harness.run("job-mcp-hlx", "import-data-file", { path: "/tmp/Dose.hlx" }), /not a data file/);
+  await rejects(harness.run("job-mcp-nopath", "import-data-file", {}), /needs a path/);
+  await rejects(harness.run("job-mcp-empty", "import-data-file", { path: "/tmp/empty.csv" }), /has no data to import/);
+  await rejects(
+    harness.run("job-mcp-missing", "import-data-file", { path: "/tmp/no-such.csv" }),
+    /couldn't be read/,
+  );
+});
+
 // ── Run ──────────────────────────────────────────────────────────────────
 
 // Descriptives are computed by R since the v1.0.7 rebase, so checks that run
