@@ -91,6 +91,7 @@ import {
   setRowGroupCount,
   setRowGroupName,
   toggleExcluded,
+  transposeBlock,
   writeBlock,
 } from "../src/views/tables/table-data";
 import { flattenThreeWay, rowGroupBands } from "../src/stats/grouped/base";
@@ -338,6 +339,39 @@ const grouped = (): TableData => {
 const treatments = (columns: string[]): TableData => ({
   columns: ["Title", ...columns],
   rows: [1, 2, 3].map((r) => [null, ...columns.map((_, c) => String(r + c))]),
+});
+
+// ── Paste Special / Transpose (seq 230) + Select Row/Column (seq 231) ──────
+// 231's selection is the grid's Shift+Space / Ctrl+Space behavior with a menu
+// name on it, so its pin is the range the keys build (whole rows / whole
+// columns of the selection); 230's pin is the transpose itself, plus the
+// transposed block landing where Paste would put it.
+
+check("transposing a block swaps rows and columns, pads ragged rows, and transposes back", () => {
+  const block = [
+    ["a", "b", "c"],
+    ["d", "e"],
+  ];
+  deepStrictEqual(transposeBlock(block), [
+    ["a", "d"],
+    ["b", "e"],
+    ["c", null],
+  ]);
+  deepStrictEqual(transposeBlock(transposeBlock(block)), [
+    ["a", "b", "c"],
+    ["d", "e", null],
+  ]);
+  deepStrictEqual(transposeBlock([["x"]]), [["x"]]);
+  deepStrictEqual(transposeBlock([]), []);
+});
+
+check("a transposed block pastes at the selection's top-left, growing the table", () => {
+  const t = newTable("xy", 2);
+  const pasted = writeBlock(t, 0, 0, transposeBlock([["r1", "r2"], ["1", "2"]]), "xy");
+  strictEqual(pasted.rows[0][0], "r1");
+  strictEqual(pasted.rows[1][0], "r2");
+  strictEqual(pasted.rows[0][1], "1");
+  strictEqual(pasted.rows[1][1], "2");
 });
 
 // ── .hlx files ───────────────────────────────────────────────────────────

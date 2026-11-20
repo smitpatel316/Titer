@@ -94,6 +94,8 @@ import {
   rowsDeleted,
   rowsInserted,
   shiftRowGroupsForDelete,
+  transposeBlock,
+  writeBlock,
 } from "../views/tables/table-data";
 import { TABLES } from "../views/tables/index";
 
@@ -1214,10 +1216,41 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           next = res.data;
           break;
         }
+        case "paste-transposed": {
+          // Seq 230, the MCP half of Edit ▸ Paste Transposed: `rows` is the
+          // clipboard block; it lands transposed (rows become columns) at
+          // (at_row, at_col), growing the table as a GUI paste does.
+          const raw = (job.args as Record<string, unknown> | null | undefined)?.rows;
+          if (
+            !Array.isArray(raw) ||
+            raw.length === 0 ||
+            raw.some(
+              (row) =>
+                !Array.isArray(row) ||
+                row.some((v) => v !== null && typeof v !== "string" && typeof v !== "number"),
+            )
+          ) {
+            throw jobErr(job, "needs rows to be a non-empty array of rows, each an array of strings, numbers or null.");
+          }
+          const block = (raw as (string | number | null)[][]).map((row) =>
+            row.map((v) => (v === null ? null : String(v))),
+          );
+          const atRow = argInt(job, job.args, "at_row", 0);
+          const atCol = argInt(job, job.args, "at_col", 0);
+          if (atRow > data.rows.length || atCol >= data.columns.length) {
+            throw jobErr(
+              job,
+              `has no cell (${atRow}, ${atCol}) to paste at — the table holds ${data.rows.length} rows and ${data.columns.length} columns.`,
+            );
+          }
+          label = "Paste Transposed";
+          next = writeBlock(data, atRow, atCol, transposeBlock(block), type);
+          break;
+        }
         default:
           throw jobErr(
             job,
-            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable.`,
+            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, paste-transposed.`,
           );
       }
       if (next === null) {

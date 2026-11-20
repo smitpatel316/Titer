@@ -31,7 +31,18 @@ function savedTheme(): Theme {
 /** Text-editing commands go to a focused text field natively, everything else to the
  *  table grid (whose idle input, marked `data-grid-idle`, doesn't count as a text field).
  *  Undo and Redo go to the field being typed in, else to the project (the store). */
-export type EditCommand = "delete" | "select-all" | "fill-down" | "exclude" | "find" | "find-next" | "find-previous";
+export type EditCommand =
+  | "delete"
+  | "select-all"
+  | "select-row"
+  | "select-column"
+  | "fill-down"
+  | "exclude"
+  | "find"
+  | "find-next"
+  | "find-previous"
+  | "paste-special"
+  | "paste-transpose";
 const TEXT_COMMANDS: EditCommand[] = ["delete", "select-all"];
 
 /** Where the keyboard is: a text field, the data grid, or elsewhere. */
@@ -241,6 +252,35 @@ export function useAppMenu(doc: DocumentActions) {
           sep,
           { text: "Delete", enabled: hasTable, action: () => edit("delete") },
           { text: "Select All", accelerator: "CmdOrCtrl+A", action: () => edit("select-all") },
+          // Seq 231: the keys already select this way in the grid (Shift+Space
+          // the rows, Ctrl+Space the columns); the menu names them.
+          {
+            text: "Select Row",
+            accelerator: "Shift+Space",
+            enabled: hasTable,
+            action: () => edit("select-row"),
+          },
+          {
+            text: "Select Column",
+            accelerator: "Ctrl+Space",
+            enabled: hasTable,
+            action: () => edit("select-column"),
+          },
+          sep,
+          // Seq 230: Paste Special offers Values / Transpose; Paste Transposed
+          // swaps the clipboard block's rows and columns at once.
+          {
+            text: "Paste Special…",
+            enabled: hasTable,
+            action: () => edit("paste-special"),
+          },
+          {
+            text: "Paste Transposed",
+            accelerator: "CmdOrCtrl+Shift+V",
+            enabled: hasTable,
+            action: () => edit("paste-transpose"),
+          },
+          sep,
           { text: "Fill Down", accelerator: "CmdOrCtrl+D", enabled: hasTable, action: () => edit("fill-down") },
           sep,
           { text: "Exclude / Include", accelerator: "CmdOrCtrl+E", enabled: hasTable, action: () => edit("exclude") },
