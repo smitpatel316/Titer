@@ -617,6 +617,50 @@ export async function onPrismFilePicked(handler: (path: string | null) => void) 
   return getCurrentWebviewWindow().listen<string | null>("prism-file-picked", ({ payload }) => handler(payload));
 }
 
+/** File ▸ Import Data File…: the Open panel for a data file (`.csv`,
+ *  `.tsv`, `.txt` or `.xlsx`). Non-blocking: the invoke returns at once,
+ *  and the shell emits "data-file-picked" with the path, or null on Cancel,
+ *  once the user picks. A blocking picker here deadlocked the app (Nov 9,
+ *  macOS + Linux): it parked the main thread while the panel needed that
+ *  thread to process clicks. */
+export const chooseDataFile = () => invoke("choose_data_file");
+
+/** Calls `handler` once with the path picked in the Import Data File
+ *  panel, or null if the user cancelled. Await it before opening the
+ *  panel so the pick is never missed; it returns the unlisten function. */
+export async function onDataFilePicked(handler: (path: string | null) => void) {
+  if (!isNative) return () => {};
+  return getCurrentWebviewWindow().listen<string | null>("data-file-picked", ({ payload }) => handler(payload));
+}
+
+/** A data file's (`.csv`, `.tsv`, `.txt`) text, for import. */
+export const readDataText = (path: string) => invoke<string>("read_data_text", { path });
+
+/** A data file's (`.xlsx`) bytes, for import — an `.xlsx` file is a ZIP, so
+ *  text won't do. The shell returns base64; this decodes it. */
+export async function readDataBytes(path: string): Promise<Uint8Array> {
+  const base64 = await invoke<string>("read_data_bytes", { path });
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** Where an imported data file goes when its shape matches the active
+ *  table: a new table, appended to that table, or nowhere (Cancel). In the
+ *  web build (no native shell) a confirm stands in for the dialog. */
+export async function askImportTarget(tableName: string): Promise<"new" | "append" | "cancel"> {
+  if (!isNative) return window.confirm(`Add the imported data to “${tableName}”, or make a new table?`) ? "append" : "new";
+  const answer = await message(`The imported data fits “${tableName}” — same kind of table, same number of columns.`, {
+    title: "Import Data File",
+    kind: "info",
+    buttons: { yes: "New Table", no: `Add to “${tableName}”`, cancel: "Cancel" },
+  });
+  if (answer === "New Table" || answer === "Yes") return "new";
+  if (answer === `Add to “${tableName}”` || answer === "No") return "append";
+  return "cancel";
+}
+
 /** Analysis ▸ Apply Method…: the Open panel for a method file (`.pzm`).
  *  Non-blocking, like `choosePrismFile`: the invoke returns at once, and the
  *  shell emits "method-file-picked" with the path, or null on Cancel, once

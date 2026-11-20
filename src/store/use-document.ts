@@ -16,6 +16,12 @@ import {
 import { parsePzfx } from "../lib/pzfx";
 import { writePzfx } from "../lib/pzfx-write";
 import { convertPrism, formatReport } from "../lib/prism";
+import {
+  importTabularFile,
+  isDataFilePath,
+  mergeIntoTable,
+  type TabularTable,
+} from "../lib/tabular-import";
 import { writePrism } from "../lib/prism-write";
 import { loadPrismSaveChoice, nextSaveAction, savePrismSaveChoice } from "../lib/prism-nudge";
 import type { SavePromptChoice } from "../components/save-prompt-dialog";
@@ -82,6 +88,14 @@ export function useDocument() {
   // (Quirk 2's family). The report lines, null when no notice is up.
   const [prismImported, setPrismImported] = React.useState<string[] | null>(null);
   const dismissPrismImported = () => setPrismImported(null);
+  // The "Data File Imported" notice, in-app rather than as a native dialog:
+  // same Quirk-2 family as `prismImported` above — the native alert's OK
+  // button could not dismiss it on macOS. Shown only when the import has
+  // something to say (assumptions it made, rows padded, sheets skipped);
+  // a clean import just opens the table. The report lines, null when no
+  // notice is up.
+  const [dataImported, setDataImported] = React.useState<string[] | null>(null);
+  const dismissDataImported = () => setDataImported(null);
   // The window's title while the project isn't saved anywhere.
   const [untitled, setUntitled] = React.useState(UNTITLED);
   // Other windows change the list too: this one reads it again when it comes to the front.
@@ -1003,6 +1017,120 @@ export function useDocument() {
     }
   };
 
+  /** Puts an imported data file's table in the project (seq 155): a new
+   *  table, or — when its shape matches the active table (same kind, same
+   *  number of columns) — appended to that table, if the user picks it.
+   *  Unlike a Prism import, this never discards the project, so there is
+   *  no save question. Notes the importer made (assumptions, padded rows,
+   *  skipped sheets) are shown in-app; a clean import just opens the table. */
+  const importDataTable = async (table: TabularTable, name: string): Promise<void> => {
+    const rows = table.data.rows.length;
+    const cols = table.data.columns.length - 1;
+    const activeId = latest.current.activeTableId;
+    const active = activeId ? latest.current.nodes[activeId] : undefined;
+    const merged =
+      active?.type === "table" && active.data && active.tableType
+        ? mergeIntoTable(active.data, active.tableType, table)
+        : null;
+    if (merged && activeId && active) {
+      const choice = await native.askImportTarget(active.name);
+      if (choice === "cancel") return;
+      if (choice === "append") {
+        latest.current.updateTable(activeId, merged, "Import");
+        const renamed = active.data!.columns.some((c, i) => c !== table.data.columns[i]);
+        const lines = [
+          `Added ${rows} row${rows === 1 ? "" : "s"} from “${name}” to “${active.name}”.`,
+          ...(renamed ? ["The imported columns had different names, so the values were added by position, not by name."] : []),
+          ...table.notes.map((n) => `• ${n}`),
+        ];
+        if (table.notes.length > 0 || renamed) setDataImported(lines);
+        return;
+      }
+    }
+    latest.current.createTableWithData(table.tableType, table.data, name);
+    if (table.notes.length > 0) {
+      setDataImported([
+        `Imported ${rows} row${rows === 1 ? "" : "s"} × ${cols} column${cols === 1 ? "" : "s"} from “${name}” as a new table.`,
+        ...table.notes.map((n) => `• ${n}`),
+      ]);
+    }
+  };
+
+  /** Imports a data file's contents (text for CSV/TXT, bytes for XLSX).
+   *  A file that can't be parsed says why, in plain language. */
+  const importDataContent = async (name: string, content: string | Uint8Array): Promise<void> => {
+    let table: TabularTable;
+    try {
+      table = await importTabularFile(name, content);
+    } catch (err) {
+      report();
+      await native.alert(
+        "Couldn't Import File",
+        err instanceof Error ? err.message : "This file couldn't be imported.",
+        "error",
+      );
+      return;
+    }
+    await importDataTable(table, fileTitle(name));
+  };
+
+  /** Imports a data file at `path` (a dropped file, or the picker). */
+  const importDataFile = async (path: string) => {
+    if (path.toLowerCase().endsWith(".xlsx")) {
+      let bytes: Uint8Array;
+      try {
+        bytes = await native.readDataBytes(path);
+      } catch {
+        report();
+        return native.alert("Couldn't Import File", `“${fileName(path)}” couldn't be read.`, "error");
+      }
+      return importDataContent(path, bytes);
+    }
+    let text: string;
+    try {
+      text = await native.readDataText(path);
+    } catch {
+      report();
+      return native.alert("Couldn't Import File", `“${fileName(path)}” couldn't be read.`, "error");
+    }
+    return importDataContent(path, text);
+  };
+
+  /** File ▸ Import Data File…: pick a data file (`.csv`, `.tsv`, `.txt`
+   *  or `.xlsx`) and import it as a table. In the web build (no native
+   *  shell) the pick is a file input instead. */
+  const importData = async () => {
+    if (native.isNative) {
+      // Listen first, then open the panel: the shell emits
+      // "data-file-picked" (path, or null on Cancel) when the user picks.
+      const off = await native.onDataFilePicked((path) => {
+        off();
+        if (path) void importDataFile(path);
+      });
+      await native.chooseDataFile();
+      return;
+    }
+    const picked = await new Promise<{ name: string; data: ArrayBuffer | string } | null>((resolve) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".csv,.tsv,.txt,.xlsx";
+      input.onchange = () => {
+        const file = input.files?.[0];
+        if (!file) return resolve(null);
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, data: reader.result as ArrayBuffer | string });
+        reader.onerror = () => resolve(null);
+        // An `.xlsx` file is a ZIP: read bytes, not text.
+        if (file.name.toLowerCase().endsWith(".xlsx")) reader.readAsArrayBuffer(file);
+        else reader.readAsText(file);
+      };
+      input.click();
+    });
+    if (!picked) return;
+    if (typeof picked.data !== "string") await importDataContent(picked.name, new Uint8Array(picked.data));
+    else await importDataContent(picked.name, picked.data);
+  };
+
   /** Applies a method file's text to the active table (plan 38): clones its
    *  first table's analyses + graphs — only what that table offers — then
    *  reports what was applied and what was skipped. A graph keeps its link
@@ -1138,10 +1266,11 @@ export function useDocument() {
     const projects = paths.filter((p) => isProjectFile(p) || isTemplatePath(p));
     const methods = paths.filter(isMethodPath);
     const prism = paths.filter((p) => p.toLowerCase().endsWith(".pzfx") || p.toLowerCase().endsWith(".prism"));
-    if (paths.length > projects.length + methods.length + prism.length) {
+    const data = paths.filter(isDataFilePath);
+    if (paths.length > projects.length + methods.length + prism.length + data.length) {
       void native.alert(
         "Can't Open File",
-        "Titer can only open .hlx project files and .pzt templates, apply .pzm method files, and import .pzfx / .prism Prism files. To convert a Prism file without opening it, use File ▸ Convert….",
+        "Titer can only open .hlx project files and .pzt templates, apply .pzm method files, and import .pzfx / .prism Prism files and .csv / .tsv / .txt / .xlsx data files. To convert a Prism file without opening it, use File ▸ Convert….",
       );
     }
     if (projects.length) openProjectsOrSay(projects);
@@ -1167,6 +1296,19 @@ export function useDocument() {
         void native.alert("Imported One Prism File", prismDropSkippedMessage(base(prism[0]), prism.slice(1).map(base)));
       }
     }
+    // One data file at a time: it imports as a new table (or into the
+    // active one, when its shape matches — the picker asks). If several
+    // were dropped, import the first and name the rest, like Prism above.
+    if (data.length) {
+      void importDataFile(data[0]);
+      if (data.length > 1) {
+        const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
+        void native.alert(
+          "Imported One Data File",
+          `Imported ${base(data[0])}; ${data.slice(1).map(base).join(", ")} ${data.length === 2 ? "was" : "were"} not imported — drop one file at a time, or use File ▸ Import Data File….`,
+        );
+      }
+    }
   };
 
   // Subscribed once; the handlers reach the current versions through this ref.
@@ -1187,12 +1329,15 @@ export function useDocument() {
     forgetRecent,
     clearRecents,
     importPrism,
+    importData,
     projectUpdated,
     dismissProjectUpdated,
     templateNotice,
     dismissTemplateNotice,
     prismImported,
     dismissPrismImported,
+    dataImported,
+    dismissDataImported,
     resolveSavePrompt,
     remote,
     openRemotePicker,

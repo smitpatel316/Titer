@@ -183,6 +183,7 @@ export function useAppMenu(doc: DocumentActions) {
             action: () => latest.current.store.openSelector({ kind: "cloud-settings" }),
           },
           { text: "Import Prism File…", action: () => void latest.current.doc.importPrism() },
+          { text: "Import Data File…", action: () => void latest.current.doc.importData() },
           {
             text: "Convert…",
             action: () => latest.current.store.openSelector({ kind: "converter" }),

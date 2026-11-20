@@ -45,7 +45,7 @@ export function AppShell() {
   // v1.6.0 L0: this window runs the MCP jobs Rust queues for it.
   useMcpJobDispatcher();
   const { projectUpdated, dismissProjectUpdated } = documentActions;
-  const { prismImported, dismissPrismImported } = documentActions;
+  const { prismImported, dismissPrismImported, dataImported, dismissDataImported } = documentActions;
   const { templateNotice, dismissTemplateNotice } = documentActions;
   const { sidebar } = useLayout();
   const [fullscreen, setFullscreen] = React.useState(false);
@@ -129,6 +129,28 @@ export function AppShell() {
         description={
           <>
             {prismImported?.map((line, i) => (
+              <React.Fragment key={i}>
+                {line}
+                <br />
+              </React.Fragment>
+            ))}
+          </>
+        }
+      />
+
+      {/* The "Data File Imported" notice, in-app for the same Quirk-2
+          reason as "Prism File Imported" above. Shown only when the import
+          has something to say (assumptions it made, rows padded, sheets
+          skipped); a clean import just opens the table. */}
+      <Dialog
+        open={dataImported !== null}
+        onClose={dismissDataImported}
+        onReturn={dismissDataImported}
+        dismissLabel="OK"
+        title="Data File Imported"
+        description={
+          <>
+            {dataImported?.map((line, i) => (
               <React.Fragment key={i}>
                 {line}
                 <br />

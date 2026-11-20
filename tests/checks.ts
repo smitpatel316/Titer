@@ -208,6 +208,17 @@ import { buildPanelFigure } from "../src/views/figures/panel-figure";
 import { createEvalDedupe, ensureSaveExtension } from "../src/native";
 import { engineStatusText, getEngineStatus, onEngineStatus, setEngineStatus } from "../src/stats/engine-status";
 import { buildOfficeDocument, officeExtension } from "../src/lib/office-export";
+import {
+  detectDelimiter,
+  excelSerialToIso,
+  importTabularFile,
+  isDataFilePath,
+  mergeIntoTable,
+  parseDelimited,
+  parseXlsx,
+  rowsToTable,
+} from "../src/lib/tabular-import";
+import { tableToXlsx } from "../src/store/mcp-export";
 import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { decodePng, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
@@ -17434,6 +17445,239 @@ check("script: the project name never reaches a .prism export; info constants ex
   ok(!texts.some((t) => t.includes(nameMarker)), "project name leaked into the .prism file");
   ok(!texts.some((t) => t.includes("infoConstants")), "infoConstants field leaked into the .prism file");
   ok(texts.some((t) => t.includes(constMarker)), "info constant missing from the .prism InfoSheet");
+});
+
+// Seq 155 — CSV / XLSX / TXT file import: parsing, mapping to a table, and
+// the menu/picker/drop wiring. The parsers are pure (src/lib/tabular-import.ts),
+// so the checks drive them directly; the .xlsx round-trip goes through the
+// export the app already writes (mcp-export.ts tableToXlsx).
+check("import-155: quoted fields, embedded commas, CRLF and a trailing newline parse", () => {
+  const rows = parseDelimited('"Sample","Value"\r\n"a, b",1\r\n"c""d",2\r\n', ",");
+  deepStrictEqual(rows, [
+    ["Sample", "Value"],
+    ["a, b", "1"],
+    ['c"d', "2"],
+  ]);
+});
+
+check("import-155: the delimiter is detected — tab, semicolon and pipe", () => {
+  strictEqual(detectDelimiter("A\tB\tC\n1\t2\t3\n4\t5\t6\n", "\t"), "\t");
+  strictEqual(detectDelimiter("A;B;C\n1;2;3\n4;5;6\n", ","), ";");
+  strictEqual(detectDelimiter("A|B|C\n1|2|3\n4|5|6\n", ","), "|");
+  strictEqual(detectDelimiter("A,B,C\n1,2,3\n4,5,6\n", ","), ",");
+  // A single column has no delimiter to find.
+  strictEqual(detectDelimiter("only\none\ncolumn\n", ","), ",");
+});
+
+check("import-155: a header row becomes column names and the first text column becomes row titles", () => {
+  const table = rowsToTable(
+    [
+      ["Sample", "Control", "Treated"],
+      ["S1", "1.5", "2.5"],
+      ["S2", "1.7", "2.9"],
+    ],
+    "data.csv",
+  );
+  strictEqual(table.tableType, "column");
+  deepStrictEqual(table.data.columns, ["Title", "Control", "Treated"]);
+  deepStrictEqual(table.data.rows, [
+    ["S1", "1.5", "2.5"],
+    ["S2", "1.7", "2.9"],
+  ]);
+  ok(table.notes.some((n) => n.includes("first row was read as column names")), "header note missing");
+  ok(table.notes.some((n) => n.includes("first column was read as row titles")), "titles note missing");
+});
+
+check("import-155: a single-column file imports as one data column, and a semicolon .csv still detects", async () => {
+  const single = await importTabularFile("one.csv", "Value\n1\n2\n");
+  strictEqual(single.tableType, "column");
+  deepStrictEqual(single.data.columns, ["Title", "Value"]);
+  deepStrictEqual(single.data.rows, [
+    [null, "1"],
+    [null, "2"],
+  ]);
+  const semi = await importTabularFile("euro.csv", "A;B\n1;2\n3;4\n");
+  deepStrictEqual(semi.data.columns, ["Title", "A", "B"]);
+  deepStrictEqual(semi.data.rows, [
+    [null, "1", "2"],
+    [null, "3", "4"],
+  ]);
+});
+
+check("import-155: a first column headed X makes an XY table; anything else is a Column table", () => {
+  const xy = rowsToTable(
+    [
+      ["X", "Response"],
+      ["0", "1.1"],
+      ["1", "2.2"],
+    ],
+    "dose.csv",
+  );
+  strictEqual(xy.tableType, "xy");
+  deepStrictEqual(xy.data.columns, ["Title", "X", "Response"]);
+  const col = rowsToTable(
+    [
+      ["Time", "Response"],
+      ["0", "1.1"],
+      ["1", "2.2"],
+    ],
+    "dose.csv",
+  );
+  strictEqual(col.tableType, "column");
+});
+
+check("import-155: ragged rows are padded and named; an empty file errors", () => {
+  const table = rowsToTable(
+    [
+      ["Name", "A", "B"],
+      ["s1", "1"],
+      ["s2", "2", "3"],
+    ],
+    "ragged.csv",
+  );
+  deepStrictEqual(table.data.rows, [
+    ["s1", "1", null],
+    ["s2", "2", "3"],
+  ]);
+  ok(table.notes.some((n) => n.includes("padded with blanks")), "ragged note missing");
+  throws(() => rowsToTable([], "empty.csv"), /has no data to import/);
+  throws(() => rowsToTable([["", "", ""]], "empty.csv"), /has no data to import/);
+  // All text and no numbers anywhere: no header is detected, so the rows
+  // come across as data under positional names — nothing is lost.
+  const textOnly = rowsToTable(
+    [
+      ["A", "B"],
+      ["C", "D"],
+    ],
+    "text.csv",
+  );
+  deepStrictEqual(textOnly.data.columns, ["Title", "A", "B"]);
+  deepStrictEqual(textOnly.data.rows, [
+    [null, "A", "B"],
+    [null, "C", "D"],
+  ]);
+});
+
+check("import-155: duplicate and blank column names take the next free name", () => {
+  const table = rowsToTable(
+    [
+      ["Sample", "A", "A", ""],
+      ["s1", "1", "2", "3"],
+    ],
+    "dup.csv",
+  );
+  deepStrictEqual(table.data.columns, ["Title", "A", "A 2", "C"]);
+});
+
+check("import-155: Titer's own .xlsx export round-trips back into the same table", async () => {
+  const data = { columns: ["Title", "A", "B"], rows: [[null, "1", "x"], ["r1", "2.5", "y"]] };
+  const bytes = await tableToXlsx(data, "Test");
+  const parsed = await parseXlsx(bytes);
+  deepStrictEqual(parsed.otherSheets, []);
+  const table = rowsToTable(parsed.sheet.rows, "test.xlsx");
+  deepStrictEqual(table.data.columns, ["Title", "A", "B"]);
+  deepStrictEqual(table.data.rows, [
+    [null, "1", "x"],
+    ["r1", "2.5", "y"],
+  ]);
+});
+
+check("import-155: shared strings, numbers, booleans and a date-formatted cell read back; extra sheets are named", async () => {
+  const zip = new JSZip();
+  zip.file(
+    "xl/workbook.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/><sheet name="Second" sheetId="2" r:id="rId2"/></sheets></workbook>`,
+  );
+  zip.file(
+    "xl/_rels/workbook.xml.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/></Relationships>`,
+  );
+  zip.file(
+    "xl/sharedStrings.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="2" uniqueCount="2"><si><t>Sample</t></si><si><t>Value</t></si></sst>`,
+  );
+  zip.file(
+    "xl/styles.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cellXfs><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/><xf numFmtId="14" fontId="0" fillId="0" borderId="0"/></cellXfs></styleSheet>`,
+  );
+  zip.file(
+    "xl/worksheets/sheet1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="inlineStr"><is><t>Note</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>S1</t></is></c><c r="B2"><v>3.5</v></c><c r="C2" t="b"><v>1</v></c></row><row r="3"><c r="A3" t="inlineStr"><is><t>S2</t></is></c><c r="B3" s="1"><v>45658</v></c></row></sheetData></worksheet>`,
+  );
+  zip.file(
+    "xl/worksheets/sheet2.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>ignored</t></is></c></row></sheetData></worksheet>`,
+  );
+  const bytes = await zip.generateAsync({ type: "uint8array" });
+  const parsed = await parseXlsx(bytes);
+  strictEqual(parsed.sheet.name, "Data");
+  deepStrictEqual(parsed.otherSheets, ["Second"]);
+  const table = await importTabularFile("book.xlsx", bytes);
+  deepStrictEqual(table.data.columns, ["Title", "Value", "Note"]);
+  deepStrictEqual(table.data.rows, [
+    ["S1", "3.5", "TRUE"],
+    ["S2", "2025-01-01", null],
+  ]);
+  ok(table.notes.some((n) => n.includes("Second") && n.includes("not imported")), "skipped-sheet note missing");
+  // Excel serials: 45658 is 2025-01-01, .5 is noon.
+  strictEqual(excelSerialToIso(45658), "2025-01-01");
+  strictEqual(excelSerialToIso(45658.5), "2025-01-01 12:00");
+});
+
+check("import-155: bytes that aren't a workbook error instead of importing garbage", async () => {
+  await rejects(parseXlsx(new TextEncoder().encode("not a zip at all")), /isn't a valid \.xlsx workbook/);
+  await rejects(importTabularFile("empty.csv", ""), /has no data to import/);
+});
+
+check("import-155: appending works only when the shapes match", () => {
+  const existing = { columns: ["Title", "A", "B"], rows: [["s1", "1", "2"]] };
+  const same = rowsToTable(
+    [
+      ["Sample", "A", "B"],
+      ["s2", "3", "4"],
+    ],
+    "more.csv",
+  );
+  const merged = mergeIntoTable(existing, "column", same);
+  deepStrictEqual(merged?.rows, [
+    ["s1", "1", "2"],
+    ["s2", "3", "4"],
+  ]);
+  // Fewer columns: no merge, a new table instead.
+  const narrow = rowsToTable([["Sample", "A"], ["s2", "3"]], "narrow.csv");
+  strictEqual(mergeIntoTable(existing, "column", narrow), null);
+  // An XY import onto a Column table: no merge either.
+  const xy = rowsToTable(
+    [
+      ["X", "Y"],
+      ["0", "1"],
+    ],
+    "xy.csv",
+  );
+  strictEqual(mergeIntoTable(existing, "column", xy), null);
+});
+
+check("import-155: the menu, picker, reader and drop route the new file types", () => {
+  const menu = readFileSync("src/app-menu.ts", "utf8");
+  ok(menu.includes("Import Data File…"), "File menu has no Import Data File… item");
+  const document = readFileSync("src/store/use-document.ts", "utf8");
+  ok(document.includes("importDataFile"), "use-document has no data-file import");
+  ok(document.includes("onDataFilePicked"), "use-document never listens for the data-file pick");
+  ok(document.includes("isDataFilePath"), "dropped data files are not routed");
+  ok(document.includes("setDataImported("), "the import raises the in-app notice");
+  ok(document.includes("Import Data File…"), "the multi-drop message names the menu item");
+  const shell = readFileSync("src/components/app-shell.tsx", "utf8");
+  ok(shell.includes('title="Data File Imported"'), "the shell mounts the in-app notice");
+  ok(shell.includes("dataImported"), "the shell reads the notice state");
+  const bridge = readFileSync("src/native.ts", "utf8");
+  ok(bridge.includes("chooseDataFile"), "native bridge has no data-file picker");
+  ok(bridge.includes("readDataBytes"), "native bridge has no .xlsx reader");
+  const rust = readFileSync("src-tauri/src/main.rs", "utf8");
+  ok(rust.includes("choose_data_file"), "shell has no data-file picker command");
+  ok(rust.includes("read_data_text"), "shell has no data-text reader command");
+  ok(rust.includes("read_data_bytes"), "shell has no data-bytes reader command");
+  ok(isDataFilePath("lab.CSV") && isDataFilePath("lab.tsv") && isDataFilePath("lab.txt") && isDataFilePath("lab.xlsx"), "extension match misses a data type");
+  ok(!isDataFilePath("lab.pzfx") && !isDataFilePath("lab.hlx"), "extension match takes a non-data file");
 });
 
 // ── Run ──────────────────────────────────────────────────────────────────
