@@ -933,6 +933,8 @@ function dataOptions(c: SectionContext): React.ReactNode {
         )
       );
     case "xy-scatter":
+    case "xy-spikes":
+    case "xy-bar-scatter":
       if (c.tableType === "multiple") return <VariablePair numericNames={c.numericNames} options={options} set={set} />;
       return (
         c.replicates && (
@@ -1488,6 +1490,28 @@ function ownStyle(context: SectionContext): React.ReactNode {
             ]}
           />
           {points}
+        </>
+      );
+    case "xy-spikes":
+      // Spikes are always stems from the baseline with a marker at each tip:
+      // no Draw-as choice, just the points' style (the stems take the Lines
+      // section, which `styleControls` adds for any graph with lines).
+      return points;
+    case "xy-bar-scatter":
+      return (
+        <>
+          <Choice
+            label="Draw as"
+            value={options.xyStyle}
+            onChange={(xyStyle) => set({ xyStyle })}
+            items={[
+              { value: "points", label: "Points" },
+              { value: "line", label: "Line" },
+              { value: "points+line", label: "Both" },
+            ]}
+          />
+          {points}
+          {shapes("Bars", context.seriesNames.length > 1 && gap)}
         </>
       );
     case "xy-bar":

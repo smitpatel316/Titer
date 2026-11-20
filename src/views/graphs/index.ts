@@ -25,6 +25,8 @@ import { xyScatter } from "./xy-scatter";
 import { bubblePlot } from "./bubble-plot";
 import { xyBar } from "./xy-bar";
 import { xyArea } from "./xy-area";
+import { xySpikes } from "./xy-spikes";
+import { xyBarScatter } from "./xy-bar-scatter";
 import { groupedBars } from "./grouped-bars";
 import { groupedScatter } from "./grouped-scatter";
 import { groupedBox } from "./grouped-box";
@@ -104,6 +106,8 @@ export const GRAPHS: Record<GraphType, GraphModule> = {
   "bubble-plot": bubblePlot,
   "xy-bar": xyBar,
   "xy-area": xyArea,
+  "xy-spikes": xySpikes,
+  "xy-bar-scatter": xyBarScatter,
   "grouped-bars": groupedBars,
   "grouped-scatter": groupedScatter,
   "grouped-before-after": groupedBeforeAfter,
@@ -316,6 +320,8 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
     "xy-scatter",
     "xy-bar",
     "xy-area",
+    "xy-spikes",
+    "xy-bar-scatter",
     "residuals",
     "schild-plot",
     "smooth-curve",

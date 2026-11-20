@@ -25,6 +25,8 @@ export type GraphType =
   | "xy-scatter"
   | "xy-bar"
   | "xy-area"
+  | "xy-spikes"
+  | "xy-bar-scatter"
   | "grouped-bars"
   | "grouped-scatter"
   | "grouped-before-after"

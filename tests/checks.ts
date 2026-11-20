@@ -3180,6 +3180,146 @@ check("seq 210 MCP: build-graph accepts the new offerings and still refuses the 
   );
 });
 
+// ── XY spikes + bar/scatter combo (seq 211) ──────────────────────────────
+
+/** A plain XY table, one column per Y data set. */
+const xyPlain = (): TableData => ({
+  columns: ["Title", "X", "A", "B"],
+  rows: [
+    [null, "1", "10", "20"],
+    [null, "2", "11", "21"],
+    [null, "3", "12", "22"],
+  ],
+});
+
+check("seq 211: spikes run a vertical line from the baseline to each point, with a marker at the tip", () => {
+  const dataset = readTable(xyPlain());
+  const options = newGraphOptions("xy-spikes");
+  const fig = GRAPHS["xy-spikes"].build(dataset.columns, options, paintOf(options, 2));
+  const traces = fig.data as {
+    mode: string;
+    name: string;
+    x: (number | null)[];
+    y: (number | null)[];
+    showlegend?: boolean;
+  }[];
+  strictEqual(traces.length, 4); // a stems trace and a tips trace per data set
+  deepStrictEqual(traces.map((t) => [t.name, t.mode, t.showlegend ?? true]), [
+    ["A", "lines", false],
+    ["A", "markers", true],
+    ["B", "lines", false],
+    ["B", "markers", true],
+  ]);
+  // The stems start at the baseline and end at the point, one segment per point.
+  deepStrictEqual(traces[0].x, [1, 1, null, 2, 2, null, 3, 3, null]);
+  deepStrictEqual(traces[0].y, [0, 10, null, 0, 11, null, 0, 12, null]);
+  deepStrictEqual(traces[1].x, [1, 2, 3]);
+  deepStrictEqual(traces[1].y, [10, 11, 12]);
+});
+
+check("seq 211: bar + scatter pairs mean bars with the scatter of the same data, following xyStyle and xyReplicates", () => {
+  const dataset = readTable(xyReplicates());
+  const options = newGraphOptions("xy-bar-scatter");
+  const fig = GRAPHS["xy-bar-scatter"].build(dataset.columns, options, paintOf(options, 2));
+  const traces = fig.data as {
+    type: string;
+    mode?: string;
+    name: string;
+    x: number[];
+    y: number[];
+    error_y?: { array: number[] };
+  }[];
+  strictEqual(traces.length, 4); // a bar trace and a scatter trace per data set
+  deepStrictEqual(traces.map((t) => [t.name, t.type, t.mode ?? "bar"]), [
+    ["A", "bar", "bar"],
+    ["A", "scatter", "markers"],
+    ["B", "bar", "bar"],
+    ["B", "scatter", "markers"],
+  ]);
+  // The bars are the per-X means with SEM whiskers; the scatter (mean replicates)
+  // sits on the same means and carries no second set of whiskers.
+  deepStrictEqual(traces[0].y, [12, 13]);
+  deepStrictEqual(traces[0].error_y?.array, [1, 1]);
+  deepStrictEqual(traces[1].y, [12, 13]);
+  strictEqual(traces[1].error_y, undefined);
+  deepStrictEqual(traces[2].y, [22, 23]);
+  // Each replicate: the scatter shows every value, the bars stay the means.
+  const each = GRAPHS["xy-bar-scatter"].build(
+    dataset.columns,
+    { ...options, xyReplicates: "each" },
+    paintOf(options, 2),
+  );
+  const eachTraces = each.data as { type: string; x: number[]; y: number[] }[];
+  deepStrictEqual(eachTraces[0].y, [12, 13]); // bars still the means
+  deepStrictEqual(eachTraces[1].x, [1, 1, 2, 2]);
+  deepStrictEqual(eachTraces[1].y, [10, 12, 11, 13]);
+  // Line style: the scatter part connects its points.
+  const lined = GRAPHS["xy-bar-scatter"].build(
+    dataset.columns,
+    { ...options, xyStyle: "points+line" },
+    paintOf(options, 2),
+  );
+  strictEqual((lined.data as { mode?: string }[])[1].mode, "lines+markers");
+});
+
+check("seq 211: spikes and the combo on a summary table draw the stored Means", () => {
+  const dataset = readTable(xySummary());
+  const options = newGraphOptions("xy-spikes");
+  const spikes = GRAPHS["xy-spikes"].build(dataset.columns, options, paintOf(options, 2), dataset.titles, "mean-sd-n");
+  const spikeTraces = spikes.data as { mode: string; y: (number | null)[]; error_y?: { array: number[] } }[];
+  deepStrictEqual(spikeTraces[1].y, [10, 12]); // the tips are the Means
+  deepStrictEqual(spikeTraces[1].error_y?.array, [1, 1.5]); // the converted SEM
+  const combo = GRAPHS["xy-bar-scatter"].build(
+    dataset.columns,
+    newGraphOptions("xy-bar-scatter"),
+    paintOf(newGraphOptions("xy-bar-scatter"), 2),
+    dataset.titles,
+    "mean-sd-n",
+  );
+  const comboTraces = combo.data as { type: string; y: number[]; error_y?: { array: number[] } }[];
+  deepStrictEqual(comboTraces[0].y, [10, 12]);
+  deepStrictEqual(comboTraces[0].error_y?.array, [1, 1.5]);
+  deepStrictEqual(comboTraces[1].y, [10, 12]);
+});
+
+check("seq 211 MCP: build-graph accepts the spike and combo kinds on XY tables", async () => {
+  const harness = mcpLaggingHarness(true);
+  const created: string[] = [];
+  harness.deps.actions!.createGraph = (tableId, graphType) => {
+    created.push(graphType);
+    return `graph_${graphType}`;
+  };
+  const xy = await harness.run("job-211-xy", "create-table", {
+    table_type: "xy",
+    columns: ["", "X", "A:Y1", "A:Y2"],
+    rows: [
+      ["", 1, 10, 12],
+      ["", 2, 11, 13],
+    ],
+  });
+  const xyId = (xy.result as { table_id: string }).table_id;
+  harness.sync();
+  for (const type of ["xy-spikes", "xy-bar-scatter"]) {
+    const done = await harness.run(`job-211-${type}`, "build-graph", { table_id: xyId, graph_type: type });
+    strictEqual((done.result as { graph_type: string }).graph_type, type);
+  }
+  // And neither is offered on a grouped table.
+  const groupedTable = await harness.run("job-211-grouped", "create-table", {
+    table_type: "grouped",
+    columns: ["", "A:Y1", "B:Y1"],
+    rows: [["r1", 1, 2]],
+  });
+  harness.sync();
+  await rejects(
+    harness.run("job-211-grouped-spikes", "build-graph", {
+      table_id: (groupedTable.result as { table_id: string }).table_id,
+      graph_type: "xy-spikes",
+    }),
+    /not offered for a Grouped table/,
+  );
+  deepStrictEqual(created, ["xy-spikes", "xy-bar-scatter"]);
+});
+
 check("summary subcolumns: interleaved scatter on a summary table draws centers, not points", () => {
   const dataset = readTable(summaryTable());
   const options = newGraphOptions("grouped-scatter");
