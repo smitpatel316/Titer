@@ -2,7 +2,7 @@
 // step, each answer choosing the next question. A wizard only declares its questions
 // and how the answers make the test's params; analysis-wizard.tsx asks them.
 // A test without an entry here runs as soon as it is picked.
-import { DOSE_MODELS, CONCENTRATION_UNITS, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel } from "../../stats/types";
+import { DOSE_MODELS, CONCENTRATION_UNITS, GOF_EXPECTED_MODES, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel } from "../../stats/types";
 import type { PlotFunctionExtra, PlotFunctionModel } from "../../stats/types";
 import {
   PLOT_FUNCTION_DEFAULTS,
