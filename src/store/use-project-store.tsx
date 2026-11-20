@@ -624,6 +624,9 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
           rootOrder: state.rootOrder,
           childOrder: state.childOrder,
           projectName: state.projectName,
+          // Present even when unset: spreading a restored content without
+          // the key would leave the scripts a change had added in place.
+          scripts: state.scripts,
         },
       };
       const rest = stack.slice(0, -1);
@@ -772,6 +775,9 @@ export function reducer(state: ProjectState, action: Action): ProjectState {
       rootOrder: state.rootOrder,
       childOrder: state.childOrder,
       projectName: state.projectName,
+      // Present even when unset, as in the undo snapshot above: a step
+      // whose content lacks the key can't undo a change that added scripts.
+      scripts: state.scripts,
     },
   };
   return {
