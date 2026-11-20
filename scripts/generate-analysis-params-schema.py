@@ -538,8 +538,7 @@ for typ, keys in sorted(KEYS_BY_TYPE.items()):
         out["gates"] = GATES[typ]
     schema[typ] = out
 
-# Sanity: 54 types, every key accounted for, offered_on non-empty.
-# (53 until seq 160 added hierarchical-clustering on check/v18.)
+# Sanity: 54 types (53 + hierarchical-clustering, seq 160), every key accounted for, offered_on non-empty.
 assert len(schema) == 54, f"{len(schema)} types, expected 54"
 for typ, entry in schema.items():
     assert entry["offered_on"], f"{typ} offered on no table type"
