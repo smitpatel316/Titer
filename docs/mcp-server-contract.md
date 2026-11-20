@@ -581,7 +581,7 @@ is on, §6); everything else is `false`. `idempotent_hint` is per-tool (e.g. `ti
 `titer_rename_node`, `titer_reorder_nodes` are idempotent; create/undo/
 redo/run tools are not).
 
-The allowlist (§12) groups the 52 tools differently — by what the user
+The allowlist (§12) groups the 56 tools differently — by what the user
 turns on, not by what they do. The two groupings overlap (e.g. the six
 `destructive_hint` tools form their own allowlist group); §12 is the
 one that decides what a client can see and call.
@@ -754,10 +754,10 @@ tool must assign it a group, or the suite fails).
 | Group | Tools | On by default |
 |---|---|---|
 | Read project data (`read`) | `titer_list_projects`, `titer_list_tables`, `titer_read_table_summary`, `titer_read_results`, `titer_read_graph` | yes |
-| Read more (`read_more`) | `titer_read_figure`, `titer_read_info_sheet`, `titer_read_activity`, `titer_send_feedback` | no |
+| Read more (`read_more`) | `titer_read_figure`, `titer_read_info_sheet`, `titer_read_activity`, `titer_send_feedback`, `titer_search`, `titer_project_summary`, `titer_get_analysis_params` | no |
 | Open and save projects (`project`) | `titer_create_project`, `titer_open_project`, `titer_save_project`, `titer_import_prism` | no |
 | Edit tables (`tables`) | `titer_create_table`, `titer_duplicate_table_family`, `titer_rename_node`, `titer_reorder_nodes`, `titer_undo`, `titer_redo` | no |
-| Run analyses (`analyses`) | `titer_run_analysis`, `titer_freeze_analysis`, `titer_simulate_data`, `titer_apply_method`, `titer_apply_wand`, `titer_read_job`, `titer_list_jobs`, `titer_cancel_job` | no |
+| Run analyses (`analyses`) | `titer_run_analysis`, `titer_rerun_analysis`, `titer_freeze_analysis`, `titer_simulate_data`, `titer_apply_method`, `titer_apply_wand`, `titer_read_job`, `titer_list_jobs`, `titer_cancel_job` | no |
 | Build graphs and figures (`graphs`) | `titer_build_graph`, `titer_update_graph`, `titer_clone_graph`, `titer_create_figure`, `titer_update_figure`, `titer_create_info_sheet`, `titer_update_info_sheet` | no |
 | Export (`export`) | `titer_export_graph`, `titer_export_figure`, `titer_export_office`, `titer_export_table_data` | no |
 | Cloud (Box) (`cloud`) | `titer_cloud_status`, `titer_cloud_list`, `titer_cloud_metadata`, `titer_cloud_revisions`, `titer_cloud_download`, `titer_cloud_upload_new`, `titer_cloud_create_folder`, `titer_cloud_move` | no |
@@ -806,5 +806,5 @@ the same human-only boundary as enable/token (D4).
 - Antigravity's `mcp_config.json` is untouched: it keeps its 5-tool
   `enabledTools`. The server-side allowlist now makes that list real
   instead of advisory; the config file format does not change.
-- The server still *has* 52 tools. The allowlist decides which subset
+- The server still *has* 56 tools. The allowlist decides which subset
   a given client sees — it does not remove tools from the server.
