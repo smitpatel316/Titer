@@ -49,6 +49,7 @@ export const ANALYSIS_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<Analysi
     "shapiro-wilk",
     "kolmogorov-smirnov",
     "outliers",
+    "p-value-stack",
     "transform",
     "monte-carlo",
     "bland-altman",
