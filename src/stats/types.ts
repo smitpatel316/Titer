@@ -411,6 +411,16 @@ export interface NonlinearRegressionParams {
   /** Weighting (plan 26): "none" (default) or a scheme — 1/Y, 1/Y², 1/X, 1/X²,
    *  or 1/SD² (replicate SDs across the table's Y columns, per row). */
   weights?: NonlinearWeightScheme;
+  /** Fit only the points inside an X range (Prism 11 Range tab, "Don't fit
+   *  points when X is less than / greater than …", seq 166): points with
+   *  X < `fitXMin` or X > `fitXMax` are ignored entirely — not fitted, not
+   *  counted, not ROUT-checked. Either bound alone is enough; both blank
+   *  (or both absent) fits every point. In Titer X is always explicit
+   *  values, so — unlike Prism before 6.04 — the restriction applies
+   *  however the X column was entered. */
+  fitXMin?: number;
+  /** The range's upper end: points with X > `fitXMax` are not fitted. */
+  fitXMax?: number;
   /** Parameter name -> fixed value (the parameter is held constant, not fitted). nls models only. */
   fixed?: Record<string, number>;
   /** Parameter name -> [lower, upper] bounds (nls models only, via algorithm="port").

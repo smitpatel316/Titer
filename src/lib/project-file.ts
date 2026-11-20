@@ -303,6 +303,8 @@ const PARAMS = {
   customEquation: "name",
   customParameters: "numbers-by-name",
   hypotheticalValue: "number", baseline: "number", q: ROUT_Q, lambda: "number", ecx: EC_ANYTHING,
+  // Seq 166 (Prism Range tab): the X-range bounds for nonlinear regression.
+  fitXMin: "number", fitXMax: "number",
   // Remove baseline (v2): how the baseline is defined, and the values it needs.
   baselineMethod: REMOVE_BASELINE_METHODS, firstN: "number", controls: "names", constant: "number",
   // Normalize (v2): how each value is rescaled, and the values it needs.
@@ -891,7 +893,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "area-under-curve": ["baseline", "sets"],
   "row-means-totals": ["ys", "x", "sets"],
   "nonlinear-regression": [
-    "x", "y", "ys", "model", "compareWith", "compare", "interpolate", "weights", "fixed", "bounds", "fixedConstants",
+    "x", "y", "ys", "model", "compareWith", "compare", "interpolate", "weights", "fitXMin", "fitXMax", "fixed", "bounds", "fixedConstants",
     "boundsConstants", "compareModel", "globalY", "sharedParams", "ligandConcentration", "ligandKd",
     "ligandConcentrationConstant", "ligandKdConstant", "fitKi", "rout", "q", "ecx", "customEquation", "customParameters",
     "sets",

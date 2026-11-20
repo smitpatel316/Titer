@@ -1094,7 +1094,7 @@ async function compareModels(
   // points (positive X, enough of them) — otherwise R fails cryptically
   // ("subscript out of bounds", "NA/NaN/Inf in 'x'"). And both models
   // must fit the SAME points, or the F test / AICc compare different data.
-  const preparedB = prepareFit(columns, params.y, otherModel);
+  const preparedB = prepareFit(columns, params.y, otherModel, 0, undefined, fitRange(params));
   if ("error" in preparedB) return preparedB;
   if (
     preparedB.xs.length !== first.xs.length ||
@@ -1197,6 +1197,32 @@ function defaultSharedParams(spec: ModelSpec): string[] {
   return out;
 }
 
+/** Seq 166 (Prism Range tab): the fitted X range from the params, when
+ *  either bound is set — `prepareFit`'s `range`, in its shape. */
+const fitRange = (params: NonlinearRegressionParams | undefined) =>
+  params?.fitXMin != null || params?.fitXMax != null
+    ? { min: params?.fitXMin, max: params?.fitXMax }
+    : undefined;
+
+/** Seq 166: the Range-tab sentence for the notes — which X the fit kept,
+ *  and how many points outside it were not fitted. */
+function rangeNotes(params: NonlinearRegressionParams | undefined, rangeExcluded: number): string {
+  if (params?.fitXMin == null && params?.fitXMax == null) return "";
+  const bounds = [
+    params.fitXMin != null ? `X ≥ ${num(params.fitXMin)}` : null,
+    params.fitXMax != null ? `X ≤ ${num(params.fitXMax)}` : null,
+  ]
+    .filter((b): b is string => b !== null)
+    .join(" and ");
+  return (
+    ` Only points with ${bounds} were fitted` +
+    (rangeExcluded
+      ? ` — ${rangeExcluded} point${rangeExcluded === 1 ? "" : "s"} outside the range ${rangeExcluded === 1 ? "was" : "were"} not fitted`
+      : "") +
+    "."
+  );
+}
+
 /** A global (shared-parameter) fit (plan 26): several Y series fitted in one
  *  stacked nls() call through runGlobalFit. Single-series fits supply the
  *  starts (a shared start is their mean); the stacked formula shares the
@@ -1206,21 +1232,35 @@ async function runGlobalNonlinear(
   params: NonlinearRegressionParams | undefined,
   model: NonlinearModel,
   spec: ModelSpec,
-  first: { xCol: Column; yCol: Column; xs: number[]; ys: number[]; rows: number[]; columns: string[] },
+  first: { xCol: Column; yCol: Column; xs: number[]; ys: number[]; rows: number[]; columns: string[]; rangeExcluded: number },
   xCol: Column,
   rout?: { q: number; titles: (string | null)[] },
 ): Promise<AnalysisOutcome> {
   const fixed = params?.fixed ?? {};
   const bounds = params?.bounds ?? {};
   const extraNames = params!.globalY!;
-  const series: { name: string; xs: number[]; ys: number[]; rows: number[]; columns: string[] }[] = [
-    { name: first.yCol.name, xs: first.xs, ys: first.ys, rows: first.rows, columns: first.columns },
+  const series: {
+    name: string;
+    xs: number[];
+    ys: number[];
+    rows: number[];
+    columns: string[];
+    rangeExcluded: number;
+  }[] = [
+    {
+      name: first.yCol.name,
+      xs: first.xs,
+      ys: first.ys,
+      rows: first.rows,
+      columns: first.columns,
+      rangeExcluded: first.rangeExcluded ?? 0,
+    },
   ];
   const yCols: Column[] = [first.yCol];
   for (const name of extraNames) {
-    const p = prepareFit(columns, name, model, Object.keys(fixed).length);
+    const p = prepareFit(columns, name, model, Object.keys(fixed).length, undefined, fitRange(params));
     if ("error" in p) return p;
-    series.push({ name, xs: p.xs, ys: p.ys, rows: p.rows, columns: p.columns });
+    series.push({ name, xs: p.xs, ys: p.ys, rows: p.rows, columns: p.columns, rangeExcluded: p.rangeExcluded });
     yCols.push(p.yCol);
   }
   // ROUT (upstream 1.0.9): each series' outliers found on its own
@@ -1514,6 +1554,7 @@ async function runGlobalNonlinear(
     `fitted separately per data set: ${perSeriesParams.length ? perSeriesParams.map(termLabel).join(", ") : "none"}. ` +
     `95% CIs are asymptotic (from each parameter's standard error). ` +
     `R² is per data set; the sum of squares, Sy.x and degrees of freedom are for all series together.` +
+    rangeNotes(params, series.reduce((s, x) => s + x.rangeExcluded, 0)) +
     (Object.keys(fixed).length
       ? ` Fixed: ${Object.entries(fixed)
           .map(([n, v]) => `${termLabel(n)} = ${num(v)}`)
@@ -1749,9 +1790,11 @@ export async function runNonlinearRegression(
     let routOutliers: CurveOutlier[] = [];
     let anyRetried = false;
     let retryMethod: string | undefined;
+    let multiRangeExcluded = 0;
     for (const name of params.ys!) {
-      let prep = prepareFit(columns, name, model, fixedNames.length, spec);
+      let prep = prepareFit(columns, name, model, fixedNames.length, spec, fitRange(params));
       if ("error" in prep) return prep;
+      multiRangeExcluded += prep.rangeExcluded;
       const wr = computeWeights(weightsScheme, prep, yColsAll);
       if ("error" in wr) return wr;
       let setFitOpts: FitOptions = {
@@ -1832,7 +1875,7 @@ export async function runNonlinearRegression(
       [],
       [],
       titles,
-      { xs: multiSets[0].xs, ys: multiSets[0].ys },
+      { xs: multiSets[0].xs, ys: multiSets[0].ys, rangeExcluded: multiRangeExcluded },
       anyRetried || undefined,
       retryMethod,
       params,
@@ -1848,7 +1891,7 @@ export async function runNonlinearRegression(
   if (comparingSets && !other) return { error: xyProblem(columns, params.compareWith)! };
   if (other && !spec.dose) return { error: "Only dose-response curves can be compared." };
 
-  let first = prepareFit(columns, params?.y, model, fixedNames.length, spec);
+  let first = prepareFit(columns, params?.y, model, fixedNames.length, spec, fitRange(params));
   if ("error" in first) return first;
   // Weighting needs the fitted points (and, for 1/SD², their rows).
   const weightResult = computeWeights(weightsScheme, first, yCols.flatMap((s) => s.columns));
@@ -1912,9 +1955,11 @@ export async function runNonlinearRegression(
   }
 
   let second: { xs: number[]; ys: number[]; rows: number[]; columns: string[] } | undefined;
+  let secondRangeExcluded = 0;
   if (other) {
-    const p = prepareFit(columns, params.compareWith, model);
+    const p = prepareFit(columns, params.compareWith, model, 0, undefined, fitRange(params));
     if ("error" in p) return p;
+    secondRangeExcluded = p.rangeExcluded;
     // ROUT: the second set's outliers found on its own fit, then left out —
     // a comparison refuses weights/fixed/bounds, so the plain spec fits it.
     if (useRout) {
@@ -2029,7 +2074,7 @@ export async function runNonlinearRegression(
       // One R call already ran; reuse its entries by re-reading them out of
       // the same shape — simplest is to keep the parsed fit and build the
       // result from it (no second R call).
-      return assembleResult(model, spec, xCol, pooledY, other, sets, [fitted], [], [], titles, first, fitted.retried, fitted.retryMethod, params, [], "", false, rout);
+      return assembleResult(model, spec, xCol, pooledY, other, sets, [fitted], [], [], titles, { ...first, rangeExcluded: first.rangeExcluded + secondRangeExcluded }, fitted.retried, fitted.retryMethod, params, [], "", false, rout);
     } catch (err) {
       if (isTwoSiteCompetition(model)) return twoSiteError;
       return fitError(err, model);
@@ -2080,7 +2125,7 @@ export async function runNonlinearRegression(
       high: inverted ? null : high,
     };
   });
-  return assembleResult(model, spec, xCol, pooledY, other, sets, parsed, interpolated, v, titles, first, retried, retryMethod, params, [], "", invertedCI, rout);
+  return assembleResult(model, spec, xCol, pooledY, other, sets, parsed, interpolated, v, titles, { ...first, rangeExcluded: first.rangeExcluded + secondRangeExcluded }, retried, retryMethod, params, [], "", invertedCI, rout);
 }
 
 /** The notes' weighting / fixed-parameter / bounds sentences (plan 26): a
@@ -2090,7 +2135,7 @@ export async function runNonlinearRegression(
 function frameworkNotes(
   params: NonlinearRegressionParams | undefined,
   coefficients: RegressionCoefficient[],
-  first: { xs: number[]; ys: number[] },
+  first: { xs: number[]; ys: number[]; rangeExcluded?: number },
 ): string {
   const parts: string[] = [];
   const scheme = params?.weights;
@@ -2122,6 +2167,10 @@ function frameworkNotes(
         })
         .join(", ")}.`,
     );
+  // Seq 166: the Range-tab sentence — which X was fitted, and how many
+  // points outside it were not fitted.
+  const range = rangeNotes(params, first.rangeExcluded ?? 0);
+  if (range) parts.push(range.trim());
   return parts.length ? ` ${parts.join(" ")}` : "";
 }
 
@@ -2143,7 +2192,7 @@ async function assembleResult(
   interpolated: InterpolatedRow[],
   v: RVector | [],
   _titles: (string | null)[],
-  first: { xs: number[]; ys: number[] },
+  first: { xs: number[]; ys: number[]; rangeExcluded?: number },
   retried: boolean | undefined,
   retryMethod: string | undefined,
   params: NonlinearRegressionParams | undefined,
