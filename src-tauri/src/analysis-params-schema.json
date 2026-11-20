@@ -1360,6 +1360,7 @@
           "segmental-linear",
           "quartic",
           "quintic",
+          "sextic",
           "exponential-growth",
           "logistic-growth",
           "gompertz-growth",
@@ -1377,6 +1378,12 @@
           "user-defined"
         ],
         "required": true
+      },
+      {
+        "name": "centered",
+        "type": "boolean",
+        "required": false,
+        "description": "Center the polynomial: fit powers of (X minus the mean of X) instead of powers of X. B0 becomes the fitted Y at the mean X; the fitted values and R² are unchanged. Polynomials only (quadratic through sextic)."
       },
       {
         "name": "compareWith",
@@ -1461,6 +1468,7 @@
           "segmental-linear",
           "quartic",
           "quintic",
+          "sextic",
           "exponential-growth",
           "logistic-growth",
           "gompertz-growth",
@@ -1803,6 +1811,7 @@
           "segmental-linear",
           "quartic",
           "quintic",
+          "sextic",
           "exponential-growth",
           "logistic-growth",
           "gompertz-growth",

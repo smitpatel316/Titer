@@ -52,6 +52,7 @@ export const PLOT_FUNCTION_DEFAULTS: Record<PlotFunctionModel, Record<string, nu
   cubic: { B0: 0, B1: 1, B2: 0, B3: 0 },
   quartic: { B0: 0, B1: 1, B2: 0, B3: 0, B4: 0 },
   quintic: { B0: 0, B1: 1, B2: 0, B3: 0, B4: 0, B5: 0 },
+  sextic: { B0: 0, B1: 1, B2: 0, B3: 0, B4: 0, B5: 0, B6: 0 },
   "segmental-linear": { B0: 0, B1: 1, B2: 0, X0: 0 },
   "sigmoidal-4pl-logx": { Bottom: 0, Top: 100, LogEC50: 0, HillSlope: 1 },
   "sigmoidal-4pl-x": { Bottom: 0, Top: 100, EC50: 1, HillSlope: 1 },

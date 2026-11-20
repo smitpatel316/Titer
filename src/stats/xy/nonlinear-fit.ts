@@ -32,6 +32,8 @@ export const MODEL_LABEL: Record<NonlinearModel, string> = {
   "segmental-linear": "Segmental linear regression (two segments)",
   quartic: "Fourth order polynomial (quartic)",
   quintic: "Fifth order polynomial (quintic)",
+  // Seq 201: Prism fits polynomials up to 6th order.
+  sextic: "Sixth order polynomial (sextic)",
   "exponential-growth": "Exponential growth",
   "logistic-growth": "Logistic growth",
   "gompertz-growth": "Gompertz growth",
@@ -262,6 +264,29 @@ const nls200 = (expr: string, start: string) => `nls(y~${expr},start=${start},co
 const nls200Tol = (expr: string, start: string) =>
   `nls(y~${expr},start=${start},control=nls.control(maxiter=200,tol=1e-3))`;
 
+/** The polynomial models (seq 201): the only models `centered` applies to. */
+export const POLYNOMIAL_MODELS = ["quadratic", "cubic", "quartic", "quintic", "sextic"] as const;
+export const isPolynomialModel = (m: NonlinearModel): boolean =>
+  (POLYNOMIAL_MODELS as readonly string[]).includes(m);
+
+/** A polynomial fit of the given degree (Plan 29: base R lm, powers of X).
+ *  Centered (seq 201) subtracts the mean of X first (`xm<-mean(x)`), so
+ *  the terms are powers of (X − mean X): B0 is the fitted Y at the mean X
+ *  and the higher terms are far less collinear. The fitted values and R²
+ *  are unchanged — only the coefficients move. The uncentered strings are
+ *  the historical ones, byte for byte. */
+function polynomialSpec(degree: number, centered = false): ModelSpec {
+  const terms = Array.from({ length: degree + 1 }, (_, i) => `B${i}`);
+  const powers = Array.from({ length: degree - 1 }, (_, i) => i + 2);
+  if (!centered)
+    return { kind: "lm", fit: `m<-lm(y~x${powers.map((k) => `+I(x^${k})`).join("")})`, terms };
+  return {
+    kind: "lm",
+    fit: `xm<-mean(x);m<-lm(y~I(x-xm)${powers.map((k) => `+I((x-xm)^${k})`).join("")})`,
+    terms,
+  };
+}
+
 export function modelSpec(
   model: NonlinearModel,
   opts?: {
@@ -280,6 +305,9 @@ export function modelSpec(
      *  required — without them the spec cannot be built. */
     customEquation?: string;
     customParameters?: Record<string, number>;
+    /** Center the polynomial (seq 201): fit powers of (X − mean X) instead
+     *  of powers of X. Polynomials only — the runner refuses it elsewhere. */
+    centered?: boolean;
   },
 ): ModelSpec {
   // v2 item 23: the spec comes from the user's equation, not a curated case.
@@ -294,20 +322,19 @@ export function modelSpec(
     case "line":
       return { kind: "lm", fit: "m<-lm(y~x)", terms: ["Intercept", "Slope"] };
     case "quadratic":
-      return { kind: "lm", fit: "m<-lm(y~x+I(x^2))", terms: ["B0", "B1", "B2"] };
+      return polynomialSpec(2, opts?.centered);
     case "cubic":
-      return { kind: "lm", fit: "m<-lm(y~x+I(x^2)+I(x^3))", terms: ["B0", "B1", "B2", "B3"] };
+      return polynomialSpec(3, opts?.centered);
     case "quartic":
       // Plan 29: 4th order polynomial — base R lm, the exact pattern of
       // the quadratic/cubic entries.
-      return { kind: "lm", fit: "m<-lm(y~x+I(x^2)+I(x^3)+I(x^4))", terms: ["B0", "B1", "B2", "B3", "B4"] };
+      return polynomialSpec(4, opts?.centered);
     case "quintic":
       // Plan 29: 5th order polynomial — same pattern, one degree higher.
-      return {
-        kind: "lm",
-        fit: "m<-lm(y~x+I(x^2)+I(x^3)+I(x^4)+I(x^5))",
-        terms: ["B0", "B1", "B2", "B3", "B4", "B5"],
-      };
+      return polynomialSpec(5, opts?.centered);
+    case "sextic":
+      // Seq 201: 6th order polynomial — Prism fits polynomials up to 6th order.
+      return polynomialSpec(6, opts?.centered);
     case "segmental-linear":
       // Plan 29: continuous two-segment line (hinge), Y = B0 + B1·X +
       // B2·max(X − X0, 0): slope B1 below the breakpoint X0, B1+B2 above.

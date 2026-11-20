@@ -157,6 +157,7 @@ import { XY_SCATTER_MAX_POINTS } from "../src/views/graphs/xy-scatter";
 import { addForestPlot } from "../src/views/graphs/forest-plot";
 import { addScreePlot } from "../src/views/graphs/scree-plot";
 import { addEstimationPlot, estimationDiffLabel } from "../src/views/graphs/estimation-plot";
+import { evaluate as evaluateFittedCurve } from "../src/views/graphs/fitted-curve";
 import { addSchildPlot, schildPlotPoints } from "../src/views/graphs/schild-plot";
 import { addRegression, fitLinear } from "../src/views/graphs/regression-overlay";
 import { fitDeming } from "../src/views/graphs/deming-overlay";
@@ -4848,9 +4849,9 @@ check("the curve wizard asks about weighting, comparing models and global fits",
   // curves" list, in Prism's order after cubic.
   deepStrictEqual(
     options({ kind: "other", model: "line" }, twoY, "model").filter((m) =>
-      ["cubic", "segmental-linear", "quartic", "quintic"].includes(m),
+      ["cubic", "segmental-linear", "quartic", "quintic", "sextic"].includes(m),
     ),
-    ["cubic", "segmental-linear", "quartic", "quintic"],
+    ["cubic", "segmental-linear", "quartic", "quintic", "sextic"],
   );
   ok(!ids({ y: "A", kind: "dose", model: "sigmoidal-4pl-logx", global: "no" }, twoY).includes("globalY"));
   ok(ids({ y: "A", kind: "dose", model: "sigmoidal-4pl-logx", global: "yes" }, twoY).includes("globalY"));
@@ -4990,6 +4991,9 @@ check("only nested model pairs get the F test", () => {
   deepStrictEqual(nestedPair("cubic", "quartic"), { simpler: "cubic", complex: "quartic" });
   deepStrictEqual(nestedPair("quartic", "quintic"), { simpler: "quartic", complex: "quintic" });
   deepStrictEqual(nestedPair("line", "quintic"), { simpler: "line", complex: "quintic" });
+  // Seq 201: the ladder continues to the 6th order polynomial.
+  deepStrictEqual(nestedPair("quintic", "sextic"), { simpler: "quintic", complex: "sextic" });
+  deepStrictEqual(nestedPair("line", "sextic"), { simpler: "line", complex: "sextic" });
   strictEqual(nestedPair("line", "segmental-linear"), null);
   strictEqual(nestedPair("line", "hyperbola"), null);
   strictEqual(nestedPair("sigmoidal-4pl-logx", "hyperbola"), null);
@@ -5227,9 +5231,127 @@ check("closed-form inverses read unknowns off the fitted curve", async () => {
   strictEqual(invertMethod("quadratic"), "numeric");
   strictEqual(invertMethod("quartic"), "numeric");
   strictEqual(invertMethod("quintic"), "numeric");
+  strictEqual(invertMethod("sextic"), "numeric");
   strictEqual(invertMethod("segmental-linear"), "numeric");
   strictEqual(invertMethod("sigmoidal-4pl-logx"), "closed-form");
   strictEqual(invertModel("quadratic", dose.coefficients, 50), null);
+});
+
+check("seq 201 6th-order polynomial + centered polynomials", async () => {
+  // Exact 6th-order data: Y = 2 + X − 0.5X² + 0.25X³ − 0.1X⁴ + 0.05X⁵
+  // + 0.01X⁶ at X = 0..7 (8 points, 7 parameters — an exact fit).
+  // Centered coefficients below are Python's polyfit on (X − 3.5), computed
+  // before the check was written; B0_centered is the curve at the mean X.
+  const sextic: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["", "0", "2"],
+      ["", "1", "2.71"],
+      ["", "2", "4.64"],
+      ["", "3", "18.59"],
+      ["", "4", "80.56"],
+      ["", "5", "275.75"],
+      ["", "6", "769.76"],
+      ["", "7", "1846.99"],
+    ],
+  };
+  const close = (got: number | null | undefined, want: number, tol: number, what: string) => {
+    if (got == null || Math.abs(got - want) > tol)
+      throw new Error(`${what}: got ${got}, expected ${want} (±${tol})`);
+  };
+  const coefOf = (out: { coefficients?: { term: string; estimate: number | null }[] }, term: string) =>
+    out.coefficients?.find((c) => c.term === term)?.estimate;
+  const r2Of = (out: { stats: { label: string; value: number | null }[] }) =>
+    out.stats.find((s) => s.label === "R squared")?.value;
+  const plain = await runAnalysis("nonlinear-regression", sextic, { y: "Y1", model: "sextic" });
+  if ("error" in plain) throw new Error(plain.error);
+  const wantPlain = [2, 1, -0.5, 0.25, -0.1, 0.05, 0.01];
+  wantPlain.forEach((want, i) => close(coefOf(plain, `B${i}`), want, i === 6 ? 1e-5 : 1e-4, `sextic B${i}`));
+  close(r2Of(plain), 1, 1e-9, "sextic R²");
+  // Centered: same fitted values, moved coefficients, center recorded.
+  const centered = await runAnalysis("nonlinear-regression", sextic, { y: "Y1", model: "sextic", centered: true });
+  if ("error" in centered) throw new Error(centered.error);
+  const wantCentered = [39.731094, 58.56625, 38.721875, 13.55, 2.6125, 0.26, 0.01];
+  wantCentered.forEach((want, i) => close(coefOf(centered, `B${i}`), want, i === 6 ? 1e-5 : 1e-4, `centered B${i}`));
+  strictEqual(centered.centeredX, 3.5);
+  close(r2Of(centered), 1, 1e-9, "centered R²");
+  ok(centered.notes.includes("Centered at the mean of X (3.5)"), `centered note missing, got: ${centered.notes}`);
+  // The overlay draws the same curve from the centered coefficients + the
+  // recorded center as from the uncentered ones.
+  for (const x of [0, 2.5, 7]) {
+    const a = evaluateFittedCurve("sextic", centered.coefficients ?? [], x, undefined, undefined, centered.centeredX);
+    const b = evaluateFittedCurve("sextic", plain.coefficients ?? [], x);
+    if (Math.abs(a - b) > 1e-6) throw new Error(`overlay at X=${x}: centered ${a} vs plain ${b}`);
+  }
+  // Interpolation reads the unknown off the centered curve too (this runs
+  // R's predict() with the center in scope — the point of the exercise).
+  const withUnknown: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: [...sextic.rows, ["", "", "80.56"]],
+  };
+  const interp = await runAnalysis("nonlinear-regression", withUnknown, {
+    y: "Y1",
+    model: "sextic",
+    centered: true,
+    interpolate: true,
+  });
+  if ("error" in interp) throw new Error(interp.error);
+  const ix = interp.interpolated?.[0]?.x;
+  ok(ix != null && Math.abs(ix - 4) < 1e-4, `centered sextic interpolation should read X ≈ 4, got ${ix}`);
+  // Centering only applies to polynomials.
+  const bad = await runAnalysis("nonlinear-regression", sextic, { y: "Y1", model: "line", centered: true });
+  ok("error" in bad && bad.error.includes("Centering only applies to polynomial fits"), `line + centered should be refused, got ${"error" in bad ? bad.error : "ran"}`);
+  // A noisy quintic: centered and uncentered fits share one R² (the fit is
+  // the same, only the coefficients move).
+  const noisy: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["", "0", "1.0003690460072447"],
+      ["", "1", "1.439623661252541"],
+      ["", "2", "1.5177586433913348"],
+      ["", "3", "1.7828224483728174"],
+      ["", "4", "2.8635987644484833"],
+      ["", "5", "4.452506033501061"],
+      ["", "6", "7.618043080779232"],
+      ["", "7", "12.252064573666361"],
+    ],
+  };
+  const qPlain = await runAnalysis("nonlinear-regression", noisy, { y: "Y1", model: "quintic" });
+  const qCentered = await runAnalysis("nonlinear-regression", noisy, { y: "Y1", model: "quintic", centered: true });
+  if ("error" in qPlain) throw new Error(qPlain.error);
+  if ("error" in qCentered) throw new Error(qCentered.error);
+  close(r2Of(qPlain), 0.9997390335327417, 1e-9, "noisy quintic R²");
+  close(r2Of(qCentered), 0.9997390335327417, 1e-9, "noisy centered quintic R²");
+  close(coefOf(qCentered, "B0"), 2.2006343154600736, 1e-9, "noisy centered B0");
+  strictEqual(qCentered.centeredX, 3.5);
+  for (const x of [0, 2.5, 7]) {
+    const a = evaluateFittedCurve("quintic", qCentered.coefficients ?? [], x, undefined, undefined, qCentered.centeredX);
+    const b = evaluateFittedCurve("quintic", qPlain.coefficients ?? [], x);
+    if (Math.abs(a - b) > 1e-6) throw new Error(`quintic overlay at X=${x}: centered ${a} vs plain ${b}`);
+  }
+});
+
+check("seq 201 centered polynomials in the curve wizard", () => {
+  const wizard = WIZARDS["nonlinear-regression"]!;
+  const twoY = readTable({ columns: ["Title", "X", "A", "B"], rows: [["", "1", "2", "3"]] });
+  const asked = (a: Record<string, string | string[]>) =>
+    wizard.questions(a, twoY).flatMap((q) => (q ? [q] : []));
+  const ids = (a: Record<string, string | string[]>) => asked(a).map((q) => q.id);
+  ok(ids({ kind: "other", model: "quintic" }).includes("centered"), "quintic should ask about centering");
+  ok(ids({ kind: "other", model: "sextic" }).includes("centered"), "sextic should ask about centering");
+  ok(!ids({ kind: "other", model: "line" }).includes("centered"), "line should not ask about centering");
+  ok(
+    !ids({ kind: "dose", model: "sigmoidal-4pl-logx" }).includes("centered"),
+    "a dose-response curve should not ask about centering",
+  );
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "quadratic", centered: "yes" }, twoY).params,
+    { y: "A", model: "quadratic", centered: true },
+  );
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "quadratic", centered: "no" }, twoY).params,
+    { y: "A", model: "quadratic" },
+  );
 });
 
 // v2 item 23: user-defined equations for nonlinear regression — the user types their own
@@ -9510,6 +9632,82 @@ check("a constant dependent in multiple linear regression is named, not a row of
   };
   const good = await runAnalysis("multiple-regression", varying, params);
   ok(!("error" in good), `varying dependent should fit, got ${"error" in good ? good.error : "ok"}`);
+});
+
+check("seq 198 multiple-regression diagnostics: VIF, ANOVA table, AICc, covariance", async () => {
+  // Y = 3 + 2·X1 − X2 + 0.5·X3 + fixed noise (10 rows). Every expected value
+  // below was computed in Python (numpy/scipy) before the check was written,
+  // not read off the runner: VIFs from regressing each predictor on the
+  // others, ANOVA from the fitted/residual sums of squares, AIC/AICc from
+  // R's lm convention (k = coefficients + residual variance), and the
+  // covariance from σ²(X′X)⁻¹ on the uncentered design (the J-transform
+  // the runner uses was verified against it in Python to 1e-16).
+  const table: TableData = {
+    columns: ["Title", "Y", "X1", "X2", "X3"],
+    rows: [
+      ["", "5.8", "1", "2", "5"],
+      ["", "7.3", "2", "1", "3"],
+      ["", "8.5", "3", "4", "6"],
+      ["", "8.6", "4", "3", "2"],
+      ["", "10.6", "5", "6", "7"],
+      ["", "12.6", "6", "5", "4"],
+      ["", "13.2", "7", "8", "9"],
+      ["", "12.7", "8", "7", "1"],
+      ["", "14.5", "9", "10", "8"],
+      ["", "19.4", "10", "9", "10"],
+    ],
+  };
+  const out = await runAnalysis("multiple-regression", table, {
+    dependent: "Y",
+    predictors: ["X1", "X2", "X3"],
+  });
+  if ("error" in out) throw new Error(out.error);
+  const close = (got: number | null | undefined, want: number, tol: number, what: string) => {
+    if (got == null || Math.abs(got - want) > tol)
+      throw new Error(`${what}: got ${got}, expected ${want} (±${tol})`);
+  };
+  // The coefficients themselves are unchanged by the diagnostics (pin them
+  // so a diagnostics regression cannot move the fit).
+  const est = (term: string) => out.coefficients?.find((c) => c.term === term)?.estimate;
+  close(est("Intercept"), 3.065391061452518, 1e-9, "Intercept");
+  close(est("X1"), 2.0856145251396656, 1e-9, "X1 slope");
+  close(est("X2"), -1.1199720670391067, 1e-9, "X2 slope");
+  close(est("X3"), 0.5351955307262564, 1e-9, "X3 slope");
+  const stat = (label: string) => out.stats.find((s) => s.label === label)?.value;
+  close(stat("AIC"), 18.0810426001175, 1e-6, "AIC");
+  close(stat("AICc"), 33.0810426001175, 1e-6, "AICc");
+  close(stat("F"), 218.72180451127812, 1e-6, "F");
+  // VIFs: X1 and X2 are strongly collinear with the others (above 10).
+  const vifOf = (term: string) => out.vif?.find((row) => row.term === term)?.vif;
+  close(vifOf("X1"), 11.965956703910615, 1e-6, "VIF X1");
+  close(vifOf("X2"), 15.768331005586576, 1e-6, "VIF X2");
+  close(vifOf("X3"), 2.3044692737430172, 1e-6, "VIF X3");
+  ok(out.notes.includes("VIF above 10"), `notes should flag the high VIFs, got: ${out.notes}`);
+  // ANOVA table: regression 3 df, residual 6 df.
+  const reg = out.anovaTable?.[0];
+  const res = out.anovaTable?.[1];
+  if (!reg || !res) throw new Error("ANOVA table missing");
+  strictEqual(reg.source, "Regression");
+  strictEqual(res.source, "Residual");
+  strictEqual(reg.df, 3);
+  strictEqual(res.df, 6);
+  close(reg.ss, 143.66234636871505, 1e-6, "regression SS");
+  close(res.ss, 1.3136536312849163, 1e-6, "residual SS");
+  close(reg.ms, 47.887448789571685, 1e-6, "regression MS");
+  close(res.ms, 0.21894227188081938, 1e-6, "residual MS");
+  close(reg.f, 218.72180451127812, 1e-6, "ANOVA F");
+  close(reg.p, 1.6218900903924267e-6, 1e-9, "ANOVA P");
+  // Covariance matrix: Intercept/X1/X2/X3 order, symmetric.
+  deepStrictEqual(out.covariance?.variables, ["Intercept", "X1", "X2", "X3"]);
+  const want: number[][] = [
+    [0.142144294809775, -0.026068196477429972, 0.019340919967125503, -0.015136372148185164],
+    [-0.026068196477429965, 0.031755802981596505, -0.0345078706449029, 0.007491739750111839],
+    [0.019340919967125458, -0.0345078706449029, 0.041846717747053265, -0.01085537800526409],
+    [-0.01513637214818514, 0.007491739750111842, -0.010855378005264097, 0.006115705918458643],
+  ];
+  want.forEach((row, i) =>
+    row.forEach((value, j) => close(out.covariance?.values[i]?.[j], value, 1e-9, `cov[${i}][${j}]`)),
+  );
 });
 
 check("a constant or collinear predictor is named, not a crash, in multiple logistic regression (R3-23)", async () => {

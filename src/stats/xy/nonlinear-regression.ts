@@ -42,6 +42,7 @@ import {
   fitSummaryStatements,
   formulaExpr,
   formulaVariables,
+  isPolynomialModel,
   MODEL_LABEL,
   modelSpec,
   parseFit,
@@ -102,6 +103,8 @@ export const invertMethod = (model: NonlinearModel): InvertMethod =>
   // as a coefficient) — invert numerically.
   model === "quartic" ||
   model === "quintic" ||
+  // Seq 201: the 6th order polynomial has no closed-form inverse either.
+  model === "sextic" ||
   model === "segmental-linear" ||
   // v2 item 23: a user equation has no closed-form inverse — the interpolation path
   // inverts it numerically (uniroot on the fitted curve), as for the polynomials.
@@ -303,6 +306,12 @@ const NESTED_PAIRS: [NonlinearModel, NonlinearModel][] = [
   ["cubic", "quartic"],
   ["cubic", "quintic"],
   ["quartic", "quintic"],
+  // Seq 201: the ladder continues to the 6th order polynomial.
+  ["line", "sextic"],
+  ["quadratic", "sextic"],
+  ["cubic", "sextic"],
+  ["quartic", "sextic"],
+  ["quintic", "sextic"],
   ["agonist-3pl-logx", "sigmoidal-4pl-logx"],
   ["inhibitor-3pl-logx", "sigmoidal-4pl-logx"],
   ["sigmoidal-4pl-logx", "asymmetric-5pl-logx"],
@@ -1123,6 +1132,8 @@ async function compareModels(
   const specB = modelSpec(otherModel, {
     ...(kiDivisorB != null ? { kiDivisor: kiDivisorB } : {}),
     ...(otherModel === "homologous-competition-logx" ? { ligandConcentration: ligand } : {}),
+    // A centered comparison centers both models the same way.
+    ...(params.centered === true ? { centered: true } : {}),
   });
   // Both fits take the weights (R3-12): the summary code already weighted
   // the sums of squares, but the lm()/nls() calls themselves were
@@ -1632,10 +1643,17 @@ export async function runNonlinearRegression(
       ...(isUserDefinedModel
         ? { customEquation: params?.customEquation, customParameters: params?.customParameters }
         : {}),
+      ...(params?.centered === true ? { centered: true } : {}),
     });
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
+  // Seq 201: centering only applies to polynomial fits (quadratic
+  // through sextic) — any other model refuses it plainly.
+  if (params?.centered === true && !isPolynomialModel(model))
+    return {
+      error: "Centering only applies to polynomial fits — choose a polynomial (quadratic through sextic) to center it.",
+    };
   // A two-site fit that does not converge says so plainly (plan 28): the
   // likeliest cause is data with a single phase, not a numerical quirk.
   const twoSiteError: AnalysisOutcome = {
@@ -2157,6 +2175,13 @@ async function assembleResult(
   comparison = sets.length > 1,
 ): Promise<AnalysisOutcome> {
   const other = comparison;
+  // Seq 201: a centered polynomial's center is the mean of the fitted X's
+  // (post-ROUT — `first` is the fitted set); the overlays need it to
+  // evaluate powers of (X − centeredX).
+  const centeredX =
+    params?.centered === true && first.xs.length
+      ? first.xs.reduce((s, v) => s + v, 0) / first.xs.length
+      : undefined;
   // Plan 29: the segmental breakpoint is a derived value, not a fitted
   // coefficient — report it as a coefficient row with no standard error
   // (the fixed-parameter precedent in runNonlinearRegression), so the
@@ -2225,6 +2250,9 @@ async function assembleResult(
     `Least-squares fit ("${MODEL_LABEL[model]}") of ${sets.map((s) => `“${s.name}”`).join(" and ")} on “${xCol.name}”. ` +
     `95% CIs are asymptotic (from each parameter's standard error${spec.terms.includes("S") ? "; the asymmetry S's, on its log" : ""}).` +
     frameworkNotes(params, coefficients, first) +
+    (centeredX != null
+      ? ` Centered at the mean of X (${num(centeredX)}): B0 is the fitted Y there, and the higher terms are powers of (X − ${num(centeredX)}).`
+      : "") +
     (other ? ` Extra sum-of-squares F test: ${question} ${answer}` : "") +
     (sets.length > 1 && !other ? " Each data set is fitted on its own." : "") +
     (comparisonNotes ? ` ${comparisonNotes}` : "") +
@@ -2299,9 +2327,9 @@ async function assembleResult(
         extraNotes.push("The breakpoint is at the edge of the data — the fit is effectively a single line.");
     }
   }
-  if (model === "quartic" || model === "quintic")
+  if (model === "quartic" || model === "quintic" || model === "sextic")
     extraNotes.push(
-      `A ${model === "quartic" ? "fourth" : "fifth"} order polynomial can overfit — it follows the noise as well as the trend, so prefer a lower order unless the extra terms are justified.`,
+      `A ${model === "quartic" ? "fourth" : model === "quintic" ? "fifth" : "sixth"} order polynomial can overfit — it follows the noise as well as the trend, so prefer a lower order unless the extra terms are justified.`,
     );
   if (isExponential(model) || isEnzyme(model) || isClassic(model)) {
     extraNotes.push(startingValues(model, first.xs, first.ys));
@@ -2340,5 +2368,7 @@ async function assembleResult(
     ...(params?.ligandConcentration != null ? { ligandConcentration: params.ligandConcentration } : {}),
     // The overlays need the equation to evaluate a user-defined curve (v2 item 23).
     ...(params?.customEquation != null ? { customEquation: params.customEquation } : {}),
+    // The overlays need the center to evaluate a centered polynomial (seq 201).
+    ...(centeredX != null ? { centeredX } : {}),
   };
 }

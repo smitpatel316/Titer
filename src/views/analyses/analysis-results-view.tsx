@@ -702,6 +702,47 @@ export function AnalysisResultsView({
         />
       )}
 
+      {result.vif && result.vif.length > 0 && (
+        <Table
+          title="Multicollinearity"
+          columns={[{ label: "" }, { label: "VIF", numeric: true }]}
+          rows={result.vif.map((row) => [row.term, num(row.vif)])}
+        />
+      )}
+
+      {result.anovaTable && result.anovaTable.length > 0 && (
+        <Table
+          title="ANOVA"
+          columns={[
+            { label: "Source" },
+            { label: "DF", numeric: true },
+            { label: "Sum of squares", numeric: true },
+            { label: "Mean square", numeric: true },
+            { label: "F", numeric: true },
+            { label: "P value", numeric: true },
+          ]}
+          rows={result.anovaTable.map((row) => [
+            row.source,
+            num(row.df),
+            num(row.ss),
+            num(row.ms),
+            num(row.f),
+            <P p={row.p} />,
+          ])}
+        />
+      )}
+
+      {result.covariance && result.covariance.variables.length > 0 && (
+        <Table
+          title="Covariance matrix"
+          columns={[{ label: "" }, ...result.covariance.variables.map((v) => ({ label: v, numeric: true }))]}
+          rows={(result.covariance?.variables ?? []).map((name, i) => [
+            name,
+            ...(result.covariance?.values[i]?.map((value) => num(value)) ?? []),
+          ])}
+        />
+      )}
+
       {result.varianceComponents && result.varianceComponents.length > 0 && (
         <Table
           title="Variance components"

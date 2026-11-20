@@ -18,17 +18,22 @@ function coef(coefficients: RegressionCoefficient[], term: string): number {
  *  The homologous model also needs the radioligand concentration [L] (its
  *  fit carries it — see AnalysisResult.ligandConcentration); without it the
  *  curve is undefined (NaN). A user-defined fit carries its equation instead
- *  (AnalysisResult.customEquation, v2 item 23) — without it, no curve. */
+ *  (AnalysisResult.customEquation, v2 item 23) — without it, no curve.
+ *  A centered polynomial fit (seq 201) carries its center instead
+ *  (AnalysisResult.centeredX): its terms are powers of (X − centeredX). */
 export function evaluate(
   model: NonlinearModel,
   coefficients: RegressionCoefficient[],
   x: number,
   ligandConcentration?: number,
   customEquation?: string,
+  centeredX?: number,
 ): number {
   const c = (term: string) => coef(coefficients, termLabel(term));
   const [bottom, top, hill, s] = [c("Bottom"), c("Top"), c("HillSlope"), c("S")];
   const rise = top - bottom;
+  // A centered polynomial's terms are powers of (X − centeredX), not of X.
+  const xc = x - (centeredX ?? 0);
   switch (model) {
     case "user-defined": {
       if (!customEquation) return NaN;
@@ -55,15 +60,21 @@ export function evaluate(
     case "hyperbola":
       return (c("Bmax") * x) / (c("Kd") + x);
     case "quadratic":
-      return c("B0") + c("B1") * x + c("B2") * x ** 2;
+      return c("B0") + c("B1") * xc + c("B2") * xc ** 2;
     case "cubic":
-      return c("B0") + c("B1") * x + c("B2") * x ** 2 + c("B3") * x ** 3;
+      return c("B0") + c("B1") * xc + c("B2") * xc ** 2 + c("B3") * xc ** 3;
     case "quartic":
       // Plan 29: the polynomial evaluator generalises by degree.
-      return c("B0") + c("B1") * x + c("B2") * x ** 2 + c("B3") * x ** 3 + c("B4") * x ** 4;
+      return c("B0") + c("B1") * xc + c("B2") * xc ** 2 + c("B3") * xc ** 3 + c("B4") * xc ** 4;
     case "quintic":
       return (
-        c("B0") + c("B1") * x + c("B2") * x ** 2 + c("B3") * x ** 3 + c("B4") * x ** 4 + c("B5") * x ** 5
+        c("B0") + c("B1") * xc + c("B2") * xc ** 2 + c("B3") * xc ** 3 + c("B4") * xc ** 4 + c("B5") * xc ** 5
+      );
+    case "sextic":
+      // Seq 201: 6th order polynomial — same pattern, one degree higher.
+      return (
+        c("B0") + c("B1") * xc + c("B2") * xc ** 2 + c("B3") * xc ** 3 + c("B4") * xc ** 4 + c("B5") * xc ** 5 +
+        c("B6") * xc ** 6
       );
     case "segmental-linear":
       // Plan 29: the continuous hinge (X0 is the coefficient row the
@@ -129,13 +140,14 @@ function fittedCurve(
   steps = 100,
   ligandConcentration?: number,
   customEquation?: string,
+  centeredX?: number,
 ): { x: number[]; y: number[] } {
   const x: number[] = [];
   const y: number[] = [];
   for (let i = 0; i <= steps; i++) {
     const x0 = xMin + ((xMax - xMin) * i) / steps;
     x.push(x0);
-    y.push(evaluate(model, coefficients, x0, ligandConcentration, customEquation));
+    y.push(evaluate(model, coefficients, x0, ligandConcentration, customEquation, centeredX));
   }
   return { x, y };
 }
@@ -202,7 +214,7 @@ export function addFittedCurves(
     if (!y || !xs.length || !coefficients.some((c) => c.estimate != null)) return [];
     const lines = curveLines(fit, i, coefficients);
     notes.push(many ? `${name}: ${lines.join(", ")}` : lines.join("<br>"));
-    const curve = fittedCurve(model, coefficients, ...extent(xs), 100, fit.ligandConcentration, fit.customEquation);
+    const curve = fittedCurve(model, coefficients, ...extent(xs), 100, fit.ligandConcentration, fit.customEquation, fit.centeredX);
     return [
       {
         type: "scatter",
@@ -246,7 +258,7 @@ export function addFittedCurve(
       const yCol = ys.find((c) => c.name === setName) ?? y;
       const xs = xyPoints(x, yCol).x.filter((v) => keepCurveX(model, v));
       if (!xs.length) continue;
-      const curve = fittedCurve(model, coefficientsForSet(coefficients, setName, sets), ...extent(xs), 100, fit.ligandConcentration, fit.customEquation);
+      const curve = fittedCurve(model, coefficientsForSet(coefficients, setName, sets), ...extent(xs), 100, fit.ligandConcentration, fit.customEquation, fit.centeredX);
       fig.data = [
         {
           type: "scatter",
@@ -264,7 +276,7 @@ export function addFittedCurve(
   }
   const xs = xyPoints(x, y).x.filter((v) => keepCurveX(model, v));
   if (!xs.length) return;
-  const curve = fittedCurve(model, coefficients, ...extent(xs), 100, fit.ligandConcentration, fit.customEquation);
+  const curve = fittedCurve(model, coefficients, ...extent(xs), 100, fit.ligandConcentration, fit.customEquation, fit.centeredX);
   fig.data = [
     {
       type: "scatter",

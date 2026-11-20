@@ -15,7 +15,7 @@ import {
 } from "../../stats/xy/plot-function";
 import { hasXColumn, type TableType, type Transform } from "../../store/types";
 import { MODEL_LABEL, termLabel } from "../../stats/xy/nonlinear-regression";
-import { modelSpec } from "../../stats/xy/nonlinear-fit";
+import { isPolynomialModel, modelSpec } from "../../stats/xy/nonlinear-fit";
 import { parseCustomParameters, parseUserEquation } from "../../stats/xy/user-defined";
 import { dataGroups, incompleteRows, pairedGroups, pairIndices } from "../../stats/column/base";
 import { rowName } from "../../stats/grouped/base";
@@ -2619,6 +2619,14 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ["other", "Another curve (line, polynomial, exponential, Michaelis-Menten…)"],
         ]),
         choice("model", "Which curve should be fitted to X and Y?", models),
+        // Seq 201: a polynomial can be centered at the mean of X — B0
+        // becomes the fitted Y there, and the higher terms are far less
+        // collinear. The fitted values and R² are unchanged.
+        (a.model !== undefined && isPolynomialModel(a.model as NonlinearModel)) &&
+          choice("centered", "Center the polynomial at the mean of X?", [
+            ["no", "No — fit powers of X itself"],
+            ["yes", "Yes — fit powers of (X − mean X); B0 is the fitted Y at the mean X"],
+          ]),
         // v2 item 23: a user-defined equation — the equation first, then one starting
         // value per parameter it names. The comparison and global-fit questions below
         // are hidden for it (the runner cannot build those from an equation yet).
@@ -2874,6 +2882,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             ? { ecx: { ec10: 10, ec20: 20, ec80: 80, ec90: 90 }[a.ecx as string] as number }
             : {}),
           ...weights,
+          ...(a.centered === "yes" ? { centered: true } : {}),
           ...compareModel,
           ...global,
           ...sharedParams,

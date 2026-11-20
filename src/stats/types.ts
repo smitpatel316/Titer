@@ -115,6 +115,8 @@ export const NONLINEAR_MODELS = [
   "segmental-linear",
   "quartic",
   "quintic",
+  // Seq 201: Prism fits polynomials up to 6th order.
+  "sextic",
   ...KINETIC_MODELS,
   // Exponential family (plan 08, 1/2: decay first; one-phase-decay is already in KINETIC_MODELS).
   "two-phase-decay",
@@ -437,6 +439,12 @@ export interface NonlinearRegressionParams {
    *  name is already taken (the other Y data set's column), so the model
    *  comparison uses this field instead. */
   compareModel?: NonlinearModel;
+  /** Center the polynomial (seq 201): fit powers of (X − mean X) instead of
+   *  powers of X. The fitted values and R² are unchanged — only the
+   *  coefficients move (B0 becomes the fitted Y at the mean X, and the
+   *  higher terms are far less collinear, so their standard errors shrink).
+   *  Polynomials only; any other model refuses it. */
+  centered?: boolean;
   /** Extra Y series for a shared-parameter (global) fit. nls models only. */
   globalY?: string[];
   /** Which parameters are shared across the global fit's series (omitted:
@@ -1348,6 +1356,37 @@ interface CorrelationMatrix {
   label?: string;
 }
 
+/** One predictor's variance inflation factor (seq 198, multiple-regression
+ *  diagnostics): VIF = 1 / (1 − R²ⱼ), where R²ⱼ is that predictor regressed
+ *  on all the others. 1 = no collinearity; above 10 the predictor is
+ *  strongly collinear with the others and its coefficient is imprecise. */
+export interface VifRow {
+  term: string;
+  vif: number | null;
+}
+
+/** One row of a regression ANOVA table (seq 198): the variation the model
+ *  explains (Regression) against what is left (Residual), with the F test
+ *  of the whole model. */
+export interface AnovaRow {
+  source: string;
+  df: number | null;
+  ss: number | null;
+  ms: number | null;
+  f: number | null;
+  p: number | null;
+}
+
+/** A covariance matrix of fitted coefficients (seq 198): `values[i][j]` is
+ *  the covariance between the coefficients of `variables[i]` and
+ *  `variables[j]` (symmetric; the diagonal is each coefficient's variance).
+ *  Reported on the uncentered scale — the intercept's row is the intercept
+ *  as fitted, not the centered fit's. */
+export interface CovarianceMatrix {
+  variables: string[];
+  values: (number | null)[][];
+}
+
 /** One group of a survival analysis: its subjects, its events, and its median survival with
  *  the median's 95% interval (null where the curve, or the band's edge, never reaches 50%). */
 export interface SurvivalGroupRow {
@@ -1863,6 +1902,12 @@ export interface AnalysisResult {
   matrix?: CorrelationMatrix;
   /** Optional regression coefficients table (multiple regression). */
   coefficients?: RegressionCoefficient[];
+  /** Optional multiple-regression diagnostics (seq 198): one VIF per
+   *  predictor (multicollinearity), the regression ANOVA table, and the
+   *  covariance matrix of the coefficients. */
+  vif?: VifRow[];
+  anovaTable?: AnovaRow[];
+  covariance?: CovarianceMatrix;
   /** A curve fit's best-fit values, one column per data set (two when curves are compared). */
   fit?: { sets: string[]; rows: FitRow[] };
   /** A standard curve's unknowns, interpolated. */
@@ -1876,6 +1921,11 @@ export interface AnalysisResult {
    *  overlays need it to evaluate the curve, and the result alone does not carry it.
    *  Set whenever the run supplied one. */
   customEquation?: string;
+  /** The X a centered polynomial fit was centered at (seq 201): the mean of
+   *  the fitted X values. The fitted-curve overlays need it to evaluate the
+   *  curve (powers of X − centeredX, not of X). Set whenever the run fitted
+   *  a polynomial with `centered`. */
+  centeredX?: number;
   /** Optional variance components ("mixed-effects"): one row per
    *  random-effects grouping (subject intercept + residual in v1). */
   varianceComponents?: VarianceComponent[];
