@@ -31,6 +31,7 @@ import {
   type TemplateInfo,
 } from "../src/lib/template";
 import { highlightStyle, searchProject } from "../src/lib/project-search";
+import { formatMergeReport, mergeProjects, type MergeInput } from "../src/lib/project-merge";
 import { kaplanMeier } from "../src/lib/kaplan-meier";
 import { transformTable } from "../src/lib/transform";
 import {
@@ -44,6 +45,7 @@ import {
 import { writePrism } from "../src/lib/prism-write";
 import {
   infoSheetsOf,
+  MAX_INFO_SHEETS,
   newInfoSheetData,
   resolveAnalysisParams,
   resolveBoundSide,
@@ -508,6 +510,194 @@ check("replacing the copy's data leaves the original family untouched", () => {
   ok(JSON.stringify(s.nodes[t1].data?.rows) !== JSON.stringify(replacement.rows), "the original keeps its own values");
   strictEqual(s.nodes[copyAnalysis].parentId, copyId);
   strictEqual(s.nodes.a1.parentId, t1);
+});
+
+// ── File ▸ Merge (seq 180) ───────────────────────────────────────────────
+// Prism 10 User Guide, "Merging and splitting projects": File ▸ Merge
+// appends all sheets from another project file to the current one, and
+// "Prism places an asterisk (*) in front of the name of each merged sheet."
+// Before the fix there was no merge operation at all: no `mergeProjects`,
+// no `mergeProject` reducer action. These pins drive the pure merge first
+// (a family with every link kind), then the reducer action.
+const mergeTableData = (values: string[][]): TableData => ({ columns: ["", "Y1"], rows: values });
+
+/** The current project: two tables, an analysis + graph family, a figure and a linked info sheet. */
+const mergeCurrent = (): MergeInput => ({
+  nodes: {
+    t1: { id: "t1", type: "table", name: "Table 1", parentId: null, tableType: "column", data: mergeTableData([["A", "1"], ["B", "2"]]) },
+    t2: { id: "t2", type: "table", name: "Doses", parentId: null, tableType: "column", data: mergeTableData([["A", "3"]]) },
+    a1: { id: "a1", type: "analysis", name: "Descriptive statistics", parentId: "t1", analysisType: "descriptive-statistics", analysisParams: { columns: ["Y1"] } as AnalysisParams },
+    g1: { id: "g1", type: "graph", name: "Individual values", parentId: "t1", graphType: "individual", graphOptions: { ...newGraphOptions("individual"), sigAnalysisId: "a1" } },
+    f1: { id: "f1", type: "figure", name: "Figure 1", parentId: null, panels: [{ graphId: "g1", label: "A", title: "", row: 0, col: 0, rowSpan: 1, colSpan: 1 }], grid: { rows: 1, cols: 1 } },
+    i1: { id: "i1", type: "info", name: "Info Sheet", parentId: null, info: { constants: [], notes: "", linkedTableId: "t1" } },
+  },
+  rootOrder: ["t1", "t2", "i1", "f1"],
+  childOrder: { t1: ["a1", "g1"], t2: [] },
+  activeNodeId: "t1",
+});
+
+/** The incoming project: name collisions ("Doses", "Table 1"), an id
+ *  collision (its table is also "t1"), every link kind, an orphaned
+ *  analysis, and two dangling links (a graph link + a figure panel) that
+ *  must be dropped and reported, never silently swallowed. */
+const mergeIncoming = (): MergeInput => ({
+  nodes: {
+    t1: { id: "t1", type: "table", name: "Doses", parentId: null, tableType: "column", data: mergeTableData([["A", "9"]]) },
+    s2: { id: "s2", type: "table", name: "Table 1", parentId: null, tableType: "column", data: mergeTableData([["A", "8"]]) },
+    st1: { id: "st1", type: "table", name: "Doses, Log10", parentId: null, tableType: "column", data: mergeTableData([["A", "0"]]), transform: { from: "t1", kind: "log10" } },
+    sa1: { id: "sa1", type: "analysis", name: "t test", parentId: "t1", analysisType: "t-test", analysisParams: { columns: ["Y1"] } as AnalysisParams },
+    sg1: { id: "sg1", type: "graph", name: "Individual values", parentId: "t1", graphType: "individual", graphOptions: { ...newGraphOptions("individual"), regAnalysisId: "sa1", sigAnalysisId: "missing-analysis" } },
+    sf1: { id: "sf1", type: "figure", name: "Layout 1", parentId: null, panels: [{ graphId: "sg1", label: "A", title: "", row: 0, col: 0, rowSpan: 1, colSpan: 1 }, { graphId: "missing-graph", graphName: "Gone", label: "B", title: "", row: 0, col: 1, rowSpan: 1, colSpan: 1 }], grid: { rows: 1, cols: 2 } },
+    si1: { id: "si1", type: "info", name: "Info Sheet", parentId: null, info: { constants: [], notes: "", linkedTableId: "t1" } },
+    so1: { id: "so1", type: "analysis", name: "Old results", parentId: null, orphaned: true, sourceTableName: "Gone", analysisType: "descriptive-statistics" },
+  },
+  rootOrder: ["t1", "s2", "st1", "si1", "sf1", "so1"],
+  childOrder: { t1: ["sa1", "sg1"], s2: [], st1: [] },
+  activeNodeId: "t1",
+});
+
+check("merging a project appends its sheets with Prism's asterisk and keeps every link", () => {
+  const current = mergeCurrent();
+  const incoming = mergeIncoming();
+  const merged = mergeProjects(current, incoming, "Other.hlx");
+  // Root order keeps the file invariant (tables, then info, then figures,
+  // then orphaned analyses): current tables + incoming tables, current
+  // infos + incoming infos, current figures + incoming figures, orphans last.
+  const types = merged.rootOrder.map((id) => merged.nodes[id].type);
+  strictEqual(types.join(","), "table,table,table,table,table,info,info,figure,figure,analysis");
+  const incomingIds = Object.keys(incoming.nodes);
+  const mergedIncoming = merged.rootOrder.filter((id) => !current.nodes[id]);
+  strictEqual(mergedIncoming.length, incomingIds.length);
+  for (const id of mergedIncoming) ok(!incomingIds.includes(id), `incoming id ${id} was reused — merge must mint fresh ids`);
+  const byName = new Map(Object.values(merged.nodes).map((n) => [n.name, n]));
+  // Prism's asterisk, on every merged sheet — including the name collisions.
+  strictEqual(byName.get("* Doses")?.type, "table");
+  strictEqual(byName.get("* Table 1")?.type, "table");
+  strictEqual(byName.get("* t test")?.type, "analysis");
+  strictEqual(byName.get("* Individual values")?.type, "graph");
+  strictEqual(byName.get("* Layout 1")?.type, "figure");
+  strictEqual(byName.get("* Info Sheet")?.type, "info");
+  strictEqual(byName.get("* Doses, Log10")?.type, "table");
+  strictEqual(byName.get("* Old results")?.type, "analysis");
+  // The current project's sheets are untouched, names and ids alike.
+  strictEqual(merged.nodes.t1.name, "Table 1");
+  strictEqual(merged.nodes.t2.name, "Doses");
+  deepStrictEqual(merged.childOrder.t1, ["a1", "g1"]);
+  // The merged family links to itself, through the fresh ids.
+  const table = byName.get("* Doses")!;
+  const analysis = byName.get("* t test")!;
+  const graph = byName.get("* Individual values")!;
+  strictEqual(analysis.parentId, table.id);
+  strictEqual(graph.parentId, table.id);
+  strictEqual(graph.graphOptions?.regAnalysisId, analysis.id);
+  strictEqual(graph.graphOptions?.sigAnalysisId, undefined, "a link to an analysis that isn't in the file is dropped");
+  deepStrictEqual(merged.childOrder[table.id], [analysis.id, graph.id]);
+  const figure = byName.get("* Layout 1")!;
+  strictEqual(figure.panels?.length, 1, "a panel whose graph isn't in the file is dropped");
+  strictEqual(figure.panels?.[0].graphId, graph.id);
+  const info = byName.get("* Info Sheet")!;
+  strictEqual(info.info?.linkedTableId, table.id);
+  const transformed = byName.get("* Doses, Log10")!;
+  strictEqual(transformed.transform?.from, table.id);
+  const orphan = byName.get("* Old results")!;
+  strictEqual(orphan.parentId, null);
+  strictEqual(orphan.orphaned, true);
+  // The data is copied, not shared with the incoming project.
+  ok(table.data !== incoming.nodes.t1.data, "the merged table owns its data");
+  deepStrictEqual(table.data, incoming.nodes.t1.data);
+  // The merge appends; it doesn't navigate away.
+  strictEqual(merged.activeNodeId, "t1");
+  // The report names what merged and what was dropped.
+  strictEqual(merged.report.sourceName, "Other.hlx");
+  deepStrictEqual(merged.report.tables, ["* Doses", "* Table 1", "* Doses, Log10"]);
+  deepStrictEqual(merged.report.analyses, ["* t test", "* Old results"]);
+  deepStrictEqual(merged.report.graphs, ["* Individual values"]);
+  deepStrictEqual(merged.report.figures, ["* Layout 1"]);
+  deepStrictEqual(merged.report.infoSheets, ["* Info Sheet"]);
+  deepStrictEqual(merged.report.renamed, []);
+  strictEqual(merged.report.skipped.length, 0);
+  strictEqual(merged.report.dropped.length, 2);
+  ok(merged.report.dropped.some((d) => d.includes("missing-analysis")), "the dropped graph link is named");
+  ok(merged.report.dropped.some((d) => d.includes("missing-graph")), "the dropped figure panel is named");
+  // The report reads as the merge notice.
+  const lines = formatMergeReport(merged.report).split("\n");
+  strictEqual(lines[0], `Merged 8 sheets from “Other.hlx”:`);
+  ok(lines.some((l) => l.includes("* Doses")), "the notice lists the merged tables");
+  ok(lines.some((l) => l.includes("Dropped links:")), "the notice has a dropped-links section");
+});
+
+check("merging uniquifies a name when even the asterisk form is taken", () => {
+  const current = mergeCurrent();
+  current.nodes.star = { id: "star", type: "table", name: "* Doses", parentId: null, tableType: "column", data: mergeTableData([["A", "0"]]) };
+  current.rootOrder = ["t1", "t2", "star", "i1", "f1"];
+  current.childOrder.star = [];
+  const incoming: MergeInput = {
+    nodes: {
+      d1: { id: "d1", type: "table", name: "Doses", parentId: null, tableType: "column", data: mergeTableData([["A", "1"]]) },
+      d2: { id: "d2", type: "table", name: "Doses", parentId: null, tableType: "column", data: mergeTableData([["A", "2"]]) },
+    },
+    rootOrder: ["d1", "d2"],
+    childOrder: { d1: [], d2: [] },
+    activeNodeId: "d1",
+  };
+  const merged = mergeProjects(current, incoming, "Doses.hlx");
+  const names = merged.rootOrder.map((id) => merged.nodes[id].name);
+  ok(names.includes("* Doses 2"), "first colliding table takes * Doses 2");
+  ok(names.includes("* Doses 3"), "second colliding table takes * Doses 3");
+  ok(names.includes("* Doses"), "the existing * Doses table is untouched");
+  deepStrictEqual(merged.report.renamed, [
+    { from: "Doses", to: "* Doses 2" },
+    { from: "Doses", to: "* Doses 3" },
+  ]);
+});
+
+check("merging stops at the 500 info-sheet cap and says what it skipped", () => {
+  const current = mergeCurrent();
+  const nodes: Record<string, ProjectNode> = {};
+  const rootOrder: string[] = [];
+  for (let i = 0; i < MAX_INFO_SHEETS + 1; i++) {
+    const id = `info${i}`;
+    nodes[id] = { id, type: "info", name: `Info ${i + 1}`, parentId: null, info: { constants: [], notes: "" } };
+    rootOrder.push(id);
+  }
+  const incoming: MergeInput = { nodes, rootOrder, childOrder: {}, activeNodeId: rootOrder[0] };
+  const merged = mergeProjects(current, incoming, "Infos.hlx");
+  const infoCount = Object.values(merged.nodes).filter((n) => n.type === "info").length;
+  strictEqual(infoCount, MAX_INFO_SHEETS, "the cap counts the project's existing info sheets too");
+  strictEqual(merged.report.skipped.length, 1);
+  ok(merged.report.skipped[0].reason.includes("500"), "the skip names the cap");
+  strictEqual(merged.report.infoSheets.length, MAX_INFO_SHEETS - 1);
+});
+
+check("mergeProject is one undo step and leaves the project dirty", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  s = reducer(s, {
+    type: "create",
+    node: { id: "a1", type: "analysis", name: "Descriptive statistics", parentId: t1, analysisType: "descriptive-statistics", analysisParams: { columns: ["Y1"] } as AnalysisParams },
+  });
+  const before = s;
+  const current: MergeInput = { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId };
+  const merged = mergeProjects(current, mergeIncoming(), "Other.hlx");
+  s = reducer(s, { type: "mergeProject", nodes: merged.nodes, rootOrder: merged.rootOrder, childOrder: merged.childOrder, activeNodeId: merged.activeNodeId });
+  strictEqual(s.isDirty, true);
+  strictEqual(s.rootOrder.length, before.rootOrder.length + 6);
+  strictEqual(s.activeNodeId, before.activeNodeId, "merging doesn't move the active sheet");
+  strictEqual(s.past.at(-1)?.label, "Merge Project", "the Edit menu names the undo step");
+  s = reducer(s, { type: "undo" });
+  deepStrictEqual(s.rootOrder, before.rootOrder);
+  deepStrictEqual(s.childOrder, before.childOrder);
+  deepStrictEqual(Object.keys(s.nodes).sort(), Object.keys(before.nodes).sort());
+});
+
+check("remapGraphOptions keeps an estimation plot's t-test link when the analysis is cloned", () => {
+  const options = { ...newGraphOptions("individual"), ttestAnalysisId: "a1" };
+  const { options: kept, dropped } = remapGraphOptions(options, { a1: "a9" });
+  strictEqual(kept?.ttestAnalysisId, "a9");
+  deepStrictEqual(dropped, []);
+  const { options: gone, dropped: dropped2 } = remapGraphOptions(options, {});
+  strictEqual(gone?.ttestAnalysisId, undefined);
+  deepStrictEqual(dropped2, ["ttestAnalysisId"]);
 });
 
 // ── v1.6 MCP race fix ──────────────────────────────────────────────────────

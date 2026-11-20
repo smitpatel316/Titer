@@ -263,6 +263,7 @@ export const GRAPH_ANALYSIS_ID_KEYS = [
   "regAnalysisId",
   "demingAnalysisId",
   "coxAnalysisId",
+  "ttestAnalysisId",
   "poissonAnalysisId",
   "smoothAnalysisId",
   "pcaAnalysisId",
