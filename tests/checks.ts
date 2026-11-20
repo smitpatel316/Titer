@@ -804,6 +804,11 @@ check("seq 244 (MCP): update-graph with graph_type changes the type; an unoffere
   await harness.run("job-244-opt", "update-graph", { graph_id: "g1", options: { yMax: 20 } });
   strictEqual(harness.state().nodes.g1.graphType, "xy-bar");
   strictEqual(harness.state().nodes.g1.graphOptions?.yMax, 20);
+  // The same type with nothing to change is a no-op, not an undo step.
+  const pastBefore = harness.state().past?.length ?? 0;
+  const done3 = await harness.run("job-244-same", "update-graph", { graph_id: "g1", graph_type: "xy-bar" });
+  strictEqual((done3.result as { graph_type: string }).graph_type, "xy-bar");
+  strictEqual(harness.state().past?.length ?? 0, pastBefore);
   // Neither options nor a type: refused.
   await rejects(harness.run("job-244-neither", "update-graph", { graph_id: "g1" }), /needs “options”/);
 });

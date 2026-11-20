@@ -744,7 +744,11 @@ export function executeUpdateGraph(job: McpJob, deps: GraphJobDeps): GraphJobOut
   const { options, warnings } = validateGraphOptions(job, args.options, state, tableId);
   // A type change goes through `changeGraphType`, not `updateGraph`: the
   // store takes the new type's defaults (or the caller's merged options)
-  // and renames the graph for its new type.
+  // and renames the graph for its new type. The same type with nothing to
+  // change is a no-op, not a spurious undo step.
+  if (graphType !== undefined && graphType === node.graphType && args.options === undefined) {
+    return { result: { project_id: job.project_id, graph_id: graphId, graph_type: graphType } };
+  }
   if (graphType !== undefined && graphType !== node.graphType) {
     const table = tableId ? state.nodes[tableId] : undefined;
     const tableType = table?.type === "table" ? table.tableType : undefined;
