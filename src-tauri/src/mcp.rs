@@ -1309,13 +1309,13 @@ pub async fn mcp_autostart_if_opted_in(app: AppHandle) {
 // stdio bridge is untouched — it stays a byte-forwarder (contract
 // §11.2) and naturally advertises only what the server advertises.
 //
-// Groups, not 52 checkboxes: every tool belongs to exactly one group
+// Groups, not 56 checkboxes: every tool belongs to exactly one group
 // (the unit test `allowlist_groups_cover_all_tools_once` pins the
 // inventory), so the enabled groups fully determine the advertised set.
-// The `destructive` group holds the six `destructive_hint` tools, so a
-// user who turns on "Edit tables" still cannot have data replaced or
-// deleted until they also turn on "Destructive actions" — the two
-// decisions stay separate on purpose.
+// The `destructive` group holds the two tools that delete data or run
+// arbitrary scripts (`titer_delete_node`, `titer_run_script`); table
+// writes and edits live in `tables`, closing in `project`, cloud
+// overwrites in `cloud` — each toggle grants only its own area.
 
 /// One allowlist group: the toggle the user sees in Settings → AI
 /// Connections, and the tools it unlocks.
@@ -1350,17 +1350,25 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
         tools: &["titer_read_figure", "titer_read_info_sheet", "titer_read_activity", "titer_send_feedback"],
     },
     AllowlistGroup {
+        id: "discovery",
+        label: "Discover projects and params",
+        description: "Summarise projects, search nodes by name, and look up an analysis type's valid params before running it.",
+        tools: &["titer_project_summary", "titer_search", "titer_get_analysis_params"],
+    },
+    AllowlistGroup {
         id: "project",
         label: "Open and save projects",
-        description: "Create, open, save and import projects.",
-        tools: &["titer_create_project", "titer_open_project", "titer_save_project", "titer_import_prism"],
+        description: "Create, open, save, close and import projects.",
+        tools: &["titer_create_project", "titer_open_project", "titer_save_project", "titer_close_project", "titer_import_prism"],
     },
     AllowlistGroup {
         id: "tables",
         label: "Edit tables",
-        description: "Create, duplicate, rename and reorder tables; undo and redo.",
+        description: "Create, write, edit, duplicate, rename and reorder tables; undo and redo.",
         tools: &[
             "titer_create_table",
+            "titer_write_table",
+            "titer_edit_table",
             "titer_duplicate_table_family",
             "titer_rename_node",
             "titer_reorder_nodes",
@@ -1374,6 +1382,7 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
         description: "Run and freeze analyses, simulate data, apply methods and the wand; check job status.",
         tools: &[
             "titer_run_analysis",
+            "titer_rerun_analysis",
             "titer_freeze_analysis",
             "titer_simulate_data",
             "titer_apply_method",
@@ -1413,6 +1422,7 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
             "titer_cloud_metadata",
             "titer_cloud_revisions",
             "titer_cloud_download",
+            "titer_cloud_upload",
             "titer_cloud_upload_new",
             "titer_cloud_create_folder",
             "titer_cloud_move",
@@ -1421,14 +1431,10 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
     AllowlistGroup {
         id: "destructive",
         label: "Destructive actions",
-        description: "Replace or delete data, run scripts, close without saving, overwrite cloud files.",
+        description: "Delete nodes and run scripts.",
         tools: &[
-            "titer_write_table",
-            "titer_edit_table",
             "titer_delete_node",
-            "titer_close_project",
             "titer_run_script",
-            "titer_cloud_upload",
         ],
     },
 ];
@@ -3348,7 +3354,7 @@ impl TiterMcpServer {
     /// sheets, without pulling the whole project listing.
     #[tool(
         name = "titer_search",
-        description = "Search the open projects for nodes by name (case-insensitive substring; an analysis or graph also matches on its type, so \"anova\" finds a One-way ANOVA node whatever it is named). Returns id, name, kind and parent per match, at most 100 (the answer says how many matched in total). Omit project_id to search every open project; kind narrows to table, analysis, graph, figure or info.",
+        description = "Search the open projects for nodes by name (case-insensitive substring; an analysis or graph also matches on its type, so \"anova\" finds a One-way ANOVA node whatever it is named). Figures are not searched — find them through their graphs. Returns id, name, kind and parent per match, at most 100 (the answer says how many matched in total). Omit project_id to search every open project; kind narrows to table, analysis, graph or info.",
         annotations(
             title = "Search nodes",
             read_only_hint = true,
@@ -7129,15 +7135,17 @@ const SEARCH_MAX_RESULTS: usize = 100;
 /// Nodes whose name matches `query` (case-insensitive substring; an
 /// analysis or graph also matches on its type, so "anova" finds a
 /// "One-way ANOVA" node whatever it is named), in listing order
-/// (tables, analyses, graphs, figures, info sheets). Returns the
-/// matches (at most `SEARCH_MAX_RESULTS`) and the total match count.
+/// (tables, analyses, graphs, info sheets). Figures are not searched:
+/// a figure is a container for graphs, found through its graphs.
+/// Returns the matches (at most `SEARCH_MAX_RESULTS`) and the total
+/// match count.
 fn search_nodes(snapshot: &serde_json::Value, query: &str, kind: Option<&str>) -> (Vec<serde_json::Value>, usize) {
     let nodes = nodes_of(snapshot);
-    let (tables, analyses, graphs, figures, info_sheets) = project_buckets(snapshot);
+    let (tables, analyses, graphs, _figures, info_sheets) = project_buckets(snapshot);
     let q = query.to_lowercase();
     let mut matches = Vec::new();
     let mut total = 0;
-    for bucket in [tables, analyses, graphs, figures, info_sheets] {
+    for bucket in [tables, analyses, graphs, info_sheets] {
         for entry in bucket {
             let Some(id) = entry.get("id").and_then(|v| v.as_str()) else { continue };
             let Some(node) = nodes.get(id) else { continue };
@@ -8815,7 +8823,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 52 tools, so it enables every group first.
+        // this test drives all 56 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -9878,12 +9886,12 @@ mod tests {
 
     #[test]
     fn allowlist_groups_cover_all_tools_once() {
-        // The inventory pin: every tool in exactly one group, 52 total.
+        // The inventory pin: every tool in exactly one group, 56 total.
         // A lane that adds a tool must assign it a group here, or this
         // fails — an ungrouped tool would otherwise be silently hidden.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 52, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 56, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
