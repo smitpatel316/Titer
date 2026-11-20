@@ -691,6 +691,56 @@ const linesAllZeroY = table(
     ["", "2", "-1"],
   ],
 );
+/** Dose-response variants (1.8, B6): noiseless by construction.
+ *  doseLogB6X: X = log(concentration) -3..3. N3A: agonist 3PL normalized
+ *  LogEC50=0. N4A: agonist 4PL normalized LogEC50=0, HillSlope=1.5.
+ *  N3I: inhibitor 3PL normalized LogIC50=0. N4I: inhibitor 4PL normalized
+ *  LogIC50=0, HillSlope=1.5. N3B: a second normalized 3PL with
+ *  LogEC50=0.5, for the curve-comparison check. */
+const doseLogB6X = table(
+  ["Title", "X", "N3A", "N4A", "N3I", "N4I", "N3B"],
+  [
+    ["", "-3", "0.0999000999", "0.0031621777", "99.9000999001", "99.9968378223", "0.0316127798"],
+    ["", "-2.5", "0.3152309183", "0.0177796324", "99.6847690817", "99.9822203676", "0.0999000999"],
+    ["", "-2", "0.9900990099", "0.0999000999", "99.0099009901", "99.9000999001", "0.3152309183"],
+    ["", "-1.5", "3.0653430032", "0.5591967309", "96.9346569968", "99.4408032691", "0.9900990099"],
+    ["", "-1", "9.0909090909", "3.0653430032", "90.9090909091", "96.9346569968", "3.0653430032"],
+    ["", "-0.5", "24.0253073352", "15.0979557211", "75.9746926648", "84.9020442789", "9.0909090909"],
+    ["", "0", "50.0000000000", "50.0000000000", "50.0000000000", "50.0000000000", "24.0253073352"],
+    ["", "0.5", "75.9746926648", "84.9020442789", "24.0253073352", "15.0979557211", "50.0000000000"],
+    ["", "1", "90.9090909091", "96.9346569968", "9.0909090909", "3.0653430032", "75.9746926648"],
+    ["", "1.5", "96.9346569968", "99.4408032691", "3.0653430032", "0.5591967309", "90.9090909091"],
+    ["", "2", "99.0099009901", "99.9000999001", "0.9900990099", "0.0999000999", "96.9346569968"],
+    ["", "2.5", "99.6847690817", "99.9822203676", "0.3152309183", "0.0177796324", "99.0099009901"],
+    ["", "3", "99.9000999001", "99.9968378223", "0.0999000999", "0.0031621777", "99.6847690817"],
+  ],
+);
+
+/** doseXB6X: X = concentration, log-spaced 0.001..1000 plus the vehicle
+ *  point X = 0. A3X: agonist 3PL Bottom=0, Top=100, EC50=1.
+ *  I3X: inhibitor 3PL Bottom=0, Top=100, IC50=1. N3AX/N3IX: the
+ *  normalized 3PL twins (same curves). N4AX: agonist 4PL normalized
+ *  EC50=1, HillSlope=1.5. N4IX: inhibitor 4PL normalized IC50=1,
+ *  HillSlope=1.5. */
+const doseXB6X = table(
+  ["Title", "X", "A3X", "I3X", "N3AX", "N4AX", "N3IX", "N4IX"],
+  [
+    ["", "0", "0.0000000000", "100.0000000000", "0.0000000000", "0.0000000000", "100.0000000000", "100.0000000000"],
+    ["", "0.001", "0.0999000999", "99.9000999001", "0.0999000999", "0.0031621777", "99.9000999001", "99.9968378223"],
+    ["", "0.003", "0.2991026919", "99.7008973081", "0.2991026919", "0.0164289772", "99.7008973081", "99.9835710228"],
+    ["", "0.01", "0.9900990099", "99.0099009901", "0.9900990099", "0.0999000999", "99.0099009901", "99.9000999001"],
+    ["", "0.03", "2.9126213592", "97.0873786408", "2.9126213592", "0.5169291994", "97.0873786408", "99.4830708006"],
+    ["", "0.1", "9.0909090909", "90.9090909091", "9.0909090909", "3.0653430032", "90.9090909091", "96.9346569968"],
+    ["", "0.3", "23.0769230769", "76.9230769231", "23.0769230769", "14.1127201697", "76.9230769231", "85.8872798303"],
+    ["", "1", "50.0000000000", "50.0000000000", "50.0000000000", "50.0000000000", "50.0000000000", "50.0000000000"],
+    ["", "3", "75.0000000000", "25.0000000000", "75.0000000000", "83.8609522204", "25.0000000000", "16.1390477796"],
+    ["", "10", "90.9090909091", "9.0909090909", "90.9090909091", "96.9346569968", "9.0909090909", "3.0653430032"],
+    ["", "30", "96.7741935484", "3.2258064516", "96.7741935484", "99.3951006806", "3.2258064516", "0.6048993194"],
+    ["", "100", "99.0099009901", "0.9900990099", "99.0099009901", "99.9000999001", "0.9900990099", "0.0999000999"],
+    ["", "300", "99.6677740864", "0.3322259136", "99.6677740864", "99.9807586940", "0.3322259136", "0.0192413060"],
+    ["", "1000", "99.9000999001", "0.0999000999", "99.9000999001", "99.9968378223", "0.0999000999", "0.0031621777"],
+  ],
+);
 /** A sine wave needs ≥ 5 points (4 parameters + 1) — this has 4. */
 const classicTooFew = table(
   ["Title", "X", "Y"],
@@ -2626,6 +2676,17 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["classicB6X", classicB6X, "nonlinear-regression", { y: "PA", model: "plateau-association" }],
   ["lognormX", lognormX, "nonlinear-regression", { y: "LN", model: "lognormal" }],
   ["sincX", sincX, "nonlinear-regression", { y: "SC", model: "sinc" }],
+  ["doseLogB6X", doseLogB6X, "nonlinear-regression", { y: "N3A", model: "agonist-3pl-normalized-logx" }],
+  ["doseLogB6X", doseLogB6X, "nonlinear-regression", { y: "N4A", model: "agonist-4pl-normalized-logx" }],
+  ["doseLogB6X", doseLogB6X, "nonlinear-regression", { y: "N3I", model: "inhibitor-3pl-normalized-logx" }],
+  ["doseLogB6X", doseLogB6X, "nonlinear-regression", { y: "N4I", model: "inhibitor-4pl-normalized-logx" }],
+  ["doseLogB6X", doseLogB6X, "nonlinear-regression", { y: "N3A", model: "agonist-3pl-normalized-logx", compareWith: "N3B", compare: "ec50" }],
+  ["doseXB6X", doseXB6X, "nonlinear-regression", { y: "A3X", model: "agonist-3pl-x" }],
+  ["doseXB6X", doseXB6X, "nonlinear-regression", { y: "I3X", model: "inhibitor-3pl-x" }],
+  ["doseXB6X", doseXB6X, "nonlinear-regression", { y: "N3AX", model: "agonist-3pl-normalized-x" }],
+  ["doseXB6X", doseXB6X, "nonlinear-regression", { y: "N4AX", model: "agonist-4pl-normalized-x" }],
+  ["doseXB6X", doseXB6X, "nonlinear-regression", { y: "N3IX", model: "inhibitor-3pl-normalized-x" }],
+  ["doseXB6X", doseXB6X, "nonlinear-regression", { y: "N4IX", model: "inhibitor-4pl-normalized-x" }],
   ["linesX", linesX, "nonlinear-regression", { y: "LO", model: "line-through-origin" }],
   ["linesX", linesX, "nonlinear-regression", { y: "HL", model: "horizontal-line" }],
   ["linesX", linesX, "nonlinear-regression", { y: "SL", model: "semilog-y-log" }],
@@ -5258,6 +5319,307 @@ async function disagreements(): Promise<string[]> {
     out.push(
       `Classic curves semilog Y-log interpolate: ${"error" in interpRefused ? interpRefused.error : "ran without error"}, expected a log-Y refusal`,
     );
+  // Dose-response variants (1.8, B6): the X-concentration 3PLs and the
+  // normalized 3PL/4PLs, on the noiseless dose fixtures. Same tolerances
+  // as the other dose fits (parameters and derived rows 1e-3 relative,
+  // R² 1e-6), plus the TS-vs-R overlay check per model and the closed-form
+  // inverse at the midpoint (Y = 50 reads the midpoint back).
+  const doseLogXs = [...Array(13)].map((_, i) => -3 + i * 0.5);
+  const doseXXs = [0, 0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000];
+  const checkDoseInverse = (label: string, fit: AnalysisResult | null, model: NonlinearModel, want: number) => {
+    if (!fit) return;
+    const back = invertModel(model, fit.coefficients ?? [], 50);
+    if (back == null || Math.abs(back - want) > 1e-3)
+      out.push(`Dose ${label} inverse at Y=50: ${back}, expected ${want}`);
+  };
+  const fitA3X = await checkClassic(
+    "agonist 3PL X",
+    "A3X",
+    "agonist-3pl-x",
+    [
+      ["Bottom", 0],
+      ["Top", 100],
+      ["EC50", 1],
+    ],
+    [
+      ["Span", 100],
+      ["R squared", 1],
+    ],
+    doseXB6X,
+  );
+  if (fitA3X) {
+    await checkClassicOverlay(
+      "agonist 3PL X",
+      "A3X",
+      "agonist-3pl-x",
+      fitA3X,
+      (p) =>
+        `${p.Bottom!.toPrecision(15)}+(${p.Top!.toPrecision(15)}-${p.Bottom!.toPrecision(15)})/(1+${p.EC50!.toPrecision(15)}/x)`,
+      doseXB6X,
+      doseXXs,
+    );
+    checkDoseInverse("agonist 3PL X", fitA3X, "agonist-3pl-x", 1);
+  }
+  const fitI3X = await checkClassic(
+    "inhibitor 3PL X",
+    "I3X",
+    "inhibitor-3pl-x",
+    [
+      ["Bottom", 0],
+      ["Top", 100],
+      ["IC50", 1],
+    ],
+    [
+      ["Span", 100],
+      ["R squared", 1],
+    ],
+    doseXB6X,
+  );
+  if (fitI3X) {
+    await checkClassicOverlay(
+      "inhibitor 3PL X",
+      "I3X",
+      "inhibitor-3pl-x",
+      fitI3X,
+      (p) =>
+        `${p.Bottom!.toPrecision(15)}+(${p.Top!.toPrecision(15)}-${p.Bottom!.toPrecision(15)})/(1+x/${p.IC50!.toPrecision(15)})`,
+      doseXB6X,
+      doseXXs,
+    );
+    checkDoseInverse("inhibitor 3PL X", fitI3X, "inhibitor-3pl-x", 1);
+  }
+  const fitN3A = await checkClassic(
+    "agonist 3PL normalized logx",
+    "N3A",
+    "agonist-3pl-normalized-logx",
+    [["LogEC50", 0]],
+    [
+      ["EC50", 1],
+      ["Span", 100],
+      ["R squared", 1],
+    ],
+    doseLogB6X,
+  );
+  if (fitN3A) {
+    await checkClassicOverlay(
+      "agonist 3PL normalized logx",
+      "N3A",
+      "agonist-3pl-normalized-logx",
+      fitN3A,
+      (p) => `100/(1+10^(${p.LogEC50!.toPrecision(15)}-x))`,
+      doseLogB6X,
+      doseLogXs,
+    );
+    checkDoseInverse("agonist 3PL normalized logx", fitN3A, "agonist-3pl-normalized-logx", 0);
+  }
+  const fitN4A = await checkClassic(
+    "agonist 4PL normalized logx",
+    "N4A",
+    "agonist-4pl-normalized-logx",
+    [
+      ["LogEC50", 0],
+      ["HillSlope", 1.5],
+    ],
+    [
+      ["EC50", 1],
+      ["Span", 100],
+      ["R squared", 1],
+    ],
+    doseLogB6X,
+  );
+  if (fitN4A) {
+    await checkClassicOverlay(
+      "agonist 4PL normalized logx",
+      "N4A",
+      "agonist-4pl-normalized-logx",
+      fitN4A,
+      (p) => `100/(1+10^((${p.LogEC50!.toPrecision(15)}-x)*${p.HillSlope!.toPrecision(15)}))`,
+      doseLogB6X,
+      doseLogXs,
+    );
+    checkDoseInverse("agonist 4PL normalized logx", fitN4A, "agonist-4pl-normalized-logx", 0);
+  }
+  const fitN3I = await checkClassic(
+    "inhibitor 3PL normalized logx",
+    "N3I",
+    "inhibitor-3pl-normalized-logx",
+    [["LogIC50", 0]],
+    [
+      ["IC50", 1],
+      ["Span", 100],
+      ["R squared", 1],
+    ],
+    doseLogB6X,
+  );
+  if (fitN3I) {
+    await checkClassicOverlay(
+      "inhibitor 3PL normalized logx",
+      "N3I",
+      "inhibitor-3pl-normalized-logx",
+      fitN3I,
+      (p) => `100/(1+10^(x-${p.LogIC50!.toPrecision(15)}))`,
+      doseLogB6X,
+      doseLogXs,
+    );
+    checkDoseInverse("inhibitor 3PL normalized logx", fitN3I, "inhibitor-3pl-normalized-logx", 0);
+  }
+  const fitN4I = await checkClassic(
+    "inhibitor 4PL normalized logx",
+    "N4I",
+    "inhibitor-4pl-normalized-logx",
+    [
+      ["LogIC50", 0],
+      ["HillSlope", 1.5],
+    ],
+    [
+      ["IC50", 1],
+      ["Span", 100],
+      ["R squared", 1],
+    ],
+    doseLogB6X,
+  );
+  if (fitN4I) {
+    await checkClassicOverlay(
+      "inhibitor 4PL normalized logx",
+      "N4I",
+      "inhibitor-4pl-normalized-logx",
+      fitN4I,
+      (p) => `100/(1+10^((x-${p.LogIC50!.toPrecision(15)})*${p.HillSlope!.toPrecision(15)}))`,
+      doseLogB6X,
+      doseLogXs,
+    );
+    checkDoseInverse("inhibitor 4PL normalized logx", fitN4I, "inhibitor-4pl-normalized-logx", 0);
+  }
+  const fitN3AX = await checkClassic(
+    "agonist 3PL normalized X",
+    "N3AX",
+    "agonist-3pl-normalized-x",
+    [["EC50", 1]],
+    [
+      ["Span", 100],
+      ["R squared", 1],
+    ],
+    doseXB6X,
+  );
+  if (fitN3AX) {
+    await checkClassicOverlay(
+      "agonist 3PL normalized X",
+      "N3AX",
+      "agonist-3pl-normalized-x",
+      fitN3AX,
+      (p) => `ifelse(x==0,0,100/(1+${p.EC50!.toPrecision(15)}/x))`,
+      doseXB6X,
+      doseXXs,
+    );
+    checkDoseInverse("agonist 3PL normalized X", fitN3AX, "agonist-3pl-normalized-x", 1);
+  }
+  const fitN4AX = await checkClassic(
+    "agonist 4PL normalized X",
+    "N4AX",
+    "agonist-4pl-normalized-x",
+    [
+      ["EC50", 1],
+      ["HillSlope", 1.5],
+    ],
+    [
+      ["Span", 100],
+      ["R squared", 1],
+    ],
+    doseXB6X,
+  );
+  if (fitN4AX) {
+    await checkClassicOverlay(
+      "agonist 4PL normalized X",
+      "N4AX",
+      "agonist-4pl-normalized-x",
+      fitN4AX,
+      (p) => `ifelse(x==0,0,100/(1+(${p.EC50!.toPrecision(15)}/x)^${p.HillSlope!.toPrecision(15)}))`,
+      doseXB6X,
+      doseXXs,
+    );
+    checkDoseInverse("agonist 4PL normalized X", fitN4AX, "agonist-4pl-normalized-x", 1);
+  }
+  const fitN3IX = await checkClassic(
+    "inhibitor 3PL normalized X",
+    "N3IX",
+    "inhibitor-3pl-normalized-x",
+    [["IC50", 1]],
+    [
+      ["Span", 100],
+      ["R squared", 1],
+    ],
+    doseXB6X,
+  );
+  if (fitN3IX) {
+    await checkClassicOverlay(
+      "inhibitor 3PL normalized X",
+      "N3IX",
+      "inhibitor-3pl-normalized-x",
+      fitN3IX,
+      (p) => `ifelse(x==0,0,100/(1+x/${p.IC50!.toPrecision(15)}))`,
+      doseXB6X,
+      doseXXs,
+    );
+    checkDoseInverse("inhibitor 3PL normalized X", fitN3IX, "inhibitor-3pl-normalized-x", 1);
+  }
+  const fitN4IX = await checkClassic(
+    "inhibitor 4PL normalized X",
+    "N4IX",
+    "inhibitor-4pl-normalized-x",
+    [
+      ["IC50", 1],
+      ["HillSlope", 1.5],
+    ],
+    [
+      ["Span", 100],
+      ["R squared", 1],
+    ],
+    doseXB6X,
+  );
+  if (fitN4IX) {
+    await checkClassicOverlay(
+      "inhibitor 4PL normalized X",
+      "N4IX",
+      "inhibitor-4pl-normalized-x",
+      fitN4IX,
+      (p) => `ifelse(x==0,0,100/(1+(x/${p.IC50!.toPrecision(15)})^${p.HillSlope!.toPrecision(15)}))`,
+      doseXB6X,
+      doseXXs,
+    );
+    checkDoseInverse("inhibitor 4PL normalized X", fitN4IX, "inhibitor-4pl-normalized-x", 1);
+  }
+  // ECanything on the new models: EC80 of the normalized 3PL agonist is
+  // 10^log10(4) = 4, and IC80 of the inhibitor 3PL X is IC50·(80/20) = 4
+  // — the latter exercises the fixed inhibitor-x midpoint (IC50, not
+  // LogIC50/EC50). IC80 of the normalized 4PL inhibitor is 4^(1/1.5).
+  const ec80 = async (label: string, y: string, model: NonlinearModel, table: TableData, row: string, want: number) => {
+    const r = await runAnalysis("nonlinear-regression", table, { y, model, ecx: 80 });
+    if ("error" in r) {
+      out.push(`Dose ${label} EC80: ${r.error}`);
+      return;
+    }
+    const got = r.fit?.rows.find((w) => w.label === row)?.values?.[0];
+    if (!relClose(got, want, 1e-3)) out.push(`Dose ${label} ${row}: ${got}, expected ${want}`);
+  };
+  await ec80("agonist 3PL normalized logx", "N3A", "agonist-3pl-normalized-logx", doseLogB6X, "EC80", 4);
+  await ec80("inhibitor 3PL X", "I3X", "inhibitor-3pl-x", doseXB6X, "IC80", 4);
+  await ec80("inhibitor 4PL normalized logx", "N4I", "inhibitor-4pl-normalized-logx", doseLogB6X, "IC80", 2.5198);
+  // Curve comparison on a normalized 3PL — the shared-midpoint fit has no
+  // own parameter, so this is the comparisonRCode start-list case: the two
+  // EC50s are 10^0 = 1 and 10^0.5 ≈ 3.1623.
+  const normCompare = await runAnalysis("nonlinear-regression", doseLogB6X, {
+    y: "N3A",
+    model: "agonist-3pl-normalized-logx",
+    compareWith: "N3B",
+    compare: "ec50",
+  });
+  if ("error" in normCompare) {
+    out.push(`Dose normalized 3PL comparison: ${normCompare.error}`);
+  } else {
+    const ec50s = normCompare.fit?.rows.find((w) => w.label === "EC50")?.values;
+    if (ec50s == null || !relClose(ec50s[0], 1, 1e-3) || !relClose(ec50s[1], 3.1623, 1e-3))
+      out.push(`Dose normalized 3PL comparison EC50s: ${ec50s}, expected [1, 3.1623]`);
+  }
   // The sine wave needs ≥ 5 points (4 parameters + 1) — this has 4.
   const classicFew = await runAnalysis("nonlinear-regression", classicTooFew, { model: "sine-wave" });
   if (!("error" in classicFew) || !classicFew.error.includes("need at least 5"))
