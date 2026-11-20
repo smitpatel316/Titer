@@ -503,7 +503,12 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         dataFormat = "y_single";
       } else if (tableType === "parts-of-whole") {
         format = "parts_of_whole";
-        dataFormat = "y_single";
+        // The table-level format is its datasets' format when they agree
+        // (a y_sd_n Parts-of-Whole table declares y_sd_n, as a Column
+        // table does — real Prism stores the specific statistic there);
+        // otherwise y_single, and the reader names subcolumns from each
+        // dataset's own format (W7/BUG-9).
+        dataFormat = uniform ? sets[0].dataFormat : "y_single";
       } else {
         format = "column";
         dataFormat = uniform ? sets[0].dataFormat : "y_single";

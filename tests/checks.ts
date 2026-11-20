@@ -7446,6 +7446,93 @@ check("the pie drops a negative slice and names it, instead of showing inflated 
   deepStrictEqual(donutTrace.labels, ["A", "C"]);
 });
 
+// Seq 197: a Prism PartsOfWhole table imports as the native type, not Column —
+// Mendel's peas (the fixture is Prism's own example file): four mutually
+// exclusive categories as rows, one data set per column.
+check("a .pzfx PartsOfWhole table imports as Parts of Whole, rows are the categories", () => {
+  const imported = parsePzfx(readFileSync("tests/testdata/parts_of_whole.pzfx", "utf8"));
+  strictEqual(imported.issues.filter((i) => i.severity === "error").length, 0, "parses clean");
+  const table = imported.project.rootOrder
+    .map((id) => imported.project.nodes[id])
+    .find((n) => n?.type === "table");
+  strictEqual(table?.tableType, "parts-of-whole");
+  strictEqual(table?.name, "Data 2");
+  deepStrictEqual(table?.data?.columns, ["Title", "# of seeds"]);
+  deepStrictEqual(
+    table?.data?.rows.map((r) => r[0]),
+    ["Round and yellow", "Round and green", "Angular and yellow", "Angular and green"],
+  );
+  deepStrictEqual(
+    table?.data?.rows.map((r) => r[1]),
+    ["315", "108", "101", "32"],
+  );
+});
+
+check("a Parts-of-Whole pie slices the rows of one data set", () => {
+  const mendel = {
+    columns: ["Title", "# of seeds", "Expected"],
+    rows: [
+      ["Round and yellow", "315", "312.75"],
+      ["Round and green", "108", "104.25"],
+      ["Angular and yellow", "101", "104.25"],
+      ["Angular and green", "32", "34.75"],
+    ],
+  };
+  const dataset = readTable(mendel);
+  const options = newGraphOptions("pie");
+  const fig = GRAPHS.pie.build(
+    dataset.numeric,
+    options,
+    paintOf(options, 4),
+    dataset.titles,
+    undefined,
+    "parts-of-whole",
+  );
+  const [trace] = fig.data as { labels?: string[]; values?: number[] }[];
+  // Slices are the four categories, sized by the first data set — not one
+  // slice per column (the Column pie's reading).
+  deepStrictEqual(trace.labels, ["Round and yellow", "Round and green", "Angular and yellow", "Angular and green"]);
+  deepStrictEqual(trace.values, [315, 108, 101, 32]);
+  const notes = ((fig.layout.annotations as { text?: string }[] | undefined) ?? []).map((n) => n.text ?? "");
+  ok(notes.some((t) => t.includes("Expected")), `the pie must name the unshown data set, got ${JSON.stringify(notes)}`);
+  // A Column pie of the same table slices the columns instead.
+  const [columnTrace] = GRAPHS.pie.build(dataset.numeric, options, paintOf(options, 2)).data as {
+    labels?: string[];
+    values?: number[];
+  }[];
+  deepStrictEqual(columnTrace.labels, ["# of seeds", "Expected"]);
+  deepStrictEqual(columnTrace.values, [556, 556]);
+});
+
+check("a Parts-of-Whole stacked bar stacks the categories in each data set", () => {
+  const mendel = {
+    columns: ["Title", "# of seeds", "Expected"],
+    rows: [
+      ["Round and yellow", "315", "312.75"],
+      ["Round and green", "108", "104.25"],
+      ["Angular and yellow", "101", "104.25"],
+      ["Angular and green", "32", "34.75"],
+    ],
+  };
+  const dataset = readTable(mendel);
+  const options = { ...newGraphOptions("pow-stacked"), stackAs: "percent" as const };
+  const fig = GRAPHS["pow-stacked"].build(dataset.numeric, options, paintOf(options, 4), dataset.titles);
+  const traces = fig.data as { name?: string; x?: string[]; y?: (number | null)[] }[];
+  // One trace per category (row), one bar per data set (column).
+  deepStrictEqual(
+    traces.map((t) => t.name),
+    ["Round and yellow", "Round and green", "Angular and yellow", "Angular and green"],
+  );
+  deepStrictEqual(traces[0].x, ["# of seeds", "Expected"]);
+  // Each bar's segments make 100 % (both data sets total 556).
+  for (let b = 0; b < 2; b++) {
+    const total = traces.reduce((s, t) => s + (t.y?.[b] ?? 0), 0);
+    ok(Math.abs(total - 100) < 1e-9, `bar ${b} sums to ${total}, not 100`);
+  }
+  strictEqual((fig.layout as { barmode?: string }).barmode, "stack");
+  strictEqual((fig.layout.yaxis as { title: { text: string } }).title.text, "Percent of total");
+});
+
 check("Match Another Graph… takes only what is ticked, series in order", () => {
   const graph = (type: GraphType, table: string, series: string[], over: Partial<GraphOptions>): Matched => ({
     type,

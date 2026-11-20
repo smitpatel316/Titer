@@ -8275,6 +8275,8 @@ mod tests {
         assert_eq!(column_role("survival", 0, &json!({})), "Time");
         assert_eq!(column_role("parts-of-whole", 1, &json!({})), "Dataset 2");
         assert_eq!(display_table_type("parts-of-whole"), "Parts of Whole");
+        // Seq 197: titer_create_table accepts the native type.
+        assert!(TABLE_TYPES.contains(&"parts-of-whole"));
     }
 
     #[test]

@@ -91,7 +91,10 @@ export function TableView({ node }: { node: ProjectNode }) {
       </WithInspector>
     );
   }
-  if (node.tableType === "column") {
+  // A Parts-of-Whole table carries error values the same way a Column table
+  // does (its import sets the error format from the YFormat), so it gets
+  // the same Format panel.
+  if (node.tableType === "column" || node.tableType === "parts-of-whole") {
     return (
       <WithInspector
         title={node.name}
