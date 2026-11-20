@@ -117,7 +117,7 @@ import { datasetColumns, isGrouped, isNested, readTable, setColumns, splitXY, xy
 import { nestedMeans } from "../src/stats/nested/base";
 import { runNestedTTest } from "../src/stats/nested/nested-t-test";
 import { prepareFit } from "../src/stats/xy/nonlinear-fit";
-import { adjustComparisonRows, adjustPValues, describe, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
+import { adjustComparisonRows, adjustPValues, describe, describedBy, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
 import { hclustAvgSilhouette, hclustClusterWithinSs, hclustDistanceMatrix, hclustSuggestedK, hclustWithinSs } from "../src/stats/multiple/hierarchical-clustering";
 import { dendrogramSegments } from "../src/views/graphs/dendrogram";
@@ -1655,7 +1655,9 @@ check("one-way ANOVA completion: Brown-Forsythe, FDR and trend (seq 191)", () =>
     anovaSpec
       .rows(
         { F: 1, dfn: 2, dfd: 9, p: 0.4, bfF: 2, bfDfn: 2, bfDfd: 8, bfP: 0.2 },
-        groups,
+        // The Welch rows read only the groups' names and count here, so the
+        // descriptives are nulls; the values live in the R result above.
+        describedBy({}, groups),
         { posthoc: "none", equalSd: false },
       )
       .map((r) => r.label),
@@ -1731,7 +1733,7 @@ check("one-way ANOVA completion: Brown-Forsythe, FDR and trend (seq 191)", () =>
     params: { posthoc: "none", equalSd: true, trend: true },
   });
   ok(
-    wizard.checklist!({ paired: "unpaired", gaussian: "yes", trend: "yes" }).items.some((i) =>
+    wizard.checklist!({ paired: "unpaired", gaussian: "yes", trend: "yes" }, table)?.items.some((i) =>
       i.assumption.includes("natural order"),
     ),
     "the trend test adds its ordering assumption to the checklist",
