@@ -15,6 +15,7 @@ import {
   type Transform,
 } from "./types";
 import { TRANSFORM_NAMES, transformTable } from "../lib/transform";
+import { recomputeCalculated } from "../lib/calcvars";
 import { MAX_INFO_SHEETS, newInfoSheetData } from "../lib/info-sheets";
 import type { AnalysisParams, AnalysisPickerValue, AnalysisResult, AnalysisType } from "../stats/types";
 import { TABLES } from "../views/tables";
@@ -432,6 +433,12 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       // The table, then the tables computed from it (and from those) take their new values.
       const update = (id: string, data: TableData) => {
         const before = nodes[id];
+        // A calculated variable follows every edit to its table — typing a
+        // source value, pasting, inserting rows, an MCP write — because the
+        // recompute runs here, the one funnel every edit passes through. A
+        // table computed from another (a Transform) never recomputes: its
+        // values come from its source table, not from formulas.
+        if (!before.transform) data = recomputeCalculated(data);
         nodes[id] = { ...before, data };
         // The table's analyses and graphs follow its renamed columns and groups, its moved
         // rows and its deleted columns.

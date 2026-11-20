@@ -591,12 +591,28 @@ export interface RowGroup {
 export type TableErrorFormat = "sd" | "sem";
 
 /** A table's error format, defaulting to SEM (the graphs' default). */
-export const tableErrorFormat = (data: TableData): TableErrorFormat =>
-  data.errorFormat === "sd" ? "sd" : "sem";
+export const tableErrorFormat = (data: TableData): TableErrorFormat => (data.errorFormat === "sd" ? "sd" : "sem");
+
+/** One calculated variable (Prism 11, seq 156): a Multiple Variables
+ *  table's column whose values come from a formula over the table's other
+ *  variables, not from typing. `formula` is stored WITHOUT the leading `=`
+ *  (`"A + B"`); the grid and the panel display it with it. `error` is
+ *  recomputed, never trusted from a file: a formula that cannot run records
+ *  why here, and its values stay blank. The engine lives in lib/calcvars.ts. */
+export interface CalculatedVariable {
+  name: string;
+  formula: string;
+  error?: string;
+}
 
 export interface TableData {
   columns: string[];
   rows: (string | null)[][];
+  /** Calculated variables (Multiple Variables tables only): their formulas,
+   *  in column order. Their values are materialized into `rows` by
+   *  `recomputeCalculated`, so every analysis and graph reads them exactly
+   *  like typed variables. Omitted when the table has none. */
+  calculated?: CalculatedVariable[];
   /** A table's error format: what its entered error values are — SD or SEM
    *  (Prism's "Changing a data table format": a table formatted for SEM whose
    *  values are really SD can be switched). It labels the table's summary

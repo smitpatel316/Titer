@@ -92,6 +92,7 @@ import { isGrouped, isNested } from "./dataset";
 import { isSummaryFormatValue, summarySubcolumns } from "./summary-format";
 import { groupRuns } from "./columns";
 import { regroupDropped, regroupTable, renestDropped, renestTable } from "../views/tables/table-data";
+import { readCalculated, recomputeCalculated } from "./calcvars";
 import { transformTable } from "./transform";
 import {
   assignLabels,
@@ -198,7 +199,7 @@ const NODE_KEYS = Object.keys({
 // prettier-ignore
 const DATA_KEYS = Object.keys({
   columns: 1, rows: 1, groups: 1, replicates: 1, subgroups: 1, rowGroups: 1, excluded: 1,
-  widths: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1,
+  widths: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1,
 } satisfies Record<keyof TableData, 1>);
 
 // Graph options without a default, by the kind of value they hold.
@@ -587,6 +588,10 @@ function readData(
       )
     : {};
   const rowGroups = readRowGroups(d.rowGroups);
+  // Calculated variables survive only as entries naming a column with a
+  // non-empty formula; a stored error is dropped — the values are recomputed
+  // below (and on every edit), and the error is re-derived then.
+  const calculated = readCalculated(d.calculated, columns);
   // Groups of sub-columns: a Grouped table's, a Nested table's, or an XY table's data sets of replicates (after X).
   const grouping =
     (type === "grouped" || type === "xy" || type === "nested") && isCount(d.groups) && isCount(d.replicates);
@@ -604,6 +609,7 @@ function readData(
     // Only "sd" or "sem" survives: a hand-edited file holding anything else
     // reads as SEM, the default, instead of carrying a bogus format.
     errorFormat: d.errorFormat === "sd" || d.errorFormat === "sem" ? d.errorFormat : undefined,
+    calculated,
   } as TableData);
   const regroupDroppedNames: string[] = [];
   // Where the groups start: an XY table's X column comes first — unless the
@@ -1394,6 +1400,12 @@ function readNode(
     node.parentId = null;
     node.transform = readTransform(n.transform);
     if (!node.transform) delete node.transform;
+    // A file's stored values are never trusted for a calculated variable:
+    // recompute them from the formula on load, so a hand-edited file or an
+    // older save still opens with live values (and a broken formula reads
+    // as its error, not as stale numbers). A table computed from another
+    // never carries formulas — transformTable drops them.
+    if (!node.transform && lower(n.tableType) === "multiple") node.data = recomputeCalculated(node.data);
     node.tableType = lower(n.tableType) as ProjectNode["tableType"];
     if (!isIn(TABLES, node.tableType)) {
       issues.push({

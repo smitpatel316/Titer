@@ -11,6 +11,7 @@
 // store/references.ts.)
 import type { RowGroup, TableData, TableErrorFormat, TableType } from "../../store/types";
 import { tableErrorFormat } from "../../store/types";
+import { renameCalculatedReferences } from "../../lib/calcvars";
 import { seriesKeyOf, groupRuns } from "../../lib/columns";
 import { isGrouped, isNested } from "../../lib/dataset";
 import {
@@ -261,6 +262,12 @@ export function deleteColumns(data: TableData, at: number, count: number): Table
     rows: data.rows.map((row) => row.filter(keep)),
     excluded: remapExcluded(data, (r, c) => (c < at ? [r, c] : c >= at + n ? [r, c - n] : null)),
     widths: widthsOf(data.widths, columns),
+    // A deleted calculated variable goes with its column; a formula that
+    // used a deleted source keeps its text and reads as an error until it
+    // is edited or removed (the recompute names the missing variable).
+    calculated: (data.calculated ?? []).filter((v) => columns.includes(v.name)).length
+      ? (data.calculated ?? []).filter((v) => columns.includes(v.name))
+      : undefined,
   };
 }
 
@@ -271,15 +278,18 @@ function renameKey<T>(map: Record<string, T> | undefined, from: string, to: stri
   return { ...rest, [to]: value };
 }
 
-/** Renames column `c`, carrying its width over. */
+/** Renames column `c`, carrying its width over — and, for a Multiple
+ *  Variables table, carrying the rename through its calculated variables'
+ *  formulas, so `=A + B` still reads `A` after `A` becomes `Dose`. */
 export function renameColumn(data: TableData, c: number, name: string): TableData {
   const old = data.columns[c];
   if (!name || name === old || data.columns.includes(name)) return data;
-  return {
+  const next = {
     ...data,
     columns: data.columns.map((n, i) => (i === c ? name : n)),
     widths: renameKey(data.widths, old, name),
   };
+  return renameCalculatedReferences(next, old, name);
 }
 
 /** Renames a group of a grouped table: its shared prefix across all its sub-columns. */
