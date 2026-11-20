@@ -162,6 +162,12 @@ export function invertModel(
     const r = (top - y) / (y - bottom);
     return r > 0 ? r : null;
   };
+  // A normalized curve's ratio (100 − Y)/Y — Bottom=0, Top=100 by
+  // construction, so no Bottom/Top coefficients exist to read.
+  const normRatio = () => {
+    const r = (100 - y) / y;
+    return r > 0 ? r : null;
+  };
   switch (model) {
     case "line": {
       const b = c("Intercept");
@@ -221,11 +227,91 @@ export function invertModel(
       if (r == null || mid == null) return null;
       return mid - Math.log10(r);
     }
+    case "agonist-3pl-x": {
+      // B6 Stim #5: Y=Bottom+(Top-Bottom)/(1+EC50/X), so X = EC50/r.
+      const r = ratio();
+      const ec50 = c("EC50");
+      if (r == null || ec50 == null) return null;
+      const x = ec50 / r;
+      return x > 0 ? x : null;
+    }
     case "inhibitor-3pl-logx": {
       const r = ratio();
       const mid = c("LogIC50");
       if (r == null || mid == null) return null;
       return mid + Math.log10(r);
+    }
+    case "inhibitor-3pl-x": {
+      // B6 Inhib #5: Y=Bottom+(Top-Bottom)/(1+X/IC50), so X = IC50·r.
+      const r = ratio();
+      const ic50 = c("IC50");
+      if (r == null || ic50 == null) return null;
+      const x = ic50 * r;
+      return x > 0 ? x : null;
+    }
+    case "agonist-3pl-normalized-logx": {
+      // B6 Stim #3: Bottom=0, Top=100, so r = (100−Y)/Y and X = LogEC50 − log10(r).
+      const r = normRatio();
+      const mid = c("LogEC50");
+      if (r == null || mid == null) return null;
+      return mid - Math.log10(r);
+    }
+    case "agonist-4pl-normalized-logx": {
+      // B6 Stim #4: X = LogEC50 − log10(r)/HillSlope.
+      const r = normRatio();
+      const mid = c("LogEC50");
+      const h = c("HillSlope");
+      if (r == null || mid == null || h == null || h === 0) return null;
+      return mid - Math.log10(r) / h;
+    }
+    case "agonist-3pl-normalized-x": {
+      // B6 Stim #7: X = EC50/r.
+      const r = normRatio();
+      const ec50 = c("EC50");
+      if (r == null || ec50 == null) return null;
+      const x = ec50 / r;
+      return x > 0 ? x : null;
+    }
+    case "agonist-4pl-normalized-x": {
+      // B6 Stim #8: X = EC50/r^(1/HillSlope).
+      const r = normRatio();
+      const ec50 = c("EC50");
+      const h = c("HillSlope");
+      if (r == null || ec50 == null || h == null || h === 0) return null;
+      const x = ec50 / r ** (1 / h);
+      return x > 0 ? x : null;
+    }
+    case "inhibitor-3pl-normalized-logx": {
+      // B6 Inhib #3: X = LogIC50 + log10(r).
+      const r = normRatio();
+      const mid = c("LogIC50");
+      if (r == null || mid == null) return null;
+      return mid + Math.log10(r);
+    }
+    case "inhibitor-4pl-normalized-logx": {
+      // B6 Inhib #4: X = LogIC50 + log10(r)/HillSlope.
+      const r = normRatio();
+      const mid = c("LogIC50");
+      const h = c("HillSlope");
+      if (r == null || mid == null || h == null || h === 0) return null;
+      return mid + Math.log10(r) / h;
+    }
+    case "inhibitor-3pl-normalized-x": {
+      // B6 Inhib #7: X = IC50·r.
+      const r = normRatio();
+      const ic50 = c("IC50");
+      if (r == null || ic50 == null) return null;
+      const x = ic50 * r;
+      return x > 0 ? x : null;
+    }
+    case "inhibitor-4pl-normalized-x": {
+      // B6 Inhib #8: X = IC50·r^(1/HillSlope).
+      const r = normRatio();
+      const ic50 = c("IC50");
+      const h = c("HillSlope");
+      if (r == null || ic50 == null || h == null || h === 0) return null;
+      const x = ic50 * r ** (1 / h);
+      return x > 0 ? x : null;
     }
     case "asymmetric-5pl-logx": {
       const r = ratio();
@@ -1218,7 +1304,14 @@ function comparisonRCode(
   // Every parameter but the shared midpoint, one per data set (`g`).
   const own = spec.terms.filter((t) => t !== midpoint);
   const indexed = own.reduce((e, t) => e.replace(new RegExp(`\\b${t}\\b`, "g"), `${t}[g]`), expr);
-  const start = own.map((t) => `${t}=c(c0[["${t}"]],c1[["${t}"]])`).join(",");
+  // 1.8: a normalized 3PL has no own parameter at all (its only term is
+  // the midpoint) — the start list is just the midpoint, with no leading
+  // comma (`list(,LogEC50=s)` is invalid R).
+  const startParts = [
+    ...own.map((t) => `${t}=c(c0[["${t}"]],c1[["${t}"]])`),
+    `${midpoint}=s`,
+  ];
+  const start = startParts.join(",");
   // The shared midpoint starts between the two, else at either one's (curves far apart
   // may converge only from there); the best of the fits that converge is kept.
   const reduced =
@@ -1226,7 +1319,7 @@ function comparisonRCode(
       ? `x<-c(x0,x1);y<-c(y0,y1);${spec.fit}`
       : `x<-c(x0,x1);y<-c(y0,y1);g<-rep(1:2,c(length(x0),length(x1)));c0<-coef(m0);c1<-coef(m1)\n` +
         `ms<-lapply(c(mean(c(c0[["${midpoint}"]],c1[["${midpoint}"]])),c0[["${midpoint}"]],c1[["${midpoint}"]]),` +
-        `function(s)tryCatch(nls(y~${indexed},start=list(${start},${midpoint}=s),control=nls.control(maxiter=200)),error=function(e)NULL))\n` +
+        `function(s)tryCatch(nls(y~${indexed},start=list(${start}),control=nls.control(maxiter=200)),error=function(e)NULL))\n` +
         `ms<-Filter(Negate(is.null),ms);if(!length(ms))stop("no fit with a shared midpoint")\n` +
         `m<-ms[[which.min(sapply(ms,function(f)sum(residuals(f)^2)))]]`;
   // One set's fit, captured with its prefix (`a`/`b`) before the next fit overwrites `m`.

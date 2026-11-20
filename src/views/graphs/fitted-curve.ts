@@ -59,8 +59,38 @@ export function evaluate(
       return bottom + rise / (1 + (c("EC50") / x) ** hill);
     case "agonist-3pl-logx":
       return bottom + rise / (1 + 10 ** (c("LogEC50") - x));
+    case "agonist-3pl-x":
+      // B6 Stim #5: Y = Bottom+(Top-Bottom)/(1+EC50/X).
+      return bottom + rise / (1 + c("EC50") / x);
     case "inhibitor-3pl-logx":
       return bottom + rise / (1 + 10 ** (x - c("LogIC50")));
+    case "inhibitor-3pl-x":
+      // B6 Inhib #5: Y = Bottom+(Top-Bottom)/(1+X/IC50).
+      return bottom + rise / (1 + x / c("IC50"));
+    case "agonist-3pl-normalized-logx":
+      // B6 Stim #3: Bottom=0, Top=100.
+      return 100 / (1 + 10 ** (c("LogEC50") - x));
+    case "agonist-4pl-normalized-logx":
+      // B6 Stim #4.
+      return 100 / (1 + 10 ** ((c("LogEC50") - x) * hill));
+    case "agonist-3pl-normalized-x":
+      // B6 Stim #7.
+      return 100 / (1 + c("EC50") / x);
+    case "agonist-4pl-normalized-x":
+      // B6 Stim #8.
+      return 100 / (1 + (c("EC50") / x) ** hill);
+    case "inhibitor-3pl-normalized-logx":
+      // B6 Inhib #3.
+      return 100 / (1 + 10 ** (x - c("LogIC50")));
+    case "inhibitor-4pl-normalized-logx":
+      // B6 Inhib #4: the (x-LogIC50) form falls with HillSlope > 0.
+      return 100 / (1 + 10 ** ((x - c("LogIC50")) * hill));
+    case "inhibitor-3pl-normalized-x":
+      // B6 Inhib #7.
+      return 100 / (1 + x / c("IC50"));
+    case "inhibitor-4pl-normalized-x":
+      // B6 Inhib #8: the (x/IC50) form falls with HillSlope > 0.
+      return 100 / (1 + (x / c("IC50")) ** hill);
     case "asymmetric-5pl-logx":
       return bottom + rise / (1 + 10 ** ((c("LogEC50") + Math.log10(2 ** (1 / s) - 1) / hill - x) * hill)) ** s;
     case "asymmetric-5pl-x":

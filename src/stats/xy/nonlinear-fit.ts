@@ -22,6 +22,17 @@ export const MODEL_LABEL: Record<NonlinearModel, string> = {
   "sigmoidal-4pl-x": "Sigmoidal, 4PL, X is concentration",
   "agonist-3pl-logx": "log(agonist) vs. response, standard slope (3PL)",
   "inhibitor-3pl-logx": "log(inhibitor) vs. response, standard slope (3PL)",
+  // 1.8 classic-curves completion (B6 §Dose-response Stimulation/Inhibition).
+  "agonist-3pl-x": "[Agonist] vs. response (three parameters)",
+  "inhibitor-3pl-x": "[Inhibitor] vs. response (three parameters)",
+  "agonist-3pl-normalized-logx": "log(agonist) vs. normalized response",
+  "agonist-4pl-normalized-logx": "log(agonist) vs. normalized response -- Variable slope",
+  "agonist-3pl-normalized-x": "[Agonist] vs. normalized response",
+  "agonist-4pl-normalized-x": "[Agonist] vs. normalized response -- Variable slope",
+  "inhibitor-3pl-normalized-logx": "log(inhibitor) vs. normalized response",
+  "inhibitor-4pl-normalized-logx": "log(inhibitor) vs. normalized response -- Variable slope",
+  "inhibitor-3pl-normalized-x": "[Inhibitor] vs. normalized response",
+  "inhibitor-4pl-normalized-x": "[Inhibitor] vs. normalized response -- Variable slope",
   "asymmetric-5pl-logx": "Asymmetric sigmoidal, 5PL, X is log(concentration)",
   "asymmetric-5pl-x": "Asymmetric sigmoidal, 5PL, X is concentration",
   "semilog-line": "Semilog line",
@@ -173,6 +184,9 @@ const sumOf = (a: string, b: string, label = "Span"): Derived => {
   return { label, expr: value, low: `${value}-q*${se}`, high: `${value}+q*${se}` };
 };
 const span = difference("Top", "Bottom");
+/** Span for a normalized curve: Bottom=0, Top=100 by construction, so the
+ *  span is the constant 100 (a derived row with no CI, like "X center"). */
+const span100: Derived = { label: "Span", expr: "100" };
 /** Ki from a log midpoint: Ki = 10^LogIC50 / D, where D = 1 + [L]/Kd is a
  *  constant the wizard supplies — so log Ki's SE is logIC50's SE, and the
  *  Ki CI is 10^ the logIC50 CI, over D. (Cheng–Prusoff; plan 28.) */
@@ -196,8 +210,12 @@ const kiFromLinear = (label: string, p: string, d: number): Derived => ({
 export function ecAnything(model: NonlinearModel, f: number): Derived {
   const logX = model.endsWith("-logx");
   const [log, raise] = logX ? ["log10", (e: string) => `10^(${e})`] : ["log", (e: string) => `exp(${e})`];
-  const mid = model.startsWith("inhibitor") ? "LogIC50" : logX ? "LogEC50" : "EC50";
-  const at = logX ? `b[["${mid}"]]` : `log(b[["EC50"]])`;
+  // 1.8: an inhibitor's midpoint is LogIC50 on log X but IC50 on raw X —
+  // the old code read LogIC50/EC50 for every inhibitor-x model, which no
+  // existing model hit (there was no inhibitor-x model); the normalized
+  // and 3PL X models below do.
+  const mid = model.startsWith("inhibitor") ? (logX ? "LogIC50" : "IC50") : logX ? "LogEC50" : "EC50";
+  const at = logX ? `b[["${mid}"]]` : `log(b[["${mid}"]])`;
   const hill = model.includes("3pl") ? "1" : `b[["HillSlope"]]`;
   // Its shift from the midpoint: log(F / (100 − F)) / Hill slope; a 5PL's asymmetry moves it.
   const shift = model.startsWith("asymmetric")
@@ -577,6 +595,146 @@ export function modelSpec(
           'g<-function(xv,p) p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+10^(xv-p[["LogIC50"]]))',
         asymptotes: ["Bottom", "Top"],
         dose: { expr, midpoint: "LogIC50" },
+      };
+    }
+    case "agonist-3pl-x": {
+      // B6 Stim #5: [Agonist] vs. response (three parameters) — the
+      // raw-concentration twin of agonist-3pl-logx, Hill slope 1. Same
+      // X = 0 guard as FOUR_X (the vehicle point is Bottom).
+      const expr = "ifelse(x==0,Bottom,Bottom+(Top-Bottom)/(1+EC50/x))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(Bottom=min(y),Top=max(y),EC50=median(x[x>0]))")}`,
+        terms: ["Bottom", "Top", "EC50"],
+        derived: [span],
+        nonNegativeX: true,
+        curveFn:
+          'g<-function(xv,p) ifelse(xv==0,p[["Bottom"]],p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+p[["EC50"]]/xv))',
+        asymptotes: ["Bottom", "Top"],
+        dose: { expr, midpoint: "EC50" },
+      };
+    }
+    case "inhibitor-3pl-x": {
+      // B6 Inhib #5: [Inhibitor] vs. response (three parameters) —
+      // falling, Hill slope 1: Y=Bottom+(Top-Bottom)/(1+X/IC50).
+      const expr = "ifelse(x==0,Bottom,Bottom+(Top-Bottom)/(1+x/IC50))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(Bottom=min(y),Top=max(y),IC50=median(x[x>0]))")}`,
+        terms: ["Bottom", "Top", "IC50"],
+        derived: [span],
+        nonNegativeX: true,
+        curveFn:
+          'g<-function(xv,p) ifelse(xv==0,p[["Bottom"]],p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+xv/p[["IC50"]]))',
+        asymptotes: ["Bottom", "Top"],
+        dose: { expr, midpoint: "IC50" },
+      };
+    }
+    case "agonist-3pl-normalized-logx": {
+      // B6 Stim #3: log(agonist) vs. normalized response — Bottom=0,
+      // Top=100 hard-coded, so only LogEC50 is fitted.
+      const expr = "100/(1+10^(LogEC50-x))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(LogEC50=median(x))")}`,
+        terms: ["LogEC50"],
+        derived: [tenTo("EC50", "LogEC50"), span100],
+        curveFn: 'g<-function(xv,p) 100/(1+10^(p[["LogEC50"]]-xv))',
+        dose: { expr, midpoint: "LogEC50" },
+      };
+    }
+    case "agonist-4pl-normalized-logx": {
+      // B6 Stim #4: ... -- Variable slope. SIGN starts the slope on the
+      // curve's own side, as for the 4PLs.
+      const expr = "100/(1+10^((LogEC50-x)*HillSlope))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, `list(LogEC50=median(x),HillSlope=${SIGN})`)}`,
+        terms: ["LogEC50", "HillSlope"],
+        derived: [tenTo("EC50", "LogEC50"), span100],
+        curveFn: 'g<-function(xv,p) 100/(1+10^((p[["LogEC50"]]-xv)*p[["HillSlope"]]))',
+        dose: { expr, midpoint: "LogEC50" },
+      };
+    }
+    case "agonist-3pl-normalized-x": {
+      // B6 Stim #7: [Agonist] vs. normalized response.
+      const expr = "ifelse(x==0,0,100/(1+EC50/x))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(EC50=median(x[x>0]))")}`,
+        terms: ["EC50"],
+        derived: [span100],
+        nonNegativeX: true,
+        curveFn: 'g<-function(xv,p) ifelse(xv==0,0,100/(1+p[["EC50"]]/xv))',
+        dose: { expr, midpoint: "EC50" },
+      };
+    }
+    case "agonist-4pl-normalized-x": {
+      // B6 Stim #8: ... -- Variable slope.
+      const expr = "ifelse(x==0,0,100/(1+(EC50/x)^HillSlope))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, `list(EC50=median(x[x>0]),HillSlope=${SIGN})`)}`,
+        terms: ["EC50", "HillSlope"],
+        derived: [span100],
+        nonNegativeX: true,
+        curveFn:
+          'g<-function(xv,p) ifelse(xv==0,0,100/(1+(p[["EC50"]]/xv)^p[["HillSlope"]]))',
+        dose: { expr, midpoint: "EC50" },
+      };
+    }
+    case "inhibitor-3pl-normalized-logx": {
+      // B6 Inhib #3: log(inhibitor) vs. normalized response.
+      const expr = "100/(1+10^(x-LogIC50))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(LogIC50=median(x))")}`,
+        terms: ["LogIC50"],
+        derived: [tenTo("IC50", "LogIC50"), span100],
+        curveFn: 'g<-function(xv,p) 100/(1+10^(xv-p[["LogIC50"]]))',
+        dose: { expr, midpoint: "LogIC50" },
+      };
+    }
+    case "inhibitor-4pl-normalized-logx": {
+      // B6 Inhib #4: ... -- Variable slope. The (x-LogIC50) form falls
+      // with HillSlope > 0 — SIGN would start it at −1 on falling data
+      // and flip the curve, so the start is 1 outright.
+      const expr = "100/(1+10^((x-LogIC50)*HillSlope))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(LogIC50=median(x),HillSlope=1)")}`,
+        terms: ["LogIC50", "HillSlope"],
+        derived: [tenTo("IC50", "LogIC50"), span100],
+        curveFn: 'g<-function(xv,p) 100/(1+10^((xv-p[["LogIC50"]])*p[["HillSlope"]]))',
+        dose: { expr, midpoint: "LogIC50" },
+      };
+    }
+    case "inhibitor-3pl-normalized-x": {
+      // B6 Inhib #7: [Inhibitor] vs. normalized response.
+      const expr = "ifelse(x==0,0,100/(1+x/IC50))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(IC50=median(x[x>0]))")}`,
+        terms: ["IC50"],
+        derived: [span100],
+        nonNegativeX: true,
+        curveFn: 'g<-function(xv,p) ifelse(xv==0,0,100/(1+xv/p[["IC50"]]))',
+        dose: { expr, midpoint: "IC50" },
+      };
+    }
+    case "inhibitor-4pl-normalized-x": {
+      // B6 Inhib #8: ... -- Variable slope. The (x/IC50) form falls with
+      // HillSlope > 0, so the start is 1 outright (see the logx twin).
+      const expr = "ifelse(x==0,0,100/(1+(x/IC50)^HillSlope))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(IC50=median(x[x>0]),HillSlope=1)")}`,
+        terms: ["IC50", "HillSlope"],
+        derived: [span100],
+        nonNegativeX: true,
+        curveFn:
+          'g<-function(xv,p) ifelse(xv==0,0,100/(1+(xv/p[["IC50"]])^p[["HillSlope"]]))',
+        dose: { expr, midpoint: "IC50" },
       };
     }
     case "asymmetric-5pl-logx": {

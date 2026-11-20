@@ -404,6 +404,19 @@ const NONLINEAR_MODELS: Record<string, NonlinearModel> = {
   "Sixth order polynomial": "sextic",
   "Centered sixth order polynomial": "centered-sixth",
   "Exponential growth with log(population)": "exponential-growth-log",
+  // 1.8 classic-curves completion (B6 §Dose-response Stimulation/Inhibition):
+  // verbatim Model-tab names. Stim #2/#6 and Inhib #2/#6 are the variable-
+  // slope 4PLs, already mapped above as the sigmoidal-4pl forms.
+  "[Agonist] vs. response (three parameters)": "agonist-3pl-x",
+  "[Inhibitor] vs. response (three parameters)": "inhibitor-3pl-x",
+  "log(agonist) vs. normalized response": "agonist-3pl-normalized-logx",
+  "log(agonist) vs. normalized response -- Variable slope": "agonist-4pl-normalized-logx",
+  "[Agonist] vs. normalized response": "agonist-3pl-normalized-x",
+  "[Agonist] vs. normalized response -- Variable slope": "agonist-4pl-normalized-x",
+  "log(inhibitor) vs. normalized response": "inhibitor-3pl-normalized-logx",
+  "log(inhibitor) vs. normalized response -- Variable slope": "inhibitor-4pl-normalized-logx",
+  "[Inhibitor] vs. normalized response": "inhibitor-3pl-normalized-x",
+  "[Inhibitor] vs. normalized response -- Variable slope": "inhibitor-4pl-normalized-x",
 };
 
 const genId = (type: string) => `${type}_${Math.random().toString(36).slice(2, 10)}`;

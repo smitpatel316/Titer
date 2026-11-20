@@ -85,6 +85,18 @@ export const DOSE_MODELS = [
   "inhibitor-3pl-logx",
   "asymmetric-5pl-logx",
   "asymmetric-5pl-x",
+  // 1.8 classic-curves completion (B6 §Dose-response Stimulation/Inhibition):
+  // the X-concentration 3PLs and the normalized (Bottom=0, Top=100) 3PL/4PLs.
+  "agonist-3pl-x",
+  "inhibitor-3pl-x",
+  "agonist-3pl-normalized-logx",
+  "agonist-4pl-normalized-logx",
+  "agonist-3pl-normalized-x",
+  "agonist-4pl-normalized-x",
+  "inhibitor-3pl-normalized-logx",
+  "inhibitor-4pl-normalized-logx",
+  "inhibitor-3pl-normalized-x",
+  "inhibitor-4pl-normalized-x",
   // Binding — Competition (plan 28): the one-site Fit logIC50 is the
   // inhibitor 3PL above; the two-site and homologous competition curves
   // are dose-response curves too, so they live here (wizard dose list,
