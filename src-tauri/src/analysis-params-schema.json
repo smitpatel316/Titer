@@ -48,6 +48,13 @@
         "description": "The groups' geometric means compared: the ANOVA and its comparisons run on the logarithms."
       },
       {
+        "name": "effectSizes",
+        "type": "boolean",
+        "default": true,
+        "required": false,
+        "description": "Include the effect-size table — eta squared, partial eta squared, Cohen's f, with the partial eta squared's 95% CI; false omits it."
+      },
+      {
         "name": "sets",
         "type": "string[]",
         "required": false,
@@ -213,6 +220,13 @@
         "required": false
       },
       {
+        "name": "effectSizes",
+        "type": "boolean",
+        "default": true,
+        "required": false,
+        "description": "Include the effect-size CIs — Cramér's V and (2 × 2) Phi with their 95% CIs; false reports the values without them."
+      },
+      {
         "name": "sets",
         "type": "string[]",
         "required": false,
@@ -288,6 +302,13 @@
         "description": "Multiple Variables tables, unpaired: the grouping variable whose two levels are the groups."
       },
       {
+        "name": "effectSizes",
+        "type": "boolean",
+        "default": true,
+        "required": false,
+        "description": "Include the effect sizes — Cohen's d, Hedges' g and (unpaired) Glass's Δ — with their 95% CIs; false reports the test without them."
+      },
+      {
         "name": "sets",
         "type": "string[]",
         "required": false,
@@ -330,6 +351,13 @@
         "description": "Required for \"two-datasets\": the two column names to correlate."
       },
       {
+        "name": "effectSizes",
+        "type": "boolean",
+        "default": true,
+        "required": false,
+        "description": "Include each r's 95% CI; false reports r and P only."
+      },
+      {
         "name": "sets",
         "type": "string[]",
         "required": false,
@@ -353,6 +381,13 @@
         ],
         "default": "pearson",
         "required": false
+      },
+      {
+        "name": "effectSizes",
+        "type": "boolean",
+        "default": true,
+        "required": false,
+        "description": "Include each r's 95% CI in the matrix; false reports r and P only."
       },
       {
         "name": "sets",
@@ -1697,6 +1732,13 @@
         "description": "The geometric mean tested: a t test of the logarithms against the value's."
       },
       {
+        "name": "effectSizes",
+        "type": "boolean",
+        "default": true,
+        "required": false,
+        "description": "Include Cohen's d and Hedges' g with their 95% CIs; false reports the test without them."
+      },
+      {
         "name": "sets",
         "type": "string[]",
         "required": false,
@@ -2078,6 +2120,13 @@
         "description": "A mixed-effects model (REML, Kenward-Roger), every value kept: subjects may miss some."
       },
       {
+        "name": "effectSizes",
+        "type": "boolean",
+        "default": true,
+        "required": false,
+        "description": "Include the effect-size table — eta squared, partial eta squared, Cohen's f, with the partial eta squared's 95% CI; false omits it."
+      },
+      {
         "name": "sets",
         "type": "string[]",
         "required": false,
@@ -2406,6 +2455,13 @@
         "required": false
       },
       {
+        "name": "effectSizes",
+        "type": "boolean",
+        "default": true,
+        "required": false,
+        "description": "Include the effect-size table — eta squared, partial eta squared, Cohen's f, with the partial eta squared's 95% CI; false omits it."
+      },
+      {
         "name": "sets",
         "type": "string[]",
         "required": false,
@@ -2554,6 +2610,13 @@
         "type": "boolean",
         "required": false,
         "description": "Repeated measures: false (new analyses) corrects the row and interaction effects by the Geisser-Greenhouse epsilon, and compares on each comparison's own error; absent (older files) or true, sphericity is assumed."
+      },
+      {
+        "name": "effectSizes",
+        "type": "boolean",
+        "default": true,
+        "required": false,
+        "description": "Include the effect-size table — eta squared, partial eta squared, Cohen's f, with the partial eta squared's 95% CI; false omits it."
       },
       {
         "name": "sets",

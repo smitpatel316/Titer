@@ -27,7 +27,7 @@ import {
 /** Whether `v` is one of `list`. */
 const isIn = <T extends string>(list: readonly T[], v: unknown): v is T => list.includes(v as T);
 
-const DEFAULTS: AnovaParams = { posthoc: "none" };
+const DEFAULTS: AnovaParams = { posthoc: "none", effectSizes: true };
 
 const welch = (p: AnovaParams | undefined) => p?.equalSd === false;
 const lognormal = (p: AnovaParams | undefined) => p?.lognormal === true;
@@ -220,7 +220,7 @@ export const anovaSpec: ColumnTestSpec<AnovaParams> = {
   // squared (Prism: R² = η² = partial η² in one-way ANOVA). Welch's has no
   // sums of squares, so it reports no effect-size table.
   effectSizes: (v, _groups, params) =>
-    welch(params)
+    params?.effectSizes === false || welch(params)
       ? undefined
       : [
           effectSizeRow(

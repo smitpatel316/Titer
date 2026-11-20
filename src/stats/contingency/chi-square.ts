@@ -157,7 +157,7 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
       ...withCi(`Relative risk (${groups[0].name})`, "rr"),
       ...withCi(`Difference of risks (${groups[0].name})`, "d"),
       ...withCi("Number needed to treat", "nnt"),
-      ...withCi("Phi", "phi"),
+      ...(params?.effectSizes === false ? [row("Phi", "phi")] : withCi("Phi", "phi")),
       ...withCi("Sensitivity", "sens"),
       ...withCi("Specificity", "spec"),
       ...withCi("Positive predictive value", "ppv"),
@@ -176,8 +176,10 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
       stats.push({ label: "P value (test for trend)", value: v.trendP ?? null, p: true });
     }
     stats.push({ label: "Cramér's V", value: v.cramer ?? null });
-    stats.push({ label: "Cramér's V 95% CI lower", value: v.vLo ?? null });
-    stats.push({ label: "Cramér's V 95% CI upper", value: v.vHi ?? null });
+    if (params?.effectSizes !== false) {
+      stats.push({ label: "Cramér's V 95% CI lower", value: v.vLo ?? null });
+      stats.push({ label: "Cramér's V 95% CI upper", value: v.vHi ?? null });
+    }
   }
 
   const first = groups[0].name;

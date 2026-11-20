@@ -218,6 +218,9 @@ export interface CompareTwoGroupsParams {
   /** Only meaningful when paired && gaussian: compare ratios (log-transformed)
    *  instead of differences — for data where proportional change is what matters. */
   ratio: boolean;
+  /** Include the effect sizes — Cohen's d, Hedges' g and (unpaired) Glass's Δ — with
+   *  their 95% CIs; false reports the test without them. */
+  effectSizes?: boolean;
   /** Only meaningful when gaussian && !paired: compare the geometric means, a t test on the
    *  logarithms (lognormal t test, Student's or Welch's). Its own param, not `ratio`: a file
    *  of an older Helix may hold a `ratio` left from a paired answer. */
@@ -240,6 +243,8 @@ export interface OneSampleTParams {
   gaussian: boolean;
   /** The geometric mean tested: a t test of the logarithms against the value's. */
   lognormal?: boolean;
+  /** Include Cohen's d and Hedges' g with their 95% CIs; false reports the test without them. */
+  effectSizes?: boolean;
 }
 
 /** Params for "anova": optional post-hoc pairwise comparisons between groups. */
@@ -253,6 +258,9 @@ export interface AnovaParams {
   compared?: string[];
   /** The groups' geometric means compared: the ANOVA and its comparisons run on the logarithms. */
   lognormal?: boolean;
+  /** Include the effect-size table — eta squared, partial eta squared, Cohen's f, with the
+   *  partial eta squared's 95% CI; false omits it. */
+  effectSizes?: boolean;
 }
 
 /** Params for "rm-anova": Tukey, Bonferroni, Šídák, Holm–Šídák or Fisher's LSD
@@ -265,6 +273,9 @@ export interface RmAnovaParams {
   compared?: string[];
   /** A mixed-effects model (REML, Kenward-Roger), every value kept: subjects may miss some. */
   mixed?: boolean;
+  /** Include the effect-size table — eta squared, partial eta squared, Cohen's f, with the
+   *  partial eta squared's 95% CI; false omits it. */
+  effectSizes?: boolean;
 }
 
 /** Params for "kruskal-wallis": optional Dunn's post-hoc pairwise comparisons between groups
@@ -466,6 +477,8 @@ export interface NonlinearRegressionParams {
  *  (rank-based, non-parametric). */
 export interface CorrelationParams {
   method: (typeof CORRELATION_METHODS)[number];
+  /** Include each r's 95% CI in the matrix; false reports r and P only. */
+  effectSizes?: boolean;
 }
 
 /** Params for "correlation" on an XY table, Prism-style: Pearson vs. Spearman, and
@@ -476,6 +489,8 @@ export interface XYCorrelationParams {
   mode: (typeof CORRELATION_MODES)[number];
   /** Required for "two-datasets": the two column names to correlate. */
   datasets?: [string, string];
+  /** Include each r's 95% CI; false reports r and P only. */
+  effectSizes?: boolean;
 }
 
 /** Params for "multiple-regression": which variable is the dependent (Y), and which
@@ -615,6 +630,9 @@ export interface TwoWayAnovaParams {
    *  Geisser-Greenhouse epsilon, and compares on each comparison's own error; absent (older
    *  files) or true, sphericity is assumed. */
   sphericity?: boolean;
+  /** Include the effect-size table — eta squared, partial eta squared, Cohen's f, with the
+   *  partial eta squared's 95% CI; false omits it. */
+  effectSizes?: boolean;
 }
 
 /** Params for "three-way-anova" on a Grouped table's column-groups × row
@@ -626,6 +644,9 @@ export interface TwoWayAnovaParams {
 export interface ThreeWayAnovaParams {
   posthoc: (typeof POSTHOCS)[number];
   posthocTerm?: (typeof THREE_WAY_TERMS)[number];
+  /** Include the effect-size table — eta squared, partial eta squared, Cohen's f, with the
+   *  partial eta squared's 95% CI; false omits it. */
+  effectSizes?: boolean;
 }
 
 /** Params for "nested-anova" on a Nested table: optional post-hoc pairwise
@@ -790,6 +811,9 @@ export interface ChiSquareParams {
   /** The test to run (absent: Fisher's on a 2 × 2, else the chi-square). */
   test?: (typeof CONTINGENCY_TESTS)[number];
   trendOrdered?: boolean;
+  /** Include the effect-size CIs — Cramér's V and (2 × 2) Phi with their 95% CIs; false
+   *  reports the values without them. */
+  effectSizes?: boolean;
 }
 
 /** Params for "mcnemar": the continuity correction (R's mcnemar.test

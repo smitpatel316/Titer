@@ -393,7 +393,16 @@ for f in (ROOT / "src/stats").rglob("*.ts"):
 #    as the intercept model
 #  poisson-regression.ts: `params?.quasi ?? false`
 #  three-way-anova.ts: `params?.posthoc ?? "none"`
+#  effectSizes (seq 161): every runner reports them unless
+#    `params?.effectSizes === false` (column specs via the raw params;
+#    anova / compare-two-groups / one-sample-t also carry it in DEFAULTS).
 RUNNER_FALLBACKS = {
+    ("rm-anova", "effectSizes"): True,
+    ("two-way-anova", "effectSizes"): True,
+    ("three-way-anova", "effectSizes"): True,
+    ("chi-square", "effectSizes"): True,
+    ("correlation-matrix", "effectSizes"): True,
+    ("correlation", "effectSizes"): True,
     ("area-under-curve", "baseline"): 0,
     ("fraction-of-total", "totalBy"): "column",
     ("fraction-of-total", "format"): "fraction",

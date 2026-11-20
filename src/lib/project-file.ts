@@ -270,7 +270,7 @@ type ParamKind =
   | Limits;
 // prettier-ignore
 const PARAMS = {
-  paired: "yes/no", gaussian: "yes/no", equalVariance: "yes/no", ratio: "yes/no", forceOrigin: "yes/no", pooledSd: "yes/no", quasi: "yes/no", fixHillSlope: "yes/no", trendOrdered: "yes/no", continuityCorrection: "yes/no",
+  paired: "yes/no", gaussian: "yes/no", equalVariance: "yes/no", ratio: "yes/no", forceOrigin: "yes/no", pooledSd: "yes/no", quasi: "yes/no", fixHillSlope: "yes/no", trendOrdered: "yes/no", continuityCorrection: "yes/no", effectSizes: "yes/no",
   equalSd: "yes/no", sphericity: "yes/no", interpolate: "yes/no", tails: TAILS, posthoc: [...ANOVA_POSTHOCS, ...RANK_POSTHOCS], mixed: "yes/no",
   // `model` is shared by nonlinear-regression and the binding runners:
   // the reader only sanitizes, each runner validates its own.
@@ -867,11 +867,11 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   ],
   transpose: ["sets"],
   "prune-rows": ["ys", "x", "condition", "threshold", "low", "high", "sets"],
-  "compare-two-groups": ["paired", "gaussian", "equalVariance", "ratio", "lognormal", "tails", "response", "groupBy", "sets"],
-  "one-sample-t": ["hypotheticalValue", "tails", "gaussian", "lognormal", "sets"],
-  anova: ["posthoc", "equalSd", "control", "compared", "lognormal", "sets"],
+  "compare-two-groups": ["paired", "gaussian", "equalVariance", "ratio", "lognormal", "tails", "response", "groupBy", "effectSizes", "sets"],
+  "one-sample-t": ["hypotheticalValue", "tails", "gaussian", "lognormal", "effectSizes", "sets"],
+  anova: ["posthoc", "equalSd", "control", "compared", "lognormal", "effectSizes", "sets"],
   "kruskal-wallis": ["posthoc", "sets"],
-  "rm-anova": ["posthoc", "sphericity", "compared", "mixed", "sets"],
+  "rm-anova": ["posthoc", "sphericity", "compared", "mixed", "effectSizes", "sets"],
   friedman: ["posthoc", "sets"],
   "mixed-effects": ["fixedFactors", "randomStructure", "subjectId", "subjectFactor", "interaction", "sets"],
   "shapiro-wilk": ["test", "lognormal", "sets"],
@@ -884,7 +884,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "bland-altman": ["sets"],
   "roc-curve": ["truth", "score", "positive", "sets"],
   "plot-function": ["equation", "xMin", "xMax", "segments", "curves", "extra", "ligandConcentration", "sets"],
-  correlation: ["method", "mode", "datasets", "sets"],
+  correlation: ["method", "mode", "datasets", "effectSizes", "sets"],
   "linear-regression": ["x", "y", "ys", "forceOrigin", "weights", "sets"],
   "deming-regression": ["y", "lambda", "sets"],
   "simple-logistic-regression": ["y", "sets"],
@@ -904,12 +904,12 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   ],
   "spline-lowess": ["y", "method", "f", "spar", "df", "sets"],
   "smooth-differentiate-integrate": ["ys", "x", "operation", "window", "order", "smoothResults", "baseline", "startValue", "sets"],
-  "two-way-anova": ["design", "posthoc", "posthocTarget", "sphericity", "sets"],
-  "three-way-anova": ["posthoc", "posthocTerm", "sets"],
+  "two-way-anova": ["design", "posthoc", "posthocTarget", "sphericity", "effectSizes", "sets"],
+  "three-way-anova": ["posthoc", "posthocTerm", "effectSizes", "sets"],
   "multiple-t-tests": ["paired", "gaussian", "pooledSd", "correction", "sets"],
   "nested-t-test": ["sets"],
   "nested-anova": ["posthoc", "sets"],
-  "correlation-matrix": ["method", "sets"],
+  "correlation-matrix": ["method", "effectSizes", "sets"],
   "multiple-regression": ["dependent", "predictors", "sets"],
   "multiple-logistic-regression": ["dependent", "predictors", "sets"],
   "poisson-regression": ["dependent", "predictors", "quasi", "sets"],
@@ -923,7 +923,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   ],
   survival: ["curveTest", "correction", "time", "status", "groupBy", "sets"],
   cox: ["reference", "sets"],
-  "chi-square": ["test", "trendOrdered", "sets"],
+  "chi-square": ["test", "trendOrdered", "effectSizes", "sets"],
   mcnemar: ["continuityCorrection", "sets"],
 };
 

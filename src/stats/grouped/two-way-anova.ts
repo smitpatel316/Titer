@@ -470,11 +470,14 @@ async function runRepeatedMeasures(
       : undefined;
   // Each effect against its own error stratum (see the `etaCI` note above).
   const ssTotal = (v.gSS ?? 0) + (v.e1SS ?? 0) + (v.rSS ?? 0) + (v.iSS ?? 0) + (v.e2SS ?? 0);
-  const effectSizes = [
-    effectSizeRow("Group", v.gSS, v.e1SS, ssTotal, v.gLo, v.gHi),
-    effectSizeRow("Row", v.rSS, v.e2SS, ssTotal, v.rLo, v.rHi),
-    effectSizeRow("Interaction", v.iSS, v.e2SS, ssTotal, v.iLo, v.iHi),
-  ];
+  const effectSizes =
+    params.effectSizes === false
+      ? undefined
+      : [
+          effectSizeRow("Group", v.gSS, v.e1SS, ssTotal, v.gLo, v.gHi),
+          effectSizeRow("Row", v.rSS, v.e2SS, ssTotal, v.rLo, v.rHi),
+          effectSizeRow("Interaction", v.iSS, v.e2SS, ssTotal, v.iLo, v.iHi),
+        ];
   return {
     testType: "two-way-anova",
     subtitle: "Repeated-measures two-way ANOVA",
@@ -623,13 +626,14 @@ export async function runTwoWayAnova(
   // Scheirer-Ray-Hare's H statistics carry no sums of squares, so no
   // effect-size table; the parametric designs get one per effect.
   const ssTotal = (v.gSS ?? 0) + (v.rSS ?? 0) + (v.iSS ?? 0) + (v.eSS ?? 0);
-  const effectSizes = nonparametric
-    ? undefined
-    : [
-        effectSizeRow("Group", v.gSS, v.eSS, ssTotal, v.gLo, v.gHi),
-        effectSizeRow("Row", v.rSS, v.eSS, ssTotal, v.rLo, v.rHi),
-        ...(replicated ? [effectSizeRow("Interaction", v.iSS, v.eSS, ssTotal, v.iLo, v.iHi)] : []),
-      ];
+  const effectSizes =
+    nonparametric || params.effectSizes === false
+      ? undefined
+      : [
+          effectSizeRow("Group", v.gSS, v.eSS, ssTotal, v.gLo, v.gHi),
+          effectSizeRow("Row", v.rSS, v.eSS, ssTotal, v.rLo, v.rHi),
+          ...(replicated ? [effectSizeRow("Interaction", v.iSS, v.eSS, ssTotal, v.iLo, v.iHi)] : []),
+        ];
   const { groups } = await describe(
     [...new Set(group)].map((name) => ({ name, values: values.filter((_, i) => group[i] === name) })),
   );

@@ -56,6 +56,9 @@ export async function runCorrelationMatrix(
     hi[i][j] = hi[j][i] = v[`hi_${i}_${j}`] ?? null;
   }
   const { groups: described } = await describe(vars);
+  // effectSizes false: r and P only — the CI arrays stay out of the matrix,
+  // so the results view renders no CI table for it.
+  const showCi = params?.effectSizes !== false;
   return {
     testType: "correlation-matrix",
     subtitle: method === "spearman" ? "Spearman correlation matrix" : "Pearson correlation matrix",
@@ -65,10 +68,16 @@ export async function runCorrelationMatrix(
       (method === "spearman"
         ? "Spearman rank correlation between every pair of variables, computed on pairwise-complete rows; non-parametric, no linearity assumption."
         : "Pearson correlation between every pair of variables, computed on pairwise-complete rows; assumes linear relationships.") +
-      " Each r carries its 95% confidence interval." +
+      (showCi ? " Each r carries its 95% confidence interval." : "") +
       (blank
         ? ` A blank cell: fewer than ${MIN_PAIRS} complete rows, or a variable whose values are identical on them.`
         : ""),
-    matrix: { variables: vars.map((c) => c.name), r, p, lo, hi, label: "Correlation matrix (r)" },
+    matrix: {
+      variables: vars.map((c) => c.name),
+      r,
+      p,
+      ...(showCi ? { lo, hi } : {}),
+      label: "Correlation matrix (r)",
+    },
   };
 }

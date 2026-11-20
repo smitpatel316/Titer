@@ -5,7 +5,7 @@
 import type { OneSampleTParams } from "../types";
 import { ciRows, declareGroups, identical, pRow, R_EFFECT_CI, R_HEDGES, rAlt, type ColumnTestSpec } from "./base";
 
-const DEFAULTS: OneSampleTParams = { hypotheticalValue: 0, tails: "two-sided", gaussian: true };
+const DEFAULTS: OneSampleTParams = { hypotheticalValue: 0, tails: "two-sided", gaussian: true, effectSizes: true };
 
 export const oneSampleTSpec: ColumnTestSpec<OneSampleTParams> = {
   testType: "one-sample-t",
@@ -94,10 +94,14 @@ export const oneSampleTSpec: ColumnTestSpec<OneSampleTParams> = {
       pRow(`${g.name} — P value`, v[`p${i}`]),
       { label: `${g.name} — Mean vs. hypothetical`, value: v[`md${i}`] },
       ...ciRows(p.tails, v[`ci_lo${i}`], v[`ci_hi${i}`], `${g.name} — `),
-      { label: `${g.name} — Cohen's d`, value: v[`d${i}`] },
-      ...ciRows(p.tails, v[`dLo${i}`], v[`dHi${i}`], `${g.name} — Cohen's d `),
-      { label: `${g.name} — Hedges' g`, value: v[`g${i}`] },
-      ...ciRows(p.tails, v[`gLo${i}`], v[`gHi${i}`], `${g.name} — Hedges' g `),
+      ...(p.effectSizes === false
+        ? []
+        : [
+            { label: `${g.name} — Cohen's d`, value: v[`d${i}`] },
+            ...ciRows(p.tails, v[`dLo${i}`], v[`dHi${i}`], `${g.name} — Cohen's d `),
+            { label: `${g.name} — Hedges' g`, value: v[`g${i}`] },
+            ...ciRows(p.tails, v[`gLo${i}`], v[`gHi${i}`], `${g.name} — Hedges' g `),
+          ]),
     ]);
   },
   notes: (params) => {

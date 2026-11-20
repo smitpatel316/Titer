@@ -30,6 +30,7 @@ const DEFAULTS: CompareTwoGroupsParams = {
   equalVariance: true,
   ratio: false,
   tails: "two-sided",
+  effectSizes: true,
 };
 
 /** A partial params object (e.g. a field stripped on load) still runs —
@@ -276,15 +277,19 @@ export const compareTwoGroupsSpec: ColumnTestSpec<CompareTwoGroupsParams> = {
       { label: p.paired ? "Mean of differences" : "Mean difference", value: v.md },
       ...ciRows(p.tails, v.ci_lo, v.ci_hi),
       { label: "R squared", value: v.r2 },
-      { label: "Cohen's d", value: v.d },
-      ...ciRows(p.tails, v.dLo, v.dHi, "Cohen's d "),
-      { label: "Hedges' g", value: v.g },
-      ...ciRows(p.tails, v.gLo, v.gHi, "Hedges' g "),
-      ...(p.paired
+      ...(p.effectSizes === false
         ? []
         : [
-            { label: "Glass's Δ (second group's SD)", value: v.gl },
-            ...ciRows(p.tails, v.glLo, v.glHi, "Glass's Δ "),
+            { label: "Cohen's d", value: v.d },
+            ...ciRows(p.tails, v.dLo, v.dHi, "Cohen's d "),
+            { label: "Hedges' g", value: v.g },
+            ...ciRows(p.tails, v.gLo, v.gHi, "Hedges' g "),
+            ...(p.paired
+              ? []
+              : [
+                  { label: "Glass's Δ (second group's SD)", value: v.gl },
+                  ...ciRows(p.tails, v.glLo, v.glHi, "Glass's Δ "),
+                ]),
           ]),
     ];
     if (!p.paired) {

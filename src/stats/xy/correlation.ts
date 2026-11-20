@@ -31,7 +31,7 @@ export async function runXYCorrelation(
     }
     const outcome = await runCorrelationMatrix(
       yCols.map((y) => y.columns[0]),
-      { method },
+      { method, effectSizes: params?.effectSizes },
     );
     if ("error" in outcome) return outcome;
     return {
@@ -62,8 +62,12 @@ export async function runXYCorrelation(
       subtitle: `${methodLabel} correlation`,
       stats: [
         { label: `${methodLabel} r`, value: v.r },
-        { label: "95% CI lower", value: v.lo },
-        { label: "95% CI upper", value: v.hi },
+        ...(params?.effectSizes === false
+          ? []
+          : [
+              { label: "95% CI lower", value: v.lo },
+              { label: "95% CI upper", value: v.hi },
+            ]),
         ...(method === "pearson" ? [{ label: "R squared", value: v.r2 }] : []),
         pRow("P value", v.p),
       ],
@@ -98,12 +102,13 @@ export async function runXYCorrelation(
   }
   const left = yCols.filter((_, i) => !computed.has(i)).map((y) => `“${y.name}”`);
   const v = await evalNamedVector(`${R_RCI};${stmts.join(";")};c(${assigns.join(",")})`);
+  const showCi = params?.effectSizes !== false;
   const correlations: CorrelationRow[] = yCols.map((y, i) => ({
     variable: y.name,
     r: computed.has(i) ? (v[`r_${i}`] ?? null) : null,
     p: computed.has(i) ? (v[`p_${i}`] ?? null) : null,
-    low: computed.has(i) ? (v[`lo_${i}`] ?? null) : null,
-    high: computed.has(i) ? (v[`hi_${i}`] ?? null) : null,
+    low: showCi && computed.has(i) ? (v[`lo_${i}`] ?? null) : null,
+    high: showCi && computed.has(i) ? (v[`hi_${i}`] ?? null) : null,
   }));
   const { groups: described } = await describe([
     xCol,

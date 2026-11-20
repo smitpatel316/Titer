@@ -115,10 +115,13 @@ export const rmAnovaSpec: ColumnTestSpec<RmAnovaParams> = {
   // Treatment: partial eta squared (its R² is the eta squared above);
   // Matching: Prism's R² for the subjects effect (SS_subjects / SS_total) —
   // an eta squared, not a partial one, so its partial / f / CI stay null.
-  effectSizes: (v) => [
-    effectSizeRow("Treatment", v.ssT, v.ssE, (v.ssT ?? 0) + (v.ssS ?? 0) + (v.ssE ?? 0), v.pLo, v.pHi),
-    effectSizeRow("Matching (subjects)", v.ssS, null, (v.ssT ?? 0) + (v.ssS ?? 0) + (v.ssE ?? 0), null, null),
-  ],
+  effectSizes: (v, _groups, params) =>
+    params?.effectSizes === false
+      ? undefined
+      : [
+          effectSizeRow("Treatment", v.ssT, v.ssE, (v.ssT ?? 0) + (v.ssS ?? 0) + (v.ssE ?? 0), v.pLo, v.pHi),
+          effectSizeRow("Matching (subjects)", v.ssS, null, (v.ssT ?? 0) + (v.ssS ?? 0) + (v.ssE ?? 0), null, null),
+        ],
   posthoc: (params) => posthocOf({ posthoc: posthocIn(params) }),
   pairs: (groups, params) =>
     posthocIn(params) === "tukey" ? pairIndices(groups.length) : comparedPairs(groups, params?.compared),

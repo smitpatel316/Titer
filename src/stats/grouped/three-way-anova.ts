@@ -187,9 +187,12 @@ export async function runThreeWayAnova(
     "B:C": "B:C",
     "A:B:C": "A:B:C",
   };
-  const effectSizes = TERMS.map((t, k) =>
-    effectSizeRow(TERM_LABELS[t], ssTerms[k], ssError, ssTotal, v[`${keyOf(t)}Lo`], v[`${keyOf(t)}Hi`]),
-  );
+  const effectSizes =
+    params?.effectSizes === false
+      ? undefined
+      : TERMS.map((t, k) =>
+          effectSizeRow(TERM_LABELS[t], ssTerms[k], ssError, ssTotal, v[`${keyOf(t)}Lo`], v[`${keyOf(t)}Hi`]),
+        );
   const groups = (
     await describe(aLevels.map((name) => ({ name, values: flat.values.filter((_, i) => flat.a[i] === name) })))
   ).groups;
