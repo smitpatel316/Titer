@@ -1350,6 +1350,12 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
         tools: &["titer_read_figure", "titer_read_info_sheet", "titer_read_activity", "titer_send_feedback"],
     },
     AllowlistGroup {
+        id: "discovery",
+        label: "Discover projects and params",
+        description: "Summarise projects, search nodes by name, and look up an analysis type's valid params before running it.",
+        tools: &["titer_project_summary", "titer_search", "titer_get_analysis_params"],
+    },
+    AllowlistGroup {
         id: "project",
         label: "Open and save projects",
         description: "Create, open, save and import projects.",
@@ -1371,9 +1377,10 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
     AllowlistGroup {
         id: "analyses",
         label: "Run analyses",
-        description: "Run and freeze analyses, simulate data, apply methods and the wand; check job status.",
+        description: "Run, re-run and freeze analyses, simulate data, apply methods and the wand; check job status.",
         tools: &[
             "titer_run_analysis",
+            "titer_rerun_analysis",
             "titer_freeze_analysis",
             "titer_simulate_data",
             "titer_apply_method",
@@ -8160,9 +8167,9 @@ mod tests {
     fn search_nodes_finds_by_name_and_type() {
         let snap = snapshot();
         let (found, total) = search_nodes(&snap, "dose", None);
-        assert_eq!(total, 2, "{found:?}");
+        assert_eq!(total, 3, "{found:?}");
         let ids: Vec<&str> = found.iter().map(|m| m["id"].as_str().unwrap()).collect();
-        assert_eq!(ids, vec!["t1", "a1"], "table then analysis, in listing order");
+        assert_eq!(ids, vec!["t1", "a1", "f1"], "table then analysis then figure, in listing order");
         assert_eq!(found[1]["parent_id"], "t1");
         assert_eq!(found[1]["parent_name"], "Dose-response");
         // Case-insensitive, and the kind filter narrows to tables only.
@@ -8641,8 +8648,8 @@ mod tests {
     // ── Analyses (L4) ────────────────────────────────────────────────────
 
     #[test]
-    fn validate_analysis_type_accepts_the_54_and_refuses_wizard_values() {
-        assert_eq!(ANALYSIS_TYPES.len(), 54, "one entry per AnalysisType: {ANALYSIS_TYPES:?}");
+    fn validate_analysis_type_accepts_the_55_and_refuses_wizard_values() {
+        assert_eq!(ANALYSIS_TYPES.len(), 55, "one entry per AnalysisType: {ANALYSIS_TYPES:?}");
         for t in [
             "descriptive-statistics",
             "anova",
@@ -8654,6 +8661,7 @@ mod tests {
             "chi-square",
             "mcnemar",
             "cox-proportional-hazards",
+            "p-value-stack",
         ] {
             assert!(validate_analysis_type(t).is_ok(), "{t}");
         }
@@ -8818,7 +8826,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 52 tools, so it enables every group first.
+        // this test drives all 56 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -9846,7 +9854,7 @@ mod tests {
         state.lock().dir = Some(dir.clone());
         let session2 = mcp_initialize(&client, &url).await;
         let names2 = mcp_list_tool_names(&client, &url, &session2).await;
-        assert_eq!(names2.len(), 7, "five reads + two destructive tools: {names2:?}");
+        assert_eq!(names2.len(), 11, "five reads + six destructive tools: {names2:?}");
         assert!(names2.contains(&"titer_delete_node".to_string()), "delete appears: {names2:?}");
         assert!(names2.contains(&"titer_run_script".to_string()), "script appears: {names2:?}");
 
