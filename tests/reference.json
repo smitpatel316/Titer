@@ -35737,6 +35737,259 @@
  "chi-square contingencyFractional {\"trendOrdered\":true}": {
   "error": "Counts must be whole numbers; the table holds 2.5."
  },
+ "chi-square-gof gofDie {}": {
+  "testType": "chi-square-gof",
+  "subtitle": "Chi-square goodness of fit",
+  "stats": [
+   {
+    "label": "Chi-square",
+    "value": 1.4
+   },
+   {
+    "label": "df",
+    "value": 5
+   },
+   {
+    "label": "P value",
+    "value": 0.9243132728,
+    "p": true
+   }
+  ],
+  "groups": [],
+  "gofCategories": [
+   {
+    "category": "1",
+    "observed": 16,
+    "expected": 16.66666667,
+    "contribution": 0.02666666667
+   },
+   {
+    "category": "2",
+    "observed": 18,
+    "expected": 16.66666667,
+    "contribution": 0.1066666667
+   },
+   {
+    "category": "3",
+    "observed": 14,
+    "expected": 16.66666667,
+    "contribution": 0.4266666667
+   },
+   {
+    "category": "4",
+    "observed": 20,
+    "expected": 16.66666667,
+    "contribution": 0.6666666667
+   },
+   {
+    "category": "5",
+    "observed": 17,
+    "expected": 16.66666667,
+    "contribution": 0.006666666667
+   },
+   {
+    "category": "6",
+    "observed": 15,
+    "expected": 16.66666667,
+    "contribution": 0.1666666667
+   }
+  ],
+  "notes": "Chi-square goodness-of-fit test: the observed counts in “Rolls” (6 categories, N = 100) against the expected distribution, equal for every category (16.67 expected in each). The null hypothesis is that the observed counts were sampled from a population with the expected frequencies; a small P value is evidence they were not. Every category expects 5 or more, so the chi-square approximation is sound."
+ },
+ "chi-square-gof gofMendel {\"expectedMode\":\"counts\",\"expectedValues\":[312.75,104.25,104.25,34.75]}": {
+  "testType": "chi-square-gof",
+  "subtitle": "Chi-square goodness of fit",
+  "stats": [
+   {
+    "label": "Chi-square",
+    "value": 0.4700239808
+   },
+   {
+    "label": "df",
+    "value": 3
+   },
+   {
+    "label": "P value",
+    "value": 0.9254258951,
+    "p": true
+   }
+  ],
+  "groups": [],
+  "gofCategories": [
+   {
+    "category": "Round yellow",
+    "observed": 315,
+    "expected": 312.75,
+    "contribution": 0.01618705036
+   },
+   {
+    "category": "Wrinkled yellow",
+    "observed": 101,
+    "expected": 104.25,
+    "contribution": 0.1013189448
+   },
+   {
+    "category": "Round green",
+    "observed": 108,
+    "expected": 104.25,
+    "contribution": 0.1348920863
+   },
+   {
+    "category": "Wrinkled green",
+    "observed": 32,
+    "expected": 34.75,
+    "contribution": 0.2176258993
+   }
+  ],
+  "notes": "Chi-square goodness-of-fit test: the observed counts in “Peas” (4 categories, N = 556) against the expected distribution, as entered (expected counts). The null hypothesis is that the observed counts were sampled from a population with the expected frequencies; a small P value is evidence they were not. Every category expects 5 or more, so the chi-square approximation is sound."
+ },
+ "chi-square-gof gofMendel {\"expectedMode\":\"percent\",\"expectedValues\":[56.25,18.75,18.75,6.25]}": {
+  "testType": "chi-square-gof",
+  "subtitle": "Chi-square goodness of fit",
+  "stats": [
+   {
+    "label": "Chi-square",
+    "value": 0.4700239808
+   },
+   {
+    "label": "df",
+    "value": 3
+   },
+   {
+    "label": "P value",
+    "value": 0.9254258951,
+    "p": true
+   }
+  ],
+  "groups": [],
+  "gofCategories": [
+   {
+    "category": "Round yellow",
+    "observed": 315,
+    "expected": 312.75,
+    "contribution": 0.01618705036
+   },
+   {
+    "category": "Wrinkled yellow",
+    "observed": 101,
+    "expected": 104.25,
+    "contribution": 0.1013189448
+   },
+   {
+    "category": "Round green",
+    "observed": 108,
+    "expected": 104.25,
+    "contribution": 0.1348920863
+   },
+   {
+    "category": "Wrinkled green",
+    "observed": 32,
+    "expected": 34.75,
+    "contribution": 0.2176258993
+   }
+  ],
+  "notes": "Chi-square goodness-of-fit test: the observed counts in “Peas” (4 categories, N = 556) against the expected distribution, as entered (expected percentages). The null hypothesis is that the observed counts were sampled from a population with the expected frequencies; a small P value is evidence they were not. Every category expects 5 or more, so the chi-square approximation is sound."
+ },
+ "chi-square-gof gofDie {\"expectedMode\":\"percent\",\"expectedValues\":[20,20,20,10,10,10]}": {
+  "error": "The expected percentages add up to 90% — they must add up to 100%."
+ },
+ "binomial-test binomCoin {}": {
+  "testType": "binomial-test",
+  "subtitle": "Binomial test",
+  "stats": [
+   {
+    "label": "Number of trials (n)",
+    "value": 10
+   },
+   {
+    "label": "Observed in “Heads”",
+    "value": 8
+   },
+   {
+    "label": "Expected in “Heads”",
+    "value": 5
+   },
+   {
+    "label": "Observed proportion (“Heads”)",
+    "value": 0.8
+   },
+   {
+    "label": "P value (two-tailed)",
+    "value": 0.109375,
+    "p": true
+   },
+   {
+    "label": "P value (one-tailed, fewer)",
+    "value": 0.9892578125,
+    "p": true
+   },
+   {
+    "label": "P value (one-tailed, more)",
+    "value": 0.0546875,
+    "p": true
+   },
+   {
+    "label": "Observed proportion 95% CI lower",
+    "value": 0.4439045377
+   },
+   {
+    "label": "Observed proportion 95% CI upper",
+    "value": 0.9747892737
+   }
+  ],
+  "groups": [],
+  "notes": "Binomial test (exact): 8 of 10 in “Heads” vs. 2 in “Tails”, against an expected proportion of 0.5 for “Heads” (5 expected). The two-tailed P value sums the probabilities of every outcome no more likely than the one observed. The 95% CI of the observed proportion is the exact (Clopper–Pearson) interval. A small P value is evidence the true proportion is not 0.5."
+ },
+ "binomial-test binomCoin {\"expectedProportion\":0.6}": {
+  "testType": "binomial-test",
+  "subtitle": "Binomial test",
+  "stats": [
+   {
+    "label": "Number of trials (n)",
+    "value": 10
+   },
+   {
+    "label": "Observed in “Heads”",
+    "value": 8
+   },
+   {
+    "label": "Expected in “Heads”",
+    "value": 6
+   },
+   {
+    "label": "Observed proportion (“Heads”)",
+    "value": 0.8
+   },
+   {
+    "label": "P value (two-tailed)",
+    "value": 0.3335283712,
+    "p": true
+   },
+   {
+    "label": "P value (one-tailed, fewer)",
+    "value": 0.9536425984,
+    "p": true
+   },
+   {
+    "label": "P value (one-tailed, more)",
+    "value": 0.1672897536,
+    "p": true
+   },
+   {
+    "label": "Observed proportion 95% CI lower",
+    "value": 0.4439045377
+   },
+   {
+    "label": "Observed proportion 95% CI upper",
+    "value": 0.9747892737
+   }
+  ],
+  "groups": [],
+  "notes": "Binomial test (exact): 8 of 10 in “Heads” vs. 2 in “Tails”, against an expected proportion of 0.6 for “Heads” (6 expected). The two-tailed P value sums the probabilities of every outcome no more likely than the one observed. The 95% CI of the observed proportion is the exact (Clopper–Pearson) interval. A small P value is evidence the true proportion is not 0.6."
+ },
+ "binomial-test binomThree {}": {
+  "error": "The binomial test needs exactly 2 categories (rows with a count) in “Counts”; it holds 3. With more than two, use the chi-square goodness-of-fit test."
+ },
  "linear-regression xyNoX {\"forceOrigin\":false}": {
   "error": "“X”, the X column, is empty. Type the X values (times, doses…) in it."
  },
