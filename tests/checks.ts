@@ -164,7 +164,7 @@ import { addPcaBiplot } from "../src/views/graphs/pca-biplot";
 import { addObservedFitted } from "../src/views/graphs/observed-fitted";
 import { batchMatched, examplesFor, matched, type Matched } from "../src/views/graphs/match-graph";
 import type { OutlineNode } from "../src/store/use-project-store";
-import { addSignificance, deriveComparisons } from "../src/views/graphs/significance-overlay";
+import { addSignificance, deriveComparisons, lettersComparisons, sigAnalysisIdsOf, sigPairKey, sigPairSelected } from "../src/views/graphs/significance-overlay";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AnalysisResultsView, headline } from "../src/views/analyses/analysis-results-view";
@@ -8942,6 +8942,61 @@ check("a graph's stars compare the two groups its t test chose, with the test's 
     deriveComparisons(outcome).map((c) => [c.group1, c.group2, c.p]),
     [["Control", "Drug B", 0.01]],
   );
+});
+
+check("grouped-scatter multi-sig: the list wins over the single id, deduped, in order", () => {
+  const base = { ...newGraphOptions("grouped-scatter"), sigDisplay: "pvalue" as const };
+  deepStrictEqual(sigAnalysisIdsOf({ ...base, sigAnalysisId: "a1", sigAnalysisIds: ["a2", "a1", "a2"] }), ["a2", "a1"]);
+  deepStrictEqual(sigAnalysisIdsOf({ ...base, sigAnalysisId: "a1" }), ["a1"]);
+  deepStrictEqual(sigAnalysisIdsOf({ ...base, sigAnalysisIds: [] }), []);
+  deepStrictEqual(sigAnalysisIdsOf(base), []);
+});
+
+check("grouped-scatter multi-sig: the same pair from two analyses stays distinct, and a bare key still selects a legacy pair", () => {
+  const outcome = {
+    comparisons: [{ group1: "WT", group2: "SKG", p: 0.03 }],
+  } as unknown as AnalysisOutcome;
+  const fromA = deriveComparisons(outcome, "a1");
+  const fromB = deriveComparisons(outcome, "a2");
+  strictEqual(fromA[0].analysisId, "a1");
+  strictEqual(fromB[0].analysisId, "a2");
+  ok(sigPairKey(fromA[0]) !== sigPairKey(fromB[0]), "scoped keys differ");
+  // Only the first analysis's pair is ticked by its scoped key.
+  ok(sigPairSelected([sigPairKey(fromA[0])], fromA[0]));
+  ok(!sigPairSelected([sigPairKey(fromA[0])], fromB[0]));
+  // A graph saved before multi-source ticked the bare key: it still draws.
+  const legacy = deriveComparisons(outcome);
+  ok(sigPairSelected([legacy[0].key], legacy[0]));
+});
+
+check("grouped-scatter multi-sig: letters come from the first analysis only", () => {
+  const outcome = {
+    comparisons: [{ group1: "WT", group2: "SKG", p: 0.03 }],
+  } as unknown as AnalysisOutcome;
+  const all = [...deriveComparisons(outcome, "a1"), ...deriveComparisons(outcome, "a2")];
+  deepStrictEqual(
+    lettersComparisons(all).map((c) => c.analysisId),
+    ["a1"],
+  );
+  // No source tagged (legacy single source): every comparison letters.
+  deepStrictEqual(lettersComparisons(deriveComparisons(outcome)).length, 1);
+});
+
+check("a cloned graph remaps the multi-sig list per entry (remapGraphOptions)", () => {
+  const options = { ...newGraphOptions("grouped-scatter"), sigAnalysisIds: ["a1", "a9"] };
+  const both = remapGraphOptions(options, { a1: "n1", a9: "n2" });
+  deepStrictEqual(both.options?.sigAnalysisIds, ["n1", "n2"]);
+  deepStrictEqual(both.dropped, []);
+  // Only one cloned: the other entry drops out, the list survives.
+  const one = remapGraphOptions(options, { a1: "n1" });
+  deepStrictEqual(one.options?.sigAnalysisIds, ["n1"]);
+  deepStrictEqual(one.dropped, []);
+  // None cloned: the list goes with the links.
+  const none = remapGraphOptions(options, {});
+  strictEqual(none.options?.sigAnalysisIds, undefined);
+  deepStrictEqual(none.dropped, ["sigAnalysisIds"]);
+  // The input is never mutated.
+  deepStrictEqual(options.sigAnalysisIds, ["a1", "a9"]);
 });
 
 check("a matched test counts as left out only the rows holding some of its values", () => {
