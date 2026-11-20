@@ -229,6 +229,10 @@ function toExportDeps(deps: JobDeps): ExportJobDeps {
   return {
     getState: deps.getState,
     io: deps.exportIo ?? defaultExportIo,
+    // The overlay runs: the dispatcher's `run` (the real `runAnalysis`
+    // in the app, a stub in a harness), so headless exports draw the
+    // graph's overlays from the same cache the views read.
+    run: deps.run ?? runAnalysis,
   };
 }
 

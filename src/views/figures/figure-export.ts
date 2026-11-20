@@ -19,7 +19,7 @@ import {
   PT_PER_INCH,
   sharedLegendCheck,
 } from "../../lib/figure";
-import { buildPanelFigure } from "./panel-figure";
+import { buildGraphFigure, type GraphOverlayStatus } from "../graphs/graph-figure";
 import type { ExportFormat, Resolution } from "../graphs/graph-export";
 import { buildOfficeDocument, officeDialogTitle, officeExtension, type OfficeTarget } from "../../lib/office-export";
 import type { FigurePanel, ProjectNode } from "../../store/types";
@@ -30,9 +30,25 @@ const reason = (err: unknown) => (err instanceof Error ? err.message : String(er
 
 type Size = { width: number; height: number };
 
-/** A panel drawn at `size`, as an image blob (raster at `dpi`, or SVG).
- *  With `hideLegend`, the panel draws no legend of its own — the figure's
- *  one shared legend (drawn below the grid by the caller) replaces it. */
+/** One overlay list per panel, merged: an overlay counts as applied when
+ *  any panel applied it, else the first panel's report for it stands. */
+export function mergePanelOverlays(panels: GraphOverlayStatus[][]): GraphOverlayStatus[] {
+  const byName = new Map<string, GraphOverlayStatus>();
+  for (const list of panels) {
+    for (const status of list) {
+      const seen = byName.get(status.overlay);
+      if (!seen) byName.set(status.overlay, status);
+      else if (seen.status !== "applied" && status.status === "applied") byName.set(status.overlay, status);
+    }
+  }
+  return [...byName.values()];
+}
+
+/** A panel drawn at `size`, as an image blob (raster at `dpi`, or SVG),
+ *  with the overlay report for its graph. With `hideLegend`, the panel
+ *  draws no legend of its own — the figure's one shared legend (drawn
+ *  below the grid by the caller) replaces it. The figure is the shared
+ *  `buildGraphFigure`, so the panel draws the graph's overlays too. */
 async function panelImage(
   graph: ProjectNode,
   nodes: Record<string, ProjectNode>,
@@ -40,9 +56,9 @@ async function panelImage(
   format: ExportFormat,
   dpi: Resolution,
   hideLegend: boolean,
-): Promise<Blob | null> {
-  const fig = buildPanelFigure(graph, nodes, { hideLegend });
-  if (!fig) return null;
+): Promise<{ image: Blob | null; overlays: GraphOverlayStatus[] }> {
+  const { figure: fig, overlays } = await buildGraphFigure(graph, nodes, { hideLegend });
+  if (!fig) return { image: null, overlays };
   const el = document.createElement("div");
   el.style.cssText = "position:fixed;left:-10000px;top:0;visibility:hidden;";
   document.body.appendChild(el);
@@ -75,7 +91,10 @@ async function panelImage(
     // In the non-SVG branch `drawnFormat` is png|jpeg (pdf/tiff panels were
     // drawn as PNG); name that so `withDpi`'s "png"|"jpeg" parameter accepts it.
     const rasterFormat: "png" | "jpeg" = drawnFormat === "jpeg" ? "jpeg" : "png";
-    return format === "svg" ? image : withDpi(new Uint8Array(await image.arrayBuffer()), rasterFormat, Number(dpi));
+    return {
+      image: format === "svg" ? image : withDpi(new Uint8Array(await image.arrayBuffer()), rasterFormat, Number(dpi)),
+      overlays,
+    };
   } finally {
     void loadPlotly().then((Plotly) => Plotly.purge(el));
     el.remove();
@@ -116,7 +135,15 @@ export async function renderFigureRaster(
   nodes: Record<string, ProjectNode>,
   format: "png" | "jpeg" | "pdf" | "tiff",
   dpi: Resolution,
-): Promise<{ blob: Blob; missing: number; capped: boolean; reason?: string; width: number; height: number }> {
+): Promise<{
+  blob: Blob;
+  missing: number;
+  capped: boolean;
+  reason?: string;
+  width: number;
+  height: number;
+  overlays: GraphOverlayStatus[];
+}> {
   const g = geometry(figure, dpi);
   const legend =
     figure.sharedLegend === "shared" ? sharedLegendCheck(g.panels, nodes) : { ok: false as const };
@@ -131,6 +158,7 @@ export async function renderFigureRaster(
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
   const missing = missingPanels(g.panels, nodes);
+  const panelOverlays: GraphOverlayStatus[][] = [];
   const scale = Number(dpi) / PT_PER_INCH; // points → pixels at this DPI
   const fontPx = (pt: number) => pt * scale;
   // The figure title, centred in its strip above the grid.
@@ -145,7 +173,8 @@ export async function renderFigureRaster(
     const graph = nodes[rect.panel.graphId];
     const y = rect.y + g.titleStrip;
     if (graph) {
-      const image = await panelImage(graph, nodes, { width: rect.width, height: rect.height }, format, dpi, legend.ok);
+      const { image, overlays } = await panelImage(graph, nodes, { width: rect.width, height: rect.height }, format, dpi, legend.ok);
+      panelOverlays.push(overlays);
       if (image) {
         const bitmap = await createImageBitmap(image);
         ctx.drawImage(bitmap, rect.x, y, rect.width, rect.height);
@@ -203,7 +232,15 @@ export async function renderFigureRaster(
       : format === "tiff"
         ? new Blob([tiffEncode(decodePng(png), Number(dpi)) as BlobPart], { type: "image/tiff" })
         : withDpi(png, rasterFormat, Number(dpi));
-  return { blob: stamped, missing: missing.length, capped: g.exported.capped, reason: g.exported.reason, width, height };
+  return {
+    blob: stamped,
+    missing: missing.length,
+    capped: g.exported.capped,
+    reason: g.exported.reason,
+    width,
+    height,
+    overlays: mergePanelOverlays(panelOverlays),
+  };
 }
 
 /** The whole figure as one SVG (vector, editable): each panel's SVG embedded
@@ -214,15 +251,17 @@ export async function renderFigureSvg(
   figure: ProjectNode,
   nodes: Record<string, ProjectNode>,
   dpi: Resolution,
-): Promise<{ svg: string; missing: number; width: number; height: number }> {
+): Promise<{ svg: string; missing: number; width: number; height: number; overlays: GraphOverlayStatus[] }> {
   const g = geometry(figure, dpi);
   const legend =
     figure.sharedLegend === "shared" ? sharedLegendCheck(g.panels, nodes) : { ok: false as const };
   const composed: { panel: FigurePanel; svg: string }[] = [];
+  const panelOverlays: GraphOverlayStatus[][] = [];
   for (const rect of g.rects) {
     const graph = nodes[rect.panel.graphId];
     if (!graph) continue;
-    const image = await panelImage(graph, nodes, { width: rect.width, height: rect.height }, "svg", dpi, legend.ok);
+    const { image, overlays } = await panelImage(graph, nodes, { width: rect.width, height: rect.height }, "svg", dpi, legend.ok);
+    panelOverlays.push(overlays);
     if (image) composed.push({ panel: rect.panel, svg: await image.text() });
   }
   const { svg, missing } = composeFigureSvg(composed, figureOf(figure), legend.ok ? legend.entries : undefined);
@@ -233,7 +272,7 @@ export async function renderFigureSvg(
   const legendStripPt = legend.ok ? 28 : 0;
   const width = Math.round(g.size.widthIn * PX_PER_INCH);
   const height = Math.round(((g.size.heightIn * PT_PER_INCH + titleStripPt + legendStripPt) * PX_PER_INCH) / PT_PER_INCH);
-  return { svg, missing, width, height };
+  return { svg, missing, width, height, overlays: mergePanelOverlays(panelOverlays) };
 }
 
 export async function saveFigureImage(
