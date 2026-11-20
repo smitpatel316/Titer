@@ -275,7 +275,7 @@ import {
 } from "../src/stats/column/transform-concentrations";
 import { makeInitialState, reducer } from "../src/store/use-project-store";
 import { executeJob, waitForRevision, type JobDeps } from "../src/store/mcp-dispatch";
-import { executeSaveProject, toSaveWriteReport, type DocumentDeps } from "../src/store/mcp-document";
+import { executeSaveProject, toSaveWriteReport, type DocumentDeps, type DocumentState } from "../src/store/mcp-document";
 import { TABLES } from "../src/views/tables/index";
 import { UPDATE_CHECK_TIMEOUT_MS, fetchWithTimeout, isNewer, latestVersion } from "../src/lib/version";
 import { decideUpdate, type ChannelManifest } from "../src/lib/channel";
@@ -25772,7 +25772,7 @@ check("titer_save_project returns the write report (Mansi P0 #6, MCP side)", asy
   // One column table, one analysis Prism can't write (anova), one info
   // sheet: the report must name the table written, the analysis dropped
   // with its reason, and the info sheet written.
-  const state = {
+  const state: DocumentState = {
     nodes: {
       t1: {
         id: "t1",
@@ -25794,7 +25794,6 @@ check("titer_save_project returns the write report (Mansi P0 #6, MCP side)", asy
         name: "ANOVA",
         parentId: "t1",
         analysisType: "anova",
-        analysisParams: {},
       },
       i1: {
         id: "i1",
