@@ -18,7 +18,7 @@ import {
   setRQueueSnapshot,
   type RQueueSnapshot,
 } from "../src/stats/r-queue";
-import { parseProjectFile, parseProjectText, readPalette, serializeProjectFile, type ProjectFilePayload } from "../src/lib/project-file";
+import { PARAM_KEYS_BY_ANALYSIS, parseProjectFile, parseProjectText, readPalette, serializeProjectFile, validateAnalysisParams, type ProjectFilePayload } from "../src/lib/project-file";
 import { applyWand, wandExamples, wandReportMessage } from "../src/lib/wand";
 import {
   extractMethod,
@@ -710,6 +710,124 @@ check("MCP create-analysis runs a nested t test on two sets of a 3-group nested 
     /sets \[“A”, “B”, “C”\] select 3 data groups/,
   );
   deepStrictEqual(created, ["nested-t-test"]);
+});
+
+// ── 1.7.4 P0: rerun-analysis param overrides ─────────────────────────
+// A harness analysis node + a stubbed runner (no R): the run-analysis
+// job reads the node from state, merges overrides over its stored
+// params, saves them on the node, and runs with the merged params.
+const rerunHarness = async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-rerun-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B", "C"],
+    rows: [
+      ["r1", 10, 14, 20],
+      ["r2", 11, 15, 21],
+      ["r3", 10, 14, 20],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.dispatch({
+    type: "create",
+    node: {
+      id: "a1",
+      type: "analysis",
+      name: "One-way ANOVA",
+      parentId: tableId,
+      analysisType: "anova",
+      analysisParams: { posthoc: "none" },
+    },
+  });
+  harness.sync();
+  const seen: unknown[] = [];
+  harness.deps.run = async (_type, _data, params) => {
+    seen.push(params);
+    return { stats: [], groups: [], notes: "" };
+  };
+  harness.deps.publishResult = () => {};
+  harness.deps.setAnalysisParams = (id, params) =>
+    harness.dispatch({ type: "setAnalysisParams", id, params });
+  return { harness, seen };
+};
+
+check("MCP run-analysis with params overrides merges and saves them on the node (1.7.4 rerun)", async () => {
+  const { harness, seen } = await rerunHarness();
+  const done = await harness.run("job-rerun-over", "run-analysis", {
+    analysis_id: "a1",
+    params: { posthoc: "tukey" },
+  });
+  strictEqual((done.result as { stats: unknown[] }).stats.length, 0);
+  // The run saw the merged params, and the node keeps them — the next
+  // run and the UI see the override, not the old value.
+  deepStrictEqual(seen, [{ posthoc: "tukey" }]);
+  strictEqual(
+    (harness.state().nodes["a1"]?.analysisParams as { posthoc: string } | undefined)?.posthoc,
+    "tukey",
+  );
+});
+
+check("MCP run-analysis without overrides runs the node as stored", async () => {
+  const { harness, seen } = await rerunHarness();
+  await harness.run("job-rerun-plain", "run-analysis", { analysis_id: "a1" });
+  deepStrictEqual(seen, [{ posthoc: "none" }]);
+  strictEqual(
+    (harness.state().nodes["a1"]?.analysisParams as { posthoc: string } | undefined)?.posthoc,
+    "none",
+  );
+});
+
+check("MCP run-analysis rejects an unknown or cross-family params override, naming the valid choices", async () => {
+  const { harness, seen } = await rerunHarness();
+  await rejects(
+    harness.run("job-rerun-badkey", "run-analysis", { analysis_id: "a1", params: { bogus: 1 } }),
+    /Unknown parameter “bogus” for “anova”/,
+  );
+  // Dunn's is a Kruskal-Wallis/Friedman posthoc, never an ANOVA one —
+  // the override is refused rather than silently reinterpreted.
+  await rejects(
+    harness.run("job-rerun-dunn", "run-analysis", { analysis_id: "a1", params: { posthoc: "dunn" } }),
+    /must be one of:.*tukey/,
+  );
+  // A refused override leaves the stored params untouched and runs nothing.
+  deepStrictEqual(seen, []);
+  strictEqual(
+    (harness.state().nodes["a1"]?.analysisParams as { posthoc: string } | undefined)?.posthoc,
+    "none",
+  );
+});
+
+check("MCP run-analysis refuses a frozen analysis before running it", async () => {
+  const { harness, seen } = await rerunHarness();
+  harness.dispatch({ type: "setAnalysisFrozen", id: "a1", frozen: true });
+  harness.sync();
+  await rejects(
+    harness.run("job-rerun-frozen", "run-analysis", { analysis_id: "a1" }),
+    /is frozen — unfreeze it before running it again/,
+  );
+  deepStrictEqual(seen, []);
+});
+
+// The generated MCP params schema (titer_get_analysis_params) must stay
+// in step with the validator: same types, same param names per type, and
+// every listed enum value must pass validateAnalysisParams.
+check("analysis-params-schema.json matches PARAM_KEYS_BY_ANALYSIS (1.7.4)", () => {
+  const schema = JSON.parse(
+    readFileSync(new URL("../src-tauri/src/analysis-params-schema.json", import.meta.url), "utf8"),
+  ) as Record<string, { params: { name: string; enum?: string[] }[] }>;
+  deepStrictEqual(Object.keys(schema).sort(), Object.keys(PARAM_KEYS_BY_ANALYSIS).sort());
+  for (const [type, entry] of Object.entries(schema)) {
+    deepStrictEqual(
+      entry.params.map((p) => p.name).sort(),
+      [...PARAM_KEYS_BY_ANALYSIS[type]].sort(),
+      `${type} params`,
+    );
+    for (const param of entry.params) {
+      if (!param.enum?.length) continue;
+      const { errors } = validateAnalysisParams(type, { [param.name]: param.enum[0] });
+      deepStrictEqual(errors, [], `${type}.${param.name} = ${param.enum[0]}`);
+    }
+  }
 });
 
 check("create-table accepts an empty row-title column, and refuses an empty later column (v1.6 F2)", async () => {
