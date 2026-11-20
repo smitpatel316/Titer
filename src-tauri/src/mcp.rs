@@ -3388,7 +3388,9 @@ impl TiterMcpServer {
             // Borrow: `ids` is returned in the response below ("projects"),
             // so the loop must not move it (E0382 on the tip).
             for id in &ids {
-                let (mut found, count) = search_nodes(&snapshots[id], &args.query, args.kind.as_deref());
+                // `id` is `&&String` here (the loop borrows `ids`); `*id`
+                // is the `&String` the map index wants.
+                let (mut found, count) = search_nodes(&snapshots[*id], &args.query, args.kind.as_deref());
                 total += count;
                 for m in found.drain(..) {
                     let mut m = m;
