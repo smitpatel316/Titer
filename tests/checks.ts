@@ -10066,7 +10066,7 @@ check("chi-square goodness of fit refuses bad expectations and bad counts", asyn
     "counts must total the observed",
   );
   ok(
-    (await err({ expectedMode: "percent", expectedValues: [30, 30, 30, 0, 0, 0] })).includes("add up to 100"),
+    (await err({ expectedMode: "percent", expectedValues: [20, 20, 20, 10, 10, 10] })).includes("add up to 100"),
     "percentages must add up to 100",
   );
   ok(
