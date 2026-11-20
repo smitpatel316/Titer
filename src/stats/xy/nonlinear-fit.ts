@@ -636,6 +636,18 @@ export function modelSpec(
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, "list(Bottom=min(y),Top=max(y),EC50=median(x[x>0]))")}`,
+        // Same port-then-relaxed retries as the 4PLs: Gauss-Newton stalls
+        // ("singular gradient" / "minFactor") on near-perfect 3PL fits.
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(Bottom=min(y),Top=max(y),EC50=median(x[x>0])),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(Bottom=min(y),Top=max(y),EC50=median(x[x>0]))")}`,
+            method: "relaxed tolerance",
+          },
+        ],
         terms: ["Bottom", "Top", "EC50"],
         derived: [span],
         nonNegativeX: true,
@@ -657,6 +669,17 @@ export function modelSpec(
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, "list(Bottom=min(y),Top=max(y),IC50=median(x[x>0]))")}`,
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(Bottom=min(y),Top=max(y),IC50=median(x[x>0])),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(Bottom=min(y),Top=max(y),IC50=median(x[x>0]))")}`,
+            method: "relaxed tolerance",
+          },
+        ],
         terms: ["Bottom", "Top", "IC50"],
         derived: [span],
         nonNegativeX: true,
@@ -673,6 +696,18 @@ export function modelSpec(
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, "list(LogEC50=median(x))")}`,
+        // Same port-then-relaxed retries as the 4PLs: the 1-parameter
+        // normalized fits stall Gauss-Newton on noiseless data too.
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(LogEC50=median(x)),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(LogEC50=median(x))")}`,
+            method: "relaxed tolerance",
+          },
+        ],
         terms: ["LogEC50"],
         derived: [tenTo("EC50", "LogEC50"), span100],
         curveFn: 'g<-function(xv,p) 100/(1+10^(p[["LogEC50"]]-xv))',
@@ -686,6 +721,17 @@ export function modelSpec(
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, `list(LogEC50=median(x),HillSlope=${SIGN})`)}`,
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(LogEC50=median(x),HillSlope=${SIGN}),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, `list(LogEC50=median(x),HillSlope=${SIGN})`)}`,
+            method: "relaxed tolerance",
+          },
+        ],
         terms: ["LogEC50", "HillSlope"],
         derived: [tenTo("EC50", "LogEC50"), span100],
         curveFn: 'g<-function(xv,p) 100/(1+10^((p[["LogEC50"]]-xv)*p[["HillSlope"]]))',
@@ -698,6 +744,17 @@ export function modelSpec(
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, "list(EC50=median(x[x>0]))")}`,
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(EC50=median(x[x>0])),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(EC50=median(x[x>0]))")}`,
+            method: "relaxed tolerance",
+          },
+        ],
         terms: ["EC50"],
         derived: [span100],
         nonNegativeX: true,
@@ -711,6 +768,17 @@ export function modelSpec(
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, `list(EC50=median(x[x>0]),HillSlope=${SIGN})`)}`,
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(EC50=median(x[x>0]),HillSlope=${SIGN}),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, `list(EC50=median(x[x>0]),HillSlope=${SIGN})`)}`,
+            method: "relaxed tolerance",
+          },
+        ],
         terms: ["EC50", "HillSlope"],
         derived: [span100],
         nonNegativeX: true,
@@ -725,6 +793,17 @@ export function modelSpec(
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, "list(LogIC50=median(x))")}`,
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(LogIC50=median(x)),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(LogIC50=median(x))")}`,
+            method: "relaxed tolerance",
+          },
+        ],
         terms: ["LogIC50"],
         derived: [tenTo("IC50", "LogIC50"), span100],
         curveFn: 'g<-function(xv,p) 100/(1+10^(xv-p[["LogIC50"]]))',
@@ -739,6 +818,17 @@ export function modelSpec(
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, "list(LogIC50=median(x),HillSlope=1)")}`,
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(LogIC50=median(x),HillSlope=1),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(LogIC50=median(x),HillSlope=1)")}`,
+            method: "relaxed tolerance",
+          },
+        ],
         terms: ["LogIC50", "HillSlope"],
         derived: [tenTo("IC50", "LogIC50"), span100],
         curveFn: 'g<-function(xv,p) 100/(1+10^((xv-p[["LogIC50"]])*p[["HillSlope"]]))',
@@ -754,6 +844,17 @@ export function modelSpec(
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, "list(IC50=median(x[x>0]))")}`,
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(IC50=median(x[x>0])),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(IC50=median(x[x>0]))")}`,
+            method: "relaxed tolerance",
+          },
+        ],
         terms: ["IC50"],
         derived: [span100],
         nonNegativeX: true,
@@ -769,6 +870,17 @@ export function modelSpec(
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, "list(IC50=median(x[x>0]),HillSlope=1)")}`,
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(IC50=median(x[x>0]),HillSlope=1),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(IC50=median(x[x>0]),HillSlope=1)")}`,
+            method: "relaxed tolerance",
+          },
+        ],
         terms: ["IC50", "HillSlope"],
         derived: [span100],
         nonNegativeX: true,
@@ -783,14 +895,21 @@ export function modelSpec(
       // Two midpoints, so no dose field (comparison/ECanything need one).
       const expr =
         "Bottom+(Top-Bottom)*Frac/(1+10^((LogEC50_1-x)*nH1))+(Top-Bottom)*(1-Frac)/(1+10^((LogEC50_2-x)*nH2))";
-      const starts = "list(Bottom=min(y),Top=max(y),LogEC50_1=log10(median(x))-1,LogEC50_2=log10(median(x))+1,nH1=1,nH2=1,Frac=0.5)";
+      const starts = "list(Bottom=min(y),Top=max(y),LogEC50_1=median(x)-1,LogEC50_2=median(x)+1,nH1=1,nH2=1,Frac=0.5)";
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, starts)}`,
         retryFits: [
           {
-            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
+            // Bounded port: an unbounded trial step can take EC50/nH
+            // negative, and (EC50/X)^nH on a negative base is NaN.
+            // nH > 0 keeps both phases rising; Frac stays in [0, 1].
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",lower=c(-Inf,-Inf,-Inf,-Inf,0,0,0),upper=c(Inf,Inf,Inf,Inf,Inf,Inf,1),control=nls.control(maxiter=200))`,
             method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, starts)}`,
+            method: "relaxed tolerance",
           },
         ],
         terms: ["Bottom", "Top", "LogEC50_1", "LogEC50_2", "nH1", "nH2", "Frac"],
@@ -811,8 +930,15 @@ export function modelSpec(
         fit: `m<-${nls200(expr, starts)}`,
         retryFits: [
           {
-            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
+            // Bounded port: EC50_1/EC50_2 and nH stay positive, Frac in
+            // [0, 1] — a negative EC50 makes (EC50/X)^nH NaN for
+            // fractional nH (see biphasic-logx).
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",lower=c(-Inf,-Inf,0,0,0,0,0),upper=c(Inf,Inf,Inf,Inf,Inf,Inf,1),control=nls.control(maxiter=200))`,
             method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, starts)}`,
+            method: "relaxed tolerance",
           },
         ],
         terms: ["Bottom", "Top", "EC50_1", "EC50_2", "nH1", "nH2", "Frac"],
@@ -827,14 +953,19 @@ export function modelSpec(
       // + Span2/(1+10^((X−LogEC50_2)·nH2)), Span1=Plateau1−Dip, Span2=Plateau2−Dip.
       const expr =
         "Dip+(Plateau1-Dip)/(1+10^((LogEC50_1-x)*nH1))+(Plateau2-Dip)/(1+10^((x-LogEC50_2)*nH2))";
-      const starts = "list(Plateau1=max(y),Plateau2=max(y),Dip=min(y),LogEC50_1=log10(median(x))-1,LogEC50_2=log10(median(x))+1,nH1=1,nH2=1)";
+      const starts = "list(Plateau1=max(y),Plateau2=max(y),Dip=min(y),LogEC50_1=median(x)-1,LogEC50_2=median(x)+1,nH1=1,nH2=1)";
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, starts)}`,
         retryFits: [
           {
-            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
+            // Bounded port: nH1/nH2 stay positive (see biphasic-logx).
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",lower=c(-Inf,-Inf,-Inf,-Inf,-Inf,0,0),upper=c(Inf,Inf,Inf,Inf,Inf,Inf,Inf),control=nls.control(maxiter=200))`,
             method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, starts)}`,
+            method: "relaxed tolerance",
           },
         ],
         terms: ["Plateau1", "Plateau2", "Dip", "LogEC50_1", "LogEC50_2", "nH1", "nH2"],
@@ -859,8 +990,14 @@ export function modelSpec(
         fit: `m<-${nls200(expr, starts)}`,
         retryFits: [
           {
-            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
+            // Bounded port: EC50_1/EC50_2 and nH stay positive (see
+            // biphasic-x — a negative EC50 makes (EC50/X)^nH NaN).
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",lower=c(-Inf,-Inf,-Inf,0,0,0,0),upper=c(Inf,Inf,Inf,Inf,Inf,Inf,Inf),control=nls.control(maxiter=200))`,
             method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, starts)}`,
+            method: "relaxed tolerance",
           },
         ],
         terms: ["Plateau1", "Plateau2", "Dip", "EC50_1", "EC50_2", "nH1", "nH2"],
@@ -940,6 +1077,10 @@ export function modelSpec(
             fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
             method: "port",
           },
+          {
+            fit: `m<-${nls200Tol(expr, starts)}`,
+            method: "relaxed tolerance",
+          },
         ],
         terms: ["A0", "A1", "B1"],
         nonNegativeX: true,
@@ -960,6 +1101,10 @@ export function modelSpec(
             fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
             method: "port",
           },
+          {
+            fit: `m<-${nls200Tol(expr, starts)}`,
+            method: "relaxed tolerance",
+          },
         ],
         terms: ["A", "B", "C", "D"],
         nonNegativeX: true,
@@ -974,6 +1119,19 @@ export function modelSpec(
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, "list(Y0=y[which.min(x)],YM=max(y),K=0.5)")}`,
+        // Same port-then-relaxed retries as the 4PLs: Gauss-Newton
+        // stalls ("maxiter 200") on the noiseless plateau fit. The port
+        // retry bounds K > 0 — a negative K makes exp(−K·X) blow up.
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(Y0=y[which.min(x)],YM=max(y),K=0.5),algorithm="port",lower=c(-Inf,-Inf,0),control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(Y0=y[which.min(x)],YM=max(y),K=0.5)")}`,
+            method: "relaxed tolerance",
+          },
+        ],
         terms: ["Y0", "YM", "K"],
         derived: [overK("Half-life", "log(2)", "K"), difference("YM", "Y0")],
         curveFn: 'g<-function(xv,p) p[["YM"]]-(p[["YM"]]-p[["Y0"]])*exp(-p[["K"]]*xv)',
@@ -991,6 +1149,10 @@ export function modelSpec(
           {
             fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
             method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, starts)}`,
+            method: "relaxed tolerance",
           },
         ],
         terms: ["Wmax", "Te", "Tm"],
@@ -1038,6 +1200,21 @@ export function modelSpec(
       return {
         kind: "nls",
         fit: `m<-${nls200(form, starts)}`,
+        // Same port-then-relaxed retries as the 4PLs: Gauss-Newton stalls
+        // ("maxiter 200") on the scaled percent/count variants, and an
+        // unbounded trial step can take A/B negative, where exp(−(A·X +
+        // B·X²)) blows up. A and B are killing rates, so both (and Total)
+        // stay ≥ 0 in the port retry.
+        retryFits: [
+          {
+            fit: `m<-nls(y~${form},start=${starts},algorithm="port",lower=${isCount ? "c(0,0,0)" : "c(0,0)"},control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(form, starts)}`,
+            method: "relaxed tolerance",
+          },
+        ],
         terms: isCount ? ["A", "B", "Total"] : ["A", "B"],
         nonNegativeX: true,
         curveFn: `g<-function(xv,p) ${gForm}`,
