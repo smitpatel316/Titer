@@ -69,12 +69,15 @@ export type AnalysisPickerValue = AnalysisType | "compare-many-groups" | "interp
 export const TAILS = ["two-sided", "less", "greater"] as const;
 const POSTHOCS = ["none", "tukey", "bonferroni", "sidak", "holm-sidak", "lsd"] as const;
 /** The corrections that compare chosen pairs, each pair's own P adjusted for them alone.
- *  Upstream Helix calls the uncorrected one `fisher`; Titer's existing name is `lsd`. */
-export const PAIR_CORRECTIONS = ["bonferroni", "sidak", "holm-sidak", "lsd"] as const;
+ *  Upstream Helix calls the uncorrected one `fisher`; Titer's existing name is `lsd`.
+ *  `fdr` is the False Discovery Rate (Benjamini-Hochberg): the P values are the
+ *  uncorrected ones, adjusted step-up across the family (see R_ADJUST). */
+export const PAIR_CORRECTIONS = ["bonferroni", "sidak", "holm-sidak", "lsd", "fdr"] as const;
 /** A one-way ANOVA's comparisons: every pair (Tukey, Bonferroni, Šídák, Holm–Šídák,
- *  Fisher's LSD; with unequal SDs Games-Howell, Dunnett's T3), or each group against
+ *  Fisher's LSD, False Discovery Rate; with unequal SDs Games-Howell, Dunnett's T3,
+ *  False Discovery Rate on Welch t tests), or each group against
  *  a control (Dunnett). */
-export const ANOVA_POSTHOCS = [...POSTHOCS, "dunnett", "games-howell", "t3"] as const;
+export const ANOVA_POSTHOCS = [...POSTHOCS, "dunnett", "games-howell", "t3", "fdr"] as const;
 export const RANK_POSTHOCS = ["none", "dunn", "dunn-sidak", "dunn-holm-sidak"] as const;
 /** The dose-response (sigmoidal) models: what an XY scatter's fitted curve draws, and what can
  *  compare two data sets' curves. */
@@ -294,10 +297,14 @@ export interface AnovaParams {
   equalSd?: boolean;
   /** Dunnett's control group, by name. */
   control?: string;
-  /** The pairs compared (`pairKey`), when not every pair: Bonferroni, Šídák, Holm-Šídák, Fisher's. */
+  /** The pairs compared (`pairKey`), when not every pair: Bonferroni, Šídák, Holm-Šídák, Fisher's, False Discovery Rate. */
   compared?: string[];
   /** The groups' geometric means compared: the ANOVA and its comparisons run on the logarithms. */
   lognormal?: boolean;
+  /** Test for linear trend between the column means and their left-to-right order
+   *  (columns in a natural order, equally spaced): the slope of the means against
+   *  column number, and the P values for linear and (four or more groups) nonlinear trend. */
+  trend?: boolean;
 }
 
 /** Params for "rm-anova": Tukey, Bonferroni, Šídák, Holm–Šídák or Fisher's LSD

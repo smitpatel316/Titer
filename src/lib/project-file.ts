@@ -276,7 +276,7 @@ type ParamKind =
 // prettier-ignore
 const PARAMS = {
   paired: "yes/no", gaussian: "yes/no", equalVariance: "yes/no", ratio: "yes/no", forceOrigin: "yes/no", pooledSd: "yes/no", quasi: "yes/no", fixHillSlope: "yes/no", trendOrdered: "yes/no", continuityCorrection: "yes/no",
-  equalSd: "yes/no", sphericity: "yes/no", interpolate: "yes/no", tails: TAILS, posthoc: [...ANOVA_POSTHOCS, ...RANK_POSTHOCS, "fdr"], mixed: "yes/no",
+  equalSd: "yes/no", sphericity: "yes/no", interpolate: "yes/no", tails: TAILS, posthoc: [...ANOVA_POSTHOCS, ...RANK_POSTHOCS, "fdr"], mixed: "yes/no", trend: "yes/no",
   // `model` is shared by nonlinear-regression and the binding runners:
   // the reader only sanitizes, each runner validates its own.
   model: [...NONLINEAR_MODELS, ...BINDING_SATURATION_MODELS, ...BINDING_KINETICS_MODELS, ...ENZYME_INHIBITION_MODELS, ...DOSE_RESPONSE_SPECIAL_MODELS],
@@ -885,7 +885,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "prune-rows": ["ys", "x", "condition", "threshold", "low", "high", "sets"],
   "compare-two-groups": ["paired", "gaussian", "equalVariance", "ratio", "lognormal", "tails", "response", "groupBy", "sets"],
   "one-sample-t": ["hypotheticalValue", "tails", "gaussian", "lognormal", "sets"],
-  anova: ["posthoc", "equalSd", "control", "compared", "lognormal", "sets"],
+  anova: ["posthoc", "equalSd", "control", "compared", "lognormal", "trend", "sets"],
   "kruskal-wallis": ["posthoc", "sets"],
   "rm-anova": ["posthoc", "sphericity", "compared", "mixed", "sets"],
   friedman: ["posthoc", "sets"],

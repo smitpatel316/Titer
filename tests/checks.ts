@@ -123,7 +123,7 @@ import { datasetColumns, isGrouped, isNested, readTable, setColumns, splitXY, xy
 import { nestedMeans } from "../src/stats/nested/base";
 import { runNestedTTest } from "../src/stats/nested/nested-t-test";
 import { prepareFit } from "../src/stats/xy/nonlinear-fit";
-import { adjustComparisonRows, adjustFdrComparisonRows, adjustFdrPValues, adjustPValues, describe, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
+import { adjustComparisonRows, adjustFdrComparisonRows, adjustFdrPValues, adjustPValues, describe, describedBy, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
 import { hclustAvgSilhouette, hclustClusterWithinSs, hclustDistanceMatrix, hclustSuggestedK, hclustWithinSs } from "../src/stats/multiple/hierarchical-clustering";
 import { dendrogramSegments } from "../src/views/graphs/dendrogram";
@@ -1698,6 +1698,111 @@ check("a cross-family choice value falls back to the default", () => {
   deepStrictEqual(paramsOf(threeWay, "m7k"), { posthoc: "sidak" });
   const spline = withAnalysis("m7l", "spline-lowess", { method: "pearson" });
   deepStrictEqual(paramsOf(spline, "m7l"), { method: "pearson" });
+});
+
+// Seq 191 (one-way ANOVA completion): the Brown-Forsythe ANOVA beside
+// Welch's, the False Discovery Rate after either ANOVA, and the test for
+// linear trend — offered in the wizard, guarded at load, and running the
+// right R (Welch t tests, not pooled-SD ones, after Welch's ANOVA: the
+// first implementation let the pooled-SD branch catch "fdr" first, so the
+// Welch branch was dead code).
+check("one-way ANOVA completion: Brown-Forsythe, FDR and trend (seq 191)", () => {
+  const groups = [
+    { name: "A", values: [1, 2, 3] },
+    { name: "B", values: [2, 3, 4] },
+    { name: "C", values: [3, 4, 5] },
+  ];
+  // Brown-Forsythe rides with Welch's ANOVA, in the R and in the rows.
+  const welchCode = anovaSpec.rCode(groups, { posthoc: "none", equalSd: false });
+  ok(welchCode.includes("bfF<-"), "Welch's ANOVA also computes Brown-Forsythe's F*");
+  ok(welchCode.includes("bfP<-"), "…and its P value");
+  deepStrictEqual(
+    anovaSpec
+      .rows(
+        { F: 1, dfn: 2, dfd: 9, p: 0.4, bfF: 2, bfDfn: 2, bfDfd: 8, bfP: 0.2 },
+        // The Welch rows read only the groups' names and count here, so the
+        // descriptives are nulls; the values live in the R result above.
+        describedBy({}, groups),
+        { posthoc: "none", equalSd: false },
+      )
+      .map((r) => r.label),
+    [
+      "F (Welch)",
+      "DFn",
+      "DFd",
+      "P value",
+      "F (Brown-Forsythe)",
+      "DFn (Brown-Forsythe)",
+      "DFd (Brown-Forsythe)",
+      "P value (Brown-Forsythe)",
+    ],
+  );
+  // The False Discovery Rate after the ordinary ANOVA adjusts pooled-SD t
+  // P values; after Welch's, Welch t P values — never the pooled ones.
+  const fdrCode = anovaSpec.rCode(groups, { posthoc: "fdr" });
+  ok(fdrCode.includes('ps<-adj(c(2*pt(-abs('), "ordinary FDR adjusts pooled-SD t P values");
+  ok(fdrCode.includes('"fdr"'), "…with the Benjamini-Hochberg step-up");
+  ok(!fdrCode.includes("lo_0_1"), "FDR reports no confidence intervals");
+  const fdrWelchCode = anovaSpec.rCode(groups, { posthoc: "fdr", equalSd: false });
+  ok(fdrWelchCode.includes("wt<-function"), "Welch FDR defines the Welch t helper");
+  ok(fdrWelchCode.includes("ps<-adj(c({w<-wt("), "…and adjusts Welch t P values");
+  ok(!fdrWelchCode.includes("ps<-adj(c(2*pt"), "…never pooled-SD t P values");
+  // The trend test's contrast and P values, with four groups so the
+  // nonlinear trend is a test, not NA.
+  const four = [...groups, { name: "D", values: [4, 5, 6] }];
+  const trendCode = anovaSpec.rCode(four, { posthoc: "none", trend: true });
+  ok(trendCode.includes("cc<-"), "trend defines the linear contrast");
+  ok(trendCode.includes("trPlin=pf("), "…and its linear P value");
+  ok(trendCode.includes("trPnonlin=pf("), "…and the nonlinear P value (four groups)");
+  // A saved analysis asking for the trend with Welch's ANOVA or with a
+  // post-hoc is refused, not silently run — the wizard never offers those.
+  ok(
+    anovaSpec.check?.(groups as never, { posthoc: "none", trend: true, equalSd: false })?.includes("linear trend"),
+    "trend is refused with Welch's ANOVA",
+  );
+  ok(
+    anovaSpec.check?.(groups as never, { posthoc: "tukey", trend: true })?.includes("linear trend"),
+    "trend is refused with a post-hoc",
+  );
+  strictEqual(
+    anovaSpec.check?.(groups as never, { posthoc: "none", trend: true }),
+    undefined,
+    "trend runs on the ordinary ANOVA",
+  );
+  // The wizard: FDR is offered after either ANOVA; the trend question only
+  // with the ordinary ANOVA and no post-hoc, and its finish carries `trend`.
+  const table = readTable({
+    columns: ["Title", "A", "B", "C"],
+    rows: [
+      [null, "1", "2", "3"],
+      [null, "2", "3", "4"],
+      [null, "3", "4", "5"],
+    ],
+  });
+  const wizard = WIZARDS["compare-many-groups"]!;
+  const questions = (a: Answers) => wizard.questions(a, table).filter(Boolean) as Question[];
+  const ids = (a: Answers) => questions(a).map((q) => q.id);
+  const posthocValues = (a: Answers) =>
+    (questions(a).find((q) => q.id === "posthoc") as Question & { options: { value: string }[] }).options.map(
+      (o) => o.value,
+    );
+  const ordinary: Answers = { paired: "unpaired", gaussian: "yes", lognormal: "no", equalSd: "yes", posthoc: "none" };
+  const welch: Answers = { ...ordinary, equalSd: "no" };
+  ok(posthocValues(ordinary).includes("fdr"), "FDR is offered after the ordinary ANOVA");
+  ok(posthocValues(welch).includes("fdr"), "FDR is offered after Welch's ANOVA");
+  ok(ids(ordinary).includes("trend"), "trend is offered with the ordinary ANOVA and no post-hoc");
+  ok(!ids(welch).includes("trend"), "trend is not offered with Welch's ANOVA");
+  ok(!ids({ ...ordinary, posthoc: "tukey" }).includes("trend"), "trend is not offered with a post-hoc");
+  deepStrictEqual(wizard.finish({ ...ordinary, trend: "yes" }, table), {
+    type: "anova",
+    params: { posthoc: "none", equalSd: true, trend: true },
+  });
+  ok(
+    wizard.checklist!({ paired: "unpaired", gaussian: "yes", trend: "yes" }, table)?.items.some((i) =>
+      i.assumption.includes("natural order"),
+    ),
+    "the trend test adds its ordering assumption to the checklist",
+  );
 });
 
 // Quirk 2: the "Project Updated" notice must not go through the native dialog —
@@ -4492,9 +4597,10 @@ check("comparing groups asks equal SDs, then offers the comparisons that fit and
     "bonferroni",
     "sidak",
     "holm-sidak",
+    "fdr",
     "lsd",
   ]);
-  deepStrictEqual(offered({ ...unpaired, equalSd: "no" }), ["none", "games-howell", "t3"]);
+  deepStrictEqual(offered({ ...unpaired, equalSd: "no" }), ["none", "games-howell", "t3", "fdr"]);
   deepStrictEqual(offered({ paired: "paired", gaussian: "yes" }), [
     "none",
     "tukey",
