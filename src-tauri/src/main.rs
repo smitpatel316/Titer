@@ -1359,6 +1359,15 @@ fn main() {
             show_menu_pictures();
             open_cli_args(app.handle());
             restore_session(app.handle());
+            // MCP autostart: if the user previously opted in (persisted
+            // `mcp-opt-in.json` in <app_data>/mcp), start the local AI
+            // server so Antigravity can connect shortly after launch with
+            // no toggle-flip. Fresh installs and users who never opted in
+            // start with the server off (see mcp::mcp_autostart_if_opted_in).
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                mcp::mcp_autostart_if_opted_in(app_handle).await;
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1410,6 +1419,8 @@ fn main() {
             cancel_r,
             mcp::mcp_status,
             mcp::mcp_set_enabled,
+            mcp::mcp_connect_antigravity,
+            mcp::mcp_open_antigravity,
             mcp::mcp_token,
             mcp::mcp_regenerate_token,
             mcp::mcp_claude_code_command,

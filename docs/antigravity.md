@@ -77,6 +77,12 @@ agy plugin validate --strict ./plugins/titer
 
 ## Path B — `mcp_config.json` by hand (both transports)
 
+**One-click instead:** in Titer, **Settings → AI connections → Connect to Antigravity** writes the
+stdio entry below for you (after a consent dialog) — it turns the server on, reads your config
+leniently, updates only the `titer` key, keeps a `mcp_config.json.titer-bak` backup, and points at
+the bridge next to the running Titer app. The steps below are the manual equivalent, for reference
+or if the button is unavailable.
+
 Antigravity reads MCP servers from `mcp_config.json` — globally at
 `~/.gemini/config/mcp_config.json`, or per workspace at
 `<workspace>/.agents/mcp_config.json` (in the App: Customizations →

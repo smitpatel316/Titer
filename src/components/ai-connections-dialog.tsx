@@ -9,8 +9,10 @@ import {
   isNative,
   mcpActivity,
   mcpClaudeCodeCommand,
+  mcpConnectAntigravity,
   mcpFeedback,
   mcpFeedbackConsent,
+  mcpOpenAntigravity,
   mcpRegenerateToken,
   mcpSetEnabled,
   mcpSetFeedbackConsent,
@@ -92,6 +94,8 @@ export function AiConnectionsDialog() {
   const [error, setError] = React.useState("");
   const [copied, setCopied] = React.useState<"token" | "command" | "antigravity" | "prompt" | null>(null);
   const [confirmRegen, setConfirmRegen] = React.useState(false);
+  const [antigravityConsent, setAntigravityConsent] = React.useState(false);
+  const [antigravityMessage, setAntigravityMessage] = React.useState("");
 
   // Live Antigravity config (endpoint + token filled in, no placeholders);
   // null unless the server is running with a known endpoint and token.
@@ -120,6 +124,8 @@ export function AiConnectionsDialog() {
     setConfirmRegen(false);
     setCopied(null);
     setCopiedFeedback(null);
+    setAntigravityConsent(false);
+    setAntigravityMessage("");
     void refresh();
   }, [open, refresh]);
 
@@ -186,6 +192,36 @@ export function AiConnectionsDialog() {
     }
   };
 
+  /** One-click Antigravity setup, after the consent panel: turns the server
+   *  on (persisted opt-in) and writes the stdio `titer` entry into
+   *  Antigravity's config — no token anywhere. */
+  const connectAntigravity = async () => {
+    setBusy(true);
+    try {
+      const result = await mcpConnectAntigravity();
+      setAntigravityConsent(false);
+      setAntigravityMessage(
+        result.outcome === "already_connected"
+          ? "Already connected — Titer is already in Antigravity's MCP config."
+          : "Connected — open Antigravity and click Refresh under Installed MCP Servers.",
+      );
+      setError("");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openAntigravity = async () => {
+    try {
+      await mcpOpenAntigravity();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   return (
     <Dialog
       open={open}
@@ -214,6 +250,53 @@ export function AiConnectionsDialog() {
                     ? `On — listening on ${status.endpoint}`
                     : "Off — no AI app can reach Titer."}
               </span>
+            </div>
+            <div className="mt-2 flex flex-col gap-2">
+              <div className="flex gap-2">
+                <Button
+                  disabled={busy}
+                  onClick={() => {
+                    setAntigravityMessage("");
+                    setAntigravityConsent(true);
+                  }}
+                >
+                  Connect to Antigravity
+                </Button>
+              </div>
+              <p className="text-small text-secondary">
+                One-click setup for Antigravity (Gemini) — no token to copy: Titer adds itself to
+                Antigravity&apos;s MCP config, and turns “Allow AI apps to connect” on if it isn&apos;t
+                already.
+              </p>
+              {antigravityConsent && (
+                <div className="flex flex-col gap-2 rounded-md bg-control p-3">
+                  <p className="text-regular text-primary">
+                    Titer will add itself to Antigravity&apos;s MCP config
+                    (~/.gemini/config/mcp_config.json). Nothing else in that file changes. You can remove it
+                    anytime from Antigravity&apos;s Installed MCP Servers.
+                  </p>
+                  <p className="text-small text-secondary">
+                    This also turns on “Allow AI apps to connect” above, so the local server keeps running
+                    after restarts.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button disabled={busy} onClick={() => void connectAntigravity()}>
+                      Connect
+                    </Button>
+                    <Button disabled={busy} onClick={() => setAntigravityConsent(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {antigravityMessage && (
+                <div className="flex flex-col gap-2">
+                  <p className="text-regular text-primary">{antigravityMessage}</p>
+                  <div className="flex gap-2">
+                    <Button onClick={() => void openAntigravity()}>Open Antigravity</Button>
+                  </div>
+                </div>
+              )}
             </div>
           </Section>
 

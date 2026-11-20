@@ -89,6 +89,11 @@ const FEEDBACK_FILE: &str = "feedback.jsonl";
 /// toggle). Same 0700 directory as the token, so only this user reads it.
 const FEEDBACK_CONSENT_FILE: &str = "feedback-consent.json";
 
+/// The persisted MCP opt-in record: `{"enabled": bool, "ts": <unix seconds>}`.
+/// Written by `mcp_set_enabled` every time the user flips the toggle, read
+/// once at launch by `mcp_autostart_if_opted_in`.
+const OPT_IN_FILE: &str = "mcp-opt-in.json";
+
 /// The feedback server: `POST {this}` with one saved entry's JSON, and it
 /// files a Plane issue for the Titer team. `TITER_FEEDBACK_URL` (when set,
 /// non-empty) overrides this — dev/test only, so tests can point at a
@@ -955,6 +960,13 @@ pub fn mcp_status(app: AppHandle, state: State<McpState>) -> Result<McpStatus, S
 #[tauri::command]
 pub async fn mcp_set_enabled(app: AppHandle, state: State<'_, McpState>, enabled: bool) -> Result<McpStatus, String> {
     let dir = state.ensure_dir(&app)?;
+    // The toggle IS the opt-in: record the choice before touching the
+    // server, so disk and runtime never disagree about what the user asked
+    // for. A write failure surfaces as an error and the server is left
+    // untouched. On the enable path a start failure afterwards (ports busy)
+    // leaves `enabled: true` on disk with the runtime still off — the
+    // opt-in is not silently lost; the next launch retries the autostart.
+    write_opt_in_file(&dir.join(OPT_IN_FILE), enabled)?;
     if !enabled {
         let stopped = {
             let mut inner = state.lock();
@@ -1197,6 +1209,367 @@ pub fn mcp_set_feedback_consent(app: AppHandle, state: State<McpState>, sharing:
         let _ = fs::set_permissions(dir.join(FEEDBACK_CONSENT_FILE), fs::Permissions::from_mode(0o600));
     }
     Ok(Some(sharing))
+}
+
+/// The persisted MCP opt-in record: `<app_data>/mcp/mcp-opt-in.json`,
+/// `{"enabled": bool, "ts": <unix seconds>}`. The same shape as the
+/// feedback-consent record beside it (a boolean needs no secrecy, but the
+/// file lives in the same 0700 directory as the token and is written
+/// owner-only (0600) like its neighbour, so the whole directory stays
+/// uniformly private). A missing, unreadable, or malformed record reads as
+/// "never opted in" — off — so the v1.6 off-by-default decision still holds
+/// for every user who never turned the server on.
+fn read_opt_in_file(path: &std::path::Path) -> bool {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|v| v.get("enabled")?.as_bool())
+        .unwrap_or(false)
+}
+
+fn write_opt_in_file(path: &std::path::Path, enabled: bool) -> Result<(), String> {
+    let record = serde_json::json!({ "enabled": enabled, "ts": now_ts() });
+    let text = serde_json::to_string(&record).map_err(|e| e.to_string())?;
+    fs::write(path, text).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+/// Whether the user has opted in to the MCP server (persisted choice).
+/// Reads the record without creating anything: a fresh install has no
+/// `mcp/` directory at all, and that reads as off.
+pub fn mcp_opted_in(app: &AppHandle) -> bool {
+    let Ok(dir) = app.path().app_data_dir() else {
+        return false;
+    };
+    read_opt_in_file(&dir.join("mcp").join(OPT_IN_FILE))
+}
+
+/// Launch autostart: if the user previously opted in, start the server, so
+/// Antigravity can connect shortly after launch with no toggle-flip. Called
+/// once from `setup` in main.rs. A start failure (e.g. all ports 18741–18750
+/// busy) is logged to the Activity log, not fatal: the opt-in stays recorded,
+/// so the next launch retries.
+pub async fn mcp_autostart_if_opted_in(app: AppHandle) {
+    if !mcp_opted_in(&app) {
+        return;
+    }
+    let handle = app.clone();
+    let state = app.state::<McpState>();
+    if let Err(e) = mcp_set_enabled(handle, state, true).await {
+        app.state::<McpState>()
+            .log_event("server_autostart_failed", serde_json::json!({ "error": e }));
+    }
+}
+
+// ── "Connect to Antigravity" (one-click stdio setup) ─────────────────────
+// The AI Connections dialog's button writes the stdio `titer` entry into
+// Antigravity's global config, so the user never pastes a token anywhere:
+// the bridge reads the endpoint + token from Titer's own discovery file at
+// runtime. No bearer <redacted> in any URL, pasted snippet, or config entry —
+// the remote `serverUrl` variant (which would need an `Authorization:
+// Bearer` header in the config file) is deliberately NOT used here.
+
+/// The 5 Phase 1 tools Antigravity gets: read-only, the same allowlist as
+/// the documented stdio entry in docs/antigravity.md (Path B) and the
+/// plugin's bundled config. Phase 2 write tools stay hidden — this button
+/// never widens the allowlist.
+const ANTIGRAVITY_ENABLED_TOOLS: &[&str] = &[
+    "titer_list_projects",
+    "titer_list_tables",
+    "titer_read_table_summary",
+    "titer_read_results",
+    "titer_read_graph",
+];
+
+/// `timeoutSeconds` for the entry: 300 s, matching the bridge's per-request
+/// timeout (docs/antigravity.md).
+const ANTIGRAVITY_TIMEOUT_SECS: u64 = 300;
+
+/// Backup suffix for the previous Antigravity config: the entry is written
+/// next to the file it replaces (`mcp_config.json.titer-bak`), so the
+/// original bytes (comments included) are always recoverable.
+const ANTIGRAVITY_CONFIG_BACKUP_SUFFIX: &str = ".titer-bak";
+
+/// The `titer` entry this build writes: stdio via the bridge binary next to
+/// the running app, the 5-tool allowlist, `titer_list_projects` eager, 300 s
+/// timeout. No `env`, no `headers`, no `serverUrl` — nothing secret in it.
+fn expected_antigravity_entry(bridge: &std::path::Path) -> serde_json::Value {
+    serde_json::json!({
+        "command": bridge.to_string_lossy(),
+        "enabledTools": ANTIGRAVITY_ENABLED_TOOLS,
+        "tools": { "titer_list_projects": { "eager": true } },
+        "timeoutSeconds": ANTIGRAVITY_TIMEOUT_SECS,
+    })
+}
+
+/// The bridge binary next to the running app (`<bundle>/Contents/MacOS/`
+/// on macOS): derived from the running executable, never hardcoded, so a
+/// proof copy points at its own bridge and the shipped app at its own.
+/// Missing (a dev build, or a broken install) is a plain-words error, not
+/// a guessed path.
+fn antigravity_bridge_path() -> Result<std::path::PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let bridge = exe
+        .parent()
+        .ok_or_else(|| "Titer couldn't find its own install folder.".to_string())?
+        .join("titer-stdio-bridge");
+    if !bridge.is_file() {
+        return Err("Titer's Antigravity bridge (titer-stdio-bridge) isn't installed next to this copy of Titer — reinstall Titer from its DMG, then try again.".into());
+    }
+    Ok(bridge)
+}
+
+/// Antigravity's global config: `~/.gemini/config/mcp_config.json`.
+fn antigravity_config_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let home = app.path().home_dir().map_err(|e| e.to_string())?;
+    Ok(home.join(".gemini").join("config").join("mcp_config.json"))
+}
+
+/// Strips JSONC affordances so a hand-edited Antigravity config still
+/// parses: `//` line comments, `/* … */` block comments, and trailing
+/// commas before `}` or `]`. Comment markers inside strings are data, not
+/// comments — the scan tracks string/escape state. A file that parses as
+/// strict JSON never reaches this (fast path in `parse_antigravity_config`).
+fn strip_jsonc(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut in_string = false;
+    let mut escaped = false;
+    while let Some(c) = chars.next() {
+        if in_string {
+            out.push(c);
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => {
+                in_string = true;
+                out.push(c);
+            }
+            '/' => match chars.peek() {
+                Some('/') => {
+                    // Line comment: skip to the newline (kept, so line
+                    // numbers survive for any later error).
+                    for c2 in chars.by_ref() {
+                        if c2 == '\n' {
+                            out.push('\n');
+                            break;
+                        }
+                    }
+                }
+                Some('*') => {
+                    // Block comment: skip to the closing `*/`.
+                    chars.next();
+                    let mut prev = ' ';
+                    for c2 in chars.by_ref() {
+                        if prev == '*' && c2 == '/' {
+                            break;
+                        }
+                        prev = c2;
+                    }
+                }
+                _ => out.push(c),
+            },
+            ',' => {
+                // Trailing comma: drop it when only whitespace separates it
+                // from a closing `}` or `]`.
+                let mut ahead = chars.clone();
+                let mut next_non_ws = None;
+                for c2 in ahead.by_ref() {
+                    if !c2.is_whitespace() {
+                        next_non_ws = Some(c2);
+                        break;
+                    }
+                }
+                match next_non_ws {
+                    Some('}') | Some(']') => {}
+                    _ => out.push(c),
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+fn parse_antigravity_config(text: &str) -> Result<serde_json::Value, String> {
+    if let Ok(value) = serde_json::from_str(text) {
+        return Ok(value);
+    }
+    serde_json::from_str(&strip_jsonc(text)).map_err(|_| {
+        "Titer couldn't read your Antigravity config (~/.gemini/config/mcp_config.json) — it isn't valid JSON. Fix it in Antigravity, or delete it and try again. Nothing was changed.".to_string()
+    })
+}
+
+/// The current Antigravity config, if the file exists: `None` when absent
+/// or empty (no config yet — a fresh write starts from an empty document).
+/// A present-but-unparseable file is an error, never a silent overwrite.
+fn read_antigravity_config(path: &std::path::Path) -> Result<Option<serde_json::Value>, String> {
+    let Ok(text) = fs::read_to_string(path) else {
+        return Ok(None);
+    };
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    parse_antigravity_config(&text).map(Some)
+}
+
+/// Writes the `titer` entry into the Antigravity config, changing nothing
+/// else: every other server and top-level key is carried over untouched
+/// (their values, not their formatting — the file is re-serialized, so
+/// comments and key order are normalized; the backup below keeps the
+/// original bytes). Validates first, backs up the previous file, writes
+/// atomically (temp file in the same directory + rename, so a crash
+/// mid-write never leaves a half-written config), then re-reads to confirm
+/// the entry that is on disk is the one meant to be written.
+fn write_antigravity_entry(
+    path: &std::path::Path,
+    current: Option<serde_json::Value>,
+    entry: &serde_json::Value,
+) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!("Titer couldn't create Antigravity's config folder ({}): {e}", parent.display())
+        })?;
+    }
+    // Build the new document first, and validate it before touching
+    // anything on disk: a refused write (non-object doc, non-object
+    // `mcpServers`) leaves the file — and any earlier backup — alone.
+    let mut doc = current.unwrap_or_else(|| serde_json::json!({ "mcpServers": {} }));
+    if !doc.is_object() {
+        return Err("Your Antigravity config isn't a JSON object — fix it in Antigravity, or delete it and try again. Nothing was changed.".into());
+    }
+    match doc.get_mut("mcpServers") {
+        None => {
+            doc["mcpServers"] = serde_json::json!({ "titer": entry });
+        }
+        Some(servers) if servers.is_object() => {
+            servers["titer"] = entry.clone();
+        }
+        Some(_) => {
+            return Err("Your Antigravity config has a \"mcpServers\" entry that isn't a list of servers — fix it in Antigravity, then try again. Nothing was changed.".into());
+        }
+    }
+    let text = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
+    // Back up the previous file first: the restore point if anything about
+    // the new file is wrong. Overwrites any earlier `.titer-bak`.
+    if path.exists() {
+        let backup = std::path::PathBuf::from(format!(
+            "{}{ANTIGRAVITY_CONFIG_BACKUP_SUFFIX}",
+            path.display()
+        ));
+        fs::copy(path, &backup).map_err(|e| {
+            format!("Titer couldn't back up your Antigravity config ({}): {e}", backup.display())
+        })?;
+    }
+    let tmp = path.with_extension(format!("json.titer-tmp-{}", std::process::id()));
+    if let Err(e) = fs::write(&tmp, &text) {
+        return Err(e.to_string());
+    }
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    let back = read_antigravity_config(path)?.ok_or_else(|| {
+        "Titer wrote your Antigravity config but couldn't read it back — check ~/.gemini/config/mcp_config.json before continuing.".to_string()
+    })?;
+    if back.get("mcpServers").and_then(|s| s.get("titer")) != Some(entry) {
+        return Err("Titer wrote your Antigravity config but the Titer entry didn't stick — check ~/.gemini/config/mcp_config.json before continuing.".into());
+    }
+    Ok(())
+}
+
+/// What `mcp_connect_antigravity` did: `connected` (entry written) or
+/// `already_connected` (the entry was already exactly the one this build
+/// writes — nothing touched), plus where it wrote and which bridge it
+/// pointed at.
+#[derive(Serialize)]
+pub struct McpAntigravityConnect {
+    outcome: String,
+    command: String,
+    config_path: String,
+}
+
+/// One-click Antigravity setup (AI Connections → "Connect to Antigravity",
+/// after the consent dialog). Reads the global config leniently (JSONC),
+/// and: if the `titer` entry already matches, reports `already_connected`
+/// and touches nothing; otherwise turns the local server on (persisting
+/// the opt-in, so it stays on across restarts) and writes the entry
+/// (backup + atomic write + re-read verify). No token anywhere: the entry
+/// is stdio via the bridge, which reads the token from Titer's own
+/// discovery file at runtime.
+#[tauri::command]
+pub async fn mcp_connect_antigravity(
+    app: AppHandle,
+    state: State<'_, McpState>,
+) -> Result<McpAntigravityConnect, String> {
+    let bridge = antigravity_bridge_path()?;
+    let config_path = antigravity_config_path(&app)?;
+    let entry = expected_antigravity_entry(&bridge);
+    let current = read_antigravity_config(&config_path)?;
+    if let Some(doc) = &current {
+        if doc.get("mcpServers").and_then(|s| s.get("titer")) == Some(&entry) {
+            return Ok(McpAntigravityConnect {
+                outcome: "already_connected".into(),
+                command: bridge.to_string_lossy().into_owned(),
+                config_path: config_path.to_string_lossy().into_owned(),
+            });
+        }
+    }
+    // Consent given: turn the local server on — the bridge the entry
+    // points at reads its endpoint + token from the running server.
+    mcp_set_enabled(app.clone(), state, true).await?;
+    write_antigravity_entry(&config_path, current, &entry)?;
+    app.state::<McpState>().log_event(
+        "antigravity_connected",
+        serde_json::json!({ "command": bridge.to_string_lossy() }),
+    );
+    Ok(McpAntigravityConnect {
+        outcome: "connected".into(),
+        command: bridge.to_string_lossy().into_owned(),
+        config_path: config_path.to_string_lossy().into_owned(),
+    })
+}
+
+/// Brings Antigravity forward (macOS `open -a Antigravity`): the last step
+/// after connecting, so the user can click Refresh under Installed MCP
+/// Servers. No deep link: Antigravity declares an `antigravity` URL scheme
+/// but no MCP-registration route is documented anywhere, so nothing here
+/// guesses one.
+#[tauri::command]
+pub fn mcp_open_antigravity() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let status = std::process::Command::new("open")
+            .arg("-a")
+            .arg("Antigravity")
+            .status()
+            .map_err(|e| {
+                format!(
+                    "Titer couldn't open Antigravity ({e}). Open it yourself and click Refresh under Installed MCP Servers."
+                )
+            })?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err("Antigravity isn't installed on this Mac, or it couldn't be opened — open it yourself and click Refresh under Installed MCP Servers.".into())
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("Opening Antigravity from Titer is macOS-only.".into())
+    }
 }
 
 /// The feedback endpoint in effect: the env override first, then the
@@ -8575,5 +8948,148 @@ mod tests {
             None => std::env::remove_var("TITER_FEEDBACK_URL"),
         }
         assert_eq!(feedback_server_url(), FEEDBACK_SERVER_URL.unwrap());
+    }
+
+    #[test]
+    fn opt_in_record_round_trips_and_defaults_to_off() {
+        let dir = feedback_test_dir("opt-in");
+        let path = dir.join(OPT_IN_FILE);
+        // No record yet: a fresh install reads as off.
+        assert!(!read_opt_in_file(&path), "missing record means never opted in");
+        write_opt_in_file(&path, true).expect("write opt-in");
+        assert!(read_opt_in_file(&path), "opting in persists");
+        write_opt_in_file(&path, false).expect("write opt-out");
+        assert!(!read_opt_in_file(&path), "opting out persists");
+        // The record is a boolean only — no secret in it.
+        let text = std::fs::read_to_string(&path).expect("opt-in text");
+        assert!(text.contains("\"enabled\":false"), "record names the choice: {text}");
+        assert!(!text.contains("token"), "record holds no token");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn opt_in_record_malformed_reads_as_off() {
+        let dir = feedback_test_dir("opt-in-malformed");
+        let path = dir.join(OPT_IN_FILE);
+        for bad in ["", "not json", "{\"enabled\":\"yes\"}", "{\"other\":true}", "{}"] {
+            std::fs::write(&path, bad).expect("bad record");
+            assert!(!read_opt_in_file(&path), "malformed record reads as off: {bad}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn antigravity_entry_is_stdio_with_the_five_read_only_tools() {
+        let bridge = std::path::Path::new("/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge");
+        let entry = expected_antigravity_entry(bridge);
+        assert_eq!(entry["command"], "/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge");
+        assert_eq!(
+            entry["enabledTools"],
+            json!([
+                "titer_list_projects",
+                "titer_list_tables",
+                "titer_read_table_summary",
+                "titer_read_results",
+                "titer_read_graph"
+            ])
+        );
+        assert_eq!(entry["tools"]["titer_list_projects"]["eager"], true);
+        assert_eq!(entry["timeoutSeconds"], 300);
+        // Token safety: nothing secret in the entry — no headers, no
+        // serverUrl, no env.
+        assert!(entry.get("headers").is_none(), "no auth header in the entry");
+        assert!(entry.get("serverUrl").is_none(), "stdio, not remote");
+        assert!(entry.get("env").is_none(), "no env in the entry");
+        assert!(
+            !serde_json::to_string(&entry).unwrap().contains("Bearer"),
+            "no bearer <redacted> in the entry"
+        );
+    }
+
+    #[test]
+    fn strip_jsonc_keeps_strings_and_drops_comments_and_trailing_commas() {
+        // `//` inside a string is data; a real comment is not.
+        let text = r#"{
+            // a line comment
+            "url": "http://127.0.0.1:18741/mcp", /* block */
+            "tools": ["a", "b",],
+        }"#;
+        let parsed = parse_antigravity_config(text).expect("jsonc parses");
+        assert_eq!(parsed["url"], "http://127.0.0.1:18741/mcp");
+        assert_eq!(parsed["tools"], json!(["a", "b"]));
+        // Strict JSON still parses (fast path, no stripping).
+        assert!(parse_antigravity_config(r#"{"a": 1}"#).is_ok());
+        // Garbage stays garbage — never silently "fixed" into a write.
+        assert!(parse_antigravity_config("{nope").is_err());
+        assert!(parse_antigravity_config("").is_err());
+    }
+
+    #[test]
+    fn antigravity_write_keeps_other_servers_and_backs_up() {
+        let dir = feedback_test_dir("antigravity-write");
+        let path = dir.join("mcp_config.json");
+        let original = "{\n  \"mcpServers\": {\n    \"other\": { \"command\": \"other-bin\" }\n  }\n}\n";
+        std::fs::write(&path, original).expect("original config");
+        let bridge = std::path::Path::new("/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge");
+        let entry = expected_antigravity_entry(bridge);
+        let current = read_antigravity_config(&path).expect("read").expect("present");
+        write_antigravity_entry(&path, Some(current), &entry).expect("write");
+        // Backup holds the original bytes.
+        let backup = std::fs::read_to_string(dir.join("mcp_config.json.titer-bak")).expect("backup");
+        assert_eq!(backup, original, "backup is byte-identical to the original");
+        // The new file keeps the other server and adds titer.
+        let back = read_antigravity_config(&path).expect("re-read").expect("present");
+        assert_eq!(back["mcpServers"]["other"]["command"], "other-bin");
+        assert_eq!(back["mcpServers"]["titer"], entry);
+        // Re-reading now reports the entry as already connected.
+        assert_eq!(
+            back.get("mcpServers").and_then(|s| s.get("titer")),
+            Some(&entry),
+            "written entry matches the expected entry"
+        );
+        // No temp file left behind.
+        assert!(
+            std::fs::read_dir(&dir).expect("list").count() == 2,
+            "only config + backup remain, no temp file"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn antigravity_write_refuses_a_broken_config_and_a_non_object() {
+        let dir = feedback_test_dir("antigravity-broken");
+        let path = dir.join("mcp_config.json");
+        std::fs::write(&path, "{broken").expect("broken config");
+        assert!(read_antigravity_config(&path).is_err(), "broken config is an error, not a wipe");
+        let bridge = std::path::Path::new("/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge");
+        let entry = expected_antigravity_entry(bridge);
+        // A top-level array is not a config object: refuse, leave the file alone.
+        let before = std::fs::read_to_string(&path).expect("before");
+        assert!(
+            write_antigravity_entry(&path, Some(json!([1, 2])), &entry).is_err(),
+            "non-object doc is refused"
+        );
+        assert_eq!(std::fs::read_to_string(&path).expect("after"), before, "file untouched");
+        // A non-object mcpServers is refused the same way.
+        assert!(
+            write_antigravity_entry(&path, Some(json!({ "mcpServers": "nope" })), &entry).is_err(),
+            "non-object mcpServers is refused"
+        );
+        assert_eq!(std::fs::read_to_string(&path).expect("after2"), before, "file still untouched");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn antigravity_write_creates_a_fresh_config() {
+        let dir = feedback_test_dir("antigravity-fresh");
+        let path = dir.join("mcp_config.json");
+        let bridge = std::path::Path::new("/Applications/Titer.app/Contents/MacOS/titer-stdio-bridge");
+        let entry = expected_antigravity_entry(bridge);
+        assert!(read_antigravity_config(&path).expect("read").is_none(), "absent file reads as none");
+        write_antigravity_entry(&path, None, &entry).expect("fresh write");
+        let back = read_antigravity_config(&path).expect("re-read").expect("present");
+        assert_eq!(back["mcpServers"]["titer"], entry);
+        assert!(!dir.join("mcp_config.json.titer-bak").exists(), "no backup when there was no file");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
