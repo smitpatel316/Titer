@@ -449,10 +449,9 @@ export function regroupTable(
     replicates,
     excluded: remapExcluded(data, (r, c) => (to(c) < 0 ? null : [r, to(c)])),
     widths: widthsOf(data.widths, columns),
-    // Regrouping rebuilds the columns, so a linked block's region no longer
-    // lines up with its source: the link goes rather than refresh into the
-    // wrong cells (seq 168 — same rule as deleting the anchor).
-    linkedPaste: undefined,
+    // Regrouping rebuilds the columns, but the link's anchor is a position
+    // (seq 168): it stays where it was, and a refresh re-pastes the source
+    // into that same region — values keep their slots, as they do here.
   };
 }
 
@@ -503,9 +502,8 @@ export function applySummaryFormat(data: TableData, format: SummaryFormat): Tabl
       return to === null ? null : [r, to];
     }),
     widths: widthsOf(data.widths, columns),
-    // A format switch rebuilds the sub-columns: the linked region no longer
-    // lines up, so the link goes (seq 168).
-    linkedPaste: undefined,
+    // A format switch rebuilds the sub-columns, but the link's anchor is a
+    // position (seq 168): it stays where it was.
   };
 }
 
@@ -602,9 +600,8 @@ export function renestTable(data: TableData, groups: number, subgroups: number, 
     replicates,
     excluded: remapExcluded(data, (r, c) => (to(c) < 0 ? null : [r, to(c)])),
     widths: widthsOf(data.widths, columns),
-    // Renesting rebuilds the columns: the linked region no longer lines up,
-    // so the link goes (seq 168).
-    linkedPaste: undefined,
+    // Renesting rebuilds the columns, but the link's anchor is a position
+    // (seq 168): it stays where it was.
   };
 }
 

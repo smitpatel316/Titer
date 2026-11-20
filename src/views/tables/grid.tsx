@@ -11,9 +11,10 @@ import { clamp, type TableData, type TableType } from "../../store/types";
 import type { TableMove } from "../../store/references";
 import type { EditCommand } from "../../app-menu";
 import { parseCell } from "../../lib/numeric";
+import { fileName } from "../../lib/paths";
 import { seriesKeyOf } from "../../lib/columns";
 import { isGrouped, isNested, leadOf } from "../../lib/dataset";
-import { alert, popupMenu } from "../../native";
+import { alert, askPasteLink, popupMenu } from "../../native";
 import { XIcon } from "@phosphor-icons/react";
 import { cn, IconButton } from "../../ui/controls";
 import { gridMenu, type MenuZone } from "./grid-menu";
@@ -418,15 +419,20 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
   // Linked paste (Prism 11, seq 168): Edit ▸ Paste Link… and the grid menu's
   // paste the picked file as a link at the selection's top-left cell, so the
   // table updates when the file changes; Update Linked Data re-reads the
-  // source; Break Link keeps the values and drops the link.
+  // source; Break Link keeps the values and drops the link. The paste asks
+  // first — automatically update, update by hand, or cancel — as Prism's
+  // "Automatically update" checkbox does.
   const pasteLink = async (g: Range) => {
     const picked = await pickLinkedSource();
     if (!picked) return;
+    const sourceName = "path" in picked ? fileName(picked.path) : picked.name;
+    const asked = await askPasteLink(sourceName);
+    if (asked === "cancel") return;
     try {
       const res =
         "path" in picked
-          ? await pasteLinkFromPath(data, type, g.r0, g.c0, picked.path)
-          : await pasteLinkFromContent(data, type, g.r0, g.c0, picked.name, picked.content);
+          ? await pasteLinkFromPath(data, type, g.r0, g.c0, picked.path, asked === "auto")
+          : await pasteLinkFromContent(data, type, g.r0, g.c0, picked.name, picked.content, asked === "auto");
       if (!res.changed) return;
       update(res.data, "Paste Link");
       if (res.droppedColumns)

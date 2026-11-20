@@ -619,7 +619,10 @@ function buildTableData(
   if (!base) return data;
 
   // A replace keeps what the call did not replace: the marks, the bands,
-  // the widths, the error format, the freeze flag and the notes.
+  // the widths, the error format, the freeze flag and the notes. It does
+  // NOT keep a linked paste (seq 168): the values no longer come from the
+  // source, so a later refresh must not overwrite the replacement — the
+  // fresh data above carries no link, and none is restored here.
   const onCell = (k: unknown): k is string => {
     const [r, c] =
       typeof k === "string" && /^\d+,\d+$/.test(k) ? k.split(",").map(Number) : [Infinity, Infinity];

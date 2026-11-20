@@ -19289,7 +19289,7 @@ check("linked-168: MCP paste-link pastes a file as a link and remove-link breaks
   );
 });
 
-check("linked-168: regrouping, renesting or switching summary format drops the link", () => {
+check("linked-168: regrouping, renesting or switching summary format keeps the link's anchor by position", () => {
   const grouped: TableData = {
     columns: ["Title", "A:Y1", "A:Y2"],
     rows: [["r1", "1", "2"]],
@@ -19297,8 +19297,16 @@ check("linked-168: regrouping, renesting or switching summary format drops the l
     replicates: 2,
     linkedPaste: { ...linked168Link, row: 0, col: 1, rows: 1, cols: 2 },
   };
-  strictEqual(regroupTable(grouped, 2, 2).linkedPaste, undefined);
-  strictEqual(applySummaryFormat(grouped, "mean-sd-n").linkedPaste, undefined);
+  // The columns are rebuilt, but the anchor is a position: it stays where
+  // it was, and a refresh re-pastes the source into that same region.
+  deepStrictEqual(regroupTable(grouped, 2, 2).linkedPaste, { ...linked168Link, row: 0, col: 1, rows: 1, cols: 2 });
+  deepStrictEqual(applySummaryFormat(grouped, "mean-sd-n").linkedPaste, {
+    ...linked168Link,
+    row: 0,
+    col: 1,
+    rows: 1,
+    cols: 2,
+  });
   const nested: TableData = {
     columns: ["Title", "A:S1:R1", "A:S1:R2"],
     rows: [["r1", "1", "2"]],
@@ -19307,7 +19315,41 @@ check("linked-168: regrouping, renesting or switching summary format drops the l
     replicates: 2,
     linkedPaste: { ...linked168Link, row: 0, col: 1, rows: 1, cols: 2 },
   };
-  strictEqual(renestTable(nested, 2, 1, 2).linkedPaste, undefined);
+  deepStrictEqual(renestTable(nested, 2, 1, 2).linkedPaste, { ...linked168Link, row: 0, col: 1, rows: 1, cols: 2 });
+});
+
+check("linked-168: a whole-table write drops the link, so a refresh can't overwrite the replacement", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-168-wt-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B"],
+    rows: [
+      ["s1", 1, 2],
+      ["s2", 3, 4],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  const node = harness.state().nodes[tableId]!;
+  harness.dispatch({
+    type: "updateTable",
+    id: tableId,
+    data: { ...node.data!, linkedPaste: linked168Link },
+    label: "Paste Link",
+  });
+  harness.sync();
+  strictEqual(harness.state().nodes[tableId]?.data?.linkedPaste?.sourceName, "values.csv");
+  await harness.run("job-168-wt", "write-table", {
+    table_id: tableId,
+    columns: ["", "A", "B"],
+    rows: [
+      ["s1", 9, 9],
+      ["s2", 9, 9],
+    ],
+  });
+  harness.sync();
+  strictEqual(harness.state().nodes[tableId]?.data?.linkedPaste, undefined);
+  strictEqual(harness.state().nodes[tableId]?.data?.rows[0]?.[1], "9");
 });
 
 // ── Run ──────────────────────────────────────────────────────────────────

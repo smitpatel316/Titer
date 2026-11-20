@@ -995,8 +995,8 @@ export function useDocument() {
       // re-read their sources now that the project is in the store — a
       // source that can't be read is named in the Linked Data notice.
       if (target.filePath) {
-        const failures = await checkLinkedData(parsed.project.nodes);
-        if (failures.length) setLinkedNotice(failures);
+        const linkedLines = await checkLinkedData(parsed.project.nodes);
+        if (linkedLines.length) setLinkedNotice(linkedLines);
       }
       // A template that carries instructions (or a description) says so on
       // open (plan 38); any other file clears a stale notice.
@@ -1265,25 +1265,31 @@ export function useDocument() {
   /** Linked paste (Prism 11, seq 168): after a project loads, every table
    *  whose link says to update itself re-reads its source file — the values
    *  land as one undo step per table ("Update Linked Data"), and a source
-   *  that can't be read is named, not failed over. Only for a project opened
-   *  from a local file, on desktop: the web build has no disk paths to
-   *  re-read, and a remote project's paths name another machine's files.
-   *  Returns the failure lines, if any. */
+   *  that can't be read is named, not failed over. A link that updates by
+   *  hand is listed instead, so the user knows it is there to refresh.
+   *  Only for a project opened from a local file, on desktop: the web
+   *  build has no disk paths to re-read, and a remote project's paths name
+   *  another machine's files. Returns the notice lines, if any. */
   const checkLinkedData = async (nodes: Record<string, ProjectNode>): Promise<string[]> => {
     if (!native.isNative) return [];
-    const failures: string[] = [];
+    const lines: string[] = [];
     for (const node of Object.values(nodes)) {
-      if (node.type !== "table" || !node.data?.linkedPaste?.autoUpdate) continue;
+      if (node.type !== "table" || !node.data?.linkedPaste) continue;
+      const link = node.data.linkedPaste;
+      if (!link.autoUpdate) {
+        lines.push(`• “${link.sourceName}” (${node.name}) updates by hand — use Edit ▸ Update Linked Data to refresh it.`);
+        continue;
+      }
       try {
         const res = await refreshLinkedFromFile(node.data, node.tableType ?? "column");
         if (res.changed) latest.current.updateTable(node.id, res.data, "Update Linked Data");
       } catch (err) {
-        failures.push(
-          `• “${node.data.linkedPaste.sourceName}” (${node.name}) couldn't be updated — ${err instanceof Error ? err.message : "the file couldn't be read."}`,
+        lines.push(
+          `• “${link.sourceName}” (${node.name}) couldn't be updated — ${err instanceof Error ? err.message : "the file couldn't be read."}`,
         );
       }
     }
-    return failures;
+    return lines;
   };
 
   /** Imports a data file's contents (text for CSV/TXT, bytes for XLSX).

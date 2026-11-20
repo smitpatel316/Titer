@@ -3,7 +3,7 @@
 // link, refresh a table's link from its source. The pure engine lives in
 // src/lib/linked-paste.ts; this is the file-picking and file-reading half
 // (native shell on desktop, a file input on the web build).
-import { chooseDataFile, isNative, onDataFilePicked, readDataBytes, readDataText } from "../../native";
+import { chooseDataFile, isNative, onDataFilePicked, readLinkedSource } from "../../native";
 import { fileName } from "../../lib/paths";
 import {
   applyLinkedBlock,
@@ -14,14 +14,6 @@ import {
   type LinkedPaste,
 } from "../../lib/linked-paste";
 import type { TableData, TableType } from "../../store/types";
-
-/** A source file's contents, read for a paste or a refresh. */
-export async function readLinkedSourceContent(
-  sourcePath: string,
-  kind: "csv" | "xlsx",
-): Promise<string | Uint8Array> {
-  return kind === "xlsx" ? readDataBytes(sourcePath) : readDataText(sourcePath);
-}
 
 /** The paste of `block` as a link at (row, col): the values land, the link
  *  is stored — even when the values already match, so pasting a link over
@@ -69,7 +61,7 @@ export async function pasteLinkFromPath(
   const sourceName = fileName(sourcePath);
   let content: string | Uint8Array;
   try {
-    content = await readLinkedSourceContent(sourcePath, linkedPasteKindOf(sourcePath));
+    content = await readLinkedSource(sourcePath, linkedPasteKindOf(sourcePath));
   } catch {
     throw new Error(`“${sourceName}” couldn't be read.`);
   }
@@ -119,7 +111,7 @@ export async function refreshLinkedFromFile(
   if (!link) throw new Error("This table has no linked data — paste a file as a link first (Edit ▸ Paste Link…).");
   let content: string | Uint8Array;
   try {
-    content = await readLinkedSourceContent(link.sourcePath, link.kind);
+    content = await readLinkedSource(link.sourcePath, link.kind);
   } catch {
     throw new Error(`“${link.sourceName}” couldn't be read — the file may have moved or been deleted.`);
   }
