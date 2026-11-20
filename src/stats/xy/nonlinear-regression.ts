@@ -2382,8 +2382,13 @@ export async function runNonlinearRegression(
       `,setNames(li,sub("ix","il",names(ix))),setNames(hi,sub("ix","ih",names(ix)))`;
     // The effective spec (fixed parameters substituted, weights) drives
     // the interpolation too, so the unknowns are read off the same fit.
+    // The fit runs the spec's retry ladder (retryChain), not just the
+    // primary: the single-fit path used to stall here (Pade (1,1) on
+    // noiseless standards: "number of iterations exceeded maximum of
+    // 200"), while the main fit path's port/tol retry converges on the
+    // same data. A succeeding primary is untouched.
     const rCode =
-      `${fitStatementsForSpec(first.xs, first.ys, effSpec, undefined, extraAssignments, !!weights)}${R_INTERP}\n` +
+      `${fitStatementsForSpec(first.xs, first.ys, effSpec, retryChain([effSpec.fit, ...(effSpec.retryFits ?? []).map((r) => r.fit)]), extraAssignments, !!weights)}${R_INTERP}\n` +
       `ix<-interp(m,${rVec(unknownY)},${lo},${hi},${spec.positiveX || spec.nonNegativeX ? "TRUE" : "FALSE"})\n` +
       `${interpolationCode(effSpec, unknownY, lo, hi)}c(${fitEntries(effSpec)},${interpNames})`;
     try {
