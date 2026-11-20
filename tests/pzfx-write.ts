@@ -567,6 +567,24 @@ check("W4 BUG-21: empty <Template> is the last child, carrying no blob", () => {
   ok(!/<Template[^>]*>[^<]+<\/Template>/.test(xml), "Template carries no blob content");
 });
 
+// W15f builds its mixed-format column fixture with this helper, so the
+// definition must precede the W15 block (a `const` used before its
+// declaration is a TDZ error at module load — W15f failed that way).
+const refusalProject = (tableType: TableType, name: string, columns: string[], rows: (string | null)[][]) =>
+  syntheticProject(
+    {
+      table_1: {
+        id: "table_1",
+        type: "table",
+        name,
+        parentId: null,
+        tableType,
+        data: { columns, rows },
+      },
+    },
+    ["table_1"],
+  );
+
 // ── W15 (seq 163): nested/multiple + mixed-format write ──────────────
 // Mirrors tests/prism-write.ts W15 (seq 162) for the .pzfx writer, plus the
 // mixed-format split seq 163 adds: a nested or Multiple Variables table
@@ -755,7 +773,11 @@ check("W15g grouped table mixing summary and replicate groups splits (seq 163)",
             columns: ["Title", "A:Mean", "A:SD", "A:N", "B:Y1", "B:Y2"],
             rows: [[null, "1", "2", "3", "4", "5"]],
             groups: 2,
-            replicates: 3,
+            // 2: group B genuinely has 2 replicate subcolumns. (Was 3:
+            // the writer pads a replicate group to the declared count,
+            // so the split read back with a phantom empty B:Y3 — the
+            // fixture, not the writer, was inconsistent.)
+            replicates: 2,
           },
         },
       },
@@ -842,21 +864,6 @@ check("W15h mixed-format XY table splits, sharing X (seq 163)", () => {
 });
 
 // ── W5 — refusals ──────────────────────────────────────────────────────
-
-const refusalProject = (tableType: TableType, name: string, columns: string[], rows: (string | null)[][]) =>
-  syntheticProject(
-    {
-      table_1: {
-        id: "table_1",
-        type: "table",
-        name,
-        parentId: null,
-        tableType,
-        data: { columns, rows },
-      },
-    },
-    ["table_1"],
-  );
 
 check("W5 project with no tables refuses", () => {
   throws(
