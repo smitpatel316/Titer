@@ -8949,7 +8949,7 @@ check("seq 173: a headless K-means scatter draws its clusters and centres", asyn
     name: "K-means",
     parentId: "t1",
     analysisType: "k-means",
-    analysisParams: { k: 2 },
+    analysisParams: { clusters: 2 },
   };
   const graph: ProjectNode = {
     id: "g1",
