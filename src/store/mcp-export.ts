@@ -44,6 +44,8 @@ import {
   type OfficeTarget,
 } from "../lib/office-export";
 import JSZip from "jszip";
+import { writePzfx } from "../lib/pzfx-write";
+import { version as appVersion } from "../../package.json";
 import {
   DEFAULT_GRAPH_OPTIONS,
   GRAPH_LIMITS,
@@ -460,7 +462,7 @@ export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Pro
   return { result };
 }
 
-// ── Table data (CSV / XLSX / TXT) ──────────────────────────────────────
+// ── Table data (CSV / XLSX / TXT / Prism XML) ─────────────────────────
 // No UI CSV writer exists to reuse: the serializers below are new, but
 // they follow the snapshot's rule — excluded cells are written empty,
 // matching what analyses see. Cell values are the grid's stored
@@ -573,11 +575,46 @@ export async function tableToXlsx(data: TableData, name: string): Promise<Uint8A
   return zip.generateAsync({ type: "uint8array" });
 }
 
+/** The table as a Prism XML document (.xml) — the same Prism-XML dialect
+ *  the `.pzfx` writer writes (`GraphPadPrismFile`, Prism's ExportTable XML
+ *  format: it keeps subcolumns, excluded values and row titles, which the
+ *  plain-text formats drop or flatten). One table only, so the document
+ *  holds that table and an empty `<Template>` (the `.pzfx` writer's BUG-21
+ *  rule: Prism shows its XML-compliance dialog for a file not created by
+ *  GraphPad Prism unless a `<Template>` element is present). Verified by
+ *  round-trip: the repo's own `parsePzfx` reads it back as the same table.
+ *
+ *  What it cannot express it refuses, plainly, instead of silently
+ *  rewriting: a Nested or Multiple-variables table (Prism has no matching
+ *  type) and a grouped table mixing Y formats — those errors come from
+ *  `writePzfx` itself, naming the table. An empty table is refused here:
+ *  the writer skips rowless tables (a re-import would drop them), so
+ *  there would be nothing to write. */
+export function tableToXml(data: TableData, name: string, tableType: ProjectNode["tableType"] = "column"): Uint8Array {
+  if (!data || data.columns.length < 2) {
+    throw new Error(`“${name}” holds no data columns to write as Prism XML — add a data column first.`);
+  }
+  if (data.rows.length === 0) {
+    throw new Error(`“${name}” holds no rows to write as Prism XML — add a row first.`);
+  }
+  if ((tableType === "xy" || tableType === "survival") && data.columns.length < 3) {
+    throw new Error(`“${name}” holds an X column but no Y values to write as Prism XML — add a Y column first.`);
+  }
+  const table: ProjectNode = { id: "table", type: "table", name, parentId: null, tableType, data };
+  const payload = {
+    nodes: { table },
+    rootOrder: ["table"],
+    childOrder: { table: [] as string[] },
+    activeNodeId: "table",
+  };
+  return writePzfx(payload, appVersion).bytes;
+}
+
 /** The table-data export formats. */
-export const TABLE_DATA_FORMATS = ["csv", "xlsx", "txt"] as const;
+export const TABLE_DATA_FORMATS = ["csv", "xlsx", "txt", "xml"] as const;
 export type TableDataFormat = (typeof TABLE_DATA_FORMATS)[number];
 
-/** `export-table-data`: serialize one table (CSV / XLSX / TXT) and
+/** `export-table-data`: serialize one table (CSV / XLSX / TXT / Prism XML) and
  *  write the file. No render is involved, so this runs in node too
  *  (the verify script drives it via `executeJob` with stub IO). */
 export async function executeExportTableData(job: McpJob, deps: ExportJobDeps): Promise<ExportJobOutcome> {
@@ -585,7 +622,7 @@ export async function executeExportTableData(job: McpJob, deps: ExportJobDeps): 
   const tableId = reqStr(job, args, "table_id");
   const formatRaw = optStr(job, args, "format") ?? "csv";
   if (!(TABLE_DATA_FORMATS as readonly string[]).includes(formatRaw)) {
-    throw jobErr(job, `has no table format “${formatRaw}” — the formats are csv, xlsx, txt.`);
+    throw jobErr(job, `has no table format “${formatRaw}” — the formats are csv, xlsx, txt, xml.`);
   }
   const format = formatRaw as TableDataFormat;
   const path = reqStr(job, args, "path");
@@ -595,7 +632,8 @@ export async function executeExportTableData(job: McpJob, deps: ExportJobDeps): 
   let bytes: string | Uint8Array;
   if (format === "csv") bytes = tableToCsv(data);
   else if (format === "txt") bytes = tableToTxt(data);
-  else bytes = await tableToXlsx(data, table.name);
+  else if (format === "xlsx") bytes = await tableToXlsx(data, table.name);
+  else bytes = tableToXml(data, table.name, table.tableType ?? "column");
   const io = deps.io ?? defaultExportIo;
   await io.writeFile(ensureSaveExtension(path, format), bytes);
   return {

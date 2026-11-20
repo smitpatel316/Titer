@@ -3302,7 +3302,7 @@ pub struct ExportTableDataArgs {
     pub project_id: Option<String>,
     /// The table's id, as shown by titer_list_tables.
     pub table_id: String,
-    /// "csv" | "xlsx" | "txt". Omit for "csv".
+    /// "csv" | "xlsx" | "txt" | "xml". Omit for "csv".
     #[serde(default)]
     pub format: Option<String>,
     /// Where to write the file. Omit for the default path (see above).
@@ -6530,11 +6530,13 @@ impl TiterMcpServer {
         }
     }
 
-    /// Export one table's data as CSV (default), XLSX or TXT. Excluded
-    /// cells are written empty, matching what analyses see.
+    /// Export one table's data as CSV (default), XLSX, TXT or Prism XML. Excluded
+    /// cells are written empty, matching what analyses see. Prism XML keeps
+    /// subcolumns, excluded values and row titles; a Nested or Multiple-variables
+    /// table has no Prism counterpart and the export fails naming the table.
     #[tool(
         name = "titer_export_table_data",
-        description = "Export one table's data as a file: format csv (default), xlsx, or txt (tab-separated). Excluded cells are written empty, matching what analyses see. path omitted = beside the project file, else <Documents>/Titer Exports. Returns the written path and row count.",
+        description = "Export one table's data as a file: format csv (default), xlsx, txt (tab-separated), or xml (Prism XML — keeps subcolumns, excluded values and row titles). Excluded cells are written empty, matching what analyses see. path omitted = beside the project file, else <Documents>/Titer Exports. Returns the written path and row count.",
         annotations(
             title = "Export table data",
             read_only_hint = false,
@@ -6552,7 +6554,7 @@ impl TiterMcpServer {
             let format = args.format.as_deref().unwrap_or("csv");
             if !TABLE_DATA_FORMATS.contains(&format) {
                 return Err(format!(
-                    "Unknown table format “{format}” — the formats are csv, xlsx, txt."
+                    "Unknown table format “{format}” — the formats are csv, xlsx, txt, xml."
                 ));
             }
             let project_id = self.state.resolve_project(args.project_id.as_deref())?;
@@ -6761,7 +6763,7 @@ impl TiterMcpServer {
 const EXPORT_FORMATS: &[&str] = &["png", "jpeg", "svg", "pdf", "tiff"];
 const EXPORT_DPIS: &[&str] = &["150", "300", "600", "900", "1200"];
 /// The table-data export formats.
-const TABLE_DATA_FORMATS: &[&str] = &["csv", "xlsx", "txt"];
+const TABLE_DATA_FORMATS: &[&str] = &["csv", "xlsx", "txt", "xml"];
 
 /// A format's file extension ("jpeg" writes ".jpg", as the GUI does).
 fn export_extension(format: &str) -> &'static str {
