@@ -230,7 +230,12 @@ import {
   parseXlsx,
   rowsToTable,
 } from "../src/lib/tabular-import";
-import { tableToXlsx } from "../src/store/mcp-export";
+import { tableToCsv, tableToTxt, tableToXlsx } from "../src/store/mcp-export";
+import {
+  exportTableData,
+  serializeTableData,
+  TABLE_DATA_EXPORT_FORMATS,
+} from "../src/views/tables/table-data-export";
 import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { decodePng, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
@@ -18945,6 +18950,113 @@ check("import-155: the menu, picker, reader and drop route the new file types", 
   ok(rust.includes("read_data_bytes"), "shell has no data-bytes reader command");
   ok(isDataFilePath("lab.CSV") && isDataFilePath("lab.tsv") && isDataFilePath("lab.txt") && isDataFilePath("lab.xlsx"), "extension match misses a data type");
   ok(!isDataFilePath("lab.pzfx") && !isDataFilePath("lab.hlx"), "extension match takes a non-data file");
+});
+
+// Seq 164 — UI table-data export (CSV / XLSX / TXT): the File menu path
+// mirrors the MCP-only `titer_export_table_data` — same serializers, same
+// excluded-cells-empty rule — through the native save dialog.
+const EXPORT_164_DATA = {
+  columns: ["Title", "ID", "Value"],
+  rows: [
+    ["s1", "0123", "1.5"],
+    ["a, b", "x\"y", "9.9"],
+  ],
+  excluded: ["1,2"],
+};
+const EXPORT_164_NODE = {
+  id: "table_1",
+  type: "table",
+  name: "My: Table",
+  parentId: null,
+  tableType: "column",
+  data: EXPORT_164_DATA,
+};
+
+check("export-164: the UI serializes exactly what the MCP export writes", async () => {
+  const data = EXPORT_164_DATA;
+  strictEqual(await serializeTableData(data, "My: Table", "csv"), tableToCsv(data));
+  strictEqual(await serializeTableData(data, "My: Table", "txt"), tableToTxt(data));
+  const uiXlsx = await serializeTableData(data, "My: Table", "xlsx");
+  const mcpXlsx = await tableToXlsx(data, "My: Table");
+  deepStrictEqual([...uiXlsx], [...mcpXlsx]);
+  // Excluded cells are empty, as analyses see them — never the stored value.
+  ok(
+    (await serializeTableData(data, "My: Table", "csv")).endsWith('"a, b","x""y",'),
+    "excluded cell was not written empty in CSV",
+  );
+  // An ID like "0123" stays text in the workbook, never the number 123.
+  const parsed = await parseXlsx(await serializeTableData(data, "My: Table", "xlsx"));
+  deepStrictEqual(parsed.sheet.rows, [
+    ["Title", "ID", "Value"],
+    ["s1", "0123", "1.5"],
+    ["a, b", 'x"y', ""],
+  ]);
+  // An unknown format is a plain error, not a silently wrong file.
+  await rejects(serializeTableData(data, "My: Table", "pdf" as never), /no table format/);
+});
+
+check("export-164: the export goes through the save dialog and honours cancel", async () => {
+  const calls: { title: string; defaultPath: string; name: string; ext: string }[] = [];
+  const written: { path: string; bytes: string | Uint8Array }[] = [];
+  const alerts: string[] = [];
+  const io = {
+    pickSavePath: async (title: string, defaultPath: string, name: string, ext: string) => {
+      calls.push({ title, defaultPath, name, ext });
+      return "/exports/My- Table.csv";
+    },
+    writeFile: async (path: string, bytes: string | Uint8Array) => {
+      written.push({ path, bytes });
+    },
+    alert: async (title: string) => {
+      alerts.push(title);
+    },
+  };
+  await exportTableData(EXPORT_164_NODE as never, "csv", io);
+  strictEqual(calls.length, 1);
+  strictEqual(calls[0].title, "Export Table Data");
+  // The table name is sanitized as a file stem (":" becomes "-").
+  ok(calls[0].defaultPath.endsWith("My- Table.csv"), `default path was ${calls[0].defaultPath}`);
+  strictEqual(written.length, 1);
+  strictEqual(written[0].path, "/exports/My- Table.csv");
+  strictEqual(written[0].bytes, tableToCsv(EXPORT_164_DATA));
+  strictEqual(alerts.length, 0);
+  // The next export offers the folder the last one went to.
+  await exportTableData(EXPORT_164_NODE as never, "txt", io);
+  ok(calls[1].defaultPath.startsWith("/exports/"), `last folder not reused: ${calls[1].defaultPath}`);
+  // Cancel in the dialog writes nothing and alerts nothing.
+  const cancelled = {
+    ...io,
+    pickSavePath: async () => null,
+    writeFile: async () => {
+      throw new Error("writeFile must not run on cancel");
+    },
+  };
+  await exportTableData(EXPORT_164_NODE as never, "csv", cancelled);
+  // A failed write says so instead of failing silently.
+  const failing = {
+    ...io,
+    writeFile: async () => {
+      throw new Error("disk full");
+    },
+  };
+  await exportTableData(EXPORT_164_NODE as never, "csv", failing);
+  ok(alerts.some((t) => t.includes("Couldn't Export the Table Data")), "failed write raised no alert");
+});
+
+check("export-164: the File menu offers Export Table Data in CSV, XLSX and TXT", () => {
+  const menu = readFileSync("src/app-menu.ts", "utf8");
+  ok(menu.includes("Export Table Data"), "File menu has no Export Table Data item");
+  ok(menu.includes("exportTableData"), "File menu never calls the table-data export");
+  ok(menu.includes("hasTable"), "Export Table Data is not gated on having a table");
+  const exporter = readFileSync("src/views/tables/table-data-export.ts", "utf8");
+  ok(exporter.includes("TABLE_DATA_EXPORT_FORMATS"), "exporter has no format list");
+  ok(exporter.includes("serializeTableData"), "exporter has no serializer entry point");
+  ok(exporter.includes("exportTableData"), "exporter has no export entry point");
+  deepStrictEqual(
+    [...TABLE_DATA_EXPORT_FORMATS.map((f) => f.value)],
+    ["csv", "xlsx", "txt"],
+    "UI formats differ from the MCP export's csv/xlsx/txt",
+  );
 });
 
 // ── Run ──────────────────────────────────────────────────────────────────
