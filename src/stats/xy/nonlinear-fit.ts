@@ -1516,7 +1516,10 @@ function irlsLoop(
     `${baseWeights};` +
     `for(it in 1:25){cf0<-coef(m);if(any(!is.finite(cf0)))break;${update}w<-wb*wr;` +
     `ok<-tryCatch({${weightedFit};TRUE},error=function(e)FALSE);if(!ok)break;` +
-    `cf1<-coef(m);if(any(!is.finite(cf1))){${initialFit};break};` +
+    // A refit that produced non-finite coefficients is discarded — but
+    // the initial fit reads `w` when the user weighted, and `w` is now
+    // the last IRLS weights, so restore the base weights first.
+    `cf1<-coef(m);if(any(!is.finite(cf1))){w<-wb;${initialFit};break};` +
     `if(max(abs(cf1-cf0)/pmax(1,abs(cf0)))<1e-6)break};`
   );
 }
