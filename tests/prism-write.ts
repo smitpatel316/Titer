@@ -5,7 +5,8 @@
 //   W3    the written file is honestly Titer's: fresh UUIDs, createdBy Titer,
 //         no graphs/layouts, no results.json
 //   W4    a minimal one-table project writes exactly the required entries
-//   W5    a Nested table refuses the whole write, naming the table
+//   W5    (superseded by W15, seq 162): a Nested table used to refuse the
+//         whole write; it now writes as a Column table (see W15).
 //
 // `npm test` runs this after tests/prism.ts. The demo file lives in
 // tests/testdata/prism/ (a copy of the public prism2R demo — Mansi's files
@@ -151,34 +152,134 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
     minimalPaths.filter((p) => p.startsWith("data/sets/")).length === 1 &&
     minimalPaths.length === 5;
   check("W4 minimal file", minimalOk, minimalPaths.join(", "));
-  // W5: a Nested table refuses the whole write, naming the table.
-  try {
-    await writePrism(
-      {
-        nodes: {
-          table_1: {
-            id: "table_1",
-            type: "table",
-            name: "Nested data",
-            parentId: null,
-            tableType: "nested",
-            data: { columns: ["Title", "A"], rows: [[null, "1"]] },
-          },
-        },
-        rootOrder: ["table_1"],
-        childOrder: { table_1: [] },
-        activeNodeId: "table_1",
+  // W15 (seq 162): nested/multiple tables write as Column tables — the
+  // whole write no longer fails when a project holds one, values and column
+  // names survive verbatim, and the report discloses the type change. The
+  // fixtures are generated, never Mansi's files. The nested table uses the
+  // valid "Group:Subgroup:R1" shape (2 groups x 2 subgroups x 2 reps) with
+  // row titles and one excluded cell; the multiple table holds plain
+  // variable columns. Round-trip contract: columns + rows + excluded cells
+  // identical; the table comes back as Column (its groups/replicates/
+  // subgroups metadata has nowhere to live in a Column table), and the
+  // nested t test attached to it is registered as not written.
+  const nestedData = {
+    columns: ["Title", "A:S1:R1", "A:S1:R2", "A:S2:R1", "A:S2:R2", "B:S1:R1", "B:S1:R2", "B:S2:R1", "B:S2:R2"],
+    rows: [
+      ["Day 1", "10", "11", "12", "13", "20", "21", "22", "23"],
+      ["Day 2", "14", "15", "16", "17", "24", "25", "26", "27"],
+    ],
+    groups: 2,
+    subgroups: 2,
+    replicates: 2,
+    excluded: ["0,1"],
+  };
+  const multiData = {
+    columns: ["Title", "Age", "Weight", "Score"],
+    rows: [
+      [null, "34", "72.5", "88"],
+      [null, "29", "68.0", "91"],
+    ],
+  };
+  const seq162Project = {
+    nodes: {
+      t_nested: {
+        id: "t_nested",
+        type: "table",
+        name: "Nested data",
+        parentId: null,
+        tableType: "nested",
+        data: nestedData,
       },
-      "1.0.7",
-    );
-    check("W5 nested refusal", false, "wrote without error");
-  } catch (err) {
-    check(
-      "W5 nested refusal",
-      err instanceof Error && err.message.includes("Nested data") && err.message.includes("Prism has no matching"),
-      err instanceof Error ? err.message.slice(0, 120) : String(err),
-    );
+      t_multi: {
+        id: "t_multi",
+        type: "table",
+        name: "Multi var",
+        parentId: null,
+        tableType: "multiple",
+        data: multiData,
+      },
+      t_col: {
+        id: "t_col",
+        type: "table",
+        name: "Plain",
+        parentId: null,
+        tableType: "column",
+        data: { columns: ["Title", "C"], rows: [[null, "5"]] },
+      },
+      a_nested_t: {
+        id: "a_nested_t",
+        type: "analysis",
+        name: "Nested t test",
+        parentId: "t_nested",
+        analysisType: "nested-t-test",
+        analysisParams: {},
+      },
+    },
+    rootOrder: ["t_nested", "t_multi", "t_col"],
+    childOrder: { t_nested: ["a_nested_t"], t_multi: [], t_col: [], a_nested_t: [] },
+    activeNodeId: "t_nested",
+  };
+  const seq162Written = await writePrism(seq162Project as never, "1.0.7");
+  const seq162Zip = await JSZip.loadAsync(seq162Written.bytes);
+  const seq162Sheets = new Map<string, { format?: string; "@class"?: string }>();
+  for (const p of Object.keys(seq162Zip.files)) {
+    if (!p.startsWith("data/sheets/") || !p.endsWith("sheet.json") || seq162Zip.files[p].dir) continue;
+    const d = JSON.parse(await seq162Zip.file(p)!.async("string")) as {
+      title?: string;
+      table?: { format?: string; "@class"?: string };
+    };
+    if (d.title) seq162Sheets.set(d.title, d.table ?? {});
   }
+  const seq162Back = await convertPrism(seq162Written.bytes, "seq162-round-trip.prism");
+  const seq162BackTables = seq162Back.project.rootOrder
+    .map((id) => seq162Back.project.nodes[id])
+    .filter((n) => n?.type === "table");
+  const backByName = (name: string) => seq162BackTables.find((t) => t.name === name);
+  const nestedBack = backByName("Nested data");
+  const multiBack = backByName("Multi var");
+  const seq162Warnings = seq162Written.report.issues.filter((i) => i.severity === "warning").map((i) => i.message);
+  check(
+    "W15a nested table writes as Column, values verbatim (seq 162)",
+    seq162Sheets.get("Nested data")?.format === "column" &&
+      seq162Sheets.get("Nested data")?.["@class"] === "DataTable" &&
+      nestedBack?.tableType === "column" &&
+      JSON.stringify(nestedBack?.data?.columns) === JSON.stringify(nestedData.columns) &&
+      JSON.stringify(nestedBack?.data?.rows) === JSON.stringify(nestedData.rows) &&
+      JSON.stringify(nestedBack?.data?.excluded ?? []) === JSON.stringify(nestedData.excluded),
+    `back type ${nestedBack?.tableType}, columns ${JSON.stringify(nestedBack?.data?.columns)}, excluded ${JSON.stringify(nestedBack?.data?.excluded)}`,
+  );
+  check(
+    "W15b multiple table writes as Column, values verbatim (seq 162)",
+    seq162Sheets.get("Multi var")?.format === "column" &&
+      multiBack?.tableType === "column" &&
+      JSON.stringify(multiBack?.data?.columns) === JSON.stringify(multiData.columns) &&
+      JSON.stringify(multiBack?.data?.rows) === JSON.stringify(multiData.rows),
+    `back type ${multiBack?.tableType}, columns ${JSON.stringify(multiBack?.data?.columns)}`,
+  );
+  check(
+    "W15c mixed project writes all three tables (seq 162)",
+    JSON.stringify(seq162Written.report.tables) === JSON.stringify(["Nested data", "Multi var", "Plain"]) &&
+      seq162BackTables.length === 3,
+    `written: ${seq162Written.report.tables.join(", ")}; back: ${seq162BackTables.map((t) => t.name).join(", ")}`,
+  );
+  check(
+    "W15d flattening is disclosed in the report, naming each table (seq 162)",
+    seq162Warnings.some(
+      (m) => m.includes("“Nested data”") && m.includes("Nested table") && m.includes("Column table"),
+    ) &&
+      seq162Warnings.some(
+        (m) => m.includes("“Multi var”") && m.includes("Multiple variables table") && m.includes("Column table"),
+      ) &&
+      !seq162Warnings.some((m) => m.includes("“Plain”")),
+    seq162Warnings.join(" | "),
+  );
+  check(
+    "W15e nested t test is registered, not written (seq 162)",
+    seq162Written.report.analysesNotWritten.some(
+      (s) => s.startsWith("Nested t test") && s.includes("nested-t-test"),
+    ),
+    seq162Written.report.analysesNotWritten.join(" | "),
+  );
   // W7 (BUG-9): a mixed-format xy table round-trips with its MEAN/SD/N
   // names intact. The writer groups Ya/Yb into y_sd_n datasets but the
   // "XX error" column is y_single, so the table-level dataFormat is

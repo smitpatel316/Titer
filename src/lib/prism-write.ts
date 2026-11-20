@@ -42,9 +42,23 @@
 //   grouped    → format "grouped", one y_replicates dataset per group
 //   contingency→ format "contingency", one y_single dataset per column
 //   survival   → format "survival", X = time, one dataset per group
-//   nested / multiple → the write FAILS with a plain-language error naming
-//                 the table: silently dropping a table would be data loss,
-//                 and Prism has no counterpart for them.
+//   nested / multiple → written as a Column table, with a warning in the
+//                 transfer report naming the table (seq 162). No values or
+//                 column names are dropped — the flattening is lossless at
+//                 the cell level — but the table TYPE is not preserved, and
+//                 the report says so plainly. The evidence: no real Prism
+//                 file with a nested table exists in Titer's corpus (the
+//                 4 synthetic nested files are the project's own generator
+//                 output, explicitly never ground truth), so a native
+//                 `format: "nested"` emission would be a guess at Prism's
+//                 layout — and a guessed layout is the crash class seq 175
+//                 fixed. For Multiple Variables there is no `multiple`
+//                 format at all, in real or synthetic files: even the
+//                 corpus generator writes MV tables as `format: "column"`.
+//                 This mirrors the import direction, which reads Prism
+//                 nested tables as Column with the same warning
+//                 (src/lib/prism.ts), so the mapping is the exact reverse
+//                 of an established one, not a new invention.
 
 import JSZip from "jszip";
 import type { ProjectFilePayload } from "./project-file";
@@ -384,12 +398,23 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
     }
     const tableType = table.tableType ?? "column";
     if (tableType === "nested" || tableType === "multiple") {
-      // Refuse the whole write: dropping a table silently would be data
-      // loss, and Prism has no counterpart for these types. The user can
-      // convert the table to Column first and try again.
-      throw new Error(
-        `${displayName} is a ${tableType === "nested" ? "Nested" : "Multiple variables"} table, and Prism has no matching table type — convert it to a Column table first, then save as .prism.`,
-      );
+      // Written as a Column table, never refused and never dropped: the
+      // whole write used to fail here, so a project holding one nested or
+      // MV table could not be saved as .prism at all. All values and column
+      // names survive verbatim (the generic path below emits one y_single
+      // dataset per column — "A:S1:R1" names pass through untouched, since
+      // they match neither the summary nor the replicate grouping); only
+      // the table type is lost, and the report says so. The type can't be
+      // preserved honestly: no verified native representation exists (see
+      // the header note), so guessing `format: "nested"` would risk the
+      // file Prism rejects or crashes on.
+      issues.push({
+        severity: "warning",
+        message:
+          tableType === "nested"
+            ? `${displayName} is a Nested table — no verified .prism representation of a nested table exists in Titer's file corpus, so it was written as a Column table with all values and column names preserved; re-create the group/subgroup nesting in Prism.`
+            : `${displayName} is a Multiple variables table — .prism has no separate table format for it in Titer's verified file corpus, so it was written as a Column table with all values and column names preserved; re-create it as a Multiple Variables table in Prism.`,
+      });
     }
     const rowCount = data.rows.length;
     const rowTitles = data.rows.map((r) => r[0]);
