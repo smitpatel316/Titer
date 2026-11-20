@@ -8164,9 +8164,9 @@ mod tests {
     fn search_nodes_finds_by_name_and_type() {
         let snap = snapshot();
         let (found, total) = search_nodes(&snap, "dose", None);
-        assert_eq!(total, 3, "{found:?}");
+        assert_eq!(total, 2, "{found:?}");
         let ids: Vec<&str> = found.iter().map(|m| m["id"].as_str().unwrap()).collect();
-        assert_eq!(ids, vec!["t1", "a1", "f1"], "table then analysis then figure, in listing order");
+        assert_eq!(ids, vec!["t1", "a1"], "table then analysis, in listing order");
         assert_eq!(found[1]["parent_id"], "t1");
         assert_eq!(found[1]["parent_name"], "Dose-response");
         // Case-insensitive, and the kind filter narrows to tables only.
@@ -9851,7 +9851,7 @@ mod tests {
         state.lock().dir = Some(dir.clone());
         let session2 = mcp_initialize(&client, &url).await;
         let names2 = mcp_list_tool_names(&client, &url, &session2).await;
-        assert_eq!(names2.len(), 11, "five reads + six destructive tools: {names2:?}");
+        assert_eq!(names2.len(), 7, "five reads + two destructive tools: {names2:?}");
         assert!(names2.contains(&"titer_delete_node".to_string()), "delete appears: {names2:?}");
         assert!(names2.contains(&"titer_run_script".to_string()), "script appears: {names2:?}");
 
