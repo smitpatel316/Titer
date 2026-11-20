@@ -48,6 +48,7 @@ export function AppShell() {
   useMcpJobDispatcher();
   const { projectUpdated, dismissProjectUpdated } = documentActions;
   const { prismImported, dismissPrismImported, dataImported, dismissDataImported } = documentActions;
+  const { prismSavedReport, dismissPrismSavedReport } = documentActions;
   const { templateNotice, dismissTemplateNotice } = documentActions;
   const { sidebar } = useLayout();
   const [fullscreen, setFullscreen] = React.useState(false);
@@ -162,6 +163,25 @@ export function AppShell() {
           </>
         }
       />
+
+      {/* The "Saved as Prism" notice (Mansi P0 #3), in-app for the same
+          Quirk-2 reason as "Prism File Imported" above: the write report
+          used to be computed and thrown away, so dropped analyses and the
+          graphs warning were silent. A manual .prism save shows it; a
+          background save (autosave, quit-save) never does. Long reports
+          scroll, like the converter's. */}
+      <Dialog
+        open={prismSavedReport !== null}
+        onClose={dismissPrismSavedReport}
+        onReturn={dismissPrismSavedReport}
+        dismissLabel="OK"
+        title="Saved as Prism"
+        description="What made it into the .prism file — and what didn't. Anything listed as not written needs re-creating in Prism from the tables."
+      >
+        <pre className="max-h-64 overflow-auto rounded-md bg-control p-3 text-small whitespace-pre-wrap">
+          {prismSavedReport?.join("\n")}
+        </pre>
+      </Dialog>
 
       {/* The "Data File Imported" notice, in-app for the same Quirk-2
           reason as "Prism File Imported" above. Shown only when the import
