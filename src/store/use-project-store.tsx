@@ -808,6 +808,7 @@ interface ProjectActions {
       labelStyle: FigureLabelStyle;
       figureTitle: string;
       sharedLegend: SharedLegend;
+      figureBackground: string;
       dpi: Resolution;
     }>,
   ) => void;

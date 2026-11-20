@@ -5247,7 +5247,7 @@ impl TiterMcpServer {
     /// figureTitle, sharedLegend, dpi).
     #[tool(
         name = "titer_create_figure",
-        description = "Make a multi-panel figure over the given graphs (all the project's graphs when graph_ids is omitted). layout is the figure's grid/title shape: grid, figureSize, labelStyle, figureTitle, sharedLegend, dpi.",
+        description = "Make a multi-panel figure over the given graphs (all the project's graphs when graph_ids is omitted). layout is the figure's grid/title shape: grid, figureSize, labelStyle, figureTitle, sharedLegend, backgroundColor (#rrggbb page colour), dpi.",
         annotations(
             title = "Create figure",
             read_only_hint = false,
@@ -5293,10 +5293,12 @@ impl TiterMcpServer {
 
     /// Change a figure: panels, grid, titles — `layout` is the figure
     /// fields to change (panels, grid, figureSize, labelStyle,
-    /// figureTitle, sharedLegend, dpi).
+    /// figureTitle, sharedLegend, backgroundColor, dpi). A panel is a graph
+    /// ({ graphId }), a blank cell ({ kind: "blank" }) for layout, or an
+    /// embedded picture ({ kind: "image", imageData, imageName? }).
     #[tool(
         name = "titer_update_figure",
-        description = "Change a figure: layout is the figure fields to change — panels, grid, figureSize, labelStyle, figureTitle, sharedLegend, dpi.",
+        description = "Change a figure: layout is the figure fields to change — panels, grid, figureSize, labelStyle, figureTitle, sharedLegend, backgroundColor (#rrggbb page colour), dpi. Panels are graphs ({ graphId }), blank cells ({ kind: \"blank\" }), or embedded pictures ({ kind: \"image\", imageData, imageName? }).",
         annotations(
             title = "Update figure",
             read_only_hint = false,

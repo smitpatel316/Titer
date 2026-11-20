@@ -56,6 +56,7 @@ import {
   DEFAULT_GRAPH_OPTIONS,
   GRAPH_LIMITS,
   SAME_AS_FILL,
+  type FigurePanel,
   type GraphOptions,
   type GraphType,
   type ProjectNode,
@@ -205,6 +206,7 @@ import {
   clampPanel,
   composeFigureSvg,
   duplicateLabels,
+  FIGURE_IMAGE_MAX_DATA_URL,
   FIGURE_RESOLUTIONS,
   figureExportSize,
   figureLabel,
@@ -233,7 +235,9 @@ import {
 import { tableToXlsx } from "../src/store/mcp-export";
 import {
   executeBuildGraph,
+  executeUpdateFigure,
   executeUpdateGraph,
+  type FigurePatch,
   type GraphJobDeps,
 } from "../src/store/mcp-graphs";
 import { sampleProject } from "./sample-project";
@@ -3153,6 +3157,173 @@ check("seq 222: MCP update-graph accepts xError and rejects a non-boolean", () =
   executeUpdateGraph(job("job-222-ok", { xError: true }), deps);
   strictEqual(updated[0]?.options.xError, true);
   throws(() => executeUpdateGraph(job("job-222-bad", { xError: "yes" }), deps), /must be a boolean/);
+});
+
+// seq 219: blank layout / image panels + a figure background colour.
+// A panel with no graph: kind "blank" (an empty cell, for layout) or "image"
+// (an embedded picture, for a gel / blot / photo beside the graphs).
+const blankPanel = (label: string, col: number): FigurePanel => ({
+  graphId: "",
+  kind: "blank",
+  label,
+  title: "",
+  row: 0,
+  col,
+  rowSpan: 1,
+  colSpan: 1,
+});
+const imagePanel = (label: string, col: number, imageData = "data:image/png;base64,iVBORw0KGgo="): FigurePanel => ({
+  graphId: "",
+  kind: "image",
+  imageData,
+  imageName: "gel.png",
+  label,
+  title: "",
+  row: 0,
+  col,
+  rowSpan: 1,
+  colSpan: 1,
+});
+
+check("seq 219: blank and image panels are never 'missing' and never break a shared legend", () => {
+  const before = figurePayload();
+  const panels = [...before.nodes.f1.panels!, blankPanel("C", 2), imagePanel("D", 3)];
+  deepStrictEqual(missingPanels(panels, before.nodes), []);
+  const legend = sharedLegendCheck(panels, before.nodes);
+  ok(legend.ok, JSON.stringify(legend));
+  strictEqual(legend.entries?.length, 2);
+  // A deleted graph is still missing — the blank/image panels don't mask it.
+  const nodes = { ...before.nodes };
+  delete nodes.g2;
+  deepStrictEqual(missingPanels(panels, nodes).map((p) => p.graphId), ["g2"]);
+  // Blank/image panels alone can't share a legend: there is nothing to read.
+  const noGraphs = sharedLegendCheck([blankPanel("A", 0), imagePanel("B", 1)], before.nodes);
+  ok(!noGraphs.ok && noGraphs.reason?.includes("at least two"), JSON.stringify(noGraphs));
+});
+
+check("seq 219: the composed SVG uses the figure background and embeds image panels; blank panels keep their labels", () => {
+  const before = figurePayload();
+  const panels = [...before.nodes.f1.panels!, blankPanel("C", 2), imagePanel("D", 3)];
+  const panel = () =>
+    `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200"><rect width="300" height="200"/></svg>`;
+  const figure = {
+    panels,
+    grid: { rows: 1, cols: 4 },
+    figureSize: { widthIn: 10, heightIn: 7.5 },
+    labelStyle: { position: "top-left" as const, fontSizePt: 12, bold: true },
+    figureTitle: "",
+    sharedLegend: "none" as const,
+    figureBackground: "#e8e8e8",
+  };
+  const { svg, missing } = composeFigureSvg(
+    before.nodes.f1.panels!.map((p) => ({ panel: p, svg: panel() })),
+    figure,
+  );
+  strictEqual(missing, 0);
+  ok(svg.includes('fill="#e8e8e8"'), svg);
+  ok(svg.includes('<image href="data:image/png;base64,iVBORw0KGgo="'), svg);
+  ok(svg.includes(">C</text>") && svg.includes(">D</text>"), svg);
+  // No background set: the page stays white.
+  const plain = composeFigureSvg(
+    before.nodes.f1.panels!.map((p) => ({ panel: p, svg: panel() })),
+    { ...figure, panels: before.nodes.f1.panels!, grid: { rows: 1, cols: 2 }, figureBackground: undefined },
+  );
+  ok(plain.svg.includes('fill="#ffffff"'), plain.svg);
+  strictEqual(plain.missing, 0);
+});
+
+check("seq 219: blank/image panels and the background survive a .hlx round-trip; a broken image reads as no image", () => {
+  const before = figurePayload();
+  const withPanels: ProjectFilePayload = {
+    ...before,
+    nodes: {
+      ...before.nodes,
+      f1: {
+        ...before.nodes.f1,
+        figureBackground: "#e8e8e8",
+        panels: [...before.nodes.f1.panels!, blankPanel("C", 2), imagePanel("D", 3)],
+        grid: { rows: 1, cols: 4 },
+      },
+    },
+  };
+  const { project } = read(serializeProjectFile(withPanels));
+  const f1 = project.nodes.f1!;
+  strictEqual(f1.figureBackground, "#e8e8e8");
+  strictEqual(f1.panels?.length, 4);
+  deepStrictEqual(f1.panels?.[2], blankPanel("C", 2));
+  deepStrictEqual(f1.panels?.[3], imagePanel("D", 3));
+  // A hand-edited file with a non-image data URL: the image is dropped, the
+  // panel stays (blank until a real image is picked) — the file still opens.
+  const broken = JSON.parse(serializeProjectFile(withPanels)) as { project: ProjectFilePayload };
+  (broken.project.nodes.f1!.panels![3] as unknown as Record<string, unknown>).imageData = "data:text/plain,hello";
+  const reread = read(JSON.stringify(broken)).project.nodes.f1!;
+  strictEqual(reread.panels?.[3]?.kind, "image");
+  strictEqual(reread.panels?.[3]?.imageData, undefined);
+  strictEqual(reread.panels?.[3]?.imageName, "gel.png");
+});
+
+check("seq 219: MCP update-figure takes a background colour and blank/image panels, and rejects bad ones", () => {
+  const before = figurePayload();
+  const nodes = { ...before.nodes };
+  const state = { nodes, rootOrder: before.rootOrder, childOrder: before.childOrder, activeNodeId: "f1" };
+  const applied: { id: string; patch: FigurePatch }[] = [];
+  const deps: GraphJobDeps = {
+    getState: () => state,
+    updateFigure: (id, patch) => {
+      applied.push({ id, patch });
+    },
+  };
+  const job = (jobId: string, layout: unknown) => ({
+    job_id: jobId,
+    project_id: "project-1",
+    action: "update-figure",
+    args: { figure_id: "f1", layout },
+    status: "queued" as const,
+  });
+  const out = executeUpdateFigure(
+    job("job-219-ok", {
+      backgroundColor: "#123456",
+      panels: [
+        { graphId: "g1", row: 0, col: 0 },
+        { graphId: "g2", row: 0, col: 1 },
+        { kind: "blank", row: 0, col: 2 },
+        { kind: "image", imageData: "data:image/png;base64,iVBORw0KGgo=", imageName: "gel.png", row: 0, col: 3 },
+      ],
+      grid: { rows: 1, cols: 4 },
+    }),
+    deps,
+  );
+  strictEqual(applied[0]?.patch.figureBackground, "#123456");
+  strictEqual(applied[0]?.patch.panels?.length, 4);
+  strictEqual(applied[0]?.patch.panels?.[2]?.kind, "blank");
+  strictEqual(applied[0]?.patch.panels?.[3]?.kind, "image");
+  strictEqual(applied[0]?.patch.panels?.[3]?.imageName, "gel.png");
+  deepStrictEqual(
+    (out.result as { panels: { kind?: string }[] }).panels.map((p) => p.kind ?? "graph"),
+    ["graph", "graph", "blank", "image"],
+  );
+  throws(
+    () => executeUpdateFigure(job("job-219-bg", { backgroundColor: "red" }), deps),
+    /must be a #rrggbb hex/,
+  );
+  throws(
+    () =>
+      executeUpdateFigure(
+        job("job-219-big", {
+          panels: [{ kind: "image", imageData: `data:image/png;base64,${"A".repeat(FIGURE_IMAGE_MAX_DATA_URL)}`, row: 0, col: 0 }],
+        }),
+        deps,
+      ),
+    /too large/,
+  );
+  throws(
+    () =>
+      executeUpdateFigure(
+        job("job-219-nograph", { panels: [{ graphId: "nope", row: 0, col: 0 }] }),
+        deps,
+      ),
+    /names no graph/,
+  );
 });
 
 check("summary subcolumns: the heatmap plots the Mean column, not the mean of Mean/SD/N", () => {

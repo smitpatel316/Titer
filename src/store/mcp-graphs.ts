@@ -18,6 +18,7 @@ import { PALETTES, paletteNamed, savedPalette } from "../lib/palettes";
 import {
   DEFAULT_FIGURE_SIZE,
   DEFAULT_LABEL_STYLE,
+  FIGURE_IMAGE_MAX_DATA_URL,
   FIGURE_MAX_COLS,
   FIGURE_RESOLUTIONS,
   assignLabels,
@@ -70,6 +71,8 @@ export type FigurePatch = Partial<{
   labelStyle: FigureLabelStyle;
   figureTitle: string;
   sharedLegend: SharedLegend;
+  /** The page's background colour, as `#rrggbb` (absent: white). */
+  figureBackground: string;
   dpi: Resolution;
 }>;
 
@@ -563,7 +566,7 @@ function validateFigureLayout(
     // matters (update-figure checks it; create-figure starts at "none").
     return { patch: {}, panels };
   }
-  if (!isPlainObject(raw)) throw jobErr(job, `“layout” must be an object { grid?, figureSize?, labelStyle?, figureTitle?, sharedLegend?, dpi?, panels? }.`);
+  if (!isPlainObject(raw)) throw jobErr(job, `“layout” must be an object { grid?, figureSize?, labelStyle?, figureTitle?, sharedLegend?, backgroundColor?, dpi?, panels? }.`);
   const patch: FigurePatch = {};
   let nextPanels = panels;
   let nextGrid = grid;
@@ -586,19 +589,48 @@ function validateFigureLayout(
       );
     if (!Array.isArray(raw.panels)) throw jobErr(job, `“layout.panels” must be a list of panels.`);
     const parsed: FigurePanel[] = raw.panels.map((p, i) => {
-      if (!isPlainObject(p)) throw jobErr(job, `panel ${i} must be an object { graphId, label?, title?, row, col, rowSpan?, colSpan? }.`);
-      const graphId = p.graphId;
-      if (typeof graphId !== "string" || !graphId) throw jobErr(job, `panel ${i} needs a “graphId”.`);
-      const graph = state.nodes[graphId];
-      if (!graph) throw jobErr(job, `panel ${i} names no graph with id “${graphId}” — run titer_list_projects to see the graphs.`);
-      if (graph.type !== "graph") throw jobErr(job, `panel ${i} names “${graph.name}”, a ${graph.type}, not a graph.`);
+      if (!isPlainObject(p))
+        throw jobErr(
+          job,
+          `panel ${i} must be an object { graphId?, kind?, imageData?, imageName?, label?, title?, row, col, rowSpan?, colSpan? }.`,
+        );
+      const kind = p.kind ?? "graph";
+      if (kind !== "graph" && kind !== "blank" && kind !== "image")
+        throw jobErr(job, `panel ${i} “kind” must be one of: graph, blank, image — got ${JSON.stringify(kind)}.`);
+      if (kind === "graph") {
+        const graphId = p.graphId;
+        if (typeof graphId !== "string" || !graphId) throw jobErr(job, `panel ${i} needs a “graphId”.`);
+        const graph = state.nodes[graphId];
+        if (!graph) throw jobErr(job, `panel ${i} names no graph with id “${graphId}” — run titer_list_projects to see the graphs.`);
+        if (graph.type !== "graph") throw jobErr(job, `panel ${i} names “${graph.name}”, a ${graph.type}, not a graph.`);
+      }
+      // An image panel needs its picture (a data URL, within the cap — the
+      // file embeds it, so a huge one would bloat the project); a blank
+      // panel needs neither a graph nor a picture.
+      let imageData: string | undefined;
+      if (kind === "image") {
+        if (typeof p.imageData !== "string" || !p.imageData.startsWith("data:image/"))
+          throw jobErr(job, `panel ${i} is an image panel — it needs an “imageData” data URL (data:image/…).`);
+        if (p.imageData.length > FIGURE_IMAGE_MAX_DATA_URL)
+          throw jobErr(
+            job,
+            `panel ${i} “imageData” is too large (${p.imageData.length} characters — at most ${FIGURE_IMAGE_MAX_DATA_URL}). Use a smaller image.`,
+          );
+        imageData = p.imageData;
+      }
+      if (p.imageName !== undefined && typeof p.imageName !== "string")
+        throw jobErr(job, `panel ${i} “imageName” must be a string.`);
       if (p.label !== undefined && typeof p.label !== "string") throw jobErr(job, `panel ${i} “label” must be a string.`);
       if (p.labelManual !== undefined && typeof p.labelManual !== "boolean")
         throw jobErr(job, `panel ${i} “labelManual” must be a boolean.`);
       if (p.title !== undefined && typeof p.title !== "string") throw jobErr(job, `panel ${i} “title” must be a string.`);
+      const graph = kind === "graph" ? state.nodes[p.graphId as string] : undefined;
       return {
-        graphId,
-        graphName: graph.name,
+        graphId: kind === "graph" ? (p.graphId as string) : "",
+        ...(kind === "graph" ? {} : { kind }),
+        ...(imageData ? { imageData } : {}),
+        ...(p.imageName ? { imageName: p.imageName as string } : {}),
+        graphName: graph?.name,
         label: (p.label as string | undefined) ?? "",
         labelManual: p.labelManual as boolean | undefined,
         title: (p.title as string | undefined) ?? "",
@@ -673,6 +705,17 @@ function validateFigureLayout(
     patch.sharedLegend = raw.sharedLegend as SharedLegend;
   }
 
+  // The page's background colour: a #rrggbb hex; null clears it back to white.
+  if (raw.backgroundColor !== undefined) {
+    if (raw.backgroundColor === null) {
+      patch.figureBackground = undefined;
+    } else if (typeof raw.backgroundColor !== "string" || !/^#[0-9a-f]{6}$/i.test(raw.backgroundColor)) {
+      throw jobErr(job, `“layout.backgroundColor” must be a #rrggbb hex colour — got ${JSON.stringify(raw.backgroundColor)}.`);
+    } else {
+      patch.figureBackground = raw.backgroundColor;
+    }
+  }
+
   if (raw.dpi !== undefined) {
     if (typeof raw.dpi !== "string" || !(FIGURE_RESOLUTIONS as readonly string[]).includes(raw.dpi))
       throw jobErr(job, `“layout.dpi” must be one of: ${FIGURE_RESOLUTIONS.join(", ")}.`);
@@ -680,8 +723,8 @@ function validateFigureLayout(
   }
 
   for (const key of Object.keys(raw))
-    if (!["panels", "grid", "figureSize", "labelStyle", "figureTitle", "sharedLegend", "dpi"].includes(key))
-      throw jobErr(job, `unknown layout field “${key}” — use grid, figureSize, labelStyle, figureTitle, sharedLegend, dpi (and panels on update).`);
+    if (!["panels", "grid", "figureSize", "labelStyle", "figureTitle", "sharedLegend", "backgroundColor", "dpi"].includes(key))
+      throw jobErr(job, `unknown layout field “${key}” — use grid, figureSize, labelStyle, figureTitle, sharedLegend, backgroundColor, dpi (and panels on update).`);
 
   // A shared legend is only sound when every panel's graph draws the same
   // series in the same colours — the editor refuses it otherwise, and so
@@ -695,9 +738,14 @@ function validateFigureLayout(
   return { patch, panels: nextPanels };
 }
 
-/** A panel as the tool output spells it (snake_case, like the other tools). */
+/** A panel as the tool output spells it (snake_case, like the other tools).
+ *  The picture itself is never listed — it is large, and the listing stays
+ *  small; `has_image` says whether an image panel holds one. */
 const publicPanel = (p: FigurePanel) => ({
   graph_id: p.graphId,
+  kind: p.kind ?? "graph",
+  ...(p.imageName ? { image_name: p.imageName } : {}),
+  ...(p.kind === "image" ? { has_image: Boolean(p.imageData) } : {}),
   label: p.label,
   title: p.title,
   row: p.row,

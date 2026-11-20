@@ -105,6 +105,7 @@ function figureOf(figure: ProjectNode) {
     labelStyle: figure.labelStyle ?? { position: "top-left" as const, fontSizePt: 12, bold: true },
     figureTitle: figure.figureTitle ?? "",
     sharedLegend: figure.sharedLegend ?? ("none" as const),
+    figureBackground: figure.figureBackground,
   };
 }
 
@@ -128,7 +129,7 @@ export async function renderFigureRaster(
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = figure.figureBackground ?? "#ffffff";
   ctx.fillRect(0, 0, width, height);
   const missing = missingPanels(g.panels, nodes);
   const scale = Number(dpi) / PT_PER_INCH; // points → pixels at this DPI
@@ -150,6 +151,22 @@ export async function renderFigureRaster(
         const bitmap = await createImageBitmap(image);
         ctx.drawImage(bitmap, rect.x, y, rect.width, rect.height);
         bitmap.close();
+      }
+    } else if (rect.panel.kind === "image" && rect.panel.imageData) {
+      // An image panel's picture, fitted to the cell without distortion
+      // (contain, centred — the same fit the SVG export's preserveAspectRatio
+      // gives). A picture that can't be read leaves its cell blank, like a
+      // graph that couldn't be drawn.
+      try {
+        const blob = await (await fetch(rect.panel.imageData)).blob();
+        const bitmap = await createImageBitmap(blob);
+        const scale = Math.min(rect.width / bitmap.width, rect.height / bitmap.height);
+        const w = Math.round(bitmap.width * scale);
+        const h = Math.round(bitmap.height * scale);
+        ctx.drawImage(bitmap, rect.x + Math.round((rect.width - w) / 2), y + Math.round((rect.height - h) / 2), w, h);
+        bitmap.close();
+      } catch {
+        // A broken picture leaves its cell blank.
       }
     }
     // The label, in the cell's margin (top-left by default), over the panel.

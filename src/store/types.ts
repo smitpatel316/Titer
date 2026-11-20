@@ -782,15 +782,32 @@ export interface ProjectNode {
   labelStyle?: FigureLabelStyle;
   figureTitle?: string;
   sharedLegend?: SharedLegend;
+  /** The page's background colour, as `#rrggbb` (white when absent): blank
+   *  cells and the margins around panels show it, in the editor and on
+   *  export. */
+  figureBackground?: string;
   dpi?: Resolution;
   /** Info sheet nodes only: its constants, notes, and linked table. */
   info?: InfoSheetData;
 }
 
 /** One panel of a multi-panel figure: a reference to an existing graph node,
- *  never a copy of it — editing the graph updates the panel automatically. */
+ *  never a copy of it — editing the graph updates the panel automatically.
+ *  Or a panel with no graph: `kind` "blank" (an empty cell, for layout — a
+ *  spacer, or room for a caption) or "image" (an embedded picture, for a gel,
+ *  blot or photo beside the graphs). A blank/image panel's `graphId` is "". */
 export interface FigurePanel {
   graphId: string;
+  /** Which kind of panel this is (absent reads as "graph", as every panel was
+   *  before this landed — old files need no migration). */
+  kind?: "graph" | "blank" | "image";
+  /** An image panel's picture, as a data URL (embedded in the file, so the
+   *  project stays self-contained; capped — see FIGURE_IMAGE_MAX_DATA_URL).
+   *  A panel with no image yet draws blank until one is picked. */
+  imageData?: string;
+  /** An image panel's file name, for the panel's listing (never trusted for
+   *  lookup — the picture itself is `imageData`). */
+  imageName?: string;
   /** The graph's name when the panel was saved: a hint for the placeholder
    *  shown when the graph is gone ("Graph 'Dose-response' is missing").
    *  Never trusted for lookup — ids are the reference. */
