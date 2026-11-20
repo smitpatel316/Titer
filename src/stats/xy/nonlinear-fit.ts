@@ -282,6 +282,21 @@ const scaled = (label: string, f: string, p: string): Derived => ({
   high: `ifelse(cf[["${p}"]]>0,${f}*pci("${p}")[2],NA_real_)`,
 });
 
+/** Logistic growth's inflection point (Prism 11, seq 166): the X where the
+ *  curve is steepest, Y = YM/2 — Prism's transform, Inflection Point =
+ *  (1/K)·ln((YM−Y0)/Y0). Its 95% CI is the delta method (`dl`, like
+ *  EC-anything): the value itself is the plain expression, the bounds the
+ *  delta-method interval. Null when K ≤ 0, Y0 ≤ 0, or YM ≤ Y0 — the
+ *  inflection is undefined there (and Prism's guide shorthand "1/K" is
+ *  only the special case (YM−Y0)/Y0 = e). */
+const inflectionPoint = (): Derived => {
+  const f = (b: string) =>
+    `ifelse(${b}[["K"]]>0 & ${b}[["YM"]]>${b}[["Y0"]] & ${b}[["Y0"]]>0,` +
+    `log((${b}[["YM"]]-${b}[["Y0"]])/${b}[["Y0"]])/${b}[["K"]],NA_real_)`;
+  const d = `dl(function(b)${f("b")})`;
+  return { label: "Inflection point", expr: f("cf"), low: `${d}[2]`, high: `${d}[3]` };
+};
+
 /** R that assigns `m<-lm(...)` or `m<-nls(...,start=...)`; `x`/`y` are in scope. */
 export interface ModelSpec {
   /** Which R fitter to use — lm() (linear in params) or nls() (nonlinear). */
@@ -1387,7 +1402,7 @@ export function modelSpec(
         kind: "nls",
         fit: `m<-nls(y~YM*Y0/((YM-Y0)*exp(-K*x)+Y0),start=local({M<-max(y)*1.05;k<-y>0&y<M;c0<-coef(lm(log(y[k]/(M-y[k]))~x[k]));list(Y0=M*plogis(c0[[1]]),YM=M,K=c0[[2]])}),algorithm="port",control=nls.control(maxiter=200))`,
         terms: ["Y0", "YM", "K"],
-        derived: [overK("Doubling time", "log(2)")],
+        derived: [overK("Doubling time", "log(2)"), inflectionPoint()],
         curveFn:
           'g<-function(xv,p) p[["YM"]]*p[["Y0"]]/((p[["YM"]]-p[["Y0"]])*exp(-p[["K"]]*xv)+p[["Y0"]])',
       };
@@ -2150,7 +2165,20 @@ export function prepareFit(
   /** A spec built already (v2 item 23): the user-defined model's spec comes from its
    *  equation, and `modelSpec(model)` alone cannot build it — pass it here. */
   specOverride?: ModelSpec,
-): { xCol: Column; yCol: Column; xs: number[]; ys: number[]; rows: number[]; columns: string[] } | { error: string } {
+  /** Seq 166 (Prism Range tab): fit only the points with X inside
+   *  [`min`, `max`] (either end open when absent). Points outside are
+   *  ignored entirely — before the model-specific X filtering below and
+   *  before the minimum-points rule — and counted in `rangeExcluded`. */
+  range?: { min?: number; max?: number },
+): {
+  xCol: Column;
+  yCol: Column;
+  xs: number[];
+  ys: number[];
+  rows: number[];
+  columns: string[];
+  rangeExcluded: number;
+} | { error: string } {
   const { x: xCol, ys: yCols } = splitXY(columns);
   // A Y data set's replicates pool into one fit (see datasetColumns): a name
   // that is no column but is a data set ("Control" → "Control_1..3") fits
@@ -2184,6 +2212,25 @@ export function prepareFit(
           },
           { x: [] as number[], y: [] as number[], rows: [] as number[], columns: [] as string[] },
         );
+  // Seq 166 (Prism Range tab): drop the out-of-range points first, so the
+  // model-specific X filtering, the minimum-points rule and the
+  // enzyme/plateau validations below all see only the fitted points.
+  let rangeExcluded = 0;
+  if (range !== undefined) {
+    const { min, max } = range;
+    if (min != null && !Number.isFinite(min)) return { error: "The X range's lower bound must be a finite number." };
+    if (max != null && !Number.isFinite(max)) return { error: "The X range's upper bound must be a finite number." };
+    if (min != null && max != null && min > max)
+      return { error: `The X range's lower bound (${min}) is above its upper bound (${max}).` };
+    const keep = complete.x.map((x) => (min == null || x >= min) && (max == null || x <= max));
+    rangeExcluded = keep.filter((k) => !k).length;
+    const kept = (arr: number[]) => arr.filter((_, i) => keep[i]);
+    const keptStr = (arr: string[]) => arr.filter((_, i) => keep[i]);
+    complete.x = kept(complete.x);
+    complete.y = kept(complete.y);
+    complete.rows = kept(complete.rows);
+    complete.columns = keptStr(complete.columns);
+  }
   const spec = specOverride ?? modelSpec(model);
   const nParams = spec.terms.length - fixedCount;
 
@@ -2215,8 +2262,9 @@ export function prepareFit(
   if (xs.length < nParams + 1) {
     const scope = spec.positiveX ? " with X > 0" : spec.nonNegativeX ? " with X ≥ 0" : "";
     const yScope = spec.positiveY ? " with Y > 0" : "";
+    const rangeScope = range !== undefined ? " in the fitted X range" : "";
     return {
-      error: `Not enough complete points${scope}${yScope} (${xs.length}) to fit this curve; need at least ${nParams + 1}.`,
+      error: `Not enough complete points${scope}${yScope}${rangeScope} (${xs.length}) to fit this curve; need at least ${nParams + 1}.`,
     };
   }
   if (ENZYME_MODELS.includes(model)) {
@@ -2262,7 +2310,7 @@ export function prepareFit(
       ((!spec.positiveX && !spec.nonNegativeX) || (spec.positiveX ? complete.x[i] > 0 : complete.x[i] >= 0)) &&
       (!spec.positiveY || complete.y[i] > 0),
   );
-  return { xCol, yCol, xs, ys, rows, columns: pointColumns };
+  return { xCol, yCol, xs, ys, rows, columns: pointColumns, rangeExcluded };
 }
 
 /** R statements that, after `m` is fitted, compute the summary quantities

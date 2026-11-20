@@ -3148,6 +3148,31 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             },
           },
         choice("weights", "Weight the points?", weightOptions),
+        // Seq 166 (Prism 11 Range tab): "Don't fit points when X is less
+        // than / greater than …" — points outside the range are ignored
+        // entirely. Either bound alone is enough; both blank fits all.
+        choice("fitRange", "Only fit points within an X range?", [
+          ["no", "No — fit every point"],
+          ["yes", "Yes — ignore points outside an X range"],
+        ]),
+        a.fitRange === "yes" && {
+          id: "fitXMin",
+          ask: "Don't fit points when X is less than… (leave blank for no lower limit)",
+          kind: "text",
+          label: "Don't fit points when X <",
+          initial: "",
+          placeholder: "e.g. 0",
+          parse: (text: string) => parseOptionalNumber(text, "lower X limit"),
+        },
+        a.fitRange === "yes" && {
+          id: "fitXMax",
+          ask: "Don't fit points when X is greater than… (leave blank for no upper limit)",
+          kind: "text",
+          label: "Don't fit points when X >",
+          initial: "",
+          placeholder: "e.g. 10",
+          parse: (text: string) => parseOptionalNumber(text, "upper X limit"),
+        },
         dose &&
           others.length > 0 &&
           choice("compareWith", "Compare this curve with another data set's?", [
@@ -3281,6 +3306,20 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         a.weights !== undefined && a.weights !== "none"
           ? { weights: a.weights as NonlinearRegressionParams["weights"] }
           : {};
+      // Seq 166 (Prism Range tab): the X-range bounds, when the wizard
+      // asked for them — blank is no bound on that side, and both blank
+      // fits every point (the runner refuses an inverted range plainly).
+      const range =
+        a.fitRange === "yes"
+          ? (() => {
+              const lo = parseOptionalNumber(String(a.fitXMin ?? ""), "lower X limit");
+              const hi = parseOptionalNumber(String(a.fitXMax ?? ""), "upper X limit");
+              return {
+                ...(lo.value !== undefined ? { fitXMin: lo.value } : {}),
+                ...(hi.value !== undefined ? { fitXMax: hi.value } : {}),
+              };
+            })()
+          : {};
       const compareModel =
         a.compareModel !== undefined && a.compareModel !== "none"
           ? { compareModel: a.compareModel as NonlinearModel }
@@ -3373,6 +3412,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             ? { ecx: { ec10: 10, ec20: 20, ec80: 80, ec90: 90 }[a.ecx as string] as number }
             : {}),
           ...weights,
+          ...range,
           ...compareModel,
           ...global,
           ...sharedParams,

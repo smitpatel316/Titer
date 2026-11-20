@@ -439,7 +439,13 @@ function curveSentence(set: string, i: number, model: string, result: AnalysisRe
     case "logistic-growth":
     case "gompertz-growth": {
       const [max, maxCi] = param("YM");
-      what = `${Y} grows from ${param("Y0")[0]} toward a maximum of ${max} (YM; ${maxCi}), in an S shape${model === "gompertz-growth" ? " whose steepest point comes early, at about 37% of the maximum" : ""}.`;
+      // Seq 166: logistic growth reports its inflection point (Prism 11);
+      // Gompertz has no such row, so its sentence stays as it was — and a
+      // fit with no inflection row (a global fit, an old saved result)
+      // says nothing about one instead of printing a dash.
+      const hasInfl = model === "logistic-growth" && rows.some((r) => r.label === "Inflection point");
+      const [infl, inflCi] = hasInfl ? best("Inflection point") : ["", ""];
+      what = `${Y} grows from ${param("Y0")[0]} toward a maximum of ${max} (YM; ${maxCi}), in an S shape${model === "gompertz-growth" ? " whose steepest point comes early, at about 37% of the maximum" : ""}${infl ? ` — its steepest point (the inflection) is at ${X} = ${infl} (${inflCi}).` : "."}`;
       break;
     }
     case "two-phase-decay": {

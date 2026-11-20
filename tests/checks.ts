@@ -5570,6 +5570,7 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
     "kind",
     "model",
     "weights",
+    "fitRange",
     "compareWith",
     "compareModel",
     "global",
@@ -5583,6 +5584,7 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
       "kind",
       "model",
       "weights",
+      "fitRange",
       "compareWith",
       "compareModel",
       "global",
@@ -5594,7 +5596,7 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
   );
   deepStrictEqual(
     asked({ y: "A", kind: "dose", model: "homologous-competition-logx" }).map((q) => q.id),
-    ["ys", "kind", "model", "weights", "compareWith", "compareModel", "global", "constrain", "ligandConcentration"],
+    ["ys", "kind", "model", "weights", "fitRange", "compareWith", "compareModel", "global", "constrain", "ligandConcentration"],
   );
   ok(!asked({ y: "A", kind: "dose", model: "sigmoidal-4pl-logx" }).some((q) => q.id === "fitKi"));
   deepStrictEqual(
@@ -5790,6 +5792,150 @@ check("only nested model pairs get the F test", () => {
   strictEqual(nestedPair("sigmoidal-4pl-logx", "asymmetric-5pl-logx")?.complex, "asymmetric-5pl-logx");
   ok(Math.abs((aicc(0.3112, 8, 2) ?? 0) - -19.5734) < 0.001);
   strictEqual(aicc(1, 4, 3), null);
+});
+
+// Seq 166 (Prism 11 nonlinear additions): logistic growth reports its
+// inflection point — Prism's transform, Inflection Point =
+// (1/K)·ln((YM−Y0)/Y0) — with its 95% CI by the delta method. The
+// noiseless fixture (Y0 = 10, YM = 200, K = 0.2) has its inflection at
+// X = 5·ln(19) ≈ 14.722, where Y = YM/2 = 100 — the closed-form inverse
+// at Y = 100 must agree with the reported row.
+check("logistic growth reports its inflection point with a 95% CI (seq 166)", async () => {
+  const xs = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30];
+  const ys = xs.map((x) => (200 * 10) / (190 * Math.exp(-0.2 * x) + 10));
+  const table: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  };
+  const out = await runAnalysis("nonlinear-regression", table, { y: "Y1", model: "logistic-growth" });
+  ok(!("error" in out), `logistic-growth fit failed: ${"error" in out ? out.error : ""}`);
+  const expected = (1 / 0.2) * Math.log(190 / 10);
+  const rows = out.fit?.rows ?? [];
+  const at = rows.findIndex((r) => r.label === "Inflection point");
+  ok(at >= 0, `no "Inflection point" row — rows are: ${rows.map((r) => r.label).join(", ")}`);
+  const value = rows[at]?.values?.[0];
+  ok(value != null && Math.abs(value - expected) < 0.05, `inflection point should be ~${expected.toFixed(3)}, got ${value}`);
+  // The 95% CI is the row after the value (fitRows' convention, as
+  // conclusion.ts reads it) — on noiseless data it collapses onto it.
+  const [lo, hi] = rows[at + 1]?.ranges?.[0] ?? [null, null];
+  ok(
+    lo != null && hi != null && lo <= value! && value! <= hi && Math.abs(lo - value!) < 0.1 && Math.abs(hi - value!) < 0.1,
+    `inflection 95% CI should collapse onto the value on noiseless data, got [${lo}, ${hi}] around ${value}`,
+  );
+  // The closed-form inverse at the midpoint Y agrees with the row.
+  const inv = invertModel("logistic-growth", out.coefficients!, 100);
+  ok(inv != null && Math.abs(inv - expected) < 0.05, `inverse at Y = 100 should be ~${expected.toFixed(3)}, got ${inv}`);
+  // The doubling time it already reported is untouched.
+  const dt = out.fit?.rows.find((r) => r.label === "Doubling time")?.values?.[0];
+  ok(dt != null && Math.abs(dt - Math.log(2) / 0.2) < 0.05, `doubling time should be ~3.466, got ${dt}`);
+});
+
+// Seq 166 (Prism 11 nonlinear additions): the Range tab's "Don't fit
+// points when X is less than / greater than …" — points outside the
+// chosen X range are ignored entirely: not fitted, not counted, and the
+// notes say how many were left out. The line fixture's last point is an
+// outlier (Y = 100 at X = 7 on Y = 2 + 3X), so dropping it by range must
+// restore the exact line.
+check("nonlinear regression ignores points outside a chosen X range (seq 166)", async () => {
+  const xs = [0, 1, 2, 3, 4, 5, 6, 7];
+  const ys = xs.map((x) => (x === 7 ? 100 : 2 + 3 * x));
+  const table: TableData = {
+    columns: ["Title", "X", "Y1"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  };
+  const nOf = (h: AnalysisOutcome) => ("error" in h ? undefined : h.fit?.rows.find((r) => r.label === "N")?.values?.[0]);
+  const slopeOf = (h: AnalysisOutcome) => ("error" in h ? undefined : h.coefficients?.find((c) => c.term === "Slope")?.estimate);
+  const full = await runAnalysis("nonlinear-regression", table, { y: "Y1", model: "line" });
+  ok(!("error" in full), `full fit failed: ${"error" in full ? full.error : ""}`);
+  ok(nOf(full) === 8, `full fit should count 8 points, got ${nOf(full)}`);
+  ok(slopeOf(full) != null && Math.abs(slopeOf(full)! - 3) > 1, `full fit's slope should be pulled off 3 by the outlier, got ${slopeOf(full)}`);
+  const ranged = await runAnalysis("nonlinear-regression", table, { y: "Y1", model: "line", fitXMax: 6 });
+  ok(!("error" in ranged), `ranged fit failed: ${"error" in ranged ? ranged.error : ""}`);
+  ok(nOf(ranged) === 7, `fit with X ≤ 6 should count 7 points, got ${nOf(ranged)}`);
+  ok(slopeOf(ranged) != null && Math.abs(slopeOf(ranged)! - 3) < 1e-6, `ranged fit's slope should be exactly 3, got ${slopeOf(ranged)}`);
+  ok(
+    !("error" in ranged) &&
+      typeof ranged.notes === "string" &&
+      ranged.notes.includes("not fitted") &&
+      ranged.notes.includes("1 point"),
+    `notes should say 1 point was not fitted, got: ${"error" in ranged ? ranged.error : ranged.notes}`,
+  );
+  // One-sided the other way, and a two-sided range, count what they keep.
+  const from4 = await runAnalysis("nonlinear-regression", table, { y: "Y1", model: "line", fitXMin: 4 });
+  ok(!("error" in from4) && nOf(from4) === 4, `fit with X ≥ 4 should count 4 points, got ${"error" in from4 ? from4.error : nOf(from4)}`);
+  const both = await runAnalysis("nonlinear-regression", table, { y: "Y1", model: "line", fitXMin: 2, fitXMax: 5 });
+  ok(!("error" in both) && nOf(both) === 4, `fit with 2 ≤ X ≤ 5 should count 4 points, got ${"error" in both ? both.error : nOf(both)}`);
+  // A range that keeps nothing, and an inverted range, are refused plainly.
+  const none = await runAnalysis("nonlinear-regression", table, { y: "Y1", model: "line", fitXMin: 100 });
+  ok("error" in none && none.error.includes("Not enough complete points"), `empty range should be refused, got ${"error" in none ? none.error : "no error"}`);
+  const inverted = await runAnalysis("nonlinear-regression", table, { y: "Y1", model: "line", fitXMin: 5, fitXMax: 2 });
+  ok("error" in inverted && inverted.error.includes("lower bound"), `inverted range should be refused, got ${"error" in inverted ? inverted.error : "no error"}`);
+  // The wizard asks it (after the weights) and finish carries the bounds.
+  const wizard = WIZARDS["nonlinear-regression"]!;
+  const wTable = readTable({ columns: ["Title", "X", "A", "B"], rows: [["", "1", "2", "3"]] });
+  const asked = (a: Answers) => wizard.questions(a, wTable).flatMap((q) => (q ? [q] : []));
+  ok(asked({ ys: ["A"], kind: "other", model: "line" }).some((q) => q.id === "fitRange"));
+  ok(!asked({ ys: ["A"], kind: "other", model: "line" }).some((q) => q.id === "fitXMin"));
+  ok(asked({ ys: ["A"], kind: "other", model: "line", fitRange: "yes" }).some((q) => q.id === "fitXMin"));
+  ok(asked({ ys: ["A"], kind: "other", model: "line", fitRange: "yes" }).some((q) => q.id === "fitXMax"));
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "line", fitRange: "yes", fitXMin: "5", fitXMax: "25" }, wTable).params,
+    { y: "A", model: "line", fitXMin: 5, fitXMax: 25 },
+  );
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "line", fitRange: "no" }, wTable).params,
+    { y: "A", model: "line" },
+  );
+});
+
+// Seq 166 + seq 292 (MCP coverage audit): the additions are reachable via
+// titer_run_analysis, not UI-only — create-analysis accepts fitXMin/fitXMax
+// (validateAnalysisParams + the generated schema), and the run's result
+// carries the inflection-point row while N reflects the fitted X range.
+check("MCP run-analysis reaches the seq 166 additions (seq 292)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const xs = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30];
+  const ys = xs.map((x) => (200 * 10) / (190 * Math.exp(-0.2 * x) + 10));
+  const made = await harness.run("job-166-table", "create-table", {
+    table_type: "xy",
+    columns: ["", "X", "Y1"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  harness.deps.createAnalysis = (parentId, analysisType, analysisParams) => {
+    harness.dispatch({
+      type: "create",
+      node: { id: "a166", type: "analysis", name: "Logistic growth", parentId, analysisType, analysisParams },
+    });
+    return "a166";
+  };
+  harness.deps.publishResult = () => {};
+  // create-analysis is the validator's gate: an unknown range key would be refused here.
+  const created = await harness.run("job-166-create", "create-analysis", {
+    table_id: tableId,
+    analysis_type: "nonlinear-regression",
+    params: { y: "Y1", model: "logistic-growth", fitXMax: 20 },
+  });
+  strictEqual((created.result as { analysis_id: string }).analysis_id, "a166");
+  strictEqual(
+    (harness.state().nodes["a166"]?.analysisParams as { fitXMax?: number } | undefined)?.fitXMax,
+    20,
+    "the node keeps the X-range bound, so the UI sees it too",
+  );
+  harness.sync();
+  const done = await harness.run("job-166-run", "run-analysis", { analysis_id: "a166" });
+  const outcome = done.result as AnalysisOutcome;
+  ok(!("error" in outcome), `MCP logistic-growth run failed: ${"error" in outcome ? outcome.error : ""}`);
+  const expected = (1 / 0.2) * Math.log(190 / 10);
+  const row = outcome.fit?.rows.find((r) => r.label === "Inflection point");
+  ok(row, `MCP result has no "Inflection point" row — rows are: ${outcome.fit?.rows.map((r) => r.label).join(", ")}`);
+  ok(
+    row?.values?.[0] != null && Math.abs(row.values[0] - expected) < 0.5,
+    `MCP inflection point should be ~${expected.toFixed(3)}, got ${row?.values?.[0]}`,
+  );
+  const n = outcome.fit?.rows.find((r) => r.label === "N")?.values?.[0];
+  ok(n === 11, `MCP fit with X ≤ 20 should count 11 points, got ${n}`);
 });
 
 // R3-12: a weighted model comparison must fit both models weighted, a
@@ -7210,6 +7356,7 @@ check("a nonlinear regression on a Multiple Variables table names its X and Y", 
     "kind",
     "model",
     "weights",
+    "fitRange",
     "rout",
     "compareModel",
     "constrain",
