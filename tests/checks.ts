@@ -235,7 +235,7 @@ import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { decodePng, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
 import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
-import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnovaParams, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, SimulationSpec } from "../src/stats/types";
+import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnovaParams, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, SimulationSpec, ThreeWayAnovaParams } from "../src/stats/types";
 import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation/simulate";
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
 import { evaluate as evaluateCurve } from "../src/views/graphs/fitted-curve";
@@ -4073,7 +4073,12 @@ check("the three-way ANOVA wizard offers the full post-hoc suite, scope and cont
   );
   // Without row bands the wizard cannot know factor C's levels, so it asks
   // no control question (the runner refuses a missing control clearly).
-  strictEqual(asked({ posthoc: "dunnett", posthocTerm: "A" }, undefined).some((q) => q.id === "control"), false);
+  strictEqual(
+    wizard
+      .questions({ posthoc: "dunnett", posthocTerm: "A" }, table, undefined, undefined)
+      .some((q) => q !== false && q.id === "control"),
+    false,
+  );
   deepStrictEqual(
     wizard.finish({ posthoc: "dunnett", posthocTerm: "A:B", posthocScope: "simple", control: "Drug" }, table),
     {
@@ -4177,7 +4182,7 @@ check("three-way ANOVA: full post-hoc suite, simple effects and FDR (seq 192)", 
     if ("error" in out) throw new Error(`three-way ANOVA failed: ${out.error}`);
     return out;
   };
-  const counts: [AnalysisParams, number][] = [
+  const counts: [ThreeWayAnovaParams, number][] = [
     [{ posthoc: "sidak", posthocTerm: "A:B" }, 6],
     [{ posthoc: "holm-sidak", posthocTerm: "A" }, 1],
     [{ posthoc: "lsd", posthocTerm: "A:B:C" }, 28],
