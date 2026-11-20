@@ -723,13 +723,12 @@ export function executeBuildGraph(job: McpJob, deps: GraphJobDeps): GraphJobOutc
 
 /** `titer_update_graph`: a partial `GraphOptions` merged over the
  *  graph's current options (the reducer replaces them wholesale, so the
- *  merge happens here). Same validation as build. */
-/** `titer_update_graph`: change a graph's options, and (seq 244) its
- *  type — `graph_type` must be offered for the graph's table, or the
- *  error names the valid types. With a type and no options the new
- *  type's defaults apply (title and size kept, as in the UI); with both,
- *  the caller's options merge over the current ones and apply to the new
- *  type. At least one of the two is required. */
+ *  merge happens here). Same validation as build. With `graph_type`
+ *  (seq 244) it changes the graph's type instead — the type must be
+ *  offered for the graph's table, the new type's defaults apply (title
+ *  and size kept, as in the UI), and `options`, when given with it,
+ *  merge over the current ones and apply to the new type. At least one
+ *  of the two is required. */
 export function executeUpdateGraph(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
   const args = argsOf(job);
   const graphId = reqStr(job, args, "graph_id");
