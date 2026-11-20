@@ -1482,6 +1482,26 @@ export interface NonlinearFit {
   retryMethod?: string;
 }
 
+/** Warm-start an nls fit string from the current fit (seq 200): replace
+ *  the spec's `start=list(...)` with `start=as.list(coef(m))`, so an IRLS
+ *  refit starts from the previous round's coefficients instead of the
+ *  data-derived starts. lm strings have no start list and pass through
+ *  unchanged. The start list after applyFitOptions holds exactly the free
+ *  parameters, in formula order — which is exactly what coef(m) names, in
+ *  the same order — so bounds (positional lower/upper vectors) stay
+ *  aligned. Without this, the Poisson refit re-runs nls from its cold
+ *  starts under the 1/fitted weights and stalls ("false convergence"). */
+function warmStartFit(call: string): string {
+  const yAt = call.indexOf("y~");
+  const startAt = yAt < 0 ? -1 : call.indexOf(",start=", yAt);
+  if (startAt < 0) return call;
+  const rest = call.slice(startAt + 7);
+  if (!rest.startsWith("list(") && !rest.startsWith("c(")) return call;
+  const closeAt = matchParen(rest, rest.indexOf("("));
+  if (closeAt < 0) return call;
+  return `${call.slice(0, startAt + 7)}as.list(coef(m))${rest.slice(closeAt + 1)}`;
+}
+
 /** R that refits `m` by iteratively reweighted least squares (seq 200):
  *  robust (Tukey biweight) or Poisson (weights 1/fitted). `weightedFit`
  *  is the fit assignment that reads R variable `w` (the current weights);
@@ -1564,7 +1584,9 @@ export async function fitModelSpec(
       rCode = `${fitStatementsForSpec(xs, ys, eff, attempt?.fit, extra, weighted)}c(${fitEntries(eff)})`;
     } else {
       const wSpec = appliedW!.spec;
-      const weightedFit = j === 0 ? wSpec.fit : wSpec.retryFits![j - 1].fit;
+      // Warm-start each IRLS refit from the previous round's coefficients
+      // (see warmStartFit) — cold starts stall under the IRLS weights.
+      const weightedFit = warmStartFit(j === 0 ? wSpec.fit : wSpec.retryFits![j - 1].fit);
       const initialFit = attempt?.fit ?? eff.fit;
       rCode =
         `x<-${rVec(xs)};y<-${rVec(ys)};${extra}${initialFit};` +

@@ -5263,8 +5263,10 @@ check("seq 201 6th-order polynomial + centered polynomials", async () => {
   };
   const coefOf = (out: { coefficients?: { term: string; estimate: number | null }[] }, term: string) =>
     out.coefficients?.find((c) => c.term === term)?.estimate;
-  const r2Of = (out: { stats: { label: string; value: number | null }[] }) =>
-    out.stats.find((s) => s.label === "R squared")?.value;
+  // R² lives on the fit rows (parseFit's stats become fit rows), not on
+  // the top-level stats — the top level only carries comparison rows.
+  const r2Of = (out: { fit?: { rows: { label: string; values?: (number | null)[] }[] } }) =>
+    out.fit?.rows.find((r) => r.label === "R squared")?.values?.[0];
   const plain = await runAnalysis("nonlinear-regression", sextic, { y: "Y1", model: "sextic" });
   if ("error" in plain) throw new Error(plain.error);
   const wantPlain = [2, 1, -0.5, 0.25, -0.1, 0.05, 0.01];
@@ -5457,7 +5459,7 @@ check("seq 200 nonlinear fitting methods: robust and Poisson", async () => {
     y: "Y",
     model: "line",
     fitMethod: "robust",
-    interpolate: [50],
+    interpolate: true,
   });
   ok(
     "error" in withInterp && withInterp.error.includes("interpolation"),
