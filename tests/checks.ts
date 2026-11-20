@@ -18,7 +18,7 @@ import {
   setRQueueSnapshot,
   type RQueueSnapshot,
 } from "../src/stats/r-queue";
-import { parseProjectFile, parseProjectText, readPalette, serializeProjectFile, type ProjectFilePayload } from "../src/lib/project-file";
+import { PARAM_KEYS_BY_ANALYSIS, parseProjectFile, parseProjectText, readPalette, serializeProjectFile, validateAnalysisParams, type ProjectFilePayload } from "../src/lib/project-file";
 import { applyWand, wandExamples, wandReportMessage } from "../src/lib/wand";
 import {
   extractMethod,
@@ -115,9 +115,12 @@ import { deletePalette, keepPalette, loadMyPalettes } from "../src/store/my-pale
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
 import { datasetColumns, isGrouped, isNested, readTable, setColumns, splitXY, xyPoints, type Dataset } from "../src/lib/dataset";
 import { nestedMeans } from "../src/stats/nested/base";
+import { runNestedTTest } from "../src/stats/nested/nested-t-test";
 import { prepareFit } from "../src/stats/xy/nonlinear-fit";
 import { adjustComparisonRows, adjustPValues, describe, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
+import { hclustAvgSilhouette, hclustClusterWithinSs, hclustDistanceMatrix, hclustSuggestedK, hclustWithinSs } from "../src/stats/multiple/hierarchical-clustering";
+import { dendrogramSegments } from "../src/views/graphs/dendrogram";
 import { compareTwoGroupsSpec } from "../src/stats/column/compare-two-groups";
 import { kruskalWallisSpec } from "../src/stats/column/kruskal-wallis";
 import { anovaSpec } from "../src/stats/column/anova";
@@ -678,6 +681,175 @@ check("MCP create-analysis accepts anova / kruskal-wallis / rm-anova / friedman 
     }),
     /not offered for grouped tables/,
   );
+});
+
+// seq 246: on a Nested table with 3+ groups, the create-analysis gate
+// used to count the whole table and refuse a nested t test even when
+// `sets` named two groups. The gate now counts the selected sets — two
+// selected pass, none or three are refused.
+check("MCP create-analysis runs a nested t test on two sets of a 3-group nested table (seq 246)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-246-table", "create-table", {
+    table_type: "nested",
+    columns: [
+      "",
+      "A:S1:R1", "A:S1:R2", "A:S2:R1", "A:S2:R2",
+      "B:S1:R1", "B:S1:R2", "B:S2:R1", "B:S2:R2",
+      "C:S1:R1", "C:S1:R2", "C:S2:R1", "C:S2:R2",
+    ],
+    rows: [
+      ["r1", 10, 11, 12, 13, 20, 21, 22, 23, 30, 31, 32, 33],
+      ["r2", 10, 11, 12, 13, 20, 21, 22, 23, 30, 31, 32, 33],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  // The gate runs before createAnalysis, so a recording stub proves the
+  // gate passed; the real store action is exercised by the live MCP pin.
+  const created: string[] = [];
+  harness.deps.createAnalysis = (_parentId, type) => {
+    created.push(type);
+    return `analysis_${type}`;
+  };
+  // Two selected groups pass the gate…
+  const done = await harness.run("job-246-two", "create-analysis", {
+    table_id: tableId,
+    analysis_type: "nested-t-test",
+    params: { sets: ["A", "B"] },
+  });
+  strictEqual((done.result as { analysis_type: string }).analysis_type, "nested-t-test");
+  // …but no sets (the whole 3-group table) and three sets are refused.
+  await rejects(
+    harness.run("job-246-none", "create-analysis", { table_id: tableId, analysis_type: "nested-t-test" }),
+    /needs a Nested table with exactly 2 data groups/,
+  );
+  await rejects(
+    harness.run("job-246-three", "create-analysis", {
+      table_id: tableId,
+      analysis_type: "nested-t-test",
+      params: { sets: ["A", "B", "C"] },
+    }),
+    /sets \[“A”, “B”, “C”\] select 3 data groups/,
+  );
+  deepStrictEqual(created, ["nested-t-test"]);
+});
+
+// ── 1.7.4 P0: rerun-analysis param overrides ─────────────────────────
+// A harness analysis node + a stubbed runner (no R): the run-analysis
+// job reads the node from state, merges overrides over its stored
+// params, saves them on the node, and runs with the merged params.
+const rerunHarness = async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-rerun-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B", "C"],
+    rows: [
+      ["r1", 10, 14, 20],
+      ["r2", 11, 15, 21],
+      ["r3", 10, 14, 20],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.dispatch({
+    type: "create",
+    node: {
+      id: "a1",
+      type: "analysis",
+      name: "One-way ANOVA",
+      parentId: tableId,
+      analysisType: "anova",
+      analysisParams: { posthoc: "none" },
+    },
+  });
+  harness.sync();
+  const seen: unknown[] = [];
+  harness.deps.run = async (_type, _data, params) => {
+    seen.push(params);
+    return { testType: _type, stats: [], groups: [], notes: "" };
+  };
+  harness.deps.publishResult = () => {};
+  harness.deps.setAnalysisParams = (id, params) =>
+    harness.dispatch({ type: "setAnalysisParams", id, params });
+  return { harness, seen };
+};
+
+check("MCP run-analysis with params overrides merges and saves them on the node (1.7.4 rerun)", async () => {
+  const { harness, seen } = await rerunHarness();
+  const done = await harness.run("job-rerun-over", "run-analysis", {
+    analysis_id: "a1",
+    params: { posthoc: "tukey" },
+  });
+  strictEqual((done.result as { stats: unknown[] }).stats.length, 0);
+  // The run saw the merged params, and the node keeps them — the next
+  // run and the UI see the override, not the old value.
+  deepStrictEqual(seen, [{ posthoc: "tukey" }]);
+  strictEqual(
+    (harness.state().nodes["a1"]?.analysisParams as { posthoc: string } | undefined)?.posthoc,
+    "tukey",
+  );
+});
+
+check("MCP run-analysis without overrides runs the node as stored", async () => {
+  const { harness, seen } = await rerunHarness();
+  await harness.run("job-rerun-plain", "run-analysis", { analysis_id: "a1" });
+  deepStrictEqual(seen, [{ posthoc: "none" }]);
+  strictEqual(
+    (harness.state().nodes["a1"]?.analysisParams as { posthoc: string } | undefined)?.posthoc,
+    "none",
+  );
+});
+
+check("MCP run-analysis rejects an unknown or cross-family params override, naming the valid choices", async () => {
+  const { harness, seen } = await rerunHarness();
+  await rejects(
+    harness.run("job-rerun-badkey", "run-analysis", { analysis_id: "a1", params: { bogus: 1 } }),
+    /Unknown parameter “bogus” for “anova”/,
+  );
+  // Dunn's is a Kruskal-Wallis/Friedman posthoc, never an ANOVA one —
+  // the override is refused rather than silently reinterpreted.
+  await rejects(
+    harness.run("job-rerun-dunn", "run-analysis", { analysis_id: "a1", params: { posthoc: "dunn" } }),
+    /must be one of:.*tukey/,
+  );
+  // A refused override leaves the stored params untouched and runs nothing.
+  deepStrictEqual(seen, []);
+  strictEqual(
+    (harness.state().nodes["a1"]?.analysisParams as { posthoc: string } | undefined)?.posthoc,
+    "none",
+  );
+});
+
+check("MCP run-analysis refuses a frozen analysis before running it", async () => {
+  const { harness, seen } = await rerunHarness();
+  harness.dispatch({ type: "setAnalysisFrozen", id: "a1", frozen: true });
+  harness.sync();
+  await rejects(
+    harness.run("job-rerun-frozen", "run-analysis", { analysis_id: "a1" }),
+    /is frozen — unfreeze it before running it again/,
+  );
+  deepStrictEqual(seen, []);
+});
+
+// The generated MCP params schema (titer_get_analysis_params) must stay
+// in step with the validator: same types, same param names per type, and
+// every listed enum value must pass validateAnalysisParams.
+check("analysis-params-schema.json matches PARAM_KEYS_BY_ANALYSIS (1.7.4)", () => {
+  const schema = JSON.parse(
+    readFileSync(new URL("../src-tauri/src/analysis-params-schema.json", import.meta.url), "utf8"),
+  ) as Record<string, { params: { name: string; enum?: string[] }[] }>;
+  deepStrictEqual(Object.keys(schema).sort(), Object.keys(PARAM_KEYS_BY_ANALYSIS).sort());
+  for (const [type, entry] of Object.entries(schema)) {
+    deepStrictEqual(
+      entry.params.map((p) => p.name).sort(),
+      [...PARAM_KEYS_BY_ANALYSIS[type]].sort(),
+      `${type} params`,
+    );
+    for (const param of entry.params) {
+      if (!param.enum?.length) continue;
+      const { errors } = validateAnalysisParams(type, { [param.name]: param.enum[0] });
+      deepStrictEqual(errors, [], `${type}.${param.name} = ${param.enum[0]}`);
+    }
+  }
 });
 
 check("create-table accepts an empty row-title column, and refuses an empty later column (v1.6 F2)", async () => {
@@ -2973,7 +3145,9 @@ check("nested tests are offered only for their group count", () => {
   );
   deepStrictEqual(
     analysisOptionsForTable("nested", three).map((o) => o.value),
-    ["nested-anova", "plot-function"],
+    // seq 246: the t test is offered on 3+ group tables too — the wizard
+    // asks which two to compare, so offering it is no longer a dead end.
+    ["nested-t-test", "nested-anova", "plot-function"],
   );
 });
 
@@ -2992,6 +3166,37 @@ check("the nested ANOVA wizard asks only for a post-hoc choice", () => {
     type: "nested-anova",
     params: { posthoc: "tukey" },
   });
+});
+
+// seq 246: on a 3-group nested table the nested t test wizard asks which
+// two data sets to compare, and its finish carries them as `sets`; on a
+// two-group table it asks nothing and runs on the whole table.
+check("the nested t test wizard asks which two data sets to compare on a 3-group table (seq 246)", () => {
+  const three = readTable({
+    columns: ["Title", "A:S1:R1", "A:S2:R1", "B:S1:R1", "B:S2:R1", "C:S1:R1", "C:S2:R1"],
+    rows: [[null, "1", "2", "3", "4", "5", "6"]],
+    groups: 3,
+    subgroups: 2,
+    replicates: 1,
+  });
+  const wizard = WIZARDS["nested-t-test"]!;
+  const questions = wizard.questions({}, three).filter(Boolean) as Question[];
+  deepStrictEqual(questions.map((q) => q.id), ["set1", "set2"]);
+  deepStrictEqual(wizard.finish({ set1: "A", set2: "C" }, three), {
+    type: "nested-t-test",
+    params: { sets: ["A", "C"] },
+  });
+  const two = readTable({
+    columns: ["Title", "A:S1:R1", "A:S2:R1", "B:S1:R1", "B:S2:R1"],
+    rows: [[null, "1", "2", "3", "4"]],
+    groups: 2,
+    subgroups: 2,
+    replicates: 1,
+  });
+  deepStrictEqual(wizard.questions({}, two).filter(Boolean), []);
+  const done = wizard.finish({}, two);
+  strictEqual(done.type, "nested-t-test");
+  strictEqual(done.params, undefined);
 });
 
 // Round 2 M18: a choice question with zero options used to throw `TypeError`
@@ -3725,10 +3930,11 @@ check("the native Analysis menu key follows the data-dependent tests (R3-16)", (
     subgroups: 1,
     replicates: 1,
   };
-  // A third data group swaps the nested t-test for the nested ANOVA.
+  // A third data group adds the nested ANOVA — the t test stays offered,
+  // the wizard asks which two (seq 246).
   ok(analysisOptionsKey("nested", nestedTwo) !== analysisOptionsKey("nested", nestedThree));
   strictEqual(analysisOptionsKey("nested", nestedTwo), "nested-t-test,plot-function");
-  strictEqual(analysisOptionsKey("nested", nestedThree), "nested-anova,plot-function");
+  strictEqual(analysisOptionsKey("nested", nestedThree), "nested-t-test,nested-anova,plot-function");
   strictEqual(analysisOptionsKey(undefined, nestedTwo), "");
 });
 
@@ -4309,6 +4515,41 @@ check("partial nested-anova params fall back to no post-hoc (FL-R3-26)", async (
   const out = await runAnalysis("nested-anova", table, {} as AnalysisParams);
   if ("error" in out) throw new Error(`expected a result, got ${out.error}`);
   strictEqual(out.stats.find((s) => s.label === "Groups")?.value, 3);
+});
+
+// seq 246: a nested t test runs on two chosen sets of a 3-group table —
+// the runner honors `sets` instead of refusing the whole table — and
+// without `sets` it still refuses the 3-group table.
+check("a nested t test runs on two sets of a 3-group nested table (seq 246)", async () => {
+  const table: TableData = {
+    columns: [
+      "Title",
+      "A:S1:R1", "A:S1:R2", "A:S2:R1", "A:S2:R2",
+      "B:S1:R1", "B:S1:R2", "B:S2:R1", "B:S2:R2",
+      "C:S1:R1", "C:S1:R2", "C:S2:R1", "C:S2:R2",
+    ],
+    rows: [
+      [null, "10", "11", "12", "13", "20", "21", "22", "23", "30", "31", "32", "33"],
+      [null, "10", "11", "12", "13", "20", "21", "22", "23", "30", "31", "32", "33"],
+    ],
+    groups: 3,
+    subgroups: 2,
+    replicates: 2,
+  };
+  const out = await runAnalysis("nested-t-test", table, { sets: ["A", "B"] } as AnalysisParams);
+  if ("error" in out) throw new Error(`expected a result, got ${out.error}`);
+  // The test compared A with B only: C's values never enter the result.
+  ok(out.notes.includes("“A”") && out.notes.includes("“B”"), `notes name A and B: ${out.notes}`);
+  ok(!out.notes.includes("“C”"), `notes must not name C: ${out.notes}`);
+  ok(out.stats.some((s) => s.label === "P value" && typeof s.value === "number"));
+  // Without `sets` the 3-group table is still refused.
+  const refused = await runAnalysis("nested-t-test", table, {} as AnalysisParams);
+  ok("error" in refused && refused.error.includes("exactly two groups"));
+  // And the runner honors `sets` on its own, called directly.
+  const direct = await runNestedTTest(readTable(table).columns, { sets: ["B", "C"] } as AnalysisParams);
+  if ("error" in direct) throw new Error(`expected a result, got ${direct.error}`);
+  ok(direct.notes.includes("“B”") && direct.notes.includes("“C”"), `direct notes name B and C: ${direct.notes}`);
+  ok(!direct.notes.includes("“A”"), `direct notes must not name A: ${direct.notes}`);
 });
 
 check("partial two-way-anova params fall back to the ordinary design (FL-R3-26)", async () => {
@@ -9081,12 +9322,19 @@ check("a variable constant only after complete-case filtering names itself in PC
       "“A” is constant — K-means clustering cannot standardise a variable with no " +
       "variation. Remove it from the table, or run without standardisation instead.",
   });
+  deepStrictEqual(await runAnalysis("hierarchical-clustering", data, { clusters: 2 }), {
+    error:
+      "“A” is constant — Hierarchical clustering cannot standardise a variable with no " +
+      "variation. Remove it from the table, or run without standardisation instead.",
+  });
   // The same table runs on the settings that do not standardise: a constant
   // variable contributes no variance / nothing to the distances there.
   const cov = await runAnalysis("principal-component-analysis", data, { scale: "covariance" });
   ok(!("error" in cov), `covariance PCA should run, got ${"error" in cov ? cov.error : "ok"}`);
   const raw = await runAnalysis("k-means", data, { clusters: 2, standardise: false });
   ok(!("error" in raw), `raw K-means should run, got ${"error" in raw ? raw.error : "ok"}`);
+  const hraw = await runAnalysis("hierarchical-clustering", data, { clusters: 2, standardise: false });
+  ok(!("error" in hraw), `raw hierarchical clustering should run, got ${"error" in hraw ? hraw.error : "ok"}`);
 });
 
 // R3-23: same complete-case leak in Cox PH — a covariate varying only on
@@ -10219,7 +10467,7 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
   // variable split by a grouping variable, or two variables paired),
   // Principal component analysis after Multiple regression, Nonlinear
   // regression after that (1.8: X and Y variables), K-means clustering after
-  // that, Outliers after that, Multiple logistic regression after that,
+  // that, Hierarchical clustering after that, Outliers after that, Multiple logistic regression after that,
   // Poisson regression after that, Cox after that, Survival after that (1.8:
   // time, event-code and grouping variables), Extract and rearrange after
   // that, and Plot a function last.
@@ -10235,6 +10483,7 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
       "nonlinear-regression",
       "principal-component-analysis",
       "k-means",
+      "hierarchical-clustering",
       "outliers",
       "multiple-logistic-regression",
       "poisson-regression",
@@ -10247,10 +10496,11 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
   );
   // Multiple Variables tables offer the scatter plot, the histogram, the
   // QQ plot, the forest plot, the observed-vs-fitted graph, the scree plot, the scores
-  // biplot, the cluster scatter, the bubble plot, and survival curves.
+  // biplot, the cluster scatter, the dendrogram, the Elbow, Silhouette and Gap plots,
+  // the bubble plot, and survival curves.
   deepStrictEqual(
     GRAPH_OPTIONS_BY_TABLE["multiple"].map((o) => o.value),
-    ["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "survival"],
+    ["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "dendrogram", "elbow-plot", "silhouette-plot", "gap-plot", "survival"],
   );
   // Renaming a column follows the Cox analysis's params.
   const renamed = followTable(
@@ -10616,6 +10866,22 @@ check("unlinked forest / observed-fitted / smooth-curve graphs name the analysis
     "Run a K-means clustering on this table to draw the cluster scatter.",
   );
   strictEqual(
+    unlinkedAnalysisNote("dendrogram"),
+    "Run a Hierarchical clustering on this table to draw the dendrogram.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("elbow-plot"),
+    "Run a Hierarchical clustering on this table to draw the Elbow plot.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("silhouette-plot"),
+    "Run a Hierarchical clustering on this table to draw the Silhouette plot.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("gap-plot"),
+    "Run a Hierarchical clustering on this table to draw the Gap plot.",
+  );
+  strictEqual(
     unlinkedAnalysisNote("estimation-plot"),
     "Run a Compare two groups analysis on this table to draw the difference between means with its 95% CI.",
   );
@@ -10836,6 +11102,259 @@ check("the K-means wizard asks clusters then standardisation, defaulting to 2 cl
   deepStrictEqual(WIZARDS["k-means"]!.finish({ clusters: 2 }, readTable(data)), {
     type: "k-means",
     params: { clusters: 2, standardise: true },
+  });
+});
+
+check("the hierarchical-clustering wizard asks clusters, linkage, distance then standardisation, defaulting to complete linkage, Euclidean, standardised", () => {
+  const data: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "1", "1"],
+      [null, "8", "8"],
+    ],
+  };
+  const qs = WIZARDS["hierarchical-clustering"]!.questions({}, readTable(data)).filter(
+    (q): q is Question => q !== false,
+  );
+  deepStrictEqual(
+    qs.map((q) => q.id),
+    ["clusters", "linkage", "distance", "standardise"],
+  );
+  const clusters = qs.find((q) => q.id === "clusters");
+  ok(clusters && clusters.kind === "number");
+  if (clusters?.kind === "number") {
+    strictEqual(clusters.initial, 2);
+    strictEqual(clusters.validate?.(1), "Enter a whole number of clusters (at least 2).");
+    strictEqual(clusters.validate?.(2.5), "Enter a whole number of clusters (at least 2).");
+    strictEqual(clusters.validate?.(3), undefined);
+  }
+  const linkage = qs.find((q) => q.id === "linkage");
+  ok(linkage && linkage.kind === "choice");
+  deepStrictEqual(
+    linkage.kind === "choice" ? linkage.options.map((o) => o.value) : [],
+    ["complete", "average", "single", "ward.D2"],
+  );
+  const distance = qs.find((q) => q.id === "distance");
+  ok(distance && distance.kind === "choice");
+  deepStrictEqual(
+    distance.kind === "choice" ? distance.options.map((o) => o.value) : [],
+    ["euclidean", "manhattan"],
+  );
+  const standardise = qs.find((q) => q.id === "standardise");
+  ok(standardise && standardise.kind === "choice");
+  deepStrictEqual(
+    standardise.kind === "choice" ? standardise.options.map((o) => o.value) : [],
+    ["yes", "no"],
+  );
+  deepStrictEqual(
+    WIZARDS["hierarchical-clustering"]!.finish(
+      { clusters: 3, linkage: "average", distance: "manhattan", standardise: "no" },
+      readTable(data),
+    ),
+    {
+      type: "hierarchical-clustering",
+      params: { clusters: 3, linkage: "average", distance: "manhattan", standardise: false },
+    },
+  );
+  // No answers: 2 clusters, complete linkage, Euclidean, standardised.
+  deepStrictEqual(WIZARDS["hierarchical-clustering"]!.finish({ clusters: 2 }, readTable(data)), {
+    type: "hierarchical-clustering",
+    params: { clusters: 2, linkage: "complete", distance: "euclidean", standardise: true },
+  });
+});
+
+// Hierarchical clustering (seq 160): the 6×2 set is two well-separated
+// groups of three, so every linkage and distance puts rows 1–3 in one
+// cluster and rows 4–6 in the other. The tree, the diagnostics and the
+// dendrogram geometry are pinned against SciPy's linkage/cut_tree on the
+// same data (complete linkage, Euclidean, raw units).
+check("hierarchical clustering cuts the two-group set into its groups, with the R tree, diagnostics and dendrogram geometry", async () => {
+  const data: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "1", "1"],
+      [null, "1", "2"],
+      [null, "2", "1"],
+      [null, "8", "8"],
+      [null, "9", "8"],
+      [null, "8", "9"],
+    ],
+  };
+  const close = (a: number | null | undefined, b: number, eps = 1e-12): void => {
+    ok(a != null && Math.abs(a - b) < eps, `expected ${b}, got ${a}`);
+  };
+  // The TypeScript diagnostics, on the raw distance matrix: the pairwise
+  // within SS and the average silhouette width per k.
+  const points = [
+    [1, 1],
+    [1, 2],
+    [2, 1],
+    [8, 8],
+    [9, 8],
+    [8, 9],
+  ];
+  const dist = hclustDistanceMatrix(points, "euclidean");
+  close(dist[0][1], 1);
+  close(dist[0][5], Math.sqrt(113));
+  close(hclustDistanceMatrix(points, "manhattan")[0][5], 15);
+  close(hclustWithinSs([0, 0, 0, 1, 1, 1], dist), 4 / 3);
+  close(hclustWithinSs([0, 0, 0, 1, 1, 2], dist), 11 / 12);
+  close(hclustClusterWithinSs([0, 1, 2], dist), 2 / 3);
+  strictEqual(hclustClusterWithinSs([3], dist), 0);
+  close(hclustAvgSilhouette([0, 0, 0, 1, 1, 1], dist), 0.8853168309746203);
+  close(hclustAvgSilhouette([0, 0, 0, 1, 1, 2], dist), 0.4905979890831602);
+  // The Gap 1-SE rule: the smallest k within one SE of the next k's Gap.
+  strictEqual(
+    hclustSuggestedK([
+      { k: 2, withinSs: 1, avgSilhouette: 0.8, gap: 0.5, gapSe: 0.1 },
+      { k: 3, withinSs: 0.5, avgSilhouette: 0.4, gap: 0.4, gapSe: 0.1 },
+      { k: 4, withinSs: 0.25, avgSilhouette: 0.1, gap: 0.45, gapSe: 0.1 },
+    ]),
+    2,
+  );
+  strictEqual(
+    hclustSuggestedK([
+      { k: 2, withinSs: 1, avgSilhouette: 0.8, gap: 0.1, gapSe: 0.05 },
+      { k: 3, withinSs: 0.5, avgSilhouette: 0.4, gap: 0.4, gapSe: 0.05 },
+      { k: 4, withinSs: 0.25, avgSilhouette: 0.1, gap: 0.5, gapSe: 0.05 },
+    ]),
+    4,
+  );
+  strictEqual(
+    hclustSuggestedK([{ k: 2, withinSs: 1, avgSilhouette: 0.8, gap: null, gapSe: null }]),
+    null,
+  );
+
+  const result = await runAnalysis("hierarchical-clustering", data, { clusters: 2, standardise: false });
+  ok(!("error" in result), `hierarchical clustering should run, got ${"error" in result ? result.error : "ok"}`);
+  if ("error" in result) return;
+  strictEqual(result.testType, "hierarchical-clustering");
+  strictEqual(result.subtitle, "Hierarchical clustering");
+  deepStrictEqual(
+    result.stats.map((s) => [s.label, s.value]),
+    [
+      ["Number of clusters (k)", 2],
+      ["Complete rows (n)", 6],
+      ["Variables (p)", 2],
+      ["Suggested k (Gap 1-SE rule)", 2],
+    ],
+  );
+  deepStrictEqual(result.hclustClusters, [
+    { cluster: "Cluster 1", centroid: [4 / 3, 4 / 3], n: 3, withinSs: 2 / 3 },
+    { cluster: "Cluster 2", centroid: [25 / 3, 25 / 3], n: 3, withinSs: 2 / 3 },
+  ]);
+  deepStrictEqual(result.hclustAssignments, [
+    { row: "Row 1", cluster: 1 },
+    { row: "Row 2", cluster: 1 },
+    { row: "Row 3", cluster: 1 },
+    { row: "Row 4", cluster: 2 },
+    { row: "Row 5", cluster: 2 },
+    { row: "Row 6", cluster: 2 },
+  ]);
+  deepStrictEqual(result.hclustDendrogram, {
+    merge: [
+      [-1, -2],
+      [-4, -5],
+      [-3, 1],
+      [-6, 2],
+      [3, 4],
+    ],
+    heights: [1, 1, 1.4142135623730951, 1.4142135623730951, 10.63014581273465],
+    order: [2, 0, 1, 5, 3, 4],
+    labels: ["Row 1", "Row 2", "Row 3", "Row 4", "Row 5", "Row 6"],
+    cutHeight: 6.022179687553873,
+  });
+  // The choosing-k rows: within SS and silhouette are pinned exactly; the
+  // Gap column is R's seeded uniform-reference statistic (seed 1), pinned
+  // to 1e-6 against the reference.json values (10 significant digits).
+  const choosingK = result.choosingK ?? [];
+  strictEqual(choosingK.length, 4);
+  close(choosingK[0].withinSs, 4 / 3);
+  close(choosingK[0].avgSilhouette, 0.8853168309746203);
+  close(choosingK[1].withinSs, 11 / 12);
+  close(choosingK[1].avgSilhouette, 0.4905979890831602);
+  close(choosingK[2].withinSs, 0.5);
+  close(choosingK[2].avgSilhouette, 0.09763107293781752);
+  close(choosingK[3].withinSs, 0.25);
+  close(choosingK[3].avgSilhouette, 0.04881553646890876);
+  close(choosingK[0].gap, 1.979397346, 1e-6);
+  close(choosingK[1].gap, 1.256396782, 1e-6);
+  close(choosingK[2].gap, 0.608182771, 1e-6);
+  close(choosingK[3].gap, -0.3531692243, 1e-6);
+  close(choosingK[0].gapSe, 0.2782543977, 1e-6);
+  close(choosingK[1].gapSe, 0.3327141102, 1e-6);
+  close(choosingK[2].gapSe, 0.652558894, 1e-6);
+  close(choosingK[3].gapSe, 0.9459618499, 1e-6);
+  ok(result.notes.includes("complete linkage"), `notes should name the linkage: ${result.notes}`);
+  ok(result.notes.includes("deterministic"), `notes should say the clustering is deterministic: ${result.notes}`);
+
+  // The dendrogram geometry of that tree: 5 merges × 3 segments, leaves
+  // 1–6 in the tree's order, the last merge joining the two groups at
+  // height 10.630… between x 1.75 and 4.75.
+  const segments = dendrogramSegments(result.hclustDendrogram!);
+  strictEqual(segments.xs.length, 45);
+  strictEqual(segments.ys.length, 45);
+  deepStrictEqual(segments.xs.slice(0, 9), [2, 2, null, 3, 3, null, 2, 3, null]);
+  deepStrictEqual(segments.ys.slice(0, 9), [0, 1, null, 0, 1, null, 1, 1, null]);
+  deepStrictEqual(segments.xs.slice(-3), [1.75, 4.75, null]);
+  deepStrictEqual(segments.ys.slice(-3), [10.63014581273465, 10.63014581273465, null]);
+
+  // The same partition under every other linkage, the Manhattan distance,
+  // and the standardised run (same groups; centroids back-transformed).
+  for (const params of [
+    { clusters: 2, linkage: "average" as const, standardise: false },
+    { clusters: 2, linkage: "single" as const, standardise: false },
+    { clusters: 2, linkage: "ward.D2" as const, standardise: false },
+    { clusters: 2, distance: "manhattan" as const, standardise: false },
+    { clusters: 2, standardise: true },
+  ]) {
+    const other = await runAnalysis("hierarchical-clustering", data, params);
+    ok(!("error" in other), `params ${JSON.stringify(params)} should run`);
+    if (!("error" in other)) {
+      deepStrictEqual(
+        other.hclustAssignments?.map((a) => a.cluster),
+        [1, 1, 1, 2, 2, 2],
+      );
+    }
+  }
+  // The standardised tree's heights are the z-scored ones.
+  const std = await runAnalysis("hierarchical-clustering", data, { clusters: 2, standardise: true });
+  ok(!("error" in std));
+  if (!("error" in std)) {
+    close(std.hclustDendrogram?.heights[0], 0.25848625643570866);
+    close(std.hclustDendrogram?.heights[4], 2.747746596499504);
+    close(std.hclustDendrogram?.cutHeight, 1.5566506830189664);
+    close(std.choosingK?.[0].withinSs, 0.08908685968819592);
+  }
+  // The guards: too few clusters, k >= n, Ward's with Manhattan, one variable.
+  deepStrictEqual(await runAnalysis("hierarchical-clustering", data, { clusters: 1, standardise: false }), {
+    error: "Hierarchical clustering needs at least 2 clusters.",
+  });
+  deepStrictEqual(await runAnalysis("hierarchical-clustering", data, { clusters: 6, standardise: false }), {
+    error: "Hierarchical clustering needs fewer clusters than observations (k = 6, 6 complete rows).",
+  });
+  deepStrictEqual(
+    await runAnalysis("hierarchical-clustering", data, {
+      clusters: 2,
+      linkage: "ward.D2",
+      distance: "manhattan",
+      standardise: false,
+    }),
+    {
+      error:
+        "Ward's linkage needs Euclidean distances — it measures the increase in within-cluster variance, " +
+        "which is only defined for straight-line distances. Pick Euclidean distance, or another linkage.",
+    },
+  );
+  const oneVar: TableData = {
+    columns: ["Title", "X"],
+    rows: [
+      [null, "1"],
+      [null, "8"],
+    ],
+  };
+  deepStrictEqual(await runAnalysis("hierarchical-clustering", oneVar, { clusters: 2 }), {
+    error: "Hierarchical clustering needs at least 2 variables containing numeric data.",
   });
 });
 
@@ -12945,16 +13464,35 @@ check("the daily update check marks the day only after the check settles", async
   }
 });
 
-check("both update reads go through the timed fetch", () => {
+check("the channel manifest is fetched through the shell, the GitHub fallback through the timed fetch", () => {
   const version = readFileSync(fileURLToPath(new URL("../src/lib/version.ts", import.meta.url)), "utf8");
   const channel = readFileSync(fileURLToPath(new URL("../src/lib/channel.ts", import.meta.url)), "utf8");
+  const native = readFileSync(fileURLToPath(new URL("../src/native.ts", import.meta.url)), "utf8");
+  const main = readFileSync(fileURLToPath(new URL("../src-tauri/src/main.rs", import.meta.url)), "utf8");
+  // The GitHub fallback still goes through the timed webview fetch (that
+  // host sends Access-Control-Allow-Origin, so the webview fetch works).
   ok(version.includes("await fetchWithTimeout(MAIN_PACKAGE)"));
-  ok(channel.includes("await fetchWithTimeout(CHANNEL_MANIFEST_URL"));
   // The only bare `fetch` left is the helper's own implementation, which
   // is what carries the timeout signal.
   strictEqual((version.match(/await fetch\(/g) ?? []).length, 1);
   ok(version.includes("signal: controller.signal"));
-  ok(!/await fetch\(/.test(channel), "no bare fetch left in channel.ts");
+  // The channel manifest goes through the shell's curl instead: the
+  // webview enforces CORS and the channel host sends no
+  // Access-Control-Allow-Origin, so the in-page fetch failed fast while
+  // curl answered 200 (P0, Nov 19 2026). No fetch at all is left in
+  // channel.ts, and the shell command is registered.
+  ok(channel.includes("fetchChannelManifestText(CHANNEL_MANIFEST_URL)"));
+  ok(!/await fetch\(/.test(channel), "no fetch left in channel.ts");
+  ok(native.includes('invoke<string>("fetch_channel_manifest"'));
+  ok(main.includes("updater::fetch_channel_manifest"), "the command is registered");
+});
+
+check("a failed update check names the reason instead of only blaming the connection", () => {
+  const updates = readFileSync(fileURLToPath(new URL("../src/updates.ts", import.meta.url)), "utf8");
+  ok(updates.includes("lastChannelFetchError()"), "the check reads the channel failure reason");
+  ok(updates.includes("Couldn't Check for Updates"));
+  // The old bare text never appears on its own any more: the reason comes first.
+  ok(!updates.includes('"Check your internet connection and try again."'));
 });
 
 
@@ -15918,9 +16456,11 @@ check("a graph's dangling analysis link is cleared on load, warned once (FF-F13)
   const file = JSON.parse(serializeProjectFile(payload));
   file.project.nodes.g1.graphOptions.regAnalysisId = "no-such-analysis";
   file.project.nodes.g1.graphOptions.kmeansAnalysisId = "also-gone";
+  file.project.nodes.g1.graphOptions.hclustAnalysisId = "also-gone";
   const first = read(JSON.stringify(file));
   strictEqual(first.project.nodes.g1.graphOptions!.regAnalysisId, undefined, "dangling reg link should be cleared");
   strictEqual(first.project.nodes.g1.graphOptions!.kmeansAnalysisId, undefined, "dangling k-means link should be cleared");
+  strictEqual(first.project.nodes.g1.graphOptions!.hclustAnalysisId, undefined, "dangling hclust link should be cleared");
   strictEqual(first.updated, true, "clearing the link repairs the file, so it opens edited");
   ok(
     first.issues.some((i) => i.message.includes("referred to an analysis") && i.message.includes("removed")),

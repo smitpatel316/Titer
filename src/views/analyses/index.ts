@@ -85,7 +85,7 @@ export const ANALYSIS_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<Analysi
   ]),
   grouped: optionsFor(["two-way-anova", "mixed-effects", "three-way-anova", "multiple-t-tests", "row-means-totals", "transform", "plot-function"]),
   nested: optionsFor(["nested-t-test", "nested-anova", "plot-function"]),
-  multiple: optionsFor(["descriptive-statistics", "shapiro-wilk", "correlation-matrix", "linear-regression", "compare-two-groups", "multiple-regression", "nonlinear-regression", "principal-component-analysis", "k-means", "outliers", "multiple-logistic-regression", "poisson-regression", "cox-proportional-hazards", "survival", "extract-rearrange", "transform", "plot-function"]),
+  multiple: optionsFor(["descriptive-statistics", "shapiro-wilk", "correlation-matrix", "linear-regression", "compare-two-groups", "multiple-regression", "nonlinear-regression", "principal-component-analysis", "k-means", "hierarchical-clustering", "outliers", "multiple-logistic-regression", "poisson-regression", "cox-proportional-hazards", "survival", "extract-rearrange", "transform", "plot-function"]),
   survival: optionsFor(["survival", "cox", "plot-function"]),
   contingency: [...optionsFor(["chi-square", "plot-function"]), { value: "mcnemar", label: "McNemar's test (paired proportions)" }],
 };
@@ -98,12 +98,13 @@ export function hasRowGroups(data: TableData | undefined): boolean {
 /** The picker/menu options for a table: the three-way ANOVA is offered only
  *  when the table has ≥ 2 row bands — without them it would be a dead test.
  *  Likewise the nested tests are offered only for their group count (t test
- *  for exactly 2 groups with data, ANOVA for 3+) — the runners validate
- *  either way, so a stale entry point still gets a clear error. */
+ *  for 2+ groups with data — the wizard asks which two when there are more,
+ *  seq 246 — ANOVA for 3+) — the runners validate either way, so a stale
+ *  entry point still gets a clear error. */
 export function analysisOptionsForTable(tableType: TableType, data?: TableData): SelectorOption<AnalysisPickerValue>[] {
   return ANALYSIS_OPTIONS_BY_TABLE[tableType].filter((o) => {
     if (o.value === "three-way-anova") return hasRowGroups(data);
-    if (o.value === "nested-t-test") return data === undefined || countDataGroups(data) === 2;
+    if (o.value === "nested-t-test") return data === undefined || countDataGroups(data) >= 2;
     if (o.value === "nested-anova") return data === undefined || countDataGroups(data) >= 3;
     return true;
   });

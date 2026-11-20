@@ -80,7 +80,7 @@ And a spreadsheet that feels like one:
 
 ### Analyses
 
-**53 analyses**, covering all 56 analyses in GraphPad Prism 10's catalogue. That
+**54 analyses**, covering all 56 analyses in GraphPad Prism 10's catalogue. That
 "56" is a catalogue mapping — every Prism 10 analysis has a Titer equivalent listed
 below — not a single test-suite score. The numbers themselves are checked against
 Prism's own saved results and against reference values: the frozen-tip suite passed
@@ -123,11 +123,12 @@ Prism's own saved results and against reference values: the frozen-tip suite pas
 - **Survival:** Kaplan-Meier with median survival, log-rank, trend and Gehan-Breslow-Wilcoxon
   tests, hazard ratios, and Cox regression; Number at Risk shown under the curve
 - **Multivariate and simulation:** principal component analysis (with scree plot and biplot),
-  K-means clustering, ROC curves, Bland–Altman, Monte Carlo simulation
+  K-means clustering, hierarchical clustering (with dendrogram, Elbow, Silhouette and Gap plots),
+  ROC curves, Bland–Altman, Monte Carlo simulation
 - **Data operations** (not analyses, but shipped): transform data, transform concentrations,
   remove baseline, normalize — as live computed tables that follow their source and can
   be analyzed and graphed — transpose, prune rows, fraction of total
-- **Beyond Prism:** K-means clustering, plot-a-function, and row means/totals have no Prism
+- **Beyond Prism:** plot-a-function, and row means/totals have no Prism
   equivalent
 - **Clear results:** the exact test that ran, whether it is significant, every statistic,
   multiple comparisons and descriptive statistics, ready to copy
@@ -137,7 +138,7 @@ Prism's own saved results and against reference values: the frozen-tip suite pas
 
 ### Graphs
 
-**33 graph types**, all drawn from your tables and analyses:
+**37 graph types**, all drawn from your tables and analyses:
 
 - **Column and grouped data:** dot plots, before-and-after plots, box and violin plots,
   mean-with-error plots, grouped bars, grouped scatter, grouped before-and-after,
@@ -146,7 +147,7 @@ Prism's own saved results and against reference values: the frozen-tip suite pas
 - **Specialized:** heatmaps, volcano plots, survival (Kaplan–Meier) curves, forest plots,
   estimation plots, Bland–Altman plots, ROC curves, Schild plots, observed-vs-fitted
   plots, pie and donut charts, histograms, scree plots, PCA biplots, K-means scatter
-  plots, Monte Carlo histograms
+  plots, dendrograms, Elbow, Silhouette and Gap plots, Monte Carlo histograms
 
 - **Ready for a paper by default**
 - **Statistics on the graph:** significance stars, P values or group letters from your

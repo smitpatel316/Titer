@@ -53,6 +53,7 @@ import type {
   RowMeansTotalsParams,
   SurvivalParams,
   CoxParams,
+  HclustParams,
   PrincipalComponentAnalysisParams,
   ShapiroWilkParams,
   SplineLowessParams,
@@ -3485,6 +3486,13 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
     checklist: () => CHECKLISTS["three-way-anova"],
   },
 
+  "nested-t-test": {
+    // Which two groups to compare: asked only when the table has more than
+    // two data sets (seq 246) — on a two-group table it runs at once.
+    questions: (a, table) => [...twoSets(a, table)],
+    finish: (a) => ({ type: "nested-t-test", params: withSets(a) }),
+  },
+
   "nested-anova": {
     questions: (_, table) => [
       ...someSets(table, 3),
@@ -3895,6 +3903,44 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       type: "k-means",
       params: {
         clusters: a.clusters as number,
+        standardise: (a.standardise as string | undefined) !== "no",
+      },
+    }),
+  },
+
+  "hierarchical-clustering": {
+    questions: () => [
+      {
+        id: "clusters",
+        ask: "Number of clusters (k) — the tree is cut into this many clusters.",
+        kind: "number",
+        label: "Number of clusters (k)",
+        initial: 2,
+        min: 2,
+        validate: (v) =>
+          Number.isInteger(v) && v >= 2 ? undefined : "Enter a whole number of clusters (at least 2).",
+      },
+      choice("linkage", "Linkage — how clusters merge as the tree grows", [
+        ["complete", "Complete — farthest pair (compact clusters; the default)"],
+        ["average", "Average — mean pair distance"],
+        ["single", "Single — nearest pair (can chain)"],
+        ["ward.D2", "Ward's — smallest increase in within-cluster variance (Euclidean distances only)"],
+      ]),
+      choice("distance", "Distance — how rows are measured apart", [
+        ["euclidean", "Euclidean — straight-line distance"],
+        ["manhattan", "Manhattan — city-block distance"],
+      ]),
+      choice("standardise", "Standardise variables first? — z-score each variable (recommended when variables are on different scales)", [
+        ["yes", "Yes — standardise each variable (recommended when variables are on different scales)"],
+        ["no", "No — cluster on the original units"],
+      ]),
+    ],
+    finish: (a) => ({
+      type: "hierarchical-clustering",
+      params: {
+        clusters: a.clusters as number,
+        linkage: (a.linkage as HclustParams["linkage"] | undefined) ?? "complete",
+        distance: (a.distance as HclustParams["distance"] | undefined) ?? "euclidean",
         standardise: (a.standardise as string | undefined) !== "no",
       },
     }),

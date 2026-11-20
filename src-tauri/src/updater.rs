@@ -62,6 +62,37 @@ fn sh_quote(path: &Path) -> String {
     out
 }
 
+/// The update channel's manifest: the one URL the shell fetches for the
+/// page. Fixed, not a free choice: the shell must never become a fetch
+/// proxy for arbitrary hosts (localhost services included) — the page can
+/// only ever ask for this address, and anything else is refused before
+/// curl runs.
+const CHANNEL_MANIFEST_URL: &str = "https://titer.smitpatel.net/channel/version.json";
+
+/// Fetches the channel manifest through the shell's curl, not the
+/// webview's fetch: the webview enforces CORS, and the channel host sends
+/// no Access-Control-Allow-Origin, so the in-page fetch failed fast while
+/// curl answered 200 — the P0 that sent every Check for Updates to GitHub
+/// (Nov 19 2026). Same approach as `download_update`: curl -fsSL with a
+/// timeout, so a hung network fails instead of hanging. Returns the body
+/// text; the page parses it as JSON. Async, like `read_text` (seq 248):
+/// a sync command runs on macOS's main thread, and a hung fetch would
+/// park it — the curl runs on a blocking-pool thread instead.
+#[tauri::command]
+pub async fn fetch_channel_manifest(url: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || fetch_channel_manifest_sync(url))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The fetch itself, sync so the tests can drive it without a runtime.
+fn fetch_channel_manifest_sync(url: String) -> Result<String, String> {
+    if url != CHANNEL_MANIFEST_URL {
+        return Err("the channel manifest lives at titer.smitpatel.net".to_string());
+    }
+    run("curl", &["-fsSL", "--max-time", "10", url.as_str()])
+}
+
 /// Downloads the update asset to a temp file, checks its size and sha256
 /// against the manifest, and returns the temp path. The URL must be https:
 /// it comes from the channel manifest, but a manifest must never be able
@@ -193,4 +224,24 @@ pub fn apply_update(path: String, version: String) -> Result<String, String> {
 #[tauri::command]
 pub fn apply_update(_path: String, _version: String) -> Result<String, String> {
     Err("in-place updates are macOS-only; download the release instead".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The allowlist is the whole point of taking a URL at all: the shell
+    // must never fetch an arbitrary host for the page. No network is
+    // touched here — a refused URL fails before curl runs.
+    #[test]
+    fn fetch_channel_manifest_refuses_any_other_url() {
+        for url in [
+            "http://127.0.0.1:9/version.json",
+            "https://raw.githubusercontent.com/smitpatel316/Titer/main/package.json",
+            "http://titer.smitpatel.net/channel/version.json",
+        ] {
+            let err = fetch_channel_manifest_sync(url.to_string()).unwrap_err();
+            assert!(err.contains("titer.smitpatel.net"), "{url}: {err}");
+        }
+    }
 }

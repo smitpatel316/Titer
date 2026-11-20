@@ -396,6 +396,14 @@ export function unlinkedAnalysisNote(graphType: GraphType): string | null {
       return "Run a Principal component analysis on this table to draw the scores biplot.";
     case "kmeans-scatter":
       return "Run a K-means clustering on this table to draw the cluster scatter.";
+    case "dendrogram":
+      return "Run a Hierarchical clustering on this table to draw the dendrogram.";
+    case "elbow-plot":
+      return "Run a Hierarchical clustering on this table to draw the Elbow plot.";
+    case "silhouette-plot":
+      return "Run a Hierarchical clustering on this table to draw the Silhouette plot.";
+    case "gap-plot":
+      return "Run a Hierarchical clustering on this table to draw the Gap plot.";
     default:
       return null;
   }
@@ -409,6 +417,7 @@ export function unlinkedAnalysisNote(graphType: GraphType): string | null {
  *  builder's business (fixed-range graphs honour it, see roc-curve.ts). */
 export function axesRangeInputs(graphType: GraphType): { x: boolean; y: boolean } {
   if (graphType === "scree-plot") return { x: false, y: true };
+  if (graphType === "dendrogram") return { x: false, y: true };
   if (graphType === "forest-plot") return { x: true, y: false };
   return { x: true, y: true };
 }

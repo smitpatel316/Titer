@@ -122,6 +122,10 @@ type Action =
   /** Freeze (or unfreeze) a results sheet: frozen, it shows its cached
    *  result and stops auto-updating when the data change. */
   | { type: "setAnalysisFrozen"; id: string; frozen: boolean }
+  /** Replace an analysis node's params (a rerun with overrides, via MCP):
+   *  the next run — and the UI — see the new params. Orphaned sheets
+   *  keep their params (their source table is gone). */
+  | { type: "setAnalysisParams"; id: string; params: AnalysisParams }
   /** Duplicates a data table together with its analyses and graphs (its family):
    *  the copy takes new data and its analyses follow the copy (Prism 10,
    *  "Repeating an analysis"). Figures are not part of a family and stay put. */
@@ -371,6 +375,15 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       if (action.frozen) next.frozen = true;
       else delete next.frozen;
       return { ...state, nodes: { ...state.nodes, [action.id]: next }, isDirty: true };
+    }
+    case "setAnalysisParams": {
+      const node = state.nodes[action.id];
+      if (!node || node.type !== "analysis" || node.orphaned) return state;
+      return {
+        ...state,
+        nodes: { ...state.nodes, [action.id]: { ...node, analysisParams: action.params } },
+        isDirty: true,
+      };
     }
     case "duplicateFamily": {
       const source = state.nodes[action.id];
@@ -657,6 +670,7 @@ const UNDOABLE = new Set<Action["type"]>([
   "reorderRoot",
   "reorderChildren",
   "setAnalysisFrozen",
+  "setAnalysisParams",
 ]);
 const MUTATING = new Set<Action["type"]>([...UNDOABLE, "cacheAnalysisResult", "undo", "redo", "load"]);
 
@@ -675,6 +689,8 @@ function changeName(action: Action): string {
       return "Delete";
     case "setAnalysisFrozen":
       return action.frozen ? "Freeze Results" : "Unfreeze Results";
+    case "setAnalysisParams":
+      return "Change Analysis Parameters";
     case "duplicateFamily":
       return "Duplicate Family";
     case "updateTable":
@@ -811,6 +827,8 @@ interface ProjectActions {
   cacheAnalysisResult: (id: string, result: AnalysisResult) => void;
   /** Freeze (or unfreeze) a results sheet. Orphaned sheets can't freeze. */
   setAnalysisFrozen: (id: string, frozen: boolean) => void;
+  /** Replace an analysis node's params (a rerun with overrides). */
+  setAnalysisParams: (id: string, params: AnalysisParams) => void;
   /** Duplicates a data table together with its analyses and graphs (its family). */
   duplicateFamily: (id: string) => void;
   /** `label` names the edit for Undo ("Paste"); `move`: the columns or groups it renamed
@@ -865,6 +883,10 @@ interface ProjectContextValue extends ProjectActions {
   selector: ProjectState["selector"];
   filePath: string | null;
   isDirty: boolean;
+  /** Monotonic content-revision counter, bumped on every mutating action.
+   *  The autosave engine (src/store/use-document.ts) subscribes to it to
+   *  restart its debounce timer on every edit. */
+  revision: number;
   /** What Undo and Redo would take back or replay ("Paste"), if anything. */
   undoName?: string;
   redoName?: string;
@@ -1054,6 +1076,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       removeNode: (id) => dispatch({ type: "remove", id }),
       cacheAnalysisResult: (id, result) => dispatch({ type: "cacheAnalysisResult", id, result }),
       setAnalysisFrozen: (id, frozen) => dispatch({ type: "setAnalysisFrozen", id, frozen }),
+      setAnalysisParams: (id, params) => dispatch({ type: "setAnalysisParams", id, params }),
       duplicateFamily: (id) => dispatch({ type: "duplicateFamily", id }),
       updateTable: (id, data, label, move) => dispatch({ type: "updateTable", id, data, label, move }),
       updateGraph: (id, options) => dispatch({ type: "updateGraph", id, options, at: Date.now() }),
@@ -1089,6 +1112,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       selector: state.selector,
       filePath: state.filePath,
       isDirty: state.isDirty,
+      revision: state.revision,
       undoName: state.past.at(-1)?.label,
       redoName: state.future.at(-1)?.label,
     };

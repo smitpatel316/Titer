@@ -139,6 +139,21 @@ export interface McpStatus {
 
 export const mcpStatus = () => invoke<McpStatus>("mcp_status");
 export const mcpSetEnabled = (enabled: boolean) => invoke<McpStatus>("mcp_set_enabled", { enabled });
+
+/** What connecting to Antigravity did: `connected` (entry written) or
+ *  `already_connected` (the entry was already there — nothing touched). */
+export interface McpAntigravityConnect {
+  outcome: "connected" | "already_connected";
+  command: string;
+  config_path: string;
+}
+
+/** One-click Antigravity setup: turns the MCP server on (persisted opt-in)
+ *  and writes the stdio `titer` entry into ~/.gemini/config/mcp_config.json.
+ *  No token anywhere — the bridge reads it from Titer's own connection file. */
+export const mcpConnectAntigravity = () => invoke<McpAntigravityConnect>("mcp_connect_antigravity");
+/** Brings Antigravity forward (macOS) so the user can Refresh its MCP servers. */
+export const mcpOpenAntigravity = () => invoke<void>("mcp_open_antigravity");
 /** The local bearer token, for Settings to show (never for an agent). */
 export const mcpToken = () => invoke<string>("mcp_token");
 /** Rotates the token; only while the server is stopped. */
@@ -147,6 +162,54 @@ export const mcpRegenerateToken = () => invoke<string>("mcp_regenerate_token");
 export const mcpClaudeCodeCommand = () => invoke<string>("mcp_claude_code_command");
 /** The Activity log's last lines (newest last). */
 export const mcpActivity = (limit: number) => invoke<string[]>("mcp_activity", { limit });
+
+/** One feedback report saved by `titer_send_feedback`, as Settings lists it. */
+export interface FeedbackEntry {
+  feedback_id: string;
+  ts: number;
+  kind: string;
+  summary: string;
+  details: string;
+  context: {
+    app_version?: string;
+    os?: string;
+    failed_tool?: string;
+    project_file?: string;
+    recent_activity?: { ts?: number; tool: string; ok?: boolean }[];
+  };
+}
+
+/** The saved feedback entries (newest first). */
+export const mcpFeedback = () => invoke<FeedbackEntry[]>("mcp_feedback");
+
+/** One allowlist group as Settings shows it, with its current on/off state. */
+export interface McpAllowlistGroup {
+  id: string;
+  label: string;
+  description: string;
+  tools: string[];
+  enabled: boolean;
+}
+
+/** The tool-allowlist groups (contract §12) with their current on/off state. */
+export const mcpAllowlist = () => invoke<McpAllowlistGroup[]>("mcp_allowlist");
+
+/** Records the enabled allowlist groups (Settings → AI Connections).
+ *  Takes effect for MCP sessions started after the change — a connected
+ *  AI app picks it up when it reconnects. Returns the groups now in effect. */
+export const mcpSetAllowlist = (groups: string[]) =>
+  invoke<McpAllowlistGroup[]>("mcp_set_allowlist", { groups });
+
+/** The user's feedback-sharing choice, if they have made one: `true` Share,
+ *  `false` Don't share, `null` never asked (fresh install or upgrade — the
+ *  first-run prompt shows). Lives in the app-data `mcp/` folder, so it
+ *  survives restarts and the MCP server reads the same record. */
+export const mcpFeedbackConsent = () => invoke<boolean | null>("mcp_feedback_consent");
+
+/** Records the user's feedback-sharing choice (first-run prompt, or the
+ *  Settings toggle). Returns the choice now in effect. */
+export const mcpSetFeedbackConsent = (sharing: boolean) =>
+  invoke<boolean | null>("mcp_set_feedback_consent", { sharing });
 
 /** This window's project, for the MCP server to serve. Published on every
  *  revision change (debounced, see store/mcp-publish.ts). A no-op where
@@ -459,8 +522,20 @@ export function setSpinner(at: [number, number] | null) {
 /** Titer's GitHub page, its releases, or Buy Me a Coffee, in the default browser. */
 export const openLink = (link: "github" | "releases" | "coffee") => void invoke("open_link", { link });
 
+/** A pre-filled GitHub issue for one saved feedback entry, in the
+ *  default browser. The shell only opens the fixed Titer issues/new
+ *  address (see `open_github_issue`); anything else is refused. */
+export const openGithubIssue = (url: string) => invoke<void>("open_github_issue", { url });
+
 // ── Updates ──────────────────────────────────────────────────────────────
 // The shell side lives in src-tauri/src/updater.rs.
+
+/** Fetches the channel manifest through the shell's curl, not the
+ *  webview's fetch: the webview enforces CORS and the channel host sends
+ *  no Access-Control-Allow-Origin, so the in-page fetch failed fast while
+ *  curl answered 200 (P0, Nov 19 2026). Returns the manifest body text. */
+export const fetchChannelManifestText = (url: string) =>
+  invoke<string>("fetch_channel_manifest", { url });
 
 /** Downloads the update asset to a temp file and checks its size and
  *  sha256 against the manifest; the temp path. */

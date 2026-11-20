@@ -231,7 +231,7 @@ const STRING_FIELDS = [
 
 /** The options that name a sibling analysis (see `GraphOptions`): the
  *  graph draws its brackets / lines / curves from that analysis's cached
- *  result. All ten — `clone-graph`'s `GRAPH_ANALYSIS_LINKS` lists nine
+ *  result. All eleven — `clone-graph`'s `GRAPH_ANALYSIS_LINKS` lists ten
  *  (it omits `ttestAnalysisId`; see the lane log), but validation here
  *  covers the field the graphs actually read. */
 const LINK_FIELDS = [
@@ -243,6 +243,7 @@ const LINK_FIELDS = [
   "poissonAnalysisId",
   "pcaAnalysisId",
   "kmeansAnalysisId",
+  "hclustAnalysisId",
   "smoothAnalysisId",
   "monteCarloAnalysisId",
 ];

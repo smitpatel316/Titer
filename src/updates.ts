@@ -16,7 +16,7 @@ import {
   openLink,
   quitApp,
 } from "./native";
-import { decideUpdate, fetchChannelManifest, isMacOs, type ChannelManifest } from "./lib/channel";
+import { decideUpdate, fetchChannelManifest, isMacOs, lastChannelFetchError, type ChannelManifest } from "./lib/channel";
 import { isNewer, latestVersion } from "./lib/version";
 
 const CHECKED_KEY = "titer.updatesCheckedAt";
@@ -29,9 +29,14 @@ const DAY = 24 * 60 * 60 * 1000;
  *  the day (CC-m8). */
 export async function checkForUpdates(quiet = false): Promise<boolean> {
   if (!isNative) return false;
+  // The channel fetch's failure reason, captured while it is from this
+  // check: the catch below shows it instead of only blaming the
+  // connection (the P0's fetch failed while the network was fine).
+  let channelError: string | null = null;
   try {
     const current = await appVersion();
     const manifest = await fetchChannelManifest();
+    channelError = lastChannelFetchError();
     if (manifest) {
       await checkAgainstManifest(current, manifest, quiet);
       return true;
@@ -45,8 +50,13 @@ export async function checkForUpdates(quiet = false): Promise<boolean> {
       await alert("Titer is up to date", `Version ${current} is the latest.`, "info");
     }
     return true;
-  } catch {
-    if (!quiet) await alert("Couldn't Check for Updates", "Check your internet connection and try again.");
+  } catch (err) {
+    if (!quiet) {
+      const detail = channelError
+        ? `Could not reach the update channel (${channelError}) or GitHub (${String(err)}). Check your internet connection and try again.`
+        : `${String(err)} Check your internet connection and try again.`;
+      await alert("Couldn't Check for Updates", detail);
+    }
     return false;
   }
 }

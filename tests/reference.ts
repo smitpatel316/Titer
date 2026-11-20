@@ -2800,6 +2800,26 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["kmeans", kmeans, "k-means", { clusters: 1, standardise: false }],
   ["kmeans", kmeans, "k-means", { clusters: 6, standardise: false }],
   ["kmeansIdentical", kmeansIdentical, "k-means", { clusters: 2, standardise: false }],
+  // Hierarchical clustering (seq 160): the same 6×2 set — raw and
+  // standardised k = 2 (same partition; centroids back-transformed), the
+  // no-params run (defaults: k = 2, complete linkage, Euclidean,
+  // standardised), the k = 3 run, one run per linkage and per distance, and
+  // the edge cases (constant variable, too few clusters, k >= n,
+  // Ward's linkage with Manhattan distances).
+  ["kmeans", kmeans, "hierarchical-clustering", { clusters: 2, standardise: false }],
+  ["kmeans", kmeans, "hierarchical-clustering", { clusters: 2, standardise: true }],
+  ["kmeans", kmeans, "hierarchical-clustering", {}],
+  ["kmeans", kmeans, "hierarchical-clustering", { clusters: 3, standardise: false }],
+  ["kmeans", kmeans, "hierarchical-clustering", { clusters: 2, linkage: "average", standardise: false }],
+  ["kmeans", kmeans, "hierarchical-clustering", { clusters: 2, linkage: "single", standardise: false }],
+  ["kmeans", kmeans, "hierarchical-clustering", { clusters: 2, linkage: "ward.D2", standardise: false }],
+  ["kmeans", kmeans, "hierarchical-clustering", { clusters: 2, distance: "manhattan", standardise: false }],
+  ["kmeansConstant", kmeansConstant, "hierarchical-clustering", { clusters: 2, standardise: true }],
+  ["kmeansConstant", kmeansConstant, "hierarchical-clustering", { clusters: 2, standardise: false }],
+  ["kmeans", kmeans, "hierarchical-clustering", { clusters: 1, standardise: false }],
+  ["kmeans", kmeans, "hierarchical-clustering", { clusters: 6, standardise: false }],
+  ["kmeans", kmeans, "hierarchical-clustering", { clusters: 2, linkage: "ward.D2", distance: "manhattan", standardise: false }],
+  ["kmeansIdentical", kmeansIdentical, "hierarchical-clustering", { clusters: 2, standardise: false }],
   ["contingency2", contingency2, "chi-square"],
   ["contingency3", contingency3, "chi-square"],
   ["contingencyWide", contingencyWide, "chi-square"],
@@ -2996,6 +3016,10 @@ const GRAPH_CASES: [string, TableData, GraphType, Partial<GraphOptions>?][] = [
   ["pca", pca, "scree-plot"],
   ["pca", pca, "pca-biplot"],
   ["kmeans", kmeans, "kmeans-scatter"],
+  ["kmeans", kmeans, "dendrogram"],
+  ["kmeans", kmeans, "elbow-plot"],
+  ["kmeans", kmeans, "silhouette-plot"],
+  ["kmeans", kmeans, "gap-plot"],
   ["volcano", volcanoTable, "volcano", volcano],
   ["volcanoXY", volcanoXY, "volcano", { volcanoY: "P" }],
   ["volcanoLog", volcanoLog, "volcano", { volcanoY: "-log10 P", volcanoYIsPValue: false }],
@@ -5795,7 +5819,226 @@ async function disagreements(): Promise<string[]> {
       if (kmFig.layout.showlegend !== true) out.push(`Scatter legend: ${kmFig.layout.showlegend}, expected true`);
     }
   }
-  // Kolmogorov-Smirnov: the plan's values, computed independently in Python
+  // Hierarchical clustering (seq 160). The raw k = 2 tree, diagnostics and
+  // dendrogram geometry, confirmed against SciPy's linkage/cut_tree on the
+  // same 6×2 set (complete linkage, Euclidean): merge [[-1,-2],[-4,-5],
+  // [-3,1],[-6,2],[3,4]], heights [1, 1, √2, √2, 10.6301458], leaf order
+  // [2,0,1,5,3,4], within SS 4/3 and average silhouette 0.8853168 at k = 2.
+  // The Gap values are R's seeded (seed 1) uniform-reference statistic —
+  // pinned to 1e-3 here, exactly in reference.json — and the 1-SE rule
+  // suggests k = 2 for the two clean groups.
+  {
+    const hcStat = (r: AnalysisResult, label: string) => r.stats.find((s) => s.label === label)?.value;
+    const close = (got: number | null | undefined, want: number, tol: number, label: string) => {
+      if (got == null || Math.abs(got - want) > tol) out.push(`HClust ${label}: ${got}, expected ${want} ± ${tol}`);
+    };
+    const closeAll = (
+      got: (number | null | undefined)[],
+      want: number[],
+      tol: number,
+      label: string,
+    ) => {
+      if (got.length !== want.length) {
+        out.push(`HClust ${label}: ${got.length} values, expected ${want.length}`);
+        return;
+      }
+      got.forEach((g, i) => close(g, want[i], tol, `${label}[${i}]`));
+    };
+    const hcRaw = await runAnalysis("hierarchical-clustering", kmeans, { clusters: 2, standardise: false });
+    if ("error" in hcRaw) {
+      out.push(`HClust raw: ${hcRaw.error}`);
+    } else {
+      if (hcStat(hcRaw, "Number of clusters (k)") !== 2) out.push(`HClust raw k: ${hcStat(hcRaw, "Number of clusters (k)")}, expected 2`);
+      if (hcStat(hcRaw, "Suggested k (Gap 1-SE rule)") !== 2)
+        out.push(`HClust raw suggested k: ${hcStat(hcRaw, "Suggested k (Gap 1-SE rule)")}, expected 2`);
+      if (JSON.stringify(hcRaw.hclustAssignments?.map((a) => a.cluster)) !== JSON.stringify([1, 1, 1, 2, 2, 2]))
+        out.push(`HClust raw assignments: ${JSON.stringify(hcRaw.hclustAssignments?.map((a) => a.cluster))}, expected [1,1,1,2,2,2]`);
+      closeAll(hcRaw.hclustClusters?.flatMap((c) => c.centroid) ?? [], [1.3333, 1.3333, 8.3333, 8.3333], 1e-3, "centroids");
+      closeAll(hcRaw.hclustClusters?.map((c) => c.n) ?? [], [3, 3], 0, "cluster sizes");
+      closeAll(hcRaw.hclustClusters?.map((c) => c.withinSs) ?? [], [0.6667, 0.6667], 1e-3, "within per cluster");
+      if (JSON.stringify(hcRaw.hclustDendrogram?.merge) !== JSON.stringify([[-1, -2], [-4, -5], [-3, 1], [-6, 2], [3, 4]]))
+        out.push(`HClust raw merge: ${JSON.stringify(hcRaw.hclustDendrogram?.merge)}, expected [[-1,-2],[-4,-5],[-3,1],[-6,2],[3,4]]`);
+      closeAll(hcRaw.hclustDendrogram?.heights ?? [], [1, 1, 1.4142, 1.4142, 10.6301], 1e-3, "heights");
+      if (JSON.stringify(hcRaw.hclustDendrogram?.order) !== JSON.stringify([2, 0, 1, 5, 3, 4]))
+        out.push(`HClust raw order: ${JSON.stringify(hcRaw.hclustDendrogram?.order)}, expected [2,0,1,5,3,4]`);
+      close(hcRaw.hclustDendrogram?.cutHeight, 6.0222, 1e-3, "cut height");
+      const ck = hcRaw.choosingK ?? [];
+      if (ck.length !== 4) out.push(`HClust choosing-k rows: ${ck.length}, expected 4`);
+      closeAll(ck.map((r) => r.withinSs), [1.3333, 0.9167, 0.5, 0.25], 1e-3, "within SS");
+      closeAll(ck.map((r) => r.avgSilhouette), [0.8853, 0.4906, 0.0976, 0.0488], 1e-3, "avg silhouette");
+      closeAll(ck.map((r) => r.gap), [1.9794, 1.2564, 0.6082, -0.3532], 1e-3, "Gap");
+      closeAll(ck.map((r) => r.gapSe), [0.2783, 0.3327, 0.6526, 0.946], 1e-3, "Gap SE");
+      if (!hcRaw.notes.includes("complete linkage")) out.push(`HClust raw notes: linkage missing`);
+      if (!hcRaw.notes.includes("deterministic")) out.push(`HClust raw notes: deterministic missing`);
+      if (!hcRaw.notes.includes("suggests k = 2")) out.push(`HClust raw notes: suggested k missing`);
+      // The four graphs of the raw k = 2 run: the dendrogram's one line
+      // trace (5 merges × 3 segments, cut line at the cut height, leaves
+      // labelled), and the three choosing-k traces over k = 2..5.
+      const { addDendrogram, dendrogramSegments } = await import("../src/views/graphs/dendrogram");
+      const { addElbowPlot, addSilhouettePlot, addGapPlot } = await import("../src/views/graphs/choosing-k");
+      const hcCols = plotColumns(readTable(kmeans), "dendrogram", newGraphOptions("dendrogram"), "multiple");
+      const dendroOpts = newGraphOptions("dendrogram");
+      const dendroFig = GRAPHS["dendrogram"].build(hcCols, dendroOpts, paintOf(dendroOpts, 1), readTable(kmeans).titles);
+      addDendrogram(dendroFig, hcRaw, paintOf(dendroOpts, 1), dendroOpts);
+      const dendroTraces = dendroFig.data as { name?: string; mode?: string; x?: (number | null)[]; y?: (number | null)[] }[];
+      if (dendroTraces.length !== 1) out.push(`Dendrogram traces: ${dendroTraces.length}, expected 1`);
+      if (dendroTraces[0]?.name !== "Dendrogram") out.push(`Dendrogram name: ${dendroTraces[0]?.name}, expected "Dendrogram"`);
+      if (dendroTraces[0]?.mode !== "lines") out.push(`Dendrogram mode: ${dendroTraces[0]?.mode}, expected "lines"`);
+      const segments = dendrogramSegments(hcRaw.hclustDendrogram!);
+      if (JSON.stringify(dendroTraces[0]?.x) !== JSON.stringify(segments.xs))
+        out.push(`Dendrogram x does not match dendrogramSegments`);
+      if (JSON.stringify(dendroTraces[0]?.y) !== JSON.stringify(segments.ys))
+        out.push(`Dendrogram y does not match dendrogramSegments`);
+      const dendroShapes = dendroFig.layout.shapes as { y0?: number }[];
+      if (dendroShapes?.length !== 1 || Math.abs((dendroShapes[0]?.y0 ?? NaN) - 6.0222) > 1e-3)
+        out.push(`Dendrogram cut line: ${JSON.stringify(dendroShapes)}, expected one line at 6.0222`);
+      const dendroXaxis = dendroFig.layout.xaxis as { ticktext?: string[] };
+      if (JSON.stringify(dendroXaxis.ticktext) !== JSON.stringify(["Row 3", "Row 1", "Row 2", "Row 6", "Row 4", "Row 5"]))
+        out.push(`Dendrogram leaf labels: ${JSON.stringify(dendroXaxis.ticktext)}, expected Row 3, Row 1, Row 2, Row 6, Row 4, Row 5`);
+      const kPlot = async (
+        type: "elbow-plot" | "silhouette-plot" | "gap-plot",
+        add: (fig: GraphFigure, r: AnalysisResult, p: ReturnType<typeof paintOf>, o: GraphOptions) => void,
+        wantY: number[],
+        label: string,
+      ) => {
+        const opts = newGraphOptions(type);
+        const fig = GRAPHS[type].build(
+          plotColumns(readTable(kmeans), type, opts, "multiple"),
+          opts,
+          paintOf(opts, 1),
+          readTable(kmeans).titles,
+        );
+        add(fig, hcRaw, paintOf(opts, 1), opts);
+        const traces = fig.data as { x?: number[]; y?: (number | null)[]; error_y?: { array?: number[] } }[];
+        if (traces.length !== 1) out.push(`${label} traces: ${traces.length}, expected 1`);
+        if (JSON.stringify(traces[0]?.x) !== JSON.stringify([2, 3, 4, 5]))
+          out.push(`${label} x: ${JSON.stringify(traces[0]?.x)}, expected [2,3,4,5]`);
+        closeAll(traces[0]?.y ?? [], wantY, 1e-3, `${label} y`);
+        return fig;
+      };
+      await kPlot("elbow-plot", (f, r, p) => addElbowPlot(f, r, p), [1.3333, 0.9167, 0.5, 0.25], "Elbow plot");
+      const silFig = await kPlot("silhouette-plot", addSilhouettePlot, [0.8853, 0.4906, 0.0976, 0.0488], "Silhouette plot");
+      const silY = silFig.layout.yaxis as { range?: number[] };
+      if (JSON.stringify(silY.range) !== JSON.stringify([-1, 1]))
+        out.push(`Silhouette plot y range: ${JSON.stringify(silY.range)}, expected [-1, 1]`);
+      const gapFig = await kPlot("gap-plot", (f, r, p) => addGapPlot(f, r, p), [1.9794, 1.2564, 0.6082, -0.3532], "Gap plot");
+      const gapTraces = gapFig.data as { error_y?: { array?: number[] } }[];
+      closeAll(gapTraces[0]?.error_y?.array ?? [], [0.2783, 0.3327, 0.6526, 0.946], 1e-3, "Gap SE bars");
+    }
+    // The same partition under every other linkage, the Manhattan distance,
+    // and the standardised run (same groups; the standardised heights are
+    // the z-scored ones, and the Gap statistic is scale-invariant here).
+    for (const params of [
+      { clusters: 2, linkage: "average" as const, standardise: false },
+      { clusters: 2, linkage: "single" as const, standardise: false },
+      { clusters: 2, linkage: "ward.D2" as const, standardise: false },
+      { clusters: 2, distance: "manhattan" as const, standardise: false },
+      { clusters: 2, standardise: true },
+    ]) {
+      const other = await runAnalysis("hierarchical-clustering", kmeans, params);
+      if ("error" in other) {
+        out.push(`HClust ${JSON.stringify(params)}: ${other.error}`);
+      } else if (JSON.stringify(other.hclustAssignments?.map((a) => a.cluster)) !== JSON.stringify([1, 1, 1, 2, 2, 2])) {
+        out.push(`HClust ${JSON.stringify(params)} assignments: ${JSON.stringify(other.hclustAssignments?.map((a) => a.cluster))}, expected [1,1,1,2,2,2]`);
+      }
+    }
+    const hcStd = await runAnalysis("hierarchical-clustering", kmeans, { clusters: 2, standardise: true });
+    if ("error" in hcStd) {
+      out.push(`HClust standardised: ${hcStd.error}`);
+    } else {
+      close(hcStd.hclustDendrogram?.heights[0], 0.2585, 1e-3, "standardised height[0]");
+      close(hcStd.hclustDendrogram?.heights[4], 2.7477, 1e-3, "standardised height[4]");
+      close(hcStd.hclustDendrogram?.cutHeight, 1.5567, 1e-3, "standardised cut height");
+      close(hcStd.choosingK?.[0].withinSs, 0.0891, 1e-3, "standardised within SS k=2");
+      if (hcStat(hcStd, "Suggested k (Gap 1-SE rule)") !== 2)
+        out.push(`HClust standardised suggested k: ${hcStat(hcStd, "Suggested k (Gap 1-SE rule)")}, expected 2`);
+    }
+    // The defaults (no params) give the standardised k = 2 run.
+    const hcDef = await runAnalysis("hierarchical-clustering", kmeans, {});
+    if ("error" in hcDef) {
+      out.push(`HClust defaults: ${hcDef.error}`);
+    } else if (!("error" in hcStd)) {
+      for (const s of hcStd.stats) {
+        const got = hcStat(hcDef, s.label);
+        if (got !== s.value) out.push(`HClust defaults ${s.label}: ${got}, standardised run: ${s.value}`);
+      }
+    }
+    // k = 3: R splits the high group (the (8,9) singleton is Cluster 2 —
+    // canonical labels sort by first centroid coordinate).
+    const hc3 = await runAnalysis("hierarchical-clustering", kmeans, { clusters: 3, standardise: false });
+    if ("error" in hc3) {
+      out.push(`HClust k=3: ${hc3.error}`);
+    } else {
+      if (JSON.stringify(hc3.hclustAssignments?.map((a) => a.cluster)) !== JSON.stringify([1, 1, 1, 3, 3, 2]))
+        out.push(`HClust k=3 assignments: ${JSON.stringify(hc3.hclustAssignments?.map((a) => a.cluster))}, expected [1,1,1,3,3,2]`);
+      closeAll(hc3.hclustClusters?.flatMap((c) => c.centroid) ?? [], [1.3333, 1.3333, 8, 9, 8.5, 8], 1e-3, "k=3 centroids");
+      closeAll(hc3.hclustClusters?.map((c) => c.n) ?? [], [3, 1, 2], 0, "k=3 cluster sizes");
+    }
+    // Edge cases: a constant variable names itself when standardising but
+    // runs raw; k < 2 and k >= n are user-facing errors naming the problem;
+    // Ward's linkage refuses Manhattan distances; identical rows run (zero
+    // distances) with a null Gap statistic, honestly noted.
+    const hcConstStd = await runAnalysis("hierarchical-clustering", kmeansConstant, { clusters: 2, standardise: true });
+    if (!("error" in hcConstStd) || !hcConstStd.error.includes("Y"))
+      out.push(
+        `HClust constant (standardised): ${"error" in hcConstStd ? hcConstStd.error : "ran without error"}, expected an error naming Y`,
+      );
+    const hcConstRaw = await runAnalysis("hierarchical-clustering", kmeansConstant, { clusters: 2, standardise: false });
+    if ("error" in hcConstRaw) {
+      out.push(`HClust constant (raw): ${hcConstRaw.error}`);
+    } else if (hcConstRaw.hclustClusters?.length !== 2) {
+      out.push(`HClust constant (raw): ${hcConstRaw.hclustClusters?.length} clusters, expected 2`);
+    }
+    const hcOne = await runAnalysis("hierarchical-clustering", kmeans, { clusters: 1, standardise: false });
+    if (!("error" in hcOne) || !hcOne.error.includes("at least 2 clusters"))
+      out.push(`HClust k=1: ${"error" in hcOne ? hcOne.error : "ran without error"}, expected an error`);
+    const hcSix = await runAnalysis("hierarchical-clustering", kmeans, { clusters: 6, standardise: false });
+    if (!("error" in hcSix) || !hcSix.error.includes("fewer clusters than observations") || !hcSix.error.includes("k = 6"))
+      out.push(`HClust k=6: ${"error" in hcSix ? hcSix.error : "ran without error"}, expected an error naming k and n`);
+    const hcWardMan = await runAnalysis("hierarchical-clustering", kmeans, {
+      clusters: 2,
+      linkage: "ward.D2",
+      distance: "manhattan",
+      standardise: false,
+    });
+    if (!("error" in hcWardMan) || !hcWardMan.error.includes("Ward's linkage needs Euclidean distances"))
+      out.push(`HClust Ward+Manhattan: ${"error" in hcWardMan ? hcWardMan.error : "ran without error"}, expected a Ward/Euclidean error`);
+    const hcIdent = await runAnalysis("hierarchical-clustering", kmeansIdentical, { clusters: 2, standardise: false });
+    if ("error" in hcIdent) {
+      out.push(`HClust identical rows: ${hcIdent.error}`);
+    } else {
+      if (hcIdent.choosingK?.some((r) => r.gap != null))
+        out.push(`HClust identical rows Gap: ${JSON.stringify(hcIdent.choosingK?.map((r) => r.gap))}, expected all null`);
+      if (hcStat(hcIdent, "Suggested k (Gap 1-SE rule)") !== null)
+        out.push(`HClust identical rows suggested k: ${hcStat(hcIdent, "Suggested k (Gap 1-SE rule)")}, expected null`);
+      if (!hcIdent.notes.includes("Gap statistic is not defined"))
+        out.push(`HClust identical rows notes: missing Gap-not-defined note`);
+    }
+    // The wizard asks clusters, linkage, distance then standardisation, and
+    // finish makes the params (complete linkage, Euclidean, standardise by default).
+    const hcWizard = WIZARDS["hierarchical-clustering"]!;
+    const hcAsked = hcWizard.questions({}, readTable(kmeans)).flatMap((q) => (q ? [q.id] : []));
+    if (hcAsked.join(",") !== "clusters,linkage,distance,standardise")
+      out.push(`HClust wizard questions: ${hcAsked.join(",")}, expected clusters,linkage,distance,standardise`);
+    if (
+      JSON.stringify(
+        hcWizard.finish({ clusters: 3, linkage: "average", distance: "manhattan", standardise: "no" }, readTable(kmeans)),
+      ) !==
+      JSON.stringify({
+        type: "hierarchical-clustering",
+        params: { clusters: 3, linkage: "average", distance: "manhattan", standardise: false },
+      })
+    )
+      out.push(`HClust wizard finish: ${JSON.stringify(hcWizard.finish({ clusters: 3, linkage: "average", distance: "manhattan", standardise: "no" }, readTable(kmeans)))}`);
+    if (
+      JSON.stringify(hcWizard.finish({ clusters: 2 }, readTable(kmeans))) !==
+      JSON.stringify({
+        type: "hierarchical-clustering",
+        params: { clusters: 2, linkage: "complete", distance: "euclidean", standardise: true },
+      })
+    )
+      out.push(`HClust wizard finish (defaults): ${JSON.stringify(hcWizard.finish({ clusters: 2 }, readTable(kmeans)))}`);
+  }
   // with scipy.stats.ks_2samp(..., method='exact') (scipy 1.11.4) and verified
   // by a manual ECDF-difference calculation in the same script — both agreed
   // exactly. Tolerance: D exact to 1e-12; p to 1e-4 relative. The ties
