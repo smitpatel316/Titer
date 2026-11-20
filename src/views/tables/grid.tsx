@@ -18,6 +18,12 @@ import { XIcon } from "@phosphor-icons/react";
 import { cn, IconButton } from "../../ui/controls";
 import { gridMenu, type MenuZone } from "./grid-menu";
 import {
+  pasteLinkFromContent,
+  pasteLinkFromPath,
+  pickLinkedSource,
+  refreshLinkedFromFile,
+} from "./linked-data";
+import {
   columnsBeyond,
   dataEdge,
   fillRange,
@@ -409,6 +415,55 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
     if (cut) clear(range, "Cut");
   };
 
+  // Linked paste (Prism 11, seq 168): Edit ▸ Paste Link… and the grid menu's
+  // paste the picked file as a link at the selection's top-left cell, so the
+  // table updates when the file changes; Update Linked Data re-reads the
+  // source; Break Link keeps the values and drops the link.
+  const pasteLink = async (g: Range) => {
+    const picked = await pickLinkedSource();
+    if (!picked) return;
+    try {
+      const res =
+        "path" in picked
+          ? await pasteLinkFromPath(data, type, g.r0, g.c0, picked.path)
+          : await pasteLinkFromContent(data, type, g.r0, g.c0, picked.name, picked.content);
+      if (!res.changed) return;
+      update(res.data, "Paste Link");
+      if (res.droppedColumns)
+        await alert(
+          "Some Values Weren't Pasted",
+          `${res.droppedColumns === 1 ? "1 column" : `${res.droppedColumns} columns`} didn't fit in the table. Add groups or sub-columns in the Groups panel, then paste again.`,
+        );
+    } catch (err) {
+      await alert(
+        "Couldn't Paste Link",
+        err instanceof Error ? err.message : "This file couldn't be pasted as a link.",
+        "error",
+      );
+    }
+  };
+  const refreshLink = async () => {
+    try {
+      const res = await refreshLinkedFromFile(data, type);
+      if (!res.changed) return;
+      update(res.data, "Update Linked Data");
+      if (res.droppedColumns)
+        await alert(
+          "Some Values Weren't Updated",
+          `${res.droppedColumns === 1 ? "1 column" : `${res.droppedColumns} columns`} of the linked file didn't fit in the table. Add groups or sub-columns in the Groups panel, then update again.`,
+        );
+    } catch (err) {
+      await alert(
+        "Couldn't Update Linked Data",
+        err instanceof Error ? err.message : "The linked file couldn't be read.",
+        "error",
+      );
+    }
+  };
+  const breakLink = () => {
+    if (data.linkedPaste) update({ ...data, linkedPaste: undefined }, "Break Link");
+  };
+
   const onPaste = (e: React.ClipboardEvent) => {
     if (editing) return;
     e.preventDefault();
@@ -452,6 +507,9 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
       else if (cmd === "fill-down") fillDown();
       else if (cmd === "delete") clear(range);
       else if (cmd === "exclude") update(toggleExcluded(data, range), "Exclude / Include");
+      else if (cmd === "paste-link") void pasteLink(range);
+      else if (cmd === "refresh-link") void refreshLink();
+      else if (cmd === "break-link") breakLink();
     };
     window.addEventListener("titer:edit", onEdit);
     return () => window.removeEventListener("titer:edit", onEdit);
@@ -550,7 +608,21 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
       setSel({ anchor, focus });
       g = toRange({ anchor, focus });
     }
-    void popupMenu(gridMenu({ data, type, zone, range: g, update, rename: startRename, renameGroup: startRenameGroup, showGroups }));
+    void popupMenu(
+      gridMenu({
+        data,
+        type,
+        zone,
+        range: g,
+        update,
+        rename: startRename,
+        renameGroup: startRenameGroup,
+        showGroups,
+        pasteLink: (r) => void pasteLink(r),
+        refreshLink: () => void refreshLink(),
+        breakLink,
+      }),
+    );
   };
 
   /** Drag a header's right edge to resize its column; double-click it to fit the content. */

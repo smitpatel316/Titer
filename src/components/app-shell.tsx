@@ -49,6 +49,7 @@ export function AppShell() {
   const { projectUpdated, dismissProjectUpdated } = documentActions;
   const { prismImported, dismissPrismImported, dataImported, dismissDataImported } = documentActions;
   const { templateNotice, dismissTemplateNotice } = documentActions;
+  const { linkedNotice, dismissLinkedNotice } = documentActions;
   const { sidebar } = useLayout();
   const [fullscreen, setFullscreen] = React.useState(false);
   React.useEffect(() => onFullscreenChange(setFullscreen), []);
@@ -176,6 +177,29 @@ export function AppShell() {
         description={
           <>
             {dataImported?.map((line, i) => (
+              <React.Fragment key={i}>
+                {line}
+                <br />
+              </React.Fragment>
+            ))}
+          </>
+        }
+      />
+
+      {/* The "Linked Data" notice, in-app for the same Quirk-2 reason as
+          "Data File Imported" above: the linked sources a project open
+          couldn't refresh (moved, deleted, unreadable). The values stay as
+          they were saved; use Edit ▸ Update Linked Data to try again once
+          the file is back. */}
+      <Dialog
+        open={linkedNotice !== null}
+        onClose={dismissLinkedNotice}
+        onReturn={dismissLinkedNotice}
+        dismissLabel="OK"
+        title="Linked Data"
+        description={
+          <>
+            {linkedNotice?.map((line, i) => (
               <React.Fragment key={i}>
                 {line}
                 <br />

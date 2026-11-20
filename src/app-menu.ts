@@ -31,7 +31,17 @@ function savedTheme(): Theme {
 /** Text-editing commands go to a focused text field natively, everything else to the
  *  table grid (whose idle input, marked `data-grid-idle`, doesn't count as a text field).
  *  Undo and Redo go to the field being typed in, else to the project (the store). */
-export type EditCommand = "delete" | "select-all" | "fill-down" | "exclude" | "find" | "find-next" | "find-previous";
+export type EditCommand =
+  | "delete"
+  | "select-all"
+  | "fill-down"
+  | "exclude"
+  | "find"
+  | "find-next"
+  | "find-previous"
+  | "paste-link"
+  | "refresh-link"
+  | "break-link";
 const TEXT_COMMANDS: EditCommand[] = ["delete", "select-all"];
 
 /** Where the keyboard is: a text field, the data grid, or elsewhere. */
@@ -105,6 +115,8 @@ export function useAppMenu(doc: DocumentActions) {
   }, []);
   const tableType = activeTableId ? nodes[activeTableId]?.tableType : undefined;
   const hasTable = activeTableId !== null;
+  // Linked paste (Prism 11, seq 168): Update and Break act on the active table's link.
+  const hasLink = activeTableId ? Boolean(nodes[activeTableId]?.data?.linkedPaste) : false;
   // Wand needs an example: another table with ≥ 1 analysis or graph child.
   const wandAvailable = Object.values(nodes).some(
     (n) =>
@@ -238,6 +250,23 @@ export function useAppMenu(doc: DocumentActions) {
           { item: "Cut" },
           { item: "Copy" },
           { item: "Paste" },
+          {
+            // Linked paste (Prism 11, seq 168): paste a data file as a link
+            // at the selection, so the table updates when the file changes.
+            text: "Paste Link…",
+            enabled: hasTable,
+            action: () => edit("paste-link"),
+          },
+          {
+            text: "Update Linked Data",
+            enabled: hasTable && hasLink,
+            action: () => edit("refresh-link"),
+          },
+          {
+            text: "Break Link",
+            enabled: hasTable && hasLink,
+            action: () => edit("break-link"),
+          },
           sep,
           { text: "Delete", enabled: hasTable, action: () => edit("delete") },
           { text: "Select All", accelerator: "CmdOrCtrl+A", action: () => edit("select-all") },
@@ -413,6 +442,7 @@ export function useAppMenu(doc: DocumentActions) {
     focused,
     tableType,
     hasTable,
+    hasLink,
     wandAvailable,
     analysisKey,
     activeNodeId !== null,

@@ -2,9 +2,9 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 56 tools: 18 read-only (list/read/job/
+// Settings → AI connections. 57 tools: 18 read-only (list/read/job/
 // activity/cloud reads + feedback + the three 1.7.4 discovery tools)
-// and 38 mutating, via the L0 Rust→frontend dispatch + job queue —
+// and 39 mutating, via the L0 Rust→frontend dispatch + job queue —
 // run-analysis, build-graph, export and cloud tools included (Phase 2).
 // By default only the 5 Phase 1 read tools are advertised or callable:
 // the server-side allowlist (contract §12, `ALLOWLIST_GROUPS` below)
@@ -47,7 +47,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 56 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 57 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -1309,7 +1309,7 @@ pub async fn mcp_autostart_if_opted_in(app: AppHandle) {
 // stdio bridge is untouched — it stays a byte-forwarder (contract
 // §11.2) and naturally advertises only what the server advertises.
 //
-// Groups, not 56 checkboxes: every tool belongs to exactly one group
+// Groups, not 57 checkboxes: every tool belongs to exactly one group
 // (the unit test `allowlist_groups_cover_all_tools_once` pins the
 // inventory), so the enabled groups fully determine the advertised set.
 // The `destructive` group holds the two tools that delete data or run
@@ -1369,6 +1369,7 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
             "titer_create_table",
             "titer_write_table",
             "titer_edit_table",
+            "titer_refresh_linked_data",
             "titer_duplicate_table_family",
             "titer_rename_node",
             "titer_reorder_nodes",
@@ -2160,7 +2161,7 @@ async fn auth_middleware(
 /// the corruption hits every tool that returns non-ASCII text, not just
 /// transform-concentrations. Appending `; charset=utf-8` here, the one
 /// shared path every MCP response flows through, fixes the echo for all
-/// 56 tools. Returns the new header value, or `None` when the type is
+/// 57 tools. Returns the new header value, or `None` when the type is
 /// already labelled or is not one of the textual MCP response types.
 fn utf8_charset(content_type: &str) -> Option<String> {
     let lower = content_type.to_ascii_lowercase();
@@ -2737,8 +2738,8 @@ pub struct EditTableArgs {
     /// The grid-menu op: insert-rows, delete-rows, insert-columns,
     /// delete-columns, rename-column, rename-group, exclude-cells,
     /// include-cells, freeze-title, convert-comma-decimals,
-    /// add-calculated-variable, set-calculated-variable or
-    /// remove-calculated-variable.
+    /// add-calculated-variable, set-calculated-variable,
+    /// remove-calculated-variable, paste-link or remove-link.
     pub op: String,
     /// insert/delete-rows, insert/delete-columns: the 0-based row or
     /// column to act at (rows and columns are 0-based; column 0 holds the
@@ -2749,6 +2750,7 @@ pub struct EditTableArgs {
     #[serde(default)]
     pub count: Option<usize>,
     /// rename-column / rename-group: the column's index (same as `at`).
+    /// paste-link: the 0-based column to anchor the block at (default 0).
     #[serde(default)]
     pub column: Option<usize>,
     /// rename-column / rename-group: the new name.
@@ -2764,6 +2766,28 @@ pub struct EditTableArgs {
     /// (with or without its leading `=`), e.g. `=Dose * 2`.
     #[serde(default)]
     pub formula: Option<String>,
+    /// paste-link: the source file's path (`.csv`, `.tsv`, `.txt` or
+    /// `.xlsx`) — the block pasted stays linked to it.
+    #[serde(default)]
+    pub source_path: Option<String>,
+    /// paste-link: the 0-based row to anchor the block at (default 0).
+    #[serde(default)]
+    pub row: Option<usize>,
+    /// paste-link: whether the link updates itself when the source file
+    /// changes (default true).
+    #[serde(default)]
+    pub auto_update: Option<bool>,
+}
+
+/// Args for `titer_refresh_linked_data`: the table whose linked source file
+/// to re-read (Prism 11, seq 168).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RefreshLinkedDataArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The table's id, as shown by titer_list_tables.
+    pub table_id: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -4093,10 +4117,11 @@ impl TiterMcpServer {
 
     /// One tool for the grid-menu ops on a table: insert/delete rows and
     /// columns, rename a column or group, exclude/include cells, freeze
-    /// the row-title column, convert decimal commas to points.
+    /// the row-title column, convert decimal commas to points, paste a data
+    /// file as a link, or break that link.
     #[tool(
         name = "titer_edit_table",
-        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable or remove-calculated-variable. Rows and columns are 0-based; column 0 holds the row titles. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column.",
+        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, paste-link or remove-link. Rows and columns are 0-based; column 0 holds the row titles. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. paste-link { source_path, row?, column?, auto_update? } pastes a data file (.csv, .tsv, .txt or .xlsx) as a link at (row, column) — the values land and stay linked, so titer_refresh_linked_data re-reads the file into the same region later; auto_update (default true) refreshes the link when the project opens. remove-link { } keeps the values and drops the link.",
         annotations(
             title = "Edit table",
             read_only_hint = false,
@@ -4121,6 +4146,7 @@ impl TiterMcpServer {
             "name": args.name,
             "cells": args.cells.as_ref().map(|c| c.len()),
             "frozen": args.frozen,
+            "source_path": args.source_path,
         });
         let outcome: Result<serde_json::Value, String> = async {
             let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
@@ -4149,6 +4175,8 @@ impl TiterMcpServer {
                 "add-calculated-variable",
                 "set-calculated-variable",
                 "remove-calculated-variable",
+                "paste-link",
+                "remove-link",
             ];
             if !OPS.contains(&args.op.as_str()) {
                 return Err(format!("No edit op “{}” — the ops are {}.", args.op, OPS.join(", ")));
@@ -4193,6 +4221,24 @@ impl TiterMcpServer {
                     Some(n) if !n.trim().is_empty() => {}
                     _ => return Err(format!("op {} needs a non-empty name.", args.op)),
                 },
+                "paste-link" => {
+                    match &args.source_path {
+                        Some(p) if !p.trim().is_empty() => {}
+                        _ => return Err("op paste-link needs source_path (the data file to paste as a link).".into()),
+                    }
+                    if let Some(p) = &args.source_path {
+                        let lower = p.to_lowercase();
+                        if !(lower.ends_with(".csv")
+                            || lower.ends_with(".tsv")
+                            || lower.ends_with(".txt")
+                            || lower.ends_with(".xlsx"))
+                        {
+                            return Err(format!(
+                                "op paste-link needs source_path to name a data file (.csv, .tsv, .txt or .xlsx), not “{p}”."
+                            ));
+                        }
+                    }
+                }
                 _ => {}
             }
             self.run_table_job(
@@ -4208,6 +4254,9 @@ impl TiterMcpServer {
                     "cells": args.cells,
                     "frozen": args.frozen,
                     "formula": args.formula,
+                    "source_path": args.source_path,
+                    "row": args.row,
+                    "auto_update": args.auto_update,
                 }),
             )
             .await
@@ -4220,6 +4269,77 @@ impl TiterMcpServer {
             }
             Err(e) => {
                 self.state.log_call("titer_edit_table", log_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Re-read a table's linked source file into its region (Prism 11,
+    /// seq 168): the table pasted as a link from a data file updates when
+    /// that file changes. `updated` is false when the source matches what
+    /// is already there (no undo step, no dirty flag); `dropped_columns`
+    /// counts the source's columns a grouped table had no room for.
+    #[tool(
+        name = "titer_refresh_linked_data",
+        description = "Refresh a table's linked data: re-read the source file a paste-link block stays linked to, and write its current values into the same region (changed values replace, cells the source no longer covers are blanked, a larger source grows the table). Returns { project_id, table_id, rows, data_columns, updated, dropped_columns }. Errors when the table has no linked paste, or the source file can't be read. A table whose link updates itself already refreshes when its project opens; use this for a manual refresh, or a link with auto-update off.",
+        annotations(
+            title = "Refresh linked data",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn refresh_linked_data(
+        &self,
+        Parameters(args): Parameters<RefreshLinkedDataArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let log_args = serde_json::json!({
+            "project_id": args.project_id,
+            "table_id": args.table_id,
+        });
+        let outcome: Result<serde_json::Value, String> = async {
+            let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            let snap = self.state.snapshot_for_node(&id, snap, &args.table_id).await;
+            let node = find_node(&snap, &args.table_id).ok_or_else(|| {
+                format!("No table with id “{}” in project {id}. Ask titer_list_tables for the ids.", args.table_id)
+            })?;
+            if node.get("type").and_then(|v| v.as_str()) != Some("table") {
+                return Err(format!(
+                    "“{}” is not a table (it is a {}).",
+                    args.table_id,
+                    node.get("type").and_then(|v| v.as_str()).unwrap_or("node")
+                ));
+            }
+            if node
+                .get("data")
+                .and_then(|d| d.get("linkedPaste"))
+                .is_none()
+            {
+                return Err(format!(
+                    "“{}” has no linked data — paste a file as a link first (titer_edit_table paste-link).",
+                    args.table_id
+                ));
+            }
+            self.run_table_job(
+                &id,
+                "refresh-linked-data",
+                serde_json::json!({
+                    "table_id": args.table_id,
+                }),
+            )
+            .await
+        }
+        .await;
+        match outcome {
+            Ok(out) => {
+                self.state.log_call("titer_refresh_linked_data", log_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_refresh_linked_data", log_args, false, Some(&e));
                 Err(e)
             }
         }
@@ -6591,8 +6711,8 @@ impl TiterMcpServer {
         // Inspector 2.13.0 discards tools whose outputSchema has no `type`
         // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
         // returns, so `tools/list` prints `{"tools": []}` even though the
-        // server returns all 56. Every tool returns a JSON object, so stamp
-        // `type: "object"` on all 56 output schemas here — the single choke
+        // server returns all 57. Every tool returns a JSON object, so stamp
+        // `type: "object"` on all 57 output schemas here — the single choke
         // point — instead of touching each tool. `Arc::make_mut`
         // clone-on-writes: rmcp caches the `Value` schema in a thread-local
         // cache shared by all tools, so the cached Arc must never be
@@ -6829,10 +6949,10 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes up to 56 tools, gated by the allowlist in Settings → AI Connections \
+                It exposes up to 57 tools, gated by the allowlist in Settings → AI Connections \
                 (contract §12): by default only the 5 read tools below are enabled, and the user \
                 can enable more groups there — a tool that is not listed cannot be called. \
-                18 of the 56 are read-only and 38 change the open project. \
+                18 of the 57 are read-only and 39 change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_project_summary (the same discovery, as counts plus ids and names), \
                 titer_search (find a node by name), \
@@ -6846,7 +6966,7 @@ impl ServerHandler for TiterMcpServer {
                 titer_read_job, titer_list_jobs, and the cloud reads titer_cloud_status, titer_cloud_list, \
                 titer_cloud_metadata, titer_cloud_revisions. \
                 Mutating tools change the project: create/open/save/import/close projects, create/write/edit/ \
-                duplicate/rename/delete/reorder tables, undo/redo, run, re-run and freeze analyses, build/update/clone \
+                duplicate/rename/delete/reorder tables, paste a file as a link, refresh linked data, undo/redo, run, re-run and freeze analyses, build/update/clone \
                 graphs, make figures and info sheets, simulate data, apply methods and the wand, run scripts, \
                 export graphs/figures/tables, and use Box cloud storage. \
                 Most mutating tools answer directly (they wait up to 30 seconds, exports 120); \
@@ -8821,7 +8941,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 56 tools, so it enables every group first.
+        // this test drives all 57 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -8874,8 +8994,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            56,
-            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + three L4 analysis tools (run, re-run, freeze) + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools + four L8 export tools + one feedback tool + three 1.7.4 discovery tools (params, search, summary): {names:?}"
+            57,
+            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + ten L3 table tools + three L4 analysis tools (run, re-run, freeze) + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools + four L8 export tools + one feedback tool + three 1.7.4 discovery tools (params, search, summary): {names:?}"
         );
         for name in ["titer_read_job", "titer_list_jobs", "titer_cancel_job"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -9881,12 +10001,12 @@ mod tests {
 
     #[test]
     fn allowlist_groups_cover_all_tools_once() {
-        // The inventory pin: every tool in exactly one group, 56 total.
+        // The inventory pin: every tool in exactly one group, 57 total.
         // A lane that adds a tool must assign it a group here, or this
         // fails — an ungrouped tool would otherwise be silently hidden.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 56, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 57, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
@@ -9952,7 +10072,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 56, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 57, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema

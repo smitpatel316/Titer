@@ -93,6 +93,7 @@ import { isSummaryFormatValue, summarySubcolumns } from "./summary-format";
 import { groupRuns } from "./columns";
 import { regroupDropped, regroupTable, renestDropped, renestTable } from "../views/tables/table-data";
 import { readCalculated, recomputeCalculated } from "./calcvars";
+import { readLinkedPaste } from "./linked-paste";
 import { transformTable } from "./transform";
 import {
   assignLabels,
@@ -199,7 +200,7 @@ const NODE_KEYS = Object.keys({
 // prettier-ignore
 const DATA_KEYS = Object.keys({
   columns: 1, rows: 1, groups: 1, replicates: 1, subgroups: 1, rowGroups: 1, excluded: 1,
-  widths: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1,
+  widths: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1, linkedPaste: 1,
 } satisfies Record<keyof TableData, 1>);
 
 // Graph options without a default, by the kind of value they hold.
@@ -573,6 +574,8 @@ function readData(
   beyond: number;
   regroupDropped: string[];
   rowGroupsDropped: string[];
+  /** A stored link that failed validation (a hand-edited file) — dropped, so the caller can say so. */
+  linkedPasteDropped: boolean;
 } | null {
   const { seriesColors, pointColors, ...d } = canonical(raw, [...DATA_KEYS, "seriesColors", "pointColors"]);
   if (!Array.isArray(d.columns) || !Array.isArray(d.rows)) return null;
@@ -599,6 +602,11 @@ function readData(
   // non-empty formula; a stored error is dropped — the values are recomputed
   // below (and on every edit), and the error is re-derived then.
   const calculated = readCalculated(d.calculated, columns);
+  // A linked paste (Prism 11, seq 168) survives only as a well-formed link:
+  // a hand-edited file holding anything else loses the link (and the caller
+  // warns), instead of carrying a bogus source path into a refresh.
+  const linkedPaste = readLinkedPaste(d.linkedPaste);
+  const linkedPasteDropped = d.linkedPaste !== undefined && linkedPaste === undefined;
   // Groups of sub-columns: a Grouped table's, a Nested table's, or an XY table's data sets of replicates (after X).
   const grouping =
     (type === "grouped" || type === "xy" || type === "nested") && isCount(d.groups) && isCount(d.replicates);
@@ -617,6 +625,7 @@ function readData(
     // reads as SEM, the default, instead of carrying a bogus format.
     errorFormat: d.errorFormat === "sd" || d.errorFormat === "sem" ? d.errorFormat : undefined,
     calculated,
+    linkedPaste,
   } as TableData);
   const regroupDroppedNames: string[] = [];
   // Where the groups start: an XY table's X column comes first — unless the
@@ -681,6 +690,7 @@ function readData(
     beyond,
     regroupDropped: regroupDroppedNames,
     rowGroupsDropped: rowGroups.dropped,
+    linkedPasteDropped,
   };
 }
 
@@ -1405,6 +1415,12 @@ function readNode(
       issues.push({
         severity: "warning",
         message: `Table “${node.name}” left out ${dropped.length === 1 ? "a row group" : `${dropped.length} row groups`} it couldn't read: ${dropped.join(", ")}.`,
+      });
+    }
+    if (read.linkedPasteDropped) {
+      issues.push({
+        severity: "warning",
+        message: `Table “${node.name}” had a linked data entry it couldn't read; the link was dropped and its values kept as they were.`,
       });
     }
     node.parentId = null;

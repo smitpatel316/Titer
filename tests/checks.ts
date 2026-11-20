@@ -3063,6 +3063,9 @@ check("renaming a nested table's top-level group renames all its sub-columns, an
         groupColumn = c;
       },
       showGroups: () => {},
+      pasteLink: () => {},
+      refreshLink: () => {},
+      breakLink: () => {},
     });
   const items = menu(nested(), "nested");
   const texts = items.map((i) => ("text" in i ? i.text : ""));
@@ -19229,6 +19232,82 @@ check("linked-168: MCP refresh-linked-data updates a linked table, no-ops when u
     throw new Error("gone");
   };
   await rejects(harness.run("job-168-gone", "refresh-linked-data", { table_id: tableId }), /couldn't be read/);
+});
+
+check("linked-168: MCP paste-link pastes a file as a link and remove-link breaks it", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-168-pl-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B"],
+    rows: [
+      ["s1", 1, 2],
+      ["s2", 3, 4],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  harness.deps.readLinkedSource = async () => "9,8\n7,6\n";
+  const pasted = await harness.run("job-168-pl", "edit-table", {
+    table_id: tableId,
+    op: "paste-link",
+    source_path: "/tmp/lab/new.csv",
+    row: 0,
+    column: 1,
+  });
+  strictEqual((pasted.result as { rows: number }).rows, 2);
+  const linked = harness.state().nodes[tableId]?.data;
+  deepStrictEqual(linked?.linkedPaste, {
+    sourcePath: "/tmp/lab/new.csv",
+    sourceName: "new.csv",
+    kind: "csv",
+    row: 0,
+    col: 1,
+    rows: 2,
+    cols: 2,
+    autoUpdate: true,
+  });
+  strictEqual(linked?.rows[0]?.[1], "9");
+  strictEqual(linked?.rows[1]?.[2], "6");
+  // A file that isn't data is refused, and a link that is already there over
+  // identical values still stores (re-linking is not a no-op).
+  harness.deps.readLinkedSource = async () => "";
+  await rejects(
+    harness.run("job-168-pl-empty", "edit-table", { table_id: tableId, op: "paste-link", source_path: "/tmp/lab/e.csv" }),
+    /has no data to import/,
+  );
+  await rejects(
+    harness.run("job-168-pl-pdf", "edit-table", { table_id: tableId, op: "paste-link", source_path: "/tmp/lab/doc.pdf" }),
+    /data file/,
+  );
+  const removed = await harness.run("job-168-rm", "edit-table", { table_id: tableId, op: "remove-link" });
+  strictEqual((removed.result as { rows: number }).rows, 2);
+  strictEqual(harness.state().nodes[tableId]?.data?.linkedPaste, undefined);
+  strictEqual(harness.state().nodes[tableId]?.data?.rows[0]?.[1], "9");
+  await rejects(
+    harness.run("job-168-rm2", "edit-table", { table_id: tableId, op: "remove-link" }),
+    /no linked paste/,
+  );
+});
+
+check("linked-168: regrouping, renesting or switching summary format drops the link", () => {
+  const grouped: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2"],
+    rows: [["r1", "1", "2"]],
+    groups: 1,
+    replicates: 2,
+    linkedPaste: { ...linked168Link, row: 0, col: 1, rows: 1, cols: 2 },
+  };
+  strictEqual(regroupTable(grouped, 2, 2).linkedPaste, undefined);
+  strictEqual(applySummaryFormat(grouped, "mean-sd-n").linkedPaste, undefined);
+  const nested: TableData = {
+    columns: ["Title", "A:S1:R1", "A:S1:R2"],
+    rows: [["r1", "1", "2"]],
+    groups: 1,
+    subgroups: 1,
+    replicates: 2,
+    linkedPaste: { ...linked168Link, row: 0, col: 1, rows: 1, cols: 2 },
+  };
+  strictEqual(renestTable(nested, 2, 1, 2).linkedPaste, undefined);
 });
 
 // ── Run ──────────────────────────────────────────────────────────────────

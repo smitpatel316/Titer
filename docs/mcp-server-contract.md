@@ -1,6 +1,6 @@
 # MCP server contract — Titer (v1.6.0, Phase 2) ↔ stdio bridge
 
-**Status:** Phase 2 + v1.7.4 P0 (56 tools: read, write, run, graph, export, cloud).
+**Status:** Phase 2 + v1.7.4 P0 + 1.8.0 linked paste (57 tools: read, write, run, graph, export, cloud).
 **Server branch:** `check/v16-mcp-phase2` (v1.6.0); the v1.7.4 P0 tools
 (`titer_project_summary`, `titer_search`, `titer_get_analysis_params`,
 `titer_rerun_analysis`, `await_result` on `titer_run_analysis`) were
@@ -123,11 +123,11 @@ SSE stream (`text/event-stream`). Lifecycle:
    `2025-06-18`), `capabilities`, `clientInfo`. Server answers with its
    own `protocolVersion` (the negotiated one — the highest both support),
    `capabilities: { "tools": {} }`, `serverInfo: { "name": "titer",
-   "version": "<app version>" }`, and `instructions` (the 56 tools:
+   "version": "<app version>" }`, and `instructions` (the 57 tools:
    read-only vs mutating, the job model, cloud/export notes — the full
    text lives in `get_info` in `src-tauri/src/mcp.rs`).
 2. `notifications/initialized` — client sends after `initialize`.
-3. `tools/list` — returns all 56 tools in one page (`nextCursor`
+3. `tools/list` — returns all 57 tools in one page (`nextCursor`
    absent). No pagination.
 4. `tools/call` — `{ "name": "<tool>", "arguments": { … } }`.
 5. Sessions: 2025-11-25 clients use protocol-level sessions; the server
@@ -376,7 +376,8 @@ plainly ("couldn't read …") instead of silently skipping.
 |---|---|---|
 | `titer_create_table` | `project_id?`, `table_type` (`column` \| `xy` \| `grouped` \| `nested` \| `multiple` \| `contingency` \| `survival`), `name?`, `columns?: string[]`, `rows?: (string \| number \| null)[][]` | `{ project_id, table_id, name, table_type, rows, data_columns }`. Without `columns`/`rows` creates the empty table of that type (same as Table ▸ New Table). Column 0 is the row-title column; short rows pad with blanks. |
 | `titer_write_table` | `project_id?`, `table_id`, `columns: string[]`, `rows: (string \| number \| null)[][]`, `label?`, `excluded?: string[]` | `{ project_id, table_id, rows, data_columns }`. Whole-data replace via `updateTable` (the agent sends the whole table; cell-level edits are UI granularity). Validates shape against the table type and returns the validation error instead of writing a broken table. `rows` must be non-empty — a write with zero rows is refused (to empty a table use `titer_edit_table` delete-rows; to start an empty table use `titer_create_table` with no columns or rows). Excluded-cell marks (`"row,col"`) are preserved unless the call passes `excluded`, which replaces them. `label` is the Undo label ("Edit Table" when omitted). Destructive. |
-| `titer_edit_table` | `project_id?`, `table_id`, `op`, `...op_args` | `{ project_id, table_id, rows, data_columns }`. One tool for the grid-menu ops (`op` enum): `insert-rows { at, count? }`, `delete-rows { at, count? }`, `insert-columns { at, count? }`, `delete-columns { at, count? }`, `rename-column { column, name }`, `rename-group { column, name }`, `exclude-cells { cells: ["row,col", …] }`, `include-cells { cells: [...] }`, `freeze-title { frozen }`, `convert-comma-decimals {}`, `add-calculated-variable { name, formula }`, `set-calculated-variable { name, formula }`, `remove-calculated-variable { name }`. The calculated-variable ops only work on Multiple Variables tables (Prism 11, seq 156): whole-variable formulas (`=Dose * 2`), values recomputed live on every edit and usable in analyses like typed variables. Rows and columns are 0-based; column 0 holds the row titles; `count` defaults to 1. Destructive. |
+| `titer_edit_table` | `project_id?`, `table_id`, `op`, `...op_args` | `{ project_id, table_id, rows, data_columns }`. One tool for the grid-menu ops (`op` enum): `insert-rows { at, count? }`, `delete-rows { at, count? }`, `insert-columns { at, count? }`, `delete-columns { at, count? }`, `rename-column { column, name }`, `rename-group { column, name }`, `exclude-cells { cells: ["row,col", …] }`, `include-cells { cells: [...] }`, `freeze-title { frozen }`, `convert-comma-decimals {}`, `add-calculated-variable { name, formula }`, `set-calculated-variable { name, formula }`, `remove-calculated-variable { name }`, `paste-link { source_path, row?, column?, auto_update? }`, `remove-link {}`. The calculated-variable ops only work on Multiple Variables tables (Prism 11, seq 156): whole-variable formulas (`=Dose * 2`), values recomputed live on every edit and usable in analyses like typed variables. `paste-link` pastes a data file (`.csv`, `.tsv`, `.txt` or `.xlsx`) as a link at (`row`, `column`) — the values land and stay linked, so `titer_refresh_linked_data` re-reads the file into the same region later; `auto_update` (default true) refreshes the link when the project opens. `remove-link` keeps the values and drops the link. Rows and columns are 0-based; column 0 holds the row titles; `count` defaults to 1. Destructive. |
+| `titer_refresh_linked_data` | `project_id?`, `table_id` | `{ project_id, table_id, rows, data_columns, updated, dropped_columns }`. Re-reads the source file a `paste-link` block stays linked to into the same region (changed values replace, cells the source no longer covers are blanked, a larger source grows the table; a grouped table reports the source columns it had no room for as `dropped_columns`). `updated` is false when the source matches what is already there — no undo step, no dirty flag. Errors when the table has no linked paste, or the source file can't be read. A link with auto-update on already refreshes when its project opens. Destructive. |
 | `titer_duplicate_table_family` | `project_id?`, `table_id` | `{ project_id, table_id (new), children: { analyses, graphs } }` — table + its analyses/graphs cloned (same as Table ▸ Duplicate Family). The copy opens after the source table. |
 | `titer_rename_node` | `project_id?`, `node_id`, `name` | `{ project_id, node_id, name }` — any node type (table/analysis/graph/figure/info). |
 | `titer_delete_node` | `project_id?`, `node_id`, `confirm?` | `{ project_id, node_id, deleted: true }` or `{ needs_confirm: true, warning }` (two-step confirm, §5.4). The warning names what goes with it (table with analyses → "analyses kept as orphaned results, graphs deleted"). The last table is refused — a project is never empty. Destructive. |
@@ -563,15 +564,15 @@ explicit "Send to GitHub" click opens a pre-filled issue in the browser.
 | Read / discovery (Phase 1 + L1 + 1.7.4) | 12 |
 | Jobs (`titer_read_job`, `titer_list_jobs`, `titer_cancel_job`) | 3 |
 | Project / document | 5 |
-| Data tables | 9 |
+| Data tables | 10 |
 | Analyses (run + rerun + freeze + simulate + method + wand + script) | 7 |
 | Graphs / figures / info sheets | 7 |
 | Export | 4 |
 | Cloud | 9 |
-| **Total** | **56** |
+| **Total** | **57** |
 
 Annotations: 18 tools are `read_only_hint: true` (the 12 read tools +
-`read_job`/`list_jobs` + the 4 read-only cloud tools); the other 38
+`read_job`/`list_jobs` + the 4 read-only cloud tools); the other 39
 are mutating. `destructive_hint: true` on exactly six:
 `titer_write_table`, `titer_edit_table`, `titer_delete_node`,
 `titer_close_project`, `titer_run_script`, `titer_cloud_upload`.
@@ -581,7 +582,7 @@ is on, §6); everything else is `false`. `idempotent_hint` is per-tool (e.g. `ti
 `titer_rename_node`, `titer_reorder_nodes` are idempotent; create/undo/
 redo/run tools are not).
 
-The allowlist (§12) groups the 56 tools differently — by what the user
+The allowlist (§12) groups the 57 tools differently — by what the user
 turns on, not by what they do. The two groupings overlap (e.g. the
 `destructive` group holds the two tools that delete data or run
 scripts); §12 is the
@@ -595,11 +596,11 @@ The Phase 2 smoke runs against the **real server in a running Titer
 app** via a terminal CLI client (no Claude Desktop sign-in needed).
 It reads endpoint + token from `<app_data>/mcp/discovery.json`, speaks
 Streamable HTTP directly (initialize → tools/list → tools/call across
-all 56 tools), and prints a PASS/FAIL line per check; exit 0 only if
+all 57 tools), and prints a PASS/FAIL line per check; exit 0 only if
 every check passes. **Prerequisite:** in Titer, Settings → AI
 Connections, turn on every group under "What your AI can do" first —
 by default the server advertises only the 5 read tools (§12), and this
-smoke drives all 56. It drives one deterministic flow on a fresh project
+smoke drives all 57. It drives one deterministic flow on a fresh project
 it creates itself (no fixture ids — the ids it needs come from the
 tools' own outputs), plus the `tests/testdata/survival.pzfx` public
 fixture for the Prism-import step:
@@ -609,7 +610,7 @@ fixture for the Prism-import step:
    (default out dir: a fresh temp dir; exports/saves land there).
 3. `initialize` (`protocolVersion 2025-11-25`), then
    `notifications/initialized`, then `tools/list` — with every group on,
-   expect all 56 tools, nothing else (with only the default groups, §12
+   expect all 57 tools, nothing else (with only the default groups, §12
    says 5).
 4. Create a project → create an XY table → write data → summary with
    values → edit/rename/reorder/undo/redo/duplicate → simulate a
@@ -668,7 +669,7 @@ are expected to differ until the `buildGraphFigure` follow-up (§10.1).
 The in-process Rust smoke (`mcp_smoke_job_plumbing_over_http` in
 `src-tauri/src/mcp.rs`) is the other half: with every group enabled via
 its fixture allowlist record, it asserts `tools/list` returns exactly
-56 tools and drives the job plumbing + project/table/
+57 tools and drives the job plumbing + project/table/
 analysis/cloud/graph/composite/export tools over real HTTP with a
 completer task standing in for the frontend dispatcher. A second
 in-process smoke (`mcp_smoke_allowlist_default_over_http`) covers §12:
@@ -686,7 +687,7 @@ end).
 - Never add tools, prompts or resources of its own in front of the
   server: the bridge is a transport, not a server. It forwards stdio ↔
   Streamable HTTP and nothing else. It forwards whatever tools the
-  server lists — the 56 Phase 2 + 1.7.4 tools appear automatically via
+  server lists — the 57 Phase 2 + 1.7.4 + 1.8.0 tools appear automatically via
   `tools/list`; no bridge change was needed for Phase 2.
 - Never widen the bind (no `0.0.0.0`, no port forwarding, no tunnel).
 - Never log the token or table values.
@@ -758,7 +759,7 @@ tool must assign it a group, or the suite fails).
 | Read more (`read_more`) | `titer_read_figure`, `titer_read_info_sheet`, `titer_read_activity`, `titer_send_feedback` | no |
 | Discover projects and params (`discovery`) | `titer_project_summary`, `titer_search`, `titer_get_analysis_params` | no |
 | Open and save projects (`project`) | `titer_create_project`, `titer_open_project`, `titer_save_project`, `titer_close_project`, `titer_import_prism` | no |
-| Edit tables (`tables`) | `titer_create_table`, `titer_write_table`, `titer_edit_table`, `titer_duplicate_table_family`, `titer_rename_node`, `titer_reorder_nodes`, `titer_undo`, `titer_redo` | no |
+| Edit tables (`tables`) | `titer_create_table`, `titer_write_table`, `titer_edit_table`, `titer_refresh_linked_data`, `titer_duplicate_table_family`, `titer_rename_node`, `titer_reorder_nodes`, `titer_undo`, `titer_redo` | no |
 | Run analyses (`analyses`) | `titer_run_analysis`, `titer_rerun_analysis`, `titer_freeze_analysis`, `titer_simulate_data`, `titer_apply_method`, `titer_apply_wand`, `titer_read_job`, `titer_list_jobs`, `titer_cancel_job` | no |
 | Build graphs and figures (`graphs`) | `titer_build_graph`, `titer_update_graph`, `titer_clone_graph`, `titer_create_figure`, `titer_update_figure`, `titer_create_info_sheet`, `titer_update_info_sheet` | no |
 | Export (`export`) | `titer_export_graph`, `titer_export_figure`, `titer_export_office`, `titer_export_table_data` | no |
@@ -810,5 +811,5 @@ the same human-only boundary as enable/token (D4).
 - Antigravity's `mcp_config.json` is untouched: it keeps its 5-tool
   `enabledTools`. The server-side allowlist now makes that list real
   instead of advisory; the config file format does not change.
-- The server still *has* 56 tools. The allowlist decides which subset
+- The server still *has* 57 tools. The allowlist decides which subset
   a given client sees — it does not remove tools from the server.

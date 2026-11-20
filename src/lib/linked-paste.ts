@@ -11,8 +11,13 @@
 // 155's (`parseDelimited` / `parseXlsx`), so a linked source reads exactly
 // as an imported one does.
 import { detectDelimiter, parseDelimited, parseXlsx } from "./tabular-import";
-import { columnsBeyond, writeBlock } from "../views/tables/table-data";
+import { columnsBeyond, linkedPasteAfterDelete, linkedPasteAfterInsert, writeBlock } from "../views/tables/table-data";
 import type { LinkedPaste, TableData, TableType } from "../store/types";
+
+// The link's move/drop rules live with the structural edits in
+// table-data.ts (every insert/delete carries them); re-exported here so the
+// link engine is the one import for linked-paste work.
+export { linkedPasteAfterDelete, linkedPasteAfterInsert };
 
 type Cell = string | null;
 
@@ -80,7 +85,10 @@ export function blocksEqual(a: Cell[][], b: Cell[][]): boolean {
  *  only the columns it has — `droppedColumns` counts the rest, like the
  *  grid's own "Some Values Weren't Pasted" alert. An unchanged source
  *  returns the table itself (`changed: false`), so a refresh that finds
- *  nothing new leaves no undo step and no dirty flag. */
+ *  nothing new leaves no undo step and no dirty flag. A plain paste or type
+ *  over linked cells never breaks the link (only a structural edit that
+ *  moves or removes the anchor does — see table-data.ts): the next refresh
+ *  writes the source's values back over them, as in Prism. */
 export function applyLinkedBlock(
   data: TableData,
   link: LinkedPaste,
@@ -141,33 +149,13 @@ export async function refreshLinked(
   return applyLinkedBlock(data, link, await parseLinkedSource(link.sourceName, content), type);
 }
 
-/** The link after `count` rows/columns are inserted at `at` on `axis`: the
- *  anchor moves down/right with its values when the insert lands at or
- *  above/before it, and stays when the insert is past it. */
-export function linkedPasteAfterInsert(
-  link: LinkedPaste,
-  axis: "row" | "col",
-  at: number,
-  count: number,
-): LinkedPaste {
-  if (axis === "row") return link.row >= at ? { ...link, row: link.row + count } : link;
-  return link.col >= at ? { ...link, col: link.col + count } : link;
+/** The kind a source path names: `.xlsx` is a workbook, anything else
+ *  delimited text (`.csv` / `.tsv` / `.txt`). */
+export function linkedPasteKindOf(sourcePath: string): LinkedPasteKind {
+  return sourcePath.toLowerCase().endsWith(".xlsx") ? "xlsx" : "csv";
 }
 
-/** The link after `count` rows/columns are deleted from `at` on `axis` —
- *  or undefined, when the deletion takes the anchor itself: the region no
- *  longer lines up with the source, so the link goes rather than refresh
- *  into the wrong cells. A deletion past the anchor pulls it up/left. */
-export function linkedPasteAfterDelete(
-  link: LinkedPaste,
-  axis: "row" | "col",
-  at: number,
-  count: number,
-): LinkedPaste | undefined {
-  if (axis === "row") {
-    if (link.row >= at && link.row < at + count) return undefined;
-    return link.row >= at + count ? { ...link, row: link.row - count } : link;
-  }
-  if (link.col >= at && link.col < at + count) return undefined;
-  return link.col >= at + count ? { ...link, col: link.col - count } : link;
+/** Whether `sourcePath` names a file a link can be pasted from. */
+export function isLinkedSourcePath(sourcePath: string): boolean {
+  return /\.(csv|tsv|txt|xlsx)$/i.test(sourcePath);
 }
