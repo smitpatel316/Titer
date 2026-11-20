@@ -734,7 +734,7 @@ check("MCP merge-project merges a .hlx file's sheets into the project (seq 180)"
   // load (and says so in `warnings`), so the merge itself drops only the
   // figure panel whose graph isn't in the file.
   strictEqual(result.dropped.length, 1);
-  ok(result.dropped[0].includes("missing-graph"), "the dropped figure panel is named");
+  ok(result.dropped[0].includes("Gone"), "the dropped figure panel is named by its graph's name");
   strictEqual(result.warnings.length, 2);
   const after = harness.state();
   strictEqual(after.rootOrder.length, before.rootOrder.length + 6);
