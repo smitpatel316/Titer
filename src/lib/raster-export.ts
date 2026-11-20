@@ -5,6 +5,7 @@
 // size; a TIFF is the same raster with its DPI written in. Alpha is
 // composited onto white (the same rule as JPEG); no transparency, no CMYK.
 import { deflate, inflate } from "pako";
+import type { ColorMode } from "./vector-export";
 
 export type RgbaImage = { width: number; height: number; rgba: Uint8Array };
 
@@ -167,8 +168,10 @@ export function packBits(data: Uint8Array): Uint8Array {
 }
 
 /** A little-endian TIFF: RGB, PackBits, one strip, X/YResolution = dpi
- *  (rational, unit inch). Reads in Preview, Photoshop, ImageJ. */
-export function tiffEncode(image: RgbaImage, dpi: number): Uint8Array {
+ *  (rational, unit inch). Reads in Preview, Photoshop, ImageJ.
+ *  `colorMode` (seq 216, not yet implemented): "cmyk" / "grayscale". */
+export function tiffEncode(image: RgbaImage, dpi: number, colorMode: ColorMode = "color"): Uint8Array {
+  if (colorMode !== "color") throw new Error(`TIFF ${colorMode} is not implemented yet (seq 216).`);
   const { width, height } = image;
   const rgb = compositeOnWhite(image);
   const strip = packBits(rgb);
@@ -220,11 +223,19 @@ export function tiffEncode(image: RgbaImage, dpi: number): Uint8Array {
   return out;
 }
 
+/** A 24-bit BMP (seq 216, not yet implemented): uncompressed BGR, rows
+ *  bottom-up and padded to 4 bytes, DPI written as pixels per meter. */
+export function bmpEncode(_image: RgbaImage, _dpi: number): Uint8Array {
+  throw new Error("BMP export is not implemented yet (seq 216).");
+}
+
 const fmtPt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(4).replace(/0+$/, "").replace(/\.$/, ""));
 
 /** A PDF 1.4 with one page at the graph's printed size (points = px × 72/dpi)
- *  and one FlateDecode DeviceRGB image XObject. */
-export function pdfEncode(image: RgbaImage, dpi: number): Uint8Array {
+ *  and one FlateDecode DeviceRGB image XObject.
+ *  `colorMode` (seq 216, not yet implemented): "cmyk" / "grayscale". */
+export function pdfEncode(image: RgbaImage, dpi: number, colorMode: ColorMode = "color"): Uint8Array {
+  if (colorMode !== "color") throw new Error(`PDF ${colorMode} is not implemented yet (seq 216).`);
   const { width, height } = image;
   const rgb = compositeOnWhite(image);
   const compressed = deflate(rgb);

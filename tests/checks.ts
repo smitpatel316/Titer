@@ -206,6 +206,7 @@ import {
   composeFigureSvg,
   duplicateLabels,
   FIGURE_RESOLUTIONS,
+  figureDpi,
   figureExportSize,
   figureLabel,
   figurePixelSize,
@@ -233,7 +234,19 @@ import {
 import { tableToXlsx } from "../src/store/mcp-export";
 import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
-import { decodePng, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
+import { decodePng, bmpEncode, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
+import {
+  COLOR_MODES,
+  VectorExportError,
+  grayOf,
+  grayscaleFigure,
+  parseColor,
+  rgbToCmyk,
+  svgToEps,
+  svgToPdf,
+  validateExportColorMode,
+  type ColorMode,
+} from "../src/lib/vector-export";
 import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
 import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnovaParams, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, SimulationSpec } from "../src/stats/types";
 import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation/simulate";
@@ -9072,6 +9085,287 @@ check("export: the Tauri write path allows .pdf/.tif/.tiff graph exports", () =>
   for (const ext of ["pdf", "tif", "tiff"]) {
     ok(new RegExp(`"${ext}"`).test(allowed), `write_file allowlist must include .${ext}`);
   }
+});
+
+// ── Publication export (seq 216) ─────────────────────────────────────────
+// Pre-fix pins (Nov 20): EPS + BMP + vector PDF + 100 DPI + CMYK/grayscale
+// + export size. Each check below failed on the 584d7ff base and passes
+// with the lane. The representative SVG is Plotly-shaped (clipPath rect,
+// stroked paths incl. an arc, circle, rect, transformed legend group,
+// middle-anchored title text) — a live Plotly SVG was not generatable in
+// this container (Chrome cannot start: no WebGL domain policy), so the
+// real-Plotly end-to-end proof is owed on the Mac.
+const seq216Svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"><defs><clipPath id="xyplot"><rect x="80" y="20" width="500" height="400"/></clipPath></defs><rect x="0" y="0" width="640" height="480" fill="#ffffff"/><g clip-path="url(#xyplot)"><path d="M80,420 L580,420 L580,20" fill="none" stroke="#000000" stroke-width="1"/><path d="M100,400 L200,300 L300,250 L400,150" fill="none" stroke="#1f77b4" stroke-width="2"/><circle cx="100" cy="400" r="4" fill="#1f77b4" stroke="#ffffff" stroke-width="1"/><rect x="450" y="300" width="40" height="120" fill="#ff7f0e"/><path d="M100,400 A50,50 0 0 1 200,300" fill="none" stroke="#2ca02c"/><line x1="80" y1="420" x2="580" y2="420" stroke="#000000"/><text x="320" y="470" text-anchor="middle" font-family="Arial" font-size="12" fill="#000000">Dose (nM)</text><text x="320" y="40" text-anchor="middle" font-family="Arial" font-size="14" font-weight="bold" fill="#111111">Dose response</text></g><g transform="translate(500,60)"><rect x="0" y="0" width="16" height="16" fill="#1f77b4"/><text x="20" y="13" font-family="Arial" font-size="12" fill="#000000">Control</text></g></svg>`;
+
+check("seq 216: the export dialogs offer EPS/BMP and 100 DPI (formats + resolutions)", () => {
+  deepStrictEqual(
+    EXPORT_FORMATS.map((f) => f.value),
+    ["png", "jpeg", "svg", "pdf", "tiff", "eps", "bmp"],
+  );
+  deepStrictEqual([...RESOLUTIONS], ["100", "150", "300", "600", "900", "1200"]);
+  deepStrictEqual(FIGURE_RESOLUTIONS, ["100", "150", "300", "600", "900", "1200"]);
+  strictEqual(figureDpi("100"), "100");
+  strictEqual(figureDpi("999"), "600");
+  deepStrictEqual(
+    COLOR_MODES.map((m) => m.value),
+    ["color", "grayscale", "cmyk"],
+  );
+});
+
+check("seq 216: MCP advertises EPS/BMP, 100 DPI and color_mode (Rust pins)", () => {
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  for (const fmt of ["eps", "bmp"]) {
+    ok(mcp.includes(`"${fmt}"`), `EXPORT_FORMATS must include ${fmt}`);
+    ok(mcp.includes(`"${fmt}" => "${fmt}"`), `export_extension must map ${fmt}`);
+  }
+  ok(mcp.includes(`"100"`), "EXPORT_DPIS must include 100");
+  ok(mcp.includes("color_mode"), "export tools must take a color_mode arg");
+  ok(mcp.includes("format png/jpeg/svg/pdf/tiff/eps/bmp"), "export descriptions must list eps/bmp");
+  ok(mcp.includes("dpi 100/150/300/600/900/1200"), "export descriptions must list 100 DPI");
+  const main = readFileSync("src-tauri/src/main.rs", "utf8");
+  const allowed = writeFileAllowlist(main);
+  for (const ext of ["eps", "bmp"]) {
+    ok(new RegExp(`"${ext}"`).test(allowed), `write_file allowlist must include .${ext}`);
+  }
+  // The frontend dispatcher mirrors the new formats/extensions.
+  const exporter = readFileSync("src/store/mcp-export.ts", "utf8");
+  ok(exporter.includes(`eps: "eps"`), "EXPORT_EXTENSION must map eps");
+  ok(exporter.includes(`bmp: "bmp"`), "EXPORT_EXTENSION must map bmp");
+  ok(exporter.includes("colorMode") || exporter.includes("color_mode"), "dispatcher must thread color_mode");
+});
+
+check("seq 216: SVG colours parse (hex/rgb/rgba/named) and map to gray/CMYK", () => {
+  deepStrictEqual(parseColor("#f00"), { r: 255, g: 0, b: 0, a: 1 });
+  deepStrictEqual(parseColor("#1f77b4"), { r: 31, g: 119, b: 180, a: 1 });
+  deepStrictEqual(parseColor("rgb(0, 128, 0)"), { r: 0, g: 128, b: 0, a: 1 });
+  deepStrictEqual(parseColor("rgba(255, 0, 0, 0.5)"), { r: 255, g: 0, b: 0, a: 0.5 });
+  deepStrictEqual(parseColor("red"), { r: 255, g: 0, b: 0, a: 1 });
+  strictEqual(parseColor("none"), null);
+  strictEqual(parseColor("not-a-colour"), null);
+  // Rec. 601 luma: red 76, green 150, blue 29, white 255, black 0.
+  strictEqual(grayOf({ r: 255, g: 0, b: 0, a: 1 }), 76);
+  strictEqual(grayOf({ r: 0, g: 255, b: 0, a: 1 }), 150);
+  strictEqual(grayOf({ r: 0, g: 0, b: 255, a: 1 }), 29);
+  strictEqual(grayOf({ r: 255, g: 255, b: 255, a: 1 }), 255);
+  // Naive CMYK: red [0,1,1,0], white [0,0,0,0], black [0,0,0,1].
+  deepStrictEqual(rgbToCmyk(1, 0, 0), [0, 1, 1, 0]);
+  deepStrictEqual(rgbToCmyk(1, 1, 1), [0, 0, 0, 0]);
+  deepStrictEqual(rgbToCmyk(0, 0, 0), [0, 0, 0, 1]);
+  const mid = rgbToCmyk(31 / 255, 119 / 255, 180 / 255);
+  for (const [i, want] of [0.8278, 0.3389, 0, 0.2941].entries())
+    ok(Math.abs(mid[i]! - want) < 0.001, `cmyk #1f77b4 [${i}]: ${mid[i]}, want ${want}`);
+});
+
+check("seq 216: CMYK is refused for PNG/JPEG/SVG/BMP and allowed for EPS/PDF/TIFF", () => {
+  for (const fmt of ["png", "jpeg", "svg", "bmp"]) {
+    throws(() => validateExportColorMode(fmt, "cmyk"), /EPS, PDF and TIFF/);
+    validateExportColorMode(fmt, "color");
+    validateExportColorMode(fmt, "grayscale");
+  }
+  for (const fmt of ["eps", "pdf", "tiff"]) {
+    validateExportColorMode(fmt, "cmyk");
+    validateExportColorMode(fmt, "grayscale");
+    validateExportColorMode(fmt, "color");
+  }
+  throws(() => validateExportColorMode("png", "sepia" as ColorMode), /Unknown colour mode/);
+});
+
+check("seq 216: the grayscale figure walk maps colours, never labels", () => {
+  const fig = {
+    data: [
+      {
+        x: [1, 2],
+        y: [2, 3],
+        name: "Control",
+        marker: { color: "#ff0000", size: 8 },
+        line: { color: "rgb(0, 128, 0)" },
+        error_y: { color: "#0000ff" },
+        colorscale: [
+          [0, "#ff0000"],
+          [1, "#0000ff"],
+        ],
+        fillcolor: "none",
+      },
+    ],
+    layout: {
+      title: { text: "Control" },
+      paper_bgcolor: "#ffffff",
+      xaxis: { title: { text: "Dose" }, linecolor: "#111111" },
+    },
+  };
+  const gray = grayscaleFigure(fig);
+  const trace = gray.data[0] as Record<string, Record<string, unknown> | unknown>;
+  strictEqual((trace.marker as Record<string, unknown>).color, "#4c4c4c");
+  strictEqual((trace.line as Record<string, unknown>).color, "#4b4b4b");
+  strictEqual((trace.error_y as Record<string, unknown>).color, "#1d1d1d");
+  deepStrictEqual(trace.colorscale, [
+    [0, "#4c4c4c"],
+    [1, "#1d1d1d"],
+  ]);
+  strictEqual(trace.fillcolor, "none");
+  strictEqual(trace.name, "Control");
+  const layout = gray.layout as Record<string, Record<string, unknown>>;
+  strictEqual((layout.title as Record<string, unknown>).text, "Control");
+  strictEqual(layout.paper_bgcolor, "#ffffff");
+  strictEqual(((layout.xaxis as Record<string, unknown>).title as Record<string, unknown>).text, "Dose");
+  // The input figure is not mutated.
+  strictEqual(((fig.data[0] as Record<string, unknown>).marker as Record<string, unknown>).color, "#ff0000");
+});
+
+check("seq 216: vector PDF keeps the drawing vector (no image XObject)", () => {
+  const pdf = svgToPdf(seq216Svg);
+  const text = new TextDecoder().decode(pdf);
+  ok(text.startsWith("%PDF-1.4"), text.slice(0, 20));
+  ok(text.includes("/MediaBox [0 0 480 360]"), "640×480 px at 72/96 = 480×360 pt");
+  ok(!text.includes("/Subtype /Image"), "a vector PDF embeds no raster image");
+  ok(!text.includes("/XObject"), "a vector PDF has no image XObject");
+  ok(text.includes("/F1"), "text uses a base-14 font");
+  ok(text.includes("(Dose \\(nM\\))"), "text is drawn, parens escaped");
+  ok(text.includes("(Dose response)"), "the bold title is drawn");
+  // Vector operators: rect, path lines, the arc's curves, fill + stroke.
+  ok(/[\d.]+ [\d.]+ [\d.]+ [\d.]+ re/.test(text), "rect operator present");
+  ok(text.includes(" m ") || text.includes("\nm "), "moveto present");
+  ok(text.includes(" l ") || text.includes("\nl "), "lineto present");
+  ok(text.includes(" c ") || text.includes("\nc "), "curveto present (arc → cubics)");
+  ok(text.includes(" f") || text.includes(" f\n"), "fill present");
+  ok(text.includes(" S") || text.includes(" S\n"), "stroke present");
+  ok(text.includes("1 0 0 -1"), "the flipped text matrix keeps glyphs upright");
+});
+
+check("seq 216: vector PDF in grayscale has no RGB operators; CMYK has CMYK operators", () => {
+  const gray = new TextDecoder().decode(svgToPdf(seq216Svg, { colorMode: "grayscale" }));
+  ok(!/ [\d.]+ [\d.]+ [\d.]+ rg/.test(gray), "grayscale PDF sets no RGB fill");
+  ok(!/ [\d.]+ [\d.]+ [\d.]+ RG/.test(gray), "grayscale PDF sets no RGB stroke");
+  ok(/ [\d.]+ g/.test(gray), "grayscale PDF sets gray fill");
+  const cmyk = new TextDecoder().decode(svgToPdf(seq216Svg, { colorMode: "cmyk" }));
+  ok(/ [\d.]+ [\d.]+ [\d.]+ [\d.]+ k/.test(cmyk), "CMYK PDF sets CMYK fill");
+  ok(!/ [\d.]+ [\d.]+ [\d.]+ rg/.test(cmyk), "CMYK PDF sets no RGB fill");
+});
+
+check("seq 216: vector PDF refuses raster/gradient content instead of dropping it", () => {
+  const withImage = seq216Svg.replace("</svg>", `<image x="0" y="0" width="10" height="10" href="data:image/png;base64,iVBORw0KGgo="/></svg>`);
+  throws(() => svgToPdf(withImage), VectorExportError);
+  const withGradient = seq216Svg
+    .replace("<defs>", `<defs><linearGradient id="g1"><stop offset="0" stop-color="#fff"/></linearGradient>`)
+    .replace(`fill="#ff7f0e"`, `fill="url(#g1)"`);
+  throws(() => svgToPdf(withGradient), VectorExportError);
+  throws(() => svgToEps(withGradient), VectorExportError);
+});
+
+check("seq 216: EPS is true vector PostScript with a BoundingBox", () => {
+  const eps = new TextDecoder().decode(svgToEps(seq216Svg));
+  ok(eps.startsWith("%!PS-Adobe-3.0 EPSF-3.0"), eps.slice(0, 40));
+  ok(eps.includes("%%BoundingBox: 0 0 480 360"), "640×480 px at 72/96 = 480×360 pt");
+  ok(eps.includes("%%EndComments"), "EPS header closes");
+  for (const op of ["moveto", "lineto", "curveto", "fill", "stroke", "setrgbcolor", "show"]) {
+    ok(eps.includes(op), `EPS contains ${op}`);
+  }
+  ok(eps.includes("(Dose \\(nM\\))"), "EPS draws the axis title, parens escaped");
+  ok(eps.includes("%%EOF"), "EPS ends");
+  const gray = new TextDecoder().decode(svgToEps(seq216Svg, { colorMode: "grayscale" }));
+  ok(gray.includes("setgray"), "grayscale EPS sets gray");
+  ok(!gray.includes("setrgbcolor"), "grayscale EPS sets no RGB colour");
+  const cmyk = new TextDecoder().decode(svgToEps(seq216Svg, { colorMode: "cmyk" }));
+  ok(cmyk.includes("setcmykcolor"), "CMYK EPS sets CMYK colour");
+  ok(!cmyk.includes("setrgbcolor"), "CMYK EPS sets no RGB colour");
+});
+
+check("seq 216: BMP is 24-bit bottom-up BGR with DPI in the header", () => {
+  const bmp = bmpEncode({ width: 4, height: 3, rgba: fixtureRgba }, 1200);
+  strictEqual(String.fromCharCode(bmp[0]!, bmp[1]!), "BM");
+  const view = new DataView(bmp.buffer);
+  strictEqual(view.getUint32(2, true), bmp.length, "file size in the header");
+  strictEqual(view.getUint32(10, true), 54, "pixel data starts after the headers");
+  strictEqual(view.getUint32(14, true), 40, "BITMAPINFOHEADER");
+  strictEqual(view.getInt32(18, true), 4, "width");
+  strictEqual(view.getInt32(22, true), 3, "height (positive = bottom-up)");
+  strictEqual(view.getUint16(26, true), 1, "planes");
+  strictEqual(view.getUint16(28, true), 24, "24-bit");
+  strictEqual(view.getUint32(30, true), 0, "uncompressed");
+  strictEqual(view.getUint32(38, true), 47244, "1200 DPI = 47244 px/m");
+  strictEqual(view.getUint32(42, true), 47244, "1200 DPI = 47244 px/m");
+  // Bottom-up BGR: the first stored row is the fixture's last (black, red, green, blue).
+  deepStrictEqual([...bmp.subarray(54, 66)], [0, 0, 0, 0, 0, 255, 0, 255, 0, 255, 0, 0]);
+  // A 3-wide row pads to 4 bytes: 9 data bytes + 3 pad bytes.
+  const narrow = bmpEncode(
+    { width: 3, height: 1, rgba: new Uint8Array([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255]) },
+    300,
+  );
+  strictEqual(narrow.length, 54 + 12, "3 px × 3 B = 9, padded to 12");
+  deepStrictEqual([...narrow.subarray(54 + 9, 54 + 12)], [0, 0, 0]);
+});
+
+check("seq 216: TIFF CMYK writes Photometric 5 / 4 samples; grayscale writes Photometric 1", () => {
+  const readTags = (tiff: Uint8Array) => {
+    const view = new DataView(tiff.buffer);
+    const count = view.getUint16(8, true);
+    const tags = new Map<number, { type: number; count: number; value: number }>();
+    for (let i = 0; i < count; i++) {
+      const at = 10 + i * 12;
+      tags.set(view.getUint16(at, true), {
+        type: view.getUint16(at + 2, true),
+        count: view.getUint32(at + 4, true),
+        value: view.getUint32(at + 8, true),
+      });
+    }
+    return tags;
+  };
+  const cmyk = tiffEncode({ width: 4, height: 3, rgba: fixtureRgba }, 300, "cmyk");
+  const cTags = readTags(cmyk);
+  strictEqual(cTags.get(262)?.value, 5, "Photometric: CMYK");
+  strictEqual(cTags.get(277)?.value, 4, "4 samples per pixel");
+  const cStrip = cmyk.subarray(cTags.get(273)!.value, cTags.get(273)!.value + cTags.get(279)!.value);
+  const cOut: number[] = [];
+  for (let i = 0; i < cStrip.length;) {
+    const n = cStrip[i]!;
+    if (n <= 127) {
+      for (let j = 0; j <= n; j++) cOut.push(cStrip[i + 1 + j]!);
+      i += n + 2;
+    } else if (n >= 129) {
+      for (let j = 0; j < 257 - n; j++) cOut.push(cStrip[i + 1]!);
+      i += 2;
+    } else i += 1;
+  }
+  // Naive CMYK: red [0,255,255,0], green [255,0,255,0], blue [255,255,0,0], white [0,0,0,0].
+  deepStrictEqual(new Uint8Array(cOut.slice(0, 16)), new Uint8Array([0, 255, 255, 0, 255, 0, 255, 0, 255, 255, 0, 0, 0, 0, 0, 0]));
+  const gray = tiffEncode({ width: 4, height: 3, rgba: fixtureRgba }, 300, "grayscale");
+  const gTags = readTags(gray);
+  strictEqual(gTags.get(262)?.value, 1, "Photometric: BlackIsZero");
+  strictEqual(gTags.get(277)?.value, 1, "1 sample per pixel");
+  const gStrip = gray.subarray(gTags.get(273)!.value, gTags.get(273)!.value + gTags.get(279)!.value);
+  const gOut: number[] = [];
+  for (let i = 0; i < gStrip.length;) {
+    const n = gStrip[i]!;
+    if (n <= 127) {
+      for (let j = 0; j <= n; j++) gOut.push(gStrip[i + 1 + j]!);
+      i += n + 2;
+    } else if (n >= 129) {
+      for (let j = 0; j < 257 - n; j++) gOut.push(gStrip[i + 1]!);
+      i += 2;
+    } else i += 1;
+  }
+  deepStrictEqual(new Uint8Array(gOut.slice(0, 4)), new Uint8Array([76, 150, 29, 255]));
+});
+
+check("seq 216: raster PDF in CMYK/Grayscale uses the matching colour space", () => {
+  const cmyk = pdfEncode({ width: 4, height: 3, rgba: fixtureRgba }, 1200, "cmyk");
+  const cText = new TextDecoder().decode(cmyk);
+  ok(cText.includes("/ColorSpace /DeviceCMYK"), "CMYK raster PDF");
+  const cStart = cText.indexOf("stream\n") + "stream\n".length;
+  const cEnd = cText.indexOf("\nendstream", cStart);
+  deepStrictEqual(
+    new Uint8Array(inflateSync(cmyk.subarray(cStart, cEnd)).slice(0, 8)),
+    new Uint8Array([0, 255, 255, 0, 255, 0, 255, 0]),
+  );
+  const gray = pdfEncode({ width: 4, height: 3, rgba: fixtureRgba }, 1200, "grayscale");
+  const gText = new TextDecoder().decode(gray);
+  ok(gText.includes("/ColorSpace /DeviceGray"), "grayscale raster PDF");
+  const gStart = gText.indexOf("stream\n") + "stream\n".length;
+  const gEnd = gText.indexOf("\nendstream", gStart);
+  deepStrictEqual(
+    new Uint8Array(inflateSync(gray.subarray(gStart, gEnd)).slice(0, 4)),
+    new Uint8Array([76, 150, 29, 255]),
+  );
 });
 
 // ── Analyses ─────────────────────────────────────────────────────────────
