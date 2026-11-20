@@ -178,11 +178,22 @@ exist — build it with `scripts/build-stdio-bridge.sh`.)
 ## Verify the connection
 
 1. In the App: **Customizations → Installed → MCP Servers** — the server
-   shows with a green status dot and “5 tools enabled”. (⋮ → **Restart**,
-   **Disable**, **Delete** manage it.) In the CLI: `/mcp`.
-2. Ask the agent: “List my open Titer projects and their tables.” It
+   shows with a green status dot and “5 tools enabled” by default (the
+   five read tools in the snippets above). Since 1.7.4 the server
+   enforces the allowlist: Antigravity only ever sees the tools Titer
+   has enabled, so the count here is the allowlisted count, not the
+   server's full set. (In 1.7.3 the server advertised all 52 tools and
+   Antigravity 2.33.0 showed the full count, so the old “5 tools
+   enabled” expectation did not hold — that is the bug 1.7.4 fixes.)
+   (⋮ → **Restart**, **Disable**, **Delete** manage it.) In the CLI:
+   `/mcp`.
+2. To give the agent more tools, enable them in Titer under **Settings →
+   AI connections** — the count in Antigravity rises to match what you
+   enabled. Enabling write tools lets the agent change your project, so
+   only enable what you trust the app with.
+3. Ask the agent: “List my open Titer projects and their tables.” It
    should call `titer_list_projects` and report what Titer has open.
-3. Cross-check in Titer: **Settings → AI connections → Activity log**
+4. Cross-check in Titer: **Settings → AI connections → Activity log**
    records every tool call (tool name + args summary, never values or the
    token).
 
