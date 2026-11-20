@@ -1327,7 +1327,7 @@ function linesGroup({ graphType, options, set }: SectionContext) {
 
 /** Error bars (and the center line drawn with them): thickness, caps, color, and
  *  which way they go. */
-function errorsGroup({ graphType, options, set, replicates }: SectionContext) {
+function errorsGroup({ graphType, options, set, replicates, allNames }: SectionContext) {
   // An XY graph draws error bars around its replicates' centers.
   const xyErrors =
     replicates &&
@@ -1336,41 +1336,59 @@ function errorsGroup({ graphType, options, set, replicates }: SectionContext) {
       (graphType === "xy-scatter" && options.xyReplicates === "mean"));
   const bars = (WITH_ERROR_BARS.has(graphType) || xyErrors) && options.error !== "none";
   const line = WITH_CENTER_LINE.has(graphType);
-  if (!bars && !line) return null;
+  // An XY table holding an "<X> error" column (Prism's X-error subcolumn, see
+  // pzfx.ts) can draw X error bars too — independently of the Y bars, so an
+  // X-only error display is possible. The toggle shows only while the column
+  // exists; while it is on, the column is the bars, not a series.
+  const xErrorName =
+    GRAPHS[graphType].family === "xy" && allNames.length > 0 ? `${allNames[0]} error` : undefined;
+  const hasXError = xErrorName !== undefined && allNames.includes(xErrorName);
+  if (!bars && !line && !hasXError) return null;
   return (
-    <Group title={!bars ? "Center line" : line ? "Center line and error bars" : "Error bars"}>
-      <ThicknessRow
-        label="Thickness"
-        value={options.errorWidth}
-        limits={GRAPH_LIMITS.errorWidth}
-        onChange={(errorWidth) => set({ errorWidth })}
-      />
-      {bars && (
-        <Stepper
-          label="Caps"
-          value={options.errorCaps}
-          {...GRAPH_LIMITS.errorCaps}
-          step={1}
-          onChange={(errorCaps) => set({ errorCaps })}
+    <Group title={line && bars ? "Center line and error bars" : line ? "Center line" : "Error bars"}>
+      {hasXError && (
+        <Toggle
+          label={`X error bars (${xErrorName})`}
+          checked={options.xError}
+          onChange={(xError) => set({ xError })}
         />
       )}
-      <ColorRow
-        label="Color"
-        palette={paletteOf(options)}
-        color={options.errorColor}
-        same="Same as Series"
-        onChange={(color) => set({ errorColor: color === SAME_AS_FILL ? undefined : color })}
-      />
-      {bars && (
-        <Choice
-          label="Direction"
-          value={options.errorDirection}
-          onChange={(errorDirection) => set({ errorDirection })}
-          items={[
-            { value: "both", label: "Both" },
-            { value: "above", label: graphType === "grouped-hbars" ? "Right" : "Above" },
-          ]}
-        />
+      {(bars || line) && (
+        <>
+          <ThicknessRow
+            label="Thickness"
+            value={options.errorWidth}
+            limits={GRAPH_LIMITS.errorWidth}
+            onChange={(errorWidth) => set({ errorWidth })}
+          />
+          {bars && (
+            <Stepper
+              label="Caps"
+              value={options.errorCaps}
+              {...GRAPH_LIMITS.errorCaps}
+              step={1}
+              onChange={(errorCaps) => set({ errorCaps })}
+            />
+          )}
+          <ColorRow
+            label="Color"
+            palette={paletteOf(options)}
+            color={options.errorColor}
+            same="Same as Series"
+            onChange={(color) => set({ errorColor: color === SAME_AS_FILL ? undefined : color })}
+          />
+          {bars && (
+            <Choice
+              label="Direction"
+              value={options.errorDirection}
+              onChange={(errorDirection) => set({ errorDirection })}
+              items={[
+                { value: "both", label: "Both" },
+                { value: "above", label: graphType === "grouped-hbars" ? "Right" : "Above" },
+              ]}
+            />
+          )}
+        </>
       )}
     </Group>
   );

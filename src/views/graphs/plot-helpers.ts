@@ -470,17 +470,35 @@ export const centers = (cols: Column[], center: GraphOptions["center"]) =>
 export const errorOf = (v: number[], kind: GraphOptions["error"]) =>
   kind === "sem" ? sem(v) : kind === "ci" ? (v.length < 2 ? 0 : tCrit95(v.length - 1) * sem(v)) : sd(v);
 
+/** An XY table's X-error column, if one was imported: Prism's X-error
+ *  subcolumn arrives as a column named "<X> error" (see pzfx.ts) — a Y
+ *  series by the table's shape, but metadata about X, not a data set. */
+export function xErrorColumn(columns: Column[], x: Column): Column | undefined {
+  return columns.find((c) => c.name === `${x.name} error`);
+}
+
 /** A Y data set of an XY graph, as drawn: each value where X has one, keyed so it can be
  *  picked and styled; or, for replicates shown as their center (`xyReplicates`), each X's
- *  center (mean or median) and its error (none when error bars are off). */
+ *  center (mean or median) and its error (none when error bars are off). `xErrorCol` is
+ *  the table's X-error column (see `xErrorColumn`): while `options.xError` is on, each
+ *  point also carries its row's X error, aligned by row — the same value for every
+ *  replicate of that row, 0 where the column holds none. */
 export function xyDrawn(
   x: Column,
   set: DataSet,
   options: GraphOptions,
-): { x: number[]; y: number[]; keys?: string[]; errors?: number[] } {
+  xErrorCol?: Column,
+): { x: number[]; y: number[]; keys?: string[]; errors?: number[]; xErrors?: number[] } {
+  const xErrors = (rows: number[]): number[] | undefined =>
+    options.xError && xErrorCol ? rows.map((r) => xErrorCol.byRow[r] ?? 0) : undefined;
   if (set.columns.length === 1 || options.xyReplicates === "each") {
     const points = xyPoints(x, set);
-    return { x: points.x, y: points.y, keys: points.rows.map((r, i) => pointKeyOf(points.columns[i], r)) };
+    return {
+      x: points.x,
+      y: points.y,
+      keys: points.rows.map((r, i) => pointKeyOf(points.columns[i], r)),
+      xErrors: xErrors(points.rows),
+    };
   }
   const rows = xyRows(x, set);
   return {
@@ -489,6 +507,7 @@ export function xyDrawn(
     ...(options.error === "none"
       ? {}
       : { errors: rows.values.map((v) => (v.length < 2 ? 0 : errorOf(v, options.error))) }),
+    xErrors: xErrors(rows.rows),
   };
 }
 

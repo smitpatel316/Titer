@@ -155,6 +155,13 @@ export interface GraphOptions {
   xyStyle: Choice<"xyStyle">;
   // An XY table's replicates: each X's center and error (`center`, `error`), or each value.
   xyReplicates: Choice<"xyReplicates">;
+  // X error bars on XY graphs (Prism's X-error subcolumn, imported as the
+  // "<X> error" column): drawn from that column's values whenever it exists,
+  // whether or not Y error bars are on — Prism couples them, Titer does not,
+  // so an X-only error display is possible. While on, the error column is
+  // used as the bars, not drawn as a series. Off: the column stays a series,
+  // as before.
+  xError: boolean;
   // Pie/donut (axis-less proportion charts): each column is one slice, sized by the
   // column's total (sum) or mean; percentages vs. raw values on the slice labels.
   pieValue: Choice<"pieValue">;
@@ -411,6 +418,7 @@ export const DEFAULT_GRAPH_OPTIONS: GraphOptions = {
   estimationViolin: false,
   xyStyle: "points",
   xyReplicates: "mean",
+  xError: false,
   pieValue: "sum",
   pieShowPercent: true,
   groupLayout: "interleaved",

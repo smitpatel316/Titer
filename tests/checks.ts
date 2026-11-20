@@ -139,7 +139,7 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, applyNumberFormats, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, logScaleOffered, movedText, numberTickformat, paintOf, perRowSummaryStats, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, applyNumberFormats, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, logScaleOffered, movedText, numberTickformat, paintOf, perRowSummaryStats, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, withCaps, xErrorColumn, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -3036,6 +3036,123 @@ check("seq 220: MCP update-graph accepts a number format and rejects a bad one",
     () => executeUpdateGraph(job("job-220-shape", { yNumberFormat: ".2f" }), deps),
     /must be an object/,
   );
+});
+
+// seq 222: X error bars on XY graphs (Prism's X-error subcolumn, imported as
+// the "<X> error" column). The error column is used as the bars, not drawn
+// as a series, while xError is on.
+const xyWithXError = (): TableData => ({
+  columns: ["Title", "X", "Y1", "Y2", "X error"],
+  rows: [
+    ["r1", "1", "10", "20", "0.1"],
+    ["r2", "2", "30", "40", "0.2"],
+    ["r3", "3", "50", "60", "0.3"],
+  ],
+});
+
+const errorXOf = (trace: unknown): number[] | undefined => {
+  const err = (trace as { error_x?: { array?: number[] } }).error_x;
+  return err?.array;
+};
+
+check("seq 222: xErrorColumn finds the '<X> error' column; xyDrawn aligns its values with the points", () => {
+  const cols = readTable(xyWithXError()).columns;
+  const x = cols[0]!;
+  const err = xErrorColumn(cols, x);
+  strictEqual(err?.name, "X error");
+  strictEqual(xErrorColumn(readTable(xyNumbers()).columns, readTable(xyNumbers()).columns[0]!), undefined);
+  const mean = { ...newGraphOptions("xy-scatter"), xyReplicates: "mean" as const, xError: true };
+  const ySet = { name: "Y1", columns: [cols[1]!] };
+  deepStrictEqual(xyDrawn(x, ySet, mean, err).xErrors, [0.1, 0.2, 0.3]);
+  strictEqual(xyDrawn(x, ySet, { ...mean, xError: false }, err).xErrors, undefined);
+  strictEqual(xyDrawn(x, ySet, mean, undefined).xErrors, undefined);
+  // Replicates drawn each: the row's X error repeats for each replicate point.
+  const repCols = readTable({
+    columns: ["Title", "X", "Y:Y1", "Y:Y2", "X error"],
+    rows: [
+      ["r1", "1", "10", "12", "0.1"],
+      ["r2", "2", "30", "32", "0.2"],
+    ],
+  }).columns;
+  const repSet = { name: "Y", columns: [repCols[1]!, repCols[2]!] };
+  const each = xyDrawn(repCols[0]!, repSet, { ...mean, xyReplicates: "each" as const }, xErrorColumn(repCols, repCols[0]!));
+  deepStrictEqual(each.x, [1, 1, 2, 2]);
+  deepStrictEqual(each.xErrors, [0.1, 0.1, 0.2, 0.2]);
+});
+
+check("seq 222: XY scatter, bar and area draw error_x from the X-error column and stop drawing it as a series", () => {
+  const options = { ...newGraphOptions("xy-scatter"), xError: true };
+  for (const type of ["xy-scatter", "xy-bar", "xy-area"] as const) {
+    const fig = GRAPHS[type].build(readTable(xyWithXError()).columns, options, paintOf(options, 2));
+    strictEqual(fig.data.length, 2, `${type} draws the two Y sets, not the error column`);
+    deepStrictEqual(
+      fig.data.map((t) => (t as { name?: string }).name),
+      ["Y1", "Y2"],
+    );
+    for (const trace of fig.data) deepStrictEqual(errorXOf(trace), [0.1, 0.2, 0.3]);
+  }
+  // Off: today's behaviour is untouched — the error column stays a series and
+  // no X bars are drawn.
+  const off = GRAPHS["xy-scatter"].build(
+    readTable(xyWithXError()).columns,
+    newGraphOptions("xy-scatter"),
+    paintOf(newGraphOptions("xy-scatter"), 3),
+  );
+  deepStrictEqual(
+    off.data.map((t) => (t as { name?: string }).name),
+    ["Y1", "Y2", "X error"],
+  );
+  for (const trace of off.data) strictEqual(errorXOf(trace), undefined);
+  // On, but no error column: no bars, and nothing is hidden.
+  const noCol = GRAPHS["xy-scatter"].build(
+    readTable(xyNumbers()).columns,
+    { ...newGraphOptions("xy-scatter"), xError: true },
+    paintOf(newGraphOptions("xy-scatter"), 2),
+  );
+  deepStrictEqual(
+    noCol.data.map((t) => (t as { name?: string }).name),
+    ["Y1", "Y2"],
+  );
+  for (const trace of noCol.data) strictEqual(errorXOf(trace), undefined);
+});
+
+check("seq 222: MCP update-graph accepts xError and rejects a non-boolean", () => {
+  const nodes: Record<string, ProjectNode> = {
+    table_1: {
+      id: "table_1",
+      type: "table",
+      name: "XY",
+      parentId: null,
+      tableType: "xy",
+      data: xyWithXError(),
+    },
+    graph_1: {
+      id: "graph_1",
+      type: "graph",
+      name: "Scatter",
+      parentId: "table_1",
+      graphType: "xy-scatter",
+      graphOptions: newGraphOptions("xy-scatter"),
+    },
+  };
+  const state = { nodes, rootOrder: ["table_1"], childOrder: { table_1: ["graph_1"] }, activeNodeId: "table_1" };
+  const updated: { id: string; options: GraphOptions }[] = [];
+  const deps: GraphJobDeps = {
+    getState: () => state,
+    updateGraph: (id, options) => {
+      updated.push({ id, options });
+    },
+  };
+  const job = (jobId: string, options: unknown) => ({
+    job_id: jobId,
+    project_id: "project-1",
+    action: "update-graph",
+    args: { graph_id: "graph_1", options },
+    status: "queued" as const,
+  });
+  executeUpdateGraph(job("job-222-ok", { xError: true }), deps);
+  strictEqual(updated[0]?.options.xError, true);
+  throws(() => executeUpdateGraph(job("job-222-bad", { xError: "yes" }), deps), /must be a boolean/);
 });
 
 check("summary subcolumns: the heatmap plots the Mean column, not the mean of Mean/SD/N", () => {

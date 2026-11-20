@@ -194,6 +194,7 @@ const BOOLEAN_FIELDS = [
   "bars",
   "showPoints",
   "estimationViolin",
+  "xError",
   "pieShowPercent",
   "regShowLine",
   "regShowBand",

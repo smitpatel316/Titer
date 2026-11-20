@@ -263,6 +263,13 @@ export function graphSeries(type: GraphType, data: TableData, tableType: TableTy
     const x = variablePair(readTable(data).numeric, options)[0];
     return x ? [x.name] : [];
   }
+  // An XY graph with X error bars on draws its "<X> error" column as the
+  // bars, not as a series — the Series section styles only what is drawn.
+  if (family === "xy" && options.xError) {
+    const first = readTable(data).columns[0]?.name;
+    const series = seriesOf(data, tableType);
+    return first ? series.filter((s) => s !== `${first} error`) : series;
+  }
   return seriesOf(data, tableType);
 }
 
