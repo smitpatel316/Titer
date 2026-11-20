@@ -1264,7 +1264,13 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
                 ["bonferroni", "Yes, pairs I choose — Bonferroni correction"],
                 ["sidak", "Yes, pairs I choose — Šídák correction"],
                 ["holm-sidak", "Yes, pairs I choose — Holm–Šídák correction (more powerful)"],
-                ["fdr", "Yes, pairs I choose — False Discovery Rate (Benjamini-Hochberg) correction"],
+                // False Discovery Rate is a one-way ANOVA post-hoc (seq 191):
+                // repeated-measures ANOVA has no FDR path (its CIs come from
+                // `pa`, which has no step-up critical value), so it is not
+                // offered there.
+                ...(anova
+                  ? [["fdr", "Yes, pairs I choose — False Discovery Rate (Benjamini-Hochberg) correction"] as [string, string]]
+                  : []),
                 ["lsd", "Yes, pairs I choose — Fisher's LSD (no correction)"],
               ];
       const pairs = pairLabels(chosenSets(a) ?? setNames(table));
