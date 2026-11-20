@@ -120,4 +120,9 @@
   .floating-note-add {
     display: none !important;
   }
+  /* Seq 227: a printout is the sheet, not the app around it — the sidebar
+   * and inspector are both <aside>s (SidePanel), so both go. */
+  aside {
+    display: none !important;
+  }
 }

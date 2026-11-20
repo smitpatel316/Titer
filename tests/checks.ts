@@ -32,6 +32,7 @@ import {
 } from "../src/lib/template";
 import { highlightStyle, searchProject } from "../src/lib/project-search";
 import { galleryItems } from "../src/lib/gallery";
+import { loadPrintSettings, printPageCss, savePrintSettings } from "../src/lib/print-settings";
 import { kaplanMeier } from "../src/lib/kaplan-meier";
 import { transformTable } from "../src/lib/transform";
 import {
@@ -392,6 +393,33 @@ check("the gallery lists every graph in sidebar order, with its chart and table"
     { id: "g2", name: "Boxes", graphLabel: "Box and violin", tableName: "Growth" },
   ]);
   deepStrictEqual(galleryItems(nodes, ["t1"], { t1: ["a1"] }), []);
+});
+
+// ── Preferences (seq 225) + Print / Page Setup (seq 227) ─────────────────
+
+check("print settings default to Letter portrait, and the @page rule carries them", () => {
+  deepStrictEqual(loadPrintSettings(), { paperSize: "letter", orientation: "portrait", marginMm: 12, scale: 1 });
+  strictEqual(
+    printPageCss({ paperSize: "a4", orientation: "landscape", marginMm: 10, scale: 0.8 }),
+    "@page { size: a4 landscape; margin: 10mm; }\n@media print { body { zoom: 0.8; } }",
+  );
+  // A stored record with a bad paper size or an out-of-range margin/scale
+  // falls back (or clamps) instead of breaking the print.
+  const store = new Map<string, string>();
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+  };
+  try {
+    savePrintSettings({ paperSize: "a4", orientation: "portrait", marginMm: 0, scale: 2 });
+    deepStrictEqual(loadPrintSettings(), { paperSize: "a4", orientation: "portrait", marginMm: 0, scale: 2 });
+    store.set("titer.print", JSON.stringify({ paperSize: "tabloid", marginMm: 99, scale: 9 }));
+    deepStrictEqual(loadPrintSettings(), { paperSize: "letter", orientation: "portrait", marginMm: 25, scale: 2 });
+    store.set("titer.print", "not json");
+    deepStrictEqual(loadPrintSettings(), { paperSize: "letter", orientation: "portrait", marginMm: 12, scale: 1 });
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
 });
 
 // ── .hlx files ───────────────────────────────────────────────────────────

@@ -31,6 +31,9 @@ import type { FigureGrid, FigureLabelStyle, FigurePanel, FigureSize, Resolution,
 export type { ProjectNode } from "./types";
 
 /** What the universal selector is currently choosing. */
+/** The Preferences dialog's sections (seq 225). */
+export type PreferenceSection = "general" | "appearance" | "ai" | "feedback" | "print";
+
 type Selector =
   | { kind: "new-table" }
   | { kind: "new-analysis"; tableId: string; forGraph?: ForGraph }
@@ -46,7 +49,8 @@ type Selector =
   | { kind: "conflict" }
   | { kind: "remote-picker" }
   | { kind: "cloud-settings" }
-  | { kind: "ai-connections" };
+  | { kind: "ai-connections" }
+  | { kind: "preferences"; section?: PreferenceSection };
 
 /** An analysis made for a graph's stars: of the data sets it shows (its wizard's data set
  *  questions answered with them), then chosen for it, the graph staying in front. */

@@ -28,6 +28,8 @@ import { WandDialog } from "./wand-dialog";
 import { SimulateDataDialog } from "./simulate-data-dialog";
 import { CloneGraphDialog } from "./clone-graph-dialog";
 import { ScriptDialog } from "./script-dialog";
+import { PreferencesDialog } from "./preferences-dialog";
+import { PRINT_SETTINGS_CHANGED_EVENT, loadPrintSettings, printPageCss } from "../lib/print-settings";
 import { useStartAnalysis } from "../views/analyses/use-analysis-launcher";
 import { GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
 
@@ -52,6 +54,23 @@ export function AppShell() {
   const { sidebar } = useLayout();
   const [fullscreen, setFullscreen] = React.useState(false);
   React.useEffect(() => onFullscreenChange(setFullscreen), []);
+  // Seq 227: the `@page` rule for the print settings (paper, orientation,
+  // margins, scale), injected once and re-injected whenever Preferences
+  // changes them — File ▸ Print and a script's Print both print on it.
+  React.useEffect(() => {
+    const apply = () => {
+      let style = document.getElementById("titer-print-page");
+      if (!style) {
+        style = document.createElement("style");
+        style.id = "titer-print-page";
+        document.head.appendChild(style);
+      }
+      style.textContent = printPageCss(loadPrintSettings());
+    };
+    apply();
+    window.addEventListener(PRINT_SETTINGS_CHANGED_EVENT, apply);
+    return () => window.removeEventListener(PRINT_SETTINGS_CHANGED_EVENT, apply);
+  }, []);
   const hidden = HIDDEN_SIDEBAR[fullscreen ? "fullscreen" : "window"];
   const { nodes, selector, closeSelector, createTable, createGraph, isDirty } = useProjectStore();
   const startAnalysis = useStartAnalysis();
@@ -61,7 +80,7 @@ export function AppShell() {
 
   return (
     <div className="flex h-full">
-      {!sidebar && <SidebarToggle className={`fixed top-3 z-10 ${hidden.button}`} />}
+      {!sidebar && <SidebarToggle className={`fixed top-3 z-10 print:hidden ${hidden.button}`} />}
       <ProjectSidebar />
       <main
         className="flex min-w-0 flex-1 flex-col"
@@ -77,7 +96,7 @@ export function AppShell() {
             through to save()'s own save panel. */}
         <div
           data-tauri-drag-region
-          className="flex h-10 shrink-0 items-center gap-2 border-b border-separator pr-3 pl-[var(--toolbar-inset,16px)]"
+          className="flex h-10 shrink-0 items-center gap-2 border-b border-separator pr-3 pl-[var(--toolbar-inset,16px)] print:hidden"
         >
           <Button
             disabled={!isDirty}
@@ -188,6 +207,8 @@ export function AppShell() {
       <ConverterDialog />
 
       <AiConnectionsDialog />
+
+      <PreferencesDialog />
 
       <FeedbackConsentDialog />
 

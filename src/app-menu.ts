@@ -5,6 +5,7 @@
 import { WIZARDS } from "./views/analyses/wizards";
 import * as React from "react";
 import { isNative, onFocusChange, setTheme, type Theme } from "./native";
+import { THEME_CHANGED_EVENT, THEME_KEY, loadTheme } from "./lib/theme";
 import { projectItems, separator as sep, setMenuBar } from "./menus";
 import { useProjectStore } from "./store/use-project-store";
 import { useLayout } from "./store/use-layout";
@@ -15,18 +16,6 @@ import { analysisOptionsForTable, analysisOptionsKey } from "./views/analyses";
 import { GRAPH_OPTIONS_BY_TABLE } from "./views/graphs";
 import { useStartAnalysis } from "./views/analyses/use-analysis-launcher";
 import { SECTIONS } from "./views/graphs/format-panel";
-
-const THEME_KEY = "titer.theme";
-
-/** The appearance chosen in View ▸ Appearance, which every window shares. */
-function savedTheme(): Theme {
-  try {
-    const theme = localStorage.getItem(THEME_KEY);
-    return theme === "light" || theme === "dark" ? theme : "system";
-  } catch {
-    return "system";
-  }
-}
 
 /** Text-editing commands go to a focused text field natively, everything else to the
  *  table grid (whose idle input, marked `data-grid-idle`, doesn't count as a text field).
@@ -73,7 +62,7 @@ export function useAppMenu(doc: DocumentActions) {
     enabled,
     action: () => setLayout(shown === view ? { inspector: false } : { inspector: true, panel: view }),
   });
-  const [theme, setThemeState] = React.useState(savedTheme);
+  const [theme, setThemeState] = React.useState(loadTheme);
 
   // Menu actions run long after the menu was built: read everything through this ref.
   const latest = React.useRef({ store, doc, startAnalysis });
@@ -90,13 +79,21 @@ export function useAppMenu(doc: DocumentActions) {
     }
   }, [theme]);
 
+  // The theme the Preferences dialog set (seq 225) re-reads at once, not
+  // only when the window comes to the front.
+  React.useEffect(() => {
+    const onChanged = () => setThemeState(loadTheme());
+    window.addEventListener(THEME_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(THEME_CHANGED_EVENT, onChanged);
+  }, []);
+
   // Only the window in front sets the menu; it reads the theme again, which another window may have changed.
   const [focused, setFocused] = React.useState(false);
   React.useEffect(
     () =>
       onFocusChange((focus) => {
         setFocused(focus);
-        if (focus) setThemeState(savedTheme());
+        if (focus) setThemeState(loadTheme());
       }),
     [],
   );
@@ -206,6 +203,10 @@ export function useAppMenu(doc: DocumentActions) {
           sep,
           { text: "Save", accelerator: "CmdOrCtrl+S", enabled: isDirty, action: () => latest.current.doc.save() },
           { text: "Save As…", accelerator: "CmdOrCtrl+Shift+S", action: () => latest.current.doc.save(true) },
+          sep,
+          // Seq 227: Print prints the sheet as shown, on the paper Page Setup chose.
+          { text: "Page Setup…", action: () => latest.current.store.openSelector({ kind: "preferences", section: "print" }) },
+          { text: "Print…", accelerator: "CmdOrCtrl+P", action: () => window.print() },
           sep,
           // Save Special (plan 38): a template / example / method file is this
           // project with a `template` envelope block, under a `.pzt`/`.pzm`
@@ -405,9 +406,16 @@ export function useAppMenu(doc: DocumentActions) {
       {
         text: "Settings",
         items: [
+          // Seq 225: Preferences holds every setting — General, Appearance,
+          // AI Connections, Feedback and Print — in one place. ⌘, is the
+          // macOS Preferences key, so it opens Preferences, not AI Connections.
+          {
+            text: "Preferences…",
+            accelerator: "CmdOrCtrl+,",
+            action: () => latest.current.store.openSelector({ kind: "preferences" }),
+          },
           {
             text: "AI Connections…",
-            accelerator: "CmdOrCtrl+,",
             action: () => latest.current.store.openSelector({ kind: "ai-connections" }),
           },
         ],
