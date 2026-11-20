@@ -16877,7 +16877,7 @@ check("the gallery holds one blank template per table type, plus worked examples
   }
   const ids = TEMPLATES.map((t) => t.id);
   strictEqual(new Set(ids).size, ids.length, "template ids are unique");
-  const examples = TEMPLATES.filter((t) => t.kind === "example");
+  const examples: BuiltInTemplate[] = TEMPLATES.filter((t) => t.kind === "example");
   strictEqual(examples.length, 4, `want 4 example templates, got ${examples.length}`);
   for (const e of examples) {
     ok((e.data?.rows.length ?? 0) > 0, `${e.id} has sample data`);
