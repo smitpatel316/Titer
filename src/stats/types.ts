@@ -23,6 +23,7 @@ export type AnalysisType =
   | "simple-logistic-regression"
   | "two-way-anova"
   | "three-way-anova"
+  | "multifactor-anova"
   | "multiple-t-tests"
   | "nested-t-test"
   | "nested-anova"
@@ -227,6 +228,10 @@ export const THREE_WAY_POSTHOCS = [...POSTHOCS, "dunnett", "games-howell", "fdr"
  *  first factor's levels within each level of the term's last factor (simple
  *  effects — each level its own family). On a main effect the two are the same. */
 export const THREE_WAY_POSTHOC_SCOPES = ["term", "simple"] as const;
+/** The most factors a multifactor ANOVA takes (Prism allows any number; the
+ *  cell count — and the term list — grows exponentially, so five is the
+ *  practical cap: five 2-level factors already need 32 cells). */
+export const MULTIFACTOR_MAX_FACTORS = 5;
 export const CORRECTIONS = ["holm", "fdr", "none"] as const;
 /** The multiplicity corrections Prism's multiple-t-tests analysis offers
  *  (Prism 11 Stats Guide, "Options for multiple t tests"). `holm` /
@@ -782,6 +787,24 @@ export interface ThreeWayAnovaParams {
   /** The FDR approach's Q (%), the maximum false-discovery rate (`posthoc:
    *  "fdr"` only); omitted, 5. */
   fdrQ?: number;
+}
+
+/** Params for "multifactor-anova" on a Multiple Variables table: one numeric
+ *  response column and 1–5 categorical factor columns (text levels, or numeric
+ *  codes read as categories), fit on the complete rows. Prism's multifactor
+ *  ANOVA tests the main effects and every two- and three-way interaction —
+ *  never a four-way or higher one — ordinary (non-repeated measures) only.
+ *  `posthoc` pairwise-compares the means of one term (`posthocTerm`, e.g.
+ *  "Treatment" or "Treatment:Time"), Tukey- or Bonferroni-corrected — the
+ *  Šídák / Holm–Šídák / LSD options in POSTHOCS are not offered here, and the
+ *  runner refuses them rather than silently running Bonferroni. */
+export interface MultifactorAnovaParams {
+  /** Omitted defaults to the first numeric column. */
+  response?: string;
+  /** Omitted defaults to every other column with at least two levels. */
+  factors?: string[];
+  posthoc: (typeof POSTHOCS)[number];
+  posthocTerm?: string;
 }
 
 /** Params for "nested-anova" on a Nested table: optional post-hoc pairwise
@@ -1408,6 +1431,7 @@ export type AnalysisParams = DataSetsParam &
     | SimpleLogisticRegressionParams
     | TwoWayAnovaParams
     | ThreeWayAnovaParams
+    | MultifactorAnovaParams
     | MultipleTTestsParams
     | NestedAnovaParams
     | MultipleRegressionParams

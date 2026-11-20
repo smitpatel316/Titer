@@ -4018,6 +4018,70 @@ check("row groups survive a save and reload; a broken band is left out", () => {
   );
 });
 
+check("a multifactor ANOVA's params round-trip, including its free-form post-hoc term", () => {
+  const withAnalysis: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "T",
+        parentId: null,
+        tableType: "multiple",
+        data: {
+          columns: ["Title", "Response", "Treatment", "Time"],
+          rows: [
+            ["", "1", "Drug", "Day 1"],
+            ["", "2", "Placebo", "Day 2"],
+          ],
+        },
+      },
+      a1: {
+        id: "a1",
+        type: "analysis",
+        name: "A",
+        parentId: "t1",
+        analysisType: "multifactor-anova",
+        analysisParams: {
+          response: "Response",
+          factors: ["Treatment", "Time"],
+          posthoc: "tukey",
+          posthocTerm: "Treatment:Time",
+        },
+      },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: ["a1"] },
+    activeNodeId: "t1",
+  };
+  // The post-hoc term names this analysis's own factors — a free name, not
+  // one of the three-way ANOVA's fixed terms — so the reader keeps it.
+  deepStrictEqual(read(serializeProjectFile(withAnalysis)).project.nodes.a1.analysisParams, {
+    response: "Response",
+    factors: ["Treatment", "Time"],
+    posthoc: "tukey",
+    posthocTerm: "Treatment:Time",
+  });
+  // The MCP validator takes the same free-form term, and still rejects what
+  // the analysis doesn't take.
+  deepStrictEqual(
+    validateAnalysisParams("multifactor-anova", {
+      response: "Response",
+      factors: ["Treatment", "Time"],
+      posthoc: "tukey",
+      posthocTerm: "Treatment:Time",
+    }).params,
+    { response: "Response", factors: ["Treatment", "Time"], posthoc: "tukey", posthocTerm: "Treatment:Time" },
+  );
+  ok(
+    validateAnalysisParams("multifactor-anova", {
+      response: "Response",
+      factors: ["Treatment"],
+      posthoc: "tukey",
+      design: "ordinary",
+    }).errors.length > 0,
+  );
+});
+
 check("a malformed row-group band no longer blocks the three-way ANOVA", async () => {
   const project: ProjectFilePayload = {
     nodes: {
@@ -4488,6 +4552,78 @@ check("three-way ANOVA: full post-hoc suite, simple effects and FDR (seq 192)", 
   }
   ok(fdr.notes.includes("FDR approach"), `notes must name the FDR approach, got: ${fdr.notes}`);
 });
+check("the multifactor ANOVA wizard asks for response, factors and a post-hoc term", () => {
+  const table = readTable({
+    columns: ["Title", "Response", "Treatment", "Time", "Genotype"],
+    rows: [
+      ["", "10.3", "Placebo", "Day 1", "WT"],
+      ["", "9.7", "Placebo", "Day 1", "WT"],
+      ["", "12.3", "Drug", "Day 2", "KO"],
+    ],
+  });
+  const wizard = WIZARDS["multifactor-anova"]!;
+  const asked = (a: Record<string, string | number | string[] | undefined>) =>
+    wizard.questions(a, table).filter((q): q is Question => q !== false);
+  // The post-hoc term question only appears once factors are picked (its
+  // options are the terms those factors make).
+  deepStrictEqual(
+    asked({}).map((q) => q.id),
+    ["response", "factors", "posthoc"],
+  );
+  deepStrictEqual(
+    asked({ response: "Response", factors: ["Treatment", "Time", "Genotype"], posthoc: "tukey" }).map((q) => q.id),
+    ["response", "factors", "posthoc", "posthocTerm"],
+  );
+  deepStrictEqual(
+    asked({ response: "Response", factors: ["Treatment", "Time", "Genotype"], posthoc: "none" }).map((q) => q.id),
+    ["response", "factors", "posthoc"],
+  );
+  const factorsQ = asked({ response: "Response" }).find((q) => q.id === "factors");
+  ok(factorsQ && factorsQ.kind === "names");
+  deepStrictEqual(
+    factorsQ.kind === "names" ? factorsQ.options : [],
+    ["Treatment", "Time", "Genotype"],
+  );
+  const termQ = asked({ response: "Response", factors: ["Treatment", "Time", "Genotype"], posthoc: "tukey" }).find(
+    (q) => q.id === "posthocTerm",
+  );
+  ok(termQ && termQ.kind === "choice");
+  deepStrictEqual(
+    termQ.kind === "choice" ? termQ.options.map((o) => o.value) : [],
+    ["Treatment", "Time", "Genotype", "Treatment:Time", "Treatment:Genotype", "Time:Genotype", "Treatment:Time:Genotype"],
+  );
+  // The term defaults to the first factor (the wizard cannot know significance
+  // yet); "none" carries no term at all.
+  deepStrictEqual(
+    wizard.finish({ response: "Response", factors: ["Treatment", "Time", "Genotype"], posthoc: "tukey" }, table),
+    {
+      type: "multifactor-anova",
+      params: { response: "Response", factors: ["Treatment", "Time", "Genotype"], posthoc: "tukey", posthocTerm: "Treatment" },
+    },
+  );
+  deepStrictEqual(
+    wizard.finish({ response: "Response", factors: ["Treatment", "Time"], posthoc: "none" }, table),
+    {
+      type: "multifactor-anova",
+      params: { response: "Response", factors: ["Treatment", "Time"], posthoc: "none" },
+    },
+  );
+  deepStrictEqual(
+    wizard.finish(
+      { response: "Response", factors: ["Treatment", "Time", "Genotype"], posthoc: "bonferroni", posthocTerm: "Treatment:Time:Genotype" },
+      table,
+    ),
+    {
+      type: "multifactor-anova",
+      params: {
+        response: "Response",
+        factors: ["Treatment", "Time", "Genotype"],
+        posthoc: "bonferroni",
+        posthocTerm: "Treatment:Time:Genotype",
+      },
+    },
+  );
+});
 
 check("a column gone takes its width with it: a new one of its name starts at the default", () => {
   const wide = { columns: ["Title", "A", "B", "C"], rows: [], widths: { A: 200, C: 150 } };
@@ -4791,6 +4927,7 @@ check("analysis checklists cover the ANOVA family", () => {
   strictEqual(twoWay({ design: "nonparametric" }, table)!.title, "Scheirer-Ray-Hare test — checklist");
   ok(twoWay({}, table)!.items.some((i) => i.assumption.includes("interaction first")));
   strictEqual(WIZARDS["three-way-anova"]!.checklist!({}, table)!.title, "Three-way ANOVA — checklist");
+  strictEqual(WIZARDS["multifactor-anova"]!.checklist!({}, table)!.title, "Multifactor ANOVA — checklist");
 });
 
 check("analysis checklists cover regression, survival and correlation", () => {
@@ -4842,6 +4979,7 @@ check("every analysis checklist is complete and the coverage boundary holds", ()
       "correlation-matrix",
       "cox-proportional-hazards",
       "linear-regression",
+      "multifactor-anova",
       "multiple-t-tests",
       "nonlinear-regression",
       "one-sample-ks",
@@ -12426,9 +12564,11 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
   // is its own entry now, and two variables of a Multiple Variables table
   // regress on each other), Compare two groups after that (1.8: a response
   // variable split by a grouping variable, or two variables paired),
-  // Principal component analysis after Multiple regression, Nonlinear
-  // regression after that (1.8: X and Y variables), K-means clustering after
-  // that, Hierarchical clustering after that, Outliers after that, Multiple logistic regression after that,
+  // Multifactor ANOVA after Multiple regression (seq 157: N-way ANOVA on
+  // Multiple Variables tables), Nonlinear regression after that (1.8: X and
+  // Y variables), Principal component analysis after that, K-means
+  // clustering after that, Hierarchical clustering after that, Outliers
+  // after that, Multiple logistic regression after that,
   // Poisson regression after that, Cox after that, Survival after that (1.8:
   // time, event-code and grouping variables), Extract and rearrange after
   // that, and Plot a function last.
@@ -12441,6 +12581,7 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
       "linear-regression",
       "compare-two-groups",
       "multiple-regression",
+      "multifactor-anova",
       "nonlinear-regression",
       "principal-component-analysis",
       "k-means",

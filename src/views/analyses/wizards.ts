@@ -2,7 +2,7 @@
 // step, each answer choosing the next question. A wizard only declares its questions
 // and how the answers make the test's params; analysis-wizard.tsx asks them.
 // A test without an entry here runs as soon as it is picked.
-import { DOSE_MODELS, CONCENTRATION_UNITS, GOF_EXPECTED_MODES, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, fdrQError, isFdrPValueMethod, pValueAlphaError, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel, type PValueStackParams } from "../../stats/types";
+import { DOSE_MODELS, CONCENTRATION_UNITS, GOF_EXPECTED_MODES, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, MULTIFACTOR_MAX_FACTORS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, fdrQError, isFdrPValueMethod, pValueAlphaError, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel, type PValueStackParams } from "../../stats/types";
 import type { PlotFunctionExtra, PlotFunctionModel } from "../../stats/types";
 import {
   PLOT_FUNCTION_DEFAULTS,
@@ -43,6 +43,7 @@ import type {
   ExtractRearrangeParams,
   FrequencyDistributionParams,
   MultipleTTestsParams,
+  MultifactorAnovaParams,
   NestedAnovaParams,
   NonlinearRegressionParams,
   NormalizeParams,
@@ -67,6 +68,7 @@ import type {
   XYCorrelationParams,
 } from "../../stats/types";
 import { parseInhibitorConcentration } from "../../stats/xy/enzyme-inhibition";
+import { multifactorTerms } from "../../stats/multiple/multifactor-anova";
 import { columnFactorName } from "../../stats/mixed/mixed-effects";
 import { levelsOf, splitXY, type Dataset } from "../../lib/dataset";
 import { pairKey } from "../../lib/columns";
@@ -663,6 +665,7 @@ export type ChecklistKey =
   | "two-way-anova-rm"
   | "two-way-anova-srh"
   | "three-way-anova"
+  | "multifactor-anova"
   | "linear-regression"
   | "nonlinear-regression"
   | "survival"
@@ -1108,6 +1111,42 @@ export const CHECKLISTS: Record<ChecklistKey, AnalysisChecklist> = {
       {
         assumption:
           "You decided before running which comparisons matter: with three factors, the list of possible interactions is long and most of them will be hard to interpret.",
+        ifNot:
+          "Comparisons picked because the data looked interesting need a stricter correction for multiple testing.",
+      },
+      {
+        assumption:
+          "You read the interactions before the main effects: a significant interaction means the effect of one factor depends on the others.",
+        ifNot:
+          "With a significant interaction, compare the groups within each level of the other factors instead of reporting the main effects alone.",
+      },
+    ],
+  },
+  "multifactor-anova": {
+    title: "Multifactor ANOVA — checklist",
+    whenToUse:
+      "Use this when one or more factors may each affect a numeric outcome, and you want to test all of them — and how they interact — in one analysis, without reorganising the table for each factor count. It tests the main effects and every two- and three-way interaction; with four or more factors, no four-way interaction is tested.",
+    items: [
+      {
+        assumption: "The observations are independent — no subject appears in more than one cell.",
+        ifNot: "Repeated measurements need a repeated-measures or mixed-effects design instead.",
+      },
+      {
+        assumption: "The outcome is a number on a continuous scale.",
+        ifNot: "For counts or categories an ANOVA does not apply.",
+      },
+      {
+        assumption: "The residuals are roughly symmetric, with similar spread in every cell.",
+        ifNot: "With skewed residuals or very uneven spread, transform the data first or use a rank-based test.",
+      },
+      {
+        assumption:
+          "Each combination holds enough replicates to estimate the interactions — the number of cells grows fast with each factor (four 3-level factors already make 81 combinations).",
+        ifNot: "Without replicates in every combination, the higher-order interactions cannot be separated from noise.",
+      },
+      {
+        assumption:
+          "You decided before running which comparisons matter: with several factors, the list of possible interactions is long and most of them will be hard to interpret.",
         ifNot:
           "Comparisons picked because the data looked interesting need a stricter correction for multiple testing.",
       },
@@ -3999,6 +4038,54 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       type: "multiple-regression",
       params: { dependent: a.dependent as string, predictors: a.predictors as string[] },
     }),
+  },
+
+  "multifactor-anova": {
+    questions: (a, table) => {
+      const response = a.response as string | undefined;
+      const byName = new Map(table.columns.map((c) => [c.name, c]));
+      const all = table.columns.map((c) => c.name);
+      // Only columns with ≥ 2 levels can be a factor (a numeric-coded factor
+      // counts — its codes are its levels). When none qualifies, offer every
+      // column but the response and let the runner say so.
+      const factorable = all.filter((n) => n !== response && levelsOf(byName.get(n)!).length >= 2);
+      const factorOptions = factorable.length > 0 ? factorable : all.filter((n) => n !== response);
+      const terms = multifactorTerms((a.factors as string[] | undefined) ?? []);
+      return [
+        choice("response", "Which variable is the response (the outcome you measured)?", names(dataNames(table))),
+        {
+          id: "factors",
+          ask: `Which variables are the factors? Each must have at least two levels (at most ${MULTIFACTOR_MAX_FACTORS}).`,
+          kind: "names",
+          options: factorOptions,
+          min: 1,
+        },
+        choice("posthoc", "Run multiple comparisons? Only meaningful if the ANOVA is significant.", [
+          ["none", "No — just the ANOVA table"],
+          ["tukey", "Yes — Tukey's"],
+          ["bonferroni", "Yes — Bonferroni-corrected"],
+        ]),
+        a.posthoc !== "none" &&
+          terms.length > 0 &&
+          choice(
+            "posthocTerm",
+            "Which term should the comparisons follow up? The wizard cannot know yet which terms will be significant — pick the one you most want to follow up.",
+            terms.map((t): [string, string] => [t, t.includes(":") ? `Interaction ${t}` : t]),
+          ),
+      ];
+    },
+    finish: (a) => ({
+      type: "multifactor-anova",
+      params: {
+        response: a.response as string,
+        factors: a.factors as string[],
+        posthoc: (a.posthoc as MultifactorAnovaParams["posthoc"] | undefined) ?? "none",
+        ...(a.posthoc !== undefined && a.posthoc !== "none"
+          ? { posthocTerm: (a.posthocTerm as string | undefined) ?? (a.factors as string[])[0] }
+          : {}),
+      },
+    }),
+    checklist: () => CHECKLISTS["multifactor-anova"],
   },
 
   "extract-rearrange": {

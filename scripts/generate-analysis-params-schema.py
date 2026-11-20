@@ -117,10 +117,11 @@ ENUM_OVERRIDES = {
     ("friedman", "posthoc"): ARRAYS["RANK_POSTHOCS"],
     ("rm-anova", "posthoc"): POSTHOCS,
     ("two-way-anova", "posthoc"): TWO_WAY_POSTHOCS,
-    # Three-way / nested ANOVA runners refuse every posthoc but these
-    # (types.ts ThreeWayAnovaParams / NestedAnovaParams comments).
+    # Three-way / nested / multifactor ANOVA runners refuse every posthoc but these
+    # (types.ts ThreeWayAnovaParams / NestedAnovaParams / MultifactorAnovaParams comments).
     ("three-way-anova", "posthoc"): ARRAYS["THREE_WAY_POSTHOCS"],
     ("nested-anova", "posthoc"): ["tukey", "bonferroni"],
+    ("multifactor-anova", "posthoc"): ["tukey", "bonferroni"],
     # The merged `correction` PARAMS list admits every family's values (seq
     # 193 widened it for multiple-t-tests), so each family's enum is narrowed
     # here: survival only offers holm/fdr/none, multiple-t-tests the full
@@ -136,6 +137,15 @@ ENUM_OVERRIDES = {
                                      if m != "user-defined"] + ["gaussian"],
     ("plot-function", "extra"): ["none", "first-derivative",
                                  "second-derivative", "integral"],
+}
+
+# Per-type kind narrowing the shared PARAMS table cannot express: the
+# static table gives posthocTerm the three-way terms (THREE_WAY_TERMS),
+# but MultifactorAnovaParams takes any term name (the runner checks it
+# against the computed terms) — project-file.ts reads/validates it as
+# kind "name" for multifactor-anova, so the schema must too.
+KIND_OVERRIDES = {
+    ("multifactor-anova", "posthocTerm"): {"kind": "name"},
 }
 
 # Table-shape / cross-param gates, in the code's own words.
@@ -220,6 +230,7 @@ INTERFACE_TO_TYPE = {
     "ExtractRearrange": "extract-rearrange",
     "TwoWayAnova": "two-way-anova",
     "ThreeWayAnova": "three-way-anova",
+    "MultifactorAnova": "multifactor-anova",
     "MultipleTTests": "multiple-t-tests",
     "NestedAnova": "nested-anova",
     "BindingSaturation": "binding-saturation",
@@ -416,6 +427,7 @@ for f in (ROOT / "src/stats").rglob("*.ts"):
 #    as the intercept model
 #  poisson-regression.ts: `params?.quasi ?? false`
 #  three-way-anova.ts: `params?.posthoc ?? "none"`
+#  multifactor-anova.ts: `params?.posthoc ?? "none"`
 RUNNER_FALLBACKS = {
     ("area-under-curve", "baseline"): 0,
     ("fraction-of-total", "totalBy"): "column",
@@ -448,6 +460,7 @@ RUNNER_FALLBACKS = {
     ("three-way-anova", "posthoc"): "none",
     ("chi-square-gof", "expectedMode"): "equal",
     ("binomial-test", "expectedProportion"): 0.5,
+    ("multifactor-anova", "posthoc"): "none",
 }
 
 # Numeric limits the PARAMS table does not carry.
@@ -510,7 +523,7 @@ for typ, keys in sorted(KEYS_BY_TYPE.items()):
             params.append({"name": "sets", "type": "string[]", "required": False,
                            "description": SETS_DESC})
             continue
-        kind = PARAMS.get(key)
+        kind = KIND_OVERRIDES.get((typ, key), PARAMS.get(key))
         assert kind, f"no PARAMS kind for {key} (type {typ})"
         info = FIELD_INFO.get(key, {}).get(typ, {})
         if kind["kind"] == "enum":
@@ -568,8 +581,8 @@ for typ, keys in sorted(KEYS_BY_TYPE.items()):
         out["gates"] = GATES[typ]
     schema[typ] = out
 
-# Sanity: 58 types (54 + p-value-stack seq 190 + chi-square-gof + binomial-test seq 195 + one-sample-ks seq 170), every key accounted for, offered_on non-empty.
-assert len(schema) == 58, f"{len(schema)} types, expected 58"
+# Sanity: 59 types (54 + p-value-stack seq 190 + chi-square-gof + binomial-test seq 195 + one-sample-ks seq 170 + multifactor-anova seq 157), every key accounted for, offered_on non-empty.
+assert len(schema) == 59, f"{len(schema)} types, expected 59"
 for typ, entry in schema.items():
     assert entry["offered_on"], f"{typ} offered on no table type"
     assert entry["min_columns"] is not None, f"{typ} has no min_columns"

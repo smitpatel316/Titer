@@ -2445,6 +2445,7 @@ const ANALYSIS_TYPES: &[&str] = &[
     "smooth-differentiate-integrate",
     "two-way-anova",
     "three-way-anova",
+    "multifactor-anova",
     "multiple-t-tests",
     "nested-t-test",
     "nested-anova",
@@ -2831,7 +2832,7 @@ pub struct RunAnalysisArgs {
     pub project_id: Option<String>,
     /// The table to analyse, as shown by titer_list_tables.
     pub table_id: String,
-    /// One of the 58 analysis types — never "compare-many-groups" or
+    /// One of the 59 analysis types — never "compare-many-groups" or
     /// "interpolate" (pass a concrete type instead; see the tool text).
     pub analysis_type: String,
     /// Params for that analysis (the AnalysisParams member for the type);
@@ -8663,7 +8664,7 @@ mod tests {
 
     #[test]
     fn validate_analysis_type_accepts_all_and_refuses_wizard_values() {
-        assert_eq!(ANALYSIS_TYPES.len(), 58, "one entry per AnalysisType: {ANALYSIS_TYPES:?}");
+        assert_eq!(ANALYSIS_TYPES.len(), 59, "one entry per AnalysisType: {ANALYSIS_TYPES:?}");
         for t in [
             "descriptive-statistics",
             "anova",
@@ -8679,6 +8680,7 @@ mod tests {
             "cox-proportional-hazards",
             "p-value-stack",
             "one-sample-ks",
+            "multifactor-anova",
         ] {
             assert!(validate_analysis_type(t).is_ok(), "{t}");
         }

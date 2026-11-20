@@ -1741,6 +1741,136 @@ const grouped3wayN1 = table(
   },
 );
 
+/** Multifactor ANOVA (seq 157): Treatment × Time × Genotype, 2 levels each,
+ *  2 reps per cell, one replicate dropped (unbalanced — Type III matters),
+ *  plus one row with a blank response and one with a blank factor (both
+ *  dropped as incomplete cases). The expected F/P values are computed
+ *  independently in Python (numpy/scipy, effect-coded least squares) in
+ *  ~/workspace/.helix-v18/lane-157/scratch/type3.py. */
+const mv3 = table(
+  ["Title", "Response", "Treatment", "Time", "Genotype"],
+  [
+    ["", "10.3", "Placebo", "Day 1", "WT"],
+    ["", "9.7", "Placebo", "Day 1", "WT"],
+    ["", "12.3", "Placebo", "Day 1", "KO"],
+    ["", "11.7", "Placebo", "Day 1", "KO"],
+    ["", "13.3", "Placebo", "Day 2", "WT"],
+    ["", "12.7", "Placebo", "Day 2", "WT"],
+    ["", "16.3", "Placebo", "Day 2", "KO"],
+    ["", "15.7", "Placebo", "Day 2", "KO"],
+    ["", "14.3", "Drug", "Day 1", "WT"],
+    ["", "13.7", "Drug", "Day 1", "WT"],
+    ["", "15.3", "Drug", "Day 1", "KO"],
+    ["", "14.7", "Drug", "Day 1", "KO"],
+    ["", "19.3", "Drug", "Day 2", "WT"],
+    ["", "18.7", "Drug", "Day 2", "WT"],
+    ["", "22.8", "Drug", "Day 2", "KO"],
+    ["", "", "Drug", "Day 2", "WT"],
+    ["", "12.0", "", "Day 1", "WT"],
+  ],
+);
+
+/** The Drug × Day 2 × KO cell emptied (its one remaining replicate blank). */
+const mv3Empty = table(
+  ["Title", "Response", "Treatment", "Time", "Genotype"],
+  [
+    ["", "10.3", "Placebo", "Day 1", "WT"],
+    ["", "9.7", "Placebo", "Day 1", "WT"],
+    ["", "12.3", "Placebo", "Day 1", "KO"],
+    ["", "11.7", "Placebo", "Day 1", "KO"],
+    ["", "13.3", "Placebo", "Day 2", "WT"],
+    ["", "12.7", "Placebo", "Day 2", "WT"],
+    ["", "16.3", "Placebo", "Day 2", "KO"],
+    ["", "15.7", "Placebo", "Day 2", "KO"],
+    ["", "14.3", "Drug", "Day 1", "WT"],
+    ["", "13.7", "Drug", "Day 1", "WT"],
+    ["", "15.3", "Drug", "Day 1", "KO"],
+    ["", "14.7", "Drug", "Day 1", "KO"],
+    ["", "19.3", "Drug", "Day 2", "WT"],
+    ["", "18.7", "Drug", "Day 2", "WT"],
+    ["", "", "Drug", "Day 2", "KO"],
+  ],
+);
+
+/** One observation per cell: no residual degrees of freedom. */
+const mv3N1 = table(
+  ["Title", "Response", "Treatment", "Time", "Genotype"],
+  [
+    ["", "10.3", "Placebo", "Day 1", "WT"],
+    ["", "12.3", "Placebo", "Day 1", "KO"],
+    ["", "13.3", "Placebo", "Day 2", "WT"],
+    ["", "16.3", "Placebo", "Day 2", "KO"],
+    ["", "14.3", "Drug", "Day 1", "WT"],
+    ["", "15.3", "Drug", "Day 1", "KO"],
+    ["", "19.3", "Drug", "Day 2", "WT"],
+    ["", "22.8", "Drug", "Day 2", "KO"],
+  ],
+);
+
+/** One factor only: the multifactor one-way path. */
+const mv1 = table(
+  ["Title", "Response", "Treatment"],
+  [
+    ["", "10.1", "Placebo"],
+    ["", "10.5", "Placebo"],
+    ["", "9.9", "Placebo"],
+    ["", "14.2", "Drug"],
+    ["", "13.8", "Drug"],
+    ["", "14.6", "Drug"],
+  ],
+);
+
+/** Four factors (Treatment × Time × Genotype × Sex): 14 terms are tested —
+ *  4 mains, 6 two-way, 4 three-way — and no four-way interaction. One
+ *  replicate dropped, as in mv3. */
+const mv4 = table(
+  ["Title", "Response", "Treatment", "Time", "Genotype", "Sex"],
+  [
+    ["", "10.4", "Placebo", "Day 1", "WT", "M"],
+    ["", "9.6", "Placebo", "Day 1", "WT", "M"],
+    ["", "10.9", "Placebo", "Day 1", "WT", "F"],
+    ["", "10.1", "Placebo", "Day 1", "WT", "F"],
+    ["", "11.4", "Placebo", "Day 1", "KO", "M"],
+    ["", "10.6", "Placebo", "Day 1", "KO", "M"],
+    ["", "10.9", "Placebo", "Day 1", "KO", "F"],
+    ["", "10.1", "Placebo", "Day 1", "KO", "F"],
+    ["", "13.4", "Placebo", "Day 2", "WT", "M"],
+    ["", "12.6", "Placebo", "Day 2", "WT", "M"],
+    ["", "13.9", "Placebo", "Day 2", "WT", "F"],
+    ["", "13.1", "Placebo", "Day 2", "WT", "F"],
+    ["", "14.4", "Placebo", "Day 2", "KO", "M"],
+    ["", "13.6", "Placebo", "Day 2", "KO", "M"],
+    ["", "13.9", "Placebo", "Day 2", "KO", "F"],
+    ["", "13.1", "Placebo", "Day 2", "KO", "F"],
+    ["", "12.4", "Drug", "Day 1", "WT", "M"],
+    ["", "11.6", "Drug", "Day 1", "WT", "M"],
+    ["", "12.9", "Drug", "Day 1", "WT", "F"],
+    ["", "12.1", "Drug", "Day 1", "WT", "F"],
+    ["", "13.4", "Drug", "Day 1", "KO", "M"],
+    ["", "12.6", "Drug", "Day 1", "KO", "M"],
+    ["", "12.9", "Drug", "Day 1", "KO", "F"],
+    ["", "12.1", "Drug", "Day 1", "KO", "F"],
+    ["", "16.9", "Drug", "Day 2", "WT", "M"],
+    ["", "16.1", "Drug", "Day 2", "WT", "M"],
+    ["", "17.4", "Drug", "Day 2", "WT", "F"],
+    ["", "16.6", "Drug", "Day 2", "WT", "F"],
+    ["", "19.9", "Drug", "Day 2", "KO", "M"],
+    ["", "19.1", "Drug", "Day 2", "KO", "M"],
+    ["", "19.4", "Drug", "Day 2", "KO", "F"],
+  ],
+);
+
+/** Six factors: past the five-factor cap, so the run refuses before reading data. */
+const mv3Six = table(
+  ["Title", "Response", "Treatment", "Time", "Genotype", "Sex", "Dose", "Site"],
+  [
+    ["", "10.3", "Placebo", "Day 1", "WT", "M", "Low", "A"],
+    ["", "9.7", "Placebo", "Day 1", "WT", "F", "High", "B"],
+    ["", "12.3", "Placebo", "Day 1", "KO", "M", "Low", "A"],
+    ["", "14.3", "Drug", "Day 1", "WT", "F", "High", "B"],
+  ],
+);
+
 /** Nested t test / nested one-way ANOVA (plan 14): 3 groups × 3 subgroups × 3
  *  replicates, one row — each subgroup's three replicate values sit in that
  *  row across its replicate columns, so the subcolumn means are exactly
@@ -2915,6 +3045,42 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["grouped3wayBadBands", grouped3wayBadBands, "three-way-anova", { posthoc: "none" }],
   ["grouped3wayN1", grouped3wayN1, "three-way-anova", { posthoc: "none" }],
   ["grouped", grouped, "three-way-anova", { posthoc: "none" }],
+  // Multifactor ANOVA (seq 157): the ANOVA table on the 3-factor MV table
+  // (unbalanced Type III), Tukey on Treatment:Time, Bonferroni on the 3-way
+  // term, the 4-factor run (14 terms, no 4-way), the one-factor run, and the
+  // empty-cell / no-residual-df / too-many-factors errors.
+  ["mv3", mv3, "multifactor-anova", { response: "Response", factors: ["Treatment", "Time", "Genotype"], posthoc: "none" }],
+  [
+    "mv3",
+    mv3,
+    "multifactor-anova",
+    { response: "Response", factors: ["Treatment", "Time", "Genotype"], posthoc: "tukey", posthocTerm: "Treatment:Time" },
+  ],
+  [
+    "mv3",
+    mv3,
+    "multifactor-anova",
+    {
+      response: "Response",
+      factors: ["Treatment", "Time", "Genotype"],
+      posthoc: "bonferroni",
+      posthocTerm: "Treatment:Time:Genotype",
+    },
+  ],
+  ["mv4", mv4, "multifactor-anova", { response: "Response", factors: ["Treatment", "Time", "Genotype", "Sex"], posthoc: "none" }],
+  ["mv1", mv1, "multifactor-anova", { response: "Response", factors: ["Treatment"], posthoc: "none" }],
+  ["mv3Empty", mv3Empty, "multifactor-anova", { response: "Response", factors: ["Treatment", "Time", "Genotype"], posthoc: "none" }],
+  ["mv3N1", mv3N1, "multifactor-anova", { response: "Response", factors: ["Treatment", "Time", "Genotype"], posthoc: "none" }],
+  [
+    "mv3Six",
+    mv3Six,
+    "multifactor-anova",
+    {
+      response: "Response",
+      factors: ["Treatment", "Time", "Genotype", "Sex", "Dose", "Site"],
+      posthoc: "none",
+    },
+  ],
   // Nested t test and nested one-way ANOVA (plan 14): the tests run on
   // subcolumn MEANS, one value per animal/subject — the naive test on all 18
   // raw values would give a far smaller P, so these entries assert the
@@ -6589,6 +6755,200 @@ async function disagreements(): Promise<string[]> {
     if (!("error" in r) || !r.error.includes(want))
       out.push(
         `Three-way ANOVA ${label}: ${"error" in r ? r.error : "ran without error"}, expected an error naming ${want}`,
+      );
+  }
+  // Multifactor ANOVA (seq 157): the plan's values, computed independently in
+  // Python (numpy/scipy, effect-coded least squares) and re-verified in WebR
+  // base R (aov + drop1, match() on row names) before locking. Tolerances from
+  // the three-way plan: SS/F relative 1e-3; p relative 1e-2 for p < 0.01,
+  // absolute 1e-3 for p >= 0.01. The Tukey Treatment:Time comparisons are
+  // cross-checked against an independent R computation (tapply cell means +
+  // pooled MSE + ptukey), matched by comparison label, not by row order.
+  const multiParams = { response: "Response", factors: ["Treatment", "Time", "Genotype"] };
+  const multi = await runAnalysis("multifactor-anova", mv3, { ...multiParams, posthoc: "none" });
+  if ("error" in multi) {
+    out.push(`Multifactor ANOVA: ${multi.error}`);
+  } else {
+    const stat = (label: string) => multi.stats.find((s) => s.label === label)?.value;
+    const planF: [string, number, number][] = [
+      ["Treatment", 484.0, 1.013e-7],
+      ["Time", 484.0, 1.013e-7],
+      ["Genotype", 118.5679, 1.217e-5],
+      ["Treatment:Time", 41.5309, 3.521e-4],
+      ["Treatment:Genotype", 0.0494, 0.8305],
+      ["Time:Genotype", 17.8272, 0.003926],
+      ["Treatment:Time:Genotype", 4.0, 0.08562],
+    ];
+    for (const [term, f, p] of planF) {
+      const gotF = stat(`${term} F`);
+      const gotP = stat(`${term} P value`);
+      if (gotF == null || Math.abs(gotF - f) / f > 1e-3) out.push(`Multifactor ANOVA ${term} F: ${gotF}, plan says ${f}`);
+      if (gotP == null || (p < 0.01 ? Math.abs(gotP - p) / p > 1e-2 : Math.abs(gotP - p) > 1e-3))
+        out.push(`Multifactor ANOVA ${term} p: ${gotP}, plan says ${p}`);
+      if (stat(`${term} DFn`) !== 1) out.push(`Multifactor ANOVA ${term} DFn: ${stat(`${term} DFn`)}, expected 1`);
+    }
+    // Effect sizes: the same Python computation (SS_term / SS_total, and
+    // SS_term / (SS_term + SS_residual)).
+    const eta = (term: string, want: number, partial: number) => {
+      const gotEta = stat(`${term} eta squared`);
+      const gotPartial = stat(`${term} partial eta squared`);
+      if (gotEta == null || Math.abs(gotEta - want) > 1e-3)
+        out.push(`Multifactor ANOVA ${term} eta squared: ${gotEta}, plan says ${want}`);
+      if (gotPartial == null || Math.abs(gotPartial - partial) > 1e-3)
+        out.push(`Multifactor ANOVA ${term} partial eta squared: ${gotPartial}, plan says ${partial}`);
+    };
+    eta("Treatment", 0.5038, 0.9857);
+    eta("Treatment:Time:Genotype", 0.0042, 0.3636);
+    if (stat("DFd (residual)") !== 7) out.push(`Multifactor ANOVA DFd: ${stat("DFd (residual)")}, expected 7`);
+    if (multi.subtitle !== "Multifactor ANOVA") out.push(`Multifactor ANOVA subtitle: ${multi.subtitle}`);
+    if (!multi.notes.includes("Response “Response” by Treatment (Placebo, Drug); Time (Day 1, Day 2); Genotype (WT, KO)."))
+      out.push(`Multifactor ANOVA notes missing the factor mapping: ${multi.notes}`);
+    if (!multi.notes.includes("15 complete rows in 8 cells; 2 rows left out"))
+      out.push(`Multifactor ANOVA notes missing the row count: ${multi.notes}`);
+    if (multi.groups.length !== 8) out.push(`Multifactor ANOVA cells: ${multi.groups.length}, expected 8`);
+  }
+  const multiTukey = await runAnalysis("multifactor-anova", mv3, {
+    ...multiParams,
+    posthoc: "tukey",
+    posthocTerm: "Treatment:Time",
+  });
+  if ("error" in multiTukey) {
+    out.push(`Multifactor ANOVA Tukey: ${multiTukey.error}`);
+  } else {
+    const comps = multiTukey.comparisons ?? [];
+    if (comps.length !== 6) out.push(`Multifactor ANOVA Tukey Treatment:Time comparisons: ${comps.length}, expected 6`);
+    if (multiTukey.comparisonsLabel !== "Tukey's multiple comparisons test (Treatment:Time cell means)")
+      out.push(`Multifactor ANOVA Tukey label: ${multiTukey.comparisonsLabel}`);
+    // The independent R computation: tapply cell means + pooled MSE + ptukey.
+    const raw = mv3.rows.flatMap((row) => row.slice(1, 2).map((c) => (c == null ? "NA" : c)));
+    const expected = await evalNamedVector(
+      `v<-c(${raw.join(",")});` +
+        `A<-factor(c("Placebo","Placebo","Placebo","Placebo","Placebo","Placebo","Placebo","Placebo","Drug","Drug","Drug","Drug","Drug","Drug","Drug",NA,NA));` +
+        `B<-factor(c("Day 1","Day 1","Day 1","Day 1","Day 2","Day 2","Day 2","Day 2","Day 1","Day 1","Day 1","Day 1","Day 2","Day 2","Day 2",NA,NA));` +
+        `C<-factor(c("WT","WT","KO","KO","WT","WT","KO","KO","WT","WT","KO","KO","WT","WT","KO",NA,NA));` +
+        `f<-aov(v~A*B*C);mse<-deviance(f)/df.residual(f);` +
+        `m<-tapply(v,list(A,B),mean);n<-tapply(v,list(A,B),length);` +
+        `c(${[
+          [0, 1],
+          [0, 2],
+          [0, 3],
+          [1, 2],
+          [1, 3],
+          [2, 3],
+        ]
+          .map(
+            ([i, j], k) =>
+              `p${k}=1-ptukey(sqrt(2)*abs((m[${i + 1}]-m[${j + 1}])/sqrt(mse*(1/n[${i + 1}]+1/n[${j + 1}]))),4,df.residual(f))`,
+          )
+          .join(",")})`,
+    );
+    // R orders tapply cells by factor level (Drug before Placebo) and flattens
+    // the A×B matrix column-major: m[1]=Drug/Day 1, m[2]=Placebo/Day 1,
+    // m[3]=Drug/Day 2, m[4]=Placebo/Day 2. The JS runner orders them first-seen
+    // (Placebo first) — match by label, and compare the (label1, label2) pair's
+    // P, whichever order R lists it in.
+    const rCells = ["Day 1", "Day 2"].flatMap((b) => ["Drug", "Placebo"].map((a) => `${a} (${b})`));
+    const pairs: [number, number][] = [
+      [0, 1],
+      [0, 2],
+      [0, 3],
+      [1, 2],
+      [1, 3],
+      [2, 3],
+    ];
+    pairs.forEach(([i, j], k) => {
+      const got =
+        comps.find((c) => c.group1 === rCells[i] && c.group2 === rCells[j]) ??
+        comps.find((c) => c.group1 === rCells[j] && c.group2 === rCells[i]);
+      const want = expected[`p${k}`];
+      if (!got || got.p == null || want == null || Math.abs(got.p - want) > 1e-9)
+        out.push(`Multifactor ANOVA Tukey ${rCells[i]} vs ${rCells[j]}: ${got?.p}, R says ${want}`);
+    });
+  }
+  const multiBonf = await runAnalysis("multifactor-anova", mv3, {
+    ...multiParams,
+    posthoc: "bonferroni",
+    posthocTerm: "Treatment:Time:Genotype",
+  });
+  if ("error" in multiBonf) {
+    out.push(`Multifactor ANOVA Bonferroni: ${multiBonf.error}`);
+  } else if ((multiBonf.comparisons ?? []).length !== 28) {
+    out.push(`Multifactor ANOVA Bonferroni 3-way comparisons: ${(multiBonf.comparisons ?? []).length}, expected 28`);
+  } else if (multiBonf.comparisonsLabel !== "Bonferroni-corrected multiple comparisons test (Treatment:Time:Genotype cell means)") {
+    out.push(`Multifactor ANOVA Bonferroni label: ${multiBonf.comparisonsLabel}`);
+  }
+  // Four factors: 14 terms (4 mains + 6 two-way + 4 three-way) and no 4-way
+  // term, with the Python values for three of them.
+  const multi4 = await runAnalysis("multifactor-anova", mv4, {
+    response: "Response",
+    factors: ["Treatment", "Time", "Genotype", "Sex"],
+    posthoc: "none",
+  });
+  if ("error" in multi4) {
+    out.push(`Multifactor ANOVA (4 factors): ${multi4.error}`);
+  } else {
+    const stat = (label: string) => multi4.stats.find((s) => s.label === label)?.value;
+    const terms = multi4.stats.filter((s) => s.label.endsWith(" P value")).map((s) => s.label.slice(0, -" P value".length));
+    if (terms.length !== 14) out.push(`Multifactor ANOVA (4 factors) terms: ${terms.length}, expected 14`);
+    if (terms.some((t) => t.split(":").length > 3))
+      out.push(`Multifactor ANOVA (4 factors) tests a four-way interaction: ${terms.join(", ")}`);
+    for (const [term, f, p] of [
+      ["Treatment", 272.7086, 1.792e-11],
+      ["Time", 463.2207, 3.078e-13],
+      ["Treatment:Time:Genotype", 7.5078, 0.01453],
+    ] as const) {
+      const gotF = stat(`${term} F`);
+      const gotP = stat(`${term} P value`);
+      if (gotF == null || Math.abs(gotF - f) / f > 1e-3)
+        out.push(`Multifactor ANOVA (4 factors) ${term} F: ${gotF}, plan says ${f}`);
+      if (gotP == null || (p < 0.01 ? Math.abs(gotP - p) / p > 1e-2 : Math.abs(gotP - p) > 1e-3))
+        out.push(`Multifactor ANOVA (4 factors) ${term} p: ${gotP}, plan says ${p}`);
+    }
+    if (stat("DFd (residual)") !== 16) out.push(`Multifactor ANOVA (4 factors) DFd: ${stat("DFd (residual)")}, expected 16`);
+    if (!multi4.notes.includes("no four-way or higher interaction is tested"))
+      out.push(`Multifactor ANOVA (4 factors) notes missing the interaction cap: ${multi4.notes}`);
+  }
+  // One factor: the multifactor one-way path — one term, DFd 4.
+  const multi1 = await runAnalysis("multifactor-anova", mv1, {
+    response: "Response",
+    factors: ["Treatment"],
+    posthoc: "none",
+  });
+  if ("error" in multi1) {
+    out.push(`Multifactor ANOVA (1 factor): ${multi1.error}`);
+  } else {
+    const stat = (label: string) => multi1.stats.find((s) => s.label === label)?.value;
+    if (stat("Treatment F") == null || Math.abs(stat("Treatment F")! - 192.6447) / 192.6447 > 1e-3)
+      out.push(`Multifactor ANOVA (1 factor) Treatment F: ${stat("Treatment F")}, plan says 192.6447`);
+    if (stat("DFd (residual)") !== 4) out.push(`Multifactor ANOVA (1 factor) DFd: ${stat("DFd (residual)")}, expected 4`);
+    if (multi1.stats.some((s) => s.label.includes(":")))
+      out.push(`Multifactor ANOVA (1 factor) has interaction terms: ${multi1.stats.map((s) => s.label).join(", ")}`);
+  }
+  // The edge cases are errors, not NA rows.
+  for (const [data, params, label, want] of [
+    [mv3Empty, multiParams, "empty cell", "Treatment Drug × Time Day 2 × Genotype KO has no values"],
+    [mv3N1, multiParams, "no residual df", "no residual degrees of freedom"],
+    [
+      mv3Six,
+      { response: "Response", factors: ["Treatment", "Time", "Genotype", "Sex", "Dose", "Site"] },
+      "too many factors",
+      "at most 5 factors",
+    ],
+    [mv3, { ...multiParams, posthoc: "sidak" }, "sidak posthoc", "not available for multifactor ANOVA"],
+    [
+      mv3,
+      { ...multiParams, posthoc: "tukey", posthocTerm: "Treatment:Sex" },
+      "unknown posthoc term",
+      "is not one of this analysis's terms",
+    ],
+  ] as const) {
+    const r = await runAnalysis("multifactor-anova", data, {
+      ...params,
+      posthoc: "posthoc" in params ? params.posthoc : "none",
+    });
+    if (!("error" in r) || !r.error.includes(want))
+      out.push(
+        `Multifactor ANOVA ${label}: ${"error" in r ? r.error : "ran without error"}, expected an error naming ${want}`,
       );
   }
   // Poisson regression (plan 12): the plan's values, computed by the planner

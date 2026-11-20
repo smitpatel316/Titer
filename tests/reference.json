@@ -36508,6 +36508,1442 @@
  "three-way-anova grouped {\"posthoc\":\"none\"}": {
   "error": "Three-way ANOVA needs at least 2 column groups, 2 rows per row group, and 2 row groups. Add row groups in the table's Groups panel: split the rows into at least 2 named bands."
  },
+ "multifactor-anova mv3 {\"response\":\"Response\",\"factors\":[\"Treatment\",\"Time\",\"Genotype\"],\"posthoc\":\"none\"}": {
+  "testType": "multifactor-anova",
+  "subtitle": "Multifactor ANOVA",
+  "stats": [
+   {
+    "label": "Treatment F",
+    "value": 484
+   },
+   {
+    "label": "Treatment DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment P value",
+    "value": 1.012540312e-7,
+    "p": true
+   },
+   {
+    "label": "Treatment partial eta squared",
+    "value": 0.9857433809
+   },
+   {
+    "label": "Treatment eta squared",
+    "value": 0.5038051398
+   },
+   {
+    "label": "Time F",
+    "value": 484
+   },
+   {
+    "label": "Time DFn",
+    "value": 1
+   },
+   {
+    "label": "Time P value",
+    "value": 1.012540312e-7,
+    "p": true
+   },
+   {
+    "label": "Time partial eta squared",
+    "value": 0.9857433809
+   },
+   {
+    "label": "Time eta squared",
+    "value": 0.5038051398
+   },
+   {
+    "label": "Genotype F",
+    "value": 118.5679012
+   },
+   {
+    "label": "Genotype DFn",
+    "value": 1
+   },
+   {
+    "label": "Genotype P value",
+    "value": 0.00001217145853,
+    "p": true
+   },
+   {
+    "label": "Genotype partial eta squared",
+    "value": 0.9442532691
+   },
+   {
+    "label": "Genotype eta squared",
+    "value": 0.1234196654
+   },
+   {
+    "label": "Treatment:Time F",
+    "value": 41.5308642
+   },
+   {
+    "label": "Treatment:Time DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment:Time P value",
+    "value": 0.0003521138647,
+    "p": true
+   },
+   {
+    "label": "Treatment:Time partial eta squared",
+    "value": 0.8557618926
+   },
+   {
+    "label": "Treatment:Time eta squared",
+    "value": 0.04323029513
+   },
+   {
+    "label": "Treatment:Genotype F",
+    "value": 0.04938271605
+   },
+   {
+    "label": "Treatment:Genotype DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment:Genotype P value",
+    "value": 0.8304853021,
+    "p": true
+   },
+   {
+    "label": "Treatment:Genotype partial eta squared",
+    "value": 0.00700525394
+   },
+   {
+    "label": "Treatment:Genotype eta squared",
+    "value": 0.00005140344249
+   },
+   {
+    "label": "Time:Genotype F",
+    "value": 17.82716049
+   },
+   {
+    "label": "Time:Genotype DFn",
+    "value": 1
+   },
+   {
+    "label": "Time:Genotype P value",
+    "value": 0.003925775865,
+    "p": true
+   },
+   {
+    "label": "Time:Genotype partial eta squared",
+    "value": 0.718050721
+   },
+   {
+    "label": "Time:Genotype eta squared",
+    "value": 0.01855664274
+   },
+   {
+    "label": "Treatment:Time:Genotype F",
+    "value": 4
+   },
+   {
+    "label": "Treatment:Time:Genotype DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment:Time:Genotype P value",
+    "value": 0.08561932856,
+    "p": true
+   },
+   {
+    "label": "Treatment:Time:Genotype partial eta squared",
+    "value": 0.3636363636
+   },
+   {
+    "label": "Treatment:Time:Genotype eta squared",
+    "value": 0.004163678842
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 7
+   }
+  ],
+  "groups": [
+   {
+    "name": "Treatment = Placebo, Time = Day 1, Genotype = WT",
+    "mean": 10,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 10,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Placebo, Time = Day 1, Genotype = KO",
+    "mean": 12,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 12,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Placebo, Time = Day 2, Genotype = WT",
+    "mean": 13,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 13,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Placebo, Time = Day 2, Genotype = KO",
+    "mean": 16,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 16,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 1, Genotype = WT",
+    "mean": 14,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 14,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 1, Genotype = KO",
+    "mean": 15,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 15,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 2, Genotype = WT",
+    "mean": 19,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 19,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 2, Genotype = KO",
+    "mean": 22.8,
+    "sd": null,
+    "sem": null,
+    "median": 22.8,
+    "n": 1
+   }
+  ],
+  "notes": "Response “Response” by Treatment (Placebo, Drug); Time (Day 1, Day 2); Genotype (WT, KO). Tests the main effects and every two- and three-way interaction; assumes normal distributions with equal variances (Type III sums of squares). 15 complete rows in 8 cells; 2 rows left out (missing response or factor).",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "Response",
+     "n": 15
+    }
+   ],
+   "how": "list",
+   "detail": "by “Treatment”, “Time” and “Genotype”",
+   "left": []
+  },
+  "summary": "“Treatment”, “Time”, “Genotype”, “Treatment:Time” and “Time:Genotype” affect “Response” (P < 0.0001, P < 0.0001, P < 0.0001, P = 0.0003521, P = 0.003926). The data don't show an effect of “Treatment:Genotype” and “Treatment:Time:Genotype”."
+ },
+ "multifactor-anova mv3 {\"response\":\"Response\",\"factors\":[\"Treatment\",\"Time\",\"Genotype\"],\"posthoc\":\"tukey\",\"posthocTerm\":\"Treatment:Time\"}": {
+  "testType": "multifactor-anova",
+  "subtitle": "Multifactor ANOVA",
+  "stats": [
+   {
+    "label": "Treatment F",
+    "value": 484
+   },
+   {
+    "label": "Treatment DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment P value",
+    "value": 1.012540312e-7,
+    "p": true
+   },
+   {
+    "label": "Treatment partial eta squared",
+    "value": 0.9857433809
+   },
+   {
+    "label": "Treatment eta squared",
+    "value": 0.5038051398
+   },
+   {
+    "label": "Time F",
+    "value": 484
+   },
+   {
+    "label": "Time DFn",
+    "value": 1
+   },
+   {
+    "label": "Time P value",
+    "value": 1.012540312e-7,
+    "p": true
+   },
+   {
+    "label": "Time partial eta squared",
+    "value": 0.9857433809
+   },
+   {
+    "label": "Time eta squared",
+    "value": 0.5038051398
+   },
+   {
+    "label": "Genotype F",
+    "value": 118.5679012
+   },
+   {
+    "label": "Genotype DFn",
+    "value": 1
+   },
+   {
+    "label": "Genotype P value",
+    "value": 0.00001217145853,
+    "p": true
+   },
+   {
+    "label": "Genotype partial eta squared",
+    "value": 0.9442532691
+   },
+   {
+    "label": "Genotype eta squared",
+    "value": 0.1234196654
+   },
+   {
+    "label": "Treatment:Time F",
+    "value": 41.5308642
+   },
+   {
+    "label": "Treatment:Time DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment:Time P value",
+    "value": 0.0003521138647,
+    "p": true
+   },
+   {
+    "label": "Treatment:Time partial eta squared",
+    "value": 0.8557618926
+   },
+   {
+    "label": "Treatment:Time eta squared",
+    "value": 0.04323029513
+   },
+   {
+    "label": "Treatment:Genotype F",
+    "value": 0.04938271605
+   },
+   {
+    "label": "Treatment:Genotype DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment:Genotype P value",
+    "value": 0.8304853021,
+    "p": true
+   },
+   {
+    "label": "Treatment:Genotype partial eta squared",
+    "value": 0.00700525394
+   },
+   {
+    "label": "Treatment:Genotype eta squared",
+    "value": 0.00005140344249
+   },
+   {
+    "label": "Time:Genotype F",
+    "value": 17.82716049
+   },
+   {
+    "label": "Time:Genotype DFn",
+    "value": 1
+   },
+   {
+    "label": "Time:Genotype P value",
+    "value": 0.003925775865,
+    "p": true
+   },
+   {
+    "label": "Time:Genotype partial eta squared",
+    "value": 0.718050721
+   },
+   {
+    "label": "Time:Genotype eta squared",
+    "value": 0.01855664274
+   },
+   {
+    "label": "Treatment:Time:Genotype F",
+    "value": 4
+   },
+   {
+    "label": "Treatment:Time:Genotype DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment:Time:Genotype P value",
+    "value": 0.08561932856,
+    "p": true
+   },
+   {
+    "label": "Treatment:Time:Genotype partial eta squared",
+    "value": 0.3636363636
+   },
+   {
+    "label": "Treatment:Time:Genotype eta squared",
+    "value": 0.004163678842
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 7
+   }
+  ],
+  "groups": [
+   {
+    "name": "Treatment = Placebo, Time = Day 1, Genotype = WT",
+    "mean": 10,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 10,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Placebo, Time = Day 1, Genotype = KO",
+    "mean": 12,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 12,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Placebo, Time = Day 2, Genotype = WT",
+    "mean": 13,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 13,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Placebo, Time = Day 2, Genotype = KO",
+    "mean": 16,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 16,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 1, Genotype = WT",
+    "mean": 14,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 14,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 1, Genotype = KO",
+    "mean": 15,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 15,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 2, Genotype = WT",
+    "mean": 19,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 19,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 2, Genotype = KO",
+    "mean": 22.8,
+    "sd": null,
+    "sem": null,
+    "median": 22.8,
+    "n": 1
+   }
+  ],
+  "notes": "Response “Response” by Treatment (Placebo, Drug); Time (Day 1, Day 2); Genotype (WT, KO). Tests the main effects and every two- and three-way interaction; assumes normal distributions with equal variances (Type III sums of squares). 15 complete rows in 8 cells; 2 rows left out (missing response or factor). Multiple comparisons follow the Treatment:Time term.",
+  "comparisons": [
+   {
+    "group1": "Placebo (Day 1)",
+    "group2": "Placebo (Day 2)",
+    "diff": -3.5,
+    "p": 0.00003439711285
+   },
+   {
+    "group1": "Placebo (Day 1)",
+    "group2": "Drug (Day 1)",
+    "diff": -3.5,
+    "p": 0.00003439711285
+   },
+   {
+    "group1": "Placebo (Day 1)",
+    "group2": "Drug (Day 2)",
+    "diff": -9.266666667,
+    "p": 9.310456206e-8
+   },
+   {
+    "group1": "Placebo (Day 2)",
+    "group2": "Drug (Day 1)",
+    "diff": 0,
+    "p": 1
+   },
+   {
+    "group1": "Placebo (Day 2)",
+    "group2": "Drug (Day 2)",
+    "diff": -5.766666667,
+    "p": 0.000001790832763
+   },
+   {
+    "group1": "Drug (Day 1)",
+    "group2": "Drug (Day 2)",
+    "diff": -5.766666667,
+    "p": 0.000001790832763
+   }
+  ],
+  "comparisonsLabel": "Tukey's multiple comparisons test (Treatment:Time cell means)",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "Response",
+     "n": 15
+    }
+   ],
+   "how": "list",
+   "detail": "by “Treatment”, “Time” and “Genotype”",
+   "left": []
+  },
+  "summary": "“Treatment”, “Time”, “Genotype”, “Treatment:Time” and “Time:Genotype” affect “Response” (P < 0.0001, P < 0.0001, P < 0.0001, P = 0.0003521, P = 0.003926). The data don't show an effect of “Treatment:Genotype” and “Treatment:Time:Genotype”. 5 of 6 pairs differ significantly in the comparisons."
+ },
+ "multifactor-anova mv3 {\"response\":\"Response\",\"factors\":[\"Treatment\",\"Time\",\"Genotype\"],\"posthoc\":\"bonferroni\",\"posthocTerm\":\"Treatment:Time:Genotype\"}": {
+  "testType": "multifactor-anova",
+  "subtitle": "Multifactor ANOVA",
+  "stats": [
+   {
+    "label": "Treatment F",
+    "value": 484
+   },
+   {
+    "label": "Treatment DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment P value",
+    "value": 1.012540312e-7,
+    "p": true
+   },
+   {
+    "label": "Treatment partial eta squared",
+    "value": 0.9857433809
+   },
+   {
+    "label": "Treatment eta squared",
+    "value": 0.5038051398
+   },
+   {
+    "label": "Time F",
+    "value": 484
+   },
+   {
+    "label": "Time DFn",
+    "value": 1
+   },
+   {
+    "label": "Time P value",
+    "value": 1.012540312e-7,
+    "p": true
+   },
+   {
+    "label": "Time partial eta squared",
+    "value": 0.9857433809
+   },
+   {
+    "label": "Time eta squared",
+    "value": 0.5038051398
+   },
+   {
+    "label": "Genotype F",
+    "value": 118.5679012
+   },
+   {
+    "label": "Genotype DFn",
+    "value": 1
+   },
+   {
+    "label": "Genotype P value",
+    "value": 0.00001217145853,
+    "p": true
+   },
+   {
+    "label": "Genotype partial eta squared",
+    "value": 0.9442532691
+   },
+   {
+    "label": "Genotype eta squared",
+    "value": 0.1234196654
+   },
+   {
+    "label": "Treatment:Time F",
+    "value": 41.5308642
+   },
+   {
+    "label": "Treatment:Time DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment:Time P value",
+    "value": 0.0003521138647,
+    "p": true
+   },
+   {
+    "label": "Treatment:Time partial eta squared",
+    "value": 0.8557618926
+   },
+   {
+    "label": "Treatment:Time eta squared",
+    "value": 0.04323029513
+   },
+   {
+    "label": "Treatment:Genotype F",
+    "value": 0.04938271605
+   },
+   {
+    "label": "Treatment:Genotype DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment:Genotype P value",
+    "value": 0.8304853021,
+    "p": true
+   },
+   {
+    "label": "Treatment:Genotype partial eta squared",
+    "value": 0.00700525394
+   },
+   {
+    "label": "Treatment:Genotype eta squared",
+    "value": 0.00005140344249
+   },
+   {
+    "label": "Time:Genotype F",
+    "value": 17.82716049
+   },
+   {
+    "label": "Time:Genotype DFn",
+    "value": 1
+   },
+   {
+    "label": "Time:Genotype P value",
+    "value": 0.003925775865,
+    "p": true
+   },
+   {
+    "label": "Time:Genotype partial eta squared",
+    "value": 0.718050721
+   },
+   {
+    "label": "Time:Genotype eta squared",
+    "value": 0.01855664274
+   },
+   {
+    "label": "Treatment:Time:Genotype F",
+    "value": 4
+   },
+   {
+    "label": "Treatment:Time:Genotype DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment:Time:Genotype P value",
+    "value": 0.08561932856,
+    "p": true
+   },
+   {
+    "label": "Treatment:Time:Genotype partial eta squared",
+    "value": 0.3636363636
+   },
+   {
+    "label": "Treatment:Time:Genotype eta squared",
+    "value": 0.004163678842
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 7
+   }
+  ],
+  "groups": [
+   {
+    "name": "Treatment = Placebo, Time = Day 1, Genotype = WT",
+    "mean": 10,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 10,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Placebo, Time = Day 1, Genotype = KO",
+    "mean": 12,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 12,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Placebo, Time = Day 2, Genotype = WT",
+    "mean": 13,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 13,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Placebo, Time = Day 2, Genotype = KO",
+    "mean": 16,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 16,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 1, Genotype = WT",
+    "mean": 14,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 14,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 1, Genotype = KO",
+    "mean": 15,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 15,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 2, Genotype = WT",
+    "mean": 19,
+    "sd": 0.4242640687,
+    "sem": 0.3,
+    "median": 19,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 2, Genotype = KO",
+    "mean": 22.8,
+    "sd": null,
+    "sem": null,
+    "median": 22.8,
+    "n": 1
+   }
+  ],
+  "notes": "Response “Response” by Treatment (Placebo, Drug); Time (Day 1, Day 2); Genotype (WT, KO). Tests the main effects and every two- and three-way interaction; assumes normal distributions with equal variances (Type III sums of squares). 15 complete rows in 8 cells; 2 rows left out (missing response or factor). Multiple comparisons follow the Treatment:Time:Genotype term.",
+  "comparisons": [
+   {
+    "group1": "Placebo (Day 1, WT)",
+    "group2": "Placebo (Day 1, KO)",
+    "diff": -2,
+    "p": 0.0608324572
+   },
+   {
+    "group1": "Placebo (Day 1, WT)",
+    "group2": "Placebo (Day 2, WT)",
+    "diff": -3,
+    "p": 0.0055624174
+   },
+   {
+    "group1": "Placebo (Day 1, WT)",
+    "group2": "Placebo (Day 2, KO)",
+    "diff": -6,
+    "p": 0.00005872607193
+   },
+   {
+    "group1": "Placebo (Day 1, WT)",
+    "group2": "Drug (Day 1, WT)",
+    "diff": -4,
+    "p": 0.00088199832
+   },
+   {
+    "group1": "Placebo (Day 1, WT)",
+    "group2": "Drug (Day 1, KO)",
+    "diff": -5,
+    "p": 0.0002009680074
+   },
+   {
+    "group1": "Placebo (Day 1, WT)",
+    "group2": "Drug (Day 2, WT)",
+    "diff": -9,
+    "p": 0.00000364611418
+   },
+   {
+    "group1": "Placebo (Day 1, WT)",
+    "group2": "Drug (Day 2, KO)",
+    "diff": -12.8,
+    "p": 0.000001296396302
+   },
+   {
+    "group1": "Placebo (Day 1, KO)",
+    "group2": "Placebo (Day 2, WT)",
+    "diff": -1,
+    "p": 1
+   },
+   {
+    "group1": "Placebo (Day 1, KO)",
+    "group2": "Placebo (Day 2, KO)",
+    "diff": -4,
+    "p": 0.00088199832
+   },
+   {
+    "group1": "Placebo (Day 1, KO)",
+    "group2": "Drug (Day 1, WT)",
+    "diff": -2,
+    "p": 0.0608324572
+   },
+   {
+    "group1": "Placebo (Day 1, KO)",
+    "group2": "Drug (Day 1, KO)",
+    "diff": -3,
+    "p": 0.0055624174
+   },
+   {
+    "group1": "Placebo (Day 1, KO)",
+    "group2": "Drug (Day 2, WT)",
+    "diff": -7,
+    "p": 0.00002052993299
+   },
+   {
+    "group1": "Placebo (Day 1, KO)",
+    "group2": "Drug (Day 2, KO)",
+    "diff": -10.8,
+    "p": 0.000004197769862
+   },
+   {
+    "group1": "Placebo (Day 2, WT)",
+    "group2": "Placebo (Day 2, KO)",
+    "diff": -3,
+    "p": 0.0055624174
+   },
+   {
+    "group1": "Placebo (Day 2, WT)",
+    "group2": "Drug (Day 1, WT)",
+    "diff": -1,
+    "p": 1
+   },
+   {
+    "group1": "Placebo (Day 2, WT)",
+    "group2": "Drug (Day 1, KO)",
+    "diff": -2,
+    "p": 0.0608324572
+   },
+   {
+    "group1": "Placebo (Day 2, WT)",
+    "group2": "Drug (Day 2, WT)",
+    "diff": -6,
+    "p": 0.00005872607193
+   },
+   {
+    "group1": "Placebo (Day 2, WT)",
+    "group2": "Drug (Day 2, KO)",
+    "diff": -9.8,
+    "p": 0.000008199501966
+   },
+   {
+    "group1": "Placebo (Day 2, KO)",
+    "group2": "Drug (Day 1, WT)",
+    "diff": 2,
+    "p": 0.0608324572
+   },
+   {
+    "group1": "Placebo (Day 2, KO)",
+    "group2": "Drug (Day 1, KO)",
+    "diff": 1,
+    "p": 1
+   },
+   {
+    "group1": "Placebo (Day 2, KO)",
+    "group2": "Drug (Day 2, WT)",
+    "diff": -3,
+    "p": 0.0055624174
+   },
+   {
+    "group1": "Placebo (Day 2, KO)",
+    "group2": "Drug (Day 2, KO)",
+    "diff": -6.8,
+    "p": 0.0000993104168
+   },
+   {
+    "group1": "Drug (Day 1, WT)",
+    "group2": "Drug (Day 1, KO)",
+    "diff": -1,
+    "p": 1
+   },
+   {
+    "group1": "Drug (Day 1, WT)",
+    "group2": "Drug (Day 2, WT)",
+    "diff": -5,
+    "p": 0.0002009680074
+   },
+   {
+    "group1": "Drug (Day 1, WT)",
+    "group2": "Drug (Day 2, KO)",
+    "diff": -8.8,
+    "p": 0.00001716879638
+   },
+   {
+    "group1": "Drug (Day 1, KO)",
+    "group2": "Drug (Day 2, WT)",
+    "diff": -4,
+    "p": 0.00088199832
+   },
+   {
+    "group1": "Drug (Day 1, KO)",
+    "group2": "Drug (Day 2, KO)",
+    "diff": -7.8,
+    "p": 0.00003914685695
+   },
+   {
+    "group1": "Drug (Day 2, WT)",
+    "group2": "Drug (Day 2, KO)",
+    "diff": -3.8,
+    "p": 0.004506297207
+   }
+  ],
+  "comparisonsLabel": "Bonferroni-corrected multiple comparisons test (Treatment:Time:Genotype cell means)",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "Response",
+     "n": 15
+    }
+   ],
+   "how": "list",
+   "detail": "by “Treatment”, “Time” and “Genotype”",
+   "left": []
+  },
+  "summary": "“Treatment”, “Time”, “Genotype”, “Treatment:Time” and “Time:Genotype” affect “Response” (P < 0.0001, P < 0.0001, P < 0.0001, P = 0.0003521, P = 0.003926). The data don't show an effect of “Treatment:Genotype” and “Treatment:Time:Genotype”. 20 of 28 pairs differ significantly in the comparisons."
+ },
+ "multifactor-anova mv4 {\"response\":\"Response\",\"factors\":[\"Treatment\",\"Time\",\"Genotype\",\"Sex\"],\"posthoc\":\"none\"}": {
+  "testType": "multifactor-anova",
+  "subtitle": "Multifactor ANOVA",
+  "stats": [
+   {
+    "label": "Treatment F",
+    "value": 272.7085503
+   },
+   {
+    "label": "Treatment DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment P value",
+    "value": 1.792075084e-11,
+    "p": true
+   },
+   {
+    "label": "Treatment partial eta squared",
+    "value": 0.9445807892
+   },
+   {
+    "label": "Treatment eta squared",
+    "value": 0.346450683
+   },
+   {
+    "label": "Time F",
+    "value": 463.2207031
+   },
+   {
+    "label": "Time DFn",
+    "value": 1
+   },
+   {
+    "label": "Time P value",
+    "value": 3.078348729e-13,
+    "p": true
+   },
+   {
+    "label": "Time partial eta squared",
+    "value": 0.9666124608
+   },
+   {
+    "label": "Time eta squared",
+    "value": 0.5884785379
+   },
+   {
+    "label": "Genotype F",
+    "value": 27.50347222
+   },
+   {
+    "label": "Genotype DFn",
+    "value": 1
+   },
+   {
+    "label": "Genotype P value",
+    "value": 0.00008022100434,
+    "p": true
+   },
+   {
+    "label": "Genotype partial eta squared",
+    "value": 0.6322132652
+   },
+   {
+    "label": "Genotype eta squared",
+    "value": 0.03494058666
+   },
+   {
+    "label": "Sex F",
+    "value": 0.05555555556
+   },
+   {
+    "label": "Sex DFn",
+    "value": 1
+   },
+   {
+    "label": "Sex P value",
+    "value": 0.8166542036,
+    "p": true
+   },
+   {
+    "label": "Sex partial eta squared",
+    "value": 0.003460207612
+   },
+   {
+    "label": "Sex eta squared",
+    "value": 0.00007057813238
+   },
+   {
+    "label": "Treatment:Time F",
+    "value": 42.20507812
+   },
+   {
+    "label": "Treatment:Time DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment:Time P value",
+    "value": 0.000007369106774,
+    "p": true
+   },
+   {
+    "label": "Treatment:Time partial eta squared",
+    "value": 0.7251098956
+   },
+   {
+    "label": "Treatment:Time eta squared",
+    "value": 0.05361760064
+   },
+   {
+    "label": "Treatment:Genotype F",
+    "value": 7.5078125
+   },
+   {
+    "label": "Treatment:Genotype DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment:Genotype P value",
+    "value": 0.01452844669,
+    "p": true
+   },
+   {
+    "label": "Treatment:Genotype partial eta squared",
+    "value": 0.3193752077
+   },
+   {
+    "label": "Treatment:Genotype eta squared",
+    "value": 0.009537972921
+   },
+   {
+    "label": "Treatment:Sex F",
+    "value": 0.05555555556
+   },
+   {
+    "label": "Treatment:Sex DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment:Sex P value",
+    "value": 0.8166542036,
+    "p": true
+   },
+   {
+    "label": "Treatment:Sex partial eta squared",
+    "value": 0.003460207612
+   },
+   {
+    "label": "Treatment:Sex eta squared",
+    "value": 0.00007057813238
+   },
+   {
+    "label": "Time:Genotype F",
+    "value": 7.5078125
+   },
+   {
+    "label": "Time:Genotype DFn",
+    "value": 1
+   },
+   {
+    "label": "Time:Genotype P value",
+    "value": 0.01452844669,
+    "p": true
+   },
+   {
+    "label": "Time:Genotype partial eta squared",
+    "value": 0.3193752077
+   },
+   {
+    "label": "Time:Genotype eta squared",
+    "value": 0.009537972921
+   },
+   {
+    "label": "Time:Sex F",
+    "value": 0.05555555556
+   },
+   {
+    "label": "Time:Sex DFn",
+    "value": 1
+   },
+   {
+    "label": "Time:Sex P value",
+    "value": 0.8166542036,
+    "p": true
+   },
+   {
+    "label": "Time:Sex partial eta squared",
+    "value": 0.003460207612
+   },
+   {
+    "label": "Time:Sex eta squared",
+    "value": 0.00007057813238
+   },
+   {
+    "label": "Genotype:Sex F",
+    "value": 5.146701389
+   },
+   {
+    "label": "Genotype:Sex DFn",
+    "value": 1
+   },
+   {
+    "label": "Genotype:Sex P value",
+    "value": 0.03748257875,
+    "p": true
+   },
+   {
+    "label": "Genotype:Sex partial eta squared",
+    "value": 0.2433808136
+   },
+   {
+    "label": "Genotype:Sex eta squared",
+    "value": 0.006538402295
+   },
+   {
+    "label": "Treatment:Time:Genotype F",
+    "value": 7.5078125
+   },
+   {
+    "label": "Treatment:Time:Genotype DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment:Time:Genotype P value",
+    "value": 0.01452844669,
+    "p": true
+   },
+   {
+    "label": "Treatment:Time:Genotype partial eta squared",
+    "value": 0.3193752077
+   },
+   {
+    "label": "Treatment:Time:Genotype eta squared",
+    "value": 0.009537972921
+   },
+   {
+    "label": "Treatment:Time:Sex F",
+    "value": 0.05555555556
+   },
+   {
+    "label": "Treatment:Time:Sex DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment:Time:Sex P value",
+    "value": 0.8166542036,
+    "p": true
+   },
+   {
+    "label": "Treatment:Time:Sex partial eta squared",
+    "value": 0.003460207612
+   },
+   {
+    "label": "Treatment:Time:Sex eta squared",
+    "value": 0.00007057813238
+   },
+   {
+    "label": "Treatment:Genotype:Sex F",
+    "value": 0.05555555556
+   },
+   {
+    "label": "Treatment:Genotype:Sex DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment:Genotype:Sex P value",
+    "value": 0.8166542036,
+    "p": true
+   },
+   {
+    "label": "Treatment:Genotype:Sex partial eta squared",
+    "value": 0.003460207612
+   },
+   {
+    "label": "Treatment:Genotype:Sex eta squared",
+    "value": 0.00007057813238
+   },
+   {
+    "label": "Time:Genotype:Sex F",
+    "value": 0.05555555556
+   },
+   {
+    "label": "Time:Genotype:Sex DFn",
+    "value": 1
+   },
+   {
+    "label": "Time:Genotype:Sex P value",
+    "value": 0.8166542036,
+    "p": true
+   },
+   {
+    "label": "Time:Genotype:Sex partial eta squared",
+    "value": 0.003460207612
+   },
+   {
+    "label": "Time:Genotype:Sex eta squared",
+    "value": 0.00007057813238
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 16
+   }
+  ],
+  "groups": [
+   {
+    "name": "Treatment = Placebo, Time = Day 1, Genotype = WT, Sex = M",
+    "mean": 10,
+    "sd": 0.5656854249,
+    "sem": 0.4,
+    "median": 10,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Placebo, Time = Day 1, Genotype = WT, Sex = F",
+    "mean": 10.5,
+    "sd": 0.5656854249,
+    "sem": 0.4,
+    "median": 10.5,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Placebo, Time = Day 1, Genotype = KO, Sex = M",
+    "mean": 11,
+    "sd": 0.5656854249,
+    "sem": 0.4,
+    "median": 11,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Placebo, Time = Day 1, Genotype = KO, Sex = F",
+    "mean": 10.5,
+    "sd": 0.5656854249,
+    "sem": 0.4,
+    "median": 10.5,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Placebo, Time = Day 2, Genotype = WT, Sex = M",
+    "mean": 13,
+    "sd": 0.5656854249,
+    "sem": 0.4,
+    "median": 13,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Placebo, Time = Day 2, Genotype = WT, Sex = F",
+    "mean": 13.5,
+    "sd": 0.5656854249,
+    "sem": 0.4,
+    "median": 13.5,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Placebo, Time = Day 2, Genotype = KO, Sex = M",
+    "mean": 14,
+    "sd": 0.5656854249,
+    "sem": 0.4,
+    "median": 14,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Placebo, Time = Day 2, Genotype = KO, Sex = F",
+    "mean": 13.5,
+    "sd": 0.5656854249,
+    "sem": 0.4,
+    "median": 13.5,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 1, Genotype = WT, Sex = M",
+    "mean": 12,
+    "sd": 0.5656854249,
+    "sem": 0.4,
+    "median": 12,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 1, Genotype = WT, Sex = F",
+    "mean": 12.5,
+    "sd": 0.5656854249,
+    "sem": 0.4,
+    "median": 12.5,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 1, Genotype = KO, Sex = M",
+    "mean": 13,
+    "sd": 0.5656854249,
+    "sem": 0.4,
+    "median": 13,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 1, Genotype = KO, Sex = F",
+    "mean": 12.5,
+    "sd": 0.5656854249,
+    "sem": 0.4,
+    "median": 12.5,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 2, Genotype = WT, Sex = M",
+    "mean": 16.5,
+    "sd": 0.5656854249,
+    "sem": 0.4,
+    "median": 16.5,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 2, Genotype = WT, Sex = F",
+    "mean": 17,
+    "sd": 0.5656854249,
+    "sem": 0.4,
+    "median": 17,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 2, Genotype = KO, Sex = M",
+    "mean": 19.5,
+    "sd": 0.5656854249,
+    "sem": 0.4,
+    "median": 19.5,
+    "n": 2
+   },
+   {
+    "name": "Treatment = Drug, Time = Day 2, Genotype = KO, Sex = F",
+    "mean": 19.4,
+    "sd": null,
+    "sem": null,
+    "median": 19.4,
+    "n": 1
+   }
+  ],
+  "notes": "Response “Response” by Treatment (Placebo, Drug); Time (Day 1, Day 2); Genotype (WT, KO); Sex (M, F). Tests the main effects and every two- and three-way interaction (no four-way or higher interaction is tested); assumes normal distributions with equal variances (Type III sums of squares). 31 complete rows in 16 cells.",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "Response",
+     "n": 31
+    }
+   ],
+   "how": "list",
+   "detail": "by “Treatment”, “Time”, “Genotype” and “Sex”",
+   "left": []
+  },
+  "summary": "“Treatment”, “Time”, “Genotype”, “Treatment:Time”, “Treatment:Genotype”, “Time:Genotype”, “Genotype:Sex” and “Treatment:Time:Genotype” affect “Response” (P < 0.0001, P < 0.0001, P < 0.0001, P < 0.0001, P = 0.01453, P = 0.01453, P = 0.03748, P = 0.01453). The data don't show an effect of “Sex”, “Treatment:Sex”, “Time:Sex”, “Treatment:Time:Sex”, “Treatment:Genotype:Sex” and “Time:Genotype:Sex”."
+ },
+ "multifactor-anova mv1 {\"response\":\"Response\",\"factors\":[\"Treatment\"],\"posthoc\":\"none\"}": {
+  "testType": "multifactor-anova",
+  "subtitle": "Multifactor ANOVA",
+  "stats": [
+   {
+    "label": "Treatment F",
+    "value": 192.6447368
+   },
+   {
+    "label": "Treatment DFn",
+    "value": 1
+   },
+   {
+    "label": "Treatment P value",
+    "value": 0.0001562267079,
+    "p": true
+   },
+   {
+    "label": "Treatment partial eta squared",
+    "value": 0.9796587487
+   },
+   {
+    "label": "Treatment eta squared",
+    "value": 0.9796587487
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 4
+   }
+  ],
+  "groups": [
+   {
+    "name": "Treatment = Placebo",
+    "mean": 10.16666667,
+    "sd": 0.3055050463,
+    "sem": 0.1763834207,
+    "median": 10.1,
+    "n": 3
+   },
+   {
+    "name": "Treatment = Drug",
+    "mean": 14.2,
+    "sd": 0.4,
+    "sem": 0.2309401077,
+    "median": 14.2,
+    "n": 3
+   }
+  ],
+  "notes": "Response “Response” by Treatment (Placebo, Drug). Tests the main effect; assumes normal distributions with equal variances (Type III sums of squares). 6 complete rows in 2 cells.",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "Response",
+     "n": 6
+    }
+   ],
+   "how": "list",
+   "detail": "by “Treatment”",
+   "left": []
+  },
+  "summary": "“Treatment” affects “Response” (P = 0.0001562)."
+ },
+ "multifactor-anova mv3Empty {\"response\":\"Response\",\"factors\":[\"Treatment\",\"Time\",\"Genotype\"],\"posthoc\":\"none\"}": {
+  "error": "Every combination of the factors in each tested term needs at least one value. Treatment Drug × Time Day 2 × Genotype KO has no values."
+ },
+ "multifactor-anova mv3N1 {\"response\":\"Response\",\"factors\":[\"Treatment\",\"Time\",\"Genotype\"],\"posthoc\":\"none\"}": {
+  "error": "Each combination needs replicates (or the design needs more rows) — there are no residual degrees of freedom."
+ },
+ "multifactor-anova mv3Six {\"response\":\"Response\",\"factors\":[\"Treatment\",\"Time\",\"Genotype\",\"Sex\",\"Dose\",\"Site\"],\"posthoc\":\"none\"}": {
+  "error": "Multifactor ANOVA takes at most 5 factors — 6 were chosen. Drop a factor and try again."
+ },
  "nested-t-test nested3 {\"sets\":[\"Control\",\"Treated\"]}": {
   "testType": "nested-t-test",
   "stats": [
