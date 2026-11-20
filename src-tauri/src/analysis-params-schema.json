@@ -1,0 +1,2484 @@
+{
+  "anova": {
+    "label": "One-way ANOVA",
+    "min_columns": 2,
+    "offered_on": [
+      "column"
+    ],
+    "params": [
+      {
+        "name": "posthoc",
+        "type": "string",
+        "enum": [
+          "none",
+          "tukey",
+          "bonferroni",
+          "sidak",
+          "holm-sidak",
+          "lsd",
+          "dunnett",
+          "games-howell",
+          "t3"
+        ],
+        "default": "none",
+        "required": false
+      },
+      {
+        "name": "equalSd",
+        "type": "boolean",
+        "required": false,
+        "description": "false: Welch's ANOVA (the groups' SDs differ); absent or true, the ordinary one."
+      },
+      {
+        "name": "control",
+        "type": "string",
+        "required": false,
+        "description": "Dunnett's control group, by name."
+      },
+      {
+        "name": "compared",
+        "type": "string[]",
+        "required": false,
+        "description": "The pairs compared (`pairKey`), when not every pair: Bonferroni, Šídák, Holm-Šídák, Fisher's."
+      },
+      {
+        "name": "lognormal",
+        "type": "boolean",
+        "required": false,
+        "description": "The groups' geometric means compared: the ANOVA and its comparisons run on the logarithms."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "area-under-curve": {
+    "label": "Area under the curve",
+    "min_columns": 2,
+    "offered_on": [
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "baseline",
+        "type": "number",
+        "default": 0,
+        "required": false,
+        "description": "Baseline Y value the area is measured from (peaks are heights above it)."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "binding-kinetics": {
+    "label": "Binding — Kinetics",
+    "min_columns": 2,
+    "offered_on": [
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "y",
+        "type": "string | string[]",
+        "required": false,
+        "description": "Omitted defaults to the first Y data column."
+      },
+      {
+        "name": "model",
+        "type": "string",
+        "enum": [
+          "association-one-phase",
+          "dissociation-one-phase",
+          "association-two-phase",
+          "dissociation-two-phase",
+          "association-then-dissociation"
+        ],
+        "required": true
+      },
+      {
+        "name": "ligandConcentration",
+        "type": "number",
+        "required": false,
+        "description": "Radioligand concentration (association-one-phase only), same units as the experiment; omitted = kon / kinetic Kd not reported."
+      },
+      {
+        "name": "koff",
+        "type": "number",
+        "required": false,
+        "description": "Koff from a dissociation experiment (association-one-phase only), same time units as X; omitted = kon / kinetic Kd not reported."
+      },
+      {
+        "name": "hotNM",
+        "type": "number",
+        "required": false,
+        "description": "Radioligand concentration in nM during association (association-then-dissociation only, required)."
+      },
+      {
+        "name": "time0",
+        "type": "number",
+        "required": false,
+        "description": "Time at which dissociation starts (association-then-dissociation only, required), same time units as X."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "binding-saturation": {
+    "label": "Binding — Saturation",
+    "min_columns": 2,
+    "offered_on": [
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "y",
+        "type": "string | string[]",
+        "required": false,
+        "description": "Omitted defaults to the first Y data column."
+      },
+      {
+        "name": "model",
+        "type": "string",
+        "enum": [
+          "one-site-total",
+          "two-site-specific",
+          "one-site-total-and-ns",
+          "two-site-total-and-ns"
+        ],
+        "required": true
+      },
+      {
+        "name": "y2",
+        "type": "string",
+        "required": false,
+        "description": "The nonspecific series (two-series models only); omitted defaults to the second Y data column."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "bland-altman": {
+    "label": "Bland-Altman method comparison",
+    "min_columns": 2,
+    "offered_on": [
+      "column",
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "chi-square": {
+    "label": "Chi-square or Fisher's exact test",
+    "min_columns": 2,
+    "offered_on": [
+      "contingency"
+    ],
+    "params": [
+      {
+        "name": "test",
+        "type": "string",
+        "enum": [
+          "fisher",
+          "yates",
+          "chi-square",
+          "trend"
+        ],
+        "required": false,
+        "description": "The test to run (absent: Fisher's on a 2 × 2, else the chi-square)."
+      },
+      {
+        "name": "trendOrdered",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ],
+    "requires_packages": [
+      "survival"
+    ]
+  },
+  "compare-two-groups": {
+    "label": "Compare two groups",
+    "min_columns": 2,
+    "offered_on": [
+      "column"
+    ],
+    "params": [
+      {
+        "name": "paired",
+        "type": "boolean",
+        "default": false,
+        "required": false
+      },
+      {
+        "name": "gaussian",
+        "type": "boolean",
+        "default": true,
+        "required": false
+      },
+      {
+        "name": "equalVariance",
+        "type": "boolean",
+        "default": true,
+        "required": false,
+        "description": "Only meaningful when gaussian && !paired (Student vs Welch)."
+      },
+      {
+        "name": "ratio",
+        "type": "boolean",
+        "default": false,
+        "required": false,
+        "description": "Only meaningful when paired && gaussian: compare ratios (log-transformed) instead of differences — for data where proportional change is what matters."
+      },
+      {
+        "name": "lognormal",
+        "type": "boolean",
+        "required": false,
+        "description": "Only meaningful when gaussian && !paired: compare the geometric means, a t test on the logarithms (lognormal t test, Student's or Welch's). Its own param, not `ratio`: a file of an older Helix may hold a `ratio` left from a paired answer."
+      },
+      {
+        "name": "tails",
+        "type": "string",
+        "enum": [
+          "two-sided",
+          "less",
+          "greater"
+        ],
+        "default": "two-sided",
+        "required": false,
+        "description": "\"less\"/\"greater\" follow R's t.test semantics: alternative on (col0 vs col1)."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "correlation": {
+    "label": "Correlation",
+    "min_columns": 2,
+    "offered_on": [
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "method",
+        "type": "string",
+        "enum": [
+          "pearson",
+          "spearman"
+        ],
+        "default": "pearson",
+        "required": false
+      },
+      {
+        "name": "mode",
+        "type": "string",
+        "enum": [
+          "x-vs-every-y",
+          "two-datasets",
+          "matrix"
+        ],
+        "default": "x-vs-every-y",
+        "required": false
+      },
+      {
+        "name": "datasets",
+        "type": "string[]",
+        "required": false,
+        "description": "Required for \"two-datasets\": the two column names to correlate."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "correlation-matrix": {
+    "label": "Correlation matrix",
+    "min_columns": 2,
+    "offered_on": [
+      "multiple"
+    ],
+    "params": [
+      {
+        "name": "method",
+        "type": "string",
+        "enum": [
+          "pearson",
+          "spearman"
+        ],
+        "default": "pearson",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "cox": {
+    "label": "Cox proportional hazards regression",
+    "min_columns": 3,
+    "offered_on": [
+      "survival"
+    ],
+    "params": [
+      {
+        "name": "reference",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ],
+    "requires_packages": [
+      "survival"
+    ]
+  },
+  "cox-proportional-hazards": {
+    "label": "Cox proportional-hazards regression",
+    "min_columns": 3,
+    "offered_on": [
+      "multiple"
+    ],
+    "params": [
+      {
+        "name": "time",
+        "type": "string",
+        "required": false,
+        "description": "Omitted defaults to the first data column."
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "required": false,
+        "description": "Omitted defaults to the second data column."
+      },
+      {
+        "name": "covariates",
+        "type": "string[]",
+        "required": false,
+        "description": "Omitted (or empty — see the runner) defaults to all remaining data columns."
+      },
+      {
+        "name": "ties",
+        "type": "string",
+        "enum": [
+          "efron",
+          "breslow"
+        ],
+        "required": false
+      },
+      {
+        "name": "stratifyBy",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ],
+    "requires_packages": [
+      "survival"
+    ]
+  },
+  "deming-regression": {
+    "label": "Deming regression",
+    "min_columns": 2,
+    "offered_on": [
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "y",
+        "type": "string | string[]",
+        "required": false,
+        "description": "Omitted defaults to the first Y data column."
+      },
+      {
+        "name": "lambda",
+        "type": "number",
+        "default": 1,
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "descriptive-statistics": {
+    "label": "Descriptive statistics",
+    "min_columns": 1,
+    "offered_on": [
+      "column",
+      "multiple"
+    ],
+    "params": [
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "dose-response-special": {
+    "label": "Dose-response — Special (EC50 shift / Schild / operational)",
+    "min_columns": 2,
+    "offered_on": [
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "ys",
+        "type": "string[]",
+        "required": false,
+        "description": "Omitted defaults to all Y data columns, in table order — the first is the control (no antagonist) for Schild / EC50 shift, the full agonist for the operational model."
+      },
+      {
+        "name": "model",
+        "type": "string",
+        "enum": [
+          "ec50-shift",
+          "schild",
+          "schild-slope-1",
+          "operational-partial"
+        ],
+        "required": true
+      },
+      {
+        "name": "antagonistConcentrations",
+        "type": "object",
+        "value_shape": "object mapping a column name to a number",
+        "required": false,
+        "description": "Per-series B, keyed by Y column name (Schild / EC50 shift only)."
+      },
+      {
+        "name": "bUnits",
+        "type": "string",
+        "enum": [
+          "M",
+          "nM",
+          "µM"
+        ],
+        "required": false,
+        "description": "Units B was entered in — shown next to pA2; default \"M\"."
+      },
+      {
+        "name": "fixHillSlope",
+        "type": "boolean",
+        "required": false,
+        "description": "Constrain HillSlope to 1.0 (Schild only, default false)."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ],
+    "gates": [
+      "Every model needs X + at least 2 Y series (control + at least 1 shifted curve; full agonist + at least 1 partial agonist)"
+    ]
+  },
+  "enzyme-inhibition": {
+    "label": "Enzyme kinetics — Inhibition",
+    "min_columns": 2,
+    "offered_on": [
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "y",
+        "type": "string | string[]",
+        "required": false,
+        "description": "Omitted defaults to all Y data columns."
+      },
+      {
+        "name": "model",
+        "type": "string",
+        "enum": [
+          "competitive",
+          "noncompetitive",
+          "uncompetitive",
+          "mixed",
+          "morrison"
+        ],
+        "required": true
+      },
+      {
+        "name": "inhibitorConcentrations",
+        "type": "object",
+        "value_shape": "object mapping a column name to a number",
+        "required": false,
+        "description": "Per-series [I], keyed by Y column name."
+      },
+      {
+        "name": "enzymeConcentration",
+        "type": "number",
+        "required": false,
+        "description": "Total enzyme concentration Et (Morrison only, required)."
+      },
+      {
+        "name": "substrateConcentration",
+        "type": "number",
+        "required": false,
+        "description": "Fixed substrate concentration [S] (Morrison only, with Km)."
+      },
+      {
+        "name": "kmForMorrison",
+        "type": "number",
+        "required": false,
+        "description": "Michaelis constant Km (Morrison only, with [S]) — converts Kiapp to Ki."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ],
+    "gates": [
+      "Global models need X + at least 2 Y series (including an uninhibited one); Morrison needs X + 1 Y series and enzymeConcentration"
+    ]
+  },
+  "extract-rearrange": {
+    "label": "Extract and rearrange",
+    "min_columns": 1,
+    "offered_on": [
+      "multiple"
+    ],
+    "params": [
+      {
+        "name": "target",
+        "type": "string",
+        "enum": [
+          "xy",
+          "column",
+          "grouped",
+          "contingency"
+        ],
+        "required": true
+      },
+      {
+        "name": "x",
+        "type": "string",
+        "required": false,
+        "description": "XY only: the X variable (numbers)."
+      },
+      {
+        "name": "response",
+        "type": "string",
+        "required": false,
+        "description": "XY / Column / Grouped: the response variable (numbers)."
+      },
+      {
+        "name": "grouping",
+        "type": "string",
+        "required": false,
+        "description": "XY / Column: the variable whose levels become the data sets / columns."
+      },
+      {
+        "name": "subject",
+        "type": "string",
+        "required": false,
+        "description": "XY / Column / Grouped: the variable whose levels become the replicate sub-columns (XY/Grouped) or the rows (Column)."
+      },
+      {
+        "name": "rowTitles",
+        "type": "string",
+        "required": false,
+        "description": "XY / Column: the column the new table's row titles come from."
+      },
+      {
+        "name": "rowFactor",
+        "type": "string",
+        "required": false,
+        "description": "Grouped only: the variable whose levels become the rows."
+      },
+      {
+        "name": "columnFactor",
+        "type": "string",
+        "required": false,
+        "description": "Grouped only: the variable whose levels become the column groups."
+      },
+      {
+        "name": "rowVariable",
+        "type": "string",
+        "required": false,
+        "description": "Contingency only: the variable whose levels become the rows."
+      },
+      {
+        "name": "outcome",
+        "type": "string",
+        "required": false,
+        "description": "Contingency only: the variable whose levels become the columns."
+      },
+      {
+        "name": "count",
+        "type": "string",
+        "required": false,
+        "description": "Contingency only: the variable holding each source row's increment."
+      },
+      {
+        "name": "prefixNames",
+        "type": "boolean",
+        "required": false,
+        "description": "Prefix level-derived titles with their variable name."
+      },
+      {
+        "name": "completeRows",
+        "type": "boolean",
+        "required": false,
+        "description": "Condense to complete rows (XY/Column); false keeps source-row alignment."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "fraction-of-total": {
+    "label": "Fraction of total",
+    "min_columns": 1,
+    "offered_on": [
+      "column",
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "ys",
+        "type": "string[]",
+        "required": false,
+        "description": "Omitted: every numeric column except `x` — the wizard always sets it."
+      },
+      {
+        "name": "x",
+        "type": "string",
+        "required": false,
+        "description": "XY tables only: the X column, for the result rows' X values."
+      },
+      {
+        "name": "totalBy",
+        "type": "string",
+        "enum": [
+          "column",
+          "row",
+          "grand"
+        ],
+        "default": "column",
+        "required": false
+      },
+      {
+        "name": "format",
+        "type": "string",
+        "enum": [
+          "fraction",
+          "percent"
+        ],
+        "default": "fraction",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "frequency-distribution": {
+    "label": "Frequency distribution",
+    "min_columns": 1,
+    "offered_on": [
+      "column"
+    ],
+    "params": [
+      {
+        "name": "binMode",
+        "type": "string",
+        "enum": [
+          "auto",
+          "width",
+          "count"
+        ],
+        "default": "auto",
+        "required": false
+      },
+      {
+        "name": "binWidth",
+        "type": "number",
+        "required": false
+      },
+      {
+        "name": "binCount",
+        "type": "number",
+        "min": 2.0,
+        "max": 100.0,
+        "required": false
+      },
+      {
+        "name": "startAt",
+        "type": "number",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "friedman": {
+    "label": "Friedman test",
+    "min_columns": 2,
+    "offered_on": [
+      "column"
+    ],
+    "params": [
+      {
+        "name": "posthoc",
+        "type": "string",
+        "enum": [
+          "none",
+          "dunn",
+          "dunn-sidak",
+          "dunn-holm-sidak"
+        ],
+        "default": "none",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "k-means": {
+    "label": "K-means clustering",
+    "min_columns": 2,
+    "offered_on": [
+      "multiple"
+    ],
+    "params": [
+      {
+        "name": "clusters",
+        "type": "number",
+        "default": 2,
+        "required": false
+      },
+      {
+        "name": "standardise",
+        "type": "boolean",
+        "default": true,
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "kolmogorov-smirnov": {
+    "label": "Kolmogorov-Smirnov test",
+    "min_columns": 1,
+    "offered_on": [
+      "column"
+    ],
+    "params": [
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "kruskal-wallis": {
+    "label": "Kruskal-Wallis test",
+    "min_columns": 2,
+    "offered_on": [
+      "column"
+    ],
+    "params": [
+      {
+        "name": "posthoc",
+        "type": "string",
+        "enum": [
+          "none",
+          "dunn",
+          "dunn-sidak",
+          "dunn-holm-sidak"
+        ],
+        "default": "none",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "linear-regression": {
+    "label": "Linear regression",
+    "min_columns": 2,
+    "offered_on": [
+      "multiple",
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "x",
+        "type": "string",
+        "required": false,
+        "description": "The X variable of a Multiple Variables table; omitted, X is the first data column (XY)."
+      },
+      {
+        "name": "y",
+        "type": "string | string[]",
+        "required": false,
+        "description": "Omitted defaults to the first Y data column."
+      },
+      {
+        "name": "ys",
+        "type": "string[]",
+        "required": false,
+        "description": "An XY table's Y data sets, each regressed on its own (`y` then unused)."
+      },
+      {
+        "name": "forceOrigin",
+        "type": "boolean",
+        "default": false,
+        "required": false
+      },
+      {
+        "name": "weights",
+        "type": "string",
+        "enum": [
+          "none",
+          "1/y",
+          "1/y2",
+          "1/x",
+          "1/x2"
+        ],
+        "required": false,
+        "description": "Weighting (plan 26, same schemes as nonlinear regression except 1/SD², which needs the replicate columns this runner never sees)."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "mcnemar": {
+    "label": "McNemar's test",
+    "min_columns": 2,
+    "offered_on": [
+      "contingency"
+    ],
+    "params": [
+      {
+        "name": "continuityCorrection",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ],
+    "requires_packages": [
+      "survival"
+    ]
+  },
+  "mixed-effects": {
+    "label": "Mixed-effects model",
+    "min_columns": 3,
+    "offered_on": [
+      "column",
+      "grouped"
+    ],
+    "params": [
+      {
+        "name": "fixedFactors",
+        "type": "string[]",
+        "required": false
+      },
+      {
+        "name": "randomStructure",
+        "type": "string",
+        "enum": [
+          "intercept",
+          "slope"
+        ],
+        "default": "intercept",
+        "required": false
+      },
+      {
+        "name": "subjectId",
+        "type": "string",
+        "enum": [
+          "row",
+          "replicate"
+        ],
+        "required": false
+      },
+      {
+        "name": "subjectFactor",
+        "type": "object",
+        "value_shape": "object with { name: string, levels: string[] }",
+        "required": false,
+        "description": "Between-subject factor (Column tables): one level per subject row, in row order."
+      },
+      {
+        "name": "interaction",
+        "type": "boolean",
+        "required": false,
+        "description": "Include the subject-factor × column-factor interaction (default false; Grouped tables default it on — see the wizard)."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ],
+    "requires_packages": [
+      "lme4",
+      "lmerTest"
+    ]
+  },
+  "monte-carlo": {
+    "label": "Monte Carlo simulation",
+    "min_columns": 1,
+    "offered_on": [
+      "column",
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "targetAnalysis",
+        "type": "string",
+        "enum": [
+          "compare-two-groups",
+          "one-sample-t",
+          "descriptive-statistics",
+          "linear-regression",
+          "correlation"
+        ],
+        "required": true
+      },
+      {
+        "name": "summaryStatistic",
+        "type": "string",
+        "enum": [
+          "P value",
+          "Mean difference",
+          "Mean",
+          "Slope",
+          "Y-intercept",
+          "r"
+        ],
+        "required": false
+      },
+      {
+        "name": "repeats",
+        "type": "number",
+        "default": 1000,
+        "min": 10,
+        "max": 10000,
+        "required": false
+      },
+      {
+        "name": "seed",
+        "type": "number",
+        "required": true
+      },
+      {
+        "name": "groupMeans",
+        "type": "object",
+        "value_shape": "object mapping a column name to a number",
+        "required": false,
+        "description": "Per-column simulated means, keyed by column name."
+      },
+      {
+        "name": "groupSds",
+        "type": "object",
+        "value_shape": "object mapping a column name to a number",
+        "required": false,
+        "description": "Per-column simulated SDs, keyed by column name."
+      },
+      {
+        "name": "equalVariance",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "hypotheticalValue",
+        "type": "number",
+        "required": false
+      },
+      {
+        "name": "y",
+        "type": "string | string[]",
+        "required": false,
+        "description": "Which column (descriptive-statistics / linear-regression)."
+      },
+      {
+        "name": "method",
+        "type": "string",
+        "enum": [
+          "pearson",
+          "spearman"
+        ],
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ],
+    "gates": [
+      "targetAnalysis is one of compare-two-groups, one-sample-t, descriptive-statistics, linear-regression, correlation"
+    ]
+  },
+  "multiple-logistic-regression": {
+    "label": "Multiple logistic regression",
+    "min_columns": 2,
+    "offered_on": [
+      "multiple"
+    ],
+    "params": [
+      {
+        "name": "dependent",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "predictors",
+        "type": "string[]",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "multiple-regression": {
+    "label": "Multiple regression",
+    "min_columns": 2,
+    "offered_on": [
+      "multiple"
+    ],
+    "params": [
+      {
+        "name": "dependent",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "predictors",
+        "type": "string[]",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "multiple-t-tests": {
+    "label": "Multiple t tests",
+    "min_columns": 2,
+    "offered_on": [
+      "grouped"
+    ],
+    "params": [
+      {
+        "name": "paired",
+        "type": "boolean",
+        "default": false,
+        "required": false
+      },
+      {
+        "name": "gaussian",
+        "type": "boolean",
+        "default": true,
+        "required": false
+      },
+      {
+        "name": "pooledSd",
+        "type": "boolean",
+        "default": false,
+        "required": false
+      },
+      {
+        "name": "correction",
+        "type": "string",
+        "enum": [
+          "holm",
+          "fdr",
+          "none"
+        ],
+        "default": "holm",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "nested-anova": {
+    "label": "Nested one-way ANOVA",
+    "min_columns": 3,
+    "offered_on": [
+      "nested"
+    ],
+    "params": [
+      {
+        "name": "posthoc",
+        "type": "string",
+        "enum": [
+          "tukey",
+          "bonferroni"
+        ],
+        "default": "none",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ],
+    "gates": [
+      "Nested table with at least 3 data groups"
+    ]
+  },
+  "nested-t-test": {
+    "label": "Nested t test",
+    "min_columns": 2,
+    "offered_on": [
+      "nested"
+    ],
+    "params": [
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ],
+    "gates": [
+      "Nested table with exactly 2 data groups; params.sets can select the two"
+    ]
+  },
+  "nonlinear-regression": {
+    "label": "Nonlinear regression",
+    "min_columns": 2,
+    "offered_on": [
+      "xy",
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "y",
+        "type": "string | string[]",
+        "required": false,
+        "description": "Omitted defaults to the first Y data column."
+      },
+      {
+        "name": "ys",
+        "type": "string[]",
+        "required": false,
+        "description": "The Y data sets fitted, each on its own (`y` then unused; no comparison)."
+      },
+      {
+        "name": "model",
+        "type": "string",
+        "enum": [
+          "sigmoidal-4pl-logx",
+          "sigmoidal-4pl-x",
+          "agonist-3pl-logx",
+          "inhibitor-3pl-logx",
+          "asymmetric-5pl-logx",
+          "asymmetric-5pl-x",
+          "two-site-competition-logx",
+          "two-site-competition-x",
+          "homologous-competition-logx",
+          "line",
+          "semilog-line",
+          "hyperbola",
+          "quadratic",
+          "cubic",
+          "segmental-linear",
+          "quartic",
+          "quintic",
+          "exponential-growth",
+          "logistic-growth",
+          "gompertz-growth",
+          "one-phase-decay",
+          "michaelis-menten",
+          "two-phase-decay",
+          "plateau-decay",
+          "one-phase-association",
+          "allosteric-sigmoidal",
+          "substrate-inhibition",
+          "gaussian",
+          "boltzmann-sigmoid",
+          "lorentzian",
+          "sine-wave",
+          "user-defined"
+        ],
+        "required": true
+      },
+      {
+        "name": "compareWith",
+        "type": "string",
+        "required": false,
+        "description": "A dose-response curve compared with this other Y data set's (an extra sum-of-squares F test)."
+      },
+      {
+        "name": "compare",
+        "type": "string",
+        "enum": [
+          "ec50",
+          "all"
+        ],
+        "required": false
+      },
+      {
+        "name": "interpolate",
+        "type": "boolean",
+        "required": false,
+        "description": "Interpolate the unknowns: the rows holding a Y but no X get the X the curve gives them."
+      },
+      {
+        "name": "weights",
+        "type": "string",
+        "enum": [
+          "none",
+          "1/y",
+          "1/y2",
+          "1/x",
+          "1/x2",
+          "1/sd2"
+        ],
+        "required": false,
+        "description": "Weighting (plan 26): \"none\" (default) or a scheme — 1/Y, 1/Y², 1/X, 1/X², or 1/SD² (replicate SDs across the table's Y columns, per row)."
+      },
+      {
+        "name": "fixed",
+        "type": "object",
+        "value_shape": "object mapping a column name to a number",
+        "required": false,
+        "description": "Parameter name -> fixed value (the parameter is held constant, not fitted). nls models only."
+      },
+      {
+        "name": "bounds",
+        "type": "object",
+        "value_shape": "object mapping a name to a [low, high] number pair",
+        "required": false,
+        "description": "Parameter name -> [lower, upper] bounds (nls models only, via algorithm=\"port\"). A parameter cannot be both fixed and bounded."
+      },
+      {
+        "name": "fixedConstants",
+        "type": "object",
+        "value_shape": "object mapping a name to text",
+        "required": false,
+        "description": "Info-constant hooks for the above (the constant's name, not its value): `fixedConstants` resolves to `fixed`, `boundsConstants` — each side a plain number or a constant name — to `bounds`. Live: resolved in useAnalysis before the run, so editing the constant re-runs the fit."
+      },
+      {
+        "name": "boundsConstants",
+        "type": "object",
+        "value_shape": "object mapping a name to a [first, second] text pair",
+        "required": false
+      },
+      {
+        "name": "compareModel",
+        "type": "string",
+        "enum": [
+          "sigmoidal-4pl-logx",
+          "sigmoidal-4pl-x",
+          "agonist-3pl-logx",
+          "inhibitor-3pl-logx",
+          "asymmetric-5pl-logx",
+          "asymmetric-5pl-x",
+          "two-site-competition-logx",
+          "two-site-competition-x",
+          "homologous-competition-logx",
+          "line",
+          "semilog-line",
+          "hyperbola",
+          "quadratic",
+          "cubic",
+          "segmental-linear",
+          "quartic",
+          "quintic",
+          "exponential-growth",
+          "logistic-growth",
+          "gompertz-growth",
+          "one-phase-decay",
+          "michaelis-menten",
+          "two-phase-decay",
+          "plateau-decay",
+          "one-phase-association",
+          "allosteric-sigmoidal",
+          "substrate-inhibition",
+          "gaussian",
+          "boltzmann-sigmoid",
+          "lorentzian",
+          "sine-wave",
+          "user-defined"
+        ],
+        "required": false,
+        "description": "A second MODEL fitted to the same data and compared (extra-sum-of-squares F test when the pair is nested, AICc always). NOTE: the plan's `compareWith` name is already taken (the other Y data set's column), so the model comparison uses this field instead."
+      },
+      {
+        "name": "globalY",
+        "type": "string[]",
+        "required": false,
+        "description": "Extra Y series for a shared-parameter (global) fit. nls models only."
+      },
+      {
+        "name": "sharedParams",
+        "type": "string[]",
+        "required": false,
+        "description": "Which parameters are shared across the global fit's series (omitted: the model default — the dose midpoint + HillSlope when the model has them, else none shared). An explicit [] shares nothing."
+      },
+      {
+        "name": "ligandConcentration",
+        "type": "number",
+        "required": false,
+        "description": "Radioligand concentration [L], in the same units as X's concentrations (plan 28 — reuses plan 16's `ligandConcentration` vocabulary). Required for the homologous competition model ([L] is a constant of its equation) and when `fitKi` is set; ignored otherwise."
+      },
+      {
+        "name": "ligandKd",
+        "type": "number",
+        "required": false,
+        "description": "Radioligand dissociation constant Kd, in the same units as [L]. Required when `fitKi` is set (Cheng–Prusoff divisor 1 + [L]/Kd); ignored otherwise. The homologous model fits Kd — it is not entered."
+      },
+      {
+        "name": "ligandConcentrationConstant",
+        "type": "string",
+        "required": false,
+        "description": "Info-constant hooks for [L] and Kd (the constant's name): resolved live in useAnalysis, like `fixedConstants` above."
+      },
+      {
+        "name": "ligandKdConstant",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "fitKi",
+        "type": "boolean",
+        "required": false,
+        "description": "When true on a one-site (inhibitor 3PL) or two-site competition fit, the result also reports Ki (Cheng–Prusoff: Ki = IC50 / (1 + [L]/Kd)) alongside IC50. False/absent: today's behaviour (IC50 only)."
+      },
+      {
+        "name": "rout",
+        "type": "boolean",
+        "required": false,
+        "description": "Find each data set's outliers by ROUT (at `q`, in %) and leave them out of its fit."
+      },
+      {
+        "name": "q",
+        "type": "number",
+        "min": 0.01,
+        "max": 50.0,
+        "required": false
+      },
+      {
+        "name": "ecx",
+        "type": "number",
+        "min": 1.0,
+        "max": 99.0,
+        "required": false,
+        "description": "A dose-response curve also reports its ECF (`ecx` = F, in %: EC80…), with its CI."
+      },
+      {
+        "name": "customEquation",
+        "type": "string",
+        "required": false,
+        "description": "User-defined equation (v2 item 23, model \"user-defined\" only): the equation as the user typed it (`Y = A*exp(-k*X) + C`, or just the right-hand side), and each named parameter's starting value. The fitter fits the parameters from those starts."
+      },
+      {
+        "name": "customParameters",
+        "type": "object",
+        "value_shape": "object mapping a column name to a number",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "normalize": {
+    "label": "Normalize",
+    "min_columns": 1,
+    "offered_on": [
+      "column",
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "ys",
+        "type": "string[]",
+        "required": false,
+        "description": "Omitted: every numeric column except `x` — the wizard always sets it."
+      },
+      {
+        "name": "x",
+        "type": "string",
+        "required": false,
+        "description": "XY tables only: the X column, for the result rows' X values."
+      },
+      {
+        "name": "normalizeMethod",
+        "type": "string",
+        "enum": [
+          "percent-of-largest",
+          "percent-of-smallest",
+          "percent-of-first",
+          "percent-of-mean-controls",
+          "percent-of-constant",
+          "zero-to-hundred"
+        ],
+        "default": "percent-of-largest",
+        "required": false
+      },
+      {
+        "name": "asPercent",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "controls",
+        "type": "string[]",
+        "required": false,
+        "description": "Control columns whose values are averaged (method \"percent-of-mean-controls\")."
+      },
+      {
+        "name": "constant",
+        "type": "number",
+        "required": false,
+        "description": "The 100% reference value (method \"percent-of-constant\")."
+      },
+      {
+        "name": "constantHook",
+        "type": "string",
+        "required": false,
+        "description": "Info-constant hook for the 100% value (the constant's name)."
+      },
+      {
+        "name": "zeroDef",
+        "type": "string",
+        "enum": [
+          "smallest",
+          "first",
+          "constant"
+        ],
+        "required": false,
+        "description": "What 0% is (method \"zero-to-hundred\")."
+      },
+      {
+        "name": "zeroConstant",
+        "type": "number",
+        "required": false,
+        "description": "The 0% value (zeroDef \"constant\")."
+      },
+      {
+        "name": "zeroConstantHook",
+        "type": "string",
+        "required": false,
+        "description": "Info-constant hook for the 0% value (the constant's name)."
+      },
+      {
+        "name": "hundredDef",
+        "type": "string",
+        "enum": [
+          "largest",
+          "last",
+          "constant",
+          "sum"
+        ],
+        "required": false,
+        "description": "What 100% is (method \"zero-to-hundred\")."
+      },
+      {
+        "name": "hundredConstant",
+        "type": "number",
+        "required": false,
+        "description": "The 100% value (hundredDef \"constant\")."
+      },
+      {
+        "name": "hundredConstantHook",
+        "type": "string",
+        "required": false,
+        "description": "Info-constant hook for the 100% value (the constant's name)."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "one-sample-t": {
+    "label": "Compare one group to a value",
+    "min_columns": 1,
+    "offered_on": [
+      "column"
+    ],
+    "params": [
+      {
+        "name": "hypotheticalValue",
+        "type": "number",
+        "default": 0,
+        "required": false
+      },
+      {
+        "name": "tails",
+        "type": "string",
+        "enum": [
+          "two-sided",
+          "less",
+          "greater"
+        ],
+        "default": "two-sided",
+        "required": false
+      },
+      {
+        "name": "gaussian",
+        "type": "boolean",
+        "default": true,
+        "required": false
+      },
+      {
+        "name": "lognormal",
+        "type": "boolean",
+        "required": false,
+        "description": "The geometric mean tested: a t test of the logarithms against the value's."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "outliers": {
+    "label": "Identify outliers",
+    "min_columns": 1,
+    "offered_on": [
+      "column",
+      "multiple"
+    ],
+    "params": [
+      {
+        "name": "q",
+        "type": "number",
+        "min": 0.01,
+        "max": 50.0,
+        "default": 1,
+        "required": false,
+        "description": "Q (%) for ROUT; omitted for Grubbs (the runner defaults it to 1)."
+      },
+      {
+        "name": "method",
+        "type": "string",
+        "enum": [
+          "rout",
+          "grubbs"
+        ],
+        "required": false,
+        "description": "Which method identifies the outliers: \"rout\" (default) or \"grubbs\"."
+      },
+      {
+        "name": "alpha",
+        "type": "number",
+        "min": 0.001,
+        "max": 0.5,
+        "default": 0.05,
+        "required": false,
+        "description": "Grubbs' test significance level (default 0.05); ignored for ROUT."
+      },
+      {
+        "name": "iterate",
+        "type": "boolean",
+        "default": true,
+        "required": false,
+        "description": "Grubbs' test: re-test after removing each outlier (default true); ignored for ROUT."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "plot-function": {
+    "label": "Plot a function",
+    "min_columns": 0,
+    "offered_on": [
+      "column",
+      "contingency",
+      "grouped",
+      "multiple",
+      "nested",
+      "survival",
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "equation",
+        "type": "string",
+        "enum": [
+          "sigmoidal-4pl-logx",
+          "sigmoidal-4pl-x",
+          "agonist-3pl-logx",
+          "inhibitor-3pl-logx",
+          "asymmetric-5pl-logx",
+          "asymmetric-5pl-x",
+          "two-site-competition-logx",
+          "two-site-competition-x",
+          "homologous-competition-logx",
+          "line",
+          "semilog-line",
+          "hyperbola",
+          "quadratic",
+          "cubic",
+          "segmental-linear",
+          "quartic",
+          "quintic",
+          "exponential-growth",
+          "logistic-growth",
+          "gompertz-growth",
+          "one-phase-decay",
+          "michaelis-menten",
+          "two-phase-decay",
+          "plateau-decay",
+          "one-phase-association",
+          "allosteric-sigmoidal",
+          "substrate-inhibition",
+          "gaussian",
+          "boltzmann-sigmoid",
+          "lorentzian",
+          "sine-wave",
+          "gaussian"
+        ],
+        "required": true
+      },
+      {
+        "name": "xMin",
+        "type": "number",
+        "required": true
+      },
+      {
+        "name": "xMax",
+        "type": "number",
+        "required": true
+      },
+      {
+        "name": "segments",
+        "type": "number",
+        "min": 10.0,
+        "max": 1000.0,
+        "required": false,
+        "description": "Line segments per curve (points = segments + 1); omitted = 150."
+      },
+      {
+        "name": "curves",
+        "type": "array",
+        "value_shape": "list of { label: string, params: { <parameter name>: number } }",
+        "required": true
+      },
+      {
+        "name": "extra",
+        "type": "string",
+        "enum": [
+          "none",
+          "first-derivative",
+          "second-derivative",
+          "integral"
+        ],
+        "required": false,
+        "description": "Extra series per curve; omitted or \"none\" = the function only."
+      },
+      {
+        "name": "ligandConcentration",
+        "type": "number",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "poisson-regression": {
+    "label": "Poisson regression",
+    "min_columns": 2,
+    "offered_on": [
+      "multiple"
+    ],
+    "params": [
+      {
+        "name": "dependent",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "predictors",
+        "type": "string[]",
+        "required": false
+      },
+      {
+        "name": "quasi",
+        "type": "boolean",
+        "default": false,
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "principal-component-analysis": {
+    "label": "Principal component analysis",
+    "min_columns": 2,
+    "offered_on": [
+      "multiple"
+    ],
+    "params": [
+      {
+        "name": "scale",
+        "type": "string",
+        "enum": [
+          "correlation",
+          "covariance"
+        ],
+        "default": "correlation",
+        "required": false
+      },
+      {
+        "name": "components",
+        "type": "number",
+        "default": 0,
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "prune-rows": {
+    "label": "Prune rows",
+    "min_columns": 1,
+    "offered_on": [
+      "column",
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "ys",
+        "type": "string[]",
+        "required": false,
+        "description": "Omitted: every numeric column except `x` — the wizard always sets it."
+      },
+      {
+        "name": "x",
+        "type": "string",
+        "required": false,
+        "description": "XY tables only: the X column, for the result rows' X values."
+      },
+      {
+        "name": "condition",
+        "type": "string",
+        "enum": [
+          "empty",
+          "below",
+          "above",
+          "outside"
+        ],
+        "default": "empty",
+        "required": false
+      },
+      {
+        "name": "threshold",
+        "type": "number",
+        "required": false,
+        "description": "The threshold (conditions \"below\" / \"above\")."
+      },
+      {
+        "name": "low",
+        "type": "number",
+        "required": false,
+        "description": "The range's ends (condition \"outside\")."
+      },
+      {
+        "name": "high",
+        "type": "number",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "remove-baseline": {
+    "label": "Remove baseline",
+    "min_columns": 1,
+    "offered_on": [
+      "column",
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "ys",
+        "type": "string[]",
+        "required": false,
+        "description": "Omitted: every numeric column except `x` — the wizard always sets it."
+      },
+      {
+        "name": "x",
+        "type": "string",
+        "required": false,
+        "description": "XY tables only: the X column, for the result rows' X values."
+      },
+      {
+        "name": "baselineMethod",
+        "type": "string",
+        "enum": [
+          "first-value",
+          "mean-first-n",
+          "mean-of-controls",
+          "constant"
+        ],
+        "default": "first-value",
+        "required": false
+      },
+      {
+        "name": "firstN",
+        "type": "number",
+        "required": false,
+        "description": "Mean of the first N values (method \"mean-first-n\")."
+      },
+      {
+        "name": "controls",
+        "type": "string[]",
+        "required": false,
+        "description": "Control columns whose values are averaged (method \"mean-of-controls\")."
+      },
+      {
+        "name": "constant",
+        "type": "number",
+        "required": false,
+        "description": "The baseline value (method \"constant\")."
+      },
+      {
+        "name": "constantHook",
+        "type": "string",
+        "required": false,
+        "description": "Info-constant hook for the baseline (the constant's name): resolved live in useAnalysis, so editing the constant re-runs the transform."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "rm-anova": {
+    "label": "Repeated-measures ANOVA",
+    "min_columns": 2,
+    "offered_on": [
+      "column"
+    ],
+    "params": [
+      {
+        "name": "posthoc",
+        "type": "string",
+        "enum": [
+          "none",
+          "tukey",
+          "bonferroni",
+          "sidak",
+          "holm-sidak",
+          "lsd"
+        ],
+        "required": true
+      },
+      {
+        "name": "sphericity",
+        "type": "boolean",
+        "required": false,
+        "description": "false: not assumed, the Geisser-Greenhouse correction applies; absent or true, assumed."
+      },
+      {
+        "name": "compared",
+        "type": "string[]",
+        "required": false,
+        "description": "The pairs compared (`pairKey`), when not every pair."
+      },
+      {
+        "name": "mixed",
+        "type": "boolean",
+        "required": false,
+        "description": "A mixed-effects model (REML, Kenward-Roger), every value kept: subjects may miss some."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "roc-curve": {
+    "label": "ROC curve",
+    "min_columns": 1,
+    "offered_on": [
+      "column",
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "truth",
+        "type": "string",
+        "required": false,
+        "description": "Truth column; defaults to the first data column."
+      },
+      {
+        "name": "score",
+        "type": "string",
+        "required": false,
+        "description": "Score column; defaults to the second data column."
+      },
+      {
+        "name": "positive",
+        "type": "string | number",
+        "required": false,
+        "description": "Which truth value counts as \"positive\" (e.g. 1, or \"Diseased\")."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "row-means-totals": {
+    "label": "Row means and totals",
+    "min_columns": 1,
+    "offered_on": [
+      "grouped",
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "ys",
+        "type": "string[]",
+        "required": false,
+        "description": "Omitted: every numeric column except `x` — the wizard always sets it."
+      },
+      {
+        "name": "x",
+        "type": "string",
+        "required": false,
+        "description": "XY tables only: the X column, for the result rows' X values."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "shapiro-wilk": {
+    "label": "Normality tests",
+    "min_columns": 1,
+    "offered_on": [
+      "column",
+      "multiple"
+    ],
+    "params": [
+      {
+        "name": "test",
+        "type": "string",
+        "enum": [
+          "shapiro-wilk",
+          "dagostino-pearson",
+          "anderson-darling",
+          "kolmogorov-smirnov"
+        ],
+        "default": "shapiro-wilk",
+        "required": false
+      },
+      {
+        "name": "lognormal",
+        "type": "boolean",
+        "required": false,
+        "description": "Also test log-transformed data; omitted defaults to false."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ],
+    "packages_note": "Only the Anderson-Darling test (test: \"anderson-darling\") needs an R package (\"nortest\"); the other three tests need none."
+  },
+  "simple-logistic-regression": {
+    "label": "Simple logistic regression",
+    "min_columns": 2,
+    "offered_on": [
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "y",
+        "type": "string | string[]",
+        "required": false,
+        "description": "Omitted defaults to the first Y data column."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "smooth-differentiate-integrate": {
+    "label": "Smooth, differentiate or integrate a curve",
+    "min_columns": 2,
+    "offered_on": [
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "ys",
+        "type": "string[]",
+        "required": false,
+        "description": "Omitted: every Y data set."
+      },
+      {
+        "name": "x",
+        "type": "string",
+        "required": false,
+        "description": "XY tables only: the X column, for the result rows' X values."
+      },
+      {
+        "name": "operation",
+        "type": "string",
+        "enum": [
+          "smooth",
+          "first-derivative",
+          "second-derivative",
+          "integral"
+        ],
+        "default": "smooth",
+        "required": false
+      },
+      {
+        "name": "window",
+        "type": "number",
+        "required": false
+      },
+      {
+        "name": "order",
+        "type": "number",
+        "required": false
+      },
+      {
+        "name": "smoothResults",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "baseline",
+        "type": "number",
+        "required": false
+      },
+      {
+        "name": "startValue",
+        "type": "number",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "spline-lowess": {
+    "label": "Spline and Lowess",
+    "min_columns": 2,
+    "offered_on": [
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "y",
+        "type": "string | string[]",
+        "required": false,
+        "description": "Omitted defaults to the first Y data column."
+      },
+      {
+        "name": "method",
+        "type": "string",
+        "enum": [
+          "spline",
+          "lowess"
+        ],
+        "default": "lowess",
+        "required": false
+      },
+      {
+        "name": "f",
+        "type": "number",
+        "default": 0.6666666666666666,
+        "required": false,
+        "description": "Lowess span: the fraction of points in each local fit (default 2/3, range (0, 1])."
+      },
+      {
+        "name": "spar",
+        "type": "number",
+        "required": false,
+        "description": "Spline smoothing parameter (null = choose automatically by GCV, the default)."
+      },
+      {
+        "name": "df",
+        "type": "number",
+        "required": false,
+        "description": "Alternative spline control: the equivalent degrees of freedom."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "survival": {
+    "label": "Survival analysis",
+    "min_columns": 3,
+    "offered_on": [
+      "survival"
+    ],
+    "params": [
+      {
+        "name": "curveTest",
+        "type": "string",
+        "enum": [
+          "logrank",
+          "trend",
+          "gehan"
+        ],
+        "default": "logrank",
+        "required": false
+      },
+      {
+        "name": "correction",
+        "type": "string",
+        "enum": [
+          "holm",
+          "fdr",
+          "none"
+        ],
+        "default": "holm",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ],
+    "requires_packages": [
+      "survival"
+    ]
+  },
+  "three-way-anova": {
+    "label": "Three-way ANOVA",
+    "min_columns": 2,
+    "offered_on": [
+      "grouped"
+    ],
+    "params": [
+      {
+        "name": "posthoc",
+        "type": "string",
+        "enum": [
+          "tukey",
+          "bonferroni"
+        ],
+        "default": "none",
+        "required": false
+      },
+      {
+        "name": "posthocTerm",
+        "type": "string",
+        "enum": [
+          "A",
+          "B",
+          "C",
+          "A:B",
+          "A:C",
+          "B:C",
+          "A:B:C"
+        ],
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ],
+    "gates": [
+      "Grouped table with at least 2 row bands (rowGroups)"
+    ]
+  },
+  "transform-concentrations": {
+    "label": "Transform concentrations",
+    "min_columns": 1,
+    "offered_on": [
+      "column",
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "column",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "fromUnit",
+        "type": "string",
+        "enum": [
+          "M",
+          "mM",
+          "µM",
+          "nM",
+          "pM"
+        ],
+        "required": true
+      },
+      {
+        "name": "toUnit",
+        "type": "string",
+        "enum": [
+          "M",
+          "mM",
+          "µM",
+          "nM",
+          "pM"
+        ],
+        "required": true
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "transform-data": {
+    "label": "Transform data",
+    "min_columns": 1,
+    "offered_on": [
+      "column",
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "function",
+        "type": "string",
+        "enum": [
+          "log10",
+          "ln",
+          "log2",
+          "sqrt",
+          "reciprocal",
+          "exp",
+          "square"
+        ],
+        "default": "log10",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "transpose": {
+    "label": "Transpose rows/columns",
+    "min_columns": 1,
+    "offered_on": [
+      "column",
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
+  "two-way-anova": {
+    "label": "Two-way ANOVA",
+    "min_columns": 2,
+    "offered_on": [
+      "grouped"
+    ],
+    "params": [
+      {
+        "name": "design",
+        "type": "string",
+        "enum": [
+          "ordinary",
+          "repeated-measures",
+          "nonparametric"
+        ],
+        "required": true
+      },
+      {
+        "name": "posthoc",
+        "type": "string",
+        "enum": [
+          "none",
+          "tukey",
+          "bonferroni",
+          "sidak",
+          "holm-sidak",
+          "lsd",
+          "dunnett",
+          "games-howell"
+        ],
+        "required": true
+      },
+      {
+        "name": "posthocTarget",
+        "type": "string",
+        "enum": [
+          "groups",
+          "rows"
+        ],
+        "required": true
+      },
+      {
+        "name": "sphericity",
+        "type": "boolean",
+        "required": false,
+        "description": "Repeated measures: false (new analyses) corrects the row and interaction effects by the Geisser-Greenhouse epsilon, and compares on each comparison's own error; absent (older files) or true, sphericity is assumed."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  }
+}

@@ -122,6 +122,8 @@ export interface JobDeps {
   renameNode?: (id: string, name: string) => void;
   /** Freeze or unfreeze an analysis node (default: the real store action). */
   setAnalysisFrozen?: (id: string, frozen: boolean) => void;
+  /** Replace an analysis node's params (default: the real store action). */
+  setAnalysisParams?: (id: string, params: AnalysisParams) => void;
   /** Copy an example table's analyses + graphs onto target tables, as one
    *  undo step (default: the real store action). Returns the per-table
    *  report. */
@@ -814,7 +816,8 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       };
     }
     case "run-analysis": {
-      const analysisId = (job.args as { analysis_id?: unknown } | null | undefined)?.analysis_id;
+      const args = (job.args as { analysis_id?: unknown; params?: unknown } | null | undefined) ?? {};
+      const analysisId = args.analysis_id;
       if (typeof analysisId !== "string" || !analysisId) {
         throw new Error(`Job ${job.job_id} (run-analysis) has no analysis_id.`);
       }
@@ -826,7 +829,36 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       if (node.frozen) {
         throw new Error(`Analysis “${node.name}” is frozen — unfreeze it before running it again.`);
       }
+      // `titer_rerun_analysis` overrides: validated strictly (unknown or
+      // out-of-range keys are rejected naming the valid choices, never
+      // silently defaulted) and merged over the node's stored params —
+      // then saved on the node, so the next run and the UI see them. An
+      // orphaned analysis keeps its params (its source table is gone),
+      // so overrides on one are refused here. The stored params
+      // themselves are not re-validated: a file-loaded node may carry a
+      // key this version doesn't know (FF-F12), which the runners ignore.
+      let storedParams = node.analysisParams;
       const type = node.analysisType;
+      if (args.params !== undefined) {
+        if (node.orphaned) {
+          throw new Error(
+            `Analysis “${node.name}” is orphaned (its table was deleted) — its parameters can't be changed.`,
+          );
+        }
+        if (!type) {
+          throw new Error(`Analysis “${node.name}” has no analysis type recorded.`);
+        }
+        const { errors, params: checked } = validateAnalysisParams(type, args.params);
+        if (errors.length) throw new Error(errors.join(" "));
+        const merged = { ...(storedParams ?? {}), ...(checked ?? {}) } as AnalysisParams;
+        const setParams =
+          deps.setAnalysisParams ??
+          (() => {
+            throw new Error("This window can't change analysis params (no setAnalysisParams).");
+          });
+        setParams(analysisId, merged);
+        storedParams = merged;
+      }
       const parent = node.parentId ? state.nodes[node.parentId] : undefined;
       const data = parent?.type === "table" ? parent.data : undefined;
       if (!type || !data) {
@@ -835,7 +867,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       // Info-constant hooks resolve live, exactly as the analysis view
       // does — a hook that can't resolve is an error, never a guessed number.
       const sheets = infoSheetsOf(state.nodes, state.rootOrder);
-      const resolved = resolveAnalysisParams(node.analysisParams, type, sheets);
+      const resolved = resolveAnalysisParams(storedParams, type, sheets);
       if ("error" in resolved) throw new Error(resolved.error);
       const outcome = await (deps.run ?? runAnalysis)(type, data, resolved.params);
       // Await the publish: the result must be in the server's map before
@@ -1590,6 +1622,7 @@ export function useMcpJobDispatcher() {
   const createAnalysis = actions.createAnalysis;
   const renameNode = actions.renameNode;
   const setAnalysisFrozen = actions.setAnalysisFrozen;
+  const setAnalysisParams = actions.setAnalysisParams;
   const applyWand = actions.applyWand;
   const applyScript = actions.applyScript;
   const loadProject = actions.loadProject;
@@ -1665,6 +1698,7 @@ export function useMcpJobDispatcher() {
                 createAnalysis,
                 renameNode,
                 setAnalysisFrozen,
+                setAnalysisParams,
                 applyWand,
                 applyScript,
                 loadProject,

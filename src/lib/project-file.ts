@@ -849,8 +849,10 @@ function readParam(kind: ParamKind, v: unknown, report?: (dropped: number) => vo
  *  compiler-checked as a `ParamKey`, the per-type grouping is not — a key
  *  listed under the wrong type is caught by the runner, not here.
  *  `correlation` takes `XYCorrelationParams`, `correlation-matrix` takes
- *  `CorrelationParams` (method only) — see `src/stats/index.ts`. */
-const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
+ *  `CorrelationParams` (method only) — see `src/stats/index.ts`.
+ *  Exported: tests/checks.ts pins the generated MCP params schema
+ *  (src-tauri/src/analysis-params-schema.json) against this list. */
+export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "descriptive-statistics": ["sets"],
   "frequency-distribution": ["binMode", "binWidth", "binCount", "startAt", "sets"],
   "fraction-of-total": ["ys", "x", "totalBy", "format", "sets"],
