@@ -261,7 +261,6 @@ export async function runPValueStack(columns: Column[], params?: PValueStackPara
     threshold == null
       ? ps.reduce<number | null>((acc, p, i) => (flagged[i] ? Math.max(acc ?? -Infinity, p) : acc), null)
       : null;
-  const flagNoun = fdr ? "discoveries" : "significant";
   const flaggedList =
     flaggedCount > 0 && flaggedCount <= 10
       ? ` Flagged: ${entries.filter((_, i) => flagged[i]).map((e) => e.label).join(", ")}.`

@@ -2410,6 +2410,7 @@ const ANALYSIS_TYPES: &[&str] = &[
     "shapiro-wilk",
     "kolmogorov-smirnov",
     "outliers",
+    "p-value-stack",
     "monte-carlo",
     "bland-altman",
     "roc-curve",
