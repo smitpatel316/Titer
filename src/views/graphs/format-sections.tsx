@@ -1430,6 +1430,33 @@ function ownStyle(context: SectionContext): React.ReactNode {
           { value: "violin", label: "Violin" },
         ]}
       />
+      {options.kind === "box" ? (
+        <Choice
+          label="Whiskers"
+          value={options.whisker}
+          onChange={(whisker) => set({ whisker })}
+          items={[
+            { value: "min-max", label: "Min to max" },
+            { value: "tukey", label: "Tukey (1.5× IQR)" },
+            { value: "p10-90", label: "10–90 percentiles" },
+            { value: "p5-95", label: "5–95 percentiles" },
+            { value: "p2.5-97.5", label: "2.5–97.5 percentiles" },
+            { value: "p1-99", label: "1–99 percentiles" },
+            { value: "min-max-all", label: "Min to max, all points" },
+          ]}
+        />
+      ) : (
+        <Choice
+          label="Violin"
+          value={options.violinVariant}
+          onChange={(violinVariant) => set({ violinVariant })}
+          items={[
+            { value: "full", label: "Full" },
+            { value: "truncated", label: "Truncated at data" },
+            { value: "half", label: "Half" },
+          ]}
+        />
+      )}
       {shapes(options.kind === "violin" ? "Violin" : "Box")}
       {pointsGroup(
         context,

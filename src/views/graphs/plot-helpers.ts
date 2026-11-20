@@ -15,7 +15,7 @@ import { xyPoints, xyRows, type Column, type DataSet } from "../../lib/dataset";
 import { pointKeyOf } from "../../lib/columns";
 import type { GraphFigure } from ".";
 import { paletteColor, paletteOf, withOpacity } from "../../lib/palettes";
-import { boxOf, mean, median, sd, sem } from "../../lib/summary";
+import { boxOf, mean, median, quantile, sd, sem } from "../../lib/summary";
 import { summaryFormatDef, type SummaryFormat } from "../../lib/summary-format";
 import { tCrit95 } from "../../lib/student-t";
 
@@ -726,18 +726,60 @@ const xAxisRange = (options: GraphOptions, zeroBase?: boolean, grid: GraphOption
  *  their values, but texts (annotations) at the log10 of them on a log axis. */
 export const onAxis = (v: number, scale: GraphOptions["xScale"]) => (scale === "linear" ? v : Math.log10(v));
 
+/** Where a box's whiskers end, and which values lie past them (Prism's whisker
+ *  choices, FAQ 1481): min to max (no outliers), Tukey's 1.5×IQR fences — the
+ *  whiskers end at an observed data point, values beyond are outliers — or a
+ *  percentile pair, with values outside the pair as outliers. "min-max-all"
+ *  is min to max with all points drawn (its outliers list is empty; the
+ *  builders draw the points instead). Percentiles use Titer's `quantile`
+ *  (R type 6), the same method as the box's quartiles. */
+export function whiskerBounds(
+  values: number[],
+  whisker: GraphOptions["whisker"],
+): { low: number; high: number; outliers: number[] } {
+  const lo = minOf(values);
+  const hi = maxOf(values);
+  if (whisker === "min-max" || whisker === "min-max-all") return { low: lo, high: hi, outliers: [] };
+  if (whisker === "tukey") {
+    const q1 = quantile(values, 0.25);
+    const q3 = quantile(values, 0.75);
+    const iqr = q3 - q1;
+    const lowFence = q1 - 1.5 * iqr;
+    const highFence = q3 + 1.5 * iqr;
+    const inside = values.filter((v) => v >= lowFence && v <= highFence);
+    return {
+      low: minOf(inside),
+      high: maxOf(inside),
+      outliers: values.filter((v) => v < lowFence || v > highFence),
+    };
+  }
+  const [p, q] =
+    whisker === "p10-90"
+      ? [0.1, 0.9]
+      : whisker === "p5-95"
+        ? [0.05, 0.95]
+        : whisker === "p2.5-97.5"
+          ? [0.025, 0.975]
+          : [0.01, 0.99];
+  const low = quantile(values, p);
+  const high = quantile(values, q);
+  return { low, high, outliers: values.filter((v) => v < low || v > high) };
+}
+
 /** Boxes at `x`, one per list of values, as Helix computes them (`boxOf`: the quartiles of
- *  Descriptive statistics, whiskers to the minimum and maximum): Plotly only draws them. */
-export function boxTrace(x: number[], values: number[][]) {
+ *  Descriptive statistics, whiskers to the minimum and maximum): Plotly only draws them.
+ *  `whisker` moves the fences (Tukey, percentiles); the quartiles never move. */
+export function boxTrace(x: number[], values: number[][], whisker: GraphOptions["whisker"] = "min-max") {
   const boxes = values.map(boxOf);
+  const fences = values.map((v) => whiskerBounds(v, whisker));
   const field = (k: keyof (typeof boxes)[number]) => boxes.map((b) => b[k]);
   return {
     x,
     q1: field("q1"),
     median: field("median"),
     q3: field("q3"),
-    lowerfence: field("lowerfence"),
-    upperfence: field("upperfence"),
+    lowerfence: fences.map((f) => f.low),
+    upperfence: fences.map((f) => f.high),
   };
 }
 

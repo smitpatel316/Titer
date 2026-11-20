@@ -143,7 +143,7 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, logScaleOffered, movedText, paintOf, perRowSummaryStats, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, withCaps, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, logScaleOffered, movedText, paintOf, perRowSummaryStats, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -3460,6 +3460,149 @@ check("seq 212 MCP: build-graph accepts floating bars on column, grouped, nested
     /not offered for a XY table/,
   );
   deepStrictEqual(created, ["floating-bars", "floating-bars", "floating-bars", "floating-bars"]);
+});
+
+// ── Whisker definitions + violin variants (seq 213) ──────────────────────
+
+/** One column, 1–9 with a far outlier at 100: quartiles 2.75 / 5.5 / 8.25 (R type 6). */
+const outlierColumn = (): TableData => ({
+  columns: ["Title", "A"],
+  rows: [[null, "1"], [null, "2"], [null, "3"], [null, "4"], [null, "5"], [null, "6"], [null, "7"], [null, "8"], [null, "9"], [null, "100"]],
+});
+
+check("seq 213: whisker bounds follow Prism's definitions (Tukey fences end at observed points)", () => {
+  const values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 100];
+  deepStrictEqual(whiskerBounds(values, "min-max"), { low: 1, high: 100, outliers: [] });
+  // IQR 5.5, fences −5.5 and 16.5: the whiskers end at 1 and 9, 100 is out.
+  deepStrictEqual(whiskerBounds(values, "tukey"), { low: 1, high: 9, outliers: [100] });
+  // 10–90 percentiles (type 6): 1.1 and 90.9 — 1 and 100 lie outside.
+  deepStrictEqual(whiskerBounds(values, "p10-90"), { low: 1.1, high: 90.9, outliers: [1, 100] });
+  deepStrictEqual(whiskerBounds(values, "p5-95"), { low: 1, high: 100, outliers: [] });
+  deepStrictEqual(whiskerBounds(values, "min-max-all"), { low: 1, high: 100, outliers: [] });
+});
+
+check("seq 213: a box draws its whiskers to the chosen fences and its outliers as points", () => {
+  const dataset = readTable(outlierColumn());
+  const base = newGraphOptions("box-violin");
+  type BoxTrace = { type: string; q1: number[]; median: number[]; q3: number[]; lowerfence: number[]; upperfence: number[] };
+  const boxOf = (fig: GraphFigure) => {
+    const t = (fig.data as (BoxTrace & Record<string, unknown>)[]).find((t) => t.type === "box")!;
+    return { type: t.type, q1: t.q1, median: t.median, q3: t.q3, lowerfence: t.lowerfence, upperfence: t.upperfence };
+  };
+  const outliersOf = (fig: GraphFigure) =>
+    (fig.data as { type: string; mode?: string; y: number[] }[]).filter((t) => t.type === "scatter");
+  // Min to max: the quartiles never move, and no outlier trace.
+  const plain = GRAPHS["box-violin"].build(dataset.columns, base, paintOf(base, 1));
+  deepStrictEqual(boxOf(plain), { type: "box", q1: [2.75], median: [5.5], q3: [8.25], lowerfence: [1], upperfence: [100] });
+  strictEqual(outliersOf(plain).length, 0);
+  // Tukey: whiskers 1 to 9, 100 drawn as a point.
+  const tukey = GRAPHS["box-violin"].build(dataset.columns, { ...base, whisker: "tukey" }, paintOf(base, 1));
+  deepStrictEqual(boxOf(tukey).lowerfence, [1]);
+  deepStrictEqual(boxOf(tukey).upperfence, [9]);
+  deepStrictEqual(boxOf(tukey).q1, [2.75]); // the quartiles don't move with the whiskers
+  deepStrictEqual(outliersOf(tukey).map((t) => t.y), [[100]]);
+  // 10–90 percentiles: whiskers 1.1 to 90.9, 1 and 100 drawn as points.
+  const p1090 = GRAPHS["box-violin"].build(dataset.columns, { ...base, whisker: "p10-90" }, paintOf(base, 1));
+  deepStrictEqual(boxOf(p1090).lowerfence, [1.1]);
+  deepStrictEqual(boxOf(p1090).upperfence, [90.9]);
+  deepStrictEqual(outliersOf(p1090).map((t) => t.y), [[1, 100]]);
+  // Min to max, all points: the points trace is drawn even with Show points off.
+  const all = GRAPHS["box-violin"].build(dataset.columns, { ...base, whisker: "min-max-all" }, paintOf(base, 1));
+  strictEqual(outliersOf(all).length, 1);
+  deepStrictEqual(outliersOf(all)[0].y, [1, 2, 3, 4, 5, 6, 7, 8, 9, 100]);
+});
+
+check("seq 213: violin variants map to spanmode and side (full, truncated, half)", () => {
+  const dataset = readTable(outlierColumn());
+  const base = { ...newGraphOptions("box-violin"), kind: "violin" as const };
+  type ViolinTrace = { type: string; spanmode: string; side?: string };
+  const violinOf = (fig: GraphFigure) => {
+    const t = (fig.data as ViolinTrace[]).find((t) => t.type === "violin")!;
+    return { type: t.type, spanmode: t.spanmode, ...(t.side ? { side: t.side } : {}) };
+  };
+  deepStrictEqual(violinOf(GRAPHS["box-violin"].build(dataset.columns, base, paintOf(base, 1))), {
+    type: "violin",
+    spanmode: "soft",
+  });
+  deepStrictEqual(
+    violinOf(GRAPHS["box-violin"].build(dataset.columns, { ...base, violinVariant: "truncated" }, paintOf(base, 1))),
+    { type: "violin", spanmode: "hard" },
+  );
+  deepStrictEqual(
+    violinOf(GRAPHS["box-violin"].build(dataset.columns, { ...base, violinVariant: "half" }, paintOf(base, 1))),
+    { type: "violin", spanmode: "hard", side: "positive" },
+  );
+});
+
+check("seq 213: a grouped box draws Tukey outliers per row, and the Format panel offers both choices", () => {
+  const table: TableData = {
+    columns: ["Title", ...Array.from({ length: 10 }, (_, i) => `A:Y${i + 1}`)],
+    rows: [["r1", "1", "2", "3", "4", "5", "6", "7", "8", "9", "100"]],
+    groups: 1,
+    replicates: 10,
+  };
+  const dataset = readTable(table);
+  const options = { ...newGraphOptions("grouped-box"), whisker: "tukey" as const };
+  const fig = GRAPHS["grouped-box"].build(dataset.columns, options, paintOf(options, 1), dataset.titles);
+  const traces = fig.data as { type: string; lowerfence?: number[]; upperfence?: number[]; y?: number[] }[];
+  strictEqual(traces.length, 2); // the box, and its outlier points
+  deepStrictEqual(traces[0].lowerfence, [1]);
+  deepStrictEqual(traces[0].upperfence, [9]);
+  deepStrictEqual(traces[1].y, [100]);
+  // The shared box/violin Format block offers the whisker choice for boxes
+  // and the variant choice for violins.
+  const src = readFileSync("src/views/graphs/format-sections.tsx", "utf8");
+  const block = src.slice(src.indexOf("const boxOrViolin"));
+  ok(block.includes('label="Whiskers"'), "the Format panel offers a Whiskers choice");
+  ok(block.includes("options.whisker"), "the Whiskers choice writes options.whisker");
+  ok(block.includes('label="Violin"'), "the Format panel offers a Violin variant choice");
+  ok(block.includes("options.violinVariant"), "the Violin choice writes options.violinVariant");
+});
+
+check("seq 213 MCP: build-graph accepts whisker and violinVariant options and refuses bad ones", async () => {
+  const harness = mcpLaggingHarness(true);
+  const captured: { whisker?: string; violinVariant?: string }[] = [];
+  harness.deps.actions!.createGraph = (tableId, graphType, options) => {
+    captured.push({ whisker: options?.whisker, violinVariant: options?.violinVariant });
+    return `graph_${graphType}`;
+  };
+  const made = await harness.run("job-213-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A"],
+    rows: [["r1", 1]],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  await harness.run("job-213-tukey", "build-graph", {
+    table_id: tableId,
+    graph_type: "box-violin",
+    options: { whisker: "tukey" },
+  });
+  await harness.run("job-213-half", "build-graph", {
+    table_id: tableId,
+    graph_type: "box-violin",
+    options: { kind: "violin", violinVariant: "half" },
+  });
+  deepStrictEqual(captured, [
+    { whisker: "tukey", violinVariant: "full" },
+    { whisker: "min-max", violinVariant: "half" },
+  ]);
+  await rejects(
+    harness.run("job-213-bad", "build-graph", {
+      table_id: tableId,
+      graph_type: "box-violin",
+      options: { whisker: "bogus" },
+    }),
+    /option “whisker” must be one of/,
+  );
+  await rejects(
+    harness.run("job-213-bad2", "build-graph", {
+      table_id: tableId,
+      graph_type: "box-violin",
+      options: { violinVariant: "wide" },
+    }),
+    /option “violinVariant” must be one of/,
+  );
 });
 
 check("summary subcolumns: interleaved scatter on a summary table draws centers, not points", () => {
