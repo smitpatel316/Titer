@@ -122,6 +122,8 @@ export interface JobDeps {
   renameNode?: (id: string, name: string) => void;
   /** Freeze or unfreeze an analysis node (default: the real store action). */
   setAnalysisFrozen?: (id: string, frozen: boolean) => void;
+  /** Freeze or unfreeze a table node (default: the real store action). */
+  setTableFrozen?: (id: string, frozen: boolean) => void;
   /** Replace an analysis node's params (default: the real store action). */
   setAnalysisParams?: (id: string, params: AnalysisParams) => void;
   /** Copy an example table's analyses + graphs onto target tables, as one
@@ -911,6 +913,34 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         created: { analysis_id: analysisId },
       };
     }
+    case "freeze-table": {
+      // `setTableFrozen` — a frozen table can't be edited until unfrozen
+      // (seq 165); freezing is idempotent, unfreezing restores edits.
+      const args = (job.args ?? {}) as { table_id?: unknown; frozen?: unknown };
+      const tableId = reqString(args.table_id, "table_id");
+      if (typeof args.frozen !== "boolean") {
+        throw new Error(`Job argument “frozen” must be true or false.`);
+      }
+      const state = deps.getState();
+      const node = state.nodes[tableId];
+      if (!node || node.type !== "table") {
+        throw new Error(
+          node
+            ? `“${tableId}” is not a table (it is a ${node.type}).`
+            : `No table with id “${tableId}” in this project.`,
+        );
+      }
+      const freeze =
+        deps.setTableFrozen ??
+        (() => {
+          throw new Error("This window can't freeze tables (no setTableFrozen).");
+        });
+      freeze(tableId, args.frozen);
+      return {
+        result: { project_id: job.project_id, table_id: tableId, frozen: args.frozen },
+        created: { table_id: tableId },
+      };
+    }
     case "save-project": {
       // L2: write the project (GAP-4 — the TS writers build the bytes, Rust
       // only ever wrote them) and mark it saved. The job's result is the
@@ -984,6 +1014,9 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       const actions = tableActions(job, deps);
       const tableId = argString(job, job.args, "table_id");
       const node = tableNode(job, deps.getState(), tableId);
+      if (node.frozen) {
+        throw jobErr(job, `Table “${node.name}” is frozen — unfreeze it before writing to it.`);
+      }
       const type = node.tableType ?? "column";
       const columns = (job.args as Record<string, unknown> | null | undefined)?.columns;
       const rows = (job.args as Record<string, unknown> | null | undefined)?.rows;
@@ -1032,6 +1065,9 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       const op = argString(job, job.args, "op");
       const state = deps.getState();
       const node = tableNode(job, state, tableId);
+      if (node.frozen) {
+        throw jobErr(job, `Table “${node.name}” is frozen — unfreeze it before editing it.`);
+      }
       const type = node.tableType ?? "column";
       const data = node.data ?? { columns: ["Title"], rows: [] };
       // One grid-menu op: a new TableData via the table-data.ts helpers,
@@ -1622,6 +1658,7 @@ export function useMcpJobDispatcher() {
   const createAnalysis = actions.createAnalysis;
   const renameNode = actions.renameNode;
   const setAnalysisFrozen = actions.setAnalysisFrozen;
+  const setTableFrozen = actions.setTableFrozen;
   const setAnalysisParams = actions.setAnalysisParams;
   const applyWand = actions.applyWand;
   const applyScript = actions.applyScript;
@@ -1698,6 +1735,7 @@ export function useMcpJobDispatcher() {
                 createAnalysis,
                 renameNode,
                 setAnalysisFrozen,
+                setTableFrozen,
                 setAnalysisParams,
                 applyWand,
                 applyScript,

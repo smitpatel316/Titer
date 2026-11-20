@@ -122,6 +122,9 @@ type Action =
   /** Freeze (or unfreeze) a results sheet: frozen, it shows its cached
    *  result and stops auto-updating when the data change. */
   | { type: "setAnalysisFrozen"; id: string; frozen: boolean }
+  /** Freeze (or unfreeze) a data table: frozen, it can't be edited until
+   *  unfrozen (Prism's Freeze Sheet). */
+  | { type: "setTableFrozen"; id: string; frozen: boolean }
   /** Replace an analysis node's params (a rerun with overrides, via MCP):
    *  the next run — and the UI — see the new params. Orphaned sheets
    *  keep their params (their source table is gone). */
@@ -376,6 +379,15 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       else delete next.frozen;
       return { ...state, nodes: { ...state.nodes, [action.id]: next }, isDirty: true };
     }
+    case "setTableFrozen": {
+      const node = state.nodes[action.id];
+      if (!node || node.type !== "table") return state;
+      if (node.frozen === true ? action.frozen : !action.frozen) return state;
+      const next = { ...node };
+      if (action.frozen) next.frozen = true;
+      else delete next.frozen;
+      return { ...state, nodes: { ...state.nodes, [action.id]: next }, isDirty: true };
+    }
     case "setAnalysisParams": {
       const node = state.nodes[action.id];
       if (!node || node.type !== "analysis" || node.orphaned) return state;
@@ -401,6 +413,9 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
           ? JSON.parse(JSON.stringify(source.floatingNotes))
           : undefined,
       };
+      // A frozen table's copy starts editable: freezing is the source's
+      // state, not the copy's (seq 165).
+      delete copy.frozen;
       // Every child (analysis or graph, in sidebar order) is cloned with a
       // fresh id and re-parented to the copy; its params/options are deep
       // copies, so editing the copy's family never touches the source's.
@@ -441,7 +456,7 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
     }
     case "updateTable": {
       const node = state.nodes[action.id];
-      if (!node || node.type !== "table") return state;
+      if (!node || node.type !== "table" || node.frozen) return state;
       const nodes = { ...state.nodes };
       // The table, then the tables computed from it (and from those) take their new values.
       const update = (id: string, data: TableData) => {
@@ -670,6 +685,7 @@ const UNDOABLE = new Set<Action["type"]>([
   "reorderRoot",
   "reorderChildren",
   "setAnalysisFrozen",
+  "setTableFrozen",
   "setAnalysisParams",
 ]);
 const MUTATING = new Set<Action["type"]>([...UNDOABLE, "cacheAnalysisResult", "undo", "redo", "load"]);
@@ -689,6 +705,8 @@ function changeName(action: Action): string {
       return "Delete";
     case "setAnalysisFrozen":
       return action.frozen ? "Freeze Results" : "Unfreeze Results";
+    case "setTableFrozen":
+      return action.frozen ? "Freeze Table" : "Unfreeze Table";
     case "setAnalysisParams":
       return "Change Analysis Parameters";
     case "duplicateFamily":
@@ -827,6 +845,8 @@ interface ProjectActions {
   cacheAnalysisResult: (id: string, result: AnalysisResult) => void;
   /** Freeze (or unfreeze) a results sheet. Orphaned sheets can't freeze. */
   setAnalysisFrozen: (id: string, frozen: boolean) => void;
+  /** Freeze (or unfreeze) a data table: frozen, it can't be edited. */
+  setTableFrozen: (id: string, frozen: boolean) => void;
   /** Replace an analysis node's params (a rerun with overrides). */
   setAnalysisParams: (id: string, params: AnalysisParams) => void;
   /** Duplicates a data table together with its analyses and graphs (its family). */
@@ -1076,6 +1096,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       removeNode: (id) => dispatch({ type: "remove", id }),
       cacheAnalysisResult: (id, result) => dispatch({ type: "cacheAnalysisResult", id, result }),
       setAnalysisFrozen: (id, frozen) => dispatch({ type: "setAnalysisFrozen", id, frozen }),
+      setTableFrozen: (id, frozen) => dispatch({ type: "setTableFrozen", id, frozen }),
       setAnalysisParams: (id, params) => dispatch({ type: "setAnalysisParams", id, params }),
       duplicateFamily: (id) => dispatch({ type: "duplicateFamily", id }),
       updateTable: (id, data, label, move) => dispatch({ type: "updateTable", id, data, label, move }),

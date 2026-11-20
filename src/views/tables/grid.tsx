@@ -121,9 +121,11 @@ interface GridProps {
   update: (next: TableData, label: string, move?: TableMove) => void;
   /** Shows a grouped table's Groups panel. */
   showGroups: () => void;
+  /** The table is frozen: no editing until unfrozen (seq 165). */
+  tableFrozen?: boolean;
 }
 
-export function Grid({ data, type, update, showGroups }: GridProps) {
+export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps) {
   const nested = isNested(data);
   const grouped = isGrouped(data) || nested;
   const replicates = data.replicates ?? 1;
@@ -169,6 +171,10 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
   // Mirrors `editing` for finishEdit, which runs twice when saving also blurs the editor.
   const editingRef = React.useRef(editing);
   const setEditing = (next: Editing | null) => {
+    // A frozen table opens no editor: its values can't change until unfrozen
+    // (seq 165). Closing still runs — the editor never opens, so there is
+    // nothing to close.
+    if (tableFrozen && next !== null) return;
     editingRef.current = next;
     setEditingState(next);
   };
@@ -550,7 +556,7 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
       setSel({ anchor, focus });
       g = toRange({ anchor, focus });
     }
-    void popupMenu(gridMenu({ data, type, zone, range: g, update, rename: startRename, renameGroup: startRenameGroup, showGroups }));
+    void popupMenu(gridMenu({ data, type, zone, range: g, update, rename: startRename, renameGroup: startRenameGroup, showGroups, tableFrozen }));
   };
 
   /** Drag a header's right edge to resize its column; double-click it to fit the content. */
