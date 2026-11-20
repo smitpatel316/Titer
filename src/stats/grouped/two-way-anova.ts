@@ -86,7 +86,9 @@ const fdrNote = (params: TwoWayAnovaParams, comparisons: ComparisonRow[] | undef
   return (
     ` ${fdrLabel(params.fdrMethod ?? "bh", params.fdrQ ?? 5)}: ${discoveries} of ${comparisons.length} ` +
     `comparison${comparisons.length === 1 ? " is" : "s are"} discoveries (adjusted P < ${q}). ` +
-    "The P values are FDR-adjusted; their 95% CIs are unadjusted."
+    // No CI claim here: FDR comparisons carry no interval (runPosthoc and
+    // the RM path both null low/high), same as the three-way note.
+    "The P values are FDR-adjusted."
   );
 };
 
