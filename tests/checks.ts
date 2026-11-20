@@ -12299,7 +12299,7 @@ check("fraction of total carries a 95% CI of each proportion (Wilson/Brown or Cl
     [out.fractionsOfTotal?.[1].rows[0].ciLow ?? NaN, out.fractionsOfTotal?.[1].rows[0].ciHigh ?? NaN],
     [0.4618143774758936, 0.7239161026974346],
   );
-  ok(out.subtitle.includes("Wilson/Brown"));
+  ok(out.subtitle?.includes("Wilson/Brown"));
   ok(out.notes.includes("Wilson/Brown"));
   // Clopper–Pearson on the same table, as percentages: the intervals scale
   // by 100 with the values.
@@ -12312,9 +12312,9 @@ check("fraction of total carries a 95% CI of each proportion (Wilson/Brown or Cl
   if ("error" in cp) throw new Error(cp.error);
   strictEqual(cp.fractionsOfTotal?.[0].ci, "clopper-pearson");
   const pct = cp.fractionsOfTotal?.[0].rows[0];
-  ok(pct?.value === 25 && pct.ciLow !== null && Math.abs(pct.ciLow - 12.6914798932845) < 1e-9);
-  ok(pct?.ciHigh !== null && Math.abs(pct.ciHigh - 41.19619801514299) < 1e-9);
-  ok(cp.subtitle.includes("Clopper–Pearson"));
+  ok(pct?.value === 25 && pct.ciLow != null && Math.abs(pct.ciLow - 12.6914798932845) < 1e-9);
+  ok(pct?.ciHigh != null && Math.abs(pct.ciHigh - 41.19619801514299) < 1e-9);
+  ok(cp.subtitle?.includes("Clopper–Pearson"));
   // No CI asked: the rows carry no interval fields at all.
   const plain = await runAnalysis("fraction-of-total", table, {
     ys: ["Men"],
