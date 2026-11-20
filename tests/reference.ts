@@ -4198,6 +4198,22 @@ async function disagreements(): Promise<string[]> {
     "power-series": [growthB6X, "PS"],
     lognormal: [lognormX, "LN"],
     "pade-11": [growthB6X, "PD"],
+    // Same wrong-shape fallback problem for the biphasic/bell pair
+    // (doseLog/doseRaw are single-phase sigmoids, not two-phase or
+    // bell curves) and the linear-quadratic family (a sigmoid is not a
+    // cell-death curve), plus inhibitor-4pl-normalized-x, whose
+    // (x/IC50)^HillSlope form errors on the rising fallback data.
+    "biphasic-logx": [specialB6X, "BP"],
+    "biphasic-x": [specialXB6X, "BPX"],
+    "bell-shaped-logx": [specialB6X, "BL"],
+    "bell-shaped-x": [specialXB6X, "BLX"],
+    "lq-fraction-surviving": [lqB6X, "FS"],
+    "lq-percent-surviving": [lqB6X, "PSV"],
+    "lq-fraction-dead": [lqB6X, "FD"],
+    "lq-percent-dead": [lqB6X, "PDD"],
+    "lq-count-alive": [lqB6X, "CA"],
+    "lq-count-dead": [lqB6X, "CD"],
+    "inhibitor-4pl-normalized-x": [doseXB6X, "N4IX"],
     // The user-defined model needs its equation and starting values — without
     // them the fit is refused by design, so it runs on its own fixture with
     // the same equation and starts the checks.ts user-defined check uses.

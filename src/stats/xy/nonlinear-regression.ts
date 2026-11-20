@@ -1385,12 +1385,16 @@ function comparisonRCode(
       ? `x<-c(x0,x1);y<-c(y0,y1);${spec.fit}`
       : `x<-c(x0,x1);y<-c(y0,y1);g<-rep(1:2,c(length(x0),length(x1)));c0<-coef(m0);c1<-coef(m1)\n` +
         `ms<-lapply(c(mean(c(c0[["${midpoint}"]],c1[["${midpoint}"]])),c0[["${midpoint}"]],c1[["${midpoint}"]]),` +
-        `function(s)tryCatch(nls(y~${indexed},start=list(${start}),control=nls.control(maxiter=200)),error=function(e)NULL))\n` +
+        `function(s)tryCatch(nls(y~${indexed},start=list(${start}),control=nls.control(maxiter=200)),error=function(e)tryCatch(nls(y~${indexed},start=list(${start}),control=nls.control(maxiter=200,tol=1e-3)),error=function(e2)NULL))\n` +
         `ms<-Filter(Negate(is.null),ms);if(!length(ms))stop("no fit with a shared midpoint")\n` +
         `m<-ms[[which.min(sapply(ms,function(f)sum(residuals(f)^2)))]]`;
   // One set's fit, captured with its prefix (`a`/`b`) before the next fit overwrites `m`.
+  // Each set runs the spec's retry ladder (retryChain), not just the
+  // primary — a model whose primary stalls on a noiseless curve but whose
+  // retry converges (agonist-3pl-normalized-logx) used to fail the whole
+  // comparison here.
   const setBlock = (xVar: string, yVar: string, prefix: string) =>
-    `x<-${xVar};y<-${yVar};${spec.fit};${fitSummaryStatements(spec)}` +
+    `x<-${xVar};y<-${yVar};${retryChain([spec.fit, ...(spec.retryFits ?? []).map((r) => r.fit)])};${fitSummaryStatements(spec)}` +
     `${prefix.replace(/_$/, "")}<-c(${fitEntries(spec, prefix)});`;
   return (
     `x0<-${rVec(s0.xs)};y0<-${rVec(s0.ys)};x1<-${rVec(s1.xs)};y1<-${rVec(s1.ys)};` +
@@ -1541,6 +1545,23 @@ async function compareModels(
         : "AICc could not be computed (too few points for the correction).");
   const sets = [{ name: first.yCol.name, xs: first.xs, ys: first.ys }];
   return assembleResult(model, spec, xCol, first.yCol, undefined, sets, [parsedA], [], [], titles, first, undefined, undefined, params, stats, extraNotes);
+}
+
+/** fitModelSpec's retry ladder, as R: try each `m<-nls(...)` fit string in
+ *  turn (primary, then the retries), keeping the first that converges and
+ *  throwing the last error. The comparison's per-set fits used to run only
+ *  the primary, so a model whose primary stalls on a noiseless curve but
+ *  whose retry converges (agonist-3pl-normalized-logx) failed the whole
+ *  comparison. A succeeding primary is untouched — the chain returns its
+ *  result and the retries never run. */
+function retryChain(fits: string[]): string {
+  const calls = fits.map((f) => f.replace(/^m<-/, ""));
+  // Innermost attempt throws (no handler); each outer layer catches its
+  // attempt's failure and tries the next.
+  let inner = calls[calls.length - 1]!;
+  for (let i = calls.length - 2; i >= 0; i--)
+    inner = `tryCatch(${calls[i]},error=function(e${i})${inner})`;
+  return `m<-${inner}`;
 }
 
 /** The default shared parameters for a global fit (plan 26): the dose
