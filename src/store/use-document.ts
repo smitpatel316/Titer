@@ -854,24 +854,70 @@ export function useDocument() {
     }
   };
 
+  // Quit-save settle (Plane seq 281): the transpose race. An analysis whose
+  // results are still computing when the quit-save snapshots the project
+  // lands through `cacheAnalysisResult`, which bumps `revision` and sets
+  // `isDirty` (use-project-store.tsx) — and `cachedResult` is file content,
+  // so the file the quit-save just wrote is genuinely stale and the
+  // discard prompt fires, even though the user only just watched the app
+  // save. Waiting alone cannot fix that: nothing clears `isDirty` except
+  // `markProjectSaved`, so a result that landed after the snapshot leaves
+  // the project dirty after any wait. The settle below therefore ends in
+  // one follow-up save, not just a re-check: settle, save once more if
+  // still dirty, then let the prompt decide. One extra save, never a loop.
+  const QUIT_SAVE_SETTLE_MS = 2000;
+  const QUIT_SAVE_QUIET_MS = 250;
+  const QUIT_SAVE_POLL_MS = 50;
+  const quitSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+  /** Wait until the store has gone quiet — no `revision` change for
+   *  `QUIT_SAVE_QUIET_MS` — or the bound runs out. Revision bumps on
+   *  every mutating action, including a landing analysis result, so a
+   *  quiet revision means nothing landed recently; chained recomputes
+   *  keep resetting the quiet clock until the bound caps the wait. */
+  const waitForQuitSettle = async (): Promise<void> => {
+    const startedAt = Date.now();
+    let lastRevision = latest.current.revision;
+    let lastChangeAt = startedAt;
+    while (Date.now() - startedAt < QUIT_SAVE_SETTLE_MS) {
+      await quitSleep(QUIT_SAVE_POLL_MS);
+      if (latest.current.revision !== lastRevision) {
+        lastRevision = latest.current.revision;
+        lastChangeAt = Date.now();
+      } else if (Date.now() - lastChangeAt >= QUIT_SAVE_QUIET_MS) {
+        return;
+      }
+    }
+  };
+
   /** Close with autosave: one save attempt first (only when the toggle is
    *  on, the project is dirty, and it has a target), then the existing
    *  discard prompt — which only appears if the project is still dirty
-   *  afterwards, so a successful autosave closes silently. A failing save
-   *  never blocks quitting forever: the prompt decides. Two close
-   *  requests at once share the one attempt, like confirmDiscard itself. */
+   *  afterwards, so a successful autosave closes silently. After a
+   *  successful quit-save the store is given a bounded moment to settle
+   *  (an analysis result landing just after the snapshot re-dirties the
+   *  project); if it did, one more save writes it, and only if the
+   *  project is STILL dirty after that does the prompt decide. A failing
+   *  save skips the settle and the second attempt — it already alerted,
+   *  and the prompt decides, exactly as before. Two close requests at
+   *  once share the one attempt, like confirmDiscard itself. */
   const quitSaveInFlight = React.useRef<Promise<boolean> | null>(null);
   const confirmDiscardWithAutosave = async (): Promise<boolean> => {
     if (quitSaveInFlight.current) return quitSaveInFlight.current;
     const asked = (async () => {
-      if (
+      const quitSaveAllowed = () =>
         isAutosaveEnabled() &&
         latest.current.isDirty &&
         (latest.current.filePath || remoteRef.current) &&
         !conflictRef.current &&
-        !autosaveWouldPrompt()
-      ) {
-        await saveRef.current();
+        !autosaveWouldPrompt();
+      if (quitSaveAllowed()) {
+        const saved = await saveRef.current();
+        if (saved) {
+          await waitForQuitSettle();
+          if (quitSaveAllowed()) {
+            await saveRef.current();
+          }
+        }
       }
       return confirmDiscard();
     })();
