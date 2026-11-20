@@ -76,6 +76,8 @@ import {
   RANK_POSTHOCS,
   REMOVE_BASELINE_METHODS,
   ROUT_Q,
+  SELECT_TRANSFORM_KINDS,
+  SELECT_TRANSFORM_OPERATORS,
   SMOOTH_DIFF_INT_OPERATIONS,
   TAILS,
   THREE_WAY_TERMS,
@@ -266,6 +268,11 @@ type ParamKind =
   | "plot-curves"
   | "texts-by-name"
   | "text-pairs-by-name"
+  | "transforms"
+  | "equations"
+  | "row-range"
+  | "row-filter"
+  | "column-filter"
   | readonly string[]
   | Limits;
 // prettier-ignore
@@ -388,6 +395,15 @@ const PARAMS = {
   response: "name", grouping: "name", subject: "name", rowTitles: "name",
   rowFactor: "name", columnFactor: "name", rowVariable: "name", outcome: "name", count: "name",
   prefixNames: "yes/no", completeRows: "yes/no",
+  // Select and transform (seq 177): which variables the new table keeps, the
+  // per-variable transforms and equations that add columns, and the row
+  // selection (a range, a value comparison, a column comparison).
+  columns: "names",
+  transforms: "transforms",
+  equations: "equations",
+  rowRange: "row-range",
+  rowFilter: "row-filter",
+  columnFilter: "column-filter",
 } satisfies Record<ParamKey, ParamKind>;
 
 const isFiniteNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -834,6 +850,71 @@ function readParam(kind: ParamKind, v: unknown, report?: (dropped: number) => vo
     if (kept.length !== v.length) report?.(v.length - kept.length);
     return kept.length ? kept : undefined;
   }
+  if (kind === "transforms") {
+    // One transform per entry: a variable, a kind from the offered list, and
+    // the constant K / title when given. An entry naming an unknown kind, or
+    // with a non-numeric K, is left out whole and reported (M6).
+    if (!Array.isArray(v)) return undefined;
+    const kept = v.filter(
+      (t): t is { variable: string; kind: string; k?: number; title?: string } =>
+        isObj(t) &&
+        typeof t.variable === "string" &&
+        typeof t.kind === "string" &&
+        (SELECT_TRANSFORM_KINDS as readonly string[]).includes(t.kind) &&
+        (t.k === undefined || isFiniteNumber(t.k)) &&
+        (t.title === undefined || typeof t.title === "string"),
+    );
+    if (kept.length !== v.length) report?.(v.length - kept.length);
+    return kept.length ? kept : undefined;
+  }
+  if (kind === "equations") {
+    // One equation per entry: a name and its formula, both strings. A
+    // nameless or formula-less entry is left out whole and reported (M6).
+    if (!Array.isArray(v)) return undefined;
+    const kept = v.filter(
+      (e): e is { name: string; formula: string } =>
+        isObj(e) && typeof e.name === "string" && e.name.trim() !== "" && typeof e.formula === "string",
+    );
+    if (kept.length !== v.length) report?.(v.length - kept.length);
+    return kept.length ? kept : undefined;
+  }
+  if (kind === "row-range") {
+    // A 1-based inclusive row range: both ends finite numbers (the runner
+    // checks they are whole rows inside the table).
+    if (!isObj(v) || !isFiniteNumber(v.first) || !isFiniteNumber(v.last)) return undefined;
+    return { first: v.first, last: v.last };
+  }
+  if (kind === "row-filter") {
+    // A variable, a comparison from the offered list, and the value to
+    // compare against when the comparison needs one ("is-not-missing" does not).
+    if (
+      !isObj(v) ||
+      typeof v.variable !== "string" ||
+      typeof v.operator !== "string" ||
+      !(SELECT_TRANSFORM_OPERATORS as readonly string[]).includes(v.operator) ||
+      (v.operator !== "is-not-missing" && v.value !== undefined && !isFiniteNumber(v.value))
+    )
+      return undefined;
+    return {
+      variable: v.variable,
+      operator: v.operator,
+      ...(v.value !== undefined ? { value: v.value } : {}),
+    };
+  }
+  if (kind === "column-filter") {
+    // Two different variables and a comparison between them ("is-not-missing"
+    // compares a variable to a value, not to another variable).
+    if (
+      !isObj(v) ||
+      typeof v.variable !== "string" ||
+      typeof v.otherVariable !== "string" ||
+      typeof v.operator !== "string" ||
+      v.operator === "is-not-missing" ||
+      !(SELECT_TRANSFORM_OPERATORS as readonly string[]).includes(v.operator)
+    )
+      return undefined;
+    return { variable: v.variable, operator: v.operator, otherVariable: v.otherVariable };
+  }
   if (kind === "names") {
     if (!Array.isArray(v)) return undefined;
     const kept = v.filter((s): s is string => typeof s === "string");
@@ -921,6 +1002,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
     "target", "x", "response", "grouping", "subject", "rowTitles", "rowFactor", "columnFactor", "rowVariable",
     "outcome", "count", "prefixNames", "completeRows", "sets",
   ],
+  "select-transform": ["columns", "transforms", "equations", "rowRange", "rowFilter", "columnFilter", "sets"],
   survival: ["curveTest", "correction", "time", "status", "groupBy", "sets"],
   cox: ["reference", "sets"],
   "chi-square": ["test", "trendOrdered", "sets"],
@@ -1015,6 +1097,63 @@ function checkParamValue(kind: ParamKind, key: string, v: unknown): { value: unk
     )
       return { value: v };
     return bad("a list of curves, each { label, params } with numeric parameter values");
+  }
+  if (kind === "transforms") {
+    if (
+      Array.isArray(v) &&
+      v.length &&
+      v.every(
+        (t) =>
+          isObj(t) &&
+          typeof t.variable === "string" &&
+          typeof t.kind === "string" &&
+          (SELECT_TRANSFORM_KINDS as readonly string[]).includes(t.kind) &&
+          (t.k === undefined || isFiniteNumber(t.k)) &&
+          (t.title === undefined || typeof t.title === "string"),
+      )
+    )
+      return { value: v };
+    return bad(
+      `a list of transforms, each { variable, kind } with kind one of: ${SELECT_TRANSFORM_KINDS.join(", ")}`,
+    );
+  }
+  if (kind === "equations") {
+    if (
+      Array.isArray(v) &&
+      v.length &&
+      v.every((e) => isObj(e) && typeof e.name === "string" && e.name.trim() !== "" && typeof e.formula === "string")
+    )
+      return { value: v };
+    return bad('a list of equations, each { name, formula }, e.g. { name: "BMI", formula: "Weight / Height^2" }');
+  }
+  if (kind === "row-range") {
+    if (isObj(v) && isFiniteNumber(v.first) && isFiniteNumber(v.last)) return { value: v };
+    return bad("a row range { first, last }, e.g. { first: 2, last: 5 }");
+  }
+  if (kind === "row-filter") {
+    if (
+      isObj(v) &&
+      typeof v.variable === "string" &&
+      typeof v.operator === "string" &&
+      (SELECT_TRANSFORM_OPERATORS as readonly string[]).includes(v.operator) &&
+      (v.operator === "is-not-missing" || v.value === undefined || isFiniteNumber(v.value))
+    )
+      return { value: v };
+    return bad(
+      `a row filter { variable, operator, value? } with operator one of: ${SELECT_TRANSFORM_OPERATORS.join(", ")}`,
+    );
+  }
+  if (kind === "column-filter") {
+    if (
+      isObj(v) &&
+      typeof v.variable === "string" &&
+      typeof v.otherVariable === "string" &&
+      typeof v.operator === "string" &&
+      v.operator !== "is-not-missing" &&
+      (SELECT_TRANSFORM_OPERATORS as readonly string[]).includes(v.operator)
+    )
+      return { value: v };
+    return bad("a column filter { variable, operator, otherVariable } with operator one of: >, <, =, >=, <=, !=");
   }
   if (Array.isArray(kind)) {
     const found = oneOf(kind, v);

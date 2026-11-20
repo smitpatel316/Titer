@@ -95,6 +95,7 @@ import { runCox } from "./survival/cox-regression";
 import { runMcNemar } from "./contingency/mcnemar";
 import { runCoxPH } from "./survival/cox-ph";
 import { runExtractRearrange } from "./multiple/extract-rearrange";
+import { runSelectTransform } from "./multiple/select-transform";
 import { runMixedEffects } from "./mixed/mixed-effects";
 import { runBlandAltman } from "./column/bland-altman";
 import { runRocCurve } from "./column/roc-curve";
@@ -104,7 +105,7 @@ import { runTransformConcentrations } from "./column/transform-concentrations";
 import { runNormalize } from "./xy/normalize";
 import { runTranspose } from "./column/transpose";
 import { runMonteCarlo } from "./simulation/monte-carlo";
-import type { ExtractRearrangeParams, MonteCarloParams } from "./types";
+import type { ExtractRearrangeParams, MonteCarloParams, SelectTransformParams } from "./types";
 import type { TableData } from "../store/types";
 import { datasetColumns, readTable, setColumns, type Column } from "../lib/dataset";
 import { REPLICATE_TESTS, summaryTableProblem } from "../lib/summary-format";
@@ -415,6 +416,13 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     // the table holds, and the runner validates per target.
     minColumns: 1,
     run: (c, p, t) => runExtractRearrange(c, p as ExtractRearrangeParams, t),
+  },
+  "select-transform": {
+    label: "Select and transform",
+    // minColumns is a floor only: the runner validates each named variable
+    // (a transform needs numbers) — the wizard offers only what the table holds.
+    minColumns: 1,
+    run: (c, p, t) => runSelectTransform(c, p as SelectTransformParams, t),
   },
 };
 

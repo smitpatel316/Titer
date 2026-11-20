@@ -101,7 +101,7 @@ export async function runSelectTransform(
   let rowFilterValue: number | undefined;
   if (p.rowFilter !== undefined) {
     const f = p.rowFilter;
-    const col = pick(f.variable, "row-filter variable");
+    const col = pick(f.variable);
     if (isError(col)) return { error: col };
     if (!isOperator(f.operator))
       return {
@@ -120,9 +120,9 @@ export async function runSelectTransform(
   let columnFilterOp: SelectTransformOperator | undefined;
   if (p.columnFilter !== undefined) {
     const f = p.columnFilter;
-    const a = pick(f.variable, "column-filter variable");
+    const a = pick(f.variable);
     if (isError(a)) return { error: a };
-    const b = pick(f.otherVariable, "column-filter variable");
+    const b = pick(f.otherVariable);
     if (isError(b)) return { error: b };
     if (a.name === b.name)
       return { error: "The two variables must be different — pick two different variables." };
@@ -158,7 +158,9 @@ export async function runSelectTransform(
   for (let r = first; r <= last; r++) {
     if (rowFilter !== undefined && rowFilterOp !== undefined) {
       if (rowFilterOp === "is-not-missing") {
-        if (rowFilter.cells[r] == null) continue;
+        // A blank cell is missing too — its text is "" (not null), so the
+        // test is "has any text", not "is not null".
+        if (textOf(rowFilter.cells[r]) === undefined) continue;
       } else {
         const v = rowFilter.byRow[r];
         if (v == null || !compares(v, rowFilterOp, rowFilterValue!)) continue;
@@ -281,9 +283,14 @@ export async function runSelectTransform(
           return summary;
       }
     };
+    // A summary transform broadcasts its value to every kept row — even a
+    // row where the source variable is blank, which has no value of its own.
+    const isSummaryKind =
+      t.kind === "min" || t.kind === "max" || t.kind === "mean" || t.kind === "stdev" || t.kind === "stderr";
     newColumns.push({
       title,
       values: keptRows.map((r) => {
+        if (isSummaryKind) return cell(summary);
         const v = col.byRow[r];
         return v == null ? null : cell(of(v));
       }),

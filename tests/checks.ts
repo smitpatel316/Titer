@@ -17698,7 +17698,12 @@ check("select and transform copies the table when nothing is selected", async ()
   strictEqual(out.testType, "select-transform");
   strictEqual(out.extracted?.tableType, "multiple");
   deepStrictEqual(out.extracted?.table.columns, SELECT_TABLE.columns);
-  deepStrictEqual(out.extracted?.table.rows, SELECT_TABLE.rows);
+  // The copy matches the source — except a blank cell, which comes out as
+  // null (the readTable rule; extract-rearrange does the same). Row titles
+  // stay "" — only data cells go through that rule.
+  const expectedRows = SELECT_TABLE.rows.map((r) => [...r]);
+  expectedRows[4][5] = null;
+  deepStrictEqual(out.extracted?.table.rows, expectedRows);
   ok(out.notes.includes("source table is unchanged"));
   // The source table is untouched by the run.
   deepStrictEqual(SELECT_TABLE.rows[0], ["", "25", "70", "1.75", "F", "5", "6"]);
