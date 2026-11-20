@@ -1,7 +1,8 @@
 // What both survival analyses read of a Survival table: each group holding subjects, with
 // their times and codes, checked (1 = event, 0 = censored; times must be positive).
 import type { Column } from "../types";
-import { pairUp, splitXY, xyProblem } from "../../lib/dataset";
+import { levelsOf, pairUp, splitXY, xyProblem } from "../../lib/dataset";
+import { missingColumn } from "../column/base";
 import { num } from "../../lib/format";
 
 interface SurvivalGroup {
@@ -12,13 +13,67 @@ interface SurvivalGroup {
   y: number[];
 }
 
-/** The groups holding subjects, at least 2, or what is wrong with the table. */
-export function survivalGroups(columns: Column[]): SurvivalGroup[] | { error: string } {
+/** The groups holding subjects, at least 2, or what is wrong with the table. A Multiple
+ *  Variables table assigns its variables instead (`time`, `status`, `groupBy`): the time
+ *  and event-code columns, split by the grouping variable's levels. */
+export function survivalGroups(
+  columns: Column[],
+  assignment?: { time?: string; status?: string; groupBy?: string },
+): SurvivalGroup[] | { error: string } {
+  if (assignment?.time !== undefined || assignment?.status !== undefined || assignment?.groupBy !== undefined)
+    return survivalGroupsByAssignment(columns, assignment);
   const { x, ys } = splitXY(columns);
   if (!x) return { error: xyProblem(columns)! };
   if (ys.some((y) => y.columns.length > 1))
     return { error: "Each group needs one column of event codes, not replicates." };
   const groups = ys.map((y) => ({ name: y.name, ...pairUp(x, y.columns[0]) })).filter((g) => g.y.length > 0);
+  return checkedSurvivalGroups(groups);
+}
+
+/** A Multiple Variables table's groups: each grouping level's subjects, with their times
+ *  and codes — only the rows holding all three (a row with a blank level, or a non-numeric
+ *  time or code, is left out, as pairUp leaves such rows out of a Survival table). */
+function survivalGroupsByAssignment(
+  columns: Column[],
+  assignment: { time?: string; status?: string; groupBy?: string },
+): SurvivalGroup[] | { error: string } {
+  const { time, status, groupBy } = assignment;
+  if (time === undefined)
+    return { error: "Pick a time variable — run the analysis again and choose the variables." };
+  if (status === undefined)
+    return { error: "Pick an event-code variable — run the analysis again and choose the variables." };
+  if (groupBy === undefined)
+    return { error: "Pick a grouping variable — run the analysis again and choose the variables." };
+  const timeCol = columns.find((c) => c.name === time);
+  if (!timeCol) return { error: missingColumn(time) };
+  if (!timeCol.values.length) return { error: `“${time}” holds no numbers yet.` };
+  const statusCol = columns.find((c) => c.name === status);
+  if (!statusCol) return { error: missingColumn(status) };
+  if (!statusCol.values.length) return { error: `“${status}” holds no numbers yet.` };
+  if (timeCol === statusCol) return { error: "The time and event-code variables must be different variables." };
+  const groupCol = columns.find((c) => c.name === groupBy);
+  if (!groupCol) return { error: missingColumn(groupBy) };
+  const levels = levelsOf(groupCol);
+  if (levels.length < 2)
+    return {
+      error:
+        levels.length === 0
+          ? `“${groupBy}” holds no values — a grouping variable needs at least two levels to compare.`
+          : `“${groupBy}” holds only “${levels[0]}” — a grouping variable needs at least two levels to compare.`,
+    };
+  const at = (r: number) => groupCol.cells[r]?.trim();
+  const groups = levels
+    .map((level) => {
+      const rows = timeCol.rows.filter((r) => statusCol.byRow[r] != null && at(r) === level);
+      return { name: level, x: rows.map((r) => timeCol.byRow[r]!), y: rows.map((r) => statusCol.byRow[r]!) };
+    })
+    .filter((g) => g.y.length > 0);
+  return checkedSurvivalGroups(groups);
+}
+
+/** The checks every set of survival groups passes: codes 1/0, positive times, at least
+ *  2 groups holding subjects, at least one event anywhere. */
+function checkedSurvivalGroups(groups: SurvivalGroup[]): SurvivalGroup[] | { error: string } {
   for (const g of groups) {
     const code = g.y.find((c) => c !== 0 && c !== 1);
     if (code !== undefined)
