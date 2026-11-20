@@ -12939,6 +12939,101 @@ check("freezing a results sheet keeps its cached result and stops it caching new
   strictEqual(s.nodes[analysis.id].frozen, undefined);
 });
 
+check("freezing a data table blocks edits until unfrozen (seq 165)", () => {
+  let s = makeInitialState();
+  const tableId = s.rootOrder[0];
+  // Known data, so the blocked edit has a value to check against.
+  s = reducer(s, { type: "updateTable", id: tableId, data: table.data!, label: "Setup" });
+  const edited: TableData = { ...table.data!, rows: [["a", "999", "2.5"], [null, "2", null]] };
+  // A table freezes like a results sheet: the flag, and an undo step.
+  s = reducer(s, { type: "setTableFrozen", id: tableId, frozen: true });
+  strictEqual(s.nodes[tableId].frozen, true);
+  // Freezing twice is a no-op, not another undo step.
+  const frozenOnce = s;
+  s = reducer(s, { type: "setTableFrozen", id: tableId, frozen: true });
+  strictEqual(s, frozenOnce);
+  // While frozen, an edit is refused outright — same state back, no undo step.
+  const before = s;
+  s = reducer(s, { type: "updateTable", id: tableId, data: edited, label: "Typing" });
+  strictEqual(s, before);
+  strictEqual(s.nodes[tableId].data!.rows[0][1], "1");
+  s = reducer(s, { type: "undo" });
+  strictEqual(s.nodes[tableId].frozen, undefined);
+  // Unfrozen, the same edit lands.
+  s = reducer(s, { type: "setTableFrozen", id: tableId, frozen: true });
+  s = reducer(s, { type: "setTableFrozen", id: tableId, frozen: false });
+  strictEqual(s.nodes[tableId].frozen, undefined);
+  s = reducer(s, { type: "updateTable", id: tableId, data: edited, label: "Typing" });
+  strictEqual(s.nodes[tableId].data!.rows[0][1], "999");
+  // Duplicating a frozen family leaves the copy editable; the source stays frozen.
+  s = reducer(s, { type: "setTableFrozen", id: tableId, frozen: true });
+  s = reducer(s, { type: "duplicateFamily", id: tableId });
+  const copyId = s.rootOrder[1];
+  strictEqual(s.nodes[copyId].frozen, undefined);
+  const copyEdited: TableData = { ...table.data!, rows: [["a", "555", "2.5"], [null, "2", null]] };
+  s = reducer(s, { type: "updateTable", id: copyId, data: copyEdited, label: "Typing" });
+  strictEqual(s.nodes[copyId].data!.rows[0][1], "555");
+  strictEqual(s.nodes[tableId].frozen, true);
+  strictEqual(s.nodes[tableId].data!.rows[0][1], "999");
+  // A non-table can't freeze as a table.
+  s = reducer(s, { type: "create", node: { ...analysis, parentId: tableId } });
+  s = reducer(s, { type: "setTableFrozen", id: analysis.id, frozen: true });
+  strictEqual(s.nodes[analysis.id].frozen, undefined);
+});
+
+check("a frozen table survives a save and reload, and a frozen flag on a graph is dropped (seq 165)", () => {
+  const file = {
+    nodes: { t1: { ...table, frozen: true }, g1: { ...graph, frozen: true } },
+    rootOrder: ["t1"],
+    childOrder: { t1: ["g1"] },
+    activeNodeId: "t1",
+  };
+  const readBack = read(serializeProjectFile(file));
+  strictEqual(readBack.updated, false);
+  strictEqual(readBack.project.nodes.t1.frozen, true);
+  strictEqual(readBack.project.nodes.g1.frozen, undefined);
+  // A non-boolean frozen flag on a table is a hand edit, dropped rather than trusted.
+  const sloppy = { ...table, frozen: "yes" as unknown as boolean };
+  const readSloppy = read(
+    serializeProjectFile({ nodes: { t1: sloppy }, rootOrder: ["t1"], childOrder: { t1: [] }, activeNodeId: "t1" }),
+  );
+  strictEqual(readSloppy.project.nodes.t1.frozen, undefined);
+});
+
+check("MCP freeze-table freezes a table and edit-table/write-table refuse it until unfrozen (seq 165)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-165-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B"],
+    rows: [["r1", 1, 2]],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.deps.setTableFrozen = (id, frozen) => harness.dispatch({ type: "setTableFrozen", id, frozen });
+  const done = await harness.run("job-165-freeze", "freeze-table", { table_id: tableId, frozen: true });
+  deepStrictEqual(done.result, { project_id: "project-1", table_id: tableId, frozen: true });
+  strictEqual(harness.state().nodes[tableId]?.frozen, true);
+  await rejects(
+    harness.run("job-165-edit", "edit-table", { table_id: tableId, op: "insert-rows", at: 0 }),
+    /is frozen — unfreeze it/,
+  );
+  await rejects(
+    harness.run("job-165-write", "write-table", {
+      table_id: tableId,
+      columns: ["", "A", "B"],
+      rows: [["r1", 9, 2]],
+    }),
+    /is frozen — unfreeze it/,
+  );
+  // Freezing twice is still fine (idempotent); unfreezing restores edits.
+  await harness.run("job-165-refreeze", "freeze-table", { table_id: tableId, frozen: true });
+  await harness.run("job-165-unfreeze", "freeze-table", { table_id: tableId, frozen: false });
+  strictEqual(harness.state().nodes[tableId]?.frozen, undefined);
+  const edited = await harness.run("job-165-edit2", "edit-table", { table_id: tableId, op: "insert-rows", at: 0 });
+  strictEqual((edited.result as { rows: number }).rows, 2);
+  // An unknown id is a plain error.
+  await rejects(harness.run("job-165-gone", "freeze-table", { table_id: "nope", frozen: true }), /No table/);
+});
+
 check("a non-orphaned analysis whose table is gone is still dropped on reload", () => {
   const file = {
     nodes: { t1: table, a1: { ...analysis, parentId: "t-gone" } },
