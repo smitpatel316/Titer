@@ -354,6 +354,12 @@ export interface AreaUnderCurveParams {
 export const REMOVE_BASELINE_METHODS = ["first-value", "mean-first-n", "mean-of-controls", "constant"] as const;
 export type RemoveBaselineMethod = (typeof REMOVE_BASELINE_METHODS)[number];
 
+/** The column-math operations "remove-baseline" offers (Prism's Remove
+ *  baseline and column math): combine two columns row by row. Divide by
+ *  zero leaves that row blank rather than inventing a value. */
+export const COLUMN_MATH_OPERATIONS = ["subtract", "divide", "multiply", "add"] as const;
+export type ColumnMathOperation = (typeof COLUMN_MATH_OPERATIONS)[number];
+
 /** Params for "remove-baseline": which columns to subtract from (`ys`),
  *  how the baseline is defined, and — for XY tables — the X column whose
  *  values label the result rows. */
@@ -362,7 +368,9 @@ export interface RemoveBaselineParams {
   ys?: string[];
   /** XY tables only: the X column, for the result rows' X values. */
   x?: string;
-  baselineMethod: RemoveBaselineMethod;
+  /** Omitted in column-math mode (the operation names the columns instead),
+   *  and defaulted to "first-value" by the runner when missing. */
+  baselineMethod?: RemoveBaselineMethod;
   /** Mean of the first N values (method "mean-first-n"). */
   firstN?: number;
   /** Control columns whose values are averaged (method "mean-of-controls"). */
@@ -372,6 +380,13 @@ export interface RemoveBaselineParams {
   /** Info-constant hook for the baseline (the constant's name): resolved live
    *  in useAnalysis, so editing the constant re-runs the transform. */
   constantHook?: string;
+  /** Column math (Prism's "Remove baseline and column math"): when set,
+   *  the analysis combines two columns row by row instead of removing a
+   *  baseline — `columnMathOperation` says how, `columnMathA`/`columnMathB`
+   *  name the two columns. `baselineMethod` is ignored in this mode. */
+  columnMathOperation?: ColumnMathOperation;
+  columnMathA?: string;
+  columnMathB?: string;
 }
 
 export const PRUNE_ROWS_CONDITIONS = ["empty", "below", "above", "outside"] as const;
@@ -1527,6 +1542,28 @@ export interface BaselineRemovedColumn {
   method: string;
   rows: BaselineRemovedRow[];
 }
+
+/** One row of a column-math result ("remove-baseline"): the row title (or
+ *  row number), the X value at that row (XY tables only), the two values
+ *  combined, and the result — `null` when the operation could not produce
+ *  one (dividing by zero). Only rows holding a value in both columns are
+ *  listed. */
+export interface ColumnMathRow {
+  row: string;
+  x?: number | null;
+  a: number;
+  b: number;
+  result: number | null;
+}
+
+/** A column-math result ("remove-baseline"): the two columns combined, the
+ *  operation, and the row-matched rows. */
+export interface ColumnMathResult {
+  a: string;
+  b: string;
+  operation: ColumnMathOperation;
+  rows: ColumnMathRow[];
+}
 /** One kept or pruned row ("prune-rows"): the row title (or row number),
  *  the X value at that row (XY tables only), and the value held in each
  *  chosen column (`null`: blank). */
@@ -1967,6 +2004,9 @@ export interface AnalysisResult {
   /** Optional per-column baseline-subtracted values ("remove-baseline"):
    *  one table per column, each with the baseline used recorded. */
   baselineRemoved?: BaselineRemovedColumn[];
+  /** Optional column-math result ("remove-baseline", column-math mode):
+   *  the two columns combined row by row, with the operation recorded. */
+  columnMath?: ColumnMathResult;
   /** Optional kept and pruned rows ("prune-rows"): the kept rows, then
    *  the pruned rows listed so what was dropped stays visible. */
   prunedRows?: PrunedRowsResult;

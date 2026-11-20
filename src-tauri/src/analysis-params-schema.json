@@ -2052,7 +2052,8 @@
           "constant"
         ],
         "default": "first-value",
-        "required": false
+        "required": false,
+        "description": "Omitted in column-math mode (the operation names the columns instead), and defaulted to \"first-value\" by the runner when missing."
       },
       {
         "name": "firstN",
@@ -2077,6 +2078,28 @@
         "type": "string",
         "required": false,
         "description": "Info-constant hook for the baseline (the constant's name): resolved live in useAnalysis, so editing the constant re-runs the transform."
+      },
+      {
+        "name": "columnMathOperation",
+        "type": "string",
+        "enum": [
+          "subtract",
+          "divide",
+          "multiply",
+          "add"
+        ],
+        "required": false,
+        "description": "Column math (Prism's \"Remove baseline and column math\"): when set, the analysis combines two columns row by row instead of removing a baseline — `columnMathOperation` says how, `columnMathA`/`columnMathB` name the two columns. `baselineMethod` is ignored in this mode."
+      },
+      {
+        "name": "columnMathA",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "columnMathB",
+        "type": "string",
+        "required": false
       },
       {
         "name": "sets",

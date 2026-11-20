@@ -236,7 +236,7 @@ import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { decodePng, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
 import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
-import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnovaParams, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, SimulationSpec } from "../src/stats/types";
+import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnovaParams, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, RemoveBaselineParams, SimulationSpec } from "../src/stats/types";
 import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation/simulate";
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
 import { evaluate as evaluateCurve } from "../src/views/graphs/fitted-curve";
@@ -5986,11 +5986,11 @@ check("remove-baseline wizard asks for the baseline and finishes with its params
   // The follow-up question depends on the method answered.
   deepStrictEqual(
     wizard.questions({ baselineMethod: "mean-first-n", ys: ["Y1"] }, table, "xy").filter(Boolean).map((q) => (q as Question).id),
-    ["ys", "baselineMethod", "firstN"],
+    ["mode", "ys", "baselineMethod", "firstN"],
   );
   deepStrictEqual(
     wizard.questions({ baselineMethod: "mean-of-controls", ys: ["Y1"] }, table, "xy").filter(Boolean).map((q) => (q as Question).id),
-    ["ys", "baselineMethod", "controls"],
+    ["mode", "ys", "baselineMethod", "controls"],
   );
   deepStrictEqual(wizard.finish({ ys: ["Y1", "Y2"], baselineMethod: "first-value" }, table, "xy"), {
     type: "remove-baseline",
@@ -6008,6 +6008,202 @@ check("remove-baseline wizard asks for the baseline and finishes with its params
     type: "remove-baseline",
     params: { ys: ["Y1"], baselineMethod: "constant", constant: 3 },
   });
+});
+
+check("remove-baseline combines two columns row by row (seq 206)", async () => {
+  const table: TableData = {
+    columns: ["Title", "Time", "Y1", "Y2"],
+    rows: [
+      ["", "0", "10", "5"],
+      ["", "1", "12", "7"],
+      ["", "2", "14", "0"],
+      ["", "3", "16", "8"],
+    ],
+  };
+  // Subtract: Y1 − Y2 = 5, 5, 14, 8.
+  const sub = await runAnalysis("remove-baseline", table, {
+    columnMathOperation: "subtract",
+    columnMathA: "Y1",
+    columnMathB: "Y2",
+    x: "Time",
+  });
+  if ("error" in sub) throw new Error(sub.error);
+  strictEqual(sub.testType, "remove-baseline");
+  deepStrictEqual(sub.columnMath, {
+    a: "Y1",
+    b: "Y2",
+    operation: "subtract",
+    rows: [
+      { row: "Row 1", x: 0, a: 10, b: 5, result: 5 },
+      { row: "Row 2", x: 1, a: 12, b: 7, result: 5 },
+      { row: "Row 3", x: 2, a: 14, b: 0, result: 14 },
+      { row: "Row 4", x: 3, a: 16, b: 8, result: 8 },
+    ],
+  });
+  deepStrictEqual(
+    sub.stats.map((s) => [s.label, s.value]),
+    [["Y1 − Y2 — N", 4]],
+  );
+  // The descriptives are of the combined values, not the originals.
+  deepStrictEqual(
+    sub.groups.map((g) => [g.name, g.mean, g.n]),
+    [["Y1 − Y2", 8, 4]],
+  );
+  ok(sub.notes.includes("Subtracted"));
+  ok(!sub.notes.includes("blank"));
+  // Divide: 10/5, 12/7, 14/0 (blank), 16/8 — the zero row stays listed, blank.
+  const div = await runAnalysis("remove-baseline", table, {
+    columnMathOperation: "divide",
+    columnMathA: "Y1",
+    columnMathB: "Y2",
+    x: "Time",
+  });
+  if ("error" in div) throw new Error(div.error);
+  deepStrictEqual(
+    div.columnMath?.rows.map((r) => r.result),
+    [2, 12 / 7, null, 2],
+  );
+  deepStrictEqual(
+    div.stats.map((s) => [s.label, s.value]),
+    [
+      ["Y1 / Y2 — N", 3],
+      ["Y1 / Y2 — blank (divide by zero)", 1],
+    ],
+  );
+  const divMean = div.groups.find((g) => g.name === "Y1 / Y2")?.mean;
+  ok(divMean != null && Math.abs(divMean - (2 + 12 / 7 + 2) / 3) < 1e-12);
+  ok(div.notes.includes("blank"));
+  // Multiply and add use the same rows.
+  const mul = await runAnalysis("remove-baseline", table, {
+    columnMathOperation: "multiply",
+    columnMathA: "Y1",
+    columnMathB: "Y2",
+    x: "Time",
+  });
+  if ("error" in mul) throw new Error(mul.error);
+  deepStrictEqual(
+    mul.columnMath?.rows.map((r) => r.result),
+    [50, 84, 0, 128],
+  );
+  const add = await runAnalysis("remove-baseline", table, {
+    columnMathOperation: "add",
+    columnMathA: "Y1",
+    columnMathB: "Y2",
+    x: "Time",
+  });
+  if ("error" in add) throw new Error(add.error);
+  deepStrictEqual(
+    add.columnMath?.rows.map((r) => r.result),
+    [15, 19, 14, 24],
+  );
+  // Rows holding a value in only one column are skipped, not listed.
+  const gappy: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["", "1", "10"],
+      ["", "2", ""],
+      ["", "3", "30"],
+    ],
+  };
+  const gap = await runAnalysis("remove-baseline", gappy, {
+    columnMathOperation: "subtract",
+    columnMathA: "A",
+    columnMathB: "B",
+  });
+  if ("error" in gap) throw new Error(gap.error);
+  deepStrictEqual(
+    gap.columnMath?.rows.map((r) => [r.row, r.result]),
+    [
+      ["Row 1", -9],
+      ["Row 3", -27],
+    ],
+  );
+  ok(gap.notes.includes("1 row was skipped"));
+  // Errors name the problem instead of combining something wrong.
+  deepStrictEqual(
+    await runAnalysis("remove-baseline", table, {
+      columnMathOperation: "subtract",
+      columnMathA: "Y1",
+      x: "Time",
+    }),
+    { error: "Choose two columns to combine." },
+  );
+  deepStrictEqual(
+    await runAnalysis("remove-baseline", table, {
+      columnMathOperation: "sideways",
+      columnMathA: "Y1",
+      columnMathB: "Y2",
+      x: "Time",
+    } as unknown as RemoveBaselineParams),
+    { error: "Unknown column math operation: “sideways”." },
+  );
+  deepStrictEqual(
+    await runAnalysis("remove-baseline", table, {
+      columnMathOperation: "add",
+      columnMathA: "Nope",
+      columnMathB: "Y2",
+      x: "Time",
+    }),
+    { error: "The column “Nope” is no longer in the table. Create this analysis again to choose another." },
+  );
+  deepStrictEqual(
+    await runAnalysis(
+      "remove-baseline",
+      {
+        columns: ["Title", "A", "B"],
+        rows: [
+          ["", "1", ""],
+          ["", "", "2"],
+        ],
+      },
+      { columnMathOperation: "add", columnMathA: "A", columnMathB: "B" },
+    ),
+    { error: "“A” and “B” share no row holding a value in both." },
+  );
+});
+
+check("remove-baseline wizard asks for the column math first, then its two columns (seq 206)", () => {
+  const data: TableData = {
+    columns: ["Title", "Time", "Y1", "Y2"],
+    rows: [
+      ["", "0", "10", "5"],
+      ["", "1", "12", "7"],
+    ],
+  };
+  const table = readTable(data);
+  const wizard = WIZARDS["remove-baseline"]!;
+  deepStrictEqual(
+    wizard.questions({ mode: "column-math" }, table, "xy").filter(Boolean).map((q) => (q as Question).id),
+    ["mode", "columnMathA", "columnMathB", "columnMathOperation"],
+  );
+  deepStrictEqual(
+    wizard.finish(
+      { mode: "column-math", columnMathOperation: "divide", columnMathA: "Y1", columnMathB: "Y2" },
+      table,
+      "xy",
+    ),
+    {
+      type: "remove-baseline",
+      params: { columnMathOperation: "divide", columnMathA: "Y1", columnMathB: "Y2", x: "Time" },
+    },
+  );
+  // A Column table has no X column to carry into the result rows.
+  deepStrictEqual(
+    wizard.finish(
+      { mode: "column-math", columnMathOperation: "subtract", columnMathA: "Y1", columnMathB: "Y2" },
+      table,
+      "column",
+    ),
+    {
+      type: "remove-baseline",
+      params: { columnMathOperation: "subtract", columnMathA: "Y1", columnMathB: "Y2" },
+    },
+  );
+  // No mode answered yet means remove-baseline, as before.
+  deepStrictEqual(
+    wizard.questions({}, table, "xy").filter(Boolean).map((q) => (q as Question).id),
+    ["mode", "ys", "baselineMethod"],
+  );
 });
 
 // R3-10: standard-curve interpolation on enzyme models. Their formulas

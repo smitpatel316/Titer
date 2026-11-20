@@ -2268,8 +2268,29 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
     questions: (a, table, tableType) => {
       const targets = tableType === "xy" ? yNames(table) : dataNames(table);
       if (!targets.length) return [];
+      const mode = (a.mode as string | undefined) ?? "remove-baseline";
+      const modeQuestion = choice("mode", "What should this analysis do?", [
+        ["remove-baseline", "Remove a baseline — subtract a baseline from each value"],
+        ["column-math", "Combine two columns — add, subtract, multiply or divide two data sets row by row"],
+      ]);
+      // Column math (seq 206, Prism's "Remove baseline and column math"):
+      // two columns combined row by row, instead of a baseline removed.
+      if (mode === "column-math") {
+        return [
+          modeQuestion,
+          choice("columnMathA", "Which is the first column?", names(targets)),
+          choice("columnMathB", "Which is the second column?", names(targets)),
+          choice("columnMathOperation", "How should the two columns be combined?", [
+            ["subtract", "Subtract — first minus second"],
+            ["divide", "Divide — first divided by second"],
+            ["multiply", "Multiply — first times second"],
+            ["add", "Add — first plus second"],
+          ]),
+        ];
+      }
       const method = a.baselineMethod as string | undefined;
       return [
+        modeQuestion,
         {
           id: "ys",
           ask: "Which data sets should have the baseline removed?",
@@ -2310,17 +2331,30 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         },
       ];
     },
-    finish: (a, table, tableType) => ({
-      type: "remove-baseline",
-      params: {
-        ys: a.ys as string[],
-        ...(tableType === "xy" ? { x: table.columns[0]?.name } : {}),
-        baselineMethod: a.baselineMethod as RemoveBaselineParams["baselineMethod"],
-        ...(a.baselineMethod === "mean-first-n" ? { firstN: a.firstN as number } : {}),
-        ...(a.baselineMethod === "mean-of-controls" ? { controls: a.controls as string[] } : {}),
-        ...(a.baselineMethod === "constant" ? constantParam(a.constant) : {}),
-      },
-    }),
+    finish: (a, table, tableType) => {
+      if (a.mode === "column-math") {
+        return {
+          type: "remove-baseline",
+          params: {
+            columnMathOperation: a.columnMathOperation as RemoveBaselineParams["columnMathOperation"],
+            columnMathA: a.columnMathA as string,
+            columnMathB: a.columnMathB as string,
+            ...(tableType === "xy" ? { x: table.columns[0]?.name } : {}),
+          },
+        };
+      }
+      return {
+        type: "remove-baseline",
+        params: {
+          ys: a.ys as string[],
+          ...(tableType === "xy" ? { x: table.columns[0]?.name } : {}),
+          baselineMethod: a.baselineMethod as RemoveBaselineParams["baselineMethod"],
+          ...(a.baselineMethod === "mean-first-n" ? { firstN: a.firstN as number } : {}),
+          ...(a.baselineMethod === "mean-of-controls" ? { controls: a.controls as string[] } : {}),
+          ...(a.baselineMethod === "constant" ? constantParam(a.constant) : {}),
+        },
+      };
+    },
   },
 
   "prune-rows": {

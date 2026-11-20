@@ -67,6 +67,7 @@ import {
   FRACTION_OF_TOTAL_TOTALS,
   MONTE_CARLO_SIMULATION_DISTRIBUTIONS,
   MONTE_CARLO_STATISTICS,
+  COLUMN_MATH_OPERATIONS,
   MONTE_CARLO_TARGETS,
   NONLINEAR_MODELS,
   NORMALIZE_HUNDRED_DEFS,
@@ -306,7 +307,9 @@ const PARAMS = {
   customParameters: "numbers-by-name",
   hypotheticalValue: "number", baseline: "number", q: ROUT_Q, lambda: "number", ecx: EC_ANYTHING,
   // Remove baseline (v2): how the baseline is defined, and the values it needs.
+  // Seq 206: column math — the operation and the two columns it combines.
   baselineMethod: REMOVE_BASELINE_METHODS, firstN: "number", controls: "names", constant: "number",
+  columnMathOperation: COLUMN_MATH_OPERATIONS, columnMathA: "name", columnMathB: "name",
   // Normalize (v2): how each value is rescaled, and the values it needs.
   normalizeMethod: NORMALIZE_METHODS, asPercent: "yes/no", zeroDef: NORMALIZE_ZERO_DEFS, hundredDef: NORMALIZE_HUNDRED_DEFS,
   zeroConstant: "number", hundredConstant: "number",
@@ -868,7 +871,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "fraction-of-total": ["ys", "x", "totalBy", "format", "sets"],
   "transform-data": ["function", "constant", "sets"],
   "transform-concentrations": ["column", "fromUnit", "toUnit", "sets"],
-  "remove-baseline": ["ys", "x", "baselineMethod", "firstN", "controls", "constant", "constantHook", "sets"],
+  "remove-baseline": ["ys", "x", "baselineMethod", "firstN", "controls", "constant", "constantHook", "columnMathOperation", "columnMathA", "columnMathB", "sets"],
   normalize: [
     "ys", "x", "normalizeMethod", "asPercent", "controls", "constant", "constantHook", "zeroDef", "zeroConstant",
     "zeroConstantHook", "hundredDef", "hundredConstant", "hundredConstantHook", "sets",
