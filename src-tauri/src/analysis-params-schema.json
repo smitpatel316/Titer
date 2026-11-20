@@ -825,6 +825,7 @@
       {
         "name": "clusters",
         "type": "number",
+        "default": 2,
         "required": false
       },
       {
@@ -836,6 +837,7 @@
           "single",
           "ward.D2"
         ],
+        "default": "complete",
         "required": false
       },
       {
@@ -845,11 +847,13 @@
           "euclidean",
           "manhattan"
         ],
+        "default": "euclidean",
         "required": false
       },
       {
         "name": "standardise",
         "type": "boolean",
+        "default": true,
         "required": false
       },
       {
