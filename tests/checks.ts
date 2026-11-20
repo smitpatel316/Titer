@@ -162,7 +162,8 @@ import { addRegression, fitLinear } from "../src/views/graphs/regression-overlay
 import { fitDeming } from "../src/views/graphs/deming-overlay";
 import { addPcaBiplot } from "../src/views/graphs/pca-biplot";
 import { addObservedFitted } from "../src/views/graphs/observed-fitted";
-import { batchMatched, examplesFor, matched, type Matched } from "../src/views/graphs/match-graph";
+import { asMatched, batchMatched, examplesFor, matched, type Matched } from "../src/views/graphs/match-graph";
+import { previewFigure } from "../src/views/graphs/match-preview";
 import type { OutlineNode } from "../src/store/use-project-store";
 import { addSignificance, deriveComparisons } from "../src/views/graphs/significance-overlay";
 import { createElement } from "react";
@@ -765,7 +766,7 @@ const rerunHarness = async () => {
   const seen: unknown[] = [];
   harness.deps.run = async (_type, _data, params) => {
     seen.push(params);
-    return { stats: [], groups: [], notes: "" };
+    return { testType: "anova", stats: [], groups: [], notes: "" };
   };
   harness.deps.publishResult = () => {};
   harness.deps.setAnalysisParams = (id, params) =>
@@ -7196,6 +7197,91 @@ check("Match Another Graph… takes only what is ticked, series in order", () =>
     g3: { ...child("g3"), graphType: "sankey" as GraphType }, // from a newer Helix
   } as Record<string, ProjectNode>;
   deepStrictEqual(examplesFor("g1", tables, nodes), [{ table: "T", graphs: [child("g2")] }]);
+});
+
+// Mansi P0 #7 (1.8 M6): Match shows a preview of what the new graph will look
+// like — the target graph drawn with the matched options, live as the example
+// and the ticked properties change.
+check("Match preview draws the target graph with the matched options", () => {
+  const data: TableData = {
+    columns: ["Title", "WT:Y1", "WT:Y2", "WT:Y3", "SKG:Y1", "SKG:Y2", "SKG:Y3"],
+    rows: [
+      ["Day 1", "10", "12", "11", "20", "22", "21"],
+      ["Day 2", "13", "14", "12", "24", "23", "25"],
+    ],
+    groups: 2,
+    replicates: 3,
+  };
+  const table: ProjectNode = { id: "t", type: "table", name: "T", parentId: null, tableType: "grouped", data };
+  const target: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Mine",
+    parentId: "t",
+    graphType: "grouped-scatter",
+    graphOptions: newGraphOptions("grouped-scatter"),
+  };
+  const example: ProjectNode = {
+    id: "g2",
+    type: "graph",
+    name: "Theirs",
+    parentId: "t",
+    graphType: "grouped-scatter",
+    graphOptions: { ...newGraphOptions("grouped-scatter"), pointSize: 12, title: "Example" },
+  };
+  const nodes: Record<string, ProjectNode> = { t: table, g1: target, g2: example };
+  const targetMatched = asMatched(target, nodes);
+  const exampleMatched = asMatched(example, nodes);
+  type Trace = { mode?: string; name?: string; marker?: { size?: number[] } };
+  const pointsTrace = (fig: { data: unknown[] }) =>
+    (fig.data as Trace[]).find((tr) => tr.mode === "markers" && tr.name === "WT");
+  const titleOf = (fig: { layout: Record<string, unknown> }) =>
+    (fig.layout.title as { text?: string } | undefined)?.text;
+
+  // Nothing ticked: the preview is the graph as it is — no title, default point size.
+  const plain = previewFigure(target, nodes, matched(targetMatched, exampleMatched, []));
+  ok(plain, "the target graph has data to preview");
+  strictEqual(titleOf(plain), undefined);
+  ok(pointsTrace(plain)?.marker?.size?.every((s) => s === newGraphOptions("grouped-scatter").pointSize));
+
+  // Points + titles ticked: the preview takes the example's point size and title.
+  const previewOptions = matched(targetMatched, exampleMatched, ["points", "titles"]);
+  const previewed = previewFigure(target, nodes, previewOptions);
+  ok(previewed, "the matched graph has data to preview");
+  strictEqual(titleOf(previewed), "Example");
+  ok(pointsTrace(previewed)?.marker?.size?.every((s) => s === 12));
+  // The preview is exactly the figure the matched options build — same traces, same layout.
+  const dataset = readTable(data);
+  const expected = GRAPHS["grouped-scatter"].build(
+    plotColumns(dataset, "grouped-scatter", previewOptions, "grouped"),
+    previewOptions,
+    paintOf(previewOptions, 2),
+    dataset.titles,
+  );
+  deepStrictEqual(previewed.data, expected.data);
+  deepStrictEqual(previewed.layout, expected.layout);
+
+  // Nothing to draw: an empty table previews nothing.
+  const emptyTable: ProjectNode = {
+    id: "te",
+    type: "table",
+    name: "Empty",
+    parentId: null,
+    tableType: "grouped",
+    data: { columns: ["Title", "WT:Y1", "SKG:Y1"], rows: [["r1", "", ""]] },
+  };
+  const emptyGraph: ProjectNode = {
+    id: "ge",
+    type: "graph",
+    name: "Empty graph",
+    parentId: "te",
+    graphType: "grouped-scatter",
+    graphOptions: newGraphOptions("grouped-scatter"),
+  };
+  strictEqual(
+    previewFigure(emptyGraph, { te: emptyTable, ge: emptyGraph }, newGraphOptions("grouped-scatter")),
+    null,
+  );
 });
 
 check("Batch Magic applies the ticked properties to many graphs at once, in one undo step", () => {
