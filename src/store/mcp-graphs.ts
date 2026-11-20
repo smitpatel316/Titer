@@ -79,6 +79,10 @@ export interface GraphJobDeps {
   getState: () => GraphJobState;
   createGraph?: (parentId: string, graphType: GraphType, graphOptions?: GraphOptions) => string;
   updateGraph?: (id: string, options: GraphOptions) => void;
+  /** Change a graph's type (seq 244): the new type's defaults, keeping
+   *  the title and the size — or `options` wholesale, as the MCP path
+   *  merges the caller's options over the current ones already. */
+  changeGraphType?: (id: string, graphType: GraphType, options?: GraphOptions) => void;
   cloneGraph?: (graphId: string, options: CloneOptions) => string;
   createFigure?: (graphIds?: string[]) => string;
   updateFigure?: (id: string, patch: FigurePatch) => void;
@@ -720,16 +724,50 @@ export function executeBuildGraph(job: McpJob, deps: GraphJobDeps): GraphJobOutc
 /** `titer_update_graph`: a partial `GraphOptions` merged over the
  *  graph's current options (the reducer replaces them wholesale, so the
  *  merge happens here). Same validation as build. */
+/** `titer_update_graph`: change a graph's options, and (seq 244) its
+ *  type — `graph_type` must be offered for the graph's table, or the
+ *  error names the valid types. With a type and no options the new
+ *  type's defaults apply (title and size kept, as in the UI); with both,
+ *  the caller's options merge over the current ones and apply to the new
+ *  type. At least one of the two is required. */
 export function executeUpdateGraph(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
   const args = argsOf(job);
   const graphId = reqStr(job, args, "graph_id");
-  if (args.options === undefined) throw jobErr(job, `needs “options” — the graph options to change.`);
+  const graphType = optStr(job, args, "graph_type");
+  if (graphType === undefined && args.options === undefined)
+    throw jobErr(job, `needs “options” to change, or “graph_type” to change the graph's type.`);
   const state = deps.getState();
   const node = state.nodes[graphId];
   if (!node) throw jobErr(job, `no graph with id “${graphId}” — run titer_list_projects to see the graphs.`);
   if (node.type !== "graph") throw jobErr(job, `“${node.name}” is a ${node.type}, not a graph.`);
   const tableId = node.parentId && state.nodes[node.parentId]?.type === "table" ? node.parentId : undefined;
   const { options, warnings } = validateGraphOptions(job, args.options, state, tableId);
+  // A type change goes through `changeGraphType`, not `updateGraph`: the
+  // store takes the new type's defaults (or the caller's merged options)
+  // and renames the graph for its new type.
+  if (graphType !== undefined && graphType !== node.graphType) {
+    const table = tableId ? state.nodes[tableId] : undefined;
+    const tableType = table?.type === "table" ? table.tableType : undefined;
+    if (!tableType) throw jobErr(job, `graph “${node.name}” has no data table, so its type can't change.`);
+    const offered = GRAPH_OPTIONS_BY_TABLE[tableType];
+    if (!offered.some((o) => o.value === graphType))
+      throw jobErr(
+        job,
+        `“${graphType}” is not a graph type for a ${TABLE_TYPE_LABELS[tableType]} table — the types are: ${offered
+          .map((o) => o.value)
+          .join(", ")}.`,
+      );
+    const change = need(job, deps.changeGraphType, "change a graph's type");
+    if (args.options === undefined) {
+      change(graphId, graphType as GraphType);
+    } else {
+      const merged: GraphOptions = { ...DEFAULT_GRAPH_OPTIONS, ...(node.graphOptions ?? {}), ...options };
+      change(graphId, graphType as GraphType, merged);
+    }
+    const result: Record<string, unknown> = { project_id: job.project_id, graph_id: graphId, graph_type: graphType };
+    if (warnings.length) result.warnings = warnings;
+    return { result };
+  }
   const merged: GraphOptions = { ...DEFAULT_GRAPH_OPTIONS, ...(node.graphOptions ?? {}), ...options };
   need(job, deps.updateGraph, "update a graph")(graphId, merged);
   const result: Record<string, unknown> = { project_id: job.project_id, graph_id: graphId };

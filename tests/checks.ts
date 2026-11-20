@@ -742,6 +742,72 @@ check("seq 244: changing a graph's type keeps its titles, resets its options and
   ok(/Change Graph Type/.test(menu), "Graph menu lacks Change Graph Type");
 });
 
+// seq 242 (MCP): titer_repoint_analysis moves the orphan through the
+// dispatcher — and refuses a live analysis and a table that doesn't
+// offer the test.
+check("seq 242 (MCP): repoint-analysis re-parents the orphan; a live analysis or a wrong table is refused", async () => {
+  const harness = mcpLaggingHarness(true);
+  const t1 = harness.state().rootOrder[0];
+  harness.dispatch({
+    type: "create",
+    node: { id: "a1", type: "analysis", name: "Stats", parentId: t1, analysisType: "descriptive-statistics", cachedResult: { kind: "descriptive-statistics" } as unknown as AnalysisResult },
+  });
+  harness.dispatch({ type: "remove", id: t1 });
+  harness.sync();
+  ok(harness.state().nodes.a1.orphaned, "deleting the table should orphan its analysis");
+  harness.dispatch({
+    type: "create",
+    node: { id: "t2", type: "table", name: "Groups", parentId: null, tableType: "column", data: { columns: ["Title", "A"], rows: [[null, "1"]] } },
+  });
+  harness.dispatch({
+    type: "create",
+    node: { id: "t3", type: "table", name: "Doses", parentId: null, tableType: "xy", data: { columns: ["Title", "X", "Y1"], rows: [[null, "1", "2"]] } },
+  });
+  harness.sync();
+  // The XY table doesn't offer descriptive-statistics — refused, naming
+  // the table that does.
+  await rejects(harness.run("job-242-xy", "repoint-analysis", { analysis_id: "a1", table_id: "t3" }), /doesn't offer/);
+  const done = await harness.run("job-242-ok", "repoint-analysis", { analysis_id: "a1", table_id: "t2" });
+  deepStrictEqual(done.result, { project_id: "project-1", analysis_id: "a1", table_id: "t2", table_name: "Groups" });
+  strictEqual(harness.state().nodes.a1.parentId, "t2");
+  strictEqual(harness.state().nodes.a1.orphaned, false);
+  // Now live: a second re-point is refused.
+  await rejects(harness.run("job-242-live", "repoint-analysis", { analysis_id: "a1", table_id: "t2" }), /not orphaned/);
+});
+
+// seq 244 (MCP): titer_update_graph with graph_type changes the type
+// through the dispatcher — the new type's defaults, title kept — and a
+// type the table doesn't offer is refused.
+check("seq 244 (MCP): update-graph with graph_type changes the type; an unoffered type is refused", async () => {
+  const harness = mcpLaggingHarness(true);
+  harness.dispatch({
+    type: "create",
+    node: { id: "t2", type: "table", name: "Doses", parentId: null, tableType: "xy", data: { columns: ["Title", "X", "Y1"], rows: [[null, "1", "2"]] } },
+  });
+  harness.dispatch({
+    type: "create",
+    node: { id: "g1", type: "graph", name: "Scatter", parentId: "t2", graphType: "xy-scatter", graphOptions: { ...newGraphOptions("xy-scatter"), title: "My Title", yMax: 10 } },
+  });
+  harness.sync();
+  await rejects(
+    harness.run("job-244-bad", "update-graph", { graph_id: "g1", graph_type: "individual" }),
+    /not a graph type for a XY table/,
+  );
+  const done = await harness.run("job-244-ok", "update-graph", { graph_id: "g1", graph_type: "xy-bar" });
+  strictEqual((done.result as { graph_type: string }).graph_type, "xy-bar");
+  const g1 = harness.state().nodes.g1;
+  strictEqual(g1.graphType, "xy-bar");
+  strictEqual(g1.name, GRAPHS["xy-bar"].label);
+  strictEqual(g1.graphOptions?.title, "My Title");
+  strictEqual(g1.graphOptions?.yMax, undefined);
+  // Options alone still take the old path — no type change.
+  await harness.run("job-244-opt", "update-graph", { graph_id: "g1", options: { yMax: 20 } });
+  strictEqual(harness.state().nodes.g1.graphType, "xy-bar");
+  strictEqual(harness.state().nodes.g1.graphOptions?.yMax, 20);
+  // Neither options nor a type: refused.
+  await rejects(harness.run("job-244-neither", "update-graph", { graph_id: "g1" }), /needs “options”/);
+});
+
 // ── v1.6 MCP race fix ──────────────────────────────────────────────────────
 // Failure B: the dispatcher's create-table read the new id back from
 // `getState()` after two blind zero-timers; under load React defers the
@@ -802,7 +868,10 @@ const mcpLaggingHarness = (withRevisionWait: boolean) => {
     undo: () => dispatch({ type: "undo" }),
     redo: () => dispatch({ type: "redo" }),
     createGraph: neverUnused,
-    updateGraph: neverUnused,
+    updateGraph: (id, options) => dispatch({ type: "updateGraph", id, options, at: Date.now() }),
+    repointAnalysis: (id, tableId) => dispatch({ type: "repointAnalysis", id, tableId }),
+    changeGraphType: (id, graphType, options) =>
+      dispatch({ type: "changeGraphType", id, graphType, ...(options ? { options } : {}) }),
     cloneGraph: neverUnused,
     createFigure: neverUnused,
     updateFigure: neverUnused,

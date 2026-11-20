@@ -16,6 +16,7 @@ import { useAnalysis, useEngineBootStatus, useRQueue } from "./use-analysis";
 import { publishAnalysisResult } from "../../store/mcp-publish";
 import { rQueueStatusText } from "../../stats/r-queue";
 import { engineStatusText } from "../../stats/engine-status";
+import { repointCandidates } from "../../lib/repoint-analysis";
 
 /** "1:23" for the elapsed running time. */
 function formatElapsed(ms: number): string {
@@ -49,7 +50,10 @@ function Running() {
 
 export function AnalysisView({ node }: { node: ProjectNode }) {
   const { nodes, createTableWithData } = useProjectStore();
-  const { cacheAnalysisResult, setAnalysisFrozen } = useProjectActions();
+  const { cacheAnalysisResult, setAnalysisFrozen, repointAnalysis } = useProjectActions();
+  // The tables this orphaned analysis may move to (seq 242): only the
+  // ones offering its test, so the re-run it is waiting for can run there.
+  const candidates = node.orphaned ? repointCandidates(node, nodes) : [];
   const data = node.parentId ? nodes[node.parentId]?.data : undefined;
   // A frozen or orphaned sheet never re-runs: it shows its saved result, so
   // the live run gets no data to run on (a frozen sheet stops auto-updating
@@ -126,10 +130,31 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
           </p>
         )}
         {node.orphaned && (
-          <p className="border-b border-separator bg-control px-8 py-2 text-regular text-secondary">
-            Orphaned — the source table “{node.sourceTableName ?? "Unknown"}” was deleted. These results are kept
-            as they were; the analysis parameters cannot be changed.
-          </p>
+          <div className="border-b border-separator bg-control px-8 py-2 text-regular text-secondary">
+            <p>
+              Orphaned — the source table “{node.sourceTableName ?? "Unknown"}” was deleted. These results are kept
+              as they were; the analysis parameters cannot be changed.
+            </p>
+            {candidates.length > 0 ? (
+              <p className="mt-1">
+                Re-point to:{" "}
+                {candidates.map((t, i) => (
+                  <React.Fragment key={t.id}>
+                    {i > 0 ? " · " : ""}
+                    <button
+                      type="button"
+                      className="underline underline-offset-2"
+                      onClick={() => repointAnalysis(node.id, t.id)}
+                    >
+                      {t.name}
+                    </button>
+                  </React.Fragment>
+                ))}
+              </p>
+            ) : (
+              <p className="mt-1">No table in this project offers this test, so it can’t be re-pointed.</p>
+            )}
+          </div>
         )}
         {bootFailure && (
           <p className="border-b border-separator bg-control px-8 py-2 text-regular text-secondary">{bootFailure}</p>

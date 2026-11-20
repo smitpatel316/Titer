@@ -41,6 +41,7 @@ type Selector =
   | { kind: "wand"; tableId: string }
   | { kind: "clone-graph"; graphId: string }
   | { kind: "simulate-data"; tableId: string }
+  | { kind: "go-to-sheet" }
   | { kind: "script" }
   | { kind: "converter" }
   | { kind: "save-prompt" }
