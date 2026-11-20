@@ -46,7 +46,8 @@ type Selector =
   | { kind: "conflict" }
   | { kind: "remote-picker" }
   | { kind: "cloud-settings" }
-  | { kind: "ai-connections" };
+  | { kind: "ai-connections" }
+  | { kind: "export-all-graphs" };
 
 /** An analysis made for a graph's stars: of the data sets it shows (its wizard's data set
  *  questions answered with them), then chosen for it, the graph staying in front. */

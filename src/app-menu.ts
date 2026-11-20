@@ -215,6 +215,12 @@ export function useAppMenu(doc: DocumentActions) {
             action: () => latest.current.store.openSelector({ kind: "save-template", templateKind: "method" }),
           },
           sep,
+          {
+            text: "Export All Graphs…",
+            enabled: Object.values(nodes).some((n) => n.type === "graph" || n.type === "figure"),
+            action: () => latest.current.store.openSelector({ kind: "export-all-graphs" }),
+          },
+          sep,
           { item: "CloseWindow" },
         ],
       },

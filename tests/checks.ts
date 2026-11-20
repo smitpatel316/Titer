@@ -218,7 +218,7 @@ import {
 } from "../src/lib/figure";
 import { buildPanelFigure } from "../src/views/figures/panel-figure";
 import { createEvalDedupe, ensureSaveExtension, type McpJob } from "../src/native";
-import { planExportAll } from "../src/lib/export-all";
+import { defaultExportAllFolder, planExportAll } from "../src/lib/export-all";
 import { engineStatusText, getEngineStatus, onEngineStatus, setEngineStatus } from "../src/stats/engine-status";
 import { buildOfficeDocument, officeExtension } from "../src/lib/office-export";
 import {
@@ -231,7 +231,7 @@ import {
   parseXlsx,
   rowsToTable,
 } from "../src/lib/tabular-import";
-import { executeExportAllGraphs, tableToXlsx, type ExportJobDeps } from "../src/store/mcp-export";
+import { executeExportAllGraphs, runExportAllBatch, tableToXlsx, type ExportJobDeps } from "../src/store/mcp-export";
 import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { decodePng, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
@@ -8762,6 +8762,25 @@ check("export-all through the dispatcher reports an empty project instead of an 
   await rejects(
     harness.run("job-179-empty", "export-all-graphs", { folder: "/tmp/exports", format: "png" }),
     /nothing to export/i,
+  );
+});
+
+check("export-all default folder sits beside the project file (seq 179)", () => {
+  strictEqual(defaultExportAllFolder("/Users/smit/Work/Tumor.hlx"), "/Users/smit/Work/Tumor Exports");
+  strictEqual(defaultExportAllFolder("Tumor.hlx"), "Tumor Exports");
+  strictEqual(defaultExportAllFolder("/Users/smit/Work/A/B: C.hlx"), "/Users/smit/Work/A/B- C Exports");
+  strictEqual(defaultExportAllFolder(null), null);
+});
+
+check("export-all refuses an empty folder instead of writing to the root (seq 179)", async () => {
+  const payload = figurePayload();
+  await rejects(
+    runExportAllBatch(
+      { nodes: payload.nodes, rootOrder: payload.rootOrder, childOrder: payload.childOrder, activeNodeId: payload.activeNodeId },
+      { folder: "   ", format: "png", dpi: "300" },
+      {},
+    ),
+    /needs a folder/i,
   );
 });
 

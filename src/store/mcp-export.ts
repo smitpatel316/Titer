@@ -497,7 +497,12 @@ export async function runExportAllBatch(
   options: RunExportAllOptions,
   deps: Pick<ExportJobDeps, "io" | "render">,
 ): Promise<ExportAllBatchOutcome> {
-  const folder = options.folder.replace(/\/+$/, "") || "/";
+  // An empty folder would land files in "/" after the trailing-slash
+  // trim below — refuse it here, so no caller (MCP, GUI, future) can
+  // write a batch to the filesystem root by mistake. The MCP path
+  // rejects it earlier (`reqStr`); the GUI validates before calling.
+  const folder = options.folder.trim().replace(/\/+$/, "");
+  if (!folder) throw new Error("Export-all needs a folder to write into.");
   const plan = planExportAll(state, options);
   const render = deps.render ?? defaultExportAllRender;
   const io = deps.io ?? defaultExportIo;

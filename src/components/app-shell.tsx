@@ -9,6 +9,7 @@ import { onFullscreenChange } from "../native";
 import { UniversalModal } from "./universal-modal";
 import { Dialog } from "../ui/dialog";
 import { ConverterDialog } from "./converter-dialog";
+import { ExportAllDialog } from "./export-all-dialog";
 import { AiConnectionsDialog } from "./ai-connections-dialog";
 import { FeedbackConsentDialog } from "./feedback-consent-dialog";
 import { useMcpSnapshotPublisher } from "../store/mcp-publish";
@@ -186,6 +187,8 @@ export function AppShell() {
       />
 
       <ConverterDialog />
+
+      <ExportAllDialog />
 
       <AiConnectionsDialog />
 

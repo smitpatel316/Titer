@@ -4,7 +4,7 @@
 // The plan below is pure (no DOM, no IO) so the node test harness can pin
 // it; the render + write live in `src/store/mcp-export.ts`
 // (`executeExportAllGraphs`, used by both the MCP tool and the File-menu
-// dialog), and the folder default lives in Rust (`default_export_folder`).
+// dialog), and the folder default lives in Rust (`default_export_dir`).
 //
 // A figure with no panels is skipped, not failed: there is nothing to draw
 // yet, and one empty layout must not stop the rest of the batch. A graph
@@ -12,6 +12,7 @@
 // and a render failure is reported per item while the batch goes on.
 import { EXPORT_FORMATS, RESOLUTIONS, type ExportFormat, type Resolution } from "../views/graphs/graph-export";
 import type { ProjectNode } from "../store/types";
+import { fileTitle } from "./paths";
 
 /** A graph or figure node, as the batch sees it. */
 export type ExportAllKind = "graph" | "figure";
@@ -84,6 +85,19 @@ export function sanitizeExportAllStem(name: string, fallback: string): string {
     .trim()
     .replace(/^[.\s]+|[.\s]+$/g, "");
   return stem ? stem.slice(0, 200) : fallback;
+}
+
+/** The folder a batch writes into when the user picks none (seq 179):
+ *  a `<project-stem> Exports` folder beside the project file, or null
+ *  when the project has no file yet (the caller then offers
+ *  `<Documents>/Titer Exports`, or asks for a folder). Mirrors
+ *  `default_export_dir` in Rust — keep the two in step. */
+export function defaultExportAllFolder(filePath: string | null): string | null {
+  if (!filePath) return null;
+  const cut = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  const dir = cut >= 0 ? filePath.slice(0, cut) : "";
+  const stem = sanitizeExportAllStem(fileTitle(filePath), "Titer");
+  return dir ? `${dir}/${stem} Exports` : `${stem} Exports`;
 }
 
 /** Graph and figure nodes in sidebar order: each root item, then its
