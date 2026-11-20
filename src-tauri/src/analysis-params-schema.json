@@ -1734,6 +1734,97 @@
       }
     ]
   },
+  "one-sample-ks": {
+    "label": "One-sample Kolmogorov-Smirnov test",
+    "min_columns": 1,
+    "offered_on": [
+      "column"
+    ],
+    "params": [
+      {
+        "name": "distribution",
+        "type": "string",
+        "enum": [
+          "normal",
+          "lognormal",
+          "exponential",
+          "uniform"
+        ],
+        "default": "normal",
+        "required": false
+      },
+      {
+        "name": "paramsFrom",
+        "type": "string",
+        "enum": [
+          "specified",
+          "estimated"
+        ],
+        "default": "estimated",
+        "required": false,
+        "description": "\"specified\": the entered parameters; \"estimated\": fitted to the sample."
+      },
+      {
+        "name": "mean",
+        "type": "number",
+        "required": false,
+        "description": "Normal mean (specified mode; default 0)."
+      },
+      {
+        "name": "sd",
+        "type": "number",
+        "required": false,
+        "description": "Normal SD (specified mode; default 1)."
+      },
+      {
+        "name": "meanlog",
+        "type": "number",
+        "required": false,
+        "description": "Lognormal mean of the logarithms (specified mode; default 0)."
+      },
+      {
+        "name": "sdlog",
+        "type": "number",
+        "required": false,
+        "description": "Lognormal SD of the logarithms (specified mode; default 1)."
+      },
+      {
+        "name": "rate",
+        "type": "number",
+        "required": false,
+        "description": "Exponential rate, mean = 1/rate (specified mode; default 1)."
+      },
+      {
+        "name": "min",
+        "type": "number",
+        "required": false,
+        "description": "Uniform lower limit (specified mode; default 0)."
+      },
+      {
+        "name": "max",
+        "type": "number",
+        "required": false,
+        "description": "Uniform upper limit (specified mode; default 1)."
+      },
+      {
+        "name": "tails",
+        "type": "string",
+        "enum": [
+          "two-sided",
+          "less",
+          "greater"
+        ],
+        "default": "two-sided",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
   "one-sample-t": {
     "label": "Compare one group to a value",
     "min_columns": 1,

@@ -47,6 +47,7 @@ import type {
   NonlinearRegressionParams,
   NormalizeParams,
   OneSampleTParams,
+  OneSampleKsParams,
   RemoveBaselineParams,
   PruneRowsParams,
   FractionOfTotalParams,
@@ -648,6 +649,7 @@ const PAIRED = "How were the data collected?";
 /** The key of a checklist in CHECKLISTS. */
 export type ChecklistKey =
   | "one-sample-t"
+  | "one-sample-ks"
   | "wilcoxon-signed-rank"
   | "two-sample-t"
   | "paired-t"
@@ -702,6 +704,37 @@ export const CHECKLISTS: Record<ChecklistKey, AnalysisChecklist> = {
         assumption:
           "The hypothetical value was picked before looking at the data, not chosen to match the observed mean.",
         ifNot: "Testing against a value picked from the same data makes the P value meaningless.",
+      },
+    ],
+  },
+  "one-sample-ks": {
+    title: "One-sample Kolmogorov–Smirnov test — checklist",
+    whenToUse:
+      "Use this when you have one group of numbers and want to test whether they could have come from a particular theoretical distribution (Normal, Lognormal, Exponential or Uniform).",
+    items: [
+      {
+        assumption: "The values are numbers on a continuous scale — measurements, not counts or categories.",
+        ifNot: "For counts or categories this test does not apply; a chi-square goodness-of-fit test is built for that kind of data.",
+      },
+      {
+        assumption: "Each value is independent — no value is a repeat measurement of another, and no two values come from the same subject.",
+        ifNot: "Repeated or matched values need a test that accounts for the matching.",
+      },
+      {
+        assumption:
+          "The reference distribution and its parameters were picked before looking at the data — or, if the parameters were estimated from the same sample, the P value is only approximate (anti-conservative).",
+        ifNot:
+          "A distribution fitted to the same data and then tested against it will look like a better fit than it is; enter the parameters in advance when you can.",
+      },
+      {
+        assumption:
+          "The values are not heavily rounded or tied — the test compares cumulative distributions, and many tied values blunt it.",
+        ifNot: "With many ties the P value is asymptotic, not exact, and the test loses power.",
+      },
+      {
+        assumption:
+          "The sample is big enough to notice a mismatch — the test is most sensitive near the centre of the distribution and weak in the tails.",
+        ifNot: "A non-significant result on a small sample is weak evidence that the data follow the distribution.",
       },
     ],
   },
@@ -1864,6 +1897,120 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         lognormal: a.lognormal === "yes",
       }),
     }),
+  },
+
+  // One-sample Kolmogorov–Smirnov test (seq 170): which theoretical
+  // distribution, and whether its parameters are entered or estimated from
+  // the sample. Only the chosen distribution's parameters are asked, and
+  // only when they are entered — estimated parameters need no questions.
+  // The Uniform limits default to the first data column's range.
+  "one-sample-ks": {
+    questions: (a, table) => {
+      const dist = (a.distribution as string | undefined) ?? "normal";
+      const from = (a.paramsFrom as string | undefined) ?? "estimated";
+      const values = table.numeric[0]?.values ?? [];
+      const lo = values.length ? Math.min(...values) : 0;
+      const hi = values.length ? Math.max(...values) : 1;
+      return [
+        ...someSets(table, 1),
+        choice("distribution", "Which theoretical distribution should each data set be compared against?", [
+          ["normal", "Normal (Gaussian)"],
+          ["lognormal", "Lognormal"],
+          ["exponential", "Exponential"],
+          ["uniform", "Uniform"],
+        ]),
+        choice("paramsFrom", "Where do the distribution's parameters come from?", [
+          ["estimated", "Estimate them from the data (the P value is then approximate)"],
+          ["specified", "Enter them — the reference distribution is fully specified"],
+        ]),
+        from === "specified" &&
+          dist === "normal" && {
+            id: "mean",
+            ask: "Mean of the Normal distribution?",
+            kind: "number",
+            label: "Mean",
+            initial: 0,
+          },
+        from === "specified" &&
+          dist === "normal" && {
+            id: "sd",
+            ask: "Standard deviation of the Normal distribution?",
+            kind: "number",
+            label: "SD",
+            initial: 1,
+            validate: (v) => (v > 0 ? undefined : "The SD must be greater than 0."),
+          },
+        from === "specified" &&
+          dist === "lognormal" && {
+            id: "meanlog",
+            ask: "Mean of the logarithms (the Lognormal distribution's meanlog)?",
+            kind: "number",
+            label: "Mean of the logarithms",
+            initial: 0,
+          },
+        from === "specified" &&
+          dist === "lognormal" && {
+            id: "sdlog",
+            ask: "Standard deviation of the logarithms (the Lognormal distribution's sdlog)?",
+            kind: "number",
+            label: "SD of the logarithms",
+            initial: 1,
+            validate: (v) => (v > 0 ? undefined : "The SD of the logarithms must be greater than 0."),
+          },
+        from === "specified" &&
+          dist === "exponential" && {
+            id: "rate",
+            ask: "Rate of the Exponential distribution (its mean is 1 / rate)?",
+            kind: "number",
+            label: "Rate",
+            initial: 1,
+            validate: (v) => (v > 0 ? undefined : "The rate must be greater than 0."),
+          },
+        from === "specified" &&
+          dist === "uniform" && {
+            id: "min",
+            ask: "Lower limit of the Uniform distribution?",
+            kind: "number",
+            label: "Minimum",
+            initial: lo,
+          },
+        from === "specified" &&
+          dist === "uniform" && {
+            id: "max",
+            ask: "Upper limit of the Uniform distribution?",
+            kind: "number",
+            label: "Maximum",
+            initial: hi,
+          },
+        choice("tails", "One-tailed or two-tailed P value?", [
+          ["two-sided", "Two-tailed (recommended)"],
+          ["less", "One-tailed: expect the sample to fall below the distribution"],
+          ["greater", "One-tailed: expect the sample to fall above the distribution"],
+        ]),
+      ];
+    },
+    finish: (a) => {
+      const distribution = (a.distribution as OneSampleKsParams["distribution"] | undefined) ?? "normal";
+      const specified = a.paramsFrom === "specified";
+      const num = (id: string, fallback: number) => (a[id] as number | undefined) ?? fallback;
+      return {
+        type: "one-sample-ks",
+        params: withSets(a, {
+          distribution,
+          paramsFrom: specified ? "specified" : "estimated",
+          tails: (a.tails as OneSampleKsParams["tails"] | undefined) ?? "two-sided",
+          ...(specified && distribution === "normal"
+            ? { mean: num("mean", 0), sd: num("sd", 1) }
+            : {}),
+          ...(specified && distribution === "lognormal"
+            ? { meanlog: num("meanlog", 0), sdlog: num("sdlog", 1) }
+            : {}),
+          ...(specified && distribution === "exponential" ? { rate: num("rate", 1) } : {}),
+          ...(specified && distribution === "uniform" ? { min: num("min", 0), max: num("max", 1) } : {}),
+        }),
+      };
+    },
+    checklist: () => CHECKLISTS["one-sample-ks"],
   },
 
   "frequency-distribution": {

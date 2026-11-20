@@ -106,6 +106,21 @@ export function conclusionOf(
         .join(" ");
     }
 
+    case "one-sample-ks": {
+      const dist =
+        { normal: "Normal", lognormal: "Lognormal", exponential: "Exponential", uniform: "Uniform" }[
+          (p?.distribution as string | undefined) ?? "normal"
+        ] ?? "Normal";
+      return result.groups
+        .map((g) => {
+          const pv = stat(`${g.name} — P value`);
+          return sig(pv)
+            ? `${q(g.name)}'s distribution differs significantly from the ${dist} distribution (${P(pv)}).`
+            : `The data don't show that ${q(g.name)}'s distribution differs from the ${dist} distribution (${P(pv)}). That doesn't prove they follow it.`;
+        })
+        .join(" ");
+    }
+
     case "anova":
     case "rm-anova":
     case "kruskal-wallis":

@@ -63,6 +63,7 @@ import { withReport } from "./report";
 import { friedmanSpec } from "./column/friedman";
 import { shapiroWilkSpec } from "./column/shapiro-wilk";
 import { kolmogorovSmirnovSpec } from "./column/kolmogorov-smirnov";
+import { oneSampleKsSpec } from "./column/one-sample-ks";
 import { runOutliers } from "./column/rout";
 import { runPValueStack } from "./column/p-values";
 import { runXYCorrelation } from "./xy/correlation";
@@ -191,6 +192,7 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     (p as ShapiroWilkParams | undefined)?.test === "anderson-darling" ? ["nortest"] : [],
   ),
   "kolmogorov-smirnov": spec("Kolmogorov-Smirnov test", kolmogorovSmirnovSpec),
+  "one-sample-ks": spec("One-sample Kolmogorov-Smirnov test", oneSampleKsSpec),
   outliers: { label: "Identify outliers", minColumns: 1, run: (c, p) => runOutliers(c, p as OutliersParams) },
   "p-value-stack": {
     label: "Analyze a stack of P values",

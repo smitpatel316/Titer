@@ -307,14 +307,14 @@ treat it as a local-only read.
 | `titer_read_activity` | `limit?` (default 50, max 500) | `{ lines: string[] }` (newest last) — the agent's own audit trail (what it did, what failed). Lines are the stored JSONL as-is (§10). |
 | `titer_send_feedback` | `kind` (`"bug"` \| `"missing-feature"` \| `"other"`), `summary` (short, required, at most 200 characters), `details` (required, at most 4000 characters — what was tried, what happened, what was expected), `failed_tool?` (the tool or step that failed, if any) | `{ feedback_id, received: true, sent: true/false, ... }`. Reports a missing feature or a bug to the Titer team — **read-only wrt the project**: it never touches a snapshot, a job, or a project file. **But it is `open_world_hint: true`, not a local-only read:** the report is always saved on this Mac first: one JSONL entry appended to `<app_data>/mcp/feedback.jsonl` (same 0700 directory as the token, §10), and the user reviews the entries in Settings → AI Connections, sending one to GitHub only by clicking "Send to GitHub" there. **Consent gate:** the entry is also POSTed to the feedback server (`POST https://feedback.smitpatel.net/api/v1/feedback`, 10 s timeout) only when the user has turned on feedback sharing — first-run prompt (Share / Don't share, default off) or the Settings toggle, recorded in `<app_data>/mcp/feedback-consent.json`. Sharing off → `{ feedback_id, received: true, sent: false, sharing: "disabled", note: "…" }` and no POST is attempted (the tool says sharing is disabled, never silently stays local). Sharing on + server 201 → `{ feedback_id, received: true, sent: true, issue_url: "…" }`. Sharing on + server unreachable / timeout / non-2xx → `{ feedback_id, received: true, sent: false, sharing: "enabled", error: "…" }` — the entry stays saved locally and the tool call still succeeds. The bridge auto-attaches minimal context only: app version, OS, the failed tool/step if any, and the last few Activity lines (tool names + ok flags only). **No table data values, no file paths beyond the project file name.** An unknown `kind`, an empty `summary`/`details`, or an over-long one is a plain-language tool error naming the valid choices. |
 
-## 7. Analyses (53 types) — run, freeze, simulate, method, wand, script
+## 7. Analyses (55 types) — run, freeze, simulate, method, wand, script
 
-All 53 `AnalysisType` values in `src/stats/types.ts` are runnable via
+All 55 `AnalysisType` values in `src/stats/types.ts` are runnable via
 `titer_run_analysis`; `params` must match the `AnalysisParams` member
 for the type (§4: unknown/out-of-range params are rejected with the
 valid choices). **Do not guess params — ask first:**
 `titer_get_analysis_params` (§6) returns the valid params, with types,
-ranges, defaults and the table-type gate, for any of the 53 types. The
+ranges, defaults and the table-type gate, for any of the 55 types. The
 table-type gate applies: the analysis must be offered for the table's
 type (`ANALYSIS_OPTIONS_BY_TABLE`, including the data-dependent gates
 — three-way ANOVA needs ≥ 2 row bands; nested t-test needs exactly 2

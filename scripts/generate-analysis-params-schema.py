@@ -235,6 +235,7 @@ INTERFACE_TO_TYPE = {
     "Outliers": "outliers",
     "PValueStack": "p-value-stack",
     "ShapiroWilk": "shapiro-wilk",
+    "OneSampleKs": "one-sample-ks",
     "FrequencyDistribution": "frequency-distribution",
     "TransformData": "transform-data",
     "TransformConcentrations": "transform-concentrations",
@@ -353,6 +354,7 @@ SPEC_LABELS = {
     "friedman": "Friedman test",
     "shapiro-wilk": "Normality tests",
     "kolmogorov-smirnov": "Kolmogorov-Smirnov test",
+    "one-sample-ks": "One-sample Kolmogorov-Smirnov test",
     "linear-regression": "Linear regression",
     "deming-regression": "Deming regression",
 }
@@ -367,7 +369,7 @@ for spec_file in (ROOT / "src/stats/column").glob("*.ts"):
 SPEC_MIN = {
     "compare-two-groups": 2, "one-sample-t": 1, "anova": 2,
     "kruskal-wallis": 2, "rm-anova": 2, "friedman": 2,
-    "shapiro-wilk": 1, "kolmogorov-smirnov": 1,
+    "shapiro-wilk": 1, "kolmogorov-smirnov": 1, "one-sample-ks": 1,
     "linear-regression": 2, "deming-regression": 2,
 }
 for typ, n in SPEC_MIN.items():
@@ -566,8 +568,8 @@ for typ, keys in sorted(KEYS_BY_TYPE.items()):
         out["gates"] = GATES[typ]
     schema[typ] = out
 
-# Sanity: 57 types (54 + p-value-stack seq 190 + chi-square-gof + binomial-test seq 195), every key accounted for, offered_on non-empty.
-assert len(schema) == 57, f"{len(schema)} types, expected 57"
+# Sanity: 58 types (54 + p-value-stack seq 190 + chi-square-gof + binomial-test seq 195 + one-sample-ks seq 170), every key accounted for, offered_on non-empty.
+assert len(schema) == 58, f"{len(schema)} types, expected 58"
 for typ, entry in schema.items():
     assert entry["offered_on"], f"{typ} offered on no table type"
     assert entry["min_columns"] is not None, f"{typ} has no min_columns"

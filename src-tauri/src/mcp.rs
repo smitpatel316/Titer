@@ -2423,6 +2423,7 @@ const ANALYSIS_TYPES: &[&str] = &[
     "mixed-effects",
     "shapiro-wilk",
     "kolmogorov-smirnov",
+    "one-sample-ks",
     "outliers",
     "p-value-stack",
     "monte-carlo",
@@ -2830,7 +2831,7 @@ pub struct RunAnalysisArgs {
     pub project_id: Option<String>,
     /// The table to analyse, as shown by titer_list_tables.
     pub table_id: String,
-    /// One of the 56 analysis types — never "compare-many-groups" or
+    /// One of the 58 analysis types — never "compare-many-groups" or
     /// "interpolate" (pass a concrete type instead; see the tool text).
     pub analysis_type: String,
     /// Params for that analysis (the AnalysisParams member for the type);
@@ -8662,7 +8663,7 @@ mod tests {
 
     #[test]
     fn validate_analysis_type_accepts_all_and_refuses_wizard_values() {
-        assert_eq!(ANALYSIS_TYPES.len(), 57, "one entry per AnalysisType: {ANALYSIS_TYPES:?}");
+        assert_eq!(ANALYSIS_TYPES.len(), 58, "one entry per AnalysisType: {ANALYSIS_TYPES:?}");
         for t in [
             "descriptive-statistics",
             "anova",
@@ -8677,6 +8678,7 @@ mod tests {
             "mcnemar",
             "cox-proportional-hazards",
             "p-value-stack",
+            "one-sample-ks",
         ] {
             assert!(validate_analysis_type(t).is_ok(), "{t}");
         }

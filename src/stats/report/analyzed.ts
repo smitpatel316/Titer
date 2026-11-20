@@ -49,6 +49,14 @@ export function analyzedOf(
     }
     case "one-sample-t":
       return make(described, "list", `each against ${p?.hypotheticalValue ?? 0}`);
+    case "one-sample-ks": {
+      const dist =
+        { normal: "Normal", lognormal: "Lognormal", exponential: "Exponential", uniform: "Uniform" }[
+          (p?.distribution as string | undefined) ?? "normal"
+        ] ?? "Normal";
+      const article = dist === "Exponential" ? "an" : "a";
+      return make(described, "list", `each against ${article} ${dist} distribution`);
+    }
     case "anova":
     case "kruskal-wallis": {
       const control = p?.posthoc === "dunnett" ? (p.control as string | undefined) : undefined;

@@ -1300,6 +1300,86 @@ const ksTooFew = table(
   ],
 );
 
+/** One-sample Kolmogorov–Smirnov (seq 170): three values against a standard
+ *  Normal — D = 1/3 − Φ(−1) = 0.1746780794, by hand (the largest gap is at
+ *  −1, where the ECDF is 1/3 and Φ is 0.1586552539). */
+const ks1Normal = table(
+  ["Title", "X"],
+  [
+    ["", "-1"],
+    ["", "0"],
+    ["", "1"],
+  ],
+);
+
+/** One-sample KS (seq 170): quartiles of a Uniform(0, 1) — D = 0.25 exactly
+ *  (just below each quartile the ECDF lags the CDF by 0.25). */
+const ks1Uniform = table(
+  ["Title", "X"],
+  [
+    ["", "0.25"],
+    ["", "0.5"],
+    ["", "0.75"],
+    ["", "1"],
+  ],
+);
+
+/** One-sample KS (seq 170): four values against an Exponential(1) — D =
+ *  0.25 − (1 − e^−0.1) = 0.1548374180, by hand (the largest gap is at 0.1). */
+const ks1Exp = table(
+  ["Title", "X"],
+  [
+    ["", "0.1"],
+    ["", "0.5"],
+    ["", "1"],
+    ["", "2"],
+  ],
+);
+
+/** One-sample KS (seq 170): powers of two against a Lognormal(meanlog 1,
+ *  sdlog 1) — D ≈ 0.2598, by hand (the largest gap is just below 8, where
+ *  the ECDF is 0.6 and Φ(1.0794) ≈ 0.8598). */
+const ks1Lognormal = table(
+  ["Title", "X"],
+  [
+    ["", "1"],
+    ["", "2"],
+    ["", "4"],
+    ["", "8"],
+    ["", "16"],
+  ],
+);
+
+/** One-sample KS (seq 170): the Control column's values against an
+ *  estimated Normal — parameters fitted to the same sample, so the P value
+ *  is approximate (pinned in reference.json). */
+const ks1Estimated = table(
+  ["Title", "X"],
+  [
+    ["", "12.1"],
+    ["", "11.4"],
+    ["", "13.2"],
+    ["", "12.8"],
+    ["", "10.9"],
+    ["", "12.5"],
+    ["", "11.8"],
+    ["", "14.0"],
+  ],
+);
+
+/** One-sample KS (seq 170): one value only — an error (the test needs 2). */
+const ks1TooFew = table(["Title", "X"], [["", "5"]]);
+
+/** One-sample KS (seq 170): a zero in the column — Lognormal refused. */
+const ks1Nonpositive = table(
+  ["Title", "X"],
+  [
+    ["", "1"],
+    ["", "0"],
+    ["", "2"],
+  ],
+);
+
 /** Normality tests (plan 23): n = 25 per column, so D'Agostino–Pearson is
  *  valid. A is near-Gaussian; B is right-skewed (lognormal-ish: SW on
  *  log(B) passes). Values pinned from SciPy 1.11 for SW/DP/AD-statistic/KS-D,
@@ -2333,6 +2413,18 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["ksTooFew", ksTooFew, "kolmogorov-smirnov"],
   ["column", column, "kolmogorov-smirnov"],
   ["column", column, "kolmogorov-smirnov", { sets: ["High", "Control"] }],
+  // One-sample Kolmogorov–Smirnov (seq 170): one column against a
+  // theoretical distribution — Normal / Uniform / Exponential / Lognormal
+  // with entered parameters, Normal with estimated parameters, one-tailed,
+  // and the error cases (too few values, Lognormal on a non-positive column).
+  ["ks1Normal", ks1Normal, "one-sample-ks", { distribution: "normal", paramsFrom: "specified", mean: 0, sd: 1, tails: "two-sided" }],
+  ["ks1Uniform", ks1Uniform, "one-sample-ks", { distribution: "uniform", paramsFrom: "specified", min: 0, max: 1, tails: "two-sided" }],
+  ["ks1Exp", ks1Exp, "one-sample-ks", { distribution: "exponential", paramsFrom: "specified", rate: 1, tails: "two-sided" }],
+  ["ks1Lognormal", ks1Lognormal, "one-sample-ks", { distribution: "lognormal", paramsFrom: "specified", meanlog: 1, sdlog: 1, tails: "two-sided" }],
+  ["ks1Estimated", ks1Estimated, "one-sample-ks", { distribution: "normal", paramsFrom: "estimated", tails: "two-sided" }],
+  ["ks1Normal", ks1Normal, "one-sample-ks", { distribution: "normal", paramsFrom: "specified", mean: 0, sd: 1, tails: "less" }],
+  ["ks1TooFew", ks1TooFew, "one-sample-ks", { distribution: "normal", paramsFrom: "specified", mean: 0, sd: 1, tails: "two-sided" }],
+  ["ks1Nonpositive", ks1Nonpositive, "one-sample-ks", { distribution: "lognormal", paramsFrom: "estimated", tails: "two-sided" }],
   ["column", column, "outliers", { q: 1 }],
   ["column", column, "outliers", { q: 5 }],
   // Grubbs' test (plan 24): the shared column table (Control flags 30, round
@@ -6202,6 +6294,103 @@ async function disagreements(): Promise<string[]> {
       out.push(`KS identical D: ${ksIdenticalR.stat("KS distance D")}, expected 0`);
     if (ksIdenticalR.stat("P value") !== 1) out.push(`KS identical p: ${ksIdenticalR.stat("P value")}, expected 1`);
   }
+  // One-sample Kolmogorov–Smirnov (seq 170): one column against a
+  // theoretical distribution. The D values are hand computations (see the
+  // fixture comments): Normal 1/3 − Φ(−1), Uniform 0.25 exactly, Exponential
+  // 0.25 − (1 − e^−0.1), Lognormal Φ(1.0794) − 0.6; the P values are R's
+  // asymptotic Kolmogorov P, pinned in reference.json too.
+  const ks1Run = async (data: TableData, label: string, params: AnalysisParams) => {
+    const r = await runAnalysis("one-sample-ks", data, params);
+    if ("error" in r) {
+      out.push(`One-sample KS ${label}: ${r.error}`);
+      return null;
+    }
+    return {
+      stat: (l: string) => r.stats.find((s) => s.label === l)?.value,
+      notes: r.notes,
+      subtitle: r.subtitle,
+      count: r.stats.length,
+    };
+  };
+  const ks1 = async (
+    data: TableData,
+    label: string,
+    params: AnalysisParams,
+    d: number,
+    p: number,
+  ) => {
+    const r = await ks1Run(data, label, params);
+    if (!r) return;
+    const gotD = r.stat("X — KS distance D");
+    const gotP = r.stat("X — P value");
+    if (gotD == null || Math.abs(gotD - d) > 1e-9) out.push(`One-sample KS ${label} D: ${gotD}, expected ${d}`);
+    if (gotP == null || Math.abs(gotP - p) / p > 1e-4) out.push(`One-sample KS ${label} p: ${gotP}, expected ${p}`);
+    if (r.stat("X — N") == null) out.push(`One-sample KS ${label}: missing N row`);
+  };
+  await ks1(ks1Normal, "normal", { distribution: "normal", paramsFrom: "specified", mean: 0, sd: 1, tails: "two-sided" }, 0.1746780794, 0.9999753187);
+  await ks1(ks1Uniform, "uniform", { distribution: "uniform", paramsFrom: "specified", min: 0, max: 1, tails: "two-sided" }, 0.25, 0.90625);
+  await ks1(ks1Exp, "exponential", { distribution: "exponential", paramsFrom: "specified", rate: 1, tails: "two-sided" }, 0.154837418, 0.999695648);
+  await ks1(ks1Lognormal, "lognormal", { distribution: "lognormal", paramsFrom: "specified", meanlog: 1, sdlog: 1, tails: "two-sided" }, 0.2598045297, 0.8130011061);
+  // Estimated Normal on the 8-value column: D and p are R's (the parameters
+  // come from the same sample, so the notes must carry the Lilliefors caveat).
+  const ks1Est = await ks1Run(ks1Estimated, "estimated", { distribution: "normal", paramsFrom: "estimated", tails: "two-sided" });
+  if (ks1Est) {
+    const d = ks1Est.stat("X — KS distance D");
+    const p = ks1Est.stat("X — P value");
+    if (d == null || Math.abs(d - 0.09361161621) > 1e-9) out.push(`One-sample KS estimated D: ${d}, expected 0.09361161621`);
+    if (p == null || Math.abs(p - 0.9999909397) / 0.9999909397 > 1e-4)
+      out.push(`One-sample KS estimated p: ${p}, expected 0.9999909397`);
+    if (!ks1Est.notes.includes("estimated from the sample")) out.push(`One-sample KS estimated notes: missing estimated-params note`);
+    if (!ks1Est.notes.includes("anti-conservative")) out.push(`One-sample KS estimated notes: missing Lilliefors caveat`);
+    if (!ks1Est.notes.includes("mean 12.3375 and SD 1.0027640371920574"))
+      out.push(`One-sample KS estimated notes: missing fitted parameters: ${ks1Est.notes}`);
+    if (ks1Est.subtitle !== "One-sample Kolmogorov–Smirnov test (vs. Normal distribution)")
+      out.push(`One-sample KS subtitle: ${ks1Est.subtitle}`);
+  }
+  // One-tailed: the same D (the largest gap is on the "less" side), a
+  // different P — and the notes say one-tailed.
+  const ks1Less = await ks1Run(ks1Normal, "one-tailed", {
+    distribution: "normal",
+    paramsFrom: "specified",
+    mean: 0,
+    sd: 1,
+    tails: "less",
+  });
+  if (ks1Less) {
+    if (ks1Less.stat("X — KS distance D") == null || Math.abs(ks1Less.stat("X — KS distance D")! - 0.1746780794) > 1e-9)
+      out.push(`One-sample KS one-tailed D: ${ks1Less.stat("X — KS distance D")}, expected 0.1746780794`);
+    if (ks1Less.stat("X — P value") == null || Math.abs(ks1Less.stat("X — P value")! - 0.7589672048) / 0.7589672048 > 1e-4)
+      out.push(`One-sample KS one-tailed p: ${ks1Less.stat("X — P value")}, expected 0.7589672048`);
+    if (!ks1Less.notes.includes("One-tailed P value.")) out.push(`One-sample KS one-tailed notes: missing one-tailed note`);
+  }
+  // Two columns run together: three rows each (D, P, N).
+  const ks1Two = await ks1Run(ksShifted, "two columns", { distribution: "normal", paramsFrom: "estimated", tails: "two-sided" });
+  if (ks1Two && ks1Two.count !== 6) out.push(`One-sample KS two columns: ${ks1Two.count} stat rows, expected 6`);
+  // Tied values: the notes say the P value is asymptotic.
+  const ks1Ties = await ks1Run(
+    table(["Title", "X"], [["", "1"], ["", "1"], ["", "2"], ["", "2"], ["", "3"], ["", "3"]]),
+    "ties",
+    { distribution: "normal", paramsFrom: "specified", mean: 2, sd: 1, tails: "two-sided" },
+  );
+  if (ks1Ties && !ks1Ties.notes.includes("Tied values present")) out.push(`One-sample KS ties notes: missing ties warning`);
+  // Error cases: too few values, Lognormal on a non-positive column, a
+  // specified SD of 0, a Uniform with max ≤ min, and estimated parameters
+  // on identical values.
+  const ks1Err = async (data: TableData, label: string, params: AnalysisParams, want: string) => {
+    const r = await runAnalysis("one-sample-ks", data, params);
+    if (!("error" in r) || !r.error.includes(want))
+      out.push(`One-sample KS ${label}: ${"error" in r ? r.error : "ran without error"}, expected an error containing “${want}”`);
+  };
+  await ks1Err(ks1TooFew, "too few", { distribution: "normal", paramsFrom: "specified", mean: 0, sd: 1, tails: "two-sided" }, "at least 2");
+  await ks1Err(ks1Nonpositive, "lognormal non-positive", { distribution: "lognormal", paramsFrom: "estimated", tails: "two-sided" }, "above 0");
+  await ks1Err(ks1Normal, "sd 0", { distribution: "normal", paramsFrom: "specified", mean: 0, sd: 0, tails: "two-sided" }, "SD above 0");
+  await ks1Err(ks1Uniform, "uniform max ≤ min", { distribution: "uniform", paramsFrom: "specified", min: 1, max: 1, tails: "two-sided" }, "maximum above its minimum");
+  await ks1Err(
+    table(["Title", "X"], [["", "5"], ["", "5"], ["", "5"]]),
+    "estimated identical",
+    { distribution: "normal", paramsFrom: "estimated", tails: "two-sided" },
+    "all identical",
+  );
   // Frequency distribution: the TypeScript binning equals R's hist()
   // (right-closed, first bin closed), the auto breaks are R's pretty() breaks,
   // and the histogram's bars equal the analysis's counts. The plan's counts are

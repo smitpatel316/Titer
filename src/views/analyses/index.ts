@@ -50,6 +50,7 @@ export const ANALYSIS_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<Analysi
     "kolmogorov-smirnov",
     "chi-square-gof",
     "binomial-test",
+    "one-sample-ks",
     "outliers",
     "p-value-stack",
     "transform",

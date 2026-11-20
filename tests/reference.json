@@ -6877,7 +6877,7 @@
     "n": 8
    }
   ],
-  "notes": "D is the maximum absolute difference between the two cumulative distributions. One-sample KS (vs. a reference distribution) is not included; see plan 07 follow-on."
+  "notes": "D is the maximum absolute difference between the two cumulative distributions. To compare a sample against a theoretical distribution instead, use the one-sample Kolmogorov–Smirnov test."
  },
  "kolmogorov-smirnov ksSimilar {}": {
   "testType": "kolmogorov-smirnov",
@@ -6919,7 +6919,7 @@
     "n": 8
    }
   ],
-  "notes": "D is the maximum absolute difference between the two cumulative distributions. One-sample KS (vs. a reference distribution) is not included; see plan 07 follow-on."
+  "notes": "D is the maximum absolute difference between the two cumulative distributions. To compare a sample against a theoretical distribution instead, use the one-sample Kolmogorov–Smirnov test."
  },
  "kolmogorov-smirnov ksTies {}": {
   "testType": "kolmogorov-smirnov",
@@ -6961,7 +6961,7 @@
     "n": 8
    }
   ],
-  "notes": "D is the maximum absolute difference between the two cumulative distributions. Tied values present — P value is asymptotic, not exact. One-sample KS (vs. a reference distribution) is not included; see plan 07 follow-on."
+  "notes": "D is the maximum absolute difference between the two cumulative distributions. Tied values present — P value is asymptotic, not exact. To compare a sample against a theoretical distribution instead, use the one-sample Kolmogorov–Smirnov test."
  },
  "kolmogorov-smirnov ksIdentical {}": {
   "testType": "kolmogorov-smirnov",
@@ -7003,7 +7003,7 @@
     "n": 8
    }
   ],
-  "notes": "D is the maximum absolute difference between the two cumulative distributions. Tied values present — P value is asymptotic, not exact. One-sample KS (vs. a reference distribution) is not included; see plan 07 follow-on."
+  "notes": "D is the maximum absolute difference between the two cumulative distributions. Tied values present — P value is asymptotic, not exact. To compare a sample against a theoretical distribution instead, use the one-sample Kolmogorov–Smirnov test."
  },
  "kolmogorov-smirnov ksTooFew {}": {
   "error": "Kolmogorov-Smirnov test needs two groups with at least 2 values each."
@@ -7048,7 +7048,7 @@
     "n": 7
    }
   ],
-  "notes": "D is the maximum absolute difference between the two cumulative distributions. Compares “Control” and “Low”, the first two columns with data; not included: “High”, “Sparse”. “Low”: 1 non-numeric cell ignored. One-sample KS (vs. a reference distribution) is not included; see plan 07 follow-on."
+  "notes": "D is the maximum absolute difference between the two cumulative distributions. Compares “Control” and “Low”, the first two columns with data; not included: “High”, “Sparse”. “Low”: 1 non-numeric cell ignored. To compare a sample against a theoretical distribution instead, use the one-sample Kolmogorov–Smirnov test."
  },
  "kolmogorov-smirnov column {\"sets\":[\"High\",\"Control\"]}": {
   "testType": "kolmogorov-smirnov",
@@ -7090,7 +7090,265 @@
     "n": 8
    }
   ],
-  "notes": "D is the maximum absolute difference between the two cumulative distributions. One-sample KS (vs. a reference distribution) is not included; see plan 07 follow-on."
+  "notes": "D is the maximum absolute difference between the two cumulative distributions. To compare a sample against a theoretical distribution instead, use the one-sample Kolmogorov–Smirnov test."
+ },
+ "one-sample-ks ks1Normal {\"distribution\":\"normal\",\"paramsFrom\":\"specified\",\"mean\":0,\"sd\":1,\"tails\":\"two-sided\"}": {
+  "testType": "one-sample-ks",
+  "subtitle": "One-sample Kolmogorov–Smirnov test (vs. Normal distribution)",
+  "stats": [
+   {
+    "label": "X — KS distance D",
+    "value": 0.1746780794
+   },
+   {
+    "label": "X — P value",
+    "value": 0.9999753187,
+    "p": true
+   },
+   {
+    "label": "X — N",
+    "value": 3
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 0,
+    "sd": 1,
+    "sem": 0.5773502692,
+    "median": 0,
+    "n": 3
+   }
+  ],
+  "notes": "Compares each column's cumulative distribution with a Normal distribution (parameters as entered). D is the largest absolute difference between the two cumulative distributions. Two-tailed P value. The Normal distribution used for “X”: mean 0 and SD 1 (as entered). KS is most sensitive near the centre of the distribution and weak in the tails — a non-significant result on a small sample is weak evidence that the data follow the distribution.",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "X",
+     "n": 3
+    }
+   ],
+   "how": "list",
+   "detail": "each against a Normal distribution",
+   "left": []
+  },
+  "summary": "The data don't show that “X”'s distribution differs from the Normal distribution (P = 1). That doesn't prove they follow it."
+ },
+ "one-sample-ks ks1Uniform {\"distribution\":\"uniform\",\"paramsFrom\":\"specified\",\"min\":0,\"max\":1,\"tails\":\"two-sided\"}": {
+  "testType": "one-sample-ks",
+  "subtitle": "One-sample Kolmogorov–Smirnov test (vs. Uniform distribution)",
+  "stats": [
+   {
+    "label": "X — KS distance D",
+    "value": 0.25
+   },
+   {
+    "label": "X — P value",
+    "value": 0.90625,
+    "p": true
+   },
+   {
+    "label": "X — N",
+    "value": 4
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 0.625,
+    "sd": 0.3227486122,
+    "sem": 0.1613743061,
+    "median": 0.625,
+    "n": 4
+   }
+  ],
+  "notes": "Compares each column's cumulative distribution with a Uniform distribution (parameters as entered). D is the largest absolute difference between the two cumulative distributions. Two-tailed P value. The Uniform distribution used for “X”: from 0 to 1 (as entered). KS is most sensitive near the centre of the distribution and weak in the tails — a non-significant result on a small sample is weak evidence that the data follow the distribution.",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "X",
+     "n": 4
+    }
+   ],
+   "how": "list",
+   "detail": "each against a Uniform distribution",
+   "left": []
+  },
+  "summary": "The data don't show that “X”'s distribution differs from the Uniform distribution (P = 0.9063). That doesn't prove they follow it."
+ },
+ "one-sample-ks ks1Exp {\"distribution\":\"exponential\",\"paramsFrom\":\"specified\",\"rate\":1,\"tails\":\"two-sided\"}": {
+  "testType": "one-sample-ks",
+  "subtitle": "One-sample Kolmogorov–Smirnov test (vs. Exponential distribution)",
+  "stats": [
+   {
+    "label": "X — KS distance D",
+    "value": 0.154837418
+   },
+   {
+    "label": "X — P value",
+    "value": 0.999695648,
+    "p": true
+   },
+   {
+    "label": "X — N",
+    "value": 4
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 0.9,
+    "sd": 0.8205689083,
+    "sem": 0.4102844542,
+    "median": 0.75,
+    "n": 4
+   }
+  ],
+  "notes": "Compares each column's cumulative distribution with an Exponential distribution (parameters as entered). D is the largest absolute difference between the two cumulative distributions. Two-tailed P value. The Exponential distribution used for “X”: rate 1 (as entered). KS is most sensitive near the centre of the distribution and weak in the tails — a non-significant result on a small sample is weak evidence that the data follow the distribution.",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "X",
+     "n": 4
+    }
+   ],
+   "how": "list",
+   "detail": "each against an Exponential distribution",
+   "left": []
+  },
+  "summary": "The data don't show that “X”'s distribution differs from the Exponential distribution (P = 0.9997). That doesn't prove they follow it."
+ },
+ "one-sample-ks ks1Lognormal {\"distribution\":\"lognormal\",\"paramsFrom\":\"specified\",\"meanlog\":1,\"sdlog\":1,\"tails\":\"two-sided\"}": {
+  "testType": "one-sample-ks",
+  "subtitle": "One-sample Kolmogorov–Smirnov test (vs. Lognormal distribution)",
+  "stats": [
+   {
+    "label": "X — KS distance D",
+    "value": 0.2598045297
+   },
+   {
+    "label": "X — P value",
+    "value": 0.8130011061,
+    "p": true
+   },
+   {
+    "label": "X — N",
+    "value": 5
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6.2,
+    "sd": 6.099180273,
+    "sem": 2.727636339,
+    "median": 4,
+    "n": 5
+   }
+  ],
+  "notes": "Compares each column's cumulative distribution with a Lognormal distribution (parameters as entered). D is the largest absolute difference between the two cumulative distributions. Two-tailed P value. The Lognormal distribution used for “X”: mean of the logarithms 1 and SD of the logarithms 1 (as entered). KS is most sensitive near the centre of the distribution and weak in the tails — a non-significant result on a small sample is weak evidence that the data follow the distribution.",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "X",
+     "n": 5
+    }
+   ],
+   "how": "list",
+   "detail": "each against a Lognormal distribution",
+   "left": []
+  },
+  "summary": "The data don't show that “X”'s distribution differs from the Lognormal distribution (P = 0.813). That doesn't prove they follow it."
+ },
+ "one-sample-ks ks1Estimated {\"distribution\":\"normal\",\"paramsFrom\":\"estimated\",\"tails\":\"two-sided\"}": {
+  "testType": "one-sample-ks",
+  "subtitle": "One-sample Kolmogorov–Smirnov test (vs. Normal distribution)",
+  "stats": [
+   {
+    "label": "X — KS distance D",
+    "value": 0.09361161621
+   },
+   {
+    "label": "X — P value",
+    "value": 0.9999909397,
+    "p": true
+   },
+   {
+    "label": "X — N",
+    "value": 8
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 12.3375,
+    "sd": 1.002764037,
+    "sem": 0.3545306253,
+    "median": 12.3,
+    "n": 8
+   }
+  ],
+  "notes": "Compares each column's cumulative distribution with a Normal distribution (parameters estimated from the sample). D is the largest absolute difference between the two cumulative distributions. Two-tailed P value. The Normal distribution used for “X”: mean 12.3375 and SD 1.0027640371920574 (estimated from the sample). The parameters were estimated from the same sample being tested, so the P value is approximate (anti-conservative — the proper test with estimated parameters is Lilliefors); for a fully specified reference distribution, enter the parameters instead. KS is most sensitive near the centre of the distribution and weak in the tails — a non-significant result on a small sample is weak evidence that the data follow the distribution.",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "X",
+     "n": 8
+    }
+   ],
+   "how": "list",
+   "detail": "each against a Normal distribution",
+   "left": []
+  },
+  "summary": "The data don't show that “X”'s distribution differs from the Normal distribution (P = 1). That doesn't prove they follow it."
+ },
+ "one-sample-ks ks1Normal {\"distribution\":\"normal\",\"paramsFrom\":\"specified\",\"mean\":0,\"sd\":1,\"tails\":\"less\"}": {
+  "testType": "one-sample-ks",
+  "subtitle": "One-sample Kolmogorov–Smirnov test (vs. Normal distribution)",
+  "stats": [
+   {
+    "label": "X — KS distance D",
+    "value": 0.1746780794
+   },
+   {
+    "label": "X — P value",
+    "value": 0.7589672048,
+    "p": true
+   },
+   {
+    "label": "X — N",
+    "value": 3
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 0,
+    "sd": 1,
+    "sem": 0.5773502692,
+    "median": 0,
+    "n": 3
+   }
+  ],
+  "notes": "Compares each column's cumulative distribution with a Normal distribution (parameters as entered). D is the largest absolute difference between the two cumulative distributions. One-tailed P value. The Normal distribution used for “X”: mean 0 and SD 1 (as entered). KS is most sensitive near the centre of the distribution and weak in the tails — a non-significant result on a small sample is weak evidence that the data follow the distribution.",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "X",
+     "n": 3
+    }
+   ],
+   "how": "list",
+   "detail": "each against a Normal distribution",
+   "left": []
+  },
+  "summary": "The data don't show that “X”'s distribution differs from the Normal distribution (one-tailed P = 0.759). That doesn't prove they follow it."
+ },
+ "one-sample-ks ks1TooFew {\"distribution\":\"normal\",\"paramsFrom\":\"specified\",\"mean\":0,\"sd\":1,\"tails\":\"two-sided\"}": {
+  "error": "“X” holds 1 value; this test needs at least 2 in each group."
+ },
+ "one-sample-ks ks1Nonpositive {\"distribution\":\"lognormal\",\"paramsFrom\":\"estimated\",\"tails\":\"two-sided\"}": {
+  "error": "A Lognormal distribution needs values above 0 (log is undefined at or below zero) — “X” holds 0."
  },
  "outliers column {\"q\":1}": {
   "testType": "outliers",
