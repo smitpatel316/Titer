@@ -664,7 +664,13 @@ check("merging stops at the 500 info-sheet cap and says what it skipped", () => 
   const merged = mergeProjects(current, incoming, "Infos.hlx");
   const infoCount = Object.values(merged.nodes).filter((n) => n.type === "info").length;
   strictEqual(infoCount, MAX_INFO_SHEETS, "the cap counts the project's existing info sheets too");
-  strictEqual(merged.report.skipped.length, 1);
+  // The current project already holds 1 info sheet, so 499 of the 501
+  // incoming ones fit under the 500 cap — the last two are skipped.
+  strictEqual(merged.report.skipped.length, 2);
+  deepStrictEqual(
+    merged.report.skipped.map((s) => s.name),
+    ["Info 500", "Info 501"],
+  );
   ok(merged.report.skipped[0].reason.includes("500"), "the skip names the cap");
   strictEqual(merged.report.infoSheets.length, MAX_INFO_SHEETS - 1);
 });
@@ -715,6 +721,7 @@ check("MCP merge-project merges a .hlx file's sheets into the project (seq 180)"
     merged: string[];
     renamed: unknown[];
     dropped: string[];
+    warnings: string[];
   };
   strictEqual(result.merged_tables, 3);
   strictEqual(result.merged_analyses, 2);
@@ -723,7 +730,12 @@ check("MCP merge-project merges a .hlx file's sheets into the project (seq 180)"
   strictEqual(result.merged_info_sheets, 1);
   ok(result.merged.includes("* Doses"), "the merged names carry Prism's asterisk");
   deepStrictEqual(result.renamed, []);
-  strictEqual(result.dropped.length, 2);
+  // The .hlx reader already prunes the graph's dangling analysis link on
+  // load (and says so in `warnings`), so the merge itself drops only the
+  // figure panel whose graph isn't in the file.
+  strictEqual(result.dropped.length, 1);
+  ok(result.dropped[0].includes("missing-graph"), "the dropped figure panel is named");
+  strictEqual(result.warnings.length, 2);
   const after = harness.state();
   strictEqual(after.rootOrder.length, before.rootOrder.length + 6);
   strictEqual(after.activeNodeId, before.activeNodeId, "merging doesn't move the active sheet");
