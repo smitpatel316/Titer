@@ -30,6 +30,7 @@ import { xyBarScatter } from "./xy-bar-scatter";
 import { groupedBars } from "./grouped-bars";
 import { groupedScatter } from "./grouped-scatter";
 import { groupedBox } from "./grouped-box";
+import { floatingBars } from "./floating-bars";
 import { groupedLines } from "./grouped-lines";
 import { groupedStacked } from "./grouped-stacked";
 import { groupedHbars } from "./grouped-hbars";
@@ -115,6 +116,7 @@ export const GRAPHS: Record<GraphType, GraphModule> = {
   "grouped-stacked": groupedStacked,
   "grouped-hbars": groupedHbars,
   "grouped-box": groupedBox,
+  "floating-bars": floatingBars,
   pie,
   donut,
   "schild-plot": schildPlot,
@@ -315,6 +317,8 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
     "bland-altman",
     "roc-curve",
     "monte-carlo-histogram",
+    // Seq 212: one bar per column, spanning its min to its max.
+    "floating-bars",
   ]),
   xy: optionsFor([
     "xy-scatter",
@@ -351,6 +355,8 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
     "grouped-hbars",
     "heatmap",
     "volcano",
+    // Seq 212: one bar per row × group, spanning the cell's min to max.
+    "floating-bars",
   ]),
   // A nested table's groups plot one series per group across the rows, as a
   // grouped table's do — the grouped builders read the groups through
@@ -358,11 +364,13 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
   // "A:S1:R1"), so bars, scatter and lines all draw from nested columns.
   // Seq 210: mean-and-error too (its per-subgroup pooling reads the Mean
   // columns of a nested summary table; see mean-error.ts).
-  nested: optionsFor(["grouped-bars", "grouped-scatter", "grouped-lines", "mean-error"]),
+  // Seq 212: floating bars — one bar per row × group × subgroup cell.
+  nested: optionsFor(["grouped-bars", "grouped-scatter", "grouped-lines", "mean-error", "floating-bars"]),
   multiple: optionsFor(["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "dendrogram", "elbow-plot", "silhouette-plot", "gap-plot", "survival"]),
   // Outcomes as series across the row categories, as Prism graphs contingency tables.
   // Seq 210: scatter and box-and-violin too (one value per cell: a box from a
   // single value is degenerate, a line — but that is what Prism offers).
-  contingency: optionsFor(["grouped-bars", "grouped-stacked", "grouped-hbars", "heatmap", "grouped-scatter", "grouped-box"]),
+  // Seq 212: floating bars — one bar per outcome, spanning its counts across the rows.
+  contingency: optionsFor(["grouped-bars", "grouped-stacked", "grouped-hbars", "heatmap", "grouped-scatter", "grouped-box", "floating-bars"]),
   survival: optionsFor(["survival"]),
 };

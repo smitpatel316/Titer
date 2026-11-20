@@ -34,6 +34,7 @@ export type GraphType =
   | "grouped-lines"
   | "grouped-stacked"
   | "grouped-hbars"
+  | "floating-bars"
   | "pie"
   | "donut"
   | "schild-plot"

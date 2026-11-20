@@ -3320,6 +3320,148 @@ check("seq 211 MCP: build-graph accepts the spike and combo kinds on XY tables",
   deepStrictEqual(created, ["xy-spikes", "xy-bar-scatter"]);
 });
 
+// ── Floating bars (seq 212) ──────────────────────────────────────────────
+
+check("seq 212: a column table's floating bars span each column's min to max", () => {
+  const table: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "5", "7"],
+      ["r2", "3", "9"],
+      ["r3", "4", "8"],
+    ],
+  };
+  const dataset = readTable(table);
+  const options = newGraphOptions("floating-bars");
+  const fig = GRAPHS["floating-bars"].build(
+    plotColumns(dataset, "floating-bars", options, "column"),
+    options,
+    paintOf(options, 2),
+    dataset.titles,
+  );
+  const traces = fig.data as { type: string; name: string; x: number[]; y: number[]; base: number[] }[];
+  deepStrictEqual(traces.map((t) => [t.name, t.x, t.y, t.base]), [
+    ["A", [0], [2], [3]], // 3 to 5
+    ["B", [1], [2], [7]], // 7 to 9
+  ]);
+});
+
+check("seq 212: a grouped table's floating bars span each cell's min to max, per row", () => {
+  const table: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+    rows: [
+      ["r1", "10", "14", "20", "24"],
+      ["r2", "11", "15", "21", "25"],
+    ],
+    groups: 2,
+    replicates: 2,
+  };
+  const dataset = readTable(table);
+  const options = newGraphOptions("floating-bars");
+  const fig = GRAPHS["floating-bars"].build(
+    plotColumns(dataset, "floating-bars", options, "grouped"),
+    options,
+    paintOf(options, 2),
+    dataset.titles,
+    "replicates",
+  );
+  const traces = fig.data as { type: string; name: string; x: string[]; y: number[]; base: number[] }[];
+  deepStrictEqual(traces.map((t) => [t.name, t.x, t.y, t.base]), [
+    ["A", ["r1", "r2"], [4, 4], [10, 11]],
+    ["B", ["r1", "r2"], [4, 4], [20, 21]],
+  ]);
+});
+
+check("seq 212: on a summary table a floating bar is the stored Mean ± its stored error", () => {
+  const dataset = readTable(summaryTable());
+  const options = newGraphOptions("floating-bars"); // SEM by default
+  const fig = GRAPHS["floating-bars"].build(
+    plotColumns(dataset, "floating-bars", options, "grouped"),
+    options,
+    paintOf(options, 2),
+    dataset.titles,
+    "mean-sd-n",
+  );
+  const traces = fig.data as { name: string; y: number[]; base: number[] }[];
+  // A: 10 ± 1 and 12 ± 1.5; B: 20 ± 4/3 and 22 ± 2.
+  deepStrictEqual(traces.map((t) => [t.name, t.y, t.base]), [
+    ["A", [2, 3], [9, 10.5]],
+    ["B", [8 / 3, 4], [20 - 4 / 3, 20]],
+  ]);
+  // SD instead of SEM widens the bars to the stored SDs.
+  const sd = GRAPHS["floating-bars"].build(
+    plotColumns(dataset, "floating-bars", { ...options, error: "sd" }, "grouped"),
+    { ...options, error: "sd" },
+    paintOf(options, 2),
+    dataset.titles,
+    "mean-sd-n",
+  );
+  deepStrictEqual((sd.data as { name: string; y: number[]; base: number[] }[]).map((t) => [t.name, t.y, t.base]), [
+    ["A", [4, 6], [8, 9]],
+    ["B", [8, 12], [16, 16]],
+  ]);
+});
+
+check("seq 212: a contingency table's floating bars span each outcome's counts across the rows", () => {
+  const table: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "5", "7"],
+      ["r2", "3", "9"],
+    ],
+  };
+  const dataset = readTable(table);
+  const options = newGraphOptions("floating-bars");
+  const fig = GRAPHS["floating-bars"].build(
+    plotColumns(dataset, "floating-bars", options, "contingency"),
+    options,
+    paintOf(options, 2),
+    dataset.titles,
+  );
+  const traces = fig.data as { name: string; y: number[]; base: number[] }[];
+  deepStrictEqual(traces.map((t) => [t.name, t.y, t.base]), [
+    ["A", [2], [3]],
+    ["B", [2], [7]],
+  ]);
+});
+
+check("seq 212 MCP: build-graph accepts floating bars on column, grouped, nested and contingency — not XY", async () => {
+  const harness = mcpLaggingHarness(true);
+  const created: string[] = [];
+  harness.deps.actions!.createGraph = (tableId, graphType) => {
+    created.push(graphType);
+    return `graph_${graphType}`;
+  };
+  for (const [tableType, columns, rows] of [
+    ["column", ["", "A", "B"], [["r1", 5, 7]]],
+    ["grouped", ["", "A:Y1", "B:Y1"], [["r1", 5, 7]]],
+    ["nested", ["", "A:S1:R1", "A:S1:R2"], [["r1", 5, 7]]],
+    ["contingency", ["", "A", "B"], [["r1", 5, 7]]],
+  ] as const) {
+    const made = await harness.run(`job-212-${tableType}`, "create-table", { table_type: tableType, columns, rows });
+    harness.sync();
+    const done = await harness.run(`job-212-${tableType}-graph`, "build-graph", {
+      table_id: (made.result as { table_id: string }).table_id,
+      graph_type: "floating-bars",
+    });
+    strictEqual((done.result as { graph_type: string }).graph_type, "floating-bars");
+  }
+  const xy = await harness.run("job-212-xy", "create-table", {
+    table_type: "xy",
+    columns: ["", "X", "A"],
+    rows: [["", 1, 10]],
+  });
+  harness.sync();
+  await rejects(
+    harness.run("job-212-xy-graph", "build-graph", {
+      table_id: (xy.result as { table_id: string }).table_id,
+      graph_type: "floating-bars",
+    }),
+    /not offered for a XY table/,
+  );
+  deepStrictEqual(created, ["floating-bars", "floating-bars", "floating-bars", "floating-bars"]);
+});
+
 check("summary subcolumns: interleaved scatter on a summary table draws centers, not points", () => {
   const dataset = readTable(summaryTable());
   const options = newGraphOptions("grouped-scatter");

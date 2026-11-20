@@ -953,6 +953,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
           logLeftOut={logLeftOut}
           binsTooMany={binsTooMany}
           replicates={parent?.tableType === "xy" && Boolean(parent.data && isGrouped(parent.data))}
+          summary={dataset?.summary}
           onFindGenes={findGenes}
           numericNames={dataset?.numeric.map((c) => c.name) ?? []}
           allNames={dataset?.columns.map((c) => c.name) ?? []}

@@ -16,6 +16,7 @@ import {
   type TableType,
 } from "../../store/types";
 import { isSignificant, pStars } from "../../lib/format";
+import type { SummaryFormat } from "../../lib/summary-format";
 import { GRAPHS, variablePair } from ".";
 import { GROUPED_STARS, lettersFit, ranOn, starsFit, type SigComparison } from "./significance-overlay";
 import { cutoffAsP, cutoffOfP, volcanoAxes, volcanoPair } from "./volcano";
@@ -60,6 +61,9 @@ export interface SectionContext {
   binsTooMany: boolean;
   /** An XY table whose data sets hold replicates. */
   replicates: boolean;
+  /** The table's sub-column format ("replicates", or the summaries its
+   *  sub-columns hold) — only the summary-conditional Data choices read it. */
+  summary?: SummaryFormat;
   numericNames: string[];
   allNames: string[];
   /** The chosen regression's failure, when it couldn't be fitted. */
@@ -868,6 +872,12 @@ function dataOptions(c: SectionContext): React.ReactNode {
           {stackAs}
         </>
       ); // stacked bars have no error bars
+    case "floating-bars":
+      // The span's error kind matters only on a summary table (Mean ± error);
+      // on replicates the bars are the cell's min to max whatever it says.
+      return c.summary !== undefined && c.summary !== "replicates" ? (
+        <Choice label="Span" value={options.error} onChange={(error) => set({ error })} items={ERROR_ITEMS} />
+      ) : null;
     case "heatmap":
       return c.tableType === "grouped" ? center : null; // a cell sums up a group's replicates
     case "histogram":
@@ -1536,6 +1546,8 @@ function ownStyle(context: SectionContext): React.ReactNode {
     case "grouped-stacked":
     case "histogram":
       return shapes("Bars");
+    case "floating-bars":
+      return shapes("Bars", gap);
     case "xy-area":
       return shapes("Area");
     case "grouped-bars":
