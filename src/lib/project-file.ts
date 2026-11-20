@@ -209,7 +209,7 @@ type OptionalOption = {
 const OPTIONAL_OPTIONS = {
   yMin: "number", yMax: "number", yStep: "number", xMin: "number", xMax: "number", xStep: "number", y2Min: "number", y2Max: "number", y2Step: "number", binWidth: "number",
   yMinConstant: "text", yMaxConstant: "text", xMinConstant: "text", xMaxConstant: "text",
-  sigAnalysisId: "text", sigPairs: "texts", regAnalysisId: "text", demingAnalysisId: "text", coxAnalysisId: "text", ttestAnalysisId: "text", poissonAnalysisId: "text", smoothAnalysisId: "text", pcaAnalysisId: "text", kmeansAnalysisId: "text", monteCarloAnalysisId: "text", xVariable: "text", yVariable: "text", bubbleSizeVariable: "text", bubbleColorVariable: "text",
+  sigAnalysisId: "text", sigPairs: "texts", regAnalysisId: "text", demingAnalysisId: "text", coxAnalysisId: "text", ttestAnalysisId: "text", poissonAnalysisId: "text", smoothAnalysisId: "text", pcaAnalysisId: "text", kmeansAnalysisId: "text", hclustAnalysisId: "text", monteCarloAnalysisId: "text", xVariable: "text", yVariable: "text", bubbleSizeVariable: "text", bubbleColorVariable: "text",
   volcanoX: "text", volcanoY: "text", volcanoLabel: "text", volcanoGroupA: "text", volcanoGroupB: "text", rightYDataset: "text", y2Label: "text",
   palette: "palette", series: "styles", points: "pointStyles", outlineColor: "color", pointOutlineColor: "color", errorColor: "color",
   legend: "place", note: "place", refLines: "refLines", sets: "texts",
@@ -217,7 +217,7 @@ const OPTIONAL_OPTIONS = {
 // A graph's links to its analyses (FF-F13): the graph options that name a
 // sibling analysis node — the source of an overlay (significance brackets,
 // a regression line, a Deming/Cox/t-test/Poisson/PCA/smooth/k-means/
-// Monte-Carlo overlay). Every `*AnalysisId` option, including the two the
+// hierarchical-clustering/Monte-Carlo overlay). Every `*AnalysisId` option, including the two the
 // old warning missed (kmeans, monte-carlo).
 const GRAPH_ANALYSIS_LINKS = [
   "sigAnalysisId",
@@ -229,6 +229,7 @@ const GRAPH_ANALYSIS_LINKS = [
   "pcaAnalysisId",
   "smoothAnalysisId",
   "kmeansAnalysisId",
+  "hclustAnalysisId",
   "monteCarloAnalysisId",
 ] as const;
 // The retired dose-response graph's own options (before Titer 1.0.7): no
@@ -342,6 +343,10 @@ const PARAMS = {
   // K-means clustering (plan 30): how many clusters, and whether to
   // standardise the variables first.
   clusters: "number", standardise: "yes/no",
+  // Hierarchical clustering (seq 160): how clusters merge, and how rows
+  // are measured apart.
+  linkage: ["complete", "average", "single", "ward.D2"],
+  distance: ["euclidean", "manhattan"],
   // Mixed-effects model (plan 20): the random structure and the subject
   // identity are choices; `subjectFactor` is one name + its per-row levels.
   // (FF-F18) `slopeVariable` was dropped in v1.5.0: a dead param, accepted
@@ -900,6 +905,7 @@ const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "poisson-regression": ["dependent", "predictors", "quasi", "sets"],
   "principal-component-analysis": ["scale", "components", "sets"],
   "k-means": ["clusters", "standardise", "sets"],
+  "hierarchical-clustering": ["clusters", "linkage", "distance", "standardise", "sets"],
   "cox-proportional-hazards": ["time", "status", "covariates", "ties", "stratifyBy", "sets"],
   "extract-rearrange": [
     "target", "x", "response", "grouping", "subject", "rowTitles", "rowFactor", "columnFactor", "rowVariable",

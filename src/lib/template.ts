@@ -267,6 +267,7 @@ export const GRAPH_ANALYSIS_ID_KEYS = [
   "smoothAnalysisId",
   "pcaAnalysisId",
   "kmeansAnalysisId",
+  "hclustAnalysisId",
   "monteCarloAnalysisId",
 ] as const;
 

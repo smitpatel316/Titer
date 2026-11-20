@@ -32137,6 +32137,1641 @@
  "k-means kmeansIdentical {\"clusters\":2,\"standardise\":false}": {
   "error": "K-means clustering needs fewer clusters than distinct data points — there are only 1 distinct complete row for 2 clusters."
  },
+ "hierarchical-clustering kmeans {\"clusters\":2,\"standardise\":false}": {
+  "testType": "hierarchical-clustering",
+  "subtitle": "Hierarchical clustering",
+  "stats": [
+   {
+    "label": "Number of clusters (k)",
+    "value": 2
+   },
+   {
+    "label": "Complete rows (n)",
+    "value": 6
+   },
+   {
+    "label": "Variables (p)",
+    "value": 2
+   },
+   {
+    "label": "Suggested k (Gap 1-SE rule)",
+    "value": 2
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   },
+   {
+    "name": "Y",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   }
+  ],
+  "notes": "Hierarchical clustering on the variables in their original units. Agglomerative clustering, complete linkage (farthest pair), Euclidean distances. The clustering is deterministic — the same table and settings always give the same tree. Uses 6 complete rows. Choosing k covers k = 2–5: within-cluster sum of squares (Elbow), average silhouette width, and the Gap statistic against 10 uniform reference sets (seed 1). The Gap 1-SE rule suggests k = 2.",
+  "hclustClusters": [
+   {
+    "cluster": "Cluster 1",
+    "centroid": [
+     1.333333333,
+     1.333333333
+    ],
+    "n": 3,
+    "withinSs": 0.6666666667
+   },
+   {
+    "cluster": "Cluster 2",
+    "centroid": [
+     8.333333333,
+     8.333333333
+    ],
+    "n": 3,
+    "withinSs": 0.6666666667
+   }
+  ],
+  "hclustAssignments": [
+   {
+    "row": "Row 1",
+    "cluster": 1
+   },
+   {
+    "row": "Row 2",
+    "cluster": 1
+   },
+   {
+    "row": "Row 3",
+    "cluster": 1
+   },
+   {
+    "row": "Row 4",
+    "cluster": 2
+   },
+   {
+    "row": "Row 5",
+    "cluster": 2
+   },
+   {
+    "row": "Row 6",
+    "cluster": 2
+   }
+  ],
+  "hclustDendrogram": {
+   "merge": [
+    [
+     -1,
+     -2
+    ],
+    [
+     -4,
+     -5
+    ],
+    [
+     -3,
+     1
+    ],
+    [
+     -6,
+     2
+    ],
+    [
+     3,
+     4
+    ]
+   ],
+   "heights": [
+    1,
+    1,
+    1.414213562,
+    1.414213562,
+    10.63014581
+   ],
+   "order": [
+    2,
+    0,
+    1,
+    5,
+    3,
+    4
+   ],
+   "labels": [
+    "Row 1",
+    "Row 2",
+    "Row 3",
+    "Row 4",
+    "Row 5",
+    "Row 6"
+   ],
+   "cutHeight": 6.022179688
+  },
+  "choosingK": [
+   {
+    "k": 2,
+    "withinSs": 1.333333333,
+    "avgSilhouette": 0.885316831,
+    "gap": 1.979397346,
+    "gapSe": 0.2782543977
+   },
+   {
+    "k": 3,
+    "withinSs": 0.9166666667,
+    "avgSilhouette": 0.4905979891,
+    "gap": 1.256396782,
+    "gapSe": 0.3327141102
+   },
+   {
+    "k": 4,
+    "withinSs": 0.5,
+    "avgSilhouette": 0.09763107294,
+    "gap": 0.608182771,
+    "gapSe": 0.652558894
+   },
+   {
+    "k": 5,
+    "withinSs": 0.25,
+    "avgSilhouette": 0.04881553647,
+    "gap": -0.3531692243,
+    "gapSe": 0.9459618499
+   }
+  ]
+ },
+ "hierarchical-clustering kmeans {\"clusters\":2,\"standardise\":true}": {
+  "testType": "hierarchical-clustering",
+  "subtitle": "Hierarchical clustering",
+  "stats": [
+   {
+    "label": "Number of clusters (k)",
+    "value": 2
+   },
+   {
+    "label": "Complete rows (n)",
+    "value": 6
+   },
+   {
+    "label": "Variables (p)",
+    "value": 2
+   },
+   {
+    "label": "Suggested k (Gap 1-SE rule)",
+    "value": 2
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   },
+   {
+    "name": "Y",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   }
+  ],
+  "notes": "Hierarchical clustering on standardised variables (z-scores) — each variable scaled to mean 0, SD 1 before clustering. Cluster centroids are reported back-transformed to the original units. Agglomerative clustering, complete linkage (farthest pair), Euclidean distances. The clustering is deterministic — the same table and settings always give the same tree. Uses 6 complete rows. Choosing k covers k = 2–5: within-cluster sum of squares (Elbow), average silhouette width, and the Gap statistic against 10 uniform reference sets (seed 1). The Gap 1-SE rule suggests k = 2.",
+  "hclustClusters": [
+   {
+    "cluster": "Cluster 1",
+    "centroid": [
+     1.333333333,
+     1.333333333
+    ],
+    "n": 3,
+    "withinSs": 0.04454342984
+   },
+   {
+    "cluster": "Cluster 2",
+    "centroid": [
+     8.333333333,
+     8.333333333
+    ],
+    "n": 3,
+    "withinSs": 0.04454342984
+   }
+  ],
+  "hclustAssignments": [
+   {
+    "row": "Row 1",
+    "cluster": 1
+   },
+   {
+    "row": "Row 2",
+    "cluster": 1
+   },
+   {
+    "row": "Row 3",
+    "cluster": 1
+   },
+   {
+    "row": "Row 4",
+    "cluster": 2
+   },
+   {
+    "row": "Row 5",
+    "cluster": 2
+   },
+   {
+    "row": "Row 6",
+    "cluster": 2
+   }
+  ],
+  "hclustDendrogram": {
+   "merge": [
+    [
+     -1,
+     -2
+    ],
+    [
+     -4,
+     -5
+    ],
+    [
+     -3,
+     1
+    ],
+    [
+     -6,
+     2
+    ],
+    [
+     3,
+     4
+    ]
+   ],
+   "heights": [
+    0.2584862564,
+    0.2584862564,
+    0.3655547695,
+    0.3655547695,
+    2.747746596
+   ],
+   "order": [
+    2,
+    0,
+    1,
+    5,
+    3,
+    4
+   ],
+   "labels": [
+    "Row 1",
+    "Row 2",
+    "Row 3",
+    "Row 4",
+    "Row 5",
+    "Row 6"
+   ],
+   "cutHeight": 1.556650683
+  },
+  "choosingK": [
+   {
+    "k": 2,
+    "withinSs": 0.08908685969,
+    "avgSilhouette": 0.885316831,
+    "gap": 1.979397346,
+    "gapSe": 0.2782543977
+   },
+   {
+    "k": 3,
+    "withinSs": 0.06124721604,
+    "avgSilhouette": 0.4905979891,
+    "gap": 1.256396782,
+    "gapSe": 0.3327141102
+   },
+   {
+    "k": 4,
+    "withinSs": 0.03340757238,
+    "avgSilhouette": 0.09763107294,
+    "gap": 0.608182771,
+    "gapSe": 0.652558894
+   },
+   {
+    "k": 5,
+    "withinSs": 0.01670378619,
+    "avgSilhouette": 0.04881553647,
+    "gap": -0.3531692243,
+    "gapSe": 0.9459618499
+   }
+  ]
+ },
+ "hierarchical-clustering kmeans {}": {
+  "testType": "hierarchical-clustering",
+  "subtitle": "Hierarchical clustering",
+  "stats": [
+   {
+    "label": "Number of clusters (k)",
+    "value": 2
+   },
+   {
+    "label": "Complete rows (n)",
+    "value": 6
+   },
+   {
+    "label": "Variables (p)",
+    "value": 2
+   },
+   {
+    "label": "Suggested k (Gap 1-SE rule)",
+    "value": 2
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   },
+   {
+    "name": "Y",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   }
+  ],
+  "notes": "Hierarchical clustering on standardised variables (z-scores) — each variable scaled to mean 0, SD 1 before clustering. Cluster centroids are reported back-transformed to the original units. Agglomerative clustering, complete linkage (farthest pair), Euclidean distances. The clustering is deterministic — the same table and settings always give the same tree. Uses 6 complete rows. Choosing k covers k = 2–5: within-cluster sum of squares (Elbow), average silhouette width, and the Gap statistic against 10 uniform reference sets (seed 1). The Gap 1-SE rule suggests k = 2.",
+  "hclustClusters": [
+   {
+    "cluster": "Cluster 1",
+    "centroid": [
+     1.333333333,
+     1.333333333
+    ],
+    "n": 3,
+    "withinSs": 0.04454342984
+   },
+   {
+    "cluster": "Cluster 2",
+    "centroid": [
+     8.333333333,
+     8.333333333
+    ],
+    "n": 3,
+    "withinSs": 0.04454342984
+   }
+  ],
+  "hclustAssignments": [
+   {
+    "row": "Row 1",
+    "cluster": 1
+   },
+   {
+    "row": "Row 2",
+    "cluster": 1
+   },
+   {
+    "row": "Row 3",
+    "cluster": 1
+   },
+   {
+    "row": "Row 4",
+    "cluster": 2
+   },
+   {
+    "row": "Row 5",
+    "cluster": 2
+   },
+   {
+    "row": "Row 6",
+    "cluster": 2
+   }
+  ],
+  "hclustDendrogram": {
+   "merge": [
+    [
+     -1,
+     -2
+    ],
+    [
+     -4,
+     -5
+    ],
+    [
+     -3,
+     1
+    ],
+    [
+     -6,
+     2
+    ],
+    [
+     3,
+     4
+    ]
+   ],
+   "heights": [
+    0.2584862564,
+    0.2584862564,
+    0.3655547695,
+    0.3655547695,
+    2.747746596
+   ],
+   "order": [
+    2,
+    0,
+    1,
+    5,
+    3,
+    4
+   ],
+   "labels": [
+    "Row 1",
+    "Row 2",
+    "Row 3",
+    "Row 4",
+    "Row 5",
+    "Row 6"
+   ],
+   "cutHeight": 1.556650683
+  },
+  "choosingK": [
+   {
+    "k": 2,
+    "withinSs": 0.08908685969,
+    "avgSilhouette": 0.885316831,
+    "gap": 1.979397346,
+    "gapSe": 0.2782543977
+   },
+   {
+    "k": 3,
+    "withinSs": 0.06124721604,
+    "avgSilhouette": 0.4905979891,
+    "gap": 1.256396782,
+    "gapSe": 0.3327141102
+   },
+   {
+    "k": 4,
+    "withinSs": 0.03340757238,
+    "avgSilhouette": 0.09763107294,
+    "gap": 0.608182771,
+    "gapSe": 0.652558894
+   },
+   {
+    "k": 5,
+    "withinSs": 0.01670378619,
+    "avgSilhouette": 0.04881553647,
+    "gap": -0.3531692243,
+    "gapSe": 0.9459618499
+   }
+  ]
+ },
+ "hierarchical-clustering kmeans {\"clusters\":3,\"standardise\":false}": {
+  "testType": "hierarchical-clustering",
+  "subtitle": "Hierarchical clustering",
+  "stats": [
+   {
+    "label": "Number of clusters (k)",
+    "value": 3
+   },
+   {
+    "label": "Complete rows (n)",
+    "value": 6
+   },
+   {
+    "label": "Variables (p)",
+    "value": 2
+   },
+   {
+    "label": "Suggested k (Gap 1-SE rule)",
+    "value": 2
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   },
+   {
+    "name": "Y",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   }
+  ],
+  "notes": "Hierarchical clustering on the variables in their original units. Agglomerative clustering, complete linkage (farthest pair), Euclidean distances. The clustering is deterministic — the same table and settings always give the same tree. Uses 6 complete rows. Choosing k covers k = 2–5: within-cluster sum of squares (Elbow), average silhouette width, and the Gap statistic against 10 uniform reference sets (seed 1). The Gap 1-SE rule suggests k = 2.",
+  "hclustClusters": [
+   {
+    "cluster": "Cluster 1",
+    "centroid": [
+     1.333333333,
+     1.333333333
+    ],
+    "n": 3,
+    "withinSs": 0.6666666667
+   },
+   {
+    "cluster": "Cluster 2",
+    "centroid": [
+     8,
+     9
+    ],
+    "n": 1,
+    "withinSs": 0
+   },
+   {
+    "cluster": "Cluster 3",
+    "centroid": [
+     8.5,
+     8
+    ],
+    "n": 2,
+    "withinSs": 0.25
+   }
+  ],
+  "hclustAssignments": [
+   {
+    "row": "Row 1",
+    "cluster": 1
+   },
+   {
+    "row": "Row 2",
+    "cluster": 1
+   },
+   {
+    "row": "Row 3",
+    "cluster": 1
+   },
+   {
+    "row": "Row 4",
+    "cluster": 3
+   },
+   {
+    "row": "Row 5",
+    "cluster": 3
+   },
+   {
+    "row": "Row 6",
+    "cluster": 2
+   }
+  ],
+  "hclustDendrogram": {
+   "merge": [
+    [
+     -1,
+     -2
+    ],
+    [
+     -4,
+     -5
+    ],
+    [
+     -3,
+     1
+    ],
+    [
+     -6,
+     2
+    ],
+    [
+     3,
+     4
+    ]
+   ],
+   "heights": [
+    1,
+    1,
+    1.414213562,
+    1.414213562,
+    10.63014581
+   ],
+   "order": [
+    2,
+    0,
+    1,
+    5,
+    3,
+    4
+   ],
+   "labels": [
+    "Row 1",
+    "Row 2",
+    "Row 3",
+    "Row 4",
+    "Row 5",
+    "Row 6"
+   ],
+   "cutHeight": 1.414213562
+  },
+  "choosingK": [
+   {
+    "k": 2,
+    "withinSs": 1.333333333,
+    "avgSilhouette": 0.885316831,
+    "gap": 1.979397346,
+    "gapSe": 0.2782543977
+   },
+   {
+    "k": 3,
+    "withinSs": 0.9166666667,
+    "avgSilhouette": 0.4905979891,
+    "gap": 1.256396782,
+    "gapSe": 0.3327141102
+   },
+   {
+    "k": 4,
+    "withinSs": 0.5,
+    "avgSilhouette": 0.09763107294,
+    "gap": 0.608182771,
+    "gapSe": 0.652558894
+   },
+   {
+    "k": 5,
+    "withinSs": 0.25,
+    "avgSilhouette": 0.04881553647,
+    "gap": -0.3531692243,
+    "gapSe": 0.9459618499
+   }
+  ]
+ },
+ "hierarchical-clustering kmeans {\"clusters\":2,\"linkage\":\"average\",\"standardise\":false}": {
+  "testType": "hierarchical-clustering",
+  "subtitle": "Hierarchical clustering",
+  "stats": [
+   {
+    "label": "Number of clusters (k)",
+    "value": 2
+   },
+   {
+    "label": "Complete rows (n)",
+    "value": 6
+   },
+   {
+    "label": "Variables (p)",
+    "value": 2
+   },
+   {
+    "label": "Suggested k (Gap 1-SE rule)",
+    "value": 2
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   },
+   {
+    "name": "Y",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   }
+  ],
+  "notes": "Hierarchical clustering on the variables in their original units. Agglomerative clustering, average linkage (mean pair distance), Euclidean distances. The clustering is deterministic — the same table and settings always give the same tree. Uses 6 complete rows. Choosing k covers k = 2–5: within-cluster sum of squares (Elbow), average silhouette width, and the Gap statistic against 10 uniform reference sets (seed 1). The Gap 1-SE rule suggests k = 2.",
+  "hclustClusters": [
+   {
+    "cluster": "Cluster 1",
+    "centroid": [
+     1.333333333,
+     1.333333333
+    ],
+    "n": 3,
+    "withinSs": 0.6666666667
+   },
+   {
+    "cluster": "Cluster 2",
+    "centroid": [
+     8.333333333,
+     8.333333333
+    ],
+    "n": 3,
+    "withinSs": 0.6666666667
+   }
+  ],
+  "hclustAssignments": [
+   {
+    "row": "Row 1",
+    "cluster": 1
+   },
+   {
+    "row": "Row 2",
+    "cluster": 1
+   },
+   {
+    "row": "Row 3",
+    "cluster": 1
+   },
+   {
+    "row": "Row 4",
+    "cluster": 2
+   },
+   {
+    "row": "Row 5",
+    "cluster": 2
+   },
+   {
+    "row": "Row 6",
+    "cluster": 2
+   }
+  ],
+  "hclustDendrogram": {
+   "merge": [
+    [
+     -1,
+     -2
+    ],
+    [
+     -4,
+     -5
+    ],
+    [
+     -3,
+     1
+    ],
+    [
+     -6,
+     2
+    ],
+    [
+     3,
+     4
+    ]
+   ],
+   "heights": [
+    1,
+    1,
+    1.207106781,
+    1.207106781,
+    9.93309615
+   ],
+   "order": [
+    2,
+    0,
+    1,
+    5,
+    3,
+    4
+   ],
+   "labels": [
+    "Row 1",
+    "Row 2",
+    "Row 3",
+    "Row 4",
+    "Row 5",
+    "Row 6"
+   ],
+   "cutHeight": 5.570101466
+  },
+  "choosingK": [
+   {
+    "k": 2,
+    "withinSs": 1.333333333,
+    "avgSilhouette": 0.885316831,
+    "gap": 2.003062415,
+    "gapSe": 0.2986946258
+   },
+   {
+    "k": 3,
+    "withinSs": 0.9166666667,
+    "avgSilhouette": 0.4905979891,
+    "gap": 1.256396782,
+    "gapSe": 0.3327141102
+   },
+   {
+    "k": 4,
+    "withinSs": 0.5,
+    "avgSilhouette": 0.09763107294,
+    "gap": 0.6082792533,
+    "gapSe": 0.6525761447
+   },
+   {
+    "k": 5,
+    "withinSs": 0.25,
+    "avgSilhouette": 0.04881553647,
+    "gap": -0.3531692243,
+    "gapSe": 0.9459618499
+   }
+  ]
+ },
+ "hierarchical-clustering kmeans {\"clusters\":2,\"linkage\":\"single\",\"standardise\":false}": {
+  "testType": "hierarchical-clustering",
+  "subtitle": "Hierarchical clustering",
+  "stats": [
+   {
+    "label": "Number of clusters (k)",
+    "value": 2
+   },
+   {
+    "label": "Complete rows (n)",
+    "value": 6
+   },
+   {
+    "label": "Variables (p)",
+    "value": 2
+   },
+   {
+    "label": "Suggested k (Gap 1-SE rule)",
+    "value": 2
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   },
+   {
+    "name": "Y",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   }
+  ],
+  "notes": "Hierarchical clustering on the variables in their original units. Agglomerative clustering, single linkage (nearest pair), Euclidean distances. The clustering is deterministic — the same table and settings always give the same tree. Uses 6 complete rows. Choosing k covers k = 2–5: within-cluster sum of squares (Elbow), average silhouette width, and the Gap statistic against 10 uniform reference sets (seed 1). The Gap 1-SE rule suggests k = 2.",
+  "hclustClusters": [
+   {
+    "cluster": "Cluster 1",
+    "centroid": [
+     1.333333333,
+     1.333333333
+    ],
+    "n": 3,
+    "withinSs": 0.6666666667
+   },
+   {
+    "cluster": "Cluster 2",
+    "centroid": [
+     8.333333333,
+     8.333333333
+    ],
+    "n": 3,
+    "withinSs": 0.6666666667
+   }
+  ],
+  "hclustAssignments": [
+   {
+    "row": "Row 1",
+    "cluster": 1
+   },
+   {
+    "row": "Row 2",
+    "cluster": 1
+   },
+   {
+    "row": "Row 3",
+    "cluster": 1
+   },
+   {
+    "row": "Row 4",
+    "cluster": 2
+   },
+   {
+    "row": "Row 5",
+    "cluster": 2
+   },
+   {
+    "row": "Row 6",
+    "cluster": 2
+   }
+  ],
+  "hclustDendrogram": {
+   "merge": [
+    [
+     -1,
+     -2
+    ],
+    [
+     -3,
+     1
+    ],
+    [
+     -4,
+     -5
+    ],
+    [
+     -6,
+     3
+    ],
+    [
+     2,
+     4
+    ]
+   ],
+   "heights": [
+    1,
+    1,
+    1,
+    1,
+    9.219544457
+   ],
+   "order": [
+    2,
+    0,
+    1,
+    5,
+    3,
+    4
+   ],
+   "labels": [
+    "Row 1",
+    "Row 2",
+    "Row 3",
+    "Row 4",
+    "Row 5",
+    "Row 6"
+   ],
+   "cutHeight": 5.109772229
+  },
+  "choosingK": [
+   {
+    "k": 2,
+    "withinSs": 1.333333333,
+    "avgSilhouette": 0.885316831,
+    "gap": 2.15272583,
+    "gapSe": 0.3726939524
+   },
+   {
+    "k": 3,
+    "withinSs": 0.9166666667,
+    "avgSilhouette": 0.4905979891,
+    "gap": 1.438058448,
+    "gapSe": 0.5751996067
+   },
+   {
+    "k": 4,
+    "withinSs": 0.6666666667,
+    "avgSilhouette": 0.4395210865,
+    "gap": 0.4354105121,
+    "gapSe": 0.8017700566
+   },
+   {
+    "k": 5,
+    "withinSs": 0.25,
+    "avgSilhouette": 0.04881553647,
+    "gap": -0.3531692243,
+    "gapSe": 0.9459618499
+   }
+  ]
+ },
+ "hierarchical-clustering kmeans {\"clusters\":2,\"linkage\":\"ward.D2\",\"standardise\":false}": {
+  "testType": "hierarchical-clustering",
+  "subtitle": "Hierarchical clustering",
+  "stats": [
+   {
+    "label": "Number of clusters (k)",
+    "value": 2
+   },
+   {
+    "label": "Complete rows (n)",
+    "value": 6
+   },
+   {
+    "label": "Variables (p)",
+    "value": 2
+   },
+   {
+    "label": "Suggested k (Gap 1-SE rule)",
+    "value": 2
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   },
+   {
+    "name": "Y",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   }
+  ],
+  "notes": "Hierarchical clustering on the variables in their original units. Agglomerative clustering, Ward's linkage (smallest increase in within-cluster variance), Euclidean distances. The clustering is deterministic — the same table and settings always give the same tree. Uses 6 complete rows. Choosing k covers k = 2–5: within-cluster sum of squares (Elbow), average silhouette width, and the Gap statistic against 10 uniform reference sets (seed 1). The Gap 1-SE rule suggests k = 2.",
+  "hclustClusters": [
+   {
+    "cluster": "Cluster 1",
+    "centroid": [
+     1.333333333,
+     1.333333333
+    ],
+    "n": 3,
+    "withinSs": 0.6666666667
+   },
+   {
+    "cluster": "Cluster 2",
+    "centroid": [
+     8.333333333,
+     8.333333333
+    ],
+    "n": 3,
+    "withinSs": 0.6666666667
+   }
+  ],
+  "hclustAssignments": [
+   {
+    "row": "Row 1",
+    "cluster": 1
+   },
+   {
+    "row": "Row 2",
+    "cluster": 1
+   },
+   {
+    "row": "Row 3",
+    "cluster": 1
+   },
+   {
+    "row": "Row 4",
+    "cluster": 2
+   },
+   {
+    "row": "Row 5",
+    "cluster": 2
+   },
+   {
+    "row": "Row 6",
+    "cluster": 2
+   }
+  ],
+  "hclustDendrogram": {
+   "merge": [
+    [
+     -1,
+     -2
+    ],
+    [
+     -4,
+     -5
+    ],
+    [
+     -3,
+     1
+    ],
+    [
+     -6,
+     2
+    ],
+    [
+     3,
+     4
+    ]
+   ],
+   "heights": [
+    1,
+    1,
+    1.290994449,
+    1.290994449,
+    17.1464282
+   ],
+   "order": [
+    2,
+    0,
+    1,
+    5,
+    3,
+    4
+   ],
+   "labels": [
+    "Row 1",
+    "Row 2",
+    "Row 3",
+    "Row 4",
+    "Row 5",
+    "Row 6"
+   ],
+   "cutHeight": 9.218711324
+  },
+  "choosingK": [
+   {
+    "k": 2,
+    "withinSs": 1.333333333,
+    "avgSilhouette": 0.885316831,
+    "gap": 1.946138637,
+    "gapSe": 0.2473416614
+   },
+   {
+    "k": 3,
+    "withinSs": 0.9166666667,
+    "avgSilhouette": 0.4905979891,
+    "gap": 1.256396782,
+    "gapSe": 0.3327141102
+   },
+   {
+    "k": 4,
+    "withinSs": 0.5,
+    "avgSilhouette": 0.09763107294,
+    "gap": 0.608182771,
+    "gapSe": 0.652558894
+   },
+   {
+    "k": 5,
+    "withinSs": 0.25,
+    "avgSilhouette": 0.04881553647,
+    "gap": -0.3531692243,
+    "gapSe": 0.9459618499
+   }
+  ]
+ },
+ "hierarchical-clustering kmeans {\"clusters\":2,\"distance\":\"manhattan\",\"standardise\":false}": {
+  "testType": "hierarchical-clustering",
+  "subtitle": "Hierarchical clustering",
+  "stats": [
+   {
+    "label": "Number of clusters (k)",
+    "value": 2
+   },
+   {
+    "label": "Complete rows (n)",
+    "value": 6
+   },
+   {
+    "label": "Variables (p)",
+    "value": 2
+   },
+   {
+    "label": "Suggested k (Gap 1-SE rule)",
+    "value": 2
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   },
+   {
+    "name": "Y",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   }
+  ],
+  "notes": "Hierarchical clustering on the variables in their original units. Agglomerative clustering, complete linkage (farthest pair), Manhattan distances. The clustering is deterministic — the same table and settings always give the same tree. Uses 6 complete rows. Choosing k covers k = 2–5: within-cluster sum of squares (Elbow), average silhouette width, and the Gap statistic against 10 uniform reference sets (seed 1). The Gap 1-SE rule suggests k = 2.",
+  "hclustClusters": [
+   {
+    "cluster": "Cluster 1",
+    "centroid": [
+     1.333333333,
+     1.333333333
+    ],
+    "n": 3,
+    "withinSs": 1
+   },
+   {
+    "cluster": "Cluster 2",
+    "centroid": [
+     8.333333333,
+     8.333333333
+    ],
+    "n": 3,
+    "withinSs": 1
+   }
+  ],
+  "hclustAssignments": [
+   {
+    "row": "Row 1",
+    "cluster": 1
+   },
+   {
+    "row": "Row 2",
+    "cluster": 1
+   },
+   {
+    "row": "Row 3",
+    "cluster": 1
+   },
+   {
+    "row": "Row 4",
+    "cluster": 2
+   },
+   {
+    "row": "Row 5",
+    "cluster": 2
+   },
+   {
+    "row": "Row 6",
+    "cluster": 2
+   }
+  ],
+  "hclustDendrogram": {
+   "merge": [
+    [
+     -1,
+     -2
+    ],
+    [
+     -4,
+     -5
+    ],
+    [
+     -3,
+     1
+    ],
+    [
+     -6,
+     2
+    ],
+    [
+     3,
+     4
+    ]
+   ],
+   "heights": [
+    1,
+    1,
+    2,
+    2,
+    15
+   ],
+   "order": [
+    2,
+    0,
+    1,
+    5,
+    3,
+    4
+   ],
+   "labels": [
+    "Row 1",
+    "Row 2",
+    "Row 3",
+    "Row 4",
+    "Row 5",
+    "Row 6"
+   ],
+   "cutHeight": 8.5
+  },
+  "choosingK": [
+   {
+    "k": 2,
+    "withinSs": 2,
+    "avgSilhouette": 0.9046672769,
+    "gap": 2.051359066,
+    "gapSe": 0.2287142224
+   },
+   {
+    "k": 3,
+    "withinSs": 1.25,
+    "avgSilhouette": 0.5348020434,
+    "gap": 1.477086249,
+    "gapSe": 0.4625617105
+   },
+   {
+    "k": 4,
+    "withinSs": 0.5,
+    "avgSilhouette": 0.1666666667,
+    "gap": 1.12990602,
+    "gapSe": 0.7227992535
+   },
+   {
+    "k": 5,
+    "withinSs": 0.25,
+    "avgSilhouette": 0.08333333333,
+    "gap": 0.1919632767,
+    "gapSe": 0.9029706476
+   }
+  ]
+ },
+ "hierarchical-clustering kmeansConstant {\"clusters\":2,\"standardise\":true}": {
+  "error": "“Y” is constant — Hierarchical clustering cannot standardise a variable with no variation. Remove it from the table, or run without standardisation instead."
+ },
+ "hierarchical-clustering kmeansConstant {\"clusters\":2,\"standardise\":false}": {
+  "testType": "hierarchical-clustering",
+  "subtitle": "Hierarchical clustering",
+  "stats": [
+   {
+    "label": "Number of clusters (k)",
+    "value": 2
+   },
+   {
+    "label": "Complete rows (n)",
+    "value": 6
+   },
+   {
+    "label": "Variables (p)",
+    "value": 2
+   },
+   {
+    "label": "Suggested k (Gap 1-SE rule)",
+    "value": 2
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 4.833333333,
+    "sd": 3.868677638,
+    "sem": 1.579381032,
+    "median": 5,
+    "n": 6
+   },
+   {
+    "name": "Y",
+    "mean": 5,
+    "sd": 0,
+    "sem": 0,
+    "median": 5,
+    "n": 6
+   }
+  ],
+  "notes": "Hierarchical clustering on the variables in their original units. Agglomerative clustering, complete linkage (farthest pair), Euclidean distances. The clustering is deterministic — the same table and settings always give the same tree. Uses 6 complete rows. Choosing k covers k = 2–5: within-cluster sum of squares (Elbow), average silhouette width, and the Gap statistic against 10 uniform reference sets (seed 1). The Gap 1-SE rule suggests k = 2.",
+  "hclustClusters": [
+   {
+    "cluster": "Cluster 1",
+    "centroid": [
+     1.333333333,
+     5
+    ],
+    "n": 3,
+    "withinSs": 0.3333333333
+   },
+   {
+    "cluster": "Cluster 2",
+    "centroid": [
+     8.333333333,
+     5
+    ],
+    "n": 3,
+    "withinSs": 0.3333333333
+   }
+  ],
+  "hclustAssignments": [
+   {
+    "row": "Row 1",
+    "cluster": 1
+   },
+   {
+    "row": "Row 2",
+    "cluster": 1
+   },
+   {
+    "row": "Row 3",
+    "cluster": 1
+   },
+   {
+    "row": "Row 4",
+    "cluster": 2
+   },
+   {
+    "row": "Row 5",
+    "cluster": 2
+   },
+   {
+    "row": "Row 6",
+    "cluster": 2
+   }
+  ],
+  "hclustDendrogram": {
+   "merge": [
+    [
+     -1,
+     -2
+    ],
+    [
+     -4,
+     -6
+    ],
+    [
+     -3,
+     1
+    ],
+    [
+     -5,
+     2
+    ],
+    [
+     3,
+     4
+    ]
+   ],
+   "heights": [
+    0,
+    0,
+    1,
+    1,
+    8
+   ],
+   "order": [
+    2,
+    0,
+    1,
+    4,
+    3,
+    5
+   ],
+   "labels": [
+    "Row 1",
+    "Row 2",
+    "Row 3",
+    "Row 4",
+    "Row 5",
+    "Row 6"
+   ],
+   "cutHeight": 4.5
+  },
+  "choosingK": [
+   {
+    "k": 2,
+    "withinSs": 0.6666666667,
+    "avgSilhouette": 0.9042178074,
+    "gap": 0.8179125459,
+    "gapSe": 0.8729926127
+   },
+   {
+    "k": 3,
+    "withinSs": 0.3333333333,
+    "avgSilhouette": 0.7817460317,
+    "gap": -0.1498807082,
+    "gapSe": 0.8672634908
+   },
+   {
+    "k": 4,
+    "withinSs": 0,
+    "avgSilhouette": 0.6666666667,
+    "gap": null,
+    "gapSe": 0.6860393705
+   },
+   {
+    "k": 5,
+    "withinSs": 0,
+    "avgSilhouette": 0.3333333333,
+    "gap": null,
+    "gapSe": 1.722733162
+   }
+  ]
+ },
+ "hierarchical-clustering kmeans {\"clusters\":1,\"standardise\":false}": {
+  "error": "Hierarchical clustering needs at least 2 clusters."
+ },
+ "hierarchical-clustering kmeans {\"clusters\":6,\"standardise\":false}": {
+  "error": "Hierarchical clustering needs fewer clusters than observations (k = 6, 6 complete rows)."
+ },
+ "hierarchical-clustering kmeans {\"clusters\":2,\"linkage\":\"ward.D2\",\"distance\":\"manhattan\",\"standardise\":false}": {
+  "error": "Ward's linkage needs Euclidean distances — it measures the increase in within-cluster variance, which is only defined for straight-line distances. Pick Euclidean distance, or another linkage."
+ },
+ "hierarchical-clustering kmeansIdentical {\"clusters\":2,\"standardise\":false}": {
+  "testType": "hierarchical-clustering",
+  "subtitle": "Hierarchical clustering",
+  "stats": [
+   {
+    "label": "Number of clusters (k)",
+    "value": 2
+   },
+   {
+    "label": "Complete rows (n)",
+    "value": 4
+   },
+   {
+    "label": "Variables (p)",
+    "value": 2
+   },
+   {
+    "label": "Suggested k (Gap 1-SE rule)",
+    "value": null
+   }
+  ],
+  "groups": [
+   {
+    "name": "X",
+    "mean": 1,
+    "sd": 0,
+    "sem": 0,
+    "median": 1,
+    "n": 4
+   },
+   {
+    "name": "Y",
+    "mean": 1,
+    "sd": 0,
+    "sem": 0,
+    "median": 1,
+    "n": 4
+   }
+  ],
+  "notes": "Hierarchical clustering on the variables in their original units. Agglomerative clustering, complete linkage (farthest pair), Euclidean distances. The clustering is deterministic — the same table and settings always give the same tree. Uses 4 complete rows. Choosing k covers k = 2–3 (within-cluster sum of squares and average silhouette width); the Gap statistic is not defined for this data (every within-cluster sum of squares is 0).",
+  "hclustClusters": [
+   {
+    "cluster": "Cluster 1",
+    "centroid": [
+     1,
+     1
+    ],
+    "n": 3,
+    "withinSs": 0
+   },
+   {
+    "cluster": "Cluster 2",
+    "centroid": [
+     1,
+     1
+    ],
+    "n": 1,
+    "withinSs": 0
+   }
+  ],
+  "hclustAssignments": [
+   {
+    "row": "Row 1",
+    "cluster": 1
+   },
+   {
+    "row": "Row 2",
+    "cluster": 1
+   },
+   {
+    "row": "Row 3",
+    "cluster": 1
+   },
+   {
+    "row": "Row 4",
+    "cluster": 2
+   }
+  ],
+  "hclustDendrogram": {
+   "merge": [
+    [
+     -1,
+     -2
+    ],
+    [
+     -3,
+     1
+    ],
+    [
+     -4,
+     2
+    ]
+   ],
+   "heights": [
+    0,
+    0,
+    0
+   ],
+   "order": [
+    3,
+    2,
+    0,
+    1
+   ],
+   "labels": [
+    "Row 1",
+    "Row 2",
+    "Row 3",
+    "Row 4"
+   ],
+   "cutHeight": 0
+  },
+  "choosingK": [
+   {
+    "k": 2,
+    "withinSs": 0,
+    "avgSilhouette": 0,
+    "gap": null,
+    "gapSe": null
+   },
+   {
+    "k": 3,
+    "withinSs": 0,
+    "avgSilhouette": 0,
+    "gap": null,
+    "gapSe": null
+   }
+  ]
+ },
  "chi-square contingency2 {}": {
   "testType": "chi-square",
   "subtitle": "Fisher's exact test",
@@ -50477,6 +52112,231 @@
     "automargin": true,
     "title": {
      "text": "Y",
+     "standoff": 2
+    }
+   }
+  }
+ },
+ "graph dendrogram kmeans": {
+  "data": [],
+  "layout": {
+   "paper_bgcolor": "#ffffff",
+   "plot_bgcolor": "#ffffff",
+   "dragmode": false,
+   "font": {
+    "color": "#111827",
+    "family": "system-ui, -apple-system, sans-serif",
+    "size": 13
+   },
+   "margin": {
+    "l": 16,
+    "r": 16,
+    "t": 16,
+    "b": 16
+   },
+   "showlegend": false,
+   "legend": {
+    "x": 1.02,
+    "y": 1,
+    "xanchor": "left"
+   },
+   "xaxis": {
+    "type": "linear",
+    "showgrid": false,
+    "zeroline": false,
+    "linecolor": "#111827",
+    "linewidth": 1,
+    "ticks": "outside",
+    "ticklen": 5,
+    "tickwidth": 1,
+    "fixedrange": true,
+    "automargin": true,
+    "title": {
+     "text": "Row",
+     "standoff": 12
+    }
+   },
+   "yaxis": {
+    "showgrid": false,
+    "zeroline": false,
+    "linecolor": "#111827",
+    "linewidth": 1,
+    "ticks": "outside",
+    "ticklen": 5,
+    "tickwidth": 1,
+    "fixedrange": true,
+    "automargin": true,
+    "rangemode": "tozero",
+    "title": {
+     "text": "Distance",
+     "standoff": 2
+    }
+   }
+  }
+ },
+ "graph elbow-plot kmeans": {
+  "data": [],
+  "layout": {
+   "paper_bgcolor": "#ffffff",
+   "plot_bgcolor": "#ffffff",
+   "dragmode": false,
+   "font": {
+    "color": "#111827",
+    "family": "system-ui, -apple-system, sans-serif",
+    "size": 13
+   },
+   "margin": {
+    "l": 16,
+    "r": 16,
+    "t": 16,
+    "b": 16
+   },
+   "showlegend": false,
+   "legend": {
+    "x": 1.02,
+    "y": 1,
+    "xanchor": "left"
+   },
+   "xaxis": {
+    "type": "linear",
+    "showgrid": false,
+    "zeroline": false,
+    "linecolor": "#111827",
+    "linewidth": 1,
+    "ticks": "outside",
+    "ticklen": 5,
+    "tickwidth": 1,
+    "fixedrange": true,
+    "automargin": true,
+    "title": {
+     "text": "k (number of clusters)",
+     "standoff": 12
+    }
+   },
+   "yaxis": {
+    "showgrid": false,
+    "zeroline": false,
+    "linecolor": "#111827",
+    "linewidth": 1,
+    "ticks": "outside",
+    "ticklen": 5,
+    "tickwidth": 1,
+    "fixedrange": true,
+    "automargin": true,
+    "title": {
+     "text": "Within-cluster SS",
+     "standoff": 2
+    }
+   }
+  }
+ },
+ "graph silhouette-plot kmeans": {
+  "data": [],
+  "layout": {
+   "paper_bgcolor": "#ffffff",
+   "plot_bgcolor": "#ffffff",
+   "dragmode": false,
+   "font": {
+    "color": "#111827",
+    "family": "system-ui, -apple-system, sans-serif",
+    "size": 13
+   },
+   "margin": {
+    "l": 16,
+    "r": 16,
+    "t": 16,
+    "b": 16
+   },
+   "showlegend": false,
+   "legend": {
+    "x": 1.02,
+    "y": 1,
+    "xanchor": "left"
+   },
+   "xaxis": {
+    "type": "linear",
+    "showgrid": false,
+    "zeroline": false,
+    "linecolor": "#111827",
+    "linewidth": 1,
+    "ticks": "outside",
+    "ticklen": 5,
+    "tickwidth": 1,
+    "fixedrange": true,
+    "automargin": true,
+    "title": {
+     "text": "k (number of clusters)",
+     "standoff": 12
+    }
+   },
+   "yaxis": {
+    "showgrid": false,
+    "zeroline": false,
+    "linecolor": "#111827",
+    "linewidth": 1,
+    "ticks": "outside",
+    "ticklen": 5,
+    "tickwidth": 1,
+    "fixedrange": true,
+    "automargin": true,
+    "title": {
+     "text": "Average silhouette width",
+     "standoff": 2
+    }
+   }
+  }
+ },
+ "graph gap-plot kmeans": {
+  "data": [],
+  "layout": {
+   "paper_bgcolor": "#ffffff",
+   "plot_bgcolor": "#ffffff",
+   "dragmode": false,
+   "font": {
+    "color": "#111827",
+    "family": "system-ui, -apple-system, sans-serif",
+    "size": 13
+   },
+   "margin": {
+    "l": 16,
+    "r": 16,
+    "t": 16,
+    "b": 16
+   },
+   "showlegend": false,
+   "legend": {
+    "x": 1.02,
+    "y": 1,
+    "xanchor": "left"
+   },
+   "xaxis": {
+    "type": "linear",
+    "showgrid": false,
+    "zeroline": false,
+    "linecolor": "#111827",
+    "linewidth": 1,
+    "ticks": "outside",
+    "ticklen": 5,
+    "tickwidth": 1,
+    "fixedrange": true,
+    "automargin": true,
+    "title": {
+     "text": "k (number of clusters)",
+     "standoff": 12
+    }
+   },
+   "yaxis": {
+    "showgrid": false,
+    "zeroline": false,
+    "linecolor": "#111827",
+    "linewidth": 1,
+    "ticks": "outside",
+    "ticklen": 5,
+    "tickwidth": 1,
+    "fixedrange": true,
+    "automargin": true,
+    "title": {
+     "text": "Gap statistic",
      "standoff": 2
     }
    }

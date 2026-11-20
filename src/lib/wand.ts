@@ -21,6 +21,7 @@ export const WAND_LINK_FIELDS = [
   "poissonAnalysisId",
   "pcaAnalysisId",
   "kmeansAnalysisId",
+  "hclustAnalysisId",
   "smoothAnalysisId",
   "monteCarloAnalysisId",
 ] as const;

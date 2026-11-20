@@ -783,6 +783,52 @@ export function AnalysisResultsView({
         />
       )}
 
+      {result.hclustClusters && result.hclustClusters.length > 0 && (
+        <Table
+          title="Clusters"
+          columns={[
+            { label: "Cluster" },
+            ...groups.map((g) => ({ label: g.name, numeric: true })),
+            { label: "n", numeric: true },
+            { label: "Within-cluster SS", numeric: true },
+          ]}
+          rows={result.hclustClusters.map((row) => [
+            row.cluster,
+            ...row.centroid.map((c) => num(c)),
+            row.n,
+            num(row.withinSs),
+          ])}
+        />
+      )}
+
+      {result.hclustAssignments && result.hclustAssignments.length > 0 && (
+        <Table
+          title="Cluster assignments"
+          columns={[{ label: "Row" }, { label: "Cluster", numeric: true }]}
+          rows={result.hclustAssignments.map((row) => [row.row, row.cluster])}
+        />
+      )}
+
+      {result.choosingK && result.choosingK.length > 0 && (
+        <Table
+          title="Choosing k"
+          columns={[
+            { label: "k", numeric: true },
+            { label: "Within-cluster SS", numeric: true },
+            { label: "Average silhouette width", numeric: true },
+            { label: "Gap statistic", numeric: true },
+            { label: "Gap SE", numeric: true },
+          ]}
+          rows={result.choosingK.map((row) => [
+            row.k,
+            num(row.withinSs),
+            num(row.avgSilhouette),
+            num(row.gap),
+            num(row.gapSe),
+          ])}
+        />
+      )}
+
       {result.fitted && result.fitted.length > 0 && (
         <Table
           title="Fitted values and residuals"

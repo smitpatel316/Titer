@@ -1516,6 +1516,7 @@ const ANALYSIS_TYPES: &[&str] = &[
     "poisson-regression",
     "principal-component-analysis",
     "k-means",
+    "hierarchical-clustering",
     "cox-proportional-hazards",
     "extract-rearrange",
     "survival",
@@ -1840,7 +1841,7 @@ pub struct RunAnalysisArgs {
     pub project_id: Option<String>,
     /// The table to analyse, as shown by titer_list_tables.
     pub table_id: String,
-    /// One of the 53 analysis types — never "compare-many-groups" or
+    /// One of the 54 analysis types — never "compare-many-groups" or
     /// "interpolate" (pass a concrete type instead; see the tool text).
     pub analysis_type: String,
     /// Params for that analysis (the AnalysisParams member for the type);
@@ -6878,8 +6879,8 @@ mod tests {
     // ── Analyses (L4) ────────────────────────────────────────────────────
 
     #[test]
-    fn validate_analysis_type_accepts_the_53_and_refuses_wizard_values() {
-        assert_eq!(ANALYSIS_TYPES.len(), 53, "one entry per AnalysisType: {ANALYSIS_TYPES:?}");
+    fn validate_analysis_type_accepts_the_54_and_refuses_wizard_values() {
+        assert_eq!(ANALYSIS_TYPES.len(), 54, "one entry per AnalysisType: {ANALYSIS_TYPES:?}");
         for t in [
             "descriptive-statistics",
             "anova",
@@ -6887,6 +6888,7 @@ mod tests {
             "mixed-effects",
             "nonlinear-regression",
             "binding-saturation",
+            "hierarchical-clustering",
             "chi-square",
             "mcnemar",
             "cox-proportional-hazards",

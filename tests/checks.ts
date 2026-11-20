@@ -109,6 +109,8 @@ import { nestedMeans } from "../src/stats/nested/base";
 import { prepareFit } from "../src/stats/xy/nonlinear-fit";
 import { adjustComparisonRows, adjustPValues, describe, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
+import { hclustAvgSilhouette, hclustClusterWithinSs, hclustDistanceMatrix, hclustSuggestedK, hclustWithinSs } from "../src/stats/multiple/hierarchical-clustering";
+import { dendrogramSegments } from "../src/views/graphs/dendrogram";
 import { compareTwoGroupsSpec } from "../src/stats/column/compare-two-groups";
 import { kruskalWallisSpec } from "../src/stats/column/kruskal-wallis";
 import { anovaSpec } from "../src/stats/column/anova";
@@ -8774,12 +8776,19 @@ check("a variable constant only after complete-case filtering names itself in PC
       "“A” is constant — K-means clustering cannot standardise a variable with no " +
       "variation. Remove it from the table, or run without standardisation instead.",
   });
+  deepStrictEqual(await runAnalysis("hierarchical-clustering", data, { clusters: 2 }), {
+    error:
+      "“A” is constant — Hierarchical clustering cannot standardise a variable with no " +
+      "variation. Remove it from the table, or run without standardisation instead.",
+  });
   // The same table runs on the settings that do not standardise: a constant
   // variable contributes no variance / nothing to the distances there.
   const cov = await runAnalysis("principal-component-analysis", data, { scale: "covariance" });
   ok(!("error" in cov), `covariance PCA should run, got ${"error" in cov ? cov.error : "ok"}`);
   const raw = await runAnalysis("k-means", data, { clusters: 2, standardise: false });
   ok(!("error" in raw), `raw K-means should run, got ${"error" in raw ? raw.error : "ok"}`);
+  const hraw = await runAnalysis("hierarchical-clustering", data, { clusters: 2, standardise: false });
+  ok(!("error" in hraw), `raw hierarchical clustering should run, got ${"error" in hraw ? hraw.error : "ok"}`);
 });
 
 // R3-23: same complete-case leak in Cox PH — a covariate varying only on
@@ -9922,6 +9931,7 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
       "multiple-regression",
       "principal-component-analysis",
       "k-means",
+      "hierarchical-clustering",
       "outliers",
       "multiple-logistic-regression",
       "poisson-regression",
@@ -9933,10 +9943,11 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
   );
   // Multiple Variables tables offer the scatter plot, the histogram, the
   // QQ plot, the forest plot, the observed-vs-fitted graph, the scree plot, the scores
-  // biplot, the cluster scatter, the bubble plot, and survival curves.
+  // biplot, the cluster scatter, the dendrogram, the Elbow, Silhouette and Gap plots,
+  // the bubble plot, and survival curves.
   deepStrictEqual(
     GRAPH_OPTIONS_BY_TABLE["multiple"].map((o) => o.value),
-    ["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "survival"],
+    ["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "dendrogram", "elbow-plot", "silhouette-plot", "gap-plot", "survival"],
   );
   // Renaming a column follows the Cox analysis's params.
   const renamed = followTable(
@@ -10302,6 +10313,22 @@ check("unlinked forest / observed-fitted / smooth-curve graphs name the analysis
     "Run a K-means clustering on this table to draw the cluster scatter.",
   );
   strictEqual(
+    unlinkedAnalysisNote("dendrogram"),
+    "Run a Hierarchical clustering on this table to draw the dendrogram.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("elbow-plot"),
+    "Run a Hierarchical clustering on this table to draw the Elbow plot.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("silhouette-plot"),
+    "Run a Hierarchical clustering on this table to draw the Silhouette plot.",
+  );
+  strictEqual(
+    unlinkedAnalysisNote("gap-plot"),
+    "Run a Hierarchical clustering on this table to draw the Gap plot.",
+  );
+  strictEqual(
     unlinkedAnalysisNote("estimation-plot"),
     "Run a Compare two groups analysis on this table to draw the difference between means with its 95% CI.",
   );
@@ -10522,6 +10549,259 @@ check("the K-means wizard asks clusters then standardisation, defaulting to 2 cl
   deepStrictEqual(WIZARDS["k-means"]!.finish({ clusters: 2 }, readTable(data)), {
     type: "k-means",
     params: { clusters: 2, standardise: true },
+  });
+});
+
+check("the hierarchical-clustering wizard asks clusters, linkage, distance then standardisation, defaulting to complete linkage, Euclidean, standardised", () => {
+  const data: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "1", "1"],
+      [null, "8", "8"],
+    ],
+  };
+  const qs = WIZARDS["hierarchical-clustering"]!.questions({}, readTable(data)).filter(
+    (q): q is Question => q !== false,
+  );
+  deepStrictEqual(
+    qs.map((q) => q.id),
+    ["clusters", "linkage", "distance", "standardise"],
+  );
+  const clusters = qs.find((q) => q.id === "clusters");
+  ok(clusters && clusters.kind === "number");
+  if (clusters?.kind === "number") {
+    strictEqual(clusters.initial, 2);
+    strictEqual(clusters.validate?.(1), "Enter a whole number of clusters (at least 2).");
+    strictEqual(clusters.validate?.(2.5), "Enter a whole number of clusters (at least 2).");
+    strictEqual(clusters.validate?.(3), undefined);
+  }
+  const linkage = qs.find((q) => q.id === "linkage");
+  ok(linkage && linkage.kind === "choice");
+  deepStrictEqual(
+    linkage.kind === "choice" ? linkage.options.map((o) => o.value) : [],
+    ["complete", "average", "single", "ward.D2"],
+  );
+  const distance = qs.find((q) => q.id === "distance");
+  ok(distance && distance.kind === "choice");
+  deepStrictEqual(
+    distance.kind === "choice" ? distance.options.map((o) => o.value) : [],
+    ["euclidean", "manhattan"],
+  );
+  const standardise = qs.find((q) => q.id === "standardise");
+  ok(standardise && standardise.kind === "choice");
+  deepStrictEqual(
+    standardise.kind === "choice" ? standardise.options.map((o) => o.value) : [],
+    ["yes", "no"],
+  );
+  deepStrictEqual(
+    WIZARDS["hierarchical-clustering"]!.finish(
+      { clusters: 3, linkage: "average", distance: "manhattan", standardise: "no" },
+      readTable(data),
+    ),
+    {
+      type: "hierarchical-clustering",
+      params: { clusters: 3, linkage: "average", distance: "manhattan", standardise: false },
+    },
+  );
+  // No answers: 2 clusters, complete linkage, Euclidean, standardised.
+  deepStrictEqual(WIZARDS["hierarchical-clustering"]!.finish({ clusters: 2 }, readTable(data)), {
+    type: "hierarchical-clustering",
+    params: { clusters: 2, linkage: "complete", distance: "euclidean", standardise: true },
+  });
+});
+
+// Hierarchical clustering (seq 160): the 6×2 set is two well-separated
+// groups of three, so every linkage and distance puts rows 1–3 in one
+// cluster and rows 4–6 in the other. The tree, the diagnostics and the
+// dendrogram geometry are pinned against SciPy's linkage/cut_tree on the
+// same data (complete linkage, Euclidean, raw units).
+check("hierarchical clustering cuts the two-group set into its groups, with the R tree, diagnostics and dendrogram geometry", async () => {
+  const data: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "1", "1"],
+      [null, "1", "2"],
+      [null, "2", "1"],
+      [null, "8", "8"],
+      [null, "9", "8"],
+      [null, "8", "9"],
+    ],
+  };
+  const close = (a: number | null | undefined, b: number, eps = 1e-12): void => {
+    ok(a != null && Math.abs(a - b) < eps, `expected ${b}, got ${a}`);
+  };
+  // The TypeScript diagnostics, on the raw distance matrix: the pairwise
+  // within SS and the average silhouette width per k.
+  const points = [
+    [1, 1],
+    [1, 2],
+    [2, 1],
+    [8, 8],
+    [9, 8],
+    [8, 9],
+  ];
+  const dist = hclustDistanceMatrix(points, "euclidean");
+  close(dist[0][1], 1);
+  close(dist[0][5], Math.sqrt(113));
+  close(hclustDistanceMatrix(points, "manhattan")[0][5], 15);
+  close(hclustWithinSs([0, 0, 0, 1, 1, 1], dist), 4 / 3);
+  close(hclustWithinSs([0, 0, 0, 1, 1, 2], dist), 11 / 12);
+  close(hclustClusterWithinSs([0, 1, 2], dist), 2 / 3);
+  strictEqual(hclustClusterWithinSs([3], dist), 0);
+  close(hclustAvgSilhouette([0, 0, 0, 1, 1, 1], dist), 0.8853168309746203);
+  close(hclustAvgSilhouette([0, 0, 0, 1, 1, 2], dist), 0.4905979890831602);
+  // The Gap 1-SE rule: the smallest k within one SE of the next k's Gap.
+  strictEqual(
+    hclustSuggestedK([
+      { k: 2, withinSs: 1, avgSilhouette: 0.8, gap: 0.5, gapSe: 0.1 },
+      { k: 3, withinSs: 0.5, avgSilhouette: 0.4, gap: 0.4, gapSe: 0.1 },
+      { k: 4, withinSs: 0.25, avgSilhouette: 0.1, gap: 0.45, gapSe: 0.1 },
+    ]),
+    2,
+  );
+  strictEqual(
+    hclustSuggestedK([
+      { k: 2, withinSs: 1, avgSilhouette: 0.8, gap: 0.1, gapSe: 0.05 },
+      { k: 3, withinSs: 0.5, avgSilhouette: 0.4, gap: 0.4, gapSe: 0.05 },
+      { k: 4, withinSs: 0.25, avgSilhouette: 0.1, gap: 0.5, gapSe: 0.05 },
+    ]),
+    4,
+  );
+  strictEqual(
+    hclustSuggestedK([{ k: 2, withinSs: 1, avgSilhouette: 0.8, gap: null, gapSe: null }]),
+    null,
+  );
+
+  const result = await runAnalysis("hierarchical-clustering", data, { clusters: 2, standardise: false });
+  ok(!("error" in result), `hierarchical clustering should run, got ${"error" in result ? result.error : "ok"}`);
+  if ("error" in result) return;
+  strictEqual(result.testType, "hierarchical-clustering");
+  strictEqual(result.subtitle, "Hierarchical clustering");
+  deepStrictEqual(
+    result.stats.map((s) => [s.label, s.value]),
+    [
+      ["Number of clusters (k)", 2],
+      ["Complete rows (n)", 6],
+      ["Variables (p)", 2],
+      ["Suggested k (Gap 1-SE rule)", 2],
+    ],
+  );
+  deepStrictEqual(result.hclustClusters, [
+    { cluster: "Cluster 1", centroid: [4 / 3, 4 / 3], n: 3, withinSs: 2 / 3 },
+    { cluster: "Cluster 2", centroid: [25 / 3, 25 / 3], n: 3, withinSs: 2 / 3 },
+  ]);
+  deepStrictEqual(result.hclustAssignments, [
+    { row: "Row 1", cluster: 1 },
+    { row: "Row 2", cluster: 1 },
+    { row: "Row 3", cluster: 1 },
+    { row: "Row 4", cluster: 2 },
+    { row: "Row 5", cluster: 2 },
+    { row: "Row 6", cluster: 2 },
+  ]);
+  deepStrictEqual(result.hclustDendrogram, {
+    merge: [
+      [-1, -2],
+      [-4, -5],
+      [-3, 1],
+      [-6, 2],
+      [3, 4],
+    ],
+    heights: [1, 1, 1.4142135623730951, 1.4142135623730951, 10.63014581273465],
+    order: [2, 0, 1, 5, 3, 4],
+    labels: ["Row 1", "Row 2", "Row 3", "Row 4", "Row 5", "Row 6"],
+    cutHeight: 6.022179687553873,
+  });
+  // The choosing-k rows: within SS and silhouette are pinned exactly; the
+  // Gap column is R's seeded uniform-reference statistic (seed 1), pinned
+  // to 1e-6 against the reference.json values (10 significant digits).
+  const choosingK = result.choosingK ?? [];
+  strictEqual(choosingK.length, 4);
+  close(choosingK[0].withinSs, 4 / 3);
+  close(choosingK[0].avgSilhouette, 0.8853168309746203);
+  close(choosingK[1].withinSs, 11 / 12);
+  close(choosingK[1].avgSilhouette, 0.4905979890831602);
+  close(choosingK[2].withinSs, 0.5);
+  close(choosingK[2].avgSilhouette, 0.09763107293781752);
+  close(choosingK[3].withinSs, 0.25);
+  close(choosingK[3].avgSilhouette, 0.04881553646890876);
+  close(choosingK[0].gap, 1.979397346, 1e-6);
+  close(choosingK[1].gap, 1.256396782, 1e-6);
+  close(choosingK[2].gap, 0.608182771, 1e-6);
+  close(choosingK[3].gap, -0.3531692243, 1e-6);
+  close(choosingK[0].gapSe, 0.2782543977, 1e-6);
+  close(choosingK[1].gapSe, 0.3327141102, 1e-6);
+  close(choosingK[2].gapSe, 0.652558894, 1e-6);
+  close(choosingK[3].gapSe, 0.9459618499, 1e-6);
+  ok(result.notes.includes("complete linkage"), `notes should name the linkage: ${result.notes}`);
+  ok(result.notes.includes("deterministic"), `notes should say the clustering is deterministic: ${result.notes}`);
+
+  // The dendrogram geometry of that tree: 5 merges × 3 segments, leaves
+  // 1–6 in the tree's order, the last merge joining the two groups at
+  // height 10.630… between x 1.75 and 4.75.
+  const segments = dendrogramSegments(result.hclustDendrogram!);
+  strictEqual(segments.xs.length, 45);
+  strictEqual(segments.ys.length, 45);
+  deepStrictEqual(segments.xs.slice(0, 9), [2, 2, null, 3, 3, null, 2, 3, null]);
+  deepStrictEqual(segments.ys.slice(0, 9), [0, 1, null, 0, 1, null, 1, 1, null]);
+  deepStrictEqual(segments.xs.slice(-3), [1.75, 4.75, null]);
+  deepStrictEqual(segments.ys.slice(-3), [10.63014581273465, 10.63014581273465, null]);
+
+  // The same partition under every other linkage, the Manhattan distance,
+  // and the standardised run (same groups; centroids back-transformed).
+  for (const params of [
+    { clusters: 2, linkage: "average" as const, standardise: false },
+    { clusters: 2, linkage: "single" as const, standardise: false },
+    { clusters: 2, linkage: "ward.D2" as const, standardise: false },
+    { clusters: 2, distance: "manhattan" as const, standardise: false },
+    { clusters: 2, standardise: true },
+  ]) {
+    const other = await runAnalysis("hierarchical-clustering", data, params);
+    ok(!("error" in other), `params ${JSON.stringify(params)} should run`);
+    if (!("error" in other)) {
+      deepStrictEqual(
+        other.hclustAssignments?.map((a) => a.cluster),
+        [1, 1, 1, 2, 2, 2],
+      );
+    }
+  }
+  // The standardised tree's heights are the z-scored ones.
+  const std = await runAnalysis("hierarchical-clustering", data, { clusters: 2, standardise: true });
+  ok(!("error" in std));
+  if (!("error" in std)) {
+    close(std.hclustDendrogram?.heights[0], 0.25848625643570866);
+    close(std.hclustDendrogram?.heights[4], 2.747746596499504);
+    close(std.hclustDendrogram?.cutHeight, 1.5566506830189664);
+    close(std.choosingK?.[0].withinSs, 0.08908685968819592);
+  }
+  // The guards: too few clusters, k >= n, Ward's with Manhattan, one variable.
+  deepStrictEqual(await runAnalysis("hierarchical-clustering", data, { clusters: 1, standardise: false }), {
+    error: "Hierarchical clustering needs at least 2 clusters.",
+  });
+  deepStrictEqual(await runAnalysis("hierarchical-clustering", data, { clusters: 6, standardise: false }), {
+    error: "Hierarchical clustering needs fewer clusters than observations (k = 6, 6 complete rows).",
+  });
+  deepStrictEqual(
+    await runAnalysis("hierarchical-clustering", data, {
+      clusters: 2,
+      linkage: "ward.D2",
+      distance: "manhattan",
+      standardise: false,
+    }),
+    {
+      error:
+        "Ward's linkage needs Euclidean distances — it measures the increase in within-cluster variance, " +
+        "which is only defined for straight-line distances. Pick Euclidean distance, or another linkage.",
+    },
+  );
+  const oneVar: TableData = {
+    columns: ["Title", "X"],
+    rows: [
+      [null, "1"],
+      [null, "8"],
+    ],
+  };
+  deepStrictEqual(await runAnalysis("hierarchical-clustering", oneVar, { clusters: 2 }), {
+    error: "Hierarchical clustering needs at least 2 variables containing numeric data.",
   });
 });
 
@@ -15180,9 +15460,11 @@ check("a graph's dangling analysis link is cleared on load, warned once (FF-F13)
   const file = JSON.parse(serializeProjectFile(payload));
   file.project.nodes.g1.graphOptions.regAnalysisId = "no-such-analysis";
   file.project.nodes.g1.graphOptions.kmeansAnalysisId = "also-gone";
+  file.project.nodes.g1.graphOptions.hclustAnalysisId = "also-gone";
   const first = read(JSON.stringify(file));
   strictEqual(first.project.nodes.g1.graphOptions!.regAnalysisId, undefined, "dangling reg link should be cleared");
   strictEqual(first.project.nodes.g1.graphOptions!.kmeansAnalysisId, undefined, "dangling k-means link should be cleared");
+  strictEqual(first.project.nodes.g1.graphOptions!.hclustAnalysisId, undefined, "dangling hclust link should be cleared");
   strictEqual(first.updated, true, "clearing the link repairs the file, so it opens edited");
   ok(
     first.issues.some((i) => i.message.includes("referred to an analysis") && i.message.includes("removed")),

@@ -46,6 +46,8 @@ import { observedFitted, OBSERVED_FITTED_SERIES } from "./observed-fitted";
 import { screePlot, SCREE_SERIES } from "./scree-plot";
 import { pcaBiplot, PCA_BIPLOT_SERIES } from "./pca-biplot";
 import { kmeansScatter } from "./kmeans-scatter";
+import { dendrogram, DENDROGRAM_SERIES } from "./dendrogram";
+import { elbowPlot, gapPlot, silhouettePlot, ELBOW_SERIES, GAP_SERIES, SILHOUETTE_SERIES } from "./choosing-k";
 import { histogram } from "./histogram";
 import { monteCarloHistogram, MONTE_CARLO_HISTOGRAM_SERIES } from "./monte-carlo-histogram";
 import { qqPlot } from "./qq-plot";
@@ -125,6 +127,10 @@ export const GRAPHS: Record<GraphType, GraphModule> = {
   "scree-plot": screePlot,
   "pca-biplot": pcaBiplot,
   "kmeans-scatter": kmeansScatter,
+  dendrogram,
+  "elbow-plot": elbowPlot,
+  "silhouette-plot": silhouettePlot,
+  "gap-plot": gapPlot,
   histogram,
   "monte-carlo-histogram": monteCarloHistogram,
   "qq-plot": qqPlot,
@@ -236,6 +242,10 @@ export function graphSeries(type: GraphType, data: TableData, tableType: TableTy
   // not the table's variables — the Series section styles that series.
   if (type === "scree-plot") return [SCREE_SERIES];
   if (type === "pca-biplot") return [PCA_BIPLOT_SERIES];
+  if (type === "dendrogram") return [DENDROGRAM_SERIES];
+  if (type === "elbow-plot") return [ELBOW_SERIES];
+  if (type === "silhouette-plot") return [SILHOUETTE_SERIES];
+  if (type === "gap-plot") return [GAP_SERIES];
   // The cluster scatter's series are its clusters, whose count lives in the
   // linked analysis's result — not in the table or the options — so there is
   // no fixed list to offer; the traces take the palette's colours in order
@@ -324,7 +334,7 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
   // `groupsOf`, which takes a nested column's group prefix ("A" for
   // "A:S1:R1"), so bars, scatter and lines all draw from nested columns.
   nested: optionsFor(["grouped-bars", "grouped-scatter", "grouped-lines"]),
-  multiple: optionsFor(["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "survival"]),
+  multiple: optionsFor(["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "dendrogram", "elbow-plot", "silhouette-plot", "gap-plot", "survival"]),
   // Outcomes as series across the row categories, as Prism graphs contingency tables.
   contingency: optionsFor(["grouped-bars", "grouped-stacked", "grouped-hbars", "heatmap"]),
   survival: optionsFor(["survival"]),
