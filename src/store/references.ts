@@ -36,6 +36,8 @@ const PARAM_NAMES = [
   "status",
   "covariates",
   "stratifyBy",
+  "response",
+  "groupBy",
 ] as const;
 // prettier-ignore
 const OPTION_NAMES = ["xVariable", "yVariable", "volcanoX", "volcanoY", "volcanoLabel", "volcanoGroupA", "volcanoGroupB", "rightYDataset", "sets"] as const;
