@@ -661,6 +661,8 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
     dupXYProblems.length === 0,
     dupXYProblems.join("; ") || "2 inputs A/B, distinct dataset uids, Y0/Plateau/K rules exact",
   );
+}
+
 // W14 (seq 289, 1.8 M1): multiple-t-tests analyses write as
 // MULTIPLE_TWO_SAMPLE_TESTS, params-only like NLREG/survival — the test
 // enum + correction Prism recomputes per row (t, df, p) on open. Fixtures
