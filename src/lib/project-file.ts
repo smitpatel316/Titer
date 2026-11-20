@@ -886,6 +886,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "plot-function": ["equation", "xMin", "xMax", "segments", "curves", "extra", "ligandConcentration", "sets"],
   correlation: ["method", "mode", "datasets", "sets"],
   "linear-regression": ["x", "y", "ys", "forceOrigin", "weights", "sets"],
+  "compare-slopes": ["ys", "sets"],
   "deming-regression": ["y", "lambda", "sets"],
   "simple-logistic-regression": ["y", "sets"],
   "area-under-curve": ["baseline", "sets"],

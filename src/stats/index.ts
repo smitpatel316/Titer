@@ -31,6 +31,7 @@ import type {
   NestedAnovaParams,
   NormalizeParams,
   LinearRegressionParams,
+  CompareSlopesParams,
   SimpleLogisticRegressionParams,
   NonlinearRegressionParams,
   OutliersParams,
@@ -63,6 +64,7 @@ import { kolmogorovSmirnovSpec } from "./column/kolmogorov-smirnov";
 import { runOutliers } from "./column/rout";
 import { runXYCorrelation } from "./xy/correlation";
 import { linearRegressionSpec, runLinearRegressions } from "./xy/linear-regression";
+import { runCompareSlopes } from "./xy/compare-slopes";
 import { demingRegressionSpec } from "./xy/deming-regression";
 import { runSimpleLogisticRegression } from "./xy/logistic-regression";
 import { runAreaUnderCurve } from "./xy/area-under-curve";
@@ -199,6 +201,12 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     },
   },
   "deming-regression": spec("Deming regression", demingRegressionSpec),
+  "compare-slopes": {
+    label: "Compare slopes and intercepts",
+    // X + at least two Y data sets — the runner enforces the per-set minimums.
+    minColumns: 3,
+    run: (c, p) => runCompareSlopes(c, p as CompareSlopesParams),
+  },
   "simple-logistic-regression": {
     label: "Simple logistic regression",
     minColumns: 2,

@@ -572,6 +572,7 @@ export type ChecklistKey =
   | "two-way-anova-srh"
   | "three-way-anova"
   | "linear-regression"
+  | "compare-slopes"
   | "nonlinear-regression"
   | "survival"
   | "cox-ph"
@@ -1034,6 +1035,43 @@ export const CHECKLISTS: Record<ChecklistKey, AnalysisChecklist> = {
         assumption:
           "Forcing the line through the origin is only justified when Y really is zero at X = 0 — the wizard asks, and “No” is the safe default.",
         ifNot: "Forcing through the origin when it does not hold bends the whole line and biases the slope.",
+      },
+    ],
+  },
+  "compare-slopes": {
+    title: "Compare slopes and intercepts — checklist",
+    whenToUse:
+      "Use this when you fitted a line to each of two or more Y data sets on the same X and want to know whether the lines really differ — whether their slopes differ, and (when they don't) whether the lines are identical or parallel with different intercepts.",
+    items: [
+      {
+        assumption: "Each data set's relationship is straight — check a scatter plot of Y against X before comparing, not after.",
+        ifNot:
+          "A curved relationship needs a curve fit (nonlinear regression) or a transformation, not a comparison of straight lines through a curve.",
+      },
+      {
+        assumption: "Each point is independent — no point is a repeat measurement of another, and no two points share a subject.",
+        ifNot: "Repeated measurements need a model that accounts for the repeats, such as a mixed-effects analysis.",
+      },
+      {
+        assumption:
+          "The scatter around the line is similar in every data set — the comparison pools one residual variance across them.",
+        ifNot:
+          "When one data set scatters much more than another, the pooled variance misleads both tests; compare the lines another way (for example, fit each on its own and compare the slopes with their standard errors).",
+      },
+      {
+        assumption:
+          "The residuals — the distances from each line — are roughly symmetric, which matters most for small samples and for confidence intervals.",
+        ifNot: "With skewed residuals, transform Y first or use a robust fit.",
+      },
+      {
+        assumption: "No single point drags a line: check points with extreme X (high leverage) and points far from the line.",
+        ifNot: "Investigate influential points first; one point can move a slope and the P value a lot.",
+      },
+      {
+        assumption:
+          "The lines are compared where the data are: the X ranges should overlap, and the intercepts are compared at X = 0.",
+        ifNot:
+          "Lines fitted on disjoint X ranges, or intercepts at an X far outside the data, are extrapolations — the comparison still runs, but say so when you report it.",
       },
     ],
   },
@@ -2117,6 +2155,22 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       },
     }),
     checklist: () => CHECKLISTS["linear-regression"],
+  },
+
+  "compare-slopes": {
+    // Prism's "Test whether the slopes and intercepts are significantly
+    // different": an XY table's Y data sets, each needing at least 3 points
+    // (the runner says so when one is short). No origin question — Prism
+    // disables the comparison when the lines are forced through the origin —
+    // and no weighting: the F tests pool one residual variance.
+    questions: (_a, table) => [
+      ysQuestion(table, "Which Y data sets' lines should be compared? Each is fitted on its own first, then the lines are compared."),
+    ],
+    finish: (a) => ({
+      type: "compare-slopes",
+      params: a.ys === undefined ? {} : { ys: a.ys as string[] },
+    }),
+    checklist: () => CHECKLISTS["compare-slopes"],
   },
 
   "deming-regression": {

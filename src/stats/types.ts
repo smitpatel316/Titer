@@ -15,6 +15,7 @@ export type AnalysisType =
   | "kolmogorov-smirnov"
   | "correlation"
   | "linear-regression"
+  | "compare-slopes"
   | "deming-regression"
   | "area-under-curve"
   | "remove-baseline"
@@ -293,6 +294,18 @@ export interface LinearRegressionParams {
   /** Weighting (plan 26, same schemes as nonlinear regression except 1/SD²,
    *  which needs the replicate columns this runner never sees). */
   weights?: Exclude<NonlinearWeightScheme, "1/sd2">;
+}
+
+/** Params for "compare-slopes" (XY table, #46): which Y data sets' lines to
+ *  compare — Prism's "Test whether the slopes and intercepts are significantly
+ *  different" (linear regression, ANCOVA-equivalent extra sum-of-squares F
+ *  tests; Zar, Biostatistical Analysis, ch. 18). Omitted, every Y data set.
+ *  Unweighted OLS only: Prism's comparison shares one residual variance, so
+ *  no weighting is offered, and forcing through the origin is not offered
+ *  either — Prism disables the option then (FAQ 677). */
+export interface CompareSlopesParams {
+  /** An XY table's Y data sets to compare; omitted, all of them. */
+  ys?: string[];
 }
 
 /** Params for "deming-regression" (XY table): which Y series to compare with X,
@@ -1207,6 +1220,7 @@ export type AnalysisParams = DataSetsParam &
     | CorrelationParams
     | XYCorrelationParams
     | LinearRegressionParams
+    | CompareSlopesParams
     | DemingRegressionParams
     | AreaUnderCurveParams
     | RemoveBaselineParams

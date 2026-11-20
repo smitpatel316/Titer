@@ -80,7 +80,7 @@ And a spreadsheet that feels like one:
 
 ### Analyses
 
-**54 analyses**, covering all 56 analyses in GraphPad Prism 10's catalogue. That
+**55 analyses**, covering all 56 analyses in GraphPad Prism 10's catalogue. That
 "56" is a catalogue mapping — every Prism 10 analysis has a Titer equivalent listed
 below — not a single test-suite score. The numbers themselves are checked against
 Prism's own saved results and against reference values: the frozen-tip suite passed

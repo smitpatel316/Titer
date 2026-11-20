@@ -238,6 +238,20 @@ export function conclusionOf(
         : `The data don't show that ${q(Y)} changes with ${q(X)} (${P(pv)}). The slope could be anywhere from ${num(lo)} to ${num(hi)} (95% CI).`;
     }
 
+    // Prism's "Are lines different?": slopes first, then — only when the
+    // slopes do not differ — whether the lines are identical.
+    case "compare-slopes": {
+      const sets = result.fit?.sets ?? [];
+      const pSlopes = stat("P value (slopes differ)");
+      const pIdentical = stat("P value (lines identical)");
+      if (!sets.length) return undefined;
+      if (sig(pSlopes))
+        return `The slopes of ${list(sets)} differ significantly (${P(pSlopes)}): the lines are not parallel, so their intercepts are not compared.`;
+      if (sig(pIdentical))
+        return `The slopes of ${list(sets)} do not differ significantly (${P(pSlopes)}), but the lines are not identical (${P(pIdentical)}): they are parallel lines with different intercepts.`;
+      return `The data don't show that the lines of ${list(sets)} differ: neither the slopes (${P(pSlopes)}) nor the lines as a whole (${P(pIdentical)}) differ significantly, so one line may describe them all.`;
+    }
+
     case "nonlinear-regression": {
       const fit = result.fit;
       if (!fit) return undefined;

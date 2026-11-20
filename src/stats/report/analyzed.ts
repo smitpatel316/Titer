@@ -7,6 +7,7 @@ import type { AnalysisParams, AnalysisResult, AnalysisType, Analyzed } from "../
 /** The analyses of a table with an X (its first data column): X is never one of its data sets. */
 const ON_X = new Set<AnalysisType>([
   "linear-regression",
+  "compare-slopes",
   "simple-logistic-regression",
   "nonlinear-regression",
   "area-under-curve",
@@ -95,6 +96,7 @@ export function analyzedOf(
     case "correlation-matrix":
       return make((result.matrix?.variables ?? []).map((name) => ({ name })));
     case "linear-regression":
+    case "compare-slopes":
     case "nonlinear-regression": {
       // On X: a Multiple Variables table's chosen one, else the table's.
       const x = (p?.x as string | undefined) ?? xName ?? "X";
