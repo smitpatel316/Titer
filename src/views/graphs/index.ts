@@ -202,6 +202,14 @@ export function plotColumns(
     const x = variablePair(numeric, options)[0];
     return x ? [x] : [];
   }
+  // A grouped graph on an XY table plots the Y data sets across the rows
+  // (Prism's grouped reading of XY data): the X column is the independent
+  // variable, not a group, and the rows are spaced by row number — handing
+  // X to the grouped builders would plot it as a series of its own.
+  if (family === "grouped" && tableType === "xy") {
+    const { x } = splitXY(allColumns);
+    return numeric.filter((c) => c !== x && keep(c));
+  }
   if (family !== "xy") return numeric.filter(keep);
   if (tableType === "multiple") {
     const [x, y] = variablePair(numeric, options);
@@ -317,6 +325,15 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
     "bland-altman",
     "roc-curve",
     "monte-carlo-histogram",
+    // Seq 210: an XY table also plots as grouped — its Y data sets are the
+    // groups, the rows its categories (Prism's grouped reading of XY data):
+    // the X column is the independent variable, not a group, and the rows
+    // are spaced by row number (`plotColumns` drops X for this family).
+    "grouped-bars",
+    "grouped-scatter",
+    "grouped-lines",
+    "grouped-stacked",
+    "grouped-hbars",
   ]),
   grouped: optionsFor([
     "grouped-scatter",
@@ -333,9 +350,13 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
   // grouped table's do — the grouped builders read the groups through
   // `groupsOf`, which takes a nested column's group prefix ("A" for
   // "A:S1:R1"), so bars, scatter and lines all draw from nested columns.
-  nested: optionsFor(["grouped-bars", "grouped-scatter", "grouped-lines"]),
+  // Seq 210: mean-and-error too (its per-subgroup pooling reads the Mean
+  // columns of a nested summary table; see mean-error.ts).
+  nested: optionsFor(["grouped-bars", "grouped-scatter", "grouped-lines", "mean-error"]),
   multiple: optionsFor(["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "dendrogram", "elbow-plot", "silhouette-plot", "gap-plot", "survival"]),
   // Outcomes as series across the row categories, as Prism graphs contingency tables.
-  contingency: optionsFor(["grouped-bars", "grouped-stacked", "grouped-hbars", "heatmap"]),
+  // Seq 210: scatter and box-and-violin too (one value per cell: a box from a
+  // single value is degenerate, a line — but that is what Prism offers).
+  contingency: optionsFor(["grouped-bars", "grouped-stacked", "grouped-hbars", "heatmap", "grouped-scatter", "grouped-box"]),
   survival: optionsFor(["survival"]),
 };

@@ -3053,6 +3053,133 @@ check("seq 208 MCP: a nested table written with summary columns is detected as a
   strictEqual(harness.state().nodes[tableId]?.data?.summaryFormat, "mean-sd-n");
 });
 
+// ── Contingency + nested graph shapes, grouped graphs from XY (seq 210) ───
+
+check("seq 210: the offerings cover grouped graphs from XY, scatter/box from contingency, mean-error from nested", () => {
+  const offered = (t: string) => GRAPH_OPTIONS_BY_TABLE[t as keyof typeof GRAPH_OPTIONS_BY_TABLE].map((o) => o.value);
+  for (const type of ["grouped-bars", "grouped-scatter", "grouped-lines", "grouped-stacked", "grouped-hbars"] as const) {
+    ok(offered("xy").includes(type), `xy should offer ${type}`);
+  }
+  ok(offered("contingency").includes("grouped-scatter"), "contingency should offer grouped-scatter");
+  ok(offered("contingency").includes("grouped-box"), "contingency should offer grouped-box");
+  ok(offered("nested").includes("mean-error"), "nested should offer mean-error");
+  // And the ones Prism does not list stay unoffered: no box from XY, no box from nested.
+  ok(!offered("xy").includes("grouped-box"), "xy should not offer grouped-box");
+  ok(!offered("nested").includes("grouped-box"), "nested should not offer grouped-box");
+});
+
+check("seq 210: grouped bars from an XY table plot the Y data sets across the rows, X ignored", () => {
+  const dataset = readTable(xyReplicates());
+  const options = newGraphOptions("grouped-bars");
+  // The X column never reaches the builder: it is not a group.
+  deepStrictEqual(
+    plotColumns(dataset, "grouped-bars", options, "xy").map((c) => c.name),
+    ["A:Y1", "A:Y2", "A:Y3", "B:Y1", "B:Y2", "B:Y3"],
+  );
+  const fig = GRAPHS["grouped-bars"].build(
+    plotColumns(dataset, "grouped-bars", options, "xy"),
+    options,
+    paintOf(options, 2),
+    dataset.titles,
+    "replicates",
+  );
+  const traces = fig.data as { name: string; y: (number | null)[] }[];
+  deepStrictEqual(traces.map((t) => t.name), ["A", "B"]);
+  deepStrictEqual(traces[0].y, [12, 13]); // mean of 10/12/14, then 11/13/15
+  deepStrictEqual(traces[1].y, [22, 23]);
+});
+
+check("seq 210: grouped box from a contingency table draws one degenerate box per outcome", () => {
+  const table: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "5", "7"],
+      ["r2", "3", "9"],
+    ],
+  };
+  const dataset = readTable(table);
+  const options = newGraphOptions("grouped-box");
+  const fig = GRAPHS["grouped-box"].build(
+    plotColumns(dataset, "grouped-box", options, "contingency"),
+    options,
+    paintOf(options, 2),
+    dataset.titles,
+  );
+  const traces = fig.data as { type: string; median: number[] }[];
+  strictEqual(traces.length, 2);
+  ok(traces.every((t) => t.type === "box"), "both traces are boxes");
+  // One box per row, one value in each: the median is the value itself.
+  deepStrictEqual(traces.map((t) => t.median), [
+    [5, 3],
+    [7, 9],
+  ]);
+});
+
+check("seq 210: a grouped box on an XY or nested summary table is refused the same as on a grouped one", () => {
+  // The refusal itself lives in the graph view (`summaryLack`); the message
+  // it shows comes from here, and it must fire for the new summary tables.
+  ok(summaryTableProblem(xySummary(), "Box and violin")?.includes("pre-calculated summaries"));
+  ok(summaryTableProblem(nestedSummary(), "Box and violin")?.includes("pre-calculated summaries"));
+  strictEqual(summaryTableProblem(xyReplicates(), "Box and violin"), undefined);
+});
+
+check("seq 210 MCP: build-graph accepts the new offerings and still refuses the unoffered ones", async () => {
+  const harness = mcpLaggingHarness(true);
+  // The gate runs before createGraph, so a recording stub proves it passed;
+  // the real store action is exercised by the live MCP pin.
+  const created: [string, string][] = [];
+  harness.deps.actions!.createGraph = (tableId, graphType) => {
+    created.push([tableId, graphType]);
+    return `graph_${graphType}`;
+  };
+  const contingency = await harness.run("job-210-cont", "create-table", {
+    table_type: "contingency",
+    columns: ["", "A", "B"],
+    rows: [
+      ["r1", 5, 7],
+      ["r2", 3, 9],
+    ],
+  });
+  const contId = (contingency.result as { table_id: string }).table_id;
+  harness.sync();
+  for (const type of ["grouped-scatter", "grouped-box"]) {
+    const done = await harness.run(`job-210-cont-${type}`, "build-graph", { table_id: contId, graph_type: type });
+    strictEqual((done.result as { graph_type: string }).graph_type, type);
+  }
+  const xy = await harness.run("job-210-xy", "create-table", {
+    table_type: "xy",
+    columns: ["", "X", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+    rows: [
+      ["", 1, 10, 12, 20, 22],
+      ["", 2, 11, 13, 21, 23],
+    ],
+  });
+  const xyId = (xy.result as { table_id: string }).table_id;
+  harness.sync();
+  const bars = await harness.run("job-210-xy-bars", "build-graph", { table_id: xyId, graph_type: "grouped-bars" });
+  strictEqual((bars.result as { graph_type: string }).graph_type, "grouped-bars");
+  await rejects(
+    harness.run("job-210-xy-box", "build-graph", { table_id: xyId, graph_type: "grouped-box" }),
+    /not offered for a XY table/,
+  );
+  const nested = await harness.run("job-210-nested", "create-table", {
+    table_type: "nested",
+    columns: ["", "A:S1:R1", "A:S1:R2", "A:S2:R1", "A:S2:R2"],
+    rows: [["r1", 10, 11, 12, 13]],
+  });
+  const nestedId = (nested.result as { table_id: string }).table_id;
+  harness.sync();
+  const meanError = await harness.run("job-210-nested-me", "build-graph", {
+    table_id: nestedId,
+    graph_type: "mean-error",
+  });
+  strictEqual((meanError.result as { graph_type: string }).graph_type, "mean-error");
+  deepStrictEqual(
+    created.map(([, t]) => t),
+    ["grouped-scatter", "grouped-box", "grouped-bars", "mean-error"],
+  );
+});
+
 check("summary subcolumns: interleaved scatter on a summary table draws centers, not points", () => {
   const dataset = readTable(summaryTable());
   const options = newGraphOptions("grouped-scatter");
