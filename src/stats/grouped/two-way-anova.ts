@@ -328,13 +328,16 @@ async function runPosthoc(
       rMethodOf(method),
     )})`,
   );
+  // No multiplicity-adjusted interval exists for the FDR approach (as for
+  // Holm–Šídák, whose `pa` is NA) — the comparison carries no CI rather
+  // than the unadjusted LSD interval its P values no longer match.
   const comparisons = cells.map((c, k) => ({
     group1: c.label1,
     group2: c.label2,
     ...(c.at ? { cells: c.at } : {}),
     diff: v[`d_${k}`] ?? null,
-    low: v[`lo_${k}`] ?? null,
-    high: v[`hi_${k}`] ?? null,
+    low: method === "fdr" ? null : (v[`lo_${k}`] ?? null),
+    high: method === "fdr" ? null : (v[`hi_${k}`] ?? null),
     p: v[`p_${k}`] ?? null,
   }));
   if (method !== "fdr" || !fdr) return comparisons;
@@ -568,8 +571,11 @@ async function runRepeatedMeasures(
         group2,
         cells: posthoc.cells[k],
         diff: v[`d_${k}`] ?? null,
-        low: v[`lo_${k}`] ?? null,
-        high: v[`hi_${k}`] ?? null,
+        // No multiplicity-adjusted interval exists for the FDR approach —
+        // the comparison carries no CI rather than the unadjusted LSD
+        // interval its P values no longer match (same as runPosthoc).
+        low: params.posthoc === "fdr" ? null : (v[`lo_${k}`] ?? null),
+        high: params.posthoc === "fdr" ? null : (v[`hi_${k}`] ?? null),
         p: v[`p_${k}`] ?? null,
       }))
     : params.posthoc !== "none"

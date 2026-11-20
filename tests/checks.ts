@@ -4156,6 +4156,16 @@ check("two-way ANOVA: FDR post-hoc adjusts the LSD P values; cells and marginal 
     posthocTarget: "cells",
   } as AnalysisParams);
   ok("error" in rmRefused && /ordinary two-way ANOVA/.test(rmRefused.error));
+  // The repeated-measures FDR path (Geisser-Greenhouse, no sphericity) also
+  // carries no CI — its P values are the FDR-adjusted ones.
+  const rmFdr = await run({
+    design: "repeated-measures",
+    posthoc: "fdr",
+    posthocTarget: "groups",
+    sphericity: false,
+  } as AnalysisParams);
+  ok(rmFdr.comparisons!.length > 0);
+  ok(rmFdr.comparisons!.every((c) => c.low == null && c.high == null), "RM FDR comparisons carry no CI");
 });
 
 // Seq 192 — three-way engine: the full post-hoc suite runs on a term, simple
