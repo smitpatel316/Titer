@@ -217,6 +217,8 @@ import {
   validateFigureSize,
 } from "../src/lib/figure";
 import { buildPanelFigure } from "../src/views/figures/panel-figure";
+import { buildGraphFigure, type AnalysisRunner } from "../src/views/graphs/graph-figure";
+import { overlayReport } from "../src/store/mcp-export";
 import { createEvalDedupe, ensureSaveExtension } from "../src/native";
 import { engineStatusText, getEngineStatus, onEngineStatus, setEngineStatus } from "../src/stats/engine-status";
 import { buildOfficeDocument, officeExtension } from "../src/lib/office-export";
@@ -8753,6 +8755,480 @@ check("a shared legend hides each panel's own legend (BUG-REPORT #15)", () => {
   const exporter = readFileSync("src/views/figures/figure-export.ts", "utf8");
   ok(exporter.includes("}, format, dpi, legend.ok)"), "the raster export must pass legend.ok");
   ok(exporter.includes('}, "svg", dpi, legend.ok)'), "the SVG export must pass legend.ok");
+});
+
+// ── seq 173: MCP headless export draws graph overlays ────────────────
+// Pre-fix, `buildPanelFigure` drew only the base chart: a forest plot
+// exported headlessly had no hazard ratios, a scree plot no bars, a
+// significance graph no brackets. `buildGraphFigure` is the shared builder
+// that draws the overlays the graph view draws, from the same sibling
+// analyses — these pins drive it with stubbed runs (no R engine, no DOM),
+// and pin the failure modes: a missing analysis still builds the base
+// figure and says so, a frozen analysis uses its stored result without
+// running, and the export job reports which overlays drew.
+const overlayFixture = (
+  table: ProjectNode,
+  graph: ProjectNode,
+  analyses: ProjectNode[],
+): Record<string, ProjectNode> => {
+  const nodes: Record<string, ProjectNode> = { [table.id]: table, [graph.id]: graph };
+  for (const a of analyses) nodes[a.id] = a;
+  return nodes;
+};
+
+const stubRun =
+  (outcome: AnalysisOutcome, seen: string[] = []): AnalysisRunner =>
+  async (type) => {
+    seen.push(type);
+    return outcome;
+  };
+
+const resultOf = (testType: AnalysisResult["testType"], extra: Partial<AnalysisResult>): AnalysisResult => ({
+  testType,
+  stats: [],
+  groups: [],
+  notes: "",
+  ...extra,
+});
+
+check("seq 173: a headless forest plot draws its Cox hazard ratios (base-only drew axes)", async () => {
+  const table: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "MV",
+    parentId: null,
+    tableType: "multiple",
+    data: {
+      columns: ["Title", "Time", "Status", "Trt", "Age"],
+      rows: [
+        ["S1", "12", "1", "0", "61"],
+        ["S2", "24", "1", "1", "55"],
+        ["S3", "30", "0", "0", "70"],
+        ["S4", "18", "1", "1", "48"],
+      ],
+    },
+  };
+  const cox: ProjectNode = {
+    id: "a1",
+    type: "analysis",
+    name: "Cox",
+    parentId: "t1",
+    analysisType: "cox-proportional-hazards",
+    analysisParams: { time: "Time", status: "Status", covariates: ["Trt", "Age"] },
+  };
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Forest",
+    parentId: "t1",
+    graphType: "forest-plot",
+    graphOptions: { ...newGraphOptions("forest-plot"), coxAnalysisId: "a1" },
+  };
+  const nodes = overlayFixture(table, graph, [cox]);
+  // The pre-fix builder drew axes only: no marker trace at all.
+  strictEqual(buildPanelFigure(graph, nodes)?.data.length, 0);
+  const outcome = resultOf("cox-proportional-hazards", {
+    coefficients: [
+      { term: "Trt", estimate: null, stdError: null, t: null, p: null, hazardRatio: 0.5, low: 0.25, high: 1 },
+      { term: "Age", estimate: null, stdError: null, t: null, p: null, hazardRatio: 2, low: 1.5, high: 3 },
+    ],
+  });
+  const { figure, overlays } = await buildGraphFigure(graph, nodes, { run: stubRun(outcome) });
+  ok(figure, "the forest plot builds");
+  const row = (figure!.data as { mode?: string; x?: number[]; y?: string[] }[]).find((t) => t.mode === "markers");
+  deepStrictEqual(row?.y, ["Trt", "Age"]);
+  deepStrictEqual(row?.x, [0.5, 2]);
+  deepStrictEqual(
+    overlays.map((o) => [o.overlay, o.status]),
+    [["forest", "applied"]],
+  );
+});
+
+check("seq 173: a headless scree plot draws its PCA variance, and a missing PCA still builds with a prompt", async () => {
+  const table: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "MV",
+    parentId: null,
+    tableType: "multiple",
+    data: {
+      columns: ["Title", "V1", "V2", "V3"],
+      rows: [
+        ["S1", "1", "2", "3"],
+        ["S2", "2", "3", "4"],
+        ["S3", "3", "1", "2"],
+        ["S4", "4", "2", "1"],
+      ],
+    },
+  };
+  const pca: ProjectNode = {
+    id: "a1",
+    type: "analysis",
+    name: "PCA",
+    parentId: "t1",
+    analysisType: "principal-component-analysis",
+    analysisParams: {},
+  };
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Scree",
+    parentId: "t1",
+    graphType: "scree-plot",
+    graphOptions: { ...newGraphOptions("scree-plot"), pcaAnalysisId: "a1" },
+  };
+  const nodes = overlayFixture(table, graph, [pca]);
+  strictEqual(buildPanelFigure(graph, nodes)?.data.length, 0);
+  const outcome = resultOf("principal-component-analysis", {
+    pcaVariance: [
+      { component: "PC1", eigenvalue: 2, sd: 1.4, proportion: 0.6, cumulative: 0.6 },
+      { component: "PC2", eigenvalue: 1, sd: 1, proportion: 0.3, cumulative: 0.9 },
+      { component: "PC3", eigenvalue: 0.3, sd: 0.55, proportion: 0.1, cumulative: 1 },
+    ],
+  });
+  const built = await buildGraphFigure(graph, nodes, { run: stubRun(outcome) });
+  ok(built.figure, "the scree plot builds");
+  const bar = (built.figure!.data as { type?: string; y?: number[] }[]).find((t) => t.type === "bar");
+  deepStrictEqual(bar?.y, [60, 30, 10]);
+  deepStrictEqual(
+    built.overlays.map((o) => [o.overlay, o.status]),
+    [["scree", "applied"]],
+  );
+  // No PCA result: the axes still build, the on-canvas prompt names the
+  // analysis to run, and the overlay reports missing instead of vanishing.
+  const seen: string[] = [];
+  const missing = await buildGraphFigure(graph, nodes, {
+    run: async (type) => {
+      seen.push(type);
+      return { error: "The R engine is not running." };
+    },
+  });
+  ok(missing.figure, "the scree plot still builds without its PCA");
+  strictEqual(missing.figure!.data.length, 0);
+  deepStrictEqual(
+    missing.overlays.map((o) => [o.overlay, o.status]),
+    [["scree", "error"]],
+  );
+  const unlinked = await buildGraphFigure(
+    { ...graph, graphOptions: { ...newGraphOptions("scree-plot") } },
+    overlayFixture(table, { ...graph, graphOptions: { ...newGraphOptions("scree-plot") } }, []),
+  );
+  ok(unlinked.figure, "an unlinked scree plot still builds");
+  deepStrictEqual(
+    unlinked.overlays.map((o) => [o.overlay, o.status]),
+    [["scree", "missing"]],
+  );
+  ok(
+    ((unlinked.figure!.layout.annotations as { text?: string }[] | undefined) ?? []).some((a) =>
+      a.text?.includes("Principal component analysis"),
+    ),
+    "the unlinked plot prompts for its analysis",
+  );
+});
+
+check("seq 173: a headless K-means scatter draws its clusters and centres", async () => {
+  const table: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "MV",
+    parentId: null,
+    tableType: "multiple",
+    data: {
+      columns: ["Title", "V1", "V2"],
+      rows: [
+        ["S1", "1", "1"],
+        ["S2", "1.5", "1.2"],
+        ["S3", "8", "8"],
+        ["S4", "8.5", "7.8"],
+      ],
+    },
+  };
+  const kmeans: ProjectNode = {
+    id: "a1",
+    type: "analysis",
+    name: "K-means",
+    parentId: "t1",
+    analysisType: "k-means",
+    analysisParams: { k: 2 },
+  };
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Clusters",
+    parentId: "t1",
+    graphType: "kmeans-scatter",
+    graphOptions: { ...newGraphOptions("kmeans-scatter"), kmeansAnalysisId: "a1" },
+  };
+  const nodes = overlayFixture(table, graph, [kmeans]);
+  const outcome = resultOf("k-means", {
+    kmeansClusters: [
+      { cluster: "1", centre: [1.25, 1.1], n: 2, withinSs: 0.1 },
+      { cluster: "2", centre: [8.25, 7.9], n: 2, withinSs: 0.1 },
+    ],
+    kmeansAssignments: [
+      { row: "S1", cluster: 1 },
+      { row: "S2", cluster: 1 },
+      { row: "S3", cluster: 2 },
+      { row: "S4", cluster: 2 },
+    ],
+  });
+  const { figure, overlays } = await buildGraphFigure(graph, nodes, { run: stubRun(outcome) });
+  ok(figure, "the cluster scatter builds");
+  const names = (figure!.data as { name?: string }[]).map((t) => t.name);
+  deepStrictEqual(names, ["Cluster 1", "Cluster 2", "Cluster centres"]);
+  deepStrictEqual(
+    overlays.map((o) => [o.overlay, o.status]),
+    [["kmeans", "applied"]],
+  );
+});
+
+check("seq 173: a headless graph draws significance brackets from its ANOVA", async () => {
+  const table: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Column",
+    parentId: null,
+    tableType: "column",
+    data: {
+      columns: ["Title", "A", "B", "C"],
+      rows: [
+        ["r1", "10", "14", "20"],
+        ["r2", "11", "15", "21"],
+        ["r3", "10", "14", "20"],
+      ],
+    },
+  };
+  const anova: ProjectNode = {
+    id: "a1",
+    type: "analysis",
+    name: "ANOVA",
+    parentId: "t1",
+    analysisType: "anova",
+    analysisParams: {},
+  };
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Means",
+    parentId: "t1",
+    graphType: "mean-error",
+    graphOptions: {
+      ...newGraphOptions("mean-error"),
+      sigAnalysisId: "a1",
+      sigPairs: [pairKey("A", "B")],
+    },
+  };
+  const nodes = overlayFixture(table, graph, [anova]);
+  const outcome = resultOf("anova", {
+    comparisons: [{ group1: "A", group2: "B", p: 0.01, diff: 4, low: 1, high: 7 }],
+  });
+  const base = buildPanelFigure(graph, nodes);
+  strictEqual((base?.layout.shapes as unknown[] | undefined)?.length ?? 0, 0, "the base chart has no brackets");
+  const { figure, overlays } = await buildGraphFigure(graph, nodes, { run: stubRun(outcome) });
+  ok(figure, "the graph builds");
+  ok(((figure!.layout.shapes as unknown[]) ?? []).length > 0, "the brackets draw as shapes");
+  ok(
+    ((figure!.layout.annotations as { text?: string }[] | undefined) ?? []).some((a) => a.text?.includes("*")),
+    "the bracket carries its star",
+  );
+  deepStrictEqual(
+    overlays.map((o) => [o.overlay, o.status]),
+    [["significance", "applied"]],
+  );
+});
+
+check("seq 173: a headless XY scatter draws its fitted nonlinear curve", async () => {
+  const table: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Dose",
+    parentId: null,
+    tableType: "xy",
+    data: {
+      columns: ["Title", "X", "Y1"],
+      rows: [
+        ["", "0", "10"],
+        ["", "1", "6.5"],
+        ["", "2", "4.2"],
+        ["", "3", "2.8"],
+      ],
+    },
+  };
+  const fit: ProjectNode = {
+    id: "a1",
+    type: "analysis",
+    name: "Decay",
+    parentId: "t1",
+    analysisType: "nonlinear-regression",
+    analysisParams: { model: "one-phase-decay", y: "Y1" },
+  };
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Scatter",
+    parentId: "t1",
+    graphType: "xy-scatter",
+    graphOptions: { ...newGraphOptions("xy-scatter"), regAnalysisId: "a1" },
+  };
+  const nodes = overlayFixture(table, graph, [fit]);
+  const outcome = resultOf("nonlinear-regression", {
+    coefficients: [
+      { term: "Y0", estimate: 10, stdError: null, t: null, p: null },
+      { term: "Plateau", estimate: 1, stdError: null, t: null, p: null },
+      { term: "K", estimate: 0.5, stdError: null, t: null, p: null },
+    ],
+    fit: { sets: ["Y1"], rows: [{ label: "R squared", values: [0.99] }] },
+  });
+  const base = buildPanelFigure(graph, nodes);
+  const baseLines = (base?.data as { mode?: string }[] | undefined)?.filter((t) => t.mode === "lines").length ?? 0;
+  strictEqual(baseLines, 0, "the base chart has no fitted curve");
+  const { figure, overlays } = await buildGraphFigure(graph, nodes, { run: stubRun(outcome) });
+  ok(figure, "the scatter builds");
+  const curve = (figure!.data as { mode?: string; x?: number[]; y?: number[] }[]).find((t) => t.mode === "lines");
+  strictEqual(curve?.x?.length, 101, "the curve is drawn on a 100-step grid");
+  ok(curve?.y?.every((v) => Number.isFinite(v)), "every curve point is finite");
+  deepStrictEqual(
+    overlays.map((o) => [o.overlay, o.status]),
+    [["fitted-curve", "applied"]],
+  );
+});
+
+check("seq 173: a frozen analysis draws its stored result without running anything", async () => {
+  const table: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "MV",
+    parentId: null,
+    tableType: "multiple",
+    data: {
+      columns: ["Title", "V1", "V2", "V3"],
+      rows: [
+        ["S1", "1", "2", "3"],
+        ["S2", "2", "3", "4"],
+        ["S3", "3", "1", "2"],
+      ],
+    },
+  };
+  const stored = resultOf("principal-component-analysis", {
+    pcaVariance: [
+      { component: "PC1", eigenvalue: 2, sd: 1.4, proportion: 0.6, cumulative: 0.6 },
+      { component: "PC2", eigenvalue: 1, sd: 1, proportion: 0.3, cumulative: 0.9 },
+    ],
+  });
+  const pca: ProjectNode = {
+    id: "a1",
+    type: "analysis",
+    name: "PCA",
+    parentId: "t1",
+    analysisType: "principal-component-analysis",
+    analysisParams: {},
+    frozen: true,
+    cachedResult: stored,
+  };
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Scree",
+    parentId: "t1",
+    graphType: "scree-plot",
+    graphOptions: { ...newGraphOptions("scree-plot"), pcaAnalysisId: "a1" },
+  };
+  const nodes = overlayFixture(table, graph, [pca]);
+  const seen: string[] = [];
+  const run: AnalysisRunner = async (type) => {
+    seen.push(type);
+    throw new Error("a frozen analysis must not run");
+  };
+  const { figure, overlays } = await buildGraphFigure(graph, nodes, { run });
+  ok(figure, "the scree plot builds from the stored result");
+  deepStrictEqual(seen, [], "no analysis ran");
+  const bar = (figure!.data as { type?: string; y?: number[] }[]).find((t) => t.type === "bar");
+  deepStrictEqual(bar?.y, [60, 30]);
+  deepStrictEqual(
+    overlays.map((o) => [o.overlay, o.status]),
+    [["scree", "applied"]],
+  );
+});
+
+check("seq 173: a headless PCA biplot draws its scores, and the export reports its overlays", async () => {
+  const table: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "MV",
+    parentId: null,
+    tableType: "multiple",
+    data: {
+      columns: ["Title", "V1", "V2"],
+      rows: [
+        ["S1", "-8", "-2"],
+        ["S2", "0", "0"],
+        ["S3", "5", "3"],
+        ["S4", "10", "9.5"],
+        ["S5", "-3", "7"],
+      ],
+    },
+  };
+  const pca: ProjectNode = {
+    id: "a1",
+    type: "analysis",
+    name: "PCA",
+    parentId: "t1",
+    analysisType: "principal-component-analysis",
+    analysisParams: {},
+  };
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Biplot",
+    parentId: "t1",
+    graphType: "pca-biplot",
+    graphOptions: { ...newGraphOptions("pca-biplot"), pcaAnalysisId: "a1" },
+  };
+  const nodes = overlayFixture(table, graph, [pca]);
+  const outcome = resultOf("principal-component-analysis", {
+    pcaVariance: [
+      { component: "PC1", eigenvalue: 2, sd: 1, proportion: 0.6, cumulative: 0.6 },
+      { component: "PC2", eigenvalue: 1, sd: 1, proportion: 0.3, cumulative: 0.9 },
+    ],
+    pcaLoadings: [
+      { variable: "V1", loadings: [0.9, 0.1] },
+      { variable: "V2", loadings: [0.1, 0.9] },
+    ],
+    pcaScores: [
+      { row: "S1", scores: [-8, -2] },
+      { row: "S2", scores: [0, 0] },
+      { row: "S3", scores: [5, 3] },
+      { row: "S4", scores: [10, 9.5] },
+      { row: "S5", scores: [-3, 7] },
+    ],
+  });
+  const { figure, overlays } = await buildGraphFigure(graph, nodes, { run: stubRun(outcome) });
+  ok(figure, "the biplot builds");
+  ok((figure!.data as unknown[]).length > 0, "the scores draw");
+  deepStrictEqual(
+    overlays.map((o) => [o.overlay, o.status]),
+    [["pca-biplot", "applied"]],
+  );
+  // The export job's overlay report: applied names, and missing ones with
+  // their status and reason — so a caller can tell "no overlays" from
+  // "the analysis hasn't run yet".
+  deepStrictEqual(overlayReport(overlays), { overlays_applied: ["pca-biplot"], overlays_missing: [] });
+  deepStrictEqual(overlayReport([{ overlay: "scree", status: "missing", detail: "Run a Principal component analysis first." }]), {
+    overlays_applied: [],
+    overlays_missing: [{ overlay: "scree", status: "missing", detail: "Run a Principal component analysis first." }],
+  });
+  // The wiring: the export jobs build through the shared builder and report
+  // the overlays, and the dispatcher passes its run through.
+  const exporter = readFileSync("src/store/mcp-export.ts", "utf8");
+  ok(exporter.includes("buildGraphFigure(graph, nodes, { run })"), "export-graph must build through buildGraphFigure");
+  ok(exporter.includes("...overlayReport(out.overlays)"), "export-graph must report its overlays");
+  ok(exporter.includes("...overlayReport(overlays)"), "export-figure/office must report their overlays");
+  const dispatch = readFileSync("src/store/mcp-dispatch.ts", "utf8");
+  ok(dispatch.includes("run: deps.run ?? runAnalysis,"), "the dispatcher must pass its run to the export jobs");
+  const figureExporter = readFileSync("src/views/figures/figure-export.ts", "utf8");
+  ok(figureExporter.includes("buildGraphFigure(graph, nodes, { hideLegend })"), "figure panels must build through buildGraphFigure");
+  const scriptExporter = readFileSync("src/views/graphs/script-graph-export.ts", "utf8");
+  ok(scriptExporter.includes("buildGraphFigure(graph, nodes)"), "script export must build through buildGraphFigure");
 });
 
 check("an oversize figure offers the largest fitting size, never silently (F-12)", () => {

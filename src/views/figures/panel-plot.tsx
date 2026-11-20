@@ -1,10 +1,19 @@
 // One panel of the figure editor: the graph's chart drawn with Plotly at the
 // panel's size (see panel-figure.ts for what it draws), or the placeholder
 // when the graph is gone or has nothing to draw.
+//
+// The panel starts from the synchronous base figure (`buildPanelFigure`) so
+// it paints at once, then upgrades to the full figure (`buildGraphFigure`,
+// seq 173) when the graph's overlay analyses resolve — so the preview shows
+// the same brackets and curves the export draws, instead of the bare base
+// chart. A re-run that lands late (after the graph changed again) is
+// dropped, and a failed overlay run leaves the base figure up.
 import * as React from "react";
 import type { ProjectNode } from "../../store/types";
 import { loadPlotly } from "../graphs/plotly";
 import { buildPanelFigure } from "./panel-figure";
+import { buildGraphFigure } from "../graphs/graph-figure";
+import type { GraphFigure } from "../graphs";
 
 export function PanelPlot({
   graph,
@@ -25,7 +34,23 @@ export function PanelPlot({
 }) {
   const ref = React.useRef<HTMLDivElement>(null);
   const plottedRef = React.useRef<HTMLDivElement | null>(null);
-  const fig = React.useMemo(() => buildPanelFigure(graph, nodes, { hideLegend }), [graph, nodes, hideLegend]);
+  const [fig, setFig] = React.useState<GraphFigure | null>(() =>
+    buildPanelFigure(graph, nodes, { hideLegend }),
+  );
+
+  React.useEffect(() => {
+    let current = true;
+    // The base figure paints at once (below); the full figure replaces it
+    // when the overlays resolve. A base figure that is already the full
+    // figure (no overlays to resolve) stays as it is.
+    setFig(buildPanelFigure(graph, nodes, { hideLegend }));
+    void buildGraphFigure(graph, nodes, { hideLegend }).then(({ figure }) => {
+      if (current && figure) setFig(figure);
+    });
+    return () => {
+      current = false;
+    };
+  }, [graph, nodes, hideLegend]);
 
   React.useEffect(() => {
     const el = ref.current;
