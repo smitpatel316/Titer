@@ -2971,6 +2971,14 @@ check("titer_edit_table generate-series fills a column through MCP, with the dia
     harness.run("job-169e", "edit-table", { table_id: tid, op: "generate-series", mode: "logarithmic" }),
     /arithmetic.*geometric|geometric.*arithmetic/,
   );
+  await rejects(
+    harness.run("job-169f", "edit-table", { table_id: tid, op: "generate-series", column: 0 }),
+    /row titles/,
+  );
+  await rejects(
+    harness.run("job-169g", "edit-table", { table_id: tid, op: "generate-series", at: 99 }),
+    /no row 99/,
+  );
   deepStrictEqual(data().rows.map((r) => r[1]), ["10", "20", "30"]);
 });
 

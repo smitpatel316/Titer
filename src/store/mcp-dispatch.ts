@@ -1227,10 +1227,16 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
               : (() => {
                   throw jobErr(job, "needs column — only XY and Survival tables default to the X column (1).");
                 })());
+          if (column < 1) {
+            throw jobErr(job, "needs a data column (1 or later) — column 0 holds the row titles, and takes no series.");
+          }
           if (column >= data.columns.length) {
             throw jobErr(job, `has no column ${column} — the table has ${data.columns.length} columns (0 is the row titles).`);
           }
           const at = argInt(job, job.args, "at", 0);
+          if (at > data.rows.length) {
+            throw jobErr(job, `has no row ${at} to start at — the table holds ${data.rows.length} stored rows.`);
+          }
           const count = argOptNumber(job, job.args, "count") ?? Math.max(1, data.rows.length - at);
           const spec = {
             count,
