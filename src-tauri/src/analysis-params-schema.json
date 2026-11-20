@@ -2479,10 +2479,22 @@
           "sqrt",
           "reciprocal",
           "exp",
-          "square"
+          "square",
+          "y-plus-k",
+          "y-minus-k",
+          "y-times-k",
+          "y-divided-by-k",
+          "k-minus-y",
+          "k-divided-by-y"
         ],
         "default": "log10",
         "required": false
+      },
+      {
+        "name": "constant",
+        "type": "number",
+        "required": false,
+        "description": "The constant K for the arithmetic functions (seq 205)."
       },
       {
         "name": "sets",

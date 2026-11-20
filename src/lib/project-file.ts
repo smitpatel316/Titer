@@ -858,7 +858,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "descriptive-statistics": ["sets"],
   "frequency-distribution": ["binMode", "binWidth", "binCount", "startAt", "sets"],
   "fraction-of-total": ["ys", "x", "totalBy", "format", "sets"],
-  "transform-data": ["function", "sets"],
+  "transform-data": ["function", "constant", "sets"],
   "transform-concentrations": ["column", "fromUnit", "toUnit", "sets"],
   "remove-baseline": ["ys", "x", "baselineMethod", "firstN", "controls", "constant", "constantHook", "sets"],
   normalize: [

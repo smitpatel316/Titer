@@ -17,6 +17,7 @@ import { hasXColumn, type TableType, type Transform } from "../../store/types";
 import { MODEL_LABEL, termLabel } from "../../stats/xy/nonlinear-regression";
 import { modelSpec } from "../../stats/xy/nonlinear-fit";
 import { parseCustomParameters, parseUserEquation } from "../../stats/xy/user-defined";
+import { isArithmeticTransform } from "../../stats/column/transform-data";
 import { dataGroups, incompleteRows, pairedGroups, pairIndices } from "../../stats/column/base";
 import { rowName } from "../../stats/grouped/base";
 import { distinctTruthValues } from "../../stats/column/roc-curve";
@@ -1752,7 +1753,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
   // exp, square); a value the function is undefined for is left blank in
   // the results sheet, never NaN — the runner states the reason in its notes.
   "transform-data": {
-    questions: (_, table) => [
+    questions: (a, table) => [
       ...someSets(table, 1),
       choice("function", "Which function should be applied to the values?", [
         ["log10", "log10(Y) — logarithm, base 10"],
@@ -1762,11 +1763,33 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ["reciprocal", "1/Y — reciprocal"],
         ["exp", "exp(Y) — e to the power of Y"],
         ["square", "Y² — square"],
+        ["y-plus-k", "Y+K — add a constant to every value"],
+        ["y-minus-k", "Y−K — subtract a constant from every value"],
+        ["y-times-k", "Y×K — multiply every value by a constant"],
+        ["y-divided-by-k", "Y/K — divide every value by a constant"],
+        ["k-minus-y", "K−Y — subtract every value from a constant"],
+        ["k-divided-by-y", "K/Y — divide a constant by every value"],
       ]),
+      isArithmeticTransform((a.function as TransformFunction | undefined) ?? "log10") && {
+        id: "constant",
+        ask: "What is the constant K to apply?",
+        kind: "number",
+        label: "Constant K",
+        initial: 1,
+        validate: (v) =>
+          a.function === "y-divided-by-k" && v === 0
+            ? "K must not be 0 for Y/K — dividing by 0 is undefined."
+            : undefined,
+      },
     ],
     finish: (a) => ({
       type: "transform-data",
-      params: withSets(a, { function: (a.function as TransformFunction | undefined) ?? "log10" }),
+      params: withSets(a, {
+        function: (a.function as TransformFunction | undefined) ?? "log10",
+        ...(isArithmeticTransform((a.function as TransformFunction | undefined) ?? "log10")
+          ? { constant: a.constant as number }
+          : {}),
+      }),
     }),
   },
   // Transform concentrations (v2): one numeric column (an XY table's X

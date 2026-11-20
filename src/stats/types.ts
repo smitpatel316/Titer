@@ -144,9 +144,37 @@ export const NONLINEAR_MODELS = [
 export const CURVE_COMPARISONS = ["ec50", "all"] as const;
 export const CORRELATION_METHODS = ["pearson", "spearman"] as const;
 /** The Transform functions (Prism's documented standard set — Prism 8 User
- *  Guide, "Transform data"): log10, ln, log2, sqrt, reciprocal, exp, square. */
-export const TRANSFORM_FUNCTIONS = ["log10", "ln", "log2", "sqrt", "reciprocal", "exp", "square"] as const;
+ *  Guide, "Transform data"): log10, ln, log2, sqrt, reciprocal, exp, square —
+ *  plus Prism's arithmetic transforms (seq 205), which apply a constant K to
+ *  every value: Y+K, Y−K, Y×K, Y/K, K−Y, K/Y. The arithmetic functions read
+ *  the constant from TransformDataParams.constant. */
+export const TRANSFORM_FUNCTIONS = [
+  "log10",
+  "ln",
+  "log2",
+  "sqrt",
+  "reciprocal",
+  "exp",
+  "square",
+  "y-plus-k",
+  "y-minus-k",
+  "y-times-k",
+  "y-divided-by-k",
+  "k-minus-y",
+  "k-divided-by-y",
+] as const;
 export type TransformFunction = (typeof TRANSFORM_FUNCTIONS)[number];
+/** The arithmetic Transform functions — the ones that need a constant K
+ *  (TransformDataParams.constant). */
+export const TRANSFORM_ARITHMETIC_FUNCTIONS = [
+  "y-plus-k",
+  "y-minus-k",
+  "y-times-k",
+  "y-divided-by-k",
+  "k-minus-y",
+  "k-divided-by-y",
+] as const;
+export type TransformArithmeticFunction = (typeof TRANSFORM_ARITHMETIC_FUNCTIONS)[number];
 /** Binding — Saturation models (plan 16): one-site total, two-site
  *  specific, and the two-series total+nonspecific fits (NS/Background shared). */
 export const BINDING_SATURATION_MODELS = [
@@ -850,9 +878,13 @@ export interface FrequencyDistributionParams {
 }
 
 /** Params for "transform-data": which function to apply to the values. The
- *  wizard always sets it; the runner defaults to log10 when it is absent. */
+ *  wizard always sets it; the runner defaults to log10 when it is absent.
+ *  `constant` is the K of the arithmetic functions (Y±K, Y×K, Y/K, K−Y, K/Y)
+ *  — required for those, ignored by the rest. */
 export interface TransformDataParams {
   function: TransformFunction;
+  /** The constant K for the arithmetic functions (seq 205). */
+  constant?: number;
 }
 /** Molar concentration units (Prism's set), in descending magnitude: each
  *  step is a factor of 1000. µ is U+00B5 MICRO SIGN, matching the bUnits in
