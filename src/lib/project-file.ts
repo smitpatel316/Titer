@@ -63,6 +63,7 @@ import {
   EC_ANYTHING,
   ENZYME_INHIBITION_MODELS,
   EXTRACT_REARRANGE_TARGETS,
+  FRACTION_OF_TOTAL_CIS,
   FRACTION_OF_TOTAL_FORMATS,
   FRACTION_OF_TOTAL_TOTALS,
   MONTE_CARLO_STATISTICS,
@@ -310,9 +311,10 @@ const PARAMS = {
   zeroConstant: "number", hundredConstant: "number",
   // Prune rows (v2): the condition, and the threshold/range it needs.
   condition: PRUNE_ROWS_CONDITIONS, threshold: "number", low: "number", high: "number",
-  // Fraction of total (v2): which total each value is divided by, and
-  // whether the result is a fraction or a percent.
-  totalBy: FRACTION_OF_TOTAL_TOTALS, format: FRACTION_OF_TOTAL_FORMATS,
+  // Fraction of total (v2): which total each value is divided by, whether
+  // the result is a fraction or a percent, and which 95% CI of each
+  // proportion it carries (seq 196).
+  totalBy: FRACTION_OF_TOTAL_TOTALS, format: FRACTION_OF_TOTAL_FORMATS, ci: FRACTION_OF_TOTAL_CIS,
   alpha: { min: 0.001, max: 0.5 }, iterate: "yes/no",
   f: "number", spar: "number", df: "number",
   // Smooth, differentiate or integrate a curve (v2): the operation is a
@@ -857,7 +859,7 @@ function readParam(kind: ParamKind, v: unknown, report?: (dropped: number) => vo
 export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "descriptive-statistics": ["sets"],
   "frequency-distribution": ["binMode", "binWidth", "binCount", "startAt", "sets"],
-  "fraction-of-total": ["ys", "x", "totalBy", "format", "sets"],
+  "fraction-of-total": ["ys", "x", "totalBy", "format", "ci", "sets"],
   "transform-data": ["function", "sets"],
   "transform-concentrations": ["column", "fromUnit", "toUnit", "sets"],
   "remove-baseline": ["ys", "x", "baselineMethod", "firstN", "controls", "constant", "constantHook", "sets"],

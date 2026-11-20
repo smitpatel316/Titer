@@ -701,6 +701,7 @@
     "min_columns": 1,
     "offered_on": [
       "column",
+      "contingency",
       "xy"
     ],
     "params": [
@@ -736,6 +737,18 @@
         ],
         "default": "fraction",
         "required": false
+      },
+      {
+        "name": "ci",
+        "type": "string",
+        "enum": [
+          "none",
+          "wilson",
+          "clopper-pearson"
+        ],
+        "default": "none",
+        "required": false,
+        "description": "Omitted: no confidence interval. The CI treats the original value as successes out of the total as trials, so it is blank for a value that is not a proportion of its total (below 0, or above the total)."
       },
       {
         "name": "sets",

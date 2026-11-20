@@ -2294,6 +2294,11 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ["fraction", "Fractions (0 to 1)"],
           ["percent", "Percentages (0 to 100)"],
         ]),
+        choice("ci", "Confidence interval of each proportion…", [
+          ["none", "No confidence interval"],
+          ["wilson", "Wilson/Brown (recommended) — 95% CI"],
+          ["clopper-pearson", "Clopper–Pearson (exact) — 95% CI"],
+        ]),
       ];
     },
     finish: (a, table, tableType) => ({
@@ -2303,6 +2308,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ...(tableType === "xy" ? { x: table.columns[0]?.name } : {}),
         totalBy: a.totalBy as FractionOfTotalParams["totalBy"],
         format: a.format as FractionOfTotalParams["format"],
+        ...(a.ci ? { ci: a.ci as FractionOfTotalParams["ci"] } : {}),
       },
     }),
   },
