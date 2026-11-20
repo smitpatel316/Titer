@@ -1,6 +1,6 @@
 # MCP server contract — Titer (v1.6.0, Phase 2) ↔ stdio bridge
 
-**Status:** Phase 2 + v1.7.4 P0 (56 tools: read, write, run, graph, export, cloud).
+**Status:** Phase 2 + v1.7.4 P0 + 1.8.0 menus batch B (64 tools: read, write, run, graph, export, cloud).
 **Server branch:** `check/v16-mcp-phase2` (v1.6.0); the v1.7.4 P0 tools
 (`titer_project_summary`, `titer_search`, `titer_get_analysis_params`,
 `titer_rerun_analysis`, `await_result` on `titer_run_analysis`) were
@@ -123,11 +123,11 @@ SSE stream (`text/event-stream`). Lifecycle:
    `2025-06-18`), `capabilities`, `clientInfo`. Server answers with its
    own `protocolVersion` (the negotiated one — the highest both support),
    `capabilities: { "tools": {} }`, `serverInfo: { "name": "titer",
-   "version": "<app version>" }`, and `instructions` (the 56 tools:
+   "version": "<app version>" }`, and `instructions` (the 64 tools:
    read-only vs mutating, the job model, cloud/export notes — the full
    text lives in `get_info` in `src-tauri/src/mcp.rs`).
 2. `notifications/initialized` — client sends after `initialize`.
-3. `tools/list` — returns all 56 tools in one page (`nextCursor`
+3. `tools/list` — returns all 64 tools in one page (`nextCursor`
    absent). No pagination.
 4. `tools/call` — `{ "name": "<tool>", "arguments": { … } }`.
 5. Sessions: 2025-11-25 clients use protocol-level sessions; the server
@@ -344,6 +344,7 @@ valid analyses for that table type.
 | `titer_run_analysis` | `project_id?`, `table_id`, `analysis_type`, `params?`, `name?`, `await_result?` (default false), `await_seconds?` (default 30, 1–120) | `{ job_id, status: "queued", analysis_id, project_id }` — immediately (async, §5.2). Creates the analysis node (`createAnalysis` with `analysis_type` + `params`) and enqueues the run; poll `titer_read_job` — `done` carries the full `AnalysisResult` (same shape as `titer_read_results` `"computed"`). `name?` overrides the node's display name. `table_id` is required — every analysis has a parent table. With `await_result: true` a run that finishes within `await_seconds` returns inline instead: `{ job_id, status: "done", analysis_id, project_id, result }`; a run still going returns the queued shape plus a `note` naming the `job_id` to poll (§5.2). |
 | `titer_rerun_analysis` **(1.7.4)** | `project_id?`, `analysis_id`, `params?` (overrides), `await_result?`, `await_seconds?` | `{ job_id, status: "queued", analysis_id, project_id }` — the same async shape as `titer_run_analysis`, but it runs an EXISTING analysis node: no new node is created. `params?` are overrides only, merged over the node's stored params and **saved on the node** (the next run and the UI see them); they are validated exactly like `titer_run_analysis` params — unknown/out-of-range keys are rejected naming the valid choices. A frozen analysis is refused ("unfreeze it with `titer_freeze_analysis`"); an orphaned analysis (its table was deleted) is refused — its params can't change. Same `await_result` / `await_seconds` semantics as `titer_run_analysis` (§5.2). This is the run path for method/wand-created analyses (see §11.3, now closed). |
 | `titer_freeze_analysis` | `project_id?`, `analysis_id`, `frozen` (boolean) | `{ project_id, analysis_id, frozen }`. A frozen result survives later data edits; unfreezing re-runs on next read. Undoable via `frozen: false` / `titer_undo`. |
+| `titer_clone_analysis` **(1.8.0)** | `project_id?`, `analysis_id` | `{ project_id, analysis_id (new) }` — Duplicate Current Sheet for an analysis (seq 236): the sheet and nothing else, right after its source with a fresh id and a uniquified name. A table's children are not copied; `titer_duplicate_table_family` is the tool for that. |
 | `titer_simulate_data` | `project_id?`, `table_type` (`column` \| `grouped` \| `xy`), `distribution` (`gaussian` \| `lognormal` \| `uniform` \| `binomial` \| `poisson` \| `exponential`), `n` (values per dataset, ≥ 2), `datasets` (≥ 1), `seed` (integer), `mean?`/`sd?`, `meanlog?`/`sdlog?` (of the LOGGED values), `min?`/`max?`, `size?`/`prob?` (0–1), `lambda?`, `rate?` — flat args, no nested object; only the fields its distribution needs are read. | `{ project_id, table_id, rows, data_columns }` — the new table via `createSimulatedTable` ("Simulated data", numbered). `n`/`datasets`/`seed` must be whole numbers (20.0 is not one); the frontend validator (`validateSimulationSpec`, the same function the dialog uses) is the authority on ranges and per-distribution requirements, including the 100,000-value cap. Same seed + settings reproduces the table. Awaited (one webR round-trip), not polled. |
 | `titer_apply_method` | `project_id?`, `table_id`, `path` | `{ project_id, table_id, created: { analyses: string[], graphs: string[] } }` (+ `skipped` with reasons, `dropped_links` naming graph links to analyses that weren't applied). Applies a `.pzm` method file's analyses + graphs to the table (Rust reads the file — local paths only, `.pzm` required; the frontend parses it). Only what the table offers is applied. **The created analyses are nodes with params, not runs** — run them with `titer_rerun_analysis` (§7; the §11.3 open item this closed in 1.7.4). A method file with no analyses/graphs at all is an error; a method with some, none of which fit this table, is a successful no-op (`created` empty + `skipped`). |
 | `titer_apply_wand` | `project_id?`, `table_id`, `example_table_id`, `prefix?` | `{ project_id, table_id, created: { analyses: string[], graphs: string[] }, report }` — the existing `WandReport`. Analyse + graph this table like another table (one target table only). Example == target, example with no children, or target with no numeric data are reported as `skipped` entries, not errors. **Copied analyses are nodes with params, not runs** — run them with `titer_rerun_analysis` (§7; the §11.3 open item this closed in 1.7.4). |
@@ -402,6 +403,13 @@ Multi-table graphs are not in scope (the graph node has a single
 | `titer_build_graph` | `project_id?`, `table_id`, `graph_type`, `options?`, `name?` | `{ project_id, graph_id, graph_type, warnings? }`. `graph_type` must be offered for the table's type (`GRAPH_OPTIONS_BY_TABLE` — 33 graph types; see below) — otherwise a plain error naming the valid types. `options` is a partial `GraphOptions` over the type's defaults; linked-analysis ids (`regAnalysisId`, `sigAnalysisId`, `demingAnalysisId`, `coxAnalysisId`, `ttestAnalysisId`, `poissonAnalysisId`, `pcaAnalysisId`, `kmeansAnalysisId`, …) must name existing analyses. **Synchronous** (builders are pure TS over table data + cached results). `warnings` says when a linked analysis is not computed yet, and when a `*Constant` hook names a constant that exists in no info sheet. |
 | `titer_update_graph` | `project_id?`, `graph_id`, `options` | `{ project_id, graph_id }` — partial `GraphOptions` merged over the graph's current options (titles, axis limits, linked analyses, display choices). Same validation as build. |
 | `titer_clone_graph` | `project_id?`, `graph_id`, `options?: { clearY?, clearX?, clearTitles? }` | `{ project_id, graph_id (new) }` — Prism's Clone Graph (same-table clone with changed options; defaults `clearY: true`, the rest false). The new table's id is visible via `titer_list_tables` afterwards. |
+| `titer_clone_figure` **(1.8.0)** | `project_id?`, `figure_id` | `{ project_id, figure_id (new) }` — Duplicate Current Sheet for a figure (seq 236): the sheet and nothing else, right after its source with a fresh id and a uniquified name; its panels still point at the same graphs. |
+| `titer_freeze_graph` **(1.8.0)** | `project_id?`, `graph_id`, `frozen` (boolean) | `{ project_id, graph_id, frozen }` — Freeze/Unfreeze a graph (seq 237): a frozen graph draws its snapshot while the data change; unfreezing draws live again. Refused when the graph has no data table to freeze from. Undoable via `frozen: false` / `titer_undo`. |
+| `titer_freeze_figure` **(1.8.0)** | `project_id?`, `figure_id`, `frozen` (boolean) | `{ project_id, figure_id, frozen }` — Freeze/Unfreeze a figure (seq 237): a frozen figure draws each panel from its snapshot; unfreezing draws live again. Refused when no panel has a data table to freeze from. |
+| `titer_add_drawing_object` **(1.8.0)** | `project_id?`, `node_id` (a graph or figure), `object` | `{ project_id, node_id, object_id }` — add a text/drawing/picture object to a graph or figure sheet (seq 238). `object` is `{ kind, x, y, width, height, text?, fontSize?, color?, fill?, strokeWidth?, src? }`; `kind` is `text`, `rect`, `ellipse`, `line`, `arrow` or `picture`; x/y/width/height are sheet px; a picture needs `src` as an image data URL under 5 MB. Objects are screen-only — exporters render the Plotly figure, not the drawing layer. |
+| `titer_update_drawing_object` **(1.8.0)** | `project_id?`, `node_id`, `object_id`, `patch` | `{ project_id, node_id, object_id }` — change one drawing object (seq 238): `patch` is the fields to change (`x`, `y`, `width`, `height`, `text`, `fontSize`, `color`, `fill`, `strokeWidth`, `src`, `groupId`). An empty patch is a plain error. |
+| `titer_delete_drawing_object` **(1.8.0)** | `project_id?`, `node_id`, `object_id` | `{ project_id, node_id, object_id, deleted: true }` — delete one drawing object (seq 238). Destructive. |
+| `titer_arrange_drawing_objects` **(1.8.0)** | `project_id?`, `node_id`, `op`, `object_ids` | `{ project_id, node_id, op, object_ids }` — arrange drawing objects (seq 238): `op` is `bring-to-front`, `send-to-back`, `bring-forward`, `send-backward`, `duplicate`, `group`, `ungroup` or `delete`. |
 | `titer_create_figure` | `project_id?`, `graph_ids?: string[]`, `layout?` | `{ project_id, figure_id, panels }` — a multi-panel layout over the given graphs (default: **all** the project's graphs when omitted — a tool convenience; the UI's New Figure creates an empty figure). `layout` is the figure's grid/title shape: `grid`, `figureSize`, `labelStyle`, `figureTitle`, `sharedLegend`, `dpi` (a `panels` key is rejected here — use `titer_update_figure` to place panels by hand). |
 | `titer_update_figure` | `project_id?`, `figure_id`, `layout` | `{ project_id, figure_id, panels }` — `layout` is the figure fields to change: `panels` (`FigurePanel[]`: `graphId`, `label`, `labelManual?`, `title`, `row`, `col`, `rowSpan`, `colSpan`), `grid` (`{ rows, cols }`, cols ≤ 6, rows × cols must fit the panels), `figureSize` (`{ widthIn, heightIn }`, 1–20 in each, aspect within 4:1), `labelStyle` (`{ position: "top-left" \| "top-right" \| "above-panel", fontSizePt, bold }`), `figureTitle` (string), `sharedLegend` (`"none" \| "shared"` — `"shared"` is refused when the panels' series differ), `dpi` (150/300/600/900/1200). |
 | `titer_create_info_sheet` | `project_id?`, `linked_table_id?` | `{ project_id, info_sheet_id, name }` — optionally linked to a table, as the UI allows. A new sheet starts with Prism's six default constants, empty. |
@@ -564,24 +572,24 @@ explicit "Send to GitHub" click opens a pre-filled issue in the browser.
 | Jobs (`titer_read_job`, `titer_list_jobs`, `titer_cancel_job`) | 3 |
 | Project / document | 5 |
 | Data tables | 9 |
-| Analyses (run + rerun + freeze + simulate + method + wand + script) | 7 |
-| Graphs / figures / info sheets | 7 |
+| Analyses (run + rerun + freeze + clone + simulate + method + wand + script) | 8 |
+| Graphs / figures / info sheets / drawing objects | 14 |
 | Export | 4 |
 | Cloud | 9 |
-| **Total** | **56** |
+| **Total** | **64** |
 
 Annotations: 18 tools are `read_only_hint: true` (the 12 read tools +
-`read_job`/`list_jobs` + the 4 read-only cloud tools); the other 38
-are mutating. `destructive_hint: true` on exactly six:
+`read_job`/`list_jobs` + the 4 read-only cloud tools); the other 46
+are mutating. `destructive_hint: true` on exactly seven:
 `titer_write_table`, `titer_edit_table`, `titer_delete_node`,
-`titer_close_project`, `titer_run_script`, `titer_cloud_upload`.
+`titer_close_project`, `titer_delete_drawing_object`, `titer_run_script`, `titer_cloud_upload`.
 `open_world_hint: true` on the nine cloud tools plus
 `titer_send_feedback` (which POSTs to the feedback server when sharing
 is on, §6); everything else is `false`. `idempotent_hint` is per-tool (e.g. `titer_save_project`,
 `titer_rename_node`, `titer_reorder_nodes` are idempotent; create/undo/
 redo/run tools are not).
 
-The allowlist (§12) groups the 56 tools differently — by what the user
+The allowlist (§12) groups the 64 tools differently — by what the user
 turns on, not by what they do. The two groupings overlap (e.g. the
 `destructive` group holds the two tools that delete data or run
 scripts); §12 is the
@@ -595,11 +603,11 @@ The Phase 2 smoke runs against the **real server in a running Titer
 app** via a terminal CLI client (no Claude Desktop sign-in needed).
 It reads endpoint + token from `<app_data>/mcp/discovery.json`, speaks
 Streamable HTTP directly (initialize → tools/list → tools/call across
-all 56 tools), and prints a PASS/FAIL line per check; exit 0 only if
+all 64 tools), and prints a PASS/FAIL line per check; exit 0 only if
 every check passes. **Prerequisite:** in Titer, Settings → AI
 Connections, turn on every group under "What your AI can do" first —
 by default the server advertises only the 5 read tools (§12), and this
-smoke drives all 56. It drives one deterministic flow on a fresh project
+smoke drives all 64. It drives one deterministic flow on a fresh project
 it creates itself (no fixture ids — the ids it needs come from the
 tools' own outputs), plus the `tests/testdata/survival.pzfx` public
 fixture for the Prism-import step:
@@ -609,7 +617,7 @@ fixture for the Prism-import step:
    (default out dir: a fresh temp dir; exports/saves land there).
 3. `initialize` (`protocolVersion 2025-11-25`), then
    `notifications/initialized`, then `tools/list` — with every group on,
-   expect all 56 tools, nothing else (with only the default groups, §12
+   expect all 64 tools, nothing else (with only the default groups, §12
    says 5).
 4. Create a project → create an XY table → write data → summary with
    values → edit/rename/reorder/undo/redo/duplicate → simulate a
@@ -668,7 +676,7 @@ are expected to differ until the `buildGraphFigure` follow-up (§10.1).
 The in-process Rust smoke (`mcp_smoke_job_plumbing_over_http` in
 `src-tauri/src/mcp.rs`) is the other half: with every group enabled via
 its fixture allowlist record, it asserts `tools/list` returns exactly
-56 tools and drives the job plumbing + project/table/
+64 tools and drives the job plumbing + project/table/
 analysis/cloud/graph/composite/export tools over real HTTP with a
 completer task standing in for the frontend dispatcher. A second
 in-process smoke (`mcp_smoke_allowlist_default_over_http`) covers §12:
@@ -686,7 +694,7 @@ end).
 - Never add tools, prompts or resources of its own in front of the
   server: the bridge is a transport, not a server. It forwards stdio ↔
   Streamable HTTP and nothing else. It forwards whatever tools the
-  server lists — the 56 Phase 2 + 1.7.4 tools appear automatically via
+  server lists — the 64 Phase 2 + 1.7.4 + 1.8.0 tools appear automatically via
   `tools/list`; no bridge change was needed for Phase 2.
 - Never widen the bind (no `0.0.0.0`, no port forwarding, no tunnel).
 - Never log the token or table values.
@@ -759,8 +767,8 @@ tool must assign it a group, or the suite fails).
 | Discover projects and params (`discovery`) | `titer_project_summary`, `titer_search`, `titer_get_analysis_params` | no |
 | Open and save projects (`project`) | `titer_create_project`, `titer_open_project`, `titer_save_project`, `titer_close_project`, `titer_import_prism` | no |
 | Edit tables (`tables`) | `titer_create_table`, `titer_write_table`, `titer_edit_table`, `titer_duplicate_table_family`, `titer_rename_node`, `titer_reorder_nodes`, `titer_undo`, `titer_redo` | no |
-| Run analyses (`analyses`) | `titer_run_analysis`, `titer_rerun_analysis`, `titer_freeze_analysis`, `titer_simulate_data`, `titer_apply_method`, `titer_apply_wand`, `titer_read_job`, `titer_list_jobs`, `titer_cancel_job` | no |
-| Build graphs and figures (`graphs`) | `titer_build_graph`, `titer_update_graph`, `titer_clone_graph`, `titer_create_figure`, `titer_update_figure`, `titer_create_info_sheet`, `titer_update_info_sheet` | no |
+| Run analyses (`analyses`) | `titer_run_analysis`, `titer_rerun_analysis`, `titer_freeze_analysis`, `titer_clone_analysis`, `titer_simulate_data`, `titer_apply_method`, `titer_apply_wand`, `titer_read_job`, `titer_list_jobs`, `titer_cancel_job` | no |
+| Build graphs and figures (`graphs`) | `titer_build_graph`, `titer_update_graph`, `titer_clone_graph`, `titer_clone_figure`, `titer_freeze_graph`, `titer_freeze_figure`, `titer_add_drawing_object`, `titer_update_drawing_object`, `titer_delete_drawing_object`, `titer_arrange_drawing_objects`, `titer_create_figure`, `titer_update_figure`, `titer_create_info_sheet`, `titer_update_info_sheet` | no |
 | Export (`export`) | `titer_export_graph`, `titer_export_figure`, `titer_export_office`, `titer_export_table_data` | no |
 | Cloud (Box) (`cloud`) | `titer_cloud_status`, `titer_cloud_list`, `titer_cloud_metadata`, `titer_cloud_revisions`, `titer_cloud_download`, `titer_cloud_upload`, `titer_cloud_upload_new`, `titer_cloud_create_folder`, `titer_cloud_move` | no |
 | Destructive actions (`destructive`) | `titer_delete_node`, `titer_run_script` | no |
@@ -810,5 +818,5 @@ the same human-only boundary as enable/token (D4).
 - Antigravity's `mcp_config.json` is untouched: it keeps its 5-tool
   `enabledTools`. The server-side allowlist now makes that list real
   instead of advisory; the config file format does not change.
-- The server still *has* 56 tools. The allowlist decides which subset
+- The server still *has* 64 tools. The allowlist decides which subset
   a given client sees — it does not remove tools from the server.
