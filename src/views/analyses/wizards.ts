@@ -2260,6 +2260,10 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           options: targets,
           min: 1,
         },
+        choice("rowScope", "Should each row be summarised across all the data sets together, or separately within each one?", [
+          ["pooled", "Across all data sets together — one summary per row"],
+          ["per-column", "Within each data set separately — one summary per row per data set"],
+        ]),
       ];
     },
     finish: (a, table, tableType) => ({
@@ -2267,6 +2271,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       params: {
         ys: a.ys as string[],
         ...(tableType === "xy" ? { x: table.columns[0]?.name } : {}),
+        rowScope: (a.rowScope as RowMeansTotalsParams["rowScope"]) ?? "pooled",
       } satisfies RowMeansTotalsParams,
     }),
   },

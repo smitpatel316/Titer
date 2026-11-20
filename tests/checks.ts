@@ -765,7 +765,9 @@ const rerunHarness = async () => {
   const seen: unknown[] = [];
   harness.deps.run = async (_type, _data, params) => {
     seen.push(params);
-    return { stats: [], groups: [], notes: "" };
+    // A bare-bones outcome: the rerun checks only see the params and the
+    // empty stats, but the mock must still be a valid AnalysisOutcome.
+    return { testType: "anova", stats: [], groups: [], notes: "" };
   };
   harness.deps.publishResult = () => {};
   harness.deps.setAnalysisParams = (id, params) =>
@@ -11946,10 +11948,12 @@ check("fraction-of-total wizard asks for the total and the format, and finishes 
 });
 
 // Row means / totals (v2): each row summarised across its data sets — total,
-// mean, SD, SEM, median, t-based 95% CI of the mean, %CV and geometric mean —
-// for XY and Grouped tables. The definitions are the per-column descriptives',
-// transposed to rows: a one-value row has no SD, SEM, CI or %CV, and the
-// geometric mean needs every value above 0.
+// mean, SD, SEM, median, t-based 95% CI of the mean, %CV, geometric mean,
+// min, max, quartiles, 10th/90th percentiles, geometric SD and 95% CI of
+// the geometric mean — for XY and Grouped tables. The definitions are the
+// per-column descriptives', transposed to rows: a one-value row has no SD,
+// SEM, CI, %CV, geometric SD or geometric CI, and the geometric mean needs
+// every value above 0.
 check("row means and totals summarises each row across its data sets", async () => {
   const table: TableData = {
     columns: ["Title", "Time", "Y1", "Y2"],
@@ -11983,22 +11987,28 @@ check("row means and totals summarises each row across its data sets", async () 
   );
   const close = (got: number | null, want: number | null) =>
     (got == null && want == null) || (got != null && want != null && Math.abs(got - want) < 1e-9);
-  const expected: [number | null, number | null, number | null, number | null, number | null, number | null][] = [
-    // sd, sem, CI low, CI high, %CV, geometric mean — row [10, 30].
-    [14.142135623730951, 10, -107.06204736174693, 147.06204736174693, 70.71067811865476, 17.32050807568877],
+  const expected: [number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null][] = [
+    // sd, sem, CI low, CI high, %CV, geometric mean — row [10, 30] — then
+    // min, max, 25th, 75th, 10th, 90th percentiles (R type 6 clamps at n=2,
+    // so the quartiles/percentiles are the min/max), geometric SD and the
+    // 95% CI of the geometric mean.
+    [14.142135623730951, 10, -107.06204736174693, 147.06204736174693, 70.71067811865476, 17.32050807568877, 10, 30, 10, 30, 10, 30, 2.1745814281919666, 0.0161198298782283, 18610.61824263944],
     // Row [30, 20].
-    [7.0710678118654755, 5, -38.531023680873474, 88.53102368087347, 28.284271247461902, 24.49489742783178],
-    // Row [5]: one value, so no SD, SEM, CI or %CV — but a geometric mean.
-    [null, null, null, null, null, 5],
-    // Row [0, 4]: a 0 kills the geometric mean, not the rest.
-    [2.8284271247461903, 2, -23.41240947234939, 27.41240947234939, 141.4213562373095, null],
+    [7.0710678118654755, 5, -38.531023680873474, 88.53102368087347, 28.284271247461902, 24.49489742783178, 20, 30, 20, 30, 20, 30, 1.3320340401739696, 1.8635876781948322, 321.9596303519196],
+    // Row [5]: one value, so no SD, SEM, CI, %CV, geometric SD or geometric
+    // CI — but a geometric mean, and min/max/quartiles/percentiles are 5.
+    [null, null, null, null, null, 5, 5, 5, 5, 5, 5, 5, null, null, null],
+    // Row [0, 4]: a 0 kills the geometric mean, SD and CI, not the rest.
+    [2.8284271247461903, 2, -23.41240947234939, 27.41240947234939, 141.4213562373095, null, 0, 4, 0, 4, 0, 4, null, null, null],
   ];
   ok(out.rowMeans?.length === expected.length);
   out.rowMeans?.forEach((r, i) => {
-    const [sd, sem, lo, hi, cv, gm] = expected[i];
+    const [sd, sem, lo, hi, cv, gm, min, max, q1, q3, p10, p90, gsd, glo, ghi] = expected[i];
     ok(
-      close(r.sd, sd) && close(r.sem, sem) && close(r.ciLow, lo) && close(r.ciHigh, hi) && close(r.cv, cv) && close(r.geoMean, gm),
-      `row ${i + 1}: got sd ${r.sd} sem ${r.sem} CI ${r.ciLow}–${r.ciHigh} CV ${r.cv} gm ${r.geoMean}`,
+      close(r.sd, sd) && close(r.sem, sem) && close(r.ciLow, lo) && close(r.ciHigh, hi) && close(r.cv, cv) && close(r.geoMean, gm) &&
+        close(r.min, min) && close(r.max, max) && close(r.q1, q1) && close(r.q3, q3) && close(r.p10, p10) && close(r.p90, p90) &&
+        close(r.geoSd, gsd) && close(r.geoCiLow, glo) && close(r.geoCiHigh, ghi),
+      `row ${i + 1}: got sd ${r.sd} sem ${r.sem} CI ${r.ciLow}–${r.ciHigh} CV ${r.cv} gm ${r.geoMean} min ${r.min} max ${r.max} q1 ${r.q1} q3 ${r.q3} p10 ${r.p10} p90 ${r.p90} gsd ${r.geoSd} geoCI ${r.geoCiLow}–${r.geoCiHigh}`,
     );
   });
   deepStrictEqual(out.stats, []);
@@ -12066,10 +12076,97 @@ check("row means and totals runs on a grouped table, across every replicate", as
   ok(first && close(first.sd, 1.2909944487358056) && close(first.sem, 0.6454972243679028));
   ok(first && close(first.ciLow, 0.445739743239121) && close(first.ciHigh, 4.5542602567608785));
   ok(first && close(first.cv, 51.63977794943222) && close(first.geoMean, 2.213363839400643));
+  // Min/max, quartiles and percentiles (R type 6) of [1, 2, 3, 4], and the
+  // geometric SD with the 95% CI of the geometric mean (t, df 3).
+  ok(first && close(first.min, 1) && close(first.max, 4) && close(first.q1, 1.25) && close(first.q3, 3.75));
+  ok(first && close(first.p10, 1) && close(first.p90, 4));
+  ok(first && close(first.geoSd, 1.8242475707663655) && close(first.geoCiLow, 0.8503745620786809) && close(first.geoCiHigh, 5.760966642265432));
   ok(second && close(second.sd, 12.909944487358056) && close(second.sem, 6.454972243679028));
   ok(second && close(second.ciLow, 4.457397432391211) && close(second.ciHigh, 45.54260256760879));
   ok(second && close(second.cv, 51.639777949432215) && close(second.geoMean, 22.133638394006436));
+  ok(second && close(second.min, 10) && close(second.max, 40) && close(second.q1, 12.5) && close(second.q3, 37.5));
+  ok(second && close(second.p10, 10) && close(second.p90, 40));
+  ok(second && close(second.geoSd, 1.8242475707663655) && close(second.geoCiLow, 8.50374562078681) && close(second.geoCiHigh, 57.609666422654364));
   ok(out.notes.includes("“A”, “B”"));
+});
+
+// Row means / totals, per-column mode (seq 194): each row summarised
+// separately within each chosen data set — one summary per row per data
+// set — with the same min/max, quartiles, percentiles and geometric
+// SD/CI as the pooled mode. Row-major order: each row's data sets sit
+// together under its title.
+check("row means and totals per-column mode summarises each row within each data set", async () => {
+  const grouped: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+    rows: [
+      ["Day 1", "1", "2", "3", "4"],
+      ["Day 2", "10", "20", "30", "40"],
+    ],
+    groups: 2,
+    replicates: 2,
+  };
+  const out = await runAnalysis("row-means-totals", grouped, { ys: ["A", "B"], rowScope: "per-column" });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(
+    out.rowMeans?.map((r) => [r.row, r.column, r.n, r.total, r.mean, r.median]),
+    [
+      ["Day 1", "A", 2, 3, 1.5, 1.5],
+      ["Day 1", "B", 2, 7, 3.5, 3.5],
+      ["Day 2", "A", 2, 30, 15, 15],
+      ["Day 2", "B", 2, 70, 35, 35],
+    ],
+  );
+  const close = (got: number | null, want: number | null) =>
+    (got == null && want == null) || (got != null && want != null && Math.abs(got - want) < 1e-9);
+  const expected: [number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null, number | null][] = [
+    // min, max, q1, q3, p10, p90, geo SD, geo CI low, geo CI high — [1, 2].
+    [1, 2, 1, 2, 1, 2, 1.6325269194381526, 0.017299781563100684, 115.60839613523623],
+    // [3, 4].
+    [3, 4, 3, 4, 3, 4, 1.2255894896086423, 0.5569831277224836, 21.544638253349362],
+    // [10, 20].
+    [10, 20, 10, 20, 10, 20, 1.6325269194381524, 0.17299781563100733, 1156.0839613523594],
+    // [30, 40].
+    [30, 40, 30, 40, 30, 40, 1.2255894896086421, 5.569831277224844, 215.4463825334934],
+  ];
+  ok(out.rowMeans?.length === expected.length);
+  out.rowMeans?.forEach((r, i) => {
+    const [min, max, q1, q3, p10, p90, gsd, glo, ghi] = expected[i];
+    ok(
+      close(r.min, min) && close(r.max, max) && close(r.q1, q1) && close(r.q3, q3) && close(r.p10, p10) &&
+        close(r.p90, p90) && close(r.geoSd, gsd) && close(r.geoCiLow, glo) && close(r.geoCiHigh, ghi),
+      `cell ${i}: got min ${r.min} max ${r.max} q1 ${r.q1} q3 ${r.q3} p10 ${r.p10} p90 ${r.p90} gsd ${r.geoSd} geoCI ${r.geoCiLow}–${r.geoCiHigh}`,
+    );
+  });
+  ok(out.notes.includes("per row per data set"));
+  // The same mode on an XY table: each Y data set gets its own one-value
+  // summaries (no SD/SEM/CI/%CV/geometric SD/CI, but min/max and the
+  // quartiles/percentiles are the value itself).
+  const xy: TableData = {
+    columns: ["Title", "Time", "Y1", "Y2"],
+    rows: [
+      ["", "0", "10", "30"],
+      ["", "1", "30", "20"],
+      ["", "2", "5", ""],
+      ["", "3", "0", "4"],
+    ],
+  };
+  const xyOut = await runAnalysis("row-means-totals", xy, { ys: ["Y1", "Y2"], x: "Time", rowScope: "per-column" });
+  if ("error" in xyOut) throw new Error(xyOut.error);
+  deepStrictEqual(
+    xyOut.rowMeans?.map((r) => [r.row, r.column, r.x, r.n, r.total, r.mean, r.sd, r.geoMean, r.min, r.max]),
+    [
+      ["Row 1", "Y1", 0, 1, 10, 10, null, 10, 10, 10],
+      ["Row 1", "Y2", 0, 1, 30, 30, null, 30, 30, 30],
+      ["Row 2", "Y1", 1, 1, 30, 30, null, 30, 30, 30],
+      ["Row 2", "Y2", 1, 1, 20, 20, null, 20, 20, 20],
+      ["Row 3", "Y1", 2, 1, 5, 5, null, 5, 5, 5],
+      ["Row 4", "Y1", 3, 1, 0, 0, null, null, 0, 0],
+      ["Row 4", "Y2", 3, 1, 4, 4, null, 4, 4, 4],
+    ],
+  );
+  // Row 3 has no Y2 value, so it gets no Y2 summary; every cell's
+  // geometric SD/CI is null on a single value.
+  ok(xyOut.rowMeans?.every((r) => r.geoSd == null && r.geoCiLow == null && r.geoCiHigh == null));
 });
 
 check("row-means-totals wizard asks for the data sets, and finishes with its params", () => {
@@ -12084,15 +12181,19 @@ check("row-means-totals wizard asks for the data sets, and finishes with its par
   const wizard = WIZARDS["row-means-totals"]!;
   deepStrictEqual(
     wizard.questions({}, table, "xy").filter(Boolean).map((q) => (q as Question).id),
-    ["ys"],
+    ["ys", "rowScope"],
   );
   deepStrictEqual(
     wizard.questions({}, table, "xy").filter(Boolean).map((q) => (q as Question).kind),
-    ["names"],
+    ["names", "choice"],
   );
-  deepStrictEqual(wizard.finish({ ys: ["Y1", "Y2"] }, table, "xy"), {
+  deepStrictEqual(wizard.finish({ ys: ["Y1", "Y2"], rowScope: "pooled" }, table, "xy"), {
     type: "row-means-totals",
-    params: { ys: ["Y1", "Y2"], x: "Time" },
+    params: { ys: ["Y1", "Y2"], x: "Time", rowScope: "pooled" },
+  });
+  deepStrictEqual(wizard.finish({ ys: ["Y1", "Y2"], rowScope: "per-column" }, table, "xy"), {
+    type: "row-means-totals",
+    params: { ys: ["Y1", "Y2"], x: "Time", rowScope: "per-column" },
   });
   // A Grouped table offers its groups (each spanning its replicates), and
   // carries no X column into the result rows.
@@ -12105,14 +12206,14 @@ check("row-means-totals wizard asks for the data sets, and finishes with its par
   const gtable = readTable(grouped);
   deepStrictEqual(
     wizard.questions({}, gtable, "grouped").filter(Boolean).map((q) => (q as Question).id),
-    ["ys"],
+    ["ys", "rowScope"],
   );
   const namesQ = wizard.questions({}, gtable, "grouped")[0];
   ok(namesQ && namesQ.kind === "names");
   deepStrictEqual(namesQ.kind === "names" ? namesQ.options : [], ["A", "B"]);
-  deepStrictEqual(wizard.finish({ ys: ["A"] }, gtable, "grouped"), {
+  deepStrictEqual(wizard.finish({ ys: ["A"], rowScope: "pooled" }, gtable, "grouped"), {
     type: "row-means-totals",
-    params: { ys: ["A"] },
+    params: { ys: ["A"], rowScope: "pooled" },
   });
   // The menu offers it after Fraction of total on XY tables, and after
   // Multiple t tests on grouped tables (Transform follows it there; Plot a

@@ -549,6 +549,7 @@ export function AnalysisResultsView({
           columns={[
             { label: "Row" },
             ...(result.rowMeans.some((r) => r.x !== undefined) ? [{ label: "X", numeric: true }] : []),
+            ...(result.rowMeans.some((r) => r.column !== undefined) ? [{ label: "Data set" }] : []),
             { label: "N", numeric: true },
             { label: "Total", numeric: true },
             { label: "Mean", numeric: true },
@@ -557,11 +558,20 @@ export function AnalysisResultsView({
             { label: "95% CI of mean", numeric: true },
             { label: "%CV", numeric: true },
             { label: "Median", numeric: true },
+            { label: "25th percentile", numeric: true },
+            { label: "75th percentile", numeric: true },
+            { label: "Minimum", numeric: true },
+            { label: "Maximum", numeric: true },
+            { label: "10th percentile", numeric: true },
+            { label: "90th percentile", numeric: true },
             { label: "Geometric mean", numeric: true },
+            { label: "Geometric SD", numeric: true },
+            { label: "95% CI of geometric mean", numeric: true },
           ]}
           rows={result.rowMeans.map((r) => [
             r.row,
             ...(result.rowMeans!.some((w) => w.x !== undefined) ? [num(r.x)] : []),
+            ...(result.rowMeans!.some((w) => w.column !== undefined) ? [r.column ?? "—"] : []),
             r.n,
             num(r.total),
             num(r.mean),
@@ -570,7 +580,15 @@ export function AnalysisResultsView({
             r.ciLow == null && r.ciHigh == null ? "—" : `${num(r.ciLow)} to ${num(r.ciHigh)}`,
             r.cv == null ? "—" : `${num(r.cv)}%`,
             num(r.median),
+            num(r.q1),
+            num(r.q3),
+            num(r.min),
+            num(r.max),
+            num(r.p10),
+            num(r.p90),
             num(r.geoMean),
+            num(r.geoSd),
+            r.geoCiLow == null && r.geoCiHigh == null ? "—" : `${num(r.geoCiLow)} to ${num(r.geoCiHigh)}`,
           ])}
         />
       )}
