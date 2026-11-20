@@ -921,9 +921,17 @@ export function modelSpec(
     case "pade-11": {
       // B6 Standard #10: Y=(A0+A1·X)/(1+B1·X) — Prism's standard curve
       // for interpolating when the curve plateaus at large concentrations.
-      // The guide's starts are all 1.0.
+      // The guide's starts are all 1.0, but (1,1,1) makes the curve
+      // identically 1, so the Jacobian is singular there and nls dies
+      // with "singular gradient matrix at initial parameter estimates"
+      // on every dataset. Instead the starts linearize the equation:
+      // Y·(1+B1·X)=A0+A1·X, so with A0 the left-edge Y, (Y−A0) regressed
+      // on X and −X·Y (no intercept) gives (A1, B1) — exact on
+      // noiseless data. A plain list(...) start, so the fit rewriters
+      // still parse it.
       const expr = "(A0+A1*x)/(1+B1*x)";
-      const starts = "list(A0=1,A1=1,B1=1)";
+      const lin = "lm(I(y-y[which.min(x)])~0+x+I(-x*y))";
+      const starts = `list(A0=y[which.min(x)],A1=coef(${lin})[[1]],B1=coef(${lin})[[2]])`;
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, starts)}`,
