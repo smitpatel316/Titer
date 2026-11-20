@@ -16,6 +16,7 @@ import {
 } from "./types";
 import { TRANSFORM_NAMES, transformTable } from "../lib/transform";
 import { recomputeCalculated } from "../lib/calcvars";
+import { remapQualifiedOptions, restoreForeignPoints } from "../lib/multi-table";
 import { MAX_INFO_SHEETS, newInfoSheetData } from "../lib/info-sheets";
 import type { AnalysisParams, AnalysisPickerValue, AnalysisResult, AnalysisType } from "../stats/types";
 import { TABLES } from "../views/tables";
@@ -133,6 +134,9 @@ type Action =
   /** `label` names the edit in the Edit menu; `move`: what it renamed or moved. */
   | { type: "updateTable"; id: string; data: TableData; label: string; move?: TableMove }
   | { type: "updateGraph"; id: string; options: GraphOptions; at: number }
+  /** A graph's extra source tables (#48): the ids, in order; empty clears
+   *  them (the graph goes back to its primary table alone). */
+  | { type: "setGraphSources"; id: string; sourceTableIds: string[]; at: number }
   | { type: "setNotes"; id: string; notes: string; at: number }
   | { type: "setTags"; id: string; tags: TagColor[] }
   /** Batch Magic: several graphs at once, in one undo step. */
@@ -308,11 +312,18 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
     case "rename": {
       const node = state.nodes[action.id];
       if (!node || node.name === action.name) return state;
-      return {
-        ...state,
-        nodes: { ...state.nodes, [action.id]: { ...node, name: action.name } },
-        isDirty: true,
-      };
+      const nodes = { ...state.nodes, [action.id]: { ...node, name: action.name } };
+      if (node.type === "table") {
+        // A source table's name is baked into the qualified series names
+        // of the graphs that plot it ("Assay 2 — Control"), so renaming
+        // the table re-qualifies those graphs' options with it.
+        for (const g of Object.values(nodes)) {
+          if (g.type !== "graph" || !g.sourceTableIds?.includes(action.id) || !g.graphOptions) continue;
+          const remapped = remapQualifiedOptions(g.graphOptions, node.name, action.name);
+          if (remapped) nodes[g.id] = { ...g, graphOptions: remapped };
+        }
+      }
+      return { ...state, nodes, isDirty: true };
     }
     case "remove": {
       const target = state.nodes[action.id];
@@ -340,9 +351,22 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
           unlinked.transform && remove.has(unlinked.transform.from)
             ? (({ transform: _, ...rest }) => rest)(unlinked)
             : unlinked;
+        // A graph that plotted the removed table as an extra source (#48)
+        // drops that source and keeps plotting the rest; a graph whose
+        // primary table was removed is itself removed above.
+        const unsourced =
+          detached.type === "graph" && detached.sourceTableIds?.some((id) => remove.has(id))
+            ? (() => {
+                const kept = detached.sourceTableIds.filter((id) => !remove.has(id));
+                const next = { ...detached };
+                if (kept.length) next.sourceTableIds = kept;
+                else delete next.sourceTableIds;
+                return next;
+              })()
+            : detached;
         nodes[id] = orphan
           ? { ...orphan, parentId: null, orphaned: true, sourceTableName: target?.name }
-          : detached;
+          : unsourced;
       }
       const rootOrder = [...state.rootOrder.filter((id) => !remove.has(id)), ...orphaned.map((o) => o.id)];
       // Drop removed tables' order lists, and removed children from surviving lists.
@@ -458,7 +482,14 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         const columnsChanged = data.columns.join("\n") !== before.data?.columns.join("\n");
         if (action.move || columnsChanged) {
           for (const child of Object.values(nodes)) {
-            if (child.parentId === id) nodes[child.id] = followTable(child, action.move ?? {}, data.columns);
+            if (child.parentId === id) {
+              const followed = followTable(child, action.move ?? {}, data.columns);
+              // A multi-table graph's point styles on its *extra* tables
+              // aren't in this table's columns, so `followTable` drops
+              // them — put them back (their rows may have moved; the
+              // styles stay, on their original rows).
+              nodes[child.id] = restoreForeignPoints(child, followed, nodes);
+            }
           }
         }
         // Its values changed, not only a column's width: the tables computed from it follow.
@@ -478,6 +509,21 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       return {
         ...state,
         nodes: { ...state.nodes, [action.id]: { ...node, graphOptions: action.options } },
+        isDirty: true,
+      };
+    }
+    case "setGraphSources": {
+      const node = state.nodes[action.id];
+      if (!node || node.type !== "graph") return state;
+      const before = node.sourceTableIds ?? [];
+      if (before.length === action.sourceTableIds.length && before.every((id, i) => id === action.sourceTableIds[i]))
+        return state;
+      const next = { ...node };
+      if (action.sourceTableIds.length) next.sourceTableIds = [...action.sourceTableIds];
+      else delete next.sourceTableIds;
+      return {
+        ...state,
+        nodes: { ...state.nodes, [action.id]: next },
         isDirty: true,
       };
     }
@@ -659,6 +705,7 @@ const UNDOABLE = new Set<Action["type"]>([
   "duplicateFamily",
   "updateTable",
   "updateGraph",
+  "setGraphSources",
   "updateGraphs",
   "updateInfoSheet",
   "updateFloatingNotes",
@@ -697,6 +744,8 @@ function changeName(action: Action): string {
       return action.label;
     case "updateGraph":
       return "Format Change";
+    case "setGraphSources":
+      return "Source Tables";
     case "setNotes":
       return "Notes";
     case "setTags":
@@ -726,7 +775,7 @@ export function reducer(state: ProjectState, action: Action): ProjectState {
   if (!UNDOABLE.has(action.type)) return { ...next, revision };
 
   const change =
-    action.type === "updateGraph"
+    action.type === "updateGraph" || action.type === "setGraphSources"
       ? { key: `graph ${action.id}`, at: action.at }
       : action.type === "updateGraphs"
         ? { key: "graphs batch", at: action.at }
@@ -779,9 +828,17 @@ interface ProjectActions {
   createAnalysis: (parentId: string, analysisType: AnalysisType, analysisParams?: AnalysisParams) => string;
   /** `graphOptions` (plan 38, Apply Method): the cloned options of a method
    *  file's graph, with its analysis links remapped; omitted, the graph gets
-   *  its defaults as today. Returns the new node's id, so the caller can
+   *  its defaults as today. `sourceTableIds` (#48): the extra tables the
+   *  graph also plots. Returns the new node's id, so the caller can
    *  remap what links to it. */
-  createGraph: (parentId: string, graphType: GraphType, graphOptions?: GraphOptions) => string;
+  createGraph: (
+    parentId: string,
+    graphType: GraphType,
+    graphOptions?: GraphOptions,
+    sourceTableIds?: string[],
+  ) => string;
+  /** A graph's extra source tables (#48), in order; empty clears them. */
+  setGraphSources: (id: string, sourceTableIds: string[]) => void;
   /** Wand (plan 37): copies the example table's analyses + graphs onto the
    *  target tables as one undo step; returns the per-table report (created /
    *  skipped) for the dialog's summary. Throws when the example has nothing to copy. */
@@ -992,7 +1049,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         });
         return id;
       },
-      createGraph: (parentId, graphType, graphOptions) => {
+      createGraph: (parentId, graphType, graphOptions, sourceTableIds) => {
         // A new graph inherits its table's error format: an SD-formatted
         // table's graphs default to SD error bars (a table with no format
         // recorded reads as SEM, the default, as before).
@@ -1007,10 +1064,13 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
             parentId,
             graphType,
             graphOptions: graphOptions ?? newGraphOptions(graphType, parent?.data?.errorFormat),
+            ...(sourceTableIds?.length ? { sourceTableIds: [...sourceTableIds] } : {}),
           },
         });
         return id;
-      },
+      };
+      setGraphSources: (id, sourceTableIds) =>
+        dispatch({ type: "setGraphSources", id, sourceTableIds, at: Date.now() }),
       applyWand: (exampleId, targetIds, prefix) => {
         const s = latest.current;
         const result = planWand({ nodes: s.nodes, childOrder: s.childOrder }, exampleId, targetIds, prefix);

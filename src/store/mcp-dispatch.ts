@@ -214,6 +214,7 @@ function toGraphDeps(deps: JobDeps): GraphJobDeps {
     getState: deps.getState,
     createGraph: a?.createGraph,
     updateGraph: a?.updateGraph,
+    setGraphSources: a?.setGraphSources,
     cloneGraph: a?.cloneGraph,
     createFigure: a?.createFigure,
     updateFigure: a?.updateFigure,

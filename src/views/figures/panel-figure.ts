@@ -13,9 +13,9 @@
 // the graph view for overlay graphs.
 
 import { DEFAULT_GRAPH_OPTIONS, type ProjectNode } from "../../store/types";
-import { readTable } from "../../lib/dataset";
 import { infoSheetsOf, resolveGraphOptions } from "../../lib/info-sheets";
-import { GRAPHS, graphSeries, plotColumns, type GraphFigure } from "../graphs";
+import { mergedGraphData } from "../../lib/multi-table";
+import { GRAPHS, graphSeriesDataset, plotColumns, type GraphFigure } from "../graphs";
 import { paintOf } from "../graphs/plot-helpers";
 
 /** The panel's figure, or null when its graph has nothing to draw (no table,
@@ -32,14 +32,19 @@ export function buildPanelFigure(
   if (graph.type !== "graph" || !graph.graphType || !Object.hasOwn(GRAPHS, graph.graphType)) return null;
   const parent = graph.parentId ? nodes[graph.parentId] : undefined;
   if (!parent?.data || !parent.tableType) return null;
+  // A multi-table graph (#48) draws its merged dataset — the same one its
+  // own view draws — so a figure panel and an export show every table.
+  // A merge problem draws nothing here; the graph's own view says why.
+  const merged = mergedGraphData(graph, nodes);
+  if (!merged || merged.problem) return null;
+  const dataset = merged.dataset;
   // The graph's own view resolves the same hooks (see graph-view.tsx), so a
   // panel's titles and axis limits match the graph exactly.
   const sheets = infoSheetsOf(nodes, Object.keys(nodes));
   const options = resolveGraphOptions({ ...DEFAULT_GRAPH_OPTIONS, ...graph.graphOptions }, sheets);
-  const dataset = readTable(parent.data);
   const columns = plotColumns(dataset, graph.graphType, options, parent.tableType);
   if (!columns.some((c) => c.values.length > 0)) return null;
-  const paint = paintOf(options, graphSeries(graph.graphType, parent.data, parent.tableType, options).length);
+  const paint = paintOf(options, graphSeriesDataset(graph.graphType, dataset, parent.tableType, options).length);
   const fig = GRAPHS[graph.graphType].build(columns, options, paint, dataset.titles);
   return opts.hideLegend ? { ...fig, layout: { ...fig.layout, showlegend: false } } : fig;
 }

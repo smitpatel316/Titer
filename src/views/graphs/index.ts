@@ -12,7 +12,7 @@ import {
   type TableType,
 } from "../../store/types";
 import type { SelectorOption } from "../../components/universal-modal";
-import { readTable, seriesOf, splitXY, type Column, type Dataset } from "../../lib/dataset";
+import { readTable, seriesOfDataset, splitXY, type Column, type Dataset } from "../../lib/dataset";
 import type { SummaryFormat } from "../../lib/summary-format";
 import { paletteNamed, savedPalette } from "../../lib/palettes";
 import { titleCase } from "../../lib/format";
@@ -235,6 +235,17 @@ export function choosableSets(type: GraphType, table: Dataset, tableType: TableT
  *  that graph (its points are one series, not the table's columns), a Multiple
  *  Variables scatter's Y variable, else the table's series. */
 export function graphSeries(type: GraphType, data: TableData, tableType: TableType, options: GraphOptions): string[] {
+  return graphSeriesDataset(type, readTable(data), tableType, options);
+}
+
+/** `graphSeries`, over an already-read dataset — the merged dataset of a
+ *  multi-table graph (#48) has no single `TableData` to read from. */
+export function graphSeriesDataset(
+  type: GraphType,
+  dataset: Dataset,
+  tableType: TableType,
+  options: GraphOptions,
+): string[] {
   const { family } = GRAPHS[type];
   if (type === "observed-fitted") return [OBSERVED_FITTED_SERIES];
   if (type === "monte-carlo-histogram") return [MONTE_CARLO_HISTOGRAM_SERIES];
@@ -254,14 +265,14 @@ export function graphSeries(type: GraphType, data: TableData, tableType: TableTy
   if (family === "volcano") return Object.keys(VOLCANO_SERIES);
   if (family === "heatmap") return [];
   if (family === "xy" && tableType === "multiple") {
-    const y = variablePair(readTable(data).numeric, options)[1];
+    const y = variablePair(dataset.numeric, options)[1];
     return y ? [y.name] : [];
   }
   if (family === "histogram" && tableType === "multiple") {
-    const x = variablePair(readTable(data).numeric, options)[0];
+    const x = variablePair(dataset.numeric, options)[0];
     return x ? [x.name] : [];
   }
-  return seriesOf(data, tableType);
+  return seriesOfDataset(dataset, tableType);
 }
 
 /** A new graph's options: the defaults, with its type's palette and own defaults.

@@ -3006,6 +3006,11 @@ pub struct BuildGraphArgs {
     /// Display name for the graph. Omit for the type's label.
     #[serde(default)]
     pub name: Option<String>,
+    /// Extra tables (by id, as shown by titer_list_tables) whose data sets
+    /// this graph also plots (#48) — same table type as table_id. Omit
+    /// for a single-table graph.
+    #[serde(default)]
+    pub source_table_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -3016,7 +3021,14 @@ pub struct UpdateGraphArgs {
     /// The graph node's id, as shown by titer_list_projects.
     pub graph_id: String,
     /// Partial GraphOptions to merge over the graph's current options.
-    pub options: serde_json::Value,
+    /// Omit when only changing the source tables.
+    #[serde(default)]
+    pub options: Option<serde_json::Value>,
+    /// Extra tables (by id) this graph also plots (#48), replacing its
+    /// current sources outright — same table type as the graph's table.
+    /// Empty clears them. Omit to leave the sources alone.
+    #[serde(default)]
+    pub source_table_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -5105,10 +5117,12 @@ impl TiterMcpServer {
     /// table's type, or the error names the valid types. `options` is a
     /// partial GraphOptions over the type's defaults. Synchronous — the
     /// builders are pure TS over table data + cached results. `warnings`
-    /// says when a linked analysis is not computed yet.
+    /// says when a linked analysis is not computed yet. `source_table_ids`
+    /// adds further tables of the same type, whose data sets the graph
+    /// also plots (one graph from multiple tables).
     #[tool(
         name = "titer_build_graph",
-        description = "Build a graph on a table: graph_type must be offered for the table's type (otherwise the error names the valid types); options is a partial GraphOptions over the type's defaults (titles, axis limits, linked analyses, palette by built-in name or { name, kind, colors }); name overrides the display name. Warnings says when a linked analysis is not computed yet.",
+        description = "Build a graph on a table: graph_type must be offered for the table's type (otherwise the error names the valid types); options is a partial GraphOptions over the type's defaults (titles, axis limits, linked analyses, palette by built-in name or { name, kind, colors }); name overrides the display name; source_table_ids adds further tables of the same type whose data sets the graph also plots. Warnings says when a linked analysis is not computed yet.",
         annotations(
             title = "Build graph",
             read_only_hint = false,
@@ -5130,6 +5144,9 @@ impl TiterMcpServer {
             }
             if let Some(name) = &args.name {
                 job_args["name"] = serde_json::Value::String(name.clone());
+            }
+            if let Some(source_table_ids) = &args.source_table_ids {
+                job_args["source_table_ids"] = serde_json::json!(source_table_ids);
             }
             let job = self.state.enqueue_job(&project_id, "build-graph", job_args, serde_json::json!({}))?;
             let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
@@ -5153,10 +5170,11 @@ impl TiterMcpServer {
     }
 
     /// Change a graph's options: a partial GraphOptions merged over its
-    /// current options. Same validation as the build.
+    /// current options. Same validation as the build. `source_table_ids`
+    /// replaces the graph's extra tables outright (empty clears them).
     #[tool(
         name = "titer_update_graph",
-        description = "Change a graph's options: a partial GraphOptions merged over its current options (titles, axis limits, linked analyses, display choices). Same validation as titer_build_graph.",
+        description = "Change a graph's options: a partial GraphOptions merged over its current options (titles, axis limits, linked analyses, display choices). Same validation as titer_build_graph. source_table_ids replaces the graph's extra source tables outright (empty clears them); omit options when only changing sources.",
         annotations(
             title = "Update graph",
             read_only_hint = false,
@@ -5172,7 +5190,13 @@ impl TiterMcpServer {
         let call_args = serde_json::json!({ "project_id": args.project_id, "graph_id": args.graph_id });
         let result: Result<serde_json::Value, String> = async {
             let project_id = self.state.resolve_project(args.project_id.as_deref())?;
-            let job_args = serde_json::json!({ "graph_id": args.graph_id, "options": args.options });
+            let mut job_args = serde_json::json!({ "graph_id": args.graph_id });
+            if let Some(options) = &args.options {
+                job_args["options"] = options.clone();
+            }
+            if let Some(source_table_ids) = &args.source_table_ids {
+                job_args["source_table_ids"] = serde_json::json!(source_table_ids);
+            }
             let job = self.state.enqueue_job(&project_id, "update-graph", job_args, serde_json::json!({}))?;
             let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
             if done.status == JobStatus::Done {
