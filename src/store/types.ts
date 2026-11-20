@@ -13,7 +13,7 @@ export const NODE_NAMES: Record<NodeType, string> = {
   figure: "Figure",
   info: "Info Sheet",
 };
-export type TableType = "column" | "xy" | "grouped" | "nested" | "multiple" | "contingency" | "survival";
+export type TableType = "column" | "xy" | "grouped" | "nested" | "multiple" | "contingency" | "survival" | "parts-of-whole";
 /** Tables whose first data column is X (a Survival table's is the time). */
 export const hasXColumn = (type: TableType) => type === "xy" || type === "survival";
 // Every graph type; views/graphs/index.ts says what each draws and for which tables.
@@ -38,6 +38,7 @@ export type GraphType =
   | "logistic-curve"
   | "heatmap"
   | "survival"
+  | "pow-stacked"
   | "forest-plot"
   | "volcano"
   | "bland-altman"

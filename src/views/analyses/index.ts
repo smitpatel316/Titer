@@ -88,6 +88,16 @@ export const ANALYSIS_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<Analysi
   multiple: optionsFor(["descriptive-statistics", "shapiro-wilk", "correlation-matrix", "linear-regression", "compare-two-groups", "multiple-regression", "nonlinear-regression", "principal-component-analysis", "k-means", "hierarchical-clustering", "outliers", "multiple-logistic-regression", "poisson-regression", "cox-proportional-hazards", "survival", "extract-rearrange", "transform", "plot-function"]),
   survival: optionsFor(["survival", "cox", "plot-function"]),
   contingency: [...optionsFor(["chi-square", "plot-function"]), { value: "mcnemar", label: "McNemar's test (paired proportions)" }],
+  // Each row is a mutually exclusive category, each column a data set: the
+  // analyses are the ones Prism offers on a Parts of Whole table. Fraction
+  // of Total is its home analysis (each value as a share of its column, row
+  // or grand total); Transform or Normalize is Prism's "Transform,
+  // Normalize..." group, Fraction of Total included. "Compare observed
+  // distribution with expected" — the chi-square goodness-of-fit test, or
+  // the binomial test for two categories — is Prism's "Parts of whole
+  // analyses" entry and belongs here too, but it is seq 195's analysis to
+  // build: when it lands, its entry goes in this list.
+  "parts-of-whole": optionsFor(["fraction-of-total", "transform", "plot-function"]),
 };
 
 /** Whether the table has the ≥ 2 row bands a three-way ANOVA needs. */

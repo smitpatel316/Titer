@@ -868,6 +868,8 @@ function dataOptions(c: SectionContext): React.ReactNode {
           {stackAs}
         </>
       ); // stacked bars have no error bars
+    case "pow-stacked":
+      return stackAs; // one bar per data set, segments are its categories — nothing to center
     case "heatmap":
       return c.tableType === "grouped" ? center : null; // a cell sums up a group's replicates
     case "histogram":
@@ -892,6 +894,9 @@ function dataOptions(c: SectionContext): React.ReactNode {
       );
     case "pie":
     case "donut":
+      // A Parts-of-Whole pie's slices are its rows, not its columns: there is
+      // no column total or mean to choose — the slice value choice is left out.
+      if (c.tableType === "parts-of-whole") return null;
       return (
         <Choice
           label="Slice value"

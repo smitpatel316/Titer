@@ -889,6 +889,7 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
     else if (format === "grouped") helixType = "grouped";
     else if (format === "contingency") helixType = "contingency";
     else if (format === "column") helixType = "column";
+    else if (format === "parts_of_whole") helixType = "parts-of-whole";
     else if (format === "nested") {
       // A Prism nested table is one of Prism's formats, but Titer's nested
       // table needs its own structure — import as Column, never silently.

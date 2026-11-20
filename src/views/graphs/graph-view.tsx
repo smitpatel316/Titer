@@ -658,7 +658,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
           : allSeries.length,
         allSeries,
       );
-      const fig = GRAPHS[type].build(coxSurvivalCols ?? volcanoColumns, buildOptions, paint, dataset?.titles, dataset?.summary);
+      const fig = GRAPHS[type].build(coxSurvivalCols ?? volcanoColumns, buildOptions, paint, dataset?.titles, dataset?.summary, parent?.tableType);
       fig.data = withCaps(fig.data, options);
       // A graph whose sibling analysis isn't linked draws only its axes or
       // points: say so on the canvas (G-F7), instead of leaving bare axes.

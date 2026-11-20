@@ -23,6 +23,10 @@ export const TABLES: Record<TableType, TableModule> = {
   contingency: { label: "Contingency", defaultData: () => newTable("contingency", 15) },
   // One subject per row: its time, then 1 (event) or 0 (censored) in its group's column.
   survival: { label: "Survival", defaultData: () => newTable("survival", 4) },
+  // Each row is a mutually exclusive category, each column a data set: the parts of a
+  // whole (Prism's 8th table type). One data set, like Prism's new table — a pie chart
+  // shows one data set, so more are added by hand.
+  "parts-of-whole": { label: "Parts of Whole", defaultData: () => newTable("parts-of-whole", 1) },
 };
 
 export const TABLE_TYPE_OPTIONS = (Object.keys(TABLES) as TableType[]).map((value) => ({

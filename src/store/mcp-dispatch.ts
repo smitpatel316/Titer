@@ -255,8 +255,8 @@ function reqString(value: unknown, name: string): string {
 // authority — they validate against live state and throw plain-language
 // errors the awaiting tool returns as tool errors.
 
-/** The seven table types, as the tools spell them. */
-const TABLE_TYPES: TableType[] = ["column", "xy", "grouped", "nested", "multiple", "contingency", "survival"];
+/** The eight table types, as the tools spell them. */
+const TABLE_TYPES: TableType[] = ["column", "xy", "grouped", "nested", "multiple", "contingency", "survival", "parts-of-whole"];
 
 /** `job (action)` prefix for the table branches' plain-language errors. */
 const jobErr = (job: McpJob, message: string) => new Error(`Job ${job.job_id} (${job.action}) ${message}`);

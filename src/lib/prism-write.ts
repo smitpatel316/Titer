@@ -41,6 +41,7 @@
 //   column     → format "column", one y_single dataset per column
 //   grouped    → format "grouped", one y_replicates dataset per group
 //   contingency→ format "contingency", one y_single dataset per column
+//   parts-of-whole → format "parts_of_whole", one y_single dataset per column
 //   survival   → format "survival", X = time, one dataset per group
 //   nested / multiple → the write FAILS with a plain-language error naming
 //                 the table: silently dropping a table would be data loss,
@@ -499,6 +500,9 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         dataFormat = "y_single";
       } else if (tableType === "contingency") {
         format = "contingency";
+        dataFormat = "y_single";
+      } else if (tableType === "parts-of-whole") {
+        format = "parts_of_whole";
         dataFormat = "y_single";
       } else {
         format = "column";

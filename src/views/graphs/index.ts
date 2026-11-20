@@ -32,6 +32,7 @@ import { groupedLines } from "./grouped-lines";
 import { groupedStacked } from "./grouped-stacked";
 import { groupedHbars } from "./grouped-hbars";
 import { pie, donut } from "./pie";
+import { powStacked } from "./pow-stacked";
 import { schildPlot } from "./schild-plot";
 import { smoothCurve } from "./smooth-curve";
 import { logisticCurveGraph } from "./logistic-curve";
@@ -92,6 +93,9 @@ export interface GraphModule {
     /** A grouped table's sub-column format ("replicates", or the summaries its
      *  sub-columns hold) — only the grouped builders read it. */
     summary?: SummaryFormat,
+    /** The table's type — only the builders whose reading depends on it
+     *  (a Parts-of-Whole pie's slices are its rows, not its columns) read it. */
+    tableType?: TableType,
   ) => GraphFigure;
 }
 
@@ -113,6 +117,7 @@ export const GRAPHS: Record<GraphType, GraphModule> = {
   "grouped-box": groupedBox,
   pie,
   donut,
+  "pow-stacked": powStacked,
   "schild-plot": schildPlot,
   "smooth-curve": smoothCurve,
   "logistic-curve": logisticCurveGraph,
@@ -253,6 +258,12 @@ export function graphSeries(type: GraphType, data: TableData, tableType: TableTy
   if (type === "kmeans-scatter") return [];
   if (family === "volcano") return Object.keys(VOLCANO_SERIES);
   if (family === "heatmap") return [];
+  // A Parts-of-Whole graph's series are its categories (rows), not its data
+  // sets: a pie's slices and a stacked bar's segments are the rows, so the
+  // Series section styles — and the paint keys — the categories.
+  if (tableType === "parts-of-whole" && (type === "pie" || type === "donut" || type === "pow-stacked")) {
+    return readTable(data).titles.filter((t): t is string => t !== null && t.trim() !== "");
+  }
   if (family === "xy" && tableType === "multiple") {
     const y = variablePair(readTable(data).numeric, options)[1];
     return y ? [y.name] : [];
@@ -338,4 +349,9 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
   // Outcomes as series across the row categories, as Prism graphs contingency tables.
   contingency: optionsFor(["grouped-bars", "grouped-stacked", "grouped-hbars", "heatmap"]),
   survival: optionsFor(["survival"]),
+  // Rows are the mutually exclusive categories, columns the data sets: a pie
+  // of one data set (slices are its rows) and a stacked bar (one bar per data
+  // set, segments are the rows) — Prism's two Parts-of-Whole graphs. The
+  // donut is Titer's pie variant, as on Column tables.
+  "parts-of-whole": optionsFor(["pie", "donut", "pow-stacked"]),
 };
