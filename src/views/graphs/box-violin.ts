@@ -34,7 +34,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
           }
         : { type: "box", ...shape, ...boxTrace([i], [c.values], options.whisker), y: undefined, boxpoints: false, whiskerwidth: 0.5 },
     );
-if (showPoints) data.push(columnPoints(paint, c, i));
+    if (showPoints) data.push(columnPoints(paint, c, i, options.scatterStyle));
     if (options.kind === "box" && !showPoints) {
       const { outliers } = whiskerBounds(c.values, options.whisker);
       if (outliers.length) {

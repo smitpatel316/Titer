@@ -155,6 +155,7 @@ const CHOICE_FIELDS: Record<string, keyof typeof GRAPH_CHOICES> = {
   kind: "kind",
   whisker: "whisker",
   violinVariant: "violinVariant",
+  scatterStyle: "scatterStyle",
   xyStyle: "xyStyle",
   xyReplicates: "xyReplicates",
   pieValue: "pieValue",

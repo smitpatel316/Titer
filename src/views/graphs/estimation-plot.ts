@@ -25,7 +25,7 @@
 import type { GraphOptions } from "../../store/types";
 import type { AnalysisResult } from "../../stats/types";
 import type { Column } from "../../lib/dataset";
-import { addNote, baseLayout, GUIDE, INK, jitter, seriesPoints, type Paint } from "./plot-helpers";
+import { addNote, baseLayout, GUIDE, INK, scatterOffsets, seriesPoints, type Paint } from "./plot-helpers";
 import { num } from "../../lib/format";
 import { pointKeyOf } from "../../lib/columns";
 import type { GraphFigure, GraphModule } from ".";
@@ -53,10 +53,11 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
         hoverinfo: "y",
       });
     }
+    const offs = scatterOffsets(c.values, options.scatterStyle, i);
     data.push({
       type: "scatter",
       mode: "markers",
-      x: c.values.map((_, vi) => i + jitter(i, vi)),
+      x: c.values.map((_, vi) => i + offs[vi]),
       y: c.values,
       ...seriesPoints(
         paint,

@@ -143,7 +143,7 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, logScaleOffered, movedText, paintOf, perRowSummaryStats, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, jitter, legendRightMargin, legendWidthPx, logScaleOffered, movedText, paintOf, perRowSummaryStats, scatterOffsets, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -3602,6 +3602,133 @@ check("seq 213 MCP: build-graph accepts whisker and violinVariant options and re
       options: { violinVariant: "wide" },
     }),
     /option “violinVariant” must be one of/,
+  );
+});
+
+// ── Scatter styles + aligned dot plot (seq 214) ─────────────────────────
+
+/** One column, three 10s and a 20: the density shape is visible in the offsets. */
+const scatterColumn = (): TableData => ({
+  columns: ["Title", "A"],
+  rows: [[null, "10"], [null, "10"], [null, "10"], [null, "20"]],
+});
+
+check("seq 214: scatter offsets — classic is the legacy jitter exactly, aligned is zero, standard spreads by density", () => {
+  const values = [10, 10, 10, 20];
+  // Classic pins to the legacy hash, value for value.
+  deepStrictEqual(
+    scatterOffsets(values, "classic", 0),
+    [0, 1, 2, 3].map((i) => jitter(0, i)),
+  );
+  // Aligned: every point on the column's center line.
+  deepStrictEqual(scatterOffsets(values, "aligned", 0), [0, 0, 0, 0]);
+  // Standard: the three 10s fan across the full width, the lone 20 sits centered.
+  deepStrictEqual(scatterOffsets(values, "standard", 0), [-0.15, 0, 0.15, 0]);
+  // Expanded: in range, deterministic, and not the classic pattern.
+  const expanded = scatterOffsets(values, "expanded", 0);
+  strictEqual(expanded[0], -0.15);
+  ok(expanded.every((o) => o >= -0.15 && o < 0.15), "expanded offsets stay in range");
+  ok(expanded.some((o, i) => o !== jitter(0, i)), "expanded differs from classic");
+});
+
+check("seq 214: individual values draw aligned dots in a column, classic jitter otherwise", () => {
+  const dataset = readTable(scatterColumn());
+  const pointsOf = (fig: GraphFigure) =>
+    (fig.data as { type: string; mode?: string; x: number[]; y: number[] }[]).find(
+      (t) => t.type === "scatter" && t.mode === "markers" && t.y.length === 4,
+    )!;
+  // Default (classic): the legacy jitter, unchanged.
+  const classic = GRAPHS["individual"].build(dataset.columns, newGraphOptions("individual"), paintOf(newGraphOptions("individual"), 1));
+  deepStrictEqual(pointsOf(classic).x, [0, 1, 2, 3].map((i) => jitter(0, i)));
+  // Aligned: all four on the column's center line.
+  const aligned = GRAPHS["individual"].build(
+    dataset.columns,
+    { ...newGraphOptions("individual"), scatterStyle: "aligned" },
+    paintOf(newGraphOptions("individual"), 1),
+  );
+  deepStrictEqual(pointsOf(aligned).x, [0, 0, 0, 0]);
+  deepStrictEqual(pointsOf(aligned).y, [10, 10, 10, 20]);
+  // Standard: the three 10s fanned, the 20 centered.
+  const standard = GRAPHS["individual"].build(
+    dataset.columns,
+    { ...newGraphOptions("individual"), scatterStyle: "standard" },
+    paintOf(newGraphOptions("individual"), 1),
+  );
+  deepStrictEqual(pointsOf(standard).x, [-0.15, 0, 0.15, 0]);
+});
+
+check("seq 214: grouped scatter and grouped box points follow the scatter style, and the panel offers it", () => {
+  const table: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2", "A:Y3"],
+    rows: [["r1", "10", "10", "20"]],
+    groups: 1,
+    replicates: 3,
+  };
+  const dataset = readTable(table);
+  const pointsOf = (fig: GraphFigure) =>
+    (fig.data as { type: string; mode?: string; x: number[]; y: number[] }[]).find(
+      (t) => t.type === "scatter" && t.mode === "markers" && t.y.length === 3,
+    )!;
+  const base = newGraphOptions("grouped-scatter");
+  // Aligned: all three points at the group's place in the row (offset 0, one group).
+  const aligned = GRAPHS["grouped-scatter"].build(
+    plotColumns(dataset, "grouped-scatter", base, "grouped"),
+    { ...base, scatterStyle: "aligned" },
+    paintOf(base, 1),
+    dataset.titles,
+  );
+  deepStrictEqual(pointsOf(aligned).x, [0, 0, 0]);
+  // Classic: the legacy jitter (× 0.4, as grouped points are placed).
+  const classic = GRAPHS["grouped-scatter"].build(
+    plotColumns(dataset, "grouped-scatter", base, "grouped"),
+    base,
+    paintOf(base, 1),
+    dataset.titles,
+  );
+  deepStrictEqual(pointsOf(classic).x, [0, 1, 2].map((ci) => jitter(0, ci) * 0.4));
+  // Grouped box points, aligned: on the box's center line too.
+  const boxOptions = { ...newGraphOptions("grouped-box"), showPoints: true, scatterStyle: "aligned" as const };
+  const box = GRAPHS["grouped-box"].build(
+    plotColumns(dataset, "grouped-box", boxOptions, "grouped"),
+    boxOptions,
+    paintOf(boxOptions, 1),
+    dataset.titles,
+  );
+  deepStrictEqual(pointsOf(box).x, [0, 0, 0]);
+  // The Format panel offers the Scatter choice where points are drawn.
+  const src = readFileSync("src/views/graphs/format-sections.tsx", "utf8");
+  const fn = src.slice(src.indexOf("function ownStyle"));
+  ok(fn.includes('label="Scatter"'), "the Format panel offers a Scatter choice");
+  ok(fn.includes("options.scatterStyle"), "the Scatter choice writes options.scatterStyle");
+});
+
+check("seq 214 MCP: build-graph accepts the aligned scatter style and refuses bad ones", async () => {
+  const harness = mcpLaggingHarness(true);
+  const captured: (string | undefined)[] = [];
+  harness.deps.actions!.createGraph = (tableId, graphType, options) => {
+    captured.push(options?.scatterStyle);
+    return `graph_${graphType}`;
+  };
+  const made = await harness.run("job-214-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A"],
+    rows: [["r1", 1]],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  await harness.run("job-214-aligned", "build-graph", {
+    table_id: tableId,
+    graph_type: "individual",
+    options: { scatterStyle: "aligned" },
+  });
+  deepStrictEqual(captured, ["aligned"]);
+  await rejects(
+    harness.run("job-214-bad", "build-graph", {
+      table_id: tableId,
+      graph_type: "individual",
+      options: { scatterStyle: "wobbly" },
+    }),
+    /option “scatterStyle” must be one of/,
   );
 });
 

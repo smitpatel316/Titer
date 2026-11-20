@@ -184,11 +184,19 @@ export function seriesPoints(paint: Paint, key: string, index: number, pointKeys
 }
 
 /** A column's individual points at its place `i` on the axis, jittered, each styled. */
-export function columnPoints(paint: Paint, c: Column, i: number) {
+/** A column's individual points, spread sideways per `style` (classic = the
+ *  legacy jitter exactly). */
+export function columnPoints(
+  paint: Paint,
+  c: Column,
+  i: number,
+  style: GraphOptions["scatterStyle"] = "classic",
+) {
+  const offs = scatterOffsets(c.values, style, i);
   return {
     type: "scatter",
     mode: "markers",
-    x: c.values.map((_, vi) => i + jitter(i, vi)),
+    x: c.values.map((_, vi) => i + offs[vi]),
     y: c.values,
     ...seriesPoints(
       paint,
@@ -519,6 +527,45 @@ export const jitter = (col: number, i: number) => {
   const s = Math.sin(col * 131.7 + i * 977.3) * 43758.5453;
   return (s - Math.floor(s) - 0.5) * 0.3;
 };
+
+/** How far sideways each scatter point sits from its column/row, one offset
+ *  per value (nulls get 0 — the caller never draws them). "classic" is the
+ *  legacy `jitter` exactly (same seed and index, so existing graphs render
+ *  unchanged); "aligned" is 0 everywhere — dots stacked in a column, Prism's
+ *  aligned dot plot; "standard" spreads points in proportion to how many
+ *  share their Y (a lone point sits centered, the densest Y gets the full
+ *  width); "expanded" is a low-discrepancy (golden-ratio) spread, which
+ *  breaks the visual banding a single hash can leave. `indexBase` lets the
+ *  grouped builders keep their legacy per-point index (row × 10 + replicate)
+ *  so classic stays bit-identical there too. */
+export function scatterOffsets(
+  values: (number | null)[],
+  style: GraphOptions["scatterStyle"],
+  seed: number,
+  indexBase = 0,
+): number[] {
+  if (style === "aligned") return values.map(() => 0);
+  if (style === "classic") return values.map((_, i) => jitter(seed, indexBase + i));
+  if (style === "expanded") {
+    return values.map((_, i) => {
+      const f = (indexBase + i) * 0.6180339887498949 + seed * 0.3183098861837907;
+      return (f - Math.floor(f) - 0.5) * 0.3;
+    });
+  }
+  const counts = new Map<number, number>();
+  for (const v of values) if (v != null) counts.set(v, (counts.get(v) ?? 0) + 1);
+  const maxCount = Math.max(1, ...counts.values());
+  const seen = new Map<number, number>();
+  return values.map((v) => {
+    if (v == null) return 0;
+    const k = counts.get(v)!;
+    const j = seen.get(v) ?? 0;
+    seen.set(v, j + 1);
+    if (k === 1) return 0;
+    const w = 0.15 * (k / maxCount);
+    return -w + (2 * w * j) / (k - 1);
+  });
+}
 
 /** The least space around the plot area. Every axis has `automargin`, so Plotly
  *  widens it just enough for tick labels and axis titles — but automargin does

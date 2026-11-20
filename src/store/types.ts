@@ -79,6 +79,11 @@ export const GRAPH_CHOICES = {
   // A violin's shape: the full density, truncated at the data's min/max, or
   // one half only (Prism 8.4.0+ truncated vs full; half is the one-sided form).
   violinVariant: ["full", "truncated", "half"],
+  // How scatter points spread sideways: Standard (width ∝ points at that Y —
+  // Prism's distribution-shaped scatter), Classic (the legacy jitter, kept
+  // exactly), Expanded (a low-discrepancy spread that breaks visual patterns),
+  // Aligned (no spread: dots stacked in a column — Prism's aligned dot plot).
+  scatterStyle: ["standard", "classic", "expanded", "aligned"],
   xyStyle: ["points", "line", "points+line"],
   xyReplicates: ["mean", "each"],
   pieValue: ["sum", "mean"],
@@ -154,6 +159,8 @@ export interface GraphOptions {
   whisker: Choice<"whisker">;
   // A violin's shape (full density, truncated at the data, or one half only).
   violinVariant: Choice<"violinVariant">;
+  // How scatter points spread sideways (standard / classic jitter / expanded / aligned).
+  scatterStyle: Choice<"scatterStyle">;
   // Estimation plot: draw violins behind the raw points (else a scatterplot).
   estimationViolin: boolean;
   // XY scatter: markers only, connecting line only, or both
@@ -405,6 +412,7 @@ export const DEFAULT_GRAPH_OPTIONS: GraphOptions = {
   kind: "box",
   whisker: "min-max",
   violinVariant: "full",
+  scatterStyle: "classic",
   showPoints: false,
   estimationViolin: false,
   xyStyle: "points",

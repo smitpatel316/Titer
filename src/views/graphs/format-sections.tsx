@@ -1419,6 +1419,21 @@ function ownStyle(context: SectionContext): React.ReactNode {
       ]}
     />
   );
+  // How scatter points spread sideways (Standard / Classic / Expanded /
+  // Aligned dot plot) — offered wherever points are drawn.
+  const scatterStyle = (
+    <Choice
+      label="Scatter"
+      value={options.scatterStyle}
+      onChange={(scatterStyle) => set({ scatterStyle })}
+      items={[
+        { value: "standard", label: "Standard" },
+        { value: "classic", label: "Classic" },
+        { value: "expanded", label: "Expanded" },
+        { value: "aligned", label: "Aligned dot plot" },
+      ]}
+    />
+  );
   const boxOrViolin = (
     <>
       <Choice
@@ -1462,6 +1477,7 @@ function ownStyle(context: SectionContext): React.ReactNode {
         context,
         <Toggle label="Show points" checked={options.showPoints} onChange={(showPoints) => set({ showPoints })} />,
       )}
+      {(options.showPoints || options.whisker === "min-max-all") && scatterStyle}
     </>
   );
   switch (graphType) {
@@ -1472,6 +1488,7 @@ function ownStyle(context: SectionContext): React.ReactNode {
             <Toggle label="Show bars" checked={options.bars} onChange={(bars) => set({ bars })} />
             {options.bars && shapeRows(context)}
           </Group>
+          {scatterStyle}
           {points}
         </>
       );
@@ -1503,6 +1520,7 @@ function ownStyle(context: SectionContext): React.ReactNode {
               onChange={(estimationViolin) => set({ estimationViolin })}
             />
           </Group>
+          {scatterStyle}
           {points}
         </>
       );
@@ -1583,7 +1601,14 @@ function ownStyle(context: SectionContext): React.ReactNode {
       return (
         <>
           {groups}
-          {graphType === "grouped-scatter" ? points : shapes("Bars", options.groupLayout === "interleaved" && gap)}
+          {graphType === "grouped-scatter" ? (
+            <>
+              {scatterStyle}
+              {points}
+            </>
+          ) : (
+            shapes("Bars", options.groupLayout === "interleaved" && gap)
+          )}
         </>
       );
     case "grouped-lines":

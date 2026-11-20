@@ -17,7 +17,7 @@ import {
   separatedPositions,
   seriesMarker,
   seriesPoints,
-  jitter,
+  scatterOffsets,
   type Paint,
 } from "./plot-helpers";
 import { pointKeyOf } from "../../lib/columns";
@@ -180,10 +180,16 @@ export function buildGroupedScatter(
       const py: number[] = [];
       const pointKeys: string[] = [];
       for (let r = 0; r < rows; r++) {
+        const offs = scatterOffsets(
+          g.columns.map((c) => c.byRow[r] ?? null),
+          options.scatterStyle,
+          gi,
+          r * 10,
+        );
         g.columns.forEach((c, ci) => {
           const v = c.byRow[r] ?? null;
           if (v != null) {
-            px.push(basePos(r) + jitter(gi, r * 10 + ci) * 0.4);
+            px.push(basePos(r) + offs[ci] * 0.4);
             py.push(v);
             pointKeys.push(pointKeyOf(c.name, r));
           }

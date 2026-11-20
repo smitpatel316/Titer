@@ -12,9 +12,9 @@ import {
   boxTrace,
   groupOffset,
   groupedScatterLayout,
-  jitter,
   rowCountOf,
   rowLabels,
+  scatterOffsets,
   separatedPositions,
   seriesPoints,
   whiskerBounds,
@@ -39,12 +39,18 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, titles?: 
     const px: number[] = [];
     const keys: string[] = [];
     for (let r = 0; r < rows; r++) {
+      const offs = scatterOffsets(
+        g.columns.map((c) => c.byRow[r] ?? null),
+        options.scatterStyle,
+        gi,
+        r * 10,
+      );
       g.columns.forEach((c, ci) => {
         const v = c.byRow[r] ?? null;
         if (v == null) return;
         x.push(basePos(r));
         y.push(v);
-        px.push(basePos(r) + jitter(gi, r * 10 + ci) * 0.4);
+        px.push(basePos(r) + offs[ci] * 0.4);
         keys.push(pointKeyOf(c.name, r));
       });
     }
