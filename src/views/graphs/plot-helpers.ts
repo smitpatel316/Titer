@@ -1033,22 +1033,35 @@ export function summaryMeanColumn({ columns }: DataSet): Column | undefined {
   return columns.find((c) => c.name.slice(c.name.indexOf(":") + 1) === "Mean");
 }
 
-/** Horizontal offset of group `g` within a row's slot, so interleaved scatter
+/** Where a group sits within a row's slot, so interleaved scatter
  *  points fan out per group across [-0.28, 0.28] (bars use Plotly's own barmode). */
 export const groupOffset = (g: number, total: number) => (total <= 1 ? 0 : -0.28 + (0.56 * g) / (total - 1));
 
-interface SeparatedAxis {
+interface CategoryPositions {
   posOf: (group: number, row: number) => number;
   tickvals: number[];
   ticktext: string[];
   range: [number, number];
 }
 
+/** Category positions for the "Interleaved" arrangement: each group at its
+ *  offset within every row's slot (`groupOffset`), so a bar, a box and a
+ *  point of the same group and row share one place — a point overlaid on a
+ *  bar sits on its own bar. Ticks are the row labels, one per row. */
+export function interleavedPositions(groups: number, labels: string[]): CategoryPositions {
+  return {
+    posOf: (g, r) => r + groupOffset(g, groups),
+    tickvals: labels.map((_, i) => i),
+    ticktext: labels,
+    range: [-0.5, labels.length - 0.5],
+  };
+}
+
 /** Category positions for the "Separated" arrangement: each group gets its own
  *  block of `rows` slots (with a 1-slot gap between blocks) instead of sharing
  *  a slot per row, so groups sit side by side rather than interleaved. Ticks
  *  repeat the row labels once per block. */
-export function separatedPositions(groups: number, labels: string[]): SeparatedAxis {
+export function separatedPositions(groups: number, labels: string[]): CategoryPositions {
   const gap = 1;
   const rows = labels.length;
   const blockWidth = rows + gap;
@@ -1075,7 +1088,7 @@ export function separatedPositions(groups: number, labels: string[]): SeparatedA
 export function groupedBarLayout(
   options: GraphOptions,
   seriesCount: number,
-  opts: { horizontal?: boolean; separated?: SeparatedAxis; seriesNames?: string[] } = {},
+  opts: { horizontal?: boolean; positions?: CategoryPositions; seriesNames?: string[] } = {},
 ): Record<string, unknown> {
   // The grid choice follows the PHYSICAL axis: when horizontal, the value axis
   // sits on X and the category axis on Y, so the choices swap with them.
@@ -1086,15 +1099,16 @@ export function groupedBarLayout(
     ...yAxisRange(options, true, valueGrid),
     ...axisTitle(options.yLabel, options.yTitleGap),
   };
-  // Separated blocks need numeric positions with gaps between them, so they use
-  // explicit tick placement instead of Plotly's evenly-spaced "category" axis.
+  // Numeric category positions (separated blocks, or interleaved positions
+  // when points are overlaid on the bars) need explicit tick placement
+  // instead of Plotly's evenly-spaced "category" axis.
   const category = {
-    ...(opts.separated
+    ...(opts.positions
       ? {
           tickmode: "array",
-          tickvals: opts.separated.tickvals,
-          ticktext: opts.separated.ticktext,
-          range: opts.separated.range,
+          tickvals: opts.positions.tickvals,
+          ticktext: opts.positions.ticktext,
+          range: opts.positions.range,
         }
       : { type: "category" }),
     ...axisChrome(options, categoryGrid),
@@ -1115,7 +1129,7 @@ export function groupedScatterLayout(
   options: GraphOptions,
   labels: string[],
   seriesCount: number,
-  separated?: SeparatedAxis,
+  positions?: CategoryPositions,
   seriesNames: string[] = [],
 ): Record<string, unknown> {
   return {
@@ -1124,9 +1138,9 @@ export function groupedScatterLayout(
     legend: legendOf(options),
     xaxis: {
       tickmode: "array",
-      tickvals: separated ? separated.tickvals : labels.map((_, i) => i),
-      ticktext: separated ? separated.ticktext : labels,
-      range: separated ? separated.range : [-0.5, labels.length - 0.5],
+      tickvals: positions ? positions.tickvals : labels.map((_, i) => i),
+      ticktext: positions ? positions.ticktext : labels,
+      range: positions ? positions.range : [-0.5, labels.length - 0.5],
       ...axisChrome(options, options.gridX),
       ...axisTitle(options.xLabel, options.xTitleGap),
     },

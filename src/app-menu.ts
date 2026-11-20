@@ -5,6 +5,7 @@
 import { WIZARDS } from "./views/analyses/wizards";
 import * as React from "react";
 import { isNative, onFocusChange, setTheme, type Theme } from "./native";
+import { THEME_CHANGED_EVENT, THEME_KEY, loadTheme } from "./lib/theme";
 import { projectItems, separator as sep, setMenuBar } from "./menus";
 import { useProjectStore } from "./store/use-project-store";
 import { useLayout } from "./store/use-layout";
@@ -16,22 +17,21 @@ import { GRAPH_OPTIONS_BY_TABLE } from "./views/graphs";
 import { useStartAnalysis } from "./views/analyses/use-analysis-launcher";
 import { SECTIONS } from "./views/graphs/format-panel";
 
-const THEME_KEY = "titer.theme";
-
-/** The appearance chosen in View ▸ Appearance, which every window shares. */
-function savedTheme(): Theme {
-  try {
-    const theme = localStorage.getItem(THEME_KEY);
-    return theme === "light" || theme === "dark" ? theme : "system";
-  } catch {
-    return "system";
-  }
-}
-
 /** Text-editing commands go to a focused text field natively, everything else to the
  *  table grid (whose idle input, marked `data-grid-idle`, doesn't count as a text field).
  *  Undo and Redo go to the field being typed in, else to the project (the store). */
-export type EditCommand = "delete" | "select-all" | "fill-down" | "exclude" | "find" | "find-next" | "find-previous";
+export type EditCommand =
+  | "delete"
+  | "select-all"
+  | "select-row"
+  | "select-column"
+  | "fill-down"
+  | "exclude"
+  | "find"
+  | "find-next"
+  | "find-previous"
+  | "paste-special"
+  | "paste-transpose";
 const TEXT_COMMANDS: EditCommand[] = ["delete", "select-all"];
 
 /** Where the keyboard is: a text field, the data grid, or elsewhere. */
@@ -52,7 +52,7 @@ function edit(command: EditCommand) {
 export function useAppMenu(doc: DocumentActions) {
   const store = useProjectStore();
   const startAnalysis = useStartAnalysis();
-  const { sidebar, inspector, panel, inspectorHere, settingsHere, setLayout, setOpenSections, setFoldedTables } =
+  const { sidebar, inspector, panel, inspectorHere, settingsHere, gallery, setLayout, setOpenSections, setFoldedTables } =
     useLayout();
   // What the right panel shows, if shown: the note, or the settings where there are some.
   const shown = !inspector ? null : panel === "settings" && settingsHere ? "settings" : "notes";
@@ -62,7 +62,7 @@ export function useAppMenu(doc: DocumentActions) {
     enabled,
     action: () => setLayout(shown === view ? { inspector: false } : { inspector: true, panel: view }),
   });
-  const [theme, setThemeState] = React.useState(savedTheme);
+  const [theme, setThemeState] = React.useState(loadTheme);
 
   // Menu actions run long after the menu was built: read everything through this ref.
   const latest = React.useRef({ store, doc, startAnalysis });
@@ -79,13 +79,21 @@ export function useAppMenu(doc: DocumentActions) {
     }
   }, [theme]);
 
+  // The theme the Preferences dialog set (seq 225) re-reads at once, not
+  // only when the window comes to the front.
+  React.useEffect(() => {
+    const onChanged = () => setThemeState(loadTheme());
+    window.addEventListener(THEME_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(THEME_CHANGED_EVENT, onChanged);
+  }, []);
+
   // Only the window in front sets the menu; it reads the theme again, which another window may have changed.
   const [focused, setFocused] = React.useState(false);
   React.useEffect(
     () =>
       onFocusChange((focus) => {
         setFocused(focus);
-        if (focus) setThemeState(savedTheme());
+        if (focus) setThemeState(loadTheme());
       }),
     [],
   );
@@ -196,6 +204,10 @@ export function useAppMenu(doc: DocumentActions) {
           { text: "Save", accelerator: "CmdOrCtrl+S", enabled: isDirty, action: () => latest.current.doc.save() },
           { text: "Save As…", accelerator: "CmdOrCtrl+Shift+S", action: () => latest.current.doc.save(true) },
           sep,
+          // Seq 227: Print prints the sheet as shown, on the paper Page Setup chose.
+          { text: "Page Setup…", action: () => latest.current.store.openSelector({ kind: "preferences", section: "print" }) },
+          { text: "Print…", accelerator: "CmdOrCtrl+P", action: () => window.print() },
+          sep,
           // Save Special (plan 38): a template / example / method file is this
           // project with a `template` envelope block, under a `.pzt`/`.pzm`
           // name. An example is saved from a graph, a method from a data
@@ -241,6 +253,35 @@ export function useAppMenu(doc: DocumentActions) {
           sep,
           { text: "Delete", enabled: hasTable, action: () => edit("delete") },
           { text: "Select All", accelerator: "CmdOrCtrl+A", action: () => edit("select-all") },
+          // Seq 231: the keys already select this way in the grid (Shift+Space
+          // the rows, Ctrl+Space the columns); the menu names them.
+          {
+            text: "Select Row",
+            accelerator: "Shift+Space",
+            enabled: hasTable,
+            action: () => edit("select-row"),
+          },
+          {
+            text: "Select Column",
+            accelerator: "Ctrl+Space",
+            enabled: hasTable,
+            action: () => edit("select-column"),
+          },
+          sep,
+          // Seq 230: Paste Special offers Values / Transpose; Paste Transposed
+          // swaps the clipboard block's rows and columns at once.
+          {
+            text: "Paste Special…",
+            enabled: hasTable,
+            action: () => edit("paste-special"),
+          },
+          {
+            text: "Paste Transposed",
+            accelerator: "CmdOrCtrl+Shift+V",
+            enabled: hasTable,
+            action: () => edit("paste-transpose"),
+          },
+          sep,
           { text: "Fill Down", accelerator: "CmdOrCtrl+D", enabled: hasTable, action: () => edit("fill-down") },
           sep,
           { text: "Exclude / Include", accelerator: "CmdOrCtrl+E", enabled: hasTable, action: () => edit("exclude") },
@@ -365,9 +406,16 @@ export function useAppMenu(doc: DocumentActions) {
       {
         text: "Settings",
         items: [
+          // Seq 225: Preferences holds every setting — General, Appearance,
+          // AI Connections, Feedback and Print — in one place. ⌘, is the
+          // macOS Preferences key, so it opens Preferences, not AI Connections.
+          {
+            text: "Preferences…",
+            accelerator: "CmdOrCtrl+,",
+            action: () => latest.current.store.openSelector({ kind: "preferences" }),
+          },
           {
             text: "AI Connections…",
-            accelerator: "CmdOrCtrl+,",
             action: () => latest.current.store.openSelector({ kind: "ai-connections" }),
           },
         ],
@@ -379,6 +427,12 @@ export function useAppMenu(doc: DocumentActions) {
             text: sidebar ? "Hide Sidebar" : "Show Sidebar",
             accelerator: "CmdOrCtrl+B",
             action: () => setLayout({ sidebar: !sidebar }),
+          },
+          // Seq 229: the Gallery shows every graph on one sheet.
+          {
+            text: "Gallery",
+            checked: gallery,
+            action: () => setLayout({ gallery: !gallery }),
           },
           panelItem("notes", "Notes", "CmdOrCtrl+Alt+N", inspectorHere),
           panelItem("settings", "Inspector", "CmdOrCtrl+Alt+I", settingsHere),
@@ -426,6 +480,7 @@ export function useAppMenu(doc: DocumentActions) {
     doc.recents,
     theme,
     sidebar,
+    gallery,
     inspector,
     typing,
     undoName,

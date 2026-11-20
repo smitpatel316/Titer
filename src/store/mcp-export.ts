@@ -7,7 +7,7 @@
 // could not be exported. The offscreen path below reuses the one the
 // figure export already proved (`panelImage` in
 // `src/views/figures/figure-export.ts`): build the Plotly figure from
-// the node with `buildPanelFigure`, `Plotly.react` it into a detached
+// the node with `buildGraphFigure`, `Plotly.react` it into a detached
 // div, then `Plotly.toImage` — the same builder and the same `toImage`
 // call the GUI's graph export makes on its mounted element, at the same
 // size/scale. It runs in the project window's webview (the dispatcher
@@ -18,14 +18,15 @@
 // MCP boundary as base64: Rust resolves the path, enqueues the job,
 // awaits the outcome, and returns only the metadata.
 //
-// One documented delta: `buildPanelFigure` draws the graph's base chart
-// only — the overlays that need React hooks (significance brackets,
-// regression / dose-response curves, forest / scree / PCA / K-means
-// overlays) are not built, exactly as figure panels behave today (see
-// `panel-figure.ts`). A graph with no linked-analysis overlays renders
-// identically to its on-screen view; the end-pass byte-equality proof
-// records which overlay graphs differ.
-import { buildPanelFigure } from "../views/figures/panel-figure";
+// Overlays (seq 173): the figure comes from the shared `buildGraphFigure`
+// (`src/views/graphs/graph-figure.ts`), so a headless export draws the
+// same significance brackets, fitted curves and forest / scree / PCA /
+// K-means overlays the graph view draws — from the same sibling analyses,
+// run live (or their frozen / orphaned stored results). The job reports
+// which overlays drew (`overlays_applied`) and which didn't
+// (`overlays_missing`, with why), so a caller can tell an overlay-less
+// export from an overlay graph whose analysis simply hasn't run yet.
+import { buildGraphFigure, type AnalysisRunner, type GraphOverlayStatus } from "../views/graphs/graph-figure";
 import { renderFigureRaster, renderFigureSvg } from "../views/figures/figure-export";
 import { loadPlotly } from "../views/graphs/plotly";
 import { withoutSelection } from "../views/graphs/selection";
@@ -79,6 +80,24 @@ export const defaultExportIo: ExportIo = { writeFile: nativeWriteFile };
 export interface ExportJobDeps {
   getState: () => ExportJobState;
   io?: ExportIo;
+  /** Run an analysis for an overlay (default: the real `runAnalysis`, via
+   *  `buildGraphFigure`). A harness injects a stub; the table-data jobs
+   *  never call it. */
+  run?: AnalysisRunner;
+}
+
+/** An overlay report as the tool returns it: which overlays drew, and
+ *  which didn't (with why). */
+export function overlayReport(overlays: GraphOverlayStatus[]): {
+  overlays_applied: string[];
+  overlays_missing: { overlay: string; status: string; detail?: string }[];
+} {
+  return {
+    overlays_applied: overlays.filter((o) => o.status === "applied").map((o) => o.overlay),
+    overlays_missing: overlays
+      .filter((o) => o.status !== "applied")
+      .map((o) => ({ overlay: o.overlay, status: o.status, ...(o.detail ? { detail: o.detail } : {}) })),
+  };
 }
 
 /** What one export job reports: the tool's output. */
@@ -211,15 +230,24 @@ const WHITE = { paper_bgcolor: "#ffffff", plot_bgcolor: "#ffffff" };
 /** One graph as image bytes, drawn offscreen — the GUI's `toImage` path
  *  (`graph-export.ts`) with the mounted element replaced by a detached
  *  div, exactly as the figure export's `panelImage` does. PDF/TIFF are
- *  built from the PNG Plotly draws (it has no PDF/TIFF output). */
+ *  built from the PNG Plotly draws (it has no PDF/TIFF output). The figure
+ *  is the shared `buildGraphFigure`, so the graph's overlays draw too. */
 export async function renderGraphImage(
   graph: ProjectNode,
   nodes: Record<string, ProjectNode>,
   format: ExportFormat,
   dpi: Resolution,
   size96: { width: number; height: number },
-): Promise<{ bytes: Uint8Array; widthPx: number; heightPx: number; capped: boolean; reason?: string }> {
-  const fig = buildPanelFigure(graph, nodes);
+  run?: AnalysisRunner,
+): Promise<{
+  bytes: Uint8Array;
+  widthPx: number;
+  heightPx: number;
+  capped: boolean;
+  reason?: string;
+  overlays: GraphOverlayStatus[];
+}> {
+  const { figure: fig, overlays } = await buildGraphFigure(graph, nodes, { run });
   if (!fig) {
     throw new Error(
       `Graph “${graph.name}” has nothing to draw — its table has no numeric columns, or its graph type is unknown.`,
@@ -243,13 +271,13 @@ export async function renderGraphImage(
     const url = await Plotly.toImage(figure, { format: drawnFormat, ...draw96, scale });
     const image = await (await fetch(url)).blob();
     if (format === "svg") {
-      return { bytes: new TextEncoder().encode(await image.text()), ...dims };
+      return { bytes: new TextEncoder().encode(await image.text()), ...dims, overlays };
     }
     const png = new Uint8Array(await image.arrayBuffer());
-    if (format === "pdf") return { bytes: pdfEncode(decodePng(png), Number(dpi)), ...dims };
-    if (format === "tiff") return { bytes: tiffEncode(decodePng(png), Number(dpi)), ...dims };
+    if (format === "pdf") return { bytes: pdfEncode(decodePng(png), Number(dpi)), ...dims, overlays };
+    if (format === "tiff") return { bytes: tiffEncode(decodePng(png), Number(dpi)), ...dims, overlays };
     const stamped = await withDpi(png, format as "png" | "jpeg", Number(dpi)).arrayBuffer();
-    return { bytes: new Uint8Array(stamped), ...dims };
+    return { bytes: new Uint8Array(stamped), ...dims, overlays };
   } finally {
     void loadPlotly().then((Plotly) => Plotly.purge(el));
     el.remove();
@@ -269,7 +297,7 @@ export async function executeExportGraph(job: McpJob, deps: ExportJobDeps): Prom
   const state = deps.getState();
   const graph = graphNode(job, state, graphId);
   const size96 = graphDrawSize(graph, widthIn, heightIn);
-  const out = await renderGraphImage(graph, state.nodes, format, dpi, size96);
+  const out = await renderGraphImage(graph, state.nodes, format, dpi, size96, deps.run);
   const ext = EXPORT_EXTENSION[format];
   const io = deps.io ?? defaultExportIo;
   await io.writeFile(ensureSaveExtension(path, ext), out.bytes);
@@ -282,6 +310,7 @@ export async function executeExportGraph(job: McpJob, deps: ExportJobDeps): Prom
     width_px: out.widthPx,
     height_px: out.heightPx,
     capped: out.capped,
+    ...overlayReport(out.overlays),
   };
   if (out.reason) result.reason = out.reason;
   return { result };
@@ -345,12 +374,14 @@ export async function executeExportFigure(job: McpJob, deps: ExportJobDeps): Pro
   let missing: number;
   let capped = false;
   let reason: string | undefined;
+  let overlays: GraphOverlayStatus[] = [];
   if (format === "svg") {
     const out = await renderFigureSvg(figure, state.nodes, dpi);
     bytes = new TextEncoder().encode(out.svg);
     widthPx = out.width;
     heightPx = out.height;
     missing = out.missing;
+    overlays = out.overlays;
   } else {
     const out = await renderFigureRaster(figure, state.nodes, format, dpi);
     bytes = new Uint8Array(await out.blob.arrayBuffer());
@@ -359,6 +390,7 @@ export async function executeExportFigure(job: McpJob, deps: ExportJobDeps): Pro
     missing = out.missing;
     capped = out.capped;
     reason = out.reason;
+    overlays = out.overlays;
   }
   const io = deps.io ?? defaultExportIo;
   await io.writeFile(ensureSaveExtension(path, ext), bytes);
@@ -372,6 +404,7 @@ export async function executeExportFigure(job: McpJob, deps: ExportJobDeps): Pro
     height_px: heightPx,
     missing,
     capped,
+    ...overlayReport(overlays),
   };
   if (reason) result.reason = reason;
   return { result };
@@ -408,16 +441,18 @@ export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Pro
   let missing = 0;
   let capped = false;
   let reason: string | undefined;
+  let overlays: GraphOverlayStatus[] = [];
   if (graphId !== undefined) {
     const graph = graphNode(job, state, graphId);
     const size96 = graphDrawSize(graph);
-    const out = await renderGraphImage(graph, state.nodes, "png", dpi, size96);
+    const out = await renderGraphImage(graph, state.nodes, "png", dpi, size96, deps.run);
     png = out.bytes;
     title = graph.name;
     widthPx = out.widthPx;
     heightPx = out.heightPx;
     capped = out.capped;
     reason = out.reason;
+    overlays = out.overlays;
   } else {
     const figure = figureNode(job, state, figureId!);
     if (!figure.panels?.length) {
@@ -431,6 +466,7 @@ export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Pro
     missing = out.missing;
     capped = out.capped;
     reason = out.reason;
+    overlays = out.overlays;
   }
   const dims = pngSize(png);
   if (!dims) throw jobErr(job, "could not draw the image as a PNG image.");
@@ -452,6 +488,7 @@ export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Pro
     width_px: widthPx,
     height_px: heightPx,
     capped,
+    ...overlayReport(overlays),
   };
   if (graphId !== undefined) result.graph_id = graphId;
   else result.figure_id = figureId;

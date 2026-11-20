@@ -73,7 +73,7 @@ export const GRAPH_CHOICES = {
   xyReplicates: ["mean", "each"],
   pieValue: ["sum", "mean"],
   groupLayout: ["interleaved", "separated"],
-  sigDisplay: ["stars", "pvalue", "letters"],
+  sigDisplay: ["stars", "pvalue", "pvalue-eq", "letters"],
   regBand: ["confidence", "prediction"],
   residualsAs: ["x", "qq"],
   survivalMode: ["codes", "counts"],
@@ -139,7 +139,7 @@ export interface GraphOptions {
   shape: Choice<"shape">;
   // Box & violin
   kind: Choice<"kind">;
-  showPoints: boolean; // overlay individual points on box/violin
+  showPoints: boolean; // overlay individual points on box/violin and grouped bars
   // Estimation plot: draw violins behind the raw points (else a scatterplot).
   estimationViolin: boolean;
   // XY scatter: markers only, connecting line only, or both
@@ -195,8 +195,10 @@ export interface GraphOptions {
   binWidth?: number;
   // Significance annotations (Column and grouped graphs): read a sibling analysis's
   // pairwise comparisons and draw brackets. `sigAnalysisId` is the source analysis
-  // node; `sigPairs` are the comparison keys (see significance-overlay) to draw;
-  // `sigDisplay`: star marks, raw P values, or letters over every group (no brackets).
+  // node; `sigPairs` are the comparisons to draw — a comparison's own key, the
+  // pairKey of its two groups, or both group names named bare (see
+  // significance-overlay); `sigDisplay`: star marks, raw P values ("P = …" or
+  // "p=…"), or letters over every group (no brackets).
   sigAnalysisId?: string;
   sigPairs?: string[];
   sigDisplay: Choice<"sigDisplay">;
@@ -705,6 +707,18 @@ export interface InfoSheetData {
   constants: InfoConstant[];
   notes: string;
   linkedTableId?: string | null;
+}
+
+/** A Prism script saved in the project (seq 228): Prism keeps its scripts
+ *  in the project file, and runs them when the project opens or closes.
+ *  `runOnOpen` / `runOnClose` are the two hooks; both off is a script kept
+ *  for running by hand (File ▸ Run Script…). */
+export interface ProjectScript {
+  id: string;
+  name: string;
+  text: string;
+  runOnOpen: boolean;
+  runOnClose: boolean;
 }
 
 export interface ProjectNode {

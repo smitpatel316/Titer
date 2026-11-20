@@ -31,6 +31,7 @@ import {
   type Place,
   type PointStyle,
   type ProjectNode,
+  type ProjectScript,
   type RefLine,
   type RowGroup,
   SAME_AS_FILL,
@@ -63,22 +64,33 @@ import {
   EC_ANYTHING,
   ENZYME_INHIBITION_MODELS,
   EXTRACT_REARRANGE_TARGETS,
+  FDR_METHODS,
+  FDR_Q,
   FRACTION_OF_TOTAL_CIS,
   FRACTION_OF_TOTAL_FORMATS,
   FRACTION_OF_TOTAL_TOTALS,
+  GOF_EXPECTED_MODES,
+  KS_DISTRIBUTIONS,
+  MONTE_CARLO_SIMULATION_DISTRIBUTIONS,
   MONTE_CARLO_STATISTICS,
+  COLUMN_MATH_OPERATIONS,
   MONTE_CARLO_TARGETS,
+  MULTIPLE_T_TEST_CORRECTIONS,
   NONLINEAR_MODELS,
   NORMALIZE_HUNDRED_DEFS,
   NORMALIZE_METHODS,
   NORMALIZE_ZERO_DEFS,
+  PLOT_FUNCTION_DISTRIBUTIONS,
   POSTHOC_TARGETS,
   PRUNE_ROWS_CONDITIONS,
+  P_VALUE_STACK_METHODS,
   RANK_POSTHOCS,
   REMOVE_BASELINE_METHODS,
   ROUT_Q,
+  ROW_MEANS_SCOPES,
   SMOOTH_DIFF_INT_OPERATIONS,
   TAILS,
+  THREE_WAY_POSTHOC_SCOPES,
   THREE_WAY_TERMS,
   TRANSFORM_FUNCTIONS,
   TWO_WAY_DESIGNS,
@@ -118,6 +130,9 @@ export interface ProjectFilePayload {
   template?: TemplateInfo;
   /** The name a script's SetProjectName gave the project. Omitted when unset. */
   projectName?: string;
+  /** The project's saved Prism scripts (seq 228): a plain `.hlx` without
+   *  any omits the field, as it omits an unset projectName. */
+  scripts?: ProjectScript[];
   /** Unknown keys from a newer or hand-edited file (FF-F12): the file envelope's
    *  and the project's, kept verbatim and written back on save, so opening a
    *  newer file in this Titer doesn't silently lose its forward-compat data.
@@ -128,7 +143,7 @@ export interface ProjectFilePayload {
 
 // ── Writing ──────────────────────────────────────────────────────────────
 
-export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeId, template, projectName, fileUnknowns, projectUnknowns }: ProjectFilePayload): string {
+export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeId, template, projectName, scripts, fileUnknowns, projectUnknowns }: ProjectFilePayload): string {
   // Unknown keys go back where they came from, under the known keys — a
   // hand-edited file can't smuggle a second `nodes` or `app` past the reader.
   const project: ProjectFilePayload = {
@@ -138,6 +153,7 @@ export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeI
     childOrder,
     activeNodeId,
     ...(projectName ? { projectName } : {}),
+    ...(scripts?.length ? { scripts } : {}),
   };
   // The `template` block lives at the file level, beside `project` (plan 38):
   // a plain `.hlx` never carries one — only the template saver passes it.
@@ -189,7 +205,7 @@ const unknownsOf = (obj: Obj, known: readonly string[]): Obj => {
 // Every field Titer knows, per level. The `satisfies` checks make TypeScript
 // flag any field added to a type but not listed here.
 const FILE_KEYS = ["app", "schemaVersion", "savedAt", "template", "project"];
-const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId", "projectName"] satisfies (keyof ProjectFilePayload)[];
+const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId", "projectName", "scripts"] satisfies (keyof ProjectFilePayload)[];
 // prettier-ignore
 const NODE_KEYS = Object.keys({
   id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, highlight: 1, tableType: 1, data: 1, transform: 1, notes: 1, tags: 1,
@@ -259,6 +275,7 @@ type ParamKind =
   | "number"
   | "name"
   | "names"
+  | "numbers"
   | "name-or-names"
   | "name-or-number"
   | "name-and-names"
@@ -272,15 +289,18 @@ type ParamKind =
 // prettier-ignore
 const PARAMS = {
   paired: "yes/no", gaussian: "yes/no", equalVariance: "yes/no", ratio: "yes/no", forceOrigin: "yes/no", pooledSd: "yes/no", quasi: "yes/no", fixHillSlope: "yes/no", trendOrdered: "yes/no", continuityCorrection: "yes/no",
-  equalSd: "yes/no", sphericity: "yes/no", interpolate: "yes/no", tails: TAILS, posthoc: [...ANOVA_POSTHOCS, ...RANK_POSTHOCS], mixed: "yes/no",
+  equalSd: "yes/no", sphericity: "yes/no", interpolate: "yes/no", tails: TAILS, posthoc: [...ANOVA_POSTHOCS, ...RANK_POSTHOCS, "fdr"], mixed: "yes/no", trend: "yes/no",
   // `model` is shared by nonlinear-regression and the binding runners:
   // the reader only sanitizes, each runner validates its own.
   model: [...NONLINEAR_MODELS, ...BINDING_SATURATION_MODELS, ...BINDING_KINETICS_MODELS, ...ENZYME_INHIBITION_MODELS, ...DOSE_RESPONSE_SPECIAL_MODELS],
   // `method` is shared by correlation ("pearson"/"spearman") and Spline/Lowess
-  // ("spline"/"lowess") — and now outliers ("rout"/"grubbs"): the reader only
-  // sanitizes, each runner validates its own.
-  method: [...CORRELATION_METHODS, "spline", "lowess", "rout", "grubbs"],
-  mode: CORRELATION_MODES, design: TWO_WAY_DESIGNS, posthocTarget: POSTHOC_TARGETS, correction: CORRECTIONS, curveTest: CURVE_TESTS, compare: CURVE_COMPARISONS,
+  // ("spline"/"lowess") — and now outliers ("rout"/"grubbs") and the stack of
+  // P values (the seven corrections): the reader only sanitizes, each runner
+  // validates its own. The stack runner refuses a cross-family value with a
+  // clean error (the spline-lowess precedent), so it needs no PARAM_CHOICES
+  // narrowing.
+  method: [...CORRELATION_METHODS, "spline", "lowess", "rout", "grubbs", ...P_VALUE_STACK_METHODS],
+  mode: CORRELATION_MODES, design: TWO_WAY_DESIGNS, posthocTarget: POSTHOC_TARGETS, correction: [...CORRECTIONS, ...MULTIPLE_T_TEST_CORRECTIONS], curveTest: CURVE_TESTS, compare: CURVE_COMPARISONS,
   // Nonlinear regression framework (plan 26): weighting, model comparison,
   // global fitting, fixed parameters and bounds.
   weights: ["none", "1/y", "1/y2", "1/x", "1/x2", "1/sd2"],
@@ -304,8 +324,12 @@ const PARAMS = {
   customEquation: "name",
   customParameters: "numbers-by-name",
   hypotheticalValue: "number", baseline: "number", q: ROUT_Q, lambda: "number", ecx: EC_ANYTHING,
+  // Seq 166 (Prism Range tab): the X-range bounds for nonlinear regression.
+  fitXMin: "number", fitXMax: "number",
   // Remove baseline (v2): how the baseline is defined, and the values it needs.
+  // Seq 206: column math — the operation and the two columns it combines.
   baselineMethod: REMOVE_BASELINE_METHODS, firstN: "number", controls: "names", constant: "number",
+  columnMathOperation: COLUMN_MATH_OPERATIONS, columnMathA: "name", columnMathB: "name",
   // Normalize (v2): how each value is rescaled, and the values it needs.
   normalizeMethod: NORMALIZE_METHODS, asPercent: "yes/no", zeroDef: NORMALIZE_ZERO_DEFS, hundredDef: NORMALIZE_HUNDRED_DEFS,
   zeroConstant: "number", hundredConstant: "number",
@@ -315,13 +339,16 @@ const PARAMS = {
   // the result is a fraction or a percent, and which 95% CI of each
   // proportion it carries (seq 196).
   totalBy: FRACTION_OF_TOTAL_TOTALS, format: FRACTION_OF_TOTAL_FORMATS, ci: FRACTION_OF_TOTAL_CIS,
+  // Row means and totals (1.8, seq 194): whether each row is summarised
+  // across all the chosen data sets together, or within each one.
+  rowScope: ROW_MEANS_SCOPES,
   alpha: { min: 0.001, max: 0.5 }, iterate: "yes/no",
   f: "number", spar: "number", df: "number",
   // Smooth, differentiate or integrate a curve (v2): the operation is a
   // choice; window/order are numbers the runner validates (5/9/13, 2/3);
   // `baseline` already has an entry above.
   operation: SMOOTH_DIFF_INT_OPERATIONS, window: "number", order: "number", smoothResults: "yes/no", startValue: "number",
-  y: "name-or-names", y2: "name", ys: "names", dependent: "name", reference: "name", control: "name", compareWith: "name", datasets: "names", predictors: "names", sets: "names", compared: "names",
+  y: "name-or-names", y2: "name", ys: "names", dependent: "name", reference: "name", control: "name", compareWith: "name", datasets: "names", predictors: "names", sets: "names", compared: "names", factors: "names",
   // Transform concentrations (v2): the column to convert, and the units
   // it is in now vs. the units it is converted to.
   column: "name", fromUnit: CONCENTRATION_UNITS, toUnit: CONCENTRATION_UNITS,
@@ -332,6 +359,10 @@ const PARAMS = {
   bUnits: ["M", "nM", "µM"],
   binMode: BIN_MODES, binWidth: "number", binCount: { min: 2, max: 100 }, startAt: "number",
   posthocTerm: THREE_WAY_TERMS,
+  // The FDR approach after an ANOVA (seq 192): which method, and at which Q
+  // (%) a comparison counts as a discovery — same 0.01–50 range as ROUT's Q.
+  // `posthocScope` splits a three-way interaction term into simple effects.
+  fdrMethod: FDR_METHODS, fdrQ: FDR_Q, posthocScope: THREE_WAY_POSTHOC_SCOPES,
   truth: "name", score: "name", positive: "name-or-number",
   time: "name", status: "name", covariates: "names", stratifyBy: "name", ties: ["efron", "breslow"],
   // A Multiple Variables t test's response split, and a survival analysis's groups.
@@ -340,8 +371,21 @@ const PARAMS = {
   // also test the log-transformed values. `test` is shared with chi-square's
   // test choice (fisher/yates/chi-square/trend): the reader only sanitizes,
   // each runner validates its own.
+  // One-sample Kolmogorov–Smirnov test (seq 170): the theoretical
+  // distribution, where its parameters come from, and the parameters
+  // themselves — the reader only sanitizes, the runner validates its own.
+  distribution: KS_DISTRIBUTIONS,
+  paramsFrom: ["specified", "estimated"],
+  mean: "number", sd: "number", meanlog: "number", sdlog: "number", rate: "number", min: "number", max: "number",
   test: ["shapiro-wilk", "dagostino-pearson", "anderson-darling", "kolmogorov-smirnov", ...CONTINGENCY_TESTS],
   lognormal: "yes/no",
+  // Chi-square goodness of fit + binomial test (seq 195): how the expected
+  // distribution is given, the per-category values (counts or percentages,
+  // in row order), and the binomial's expected proportion for the first
+  // category (0–1).
+  expectedMode: GOF_EXPECTED_MODES,
+  expectedValues: "numbers",
+  expectedProportion: { min: 0, max: 1 },
   // Principal component analysis (plan 21): the matrix, and how many
   // components to report (0 = all).
   scale: ["correlation", "covariance"], components: "number",
@@ -365,20 +409,26 @@ const PARAMS = {
   // Monte Carlo simulation (plan 22): the target analysis + statistic are
   // choices; repeats/seed are numbers; the per-column simulated means/SDs
   // are numbers-by-name (the target's own options — equalVariance,
-  // hypotheticalValue, y, method — already have entries above).
+  // hypotheticalValue, y, method — already have entries above). Seq 204:
+  // the simulation distribution (gaussian/t) + its df, the P-value tails,
+  // and the paired-t difference mean/SD.
   targetAnalysis: MONTE_CARLO_TARGETS,
   summaryStatistic: MONTE_CARLO_STATISTICS,
   repeats: "number",
   seed: "number",
   groupMeans: "numbers-by-name",
   groupSds: "numbers-by-name",
+  simulationDistribution: MONTE_CARLO_SIMULATION_DISTRIBUTIONS,
+  simulationDf: "number",
+  differenceMean: "number",
+  differenceSd: "number",
   rout: "yes/no", x: "name",
   // Transform data (v2): which function to apply.
   function: TRANSFORM_FUNCTIONS,
   // Plot a function (v2): the equation, the X range, how many line segments
   // draw each curve, the extra series, and the curves themselves (each a
   // label + its parameter values, read by the "plot-curves" kind below).
-  equation: [...NONLINEAR_MODELS, "gaussian"],
+  equation: [...NONLINEAR_MODELS, ...PLOT_FUNCTION_DISTRIBUTIONS],
   xMin: "number",
   xMax: "number",
   segments: { min: 10, max: 1000 },
@@ -725,14 +775,14 @@ function readOptions(raw: unknown, label: string, issues: ProjectIssue[]): Graph
  *  key (`??` in the runner) or spread-merge their defaults (one-sample-t,
  *  one-way ANOVA, frequency-distribution). Mirrors each runner's DEFAULTS —
  *  compare-two-groups, kruskal-wallis, friedman, nested-anova,
- *  deming-regression, survival — and the multiple-t-tests wizard default (Holm). */
+ *  deming-regression, survival — and the multiple-t-tests wizard default (Holm–Šídák). */
 const PARAM_DEFAULTS: Record<string, Record<string, unknown>> = {
   "compare-two-groups": { paired: false, gaussian: true, equalVariance: true, ratio: false, tails: "two-sided" },
   "kruskal-wallis": { posthoc: "none" },
   friedman: { posthoc: "none" },
   "nested-anova": { posthoc: "none" },
   "deming-regression": { lambda: 1 },
-  "multiple-t-tests": { paired: false, gaussian: true, pooledSd: false, correction: "holm" },
+  "multiple-t-tests": { paired: false, gaussian: true, pooledSd: false, correction: "holm-sidak" },
   survival: { curveTest: "logrank", correction: "holm" },
   // M7 fallbacks: a cross-family choice left out below lands on these.
   anova: { posthoc: "none" },
@@ -761,6 +811,10 @@ const PARAM_CHOICES: Record<string, Record<string, readonly string[]>> = {
   correlation: { method: CORRELATION_METHODS },
   "correlation-matrix": { method: CORRELATION_METHODS },
   outliers: { method: ["rout", "grubbs"] },
+  // The merged `correction` list admits every family's values: survival only
+  // offers holm/fdr/none, multiple-t-tests the full Prism set (seq 193).
+  survival: { correction: CORRECTIONS },
+  "multiple-t-tests": { correction: MULTIPLE_T_TEST_CORRECTIONS },
 };
 
 /** A collection param, keeping its usable entries: one bad entry used to
@@ -842,6 +896,12 @@ function readParam(kind: ParamKind, v: unknown, report?: (dropped: number) => vo
     if (kept.length !== v.length) report?.(v.length - kept.length);
     return kept.length ? kept : undefined;
   }
+  if (kind === "numbers") {
+    if (!Array.isArray(v)) return undefined;
+    const kept = v.filter(isFiniteNumber);
+    if (kept.length !== v.length) report?.(v.length - kept.length);
+    return kept.length ? kept : undefined;
+  }
   return Array.isArray(kind) ? oneOf(kind, v) : within(v, kind as Limits);
 }
 
@@ -860,9 +920,9 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "descriptive-statistics": ["sets"],
   "frequency-distribution": ["binMode", "binWidth", "binCount", "startAt", "sets"],
   "fraction-of-total": ["ys", "x", "totalBy", "format", "ci", "sets"],
-  "transform-data": ["function", "sets"],
+  "transform-data": ["function", "constant", "sets"],
   "transform-concentrations": ["column", "fromUnit", "toUnit", "sets"],
-  "remove-baseline": ["ys", "x", "baselineMethod", "firstN", "controls", "constant", "constantHook", "sets"],
+  "remove-baseline": ["ys", "x", "baselineMethod", "firstN", "controls", "constant", "constantHook", "columnMathOperation", "columnMathA", "columnMathB", "sets"],
   normalize: [
     "ys", "x", "normalizeMethod", "asPercent", "controls", "constant", "constantHook", "zeroDef", "zeroConstant",
     "zeroConstantHook", "hundredDef", "hundredConstant", "hundredConstantHook", "sets",
@@ -871,17 +931,20 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "prune-rows": ["ys", "x", "condition", "threshold", "low", "high", "sets"],
   "compare-two-groups": ["paired", "gaussian", "equalVariance", "ratio", "lognormal", "tails", "response", "groupBy", "sets"],
   "one-sample-t": ["hypotheticalValue", "tails", "gaussian", "lognormal", "sets"],
-  anova: ["posthoc", "equalSd", "control", "compared", "lognormal", "sets"],
+  anova: ["posthoc", "equalSd", "control", "compared", "lognormal", "trend", "sets"],
   "kruskal-wallis": ["posthoc", "sets"],
   "rm-anova": ["posthoc", "sphericity", "compared", "mixed", "sets"],
   friedman: ["posthoc", "sets"],
   "mixed-effects": ["fixedFactors", "randomStructure", "subjectId", "subjectFactor", "interaction", "sets"],
   "shapiro-wilk": ["test", "lognormal", "sets"],
   "kolmogorov-smirnov": ["sets"],
+  "one-sample-ks": ["distribution", "paramsFrom", "mean", "sd", "meanlog", "sdlog", "rate", "min", "max", "tails", "sets"],
   outliers: ["q", "method", "alpha", "iterate", "sets"],
+  "p-value-stack": ["method", "q", "alpha", "sets"],
   "monte-carlo": [
     "targetAnalysis", "summaryStatistic", "repeats", "seed", "groupMeans", "groupSds", "equalVariance",
-    "hypotheticalValue", "y", "method", "sets",
+    "hypotheticalValue", "y", "method", "tails", "simulationDistribution", "simulationDf", "differenceMean",
+    "differenceSd", "sets",
   ],
   "bland-altman": ["sets"],
   "roc-curve": ["truth", "score", "positive", "sets"],
@@ -891,9 +954,9 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "deming-regression": ["y", "lambda", "sets"],
   "simple-logistic-regression": ["y", "sets"],
   "area-under-curve": ["baseline", "sets"],
-  "row-means-totals": ["ys", "x", "sets"],
+  "row-means-totals": ["ys", "x", "rowScope", "sets"],
   "nonlinear-regression": [
-    "x", "y", "ys", "model", "compareWith", "compare", "interpolate", "weights", "fixed", "bounds", "fixedConstants",
+    "x", "y", "ys", "model", "compareWith", "compare", "interpolate", "weights", "fitXMin", "fitXMax", "fixed", "bounds", "fixedConstants",
     "boundsConstants", "compareModel", "globalY", "sharedParams", "ligandConcentration", "ligandKd",
     "ligandConcentrationConstant", "ligandKdConstant", "fitKi", "rout", "q", "ecx", "customEquation", "customParameters",
     "sets",
@@ -906,13 +969,14 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   ],
   "spline-lowess": ["y", "method", "f", "spar", "df", "sets"],
   "smooth-differentiate-integrate": ["ys", "x", "operation", "window", "order", "smoothResults", "baseline", "startValue", "sets"],
-  "two-way-anova": ["design", "posthoc", "posthocTarget", "sphericity", "sets"],
-  "three-way-anova": ["posthoc", "posthocTerm", "sets"],
-  "multiple-t-tests": ["paired", "gaussian", "pooledSd", "correction", "sets"],
+  "two-way-anova": ["design", "posthoc", "posthocTarget", "sphericity", "control", "fdrMethod", "fdrQ", "sets"],
+  "three-way-anova": ["posthoc", "posthocTerm", "posthocScope", "control", "fdrMethod", "fdrQ", "sets"],
+  "multiple-t-tests": ["paired", "gaussian", "pooledSd", "correction", "q", "sets"],
   "nested-t-test": ["sets"],
   "nested-anova": ["posthoc", "sets"],
   "correlation-matrix": ["method", "sets"],
   "multiple-regression": ["dependent", "predictors", "sets"],
+  "multifactor-anova": ["response", "factors", "posthoc", "posthocTerm", "sets"],
   "multiple-logistic-regression": ["dependent", "predictors", "sets"],
   "poisson-regression": ["dependent", "predictors", "quasi", "sets"],
   "principal-component-analysis": ["scale", "components", "sets"],
@@ -926,6 +990,8 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   survival: ["curveTest", "correction", "time", "status", "groupBy", "sets"],
   cox: ["reference", "sets"],
   "chi-square": ["test", "trendOrdered", "sets"],
+  "chi-square-gof": ["expectedMode", "expectedValues", "sets"],
+  "binomial-test": ["expectedProportion", "sets"],
   mcnemar: ["continuityCorrection", "sets"],
 };
 
@@ -965,6 +1031,10 @@ function checkParamValue(kind: ParamKind, key: string, v: unknown): { value: unk
   if (kind === "names") {
     if (Array.isArray(v) && v.length && v.every((s) => typeof s === "string")) return { value: v };
     return bad("a list of column names");
+  }
+  if (kind === "numbers") {
+    if (Array.isArray(v) && v.length && v.every(isFiniteNumber)) return { value: v };
+    return bad("a list of numbers");
   }
   if (kind === "name-and-names") {
     if (
@@ -1056,7 +1126,13 @@ export function validateAnalysisParams(
       );
       continue;
     }
-    const checked = checkParamValue(PARAMS[key as ParamKey], key, value);
+    const checked = checkParamValue(
+      // A multifactor ANOVA's post-hoc term names its own factors
+      // ("Treatment:Time") — a free name, like the file reader's.
+      analysisType === "multifactor-anova" && key === "posthocTerm" ? "name" : PARAMS[key as ParamKey],
+      key,
+      value,
+    );
     if ("error" in checked) {
       errors.push(checked.error);
       continue;
@@ -1128,7 +1204,11 @@ function readParams(
   // it can't change what a test computes or reach R.
   const read = (k: string, v: unknown) => {
     if (!isIn(PARAMS, k)) return v;
-    const kind = PARAMS[k as ParamKey];
+    // A multifactor ANOVA's post-hoc term names its own factors
+    // ("Treatment:Time"), not one of the three-way ANOVA's fixed terms —
+    // read it as a free name; the runner checks it against the terms.
+    const kind =
+      analysisType === "multifactor-anova" && k === "posthocTerm" ? "name" : PARAMS[k as ParamKey];
     // FF-F16: a saved number outside its limits is brought within them on
     // load — warn, so the analysis doesn't silently re-run on different
     // parameters than the file specifies. The clamp itself stays: the
@@ -1150,7 +1230,7 @@ function readParams(
     // not a missing value: keep it, so a save keeps the file as it was.
     if ((k === "spar" || k === "df") && v === null) return null;
     let dropped = 0;
-    const value = readParam(PARAMS[k as ParamKey], v, (n) => {
+    const value = readParam(kind, v, (n) => {
       dropped = n;
     });
     if (dropped > 0) {
@@ -1808,6 +1888,14 @@ export function parseProjectFile(
   );
   const activeNodeId = nodeOf(project.activeNodeId) ? (project.activeNodeId as string) : rootOrder[0];
   const projectName = typeof project.projectName === "string" && project.projectName !== "" ? project.projectName : undefined;
+  // The saved scripts (seq 228): a broken entry is dropped with a warning,
+  // never an error — the project still opens, and saving keeps the rest.
+  const { scripts, droppedScripts } = parseProjectScripts(project.scripts);
+  if (droppedScripts > 0)
+    issues.push({
+      severity: "warning",
+      message: `${droppedScripts === 1 ? "1 saved script" : `${droppedScripts} saved scripts`} couldn't be read and ${droppedScripts === 1 ? "was" : "were"} dropped.`,
+    });
 
   for (const node of Object.values(nodes)) {
     if (node.type === "figure") {
@@ -1872,14 +1960,48 @@ export function parseProjectFile(
     activeNodeId,
     ...(template ? { template } : {}),
     ...(projectName ? { projectName } : {}),
+    ...(scripts.length ? { scripts } : {}),
     ...(Object.keys(fileUnknowns).length ? { fileUnknowns } : {}),
     ...(Object.keys(projectUnknowns).length ? { projectUnknowns } : {}),
   };
   // `updated` compares what Titer knows only: carrying unknowns through is not
   // a repair, so a newer file that needed no repair still opens unedited.
-  const known = { nodes, rootOrder, childOrder, activeNodeId, projectName };
+  const known = { nodes, rootOrder, childOrder, activeNodeId, projectName, scripts };
   const filed = Object.fromEntries(PROJECT_KEYS.map((k) => [k, project[k]]));
   return { project: read, issues, updated: contents(known) !== contents(filed) };
+}
+
+/** The `scripts` block of a `.hlx` file (seq 228), validated: an entry needs
+ *  a string id, name and text — the hooks default off — and duplicate ids
+ *  keep their first copy. Returns the kept scripts and how many were dropped. */
+export function parseProjectScripts(value: unknown): { scripts: ProjectScript[]; droppedScripts: number } {
+  if (value === undefined) return { scripts: [], droppedScripts: 0 };
+  if (!Array.isArray(value)) return { scripts: [], droppedScripts: 1 };
+  const scripts: ProjectScript[] = [];
+  const seen = new Set<string>();
+  let droppedScripts = 0;
+  for (const entry of value) {
+    if (
+      !isObj(entry) ||
+      typeof entry.id !== "string" ||
+      entry.id === "" ||
+      typeof entry.name !== "string" ||
+      typeof entry.text !== "string" ||
+      seen.has(entry.id)
+    ) {
+      droppedScripts++;
+      continue;
+    }
+    seen.add(entry.id);
+    scripts.push({
+      id: entry.id,
+      name: entry.name,
+      text: entry.text,
+      runOnOpen: entry.runOnOpen === true,
+      runOnClose: entry.runOnClose === true,
+    });
+  }
+  return { scripts, droppedScripts };
 }
 
 // ── Dose-response graphs (before Titer 1.0.7) ───────────────────────────

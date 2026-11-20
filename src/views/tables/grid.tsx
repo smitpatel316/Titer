@@ -15,7 +15,7 @@ import { seriesKeyOf } from "../../lib/columns";
 import { isGrouped, isNested, leadOf } from "../../lib/dataset";
 import { alert, popupMenu } from "../../native";
 import { XIcon } from "@phosphor-icons/react";
-import { cn, IconButton } from "../../ui/controls";
+import { cn, Button, IconButton } from "../../ui/controls";
 import { gridMenu, type MenuZone } from "./grid-menu";
 import {
   columnsBeyond,
@@ -30,6 +30,7 @@ import {
   setColumnWidth,
   toTSV,
   toggleExcluded,
+  transposeBlock,
   writeBlock,
   type Range,
 } from "./table-data";
@@ -449,6 +450,16 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
       else if (cmd === "find-next") findStep(1);
       else if (cmd === "find-previous") findStep(-1);
       else if (cmd === "select-all") setSel({ anchor: { r: 0, c: 0 }, focus: { r: lastRow, c: lastCol } });
+      // Seq 231: the keys already select this way (Shift+Space / Ctrl+Space);
+      // the menu items dispatch the same selection.
+      else if (cmd === "select-row")
+        setSel({ anchor: { r: range.r0, c: 0 }, focus: { r: range.r1, c: lastCol } });
+      else if (cmd === "select-column")
+        setSel({ anchor: { r: 0, c: range.c0 }, focus: { r: lastRow, c: range.c1 } });
+      // Seq 230: Paste Special reads the clipboard itself (a menu action has
+      // no clipboard event); Transpose swaps the block's rows and columns.
+      else if (cmd === "paste-transpose") void pasteTransposed();
+      else if (cmd === "paste-special") void openPasteSpecial();
       else if (cmd === "fill-down") fillDown();
       else if (cmd === "delete") clear(range);
       else if (cmd === "exclude") update(toggleExcluded(data, range), "Exclude / Include");
@@ -481,6 +492,66 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
       dir === 1 ? (matches.find(after) ?? matches[0]) : (matches.findLast(before) ?? matches[matches.length - 1]);
     setSel({ anchor: m, focus: m });
     reveal(m);
+  };
+
+  // ── Paste Special (seq 230) ────────────────────────────────────────────
+  // The clipboard text the bar is offering, with its transpose choice.
+  const [pasteOffer, setPasteOffer] = React.useState<{ text: string; transpose: boolean } | null>(null);
+
+  /** The clipboard's text, or null when it can't be read (no permission, or
+   *  nothing copied) — the menu has no clipboard event to fall back on. */
+  const readClipboardText = async (): Promise<string | null> => {
+    try {
+      const text = await navigator.clipboard.readText();
+      return text ? text : null;
+    } catch {
+      return null;
+    }
+  };
+
+  /** Writes `block` at the selection's top-left, as Paste does (growing the
+   *  table, warning about columns that don't fit), and selects what landed. */
+  const pasteBlock = (block: (string | null)[][], label: string) => {
+    if (!block.length || !block[0].length) return;
+    write(range.r0, range.c0, block, label);
+    const beyond = columnsBeyond(data, range.c0, block);
+    if (beyond)
+      void alert(
+        "Some Values Weren't Pasted",
+        `${beyond === 1 ? "1 column" : `${beyond} columns`} didn't fit in the table. Add groups or sub-columns in the Groups panel, then paste again.`,
+      );
+    setSel({
+      anchor: { r: range.r0, c: range.c0 },
+      focus: clampPoint({ r: range.r0 + block.length - 1, c: range.c0 + block[0].length - 1 }),
+    });
+  };
+
+  /** Edit ▸ Paste Transposed: the clipboard's block, rows and columns swapped. */
+  const pasteTransposed = async () => {
+    const text = await readClipboardText();
+    if (text === null) {
+      void alert("Nothing to Paste", "The clipboard is empty or couldn't be read. Copy some cells first, then try again.");
+      return;
+    }
+    pasteBlock(transposeBlock(parseTSV(text)), "Paste Transposed");
+  };
+
+  /** Edit ▸ Paste Special…: offers the clipboard with Values / Transpose. */
+  const openPasteSpecial = async () => {
+    const text = await readClipboardText();
+    if (text === null) {
+      void alert("Nothing to Paste", "The clipboard is empty or couldn't be read. Copy some cells first, then try again.");
+      return;
+    }
+    setPasteOffer({ text, transpose: false });
+    focusGrid();
+  };
+
+  const confirmPasteSpecial = () => {
+    if (!pasteOffer) return;
+    const block = parseTSV(pasteOffer.text);
+    pasteBlock(pasteOffer.transpose ? transposeBlock(block) : block, pasteOffer.transpose ? "Paste Transposed" : "Paste");
+    setPasteOffer(null);
   };
 
   // ── Mouse ────────────────────────────────────────────────────────────
@@ -856,6 +927,36 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
             {query && (matches.length ? `${current + 1 || "–"} of ${matches.length}` : "No results")}
           </span>
           <IconButton aria-label="Close Find" onClick={closeFind}>
+            <XIcon />
+          </IconButton>
+        </div>
+      )}
+
+      {pasteOffer !== null && (
+        <div className="absolute top-1 right-3 z-30 flex items-center gap-3 rounded-lg bg-surface px-2 py-1 shadow-md ring-1 ring-separator">
+          <span className="text-regular font-medium">Paste Special</span>
+          <label className="flex items-center gap-1 text-regular">
+            <input
+              type="radio"
+              name="paste-special"
+              checked={!pasteOffer.transpose}
+              onChange={() => setPasteOffer({ ...pasteOffer, transpose: false })}
+            />
+            Values
+          </label>
+          <label className="flex items-center gap-1 text-regular">
+            <input
+              type="radio"
+              name="paste-special"
+              checked={pasteOffer.transpose}
+              onChange={() => setPasteOffer({ ...pasteOffer, transpose: true })}
+            />
+            Transpose
+          </label>
+          <Button variant="accent" size="small" onClick={confirmPasteSpecial}>
+            Paste
+          </Button>
+          <IconButton aria-label="Close Paste Special" onClick={() => setPasteOffer(null)}>
             <XIcon />
           </IconButton>
         </div>

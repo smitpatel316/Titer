@@ -18,7 +18,8 @@
           "lsd",
           "dunnett",
           "games-howell",
-          "t3"
+          "t3",
+          "fdr"
         ],
         "default": "none",
         "required": false
@@ -39,13 +40,19 @@
         "name": "compared",
         "type": "string[]",
         "required": false,
-        "description": "The pairs compared (`pairKey`), when not every pair: Bonferroni, Šídák, Holm-Šídák, Fisher's."
+        "description": "The pairs compared (`pairKey`), when not every pair: Bonferroni, Šídák, Holm-Šídák, Fisher's, False Discovery Rate."
       },
       {
         "name": "lognormal",
         "type": "boolean",
         "required": false,
         "description": "The groups' geometric means compared: the ANOVA and its comparisons run on the logarithms."
+      },
+      {
+        "name": "trend",
+        "type": "boolean",
+        "required": false,
+        "description": "Test for linear trend between the column means and their left-to-right order (columns in a natural order, equally spaced): the slope of the means against column number, and the P values for linear and (four or more groups) nonlinear trend."
       },
       {
         "name": "sets",
@@ -172,6 +179,30 @@
       }
     ]
   },
+  "binomial-test": {
+    "label": "Binomial test",
+    "min_columns": 1,
+    "offered_on": [
+      "column"
+    ],
+    "params": [
+      {
+        "name": "expectedProportion",
+        "type": "number",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.5,
+        "required": false,
+        "description": "The first category's expected proportion (0–1); omitted: 0.5 (equal)."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
   "bland-altman": {
     "label": "Bland-Altman method comparison",
     "min_columns": 2,
@@ -218,9 +249,38 @@
         "required": false,
         "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
       }
+    ]
+  },
+  "chi-square-gof": {
+    "label": "Chi-square goodness of fit",
+    "min_columns": 1,
+    "offered_on": [
+      "column"
     ],
-    "requires_packages": [
-      "survival"
+    "params": [
+      {
+        "name": "expectedMode",
+        "type": "string",
+        "enum": [
+          "equal",
+          "counts",
+          "percent"
+        ],
+        "default": "equal",
+        "required": false
+      },
+      {
+        "name": "expectedValues",
+        "type": "number[]",
+        "required": false,
+        "description": "One per category, in row order — expected counts (`counts`) or percentages (`percent`); ignored for \"equal\"."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
     ]
   },
   "compare-two-groups": {
@@ -838,6 +898,7 @@
       {
         "name": "clusters",
         "type": "number",
+        "default": 2,
         "required": false
       },
       {
@@ -849,6 +910,7 @@
           "single",
           "ward.D2"
         ],
+        "default": "complete",
         "required": false
       },
       {
@@ -858,11 +920,13 @@
           "euclidean",
           "manhattan"
         ],
+        "default": "euclidean",
         "required": false
       },
       {
         "name": "standardise",
         "type": "boolean",
+        "default": true,
         "required": false
       },
       {
@@ -1013,9 +1077,6 @@
         "required": false,
         "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
       }
-    ],
-    "requires_packages": [
-      "survival"
     ]
   },
   "mixed-effects": {
@@ -1091,7 +1152,9 @@
           "one-sample-t",
           "descriptive-statistics",
           "linear-regression",
-          "correlation"
+          "correlation",
+          "paired-t",
+          "one-way-anova"
         ],
         "required": true
       },
@@ -1104,7 +1167,8 @@
           "Mean",
           "Slope",
           "Y-intercept",
-          "r"
+          "r",
+          "F"
         ],
         "required": false
       },
@@ -1161,6 +1225,45 @@
         "required": false
       },
       {
+        "name": "tails",
+        "type": "string",
+        "enum": [
+          "two-sided",
+          "less",
+          "greater"
+        ],
+        "required": false,
+        "description": "P-value tails for the t-test targets (seq 204); two-sided by default."
+      },
+      {
+        "name": "simulationDistribution",
+        "type": "string",
+        "enum": [
+          "gaussian",
+          "t"
+        ],
+        "required": false,
+        "description": "What distribution the simulated values come from (seq 204)."
+      },
+      {
+        "name": "simulationDf",
+        "type": "number",
+        "required": false,
+        "description": "Degrees of freedom for a t simulation (seq 204); must exceed 2."
+      },
+      {
+        "name": "differenceMean",
+        "type": "number",
+        "required": false,
+        "description": "Paired-t only (seq 204): the mean difference to simulate — the differences' observed mean when omitted."
+      },
+      {
+        "name": "differenceSd",
+        "type": "number",
+        "required": false,
+        "description": "Paired-t only (seq 204): the SD of the differences to simulate — the differences' observed SD when omitted."
+      },
+      {
         "name": "sets",
         "type": "string[]",
         "required": false,
@@ -1168,7 +1271,49 @@
       }
     ],
     "gates": [
-      "targetAnalysis is one of compare-two-groups, one-sample-t, descriptive-statistics, linear-regression, correlation"
+      "targetAnalysis is one of compare-two-groups, one-sample-t, descriptive-statistics, linear-regression, correlation, paired-t, one-way-anova"
+    ]
+  },
+  "multifactor-anova": {
+    "label": "Multifactor ANOVA",
+    "min_columns": 1,
+    "offered_on": [
+      "multiple"
+    ],
+    "params": [
+      {
+        "name": "response",
+        "type": "string",
+        "required": false,
+        "description": "Omitted defaults to the first numeric column."
+      },
+      {
+        "name": "factors",
+        "type": "string[]",
+        "required": false,
+        "description": "Omitted defaults to every other column with at least two levels."
+      },
+      {
+        "name": "posthoc",
+        "type": "string",
+        "enum": [
+          "tukey",
+          "bonferroni"
+        ],
+        "default": "none",
+        "required": false
+      },
+      {
+        "name": "posthocTerm",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
     ]
   },
   "multiple-logistic-regression": {
@@ -1250,11 +1395,24 @@
         "name": "correction",
         "type": "string",
         "enum": [
+          "holm-sidak",
           "holm",
+          "sidak",
+          "bonferroni",
           "fdr",
+          "fdr-bky",
+          "fdr-by",
           "none"
         ],
-        "default": "holm",
+        "default": "holm-sidak",
+        "required": false
+      },
+      {
+        "name": "q",
+        "type": "number",
+        "min": 0.01,
+        "max": 50.0,
+        "default": 5,
         "required": false
       },
       {
@@ -1348,31 +1506,81 @@
           "inhibitor-3pl-logx",
           "asymmetric-5pl-logx",
           "asymmetric-5pl-x",
+          "agonist-3pl-x",
+          "inhibitor-3pl-x",
+          "agonist-3pl-normalized-logx",
+          "agonist-4pl-normalized-logx",
+          "agonist-3pl-normalized-x",
+          "agonist-4pl-normalized-x",
+          "inhibitor-3pl-normalized-logx",
+          "inhibitor-4pl-normalized-logx",
+          "inhibitor-3pl-normalized-x",
+          "inhibitor-4pl-normalized-x",
+          "absolute-ic50-logx",
+          "absolute-ic50-x",
           "two-site-competition-logx",
           "two-site-competition-x",
           "homologous-competition-logx",
           "line",
           "semilog-line",
+          "line-through-origin",
+          "horizontal-line",
+          "semilog-y-log",
+          "log-log-line",
           "hyperbola",
           "quadratic",
           "cubic",
           "segmental-linear",
           "quartic",
           "quintic",
+          "sextic",
+          "centered-first",
+          "centered-second",
+          "centered-third",
+          "centered-fourth",
+          "centered-fifth",
+          "centered-sixth",
+          "biphasic-logx",
+          "biphasic-x",
+          "bell-shaped-logx",
+          "bell-shaped-x",
+          "pade-11",
+          "power-series",
+          "exponential-plateau",
+          "beta-growth-decay",
+          "lq-fraction-surviving",
+          "lq-percent-surviving",
+          "lq-fraction-dead",
+          "lq-percent-dead",
+          "lq-count-alive",
+          "lq-count-dead",
           "exponential-growth",
           "logistic-growth",
           "gompertz-growth",
           "one-phase-decay",
           "michaelis-menten",
+          "exponential-growth-log",
           "two-phase-decay",
+          "three-phase-decay",
           "plateau-decay",
           "one-phase-association",
+          "two-phase-association",
+          "plateau-association",
           "allosteric-sigmoidal",
           "substrate-inhibition",
           "gaussian",
           "boltzmann-sigmoid",
           "lorentzian",
           "sine-wave",
+          "sum-of-two-gaussians",
+          "lognormal",
+          "cumulative-gaussian-percent",
+          "cumulative-gaussian-fraction",
+          "cumulative-gaussian-counts",
+          "sum-of-two-lorentzians",
+          "standard-sine-wave",
+          "damped-sine-wave",
+          "sinc",
           "user-defined"
         ],
         "required": true
@@ -1413,6 +1621,18 @@
         "description": "Weighting (plan 26): \"none\" (default) or a scheme — 1/Y, 1/Y², 1/X, 1/X², or 1/SD² (replicate SDs across the table's Y columns, per row)."
       },
       {
+        "name": "fitXMin",
+        "type": "number",
+        "required": false,
+        "description": "Fit only the points inside an X range (Prism 11 Range tab, \"Don't fit points when X is less than / greater than …\", seq 166): points with X < `fitXMin` or X > `fitXMax` are ignored entirely — not fitted, not counted, not ROUT-checked. Either bound alone is enough; both blank (or both absent) fits every point. In Titer X is always explicit values, so — unlike Prism before 6.04 — the restriction applies however the X column was entered."
+      },
+      {
+        "name": "fitXMax",
+        "type": "number",
+        "required": false,
+        "description": "The range's upper end: points with X > `fitXMax` are not fitted."
+      },
+      {
         "name": "fixed",
         "type": "object",
         "value_shape": "object mapping a column name to a number",
@@ -1449,31 +1669,81 @@
           "inhibitor-3pl-logx",
           "asymmetric-5pl-logx",
           "asymmetric-5pl-x",
+          "agonist-3pl-x",
+          "inhibitor-3pl-x",
+          "agonist-3pl-normalized-logx",
+          "agonist-4pl-normalized-logx",
+          "agonist-3pl-normalized-x",
+          "agonist-4pl-normalized-x",
+          "inhibitor-3pl-normalized-logx",
+          "inhibitor-4pl-normalized-logx",
+          "inhibitor-3pl-normalized-x",
+          "inhibitor-4pl-normalized-x",
+          "absolute-ic50-logx",
+          "absolute-ic50-x",
           "two-site-competition-logx",
           "two-site-competition-x",
           "homologous-competition-logx",
           "line",
           "semilog-line",
+          "line-through-origin",
+          "horizontal-line",
+          "semilog-y-log",
+          "log-log-line",
           "hyperbola",
           "quadratic",
           "cubic",
           "segmental-linear",
           "quartic",
           "quintic",
+          "sextic",
+          "centered-first",
+          "centered-second",
+          "centered-third",
+          "centered-fourth",
+          "centered-fifth",
+          "centered-sixth",
+          "biphasic-logx",
+          "biphasic-x",
+          "bell-shaped-logx",
+          "bell-shaped-x",
+          "pade-11",
+          "power-series",
+          "exponential-plateau",
+          "beta-growth-decay",
+          "lq-fraction-surviving",
+          "lq-percent-surviving",
+          "lq-fraction-dead",
+          "lq-percent-dead",
+          "lq-count-alive",
+          "lq-count-dead",
           "exponential-growth",
           "logistic-growth",
           "gompertz-growth",
           "one-phase-decay",
           "michaelis-menten",
+          "exponential-growth-log",
           "two-phase-decay",
+          "three-phase-decay",
           "plateau-decay",
           "one-phase-association",
+          "two-phase-association",
+          "plateau-association",
           "allosteric-sigmoidal",
           "substrate-inhibition",
           "gaussian",
           "boltzmann-sigmoid",
           "lorentzian",
           "sine-wave",
+          "sum-of-two-gaussians",
+          "lognormal",
+          "cumulative-gaussian-percent",
+          "cumulative-gaussian-fraction",
+          "cumulative-gaussian-counts",
+          "sum-of-two-lorentzians",
+          "standard-sine-wave",
+          "damped-sine-wave",
+          "sinc",
           "user-defined"
         ],
         "required": false,
@@ -1673,6 +1943,97 @@
       }
     ]
   },
+  "one-sample-ks": {
+    "label": "One-sample Kolmogorov-Smirnov test",
+    "min_columns": 1,
+    "offered_on": [
+      "column"
+    ],
+    "params": [
+      {
+        "name": "distribution",
+        "type": "string",
+        "enum": [
+          "normal",
+          "lognormal",
+          "exponential",
+          "uniform"
+        ],
+        "default": "normal",
+        "required": false
+      },
+      {
+        "name": "paramsFrom",
+        "type": "string",
+        "enum": [
+          "specified",
+          "estimated"
+        ],
+        "default": "estimated",
+        "required": false,
+        "description": "\"specified\": the entered parameters; \"estimated\": fitted to the sample."
+      },
+      {
+        "name": "mean",
+        "type": "number",
+        "required": false,
+        "description": "Normal mean (specified mode; default 0)."
+      },
+      {
+        "name": "sd",
+        "type": "number",
+        "required": false,
+        "description": "Normal SD (specified mode; default 1)."
+      },
+      {
+        "name": "meanlog",
+        "type": "number",
+        "required": false,
+        "description": "Lognormal mean of the logarithms (specified mode; default 0)."
+      },
+      {
+        "name": "sdlog",
+        "type": "number",
+        "required": false,
+        "description": "Lognormal SD of the logarithms (specified mode; default 1)."
+      },
+      {
+        "name": "rate",
+        "type": "number",
+        "required": false,
+        "description": "Exponential rate, mean = 1/rate (specified mode; default 1)."
+      },
+      {
+        "name": "min",
+        "type": "number",
+        "required": false,
+        "description": "Uniform lower limit (specified mode; default 0)."
+      },
+      {
+        "name": "max",
+        "type": "number",
+        "required": false,
+        "description": "Uniform upper limit (specified mode; default 1)."
+      },
+      {
+        "name": "tails",
+        "type": "string",
+        "enum": [
+          "two-sided",
+          "less",
+          "greater"
+        ],
+        "default": "two-sided",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
   "one-sample-t": {
     "label": "Compare one group to a value",
     "min_columns": 1,
@@ -1768,6 +2129,54 @@
       }
     ]
   },
+  "p-value-stack": {
+    "label": "Analyze a stack of P values",
+    "min_columns": 1,
+    "offered_on": [
+      "column"
+    ],
+    "params": [
+      {
+        "name": "method",
+        "type": "string",
+        "enum": [
+          "bonferroni",
+          "sidak",
+          "holm",
+          "holm-sidak",
+          "bh",
+          "bky",
+          "by"
+        ],
+        "default": "holm-sidak",
+        "required": false
+      },
+      {
+        "name": "q",
+        "type": "number",
+        "min": 0.01,
+        "max": 50.0,
+        "default": 5,
+        "required": false,
+        "description": "Desired false discovery rate, in percent (FDR methods only)."
+      },
+      {
+        "name": "alpha",
+        "type": "number",
+        "min": 0.001,
+        "max": 0.5,
+        "default": 0.05,
+        "required": false,
+        "description": "Family-wise significance level (FWER methods only)."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
   "plot-function": {
     "label": "Plot a function",
     "min_columns": 0,
@@ -1791,32 +2200,87 @@
           "inhibitor-3pl-logx",
           "asymmetric-5pl-logx",
           "asymmetric-5pl-x",
+          "agonist-3pl-x",
+          "inhibitor-3pl-x",
+          "agonist-3pl-normalized-logx",
+          "agonist-4pl-normalized-logx",
+          "agonist-3pl-normalized-x",
+          "agonist-4pl-normalized-x",
+          "inhibitor-3pl-normalized-logx",
+          "inhibitor-4pl-normalized-logx",
+          "inhibitor-3pl-normalized-x",
+          "inhibitor-4pl-normalized-x",
+          "absolute-ic50-logx",
+          "absolute-ic50-x",
           "two-site-competition-logx",
           "two-site-competition-x",
           "homologous-competition-logx",
           "line",
           "semilog-line",
+          "line-through-origin",
+          "horizontal-line",
+          "semilog-y-log",
+          "log-log-line",
           "hyperbola",
           "quadratic",
           "cubic",
           "segmental-linear",
           "quartic",
           "quintic",
+          "sextic",
+          "centered-first",
+          "centered-second",
+          "centered-third",
+          "centered-fourth",
+          "centered-fifth",
+          "centered-sixth",
+          "biphasic-logx",
+          "biphasic-x",
+          "bell-shaped-logx",
+          "bell-shaped-x",
+          "pade-11",
+          "power-series",
+          "exponential-plateau",
+          "beta-growth-decay",
+          "lq-fraction-surviving",
+          "lq-percent-surviving",
+          "lq-fraction-dead",
+          "lq-percent-dead",
+          "lq-count-alive",
+          "lq-count-dead",
           "exponential-growth",
           "logistic-growth",
           "gompertz-growth",
           "one-phase-decay",
           "michaelis-menten",
+          "exponential-growth-log",
           "two-phase-decay",
+          "three-phase-decay",
           "plateau-decay",
           "one-phase-association",
+          "two-phase-association",
+          "plateau-association",
           "allosteric-sigmoidal",
           "substrate-inhibition",
           "gaussian",
           "boltzmann-sigmoid",
           "lorentzian",
           "sine-wave",
-          "gaussian"
+          "sum-of-two-gaussians",
+          "lognormal",
+          "cumulative-gaussian-percent",
+          "cumulative-gaussian-fraction",
+          "cumulative-gaussian-counts",
+          "sum-of-two-lorentzians",
+          "standard-sine-wave",
+          "damped-sine-wave",
+          "sinc",
+          "normal-distribution",
+          "t-distribution",
+          "f-distribution",
+          "chi-square-distribution",
+          "binomial-distribution",
+          "poisson-distribution"
         ],
         "required": true
       },
@@ -2018,7 +2482,8 @@
           "constant"
         ],
         "default": "first-value",
-        "required": false
+        "required": false,
+        "description": "Omitted in column-math mode (the operation names the columns instead), and defaulted to \"first-value\" by the runner when missing."
       },
       {
         "name": "firstN",
@@ -2043,6 +2508,28 @@
         "type": "string",
         "required": false,
         "description": "Info-constant hook for the baseline (the constant's name): resolved live in useAnalysis, so editing the constant re-runs the transform."
+      },
+      {
+        "name": "columnMathOperation",
+        "type": "string",
+        "enum": [
+          "subtract",
+          "divide",
+          "multiply",
+          "add"
+        ],
+        "required": false,
+        "description": "Column math (Prism's \"Remove baseline and column math\"): when set, the analysis combines two columns row by row instead of removing a baseline — `columnMathOperation` says how, `columnMathA`/`columnMathB` name the two columns. `baselineMethod` is ignored in this mode."
+      },
+      {
+        "name": "columnMathA",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "columnMathB",
+        "type": "string",
+        "required": false
       },
       {
         "name": "sets",
@@ -2151,6 +2638,16 @@
         "type": "string",
         "required": false,
         "description": "XY tables only: the X column, for the result rows' X values."
+      },
+      {
+        "name": "rowScope",
+        "type": "string",
+        "enum": [
+          "pooled",
+          "per-column"
+        ],
+        "required": false,
+        "description": "Omitted: `pooled` — one summary per row across the chosen data sets."
       },
       {
         "name": "sets",
@@ -2398,8 +2895,15 @@
         "name": "posthoc",
         "type": "string",
         "enum": [
+          "none",
           "tukey",
-          "bonferroni"
+          "bonferroni",
+          "sidak",
+          "holm-sidak",
+          "lsd",
+          "dunnett",
+          "games-howell",
+          "fdr"
         ],
         "default": "none",
         "required": false
@@ -2417,6 +2921,41 @@
           "A:B:C"
         ],
         "required": false
+      },
+      {
+        "name": "posthocScope",
+        "type": "string",
+        "enum": [
+          "term",
+          "simple"
+        ],
+        "required": false,
+        "description": "Interaction terms only: \"term\" (default) compares all the term's level combinations as one family; \"simple\" compares simple effects."
+      },
+      {
+        "name": "control",
+        "type": "string",
+        "required": false,
+        "description": "Dunnett's control: a level (or level combination) of the followed-up term, by its result-table label — within each family when the scope is simple."
+      },
+      {
+        "name": "fdrMethod",
+        "type": "string",
+        "enum": [
+          "bh",
+          "bky",
+          "by"
+        ],
+        "required": false,
+        "description": "The FDR approach's method (`posthoc: \"fdr\"` only): Benjamini-Hochberg, Benjamini-Krieger-Yekutieli (two-stage) or Benjamini-Yekutieli; omitted, Benjamini-Hochberg."
+      },
+      {
+        "name": "fdrQ",
+        "type": "number",
+        "min": 0.01,
+        "max": 50.0,
+        "required": false,
+        "description": "The FDR approach's Q (%), the maximum false-discovery rate (`posthoc: \"fdr\"` only); omitted, 5."
       },
       {
         "name": "sets",
@@ -2492,10 +3031,22 @@
           "sqrt",
           "reciprocal",
           "exp",
-          "square"
+          "square",
+          "y-plus-k",
+          "y-minus-k",
+          "y-times-k",
+          "y-divided-by-k",
+          "k-minus-y",
+          "k-divided-by-y"
         ],
         "default": "log10",
         "required": false
+      },
+      {
+        "name": "constant",
+        "type": "number",
+        "required": false,
+        "description": "The constant K for the arithmetic functions (seq 205)."
       },
       {
         "name": "sets",
@@ -2549,7 +3100,8 @@
           "holm-sidak",
           "lsd",
           "dunnett",
-          "games-howell"
+          "games-howell",
+          "fdr"
         ],
         "required": true
       },
@@ -2558,7 +3110,10 @@
         "type": "string",
         "enum": [
           "groups",
-          "rows"
+          "rows",
+          "cells",
+          "group-means",
+          "row-means"
         ],
         "required": true
       },
@@ -2567,6 +3122,31 @@
         "type": "boolean",
         "required": false,
         "description": "Repeated measures: false (new analyses) corrects the row and interaction effects by the Geisser-Greenhouse epsilon, and compares on each comparison's own error; absent (older files) or true, sphericity is assumed."
+      },
+      {
+        "name": "control",
+        "type": "string",
+        "required": false,
+        "description": "Dunnett's control, by its name: a group (groups compared within each row), a row (rows within each group), a cell (\"Group (Row)\"), or a marginal group / row mean."
+      },
+      {
+        "name": "fdrMethod",
+        "type": "string",
+        "enum": [
+          "bh",
+          "bky",
+          "by"
+        ],
+        "required": false,
+        "description": "The FDR approach's method (`posthoc: \"fdr\"` only): Benjamini-Hochberg, Benjamini-Krieger-Yekutieli (two-stage) or Benjamini-Yekutieli; omitted, Benjamini-Hochberg."
+      },
+      {
+        "name": "fdrQ",
+        "type": "number",
+        "min": 0.01,
+        "max": 50.0,
+        "required": false,
+        "description": "The FDR approach's Q (%), the maximum false-discovery rate (`posthoc: \"fdr\"` only); omitted, 5."
       },
       {
         "name": "sets",

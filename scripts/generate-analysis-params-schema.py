@@ -90,10 +90,12 @@ for needed in ["TAILS", "ANOVA_POSTHOCS", "RANK_POSTHOCS", "NONLINEAR_MODELS",
                "NORMALIZE_ZERO_DEFS", "NORMALIZE_HUNDRED_DEFS",
                "SMOOTH_DIFF_INT_OPERATIONS", "EXTRACT_REARRANGE_TARGETS",
                "NORMALITY_TESTS", "MONTE_CARLO_TARGETS",
-               "MONTE_CARLO_STATISTICS"]:
+               "MONTE_CARLO_STATISTICS", "TWO_WAY_POSTHOCS",
+               "THREE_WAY_POSTHOCS", "FDR_METHODS",
+               "THREE_WAY_POSTHOC_SCOPES"]:
     assert needed in ARRAYS, f"choice list {needed} not parsed"
 POSTHOCS = ARRAYS["POSTHOCS"]  # the six base post-hoc choices
-TWO_WAY_POSTHOCS = POSTHOCS + ["dunnett", "games-howell"]
+TWO_WAY_POSTHOCS = ARRAYS["TWO_WAY_POSTHOCS"]  # + Dunnett, Games-Howell, FDR (seq 192)
 
 # Per-type enum narrowing the merged PARAMS lists cannot express.
 ENUM_OVERRIDES = {
@@ -107,6 +109,7 @@ ENUM_OVERRIDES = {
     ("monte-carlo", "method"): ARRAYS["CORRELATION_METHODS"],
     ("spline-lowess", "method"): ["spline", "lowess"],
     ("outliers", "method"): ["rout", "grubbs"],
+    ("p-value-stack", "method"): ARRAYS["P_VALUE_STACK_METHODS"],
     ("shapiro-wilk", "test"): ARRAYS["NORMALITY_TESTS"],
     ("chi-square", "test"): ARRAYS["CONTINGENCY_TESTS"],
     ("anova", "posthoc"): ARRAYS["ANOVA_POSTHOCS"],
@@ -114,18 +117,38 @@ ENUM_OVERRIDES = {
     ("friedman", "posthoc"): ARRAYS["RANK_POSTHOCS"],
     ("rm-anova", "posthoc"): POSTHOCS,
     ("two-way-anova", "posthoc"): TWO_WAY_POSTHOCS,
-    # Three-way / nested ANOVA runners refuse every posthoc but these
-    # (types.ts ThreeWayAnovaParams / NestedAnovaParams comments).
-    ("three-way-anova", "posthoc"): ["tukey", "bonferroni"],
+    # Three-way / nested / multifactor ANOVA runners refuse every posthoc but these
+    # (types.ts ThreeWayAnovaParams / NestedAnovaParams / MultifactorAnovaParams comments).
+    ("three-way-anova", "posthoc"): ARRAYS["THREE_WAY_POSTHOCS"],
     ("nested-anova", "posthoc"): ["tukey", "bonferroni"],
+    ("multifactor-anova", "posthoc"): ["tukey", "bonferroni"],
+    # The merged `correction` PARAMS list admits every family's values (seq
+    # 193 widened it for multiple-t-tests), so each family's enum is narrowed
+    # here: survival only offers holm/fdr/none, multiple-t-tests the full
+    # Prism set. (PARAM_CHOICES says the same, but the script's reader only
+    # parses flat scalar values there.)
+    ("survival", "correction"): ARRAYS["CORRECTIONS"],
+    ("multiple-t-tests", "correction"): ARRAYS["MULTIPLE_T_TEST_CORRECTIONS"],
     # Linear regression never sees replicate columns, so 1/sd2 is not
     # offered (types.ts LinearRegressionParams.weights).
     ("linear-regression", "weights"): ["none", "1/y", "1/y2", "1/x", "1/x2"],
-    # Plot a function cannot plot a user-defined equation (types.ts).
+    # Plot a function cannot plot a user-defined equation (types.ts);
+    # the distributions (seq 203) are appended after the models. The
+    # "gaussian" is already in NONLINEAR_MODELS — do not append it again
+    # (the old override did, and the schema carried it twice).
     ("plot-function", "equation"): [m for m in ARRAYS["NONLINEAR_MODELS"]
-                                     if m != "user-defined"] + ["gaussian"],
+                                     if m != "user-defined"] + ARRAYS["PLOT_FUNCTION_DISTRIBUTIONS"],
     ("plot-function", "extra"): ["none", "first-derivative",
                                  "second-derivative", "integral"],
+}
+
+# Per-type kind narrowing the shared PARAMS table cannot express: the
+# static table gives posthocTerm the three-way terms (THREE_WAY_TERMS),
+# but MultifactorAnovaParams takes any term name (the runner checks it
+# against the computed terms) — project-file.ts reads/validates it as
+# kind "name" for multifactor-anova, so the schema must too.
+KIND_OVERRIDES = {
+    ("multifactor-anova", "posthocTerm"): {"kind": "name"},
 }
 
 # Table-shape / cross-param gates, in the code's own words.
@@ -135,7 +158,7 @@ GATES = {
     "nested-anova": ["Nested table with at least 3 data groups"],
     "enzyme-inhibition": ["Global models need X + at least 2 Y series (including an uninhibited one); Morrison needs X + 1 Y series and enzymeConcentration"],
     "dose-response-special": ["Every model needs X + at least 2 Y series (control + at least 1 shifted curve; full agonist + at least 1 partial agonist)"],
-    "monte-carlo": ["targetAnalysis is one of compare-two-groups, one-sample-t, descriptive-statistics, linear-regression, correlation"],
+    "monte-carlo": ["targetAnalysis is one of compare-two-groups, one-sample-t, descriptive-statistics, linear-regression, correlation, paired-t, one-way-anova"],
 }
 
 # ── *Params interfaces: fields, required/optional, doc comments ──────
@@ -206,9 +229,11 @@ INTERFACE_TO_TYPE = {
     "PoissonRegression": "poisson-regression",
     "PrincipalComponentAnalysis": "principal-component-analysis",
     "KMeans": "k-means",
+    "Hclust": "hierarchical-clustering",
     "ExtractRearrange": "extract-rearrange",
     "TwoWayAnova": "two-way-anova",
     "ThreeWayAnova": "three-way-anova",
+    "MultifactorAnova": "multifactor-anova",
     "MultipleTTests": "multiple-t-tests",
     "NestedAnova": "nested-anova",
     "BindingSaturation": "binding-saturation",
@@ -218,9 +243,13 @@ INTERFACE_TO_TYPE = {
     "SplineLowess": "spline-lowess",
     "SmoothDifferentiateIntegrate": "smooth-differentiate-integrate",
     "ChiSquare": "chi-square",
+    "ChiSquareGof": "chi-square-gof",
+    "BinomialTest": "binomial-test",
     "McNemar": "mcnemar",
     "Outliers": "outliers",
+    "PValueStack": "p-value-stack",
     "ShapiroWilk": "shapiro-wilk",
+    "OneSampleKs": "one-sample-ks",
     "FrequencyDistribution": "frequency-distribution",
     "TransformData": "transform-data",
     "TransformConcentrations": "transform-concentrations",
@@ -318,8 +347,12 @@ IDX = read("src/stats/index.ts")
 ANALYSES = {}
 for m in re.finditer(r'"?([\w-]+)"?:\s*\{\s*label:\s*"([^"]+)",(.*?)\bminColumns:\s*(\d+)', IDX, re.S):
     typ, label, _mid, min_cols = m.group(1), m.group(2), m.group(3), int(m.group(4))
-    # requiredPackages follows minColumns in the entry; look just past it.
-    pkgs_m = re.search(r"requiredPackages:\s*(\[[^\]]*\])", IDX[m.end():m.end() + 300])
+    # requiredPackages follows minColumns in the entry; look just past it —
+    # but never past the entry's own closing brace, or the NEXT entry's
+    # packages leak in (mcnemar, cox and chi-square used to carry survival's).
+    tail = IDX[m.end():m.end() + 300]
+    tail = re.split(r" \}|\n  \},", tail, maxsplit=1)[0]
+    pkgs_m = re.search(r"requiredPackages:\s*(\[[^\]]*\])", tail)
     pkgs = pkgs_m.group(1) if pkgs_m else None
     ANALYSES[typ] = {"label": label, "min_columns": min_cols,
                      "packages": json.loads(pkgs.replace("'", '"')) if pkgs else []}
@@ -335,6 +368,7 @@ SPEC_LABELS = {
     "friedman": "Friedman test",
     "shapiro-wilk": "Normality tests",
     "kolmogorov-smirnov": "Kolmogorov-Smirnov test",
+    "one-sample-ks": "One-sample Kolmogorov-Smirnov test",
     "linear-regression": "Linear regression",
     "deming-regression": "Deming regression",
 }
@@ -349,7 +383,7 @@ for spec_file in (ROOT / "src/stats/column").glob("*.ts"):
 SPEC_MIN = {
     "compare-two-groups": 2, "one-sample-t": 1, "anova": 2,
     "kruskal-wallis": 2, "rm-anova": 2, "friedman": 2,
-    "shapiro-wilk": 1, "kolmogorov-smirnov": 1,
+    "shapiro-wilk": 1, "kolmogorov-smirnov": 1, "one-sample-ks": 1,
     "linear-regression": 2, "deming-regression": 2,
 }
 for typ, n in SPEC_MIN.items():
@@ -378,6 +412,9 @@ for f in (ROOT / "src/stats").rglob("*.ts"):
 #  area-under-curve.ts: `params?.baseline ?? 0`
 #  fraction-of-total.ts: `?? "column"` / `?? "fraction"` / `?? "none"`
 #  k-means.ts: `params?.clusters ?? 2`, `standardise !== false`
+#  hierarchical-clustering.ts: `params?.clusters ?? 2`,
+#    linkage falls through to "complete", distance to "euclidean",
+#    `standardise !== false`
 #  normalize.ts: `?? "percent-of-largest"`; prune-rows.ts: `?? "empty"`
 #  remove-baseline.ts: `?? "first-value"`; smooth-...ts: `?? "smooth"`
 #  spline-lowess.ts: `?? "lowess"`, `?? 2/3`; transform-data.ts: `?? "log10"`
@@ -393,6 +430,7 @@ for f in (ROOT / "src/stats").rglob("*.ts"):
 #    as the intercept model
 #  poisson-regression.ts: `params?.quasi ?? false`
 #  three-way-anova.ts: `params?.posthoc ?? "none"`
+#  multifactor-anova.ts: `params?.posthoc ?? "none"`
 RUNNER_FALLBACKS = {
     ("area-under-curve", "baseline"): 0,
     ("fraction-of-total", "totalBy"): "column",
@@ -400,6 +438,10 @@ RUNNER_FALLBACKS = {
     ("fraction-of-total", "ci"): "none",
     ("k-means", "clusters"): 2,
     ("k-means", "standardise"): True,
+    ("hierarchical-clustering", "clusters"): 2,
+    ("hierarchical-clustering", "linkage"): "complete",
+    ("hierarchical-clustering", "distance"): "euclidean",
+    ("hierarchical-clustering", "standardise"): True,
     ("normalize", "normalizeMethod"): "percent-of-largest",
     ("prune-rows", "condition"): "empty",
     ("remove-baseline", "baselineMethod"): "first-value",
@@ -420,6 +462,9 @@ RUNNER_FALLBACKS = {
     ("mixed-effects", "randomStructure"): "intercept",
     ("poisson-regression", "quasi"): False,
     ("three-way-anova", "posthoc"): "none",
+    ("chi-square-gof", "expectedMode"): "equal",
+    ("binomial-test", "expectedProportion"): 0.5,
+    ("multifactor-anova", "posthoc"): "none",
 }
 
 # Numeric limits the PARAMS table does not carry.
@@ -458,6 +503,7 @@ KIND_TO_TYPE = {
     "number": ("number", None),
     "name": ("string", None),
     "names": ("string[]", None),
+    "numbers": ("number[]", None),
     "name-or-names": ("string | string[]", None),
     "name-or-number": ("string | number", None),
     "name-and-names": ("object", "object with { name: string, levels: string[] }"),
@@ -481,7 +527,7 @@ for typ, keys in sorted(KEYS_BY_TYPE.items()):
             params.append({"name": "sets", "type": "string[]", "required": False,
                            "description": SETS_DESC})
             continue
-        kind = PARAMS.get(key)
+        kind = KIND_OVERRIDES.get((typ, key), PARAMS.get(key))
         assert kind, f"no PARAMS kind for {key} (type {typ})"
         info = FIELD_INFO.get(key, {}).get(typ, {})
         if kind["kind"] == "enum":
@@ -539,8 +585,8 @@ for typ, keys in sorted(KEYS_BY_TYPE.items()):
         out["gates"] = GATES[typ]
     schema[typ] = out
 
-# Sanity: 54 types (53 + hierarchical-clustering, seq 160), every key accounted for, offered_on non-empty.
-assert len(schema) == 54, f"{len(schema)} types, expected 54"
+# Sanity: 59 types (54 + p-value-stack seq 190 + chi-square-gof + binomial-test seq 195 + one-sample-ks seq 170 + multifactor-anova seq 157), every key accounted for, offered_on non-empty.
+assert len(schema) == 59, f"{len(schema)} types, expected 59"
 for typ, entry in schema.items():
     assert entry["offered_on"], f"{typ} offered on no table type"
     assert entry["min_columns"] is not None, f"{typ} has no min_columns"

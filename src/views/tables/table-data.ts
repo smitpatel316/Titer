@@ -769,3 +769,11 @@ export function parseTSV(text: string): Cell[][] {
   rows.push(row);
   return rows;
 }
+
+/** Rows become columns and columns rows (seq 230, Paste Special ▸ Transpose):
+ *  a ragged block pads short rows with null, so the transpose never drops a
+ *  value that sat past another row's end. Transposing twice returns the block. */
+export function transposeBlock(block: Cell[][]): Cell[][] {
+  const width = block.reduce((w, row) => Math.max(w, row.length), 0);
+  return Array.from({ length: width }, (_, c) => block.map((row) => row[c] ?? null));
+}

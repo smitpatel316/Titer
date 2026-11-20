@@ -27,6 +27,8 @@ import {
 } from "../stats/types";
 import { simulateTableData, validateSimulationSpec } from "../stats/simulation/simulate";
 import { parseProjectText, validateAnalysisParams } from "../lib/project-file";
+import { fileName, fileTitle } from "../lib/paths";
+import { importTabularFile } from "../lib/tabular-import";
 import { extractMethod, methodForTable, remapGraphOptions } from "../lib/template";
 import { runScript } from "../lib/prism-script";
 import type { WandReport } from "../lib/wand";
@@ -36,6 +38,7 @@ import {
   executeCloseProject,
   executeImportPrism,
   executeSaveProject,
+  readFileWithTimeout,
   type DocumentDeps,
   type DocumentIo,
   type DocumentState,
@@ -94,6 +97,8 @@ import {
   rowsDeleted,
   rowsInserted,
   shiftRowGroupsForDelete,
+  transposeBlock,
+  writeBlock,
 } from "../views/tables/table-data";
 import { TABLES } from "../views/tables/index";
 
@@ -229,6 +234,10 @@ function toExportDeps(deps: JobDeps): ExportJobDeps {
   return {
     getState: deps.getState,
     io: deps.exportIo ?? defaultExportIo,
+    // The overlay runs: the dispatcher's `run` (the real `runAnalysis`
+    // in the app, a stub in a harness), so headless exports draw the
+    // graph's overlays from the same cache the views read.
+    run: deps.run ?? runAnalysis,
   };
 }
 
@@ -928,6 +937,63 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       const args = (job.args ?? {}) as { path?: unknown };
       return executeImportPrism(toDocumentDeps(deps), { path: reqString(args.path, "path") }, job.project_id);
     }
+    case "import-data-file": {
+      // seq 155 MCP coverage: import a data file (.csv / .tsv / .txt /
+      // .xlsx) as a NEW table in this project — the same parsers as
+      // File ▸ Import Data File…, minus the dialog. Unlike the UI, it
+      // never appends to the active table: MCP never prompts, so the
+      // append choice can't be asked — the import always makes a table.
+      const actions = tableActions(job, deps);
+      const path = argString(job, job.args, "path");
+      const name = argOptString(job, job.args, "name");
+      if (name !== undefined && !name.trim()) throw jobErr(job, "needs a non-empty name.");
+      const ext = path.split(/[\\/]/).pop()?.split(".").pop()?.toLowerCase() ?? "";
+      if (ext !== "csv" && ext !== "tsv" && ext !== "txt" && ext !== "xlsx") {
+        throw jobErr(
+          job,
+          `“${fileName(path)}” is not a data file — import a .csv, .tsv, .txt or .xlsx file.`,
+        );
+      }
+      const io = deps.io ?? defaultDocumentIo;
+      let table;
+      try {
+        const content =
+          ext === "xlsx"
+            ? await readFileWithTimeout(() => io.readDataBytes(path), path)
+            : await readFileWithTimeout(() => io.readDataText(path), path);
+        table = await importTabularFile(path, content);
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("couldn't be read in time")) throw err;
+        throw new Error(err instanceof Error ? err.message : String(err));
+      }
+      const tableName = name?.trim() ? name.trim() : fileTitle(path);
+      const preState = deps.getState();
+      const before = new Set(preState.rootOrder);
+      const beforeRevision = preState.revision;
+      actions.createTableWithData(table.tableType, table.data, tableName);
+      await settleAfterDispatch(deps, beforeRevision);
+      const after = deps.getState();
+      const createdId =
+        after.activeNodeId && !before.has(after.activeNodeId) && after.nodes[after.activeNodeId]?.type === "table"
+          ? after.activeNodeId
+          : after.rootOrder.find((id) => !before.has(id) && after.nodes[id]?.type === "table");
+      if (!createdId) {
+        throw jobErr(job, "imported the file but its table id could not be read back — ask titer_list_tables for the new table.");
+      }
+      const created = after.nodes[createdId]!;
+      return {
+        result: {
+          project_id: job.project_id,
+          table_id: createdId,
+          name: created.name,
+          table_type: TABLES[table.tableType].label,
+          rows: created.data?.rows.length ?? 0,
+          data_columns: (created.data?.columns.length ?? 1) - 1,
+          notes: table.notes,
+        },
+        created: { table_id: createdId },
+      };
+    }
     case "close-project": {
       // L2: settle the save question, then arm the close bypass — Rust
       // closes the window once this job reports done. A dirty project with
@@ -1214,10 +1280,41 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           next = res.data;
           break;
         }
+        case "paste-transposed": {
+          // Seq 230, the MCP half of Edit ▸ Paste Transposed: `rows` is the
+          // clipboard block; it lands transposed (rows become columns) at
+          // (at_row, at_col), growing the table as a GUI paste does.
+          const raw = (job.args as Record<string, unknown> | null | undefined)?.rows;
+          if (
+            !Array.isArray(raw) ||
+            raw.length === 0 ||
+            raw.some(
+              (row) =>
+                !Array.isArray(row) ||
+                row.some((v) => v !== null && typeof v !== "string" && typeof v !== "number"),
+            )
+          ) {
+            throw jobErr(job, "needs rows to be a non-empty array of rows, each an array of strings, numbers or null.");
+          }
+          const block = (raw as (string | number | null)[][]).map((row) =>
+            row.map((v) => (v === null ? null : String(v))),
+          );
+          const atRow = argInt(job, job.args, "at_row", 0);
+          const atCol = argInt(job, job.args, "at_col", 0);
+          if (atRow > data.rows.length || atCol >= data.columns.length) {
+            throw jobErr(
+              job,
+              `has no cell (${atRow}, ${atCol}) to paste at — the table holds ${data.rows.length} rows and ${data.columns.length} columns.`,
+            );
+          }
+          label = "Paste Transposed";
+          next = writeBlock(data, atRow, atCol, transposeBlock(block), type);
+          break;
+        }
         default:
           throw jobErr(
             job,
-            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable.`,
+            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, paste-transposed.`,
           );
       }
       if (next === null) {

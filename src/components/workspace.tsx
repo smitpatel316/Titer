@@ -1,6 +1,8 @@
 import * as React from "react";
 import { EmptyState } from "../ui/layout";
 import { useProjectStore } from "../store/use-project-store";
+import { useLayout } from "../store/use-layout";
+import { GalleryView } from "../components/gallery-view";
 import { TableView } from "../views/tables/table-view";
 import { AnalysisView } from "../views/analyses/analysis-view";
 import { GraphView } from "../views/graphs/graph-view";
@@ -11,10 +13,17 @@ import { ANALYSES } from "../stats";
 
 const NEWER = "It was made with a newer version of Titer.";
 
-/** Shows the active node's view. */
+/** Shows the active node's view — or the Gallery (seq 229), every graph on one sheet. */
 export function Workspace() {
   const { activeNode: node } = useProjectStore();
+  const { gallery } = useLayout();
 
+  if (gallery)
+    return (
+      <Shown key="gallery">
+        <GalleryView />
+      </Shown>
+    );
   if (node?.type === "table" && node.data)
     return (
       <Shown key={node.id}>

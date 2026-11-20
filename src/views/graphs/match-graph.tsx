@@ -19,6 +19,7 @@ import {
 } from "../../store/types";
 import { GRAPHS, graphSeries } from ".";
 import { Toggle } from "./panel-controls";
+import { MatchPreview } from "./match-preview";
 import { BatchMagicDialog, type BatchMagicGroup } from "./batch-magic-dialog";
 
 interface Property {
@@ -271,6 +272,9 @@ export function MatchSection({
       </Row>
       {example && (
         <>
+          {/* What Apply would make of the graph, live: it follows the example
+              and the ticked properties, so the match can be checked by eye. */}
+          <MatchPreview graphId={graphId} options={matched(target, example, chosen)} />
           {PROPERTIES.map((p) => (
             <Toggle
               key={p.id}

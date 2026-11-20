@@ -28,6 +28,8 @@ import { WandDialog } from "./wand-dialog";
 import { SimulateDataDialog } from "./simulate-data-dialog";
 import { CloneGraphDialog } from "./clone-graph-dialog";
 import { ScriptDialog } from "./script-dialog";
+import { PreferencesDialog } from "./preferences-dialog";
+import { PRINT_SETTINGS_CHANGED_EVENT, loadPrintSettings, printPageCss } from "../lib/print-settings";
 import { useStartAnalysis } from "../views/analyses/use-analysis-launcher";
 import { GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
 
@@ -48,10 +50,28 @@ export function AppShell() {
   useMcpJobDispatcher();
   const { projectUpdated, dismissProjectUpdated } = documentActions;
   const { prismImported, dismissPrismImported, dataImported, dismissDataImported } = documentActions;
+  const { prismSavedReport, dismissPrismSavedReport } = documentActions;
   const { templateNotice, dismissTemplateNotice } = documentActions;
   const { sidebar } = useLayout();
   const [fullscreen, setFullscreen] = React.useState(false);
   React.useEffect(() => onFullscreenChange(setFullscreen), []);
+  // Seq 227: the `@page` rule for the print settings (paper, orientation,
+  // margins, scale), injected once and re-injected whenever Preferences
+  // changes them — File ▸ Print and a script's Print both print on it.
+  React.useEffect(() => {
+    const apply = () => {
+      let style = document.getElementById("titer-print-page");
+      if (!style) {
+        style = document.createElement("style");
+        style.id = "titer-print-page";
+        document.head.appendChild(style);
+      }
+      style.textContent = printPageCss(loadPrintSettings());
+    };
+    apply();
+    window.addEventListener(PRINT_SETTINGS_CHANGED_EVENT, apply);
+    return () => window.removeEventListener(PRINT_SETTINGS_CHANGED_EVENT, apply);
+  }, []);
   const hidden = HIDDEN_SIDEBAR[fullscreen ? "fullscreen" : "window"];
   const { nodes, selector, closeSelector, createTable, createGraph, isDirty } = useProjectStore();
   const startAnalysis = useStartAnalysis();
@@ -61,7 +81,7 @@ export function AppShell() {
 
   return (
     <div className="flex h-full">
-      {!sidebar && <SidebarToggle className={`fixed top-3 z-10 ${hidden.button}`} />}
+      {!sidebar && <SidebarToggle className={`fixed top-3 z-10 print:hidden ${hidden.button}`} />}
       <ProjectSidebar />
       <main
         className="flex min-w-0 flex-1 flex-col"
@@ -77,7 +97,7 @@ export function AppShell() {
             through to save()'s own save panel. */}
         <div
           data-tauri-drag-region
-          className="flex h-10 shrink-0 items-center gap-2 border-b border-separator pr-3 pl-[var(--toolbar-inset,16px)]"
+          className="flex h-10 shrink-0 items-center gap-2 border-b border-separator pr-3 pl-[var(--toolbar-inset,16px)] print:hidden"
         >
           <Button
             disabled={!isDirty}
@@ -163,6 +183,25 @@ export function AppShell() {
         }
       />
 
+      {/* The "Saved as Prism" notice (Mansi P0 #3), in-app for the same
+          Quirk-2 reason as "Prism File Imported" above: the write report
+          used to be computed and thrown away, so dropped analyses and the
+          graphs warning were silent. A manual .prism save shows it; a
+          background save (autosave, quit-save) never does. Long reports
+          scroll, like the converter's. */}
+      <Dialog
+        open={prismSavedReport !== null}
+        onClose={dismissPrismSavedReport}
+        onReturn={dismissPrismSavedReport}
+        dismissLabel="OK"
+        title="Saved as Prism"
+        description="What made it into the .prism file — and what didn't. Anything listed as not written needs re-creating in Prism from the tables."
+      >
+        <pre className="max-h-64 overflow-auto rounded-md bg-control p-3 text-small whitespace-pre-wrap">
+          {prismSavedReport?.join("\n")}
+        </pre>
+      </Dialog>
+
       {/* The "Data File Imported" notice, in-app for the same Quirk-2
           reason as "Prism File Imported" above. Shown only when the import
           has something to say (assumptions it made, rows padded, sheets
@@ -188,6 +227,8 @@ export function AppShell() {
       <ConverterDialog />
 
       <AiConnectionsDialog />
+
+      <PreferencesDialog />
 
       <FeedbackConsentDialog />
 
