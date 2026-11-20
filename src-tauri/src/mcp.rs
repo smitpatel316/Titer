@@ -9896,8 +9896,8 @@ mod tests {
         // tools, so four 1.7.4 tools once sat ungrouped — defined, routable,
         // but never advertised or callable — while it stayed green. A tool
         // the router serves must be in exactly one group.
-        let routed: Vec<&str> =
-            TiterMcpServer::tools().list_all().iter().map(|t| t.name.as_ref()).collect();
+        let routed_tools = TiterMcpServer::tools().list_all();
+        let routed: Vec<&str> = routed_tools.iter().map(|t| t.name.as_ref()).collect();
         assert_eq!(
             routed.len(),
             all.len(),
