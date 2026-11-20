@@ -2750,8 +2750,8 @@ pub struct EditTableArgs {
     /// The grid-menu op: insert-rows, delete-rows, insert-columns,
     /// delete-columns, rename-column, rename-group, exclude-cells,
     /// include-cells, freeze-title, convert-comma-decimals,
-    /// add-calculated-variable, set-calculated-variable or
-    /// remove-calculated-variable.
+    /// add-calculated-variable, set-calculated-variable,
+    /// remove-calculated-variable or paste-transposed (seq 230).
     pub op: String,
     /// insert/delete-rows, insert/delete-columns: the 0-based row or
     /// column to act at (rows and columns are 0-based; column 0 holds the
@@ -2777,6 +2777,15 @@ pub struct EditTableArgs {
     /// (with or without its leading `=`), e.g. `=Dose * 2`.
     #[serde(default)]
     pub formula: Option<String>,
+    /// paste-transposed: the clipboard block, rows of strings, numbers or
+    /// null; it lands with rows and columns swapped.
+    #[serde(default)]
+    pub rows: Option<Vec<Vec<serde_json::Value>>>,
+    /// paste-transposed: the 0-based row / column to paste at (default 0, 0).
+    #[serde(default)]
+    pub at_row: Option<usize>,
+    #[serde(default)]
+    pub at_col: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -4109,7 +4118,7 @@ impl TiterMcpServer {
     /// the row-title column, convert decimal commas to points.
     #[tool(
         name = "titer_edit_table",
-        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable or remove-calculated-variable. Rows and columns are 0-based; column 0 holds the row titles. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column.",
+        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable or paste-transposed. Rows and columns are 0-based; column 0 holds the row titles. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. paste-transposed { rows, at_row, at_col } pastes the block with rows and columns swapped, as Edit ▸ Paste Transposed does.",
         annotations(
             title = "Edit table",
             read_only_hint = false,
@@ -4162,6 +4171,7 @@ impl TiterMcpServer {
                 "add-calculated-variable",
                 "set-calculated-variable",
                 "remove-calculated-variable",
+                "paste-transposed",
             ];
             if !OPS.contains(&args.op.as_str()) {
                 return Err(format!("No edit op “{}” — the ops are {}.", args.op, OPS.join(", ")));
@@ -4206,6 +4216,10 @@ impl TiterMcpServer {
                     Some(n) if !n.trim().is_empty() => {}
                     _ => return Err(format!("op {} needs a non-empty name.", args.op)),
                 },
+                "paste-transposed" => match &args.rows {
+                    Some(rows) if !rows.is_empty() => {}
+                    _ => return Err("op paste-transposed needs rows (at least one row of values).".into()),
+                },
                 _ => {}
             }
             self.run_table_job(
@@ -4221,6 +4235,9 @@ impl TiterMcpServer {
                     "cells": args.cells,
                     "frozen": args.frozen,
                     "formula": args.formula,
+                    "rows": args.rows,
+                    "at_row": args.at_row,
+                    "at_col": args.at_col,
                 }),
             )
             .await

@@ -30,6 +30,9 @@ import * as native from "../native";
 import { loadRecents, MAX_RECENTS, saveRecents, recentKey, type RecentEntry } from "./recents";
 import { consumeMcpCloseAllowance } from "./mcp-document";
 import { publishMcpSnapshotNow } from "./mcp-publish";
+import { runProjectScriptText } from "../lib/script-effects";
+import type { ScriptDoc } from "../lib/prism-script";
+import type { ProjectScript } from "./types";
 import { openProjectsOrSay, sayGone } from "../menus";
 import { fileName, fileTitle } from "../lib/paths";
 import {
@@ -927,6 +930,39 @@ export function useDocument() {
     }
   };
 
+  /** Run the project's saved scripts for a hook (seq 228): on open, after
+   *  the project loads; on close, before the save question. Each script runs
+   *  through the same engine + effects as the dialog's Run, in the order the
+   *  scripts are saved; a run that stops on an error changes nothing for
+   *  that script (its log is reported) and the later scripts still run.
+   *  Returns false when any script stopped, so the caller can say so — for
+   *  a close, the window stays open. */
+  const runSavedScripts = async (
+    scripts: ProjectScript[] | undefined,
+    hook: "runOnOpen" | "runOnClose",
+    doc: ScriptDoc,
+  ): Promise<boolean> => {
+    const due = (scripts ?? []).filter((s) => s[hook]);
+    if (!due.length) return true;
+    let current = doc;
+    let ok = true;
+    for (const entry of due) {
+      const result = await runProjectScriptText(current, entry.text, () => void saveRef.current());
+      if (result.stopped) {
+        ok = false;
+        await native.alert(
+          `Script “${entry.name}” Stopped`,
+          [`The ${hook === "runOnOpen" ? "run-on-open" : "run-on-close"} script stopped before it finished:`, ...result.log].join("\n"),
+          "error",
+        );
+        continue;
+      }
+      if (JSON.stringify(result.doc) !== JSON.stringify(current)) latest.current.applyScript(result.doc);
+      current = result.doc;
+    }
+    return ok;
+  };
+
   /** Close with autosave: one save attempt first (only when the toggle is
    *  on, the project is dirty, and it has a target), then the existing
    *  discard prompt — which only appears if the project is still dirty
@@ -942,6 +978,18 @@ export function useDocument() {
   const confirmDiscardWithAutosave = async (): Promise<boolean> => {
     if (quitSaveInFlight.current) return quitSaveInFlight.current;
     const asked = (async () => {
+      // Seq 228: the run-on-close scripts run first, so their changes are
+      // in the project the quit-save then writes. A script that stops
+      // calls the close off — the window stays open, with the log shown.
+      const state = latest.current.get();
+      const closed = await runSavedScripts(state.scripts, "runOnClose", {
+        nodes: state.nodes,
+        rootOrder: state.rootOrder,
+        childOrder: state.childOrder,
+        activeNodeId: state.activeNodeId,
+        projectName: state.projectName,
+      });
+      if (!closed) return false;
       const quitSaveAllowed = () =>
         isAutosaveEnabled() &&
         latest.current.isDirty &&
@@ -1011,6 +1059,17 @@ export function useDocument() {
       latest.current.loadProject({ ...parsed.project, filePath: target.filePath, edited });
       if (target.untitled) setUntitled(fileTitle(target.displayName));
       afterLoad();
+      // Seq 228: the run-on-open scripts run once the project is in the
+      // store — built from the parsed file, not the store's ref, which the
+      // load dispatch hasn't re-rendered yet. A script that stops reports
+      // its log; the project still opens.
+      await runSavedScripts(parsed.project.scripts, "runOnOpen", {
+        nodes: parsed.project.nodes,
+        rootOrder: parsed.project.rootOrder,
+        childOrder: parsed.project.childOrder,
+        activeNodeId: parsed.project.activeNodeId,
+        projectName: parsed.project.projectName,
+      });
       // A template that carries instructions (or a description) says so on
       // open (plan 38); any other file clears a stale notice.
       const info = parsed.project.template;

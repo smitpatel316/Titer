@@ -31,6 +31,8 @@ import {
   type TemplateInfo,
 } from "../src/lib/template";
 import { highlightStyle, searchProject } from "../src/lib/project-search";
+import { galleryItems } from "../src/lib/gallery";
+import { loadPrintSettings, printPageCss, savePrintSettings } from "../src/lib/print-settings";
 import { kaplanMeier } from "../src/lib/kaplan-meier";
 import {
   adjustMultipleTTestPValues,
@@ -97,6 +99,7 @@ import {
   setRowGroupCount,
   setRowGroupName,
   toggleExcluded,
+  transposeBlock,
   writeBlock,
 } from "../src/views/tables/table-data";
 import { flattenThreeWay, rowGroupBands } from "../src/stats/grouped/base";
@@ -354,6 +357,146 @@ const grouped = (): TableData => {
 const treatments = (columns: string[]): TableData => ({
   columns: ["Title", ...columns],
   rows: [1, 2, 3].map((r) => [null, ...columns.map((_, c) => String(r + c))]),
+});
+
+// ── Paste Special / Transpose (seq 230) + Select Row/Column (seq 231) ──────
+// 231's selection is the grid's Shift+Space / Ctrl+Space behavior with a menu
+// name on it, so its pin is the range the keys build (whole rows / whole
+// columns of the selection); 230's pin is the transpose itself, plus the
+// transposed block landing where Paste would put it.
+
+check("transposing a block swaps rows and columns, pads ragged rows, and transposes back", () => {
+  const block = [
+    ["a", "b", "c"],
+    ["d", "e"],
+  ];
+  deepStrictEqual(transposeBlock(block), [
+    ["a", "d"],
+    ["b", "e"],
+    ["c", null],
+  ]);
+  deepStrictEqual(transposeBlock(transposeBlock(block)), [
+    ["a", "b", "c"],
+    ["d", "e", null],
+  ]);
+  deepStrictEqual(transposeBlock([["x"]]), [["x"]]);
+  deepStrictEqual(transposeBlock([]), []);
+});
+
+check("a transposed block pastes at the selection's top-left, growing the table", () => {
+  const t = newTable("xy", 2);
+  const pasted = writeBlock(t, 0, 0, transposeBlock([["r1", "r2"], ["1", "2"]]), "xy");
+  strictEqual(pasted.rows[0][0], "r1");
+  strictEqual(pasted.rows[1][0], "r2");
+  strictEqual(pasted.rows[0][1], "1");
+  strictEqual(pasted.rows[1][1], "2");
+});
+
+// ── Gallery (seq 229) ────────────────────────────────────────────────────
+
+check("the gallery lists every graph in sidebar order, with its chart and table", () => {
+  const nodes = {
+    t1: { id: "t1", type: "table", name: "Dose", parentId: null, tableType: "xy" },
+    t2: { id: "t2", type: "table", name: "Growth", parentId: null, tableType: "column" },
+    g1: { id: "g1", type: "graph", name: "Scatter", parentId: "t1", graphType: "xy-scatter", graphOptions: {} },
+    g2: { id: "g2", type: "graph", name: "Boxes", parentId: "t2", graphType: "box-violin", graphOptions: {} },
+    g3: { id: "g3", type: "graph", name: "Heat", parentId: "t1", graphType: "heatmap", graphOptions: {} },
+    a1: { id: "a1", type: "analysis", name: "t-test", parentId: "t1", analysisType: "compare-two-groups" },
+  } as unknown as Record<string, ProjectNode>;
+  deepStrictEqual(galleryItems(nodes, ["t1", "t2"], { t1: ["g1", "a1", "g3"], t2: ["g2"] }), [
+    { id: "g1", name: "Scatter", graphLabel: "Scatter or line", tableName: "Dose" },
+    { id: "g3", name: "Heat", graphLabel: "Heatmap", tableName: "Dose" },
+    { id: "g2", name: "Boxes", graphLabel: "Box and violin", tableName: "Growth" },
+  ]);
+  deepStrictEqual(galleryItems(nodes, ["t1"], { t1: ["a1"] }), []);
+});
+
+// ── Preferences (seq 225) + Print / Page Setup (seq 227) ─────────────────
+
+check("print settings default to Letter portrait, and the @page rule carries them", () => {
+  deepStrictEqual(loadPrintSettings(), { paperSize: "letter", orientation: "portrait", marginMm: 12, scale: 1 });
+  strictEqual(
+    printPageCss({ paperSize: "a4", orientation: "landscape", marginMm: 10, scale: 0.8 }),
+    "@page { size: a4 landscape; margin: 10mm; }\n@media print { body { zoom: 0.8; } }",
+  );
+  // A stored record with a bad paper size or an out-of-range margin/scale
+  // falls back (or clamps) instead of breaking the print.
+  const store = new Map<string, string>();
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+  };
+  try {
+    savePrintSettings({ paperSize: "a4", orientation: "portrait", marginMm: 0, scale: 2 });
+    deepStrictEqual(loadPrintSettings(), { paperSize: "a4", orientation: "portrait", marginMm: 0, scale: 2 });
+    store.set("titer.print", JSON.stringify({ paperSize: "tabloid", marginMm: 99, scale: 9 }));
+    deepStrictEqual(loadPrintSettings(), { paperSize: "letter", orientation: "portrait", marginMm: 25, scale: 2 });
+    store.set("titer.print", "not json");
+    deepStrictEqual(loadPrintSettings(), { paperSize: "letter", orientation: "portrait", marginMm: 12, scale: 1 });
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+});
+
+// ── Scripts saved in the project (seq 228) ─────────────────────────────
+
+check("saved scripts round-trip through the file, and a broken entry is dropped with a warning", () => {
+  const withScripts = {
+    ...payload,
+    scripts: [
+      { id: "s1", name: "Morning", text: "RecalcAll", runOnOpen: true, runOnClose: false },
+      { id: "s2", name: "Nightly", text: "Save", runOnOpen: false, runOnClose: true },
+    ],
+  };
+  const text = serializeProjectFile(withScripts);
+  const reread = read(text);
+  deepStrictEqual(reread.project.scripts, withScripts.scripts);
+  strictEqual(reread.updated, false);
+  // No scripts at all: the field is omitted, and an old file still opens identical.
+  strictEqual(JSON.parse(serializeProjectFile(payload)).project.scripts, undefined);
+  strictEqual(read(serializeProjectFile(payload)).project.scripts, undefined);
+  const broken = JSON.parse(text) as { project: Record<string, unknown> };
+  broken.project.scripts = [
+    { id: "s1", name: "Morning", text: "RecalcAll", runOnOpen: true },
+    { id: "s1", name: "Dupe", text: "Beep" },
+    { name: "No id", text: "Beep" },
+    "not an object",
+  ];
+  const repaired = read(JSON.stringify(broken));
+  deepStrictEqual(repaired.project.scripts, [
+    { id: "s1", name: "Morning", text: "RecalcAll", runOnOpen: true, runOnClose: false },
+  ]);
+  strictEqual(repaired.updated, true);
+  ok(repaired.issues.some((i) => i.message.includes("3 saved scripts")));
+});
+
+check("editing the saved scripts is one undo step, and a script run keeps them", () => {
+  let s = reducer(makeInitialState(), {
+    type: "load",
+    nodes: payload.nodes,
+    rootOrder: payload.rootOrder,
+    childOrder: payload.childOrder,
+    activeNodeId: payload.activeNodeId,
+    filePath: null,
+  });
+  const script = { id: "s1", name: "Morning", text: "RecalcAll", runOnOpen: true, runOnClose: false };
+  s = reducer(s, { type: "setScripts", scripts: [script] });
+  deepStrictEqual(s.scripts, [script]);
+  strictEqual(s.isDirty, true);
+  strictEqual(s.past.at(-1)?.label, "Edit Scripts");
+  s = reducer(s, { type: "undo" });
+  strictEqual(s.scripts, undefined);
+  s = reducer(s, { type: "redo" });
+  deepStrictEqual(s.scripts, [script]);
+  // A script run replaces the content but leaves the saved scripts alone.
+  s = reducer(s, {
+    type: "applyScript",
+    nodes: payload.nodes,
+    rootOrder: payload.rootOrder,
+    childOrder: payload.childOrder,
+    activeNodeId: payload.activeNodeId,
+  });
+  deepStrictEqual(s.scripts, [script]);
 });
 
 // ── .hlx files ───────────────────────────────────────────────────────────
@@ -15659,7 +15802,7 @@ check("My Palettes keep, replace and delete palettes; a gradient of few colors b
 });
 
 check("a narrow window narrows the sidebar for the inspector only where there is one", () => {
-  const layout = { sidebar: true, sidebarWidth: 224, inspector: true, inspectorWidth: 256 };
+  const layout = { sidebar: true, sidebarWidth: 224, inspector: true, inspectorWidth: 256, gallery: false };
   deepStrictEqual(fitWidths(layout, 700, true), { sidebarWidth: 180, inspectorWidth: 220 });
   strictEqual(fitWidths(layout, 700, false).sidebarWidth, 224);
 });

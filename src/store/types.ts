@@ -709,6 +709,18 @@ export interface InfoSheetData {
   linkedTableId?: string | null;
 }
 
+/** A Prism script saved in the project (seq 228): Prism keeps its scripts
+ *  in the project file, and runs them when the project opens or closes.
+ *  `runOnOpen` / `runOnClose` are the two hooks; both off is a script kept
+ *  for running by hand (File ▸ Run Script…). */
+export interface ProjectScript {
+  id: string;
+  name: string;
+  text: string;
+  runOnOpen: boolean;
+  runOnClose: boolean;
+}
+
 export interface ProjectNode {
   id: string;
   type: NodeType;
