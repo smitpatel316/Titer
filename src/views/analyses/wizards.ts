@@ -386,7 +386,6 @@ const binaryNames = (table: Dataset, exclude?: string) => {
     .map((c) => c.name);
   return binary.length > 0 ? binary : dataNames(table).filter((n) => n !== exclude);
 };
-};
 
 // Which data sets a test runs on (`sets`), asked first as in Prism, and only when there
 // is a choice: columns, or a grouped table's groups, holding numbers.
