@@ -5170,10 +5170,12 @@ impl TiterMcpServer {
     /// an agent. Default: save back in the project's current format (`.hlx`,
     /// or `.prism` / `.pzfx` for a project saved in one). `path` is Save As.
     /// A writer's failure is the error (a table mixing Y formats cannot go
-    /// to `.pzfx`) — never a silent save as `.hlx`.
+    /// to `.pzfx`) — never a silent save as `.hlx`. The result includes
+    /// `write_report` — tables/analyses written vs not written, plus
+    /// warnings — for `.prism`/`.pzfx` saves; `null` for `.hlx`.
     #[tool(
         name = "titer_save_project",
-        description = "Save a project: the frontend builds the bytes and writes them. format (hlx, prism or pzfx) is explicit — the save-nudge prompt never appears to an agent; omit it to save back in the project's current format. path is Save As. A writer's failure is the error, never a silent save as .hlx.",
+        description = "Save a project: the frontend builds the bytes and writes them. format (hlx, prism or pzfx) is explicit — the save-nudge prompt never appears to an agent; omit it to save back in the project's current format. path is Save As. A writer's failure is the error, never a silent save as .hlx. The result includes write_report — tables/analyses written vs not written, plus warnings — for .prism/.pzfx saves; null for .hlx.",
         annotations(
             title = "Save project",
             read_only_hint = false,
@@ -10499,7 +10501,7 @@ mod tests {
                     "project-1",
                     &job.job_id,
                     JobStatus::Done,
-                    Some(json!({ "project_id": "project-1", "file_path": "/tmp/Dose.hlx", "format": "hlx", "revision": 7 })),
+                    Some(json!({ "project_id": "project-1", "file_path": "/tmp/Dose.hlx", "format": "hlx", "revision": 7, "write_report": null })),
                     None,
                     None,
                 );
@@ -10515,6 +10517,9 @@ mod tests {
         assert_eq!(call_text(&saved)["file_path"], "/tmp/Dose.hlx");
         assert_eq!(call_text(&saved)["format"], "hlx");
         assert_eq!(call_text(&saved)["revision"], 7);
+        // The tool passes the job's result through: an .hlx save carries
+        // no writer report (Mansi P0 #6 — write_report is null, not absent).
+        assert!(call_text(&saved)["write_report"].is_null());
 
         // close, no `save`, on a dirty project: the job answers
         // needs_confirm, and the tool returns it — no window is touched.

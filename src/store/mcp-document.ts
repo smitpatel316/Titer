@@ -17,8 +17,8 @@
 import { convertPrism, type ConvertReport } from "../lib/prism";
 import { parsePzfx } from "../lib/pzfx";
 import { parsePzf } from "../lib/pzf";
-import { writePrism } from "../lib/prism-write";
-import { writePzfx } from "../lib/pzfx-write";
+import { formatWriteReport, writePrism, type PrismWriteIssue, type PrismWriteReport } from "../lib/prism-write";
+import { formatPzfxWriteReport, writePzfx } from "../lib/pzfx-write";
 import { parseProjectText, serializeProjectFile } from "../lib/project-file";
 import { formatMergeReport, mergeProjects } from "../lib/project-merge";
 import { fileName, fileTitle, sameFilePath } from "../lib/paths";
@@ -163,11 +163,49 @@ export function resolveSaveTarget(
   return { target: pathExt ? target : `${target}.${format}`, format };
 }
 
+/** The write report as `titer_save_project` returns it (Mansi P0 #6, MCP
+ *  side): the writer's report in snake_case — the same content the UI save
+ *  dialog shows — plus the UI's verbatim summary text, so an agent learns
+ *  what was written and what was dropped without re-reading the file.
+ *  `null` for `.hlx`: the native format has no writer report, everything
+ *  is written. */
+export interface SaveWriteReport {
+  tables_written: string[];
+  analyses_written: string[];
+  analyses_not_written: string[];
+  info_sheets_written: string[];
+  issues: PrismWriteIssue[];
+  /** The UI's verbatim report text (`formatWriteReport` / `formatPzfxWriteReport`). */
+  summary: string;
+}
+
+/** Map a writer's report to the MCP shape. The summary keeps the UI's
+ *  wording — including the prism-vs-pzfx difference in the
+ *  analyses-not-written line — so the two surfaces never drift apart. */
+export function toSaveWriteReport(report: PrismWriteReport, format: "prism" | "pzfx"): SaveWriteReport {
+  return {
+    tables_written: report.tables,
+    analyses_written: report.analyses,
+    analyses_not_written: report.analysesNotWritten,
+    info_sheets_written: report.infoSheets,
+    issues: report.issues,
+    summary: format === "prism" ? formatWriteReport(report) : formatPzfxWriteReport(report),
+  };
+}
+
 /** The project's bytes in `format`, built by the TS writers — the same
- *  writers the UI save uses. Throws the writer's own error (e.g. a project
- *  with no data tables cannot go to `.pzfx`); a table mixing Y formats
- *  splits into one table per format instead of refusing (seq 163). */
-export async function buildSaveBytes(state: DocumentState, format: SaveFormat, version: string): Promise<Uint8Array> {
+/** The project's bytes in `format`, built by the TS writers — the same
+ *  writers the UI save uses — plus the writer's report for `.prism` /
+ *  `.pzfx` (which tables/analyses were written, which analyses were
+ *  dropped and why). `.hlx` has no writer report (`null`). Throws the
+ *  writer's own error (e.g. a project with no data tables cannot go to
+ *  `.pzfx`); a table mixing Y formats splits into one table per format
+ *  instead of refusing (seq 163). */
+export async function buildSaveBytes(
+  state: DocumentState,
+  format: SaveFormat,
+  version: string,
+): Promise<{ bytes: Uint8Array; writeReport: SaveWriteReport | null }> {
   const payload = {
     nodes: state.nodes,
     rootOrder: state.rootOrder,
@@ -180,16 +218,22 @@ export async function buildSaveBytes(state: DocumentState, format: SaveFormat, v
   };
   switch (format) {
     case "hlx":
-      return new TextEncoder().encode(serializeProjectFile(payload));
-    case "prism":
-      return (await writePrism(payload, version)).bytes;
-    case "pzfx":
-      return (await writePzfx(payload, version)).bytes;
+      return { bytes: new TextEncoder().encode(serializeProjectFile(payload)), writeReport: null };
+    case "prism": {
+      const written = await writePrism(payload, version);
+      return { bytes: written.bytes, writeReport: toSaveWriteReport(written.report, "prism") };
+    }
+    case "pzfx": {
+      const written = await writePzfx(payload, version);
+      return { bytes: written.bytes, writeReport: toSaveWriteReport(written.report, "pzfx") };
+    }
   }
 }
 
 /** The `save-project` job: write the project and mark it saved. Returns
- *  the tool's output shape (`{ project_id, file_path, format, revision }`). */
+ *  the tool's output shape (`{ project_id, file_path, format, revision,
+ *  write_report }`) — `write_report` is the writer's report for
+ *  `.prism`/`.pzfx` saves, `null` for `.hlx`. */
 export async function executeSaveProject(
   deps: DocumentDeps,
   args: { path?: string; format?: string },
@@ -202,7 +246,7 @@ export async function executeSaveProject(
   const revision = state.revision;
   // Read the project only now, after the format is settled: bytes are
   // built from the state as it is at write time, as the UI save does.
-  const bytes = await buildSaveBytes(deps.getState(), format, version);
+  const { bytes, writeReport } = await buildSaveBytes(deps.getState(), format, version);
   try {
     await deps.io.writeFile(target, bytes);
   } catch (err) {
@@ -211,7 +255,7 @@ export async function executeSaveProject(
     );
   }
   deps.markSaved(target, revision);
-  return { result: { project_id: projectId, file_path: target, format, revision } };
+  return { result: { project_id: projectId, file_path: target, format, revision, write_report: writeReport } };
 }
 
 // ── Prism import ─────────────────────────────────────────────────────────
