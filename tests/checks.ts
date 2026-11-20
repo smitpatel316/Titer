@@ -10138,6 +10138,87 @@ check("seq 181: the mixed-effects wizard offers the denominator-DF choice, and t
   strictEqual(validateAnalysisParams("mixed-effects", { dfMethod: "bogus" }).errors.length, 1);
 });
 
+// seq 181 (MCP, audit seq 292): the DF choice must be reachable via
+// titer_run_analysis, not UI-only (Smit's Nov 16 rule — a feature without
+// MCP support isn't done). The create-analysis job is the tool's path:
+// the offered-gate and validateAnalysisParams run before createAnalysis,
+// so a recording stub proves the validated params reach the store; the
+// run-analysis override path proves titer_rerun_analysis merges them.
+check("seq 181 (MCP): titer_run_analysis accepts dfMethod for mixed-effects, and rerun overrides merge it", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-181-table", "create-table", {
+    table_type: "column",
+    columns: ["", "T0", "T1", "T2", "T3"],
+    rows: [
+      ["r1", 10, 12, 13, 15],
+      ["r2", 12, 13, 15, 17],
+      ["r3", 9, 10, 11, 13],
+      ["r4", 14, 16, 17, 19],
+      ["r5", 16, 18, 19, 21],
+      ["r6", 13, 15, 16, 18],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  const created: { parentId: string; type: string; params: unknown }[] = [];
+  harness.deps.createAnalysis = (parentId, type, params) => {
+    created.push({ parentId, type, params });
+    return `analysis_${type}`;
+  };
+  // Kenward-Roger through the tool's create-analysis job: accepted, and
+  // the validated params reach the store.
+  const done = await harness.run("job-181-kr", "create-analysis", {
+    table_id: tableId,
+    analysis_type: "mixed-effects",
+    params: { dfMethod: "kenward-roger", sets: ["T0", "T1", "T2", "T3"] },
+  });
+  strictEqual((done.result as { analysis_type: string }).analysis_type, "mixed-effects");
+  deepStrictEqual(created, [
+    {
+      parentId: tableId,
+      type: "mixed-effects",
+      params: { dfMethod: "kenward-roger", sets: ["T0", "T1", "T2", "T3"] },
+    },
+  ]);
+  // A bogus value is rejected naming the valid choices, never silently defaulted.
+  await rejects(
+    harness.run("job-181-bad", "create-analysis", {
+      table_id: tableId,
+      analysis_type: "mixed-effects",
+      params: { dfMethod: "bogus" },
+    }),
+    /must be one of: legacy, satterthwaite, kenward-roger/,
+  );
+  deepStrictEqual(created.length, 1, "a refused create runs nothing");
+  // Rerun overrides merge over the stored params and save on the node.
+  harness.dispatch({
+    type: "create",
+    node: {
+      id: "a181",
+      type: "analysis",
+      name: "Mixed-effects model",
+      parentId: tableId,
+      analysisType: "mixed-effects",
+      analysisParams: { dfMethod: "satterthwaite", sets: ["T0", "T1", "T2", "T3"] },
+    },
+  });
+  harness.sync();
+  const seen: unknown[] = [];
+  harness.deps.run = async (_type, _data, params) => {
+    seen.push(params);
+    return { testType: _type, stats: [], groups: [], notes: "" };
+  };
+  harness.deps.publishResult = () => {};
+  harness.deps.setAnalysisParams = (id, params) =>
+    harness.dispatch({ type: "setAnalysisParams", id, params });
+  await harness.run("job-181-over", "run-analysis", { analysis_id: "a181", params: { dfMethod: "legacy" } });
+  deepStrictEqual(seen, [{ dfMethod: "legacy", sets: ["T0", "T1", "T2", "T3"] }]);
+  strictEqual(
+    (harness.state().nodes["a181"]?.analysisParams as { dfMethod?: string } | undefined)?.dfMethod,
+    "legacy",
+  );
+});
+
 check("the Cox wizard drops a stratifyBy that is no longer among the covariates (F12)", () => {
   const data: TableData = {
     columns: ["Title", "Time", "Status", "Sex", "Age"],
