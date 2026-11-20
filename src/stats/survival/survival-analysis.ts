@@ -48,6 +48,13 @@ export async function runSurvival(columns: Column[], params: SurvivalParams | un
   // no `params`, or a file whose values were dropped on load — runs these
   // instead of crashing on `params.curveTest` (BUG-15).
   const p = { ...DEFAULTS, ...params };
+  // The merged `correction` list in the file reader admits every family's
+  // values (seq 193 widened it for multiple-t-tests); survival only offers
+  // holm/fdr/none, so refuse the others instead of sending `p.adjust` a
+  // method it does not know.
+  if (!Object.hasOwn(CORRECTION_METHOD, p.correction)) {
+    return { error: `Unknown survival correction "${p.correction}".` };
+  }
   const groups = survivalGroups(columns);
   if (!Array.isArray(groups)) return groups;
 

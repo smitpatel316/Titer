@@ -67,6 +67,7 @@ import {
   FRACTION_OF_TOTAL_TOTALS,
   MONTE_CARLO_STATISTICS,
   MONTE_CARLO_TARGETS,
+  MULTIPLE_T_TEST_CORRECTIONS,
   NONLINEAR_MODELS,
   NORMALIZE_HUNDRED_DEFS,
   NORMALIZE_METHODS,
@@ -279,7 +280,7 @@ const PARAMS = {
   // ("spline"/"lowess") — and now outliers ("rout"/"grubbs"): the reader only
   // sanitizes, each runner validates its own.
   method: [...CORRELATION_METHODS, "spline", "lowess", "rout", "grubbs"],
-  mode: CORRELATION_MODES, design: TWO_WAY_DESIGNS, posthocTarget: POSTHOC_TARGETS, correction: CORRECTIONS, curveTest: CURVE_TESTS, compare: CURVE_COMPARISONS,
+  mode: CORRELATION_MODES, design: TWO_WAY_DESIGNS, posthocTarget: POSTHOC_TARGETS, correction: [...CORRECTIONS, ...MULTIPLE_T_TEST_CORRECTIONS], curveTest: CURVE_TESTS, compare: CURVE_COMPARISONS,
   // Nonlinear regression framework (plan 26): weighting, model comparison,
   // global fitting, fixed parameters and bounds.
   weights: ["none", "1/y", "1/y2", "1/x", "1/x2", "1/sd2"],
@@ -721,14 +722,14 @@ function readOptions(raw: unknown, label: string, issues: ProjectIssue[]): Graph
  *  key (`??` in the runner) or spread-merge their defaults (one-sample-t,
  *  one-way ANOVA, frequency-distribution). Mirrors each runner's DEFAULTS —
  *  compare-two-groups, kruskal-wallis, friedman, nested-anova,
- *  deming-regression, survival — and the multiple-t-tests wizard default (Holm). */
+ *  deming-regression, survival — and the multiple-t-tests wizard default (Holm–Šídák). */
 const PARAM_DEFAULTS: Record<string, Record<string, unknown>> = {
   "compare-two-groups": { paired: false, gaussian: true, equalVariance: true, ratio: false, tails: "two-sided" },
   "kruskal-wallis": { posthoc: "none" },
   friedman: { posthoc: "none" },
   "nested-anova": { posthoc: "none" },
   "deming-regression": { lambda: 1 },
-  "multiple-t-tests": { paired: false, gaussian: true, pooledSd: false, correction: "holm" },
+  "multiple-t-tests": { paired: false, gaussian: true, pooledSd: false, correction: "holm-sidak" },
   survival: { curveTest: "logrank", correction: "holm" },
   // M7 fallbacks: a cross-family choice left out below lands on these.
   anova: { posthoc: "none" },
@@ -757,6 +758,10 @@ const PARAM_CHOICES: Record<string, Record<string, readonly string[]>> = {
   correlation: { method: CORRELATION_METHODS },
   "correlation-matrix": { method: CORRELATION_METHODS },
   outliers: { method: ["rout", "grubbs"] },
+  // The merged `correction` list admits every family's values: survival only
+  // offers holm/fdr/none, multiple-t-tests the full Prism set (seq 193).
+  survival: { correction: CORRECTIONS },
+  "multiple-t-tests": { correction: MULTIPLE_T_TEST_CORRECTIONS },
 };
 
 /** A collection param, keeping its usable entries: one bad entry used to
@@ -904,7 +909,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "smooth-differentiate-integrate": ["ys", "x", "operation", "window", "order", "smoothResults", "baseline", "startValue", "sets"],
   "two-way-anova": ["design", "posthoc", "posthocTarget", "sphericity", "sets"],
   "three-way-anova": ["posthoc", "posthocTerm", "sets"],
-  "multiple-t-tests": ["paired", "gaussian", "pooledSd", "correction", "sets"],
+  "multiple-t-tests": ["paired", "gaussian", "pooledSd", "correction", "q", "sets"],
   "nested-t-test": ["sets"],
   "nested-anova": ["posthoc", "sets"],
   "correlation-matrix": ["method", "sets"],

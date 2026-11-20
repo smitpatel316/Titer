@@ -178,6 +178,10 @@ export function AnalysisResultsView({
   // Comparisons of means give their 95% CI (adjusted as their P is); ranks don't.
   // Correlations give theirs once the correlation engine emits them.
   const withCi = result.comparisons?.some((c) => c.low !== undefined) ?? false;
+  // Multiple-t-tests flags each row significant or not (corrected P against
+  // its threshold); other comparisons leave it unset, so the column only
+  // appears when a row carries a flag.
+  const withSignificant = result.comparisons?.some((c) => c.significant !== undefined) ?? false;
   const withCorrCi = result.correlations?.some((c) => c.low !== undefined) ?? false;
   const showP = headlineP != null && !Number.isNaN(headlineP);
   const groups = result.groups;
@@ -406,12 +410,14 @@ export function AnalysisResultsView({
             { label: result.comparisonsEffect ?? "Difference", numeric: true },
             ...(withCi ? [{ label: "95% CI", numeric: true }] : []),
             { label: "P value", numeric: true },
+            ...(withSignificant ? [{ label: "Significant?" }] : []),
           ]}
           rows={result.comparisons.map((c) => [
             c.group2 ? `${c.group1} vs. ${c.group2}` : c.group1,
             num(c.diff),
             ...(withCi ? [c.low == null && c.high == null ? "—" : `${num(c.low)} to ${num(c.high)}`] : []),
             <P p={c.p} />,
+            ...(withSignificant ? [c.significant === undefined ? "—" : c.significant ? "Yes" : "No"] : []),
           ])}
         />
       )}

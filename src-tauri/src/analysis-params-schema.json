@@ -802,6 +802,51 @@
       }
     ]
   },
+  "hierarchical-clustering": {
+    "label": "Hierarchical clustering",
+    "min_columns": 2,
+    "offered_on": [
+      "multiple"
+    ],
+    "params": [
+      {
+        "name": "clusters",
+        "type": "number",
+        "required": false
+      },
+      {
+        "name": "linkage",
+        "type": "string",
+        "enum": [
+          "complete",
+          "average",
+          "single",
+          "ward.D2"
+        ],
+        "required": false
+      },
+      {
+        "name": "distance",
+        "type": "string",
+        "enum": [
+          "euclidean",
+          "manhattan"
+        ],
+        "required": false
+      },
+      {
+        "name": "standardise",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
   "k-means": {
     "label": "K-means clustering",
     "min_columns": 2,
@@ -1179,11 +1224,24 @@
         "name": "correction",
         "type": "string",
         "enum": [
+          "holm-sidak",
           "holm",
+          "sidak",
+          "bonferroni",
           "fdr",
+          "fdr-bky",
+          "fdr-by",
           "none"
         ],
-        "default": "holm",
+        "default": "holm-sidak",
+        "required": false
+      },
+      {
+        "name": "q",
+        "type": "number",
+        "min": 0.01,
+        "max": 50.0,
+        "default": 5,
         "required": false
       },
       {

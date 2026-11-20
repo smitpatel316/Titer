@@ -32,6 +32,12 @@ import {
 } from "../src/lib/template";
 import { highlightStyle, searchProject } from "../src/lib/project-search";
 import { kaplanMeier } from "../src/lib/kaplan-meier";
+import {
+  adjustMultipleTTestPValues,
+  fdrQ,
+  isFdrCorrection,
+  significanceThreshold,
+} from "../src/stats/grouped/multiple-t-tests";
 import { transformTable } from "../src/lib/transform";
 import {
   addCalculatedVariable,
@@ -765,7 +771,7 @@ const rerunHarness = async () => {
   const seen: unknown[] = [];
   harness.deps.run = async (_type, _data, params) => {
     seen.push(params);
-    return { stats: [], groups: [], notes: "" };
+    return { testType: "anova", stats: [], groups: [], notes: "" };
   };
   harness.deps.publishResult = () => {};
   harness.deps.setAnalysisParams = (id, params) =>
@@ -1448,7 +1454,7 @@ check("a dropped param value falls back to its default, and says so", () => {
   const multi = withAnalysis("m5e", "multiple-t-tests", { correction: "bogus", gaussian: "yes" });
   // Both values were written and unusable, so both fall back; keys the file
   // never wrote stay absent (the runner's own fallbacks cover them).
-  deepStrictEqual(paramsOf(multi, "m5e"), { gaussian: true, correction: "holm" });
+  deepStrictEqual(paramsOf(multi, "m5e"), { gaussian: true, correction: "holm-sidak" });
 
   // A dropped `q` was already safe (the runner falls back to 1); the reader
   // still leaves it out, and the method stays.
@@ -4521,7 +4527,7 @@ check("partial two-way-anova params fall back to the ordinary design (FL-R3-26)"
   strictEqual(out.subtitle, "Ordinary two-way ANOVA");
 });
 
-check("partial multiple-t-tests params fall back to the unpaired Gaussian Holm defaults (FL-R3-26)", async () => {
+check("partial multiple-t-tests params fall back to the unpaired Gaussian Holm–Šídák defaults (FL-R3-26)", async () => {
   const data: TableData = {
     columns: ["Title", "A:1", "A:2", "A:3", "B:1", "B:2", "B:3"],
     rows: [
@@ -8832,6 +8838,102 @@ check("P-value adjustments pass nulls through", () => {
   );
 });
 
+// Multiple-t-tests corrections (seq 193): the full Prism set, adjusted in
+// TypeScript from the raw P values. Hand-computed on [0.01, 0.04, 0.03, 0.20]
+// (m = 4; sorted 0.01, 0.03, 0.04, 0.20).
+check("multiple-t-tests corrections match their hand-computed values", () => {
+  const ps = [0.01, 0.04, 0.03, 0.2];
+  const at4 = (xs: (number | null)[]) => xs.map((p) => Number(p!.toFixed(4)));
+  // Bonferroni: min(1, 4p).
+  deepStrictEqual(at4(adjustMultipleTTestPValues(ps, "bonferroni")), [0.04, 0.16, 0.12, 0.8]);
+  // Holm step-down: 0.04, max(0.04, 0.09), max(0.09, 0.08), max(0.09, 0.20).
+  deepStrictEqual(at4(adjustMultipleTTestPValues(ps, "holm")), [0.04, 0.09, 0.09, 0.2]);
+  // BH: 0.04, 0.0533, 0.0533, 0.20 (the 0.06 at rank 2 is capped by the 0.0533 above it).
+  deepStrictEqual(at4(adjustMultipleTTestPValues(ps, "fdr")), [0.04, 0.0533, 0.0533, 0.2]);
+  // BY: BH times H_4 = 2.0833.
+  deepStrictEqual(at4(adjustMultipleTTestPValues(ps, "fdr-by")), [0.0833, 0.1111, 0.1111, 0.4167]);
+  // BKY at Q = 5%: stage 1 (BH at 0.05/1.05) rejects 1 of 4, so the BH values
+  // scale by (4−1)/4 — more powerful than BH here (3 discoveries, not 1).
+  deepStrictEqual(at4(adjustMultipleTTestPValues(ps, "fdr-bky", 5)), [0.03, 0.04, 0.04, 0.15]);
+  // Holm–Šídák / Šídák delegate to the shared adjustment.
+  deepStrictEqual(
+    adjustMultipleTTestPValues(ps, "holm-sidak"),
+    adjustPValues(ps, "holm-sidak"),
+  );
+  deepStrictEqual(adjustMultipleTTestPValues(ps, "sidak"), adjustPValues(ps, "sidak"));
+  // None is the identity.
+  deepStrictEqual(adjustMultipleTTestPValues(ps, "none"), ps);
+});
+
+check("BKY falls back to no discoveries when stage 1 rejects nothing, and to all when it rejects everything", () => {
+  // Nothing small: BH is 0.8 throughout, stage 1 (BH ≤ 0.0476) rejects none,
+  // so the BH values scale UP by 1.05 — nothing can clear Q = 5%.
+  deepStrictEqual(
+    adjustMultipleTTestPValues([0.5, 0.6, 0.7, 0.8], "fdr-bky", 5).map((p) => Number(p!.toFixed(4))),
+    [0.84, 0.84, 0.84, 0.84],
+  );
+  // Everything tiny: stage 1 rejects all 4, so the BH values stand and every
+  // row is a discovery at Q = 5%.
+  deepStrictEqual(
+    adjustMultipleTTestPValues([0.001, 0.002, 0.003, 0.004], "fdr-bky", 5).map((p) => Number(p!.toFixed(4))),
+    [0.004, 0.004, 0.004, 0.004],
+  );
+});
+
+check("multiple-t-tests adjustments count null rows in the family and pass them through", () => {
+  // A constant row has no P but still counts as a comparison (m = 2 here).
+  deepStrictEqual(adjustMultipleTTestPValues([null, 0.01], "bonferroni"), [null, 0.02]);
+  deepStrictEqual(adjustMultipleTTestPValues([null, 0.01], "holm"), [null, 0.02]);
+  deepStrictEqual(adjustMultipleTTestPValues([0.01, null], "fdr"), [0.02, null]);
+  // One comparison is the identity for every method.
+  for (const method of ["holm-sidak", "holm", "sidak", "bonferroni", "fdr", "fdr-bky", "fdr-by"] as const) {
+    const one = adjustMultipleTTestPValues([0.04], method, 5);
+    ok(one.length === 1 && Math.abs(one[0]! - 0.04) < 1e-12, `${method} m=1: ${one[0]}`);
+  }
+});
+
+check("FDR Q falls back to 5% outside 0.01–50, and the significance threshold is Q for FDR, 0.05 otherwise", () => {
+  strictEqual(fdrQ(undefined), 5);
+  strictEqual(fdrQ(5), 5);
+  strictEqual(fdrQ(1), 1);
+  strictEqual(fdrQ(0), 5);
+  strictEqual(fdrQ(60), 5);
+  strictEqual(significanceThreshold("holm-sidak", 5), 0.05);
+  strictEqual(significanceThreshold("bonferroni", 5), 0.05);
+  strictEqual(significanceThreshold("none", 5), 0.05);
+  strictEqual(significanceThreshold("fdr", 5), 0.05);
+  strictEqual(significanceThreshold("fdr", 1), 0.01);
+  strictEqual(significanceThreshold("fdr-bky", 10), 0.1);
+  strictEqual(significanceThreshold("fdr-by", undefined), 0.05);
+  ok(isFdrCorrection("fdr") && isFdrCorrection("fdr-bky") && isFdrCorrection("fdr-by"));
+  ok(!isFdrCorrection("holm-sidak") && !isFdrCorrection("none"));
+});
+
+check("multiple-t-tests TypeScript adjustments agree with R p.adjust (holm, bonferroni, BH, BY)", async () => {
+  const ps = [0.01, 0.04, 0.03, 0.2, 0.5];
+  const r = await evalNamedVector(
+    `p<-c(${ps.join(",")});c(` +
+      ["holm", "bonferroni", "BH", "BY"]
+        .map(
+          (m, mi) =>
+            [1, 2, 3, 4, 5].map((i) => `m${mi}_${i}=p.adjust(p,"${m}")[${i}]`).join(","),
+        )
+        .join(",") +
+      `)`,
+  );
+  const close = (got: (number | null)[], want: (number | null)[], label: string) => {
+    for (let i = 0; i < want.length; i++)
+      ok(
+        got[i] != null && want[i] != null && Math.abs(got[i]! - want[i]!) < 1e-9,
+        `${label} #${i}: ${got[i]}, R: ${want[i]}`,
+      );
+  };
+  close(adjustMultipleTTestPValues(ps, "holm"), [1, 2, 3, 4, 5].map((i) => r[`m0_${i}`] ?? null), "holm");
+  close(adjustMultipleTTestPValues(ps, "bonferroni"), [1, 2, 3, 4, 5].map((i) => r[`m1_${i}`] ?? null), "bonferroni");
+  close(adjustMultipleTTestPValues(ps, "fdr"), [1, 2, 3, 4, 5].map((i) => r[`m2_${i}`] ?? null), "BH");
+  close(adjustMultipleTTestPValues(ps, "fdr-by"), [1, 2, 3, 4, 5].map((i) => r[`m3_${i}`] ?? null), "BY");
+});
+
 // CC-m10: the full column is re-serialized as an R literal on every run —
 // measured, not capped. The cost is linear and small at realistic sizes
 // (measured 2026-11-16: 100k rows ≈ 35 ms / 1.8 MB per column on the JS
@@ -9449,6 +9551,117 @@ check("multiple t tests leave a constant row open instead of aborting the analys
   strictEqual(out.stats.find((s) => s.label === "Rows compared")?.value, 3);
   strictEqual(out.comparisons![0].p, null, "the constant row is open");
   ok(out.comparisons![1].p !== null && out.comparisons![2].p !== null, "non-constant rows still complete");
+});
+
+// Multiple-t-tests corrections (seq 193): every method runs end to end, and
+// each run's corrected P values are exactly the pure adjustment of the
+// uncorrected run's raw P values — so the engine and the adjustment agree
+// without hard-coding R's numbers here. The rows step down in effect size
+// (r1 huge, r2 moderate, r3 small, r4 tiny) so the methods separate.
+check("multiple t tests run every Prism correction and flag significance against its threshold", async () => {
+  const data: TableData = {
+    columns: ["Title", "A:1", "A:2", "A:3", "B:1", "B:2", "B:3"],
+    rows: [
+      ["r1", "1", "2", "3", "10", "11", "12"],
+      ["r2", "1", "2", "3", "4", "5", "6"],
+      ["r3", "1", "2", "3", "2", "3", "4"],
+      ["r4", "1", "2", "3", "1.5", "2.5", "3.5"],
+    ],
+  };
+  const base = { gaussian: true, pooledSd: false, paired: false } as const;
+  const run = async (params: Record<string, unknown>) => {
+    const out = await runAnalysis("multiple-t-tests", data, params as never);
+    if ("error" in out) throw new Error(out.error);
+    return out;
+  };
+  const raw = await run({ ...base, correction: "none" });
+  const rawP = raw.comparisons!.map((c) => c.p);
+  ok(rawP.every((p) => p !== null), "the uncorrected run completes every row");
+  for (const correction of ["holm-sidak", "holm", "sidak", "bonferroni", "fdr", "fdr-bky", "fdr-by"] as const) {
+    const out = await run({ ...base, correction, q: 5 });
+    const want = adjustMultipleTTestPValues(rawP, correction, 5);
+    const threshold = significanceThreshold(correction, 5);
+    out.comparisons!.forEach((c, i) => {
+      ok(c.p != null && want[i] != null && Math.abs(c.p - want[i]!) < 1e-9, `${correction} row ${i}: ${c.p}, want ${want[i]}`);
+      strictEqual(c.significant, c.p < threshold, `${correction} row ${i}: flag follows its threshold`);
+    });
+    // Adjusted P values never fall below the raw ones for the family-wise
+    // methods and BH/BY; BKY can (it estimates the null fraction) — but all
+    // stay within [0, 1] and keep the rows' order.
+    const ps = out.comparisons!.map((c) => c.p!);
+    ok(ps.every((p) => p >= 0 && p <= 1), `${correction}: adjusted P stays in [0, 1]`);
+  }
+  // The FDR stats label names Q, and a stricter Q flags no more rows.
+  const fdr5 = await run({ ...base, correction: "fdr", q: 5 });
+  strictEqual(
+    fdr5.stats.find((s) => s.label.startsWith("Significant rows"))?.label,
+    "Significant rows (adjusted P < 5%)",
+  );
+  const fdr1 = await run({ ...base, correction: "fdr", q: 1 });
+  strictEqual(
+    fdr1.stats.find((s) => s.label.startsWith("Significant rows"))?.label,
+    "Significant rows (adjusted P < 1%)",
+  );
+  ok(
+    (fdr1.stats.find((s) => s.label.startsWith("Significant rows"))?.value as number) <=
+      (fdr5.stats.find((s) => s.label.startsWith("Significant rows"))?.value as number),
+    "Q = 1% flags no more rows than Q = 5%",
+  );
+  // The family-wise label is unchanged.
+  strictEqual(
+    (await run({ ...base, correction: "holm-sidak" })).stats.find((s) => s.label.startsWith("Significant rows"))?.label,
+    "Significant rows (P < 0.05)",
+  );
+});
+
+check("multiple t tests refuse an unknown correction instead of running it", async () => {
+  const data: TableData = {
+    columns: ["Title", "A:1", "A:2", "A:3", "B:1", "B:2", "B:3"],
+    rows: [
+      ["r1", "1", "2", "3", "4", "5", "6"],
+      ["r2", "2", "3", "4", "5", "6", "7"],
+    ],
+  };
+  const out = await runAnalysis("multiple-t-tests", data, {
+    gaussian: true,
+    pooledSd: false,
+    paired: false,
+    correction: "bogus",
+  } as never);
+  ok("error" in out && /Unknown multiple-t-tests correction/.test(out.error), "bogus correction errors cleanly");
+});
+
+check("multiple-t-tests wizard offers the full Prism correction set and asks Q only for FDR", () => {
+  let grouped = newGroupedTable(3, 1);
+  grouped = writeBlock(grouped, 0, 0, [["r1", "1", "2", "3"]], "grouped");
+  const table = readTable(grouped);
+  const questions = (a: Record<string, string | number>) =>
+    WIZARDS["multiple-t-tests"]!.questions(a as never, table);
+  const correction = questions({}).find((q) => q && q.id === "correction");
+  ok(correction && correction.kind === "choice", "correction is a choice question");
+  deepStrictEqual(
+    correction.kind === "choice" ? correction.options.map((o) => o.value) : [],
+    ["holm-sidak", "holm", "sidak", "bonferroni", "fdr", "fdr-bky", "fdr-by", "none"],
+  );
+  // No Q question before a correction is picked (Holm–Šídák is the first
+  // option) or for a family-wise method — only for the FDR methods.
+  ok(!questions({}).find((q) => q && q.id === "q"), "no Q question before picking a correction");
+  ok(!questions({ correction: "holm" }).find((q) => q && q.id === "q"), "no Q question for Holm");
+  for (const method of ["fdr", "fdr-bky", "fdr-by"]) {
+    const q = questions({ correction: method }).find((qq) => qq && qq.id === "q");
+    ok(q && q.kind === "number" && q.initial === 5, `Q question appears for ${method}`);
+  }
+  const finish = (a: Record<string, string | number>) => WIZARDS["multiple-t-tests"]!.finish(a as never, table);
+  const fdr = finish({ paired: "unpaired", gaussian: "yes", pooled: "no", correction: "fdr-bky", q: 1 });
+  deepStrictEqual(fdr.params, { paired: false, gaussian: true, pooledSd: false, correction: "fdr-bky", q: 1 });
+  const plain = finish({ paired: "unpaired", gaussian: "yes", pooled: "no", correction: "holm-sidak" });
+  deepStrictEqual(plain.params, { paired: false, gaussian: true, pooledSd: false, correction: "holm-sidak" });
+  // Unanswered, the wizard defaults to Holm–Šídák (Prism's recommended).
+  strictEqual(
+    (finish({}).params as { correction?: string }).correction,
+    "holm-sidak",
+    "unanswered correction defaults to Holm–Šídák",
+  );
 });
 
 check("the dose-response — Special wizard completes with X + 1 Y and the fit names the shortfall (R2-B4)", async () => {
@@ -13981,6 +14194,24 @@ check("the survival analysis refuses bad survival data", async () => {
       throw new Error(`expected an error mentioning "${message}", got ${JSON.stringify(out)}`);
     }
   }
+});
+
+// Seq 193: the file reader's merged `correction` list admits every family's
+// values, so a multiple-t-tests correction on a survival analysis must be
+// refused, not sent to `p.adjust` as a method it does not know.
+check("the survival analysis refuses a multiple-t-tests correction", async () => {
+  const out = await runAnalysis(
+    "survival",
+    logRankTable(
+      ["Title", "Days", "A", "B", "C"],
+      [
+        ["", "3", "1", "1", "1"],
+        ["", "5", "0", "1", "0"],
+      ],
+    ),
+    { curveTest: "logrank", correction: "holm-sidak" } as never,
+  );
+  ok("error" in out && /Unknown survival correction/.test(out.error), "holm-sidak on survival errors cleanly");
 });
 
 // v1.5.0 m17: the log-rank (and Cox on a Survival table) accepted a time of

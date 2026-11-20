@@ -118,6 +118,13 @@ ENUM_OVERRIDES = {
     # (types.ts ThreeWayAnovaParams / NestedAnovaParams comments).
     ("three-way-anova", "posthoc"): ["tukey", "bonferroni"],
     ("nested-anova", "posthoc"): ["tukey", "bonferroni"],
+    # The merged `correction` PARAMS list admits every family's values (seq
+    # 193 widened it for multiple-t-tests), so each family's enum is narrowed
+    # here: survival only offers holm/fdr/none, multiple-t-tests the full
+    # Prism set. (PARAM_CHOICES says the same, but the script's reader only
+    # parses flat scalar values there.)
+    ("survival", "correction"): ARRAYS["CORRECTIONS"],
+    ("multiple-t-tests", "correction"): ARRAYS["MULTIPLE_T_TEST_CORRECTIONS"],
     # Linear regression never sees replicate columns, so 1/sd2 is not
     # offered (types.ts LinearRegressionParams.weights).
     ("linear-regression", "weights"): ["none", "1/y", "1/y2", "1/x", "1/x2"],
@@ -538,8 +545,8 @@ for typ, keys in sorted(KEYS_BY_TYPE.items()):
         out["gates"] = GATES[typ]
     schema[typ] = out
 
-# Sanity: 53 types, every key accounted for, offered_on non-empty.
-assert len(schema) == 53, f"{len(schema)} types, expected 53"
+# Sanity: 54 types, every key accounted for, offered_on non-empty.
+assert len(schema) == 54, f"{len(schema)} types, expected 54"
 for typ, entry in schema.items():
     assert entry["offered_on"], f"{typ} offered on no table type"
     assert entry["min_columns"] is not None, f"{typ} has no min_columns"
