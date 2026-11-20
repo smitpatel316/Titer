@@ -299,8 +299,10 @@ export interface Wizard {
   /** Every question, given the answers so far (false: not asked with these answers).
    *  `tableType` scopes the questions to the table's kind (the Monte Carlo
    *  wizard offers different targets for Column and XY tables); wizards that
-   *  don't need it ignore it, and callers without a table pass none. */
-  questions: (a: Answers, table: Dataset, tableType?: TableType) => (Question | false)[];
+   *  don't need it ignore it, and callers without a table pass none.
+   *  `rowGroups` is a grouped table's third-factor bands (the three-way ANOVA's
+   *  factor C): only the three-way wizard needs it, for its Dunnett-control options. */
+  questions: (a: Answers, table: Dataset, tableType?: TableType, rowGroups?: RowGroup[]) => (Question | false)[];
   /** The test to create, once every question is answered. */
   finish: (a: Answers, table: Dataset, tableType?: TableType) => { type: AnalysisType; params?: AnalysisParams };
   /** The assumptions checklist for the test this wizard is building, given
@@ -3447,6 +3449,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
   "three-way-anova": {
     questions: (a, table, _type, rowGroups) => {
       const controlOptions = a.posthoc === "dunnett" ? threeWayControlOptions(a, table, rowGroups) : undefined;
+      const termIsInteraction = ((a.posthocTerm as string | undefined) ?? "").includes(":");
       return [
         ...someSets(table, 2),
         choice("posthoc", "Run multiple comparisons? Only meaningful if the ANOVA is significant.", [
@@ -3475,7 +3478,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             ],
           ),
         a.posthoc !== "none" &&
-          (a.posthocTerm as string | undefined)?.includes(":") &&
+          termIsInteraction &&
           choice("posthocScope", "Compare the whole term, or its simple effects?", [
             ["term", "The whole term — every level combination against every other"],
             ["simple", "Simple effects — the first factor's levels within each level of the last factor"],
@@ -3484,9 +3487,9 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           controlOptions !== undefined &&
           choice(
             "control",
-            a.posthocScope === "simple" && (a.posthocTerm as string | undefined)?.includes(":")
+            a.posthocScope === "simple" && termIsInteraction
               ? "Which level is the control (compared within each level of the last factor)?"
-              : (a.posthocTerm as string | undefined)?.includes(":")
+              : termIsInteraction
                 ? "Which cell is the control?"
                 : "Which level is the control?",
             names(controlOptions),

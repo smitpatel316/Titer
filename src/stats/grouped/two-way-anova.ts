@@ -328,7 +328,7 @@ async function runPosthoc(
       rMethodOf(method),
     )})`,
   );
-  const rows = cells.map((c, k) => ({
+  const comparisons = cells.map((c, k) => ({
     group1: c.label1,
     group2: c.label2,
     ...(c.at ? { cells: c.at } : {}),
@@ -337,21 +337,21 @@ async function runPosthoc(
     high: v[`hi_${k}`] ?? null,
     p: v[`p_${k}`] ?? null,
   }));
-  if (method !== "fdr" || !fdr) return rows;
+  if (method !== "fdr" || !fdr) return comparisons;
   // The FDR approach: R returned Fisher's LSD's raw P values (one family at a
   // time); each family's are adjusted here, in TypeScript.
   for (const family of [...new Set(cells.map((c) => c.family))]) {
     const idx = cells.map((c, i) => (c.family === family ? i : -1)).filter((i) => i >= 0);
     const adjusted = adjustFdrPValues(
-      idx.map((i) => rows[i].p),
+      idx.map((i) => comparisons[i].p),
       fdr.method,
       fdr.q,
     );
     idx.forEach((i, k) => {
-      rows[i] = { ...rows[i], p: adjusted[k] };
+      comparisons[i] = { ...comparisons[i], p: adjusted[k] };
     });
   }
-  return rows;
+  return comparisons;
 }
 
 /** R comparing the cells of a repeated-measures design without assuming sphericity (`Y`:
