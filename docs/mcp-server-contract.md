@@ -107,7 +107,9 @@ written on server start, removed on server stop.
   desktop app uses a local token). Do not implement an OAuth flow.
 - **No outbound network, ever, from the server or the bridge** — except
   the cloud tools (§9), which reach the connected storage provider by
-  design (they are the only tools with `open_world_hint: true`). The
+  design, and `titer_send_feedback` (§6), which POSTs the report to the
+  feedback server only when the user has turned on feedback sharing.
+  Those ten are the only tools with `open_world_hint: true`. The
   server only listens; the bridge only talks to `127.0.0.1` plus, for
   cloud tools, the provider the user connected in Settings.
 
@@ -281,7 +283,11 @@ spreadsheet can never become a command.
 ## 6. Read / discovery tools (12) — all read-only
 
 All twelve are annotated `read_only_hint: true`, `destructive_hint:
-false`, `idempotent_hint: true`, `open_world_hint: false`.
+false`, `idempotent_hint: true` — and `open_world_hint: false`, except
+`titer_send_feedback`, which is `open_world_hint: true`: with feedback
+sharing on it POSTs the report to the feedback server (see its row
+below), so no agent-side policy that trusts `read_only_hint` should
+treat it as a local-only read.
 
 | Tool | Arguments | Returns |
 |---|---|---|
@@ -299,7 +305,7 @@ false`, `idempotent_hint: true`, `open_world_hint: false`.
 | `titer_read_figure` | `project_id?`, `figure_id` | `{ project_id, figure_id, name, panels: [{ graph_id, rect }], grid, title }`. Phase 1 had no figure reader; needed to verify a figure before exporting it. Shape follows the stored figure node. |
 | `titer_read_info_sheet` | `project_id?`, `info_sheet_id` | `{ project_id, info_sheet_id, name, linked_table_id?, info }`. Pairs with the `info_sheets` array in `titer_list_projects`. |
 | `titer_read_activity` | `limit?` (default 50, max 500) | `{ lines: string[] }` (newest last) — the agent's own audit trail (what it did, what failed). Lines are the stored JSONL as-is (§10). |
-| `titer_send_feedback` | `kind` (`"bug"` \| `"missing-feature"` \| `"other"`), `summary` (short, required, at most 200 characters), `details` (required, at most 4000 characters — what was tried, what happened, what was expected), `failed_tool?` (the tool or step that failed, if any) | `{ feedback_id, received: true, sent: true/false, ... }`. Reports a missing feature or a bug to the Titer team — **read-only wrt the project**: it never touches a snapshot, a job, or a project file. The report is always saved on this Mac first: one JSONL entry appended to `<app_data>/mcp/feedback.jsonl` (same 0700 directory as the token, §10), and the user reviews the entries in Settings → AI Connections, sending one to GitHub only by clicking "Send to GitHub" there. **Consent gate:** the entry is also POSTed to the feedback server (`POST https://feedback.smitpatel.net/api/v1/feedback`, 10 s timeout) only when the user has turned on feedback sharing — first-run prompt (Share / Don't share, default off) or the Settings toggle, recorded in `<app_data>/mcp/feedback-consent.json`. Sharing off → `{ feedback_id, received: true, sent: false, sharing: "disabled", note: "…" }` and no POST is attempted (the tool says sharing is disabled, never silently stays local). Sharing on + server 201 → `{ feedback_id, received: true, sent: true, issue_url: "…" }`. Sharing on + server unreachable / timeout / non-2xx → `{ feedback_id, received: true, sent: false, sharing: "enabled", error: "…" }` — the entry stays saved locally and the tool call still succeeds. The bridge auto-attaches minimal context only: app version, OS, the failed tool/step if any, and the last few Activity lines (tool names + ok flags only). **No table data values, no file paths beyond the project file name.** An unknown `kind`, an empty `summary`/`details`, or an over-long one is a plain-language tool error naming the valid choices. |
+| `titer_send_feedback` | `kind` (`"bug"` \| `"missing-feature"` \| `"other"`), `summary` (short, required, at most 200 characters), `details` (required, at most 4000 characters — what was tried, what happened, what was expected), `failed_tool?` (the tool or step that failed, if any) | `{ feedback_id, received: true, sent: true/false, ... }`. Reports a missing feature or a bug to the Titer team — **read-only wrt the project**: it never touches a snapshot, a job, or a project file. **But it is `open_world_hint: true`, not a local-only read:** the report is always saved on this Mac first: one JSONL entry appended to `<app_data>/mcp/feedback.jsonl` (same 0700 directory as the token, §10), and the user reviews the entries in Settings → AI Connections, sending one to GitHub only by clicking "Send to GitHub" there. **Consent gate:** the entry is also POSTed to the feedback server (`POST https://feedback.smitpatel.net/api/v1/feedback`, 10 s timeout) only when the user has turned on feedback sharing — first-run prompt (Share / Don't share, default off) or the Settings toggle, recorded in `<app_data>/mcp/feedback-consent.json`. Sharing off → `{ feedback_id, received: true, sent: false, sharing: "disabled", note: "…" }` and no POST is attempted (the tool says sharing is disabled, never silently stays local). Sharing on + server 201 → `{ feedback_id, received: true, sent: true, issue_url: "…" }`. Sharing on + server unreachable / timeout / non-2xx → `{ feedback_id, received: true, sent: false, sharing: "enabled", error: "…" }` — the entry stays saved locally and the tool call still succeeds. The bridge auto-attaches minimal context only: app version, OS, the failed tool/step if any, and the last few Activity lines (tool names + ok flags only). **No table data values, no file paths beyond the project file name.** An unknown `kind`, an empty `summary`/`details`, or an over-long one is a plain-language tool error naming the valid choices. |
 
 ## 7. Analyses (53 types) — run, freeze, simulate, method, wand, script
 
@@ -569,8 +575,9 @@ Annotations: 18 tools are `read_only_hint: true` (the 12 read tools +
 are mutating. `destructive_hint: true` on exactly six:
 `titer_write_table`, `titer_edit_table`, `titer_delete_node`,
 `titer_close_project`, `titer_run_script`, `titer_cloud_upload`.
-`open_world_hint: true` on the nine cloud tools only; everything else
-is `false`. `idempotent_hint` is per-tool (e.g. `titer_save_project`,
+`open_world_hint: true` on the nine cloud tools plus
+`titer_send_feedback` (which POSTs to the feedback server when sharing
+is on, §6); everything else is `false`. `idempotent_hint` is per-tool (e.g. `titer_save_project`,
 `titer_rename_node`, `titer_reorder_nodes` are idempotent; create/undo/
 redo/run tools are not).
 

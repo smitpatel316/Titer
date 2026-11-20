@@ -3832,16 +3832,18 @@ impl TiterMcpServer {
     /// tool/step that failed if any, and the last few Activity lines
     /// (tool names + ok flags only). No table data values, no file
     /// paths beyond the project file name. Read-only wrt the project:
-    /// it never touches a snapshot, a job, or a file the project owns.
+    /// it never touches a snapshot, a job, or a file the project owns
+    /// — but it is `open_world_hint: true`, not a local-only read:
+    /// with sharing on it POSTs the report to the feedback server.
     #[tool(
         name = "titer_send_feedback",
-        description = "Report a missing feature or a bug to the Titer team (kind: \"bug\" | \"missing-feature\" | \"other\"; summary: one short line; details: what was tried, what happened, what was expected — no table data values). The report is always saved on this Mac for the user to review in Settings → AI Connections. If the user has turned on feedback sharing there, it is also sent to the Titer team (the report text only — no project data, no file contents, no personal info); if sharing is off, it stays on this Mac. Returns { feedback_id, received: true, sent: true/false, ... }.",
+        description = "Report a missing feature or a bug to the Titer team (kind: \"bug\" | \"missing-feature\" | \"other\"; summary: one short line; details: what was tried, what happened, what was expected — no table data values). The report is always saved on this Mac for the user to review in Settings → AI Connections. If the user has turned on feedback sharing there, it is also POSTed over the network to the Titer team's feedback server (the report text only — no project data, no file contents, no personal info); if sharing is off, it stays on this Mac and nothing leaves the machine. Returns { feedback_id, received: true, sent: true/false, ... }.",
         annotations(
             title = "Send feedback",
             read_only_hint = true,
             destructive_hint = false,
             idempotent_hint = false,
-            open_world_hint = false
+            open_world_hint = true
         )
     )]
     async fn send_feedback(
