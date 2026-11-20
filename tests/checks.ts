@@ -4333,6 +4333,7 @@ check("every analysis checklist is complete and the coverage boundary holds", ()
       "linear-regression",
       "multiple-t-tests",
       "nonlinear-regression",
+      "one-sample-ks",
       "one-sample-t",
       "survival",
       "three-way-anova",
