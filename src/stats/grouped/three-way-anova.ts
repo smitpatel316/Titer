@@ -6,19 +6,37 @@
 // reuses the pooled-MSE + ptukey technique from the two-way ANOVA's runPosthoc
 // (q = sqrt(2)*|t|, t from the pooled-MSE two-sample statistic). No TukeyHSD call.
 import type { AnalysisOutcome, Column, ComparisonRow, ThreeWayAnovaParams } from "../types";
+import { FDR_METHODS, THREE_WAY_POSTHOCS, THREE_WAY_POSTHOC_SCOPES, fdrQError } from "../types";
 import type { RowGroup } from "../../store/types";
-import { describe, pairIndices, pRow, rStr, rVec } from "../column/base";
+import { adjustFdrPValues, adjustPValues, describe, pairIndices, pRow, R_ADJUST, R_CRIT, R_PTUKEY, rStr, rVec, type FdrMethod } from "../column/base";
 import { evalNamedVector } from "../webr";
 import { flattenThreeWay, rowGroupBands, rowName } from "./base";
+import { R_MAXIMUM_T } from "../column/anova";
 import { mean } from "../../lib/summary";
 
 const TERMS = ["A", "B", "C", "A:B", "A:C", "B:C", "A:B:C"] as const;
 type ThreeWayTerm = (typeof TERMS)[number];
+type ThreeWayMethod = (typeof THREE_WAY_POSTHOCS)[number];
+
+/** The FDR approach's heading: its method and its Q (shared wording with the
+ *  two-way ANOVA's — same approach, same words). */
+const FDR_LABEL: Record<FdrMethod, string> = {
+  bh: "Benjamini-Hochberg",
+  bky: "Benjamini-Krieger-Yekutieli (two-stage)",
+  by: "Benjamini-Yekutieli",
+};
+const fdrLabel = (method: FdrMethod, q: number) => `FDR approach (${FDR_LABEL[method]}, Q = ${q}%)`;
 
 /** The cell means of one term: one entry per level (or level combination),
- *  with the values behind it and its result-table label. */
+ *  with the values behind it, its result-table label, the label a Dunnett
+ *  control is matched by inside a simple-effect family (`within` — the first
+ *  factor's label: an A level for A:B, an A:B cell for A:B:C; for a whole-term
+ *  family the control is matched by the full `label` instead), and the family
+ *  a simple-effect split puts it in (`split` — the term's last factor's level). */
 interface TermCell {
   label: string;
+  within: string;
+  split: string;
   values: number[];
 }
 
@@ -27,32 +45,61 @@ function termCells(
   flat: { values: number[]; a: string[]; b: string[]; c: string[] },
   titles: (string | null)[],
 ): TermCell[] {
-  const byKey = new Map<string, { label: string; values: number[] }>();
+  const byKey = new Map<string, TermCell>();
   const bLabel = (b: string) => rowName(titles, Number(b.slice(1)) - 1);
-  const keyAndLabel = (i: number): [string, string] => {
+  // Each component's key and label: [key, label, within-label]. The within
+  // label drops the term's last factor — so a Dunnett control names the level
+  // compared within each simple-effect family (an A level for A:B, an A:B cell
+  // for A:B:C), and the whole cell for a whole-term family.
+  const partsOf = (i: number): [string, string][] => {
     const a = flat.a[i];
     const b = flat.b[i];
     const c = flat.c[i];
     switch (term) {
       case "A":
-        return [a, a];
+        return [[a, a]];
       case "B":
-        return [b, bLabel(b)];
+        return [[b, bLabel(b)]];
       case "C":
-        return [c, c];
+        return [[c, c]];
       case "A:B":
-        return [`${a}\n${b}`, `${a} (${bLabel(b)})`];
+        return [
+          [a, a],
+          [b, bLabel(b)],
+        ];
       case "A:C":
-        return [`${a}\n${c}`, `${a} (${c})`];
+        return [
+          [a, a],
+          [c, c],
+        ];
       case "B:C":
-        return [`${b}\n${c}`, `${bLabel(b)} (${c})`];
+        return [
+          [b, bLabel(b)],
+          [c, c],
+        ];
       case "A:B:C":
-        return [`${a}\n${b}\n${c}`, `${a} (${bLabel(b)}, ${c})`];
+        return [
+          [a, a],
+          [b, bLabel(b)],
+          [c, c],
+        ];
     }
   };
+  const joinLabel = (parts: [string, string][], dropLast: boolean) => {
+    const kept = dropLast ? parts.slice(0, -1) : parts;
+    if (kept.length === 0) return parts[0][1];
+    const [first, ...rest] = kept.map(([, label]) => label);
+    return rest.length ? `${first} (${rest.join(", ")})` : first;
+  };
   flat.values.forEach((v, i) => {
-    const [key, label] = keyAndLabel(i);
-    const cell = byKey.get(key) ?? { label, values: [] };
+    const parts = partsOf(i);
+    const key = parts.map(([k]) => k).join("\n");
+    const cell = byKey.get(key) ?? {
+      label: joinLabel(parts, false),
+      within: joinLabel(parts, true),
+      split: parts[parts.length - 1][0],
+      values: [] as number[],
+    };
     cell.values.push(v);
     byKey.set(key, cell);
   });
@@ -61,30 +108,236 @@ function termCells(
   return [...byKey.values()];
 }
 
+/** One pair the post-hoc compares: the two term cells, their difference and
+ *  t (on the ANOVA's pooled MSE — or, for Games-Howell, the two cells' own
+ *  variances and Welch df), the size of its family, and its family index. */
+interface PosthocPair {
+  label1: string;
+  label2: string;
+  diff: number;
+  t: number;
+  se: number;
+  df: number;
+  means: number;
+  family: number;
+}
+
+/** The pairs of a family's `count` members compared: each with the control
+ *  (`control`, an index; Dunnett), else every pair. */
+const familyPairs = (count: number, control?: number): [number, number][] =>
+  control === undefined
+    ? pairIndices(count)
+    : Array.from({ length: count }, (_, i): [number, number] => [i, control]).filter(([i]) => i !== control);
+
+/** R: a pair's P from its t (`x`) at `df`, for the single-step methods — Tukey's
+ *  against the studentized range, Dunnett's against the largest t (its weights
+ *  `l`), Games-Howell's against the range at its Welch df, Bonferroni's and
+ *  Šídák's from the raw P times the family's `m` pairs, the rest raw (the
+ *  step-down and FDR adjustments run afterwards, in TypeScript). */
+const pExpr = (method: ThreeWayMethod, t: string, means: number, df: string, m: number, l?: string) =>
+  method === "tukey"
+    ? `1-ptukey(${t}*sqrt(2),${means},${df})`
+    : method === "dunnett"
+      ? `dun(${t},${l},${df})`
+      : method === "games-howell"
+        ? `ptk(${t}*sqrt(2),${means},${df})`
+        : method === "bonferroni"
+          ? `pmin(1,${m}*2*pt(-${t},${df}))`
+          : method === "sidak"
+            ? `1-(1-2*pt(-${t},${df}))^${m}`
+            : `2*pt(-${t},${df})`;
+
+/** R: a pair's 95% CI half-width, as a multiple of its standard error: the
+ *  statistic at which its method's P is 0.05 (Tukey / Dunnett / Games-Howell /
+ *  Bonferroni / Šídák), the unadjusted t for Fisher's LSD, none for the
+ *  step-down Holm–Šídák and the FDR approach — as in the two-way ANOVA, no
+ *  multiplicity-adjusted interval exists for those two, so the comparison
+ *  carries no CI rather than a wrong one. */
+const ciHalf = (
+  method: ThreeWayMethod,
+  means: number,
+  df: string,
+  m: number,
+  cvDunnett?: string,
+): string | undefined => {
+  switch (method) {
+    case "tukey":
+      return `crit(function(x)ptk(x*sqrt(2),${means},${df}))`;
+    case "dunnett":
+      return cvDunnett;
+    case "games-howell":
+      return `crit(function(x)ptk(x*sqrt(2),${means},${df}))`;
+    case "bonferroni":
+      return `crit(function(x)pa(x,${df},"bonferroni",${m}))`;
+    case "sidak":
+      return `crit(function(x)pa(x,${df},"sidak",${m}))`;
+    case "lsd":
+      return `qt(0.975,${df})`;
+    default:
+      return undefined;
+  }
+};
+
 async function runPosthoc(
   cells: TermCell[],
-  method: "tukey" | "bonferroni",
+  method: ThreeWayMethod,
   mse: number,
   dfResid: number,
-): Promise<ComparisonRow[] | undefined> {
-  const pairs: { label1: string; label2: string; diff: number; t: number }[] = [];
-  for (const [i, j] of pairIndices(cells.length)) {
-    const vi = cells[i].values;
-    const vj = cells[j].values;
-    const diff = mean(vi) - mean(vj);
-    const t = diff / Math.sqrt(mse * (1 / vi.length + 1 / vj.length));
-    pairs.push({ label1: cells[i].label, label2: cells[j].label, diff, t });
+  scope: "term" | "simple",
+  control?: string,
+  fdr?: { method: FdrMethod; q: number },
+): Promise<ComparisonRow[] | { error: string } | undefined> {
+  // The families: one for the whole term, or one per level of the term's last
+  // factor (simple effects). On a main effect the split is the term itself,
+  // so simple is the whole term.
+  const families = scope === "simple" ? [...new Set(cells.map((c) => c.split))] : [""];
+  const familyOf = (c: TermCell) => (scope === "simple" ? families.indexOf(c.split) : 0);
+  // Dunnett's control is matched by the full cell label for a whole-term
+  // family, by the first factor's label inside a simple-effect family.
+  const matchLabel = (c: TermCell) => (scope === "simple" ? c.within : c.label);
+  const pairs: PosthocPair[] = [];
+  for (const family of families) {
+    const members = cells.filter((c) => (scope === "simple" ? c.split === family : true));
+    const controlAt =
+      method === "dunnett" ? members.findIndex((c) => matchLabel(c) === control) : undefined;
+    if (method === "dunnett" && controlAt === -1)
+      return {
+        error:
+          `The control ${scope === "simple" ? "level" : "cell"}${control ? ` “${control}”` : ""} ` +
+          `is not one of the ${scope === "simple" ? "levels compared" : "cells"} of this term. ` +
+          "Create this analysis again to choose another.",
+      };
+    for (const [i, j] of familyPairs(members.length, controlAt)) {
+      const vi = members[i].values;
+      const vj = members[j].values;
+      const diff = mean(vi) - mean(vj);
+      if (method === "games-howell") {
+        if (vi.length < 2 || vj.length < 2)
+          return {
+            error:
+              "Games-Howell compares each cell on its own scatter: every cell compared needs 2 values or more that vary.",
+          };
+        const va = variance(vi) / vi.length;
+        const vb = variance(vj) / vj.length;
+        const se = Math.sqrt(va + vb);
+        const df = (va + vb) ** 2 / (va ** 2 / (vi.length - 1) + vb ** 2 / (vj.length - 1));
+        pairs.push({
+          label1: members[i].label,
+          label2: members[j].label,
+          diff,
+          t: Math.abs(diff) / se,
+          se,
+          df,
+          means: members.length,
+          family: familyOf(members[i]),
+        });
+      } else {
+        const se = Math.sqrt(mse * (1 / vi.length + 1 / vj.length));
+        pairs.push({
+          label1: members[i].label,
+          label2: members[j].label,
+          diff,
+          t: Math.abs(diff) / se,
+          se,
+          df: dfResid,
+          means: members.length,
+          family: familyOf(members[i]),
+        });
+      }
+    }
   }
   if (pairs.length === 0) return undefined;
-  const nmeans = cells.length;
-  const m = pairs.length;
-  const rCode =
-    method === "tukey"
-      ? `c(${pairs.map((c, k) => `p${k}=1-ptukey(${Math.abs(c.t) * Math.SQRT2},${nmeans},${dfResid})`).join(",")})`
-      : `c(${pairs.map((c, k) => `p${k}=pmin(1,${m}*2*pt(${-Math.abs(c.t)},${dfResid}))`).join(",")})`;
-  const v = await evalNamedVector(rCode);
-  return pairs.map((c, k) => ({ group1: c.label1, group2: c.label2, diff: c.diff, p: v[`p${k}`] ?? null }));
+  const df = String(dfResid);
+  // Dunnett: each family's weights (√(n / (n + n of its control))) and critical
+  // value, once — the same construction as the two-way ANOVA's runPosthoc.
+  const dunnettSetup =
+    method === "dunnett"
+      ? `${R_MAXIMUM_T}\n` +
+        families
+          .map((family, f) => {
+            const members = cells.filter((c) => (scope === "simple" ? c.split === family : true));
+            const controlAt = members.findIndex((c) => matchLabel(c) === control);
+            const weights = members
+              .filter((_, i) => i !== controlAt)
+              .map((c) => c.values.length);
+            const nc = members[controlAt].values.length;
+            const nComp = members.length - 1;
+            return (
+              `l${f}<-sqrt(c(${weights.join(",")})/(c(${weights.join(",")})+${nc}));` +
+              `cv${f}<-crit(function(x)dun(x,l${f},${df}),qt(1-0.025/c(1,${nComp}),${df}))`
+            );
+          })
+          .join(";") +
+        ";"
+      : "";
+  // The per-pair statements: each pair's difference, its P, and its CI when the
+  // method admits one — assigned as d_k / p_k / lo_k / hi_k, then gathered.
+  const assigns = pairs.map((p, k) => {
+    const t = String(p.t);
+    const m = (p.means * (p.means - 1)) / 2;
+    const l = method === "dunnett" ? `l${p.family}` : undefined;
+    const pDf = method === "games-howell" ? String(p.df) : df;
+    const pValue = pExpr(method, t, p.means, pDf, m, l);
+    const half = ciHalf(method, p.means, pDf, m, method === "dunnett" ? `cv${p.family}` : undefined);
+    return (
+      `d_${k}<-${p.diff};p_${k}<-${pValue};` +
+      (half === undefined ? "" : `h_${k}<-${half}*${p.se};lo_${k}<-d_${k}-h_${k};hi_${k}<-d_${k}+h_${k};`)
+    );
+  });
+  const v = await evalNamedVector(
+    `${R_PTUKEY};${R_CRIT};${R_ADJUST};${dunnettSetup}${assigns.join("")}` +
+      `c(${pairs.map((_, k) => `d_${k}=d_${k},p_${k}=p_${k}`).join(",")}` +
+      `${pairs
+        .map((p, k) =>
+          ciHalf(
+            method,
+            p.means,
+            method === "games-howell" ? String(p.df) : df,
+            (p.means * (p.means - 1)) / 2,
+            method === "dunnett" ? `cv${p.family}` : undefined,
+          ) === undefined
+            ? ""
+            : `,lo_${k}=lo_${k},hi_${k}=hi_${k}`,
+        )
+        .join("")})`,
+  );
+  const rows = pairs.map((p, k) => ({
+    group1: p.label1,
+    group2: p.label2,
+    diff: v[`d_${k}`] ?? null,
+    low: v[`lo_${k}`] ?? null,
+    high: v[`hi_${k}`] ?? null,
+    p: v[`p_${k}`] ?? null,
+  }));
+  // Step-down and FDR adjustments need the whole family sorted — R returned the
+  // raw P values, so they are adjusted here, in TypeScript, per family.
+  if (method === "holm-sidak" || method === "fdr") {
+    for (const family of [...new Set(pairs.map((p) => p.family))]) {
+      const idx = pairs.map((p, i) => (p.family === family ? i : -1)).filter((i) => i >= 0);
+      const adjusted =
+        method === "holm-sidak"
+          ? adjustPValues(
+              idx.map((i) => rows[i].p),
+              "holm-sidak",
+            )
+          : adjustFdrPValues(
+              idx.map((i) => rows[i].p),
+              fdr!.method,
+              fdr!.q,
+            );
+      idx.forEach((i, k) => {
+        rows[i] = { ...rows[i], p: adjusted[k] };
+      });
+    }
+  }
+  return rows;
 }
+
+/** A sample variance (n − 1), for Games-Howell's per-pair Welch statistics. */
+const variance = (values: number[]) => {
+  const m = mean(values);
+  return values.reduce((s, v) => s + (v - m) ** 2, 0) / (values.length - 1);
+};
 
 export async function runThreeWayAnova(
   columns: Column[],
@@ -174,29 +427,93 @@ export async function runThreeWayAnova(
   ).groups;
 
   const posthoc = params?.posthoc ?? "none";
-  // POSTHOCS also carries the Šídák / Holm–Šídák / LSD options other ANOVAs
-  // offer — this runner only does Tukey and Bonferroni, so refuse those here
-  // rather than silently running Bonferroni under a Šídák label.
-  if (posthoc !== "none" && posthoc !== "tukey" && posthoc !== "bonferroni") {
+  // The runner only does the methods in THREE_WAY_POSTHOCS — refuse the rest
+  // rather than silently running Bonferroni under another label.
+  if (!(THREE_WAY_POSTHOCS as readonly string[]).includes(posthoc)) {
     return {
       error:
         `“${posthoc}” multiple comparisons are not available for three-way ANOVA — ` +
-        `choose Tukey or Bonferroni.`,
+        `choose Tukey, Bonferroni, Šídák, Holm–Šídák, Fisher's LSD, Dunnett, Games-Howell or the FDR approach.`,
     };
   }
   const posthocTerm: ThreeWayTerm =
     params?.posthocTerm && (TERMS as readonly string[]).includes(params.posthocTerm) ? params.posthocTerm : "A";
+  // Simple effects only split an interaction term; on a main effect the scope
+  // is the whole term, whatever was asked.
+  const posthocScope =
+    params?.posthocScope === "simple" && posthocTerm.includes(":") ? "simple" : "term";
+  if (params?.posthocScope !== undefined && !(THREE_WAY_POSTHOC_SCOPES as readonly string[]).includes(params.posthocScope)) {
+    return {
+      error: `“${params.posthocScope}” is not a three-way comparison scope — choose the whole term, or simple effects.`,
+    };
+  }
+  if (posthoc === "fdr") {
+    if (params?.fdrMethod !== undefined && !(FDR_METHODS as readonly string[]).includes(params.fdrMethod)) {
+      return {
+        error: `“${params.fdrMethod}” is not an FDR method — choose Benjamini-Hochberg, Benjamini-Krieger-Yekutieli or Benjamini-Yekutieli.`,
+      };
+    }
+    const qError = params?.fdrQ === undefined ? undefined : fdrQError(params.fdrQ);
+    if (qError) return { error: qError };
+  }
   const cells = posthoc === "none" ? [] : termCells(posthocTerm, flat, titles);
   const comparisons =
-    posthoc === "none" ? undefined : await runPosthoc(cells, posthoc, v.mse ?? NaN, v.dfResid ?? NaN);
+    posthoc === "none"
+      ? undefined
+      : await runPosthoc(
+          cells,
+          posthoc,
+          v.mse ?? NaN,
+          v.dfResid ?? NaN,
+          posthocScope,
+          params?.control,
+          posthoc === "fdr" ? { method: params?.fdrMethod ?? "bh", q: params?.fdrQ ?? 5 } : undefined,
+        );
+  if (comparisons && "error" in comparisons) return comparisons;
   const bLabels = bLevels.map((b) => rowName(titles, Number(b.slice(1)) - 1));
+  const methodLabel =
+    posthoc === "tukey"
+      ? "Tukey's"
+      : posthoc === "bonferroni"
+        ? "Bonferroni-corrected"
+        : posthoc === "sidak"
+          ? "Šídák-corrected"
+          : posthoc === "holm-sidak"
+            ? "Holm–Šídák"
+            : posthoc === "lsd"
+              ? "Fisher's LSD (uncorrected)"
+              : posthoc === "dunnett"
+                ? `Dunnett's (vs. ${params?.control})`
+                : posthoc === "games-howell"
+                  ? "Games-Howell"
+                  : fdrLabel(params?.fdrMethod ?? "bh", params?.fdrQ ?? 5);
+  const scopeLabel =
+    posthocScope === "simple"
+      ? `simple effects (the first factor's levels within each ${posthocTerm.split(":").at(-1)} level)`
+      : `${posthocTerm} ${posthocTerm.includes(":") ? "cell means" : "means"}`;
+  const fdrNote =
+    posthoc === "fdr" && comparisons
+      ? (() => {
+          const q = (params?.fdrQ ?? 5) / 100;
+          const discoveries = comparisons.filter((c) => c.p != null && c.p < q).length;
+          return (
+            ` ${fdrLabel(params?.fdrMethod ?? "bh", params?.fdrQ ?? 5)}: ${discoveries} of ${comparisons.length} ` +
+            `comparison${comparisons.length === 1 ? " is" : "s are"} discoveries (adjusted P < ${q}). ` +
+            "The P values are FDR-adjusted."
+          );
+        })()
+      : "";
   const notes =
     `A = Group (${aLevels.join(", ")}); B = Row (${bLabels.join(", ")}); C = Row group (${cLevels.join(", ")}). ` +
     `Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). ` +
     `${flat.values.length} observations in ${aLevels.length * bLevels.length * cLevels.length} cells` +
     (flat.dropped > 0 ? `; ${flat.dropped} empty cell${flat.dropped === 1 ? "" : "s"} left out` : "") +
     "." +
-    (posthoc === "none" ? "" : ` Multiple comparisons follow the ${posthocTerm} term.`);
+    (posthoc === "none" ? "" : ` Multiple comparisons follow the ${posthocTerm} term (${scopeLabel}).`) +
+    (posthoc === "holm-sidak" || posthoc === "fdr"
+      ? " No multiplicity-adjusted confidence interval exists for this method, so the comparisons carry none."
+      : "") +
+    fdrNote;
   return {
     testType: "three-way-anova",
     subtitle: "Ordinary three-way ANOVA",
@@ -205,8 +522,7 @@ export async function runThreeWayAnova(
     notes,
     comparisons,
     comparisonsLabel: comparisons?.length
-      ? `${posthoc === "tukey" ? "Tukey's" : "Bonferroni-corrected"} multiple comparisons test ` +
-        `(${posthocTerm} ${posthocTerm.includes(":") ? "cell means" : "means"})`
+      ? `${methodLabel} multiple comparisons test (${scopeLabel})`
       : undefined,
   };
 }
