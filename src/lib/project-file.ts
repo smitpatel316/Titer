@@ -73,6 +73,7 @@ import {
   NORMALIZE_ZERO_DEFS,
   POSTHOC_TARGETS,
   PRUNE_ROWS_CONDITIONS,
+  P_VALUE_STACK_METHODS,
   RANK_POSTHOCS,
   REMOVE_BASELINE_METHODS,
   ROUT_Q,
@@ -276,9 +277,12 @@ const PARAMS = {
   // the reader only sanitizes, each runner validates its own.
   model: [...NONLINEAR_MODELS, ...BINDING_SATURATION_MODELS, ...BINDING_KINETICS_MODELS, ...ENZYME_INHIBITION_MODELS, ...DOSE_RESPONSE_SPECIAL_MODELS],
   // `method` is shared by correlation ("pearson"/"spearman") and Spline/Lowess
-  // ("spline"/"lowess") — and now outliers ("rout"/"grubbs"): the reader only
-  // sanitizes, each runner validates its own.
-  method: [...CORRELATION_METHODS, "spline", "lowess", "rout", "grubbs"],
+  // ("spline"/"lowess") — and now outliers ("rout"/"grubbs") and the stack of
+  // P values (the seven corrections): the reader only sanitizes, each runner
+  // validates its own. The stack runner refuses a cross-family value with a
+  // clean error (the spline-lowess precedent), so it needs no PARAM_CHOICES
+  // narrowing.
+  method: [...CORRELATION_METHODS, "spline", "lowess", "rout", "grubbs", ...P_VALUE_STACK_METHODS],
   mode: CORRELATION_MODES, design: TWO_WAY_DESIGNS, posthocTarget: POSTHOC_TARGETS, correction: CORRECTIONS, curveTest: CURVE_TESTS, compare: CURVE_COMPARISONS,
   // Nonlinear regression framework (plan 26): weighting, model comparison,
   // global fitting, fixed parameters and bounds.
@@ -875,6 +879,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "shapiro-wilk": ["test", "lognormal", "sets"],
   "kolmogorov-smirnov": ["sets"],
   outliers: ["q", "method", "alpha", "iterate", "sets"],
+  "p-value-stack": ["method", "q", "alpha", "sets"],
   "monte-carlo": [
     "targetAnalysis", "summaryStatistic", "repeats", "seed", "groupMeans", "groupSds", "equalVariance",
     "hypotheticalValue", "y", "method", "sets",
