@@ -48,6 +48,10 @@ export type GraphType =
   | "scree-plot"
   | "pca-biplot"
   | "kmeans-scatter"
+  | "dendrogram"
+  | "elbow-plot"
+  | "silhouette-plot"
+  | "gap-plot"
   | "monte-carlo-histogram"
   | "bubble-plot"
   | "histogram"
@@ -244,6 +248,11 @@ export interface GraphOptions {
   // and centres from (see kmeans-scatter.ts) — the graph runs the same
   // cached runAnalysis result. It plots the first two variables.
   kmeansAnalysisId?: string;
+  // Hierarchical clustering (Multiple Variables only): the sibling
+  // "Hierarchical clustering" analysis a dendrogram or a choosing-k plot
+  // draws its tree and diagnostics from (see dendrogram.ts and
+  // choosing-k.ts) — the graph runs the same cached runAnalysis result.
+  hclustAnalysisId?: string;
   // A Multiple Variables table's scatter: its X and Y variables (column names); omitted,
   // the first two holding numbers.
   xVariable?: string;

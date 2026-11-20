@@ -50,6 +50,8 @@ import { addObservedFitted } from "./observed-fitted";
 import { addScreePlot } from "./scree-plot";
 import { addPcaBiplot } from "./pca-biplot";
 import { addKmeansScatter } from "./kmeans-scatter";
+import { addDendrogram } from "./dendrogram";
+import { addElbowPlot, addGapPlot, addSilhouettePlot } from "./choosing-k";
 import { addMonteCarloHistogram } from "./monte-carlo-histogram";
 import { addSignificance, deriveComparisons, GROUPED_STARS, starsFit } from "./significance-overlay";
 import {
@@ -504,6 +506,20 @@ export function GraphView({ node }: { node: ProjectNode }) {
     kmeansAnalysis?.analysisParams,
   );
   const kmeansResult = kmeansOutcome && !("error" in kmeansOutcome) ? kmeansOutcome : null;
+  // A dendrogram or a choosing-k plot draws a sibling Hierarchical
+  // clustering's tree and diagnostics — the same cached runAnalysis result
+  // (no extra R call). Without one it draws only its axes, and the Format
+  // panel says to run the analysis first — exactly like the scree plot.
+  const hclustAnalysis = options.hclustAnalysisId ? nodes[options.hclustAnalysisId] : undefined;
+  const hclustOutcome = useAnalysis(
+    (type === "dendrogram" || type === "elbow-plot" || type === "silhouette-plot" || type === "gap-plot") &&
+      hclustAnalysis?.analysisType === "hierarchical-clustering"
+      ? "hierarchical-clustering"
+      : undefined,
+    data,
+    hclustAnalysis?.analysisParams,
+  );
+  const hclustResult = hclustOutcome && !("error" in hclustOutcome) ? hclustOutcome : null;
   // An estimation plot draws a sibling Compare two groups analysis's
   // difference between means with its 95% CI — the same cached runAnalysis
   // result (no extra R call). Without one it draws only the raw data, and
@@ -731,6 +747,22 @@ export function GraphView({ node }: { node: ProjectNode }) {
           addKmeansScatter(fig, columns, kmeansResult, options, paint, dataset?.titles);
         else unlinked("kmeans-scatter");
       }
+      if (type === "dendrogram") {
+        if (hclustResult) addDendrogram(fig, hclustResult, paint, options);
+        else unlinked("dendrogram");
+      }
+      if (type === "elbow-plot") {
+        if (hclustResult) addElbowPlot(fig, hclustResult, paint);
+        else unlinked("elbow-plot");
+      }
+      if (type === "silhouette-plot") {
+        if (hclustResult) addSilhouettePlot(fig, hclustResult, paint, options);
+        else unlinked("silhouette-plot");
+      }
+      if (type === "gap-plot") {
+        if (hclustResult) addGapPlot(fig, hclustResult, paint);
+        else unlinked("gap-plot");
+      }
       // The points' names are part of the figure (the volcano places its own, among the
       // genes it names); the selection ring only of the view. Labels clamp to the plot
       // edge (G-F4): the geometry comes from the figure's own ranges and size.
@@ -807,6 +839,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
     poissonParams,
     pcaResult,
     kmeansResult,
+    hclustResult,
     mcResult,
     allSeries.join("\n"),
     selected,

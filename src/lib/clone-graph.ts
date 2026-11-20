@@ -39,6 +39,7 @@ export const GRAPH_ANALYSIS_LINKS = [
   "poissonAnalysisId",
   "pcaAnalysisId",
   "kmeansAnalysisId",
+  "hclustAnalysisId",
   "smoothAnalysisId",
   "monteCarloAnalysisId",
 ] as const satisfies readonly (keyof GraphOptions)[];

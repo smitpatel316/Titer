@@ -22,6 +22,7 @@ import type {
   RowMeansTotalsParams,
   PlotFunctionParams,
   KMeansParams,
+  HclustParams,
   McNemarParams,
   MixedEffectsParams,
   MultipleRegressionParams,
@@ -87,6 +88,7 @@ import { runMultipleLogisticRegression } from "./multiple/multiple-logistic-regr
 import { runPoissonRegression } from "./multiple/poisson-regression";
 import { runPrincipalComponentAnalysis } from "./multiple/principal-component-analysis";
 import { runKMeans } from "./multiple/k-means";
+import { runHierarchicalClustering } from "./multiple/hierarchical-clustering";
 import { runChiSquare } from "./contingency/chi-square";
 import { runSurvival } from "./survival/survival-analysis";
 import { runCox } from "./survival/cox-regression";
@@ -332,6 +334,11 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     label: "K-means clustering",
     minColumns: 2,
     run: (c, p, t) => runKMeans(c, p as KMeansParams, t),
+  },
+  "hierarchical-clustering": {
+    label: "Hierarchical clustering",
+    minColumns: 2,
+    run: (c, p, t) => runHierarchicalClustering(c, p as HclustParams, t),
   },
   "chi-square": {
     label: "Chi-square or Fisher's exact test",

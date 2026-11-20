@@ -279,6 +279,28 @@ export function statisticsControls(c: SectionContext): React.ReactNode {
     }
     return <KmeansControls analyses={sources} options={options} set={set} />;
   }
+  if (
+    graphType === "dendrogram" ||
+    graphType === "elbow-plot" ||
+    graphType === "silhouette-plot" ||
+    graphType === "gap-plot"
+  ) {
+    const sources = c.analyses.filter((a) => a.analysisType === "hierarchical-clustering");
+    if (!sources.length) {
+      return (
+        <NoAnalysis test="hierarchical-clustering" onNewAnalysis={c.onNewAnalysis}>
+          {graphType === "dendrogram"
+            ? "Draw the merge tree of a Hierarchical clustering of this table, cut into its clusters."
+            : graphType === "elbow-plot"
+              ? "Draw within-cluster sum of squares against k from a Hierarchical clustering of this table."
+              : graphType === "silhouette-plot"
+                ? "Draw average silhouette width against k from a Hierarchical clustering of this table."
+                : "Draw the Gap statistic against k from a Hierarchical clustering of this table."}
+        </NoAnalysis>
+      );
+    }
+    return <HclustControls analyses={sources} options={options} set={set} />;
+  }
   if (graphType === "schild-plot") {
     // The plot draws from a sibling Gaddum/Schild analysis — nothing to
     // configure on the graph itself; without one, offer to start it.
@@ -487,6 +509,26 @@ function KmeansControls({
       analyses={analyses}
       value={options.kmeansAnalysisId}
       onChange={(kmeansAnalysisId) => set({ kmeansAnalysisId })}
+    />
+  );
+}
+
+/** Pick a Hierarchical clustering: the dendrogram draws its tree, the
+ *  choosing-k plots its diagnostics. */
+function HclustControls({
+  analyses,
+  options,
+  set,
+}: {
+  analyses: ProjectNode[];
+  options: GraphOptions;
+  set: SetOptions;
+}) {
+  return (
+    <AnalysisRow
+      analyses={analyses}
+      value={options.hclustAnalysisId}
+      onChange={(hclustAnalysisId) => set({ hclustAnalysisId })}
     />
   );
 }

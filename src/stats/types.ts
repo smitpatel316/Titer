@@ -31,6 +31,7 @@ export type AnalysisType =
   | "poisson-regression"
   | "principal-component-analysis"
   | "k-means"
+  | "hierarchical-clustering"
   | "spline-lowess"
   | "smooth-differentiate-integrate"
   | "binding-saturation"
@@ -514,6 +515,31 @@ export interface PrincipalComponentAnalysisParams {
  *  different scales, as Prism does by default). */
 export interface KMeansParams {
   clusters: number;
+  standardise?: boolean;
+}
+
+/** The linkage rules hierarchical clustering can merge clusters by (R
+ *  `hclust` methods): "complete" joins by the farthest pair, "average" by
+ *  the mean pair distance, "single" by the nearest pair, "ward.D2" by the
+ *  smallest increase in within-cluster variance (Ward's method, squared
+ *  Euclidean distances only). */
+export const HCLUST_LINKAGES = ["complete", "average", "single", "ward.D2"] as const;
+export type HclustLinkage = (typeof HCLUST_LINKAGES)[number];
+/** The distances hierarchical clustering can measure between rows (R `dist`
+ *  methods): straight-line ("euclidean") or city-block ("manhattan"). */
+export const HCLUST_DISTANCES = ["euclidean", "manhattan"] as const;
+export type HclustDistance = (typeof HCLUST_DISTANCES)[number];
+
+/** Params for "hierarchical-clustering" (Multiple Variables table): `clusters`
+ *  is k, the number of clusters to cut the tree into (default 2); `linkage`
+ *  is how clusters merge (default "complete"); `distance` is how rows are
+ *  measured apart (default "euclidean"); `standardise` z-scores each variable
+ *  before clustering (default true — recommended when variables are on
+ *  different scales, as Prism does by default). */
+export interface HclustParams {
+  clusters: number;
+  linkage?: HclustLinkage;
+  distance?: HclustDistance;
   standardise?: boolean;
 }
 
@@ -1194,6 +1220,7 @@ export type AnalysisParams = DataSetsParam &
     | PoissonRegressionParams
     | PrincipalComponentAnalysisParams
     | KMeansParams
+    | HclustParams
     | ExtractRearrangeParams
     | SplineLowessParams
     | SmoothDifferentiateIntegrateParams
@@ -1637,6 +1664,62 @@ export interface KMeansAssignmentRow {
   cluster: number;
 }
 
+/** One row of a hierarchical clustering's clusters table
+ *  ("hierarchical-clustering"): one cluster's centroid (the mean of its
+ *  members, in the ORIGINAL units — back-transformed when the variables were
+ *  standardised), its size, and its within-cluster sum of squares. Clusters
+ *  are in canonical order: sorted by their first centroid coordinate,
+ *  ascending — R's cutree numbers clusters by leaf order, so without this
+ *  the labels would depend on the tree's shape. */
+export interface HclustClusterRow {
+  cluster: string;
+  centroid: (number | null)[];
+  n: number;
+  withinSs: number | null;
+}
+
+/** One row of a hierarchical clustering's assignments table
+ *  ("hierarchical-clustering"): which (canonical) cluster one complete row
+ *  belongs to, in table order. `row` is the row title, or the row number
+ *  when the table has none. */
+export interface HclustAssignmentRow {
+  row: string;
+  cluster: number;
+}
+
+/** A hierarchical clustering's dendrogram ("hierarchical-clustering"): R's
+ *  `hclust` merge matrix, heights and leaf order, plus the row titles and
+ *  the height the tree is cut at for the chosen k. `merge` is one row per
+ *  merge step (n − 1 rows): R's own convention, kept as-is — a negative
+ *  entry −i is leaf i (1-based, into the complete rows), a positive entry
+ *  j is merge step j (1-based). The sign is what tells a leaf from a step,
+ *  so entries are never re-based to 0.
+ *  `order` is the leaves left-to-right as R plots them (0-based indices
+ *  into the complete rows); `labels` are the complete rows' titles, in
+ *  table order. `cutHeight` is the midpoint between the two merge heights
+ *  the chosen k falls between, or null when k leaves a single cluster. */
+export interface HclustDendrogram {
+  merge: number[][];
+  heights: number[];
+  order: number[];
+  labels: string[];
+  cutHeight: number | null;
+}
+
+/** One row of a hierarchical clustering's choosing-k table
+ *  ("hierarchical-clustering"): for one k, the within-cluster sum of
+ *  squares (the Elbow plot), the average silhouette width (the Silhouette
+ *  plot), and the Gap statistic with its standard error (the Gap plot) —
+ *  the three guides for choosing k. `gap` / `gapSe` are null when the Gap
+ *  statistic could not be computed for that k. */
+export interface ChoosingKRow {
+  k: number;
+  withinSs: number | null;
+  avgSilhouette: number | null;
+  gap: number | null;
+  gapSe: number | null;
+}
+
 /** One row of a PCA variance-explained table ("principal-component-analysis"):
  *  one component's standard deviation, eigenvalue (variance), and share of
  *  the total variance, with the running total. */
@@ -1840,6 +1923,18 @@ export interface AnalysisResult {
    *  so a stored result is stable across runs. */
   kmeansClusters?: KMeansClusterRow[];
   kmeansAssignments?: KMeansAssignmentRow[];
+  /** Optional hierarchical-clustering tables ("hierarchical-clustering"):
+   *  one row per cluster (its centroid in original units, size and
+   *  within-cluster sum of squares), one row per complete observation (its
+   *  cluster assignment), the dendrogram (merge matrix, heights, leaf order
+   *  and cut height), and the choosing-k diagnostics (within SS, average
+   *  silhouette width, Gap statistic ± SE per k). Cluster labels are
+   *  canonicalised by the runner (sorted by first centroid coordinate),
+   *  so a stored result is stable across runs. */
+  hclustClusters?: HclustClusterRow[];
+  hclustAssignments?: HclustAssignmentRow[];
+  hclustDendrogram?: HclustDendrogram;
+  choosingK?: ChoosingKRow[];
   /** Optional per-point smoother output ("spline-lowess"), the shared
    *  per-point-result mechanism for later plans: `fitted` = the fitted
    *  values at the data X's, in ascending X order; `curve` = the same
