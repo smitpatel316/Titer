@@ -9654,7 +9654,7 @@ check("multiple t tests report each row's t, df, raw P and corrected P", async (
       `${setup};c(${rowsA.map((_, i) => `t_${i}=unname(tt${i}$statistic),df_${i}=unname(tt${i}$parameter),p_${i}=tt${i}$p.value`).join(",")})`,
     );
     const out = await run({ gaussian: true, pooledSd: false, paired, correction: "holm-sidak" });
-    const rawP = out.comparisons!.map((c) => c.rawP);
+    const rawP = out.comparisons!.map((c) => c.rawP ?? null);
     const adjusted = adjustMultipleTTestPValues(rawP, "holm-sidak");
     out.comparisons!.forEach((c, i) => {
       close(c.t, want[`t_${i}`], `paired=${paired} row ${i} t`);
@@ -9684,7 +9684,7 @@ check("multiple t tests report each row's t, df, raw P and corrected P", async (
       `c(${rowsA.map((a, i) => `p_${i}=suppressWarnings(wilcox.test(c(${a.join(",")}),c(${rowsB[i].join(",")}))) $p.value`).join(",")})`,
     );
     const out = await run({ gaussian: false, pooledSd: false, paired: false, correction: "holm" });
-    const rawP = out.comparisons!.map((c) => c.rawP);
+    const rawP = out.comparisons!.map((c) => c.rawP ?? null);
     const adjusted = adjustMultipleTTestPValues(rawP, "holm");
     out.comparisons!.forEach((c, i) => {
       strictEqual(c.t, undefined, `wilcox row ${i} has no t`);
