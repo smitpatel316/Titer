@@ -6080,6 +6080,10 @@ check("classic curves interpolate: the standard-curve path inverts all four mode
   const sine = (x: number) => 5 * Math.sin((2 * Math.PI * x) / 4 + 0.5) + 10;
   const sX = await interp(sine, 10, "sine-wave");
   ok(sX != null && Math.abs(sX - (2 - 1 / Math.PI)) < 0.01, `Sine Y=10 should interpolate to X~=1.6817, got ${sX}`);
+  // Pade (1,1): Y = (1+2X)/(1+0.5X); Y = 2 -> X = (1-2)/(2*0.5-2) = 1.
+  const pade = (x: number) => (1 + 2 * x) / (1 + 0.5 * x);
+  const pX = await interp(pade, 2, "pade-11");
+  ok(pX != null && Math.abs(pX - 1) < 0.01, `Pade Y=2 should interpolate to X=1, got ${pX}`);
 });
 
 check("data sets ticked again keep the table's order", () => {

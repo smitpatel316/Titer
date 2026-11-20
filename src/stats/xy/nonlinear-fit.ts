@@ -207,11 +207,12 @@ const span = difference("Top", "Bottom");
 const span100: Derived = { label: "Span", expr: "100" };
 /** Absolute IC50: the X where the 4PL reads 50 in absolute units (not 50%
  *  of the span) — valid only when Top > 50 > Bottom, else NA. The logx
- *  form solves 10^((LogEC50−X)·H) = (Top−50)/(50−Bottom); the x form
- *  solves (EC50/X)^H = (Top−50)/(50−Bottom). */
+ *  form solves 10^((LogEC50−X)·H) = (Top−50)/(50−Bottom) and reports the
+ *  concentration (10^X), like the EC50 derived; the x form solves
+ *  (EC50/X)^H = (Top−50)/(50−Bottom). */
 const absoluteIC50Logx: Derived = {
   label: "Absolute IC50",
-  expr: `ifelse(cf[["Top"]]>50 & 50>cf[["Bottom"]],cf[["LogEC50"]]-log10((cf[["Top"]]-50)/(50-cf[["Bottom"]]))/cf[["HillSlope"]],NA_real_)`,
+  expr: `ifelse(cf[["Top"]]>50 & 50>cf[["Bottom"]],10^(cf[["LogEC50"]]-log10((cf[["Top"]]-50)/(50-cf[["Bottom"]]))/cf[["HillSlope"]]),NA_real_)`,
 };
 const absoluteIC50X: Derived = {
   label: "Absolute IC50",

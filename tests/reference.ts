@@ -741,6 +741,126 @@ const doseXB6X = table(
     ["", "1000", "99.9000999001", "0.0999000999", "99.9000999001", "99.9968378223", "0.0999000999", "0.0031621777"],
   ],
 );
+/** Special / Growth / LQ / Classic (1.8, B6): noiseless by construction.
+ *  specialB6X: X = log(concentration) -3..3. BP: biphasic logx Bottom=0,
+ *  Top=100, LogEC50_1=-1, LogEC50_2=1, nH1=nH2=1, Frac=0.5. BL: bell
+ *  logx Plateau1=100, Plateau2=80, Dip=10, LogEC50_1=-1, LogEC50_2=1,
+ *  nH1=nH2=1. AI: absolute IC50 logx Bottom=10, Top=100, LogEC50=0,
+ *  HillSlope=1 (asymmetric asymptotes, so the Absolute IC50, -0.0969,
+ *  differs from the EC50, 1). */
+const specialB6X = table(
+  ["Title", "X", "BP", "BL", "AI"],
+  [
+    ["", "-3", "0.5000490050", "80.8840898088", "10.0899100899"],
+    ["", "-2.5", "1.5484778915", "82.7366797570", "10.2837078265"],
+    ["", "-2", "4.5954045954", "88.1118881119", "10.8910891089"],
+    ["", "-1.5", "12.1702691268", "101.4021149589", "12.7588087029"],
+    ["", "-1", "25.4950495050", "124.3069306931", "18.1818181818"],
+    ["", "-0.5", "39.5200178340", "146.2314832961", "31.6227766017"],
+    ["", "0", "50.0000000000", "155.4545454545", "55.0000000000"],
+    ["", "0.5", "60.4799821660", "150.4234761625", "78.3772233983"],
+    ["", "1", "74.5049504950", "134.1089108911", "91.8181818182"],
+    ["", "1.5", "87.8297308732", "116.5340073081", "97.2411912971"],
+    ["", "2", "95.4045954046", "106.2737262737", "99.1089108911"],
+    ["", "2.5", "98.4515221085", "102.1172886004", "99.7162921735"],
+    ["", "3", "99.4999509950", "100.6840702068", "99.9100899101"],
+  ],
+);
+
+/** specialXB6X: X = concentration, log-spaced 0.001..1000 plus the vehicle
+ *  point X = 0. BPX: biphasic x Bottom=0, Top=100, EC50_1=0.1, EC50_2=10,
+ *  nH1=nH2=1, Frac=0.5. BLX: bell x Plateau1=100, Plateau2=80, Dip=10,
+ *  EC50_1=0.1, EC50_2=10, nH1=nH2=1. AIX: absolute IC50 x Bottom=10,
+ *  Top=100, EC50=1, HillSlope=1 (Absolute IC50 = 0.8). */
+const specialXB6X = table(
+  ["Title", "X", "BPX", "BLX", "AIX"],
+  [
+    ["", "0", "0.0000000000", "80.0000000000", "10.0000000000"],
+    ["", "0.001", "0.5000490050", "80.8840898088", "10.0899100899"],
+    ["", "0.003", "1.4713061810", "82.6003655214", "10.2691924227"],
+    ["", "0.01", "4.5954045954", "88.1118881119", "10.8910891089"],
+    ["", "0.03", "11.6880128844", "100.5598588849", "12.6213592233"],
+    ["", "0.1", "25.4950495050", "124.3069306931", "18.1818181818"],
+    ["", "0.3", "38.9563106796", "145.4611650485", "30.7692307692"],
+    ["", "1", "50.0000000000", "155.4545454545", "55.0000000000"],
+    ["", "3", "59.9255583127", "150.9429280397", "77.5000000000"],
+    ["", "10", "74.5049504950", "134.1089108911", "91.8181818182"],
+    ["", "30", "87.3338870432", "117.2009966777", "97.0967741935"],
+    ["", "100", "95.4045954046", "106.2737262737", "99.1089108911"],
+    ["", "300", "98.3704356612", "102.2280745128", "99.7009966777"],
+    ["", "1000", "99.4999509950", "100.6840702068", "99.9100899101"],
+  ],
+);
+
+/** growthB6X: X = 0, 0.5, …, 12. PD: Pade (1,1) A0=1, A1=2, B1=0.5.
+ *  PS: power series A=2, B=1, C=0.5, D=2. EP: exponential plateau Y0=10,
+ *  YM=100, K=0.3. BG: beta growth then decay Wmax=100, Te=6, Tm=2 (the
+ *  curve turns negative past X = 2·Te−Tm = 10 — that tail is the
+ *  function, not a fixture error). */
+const growthB6X = table(
+  ["Title", "X", "PD", "PS", "EP", "BG"],
+  [
+    ["", "0", "1.0000000000", "0.0000000000", "10.0000000000", "0.0000000000"],
+    ["", "0.5", "1.6000000000", "1.1250000000", "22.5362821217", "5.7133620389"],
+    ["", "1", "2.0000000000", "2.5000000000", "33.3263601386", "15.3093108924"],
+    ["", "1.5", "2.2857142857", "4.1250000000", "42.6134663540", "26.5625000000"],
+    ["", "2", "2.5000000000", "6.0000000000", "50.6069527515", "38.4900179460"],
+    ["", "2.5", "2.6666666667", "8.1250000000", "57.4870102533", "50.4294706537"],
+    ["", "3", "2.8000000000", "10.5000000000", "63.4087306233", "61.8718433538"],
+    ["", "3.5", "2.9090909091", "13.1250000000", "68.5056025800", "72.3983312918"],
+    ["", "4", "3.0000000000", "16.0000000000", "72.8925209279", "81.6496580928"],
+    ["", "4.5", "3.0769230769", "19.1250000000", "76.6683765419", "89.3088697653"],
+    ["", "5", "3.1428571429", "22.5000000000", "79.9182855866", "95.0907217891"],
+    ["", "5.5", "3.2000000000", "26.1250000000", "82.7155082241", "98.7346704874"],
+    ["", "6", "3.2500000000", "30.0000000000", "85.1231000601", "100.0000000000"],
+    ["", "6.5", "3.2941176471", "34.1250000000", "87.1953335572", "98.6622947664"],
+    ["", "7", "3.3333333333", "38.5000000000", "88.9789214572", "94.5108018518"],
+    ["", "7.5", "3.3684210526", "43.1250000000", "90.5140697894", "87.3464053711"],
+    ["", "8", "3.4000000000", "48.0000000000", "91.8353842040", "76.9800358920"],
+    ["", "8.5", "3.4285714286", "53.1250000000", "92.9726500599", "63.2313975444"],
+    ["", "9", "3.4545454545", "58.5000000000", "93.9515038534", "45.9279326772"],
+    ["", "9.5", "3.4782608696", "64.1250000000", "94.7940111213", "24.9039677552"],
+    ["", "10", "3.5000000000", "70.0000000000", "95.5191638469", "0.0000000000"],
+    ["", "10.5", "3.5200000000", "76.1250000000", "96.1433085820", "-28.9379049648"],
+    ["", "11", "3.5384615385", "82.5000000000", "96.6805149339", "-62.0586267021"],
+    ["", "11.5", "3.5555555556", "89.1250000000", "97.1428927260", "-99.5064316912"],
+    ["", "12", "3.5714285714", "96.0000000000", "97.5408649797", "-141.4213562373"],
+  ],
+);
+
+/** lqB6X: X = 0, 0.5, …, 12. A=0.3, B=0.02, Total=1000. FS: fraction
+ *  surviving. PSV: percent surviving. FD: fraction dead. PDD: percent
+ *  dead. CA: # alive. CD: # dead. */
+const lqB6X = table(
+  ["Title", "X", "FS", "PSV", "FD", "PDD", "CA", "CD"],
+  [
+    ["", "0", "1.0000000000", "100.0000000000", "0.0000000000", "0.0000000000", "1000.0000000000", "0.0000000000"],
+    ["", "0.5", "0.8564151775", "85.6415177484", "0.1435848225", "14.3584822516", "856.4151774836", "143.5848225164"],
+    ["", "1", "0.7261490371", "72.6149037074", "0.2738509629", "27.3850962926", "726.1490370737", "273.8509629263"],
+    ["", "1.5", "0.6095709073", "60.9570907296", "0.3904290927", "39.0429092704", "609.5709072963", "390.4290927037"],
+    ["", "2", "0.5066169924", "50.6616992366", "0.4933830076", "49.3383007634", "506.6169923656", "493.3830076344"],
+    ["", "2.5", "0.4168620197", "41.6862019679", "0.5831379803", "58.3137980321", "416.8620196785", "583.1379803215"],
+    ["", "3", "0.3395955256", "33.9595525645", "0.6604044744", "66.0404474355", "339.5955256449", "660.4044743551"],
+    ["", "3.5", "0.2738978643", "27.3897864331", "0.7261021357", "72.6102135669", "273.8978643314", "726.1021356686"],
+    ["", "4", "0.2187118870", "21.8711886952", "0.7812881130", "78.1288113048", "218.7118869522", "781.2881130478"],
+    ["", "4.5", "0.1729072423", "17.2907242292", "0.8270927577", "82.7092757708", "172.9072422917", "827.0927577083"],
+    ["", "5", "0.1353352832", "13.5335283237", "0.8646647168", "86.4664716763", "135.3352832366", "864.6647167634"],
+    ["", "5.5", "0.1048735437", "10.4873543736", "0.8951264563", "89.5126456264", "104.8735437363", "895.1264562637"],
+    ["", "6", "0.0804596067", "8.0459606750", "0.9195403933", "91.9540393250", "80.4596067495", "919.5403932505"],
+    ["", "6.5", "0.0611148743", "6.1114874333", "0.9388851257", "93.8885125667", "61.1148743326", "938.8851256674"],
+    ["", "7", "0.0459592566", "4.5959256649", "0.9540407434", "95.4040743351", "45.9592566490", "954.0407433510"],
+    ["", "7.5", "0.0342181183", "3.4218118312", "0.9657818817", "96.5781881688", "34.2181183117", "965.7818816883"],
+    ["", "8", "0.0252229748", "2.5222974835", "0.9747770252", "97.4777025165", "25.2229748352", "974.7770251648"],
+    ["", "8.5", "0.0184074464", "1.8407446411", "0.9815925536", "98.1592553589", "18.4074464107", "981.5925535893"],
+    ["", "9", "0.0132998835", "1.3299883542", "0.9867001165", "98.6700116458", "13.2998835424", "986.7001164576"],
+    ["", "9.5", "0.0095139132", "0.9513913242", "0.9904860868", "99.0486086758", "9.5139132420", "990.4860867580"],
+    ["", "10", "0.0067379470", "0.6737946999", "0.9932620530", "99.3262053001", "6.7379469991", "993.2620530009"],
+    ["", "10.5", "0.0047244695", "0.4724469498", "0.9952755305", "99.5275530502", "4.7244694975", "995.2755305025"],
+    ["", "11", "0.0032797109", "0.3279710902", "0.9967202891", "99.6720289098", "3.2797109023", "996.7202890977"],
+    ["", "11.5", "0.0022541101", "0.2254110141", "0.9977458899", "99.7745889859", "2.2541101407", "997.7458898593"],
+    ["", "12", "0.0015338107", "0.1533810679", "0.9984661893", "99.8466189321", "1.5338106793", "998.4661893207"],
+  ],
+);
 /** A sine wave needs ≥ 5 points (4 parameters + 1) — this has 4. */
 const classicTooFew = table(
   ["Title", "X", "Y"],
@@ -2676,6 +2796,22 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["classicB6X", classicB6X, "nonlinear-regression", { y: "PA", model: "plateau-association" }],
   ["lognormX", lognormX, "nonlinear-regression", { y: "LN", model: "lognormal" }],
   ["sincX", sincX, "nonlinear-regression", { y: "SC", model: "sinc" }],
+  ["specialB6X", specialB6X, "nonlinear-regression", { y: "BP", model: "biphasic-logx" }],
+  ["specialB6X", specialB6X, "nonlinear-regression", { y: "BL", model: "bell-shaped-logx" }],
+  ["specialB6X", specialB6X, "nonlinear-regression", { y: "AI", model: "absolute-ic50-logx" }],
+  ["specialXB6X", specialXB6X, "nonlinear-regression", { y: "BPX", model: "biphasic-x" }],
+  ["specialXB6X", specialXB6X, "nonlinear-regression", { y: "BLX", model: "bell-shaped-x" }],
+  ["specialXB6X", specialXB6X, "nonlinear-regression", { y: "AIX", model: "absolute-ic50-x" }],
+  ["growthB6X", growthB6X, "nonlinear-regression", { y: "PD", model: "pade-11" }],
+  ["growthB6X", growthB6X, "nonlinear-regression", { y: "PS", model: "power-series" }],
+  ["growthB6X", growthB6X, "nonlinear-regression", { y: "EP", model: "exponential-plateau" }],
+  ["growthB6X", growthB6X, "nonlinear-regression", { y: "BG", model: "beta-growth-decay" }],
+  ["lqB6X", lqB6X, "nonlinear-regression", { y: "FS", model: "lq-fraction-surviving" }],
+  ["lqB6X", lqB6X, "nonlinear-regression", { y: "PSV", model: "lq-percent-surviving" }],
+  ["lqB6X", lqB6X, "nonlinear-regression", { y: "FD", model: "lq-fraction-dead" }],
+  ["lqB6X", lqB6X, "nonlinear-regression", { y: "PDD", model: "lq-percent-dead" }],
+  ["lqB6X", lqB6X, "nonlinear-regression", { y: "CA", model: "lq-count-alive" }],
+  ["lqB6X", lqB6X, "nonlinear-regression", { y: "CD", model: "lq-count-dead" }],
   ["doseLogB6X", doseLogB6X, "nonlinear-regression", { y: "N3A", model: "agonist-3pl-normalized-logx" }],
   ["doseLogB6X", doseLogB6X, "nonlinear-regression", { y: "N4A", model: "agonist-4pl-normalized-logx" }],
   ["doseLogB6X", doseLogB6X, "nonlinear-regression", { y: "N3I", model: "inhibitor-3pl-normalized-logx" }],
@@ -5619,6 +5755,338 @@ async function disagreements(): Promise<string[]> {
     const ec50s = normCompare.fit?.rows.find((w) => w.label === "EC50")?.values;
     if (ec50s == null || !relClose(ec50s[0], 1, 1e-3) || !relClose(ec50s[1], 3.1623, 1e-3))
       out.push(`Dose normalized 3PL comparison EC50s: ${ec50s}, expected [1, 3.1623]`);
+  }
+  // Batch 4 — Special / Standard / Growth / LQ / Classic (B6). The
+  // biphasic and bell fits have two midpoints, so they have no dose
+  // field and no ECanything — only parameter/derived/overlay recovery.
+  // The absolute-IC50 fixtures use asymmetric asymptotes (Bottom = 10,
+  // Top = 100) so the Absolute IC50 (0.8) differs from the EC50 (1);
+  // the x-form would be 2.5 under the reciprocal formula in the lane
+  // plan — 0.8 is the correct value (verified by hand at Y = 50).
+  const fitBP = await checkClassic(
+    "biphasic logx",
+    "BP",
+    "biphasic-logx",
+    [
+      ["Bottom", 0],
+      ["Top", 100],
+      ["LogEC50_1", -1],
+      ["LogEC50_2", 1],
+      ["nH1", 1],
+      ["nH2", 1],
+      ["Frac", 0.5],
+    ],
+    [
+      ["EC50_1", 0.1],
+      ["EC50_2", 10],
+      ["Span", 100],
+      ["R squared", 1],
+    ],
+    specialB6X,
+  );
+  if (fitBP) {
+    await checkClassicOverlay(
+      "biphasic logx",
+      "BP",
+      "biphasic-logx",
+      fitBP,
+      (p) =>
+        `${p.Bottom!.toPrecision(15)}+(${p.Top!.toPrecision(15)}-${p.Bottom!.toPrecision(15)})*${p.Frac!.toPrecision(15)}/(1+10^((${p.LogEC50_1!.toPrecision(15)}-x)*${p.nH1!.toPrecision(15)}))+(${p.Top!.toPrecision(15)}-${p.Bottom!.toPrecision(15)})*(1-${p.Frac!.toPrecision(15)})/(1+10^((${p.LogEC50_2!.toPrecision(15)}-x)*${p.nH2!.toPrecision(15)}))`,
+      specialB6X,
+      doseLogXs,
+    );
+  }
+  const fitBL = await checkClassic(
+    "bell-shaped logx",
+    "BL",
+    "bell-shaped-logx",
+    [
+      ["Plateau1", 100],
+      ["Plateau2", 80],
+      ["Dip", 10],
+      ["LogEC50_1", -1],
+      ["LogEC50_2", 1],
+      ["nH1", 1],
+      ["nH2", 1],
+    ],
+    [
+      ["EC50_1", 0.1],
+      ["EC50_2", 10],
+      ["Span1", 90],
+      ["Span2", 70],
+      ["R squared", 1],
+    ],
+    specialB6X,
+  );
+  if (fitBL) {
+    await checkClassicOverlay(
+      "bell-shaped logx",
+      "BL",
+      "bell-shaped-logx",
+      fitBL,
+      (p) =>
+        `${p.Dip!.toPrecision(15)}+(${p.Plateau1!.toPrecision(15)}-${p.Dip!.toPrecision(15)})/(1+10^((${p.LogEC50_1!.toPrecision(15)}-x)*${p.nH1!.toPrecision(15)}))+(${p.Plateau2!.toPrecision(15)}-${p.Dip!.toPrecision(15)})/(1+10^((x-${p.LogEC50_2!.toPrecision(15)})*${p.nH2!.toPrecision(15)}))`,
+      specialB6X,
+      doseLogXs,
+    );
+  }
+  const fitAI = await checkClassic(
+    "absolute IC50 logx",
+    "AI",
+    "absolute-ic50-logx",
+    [
+      ["Bottom", 10],
+      ["Top", 100],
+      ["LogEC50", 0],
+      ["HillSlope", 1],
+    ],
+    [
+      ["EC50", 1],
+      ["Span", 90],
+      ["Absolute IC50", 0.8],
+      ["R squared", 1],
+    ],
+    specialB6X,
+  );
+  if (fitAI) {
+    await checkClassicOverlay(
+      "absolute IC50 logx",
+      "AI",
+      "absolute-ic50-logx",
+      fitAI,
+      (p) =>
+        `${p.Bottom!.toPrecision(15)}+(${p.Top!.toPrecision(15)}-${p.Bottom!.toPrecision(15)})/(1+10^((${p.LogEC50!.toPrecision(15)}-x)*${p.HillSlope!.toPrecision(15)}))`,
+      specialB6X,
+      doseLogXs,
+    );
+    checkDoseInverse("absolute IC50 logx", fitAI, "absolute-ic50-logx", -0.0969);
+  }
+  const fitBPX = await checkClassic(
+    "biphasic X",
+    "BPX",
+    "biphasic-x",
+    [
+      ["Bottom", 0],
+      ["Top", 100],
+      ["EC50_1", 0.1],
+      ["EC50_2", 10],
+      ["nH1", 1],
+      ["nH2", 1],
+      ["Frac", 0.5],
+    ],
+    [
+      ["Span", 100],
+      ["R squared", 1],
+    ],
+    specialXB6X,
+  );
+  if (fitBPX) {
+    await checkClassicOverlay(
+      "biphasic X",
+      "BPX",
+      "biphasic-x",
+      fitBPX,
+      (p) =>
+        `ifelse(x==0,${p.Bottom!.toPrecision(15)},${p.Bottom!.toPrecision(15)}+(${p.Top!.toPrecision(15)}-${p.Bottom!.toPrecision(15)})*${p.Frac!.toPrecision(15)}/(1+${p.EC50_1!.toPrecision(15)}/x)+(${p.Top!.toPrecision(15)}-${p.Bottom!.toPrecision(15)})*(1-${p.Frac!.toPrecision(15)})/(1+${p.EC50_2!.toPrecision(15)}/x))`,
+      specialXB6X,
+      doseXXs,
+    );
+  }
+  const fitBLX = await checkClassic(
+    "bell-shaped X",
+    "BLX",
+    "bell-shaped-x",
+    [
+      ["Plateau1", 100],
+      ["Plateau2", 80],
+      ["Dip", 10],
+      ["EC50_1", 0.1],
+      ["EC50_2", 10],
+      ["nH1", 1],
+      ["nH2", 1],
+    ],
+    [
+      ["Span1", 90],
+      ["Span2", 70],
+      ["R squared", 1],
+    ],
+    specialXB6X,
+  );
+  if (fitBLX) {
+    await checkClassicOverlay(
+      "bell-shaped X",
+      "BLX",
+      "bell-shaped-x",
+      fitBLX,
+      (p) =>
+        `ifelse(x==0,${p.Plateau2!.toPrecision(15)},${p.Dip!.toPrecision(15)}+(${p.Plateau1!.toPrecision(15)}-${p.Dip!.toPrecision(15)})/(1+${p.EC50_1!.toPrecision(15)}/x)+(${p.Plateau2!.toPrecision(15)}-${p.Dip!.toPrecision(15)})/(1+x/${p.EC50_2!.toPrecision(15)}))`,
+      specialXB6X,
+      doseXXs,
+    );
+  }
+  const fitAIX = await checkClassic(
+    "absolute IC50 X",
+    "AIX",
+    "absolute-ic50-x",
+    [
+      ["Bottom", 10],
+      ["Top", 100],
+      ["EC50", 1],
+      ["HillSlope", 1],
+    ],
+    [
+      ["Span", 90],
+      ["Absolute IC50", 0.8],
+      ["R squared", 1],
+    ],
+    specialXB6X,
+  );
+  if (fitAIX) {
+    await checkClassicOverlay(
+      "absolute IC50 X",
+      "AIX",
+      "absolute-ic50-x",
+      fitAIX,
+      (p) =>
+        `ifelse(x==0,${p.Bottom!.toPrecision(15)},${p.Bottom!.toPrecision(15)}+(${p.Top!.toPrecision(15)}-${p.Bottom!.toPrecision(15)})/(1+${p.EC50!.toPrecision(15)}/x))`,
+      specialXB6X,
+      doseXXs,
+    );
+    checkDoseInverse("absolute IC50 X", fitAIX, "absolute-ic50-x", 0.8);
+  }
+  const fitPD = await checkClassic(
+    "Pade (1,1)",
+    "PD",
+    "pade-11",
+    [
+      ["A0", 1],
+      ["A1", 2],
+      ["B1", 0.5],
+    ],
+    [["R squared", 1]],
+    growthB6X,
+  );
+  if (fitPD) {
+    await checkClassicOverlay(
+      "Pade (1,1)",
+      "PD",
+      "pade-11",
+      fitPD,
+      (p) => `(${p.A0!.toPrecision(15)}+${p.A1!.toPrecision(15)}*x)/(1+${p.B1!.toPrecision(15)}*x)`,
+      growthB6X,
+    );
+    // No checkDoseInverse for Pade: the helper inverts at Y = 50, where
+    // the Pade curve has no valid X ((1−50)/(50·0.5−2) < 0); the inverse
+    // is exercised by the checks.ts interpolate case (Y = 2 -> X = 1).
+  }
+  const fitPS = await checkClassic(
+    "power series",
+    "PS",
+    "power-series",
+    [
+      ["A", 2],
+      ["B", 1],
+      ["C", 0.5],
+      ["D", 2],
+    ],
+    [["R squared", 1]],
+    growthB6X,
+  );
+  if (fitPS) {
+    await checkClassicOverlay(
+      "power series",
+      "PS",
+      "power-series",
+      fitPS,
+      (p) => `${p.A!.toPrecision(15)}*x^${p.B!.toPrecision(15)}+${p.C!.toPrecision(15)}*x^${p.D!.toPrecision(15)}`,
+      growthB6X,
+    );
+  }
+  const fitEP = await checkClassic(
+    "exponential plateau",
+    "EP",
+    "exponential-plateau",
+    [
+      ["Y0", 10],
+      ["YM", 100],
+      ["K", 0.3],
+    ],
+    [
+      ["Half-life", 2.3105],
+      ["Span", 90],
+      ["R squared", 1],
+    ],
+    growthB6X,
+  );
+  if (fitEP) {
+    await checkClassicOverlay(
+      "exponential plateau",
+      "EP",
+      "exponential-plateau",
+      fitEP,
+      (p) => `${p.YM!.toPrecision(15)}-(${p.YM!.toPrecision(15)}-${p.Y0!.toPrecision(15)})*exp(-${p.K!.toPrecision(15)}*x)`,
+      growthB6X,
+    );
+    checkDoseInverse("exponential plateau", fitEP, "exponential-plateau", 1.9594);
+  }
+  const fitBG = await checkClassic(
+    "beta growth then decay",
+    "BG",
+    "beta-growth-decay",
+    [
+      ["Wmax", 100],
+      ["Te", 6],
+      ["Tm", 2],
+    ],
+    [["R squared", 1]],
+    growthB6X,
+  );
+  if (fitBG) {
+    await checkClassicOverlay(
+      "beta growth then decay",
+      "BG",
+      "beta-growth-decay",
+      fitBG,
+      (p) =>
+        `${p.Wmax!.toPrecision(15)}*(1+(${p.Te!.toPrecision(15)}-x)/(${p.Te!.toPrecision(15)}-${p.Tm!.toPrecision(15)}))*(x/${p.Te!.toPrecision(15)})^(${p.Te!.toPrecision(15)}/(${p.Te!.toPrecision(15)}-${p.Tm!.toPrecision(15)}))`,
+      growthB6X,
+    );
+  }
+  const lqModels = [
+    ["lq-fraction-surviving", "FS", "exp(-(0.3*x+0.02*x^2))"],
+    ["lq-percent-surviving", "PSV", "100*exp(-(0.3*x+0.02*x^2))"],
+    ["lq-fraction-dead", "FD", "1-exp(-(0.3*x+0.02*x^2))"],
+    ["lq-percent-dead", "PDD", "100*(1-exp(-(0.3*x+0.02*x^2)))"],
+    ["lq-count-alive", "CA", "1000*exp(-(0.3*x+0.02*x^2))"],
+    ["lq-count-dead", "CD", "1000*(1-exp(-(0.3*x+0.02*x^2)))"],
+  ] as const;
+  for (const [model, y, rexpr] of lqModels) {
+    const isCount = model === "lq-count-alive" || model === "lq-count-dead";
+    const params: [string, number][] = isCount
+      ? [
+          ["A", 0.3],
+          ["B", 0.02],
+          ["Total", 1000],
+        ]
+      : [
+          ["A", 0.3],
+          ["B", 0.02],
+        ];
+    const fit = await checkClassic(`linear quadratic ${model}`, y, model, params, [["R squared", 1]], lqB6X);
+    if (fit) {
+      await checkClassicOverlay(
+        `linear quadratic ${model}`,
+        y,
+        model,
+        fit,
+        (p) =>
+          rexpr
+            .replace("0.3", p.A!.toPrecision(15))
+            .replace("0.02", p.B!.toPrecision(15))
+            .replace("1000", p.Total ? p.Total.toPrecision(15) : "1000"),
+        lqB6X,
+      );
+    }
   }
   // The sine wave needs ≥ 5 points (4 parameters + 1) — this has 4.
   const classicFew = await runAnalysis("nonlinear-regression", classicTooFew, { model: "sine-wave" });
