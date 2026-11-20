@@ -5554,7 +5554,7 @@ async function disagreements(): Promise<string[]> {
     "agonist-4pl-normalized-logx",
     [
       ["LogEC50", 0],
-      ["HillSlope", 1.5],
+      ["Hill slope", 1.5],
     ],
     [
       ["EC50", 1],
@@ -5569,7 +5569,7 @@ async function disagreements(): Promise<string[]> {
       "N4A",
       "agonist-4pl-normalized-logx",
       fitN4A,
-      (p) => `100/(1+10^((${p.LogEC50!.toPrecision(15)}-x)*${p.HillSlope!.toPrecision(15)}))`,
+      (p) => `100/(1+10^((${p.LogEC50!.toPrecision(15)}-x)*${p["Hill slope"]!.toPrecision(15)}))`,
       doseLogB6X,
       doseLogXs,
     );
@@ -5605,7 +5605,7 @@ async function disagreements(): Promise<string[]> {
     "inhibitor-4pl-normalized-logx",
     [
       ["LogIC50", 0],
-      ["HillSlope", 1.5],
+      ["Hill slope", 1.5],
     ],
     [
       ["IC50", 1],
@@ -5620,7 +5620,7 @@ async function disagreements(): Promise<string[]> {
       "N4I",
       "inhibitor-4pl-normalized-logx",
       fitN4I,
-      (p) => `100/(1+10^((x-${p.LogIC50!.toPrecision(15)})*${p.HillSlope!.toPrecision(15)}))`,
+      (p) => `100/(1+10^((x-${p.LogIC50!.toPrecision(15)})*${p["Hill slope"]!.toPrecision(15)}))`,
       doseLogB6X,
       doseLogXs,
     );
@@ -5655,7 +5655,7 @@ async function disagreements(): Promise<string[]> {
     "agonist-4pl-normalized-x",
     [
       ["EC50", 1],
-      ["HillSlope", 1.5],
+      ["Hill slope", 1.5],
     ],
     [
       ["Span", 100],
@@ -5669,7 +5669,7 @@ async function disagreements(): Promise<string[]> {
       "N4AX",
       "agonist-4pl-normalized-x",
       fitN4AX,
-      (p) => `ifelse(x==0,0,100/(1+(${p.EC50!.toPrecision(15)}/x)^${p.HillSlope!.toPrecision(15)}))`,
+      (p) => `ifelse(x==0,0,100/(1+(${p.EC50!.toPrecision(15)}/x)^${p["Hill slope"]!.toPrecision(15)}))`,
       doseXB6X,
       doseXXs,
     );
@@ -5704,7 +5704,7 @@ async function disagreements(): Promise<string[]> {
     "inhibitor-4pl-normalized-x",
     [
       ["IC50", 1],
-      ["HillSlope", 1.5],
+      ["Hill slope", 1.5],
     ],
     [
       ["Span", 100],
@@ -5718,7 +5718,7 @@ async function disagreements(): Promise<string[]> {
       "N4IX",
       "inhibitor-4pl-normalized-x",
       fitN4IX,
-      (p) => `100/(1+(x/${p.IC50!.toPrecision(15)})^${p.HillSlope!.toPrecision(15)})`,
+      (p) => `100/(1+(x/${p.IC50!.toPrecision(15)})^${p["Hill slope"]!.toPrecision(15)})`,
       doseXB6X,
       doseXXs,
     );
@@ -5838,7 +5838,7 @@ async function disagreements(): Promise<string[]> {
       ["Bottom", 10],
       ["Top", 100],
       ["LogEC50", 0],
-      ["HillSlope", 1],
+      ["Hill slope", 1],
     ],
     [
       ["EC50", 1],
@@ -5855,7 +5855,7 @@ async function disagreements(): Promise<string[]> {
       "absolute-ic50-logx",
       fitAI,
       (p) =>
-        `${p.Bottom!.toPrecision(15)}+(${p.Top!.toPrecision(15)}-${p.Bottom!.toPrecision(15)})/(1+10^((${p.LogEC50!.toPrecision(15)}-x)*${p.HillSlope!.toPrecision(15)}))`,
+        `${p.Bottom!.toPrecision(15)}+(${p.Top!.toPrecision(15)}-${p.Bottom!.toPrecision(15)})/(1+10^((${p.LogEC50!.toPrecision(15)}-x)*${p["Hill slope"]!.toPrecision(15)}))`,
       specialB6X,
       doseLogXs,
     );
@@ -5932,7 +5932,7 @@ async function disagreements(): Promise<string[]> {
       ["Bottom", 10],
       ["Top", 100],
       ["EC50", 1],
-      ["HillSlope", 1],
+      ["Hill slope", 1],
     ],
     [
       ["Span", 90],
