@@ -123,6 +123,40 @@ export function writeFile(path: string, data: string | Uint8Array) {
 export const readMyPalettes = () => invoke<string>("read_my_palettes");
 export const writeMyPalettes = (text: string) => invoke("write_my_palettes", { text });
 
+// ── Automatic backup (Plane seq 226, 1.8.0) ─────────────────────────────
+// The separate-copy store in src-tauri/src/backup.rs: one `.hlx` snapshot
+// per project, in Titer's data folder. The engine in
+// src/store/use-document.ts calls these; nothing else should.
+
+/** One backup, as the shell lists it. `saved_at_ms` is when the snapshot
+ *  was written; `source_mtime_ms` is when the project file itself was last
+ *  written (null for untitled and cloud projects). */
+export interface BackupEntry {
+  key: string;
+  display_name: string;
+  source_path: string | null;
+  saved_at_ms: number;
+  source_mtime_ms: number | null;
+  size_bytes: number;
+}
+
+/** Writes (or overwrites) this project's backup snapshot. `base64` is the
+ *  `.hlx` serialization of the current project. */
+export const backupWrite = (identity: string, displayName: string, sourcePath: string | null, base64: string) =>
+  invoke<BackupEntry>("backup_write", { identity, displayName, sourcePath, base64 });
+/** The backups on disk, newest first (stale and incomplete ones pruned). */
+export const backupList = () => invoke<BackupEntry[]>("backup_list");
+/** The backup for one project identity, if it has one within the keep. */
+export const backupStatus = (identity: string) => invoke<BackupEntry | null>("backup_status", { identity });
+/** One backup's snapshot bytes, as base64, for restoring. */
+export const backupRead = (key: string) => invoke<string>("backup_read", { key });
+/** Deletes a project's backup. Missing is fine. */
+export const backupDelete = (key: string) => invoke<void>("backup_delete", { key });
+
+/** This window's label ("project-1", "project-2"…), for the untitled
+ *  backup's stable id. "web" outside the shell. */
+export const windowLabel = () => (isNative ? getCurrentWebviewWindow().label : "web");
+
 // ── AI connections (v3 Phase 1: the in-process MCP server) ─────────────
 // The server is off by default and starts only from Settings → AI
 // connections. These are the app's own commands — no MCP tool can call

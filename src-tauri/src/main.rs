@@ -7,6 +7,9 @@
 // xdg-open equivalents so the same commands keep their signatures.
 mod cloud;
 mod cloud_box;
+// Automatic backup (Plane seq 226, 1.8.0): the separate-copy store — see
+// backup.rs. The commands below are its frontend face.
+mod backup;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 #[cfg(target_os = "macos")]
 use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
@@ -603,6 +606,63 @@ async fn write_my_palettes(app: AppHandle, text: String) -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+// ── Automatic backup (Plane seq 226, 1.8.0) ──────────────────────────────
+// The commands behind src/lib/backup.ts + the frontend backup engine. All
+// disk work runs on a blocking-pool thread (seq 248), like the palettes
+// above; the store itself lives in backup.rs. Bytes cross as base64, like
+// `read_prism_bytes`: a JSON number array would make the webview parse a
+// large file one number at a time.
+
+/// Writes (or overwrites) this project's backup snapshot.
+#[tauri::command]
+async fn backup_write(
+    app: AppHandle,
+    identity: String,
+    display_name: String,
+    source_path: Option<String>,
+    base64: String,
+) -> Result<backup::BackupEntry, String> {
+    let bytes = BASE64.decode(base64).map_err(|e| e.to_string())?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || {
+        backup::write_backup(&dir, &identity, &display_name, source_path.as_deref(), &bytes)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The backups on disk, newest first (stale and incomplete ones pruned).
+#[tauri::command]
+async fn backup_list(app: AppHandle) -> Result<Vec<backup::BackupEntry>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || backup::list_backups(&dir)).await.map_err(|e| e.to_string())?
+}
+
+/// The backup for one project identity, if it has one within the keep.
+#[tauri::command]
+async fn backup_status(app: AppHandle, identity: String) -> Result<Option<backup::BackupEntry>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || backup::backup_status(&dir, &identity))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// One backup's snapshot bytes, as base64, for restoring.
+#[tauri::command]
+async fn backup_read(app: AppHandle, key: String) -> Result<String, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || backup::read_backup(&dir, &key).map(|bytes| BASE64.encode(bytes)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Deletes a project's backup. Missing is fine.
+#[tauri::command]
+async fn backup_delete(app: AppHandle, key: String) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || backup::delete_backup(&dir, &key)).await.map_err(|e| e.to_string())?
 }
 
 // ── Cloud storage (v2 item 75, Box first) ─────────────────────────────────
@@ -1436,6 +1496,11 @@ fn main() {
             write_file,
             read_my_palettes,
             write_my_palettes,
+            backup_write,
+            backup_list,
+            backup_status,
+            backup_read,
+            backup_delete,
             set_recent_documents,
             accent_color,
             open_link,

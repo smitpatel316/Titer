@@ -2,7 +2,7 @@
 // Groups) plus the app-wide Auto-save setting, full height like the sidebar, and the
 // building blocks its sections share.
 import * as React from "react";
-import { Button, cn, IconButton, Switch } from "../ui/controls";
+import { Button, cn, IconButton, NumberInput, Switch } from "../ui/controls";
 import {
   CaretRightIcon,
   MinusIcon,
@@ -16,6 +16,18 @@ import { clampWidth, INSPECTOR_WIDTH, useLayout } from "../store/use-layout";
 import { clamp, type ProjectNode } from "../store/types";
 import { useProjectActions } from "../store/use-project-store";
 import { AUTOSAVE_DEBOUNCE_MS, isAutosaveEnabled, setAutosaveEnabled } from "../lib/autosave";
+import {
+  BACKUP_MAX_INTERVAL_MINUTES,
+  BACKUP_MIN_INTERVAL_MINUTES,
+  BACKUP_RETENTION_DAYS,
+  backupIntervalMinutes,
+  clampBackupIntervalMinutes,
+  isBackupEnabled,
+  isBackupOnSheetSwitch,
+  setBackupEnabled,
+  setBackupIntervalMinutes,
+  setBackupOnSheetSwitch,
+} from "../lib/backup";
 
 type View = "notes" | "settings";
 
@@ -88,6 +100,7 @@ export function WithInspector({
           <>
             {settings}
             <AutosaveSection />
+            <BackupSection />
           </>
         ) : (
           <Notes node={node} />
@@ -155,6 +168,72 @@ function AutosaveSection() {
       <p className="text-small text-secondary">
         Saves {AUTOSAVE_DEBOUNCE_MS / 1000} seconds after your last edit, when you switch sheets, and when you quit —
         only for projects that already have a file or cloud location.
+      </p>
+    </Section>
+  );
+}
+
+/** App-wide automatic backup (1.8.0, seq 226): a separate copy of the
+ *  project, kept apart from its file, so a crash leaves something to come
+ *  back to — Prism's automatic backup, not auto-save (which saves in
+ *  place). One on/off toggle, on by default; the interval in minutes (1–60,
+ *  default 10, Prism's default); and the sheet-switch trigger, on by
+ *  default. The engine reads these through the backup module; a change here
+ *  takes effect on the next edit, not mid-cycle. Backups are kept
+ *  {BACKUP_RETENTION_DAYS} days and deleted when the project is saved and
+ *  closed normally. */
+function BackupSection() {
+  const [enabled, setEnabled] = React.useState(() => isBackupEnabled());
+  const [interval, setInterval] = React.useState(() => backupIntervalMinutes());
+  const [onSheetSwitch, setOnSheetSwitch] = React.useState(() => isBackupOnSheetSwitch());
+  return (
+    <Section title="Automatic backup">
+      <label className="flex items-center gap-3">
+        <Switch
+          checked={enabled}
+          onChange={(v) => {
+            setBackupEnabled(v);
+            setEnabled(v);
+          }}
+        />
+        <span className="text-regular text-primary">Automatic backup {enabled ? "on" : "off"}</span>
+      </label>
+      <label className="flex items-center gap-2 text-regular text-primary">
+        <NumberInput
+          className="w-16"
+          aria-label="Backup every (minutes)"
+          min={BACKUP_MIN_INTERVAL_MINUTES}
+          max={BACKUP_MAX_INTERVAL_MINUTES}
+          value={interval}
+          disabled={!enabled}
+          onChange={(v) => {
+            // Null while the field is empty or invalid: keep the last good
+            // value on screen, and only store a real number.
+            if (v === null) return;
+            const clamped = clampBackupIntervalMinutes(v);
+            setBackupIntervalMinutes(clamped);
+            setInterval(clamped);
+          }}
+        />
+        <span>minutes between backups</span>
+      </label>
+      <label className="flex items-center gap-3">
+        <Switch
+          checked={onSheetSwitch}
+          disabled={!enabled}
+          onChange={(v) => {
+            setBackupOnSheetSwitch(v);
+            setOnSheetSwitch(v);
+          }}
+        />
+        <span className="text-regular text-primary">Also back up when switching sheets</span>
+      </label>
+      <p className="text-small text-secondary">
+        Keeps a separate copy of your project — including unsaved work — every {interval}{" "}
+        {interval === 1 ? "minute" : "minutes"}
+        {onSheetSwitch ? " and whenever you switch sheets" : ""}. If Titer crashes, the backup is offered when you
+        reopen the project. Backups are kept {BACKUP_RETENTION_DAYS} days and deleted when you save and close
+        normally.
       </p>
     </Section>
   );

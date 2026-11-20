@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Phase 2 live MCP smoke: initialize -> tools/list -> tools/call across
-all 56 tools against a running Titer MCP server.
+all 57 tools against a running Titer MCP server.
 
 Reads endpoint + token from <app_data>/mcp/discovery.json (argv[1]).
 Speaks Streamable HTTP directly (no bridge, no Claude Desktop sign-in):
@@ -47,6 +47,8 @@ EXPECTED_TOOLS = [
     "titer_read_figure", "titer_read_info_sheet", "titer_read_activity",
     "titer_send_feedback",
     "titer_project_summary", "titer_search", "titer_get_analysis_params",
+    # 1.8 backup list (1)
+    "titer_list_backups",
     # L2 project (5)
     "titer_create_project", "titer_open_project", "titer_save_project",
     "titer_import_prism", "titer_close_project",
@@ -72,7 +74,7 @@ EXPECTED_TOOLS = [
     "titer_export_graph", "titer_export_figure", "titer_export_office",
     "titer_export_table_data",
 ]
-assert len(EXPECTED_TOOLS) == 56, len(EXPECTED_TOOLS)
+assert len(EXPECTED_TOOLS) == 57, len(EXPECTED_TOOLS)
 
 
 def main():
@@ -181,15 +183,15 @@ def main():
     check("initialize negotiates 2025-11-25",
           init["result"]["protocolVersion"] == "2025-11-25",
           init["result"]["protocolVersion"])
-    check("initialize instructions name 56 tools",
-          "56 tools" in init["result"].get("instructions", ""),
+    check("initialize instructions name 57 tools",
+          "57 tools" in init["result"].get("instructions", ""),
           init["result"].get("instructions", "")[:80])
     rpc("notifications/initialized", notif=True)
 
-    # 2. tools/list shows all 56 tools, one page
+    # 2. tools/list shows all 57 tools, one page
     lst = rpc("tools/list")
     names = [t["name"] for t in lst["result"]["tools"]]
-    check("tools/list returns 56 tools", len(names) == 56, f"{len(names)}")
+    check("tools/list returns 57 tools", len(names) == 57, f"{len(names)}")
     check("tools/list has no nextCursor", "nextCursor" not in lst["result"])
     for want in EXPECTED_TOOLS:
         check(f"tools/list has {want}", want in names)

@@ -169,6 +169,23 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AnalysisResultsView, headline } from "../src/views/analyses/analysis-results-view";
 import { loadPrismSaveChoice, nextSaveAction } from "../src/lib/prism-nudge";
+import {
+  BACKUP_DEFAULT_INTERVAL_MINUTES,
+  BACKUP_MAX_INTERVAL_MINUTES,
+  BACKUP_MIN_INTERVAL_MINUTES,
+  BACKUP_RETENTION_DAYS,
+  backupDisplayName,
+  backupIdentity,
+  backupIntervalMinutes,
+  backupIsNewerThanSource,
+  clearUntitledBackupId,
+  isBackupEnabled,
+  isBackupOnSheetSwitch,
+  setBackupEnabled,
+  setBackupIntervalMinutes,
+  setBackupOnSheetSwitch,
+  untitledBackupId,
+} from "../src/lib/backup";
 import { convertPrism } from "../src/lib/prism";
 import { yieldToPaint } from "../src/lib/yield-to-paint";
 import { fitWidths, fitZoom } from "../src/store/use-layout";
@@ -18945,6 +18962,144 @@ check("import-155: the menu, picker, reader and drop route the new file types", 
   ok(rust.includes("read_data_bytes"), "shell has no data-bytes reader command");
   ok(isDataFilePath("lab.CSV") && isDataFilePath("lab.tsv") && isDataFilePath("lab.txt") && isDataFilePath("lab.xlsx"), "extension match misses a data type");
   ok(!isDataFilePath("lab.pzfx") && !isDataFilePath("lab.hlx"), "extension match takes a non-data file");
+});
+
+// ── 1.8 seq 226: automatic backup ────────────────────────────────────────
+// Prism (FAQ 1520 + Prism 11 user guide, "Automatic back up of Prism
+// files"): backups are SEPARATE copies — written on a timer and/or on
+// sheet switch, also on save so a backup is never older than the project
+// file; deleted on normal quit; on a crash they remain and Prism reloads
+// them on restart; kept 4 days if the original was unsaved. 1.7.3 autosave
+// is the other half (it saves in place, only for projects with a target,
+// never for untitled work) — backup is the half that covers untitled work
+// and crash recovery.
+check("seq 226: automatic backup defaults to on, every 10 minutes, on sheet switch", () => {
+  const stored: Record<string, string> = {};
+  const storage = {
+    getItem: (k: string) => stored[k] ?? null,
+    setItem: (k: string, v: string) => void (stored[k] = v),
+  };
+  Object.assign(globalThis, { localStorage: storage });
+  try {
+    strictEqual(isBackupEnabled(), true, "backup should default on");
+    strictEqual(backupIntervalMinutes(), BACKUP_DEFAULT_INTERVAL_MINUTES, "interval should default to 10 minutes");
+    strictEqual(BACKUP_DEFAULT_INTERVAL_MINUTES, 10, "the default interval is Prism's 10 minutes");
+    strictEqual(BACKUP_MIN_INTERVAL_MINUTES, 1, "the shortest interval is 1 minute");
+    strictEqual(BACKUP_MAX_INTERVAL_MINUTES, 60, "the longest interval is 60 minutes");
+    strictEqual(isBackupOnSheetSwitch(), true, "backup on sheet switch should default on");
+    strictEqual(BACKUP_RETENTION_DAYS, 4, "backups are kept 4 days, like Prism 10+");
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+  // No localStorage under Node: reads as the defaults, never throws.
+  strictEqual(isBackupEnabled(), true, "no storage should read as backup on");
+  strictEqual(backupIntervalMinutes(), 10, "no storage should read as 10 minutes");
+  strictEqual(isBackupOnSheetSwitch(), true, "no storage should read as sheet-switch backup on");
+});
+
+check("seq 226: backup settings round-trip and clamp", () => {
+  const stored: Record<string, string> = {};
+  const storage = {
+    getItem: (k: string) => stored[k] ?? null,
+    setItem: (k: string, v: string) => void (stored[k] = v),
+  };
+  Object.assign(globalThis, { localStorage: storage });
+  try {
+    setBackupEnabled(false);
+    strictEqual(isBackupEnabled(), false, "disabling backup should stick");
+    setBackupEnabled(true);
+    strictEqual(isBackupEnabled(), true, "re-enabling backup should stick");
+    setBackupIntervalMinutes(0);
+    strictEqual(backupIntervalMinutes(), 1, "0 minutes should clamp to the 1-minute minimum");
+    setBackupIntervalMinutes(120);
+    strictEqual(backupIntervalMinutes(), 60, "120 minutes should clamp to the 60-minute maximum");
+    setBackupIntervalMinutes(5);
+    strictEqual(backupIntervalMinutes(), 5, "5 minutes should stick");
+    setBackupIntervalMinutes(Number.NaN);
+    strictEqual(backupIntervalMinutes(), 10, "a non-number interval should fall back to the default");
+    setBackupOnSheetSwitch(false);
+    strictEqual(isBackupOnSheetSwitch(), false, "disabling sheet-switch backup should stick");
+    setBackupOnSheetSwitch(true);
+    strictEqual(isBackupOnSheetSwitch(), true, "re-enabling sheet-switch backup should stick");
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+});
+
+check("seq 226: backup identities distinguish projects and stay stable", () => {
+  const fileA = backupIdentity({ filePath: "/Research/Dose Response.hlx" });
+  const fileB = backupIdentity({ filePath: "/Research/Other.hlx" });
+  ok(fileA !== fileB, "two files should get different backup identities");
+  strictEqual(backupIdentity({ filePath: "/Research/Dose Response.hlx" }), fileA, "the same file should keep its identity");
+  const remote = backupIdentity({ remote: { provider: "box", accountId: "u1", fileId: "123", path: "/Research/Data.hlx" } });
+  ok(remote !== fileA, "a cloud file should not share a local file's identity");
+  ok(
+    backupIdentity({ remote: { provider: "box", accountId: "u1", fileId: "124", path: "/Research/Data.hlx" } }) !== remote,
+    "two cloud files with the same path but different ids should differ",
+  );
+  strictEqual(backupDisplayName({ filePath: "/Research/Dose Response.hlx" }), "Dose Response.hlx", "a file backup shows its file name");
+  strictEqual(
+    backupDisplayName({ remote: { provider: "box", accountId: "u1", fileId: "123", path: "/Research/Data.hlx" } }),
+    "Data.hlx",
+    "a cloud backup shows its file name",
+  );
+  strictEqual(backupDisplayName({ untitledId: "abc123", untitledName: "Untitled" }), "Untitled", "an untitled backup shows its name");
+  // An untitled project's id is stable per window label across calls (so a
+  // crash leftover is found again on relaunch) and distinct per label.
+  const stored: Record<string, string> = {};
+  const storage = {
+    getItem: (k: string) => stored[k] ?? null,
+    setItem: (k: string, v: string) => void (stored[k] = v),
+  };
+  Object.assign(globalThis, { localStorage: storage });
+  try {
+    const first = untitledBackupId("project-1");
+    strictEqual(untitledBackupId("project-1"), first, "the same window label should keep its untitled id");
+    ok(untitledBackupId("project-2") !== first, "two windows should get different untitled ids");
+    ok(!untitledBackupId("project-1").includes("/"), "an untitled id should never hold a path separator");
+    clearUntitledBackupId("project-1");
+    ok(untitledBackupId("project-1") !== first, "clearing the id should mint a fresh one");
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+  // No localStorage under Node: the id is still stable within the session.
+  ok(untitledBackupId("project-9").length > 0, "no storage should still mint an untitled id");
+});
+
+check("seq 226: a backup is offered only when it is newer than the saved file", () => {
+  ok(backupIsNewerThanSource(2000, null), "an untitled backup has no saved file to be older than");
+  ok(backupIsNewerThanSource(2000, 1000), "a backup written after the last save is newer");
+  ok(!backupIsNewerThanSource(1000, 1000), "a backup from the same moment as the save is not newer");
+  ok(!backupIsNewerThanSource(1000, 2000), "a backup older than the saved file must never be offered — restoring it would regress the file");
+});
+
+check("seq 226: the backup engine, settings, dialog and shell commands are wired", () => {
+  const document = readFileSync("src/store/use-document.ts", "utf8");
+  ok(document.includes("attemptBackup"), "use-document has no backup attempt");
+  ok(document.includes("backupTimer") || document.includes("backup timer"), "use-document has no backup timer");
+  ok(document.includes("isBackupOnSheetSwitch"), "sheet-switch backup is not gated on its setting");
+  ok(document.includes("backupRecovery"), "use-document exposes no recovery state");
+  ok(document.includes("resolveBackupRecovery"), "use-document has no recovery answer");
+  ok(document.includes("deleteCurrentBackup") || document.includes("deleteBackup"), "closing a project does not delete its backup");
+  const inspector = readFileSync("src/components/inspector.tsx", "utf8");
+  ok(inspector.includes("BackupSection"), "Settings has no Automatic backup section");
+  const bridge = readFileSync("src/native.ts", "utf8");
+  ok(bridge.includes("backupWrite"), "native bridge has no backup write");
+  ok(bridge.includes("backupList"), "native bridge has no backup list");
+  ok(bridge.includes("backupRead"), "native bridge has no backup read");
+  ok(bridge.includes("backupDelete"), "native bridge has no backup delete");
+  const shell = readFileSync("src/components/app-shell.tsx", "utf8");
+  ok(shell.includes("BackupRecoveryDialog"), "the shell mounts no backup recovery dialog");
+  ok(shell.includes("backupRecovery"), "the shell reads no recovery state");
+  const rust = readFileSync("src-tauri/src/main.rs", "utf8");
+  ok(rust.includes("backup_write"), "shell has no backup write command");
+  ok(rust.includes("backup_list"), "shell has no backup list command");
+  ok(rust.includes("backup_read"), "shell has no backup read command");
+  ok(rust.includes("backup_delete"), "shell has no backup delete command");
+  ok(rust.includes("backup_status"), "shell has no backup status command");
+  ok(rust.includes("mod backup;"), "the backup module is not wired into the shell");
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(mcp.includes('"titer_list_backups"'), "the MCP server has no list-backups tool");
 });
 
 // ── Run ──────────────────────────────────────────────────────────────────
