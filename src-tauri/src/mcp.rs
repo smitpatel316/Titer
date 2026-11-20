@@ -3384,7 +3384,10 @@ impl TiterMcpServer {
             ids.sort();
             let mut matches = Vec::new();
             let mut total = 0;
-            for id in &ids {
+            // Borrow, don't move: `ids` is reused below in the "projects"
+            // field, and `&ids` would hand the loop `&&String`, which the
+            // map index won't take — `.copied()` yields `&String`.
+            for id in ids.iter().copied() {
                 let (mut found, count) = search_nodes(&snapshots[id], &args.query, args.kind.as_deref());
                 total += count;
                 for m in found.drain(..) {
