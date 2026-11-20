@@ -3385,7 +3385,7 @@ impl TiterMcpServer {
             let mut matches = Vec::new();
             let mut total = 0;
             for id in &ids {
-                let (mut found, count) = search_nodes(&snapshots[id], &args.query, args.kind.as_deref());
+                let (mut found, count) = search_nodes(&snapshots[*id], &args.query, args.kind.as_deref());
                 total += count;
                 for m in found.drain(..) {
                     let mut m = m;
