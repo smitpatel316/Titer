@@ -17677,6 +17677,321 @@ check("extract and rearrange refuses bad inputs with clear errors", async () => 
   });
 });
 
+// Select and transform (seq 177): build a new Multiple Variables table
+// from a subset of one — Prism's Analyze > Select and transform. The
+// source table is never touched; the new table's data rides in `extracted`,
+// ready for "Create table".
+const SELECT_TABLE: TableData = {
+  columns: ["Title", "Age", "Weight", "Height", "Sex", "Score", "Target"],
+  rows: [
+    ["", "25", "70", "1.75", "F", "5", "6"],
+    ["", "30", "80", "1.80", "M", "7", "6"],
+    ["", "35", "90", "1.70", "F", "9", "10"],
+    ["", "40", "100", "1.90", "M", "11", "10"],
+    ["", "45", "60", "1.60", "F", "", "6"],
+  ],
+};
+
+check("select and transform copies the table when nothing is selected", async () => {
+  const out = await runAnalysis("select-transform", SELECT_TABLE, {});
+  if ("error" in out) throw new Error(out.error);
+  strictEqual(out.testType, "select-transform");
+  strictEqual(out.extracted?.tableType, "multiple");
+  deepStrictEqual(out.extracted?.table.columns, SELECT_TABLE.columns);
+  deepStrictEqual(out.extracted?.table.rows, SELECT_TABLE.rows);
+  ok(out.notes.includes("source table is unchanged"));
+  // The source table is untouched by the run.
+  deepStrictEqual(SELECT_TABLE.rows[0], ["", "25", "70", "1.75", "F", "5", "6"]);
+  // Offered on Multiple Variables tables only — not the other data tables.
+  ok(analysisOptionsForTable("multiple").some((o) => o.value === "select-transform"));
+  ok(!analysisOptionsForTable("column").some((o) => o.value === "select-transform"));
+  ok(!analysisOptionsForTable("xy").some((o) => o.value === "select-transform"));
+  ok(!analysisOptionsForTable("grouped").some((o) => o.value === "select-transform"));
+  strictEqual(ANALYSES["select-transform"].label, "Select and transform");
+});
+
+check("select and transform keeps only the chosen columns", async () => {
+  const out = await runAnalysis("select-transform", SELECT_TABLE, { columns: ["Age", "Score"] });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(out.extracted?.table.columns, ["Title", "Age", "Score"]);
+  deepStrictEqual(out.extracted?.table.rows, [
+    ["", "25", "5"],
+    ["", "30", "7"],
+    ["", "35", "9"],
+    ["", "40", "11"],
+    ["", "45", null],
+  ]);
+});
+
+check("select and transform keeps a row range", async () => {
+  const out = await runAnalysis("select-transform", SELECT_TABLE, { rowRange: { first: 2, last: 4 } });
+  if ("error" in out) throw new Error(out.error);
+  strictEqual(out.extracted?.table.rows.length, 3);
+  deepStrictEqual(
+    out.extracted?.table.rows.map((r) => r[1]),
+    ["30", "35", "40"],
+  );
+});
+
+check("select and transform filters rows by a value comparison", async () => {
+  const gt = await runAnalysis("select-transform", SELECT_TABLE, {
+    rowFilter: { variable: "Score", operator: ">", value: 7 },
+  });
+  if ("error" in gt) throw new Error(gt.error);
+  deepStrictEqual(
+    gt.extracted?.table.rows.map((r) => r[5]),
+    ["9", "11"],
+  );
+  // "Is not missing" keeps the rows where the variable has a value.
+  const present = await runAnalysis("select-transform", SELECT_TABLE, {
+    rowFilter: { variable: "Score", operator: "is-not-missing" },
+  });
+  if ("error" in present) throw new Error(present.error);
+  strictEqual(present.extracted?.table.rows.length, 4);
+});
+
+check("select and transform filters rows by comparing two columns", async () => {
+  const out = await runAnalysis("select-transform", SELECT_TABLE, {
+    columnFilter: { variable: "Score", operator: ">", otherVariable: "Target" },
+  });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(
+    out.extracted?.table.rows.map((r) => [r[5], r[6]]),
+    [
+      ["7", "6"],
+      ["11", "10"],
+    ],
+  );
+});
+
+check("select and transform transforms a column into a new column", async () => {
+  const out = await runAnalysis("select-transform", SELECT_TABLE, {
+    transforms: [{ variable: "Score", kind: "log10" }],
+  });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(out.extracted?.table.columns, [...SELECT_TABLE.columns, "log10(Score)"]);
+  deepStrictEqual(
+    out.extracted?.table.rows.map((r) => r[7]),
+    ["0.6989700043", "0.84509804", "0.9542425094", "1.041392685", null],
+  );
+  // The transformed variable need not itself be selected.
+  const picked = await runAnalysis("select-transform", SELECT_TABLE, {
+    columns: ["Age"],
+    transforms: [{ variable: "Weight", kind: "multiply", k: 2, title: "Weight x2" }],
+  });
+  if ("error" in picked) throw new Error(picked.error);
+  deepStrictEqual(picked.extracted?.table.columns, ["Title", "Age", "Weight x2"]);
+  deepStrictEqual(
+    picked.extracted?.table.rows.map((r) => r[2]),
+    ["140", "160", "180", "200", "120"],
+  );
+});
+
+check("select and transform adds a summary transform column", async () => {
+  const out = await runAnalysis("select-transform", SELECT_TABLE, {
+    transforms: [{ variable: "Score", kind: "mean" }],
+  });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(out.extracted?.table.columns, [...SELECT_TABLE.columns, "mean(Score)"]);
+  deepStrictEqual(
+    out.extracted?.table.rows.map((r) => r[7]),
+    ["8", "8", "8", "8", "8"],
+  );
+});
+
+check("select and transform builds a new column from an equation", async () => {
+  const out = await runAnalysis("select-transform", SELECT_TABLE, {
+    equations: [{ name: "BMI", formula: "Weight / Height^2" }],
+  });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(out.extracted?.table.columns, [...SELECT_TABLE.columns, "BMI"]);
+  deepStrictEqual(
+    out.extracted?.table.rows.map((r) => r[7]),
+    ["22.85714286", "24.69135802", "31.14186851", "27.70083102", "23.4375"],
+  );
+});
+
+check("select and transform combines selection, filtering, transforms and equations", async () => {
+  const out = await runAnalysis("select-transform", SELECT_TABLE, {
+    columns: ["Age", "Score"],
+    rowRange: { first: 2, last: 5 },
+    rowFilter: { variable: "Score", operator: ">", value: 6 },
+    transforms: [{ variable: "Score", kind: "log10" }],
+    equations: [{ name: "Double", formula: "Score * 2" }],
+  });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(out.extracted?.table.columns, ["Title", "Age", "Score", "log10(Score)", "Double"]);
+  deepStrictEqual(out.extracted?.table.rows, [
+    ["", "30", "7", "0.84509804", "14"],
+    ["", "35", "9", "0.9542425094", "18"],
+    ["", "40", "11", "1.041392685", "22"],
+  ]);
+});
+
+check("select and transform refuses bad inputs with clear errors", async () => {
+  // A column renamed away after the wizard ran is caught before the runner.
+  deepStrictEqual(
+    await runAnalysis("select-transform", SELECT_TABLE, { columns: ["Age", "Gone"] }),
+    { error: "“Gone” is no longer in the table — run the analysis again and pick the variables." },
+  );
+  // A transform needs numbers.
+  deepStrictEqual(
+    await runAnalysis("select-transform", SELECT_TABLE, {
+      transforms: [{ variable: "Sex", kind: "log10" }],
+    }),
+    { error: "“Sex” holds no numbers yet — pick a variable with numbers in it." },
+  );
+  // A transform that needs a constant, without one.
+  deepStrictEqual(
+    await runAnalysis("select-transform", SELECT_TABLE, {
+      transforms: [{ variable: "Weight", kind: "multiply" }],
+    }),
+    { error: "The “multiply” transform of “Weight” needs a constant — enter a value for K." },
+  );
+  // An unknown transform kind.
+  deepStrictEqual(
+    await runAnalysis("select-transform", SELECT_TABLE, {
+      transforms: [{ variable: "Score", kind: "bogus" as never }],
+    }),
+    {
+      error:
+        "“bogus” is not a transform — pick one of: log10, ln, log2, reciprocal, sqrt, square, exp, pow10, negate, abs, multiply, divide, add, subtract, power, round, min, max, mean, stdev, stderr.",
+    },
+  );
+  // A formula that cannot be read.
+  deepStrictEqual(
+    await runAnalysis("select-transform", SELECT_TABLE, {
+      equations: [{ name: "Bad", formula: "Weight +" }],
+    }),
+    { error: "“Weight +” could not be read: the formula ends before a value." },
+  );
+  // A formula naming a variable the table does not hold.
+  deepStrictEqual(
+    await runAnalysis("select-transform", SELECT_TABLE, {
+      equations: [{ name: "Bad", formula: "Gone * 2" }],
+    }),
+    { error: "unknown variable “Gone” — the table has no variable with that name." },
+  );
+  // A new variable colliding with one the new table already has.
+  deepStrictEqual(
+    await runAnalysis("select-transform", SELECT_TABLE, {
+      equations: [{ name: "Age", formula: "Score * 2" }],
+    }),
+    { error: "“Age” is already in the new table — a new variable needs a different name." },
+  );
+  // A range that starts after it ends, and one outside the table.
+  deepStrictEqual(
+    await runAnalysis("select-transform", SELECT_TABLE, { rowRange: { first: 4, last: 2 } }),
+    { error: "The first row (4) comes after the last row (2) — pick a range that starts first." },
+  );
+  deepStrictEqual(
+    await runAnalysis("select-transform", SELECT_TABLE, { rowRange: { first: 0, last: 2 } }),
+    { error: "Row 0 is not in the table — rows run from 1 to 5." },
+  );
+  // A filter that leaves no rows.
+  deepStrictEqual(
+    await runAnalysis("select-transform", SELECT_TABLE, {
+      rowFilter: { variable: "Score", operator: ">", value: 100 },
+    }),
+    { error: "No rows are left after the selection — loosen the row filter or range." },
+  );
+  // A column filter comparing a variable with itself.
+  deepStrictEqual(
+    await runAnalysis("select-transform", SELECT_TABLE, {
+      columnFilter: { variable: "Score", operator: ">", otherVariable: "Score" },
+    }),
+    { error: "The two variables must be different — pick two different variables." },
+  );
+  // MCP-side validation: a valid call passes, a bad transform kind does not.
+  deepStrictEqual(
+    validateAnalysisParams("select-transform", {
+      columns: ["Age"],
+      transforms: [{ variable: "Score", kind: "log10" }],
+      rowRange: { first: 1, last: 3 },
+    }).errors,
+    [],
+  );
+  strictEqual(
+    validateAnalysisParams("select-transform", {
+      transforms: [{ variable: "Score", kind: "bogus" }],
+    }).errors.length,
+    1,
+  );
+  ok(
+    validateAnalysisParams("select-transform", {
+      transforms: [{ variable: "Score", kind: "bogus" }],
+    }).errors[0].includes("log10"),
+  );
+  // A wizard drives it: columns, range, value filter, one transform, one equation.
+  const wizard = WIZARDS["select-transform"];
+  ok(wizard);
+  deepStrictEqual(
+    wizard!.finish(
+      {
+        columns: ["Age", "Score"],
+        rowScope: "range",
+        firstRow: 2,
+        lastRow: 5,
+        valueFilterVariable: "Score",
+        valueFilterOperator: ">",
+        valueFilterValue: 6,
+        columnFilterVariable: "none",
+        transform0Variable: "Score",
+        transform0Kind: "log10",
+        transform0Title: "",
+        transform0Another: "no",
+        equation0: "Double = Score * 2",
+        equation0Another: "no",
+      },
+      readTable(SELECT_TABLE),
+    ),
+    {
+      type: "select-transform",
+      params: {
+        columns: ["Age", "Score"],
+        rowRange: { first: 2, last: 5 },
+        rowFilter: { variable: "Score", operator: ">", value: 6 },
+        transforms: [{ variable: "Score", kind: "log10" }],
+        equations: [{ name: "Double", formula: "Score * 2" }],
+      },
+    },
+  );
+  // The wizard's questions follow the answers: a range asks for its ends, a
+  // picked transform asks for its kind, title and whether there is another.
+  deepStrictEqual(
+    wizard!
+      .questions(
+        {
+          columns: ["Age", "Score"],
+          rowScope: "range",
+          valueFilterVariable: "Score",
+          columnFilterVariable: "none",
+          transform0Variable: "Score",
+          equation0: "",
+        },
+        readTable(SELECT_TABLE),
+        "multiple",
+      )
+      .filter(Boolean)
+      .map((q) => (q as Question).id),
+    [
+      "columns",
+      "rowScope",
+      "firstRow",
+      "lastRow",
+      "valueFilterVariable",
+      "valueFilterOperator",
+      "valueFilterValue",
+      "columnFilterVariable",
+      "transform0Variable",
+      "transform0Kind",
+      "transform0Title",
+      "transform0Another",
+      "equation0",
+    ],
+  );
+});
+
 // Prune rows (v2): drop rows matching a condition — empty, below a
 // threshold, above a threshold, or outside a range — from the chosen
 // columns, listing what was dropped; the source table is never touched.
