@@ -124,10 +124,6 @@ export interface Wizard {
   finish: (a: Answers, table: Dataset, type?: TableType) => { type: AnalysisType; params?: AnalysisParams };
 }
 
-/** Parse the spline's spar field: blank = automatic (GCV), otherwise a number
- *  in 0–1.5. `value` is null when blank; `error` is set (and `value` null) when
- *  the text is neither — the runner re-checks, so a bad value passed straight
- *  to `runAnalysis` still fails clearly. */
 /** Parse a comma-separated list of expected values (chi-square goodness of
  *  fit): every entry a finite number above 0 — a category the theory says
  *  never occurs can't be tested this way (the runner says so too, and also
@@ -147,6 +143,10 @@ export function parseExpectedValues(text: string): { values: number[]; error?: s
   return { values };
 }
 
+/** Parse the spline's spar field: blank = automatic (GCV), otherwise a number
+ *  in 0–1.5. `value` is null when blank; `error` is set (and `value` null) when
+ *  the text is neither — the runner re-checks, so a bad value passed straight
+ *  to `runAnalysis` still fails clearly. */
 export function parseSpar(text: string): { value: number | null; error?: string } {
   const t = text.trim();
   if (t === "") return { value: null };
