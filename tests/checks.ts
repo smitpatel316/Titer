@@ -117,7 +117,7 @@ import { datasetColumns, isGrouped, isNested, readTable, setColumns, splitXY, xy
 import { nestedMeans } from "../src/stats/nested/base";
 import { runNestedTTest } from "../src/stats/nested/nested-t-test";
 import { prepareFit } from "../src/stats/xy/nonlinear-fit";
-import { adjustComparisonRows, adjustPValues, describe, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
+import { adjustComparisonRows, adjustFdrComparisonRows, adjustFdrPValues, adjustPValues, describe, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
 import { hclustAvgSilhouette, hclustClusterWithinSs, hclustDistanceMatrix, hclustSuggestedK, hclustWithinSs } from "../src/stats/multiple/hierarchical-clustering";
 import { dendrogramSegments } from "../src/views/graphs/dendrogram";
@@ -3930,6 +3930,297 @@ check("the three-way ANOVA wizard asks for a post-hoc term only when comparing",
     type: "three-way-anova",
     params: { posthoc: "bonferroni", posthocTerm: "A:B:C" },
   });
+});
+
+// Seq 192 — two-way wizard: the FDR approach (method + Q), the cell and
+// marginal-mean targets (ordinary design only), and Dunnett's control for cells.
+check("the two-way ANOVA wizard offers FDR, cell/marginal targets and a cell control (seq 192)", () => {
+  const table = readTable({
+    columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+    rows: [
+      ["Day 1", "1", "2", "3", "4"],
+      ["Day 2", "5", "6", "7", "8"],
+      ["Day 3", "9", "10", "11", "12"],
+    ],
+    groups: 2,
+    replicates: 2,
+  });
+  const wizard = WIZARDS["two-way-anova"]!;
+  const asked = (a: Record<string, string | number | string[] | undefined>) =>
+    wizard.questions(a, table).filter((q): q is Question => q !== false);
+  const choiceValues = (q: Question) => (q.kind === "choice" ? q.options.map((o) => o.value) : []);
+  const byId = (a: Record<string, string | number | string[] | undefined>, id: string) =>
+    asked(a).find((q) => q.id === id);
+  deepStrictEqual(
+    choiceValues(byId({ design: "ordinary", posthoc: "tukey" }, "posthocTarget")!),
+    ["groups", "rows", "cells", "group-means", "row-means"],
+  );
+  // A repeated-measures comparison has no single error term for cell or
+  // marginal-mean comparisons, so the wizard doesn't offer them there.
+  deepStrictEqual(
+    choiceValues(byId({ design: "repeated-measures", posthoc: "tukey" }, "posthocTarget")!),
+    ["groups", "rows"],
+  );
+  deepStrictEqual(
+    asked({ design: "ordinary", posthoc: "fdr" }).map((q) => q.id),
+    ["design", "posthoc", "posthocTarget", "fdrMethod", "fdrQ"],
+  );
+  deepStrictEqual(choiceValues(byId({ design: "ordinary", posthoc: "fdr" }, "fdrMethod")!), [
+    "bh",
+    "bky",
+    "by",
+  ]);
+  const q = byId({ design: "ordinary", posthoc: "fdr" }, "fdrQ")!;
+  ok(q.kind === "number" && q.initial === 5 && q.min === 0.01 && q.max === 50, "fdrQ is 5% in 0.01–50");
+  ok(q.kind === "number" && q.validate?.(0) !== undefined && q.validate?.(5) === undefined, "fdrQ rejects 0");
+  deepStrictEqual(
+    choiceValues(byId({ design: "ordinary", posthoc: "dunnett", posthocTarget: "cells" }, "control")!),
+    ["A (Day 1)", "A (Day 2)", "A (Day 3)", "B (Day 1)", "B (Day 2)", "B (Day 3)"],
+  );
+  deepStrictEqual(
+    choiceValues(byId({ design: "ordinary", posthoc: "dunnett", posthocTarget: "group-means" }, "control")!),
+    ["A", "B"],
+  );
+  deepStrictEqual(wizard.finish({ design: "ordinary", posthoc: "fdr", posthocTarget: "cells", fdrMethod: "by", fdrQ: 10 }, table), {
+    type: "two-way-anova",
+    params: { design: "ordinary", posthoc: "fdr", posthocTarget: "cells", fdrMethod: "by", fdrQ: 10 },
+  });
+  // Unanswered, the FDR approach is Benjamini-Hochberg at Q = 5%.
+  deepStrictEqual(wizard.finish({ design: "ordinary", posthoc: "fdr" }, table), {
+    type: "two-way-anova",
+    params: { design: "ordinary", posthoc: "fdr", posthocTarget: "groups", fdrMethod: "bh", fdrQ: 5 },
+  });
+});
+
+// Seq 192 — three-way wizard: the full post-hoc suite, the simple-effects
+// scope for interaction terms, Dunnett's control from the term's cells, and
+// the FDR approach's method + Q.
+check("the three-way ANOVA wizard offers the full post-hoc suite, scope and control (seq 192)", () => {
+  const data: TableData = {
+    columns: ["Title", "Placebo:Y1", "Placebo:Y2", "Drug:Y1", "Drug:Y2"],
+    rows: [
+      ["Day 1", "1", "2", "3", "4"],
+      ["Day 2", "5", "6", "7", "8"],
+      ["Day 1", "9", "10", "11", "12"],
+      ["Day 2", "13", null, "15", "16"],
+    ],
+    groups: 2,
+    replicates: 2,
+    rowGroups: [
+      { name: "WT", count: 2 },
+      { name: "KO", count: 2 },
+    ],
+  };
+  const table = readTable(data);
+  const wizard = WIZARDS["three-way-anova"]!;
+  const asked = (
+    a: Record<string, string | number | string[] | undefined>,
+    rowGroups: TableData["rowGroups"] = data.rowGroups,
+  ) => wizard.questions(a, table, undefined, rowGroups).filter((q): q is Question => q !== false);
+  const choiceValues = (q: Question) => (q.kind === "choice" ? q.options.map((o) => o.value) : []);
+  const byId = (a: Record<string, string | number | string[] | undefined>, id: string) =>
+    asked(a).find((q) => q.id === id);
+  deepStrictEqual(choiceValues(byId({}, "posthoc")!), [
+    "none",
+    "tukey",
+    "bonferroni",
+    "sidak",
+    "holm-sidak",
+    "lsd",
+    "dunnett",
+    "games-howell",
+    "fdr",
+  ]);
+  // The scope question only follows an interaction term.
+  deepStrictEqual(
+    asked({ posthoc: "tukey", posthocTerm: "A:B" }).map((q) => q.id),
+    ["posthoc", "posthocTerm", "posthocScope"],
+  );
+  deepStrictEqual(
+    asked({ posthoc: "tukey", posthocTerm: "A" }).map((q) => q.id),
+    ["posthoc", "posthocTerm"],
+  );
+  deepStrictEqual(
+    asked({ posthoc: "fdr", posthocTerm: "A:B" }).map((q) => q.id),
+    ["posthoc", "posthocTerm", "posthocScope", "fdrMethod", "fdrQ"],
+  );
+  // Dunnett's control is a term cell (whole term) or a first-factor level
+  // (simple effects) — the same labels the runner compares.
+  deepStrictEqual(choiceValues(byId({ posthoc: "dunnett", posthocTerm: "A" }, "control")!), ["Placebo", "Drug"]);
+  deepStrictEqual(choiceValues(byId({ posthoc: "dunnett", posthocTerm: "A:B" }, "control")!), [
+    "Placebo (Day 1)",
+    "Placebo (Day 2)",
+    "Drug (Day 1)",
+    "Drug (Day 2)",
+  ]);
+  deepStrictEqual(
+    choiceValues(byId({ posthoc: "dunnett", posthocTerm: "A:B", posthocScope: "simple" }, "control")!),
+    ["Placebo", "Drug"],
+  );
+  deepStrictEqual(choiceValues(byId({ posthoc: "dunnett", posthocTerm: "A:B:C" }, "control")!), [
+    "Placebo (Day 1, WT)",
+    "Placebo (Day 2, WT)",
+    "Placebo (Day 1, KO)",
+    "Placebo (Day 2, KO)",
+    "Drug (Day 1, WT)",
+    "Drug (Day 2, WT)",
+    "Drug (Day 1, KO)",
+    "Drug (Day 2, KO)",
+  ]);
+  deepStrictEqual(
+    choiceValues(byId({ posthoc: "dunnett", posthocTerm: "A:B:C", posthocScope: "simple" }, "control")!),
+    ["Placebo (Day 1)", "Placebo (Day 2)", "Drug (Day 1)", "Drug (Day 2)"],
+  );
+  // Without row bands the wizard cannot know factor C's levels, so it asks
+  // no control question (the runner refuses a missing control clearly).
+  strictEqual(asked({ posthoc: "dunnett", posthocTerm: "A" }, undefined).some((q) => q.id === "control"), false);
+  deepStrictEqual(
+    wizard.finish({ posthoc: "dunnett", posthocTerm: "A:B", posthocScope: "simple", control: "Drug" }, table),
+    {
+      type: "three-way-anova",
+      params: { posthoc: "dunnett", posthocTerm: "A:B", posthocScope: "simple", control: "Drug" },
+    },
+  );
+  deepStrictEqual(wizard.finish({ posthoc: "fdr", posthocTerm: "A", fdrMethod: "bky", fdrQ: 1 }, table), {
+    type: "three-way-anova",
+    params: { posthoc: "fdr", posthocTerm: "A", fdrMethod: "bky", fdrQ: 1 },
+  });
+});
+
+// Seq 192 — two-way engine: FDR post-hoc is the LSD raw P values adjusted
+// per family (pinned against R's p.adjust), and the cell / marginal-mean
+// targets compare the cells and the marginal means.
+check("two-way ANOVA: FDR post-hoc adjusts the LSD P values; cells and marginal means compare (seq 192)", async () => {
+  const data: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2", "C:Y1", "C:Y2"],
+    rows: [
+      ["Day 1", "10", "11", "14", "15", "9", "10"],
+      ["Day 2", "12", "13", "18", "19", "10", "12"],
+      ["Day 3", "15", "14", "22", "24", "11", "12"],
+    ],
+    groups: 3,
+    replicates: 2,
+  };
+  const run = async (params: AnalysisParams) => {
+    const out = await runAnalysis("two-way-anova", data, params);
+    if ("error" in out) throw new Error(`two-way ANOVA failed: ${out.error}`);
+    return out;
+  };
+  const lsd = await run({ design: "ordinary", posthoc: "lsd", posthocTarget: "groups" } as AnalysisParams);
+  const fdr = await run({ design: "ordinary", posthoc: "fdr", posthocTarget: "groups" } as AnalysisParams);
+  strictEqual(lsd.comparisons!.length, 9, "3 rows × 3 pairs");
+  strictEqual(fdr.comparisons!.length, 9);
+  ok(fdr.notes.includes("FDR approach"), `notes must name the FDR approach, got: ${fdr.notes}`);
+  // The raw P values of each row-family, adjusted in R — the FDR run must match.
+  const raw = lsd.comparisons!.map((c) => c.p!);
+  for (let f = 0; f < 3; f++) {
+    const fam = await evalNamedVector(
+      `p<-c(${raw.slice(f * 3, f * 3 + 3).join(",")});c(a=p.adjust(p,"BH")[1],b=p.adjust(p,"BH")[2],c=p.adjust(p,"BH")[3])`,
+    );
+    for (let k = 0; k < 3; k++) {
+      const got = fdr.comparisons![f * 3 + k].p;
+      const want = fam[["a", "b", "c"][k]]!;
+      ok(got != null && Math.abs(got - want) < 1e-12, `family ${f} pair ${k}: ${got}, R says ${want}`);
+    }
+  }
+  // The FDR approach carries no multiplicity-adjusted CI, like Holm–Šídák.
+  ok(fdr.comparisons!.every((c) => c.low == null && c.high == null), "FDR comparisons carry no CI");
+  // Cells: 9 cell means, every pair; marginal means: 3 groups, 3 rows.
+  const cells = await run({ design: "ordinary", posthoc: "tukey", posthocTarget: "cells" } as AnalysisParams);
+  strictEqual(cells.comparisons!.length, 36, "9 cells × 8 / 2");
+  const groupMeans = await run({ design: "ordinary", posthoc: "tukey", posthocTarget: "group-means" } as AnalysisParams);
+  strictEqual(groupMeans.comparisons!.length, 3);
+  deepStrictEqual(
+    groupMeans.comparisons!.map((c) => `${c.group1} vs ${c.group2}`),
+    ["A vs B", "A vs C", "B vs C"],
+  );
+  const rowMeans = await run({ design: "ordinary", posthoc: "bonferroni", posthocTarget: "row-means" } as AnalysisParams);
+  strictEqual(rowMeans.comparisons!.length, 3);
+  const dunnettCells = await run({
+    design: "ordinary",
+    posthoc: "dunnett",
+    posthocTarget: "cells",
+    control: "A (Day 1)",
+  } as AnalysisParams);
+  strictEqual(dunnettCells.comparisons!.length, 8, "every other cell against A (Day 1)");
+  ok(dunnettCells.comparisons!.every((c) => c.group2 === "A (Day 1)" || c.group1 === "A (Day 1)"));
+  // Cell and marginal-mean targets are refused for repeated measures.
+  const rmRefused = await runAnalysis("two-way-anova", data, {
+    design: "repeated-measures",
+    posthoc: "tukey",
+    posthocTarget: "cells",
+  } as AnalysisParams);
+  ok("error" in rmRefused && /ordinary two-way ANOVA/.test(rmRefused.error));
+});
+
+// Seq 192 — three-way engine: the full post-hoc suite runs on a term, simple
+// effects split an interaction into one family per level of its last factor,
+// and the FDR approach matches R's p.adjust on the LSD raw P values.
+check("three-way ANOVA: full post-hoc suite, simple effects and FDR (seq 192)", async () => {
+  const data: TableData = {
+    columns: ["Title", "Placebo:Y1", "Placebo:Y2", "Drug:Y1", "Drug:Y2"],
+    rows: [
+      ["Day 1", "10.0", "10.3", "11.1", "11.5"],
+      ["Day 2", "14.1", "15.3", "19.4", "20.5"],
+      ["Day 1", "11.1", "10.1", "13.7", "11.7"],
+      ["Day 2", "11.1", "11.7", "14.8", "13.7"],
+    ],
+    groups: 2,
+    replicates: 2,
+    rowGroups: [
+      { name: "WT", count: 2 },
+      { name: "KO", count: 2 },
+    ],
+  };
+  const run = async (params: AnalysisParams) => {
+    const out = await runAnalysis("three-way-anova", data, params);
+    if ("error" in out) throw new Error(`three-way ANOVA failed: ${out.error}`);
+    return out;
+  };
+  const counts: [AnalysisParams, number][] = [
+    [{ posthoc: "sidak", posthocTerm: "A:B" }, 6],
+    [{ posthoc: "holm-sidak", posthocTerm: "A" }, 1],
+    [{ posthoc: "lsd", posthocTerm: "A:B:C" }, 28],
+    [{ posthoc: "dunnett", posthocTerm: "A", control: "Placebo" }, 1],
+    [{ posthoc: "games-howell", posthocTerm: "A:B" }, 6],
+    [{ posthoc: "fdr", posthocTerm: "A:B" }, 6],
+    [{ posthoc: "tukey", posthocTerm: "A:B", posthocScope: "term" }, 6],
+  ];
+  for (const [params, want] of counts) {
+    const out = await run(params);
+    strictEqual(out.comparisons!.length, want, `${params.posthoc} on ${params.posthocTerm}: ${out.comparisons!.length}, want ${want}`);
+  }
+  // Simple effects on A:B: one A-pair within each B level — 2 comparisons,
+  // not the whole term's 6 — and the notes say so.
+  const simple = await run({ posthoc: "tukey", posthocTerm: "A:B", posthocScope: "simple" } as AnalysisParams);
+  strictEqual(simple.comparisons!.length, 2);
+  ok(simple.notes.includes("simple effects"), `notes must name simple effects, got: ${simple.notes}`);
+  deepStrictEqual(
+    simple.comparisons!.map((c) => `${c.group1} vs ${c.group2}`),
+    ["Placebo (Day 1) vs Drug (Day 1)", "Placebo (Day 2) vs Drug (Day 2)"],
+  );
+  // Simple Dunnett on A:B:C: each C level its own family, control by its
+  // A:B cell label — 3 comparisons per family, 2 families.
+  const simpleDunnett = await run({
+    posthoc: "dunnett",
+    posthocTerm: "A:B:C",
+    posthocScope: "simple",
+    control: "Placebo (Day 1)",
+  } as AnalysisParams);
+  strictEqual(simpleDunnett.comparisons!.length, 6);
+  // FDR on A:B is the LSD raw P values adjusted in R (one family of 6).
+  const lsd = await run({ posthoc: "lsd", posthocTerm: "A:B" } as AnalysisParams);
+  const fdr = await run({ posthoc: "fdr", posthocTerm: "A:B" } as AnalysisParams);
+  const raw = lsd.comparisons!.map((c) => c.p!);
+  const ref = await evalNamedVector(
+    `p<-c(${raw.join(",")});c(a=p.adjust(p,"BH")[1],b=p.adjust(p,"BH")[2],c=p.adjust(p,"BH")[3],d=p.adjust(p,"BH")[4],e=p.adjust(p,"BH")[5],f=p.adjust(p,"BH")[6])`,
+  );
+  for (let k = 0; k < 6; k++) {
+    const got = fdr.comparisons![k].p;
+    const want = ref[["a", "b", "c", "d", "e", "f"][k]]!;
+    ok(got != null && Math.abs(got - want) < 1e-12, `A:B pair ${k}: ${got}, R says ${want}`);
+  }
+  ok(fdr.notes.includes("FDR approach"), `notes must name the FDR approach, got: ${fdr.notes}`);
 });
 
 check("a column gone takes its width with it: a new one of its name starts at the default", () => {
@@ -8830,6 +9121,138 @@ check("P-value adjustments pass nulls through", () => {
     ).map((r) => Number(r.p!.toFixed(4))),
     [0.05, 0.0941],
   );
+});
+
+// Seq 192: the FDR approach (BH / BKY / BY) is pure TypeScript arithmetic on
+// raw P values — BH and BY are pinned against R's p.adjust, BKY against its
+// hand-computed two-stage values, so a regression in the formula shows up
+// without running an ANOVA.
+check("the FDR approach matches R's p.adjust (BH, BY); BKY beats BH (seq 192)", async () => {
+  const ps = [0.01, 0.04, 0.5];
+  const ref = await evalNamedVector(
+    `p<-c(0.01,0.04,0.5);` +
+      `c(bh1=p.adjust(p,"BH")[1],bh2=p.adjust(p,"BH")[2],bh3=p.adjust(p,"BH")[3],` +
+      `by1=p.adjust(p,"BY")[1],by2=p.adjust(p,"BY")[2],by3=p.adjust(p,"BY")[3])`,
+  );
+  for (const [i, key] of ["bh1", "bh2", "bh3"].entries()) {
+    const got = adjustFdrPValues(ps, "bh")[i]!;
+    ok(ref[key] != null && Math.abs(got - ref[key]!) < 1e-12, `BH #${i}: ${got}, R says ${ref[key]}`);
+  }
+  for (const [i, key] of ["by1", "by2", "by3"].entries()) {
+    const got = adjustFdrPValues(ps, "by")[i]!;
+    ok(ref[key] != null && Math.abs(got - ref[key]!) < 1e-12, `BY #${i}: ${got}, R says ${ref[key]}`);
+  }
+  // BKY by hand at Q = 5%: stage 1 (BH at 0.05/1.05) rejects only 0.01, so
+  // m0 = 2, and the step-up runs with m0 in place of m — 0.02, 0.04, 0.3333,
+  // each at or below BH's 0.03, 0.06, 0.5.
+  deepStrictEqual(
+    adjustFdrPValues(ps, "bky").map((p) => Number(p!.toFixed(4))),
+    [0.02, 0.04, 0.3333],
+  );
+  // Nulls pass through, and the rows helper adjusts in place order.
+  deepStrictEqual(adjustFdrPValues([null, 0.01, 0.04], "bh"), [null, 0.03, 0.06]);
+  deepStrictEqual(
+    adjustFdrComparisonRows(
+      [
+        { group1: "A", group2: "B", diff: 1, p: 0.01 },
+        { group1: "A", group2: "C", diff: 2, p: 0.04 },
+      ],
+      "bh",
+    ).map((r) => Number(r.p!.toFixed(4))),
+    [0.02, 0.04],
+  );
+});
+
+// Seq 192: the new post-hoc params survive validation and a save/load
+// round-trip — a wizard answer must not silently vanish from the file.
+check("seq 192 params validate and survive a save/load round-trip", () => {
+  deepStrictEqual(
+    validateAnalysisParams("two-way-anova", {
+      design: "ordinary",
+      posthoc: "fdr",
+      posthocTarget: "cells",
+      control: "A (Day 1)",
+      fdrMethod: "by",
+      fdrQ: 10,
+    }).errors,
+    [],
+  );
+  deepStrictEqual(
+    validateAnalysisParams("three-way-anova", {
+      posthoc: "dunnett",
+      posthocTerm: "A:B:C",
+      posthocScope: "simple",
+      control: "Placebo (Day 1)",
+      fdrMethod: "bky",
+      fdrQ: 1,
+    }).errors,
+    [],
+  );
+  // Out of range is rejected, not clamped silently, at the MCP boundary.
+  ok(validateAnalysisParams("two-way-anova", { posthoc: "fdr", fdrQ: 0 }).errors.length > 0);
+  ok(validateAnalysisParams("three-way-anova", { posthoc: "fdr", fdrMethod: "holm" }).errors.length > 0);
+  const project: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "T",
+        parentId: null,
+        tableType: "grouped",
+        data: {
+          columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+          rows: [
+            ["Day 1", "1", "2", "3", "4"],
+            ["Day 2", "5", "6", "7", "8"],
+          ],
+          groups: 2,
+          replicates: 2,
+          rowGroups: [
+            { name: "WT", count: 1 },
+            { name: "KO", count: 1 },
+          ],
+        },
+      },
+      a1: {
+        id: "a1",
+        type: "analysis",
+        name: "Two-way",
+        parentId: "t1",
+        analysisType: "two-way-anova",
+        analysisParams: { design: "ordinary", posthoc: "fdr", posthocTarget: "cells", fdrMethod: "by", fdrQ: 10 },
+      },
+      a2: {
+        id: "a2",
+        type: "analysis",
+        name: "Three-way",
+        parentId: "t1",
+        analysisType: "three-way-anova",
+        analysisParams: {
+          posthoc: "dunnett",
+          posthocTerm: "A:B",
+          posthocScope: "simple",
+          control: "Drug",
+        },
+      },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: ["a1", "a2"] },
+    activeNodeId: "t1",
+  };
+  const reopened = read(serializeProjectFile(project)).project.nodes;
+  deepStrictEqual(reopened.a1.analysisParams, {
+    design: "ordinary",
+    posthoc: "fdr",
+    posthocTarget: "cells",
+    fdrMethod: "by",
+    fdrQ: 10,
+  });
+  deepStrictEqual(reopened.a2.analysisParams, {
+    posthoc: "dunnett",
+    posthocTerm: "A:B",
+    posthocScope: "simple",
+    control: "Drug",
+  });
 });
 
 // CC-m10: the full column is re-serialized as an R literal on every run —

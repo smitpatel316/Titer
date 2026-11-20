@@ -90,10 +90,12 @@ for needed in ["TAILS", "ANOVA_POSTHOCS", "RANK_POSTHOCS", "NONLINEAR_MODELS",
                "NORMALIZE_ZERO_DEFS", "NORMALIZE_HUNDRED_DEFS",
                "SMOOTH_DIFF_INT_OPERATIONS", "EXTRACT_REARRANGE_TARGETS",
                "NORMALITY_TESTS", "MONTE_CARLO_TARGETS",
-               "MONTE_CARLO_STATISTICS"]:
+               "MONTE_CARLO_STATISTICS", "TWO_WAY_POSTHOCS",
+               "THREE_WAY_POSTHOCS", "FDR_METHODS",
+               "THREE_WAY_POSTHOC_SCOPES"]:
     assert needed in ARRAYS, f"choice list {needed} not parsed"
 POSTHOCS = ARRAYS["POSTHOCS"]  # the six base post-hoc choices
-TWO_WAY_POSTHOCS = POSTHOCS + ["dunnett", "games-howell"]
+TWO_WAY_POSTHOCS = ARRAYS["TWO_WAY_POSTHOCS"]  # + Dunnett, Games-Howell, FDR (seq 192)
 
 # Per-type enum narrowing the merged PARAMS lists cannot express.
 ENUM_OVERRIDES = {
@@ -116,7 +118,7 @@ ENUM_OVERRIDES = {
     ("two-way-anova", "posthoc"): TWO_WAY_POSTHOCS,
     # Three-way / nested ANOVA runners refuse every posthoc but these
     # (types.ts ThreeWayAnovaParams / NestedAnovaParams comments).
-    ("three-way-anova", "posthoc"): ["tukey", "bonferroni"],
+    ("three-way-anova", "posthoc"): ARRAYS["THREE_WAY_POSTHOCS"],
     ("nested-anova", "posthoc"): ["tukey", "bonferroni"],
     # Linear regression never sees replicate columns, so 1/sd2 is not
     # offered (types.ts LinearRegressionParams.weights).

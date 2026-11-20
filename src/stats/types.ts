@@ -633,7 +633,9 @@ export interface ExtractRearrangeParams {
 export interface TwoWayAnovaParams {
   design: (typeof TWO_WAY_DESIGNS)[number];
   posthoc: (typeof TWO_WAY_POSTHOCS)[number];
-  /** Dunnett's control: a group (groups compared within each row) or a row, by its name. */
+  /** Dunnett's control, by its name: a group (groups compared within each row),
+   *  a row (rows within each group), a cell ("Group (Row)"), or a marginal group
+   *  / row mean. */
   control?: string;
   posthocTarget: (typeof POSTHOC_TARGETS)[number];
   /** The FDR approach's method (`posthoc: "fdr"` only): Benjamini-Hochberg,

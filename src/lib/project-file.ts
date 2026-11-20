@@ -63,6 +63,8 @@ import {
   EC_ANYTHING,
   ENZYME_INHIBITION_MODELS,
   EXTRACT_REARRANGE_TARGETS,
+  FDR_METHODS,
+  FDR_Q,
   FRACTION_OF_TOTAL_FORMATS,
   FRACTION_OF_TOTAL_TOTALS,
   MONTE_CARLO_STATISTICS,
@@ -78,6 +80,7 @@ import {
   ROUT_Q,
   SMOOTH_DIFF_INT_OPERATIONS,
   TAILS,
+  THREE_WAY_POSTHOC_SCOPES,
   THREE_WAY_TERMS,
   TRANSFORM_FUNCTIONS,
   TWO_WAY_DESIGNS,
@@ -271,7 +274,7 @@ type ParamKind =
 // prettier-ignore
 const PARAMS = {
   paired: "yes/no", gaussian: "yes/no", equalVariance: "yes/no", ratio: "yes/no", forceOrigin: "yes/no", pooledSd: "yes/no", quasi: "yes/no", fixHillSlope: "yes/no", trendOrdered: "yes/no", continuityCorrection: "yes/no",
-  equalSd: "yes/no", sphericity: "yes/no", interpolate: "yes/no", tails: TAILS, posthoc: [...ANOVA_POSTHOCS, ...RANK_POSTHOCS], mixed: "yes/no",
+  equalSd: "yes/no", sphericity: "yes/no", interpolate: "yes/no", tails: TAILS, posthoc: [...ANOVA_POSTHOCS, ...RANK_POSTHOCS, "fdr"], mixed: "yes/no",
   // `model` is shared by nonlinear-regression and the binding runners:
   // the reader only sanitizes, each runner validates its own.
   model: [...NONLINEAR_MODELS, ...BINDING_SATURATION_MODELS, ...BINDING_KINETICS_MODELS, ...ENZYME_INHIBITION_MODELS, ...DOSE_RESPONSE_SPECIAL_MODELS],
@@ -330,6 +333,10 @@ const PARAMS = {
   bUnits: ["M", "nM", "µM"],
   binMode: BIN_MODES, binWidth: "number", binCount: { min: 2, max: 100 }, startAt: "number",
   posthocTerm: THREE_WAY_TERMS,
+  // The FDR approach after an ANOVA (seq 192): which method, and at which Q
+  // (%) a comparison counts as a discovery — same 0.01–50 range as ROUT's Q.
+  // `posthocScope` splits a three-way interaction term into simple effects.
+  fdrMethod: FDR_METHODS, fdrQ: FDR_Q, posthocScope: THREE_WAY_POSTHOC_SCOPES,
   truth: "name", score: "name", positive: "name-or-number",
   time: "name", status: "name", covariates: "names", stratifyBy: "name", ties: ["efron", "breslow"],
   // Normality tests (plan 23): which of the four tests, and whether to
@@ -902,8 +909,8 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   ],
   "spline-lowess": ["y", "method", "f", "spar", "df", "sets"],
   "smooth-differentiate-integrate": ["ys", "x", "operation", "window", "order", "smoothResults", "baseline", "startValue", "sets"],
-  "two-way-anova": ["design", "posthoc", "posthocTarget", "sphericity", "sets"],
-  "three-way-anova": ["posthoc", "posthocTerm", "sets"],
+  "two-way-anova": ["design", "posthoc", "posthocTarget", "sphericity", "control", "fdrMethod", "fdrQ", "sets"],
+  "three-way-anova": ["posthoc", "posthocTerm", "posthocScope", "control", "fdrMethod", "fdrQ", "sets"],
   "multiple-t-tests": ["paired", "gaussian", "pooledSd", "correction", "sets"],
   "nested-t-test": ["sets"],
   "nested-anova": ["posthoc", "sets"],
