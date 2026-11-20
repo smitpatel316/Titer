@@ -4151,9 +4151,10 @@ check("comparing groups asks equal SDs, then offers the comparisons that fit and
     "bonferroni",
     "sidak",
     "holm-sidak",
+    "fdr",
     "lsd",
   ]);
-  deepStrictEqual(offered({ ...unpaired, equalSd: "no" }), ["none", "games-howell", "t3"]);
+  deepStrictEqual(offered({ ...unpaired, equalSd: "no" }), ["none", "games-howell", "t3", "fdr"]);
   deepStrictEqual(offered({ paired: "paired", gaussian: "yes" }), [
     "none",
     "tukey",
