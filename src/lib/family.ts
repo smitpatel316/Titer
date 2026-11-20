@@ -34,12 +34,14 @@ export function extractFamily(
   }
   // Info sheets linked to this table come along (their link still names
   // this table, which the family keeps); global info sheets stay behind.
+  // No childOrder entry for them — they have no children, and the loader
+  // drops empty child lists, so emitting one would mark the family
+  // "updated" on open.
   for (const rootId of rootOrder) {
     const node = nodes[rootId];
     if (node?.type === "info" && node.info?.linkedTableId === tableId) {
       familyNodes[rootId] = node;
       familyRoot.push(rootId);
-      familyChildren[rootId] = [];
     }
   }
   return {

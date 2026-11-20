@@ -19,6 +19,7 @@ import {
   type RQueueSnapshot,
 } from "../src/stats/r-queue";
 import { PARAM_KEYS_BY_ANALYSIS, parseProjectFile, parseProjectText, readPalette, serializeProjectFile, validateAnalysisParams, type ProjectFilePayload } from "../src/lib/project-file";
+import { extractFamily } from "../src/lib/family";
 import { applyWand, wandExamples, wandReportMessage } from "../src/lib/wand";
 import {
   extractMethod,
@@ -56,6 +57,7 @@ import {
   DEFAULT_GRAPH_OPTIONS,
   GRAPH_LIMITS,
   SAME_AS_FILL,
+  type DrawingObject,
   type GraphOptions,
   type GraphType,
   type ProjectNode,
@@ -172,6 +174,7 @@ import { loadPrismSaveChoice, nextSaveAction } from "../src/lib/prism-nudge";
 import { convertPrism } from "../src/lib/prism";
 import { yieldToPaint } from "../src/lib/yield-to-paint";
 import { fitWidths, fitZoom } from "../src/store/use-layout";
+import { clampZoom, zoomInStep, zoomOutStep, ZOOM_LIMITS } from "../src/store/use-zoom";
 import { isGoneReadError, prismDropSkippedMessage, prismFileOpenMessage } from "../src/store/use-document";
 import { cloneGraphPlan, DEFAULT_CLONE_OPTIONS, type CloneOptions } from "../src/lib/clone-graph";
 import { computeGroupedDEG } from "../src/lib/deg";
@@ -510,6 +513,542 @@ check("replacing the copy's data leaves the original family untouched", () => {
   strictEqual(s.nodes.a1.parentId, t1);
 });
 
+// ── Menus batch B (1.8.0, seq 232–239) ──────────────────────────────────
+// One check per item, each pinning the behaviour the menu promises: the
+// pre-fix state had no such action, so each fails there and passes here.
+
+// seq 232: New Data Table and Graph — the table's default graph, both in
+// one undo step, the table landing before the first figure.
+check("New Data Table and Graph creates the table's default graph in one undo step (seq 232)", () => {
+  let s = makeInitialState();
+  const before = s;
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "f1",
+      type: "figure",
+      name: "Figure",
+      parentId: null,
+      panels: [],
+      grid: { rows: 1, cols: 1 },
+      figureSize: { widthIn: 10, heightIn: 7.5 },
+      labelStyle: { position: "top-left", fontSizePt: 12, bold: true },
+      figureTitle: "",
+      sharedLegend: "none",
+      dpi: "600",
+    } as ProjectNode,
+  });
+  s = reducer(s, { type: "createTableWithGraph", tableType: "column" });
+  const tableId = s.rootOrder[1];
+  const table = s.nodes[tableId];
+  strictEqual(table.type, "table");
+  strictEqual(table.tableType, "column");
+  strictEqual(table.name, "Table 2");
+  // Before the first figure, like `create`.
+  deepStrictEqual(s.rootOrder, [before.rootOrder[0], tableId, "f1"]);
+  strictEqual(s.childOrder[tableId].length, 1);
+  const graphId = s.childOrder[tableId][0];
+  const graph = s.nodes[graphId];
+  strictEqual(graph.type, "graph");
+  strictEqual(graph.parentId, tableId);
+  strictEqual(graph.graphType, GRAPH_OPTIONS_BY_TABLE.column[0].value);
+  strictEqual(graph.graphType, "individual");
+  strictEqual(graph.name, "Individual values");
+  strictEqual(s.activeNodeId, graphId);
+  strictEqual(s.isDirty, true);
+  // One Undo takes both back.
+  s = reducer(s, { type: "undo" });
+  deepStrictEqual(s.rootOrder, [before.rootOrder[0], "f1"]);
+  strictEqual(s.nodes[tableId], undefined);
+  strictEqual(s.nodes[graphId], undefined);
+});
+
+// seq 233: Save Family As — the table, its children and its linked info
+// sheets, nothing else, as a standalone project that opens clean.
+check("Save Family As extracts the table, its children and its linked info sheets (seq 233)", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "a1",
+      type: "analysis",
+      name: "Descriptive statistics",
+      parentId: t1,
+      analysisType: "descriptive-statistics",
+      analysisParams: { columns: ["Y1"] } as AnalysisParams,
+    },
+  });
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "g1",
+      type: "graph",
+      name: "Individual values",
+      parentId: t1,
+      graphType: "individual",
+      graphOptions: newGraphOptions("individual"),
+    },
+  });
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "t2",
+      type: "table",
+      name: "Table",
+      parentId: null,
+      tableType: "xy",
+      data: { columns: ["Title", "X", "Y1"], rows: [["a", "1", "2.5"]] },
+    },
+  });
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "f1",
+      type: "figure",
+      name: "Figure",
+      parentId: null,
+      panels: [{ graphId: "g1", row: 0, col: 0 }],
+      grid: { rows: 1, cols: 1 },
+      figureSize: { widthIn: 10, heightIn: 7.5 },
+      labelStyle: { position: "top-left", fontSizePt: 12, bold: true },
+      figureTitle: "",
+      sharedLegend: "none",
+      dpi: "600",
+    } as ProjectNode,
+  });
+  s = reducer(s, {
+    type: "create",
+    node: { id: "i1", type: "info", name: "Info", parentId: null, info: { ...newInfoSheetData(), linkedTableId: t1 } },
+  });
+  s = reducer(s, {
+    type: "create",
+    node: { id: "i2", type: "info", name: "Global info", parentId: null, info: newInfoSheetData() },
+  });
+  const source = { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId };
+  const family = extractFamily(source, t1);
+  ok(family, "a family comes back for a table");
+  deepStrictEqual(family.rootOrder, [t1, "i1"]);
+  deepStrictEqual(family.childOrder[t1], ["a1", "g1"]);
+  strictEqual(family.nodes.t2, undefined, "the other table stays behind");
+  strictEqual(family.nodes.f1, undefined, "figures never join a family");
+  strictEqual(family.nodes.i2, undefined, "a global info sheet stays behind");
+  strictEqual(family.activeNodeId, t1);
+  // The family opens standalone, unedited.
+  const { project, updated } = read(serializeProjectFile(family));
+  strictEqual(updated, false);
+  deepStrictEqual(Object.keys(project.nodes).sort(), ["a1", "g1", "i1", t1].sort());
+  deepStrictEqual(project.nodes[t1].data, s.nodes[t1].data);
+  // Not a table → null.
+  strictEqual(extractFamily(source, "a1"), null);
+  strictEqual(extractFamily(source, "no-such-node"), null);
+});
+
+// seq 234: Save a Copy — the whole project as it stands, byte-faithful
+// through the file format (the current file is untouched by construction:
+// the saver never changes filePath or marks the project saved).
+check("Save a Copy writes the whole project as it stands (seq 234)", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "a1",
+      type: "analysis",
+      name: "Descriptive statistics",
+      parentId: t1,
+      analysisType: "descriptive-statistics",
+      analysisParams: { columns: ["Y1"] } as AnalysisParams,
+    },
+  });
+  const payload = { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId };
+  const { project, updated } = read(serializeProjectFile(payload));
+  strictEqual(updated, false);
+  deepStrictEqual(project.nodes[t1].data, s.nodes[t1].data);
+  deepStrictEqual(project.childOrder, s.childOrder);
+  deepStrictEqual(project.rootOrder, s.rootOrder);
+  // A second save of the copy is identical — the copy is faithful.
+  const again = read(serializeProjectFile(project));
+  deepStrictEqual(again.project.nodes, project.nodes);
+  deepStrictEqual(again.project.rootOrder, project.rootOrder);
+});
+
+// seq 236: Duplicate Current Sheet — one sheet, nothing else, right after
+// its source, with a uniquified name and fresh ids.
+check("Duplicate Current Sheet clones one sheet and nothing else (seq 236)", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "a1",
+      type: "analysis",
+      name: "Descriptive statistics",
+      parentId: t1,
+      analysisType: "descriptive-statistics",
+      analysisParams: { columns: ["Y1"] } as AnalysisParams,
+    },
+  });
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "g1",
+      type: "graph",
+      name: "Individual values",
+      parentId: t1,
+      graphType: "individual",
+      graphOptions: newGraphOptions("individual"),
+    },
+  });
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "f1",
+      type: "figure",
+      name: "Figure",
+      parentId: null,
+      panels: [{ graphId: "g1", row: 0, col: 0 }],
+      grid: { rows: 1, cols: 1 },
+      figureSize: { widthIn: 10, heightIn: 7.5 },
+      labelStyle: { position: "top-left", fontSizePt: 12, bold: true },
+      figureTitle: "",
+      sharedLegend: "none",
+      dpi: "600",
+    } as ProjectNode,
+  });
+  // An analysis clone lands right after its source, deep-copied. The name
+  // is uniquified with a number (`uniqueName`: "Name 2", "Name 3"…) — the
+  // " copy" suffix belongs to Duplicate Family, not to this action.
+  s = reducer(s, { type: "duplicateNode", id: "a1" });
+  const cloneA = s.childOrder[t1][1];
+  ok(cloneA !== "a1", "the clone is a new node");
+  strictEqual(s.nodes[cloneA].type, "analysis");
+  strictEqual(s.nodes[cloneA].name, "Descriptive statistics 2");
+  strictEqual(s.nodes[cloneA].parentId, t1);
+  deepStrictEqual(s.nodes[cloneA].analysisParams, { columns: ["Y1"] });
+  ok(s.nodes[cloneA].analysisParams !== s.nodes.a1.analysisParams, "params are copied, not shared");
+  strictEqual(s.activeNodeId, cloneA);
+  // A second clone of the same source uniquifies again and lands ahead of
+  // the first clone, right after the source.
+  s = reducer(s, { type: "duplicateNode", id: "a1" });
+  const cloneA2 = s.childOrder[t1][1];
+  strictEqual(s.nodes[cloneA2].name, "Descriptive statistics 3");
+  deepStrictEqual(s.childOrder[t1], ["a1", cloneA2, cloneA, "g1"]);
+  // A figure clone keeps its panels pointing at the same graphs.
+  s = reducer(s, { type: "duplicateNode", id: "f1" });
+  const cloneF = s.rootOrder[s.rootOrder.indexOf("f1") + 1];
+  strictEqual(s.nodes[cloneF].type, "figure");
+  deepStrictEqual(s.nodes[cloneF].panels, s.nodes.f1.panels);
+  // A table clone leaves the children behind (Duplicate Family copies them).
+  s = reducer(s, { type: "duplicateNode", id: t1 });
+  const cloneT = s.rootOrder[s.rootOrder.indexOf(t1) + 1];
+  strictEqual(s.nodes[cloneT].type, "table");
+  strictEqual(s.nodes[cloneT].name, "Table 1 2");
+  deepStrictEqual(s.nodes[cloneT].data, s.nodes[t1].data);
+  deepStrictEqual(s.childOrder[cloneT], []);
+  // One Undo takes the table clone back.
+  s = reducer(s, { type: "undo" });
+  strictEqual(s.nodes[cloneT], undefined);
+  // An unknown id is a no-op.
+  strictEqual(reducer(s, { type: "duplicateNode", id: "no-such-node" }), s);
+});
+
+// seq 237: Freeze/Unfreeze — freezing snapshots the data the graph draws;
+// editing the table leaves the snapshot alone; unfreezing clears it.
+check("Freeze/Unfreeze graphs snapshots the table data (seq 237)", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  const originalData = s.nodes[t1].data;
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "g1",
+      type: "graph",
+      name: "Individual values",
+      parentId: t1,
+      graphType: "individual",
+      graphOptions: newGraphOptions("individual"),
+    },
+  });
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "f1",
+      type: "figure",
+      name: "Figure",
+      parentId: null,
+      panels: [{ graphId: "g1", row: 0, col: 0 }],
+      grid: { rows: 1, cols: 1 },
+      figureSize: { widthIn: 10, heightIn: 7.5 },
+      labelStyle: { position: "top-left", fontSizePt: 12, bold: true },
+      figureTitle: "",
+      sharedLegend: "none",
+      dpi: "600",
+    } as ProjectNode,
+  });
+  s = reducer(s, { type: "setGraphFrozen", id: "g1", kind: "graph", frozen: true });
+  strictEqual(s.nodes.g1.frozen, true);
+  deepStrictEqual(s.nodes.g1.frozenData, originalData);
+  ok(s.nodes.g1.frozenData !== originalData, "the snapshot owns its data");
+  // Editing the table leaves the snapshot alone.
+  const replacement = { columns: s.nodes[t1].data!.columns, rows: [["x", "9", "8"], ["y", "7", "6"]] };
+  s = reducer(s, { type: "updateTable", id: t1, data: replacement, label: "Typing" });
+  deepStrictEqual(s.nodes.g1.frozenData, originalData);
+  // Unfreezing clears the snapshot.
+  s = reducer(s, { type: "setGraphFrozen", id: "g1", kind: "graph", frozen: false });
+  strictEqual(s.nodes.g1.frozen, undefined);
+  strictEqual(s.nodes.g1.frozenData, undefined);
+  // Freezing a figure snapshots each panel's table.
+  s = reducer(s, { type: "setGraphFrozen", id: "f1", kind: "figure", frozen: true });
+  strictEqual(s.nodes.f1.frozen, true);
+  deepStrictEqual(s.nodes.f1.frozenDataByGraph?.g1, replacement);
+  // Freezing with the wrong kind, or a graph with no data, is a no-op.
+  strictEqual(reducer(s, { type: "setGraphFrozen", id: "g1", kind: "figure", frozen: true }), s);
+  const orphan: ProjectNode = {
+    id: "g9",
+    type: "graph",
+    name: "Orphan",
+    parentId: null,
+    graphType: "individual",
+    graphOptions: newGraphOptions("individual"),
+  };
+  s = reducer(s, { type: "create", node: orphan });
+  strictEqual(reducer(s, { type: "setGraphFrozen", id: "g9", kind: "graph", frozen: true }), s);
+});
+
+// seq 237: the frozen state survives save/load; a frozen node whose snapshot
+// is missing (a corrupt or hand-edited file) is unfrozen on load, never
+// drawn frozen with no data behind it.
+check("a frozen graph survives save/load; a frozen graph with no snapshot is unfrozen on load (seq 237)", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "g1",
+      type: "graph",
+      name: "Individual values",
+      parentId: t1,
+      graphType: "individual",
+      graphOptions: newGraphOptions("individual"),
+    },
+  });
+  s = reducer(s, { type: "setGraphFrozen", id: "g1", kind: "graph", frozen: true });
+  const corrupt: ProjectNode = { ...s.nodes.g1, id: "g2", name: "Broken", frozen: true, frozenData: undefined };
+  s = reducer(s, { type: "create", node: corrupt });
+  const payload = { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId };
+  const { project, updated } = read(serializeProjectFile(payload));
+  // `updated` is true here: the loader repairs the corrupt node (drops its
+  // frozen flag), and a repair marks the file — the sound node is untouched.
+  strictEqual(updated, true);
+  strictEqual(project.nodes.g1.frozen, true);
+  deepStrictEqual(project.nodes.g1.frozenData, s.nodes[t1].data);
+  strictEqual(project.nodes.g2.frozen, undefined, "frozen without a snapshot is corrupt — unfrozen on load");
+  strictEqual(project.nodes.g2.frozenData, undefined);
+});
+
+// seq 238: drawing objects — add, move, edit, group, reorder, duplicate,
+// delete; unknown ids are no-ops.
+check("drawing objects: add, move, group, reorder and delete (seq 238)", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "g1",
+      type: "graph",
+      name: "Individual values",
+      parentId: t1,
+      graphType: "individual",
+      graphOptions: newGraphOptions("individual"),
+    },
+  });
+  const text: DrawingObject = { id: "o1", kind: "text", x: 10, y: 20, width: 160, height: 40, text: "Hi", fontSize: 14, color: "#000000" };
+  s = reducer(s, { type: "addDrawingObject", nodeId: "g1", object: text });
+  strictEqual(s.nodes.g1.drawingObjects?.length, 1);
+  strictEqual(s.nodes.g1.drawingObjects?.[0].text, "Hi");
+  // Move + edit.
+  s = reducer(s, { type: "updateDrawingObject", nodeId: "g1", objectId: "o1", patch: { x: 30, y: 40, text: "Hello" } });
+  strictEqual(s.nodes.g1.drawingObjects?.[0].x, 30);
+  strictEqual(s.nodes.g1.drawingObjects?.[0].text, "Hello");
+  // A second object, then group them.
+  const rect: DrawingObject = { id: "o2", kind: "rect", x: 0, y: 0, width: 120, height: 80, fill: "none", strokeWidth: 1.5, color: "#000000" };
+  s = reducer(s, { type: "addDrawingObject", nodeId: "g1", object: rect });
+  s = reducer(s, { type: "arrangeDrawingObjects", nodeId: "g1", op: "group", objectIds: ["o1", "o2"] });
+  const groupId = s.nodes.g1.drawingObjects?.[0].groupId;
+  ok(groupId, "grouping assigns a group id");
+  strictEqual(s.nodes.g1.drawingObjects?.[1].groupId, groupId);
+  s = reducer(s, { type: "arrangeDrawingObjects", nodeId: "g1", op: "ungroup", objectIds: ["o1", "o2"] });
+  strictEqual(s.nodes.g1.drawingObjects?.[0].groupId, undefined);
+  // Bring-forward moves o1 one step towards the front.
+  s = reducer(s, { type: "arrangeDrawingObjects", nodeId: "g1", op: "bring-forward", objectIds: ["o1"] });
+  deepStrictEqual(s.nodes.g1.drawingObjects?.map((o) => o.id), ["o2", "o1"]);
+  // Duplicate inserts a fresh-id copy right after the original.
+  s = reducer(s, { type: "arrangeDrawingObjects", nodeId: "g1", op: "duplicate", objectIds: ["o1"] });
+  strictEqual(s.nodes.g1.drawingObjects?.length, 3);
+  const dup = s.nodes.g1.drawingObjects?.[2];
+  ok(dup && dup.id !== "o1", "the duplicate gets a fresh id");
+  strictEqual(dup.text, "Hello");
+  // Delete removes just that object.
+  s = reducer(s, { type: "deleteDrawingObject", nodeId: "g1", objectId: "o1" });
+  strictEqual(s.nodes.g1.drawingObjects?.length, 2);
+  deepStrictEqual(s.nodes.g1.drawingObjects?.map((o) => o.id), ["o2", dup.id]);
+  // Unknown node / object are no-ops.
+  strictEqual(reducer(s, { type: "deleteDrawingObject", nodeId: "g1", objectId: "no-such-object" }), s);
+  strictEqual(reducer(s, { type: "addDrawingObject", nodeId: "no-such-node", object: text }), s);
+});
+
+// seq 236 + 237 + 238 through the MCP job queue: clone-analysis and
+// clone-figure read the new id back; freeze-graph freezes; the drawing
+// tools add, update, duplicate and delete — all over the real reducer.
+check("MCP clone-analysis and clone-figure duplicate one sheet through the job queue (seq 236)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const t1 = harness.state().rootOrder[0];
+  harness.dispatch({
+    type: "create",
+    node: {
+      id: "a1",
+      type: "analysis",
+      name: "Descriptive statistics",
+      parentId: t1,
+      analysisType: "descriptive-statistics",
+      analysisParams: { columns: ["Y1"] } as AnalysisParams,
+    },
+  });
+  harness.dispatch({
+    type: "create",
+    node: {
+      id: "f1",
+      type: "figure",
+      name: "Figure",
+      parentId: null,
+      panels: [],
+      grid: { rows: 1, cols: 1 },
+      figureSize: { widthIn: 10, heightIn: 7.5 },
+      labelStyle: { position: "top-left", fontSizePt: 12, bold: true },
+      figureTitle: "",
+      sharedLegend: "none",
+      dpi: "600",
+    } as ProjectNode,
+  });
+  harness.sync();
+  const clonedA = await harness.run("job-clone-a", "clone-analysis", { analysis_id: "a1" });
+  const aId = (clonedA.result as { analysis_id: string }).analysis_id;
+  ok(aId && aId !== "a1", "the clone id reads back");
+  strictEqual(harness.state().nodes[aId]?.name, "Descriptive statistics 2");
+  strictEqual(harness.state().nodes[aId]?.parentId, t1);
+  const clonedF = await harness.run("job-clone-f", "clone-figure", { figure_id: "f1" });
+  const fId = (clonedF.result as { figure_id: string }).figure_id;
+  ok(fId && fId !== "f1", "the figure clone id reads back");
+  strictEqual(harness.state().nodes[fId]?.type, "figure");
+  await rejects(harness.run("job-clone-bad", "clone-analysis", { analysis_id: "f1" }), /is a figure, not a/);
+  await rejects(harness.run("job-clone-gone", "clone-figure", { figure_id: "no-such-figure" }), /no figure/);
+});
+
+check("MCP freeze-graph freezes through the job queue and refuses a graph with no data (seq 237)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const t1 = harness.state().rootOrder[0];
+  harness.dispatch({
+    type: "create",
+    node: {
+      id: "g1",
+      type: "graph",
+      name: "Individual values",
+      parentId: t1,
+      graphType: "individual",
+      graphOptions: newGraphOptions("individual"),
+    },
+  });
+  harness.sync();
+  const done = await harness.run("job-freeze-g", "freeze-graph", { graph_id: "g1", frozen: true });
+  strictEqual((done.result as { frozen: boolean }).frozen, true);
+  strictEqual(harness.state().nodes.g1.frozen, true);
+  deepStrictEqual(harness.state().nodes.g1.frozenData, harness.state().nodes[t1].data);
+  await harness.run("job-unfreeze-g", "freeze-graph", { graph_id: "g1", frozen: false });
+  strictEqual(harness.state().nodes.g1.frozen, undefined);
+  strictEqual(harness.state().nodes.g1.frozenData, undefined);
+  await rejects(harness.run("job-freeze-bad", "freeze-graph", { graph_id: "no-such-graph", frozen: true }), /no graph/);
+});
+
+check("MCP drawing objects round-trip through the job queue (seq 238)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const t1 = harness.state().rootOrder[0];
+  harness.dispatch({
+    type: "create",
+    node: {
+      id: "g1",
+      type: "graph",
+      name: "Individual values",
+      parentId: t1,
+      graphType: "individual",
+      graphOptions: newGraphOptions("individual"),
+    },
+  });
+  harness.sync();
+  const added = await harness.run("job-draw-add", "add-drawing-object", {
+    node_id: "g1",
+    object: { kind: "text", x: 10, y: 20, width: 160, height: 40, text: "Hi" },
+  });
+  const objectId = (added.result as { object_id: string }).object_id;
+  ok(objectId, "an object id comes back");
+  // Each job reads the visible state, which only advances on a commit —
+  // sync the harness between dependent jobs, as the real dispatcher does.
+  harness.sync();
+  strictEqual(harness.state().nodes.g1.drawingObjects?.length, 1);
+  strictEqual(harness.state().nodes.g1.drawingObjects?.[0].text, "Hi");
+  const updated = await harness.run("job-draw-upd", "update-drawing-object", {
+    node_id: "g1",
+    object_id: objectId,
+    patch: { text: "Hello" },
+  });
+  strictEqual((updated.result as { object_id: string }).object_id, objectId);
+  harness.sync();
+  strictEqual(harness.state().nodes.g1.drawingObjects?.[0].text, "Hello");
+  await harness.run("job-draw-dup", "arrange-drawing-objects", { node_id: "g1", op: "duplicate", object_ids: [objectId] });
+  harness.sync();
+  strictEqual(harness.state().nodes.g1.drawingObjects?.length, 2);
+  await harness.run("job-draw-del", "delete-drawing-object", { node_id: "g1", object_id: objectId });
+  harness.sync();
+  strictEqual(harness.state().nodes.g1.drawingObjects?.length, 1);
+  // A bad kind and an empty patch are plain errors, not jobs.
+  await rejects(
+    harness.run("job-draw-bad", "add-drawing-object", {
+      node_id: "g1",
+      object: { kind: "squiggle", x: 0, y: 0, width: 10, height: 10 },
+    }),
+    /kind/,
+  );
+  await rejects(
+    harness.run("job-draw-empty", "update-drawing-object", { node_id: "g1", object_id: objectId, patch: {} }),
+    /changes nothing/,
+  );
+});
+
+// seq 239: manual zoom — the steps cover 25–400% in order, and values
+// outside the range clamp to it.
+check("manual zoom steps through 25–400% and clamps outside it (seq 239)", () => {
+  strictEqual(ZOOM_LIMITS.min, 0.25);
+  strictEqual(ZOOM_LIMITS.max, 4);
+  strictEqual(clampZoom(0.1), 0.25);
+  strictEqual(clampZoom(9), 4);
+  strictEqual(clampZoom(1), 1);
+  strictEqual(zoomInStep(1), 1.25);
+  strictEqual(zoomOutStep(1), 0.75);
+  strictEqual(zoomInStep(4), 4);
+  strictEqual(zoomOutStep(0.25), 0.25);
+  // Stepping from a fit lands on the next stop, not the fit itself.
+  strictEqual(zoomInStep(0.8), 1);
+  strictEqual(zoomOutStep(0.8), 0.75);
+  // The stops cover the whole range in order.
+  let z = ZOOM_LIMITS.min;
+  const seen = [z];
+  while (z < ZOOM_LIMITS.max) {
+    z = zoomInStep(z);
+    seen.push(z);
+  }
+  deepStrictEqual(seen, [0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4]);
+});
+
 // ── v1.6 MCP race fix ──────────────────────────────────────────────────────
 // Failure B: the dispatcher's create-table read the new id back from
 // `getState()` after two blind zero-timers; under load React defers the
@@ -576,6 +1115,12 @@ const mcpLaggingHarness = (withRevisionWait: boolean) => {
     updateFigure: neverUnused,
     createInfoSheet: neverUnused,
     updateInfoSheet: neverUnused,
+    duplicateNode: (id) => dispatch({ type: "duplicateNode", id }),
+    setGraphFrozen: (id, kind, frozen) => dispatch({ type: "setGraphFrozen", id, kind, frozen }),
+    addDrawingObject: (nodeId, object) => dispatch({ type: "addDrawingObject", nodeId, object }),
+    updateDrawingObject: (nodeId, objectId, patch) => dispatch({ type: "updateDrawingObject", nodeId, objectId, patch }),
+    deleteDrawingObject: (nodeId, objectId) => dispatch({ type: "deleteDrawingObject", nodeId, objectId }),
+    arrangeDrawingObjects: (nodeId, op, objectIds) => dispatch({ type: "arrangeDrawingObjects", nodeId, op, objectIds }),
   };
   const deps: JobDeps = {
     getState: () => ({
