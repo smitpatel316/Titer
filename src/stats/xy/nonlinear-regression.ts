@@ -1394,7 +1394,7 @@ function comparisonRCode(
   // retry converges (agonist-3pl-normalized-logx) used to fail the whole
   // comparison here.
   const setBlock = (xVar: string, yVar: string, prefix: string) =>
-    `x<-${xVar};y<-${yVar};${retryChain([spec.fit, ...(spec.retryFits ?? []).map((r) => r.fit)])};${fitSummaryStatements(spec)}` +
+    `x<-${xVar};y<-${yVar};${retryChain([spec.fit, ...(spec.retryFits ?? []).map((r) => r.fit)], fitSummaryStatements(spec))};` +
     `${prefix.replace(/_$/, "")}<-c(${fitEntries(spec, prefix)});`;
   return (
     `x0<-${rVec(s0.xs)};y0<-${rVec(s0.ys)};x1<-${rVec(s1.xs)};y1<-${rVec(s1.ys)};` +
@@ -1554,14 +1554,23 @@ async function compareModels(
  *  whose retry converges (agonist-3pl-normalized-logx) failed the whole
  *  comparison. A succeeding primary is untouched — the chain returns its
  *  result and the retries never run. */
-function retryChain(fits: string[]): string {
-  const calls = fits.map((f) => f.replace(/^m<-/, ""));
-  // Innermost attempt throws (no handler); each outer layer catches its
-  // attempt's failure and tries the next.
-  let inner = calls[calls.length - 1]!;
-  for (let i = calls.length - 2; i >= 0; i--)
-    inner = `tryCatch(${calls[i]},error=function(e${i})${inner})`;
-  return `m<-${inner}`;
+/** fitModelSpec's retry ladder, as R: try each `m<-nls(...)` fit string in
+ *  turn (primary, then the retries), keeping the first whose fit AND
+ *  summary both succeed, and throwing the last error if every attempt
+ *  fails. Each attempt is `{fit; summary}` — a summary/vcov failure on
+ *  a converged fit falls through to the next retry too (agonist-3pl-
+ *  normalized-logx: port converges but vcov fails with "element (1,1)
+ *  is zero"; tol then succeeds). A `for` loop (unlike a tryCatch
+ *  handler, which is a function whose assignments are local) does not
+ *  scope, so the assignments (m, s, co, cf, V, ...) persist; the fits
+ *  are held as unevaluated expressions so no text escaping is needed.
+ *  A succeeding primary is untouched — the loop breaks after it. */
+function retryChain(fits: string[], summary: string): string {
+  return (
+    `retryOk<-FALSE;retryErr<-NULL;` +
+    `for(retryFit in expression(${fits.join(",")})){retryOk<-tryCatch({eval(retryFit);${summary}TRUE},error=function(e){retryErr<<-e;FALSE});if(retryOk)break};` +
+    `if(!retryOk)stop(retryErr)`
+  );
 }
 
 /** The default shared parameters for a global fit (plan 26): the dose
@@ -2386,9 +2395,11 @@ export async function runNonlinearRegression(
     // primary: the single-fit path used to stall here (Pade (1,1) on
     // noiseless standards: "number of iterations exceeded maximum of
     // 200"), while the main fit path's port/tol retry converges on the
-    // same data. A succeeding primary is untouched.
+    // same data. A succeeding primary is untouched. The summary is
+    // inside the chain (retryChain takes it), so a summary/vcov failure
+    // on a converged retry falls through to the next retry too.
     const rCode =
-      `${fitStatementsForSpec(first.xs, first.ys, effSpec, retryChain([effSpec.fit, ...(effSpec.retryFits ?? []).map((r) => r.fit)]), extraAssignments, !!weights)}${R_INTERP}\n` +
+      `x<-${rVec(first.xs)};y<-${rVec(first.ys)};${extraAssignments}${retryChain([effSpec.fit, ...(effSpec.retryFits ?? []).map((r) => r.fit)], fitSummaryStatements(effSpec, !!weights))};${R_INTERP}\n` +
       `ix<-interp(m,${rVec(unknownY)},${lo},${hi},${spec.positiveX || spec.nonNegativeX ? "TRUE" : "FALSE"})\n` +
       `${interpolationCode(effSpec, unknownY, lo, hi)}c(${fitEntries(effSpec)},${interpNames})`;
     try {
