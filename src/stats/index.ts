@@ -477,11 +477,18 @@ export function runAnalysis(
   // prettier-ignore
   const named = params as
     { x?: string; y?: string | string[]; ys?: string[]; y2?: string; column?: string; controls?: string[]; dependent?: string; reference?: string; control?: string; compareWith?: string; predictors?: string[]; datasets?: string[]; time?: string; status?: string; covariates?: string[]; stratifyBy?: string } | undefined;
+  // `control` is a column name only for the one-way ANOVA — the two/three-way
+  // ANOVAs' control is a group, row or cell label ("A (Day 1)"), never a
+  // column, and their runners validate it themselves with a clear error
+  // (runPosthoc: "The control cell … holds no data"). Gating it here would
+  // refuse every Dunnett run with a control.
+  const control =
+    testType === "two-way-anova" || testType === "three-way-anova" ? undefined : named?.control;
   // prettier-ignore
   const chosen = [
     ...(Array.isArray(named?.y) ? named.y : named?.y !== undefined ? [named.y] : []),
     ...(named?.ys ?? []),
-    named?.x, named?.y2, named?.column, ...(named?.controls ?? []), named?.dependent, named?.reference, named?.control, named?.compareWith, ...(named?.predictors ?? []), ...(named?.datasets ?? []), named?.time, named?.status, ...(named?.covariates ?? []),
+    named?.x, named?.y2, named?.column, ...(named?.controls ?? []), named?.dependent, named?.reference, control, named?.compareWith, ...(named?.predictors ?? []), ...(named?.datasets ?? []), named?.time, named?.status, ...(named?.covariates ?? []),
   ];
   // (FF-F17) `stratifyBy` is NOT in the gate: no runner reads it — only the
   // survival-curves graph overlay, which draws unstratified when the column
