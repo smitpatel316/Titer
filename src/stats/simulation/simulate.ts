@@ -5,6 +5,7 @@
 // dataset order (the first n values are dataset 1, the next n dataset 2…),
 // so a simulation is one webR round-trip whatever its size.
 import type { SimulationDistribution, SimulationSpec } from "../types";
+import { SIMULATION_DISTRIBUTIONS } from "../types";
 import type { TableData } from "../../store/types";
 import { evalNumericVector } from "../webr";
 import { newGroupedTable } from "../../views/tables/table-data";
@@ -160,7 +161,7 @@ export function readSimulationSpec(v: unknown): SimulationSpec | undefined {
       seed: raw.seed,
       tableType: raw.tableType,
     }).filter(([, value]) => value !== undefined),
-  ) as SimulationSpec;
+  ) as unknown as SimulationSpec;
   return validateSimulationSpec(spec) === undefined ? spec : undefined;
 }
 

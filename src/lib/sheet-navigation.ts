@@ -17,7 +17,8 @@ export function pushHistory(history: string[], id: string): string[] {
 /** The sheet Previous Sheet goes to: the one before the current sheet's
  *  latest visit — the ping-pong partner — or null when there is none
  *  (never visited, or only ever this sheet). */
-export function pingPongTarget(history: string[], currentId: string): string | null {
+export function pingPongTarget(history: string[], currentId: string | null): string | null {
+  if (currentId === null) return null;
   const at = history.lastIndexOf(currentId);
   if (at <= 0) return null;
   return history[at - 1];

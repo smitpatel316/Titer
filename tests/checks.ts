@@ -526,7 +526,13 @@ check("seq 240: sheet history de-duplicates repeats and ping-pong skips the curr
   history = pushHistory(history, "g1");
   deepStrictEqual(history, ["t1", "a1", "g1"]);
   strictEqual(pingPongTarget(history, "g1"), "a1");
+  // From "a1" the previous visit is "t1" — the ping-pong back to "g1"
+  // only happens once the move to "a1" is itself recorded, as Previous
+  // Sheet does via setActive: then the latest "a1" sits after "g1".
+  strictEqual(pingPongTarget(history, "a1"), "t1");
+  history = pushHistory(history, "a1");
   strictEqual(pingPongTarget(history, "a1"), "g1");
+  strictEqual(pingPongTarget(history, null), null);
   strictEqual(pingPongTarget(["t1"], "t1"), null);
   strictEqual(pingPongTarget([], "t1"), null);
   const capped = Array.from({ length: 60 }, (_, i) => `s${i}`).reduce(pushHistory, [] as string[]);
@@ -707,10 +713,10 @@ check("seq 243: a simulation spec round-trips through the file; an invalid one i
   const filePayload: ProjectFilePayload = { nodes: { s1: simTable }, rootOrder: ["s1"], childOrder: { s1: [] }, activeNodeId: "s1" };
   const roundTripped = read(serializeProjectFile(filePayload));
   strictEqual(roundTripped.updated, false);
-  deepStrictEqual(roundTripped.nodes.s1.data?.simulation, { ...spec });
+  deepStrictEqual(roundTripped.project.nodes.s1.data?.simulation, { ...spec });
   const tampered = JSON.parse(serializeProjectFile(filePayload)) as { project: { nodes: Record<string, { data: Record<string, unknown> }> } };
   (tampered.project.nodes.s1.data.simulation as Record<string, unknown>).distribution = "bogus";
-  deepStrictEqual(read(JSON.stringify(tampered)).nodes.s1.data?.simulation, undefined);
+  deepStrictEqual(read(JSON.stringify(tampered)).project.nodes.s1.data?.simulation, undefined);
 });
 
 // seq 244 (change graph type): switching keeps the titles and the size,
@@ -718,7 +724,6 @@ check("seq 243: a simulation spec round-trips through the file; an invalid one i
 // doesn't offer is refused, and Undo restores the old type.
 check("seq 244: changing a graph's type keeps its titles, resets its options and renames it; Undo restores it", () => {
   let s = makeInitialState();
-  const t1 = s.rootOrder[0];
   // The initial table is a column table: switch its graph to a grouped type
   // is refused, so first move to an XY table for a real switch.
   s = reducer(s, { type: "create", node: { id: "t2", type: "table", name: "Doses", parentId: null, tableType: "xy", data: { columns: ["Title", "X", "Y1"], rows: [[null, "1", "2"]] } } });
@@ -768,7 +773,9 @@ check("seq 242 (MCP): repoint-analysis re-parents the orphan; a live analysis or
   // the table that does.
   await rejects(harness.run("job-242-xy", "repoint-analysis", { analysis_id: "a1", table_id: "t3" }), /doesn't offer/);
   const done = await harness.run("job-242-ok", "repoint-analysis", { analysis_id: "a1", table_id: "t2" });
-  deepStrictEqual(done.result, { project_id: "project-1", analysis_id: "a1", table_id: "t2", table_name: "Groups" });
+  // Root tables are numbered by the store ("Groups" → "Groups 1"), and
+  // the result reports the name the table actually has.
+  deepStrictEqual(done.result, { project_id: "project-1", analysis_id: "a1", table_id: "t2", table_name: "Groups 1" });
   strictEqual(harness.state().nodes.a1.parentId, "t2");
   strictEqual(harness.state().nodes.a1.orphaned, false);
   // Now live: a second re-point is refused.
