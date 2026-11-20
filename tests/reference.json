@@ -6381,7 +6381,7 @@
   ],
   "notes": "D is the maximum absolute difference between the two cumulative distributions. To compare a sample against a theoretical distribution instead, use the one-sample Kolmogorov–Smirnov test."
  },
- "one-sample-ks ks1Normal {\"distribution\":\"normal\",\"paramsFrom\":\"specified\",\"mean\":0,\"sd\":1}": {
+ "one-sample-ks ks1Normal {\"distribution\":\"normal\",\"paramsFrom\":\"specified\",\"mean\":0,\"sd\":1,\"tails\":\"two-sided\"}": {
   "testType": "one-sample-ks",
   "subtitle": "One-sample Kolmogorov–Smirnov test (vs. Normal distribution)",
   "stats": [
@@ -6423,7 +6423,7 @@
   },
   "summary": "The data don't show that “X”'s distribution differs from the Normal distribution (P = 1). That doesn't prove they follow it."
  },
- "one-sample-ks ks1Uniform {\"distribution\":\"uniform\",\"paramsFrom\":\"specified\",\"min\":0,\"max\":1}": {
+ "one-sample-ks ks1Uniform {\"distribution\":\"uniform\",\"paramsFrom\":\"specified\",\"min\":0,\"max\":1,\"tails\":\"two-sided\"}": {
   "testType": "one-sample-ks",
   "subtitle": "One-sample Kolmogorov–Smirnov test (vs. Uniform distribution)",
   "stats": [
@@ -6465,7 +6465,7 @@
   },
   "summary": "The data don't show that “X”'s distribution differs from the Uniform distribution (P = 0.9063). That doesn't prove they follow it."
  },
- "one-sample-ks ks1Exp {\"distribution\":\"exponential\",\"paramsFrom\":\"specified\",\"rate\":1}": {
+ "one-sample-ks ks1Exp {\"distribution\":\"exponential\",\"paramsFrom\":\"specified\",\"rate\":1,\"tails\":\"two-sided\"}": {
   "testType": "one-sample-ks",
   "subtitle": "One-sample Kolmogorov–Smirnov test (vs. Exponential distribution)",
   "stats": [
@@ -6493,7 +6493,7 @@
     "n": 4
    }
   ],
-  "notes": "Compares each column's cumulative distribution with a Exponential distribution (parameters as entered). D is the largest absolute difference between the two cumulative distributions. Two-tailed P value. The Exponential distribution used for “X”: rate 1 (as entered). KS is most sensitive near the centre of the distribution and weak in the tails — a non-significant result on a small sample is weak evidence that the data follow the distribution.",
+  "notes": "Compares each column's cumulative distribution with an Exponential distribution (parameters as entered). D is the largest absolute difference between the two cumulative distributions. Two-tailed P value. The Exponential distribution used for “X”: rate 1 (as entered). KS is most sensitive near the centre of the distribution and weak in the tails — a non-significant result on a small sample is weak evidence that the data follow the distribution.",
   "analyzed": {
    "sets": [
     {
@@ -6502,12 +6502,12 @@
     }
    ],
    "how": "list",
-   "detail": "each against a Exponential distribution",
+   "detail": "each against an Exponential distribution",
    "left": []
   },
   "summary": "The data don't show that “X”'s distribution differs from the Exponential distribution (P = 0.9997). That doesn't prove they follow it."
  },
- "one-sample-ks ks1Lognormal {\"distribution\":\"lognormal\",\"paramsFrom\":\"specified\",\"meanlog\":1,\"sdlog\":1}": {
+ "one-sample-ks ks1Lognormal {\"distribution\":\"lognormal\",\"paramsFrom\":\"specified\",\"meanlog\":1,\"sdlog\":1,\"tails\":\"two-sided\"}": {
   "testType": "one-sample-ks",
   "subtitle": "One-sample Kolmogorov–Smirnov test (vs. Lognormal distribution)",
   "stats": [
@@ -6549,7 +6549,7 @@
   },
   "summary": "The data don't show that “X”'s distribution differs from the Lognormal distribution (P = 0.813). That doesn't prove they follow it."
  },
- "one-sample-ks ks1Estimated {\"distribution\":\"normal\",\"paramsFrom\":\"estimated\"}": {
+ "one-sample-ks ks1Estimated {\"distribution\":\"normal\",\"paramsFrom\":\"estimated\",\"tails\":\"two-sided\"}": {
   "testType": "one-sample-ks",
   "subtitle": "One-sample Kolmogorov–Smirnov test (vs. Normal distribution)",
   "stats": [
@@ -6633,10 +6633,10 @@
   },
   "summary": "The data don't show that “X”'s distribution differs from the Normal distribution (one-tailed P = 0.759). That doesn't prove they follow it."
  },
- "one-sample-ks ks1TooFew {\"distribution\":\"normal\",\"paramsFrom\":\"specified\",\"mean\":0,\"sd\":1}": {
+ "one-sample-ks ks1TooFew {\"distribution\":\"normal\",\"paramsFrom\":\"specified\",\"mean\":0,\"sd\":1,\"tails\":\"two-sided\"}": {
   "error": "“X” holds 1 value; this test needs at least 2 in each group."
  },
- "one-sample-ks ks1Nonpositive {\"distribution\":\"lognormal\",\"paramsFrom\":\"estimated\"}": {
+ "one-sample-ks ks1Nonpositive {\"distribution\":\"lognormal\",\"paramsFrom\":\"estimated\",\"tails\":\"two-sided\"}": {
   "error": "A Lognormal distribution needs values above 0 (log is undefined at or below zero) — “X” holds 0."
  },
  "outliers column {\"q\":1}": {
