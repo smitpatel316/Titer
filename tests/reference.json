@@ -25419,6 +25419,4444 @@
    }
   ]
  },
+ "two-way-anova grouped {\"design\":\"ordinary\",\"posthoc\":\"fdr\",\"posthocTarget\":\"groups\"}": {
+  "testType": "two-way-anova",
+  "subtitle": "Ordinary two-way ANOVA",
+  "stats": [
+   {
+    "label": "Group F",
+    "value": 337.3565972
+   },
+   {
+    "label": "Group DFn",
+    "value": 2
+   },
+   {
+    "label": "Group P value",
+    "value": 8.270531238e-21,
+    "p": true
+   },
+   {
+    "label": "Row F",
+    "value": 120.8037173
+   },
+   {
+    "label": "Row DFn",
+    "value": 4
+   },
+   {
+    "label": "Row P value",
+    "value": 1.214541748e-17,
+    "p": true
+   },
+   {
+    "label": "Interaction F",
+    "value": 17.6411367
+   },
+   {
+    "label": "Interaction DFn",
+    "value": 8
+   },
+   {
+    "label": "Interaction P value",
+    "value": 3.199293327e-9,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 29
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 15.6,
+    "sd": 3.775863194,
+    "sem": 0.9749236844,
+    "median": 15,
+    "n": 15
+   },
+   {
+    "name": "B",
+    "mean": 22.53333333,
+    "sd": 6.479270976,
+    "sem": 1.672940572,
+    "median": 22,
+    "n": 15
+   },
+   {
+    "name": "C",
+    "mean": 12,
+    "sd": 1.664100589,
+    "sem": 0.44474959,
+    "median": 12,
+    "n": 14
+   }
+  ],
+  "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares). FDR approach (Benjamini-Hochberg, Q = 5%): 13 of 15 comparisons are discoveries (adjusted P < 0.05). The P values are FDR-adjusted.",
+  "comparisons": [
+   {
+    "group1": "A (Day 1)",
+    "group2": "B (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 0
+     }
+    ],
+    "diff": -3,
+    "low": null,
+    "high": null,
+    "p": 0.003873029273
+   },
+   {
+    "group1": "A (Day 1)",
+    "group2": "C (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 0
+     }
+    ],
+    "diff": 1,
+    "low": null,
+    "high": null,
+    "p": 0.2807046476
+   },
+   {
+    "group1": "B (Day 1)",
+    "group2": "C (Day 1)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 0
+     }
+    ],
+    "diff": 4,
+    "low": null,
+    "high": null,
+    "p": 0.0004047984831
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "B (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 1
+     }
+    ],
+    "diff": -5,
+    "low": null,
+    "high": null,
+    "p": 0.000009590558685
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": 2,
+    "low": null,
+    "high": null,
+    "p": 0.05889078966
+   },
+   {
+    "group1": "B (Day 2)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": 7,
+    "low": null,
+    "high": null,
+    "p": 4.388190384e-7
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "B (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": -7.333333333,
+    "low": null,
+    "high": null,
+    "p": 1.029953993e-8
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": 3,
+    "low": null,
+    "high": null,
+    "p": 0.002582019515
+   },
+   {
+    "group1": "B (Day 3)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": 10.33333333,
+    "low": null,
+    "high": null,
+    "p": 1.01945683e-11
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "B (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -9,
+    "low": null,
+    "high": null,
+    "p": 1.262399675e-10
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": 5,
+    "low": null,
+    "high": null,
+    "p": 0.00000639370579
+   },
+   {
+    "group1": "B (Day 4)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": 14,
+    "low": null,
+    "high": null,
+    "p": 5.19321826e-15
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "B (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -10.33333333,
+    "low": null,
+    "high": null,
+    "p": 5.097284151e-12
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": 7.333333333,
+    "low": null,
+    "high": null,
+    "p": 6.866359957e-9
+   },
+   {
+    "group1": "B (Day 5)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 4
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": 17.66666667,
+    "low": null,
+    "high": null,
+    "p": 1.091933564e-17
+   }
+  ],
+  "comparisonsLabel": "FDR approach (Benjamini-Hochberg, Q = 5%) multiple comparisons (groups within each row, each row a family)",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 15
+    },
+    {
+     "name": "B",
+     "n": 15
+    },
+    {
+     "name": "C",
+     "n": 14
+    }
+   ],
+   "how": "list",
+   "detail": "5 rows",
+   "left": []
+  },
+  "summary": "The difference between the groups depends on the row (a significant interaction, P < 0.0001): look at the comparisons within each row or group, not only at the overall effects. Overall, the groups differ (P < 0.0001). Overall, the rows differ (P < 0.0001). 13 of 15 pairs differ significantly in the comparisons.",
+  "checks": [
+   {
+    "ok": false,
+    "text": "Normality of the residuals (Shapiro-Wilk): the residuals may not be normal (P = 0.0003078). The Scheirer-Ray-Hare test doesn't assume it. With few values the test rarely flags a departure; with many, even a slight one."
+   }
+  ]
+ },
+ "two-way-anova grouped {\"design\":\"ordinary\",\"posthoc\":\"fdr\",\"posthocTarget\":\"groups\",\"fdrMethod\":\"bky\",\"fdrQ\":10}": {
+  "testType": "two-way-anova",
+  "subtitle": "Ordinary two-way ANOVA",
+  "stats": [
+   {
+    "label": "Group F",
+    "value": 337.3565972
+   },
+   {
+    "label": "Group DFn",
+    "value": 2
+   },
+   {
+    "label": "Group P value",
+    "value": 8.270531238e-21,
+    "p": true
+   },
+   {
+    "label": "Row F",
+    "value": 120.8037173
+   },
+   {
+    "label": "Row DFn",
+    "value": 4
+   },
+   {
+    "label": "Row P value",
+    "value": 1.214541748e-17,
+    "p": true
+   },
+   {
+    "label": "Interaction F",
+    "value": 17.6411367
+   },
+   {
+    "label": "Interaction DFn",
+    "value": 8
+   },
+   {
+    "label": "Interaction P value",
+    "value": 3.199293327e-9,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 29
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 15.6,
+    "sd": 3.775863194,
+    "sem": 0.9749236844,
+    "median": 15,
+    "n": 15
+   },
+   {
+    "name": "B",
+    "mean": 22.53333333,
+    "sd": 6.479270976,
+    "sem": 1.672940572,
+    "median": 22,
+    "n": 15
+   },
+   {
+    "name": "C",
+    "mean": 12,
+    "sd": 1.664100589,
+    "sem": 0.44474959,
+    "median": 12,
+    "n": 14
+   }
+  ],
+  "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares). FDR approach (Benjamini-Krieger-Yekutieli (two-stage), Q = 10%): 15 of 15 comparisons are discoveries (adjusted P < 0.1). The P values are FDR-adjusted.",
+  "comparisons": [
+   {
+    "group1": "A (Day 1)",
+    "group2": "B (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 0
+     }
+    ],
+    "diff": -3,
+    "low": null,
+    "high": null,
+    "p": 0.001291009758
+   },
+   {
+    "group1": "A (Day 1)",
+    "group2": "C (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 0
+     }
+    ],
+    "diff": 1,
+    "low": null,
+    "high": null,
+    "p": 0.09356821588
+   },
+   {
+    "group1": "B (Day 1)",
+    "group2": "C (Day 1)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 0
+     }
+    ],
+    "diff": 4,
+    "low": null,
+    "high": null,
+    "p": 0.0001349328277
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "B (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 1
+     }
+    ],
+    "diff": -5,
+    "low": null,
+    "high": null,
+    "p": 0.000003196852895
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": 2,
+    "low": null,
+    "high": null,
+    "p": 0.01963026322
+   },
+   {
+    "group1": "B (Day 2)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": 7,
+    "low": null,
+    "high": null,
+    "p": 1.462730128e-7
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "B (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": -7.333333333,
+    "low": null,
+    "high": null,
+    "p": 3.433179978e-9
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": 3,
+    "low": null,
+    "high": null,
+    "p": 0.0008606731717
+   },
+   {
+    "group1": "B (Day 3)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": 10.33333333,
+    "low": null,
+    "high": null,
+    "p": 3.398189434e-12
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "B (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -9,
+    "low": null,
+    "high": null,
+    "p": 4.207998915e-11
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": 5,
+    "low": null,
+    "high": null,
+    "p": 0.000002131235263
+   },
+   {
+    "group1": "B (Day 4)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": 14,
+    "low": null,
+    "high": null,
+    "p": 1.731072753e-15
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "B (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -10.33333333,
+    "low": null,
+    "high": null,
+    "p": 1.699094717e-12
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": 7.333333333,
+    "low": null,
+    "high": null,
+    "p": 2.288786652e-9
+   },
+   {
+    "group1": "B (Day 5)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 4
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": 17.66666667,
+    "low": null,
+    "high": null,
+    "p": 3.639778547e-18
+   }
+  ],
+  "comparisonsLabel": "FDR approach (Benjamini-Krieger-Yekutieli (two-stage), Q = 10%) multiple comparisons (groups within each row, each row a family)",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 15
+    },
+    {
+     "name": "B",
+     "n": 15
+    },
+    {
+     "name": "C",
+     "n": 14
+    }
+   ],
+   "how": "list",
+   "detail": "5 rows",
+   "left": []
+  },
+  "summary": "The difference between the groups depends on the row (a significant interaction, P < 0.0001): look at the comparisons within each row or group, not only at the overall effects. Overall, the groups differ (P < 0.0001). Overall, the rows differ (P < 0.0001). 14 of 15 pairs differ significantly in the comparisons.",
+  "checks": [
+   {
+    "ok": false,
+    "text": "Normality of the residuals (Shapiro-Wilk): the residuals may not be normal (P = 0.0003078). The Scheirer-Ray-Hare test doesn't assume it. With few values the test rarely flags a departure; with many, even a slight one."
+   }
+  ]
+ },
+ "two-way-anova grouped {\"design\":\"ordinary\",\"posthoc\":\"fdr\",\"posthocTarget\":\"rows\",\"fdrMethod\":\"by\"}": {
+  "testType": "two-way-anova",
+  "subtitle": "Ordinary two-way ANOVA",
+  "stats": [
+   {
+    "label": "Group F",
+    "value": 337.3565972
+   },
+   {
+    "label": "Group DFn",
+    "value": 2
+   },
+   {
+    "label": "Group P value",
+    "value": 8.270531238e-21,
+    "p": true
+   },
+   {
+    "label": "Row F",
+    "value": 120.8037173
+   },
+   {
+    "label": "Row DFn",
+    "value": 4
+   },
+   {
+    "label": "Row P value",
+    "value": 1.214541748e-17,
+    "p": true
+   },
+   {
+    "label": "Interaction F",
+    "value": 17.6411367
+   },
+   {
+    "label": "Interaction DFn",
+    "value": 8
+   },
+   {
+    "label": "Interaction P value",
+    "value": 3.199293327e-9,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 29
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 15.6,
+    "sd": 3.775863194,
+    "sem": 0.9749236844,
+    "median": 15,
+    "n": 15
+   },
+   {
+    "name": "B",
+    "mean": 22.53333333,
+    "sd": 6.479270976,
+    "sem": 1.672940572,
+    "median": 22,
+    "n": 15
+   },
+   {
+    "name": "C",
+    "mean": 12,
+    "sd": 1.664100589,
+    "sem": 0.44474959,
+    "median": 12,
+    "n": 14
+   }
+  ],
+  "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares). FDR approach (Benjamini-Yekutieli, Q = 5%): 20 of 30 comparisons are discoveries (adjusted P < 0.05). The P values are FDR-adjusted.",
+  "comparisons": [
+   {
+    "group1": "Day 1 (A)",
+    "group2": "Day 2 (A)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "A",
+      "row": 1
+     }
+    ],
+    "diff": -2,
+    "low": null,
+    "high": null,
+    "p": 0.1055756123
+   },
+   {
+    "group1": "Day 1 (A)",
+    "group2": "Day 3 (A)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "A",
+      "row": 2
+     }
+    ],
+    "diff": -4,
+    "low": null,
+    "high": null,
+    "p": 0.0006586899479
+   },
+   {
+    "group1": "Day 1 (A)",
+    "group2": "Day 4 (A)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "A",
+      "row": 3
+     }
+    ],
+    "diff": -7,
+    "low": null,
+    "high": null,
+    "p": 1.703766478e-7
+   },
+   {
+    "group1": "Day 1 (A)",
+    "group2": "Day 5 (A)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "A",
+      "row": 4
+     }
+    ],
+    "diff": -10,
+    "low": null,
+    "high": null,
+    "p": 2.165549422e-10
+   },
+   {
+    "group1": "Day 2 (A)",
+    "group2": "Day 3 (A)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "A",
+      "row": 2
+     }
+    ],
+    "diff": -2,
+    "low": null,
+    "high": null,
+    "p": 0.1055756123
+   },
+   {
+    "group1": "Day 2 (A)",
+    "group2": "Day 4 (A)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "A",
+      "row": 3
+     }
+    ],
+    "diff": -5,
+    "low": null,
+    "high": null,
+    "p": 0.00003745392257
+   },
+   {
+    "group1": "Day 2 (A)",
+    "group2": "Day 5 (A)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "A",
+      "row": 4
+     }
+    ],
+    "diff": -8,
+    "low": null,
+    "high": null,
+    "p": 1.639776832e-8
+   },
+   {
+    "group1": "Day 3 (A)",
+    "group2": "Day 4 (A)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "A",
+      "row": 3
+     }
+    ],
+    "diff": -3,
+    "low": null,
+    "high": null,
+    "p": 0.009453316489
+   },
+   {
+    "group1": "Day 3 (A)",
+    "group2": "Day 5 (A)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "A",
+      "row": 4
+     }
+    ],
+    "diff": -6,
+    "low": null,
+    "high": null,
+    "p": 0.000002309587157
+   },
+   {
+    "group1": "Day 4 (A)",
+    "group2": "Day 5 (A)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "A",
+      "row": 4
+     }
+    ],
+    "diff": -3,
+    "low": null,
+    "high": null,
+    "p": 0.009453316489
+   },
+   {
+    "group1": "Day 1 (B)",
+    "group2": "Day 2 (B)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 1
+     }
+    ],
+    "diff": -4,
+    "low": null,
+    "high": null,
+    "p": 0.0003952139688
+   },
+   {
+    "group1": "Day 1 (B)",
+    "group2": "Day 3 (B)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": -8.333333333,
+    "low": null,
+    "high": null,
+    "p": 2.266389452e-9
+   },
+   {
+    "group1": "Day 1 (B)",
+    "group2": "Day 4 (B)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -13,
+    "low": null,
+    "high": null,
+    "p": 1.137469679e-13
+   },
+   {
+    "group1": "Day 1 (B)",
+    "group2": "Day 5 (B)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -17.33333333,
+    "low": null,
+    "high": null,
+    "p": 1.781624547e-16
+   },
+   {
+    "group1": "Day 2 (B)",
+    "group2": "Day 3 (B)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": -4.333333333,
+    "low": null,
+    "high": null,
+    "p": 0.0001592997372
+   },
+   {
+    "group1": "Day 2 (B)",
+    "group2": "Day 4 (B)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -9,
+    "low": null,
+    "high": null,
+    "p": 4.930038094e-10
+   },
+   {
+    "group1": "Day 2 (B)",
+    "group2": "Day 5 (B)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -13.33333333,
+    "low": null,
+    "high": null,
+    "p": 8.927042395e-14
+   },
+   {
+    "group1": "Day 3 (B)",
+    "group2": "Day 4 (B)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -4.666666667,
+    "low": null,
+    "high": null,
+    "p": 0.00007399050579
+   },
+   {
+    "group1": "Day 3 (B)",
+    "group2": "Day 5 (B)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -9,
+    "low": null,
+    "high": null,
+    "p": 4.930038094e-10
+   },
+   {
+    "group1": "Day 4 (B)",
+    "group2": "Day 5 (B)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 3
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -4.333333333,
+    "low": null,
+    "high": null,
+    "p": 0.0001592997372
+   },
+   {
+    "group1": "Day 1 (C)",
+    "group2": "Day 2 (C)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": -1,
+    "low": null,
+    "high": null,
+    "p": 1
+   },
+   {
+    "group1": "Day 1 (C)",
+    "group2": "Day 3 (C)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": -2,
+    "low": null,
+    "high": null,
+    "p": 0.2639390307
+   },
+   {
+    "group1": "Day 1 (C)",
+    "group2": "Day 4 (C)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": -3,
+    "low": null,
+    "high": null,
+    "p": 0.03781326596
+   },
+   {
+    "group1": "Day 1 (C)",
+    "group2": "Day 5 (C)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": -3.666666667,
+    "low": null,
+    "high": null,
+    "p": 0.01078409417
+   },
+   {
+    "group1": "Day 2 (C)",
+    "group2": "Day 3 (C)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": -1,
+    "low": null,
+    "high": null,
+    "p": 1
+   },
+   {
+    "group1": "Day 2 (C)",
+    "group2": "Day 4 (C)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": -2,
+    "low": null,
+    "high": null,
+    "p": 0.3449785067
+   },
+   {
+    "group1": "Day 2 (C)",
+    "group2": "Day 5 (C)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": -2.666666667,
+    "low": null,
+    "high": null,
+    "p": 0.1345985267
+   },
+   {
+    "group1": "Day 3 (C)",
+    "group2": "Day 4 (C)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": -1,
+    "low": null,
+    "high": null,
+    "p": 1
+   },
+   {
+    "group1": "Day 3 (C)",
+    "group2": "Day 5 (C)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": -1.666666667,
+    "low": null,
+    "high": null,
+    "p": 0.3770057079
+   },
+   {
+    "group1": "Day 4 (C)",
+    "group2": "Day 5 (C)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": -0.6666666667,
+    "low": null,
+    "high": null,
+    "p": 1
+   }
+  ],
+  "comparisonsLabel": "FDR approach (Benjamini-Yekutieli, Q = 5%) multiple comparisons (rows within each group, each group a family)",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 15
+    },
+    {
+     "name": "B",
+     "n": 15
+    },
+    {
+     "name": "C",
+     "n": 14
+    }
+   ],
+   "how": "list",
+   "detail": "5 rows",
+   "left": []
+  },
+  "summary": "The difference between the groups depends on the row (a significant interaction, P < 0.0001): look at the comparisons within each row or group, not only at the overall effects. Overall, the groups differ (P < 0.0001). Overall, the rows differ (P < 0.0001). 20 of 30 pairs differ significantly in the comparisons.",
+  "checks": [
+   {
+    "ok": false,
+    "text": "Normality of the residuals (Shapiro-Wilk): the residuals may not be normal (P = 0.0003078). The Scheirer-Ray-Hare test doesn't assume it. With few values the test rarely flags a departure; with many, even a slight one."
+   }
+  ]
+ },
+ "two-way-anova grouped {\"design\":\"ordinary\",\"posthoc\":\"tukey\",\"posthocTarget\":\"cells\"}": {
+  "testType": "two-way-anova",
+  "subtitle": "Ordinary two-way ANOVA",
+  "stats": [
+   {
+    "label": "Group F",
+    "value": 337.3565972
+   },
+   {
+    "label": "Group DFn",
+    "value": 2
+   },
+   {
+    "label": "Group P value",
+    "value": 8.270531238e-21,
+    "p": true
+   },
+   {
+    "label": "Row F",
+    "value": 120.8037173
+   },
+   {
+    "label": "Row DFn",
+    "value": 4
+   },
+   {
+    "label": "Row P value",
+    "value": 1.214541748e-17,
+    "p": true
+   },
+   {
+    "label": "Interaction F",
+    "value": 17.6411367
+   },
+   {
+    "label": "Interaction DFn",
+    "value": 8
+   },
+   {
+    "label": "Interaction P value",
+    "value": 3.199293327e-9,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 29
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 15.6,
+    "sd": 3.775863194,
+    "sem": 0.9749236844,
+    "median": 15,
+    "n": 15
+   },
+   {
+    "name": "B",
+    "mean": 22.53333333,
+    "sd": 6.479270976,
+    "sem": 1.672940572,
+    "median": 22,
+    "n": 15
+   },
+   {
+    "name": "C",
+    "mean": 12,
+    "sd": 1.664100589,
+    "sem": 0.44474959,
+    "median": 12,
+    "n": 14
+   }
+  ],
+  "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
+  "comparisons": [
+   {
+    "group1": "A (Day 1)",
+    "group2": "A (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "A",
+      "row": 1
+     }
+    ],
+    "diff": -2,
+    "low": -5.361775953,
+    "high": 1.361775953,
+    "p": 0.6635660547
+   },
+   {
+    "group1": "A (Day 1)",
+    "group2": "A (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "A",
+      "row": 2
+     }
+    ],
+    "diff": -4,
+    "low": -7.361775953,
+    "high": -0.6382240465,
+    "p": 0.009137547538
+   },
+   {
+    "group1": "A (Day 1)",
+    "group2": "A (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "A",
+      "row": 3
+     }
+    ],
+    "diff": -7,
+    "low": -10.36177595,
+    "high": -3.638224047,
+    "p": 0.000001599387966
+   },
+   {
+    "group1": "A (Day 1)",
+    "group2": "A (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "A",
+      "row": 4
+     }
+    ],
+    "diff": -10,
+    "low": -13.36177595,
+    "high": -6.638224047,
+    "p": 7.161364834e-10
+   },
+   {
+    "group1": "A (Day 1)",
+    "group2": "B (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 0
+     }
+    ],
+    "diff": -3,
+    "low": -6.361775953,
+    "high": 0.3617759535,
+    "p": 0.1188234153
+   },
+   {
+    "group1": "A (Day 1)",
+    "group2": "B (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 1
+     }
+    ],
+    "diff": -7,
+    "low": -10.36177595,
+    "high": -3.638224047,
+    "p": 0.000001599387966
+   },
+   {
+    "group1": "A (Day 1)",
+    "group2": "B (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": -11.33333333,
+    "low": -14.69510929,
+    "high": -7.97155738,
+    "p": 3.561118067e-11
+   },
+   {
+    "group1": "A (Day 1)",
+    "group2": "B (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -16,
+    "low": -19.36177595,
+    "high": -12.63822405,
+    "p": 8.992806499e-15
+   },
+   {
+    "group1": "A (Day 1)",
+    "group2": "B (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -20.33333333,
+    "low": -23.69510929,
+    "high": -16.97155738,
+    "p": 3.552713679e-15
+   },
+   {
+    "group1": "A (Day 1)",
+    "group2": "C (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 0
+     }
+    ],
+    "diff": 1,
+    "low": -2.361775953,
+    "high": 4.361775953,
+    "p": 0.9979667466
+   },
+   {
+    "group1": "A (Day 1)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": 0,
+    "low": -3.758579779,
+    "high": 3.758579779,
+    "p": 1
+   },
+   {
+    "group1": "A (Day 1)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": -1,
+    "low": -4.361775953,
+    "high": 2.361775953,
+    "p": 0.9979667466
+   },
+   {
+    "group1": "A (Day 1)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": -2,
+    "low": -5.361775953,
+    "high": 1.361775953,
+    "p": 0.6635660547
+   },
+   {
+    "group1": "A (Day 1)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": -2.666666667,
+    "low": -6.02844262,
+    "high": 0.6951092868,
+    "p": 0.2400175526
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "A (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "A",
+      "row": 2
+     }
+    ],
+    "diff": -2,
+    "low": -5.361775953,
+    "high": 1.361775953,
+    "p": 0.6635660547
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "A (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "A",
+      "row": 3
+     }
+    ],
+    "diff": -5,
+    "low": -8.361775953,
+    "high": -1.638224047,
+    "p": 0.0005141612144
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "A (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "A",
+      "row": 4
+     }
+    ],
+    "diff": -8,
+    "low": -11.36177595,
+    "high": -4.638224047,
+    "p": 1.054575918e-7
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "B (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 0
+     }
+    ],
+    "diff": -1,
+    "low": -4.361775953,
+    "high": 2.361775953,
+    "p": 0.9979667466
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "B (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 1
+     }
+    ],
+    "diff": -5,
+    "low": -8.361775953,
+    "high": -1.638224047,
+    "p": 0.0005141612144
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "B (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": -9.333333333,
+    "low": -12.69510929,
+    "high": -5.97155738,
+    "p": 3.540218563e-9
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "B (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -14,
+    "low": -17.36177595,
+    "high": -10.63822405,
+    "p": 1.723066134e-13
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "B (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -18.33333333,
+    "low": -21.69510929,
+    "high": -14.97155738,
+    "p": 3.663735981e-15
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "C (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 0
+     }
+    ],
+    "diff": 3,
+    "low": -0.3617759535,
+    "high": 6.361775953,
+    "p": 0.1188234153
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": 2,
+    "low": -1.758579779,
+    "high": 5.758579779,
+    "p": 0.8009753258
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": 1,
+    "low": -2.361775953,
+    "high": 4.361775953,
+    "p": 0.9979667466
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": 0,
+    "low": -3.361775953,
+    "high": 3.361775953,
+    "p": 1
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": -0.6666666667,
+    "low": -4.02844262,
+    "high": 2.695109287,
+    "p": 0.9999784148
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "A (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "A",
+      "row": 3
+     }
+    ],
+    "diff": -3,
+    "low": -6.361775953,
+    "high": 0.3617759535,
+    "p": 0.1188234153
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "A (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "A",
+      "row": 4
+     }
+    ],
+    "diff": -6,
+    "low": -9.361775953,
+    "high": -2.638224047,
+    "p": 0.00002760670804
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "B (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 0
+     }
+    ],
+    "diff": 1,
+    "low": -2.361775953,
+    "high": 4.361775953,
+    "p": 0.9979667466
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "B (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 1
+     }
+    ],
+    "diff": -3,
+    "low": -6.361775953,
+    "high": 0.3617759535,
+    "p": 0.1188234153
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "B (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": -7.333333333,
+    "low": -10.69510929,
+    "high": -3.97155738,
+    "p": 6.360085089e-7
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "B (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -12,
+    "low": -15.36177595,
+    "high": -8.638224047,
+    "p": 8.731459999e-12
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "B (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -16.33333333,
+    "low": -19.69510929,
+    "high": -12.97155738,
+    "p": 6.883382753e-15
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "C (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 0
+     }
+    ],
+    "diff": 5,
+    "low": 1.638224047,
+    "high": 8.361775953,
+    "p": 0.0005141612144
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": 4,
+    "low": 0.2414202215,
+    "high": 7.758579779,
+    "p": 0.02870251571
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": 3,
+    "low": -0.3617759535,
+    "high": 6.361775953,
+    "p": 0.1188234153
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": 2,
+    "low": -1.361775953,
+    "high": 5.361775953,
+    "p": 0.6635660547
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": 1.333333333,
+    "low": -2.02844262,
+    "high": 4.695109287,
+    "p": 0.9719203074
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "A (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "A",
+      "row": 4
+     }
+    ],
+    "diff": -3,
+    "low": -6.361775953,
+    "high": 0.3617759535,
+    "p": 0.1188234153
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "B (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "B",
+      "row": 0
+     }
+    ],
+    "diff": 4,
+    "low": 0.6382240465,
+    "high": 7.361775953,
+    "p": 0.009137547538
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "B (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "B",
+      "row": 1
+     }
+    ],
+    "diff": 0,
+    "low": -3.361775953,
+    "high": 3.361775953,
+    "p": 1
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "B (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": -4.333333333,
+    "low": -7.695109287,
+    "high": -0.9715573799,
+    "p": 0.003563186496
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "B (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -9,
+    "low": -12.36177595,
+    "high": -5.638224047,
+    "p": 8.066107005e-9
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "B (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -13.33333333,
+    "low": -16.69510929,
+    "high": -9.97155738,
+    "p": 6.094014182e-13
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "C (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 0
+     }
+    ],
+    "diff": 8,
+    "low": 4.638224047,
+    "high": 11.36177595,
+    "p": 1.054575918e-7
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": 7,
+    "low": 3.241420221,
+    "high": 10.75857978,
+    "p": 0.00001299152409
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": 6,
+    "low": 2.638224047,
+    "high": 9.361775953,
+    "p": 0.00002760670804
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": 5,
+    "low": 1.638224047,
+    "high": 8.361775953,
+    "p": 0.0005141612144
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": 4.333333333,
+    "low": 0.9715573799,
+    "high": 7.695109287,
+    "p": 0.003563186496
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "B (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "B",
+      "row": 0
+     }
+    ],
+    "diff": 7,
+    "low": 3.638224047,
+    "high": 10.36177595,
+    "p": 0.000001599387966
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "B (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "B",
+      "row": 1
+     }
+    ],
+    "diff": 3,
+    "low": -0.3617759535,
+    "high": 6.361775953,
+    "p": 0.1188234153
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "B (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": -1.333333333,
+    "low": -4.695109287,
+    "high": 2.02844262,
+    "p": 0.9719203074
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "B (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -6,
+    "low": -9.361775953,
+    "high": -2.638224047,
+    "p": 0.00002760670804
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "B (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -10.33333333,
+    "low": -13.69510929,
+    "high": -6.97155738,
+    "p": 3.300041351e-10
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "C (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "C",
+      "row": 0
+     }
+    ],
+    "diff": 11,
+    "low": 7.638224047,
+    "high": 14.36177595,
+    "p": 7.359224341e-11
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": 10,
+    "low": 6.241420221,
+    "high": 13.75857978,
+    "p": 9.271621026e-9
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": 9,
+    "low": 5.638224047,
+    "high": 12.36177595,
+    "p": 8.066107005e-9
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": 8,
+    "low": 4.638224047,
+    "high": 11.36177595,
+    "p": 1.054575918e-7
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": 7.333333333,
+    "low": 3.97155738,
+    "high": 10.69510929,
+    "p": 6.360085089e-7
+   },
+   {
+    "group1": "B (Day 1)",
+    "group2": "B (Day 2)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 1
+     }
+    ],
+    "diff": -4,
+    "low": -7.361775953,
+    "high": -0.6382240465,
+    "p": 0.009137547538
+   },
+   {
+    "group1": "B (Day 1)",
+    "group2": "B (Day 3)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": -8.333333333,
+    "low": -11.69510929,
+    "high": -4.97155738,
+    "p": 4.401903797e-8
+   },
+   {
+    "group1": "B (Day 1)",
+    "group2": "B (Day 4)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -13,
+    "low": -16.36177595,
+    "high": -9.638224047,
+    "p": 1.164179864e-12
+   },
+   {
+    "group1": "B (Day 1)",
+    "group2": "B (Day 5)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -17.33333333,
+    "low": -20.69510929,
+    "high": -13.97155738,
+    "p": 4.218847494e-15
+   },
+   {
+    "group1": "B (Day 1)",
+    "group2": "C (Day 1)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 0
+     }
+    ],
+    "diff": 4,
+    "low": 0.6382240465,
+    "high": 7.361775953,
+    "p": 0.009137547538
+   },
+   {
+    "group1": "B (Day 1)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": 3,
+    "low": -0.7585797785,
+    "high": 6.758579779,
+    "p": 0.2323529776
+   },
+   {
+    "group1": "B (Day 1)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": 2,
+    "low": -1.361775953,
+    "high": 5.361775953,
+    "p": 0.6635660547
+   },
+   {
+    "group1": "B (Day 1)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": 1,
+    "low": -2.361775953,
+    "high": 4.361775953,
+    "p": 0.9979667466
+   },
+   {
+    "group1": "B (Day 1)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": 0.3333333333,
+    "low": -3.02844262,
+    "high": 3.695109287,
+    "p": 0.9999999972
+   },
+   {
+    "group1": "B (Day 2)",
+    "group2": "B (Day 3)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": -4.333333333,
+    "low": -7.695109287,
+    "high": -0.9715573799,
+    "p": 0.003563186496
+   },
+   {
+    "group1": "B (Day 2)",
+    "group2": "B (Day 4)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -9,
+    "low": -12.36177595,
+    "high": -5.638224047,
+    "p": 8.066107005e-9
+   },
+   {
+    "group1": "B (Day 2)",
+    "group2": "B (Day 5)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -13.33333333,
+    "low": -16.69510929,
+    "high": -9.97155738,
+    "p": 6.094014182e-13
+   },
+   {
+    "group1": "B (Day 2)",
+    "group2": "C (Day 1)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 0
+     }
+    ],
+    "diff": 8,
+    "low": 4.638224047,
+    "high": 11.36177595,
+    "p": 1.054575918e-7
+   },
+   {
+    "group1": "B (Day 2)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": 7,
+    "low": 3.241420221,
+    "high": 10.75857978,
+    "p": 0.00001299152409
+   },
+   {
+    "group1": "B (Day 2)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": 6,
+    "low": 2.638224047,
+    "high": 9.361775953,
+    "p": 0.00002760670804
+   },
+   {
+    "group1": "B (Day 2)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": 5,
+    "low": 1.638224047,
+    "high": 8.361775953,
+    "p": 0.0005141612144
+   },
+   {
+    "group1": "B (Day 2)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": 4.333333333,
+    "low": 0.9715573799,
+    "high": 7.695109287,
+    "p": 0.003563186496
+   },
+   {
+    "group1": "B (Day 3)",
+    "group2": "B (Day 4)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -4.666666667,
+    "low": -8.02844262,
+    "high": -1.304890713,
+    "p": 0.001361198356
+   },
+   {
+    "group1": "B (Day 3)",
+    "group2": "B (Day 5)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -9,
+    "low": -12.36177595,
+    "high": -5.638224047,
+    "p": 8.066107005e-9
+   },
+   {
+    "group1": "B (Day 3)",
+    "group2": "C (Day 1)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 0
+     }
+    ],
+    "diff": 12.33333333,
+    "low": 8.97155738,
+    "high": 15.69510929,
+    "p": 4.412470389e-12
+   },
+   {
+    "group1": "B (Day 3)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": 11.33333333,
+    "low": 7.574753555,
+    "high": 15.09191311,
+    "p": 5.200013753e-10
+   },
+   {
+    "group1": "B (Day 3)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": 10.33333333,
+    "low": 6.97155738,
+    "high": 13.69510929,
+    "p": 3.300041351e-10
+   },
+   {
+    "group1": "B (Day 3)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": 9.333333333,
+    "low": 5.97155738,
+    "high": 12.69510929,
+    "p": 3.540218563e-9
+   },
+   {
+    "group1": "B (Day 3)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": 8.666666667,
+    "low": 5.304890713,
+    "high": 12.02844262,
+    "p": 1.86856004e-8
+   },
+   {
+    "group1": "B (Day 4)",
+    "group2": "B (Day 5)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 3
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -4.333333333,
+    "low": -7.695109287,
+    "high": -0.9715573799,
+    "p": 0.003563186496
+   },
+   {
+    "group1": "B (Day 4)",
+    "group2": "C (Day 1)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 0
+     }
+    ],
+    "diff": 17,
+    "low": 13.63822405,
+    "high": 20.36177595,
+    "p": 4.773959006e-15
+   },
+   {
+    "group1": "B (Day 4)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": 16,
+    "low": 12.24142022,
+    "high": 19.75857978,
+    "p": 9.869882689e-14
+   },
+   {
+    "group1": "B (Day 4)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": 15,
+    "low": 11.63822405,
+    "high": 18.36177595,
+    "p": 3.16413562e-14
+   },
+   {
+    "group1": "B (Day 4)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": 14,
+    "low": 10.63822405,
+    "high": 17.36177595,
+    "p": 1.723066134e-13
+   },
+   {
+    "group1": "B (Day 4)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": 13.33333333,
+    "low": 9.97155738,
+    "high": 16.69510929,
+    "p": 6.094014182e-13
+   },
+   {
+    "group1": "B (Day 5)",
+    "group2": "C (Day 1)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 4
+     },
+     {
+      "group": "C",
+      "row": 0
+     }
+    ],
+    "diff": 21.33333333,
+    "low": 17.97155738,
+    "high": 24.69510929,
+    "p": 3.552713679e-15
+   },
+   {
+    "group1": "B (Day 5)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 4
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": 20.33333333,
+    "low": 16.57475355,
+    "high": 24.09191311,
+    "p": 3.774758284e-15
+   },
+   {
+    "group1": "B (Day 5)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 4
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": 19.33333333,
+    "low": 15.97155738,
+    "high": 22.69510929,
+    "p": 3.552713679e-15
+   },
+   {
+    "group1": "B (Day 5)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 4
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": 18.33333333,
+    "low": 14.97155738,
+    "high": 21.69510929,
+    "p": 3.663735981e-15
+   },
+   {
+    "group1": "B (Day 5)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 4
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": 17.66666667,
+    "low": 14.30489071,
+    "high": 21.02844262,
+    "p": 3.996802889e-15
+   },
+   {
+    "group1": "C (Day 1)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": -1,
+    "low": -4.758579779,
+    "high": 2.758579779,
+    "p": 0.9993681744
+   },
+   {
+    "group1": "C (Day 1)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": -2,
+    "low": -5.361775953,
+    "high": 1.361775953,
+    "p": 0.6635660547
+   },
+   {
+    "group1": "C (Day 1)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": -3,
+    "low": -6.361775953,
+    "high": 0.3617759535,
+    "p": 0.1188234153
+   },
+   {
+    "group1": "C (Day 1)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": -3.666666667,
+    "low": -7.02844262,
+    "high": -0.3048907132,
+    "p": 0.02268420549
+   },
+   {
+    "group1": "C (Day 2)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": -1,
+    "low": -4.758579779,
+    "high": 2.758579779,
+    "p": 0.9993681744
+   },
+   {
+    "group1": "C (Day 2)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": -2,
+    "low": -5.758579779,
+    "high": 1.758579779,
+    "p": 0.8009753258
+   },
+   {
+    "group1": "C (Day 2)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": -2.666666667,
+    "low": -6.425246445,
+    "high": 1.091913112,
+    "p": 0.396348765
+   },
+   {
+    "group1": "C (Day 3)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": -1,
+    "low": -4.361775953,
+    "high": 2.361775953,
+    "p": 0.9979667466
+   },
+   {
+    "group1": "C (Day 3)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": -1.666666667,
+    "low": -5.02844262,
+    "high": 1.695109287,
+    "p": 0.866123469
+   },
+   {
+    "group1": "C (Day 4)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": -0.6666666667,
+    "low": -4.02844262,
+    "high": 2.695109287,
+    "p": 0.9999784148
+   }
+  ],
+  "comparisonsLabel": "Tukey's multiple comparisons (every cell mean against every other cell mean, one family)",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 15
+    },
+    {
+     "name": "B",
+     "n": 15
+    },
+    {
+     "name": "C",
+     "n": 14
+    }
+   ],
+   "how": "list",
+   "detail": "5 rows",
+   "left": []
+  },
+  "summary": "The difference between the groups depends on the row (a significant interaction, P < 0.0001): look at the comparisons within each row or group, not only at the overall effects. Overall, the groups differ (P < 0.0001). Overall, the rows differ (P < 0.0001). 68 of 105 pairs differ significantly in the comparisons.",
+  "checks": [
+   {
+    "ok": false,
+    "text": "Normality of the residuals (Shapiro-Wilk): the residuals may not be normal (P = 0.0003078). The Scheirer-Ray-Hare test doesn't assume it. With few values the test rarely flags a departure; with many, even a slight one."
+   }
+  ]
+ },
+ "two-way-anova grouped {\"design\":\"ordinary\",\"posthoc\":\"dunnett\",\"posthocTarget\":\"cells\",\"control\":\"A (Day 1)\"}": {
+  "testType": "two-way-anova",
+  "subtitle": "Ordinary two-way ANOVA",
+  "stats": [
+   {
+    "label": "Group F",
+    "value": 337.3565972
+   },
+   {
+    "label": "Group DFn",
+    "value": 2
+   },
+   {
+    "label": "Group P value",
+    "value": 8.270531238e-21,
+    "p": true
+   },
+   {
+    "label": "Row F",
+    "value": 120.8037173
+   },
+   {
+    "label": "Row DFn",
+    "value": 4
+   },
+   {
+    "label": "Row P value",
+    "value": 1.214541748e-17,
+    "p": true
+   },
+   {
+    "label": "Interaction F",
+    "value": 17.6411367
+   },
+   {
+    "label": "Interaction DFn",
+    "value": 8
+   },
+   {
+    "label": "Interaction P value",
+    "value": 3.199293327e-9,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 29
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 15.6,
+    "sd": 3.775863194,
+    "sem": 0.9749236844,
+    "median": 15,
+    "n": 15
+   },
+   {
+    "name": "B",
+    "mean": 22.53333333,
+    "sd": 6.479270976,
+    "sem": 1.672940572,
+    "median": 22,
+    "n": 15
+   },
+   {
+    "name": "C",
+    "mean": 12,
+    "sd": 1.664100589,
+    "sem": 0.44474959,
+    "median": 12,
+    "n": 14
+   }
+  ],
+  "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
+  "comparisons": [
+   {
+    "group1": "A (Day 2)",
+    "group2": "A (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "A",
+      "row": 0
+     }
+    ],
+    "diff": 2,
+    "low": -0.7364861138,
+    "high": 4.736486114,
+    "p": 0.2574117638
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "A (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "A",
+      "row": 0
+     }
+    ],
+    "diff": 4,
+    "low": 1.263513886,
+    "high": 6.736486114,
+    "p": 0.001554333829
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "A (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "A",
+      "row": 0
+     }
+    ],
+    "diff": 7,
+    "low": 4.263513886,
+    "high": 9.736486114,
+    "p": 2.29374945e-7
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "A (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "A",
+      "row": 0
+     }
+    ],
+    "diff": 10,
+    "low": 7.263513886,
+    "high": 12.73648611,
+    "p": 1.016796647e-10
+   },
+   {
+    "group1": "B (Day 1)",
+    "group2": "A (Day 1)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "A",
+      "row": 0
+     }
+    ],
+    "diff": 3,
+    "low": 0.2635138862,
+    "high": 5.736486114,
+    "p": 0.0255257061
+   },
+   {
+    "group1": "B (Day 2)",
+    "group2": "A (Day 1)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 1
+     },
+     {
+      "group": "A",
+      "row": 0
+     }
+    ],
+    "diff": 7,
+    "low": 4.263513886,
+    "high": 9.736486114,
+    "p": 2.29374945e-7
+   },
+   {
+    "group1": "B (Day 3)",
+    "group2": "A (Day 1)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 2
+     },
+     {
+      "group": "A",
+      "row": 0
+     }
+    ],
+    "diff": 11.33333333,
+    "low": 8.59684722,
+    "high": 14.06981945,
+    "p": 6.911360373e-12
+   },
+   {
+    "group1": "B (Day 4)",
+    "group2": "A (Day 1)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 3
+     },
+     {
+      "group": "A",
+      "row": 0
+     }
+    ],
+    "diff": 16,
+    "low": 13.26351389,
+    "high": 18.73648611,
+    "p": 2.016720124e-12
+   },
+   {
+    "group1": "B (Day 5)",
+    "group2": "A (Day 1)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 4
+     },
+     {
+      "group": "A",
+      "row": 0
+     }
+    ],
+    "diff": 20.33333333,
+    "low": 17.59684722,
+    "high": 23.06981945,
+    "p": 2.016165013e-12
+   },
+   {
+    "group1": "C (Day 1)",
+    "group2": "A (Day 1)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 0
+     },
+     {
+      "group": "A",
+      "row": 0
+     }
+    ],
+    "diff": -1,
+    "low": -3.736486114,
+    "high": 1.736486114,
+    "p": 0.9289237768
+   },
+   {
+    "group1": "C (Day 2)",
+    "group2": "A (Day 1)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 1
+     },
+     {
+      "group": "A",
+      "row": 0
+     }
+    ],
+    "diff": 0,
+    "low": -3.059484485,
+    "high": 3.059484485,
+    "p": 1
+   },
+   {
+    "group1": "C (Day 3)",
+    "group2": "A (Day 1)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 2
+     },
+     {
+      "group": "A",
+      "row": 0
+     }
+    ],
+    "diff": 1,
+    "low": -1.736486114,
+    "high": 3.736486114,
+    "p": 0.9289237768
+   },
+   {
+    "group1": "C (Day 4)",
+    "group2": "A (Day 1)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 3
+     },
+     {
+      "group": "A",
+      "row": 0
+     }
+    ],
+    "diff": 2,
+    "low": -0.7364861138,
+    "high": 4.736486114,
+    "p": 0.2574117638
+   },
+   {
+    "group1": "C (Day 5)",
+    "group2": "A (Day 1)",
+    "cells": [
+     {
+      "group": "C",
+      "row": 4
+     },
+     {
+      "group": "A",
+      "row": 0
+     }
+    ],
+    "diff": 2.666666667,
+    "low": -0.06981944712,
+    "high": 5.40315278,
+    "p": 0.05936536824
+   }
+  ],
+  "comparisonsLabel": "Dunnett's multiple comparisons (every cell mean against every other cell mean, one family)",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 15
+    },
+    {
+     "name": "B",
+     "n": 15
+    },
+    {
+     "name": "C",
+     "n": 14
+    }
+   ],
+   "how": "list",
+   "detail": "5 rows",
+   "left": []
+  },
+  "summary": "The difference between the groups depends on the row (a significant interaction, P < 0.0001): look at the comparisons within each row or group, not only at the overall effects. Overall, the groups differ (P < 0.0001). Overall, the rows differ (P < 0.0001). 8 of 14 comparisons with “A (Day 1)” differ significantly.",
+  "checks": [
+   {
+    "ok": false,
+    "text": "Normality of the residuals (Shapiro-Wilk): the residuals may not be normal (P = 0.0003078). The Scheirer-Ray-Hare test doesn't assume it. With few values the test rarely flags a departure; with many, even a slight one."
+   }
+  ]
+ },
+ "two-way-anova grouped {\"design\":\"ordinary\",\"posthoc\":\"tukey\",\"posthocTarget\":\"group-means\"}": {
+  "testType": "two-way-anova",
+  "subtitle": "Ordinary two-way ANOVA",
+  "stats": [
+   {
+    "label": "Group F",
+    "value": 337.3565972
+   },
+   {
+    "label": "Group DFn",
+    "value": 2
+   },
+   {
+    "label": "Group P value",
+    "value": 8.270531238e-21,
+    "p": true
+   },
+   {
+    "label": "Row F",
+    "value": 120.8037173
+   },
+   {
+    "label": "Row DFn",
+    "value": 4
+   },
+   {
+    "label": "Row P value",
+    "value": 1.214541748e-17,
+    "p": true
+   },
+   {
+    "label": "Interaction F",
+    "value": 17.6411367
+   },
+   {
+    "label": "Interaction DFn",
+    "value": 8
+   },
+   {
+    "label": "Interaction P value",
+    "value": 3.199293327e-9,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 29
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 15.6,
+    "sd": 3.775863194,
+    "sem": 0.9749236844,
+    "median": 15,
+    "n": 15
+   },
+   {
+    "name": "B",
+    "mean": 22.53333333,
+    "sd": 6.479270976,
+    "sem": 1.672940572,
+    "median": 22,
+    "n": 15
+   },
+   {
+    "name": "C",
+    "mean": 12,
+    "sd": 1.664100589,
+    "sem": 0.44474959,
+    "median": 12,
+    "n": 14
+   }
+  ],
+  "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
+  "comparisons": [
+   {
+    "group1": "A",
+    "group2": "B",
+    "diff": -6.933333333,
+    "low": -7.938080012,
+    "high": -5.928586654,
+    "p": 3.885780586e-15
+   },
+   {
+    "group1": "A",
+    "group2": "C",
+    "diff": 3.6,
+    "low": 2.577468813,
+    "high": 4.622531187,
+    "p": 4.229308459e-9
+   },
+   {
+    "group1": "B",
+    "group2": "C",
+    "diff": 10.53333333,
+    "low": 9.510802146,
+    "high": 11.55586452,
+    "p": 3.552713679e-15
+   }
+  ],
+  "comparisonsLabel": "Tukey's multiple comparisons (group means averaged over rows (main effect of the groups), one family)",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 15
+    },
+    {
+     "name": "B",
+     "n": 15
+    },
+    {
+     "name": "C",
+     "n": 14
+    }
+   ],
+   "how": "list",
+   "detail": "5 rows",
+   "left": []
+  },
+  "summary": "The difference between the groups depends on the row (a significant interaction, P < 0.0001): look at the comparisons within each row or group, not only at the overall effects. Overall, the groups differ (P < 0.0001). Overall, the rows differ (P < 0.0001). 3 of 3 pairs differ significantly in the comparisons: “A” vs. “B”, “A” vs. “C”, “B” vs. “C”.",
+  "checks": [
+   {
+    "ok": false,
+    "text": "Normality of the residuals (Shapiro-Wilk): the residuals may not be normal (P = 0.0003078). The Scheirer-Ray-Hare test doesn't assume it. With few values the test rarely flags a departure; with many, even a slight one."
+   }
+  ]
+ },
+ "two-way-anova grouped {\"design\":\"ordinary\",\"posthoc\":\"bonferroni\",\"posthocTarget\":\"row-means\"}": {
+  "testType": "two-way-anova",
+  "subtitle": "Ordinary two-way ANOVA",
+  "stats": [
+   {
+    "label": "Group F",
+    "value": 337.3565972
+   },
+   {
+    "label": "Group DFn",
+    "value": 2
+   },
+   {
+    "label": "Group P value",
+    "value": 8.270531238e-21,
+    "p": true
+   },
+   {
+    "label": "Row F",
+    "value": 120.8037173
+   },
+   {
+    "label": "Row DFn",
+    "value": 4
+   },
+   {
+    "label": "Row P value",
+    "value": 1.214541748e-17,
+    "p": true
+   },
+   {
+    "label": "Interaction F",
+    "value": 17.6411367
+   },
+   {
+    "label": "Interaction DFn",
+    "value": 8
+   },
+   {
+    "label": "Interaction P value",
+    "value": 3.199293327e-9,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 29
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 15.6,
+    "sd": 3.775863194,
+    "sem": 0.9749236844,
+    "median": 15,
+    "n": 15
+   },
+   {
+    "name": "B",
+    "mean": 22.53333333,
+    "sd": 6.479270976,
+    "sem": 1.672940572,
+    "median": 22,
+    "n": 15
+   },
+   {
+    "name": "C",
+    "mean": 12,
+    "sd": 1.664100589,
+    "sem": 0.44474959,
+    "median": 12,
+    "n": 14
+   }
+  ],
+  "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
+  "comparisons": [
+   {
+    "group1": "Day 1",
+    "group2": "Day 2",
+    "diff": -2.708333333,
+    "low": -4.353102348,
+    "high": -1.063564319,
+    "p": 0.0002518697477
+   },
+   {
+    "group1": "Day 1",
+    "group2": "Day 3",
+    "diff": -4.777777778,
+    "low": -6.373438101,
+    "high": -3.182117454,
+    "p": 5.404063531e-9
+   },
+   {
+    "group1": "Day 1",
+    "group2": "Day 4",
+    "diff": -7.666666667,
+    "low": -9.26232699,
+    "high": -6.071006343,
+    "p": 6.768008785e-14
+   },
+   {
+    "group1": "Day 1",
+    "group2": "Day 5",
+    "diff": -10.33333333,
+    "low": -11.92899366,
+    "high": -8.73767301,
+    "p": 2.561586878e-17
+   },
+   {
+    "group1": "Day 2",
+    "group2": "Day 3",
+    "diff": -2.069444444,
+    "low": -3.714213459,
+    "high": -0.4246754301,
+    "p": 0.006464445698
+   },
+   {
+    "group1": "Day 2",
+    "group2": "Day 4",
+    "diff": -4.958333333,
+    "low": -6.603102348,
+    "high": -3.313564319,
+    "p": 4.662983039e-9
+   },
+   {
+    "group1": "Day 2",
+    "group2": "Day 5",
+    "diff": -7.625,
+    "low": -9.269769014,
+    "high": -5.980230986,
+    "p": 1.686395355e-13
+   },
+   {
+    "group1": "Day 3",
+    "group2": "Day 4",
+    "diff": -2.888888889,
+    "low": -4.484549213,
+    "high": -1.293228565,
+    "p": 0.00006322003269
+   },
+   {
+    "group1": "Day 3",
+    "group2": "Day 5",
+    "diff": -5.555555556,
+    "low": -7.151215879,
+    "high": -3.959895232,
+    "p": 1.818930219e-10
+   },
+   {
+    "group1": "Day 4",
+    "group2": "Day 5",
+    "diff": -2.666666667,
+    "low": -4.26232699,
+    "high": -1.071006343,
+    "p": 0.0002046810759
+   }
+  ],
+  "comparisonsLabel": "Bonferroni-corrected multiple comparisons (row means averaged over groups (main effect of the rows), one family)",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 15
+    },
+    {
+     "name": "B",
+     "n": 15
+    },
+    {
+     "name": "C",
+     "n": 14
+    }
+   ],
+   "how": "list",
+   "detail": "5 rows",
+   "left": []
+  },
+  "summary": "The difference between the groups depends on the row (a significant interaction, P < 0.0001): look at the comparisons within each row or group, not only at the overall effects. Overall, the groups differ (P < 0.0001). Overall, the rows differ (P < 0.0001). 10 of 10 pairs differ significantly in the comparisons.",
+  "checks": [
+   {
+    "ok": false,
+    "text": "Normality of the residuals (Shapiro-Wilk): the residuals may not be normal (P = 0.0003078). The Scheirer-Ray-Hare test doesn't assume it. With few values the test rarely flags a departure; with many, even a slight one."
+   }
+  ]
+ },
+ "two-way-anova grouped {\"design\":\"repeated-measures\",\"posthoc\":\"fdr\",\"posthocTarget\":\"groups\",\"sphericity\":false}": {
+  "testType": "two-way-anova",
+  "subtitle": "Repeated-measures two-way ANOVA",
+  "stats": [
+   {
+    "label": "Group F",
+    "value": 152.3995232
+   },
+   {
+    "label": "Group DFn",
+    "value": 2
+   },
+   {
+    "label": "Group P value",
+    "value": 0.00003309213745,
+    "p": true
+   },
+   {
+    "label": "Row F",
+    "value": 146.8402778
+   },
+   {
+    "label": "Row DFn",
+    "value": 1.57891887
+   },
+   {
+    "label": "Row DFd",
+    "value": 7.894594351
+   },
+   {
+    "label": "Row P value",
+    "value": 8.8294201e-7,
+    "p": true
+   },
+   {
+    "label": "Interaction F",
+    "value": 16.90393519
+   },
+   {
+    "label": "Interaction DFn",
+    "value": 3.15783774
+   },
+   {
+    "label": "Interaction DFd",
+    "value": 7.894594351
+   },
+   {
+    "label": "Interaction P value",
+    "value": 0.0007963933421,
+    "p": true
+   },
+   {
+    "label": "Geisser-Greenhouse epsilon",
+    "value": 0.3947297175
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 15.6,
+    "sd": 3.775863194,
+    "sem": 0.9749236844,
+    "median": 15,
+    "n": 15
+   },
+   {
+    "name": "B",
+    "mean": 22.53333333,
+    "sd": 6.479270976,
+    "sem": 1.672940572,
+    "median": 22,
+    "n": 15
+   },
+   {
+    "name": "C",
+    "mean": 11.9,
+    "sd": 1.728840331,
+    "sem": 0.5467073156,
+    "median": 12,
+    "n": 10
+   }
+  ],
+  "notes": "Matched by row: each replicate column is treated as the same subject across every row within its group. Sphericity not assumed: the Geisser-Greenhouse epsilon corrects the degrees of freedom of the row and interaction effects, and each comparison has its own error (rows within a group: a paired t test; groups within a row: that row's pooled SD). 1 replicate column excluded (missing a value in at least one row). FDR approach (Benjamini-Hochberg, Q = 5%): 12 of 15 comparisons are discoveries (adjusted P < 0.05). The P values are FDR-adjusted.",
+  "comparisons": [
+   {
+    "group1": "A (Day 1)",
+    "group2": "B (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 0
+     }
+    ],
+    "diff": -3,
+    "low": null,
+    "high": null,
+    "p": 0.03035681831
+   },
+   {
+    "group1": "A (Day 1)",
+    "group2": "C (Day 1)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 0
+     }
+    ],
+    "diff": 1,
+    "low": null,
+    "high": null,
+    "p": 0.3632174676
+   },
+   {
+    "group1": "B (Day 1)",
+    "group2": "C (Day 1)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 0
+     },
+     {
+      "group": "C",
+      "row": 0
+     }
+    ],
+    "diff": 4,
+    "low": null,
+    "high": null,
+    "p": 0.03035681831
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "B (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 1
+     }
+    ],
+    "diff": -5,
+    "low": null,
+    "high": null,
+    "p": 0.003791555005
+   },
+   {
+    "group1": "A (Day 2)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": 2,
+    "low": null,
+    "high": null,
+    "p": 0.1019394788
+   },
+   {
+    "group1": "B (Day 2)",
+    "group2": "C (Day 2)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 1
+     },
+     {
+      "group": "C",
+      "row": 1
+     }
+    ],
+    "diff": 7,
+    "low": null,
+    "high": null,
+    "p": 0.002750242543
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "B (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": -7.333333333,
+    "low": null,
+    "high": null,
+    "p": 0.001547889764
+   },
+   {
+    "group1": "A (Day 3)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": 3,
+    "low": null,
+    "high": null,
+    "p": 0.05474731203
+   },
+   {
+    "group1": "B (Day 3)",
+    "group2": "C (Day 3)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 2
+     },
+     {
+      "group": "C",
+      "row": 2
+     }
+    ],
+    "diff": 10.33333333,
+    "low": null,
+    "high": null,
+    "p": 0.001053180897
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "B (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -9,
+    "low": null,
+    "high": null,
+    "p": 0.0001243644513
+   },
+   {
+    "group1": "A (Day 4)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": 5.5,
+    "low": null,
+    "high": null,
+    "p": 0.00142949537
+   },
+   {
+    "group1": "B (Day 4)",
+    "group2": "C (Day 4)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 3
+     },
+     {
+      "group": "C",
+      "row": 3
+     }
+    ],
+    "diff": 14.5,
+    "low": null,
+    "high": null,
+    "p": 0.00004166594918
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "B (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -10.33333333,
+    "low": null,
+    "high": null,
+    "p": 0.0003098041902
+   },
+   {
+    "group1": "A (Day 5)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": 7,
+    "low": null,
+    "high": null,
+    "p": 0.002107802756
+   },
+   {
+    "group1": "B (Day 5)",
+    "group2": "C (Day 5)",
+    "cells": [
+     {
+      "group": "B",
+      "row": 4
+     },
+     {
+      "group": "C",
+      "row": 4
+     }
+    ],
+    "diff": 17.33333333,
+    "low": null,
+    "high": null,
+    "p": 0.0000867265642
+   }
+  ],
+  "comparisonsLabel": "FDR approach (Benjamini-Hochberg, Q = 5%) multiple comparisons (groups within each row, each row a family)",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 15
+    },
+    {
+     "name": "B",
+     "n": 15
+    },
+    {
+     "name": "C",
+     "n": 10
+    }
+   ],
+   "how": "list",
+   "detail": "5 rows",
+   "left": []
+  },
+  "summary": "The difference between the groups depends on the row (a significant interaction, P = 0.0007964): look at the comparisons within each row or group, not only at the overall effects. Overall, the groups differ (P < 0.0001). Overall, the rows differ (P < 0.0001). 12 of 15 pairs differ significantly in the comparisons."
+ },
  "two-way-anova grouped {\"design\":\"repeated-measures\",\"posthoc\":\"sidak\",\"posthocTarget\":\"groups\",\"sphericity\":false}": {
   "testType": "two-way-anova",
   "subtitle": "Repeated-measures two-way ANOVA",
@@ -28175,42 +32613,54 @@
     "n": 12
    }
   ],
-  "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B term.",
+  "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B term (A:B cell means).",
   "comparisons": [
    {
     "group1": "Placebo (Day 1)",
     "group2": "Placebo (Day 2)",
     "diff": -2.450687432,
+    "low": -3.544270834,
+    "high": -1.357104031,
     "p": 0.00004639737147
    },
    {
     "group1": "Placebo (Day 1)",
     "group2": "Drug (Day 1)",
     "diff": -1.564171915,
+    "low": -2.657755317,
+    "high": -0.4705885134,
     "p": 0.00424629462
    },
    {
     "group1": "Placebo (Day 1)",
     "group2": "Drug (Day 2)",
     "diff": -6.970574781,
+    "low": -8.064158183,
+    "high": -5.87699138,
     "p": 2.117384046e-11
    },
    {
     "group1": "Placebo (Day 2)",
     "group2": "Drug (Day 1)",
     "diff": 0.8865155175,
+    "low": -0.2070678841,
+    "high": 1.980098919,
     "p": 0.1350043211
    },
    {
     "group1": "Placebo (Day 2)",
     "group2": "Drug (Day 2)",
     "diff": -4.519887349,
+    "low": -5.61347075,
+    "high": -3.426303947,
     "p": 1.423353924e-8
    },
    {
     "group1": "Drug (Day 1)",
     "group2": "Drug (Day 2)",
     "diff": -5.406402866,
+    "low": -6.499986268,
+    "high": -4.312819465,
     "p": 1.039186404e-9
    }
   ],
@@ -28334,178 +32784,1666 @@
     "n": 12
    }
   ],
-  "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B:C term.",
+  "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B:C term (A:B:C cell means).",
   "comparisons": [
    {
     "group1": "Placebo (Day 1, WT)",
     "group2": "Placebo (Day 2, WT)",
     "diff": -4.294104831,
+    "low": -6.315713827,
+    "high": -2.272495835,
     "p": 0.00001701319139
    },
    {
     "group1": "Placebo (Day 1, WT)",
     "group2": "Placebo (Day 1, KO)",
     "diff": -0.7066188488,
+    "low": -2.728227845,
+    "high": 1.314990147,
     "p": 1
    },
    {
     "group1": "Placebo (Day 1, WT)",
     "group2": "Placebo (Day 2, KO)",
     "diff": -1.313888882,
+    "low": -3.335497878,
+    "high": 0.7077201135,
     "p": 0.7618258483
    },
    {
     "group1": "Placebo (Day 1, WT)",
     "group2": "Drug (Day 1, WT)",
     "diff": -1.212417662,
+    "low": -3.234026658,
+    "high": 0.8091913341,
     "p": 1
    },
    {
     "group1": "Placebo (Day 1, WT)",
     "group2": "Drug (Day 2, WT)",
     "diff": -10.06680544,
+    "low": -12.08841444,
+    "high": -8.045196445,
     "p": 8.025498596e-11
    },
    {
     "group1": "Placebo (Day 1, WT)",
     "group2": "Drug (Day 1, KO)",
     "diff": -2.622545017,
+    "low": -4.644154013,
+    "high": -0.600936021,
     "p": 0.00494983559
    },
    {
     "group1": "Placebo (Day 1, WT)",
     "group2": "Drug (Day 2, KO)",
     "diff": -4.58096297,
+    "low": -6.602571966,
+    "high": -2.559353974,
     "p": 0.000007295683177
    },
    {
     "group1": "Placebo (Day 2, WT)",
     "group2": "Placebo (Day 1, KO)",
     "diff": 3.587485983,
+    "low": 1.565876987,
+    "high": 5.609094979,
     "p": 0.0001600802336
    },
    {
     "group1": "Placebo (Day 2, WT)",
     "group2": "Placebo (Day 2, KO)",
     "diff": 2.980215949,
+    "low": 0.9586069531,
+    "high": 5.001824945,
     "p": 0.001322236989
    },
    {
     "group1": "Placebo (Day 2, WT)",
     "group2": "Drug (Day 1, WT)",
     "diff": 3.08168717,
+    "low": 1.060078174,
+    "high": 5.103296165,
     "p": 0.0009182725686
    },
    {
     "group1": "Placebo (Day 2, WT)",
     "group2": "Drug (Day 2, WT)",
     "diff": -5.77270061,
+    "low": -7.794309606,
+    "high": -3.751091614,
     "p": 3.059988621e-7
    },
    {
     "group1": "Placebo (Day 2, WT)",
     "group2": "Drug (Day 1, KO)",
     "diff": 1.671559814,
+    "low": -0.3500491814,
+    "high": 3.69316881,
     "p": 0.1957851652
    },
    {
     "group1": "Placebo (Day 2, WT)",
     "group2": "Drug (Day 2, KO)",
     "diff": -0.2868581389,
+    "low": -2.308467135,
+    "high": 1.734750857,
     "p": 1
    },
    {
     "group1": "Placebo (Day 1, KO)",
     "group2": "Placebo (Day 2, KO)",
     "diff": -0.6072700336,
+    "low": -2.62887903,
+    "high": 1.414338962,
     "p": 1
    },
    {
     "group1": "Placebo (Day 1, KO)",
     "group2": "Drug (Day 1, WT)",
     "diff": -0.5057988131,
+    "low": -2.527407809,
+    "high": 1.515810183,
     "p": 1
    },
    {
     "group1": "Placebo (Day 1, KO)",
     "group2": "Drug (Day 2, WT)",
     "diff": -9.360186592,
+    "low": -11.38179559,
+    "high": -7.338577596,
     "p": 2.441098385e-10
    },
    {
     "group1": "Placebo (Day 1, KO)",
     "group2": "Drug (Day 1, KO)",
     "diff": -1.915926168,
+    "low": -3.937535164,
+    "high": 0.1056828278,
     "p": 0.07556382654
    },
    {
     "group1": "Placebo (Day 1, KO)",
     "group2": "Drug (Day 2, KO)",
     "diff": -3.874344121,
+    "low": -5.895953117,
+    "high": -1.852735126,
     "p": 0.00006268281674
    },
    {
     "group1": "Placebo (Day 2, KO)",
     "group2": "Drug (Day 1, WT)",
     "diff": 0.1014712205,
+    "low": -1.920137775,
+    "high": 2.123080216,
     "p": 1
    },
    {
     "group1": "Placebo (Day 2, KO)",
     "group2": "Drug (Day 2, WT)",
     "diff": -8.752916559,
+    "low": -10.77452555,
+    "high": -6.731307563,
     "p": 6.759357322e-10
    },
    {
     "group1": "Placebo (Day 2, KO)",
     "group2": "Drug (Day 1, KO)",
     "diff": -1.308656135,
+    "low": -3.33026513,
+    "high": 0.7129528614,
     "p": 0.7766886364
    },
    {
     "group1": "Placebo (Day 2, KO)",
     "group2": "Drug (Day 2, KO)",
     "diff": -3.267074088,
+    "low": -5.288683084,
+    "high": -1.245465092,
     "p": 0.0004774427458
    },
    {
     "group1": "Drug (Day 1, WT)",
     "group2": "Drug (Day 2, WT)",
     "diff": -8.854387779,
+    "low": -10.87599678,
+    "high": -6.832778783,
     "p": 5.676994403e-10
    },
    {
     "group1": "Drug (Day 1, WT)",
     "group2": "Drug (Day 1, KO)",
     "diff": -1.410127355,
+    "low": -3.431736351,
+    "high": 0.6114816409,
     "p": 0.5321304329
    },
    {
     "group1": "Drug (Day 1, WT)",
     "group2": "Drug (Day 2, KO)",
     "diff": -3.368545308,
+    "low": -5.390154304,
+    "high": -1.346936312,
     "p": 0.0003360220817
    },
    {
     "group1": "Drug (Day 2, WT)",
     "group2": "Drug (Day 1, KO)",
     "diff": 7.444260424,
+    "low": 5.422651428,
+    "high": 9.46586942,
     "p": 7.65196906e-9
    },
    {
     "group1": "Drug (Day 2, WT)",
     "group2": "Drug (Day 2, KO)",
     "diff": 5.485842471,
+    "low": 3.464233475,
+    "high": 7.507451467,
     "p": 6.263460008e-7
    },
    {
     "group1": "Drug (Day 1, KO)",
     "group2": "Drug (Day 2, KO)",
     "diff": -1.958417953,
+    "low": -3.980026949,
+    "high": 0.06319104252,
     "p": 0.06400198081
    }
   ],
   "comparisonsLabel": "Bonferroni-corrected multiple comparisons test (A:B:C cell means)"
+ },
+ "three-way-anova grouped3way {\"posthoc\":\"sidak\",\"posthocTerm\":\"A:B\"}": {
+  "testType": "three-way-anova",
+  "subtitle": "Ordinary three-way ANOVA",
+  "stats": [
+   {
+    "label": "A F",
+    "value": 126.6761324
+   },
+   {
+    "label": "A DFn",
+    "value": 1
+   },
+   {
+    "label": "A P value",
+    "value": 5.176955776e-9,
+    "p": true
+   },
+   {
+    "label": "B F",
+    "value": 211.2668769
+   },
+   {
+    "label": "B DFn",
+    "value": 1
+   },
+   {
+    "label": "B P value",
+    "value": 1.224083575e-10,
+    "p": true
+   },
+   {
+    "label": "C F",
+    "value": 34.49064363
+   },
+   {
+    "label": "C DFn",
+    "value": 1
+   },
+   {
+    "label": "C P value",
+    "value": 0.00002357822331,
+    "p": true
+   },
+   {
+    "label": "A:B F",
+    "value": 29.89738213
+   },
+   {
+    "label": "A:B DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B P value",
+    "value": 0.00005160348178,
+    "p": true
+   },
+   {
+    "label": "A:C F",
+    "value": 2.778525512
+   },
+   {
+    "label": "A:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:C P value",
+    "value": 0.1149878616,
+    "p": true
+   },
+   {
+    "label": "B:C F",
+    "value": 95.81852674
+   },
+   {
+    "label": "B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "B:C P value",
+    "value": 3.69428998e-8,
+    "p": true
+   },
+   {
+    "label": "A:B:C F",
+    "value": 8.810973887
+   },
+   {
+    "label": "A:B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B:C P value",
+    "value": 0.009058193021,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 16
+   }
+  ],
+  "groups": [
+   {
+    "name": "Placebo",
+    "mean": 11.58726575,
+    "sd": 1.780766661,
+    "sem": 0.5140630555,
+    "median": 11.10209575,
+    "n": 12
+   },
+   {
+    "name": "Drug",
+    "mean": 14.62929538,
+    "sd": 3.567933338,
+    "sem": 1.029973636,
+    "median": 13.71392836,
+    "n": 12
+   }
+  ],
+  "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B term (A:B cell means).",
+  "comparisons": [
+   {
+    "group1": "Placebo (Day 1)",
+    "group2": "Placebo (Day 2)",
+    "diff": -2.450687432,
+    "low": -3.596683411,
+    "high": -1.304691454,
+    "p": 0.00005165419922
+   },
+   {
+    "group1": "Placebo (Day 1)",
+    "group2": "Drug (Day 1)",
+    "diff": -1.564171915,
+    "low": -2.710167893,
+    "high": -0.4181759368,
+    "p": 0.005091629676
+   },
+   {
+    "group1": "Placebo (Day 1)",
+    "group2": "Drug (Day 2)",
+    "diff": -6.970574781,
+    "low": -8.116570759,
+    "high": -5.824578803,
+    "p": 2.371369767e-11
+   },
+   {
+    "group1": "Placebo (Day 2)",
+    "group2": "Drug (Day 1)",
+    "diff": 0.8865155175,
+    "low": -0.2594804607,
+    "high": 2.032511496,
+    "p": 0.1870840502
+   },
+   {
+    "group1": "Placebo (Day 2)",
+    "group2": "Drug (Day 2)",
+    "diff": -4.519887349,
+    "low": -5.665883327,
+    "high": -3.373891371,
+    "p": 1.527058069e-8
+   },
+   {
+    "group1": "Drug (Day 1)",
+    "group2": "Drug (Day 2)",
+    "diff": -5.406402866,
+    "low": -6.552398844,
+    "high": -4.260406888,
+    "p": 1.102685943e-9
+   }
+  ],
+  "comparisonsLabel": "Šídák-corrected multiple comparisons test (A:B cell means)"
+ },
+ "three-way-anova grouped3way {\"posthoc\":\"holm-sidak\",\"posthocTerm\":\"A\"}": {
+  "testType": "three-way-anova",
+  "subtitle": "Ordinary three-way ANOVA",
+  "stats": [
+   {
+    "label": "A F",
+    "value": 126.6761324
+   },
+   {
+    "label": "A DFn",
+    "value": 1
+   },
+   {
+    "label": "A P value",
+    "value": 5.176955776e-9,
+    "p": true
+   },
+   {
+    "label": "B F",
+    "value": 211.2668769
+   },
+   {
+    "label": "B DFn",
+    "value": 1
+   },
+   {
+    "label": "B P value",
+    "value": 1.224083575e-10,
+    "p": true
+   },
+   {
+    "label": "C F",
+    "value": 34.49064363
+   },
+   {
+    "label": "C DFn",
+    "value": 1
+   },
+   {
+    "label": "C P value",
+    "value": 0.00002357822331,
+    "p": true
+   },
+   {
+    "label": "A:B F",
+    "value": 29.89738213
+   },
+   {
+    "label": "A:B DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B P value",
+    "value": 0.00005160348178,
+    "p": true
+   },
+   {
+    "label": "A:C F",
+    "value": 2.778525512
+   },
+   {
+    "label": "A:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:C P value",
+    "value": 0.1149878616,
+    "p": true
+   },
+   {
+    "label": "B:C F",
+    "value": 95.81852674
+   },
+   {
+    "label": "B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "B:C P value",
+    "value": 3.69428998e-8,
+    "p": true
+   },
+   {
+    "label": "A:B:C F",
+    "value": 8.810973887
+   },
+   {
+    "label": "A:B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B:C P value",
+    "value": 0.009058193021,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 16
+   }
+  ],
+  "groups": [
+   {
+    "name": "Placebo",
+    "mean": 11.58726575,
+    "sd": 1.780766661,
+    "sem": 0.5140630555,
+    "median": 11.10209575,
+    "n": 12
+   },
+   {
+    "name": "Drug",
+    "mean": 14.62929538,
+    "sd": 3.567933338,
+    "sem": 1.029973636,
+    "median": 13.71392836,
+    "n": 12
+   }
+  ],
+  "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A term (A means). No multiplicity-adjusted confidence interval exists for this method, so the comparisons carry none.",
+  "comparisons": [
+   {
+    "group1": "Placebo",
+    "group2": "Drug",
+    "diff": -3.042029632,
+    "low": null,
+    "high": null,
+    "p": 5.176955753e-9
+   }
+  ],
+  "comparisonsLabel": "Holm–Šídák multiple comparisons test (A means)"
+ },
+ "three-way-anova grouped3way {\"posthoc\":\"lsd\",\"posthocTerm\":\"A:B:C\"}": {
+  "testType": "three-way-anova",
+  "subtitle": "Ordinary three-way ANOVA",
+  "stats": [
+   {
+    "label": "A F",
+    "value": 126.6761324
+   },
+   {
+    "label": "A DFn",
+    "value": 1
+   },
+   {
+    "label": "A P value",
+    "value": 5.176955776e-9,
+    "p": true
+   },
+   {
+    "label": "B F",
+    "value": 211.2668769
+   },
+   {
+    "label": "B DFn",
+    "value": 1
+   },
+   {
+    "label": "B P value",
+    "value": 1.224083575e-10,
+    "p": true
+   },
+   {
+    "label": "C F",
+    "value": 34.49064363
+   },
+   {
+    "label": "C DFn",
+    "value": 1
+   },
+   {
+    "label": "C P value",
+    "value": 0.00002357822331,
+    "p": true
+   },
+   {
+    "label": "A:B F",
+    "value": 29.89738213
+   },
+   {
+    "label": "A:B DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B P value",
+    "value": 0.00005160348178,
+    "p": true
+   },
+   {
+    "label": "A:C F",
+    "value": 2.778525512
+   },
+   {
+    "label": "A:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:C P value",
+    "value": 0.1149878616,
+    "p": true
+   },
+   {
+    "label": "B:C F",
+    "value": 95.81852674
+   },
+   {
+    "label": "B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "B:C P value",
+    "value": 3.69428998e-8,
+    "p": true
+   },
+   {
+    "label": "A:B:C F",
+    "value": 8.810973887
+   },
+   {
+    "label": "A:B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B:C P value",
+    "value": 0.009058193021,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 16
+   }
+  ],
+  "groups": [
+   {
+    "name": "Placebo",
+    "mean": 11.58726575,
+    "sd": 1.780766661,
+    "sem": 0.5140630555,
+    "median": 11.10209575,
+    "n": 12
+   },
+   {
+    "name": "Drug",
+    "mean": 14.62929538,
+    "sd": 3.567933338,
+    "sem": 1.029973636,
+    "median": 13.71392836,
+    "n": 12
+   }
+  ],
+  "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B:C term (A:B:C cell means).",
+  "comparisons": [
+   {
+    "group1": "Placebo (Day 1, WT)",
+    "group2": "Placebo (Day 2, WT)",
+    "diff": -4.294104831,
+    "low": -5.440046466,
+    "high": -3.148163197,
+    "p": 6.076139781e-7
+   },
+   {
+    "group1": "Placebo (Day 1, WT)",
+    "group2": "Placebo (Day 1, KO)",
+    "diff": -0.7066188488,
+    "low": -1.852560484,
+    "high": 0.439322786,
+    "p": 0.2096225619
+   },
+   {
+    "group1": "Placebo (Day 1, WT)",
+    "group2": "Placebo (Day 2, KO)",
+    "diff": -1.313888882,
+    "low": -2.459830517,
+    "high": -0.1679472476,
+    "p": 0.02720806601
+   },
+   {
+    "group1": "Placebo (Day 1, WT)",
+    "group2": "Drug (Day 1, WT)",
+    "diff": -1.212417662,
+    "low": -2.358359297,
+    "high": -0.06647602707,
+    "p": 0.03941752275
+   },
+   {
+    "group1": "Placebo (Day 1, WT)",
+    "group2": "Drug (Day 2, WT)",
+    "diff": -10.06680544,
+    "low": -11.21274708,
+    "high": -8.920863806,
+    "p": 2.866249498e-12
+   },
+   {
+    "group1": "Placebo (Day 1, WT)",
+    "group2": "Drug (Day 1, KO)",
+    "diff": -2.622545017,
+    "low": -3.768486652,
+    "high": -1.476603382,
+    "p": 0.0001767798425
+   },
+   {
+    "group1": "Placebo (Day 1, WT)",
+    "group2": "Drug (Day 2, KO)",
+    "diff": -4.58096297,
+    "low": -5.726904605,
+    "high": -3.435021335,
+    "p": 2.605601135e-7
+   },
+   {
+    "group1": "Placebo (Day 2, WT)",
+    "group2": "Placebo (Day 1, KO)",
+    "diff": 3.587485983,
+    "low": 2.441544348,
+    "high": 4.733427617,
+    "p": 0.000005717151199
+   },
+   {
+    "group1": "Placebo (Day 2, WT)",
+    "group2": "Placebo (Day 2, KO)",
+    "diff": 2.980215949,
+    "low": 1.834274314,
+    "high": 4.126157584,
+    "p": 0.0000472227496
+   },
+   {
+    "group1": "Placebo (Day 2, WT)",
+    "group2": "Drug (Day 1, WT)",
+    "diff": 3.08168717,
+    "low": 1.935745535,
+    "high": 4.227628804,
+    "p": 0.00003279544888
+   },
+   {
+    "group1": "Placebo (Day 2, WT)",
+    "group2": "Drug (Day 2, WT)",
+    "diff": -5.77270061,
+    "low": -6.918642244,
+    "high": -4.626758975,
+    "p": 1.092853079e-8
+   },
+   {
+    "group1": "Placebo (Day 2, WT)",
+    "group2": "Drug (Day 1, KO)",
+    "diff": 1.671559814,
+    "low": 0.5256181797,
+    "high": 2.817501449,
+    "p": 0.006992327329
+   },
+   {
+    "group1": "Placebo (Day 2, WT)",
+    "group2": "Drug (Day 2, KO)",
+    "diff": -0.2868581389,
+    "low": -1.432799774,
+    "high": 0.8590834959,
+    "p": 0.6029388552
+   },
+   {
+    "group1": "Placebo (Day 1, KO)",
+    "group2": "Placebo (Day 2, KO)",
+    "diff": -0.6072700336,
+    "low": -1.753211668,
+    "high": 0.5386716012,
+    "p": 0.2778401507
+   },
+   {
+    "group1": "Placebo (Day 1, KO)",
+    "group2": "Drug (Day 1, WT)",
+    "diff": -0.5057988131,
+    "low": -1.651740448,
+    "high": 0.6401428217,
+    "p": 0.363341833
+   },
+   {
+    "group1": "Placebo (Day 1, KO)",
+    "group2": "Drug (Day 2, WT)",
+    "diff": -9.360186592,
+    "low": -10.50612823,
+    "high": -8.214244957,
+    "p": 8.718208517e-12
+   },
+   {
+    "group1": "Placebo (Day 1, KO)",
+    "group2": "Drug (Day 1, KO)",
+    "diff": -1.915926168,
+    "low": -3.061867803,
+    "high": -0.7699845333,
+    "p": 0.002698708091
+   },
+   {
+    "group1": "Placebo (Day 1, KO)",
+    "group2": "Drug (Day 2, KO)",
+    "diff": -3.874344121,
+    "low": -5.020285756,
+    "high": -2.728402487,
+    "p": 0.000002238672027
+   },
+   {
+    "group1": "Placebo (Day 2, KO)",
+    "group2": "Drug (Day 1, WT)",
+    "diff": 0.1014712205,
+    "low": -1.044470414,
+    "high": 1.247412855,
+    "p": 0.8534607144
+   },
+   {
+    "group1": "Placebo (Day 2, KO)",
+    "group2": "Drug (Day 2, WT)",
+    "diff": -8.752916559,
+    "low": -9.898858193,
+    "high": -7.606974924,
+    "p": 2.414056186e-11
+   },
+   {
+    "group1": "Placebo (Day 2, KO)",
+    "group2": "Drug (Day 1, KO)",
+    "diff": -1.308656135,
+    "low": -2.454597769,
+    "high": -0.1627144997,
+    "p": 0.02773887987
+   },
+   {
+    "group1": "Placebo (Day 2, KO)",
+    "group2": "Drug (Day 2, KO)",
+    "diff": -3.267074088,
+    "low": -4.413015723,
+    "high": -2.121132453,
+    "p": 0.00001705152663
+   },
+   {
+    "group1": "Drug (Day 1, WT)",
+    "group2": "Drug (Day 2, WT)",
+    "diff": -8.854387779,
+    "low": -10.00032941,
+    "high": -7.708446144,
+    "p": 2.027498001e-11
+   },
+   {
+    "group1": "Drug (Day 1, WT)",
+    "group2": "Drug (Day 1, KO)",
+    "diff": -1.410127355,
+    "low": -2.55606899,
+    "high": -0.2641857202,
+    "p": 0.01900465832
+   },
+   {
+    "group1": "Drug (Day 1, WT)",
+    "group2": "Drug (Day 2, KO)",
+    "diff": -3.368545308,
+    "low": -4.514486943,
+    "high": -2.222603674,
+    "p": 0.00001200078863
+   },
+   {
+    "group1": "Drug (Day 2, WT)",
+    "group2": "Drug (Day 1, KO)",
+    "diff": 7.444260424,
+    "low": 6.298318789,
+    "high": 8.590202059,
+    "p": 2.732846093e-10
+   },
+   {
+    "group1": "Drug (Day 2, WT)",
+    "group2": "Drug (Day 2, KO)",
+    "diff": 5.485842471,
+    "low": 4.339900836,
+    "high": 6.631784106,
+    "p": 2.236950003e-8
+   },
+   {
+    "group1": "Drug (Day 1, KO)",
+    "group2": "Drug (Day 2, KO)",
+    "diff": -1.958417953,
+    "low": -3.104359588,
+    "high": -0.8124763186,
+    "p": 0.002285785029
+   }
+  ],
+  "comparisonsLabel": "Fisher's LSD (uncorrected) multiple comparisons test (A:B:C cell means)"
+ },
+ "three-way-anova grouped3way {\"posthoc\":\"dunnett\",\"posthocTerm\":\"A\",\"control\":\"Placebo\"}": {
+  "testType": "three-way-anova",
+  "subtitle": "Ordinary three-way ANOVA",
+  "stats": [
+   {
+    "label": "A F",
+    "value": 126.6761324
+   },
+   {
+    "label": "A DFn",
+    "value": 1
+   },
+   {
+    "label": "A P value",
+    "value": 5.176955776e-9,
+    "p": true
+   },
+   {
+    "label": "B F",
+    "value": 211.2668769
+   },
+   {
+    "label": "B DFn",
+    "value": 1
+   },
+   {
+    "label": "B P value",
+    "value": 1.224083575e-10,
+    "p": true
+   },
+   {
+    "label": "C F",
+    "value": 34.49064363
+   },
+   {
+    "label": "C DFn",
+    "value": 1
+   },
+   {
+    "label": "C P value",
+    "value": 0.00002357822331,
+    "p": true
+   },
+   {
+    "label": "A:B F",
+    "value": 29.89738213
+   },
+   {
+    "label": "A:B DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B P value",
+    "value": 0.00005160348178,
+    "p": true
+   },
+   {
+    "label": "A:C F",
+    "value": 2.778525512
+   },
+   {
+    "label": "A:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:C P value",
+    "value": 0.1149878616,
+    "p": true
+   },
+   {
+    "label": "B:C F",
+    "value": 95.81852674
+   },
+   {
+    "label": "B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "B:C P value",
+    "value": 3.69428998e-8,
+    "p": true
+   },
+   {
+    "label": "A:B:C F",
+    "value": 8.810973887
+   },
+   {
+    "label": "A:B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B:C P value",
+    "value": 0.009058193021,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 16
+   }
+  ],
+  "groups": [
+   {
+    "name": "Placebo",
+    "mean": 11.58726575,
+    "sd": 1.780766661,
+    "sem": 0.5140630555,
+    "median": 11.10209575,
+    "n": 12
+   },
+   {
+    "name": "Drug",
+    "mean": 14.62929538,
+    "sd": 3.567933338,
+    "sem": 1.029973636,
+    "median": 13.71392836,
+    "n": 12
+   }
+  ],
+  "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A term (A means).",
+  "comparisons": [
+   {
+    "group1": "Drug",
+    "group2": "Placebo",
+    "diff": 3.042029632,
+    "low": null,
+    "high": null,
+    "p": 5.178777962e-9
+   }
+  ],
+  "comparisonsLabel": "Dunnett's (vs. Placebo) multiple comparisons test (A means)"
+ },
+ "three-way-anova grouped3way {\"posthoc\":\"games-howell\",\"posthocTerm\":\"A:B\"}": {
+  "testType": "three-way-anova",
+  "subtitle": "Ordinary three-way ANOVA",
+  "stats": [
+   {
+    "label": "A F",
+    "value": 126.6761324
+   },
+   {
+    "label": "A DFn",
+    "value": 1
+   },
+   {
+    "label": "A P value",
+    "value": 5.176955776e-9,
+    "p": true
+   },
+   {
+    "label": "B F",
+    "value": 211.2668769
+   },
+   {
+    "label": "B DFn",
+    "value": 1
+   },
+   {
+    "label": "B P value",
+    "value": 1.224083575e-10,
+    "p": true
+   },
+   {
+    "label": "C F",
+    "value": 34.49064363
+   },
+   {
+    "label": "C DFn",
+    "value": 1
+   },
+   {
+    "label": "C P value",
+    "value": 0.00002357822331,
+    "p": true
+   },
+   {
+    "label": "A:B F",
+    "value": 29.89738213
+   },
+   {
+    "label": "A:B DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B P value",
+    "value": 0.00005160348178,
+    "p": true
+   },
+   {
+    "label": "A:C F",
+    "value": 2.778525512
+   },
+   {
+    "label": "A:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:C P value",
+    "value": 0.1149878616,
+    "p": true
+   },
+   {
+    "label": "B:C F",
+    "value": 95.81852674
+   },
+   {
+    "label": "B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "B:C P value",
+    "value": 3.69428998e-8,
+    "p": true
+   },
+   {
+    "label": "A:B:C F",
+    "value": 8.810973887
+   },
+   {
+    "label": "A:B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B:C P value",
+    "value": 0.009058193021,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 16
+   }
+  ],
+  "groups": [
+   {
+    "name": "Placebo",
+    "mean": 11.58726575,
+    "sd": 1.780766661,
+    "sem": 0.5140630555,
+    "median": 11.10209575,
+    "n": 12
+   },
+   {
+    "name": "Drug",
+    "mean": 14.62929538,
+    "sd": 3.567933338,
+    "sem": 1.029973636,
+    "median": 13.71392836,
+    "n": 12
+   }
+  ],
+  "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B term (A:B cell means).",
+  "comparisons": [
+   {
+    "group1": "Placebo (Day 1)",
+    "group2": "Placebo (Day 2)",
+    "diff": -2.450687432,
+    "low": -5.046166253,
+    "high": 0.1447913879,
+    "p": 0.06259725716
+   },
+   {
+    "group1": "Placebo (Day 1)",
+    "group2": "Drug (Day 1)",
+    "diff": -1.564171915,
+    "low": -3.099997758,
+    "high": -0.02834607171,
+    "p": 0.04606657442
+   },
+   {
+    "group1": "Placebo (Day 1)",
+    "group2": "Drug (Day 2)",
+    "diff": -6.970574781,
+    "low": -11.55941171,
+    "high": -2.38173785,
+    "p": 0.008710361015
+   },
+   {
+    "group1": "Placebo (Day 2)",
+    "group2": "Drug (Day 1)",
+    "diff": 0.8865155175,
+    "low": -1.759550585,
+    "high": 3.53258162,
+    "p": 0.7153615227
+   },
+   {
+    "group1": "Placebo (Day 2)",
+    "group2": "Drug (Day 2)",
+    "diff": -4.519887349,
+    "low": -9.147236394,
+    "high": 0.1074616961,
+    "p": 0.0555056121
+   },
+   {
+    "group1": "Drug (Day 1)",
+    "group2": "Drug (Day 2)",
+    "diff": -5.406402866,
+    "low": -9.955836833,
+    "high": -0.8569688999,
+    "p": 0.02398590665
+   }
+  ],
+  "comparisonsLabel": "Games-Howell multiple comparisons test (A:B cell means)"
+ },
+ "three-way-anova grouped3way {\"posthoc\":\"fdr\",\"posthocTerm\":\"A:B\"}": {
+  "testType": "three-way-anova",
+  "subtitle": "Ordinary three-way ANOVA",
+  "stats": [
+   {
+    "label": "A F",
+    "value": 126.6761324
+   },
+   {
+    "label": "A DFn",
+    "value": 1
+   },
+   {
+    "label": "A P value",
+    "value": 5.176955776e-9,
+    "p": true
+   },
+   {
+    "label": "B F",
+    "value": 211.2668769
+   },
+   {
+    "label": "B DFn",
+    "value": 1
+   },
+   {
+    "label": "B P value",
+    "value": 1.224083575e-10,
+    "p": true
+   },
+   {
+    "label": "C F",
+    "value": 34.49064363
+   },
+   {
+    "label": "C DFn",
+    "value": 1
+   },
+   {
+    "label": "C P value",
+    "value": 0.00002357822331,
+    "p": true
+   },
+   {
+    "label": "A:B F",
+    "value": 29.89738213
+   },
+   {
+    "label": "A:B DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B P value",
+    "value": 0.00005160348178,
+    "p": true
+   },
+   {
+    "label": "A:C F",
+    "value": 2.778525512
+   },
+   {
+    "label": "A:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:C P value",
+    "value": 0.1149878616,
+    "p": true
+   },
+   {
+    "label": "B:C F",
+    "value": 95.81852674
+   },
+   {
+    "label": "B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "B:C P value",
+    "value": 3.69428998e-8,
+    "p": true
+   },
+   {
+    "label": "A:B:C F",
+    "value": 8.810973887
+   },
+   {
+    "label": "A:B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B:C P value",
+    "value": 0.009058193021,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 16
+   }
+  ],
+  "groups": [
+   {
+    "name": "Placebo",
+    "mean": 11.58726575,
+    "sd": 1.780766661,
+    "sem": 0.5140630555,
+    "median": 11.10209575,
+    "n": 12
+   },
+   {
+    "name": "Drug",
+    "mean": 14.62929538,
+    "sd": 3.567933338,
+    "sem": 1.029973636,
+    "median": 13.71392836,
+    "n": 12
+   }
+  ],
+  "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B term (A:B cell means). No multiplicity-adjusted confidence interval exists for this method, so the comparisons carry none. FDR approach (Benjamini-Hochberg, Q = 5%): 6 of 6 comparisons are discoveries (adjusted P < 0.05). The P values are FDR-adjusted.",
+  "comparisons": [
+   {
+    "group1": "Placebo (Day 1)",
+    "group2": "Placebo (Day 2)",
+    "diff": -2.450687432,
+    "low": null,
+    "high": null,
+    "p": 0.00001291382775
+   },
+   {
+    "group1": "Placebo (Day 1)",
+    "group2": "Drug (Day 1)",
+    "diff": -1.564171915,
+    "low": null,
+    "high": null,
+    "p": 0.001020493073
+   },
+   {
+    "group1": "Placebo (Day 1)",
+    "group2": "Drug (Day 2)",
+    "diff": -6.970574781,
+    "low": null,
+    "high": null,
+    "p": 2.371374333e-11
+   },
+   {
+    "group1": "Placebo (Day 2)",
+    "group2": "Drug (Day 1)",
+    "diff": 0.8865155175,
+    "low": null,
+    "high": null,
+    "p": 0.03393219875
+   },
+   {
+    "group1": "Placebo (Day 2)",
+    "group2": "Drug (Day 2)",
+    "diff": -4.519887349,
+    "low": null,
+    "high": null,
+    "p": 5.090193492e-9
+   },
+   {
+    "group1": "Drug (Day 1)",
+    "group2": "Drug (Day 2)",
+    "diff": -5.406402866,
+    "low": null,
+    "high": null,
+    "p": 5.513430691e-10
+   }
+  ],
+  "comparisonsLabel": "FDR approach (Benjamini-Hochberg, Q = 5%) multiple comparisons test (A:B cell means)"
+ },
+ "three-way-anova grouped3way {\"posthoc\":\"tukey\",\"posthocTerm\":\"A:B\",\"posthocScope\":\"simple\"}": {
+  "testType": "three-way-anova",
+  "subtitle": "Ordinary three-way ANOVA",
+  "stats": [
+   {
+    "label": "A F",
+    "value": 126.6761324
+   },
+   {
+    "label": "A DFn",
+    "value": 1
+   },
+   {
+    "label": "A P value",
+    "value": 5.176955776e-9,
+    "p": true
+   },
+   {
+    "label": "B F",
+    "value": 211.2668769
+   },
+   {
+    "label": "B DFn",
+    "value": 1
+   },
+   {
+    "label": "B P value",
+    "value": 1.224083575e-10,
+    "p": true
+   },
+   {
+    "label": "C F",
+    "value": 34.49064363
+   },
+   {
+    "label": "C DFn",
+    "value": 1
+   },
+   {
+    "label": "C P value",
+    "value": 0.00002357822331,
+    "p": true
+   },
+   {
+    "label": "A:B F",
+    "value": 29.89738213
+   },
+   {
+    "label": "A:B DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B P value",
+    "value": 0.00005160348178,
+    "p": true
+   },
+   {
+    "label": "A:C F",
+    "value": 2.778525512
+   },
+   {
+    "label": "A:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:C P value",
+    "value": 0.1149878616,
+    "p": true
+   },
+   {
+    "label": "B:C F",
+    "value": 95.81852674
+   },
+   {
+    "label": "B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "B:C P value",
+    "value": 3.69428998e-8,
+    "p": true
+   },
+   {
+    "label": "A:B:C F",
+    "value": 8.810973887
+   },
+   {
+    "label": "A:B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B:C P value",
+    "value": 0.009058193021,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 16
+   }
+  ],
+  "groups": [
+   {
+    "name": "Placebo",
+    "mean": 11.58726575,
+    "sd": 1.780766661,
+    "sem": 0.5140630555,
+    "median": 11.10209575,
+    "n": 12
+   },
+   {
+    "name": "Drug",
+    "mean": 14.62929538,
+    "sd": 3.567933338,
+    "sem": 1.029973636,
+    "median": 13.71392836,
+    "n": 12
+   }
+  ],
+  "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B term (simple effects (the first factor's levels within each B level)).",
+  "comparisons": [
+   {
+    "group1": "Placebo (Day 1)",
+    "group2": "Drug (Day 1)",
+    "diff": -1.564171915,
+    "low": -2.374475016,
+    "high": -0.7538688142,
+    "p": 0.0008504108944
+   },
+   {
+    "group1": "Placebo (Day 2)",
+    "group2": "Drug (Day 2)",
+    "diff": -4.519887349,
+    "low": -5.33019045,
+    "high": -3.709584248,
+    "p": 2.547559053e-9
+   }
+  ],
+  "comparisonsLabel": "Tukey's multiple comparisons test (simple effects (the first factor's levels within each B level))"
+ },
+ "three-way-anova grouped3way {\"posthoc\":\"dunnett\",\"posthocTerm\":\"A:B:C\",\"posthocScope\":\"simple\",\"control\":\"Placebo (Day 1)\"}": {
+  "testType": "three-way-anova",
+  "subtitle": "Ordinary three-way ANOVA",
+  "stats": [
+   {
+    "label": "A F",
+    "value": 126.6761324
+   },
+   {
+    "label": "A DFn",
+    "value": 1
+   },
+   {
+    "label": "A P value",
+    "value": 5.176955776e-9,
+    "p": true
+   },
+   {
+    "label": "B F",
+    "value": 211.2668769
+   },
+   {
+    "label": "B DFn",
+    "value": 1
+   },
+   {
+    "label": "B P value",
+    "value": 1.224083575e-10,
+    "p": true
+   },
+   {
+    "label": "C F",
+    "value": 34.49064363
+   },
+   {
+    "label": "C DFn",
+    "value": 1
+   },
+   {
+    "label": "C P value",
+    "value": 0.00002357822331,
+    "p": true
+   },
+   {
+    "label": "A:B F",
+    "value": 29.89738213
+   },
+   {
+    "label": "A:B DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B P value",
+    "value": 0.00005160348178,
+    "p": true
+   },
+   {
+    "label": "A:C F",
+    "value": 2.778525512
+   },
+   {
+    "label": "A:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:C P value",
+    "value": 0.1149878616,
+    "p": true
+   },
+   {
+    "label": "B:C F",
+    "value": 95.81852674
+   },
+   {
+    "label": "B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "B:C P value",
+    "value": 3.69428998e-8,
+    "p": true
+   },
+   {
+    "label": "A:B:C F",
+    "value": 8.810973887
+   },
+   {
+    "label": "A:B:C DFn",
+    "value": 1
+   },
+   {
+    "label": "A:B:C P value",
+    "value": 0.009058193021,
+    "p": true
+   },
+   {
+    "label": "DFd (residual)",
+    "value": 16
+   }
+  ],
+  "groups": [
+   {
+    "name": "Placebo",
+    "mean": 11.58726575,
+    "sd": 1.780766661,
+    "sem": 0.5140630555,
+    "median": 11.10209575,
+    "n": 12
+   },
+   {
+    "name": "Drug",
+    "mean": 14.62929538,
+    "sd": 3.567933338,
+    "sem": 1.029973636,
+    "median": 13.71392836,
+    "n": 12
+   }
+  ],
+  "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B:C term (simple effects (the first factor's levels within each C level)).",
+  "comparisons": [
+   {
+    "group1": "Placebo (Day 2, WT)",
+    "group2": "Placebo (Day 1, WT)",
+    "diff": 4.294104831,
+    "low": 2.892793054,
+    "high": 5.695416608,
+    "p": 0.000001744815229
+   },
+   {
+    "group1": "Drug (Day 1, WT)",
+    "group2": "Placebo (Day 1, WT)",
+    "diff": 1.212417662,
+    "low": -0.1888941153,
+    "high": 2.613729439,
+    "p": 0.09699650738
+   },
+   {
+    "group1": "Drug (Day 2, WT)",
+    "group2": "Placebo (Day 1, WT)",
+    "diff": 10.06680544,
+    "low": 8.665493664,
+    "high": 11.46811722,
+    "p": 1.027045116e-11
+   },
+   {
+    "group1": "Placebo (Day 2, KO)",
+    "group2": "Placebo (Day 1, KO)",
+    "diff": 0.6072700336,
+    "low": -0.7940417435,
+    "high": 2.008581811,
+    "p": 0.5535565946
+   },
+   {
+    "group1": "Drug (Day 1, KO)",
+    "group2": "Placebo (Day 1, KO)",
+    "diff": 1.915926168,
+    "low": 0.514614391,
+    "high": 3.317237945,
+    "p": 0.007272241748
+   },
+   {
+    "group1": "Drug (Day 2, KO)",
+    "group2": "Placebo (Day 1, KO)",
+    "diff": 3.874344121,
+    "low": 2.473032344,
+    "high": 5.275655899,
+    "p": 0.00000640473982
+   }
+  ],
+  "comparisonsLabel": "Dunnett's (vs. Placebo (Day 1)) multiple comparisons test (simple effects (the first factor's levels within each C level))"
  },
  "two-way-anova grouped3way {\"design\":\"ordinary\",\"posthoc\":\"none\",\"posthocTarget\":\"groups\"}": {
   "testType": "two-way-anova",
