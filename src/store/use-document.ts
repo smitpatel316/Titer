@@ -720,7 +720,10 @@ export function useDocument() {
 
   const saveFamilyAs = async (): Promise<boolean> => {
     const s = latest.current.get();
-    const tableId = s.activeTableId;
+    // The active table: the active node itself, or its parent (as the
+    // store's `activeTableId` derives it — the state holds only the node).
+    const activeNode = s.activeNodeId ? s.nodes[s.activeNodeId] : undefined;
+    const tableId = activeNode ? (activeNode.type === "table" ? activeNode.id : activeNode.parentId) : null;
     const family = tableId ? extractFamily(s, tableId) : null;
     if (!family) return false;
     const table = s.nodes[tableId!];

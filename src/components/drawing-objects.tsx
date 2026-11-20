@@ -10,7 +10,7 @@
 // body, resizes from its corner, edits text on double-click, and deletes
 // with the Delete key. Clicking one member of a group selects the group.
 import * as React from "react";
-import { MAX_PICTURE_BYTES, type DrawingObject, type DrawingObjectKind } from "../store/types";
+import { MAX_PICTURE_BYTES, type DrawingObject, type DrawingObjectKind, type ProjectNode } from "../store/types";
 import { useProjectActions } from "../store/use-project-store";
 import {
   clearDrawingSelection,
