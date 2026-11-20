@@ -191,6 +191,7 @@ import {
 } from "../src/stats/column/transform-concentrations";
 import { makeInitialState, reducer } from "../src/store/use-project-store";
 import { executeJob, waitForRevision, type JobDeps } from "../src/store/mcp-dispatch";
+import { executeSaveProject, toSaveWriteReport, type DocumentDeps } from "../src/store/mcp-document";
 import { TABLES } from "../src/views/tables/index";
 import { UPDATE_CHECK_TIMEOUT_MS, fetchWithTimeout, isNewer, latestVersion } from "../src/lib/version";
 import { decideUpdate, type ChannelManifest } from "../src/lib/channel";
@@ -16524,6 +16525,188 @@ check("a .prism save shows the write report (Mansi P0 #3)", () => {
     shell.includes('title="Saved as Prism"') && shell.includes("prismSavedReport"),
     "app-shell doesn't render the Saved as Prism report dialog",
   );
+});
+
+// ── Mansi P0 #6 (MCP side): titer_save_project returns the write report ──
+// The audit (seq 292) found the gap: the MCP save returned only
+// {project_id, file_path, format, revision} while the UI save showed the
+// write report — an agent saving as .prism/.pzfx never learned which
+// tables/analyses were written and which were dropped. The result now
+// carries `write_report` (snake_case, the same content as the UI report)
+// for .prism/.pzfx, and null for .hlx — the native format has no writer
+// report, everything is written.
+check("titer_save_project returns the write report (Mansi P0 #6, MCP side)", async () => {
+  // Mapper pin: the MCP shape is the writer's report in snake_case, with
+  // the UI's verbatim summary text — and the summary keeps the prism vs
+  // pzfx wording difference in the analyses-not-written line.
+  const report: PrismWriteReport = {
+    tables: ["Table A", "Table B"],
+    analyses: [],
+    analysesNotWritten: ["T-test (multiple-t-tests — not yet supported in Prism)"],
+    infoSheets: ["Project info 1"],
+    issues: [
+      {
+        severity: "warning",
+        message:
+          "Graphs and layouts are not written — Prism stores them in a binary format it does not document. Re-create them in Prism from the tables.",
+      },
+    ],
+  };
+  deepStrictEqual(toSaveWriteReport(report, "prism"), {
+    tables_written: ["Table A", "Table B"],
+    analyses_written: [],
+    analyses_not_written: ["T-test (multiple-t-tests — not yet supported in Prism)"],
+    info_sheets_written: ["Project info 1"],
+    issues: [
+      {
+        severity: "warning",
+        message:
+          "Graphs and layouts are not written — Prism stores them in a binary format it does not document. Re-create them in Prism from the tables.",
+      },
+    ],
+    summary:
+      "Tables written: 2 — Table A, Table B\n" +
+      "Analyses written: 0\n" +
+      "Info sheets written: 1 — Project info 1\n" +
+      "Analyses not written (not yet supported in Prism): T-test (multiple-t-tests — not yet supported in Prism)\n" +
+      "Warning: Graphs and layouts are not written — Prism stores them in a binary format it does not document. Re-create them in Prism from the tables.",
+  });
+  strictEqual(
+    toSaveWriteReport(report, "pzfx").summary.split("\n")[3],
+    "Analyses not written (.pzfx never contains analyses): T-test (multiple-t-tests — not yet supported in Prism)",
+  );
+  // One column table, one analysis Prism can't write (anova), one info
+  // sheet: the report must name the table written, the analysis dropped
+  // with its reason, and the info sheet written.
+  const state = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "Data 1",
+        parentId: null,
+        tableType: "column",
+        data: {
+          columns: ["Title", "A", "B"],
+          rows: [
+            [null, "1", "2"],
+            [null, "3", "4"],
+          ],
+        },
+      },
+      a1: {
+        id: "a1",
+        type: "analysis",
+        name: "ANOVA",
+        parentId: "t1",
+        analysisType: "anova",
+        analysisParams: {},
+      },
+      i1: {
+        id: "i1",
+        type: "info",
+        name: "Project info 1",
+        parentId: null,
+        info: { constants: [], notes: "" },
+      },
+    },
+    rootOrder: ["t1", "i1"],
+    childOrder: { t1: ["a1"] },
+    activeNodeId: "t1",
+    filePath: null,
+    isDirty: true,
+    revision: 7,
+  };
+  const written: { path: string; bytes: Uint8Array }[] = [];
+  const saved: { filePath: string | null; revision: number }[] = [];
+  const deps: DocumentDeps = {
+    getState: () => state,
+    loadProject: () => {
+      throw new Error("unused in this check");
+    },
+    markSaved: (filePath, revision) => {
+      saved.push({ filePath, revision });
+    },
+    io: {
+      writeFile: async (path, data) => {
+        written.push({ path, bytes: data as Uint8Array });
+      },
+      appVersion: async () => "1.8.0",
+      readPrismText: async () => {
+        throw new Error("unused in this check");
+      },
+      readPrismBytes: async () => {
+        throw new Error("unused in this check");
+      },
+    },
+  };
+  type SaveResult = {
+    project_id: string;
+    file_path: string;
+    format: string;
+    revision: number;
+    write_report: {
+      tables_written: string[];
+      analyses_written: string[];
+      analyses_not_written: string[];
+      info_sheets_written: string[];
+      issues: { severity: string; message: string }[];
+      summary: string;
+    } | null;
+  };
+  // .prism: the report names what was written and what was dropped, and
+  // the bytes are a real .prism zip (PK) — the report describes the file
+  // actually written, not a second computation.
+  const prism = (await executeSaveProject(deps, { path: "saved.prism", format: "prism" }, "project-1"))
+    .result as SaveResult;
+  strictEqual(prism.project_id, "project-1");
+  strictEqual(prism.file_path, "saved.prism");
+  strictEqual(prism.format, "prism");
+  strictEqual(prism.revision, 7);
+  ok(prism.write_report !== null, "a .prism save reports nothing about what was written");
+  deepStrictEqual(prism.write_report?.tables_written, ["Data 1"]);
+  deepStrictEqual(prism.write_report?.analyses_written, []);
+  deepStrictEqual(prism.write_report?.analyses_not_written, ["ANOVA (anova — not yet supported in Prism)"]);
+  deepStrictEqual(prism.write_report?.info_sheets_written, ["Project info 1"]);
+  ok(
+    prism.write_report?.issues.some((i) => i.message.includes("Graphs and layouts are not written")),
+    "the graphs warning is missing from the .prism report",
+  );
+  ok(prism.write_report?.summary.includes("Tables written: 1 — Data 1"), "the summary misses the table");
+  ok(
+    prism.write_report?.summary.includes(
+      "Analyses not written (not yet supported in Prism): ANOVA (anova — not yet supported in Prism)",
+    ),
+    "the summary misses the dropped analysis",
+  );
+  strictEqual(written[0].path, "saved.prism");
+  strictEqual(written[0].bytes[0], 0x50, "the .prism bytes are not a ZIP (PK)");
+  strictEqual(written[0].bytes[1], 0x4b);
+  deepStrictEqual(saved[0], { filePath: "saved.prism", revision: 7 });
+  // .pzfx: same project — tables written, every analysis dropped because
+  // a .pzfx file never contains analyses, in the .pzfx wording.
+  const pzfx = (await executeSaveProject(deps, { path: "saved.pzfx", format: "pzfx" }, "project-1"))
+    .result as SaveResult;
+  strictEqual(pzfx.format, "pzfx");
+  ok(pzfx.write_report !== null, "a .pzfx save reports nothing about what was written");
+  deepStrictEqual(pzfx.write_report?.tables_written, ["Data 1"]);
+  deepStrictEqual(pzfx.write_report?.analyses_written, []);
+  deepStrictEqual(pzfx.write_report?.analyses_not_written, ["ANOVA (anova — .pzfx never contains analyses)"]);
+  deepStrictEqual(pzfx.write_report?.info_sheets_written, ["Project info 1"]);
+  ok(
+    pzfx.write_report?.summary.includes(
+      "Analyses not written (.pzfx never contains analyses): ANOVA (anova — .pzfx never contains analyses)",
+    ),
+    "the .pzfx summary misses the dropped analysis",
+  );
+  // .hlx: the native format has no writer report — null, never an
+  // invented one. The old four fields are untouched.
+  const hlx = (await executeSaveProject(deps, { path: "saved.hlx", format: "hlx" }, "project-1"))
+    .result as SaveResult;
+  strictEqual(hlx.format, "hlx");
+  strictEqual(hlx.write_report, null);
+  strictEqual(hlx.file_path, "saved.hlx");
+  strictEqual(hlx.revision, 7);
 });
 
 // ── FF-F13: a graph's dangling analysis link is cleared on load, warned once ──
