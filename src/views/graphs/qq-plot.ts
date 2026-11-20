@@ -7,7 +7,7 @@ import type { GraphModule, GraphFigure } from ".";
 import type { Column } from "../../lib/dataset";
 import { ppoints, qnorm } from "../../lib/normal";
 import { mean, sd } from "../../lib/summary";
-import { seriesMarker, xyLayout, type Paint } from "./plot-helpers";
+import { addNote, seriesMarker, xyLayout, type Paint } from "./plot-helpers";
 
 /** A sample's QQ points: the normal quantile each sorted value stands for, and the value. */
 export function qqPoints(values: number[]): { z: number[]; y: number[] } {
@@ -41,10 +41,18 @@ export function qqTraces(samples: { name: string; values: number[] }[], paint: P
 
 function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFigure {
   const samples = columns.map((c) => ({ name: c.name, values: c.values }));
-  return {
+  const fig: GraphFigure = {
     data: qqTraces(samples, paint),
     layout: xyLayout({ ...options, xScale: "linear" }, "Normal quantile (z)", samples.length, { yName: "Value" }),
   };
+  // A data set too small for a QQ plot is named on the figure instead of
+  // silently drawing nothing (G-F8) — the regression overlay does the same
+  // for a fit it cannot draw.
+  const failed = samples
+    .filter((s) => s.values.length < 2)
+    .map((s) => `QQ plot for “${s.name}” not drawn: it needs at least 2 values.`);
+  if (failed.length) addNote(fig, failed.join("<br>"), options);
+  return fig;
 }
 
 export const qqPlot: GraphModule = { label: "QQ plot", family: "column", points: () => true, build };
