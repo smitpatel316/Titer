@@ -118,9 +118,12 @@ export const NONLINEAR_MODELS = [
   ...KINETIC_MODELS,
   // Exponential family (plan 08, 1/2: decay first; one-phase-decay is already in KINETIC_MODELS).
   "two-phase-decay",
+  "three-phase-decay",
   "plateau-decay",
   // Plan 08, 2/2: association (growth is already in KINETIC_MODELS).
   "one-phase-association",
+  "two-phase-association",
+  "plateau-association",
   // Plan 09: enzyme kinetics (substrate–velocity; michaelis-menten is
   // already in KINETIC_MODELS).
   "allosteric-sigmoidal",
@@ -132,6 +135,20 @@ export const NONLINEAR_MODELS = [
   "boltzmann-sigmoid",
   "lorentzian",
   "sine-wave",
+  // 1.8 classic-curves completion (B6 diff vs Prism 11.2.0's 152-model list):
+  // the rest of Prism's Gaussian family (sum of two Gaussians, Log Gaussian,
+  // the three cumulative Gaussians, sum of two Lorentzians) and its Sine
+  // waves family (standard sine, damped sine, sinc). Equations from Prism's
+  // Curve Fitting Guide (see modelSpec); B6 line refs in the lane report.
+  "sum-of-two-gaussians",
+  "lognormal",
+  "cumulative-gaussian-percent",
+  "cumulative-gaussian-fraction",
+  "cumulative-gaussian-counts",
+  "sum-of-two-lorentzians",
+  "standard-sine-wave",
+  "damped-sine-wave",
+  "sinc",
   // Plan 28: binding competition (two-site + homologous) — already in
   // DOSE_MODELS above, so they are covered by the spread; do NOT list them
   // again here (a duplicate entry double-runs every NONLINEAR_MODELS sweep

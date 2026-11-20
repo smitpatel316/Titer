@@ -14,6 +14,23 @@ function coef(coefficients: RegressionCoefficient[], term: string): number {
   return coefficients.find((c) => c.term === term)?.estimate ?? NaN;
 }
 
+/** The error function, Abramowitz–Stegun 7.1.26 (|ε| < 1.5e-7) — the
+ *  cumulative-Gaussian overlay needs Φ(z) = ½(1 + erf(z/√2)); R's pnorm
+ *  is exact, this is only for drawing the curve. */
+function erf(x: number): number {
+  const sign = x < 0 ? -1 : 1;
+  const ax = Math.abs(x);
+  const t = 1 / (1 + 0.3275911 * ax);
+  const y =
+    1 -
+    (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t) *
+      Math.exp(-ax * ax);
+  return sign * y;
+}
+
+/** The standard normal CDF Φ(z). */
+const pnorm = (z: number): number => 0.5 * (1 + erf(z / Math.SQRT2));
+
 /** The fitted curve at `x`: the model's equation (nonlinear-regression.ts) with its coefficients.
  *  The homologous model also needs the radioligand concentration [L] (its
  *  fit carries it — see AnalysisResult.ligandConcentration); without it the
@@ -80,14 +97,62 @@ export function evaluate(
       return (c("Y0") - c("Plateau")) * Math.exp(-c("K") * x) + c("Plateau");
     case "two-phase-decay":
       return c("Plateau") + c("Span1") * Math.exp(-c("K1") * x) + c("Span2") * Math.exp(-c("K2") * x);
+    case "three-phase-decay":
+      return (
+        c("Plateau") +
+        c("Span1") * Math.exp(-c("K1") * x) +
+        c("Span2") * Math.exp(-c("K2") * x) +
+        c("Span3") * Math.exp(-c("K3") * x)
+      );
     case "plateau-decay":
       return x < c("X0")
         ? c("Y0")
         : c("Plateau") + (c("Y0") - c("Plateau")) * Math.exp(-c("K") * (x - c("X0")));
     case "one-phase-association":
       return c("Y0") + (c("Plateau") - c("Y0")) * (1 - Math.exp(-c("K") * x));
+    case "two-phase-association":
+      return (
+        c("Y0") +
+        c("Span1") * (1 - Math.exp(-c("K1") * x)) +
+        c("Span2") * (1 - Math.exp(-c("K2") * x))
+      );
+    case "plateau-association":
+      return x < c("X0")
+        ? c("Y0")
+        : c("Y0") + (c("Plateau") - c("Y0")) * (1 - Math.exp(-c("K") * (x - c("X0"))));
     case "gaussian":
       return c("Amplitude") * Math.exp(-0.5 * ((x - c("Mean")) / c("SD")) ** 2);
+    case "sum-of-two-gaussians":
+      return (
+        c("Amplitude1") * Math.exp(-0.5 * ((x - c("Mean1")) / c("SD1")) ** 2) +
+        c("Amplitude2") * Math.exp(-0.5 * ((x - c("Mean2")) / c("SD2")) ** 2)
+      );
+    case "lognormal":
+      return (c("A") / x) * Math.exp(-0.5 * (Math.log(x / c("GeoMean")) / Math.log(c("GeoSD"))) ** 2);
+    case "cumulative-gaussian-percent":
+      return 100 * pnorm((x - c("Mean")) / c("SD"));
+    case "cumulative-gaussian-fraction":
+      return pnorm((x - c("Mean")) / c("SD"));
+    case "cumulative-gaussian-counts":
+      return c("Total") * pnorm((x - c("Mean")) / c("SD"));
+    case "sum-of-two-lorentzians":
+      return (
+        c("Amplitude1") / (1 + ((x - c("Center1")) / c("Width1")) ** 2) +
+        c("Amplitude2") / (1 + ((x - c("Center2")) / c("Width2")) ** 2)
+      );
+    case "standard-sine-wave":
+      return c("Amplitude") * Math.sin((2 * Math.PI * x) / c("Wavelength") + c("PhaseShift"));
+    case "damped-sine-wave":
+      return (
+        c("Amplitude") *
+        Math.exp(-c("K") * x) *
+        Math.sin((2 * Math.PI * x) / c("Wavelength") + c("PhaseShift"))
+      );
+    case "sinc":
+      return x === 0
+        ? c("Amplitude")
+        : (c("Amplitude") * Math.sin((2 * Math.PI * x) / c("Wavelength"))) /
+            ((2 * Math.PI * x) / c("Wavelength"));
     case "boltzmann-sigmoid":
       return c("Bottom") + (c("Top") - c("Bottom")) / (1 + Math.exp((c("V50") - x) / c("Slope")));
     case "lorentzian":

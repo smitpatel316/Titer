@@ -107,14 +107,28 @@ export const invertMethod = (model: NonlinearModel): InvertMethod =>
   // inverts it numerically (uniroot on the fitted curve), as for the polynomials.
   model === "user-defined" ||
   model === "two-phase-decay" ||
+  model === "three-phase-decay" ||
   model === "plateau-decay" ||
+  model === "plateau-association" ||
+  model === "two-phase-association" ||
   model === "substrate-inhibition" ||
   // Other classic curves (v2): the Gaussian and Lorentzian have two X
   // roots each (either side of the peak) and the sine wave infinitely many,
   // so no single closed-form inverse — invert numerically.
   model === "gaussian" ||
   model === "lorentzian" ||
-  model === "sine-wave"
+  model === "sine-wave" ||
+  // 1.8 classic-curves completion: the two-component / cumulative /
+  // lognormal / damped / sinc shapes have no closed-form inverse either.
+  model === "sum-of-two-gaussians" ||
+  model === "lognormal" ||
+  model === "cumulative-gaussian-percent" ||
+  model === "cumulative-gaussian-fraction" ||
+  model === "cumulative-gaussian-counts" ||
+  model === "sum-of-two-lorentzians" ||
+  model === "standard-sine-wave" ||
+  model === "damped-sine-wave" ||
+  model === "sinc"
     ? "numeric"
     : "closed-form";
 
@@ -485,6 +499,17 @@ function equation(
       if (plateau == null || span1 == null || k1 == null || span2 == null || k2 == null) return undefined;
       return `Y = ${num(plateau)} + ${num(span1)}·exp(−${num(k1)}·X) + ${num(span2)}·exp(−${num(k2)}·X)`;
     }
+    case "three-phase-decay": {
+      const span1 = coefOf(coefficients, "Span1");
+      const k1 = coefOf(coefficients, "K1");
+      const span2 = coefOf(coefficients, "Span2");
+      const k2 = coefOf(coefficients, "K2");
+      const span3 = coefOf(coefficients, "Span3");
+      const k3 = coefOf(coefficients, "K3");
+      if (plateau == null || span1 == null || k1 == null || span2 == null || k2 == null || span3 == null || k3 == null)
+        return undefined;
+      return `Y = ${num(plateau)} + ${num(span1)}·exp(−${num(k1)}·X) + ${num(span2)}·exp(−${num(k2)}·X) + ${num(span3)}·exp(−${num(k3)}·X)`;
+    }
     case "plateau-decay": {
       const x0 = coefOf(coefficients, "X0");
       if (x0 == null || y0 == null || plateau == null || k == null) return undefined;
@@ -493,6 +518,19 @@ function equation(
     case "one-phase-association":
       if (y0 == null || plateau == null || k == null) return undefined;
       return `Y = ${num(y0)} + (${num(plateau)} − ${num(y0)})·(1 − exp(−${num(k)}·X))`;
+    case "two-phase-association": {
+      const span1 = coefOf(coefficients, "Span1");
+      const k1 = coefOf(coefficients, "K1");
+      const span2 = coefOf(coefficients, "Span2");
+      const k2 = coefOf(coefficients, "K2");
+      if (y0 == null || span1 == null || k1 == null || span2 == null || k2 == null) return undefined;
+      return `Y = ${num(y0)} + ${num(span1)}·(1 − exp(−${num(k1)}·X)) + ${num(span2)}·(1 − exp(−${num(k2)}·X))`;
+    }
+    case "plateau-association": {
+      const x0 = coefOf(coefficients, "X0");
+      if (x0 == null || y0 == null || plateau == null || k == null) return undefined;
+      return `Y = ${num(y0)} for X < ${num(x0)}; Y = ${num(y0)} + (${num(plateau)} − ${num(y0)})·(1 − exp(−${num(k)}·(X − ${num(x0)}))) for X ≥ ${num(x0)}`;
+    }
     case "exponential-growth":
       if (y0 == null || k == null) return undefined;
       return `Y = ${num(y0)}·exp(${num(k)}·X)`;
@@ -535,6 +573,75 @@ function equation(
       const base = coefOf(coefficients, "Baseline");
       if (amp == null || wl == null || phase == null || base == null) return undefined;
       return `Y = ${num(amp)}·sin((2π·X/${num(wl)}) + ${num(phase)}) + ${num(base)}`;
+    }
+    case "sum-of-two-gaussians": {
+      const amp1 = coefOf(coefficients, "Amplitude1");
+      const mean1 = coefOf(coefficients, "Mean1");
+      const sd1 = coefOf(coefficients, "SD1");
+      const amp2 = coefOf(coefficients, "Amplitude2");
+      const mean2 = coefOf(coefficients, "Mean2");
+      const sd2 = coefOf(coefficients, "SD2");
+      if (amp1 == null || mean1 == null || sd1 == null || amp2 == null || mean2 == null || sd2 == null)
+        return undefined;
+      return `Y = ${num(amp1)}·exp(−0.5·((X − ${num(mean1)})/${num(sd1)})²) + ${num(amp2)}·exp(−0.5·((X − ${num(mean2)})/${num(sd2)})²)`;
+    }
+    case "lognormal": {
+      const a = coefOf(coefficients, "A");
+      const gm = coefOf(coefficients, "GeoMean");
+      const gsd = coefOf(coefficients, "GeoSD");
+      if (a == null || gm == null || gsd == null) return undefined;
+      return `Y = (${num(a)}/X)·exp(−0.5·(ln(X/${num(gm)})/ln(${num(gsd)}))²)`;
+    }
+    case "cumulative-gaussian-percent": {
+      const mean = coefOf(coefficients, "Mean");
+      const sd = coefOf(coefficients, "SD");
+      if (mean == null || sd == null) return undefined;
+      return `Y = 100·Φ((X − ${num(mean)})/${num(sd)})`;
+    }
+    case "cumulative-gaussian-fraction": {
+      const mean = coefOf(coefficients, "Mean");
+      const sd = coefOf(coefficients, "SD");
+      if (mean == null || sd == null) return undefined;
+      return `Y = Φ((X − ${num(mean)})/${num(sd)})`;
+    }
+    case "cumulative-gaussian-counts": {
+      const mean = coefOf(coefficients, "Mean");
+      const sd = coefOf(coefficients, "SD");
+      const total = coefOf(coefficients, "Total");
+      if (mean == null || sd == null || total == null) return undefined;
+      return `Y = ${num(total)}·Φ((X − ${num(mean)})/${num(sd)})`;
+    }
+    case "sum-of-two-lorentzians": {
+      const amp1 = coefOf(coefficients, "Amplitude1");
+      const c1 = coefOf(coefficients, "Center1");
+      const w1 = coefOf(coefficients, "Width1");
+      const amp2 = coefOf(coefficients, "Amplitude2");
+      const c2 = coefOf(coefficients, "Center2");
+      const w2 = coefOf(coefficients, "Width2");
+      if (amp1 == null || c1 == null || w1 == null || amp2 == null || c2 == null || w2 == null)
+        return undefined;
+      return `Y = ${num(amp1)}/(1 + ((X − ${num(c1)})/${num(w1)})²) + ${num(amp2)}/(1 + ((X − ${num(c2)})/${num(w2)})²)`;
+    }
+    case "standard-sine-wave": {
+      const amp = coefOf(coefficients, "Amplitude");
+      const wl = coefOf(coefficients, "Wavelength");
+      const phase = coefOf(coefficients, "PhaseShift");
+      if (amp == null || wl == null || phase == null) return undefined;
+      return `Y = ${num(amp)}·sin((2π·X/${num(wl)}) + ${num(phase)})`;
+    }
+    case "damped-sine-wave": {
+      const amp = coefOf(coefficients, "Amplitude");
+      const wl = coefOf(coefficients, "Wavelength");
+      const phase = coefOf(coefficients, "PhaseShift");
+      const kk = coefOf(coefficients, "K");
+      if (amp == null || wl == null || phase == null || kk == null) return undefined;
+      return `Y = ${num(amp)}·exp(−${num(kk)}·X)·sin((2π·X/${num(wl)}) + ${num(phase)})`;
+    }
+    case "sinc": {
+      const amp = coefOf(coefficients, "Amplitude");
+      const wl = coefOf(coefficients, "Wavelength");
+      if (amp == null || wl == null) return undefined;
+      return `Y = ${num(amp)}·sin(2π·X/${num(wl)})/(2π·X/${num(wl)})`;
     }
     case "michaelis-menten": {
       const vmax = coefOf(coefficients, "Vmax");
@@ -595,6 +702,17 @@ function equation(
   }
 }
 
+/** The sine-family Wavelength start: the mean-crossing count of the
+ *  demeaned data (each crossing half a cycle), so Wavelength ≈
+ *  2·range/crossings — the same count the R starts use. */
+function sineWavelength(xs: number[], ys: number[]): number {
+  const meanY = ys.reduce((s, v) => s + v, 0) / ys.length;
+  const signs = ys.map((v) => Math.sign(v - meanY));
+  let crossings = 0;
+  for (let i = 1; i < signs.length; i++) if (signs[i] !== signs[i - 1]) crossings++;
+  return (2 * (Math.max(...xs) - Math.min(...xs))) / Math.max(1, crossings);
+}
+
 /** The data-driven starting values the R fit used, in the same terms as
  *  modelSpec's `start` list — recomputed here from the fitted points, so the
  *  note always names what nls() actually started from. */
@@ -622,6 +740,8 @@ function startingValues(
       return `Starting values: Y0 = ${num(yAtMinX)}, Plateau = ${num(minY)}, K = 0.5.`;
     case "two-phase-decay":
       return `Starting values: Plateau = ${num(minY)}, Span1 = ${num(0.6 * (maxY - minY))}, K1 = 1, Span2 = ${num(0.4 * (maxY - minY))}, K2 = 0.1.`;
+    case "three-phase-decay":
+      return `Starting values: Plateau = ${num(minY)}, Span1 = ${num(0.5 * (maxY - minY))}, K1 = 1, Span2 = ${num(0.3 * (maxY - minY))}, K2 = 0.1, Span3 = ${num(0.2 * (maxY - minY))}, K3 = 0.01.`;
     case "plateau-decay": {
       const x0 = median(xs);
       const below = ys.filter((_, i) => xs[i] < x0);
@@ -630,6 +750,14 @@ function startingValues(
     }
     case "one-phase-association":
       return `Starting values: Y0 = ${num(yAtMinX)}, Plateau = ${num(maxY)}, K = 0.5.`;
+    case "two-phase-association":
+      return `Starting values: Y0 = ${num(yAtMinX)}, Span1 = ${num(0.6 * (maxY - minY))}, K1 = 1, Span2 = ${num(0.4 * (maxY - minY))}, K2 = 0.1.`;
+    case "plateau-association": {
+      const x0 = median(xs);
+      const below = ys.filter((_, i) => xs[i] < x0);
+      const y0 = below.reduce((s, v) => s + v, 0) / below.length;
+      return `Starting values: X0 = ${num(x0)}, Y0 = ${num(y0)}, Plateau = ${num(maxY)}, K = 0.5.`;
+    }
     case "exponential-growth":
       return `Starting values: Y0 = ${num(yAtMinX)}, K = 0.1.`;
     case "gaussian": {
@@ -652,6 +780,35 @@ function startingValues(
       for (let i = 1; i < signs.length; i++) if (signs[i] !== signs[i - 1]) crossings++;
       const wl = (2 * (Math.max(...xs) - Math.min(...xs))) / Math.max(1, crossings);
       return `Starting values: Amplitude = ${num((maxY - minY) / 2)}, Wavelength = ${num(wl)}, PhaseShift = 0, Baseline = ${num(meanY)}.`;
+    }
+    case "sum-of-two-gaussians": {
+      const xAtMaxY = xs[ys.indexOf(maxY)];
+      return `Starting values: Amplitude1 = ${num(maxY)}, Mean1 = ${num(xAtMaxY)}, SD1 = ${num((Math.max(...xs) - Math.min(...xs)) / 6)}, Amplitude2 = ${num(maxY / 2)}, Mean2 = ${num(median(xs))}, SD2 = ${num((Math.max(...xs) - Math.min(...xs)) / 6)}.`;
+    }
+    case "lognormal": {
+      const xAtMaxY = xs[ys.indexOf(maxY)];
+      return `Starting values: A = ${num(maxY * xAtMaxY)}, GeoMean = ${num(xAtMaxY)}, GeoSD = 2.`;
+    }
+    case "cumulative-gaussian-percent":
+    case "cumulative-gaussian-fraction":
+      return `Starting values: Mean = ${num(median(xs))}, SD = ${num((Math.max(...xs) - Math.min(...xs)) / 4)}.`;
+    case "cumulative-gaussian-counts":
+      return `Starting values: Mean = ${num(median(xs))}, SD = ${num((Math.max(...xs) - Math.min(...xs)) / 4)}, Total = ${num(maxY)}.`;
+    case "sum-of-two-lorentzians": {
+      const xAtMaxY = xs[ys.indexOf(maxY)];
+      return `Starting values: Amplitude1 = ${num(maxY)}, Center1 = ${num(xAtMaxY)}, Width1 = ${num((Math.max(...xs) - Math.min(...xs)) / 6)}, Amplitude2 = ${num(maxY / 2)}, Center2 = ${num(median(xs))}, Width2 = ${num((Math.max(...xs) - Math.min(...xs)) / 6)}.`;
+    }
+    case "standard-sine-wave": {
+      const wl = sineWavelength(xs, ys);
+      return `Starting values: Amplitude = ${num((maxY - minY) / 2)}, Wavelength = ${num(wl)}, PhaseShift = 0.`;
+    }
+    case "damped-sine-wave": {
+      const wl = sineWavelength(xs, ys);
+      return `Starting values: Amplitude = ${num((maxY - minY) / 2)}, Wavelength = ${num(wl)}, PhaseShift = 0, K = 0.1.`;
+    }
+    case "sinc": {
+      const wl = sineWavelength(xs, ys);
+      return `Starting values: Amplitude = ${num(maxY)}, Wavelength = ${num(wl)}.`;
     }
     case "michaelis-menten":
       return `Starting values: Vmax = ${num(maxY * 1.1)}, Km = ${num(median(xs.filter((x) => x > 0)))}.`;

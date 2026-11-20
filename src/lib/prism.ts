@@ -353,6 +353,31 @@ const NONLINEAR_MODELS: Record<string, NonlinearModel> = {
   "Sine wave": "sine-wave",
   "Two phase decay": "two-phase-decay",
   "Two-phase decay": "two-phase-decay",
+  // 1.8 classic-curves completion (B6 names, verbatim from Prism 11.2.0's
+  // Model tab): the rest of the Gaussian / Sine waves / Exponential
+  // families. The cumulative Gaussian is listed under both Gaussian and
+  // Lines in Prism's tree, with slightly different spellings ("Percents"
+  // vs "Percentages", "Fraction" vs "Fractions") — all spellings map.
+  "Sum of two Gaussians": "sum-of-two-gaussians",
+  Lognormal: "lognormal",
+  "Cumulative Gaussian -- Percents": "cumulative-gaussian-percent",
+  "Cumulative Gaussian --  Percentages": "cumulative-gaussian-percent",
+  "Cumulative Gaussian -- Fraction": "cumulative-gaussian-fraction",
+  "Cumulative Gaussian -- Fractions": "cumulative-gaussian-fraction",
+  "Cumulative Gaussian -- Counts": "cumulative-gaussian-counts",
+  "Sum of two Lorentzians": "sum-of-two-lorentzians",
+  "Lorentzian (Cauchy)": "lorentzian",
+  "Standard sine wave": "standard-sine-wave",
+  "Damped sine wave": "damped-sine-wave",
+  "Sinc()": "sinc",
+  "Sine wave with nonzero baseline": "sine-wave",
+  "Three phase decay": "three-phase-decay",
+  "Three-phase decay": "three-phase-decay",
+  "Plateau followed by one phase association": "plateau-association",
+  "Two phase association": "two-phase-association",
+  "Two-phase association": "two-phase-association",
+  "One phase association": "one-phase-association",
+  "One-phase association": "one-phase-association",
 };
 
 const genId = (type: string) => `${type}_${Math.random().toString(36).slice(2, 10)}`;

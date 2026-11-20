@@ -39,8 +39,11 @@ export const MODEL_LABEL: Record<NonlinearModel, string> = {
   "michaelis-menten": "Michaelis-Menten",
   // Prism's "Exponential" family (plan 08).
   "two-phase-decay": "Two-phase decay",
+  "three-phase-decay": "Three-phase decay",
   "plateau-decay": "Plateau followed by one-phase decay",
   "one-phase-association": "One-phase association",
+  "two-phase-association": "Two-phase association",
+  "plateau-association": "Plateau followed by one-phase association",
   // Prism's "Enzyme kinetics — Substrate vs. velocity" (plan 09;
   // michaelis-menten's label already exists above).
   "allosteric-sigmoidal": "Allosteric sigmoidal",
@@ -51,6 +54,17 @@ export const MODEL_LABEL: Record<NonlinearModel, string> = {
   "boltzmann-sigmoid": "Boltzmann sigmoid",
   lorentzian: "Lorentzian",
   "sine-wave": "Sine wave",
+  // 1.8 classic-curves completion (B6): the rest of Prism's Gaussian
+  // family (B6 §Gaussian) and Sine waves family (B6 §Sine waves).
+  "sum-of-two-gaussians": "Sum of two Gaussians",
+  lognormal: "Lognormal",
+  "cumulative-gaussian-percent": "Cumulative Gaussian — Percents",
+  "cumulative-gaussian-fraction": "Cumulative Gaussian — Fraction",
+  "cumulative-gaussian-counts": "Cumulative Gaussian — Counts",
+  "sum-of-two-lorentzians": "Sum of two Lorentzians",
+  "standard-sine-wave": "Standard sine wave",
+  "damped-sine-wave": "Damped sine wave",
+  sinc: "Sinc()",
   // Prism's "Binding — Competition" (plan 28): two-site competition and
   // homologous competition. The one-site Fit logIC50 is the inhibitor 3PL
   // above; Fit Ki is a derived quantity on it (see modelSpec's opts).
@@ -67,8 +81,11 @@ export const MODEL_LABEL: Record<NonlinearModel, string> = {
 export const EXPONENTIAL_MODELS: NonlinearModel[] = [
   "one-phase-decay",
   "two-phase-decay",
+  "three-phase-decay",
   "plateau-decay",
   "one-phase-association",
+  "two-phase-association",
+  "plateau-association",
   "exponential-growth",
 ];
 
@@ -99,6 +116,17 @@ export const CLASSIC_MODELS: NonlinearModel[] = [
   "boltzmann-sigmoid",
   "lorentzian",
   "sine-wave",
+  // 1.8 classic-curves completion (B6): the rest of Prism's Gaussian and
+  // Sine waves families — same "port" fits, same result shape.
+  "sum-of-two-gaussians",
+  "lognormal",
+  "cumulative-gaussian-percent",
+  "cumulative-gaussian-fraction",
+  "cumulative-gaussian-counts",
+  "sum-of-two-lorentzians",
+  "standard-sine-wave",
+  "damped-sine-wave",
+  "sinc",
 ];
 
 /** A derived quantity, as R expressions of the fit (`cf`, its coefficients;
@@ -535,6 +563,21 @@ export function modelSpec(
         curveFn:
           'g<-function(xv,p) p[["Plateau"]]+p[["Span1"]]*exp(-p[["K1"]]*xv)+p[["Span2"]]*exp(-p[["K2"]]*xv)',
       };
+    case "three-phase-decay":
+      // Y = Plateau + Span1·exp(−K1·X) + Span2·exp(−K2·X) + Span3·exp(−K3·X).
+      // Prism's "Exponential" family, third decay phase (B6 §Exponential #4).
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~Plateau+Span1*exp(-K1*x)+Span2*exp(-K2*x)+Span3*exp(-K3*x),start=list(Plateau=min(y),Span1=0.5*(max(y)-min(y)),K1=1,Span2=0.3*(max(y)-min(y)),K2=0.1,Span3=0.2*(max(y)-min(y)),K3=0.01),algorithm=\"port\")",
+        terms: ["Plateau", "Span1", "K1", "Span2", "K2", "Span3", "K3"],
+        derived: [
+          overK("Half-life (fast)", "log(2)", "K1"),
+          overK("Half-life (medium)", "log(2)", "K2"),
+          overK("Half-life (slow)", "log(2)", "K3"),
+        ],
+        curveFn:
+          'g<-function(xv,p) p[["Plateau"]]+p[["Span1"]]*exp(-p[["K1"]]*xv)+p[["Span2"]]*exp(-p[["K2"]]*xv)+p[["Span3"]]*exp(-p[["K3"]]*xv)',
+      };
     case "plateau-decay":
       // Y = Y0 for X < X0; Y = Plateau + (Y0 − Plateau)·exp(−K·(X − X0)) after.
       return {
@@ -556,6 +599,32 @@ export function modelSpec(
         derived: [overK("Half-life", "log(2)"), difference("Plateau", "Y0")],
         curveFn:
           'g<-function(xv,p) p[["Y0"]]+(p[["Plateau"]]-p[["Y0"]])*(1-exp(-p[["K"]]*xv))',
+      };
+    case "two-phase-association":
+      // Y = Y0 + Span1·(1 − exp(−K1·X)) + Span2·(1 − exp(−K2·X)).
+      // Prism's "Exponential" family (B6 §Exponential #7).
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~Y0+Span1*(1-exp(-K1*x))+Span2*(1-exp(-K2*x)),start=list(Y0=y[which.min(x)],Span1=0.6*(max(y)-min(y)),K1=1,Span2=0.4*(max(y)-min(y)),K2=0.1),algorithm=\"port\")",
+        terms: ["Y0", "Span1", "K1", "Span2", "K2"],
+        derived: [
+          overK("Half-life (fast)", "log(2)", "K1"),
+          overK("Half-life (slow)", "log(2)", "K2"),
+          sumOf("Span1", "Span2"),
+        ],
+        curveFn:
+          'g<-function(xv,p) p[["Y0"]]+p[["Span1"]]*(1-exp(-p[["K1"]]*xv))+p[["Span2"]]*(1-exp(-p[["K2"]]*xv))',
+      };
+    case "plateau-association":
+      // Y = Y0 for X < X0; Y = Y0 + (Plateau − Y0)·(1 − exp(−K·(X − X0)))
+      // after — the association twin of plateau-decay (B6 §Exponential #6).
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~ifelse(x<X0,Y0,Y0+(Plateau-Y0)*(1-exp(-K*(x-X0)))),start=list(X0=median(x),Y0=mean(y[x<median(x)]),Plateau=max(y),K=0.5),algorithm=\"port\")",
+        terms: ["X0", "Y0", "Plateau", "K"],
+        derived: [overK("Half-life", "log(2)"), difference("Plateau", "Y0")],
+        curveFn:
+          'g<-function(xv,p) ifelse(xv<p[["X0"]],p[["Y0"]],p[["Y0"]]+(p[["Plateau"]]-p[["Y0"]])*(1-exp(-p[["K"]]*(xv-p[["X0"]])))',
       };
     case "exponential-growth":
       // Prism's "Exponential growth": Y = Y0·exp(K·X).
@@ -669,6 +738,146 @@ export function modelSpec(
           'g<-function(xv,p) p[["Amplitude"]]*sin((2*pi*xv/p[["Wavelength"]])+p[["PhaseShift"]])+p[["Baseline"]]',
       };
     }
+    // ── Gaussian family completion (1.8, B6 §Gaussian) ───────────────────
+    // Prism's remaining Gaussian models, Curve Fitting Guide equations
+    // (reg_how_to_gaussian.htm, reg_how_to_lognormal.htm, FAQ 1212 for the
+    // cumulative forms). Same "port" fitter as the v2 classics.
+    case "sum-of-two-gaussians": {
+      // Y = One + Two (B6: "Sum of two Gaussians: Y = One + Two").
+      // The starts take the taller peak first (Mean1 at max Y); the second
+      // peak starts at the median X with half the amplitude — Prism warns
+      // its own initial values for this model are unreliable, and the fit
+      // is start-sensitive on overlapping peaks.
+      const expr =
+        "Amplitude1*exp(-0.5*((x-Mean1)/SD1)^2)+Amplitude2*exp(-0.5*((x-Mean2)/SD2)^2)";
+      return {
+        kind: "nls",
+        fit: `m<-nls(y~${expr},start=list(Amplitude1=max(y),Mean1=x[which.max(y)],SD1=(max(x)-min(x))/6,Amplitude2=max(y)/2,Mean2=median(x),SD2=(max(x)-min(x))/6),algorithm="port",lower=c(-Inf,-Inf,0,-Inf,-Inf,0),control=nls.control(maxiter=200))`,
+        terms: ["Amplitude1", "Mean1", "SD1", "Amplitude2", "Mean2", "SD2"],
+        derived: [
+          {
+            label: "Area",
+            expr: 'ifelse(cf[["SD1"]]>0&cf[["SD2"]]>0,(cf[["Amplitude1"]]*cf[["SD1"]]+cf[["Amplitude2"]]*cf[["SD2"]])*sqrt(2*pi),NA_real_)',
+          },
+        ],
+        curveFn:
+          'g<-function(xv,p) p[["Amplitude1"]]*exp(-0.5*((xv-p[["Mean1"]])/p[["SD1"]])^2)+p[["Amplitude2"]]*exp(-0.5*((xv-p[["Mean2"]])/p[["SD2"]])^2)',
+      };
+    }
+    case "lognormal":
+      // Prism's "Log Gaussian": Y=(A/X)*exp(-0.5*(ln(X/GeoMean)/ln(GeoSD))^2).
+      // A is related to amplitude and area (guide: Amplitude =
+      // A/(GeoMean/exp(0.5*ln(GeoSD)^2)); Area = A*sqrt(2*pi)*ln(GeoSD)).
+      // X must be > 0 (ln X).
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~(A/x)*exp(-0.5*(log(x/GeoMean)/log(GeoSD))^2),start=list(A=max(y)*x[which.max(y)],GeoMean=x[which.max(y)],GeoSD=2),algorithm=\"port\",lower=c(0,0,1),control=nls.control(maxiter=200))",
+        terms: ["A", "GeoMean", "GeoSD"],
+        derived: [
+          {
+            label: "Area",
+            expr: 'ifelse(cf[["GeoSD"]]>1,cf[["A"]]*sqrt(2*pi)*log(cf[["GeoSD"]]),NA_real_)',
+          },
+          {
+            label: "Amplitude",
+            expr: 'ifelse(cf[["GeoMean"]]>0&cf[["GeoSD"]]>1,cf[["A"]]*exp(0.5*log(cf[["GeoSD"]])^2)/cf[["GeoMean"]],NA_real_)',
+          },
+        ],
+        positiveX: true,
+        curveFn:
+          'g<-function(xv,p) (p[["A"]]/xv)*exp(-0.5*(log(xv/p[["GeoMean"]])/log(p[["GeoSD"]]))^2)',
+      };
+    case "cumulative-gaussian-percent":
+      // Y = 100·Φ((X−Mean)/SD) — Prism's cumulative Gaussian for data
+      // expressed as percents (FAQ 1212: Top constrained to 100).
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~100*pnorm((x-Mean)/SD),start=list(Mean=median(x),SD=(max(x)-min(x))/4),algorithm=\"port\",lower=c(-Inf,0),control=nls.control(maxiter=200))",
+        terms: ["Mean", "SD"],
+        curveFn: 'g<-function(xv,p) 100*pnorm((xv-p[["Mean"]])/p[["SD"]])',
+      };
+    case "cumulative-gaussian-fraction":
+      // Y = Φ((X−Mean)/SD) — the fractions form (Top = 1).
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~pnorm((x-Mean)/SD),start=list(Mean=median(x),SD=(max(x)-min(x))/4),algorithm=\"port\",lower=c(-Inf,0),control=nls.control(maxiter=200))",
+        terms: ["Mean", "SD"],
+        curveFn: 'g<-function(xv,p) pnorm((xv-p[["Mean"]])/p[["SD"]])',
+      };
+    case "cumulative-gaussian-counts":
+      // Y = Total·Φ((X−Mean)/SD) — the counts form (Top = N, fitted).
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~Total*pnorm((x-Mean)/SD),start=list(Mean=median(x),SD=(max(x)-min(x))/4,Total=max(y)),algorithm=\"port\",lower=c(-Inf,0,0),control=nls.control(maxiter=200))",
+        terms: ["Mean", "SD", "Total"],
+        curveFn:
+          'g<-function(xv,p) p[["Total"]]*pnorm((xv-p[["Mean"]])/p[["SD"]])',
+      };
+    case "sum-of-two-lorentzians": {
+      // Y = Amplitude1/(1+((X−Center1)/Width1)²) + Amplitude2/(1+((X−Center2)/Width2)²)
+      // — the Lorentzian twin of the sum of two Gaussians (B6 §Gaussian #8).
+      const expr =
+        "Amplitude1/(1+((x-Center1)/Width1)^2)+Amplitude2/(1+((x-Center2)/Width2)^2)";
+      return {
+        kind: "nls",
+        fit: `m<-nls(y~${expr},start=list(Amplitude1=max(y),Center1=x[which.max(y)],Width1=(max(x)-min(x))/6,Amplitude2=max(y)/2,Center2=median(x),Width2=(max(x)-min(x))/6),algorithm="port",lower=c(-Inf,-Inf,0,-Inf,-Inf,0),control=nls.control(maxiter=200))`,
+        terms: ["Amplitude1", "Center1", "Width1", "Amplitude2", "Center2", "Width2"],
+        derived: [
+          {
+            label: "Area",
+            expr: 'ifelse(cf[["Width1"]]>0&cf[["Width2"]]>0,pi*(cf[["Amplitude1"]]*cf[["Width1"]]+cf[["Amplitude2"]]*cf[["Width2"]]),NA_real_)',
+          },
+        ],
+        curveFn:
+          'g<-function(xv,p) p[["Amplitude1"]]/(1+((xv-p[["Center1"]])/p[["Width1"]])^2)+p[["Amplitude2"]]/(1+((xv-p[["Center2"]])/p[["Width2"]])^2)',
+      };
+    }
+    // ── Sine waves completion (1.8, B6 §Sine waves) ──────────────────────
+    // Prism's remaining sine models, Curve Fitting Guide equations
+    // (reg_damped_sine_wave.htm, reg_sinc_wave.htm, reg_classic_sine.htm).
+    // The standard sine wave is the sine-wave equation with Baseline fixed
+    // at 0 (the guide: "in most cases, you will want to fix BASELINE to a
+    // constant value of zero") — its own entry, so the picker names it.
+    case "standard-sine-wave": {
+      // Y = Amplitude·sin((2π·X/Wavelength)+PhaseShift).
+      const start =
+        "list(Amplitude=(max(y)-min(y))/2,Wavelength=2*(max(x)-min(x))/max(1,sum(diff(sign(y-mean(y)))!=0)),PhaseShift=0)";
+      return {
+        kind: "nls",
+        fit: `m<-nls(y~Amplitude*sin((2*pi*x/Wavelength)+PhaseShift),start=${start},algorithm="port",lower=c(-Inf,0,-Inf),control=nls.control(maxiter=200))`,
+        terms: ["Amplitude", "Wavelength", "PhaseShift"],
+        derived: [overK("Frequency", "1", "Wavelength")],
+        curveFn:
+          'g<-function(xv,p) p[["Amplitude"]]*sin((2*pi*xv/p[["Wavelength"]])+p[["PhaseShift"]])',
+      };
+    }
+    case "damped-sine-wave": {
+      // Y = Amplitude·exp(−K·X)·sin((2π·X/Wavelength)+PhaseShift).
+      // Half-life = 0.693/K (guide). No Baseline in Prism's equation.
+      const start =
+        "list(Amplitude=(max(y)-min(y))/2,Wavelength=2*(max(x)-min(x))/max(1,sum(diff(sign(y-mean(y)))!=0)),PhaseShift=0,K=0.1)";
+      return {
+        kind: "nls",
+        fit: `m<-nls(y~Amplitude*exp(-K*x)*sin((2*pi*x/Wavelength)+PhaseShift),start=${start},algorithm="port",lower=c(-Inf,0,-Inf,0),control=nls.control(maxiter=200))`,
+        terms: ["Amplitude", "Wavelength", "PhaseShift", "K"],
+        derived: [overK("Frequency", "1", "Wavelength"), overK("Half-life", "log(2)", "K")],
+        curveFn:
+          'g<-function(xv,p) p[["Amplitude"]]*exp(-p[["K"]]*xv)*sin((2*pi*xv/p[["Wavelength"]])+p[["PhaseShift"]])',
+      };
+    }
+    case "sinc":
+      // Y = Amplitude·sin(2π·X/Wavelength)/(2π·X/Wavelength), Y = Amplitude
+      // at X = 0 (guide's IF(X=0,Amplitude,…)). ifelse evaluates both
+      // branches, but the NaN in the unselected branch is discarded — the
+      // FOUR_X pattern.
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~ifelse(x==0,Amplitude,Amplitude*sin(2*pi*x/Wavelength)/(2*pi*x/Wavelength)),start=list(Amplitude=max(y),Wavelength=2*(max(x)-min(x))/max(1,sum(diff(sign(y-mean(y)))!=0))),algorithm=\"port\",lower=c(-Inf,0),control=nls.control(maxiter=200))",
+        terms: ["Amplitude", "Wavelength"],
+        derived: [overK("Frequency", "1", "Wavelength")],
+        curveFn:
+          'g<-function(xv,p) ifelse(xv==0,p[["Amplitude"]],p[["Amplitude"]]*sin(2*pi*xv/p[["Wavelength"]])/(2*pi*xv/p[["Wavelength"]]))',
+      };
     // ── Enzyme kinetics (plan 09) ───────────────────────────────────────
     // All three fit with nls() algorithm "port" (nl2sol), like plan 08's
     // exponentials: the default Gauss-Newton fails to converge on
@@ -1277,7 +1486,7 @@ export function prepareFit(
     if (new Set(xs).size === 1)
       return { error: "All substrate concentrations are equal — Km cannot be estimated." };
   }
-  if (model === "plateau-decay") {
+  if (model === "plateau-decay" || model === "plateau-association") {
     // X0 (the breakpoint) is unidentifiable without data on both sides of
     // it — validate before calling nls(), not after it fails. R's median of
     // an even count is the mean of the two middle values.
@@ -1287,7 +1496,9 @@ export function prepareFit(
         ? sorted[(sorted.length - 1) / 2]
         : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
     if (!xs.some((x) => x < mid) || !xs.some((x) => x > mid)) {
-      return { error: "Plateau-followed-by-decay needs data on both sides of the breakpoint." };
+      return {
+        error: `${MODEL_LABEL[model]} needs data on both sides of the breakpoint.`,
+      };
     }
   }
   // The fitted points' rows, in fit order (plan 26: 1/SD² weights need the

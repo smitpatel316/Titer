@@ -64,8 +64,11 @@ export const PLOT_FUNCTION_DEFAULTS: Record<PlotFunctionModel, Record<string, nu
   "gompertz-growth": { Y0: 1, YM: 100, K: 0.1 },
   "one-phase-decay": { Y0: 100, Plateau: 0, K: 0.1 },
   "two-phase-decay": { Plateau: 0, Span1: 50, K1: 1, Span2: 50, K2: 0.1 },
+  "three-phase-decay": { Plateau: 0, Span1: 50, K1: 1, Span2: 30, K2: 0.1, Span3: 20, K3: 0.01 },
   "plateau-decay": { X0: 5, Y0: 100, Plateau: 0, K: 0.1 },
   "one-phase-association": { Y0: 0, Plateau: 100, K: 0.1 },
+  "two-phase-association": { Y0: 0, Span1: 60, K1: 1, Span2: 40, K2: 0.1 },
+  "plateau-association": { X0: 5, Y0: 0, Plateau: 100, K: 0.1 },
   "michaelis-menten": { Vmax: 100, Km: 10 },
   "allosteric-sigmoidal": { Vmax: 100, Khalf: 10, HillSlope: 1 },
   "substrate-inhibition": { Vmax: 100, Km: 10, Ki: 100 },
@@ -76,6 +79,16 @@ export const PLOT_FUNCTION_DEFAULTS: Record<PlotFunctionModel, Record<string, nu
   "boltzmann-sigmoid": { Bottom: 0, Top: 100, V50: 0, Slope: 1 },
   lorentzian: { Amplitude: 100, Center: 0, Width: 1 },
   "sine-wave": { Amplitude: 1, Wavelength: 10, PhaseShift: 0, Baseline: 0 },
+  // 1.8 classic-curves completion (B6).
+  "sum-of-two-gaussians": { Amplitude1: 100, Mean1: -1, SD1: 1, Amplitude2: 60, Mean2: 2, SD2: 1.5 },
+  lognormal: { A: 100, GeoMean: 5, GeoSD: 2 },
+  "cumulative-gaussian-percent": { Mean: 0, SD: 1 },
+  "cumulative-gaussian-fraction": { Mean: 0, SD: 1 },
+  "cumulative-gaussian-counts": { Mean: 0, SD: 1, Total: 100 },
+  "sum-of-two-lorentzians": { Amplitude1: 100, Center1: -1, Width1: 1, Amplitude2: 60, Center2: 2, Width2: 1.5 },
+  "standard-sine-wave": { Amplitude: 1, Wavelength: 10, PhaseShift: 0 },
+  "damped-sine-wave": { Amplitude: 1, Wavelength: 10, PhaseShift: 0, K: 0.1 },
+  sinc: { Amplitude: 1, Wavelength: 10 },
 };
 
 /** The wizard's starting X range, per model: log-X curves need X > 0, raw
