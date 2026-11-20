@@ -9941,22 +9941,29 @@ check("the mixed-effects wizard asks the layout's questions, and the menu offers
   const asked = (data: TableData, a: Record<string, string | string[]> = {}) =>
     WIZARDS["mixed-effects"]!.questions(a, readTable(data)).flatMap((q) => (q ? [q.id] : []));
   // A Column table: the repeated-measure columns, then the matched-subjects
-  // question, then the optional between-subject-factor question.
+  // question, then the denominator-DF choice (seq 181), then the optional
+  // between-subject-factor question.
   const column = treatments(["T0", "T1", "T2", "T3"]);
-  deepStrictEqual(asked(column), ["sets", "matched", "groups"]);
-  deepStrictEqual(asked(column, { groups: "yes" }), ["sets", "matched", "groups", "groupName", "groupLevels"]);
+  deepStrictEqual(asked(column), ["sets", "matched", "dfMethod", "groups"]);
+  deepStrictEqual(asked(column, { groups: "yes" }), ["sets", "matched", "dfMethod", "groups", "groupName", "groupLevels"]);
   const setsQ = WIZARDS["mixed-effects"]!.questions({}, readTable(column))[0];
   ok(setsQ && setsQ.kind === "names" && setsQ.min === 3);
   // A Grouped table: matched-subjects, then the interaction (F10 — the
   // interaction is only asked when matched, so a not-matched answer never
-  // discards a choice the user made).
-  deepStrictEqual(asked(grouped()), ["matched", "interaction"]);
+  // discards a choice the user made), then the denominator-DF choice.
+  deepStrictEqual(asked(grouped()), ["matched", "interaction", "dfMethod"]);
   // The finish names the time factor from the columns' shared prefix (T0–T3 → "T").
   deepStrictEqual(
     WIZARDS["mixed-effects"]!.finish({ sets: ["T0", "T1", "T2", "T3"], matched: "matched" }, readTable(column)),
     {
       type: "mixed-effects",
-      params: { subjectId: "row", randomStructure: "intercept", fixedFactors: ["T"], sets: ["T0", "T1", "T2", "T3"] },
+      params: {
+        subjectId: "row",
+        randomStructure: "intercept",
+        fixedFactors: ["T"],
+        dfMethod: "kenward-roger",
+        sets: ["T0", "T1", "T2", "T3"],
+      },
     },
   );
   // With groups answered, the finish carries the subject factor (two-factor fit).
@@ -9981,6 +9988,7 @@ check("the mixed-effects wizard asks the layout's questions, and the menu offers
           name: "Treatment",
           levels: ["Control", "Control", "Control", "Treated", "Treated", "Treated"],
         },
+        dfMethod: "kenward-roger",
         sets: ["T0", "T1", "T2", "T3"],
       },
     },
@@ -10070,8 +10078,8 @@ check("the dose-response — Special wizard asks bUnits before the B values (F9)
 check("the grouped mixed-effects wizard asks matchedness before the interaction, and never asks it when not matched (F10)", () => {
   const asked = (a: Answers = {}) =>
     WIZARDS["mixed-effects"]!.questions(a, readTable(grouped())).flatMap((q) => (q ? [q.id] : []));
-  deepStrictEqual(asked(), ["matched", "interaction"]);
-  deepStrictEqual(asked({ matched: "matched" }), ["matched", "interaction"]);
+  deepStrictEqual(asked(), ["matched", "interaction", "dfMethod"]);
+  deepStrictEqual(asked({ matched: "matched" }), ["matched", "interaction", "dfMethod"]);
   // Not matched: the interaction is never asked, so no answer of the user's is
   // discarded by the ordinary-two-way-ANOVA fallback.
   deepStrictEqual(asked({ matched: "not-matched" }), ["matched"]);
@@ -10085,6 +10093,49 @@ check("the grouped mixed-effects wizard asks matchedness before the interaction,
   strictEqual((kept.params as { interaction?: boolean }).interaction, false);
   const included = WIZARDS["mixed-effects"]!.finish({ matched: "matched" }, readTable(grouped()));
   strictEqual((included.params as { interaction?: boolean }).interaction, true);
+});
+
+check("seq 181: the mixed-effects wizard offers the denominator-DF choice, and the choice survives validation", () => {
+  // All three Prism methods, Kenward-Roger first — the first option is the
+  // wizard's default, and Kenward-Roger is Prism's default.
+  const dfQ = WIZARDS["mixed-effects"]!
+    .questions({ matched: "matched" }, readTable(grouped()))
+    .find((q): q is Question => q !== false && q.id === "dfMethod");
+  ok(dfQ && dfQ.kind === "choice");
+  if (dfQ?.kind === "choice") {
+    deepStrictEqual(
+      dfQ.options.map((o) => o.value),
+      ["kenward-roger", "satterthwaite", "legacy"],
+    );
+  }
+  // The finish maps each explicit answer, and defaults to Kenward-Roger
+  // when the answer predates the choice (or is anything unrecognised).
+  const column = treatments(["T0", "T1", "T2", "T3"]);
+  for (const method of ["kenward-roger", "satterthwaite", "legacy"] as const) {
+    const fin = WIZARDS["mixed-effects"]!.finish(
+      { sets: ["T0", "T1", "T2", "T3"], matched: "matched", dfMethod: method },
+      readTable(column),
+    );
+    strictEqual((fin.params as { dfMethod?: string }).dfMethod, method);
+  }
+  const noAnswer = WIZARDS["mixed-effects"]!.finish(
+    { sets: ["T0", "T1", "T2", "T3"], matched: "matched" },
+    readTable(column),
+  );
+  strictEqual((noAnswer.params as { dfMethod?: string }).dfMethod, "kenward-roger");
+  const groupedFin = WIZARDS["mixed-effects"]!.finish(
+    { matched: "matched", interaction: "yes", dfMethod: "legacy" },
+    readTable(grouped()),
+  );
+  strictEqual((groupedFin.params as { dfMethod?: string }).dfMethod, "legacy");
+  // The choice is a kept param: validation accepts all three values, and
+  // the project-file key list carries it — a saved analysis re-opens with
+  // the same DF method instead of silently reverting to Satterthwaite.
+  ok(PARAM_KEYS_BY_ANALYSIS["mixed-effects"].includes("dfMethod"));
+  for (const method of ["kenward-roger", "satterthwaite", "legacy"]) {
+    deepStrictEqual(validateAnalysisParams("mixed-effects", { dfMethod: method }).errors, []);
+  }
+  strictEqual(validateAnalysisParams("mixed-effects", { dfMethod: "bogus" }).errors.length, 1);
 });
 
 check("the Cox wizard drops a stratifyBy that is no longer among the covariates (F12)", () => {
