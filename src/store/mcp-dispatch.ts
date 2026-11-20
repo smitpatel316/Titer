@@ -41,10 +41,16 @@ import {
   type DocumentState,
 } from "./mcp-document";
 import {
+  executeAddDrawingObject,
+  executeArrangeDrawingObjects,
   executeBuildGraph,
   executeCloneGraph,
   executeCreateFigure,
   executeCreateInfoSheet,
+  executeDeleteDrawingObject,
+  executeFreezeFigure,
+  executeFreezeGraph,
+  executeUpdateDrawingObject,
   executeUpdateFigure,
   executeUpdateGraph,
   executeUpdateInfoSheet,
@@ -158,6 +164,8 @@ export interface JobDeps {
     createSimulatedTable: (tableType: TableType, data: TableData) => void;
     updateTable: (id: string, data: TableData, label: string, move?: TableMove) => void;
     duplicateFamily: (id: string) => void;
+    /** Duplicate one sheet, nothing else (seq 236). */
+    duplicateNode: (id: string) => void;
     renameNode: (id: string, name: string) => void;
     removeNode: (id: string) => void;
     reorderTables: (order: string[]) => void;
@@ -171,6 +179,13 @@ export interface JobDeps {
     updateFigure: NonNullable<GraphJobDeps["updateFigure"]>;
     createInfoSheet: NonNullable<GraphJobDeps["createInfoSheet"]>;
     updateInfoSheet: NonNullable<GraphJobDeps["updateInfoSheet"]>;
+    /** Freeze (or unfreeze) a graph or a figure (seq 237). */
+    setGraphFrozen: NonNullable<GraphJobDeps["setGraphFrozen"]>;
+    /** Drawing objects on a graph or figure sheet (seq 238). */
+    addDrawingObject: NonNullable<GraphJobDeps["addDrawingObject"]>;
+    updateDrawingObject: NonNullable<GraphJobDeps["updateDrawingObject"]>;
+    deleteDrawingObject: NonNullable<GraphJobDeps["deleteDrawingObject"]>;
+    arrangeDrawingObjects: NonNullable<GraphJobDeps["arrangeDrawingObjects"]>;
   };
   /** Wait for the store to settle after a dispatch, so a `getState()` read
    *  sees the dispatched change. In the app this is two macrotasks (React
@@ -220,6 +235,11 @@ function toGraphDeps(deps: JobDeps): GraphJobDeps {
     createInfoSheet: a?.createInfoSheet,
     updateInfoSheet: a?.updateInfoSheet,
     renameNode: a?.renameNode,
+    setGraphFrozen: a?.setGraphFrozen,
+    addDrawingObject: a?.addDrawingObject,
+    updateDrawingObject: a?.updateDrawingObject,
+    deleteDrawingObject: a?.deleteDrawingObject,
+    arrangeDrawingObjects: a?.arrangeDrawingObjects,
   };
 }
 
@@ -911,6 +931,36 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         created: { analysis_id: analysisId },
       };
     }
+    case "clone-analysis":
+    case "clone-figure": {
+      // seq 236: one sheet, nothing else — the generic `duplicateNode`
+      // store action. Tables and graphs already have their own clone
+      // tools (duplicate_table_family / clone_graph).
+      const kind = job.action === "clone-analysis" ? "analysis" : "figure";
+      const argName = kind === "analysis" ? "analysis_id" : "figure_id";
+      const actions = tableActions(job, deps);
+      const nodeId = argString(job, job.args, argName);
+      const state = deps.getState();
+      const node = state.nodes[nodeId];
+      if (!node) throw jobErr(job, `no ${kind} with id “${nodeId}” in this project.`);
+      if (node.type !== kind) throw jobErr(job, `“${node.name}” is a ${node.type}, not a ${kind}.`);
+      const before = new Set(Object.keys(state.nodes));
+      const beforeRevision = state.revision;
+      actions.duplicateNode(nodeId);
+      await settleAfterDispatch(deps, beforeRevision);
+      const after = deps.getState();
+      const createdId = Object.keys(after.nodes).find((id) => !before.has(id));
+      if (!createdId) {
+        throw jobErr(
+          job,
+          `duplicated the ${kind} but its id could not be read back — ask titer_list_projects for the new ${kind}.`,
+        );
+      }
+      return {
+        result: { project_id: job.project_id, [`${kind}_id`]: createdId },
+        created: { [`${kind}_id`]: createdId },
+      };
+    }
     case "save-project": {
       // L2: write the project (GAP-4 — the TS writers build the bytes, Rust
       // only ever wrote them) and mark it saved. The job's result is the
@@ -1369,6 +1419,18 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       return executeUpdateGraph(job, toGraphDeps(deps));
     case "clone-graph":
       return executeCloneGraph(job, toGraphDeps(deps));
+    case "freeze-graph":
+      return executeFreezeGraph(job, toGraphDeps(deps));
+    case "freeze-figure":
+      return executeFreezeFigure(job, toGraphDeps(deps));
+    case "add-drawing-object":
+      return executeAddDrawingObject(job, toGraphDeps(deps));
+    case "update-drawing-object":
+      return executeUpdateDrawingObject(job, toGraphDeps(deps));
+    case "delete-drawing-object":
+      return executeDeleteDrawingObject(job, toGraphDeps(deps));
+    case "arrange-drawing-objects":
+      return executeArrangeDrawingObjects(job, toGraphDeps(deps));
     case "create-figure":
       return executeCreateFigure(job, toGraphDeps(deps));
     case "update-figure":
