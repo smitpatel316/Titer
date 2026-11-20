@@ -15118,6 +15118,78 @@ check("transform-data returns log10 values as a results sheet and never touches 
     throw new Error(`expected the no-data error, got ${JSON.stringify(few)}`);
 });
 
+// ── Transform arithmetic (v1.8, seq 205) ─────────────────────────────────
+// Prism's arithmetic transforms (Y±K, Y×K, Y/K, K−Y, K/Y): a constant K
+// applied to every value. The constant is required for these, ignored by
+// the unary functions, and recorded in the notes so the run is auditable.
+
+check("transformValue applies Prism's arithmetic transforms with a constant K", () => {
+  strictEqual(transformValue("y-plus-k", 5, 3), 8);
+  strictEqual(transformValue("y-minus-k", 5, 3), 2);
+  strictEqual(transformValue("y-times-k", 5, 3), 15);
+  strictEqual(transformValue("y-divided-by-k", 6, 3), 2);
+  strictEqual(transformValue("k-minus-y", 5, 10), 5);
+  strictEqual(transformValue("k-divided-by-y", 5, 10), 2);
+  // An arithmetic function without its constant has nothing to apply —
+  // blank, never NaN; K/Y is undefined for a value of 0; overflow blanks.
+  strictEqual(transformValue("y-plus-k", 5), null);
+  strictEqual(transformValue("y-times-k", 5, undefined), null);
+  strictEqual(transformValue("k-divided-by-y", 0, 10), null);
+  strictEqual(transformValue("y-times-k", 1e200, 1e200), null);
+  // The unary functions ignore a constant when one is passed anyway.
+  strictEqual(transformValue("square", 3, 99), 9);
+});
+
+check("transform-data applies an arithmetic transform and records its K", async () => {
+  const table = (values: (number | string)[]): TableData => ({
+    columns: ["Title", "V"],
+    rows: values.map((v) => [null, String(v)]),
+  });
+  const out = await runAnalysis("transform-data", table([1, 2, 3]), { function: "y-times-k", constant: 10 });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(out.transformed?.[0].values, [10, 20, 30]);
+  strictEqual(out.subtitle, "Transform data — Y×K");
+  if (!out.notes.includes("Applied with the constant K = 10."))
+    throw new Error(`expected the K in the notes, got ${JSON.stringify(out.notes)}`);
+  const divided = await runAnalysis("transform-data", table([2, 5, 10]), { function: "k-divided-by-y", constant: 10 });
+  if ("error" in divided) throw new Error(divided.error);
+  deepStrictEqual(divided.transformed?.[0].values, [5, 2, 1]);
+  // K/Y leaves a 0 blank and counts it, with the reason in the notes.
+  const zero = await runAnalysis("transform-data", table([0, 2]), { function: "k-divided-by-y", constant: 10 });
+  if ("error" in zero) throw new Error(zero.error);
+  deepStrictEqual(zero.transformed?.[0].values, [null, 5]);
+  strictEqual(zero.transformed?.[0].excluded, 1);
+  if (!zero.notes.includes("K/Y is undefined for values of 0"))
+    throw new Error(`expected the exclusion reason in the notes, got ${JSON.stringify(zero.notes)}`);
+  // Errors name the problem instead of transforming with a missing or
+  // unusable K.
+  deepStrictEqual(await runAnalysis("transform-data", table([1, 2]), { function: "y-plus-k" }), {
+    error: "“Y+K” needs a constant K — enter one and try again.",
+  });
+  deepStrictEqual(await runAnalysis("transform-data", table([1, 2]), { function: "y-divided-by-k", constant: 0 }), {
+    error: "“Y/K” needs a constant K other than 0 — dividing by 0 is undefined.",
+  });
+});
+
+check("transform-data wizard asks for K only for the arithmetic functions", () => {
+  const table = readTable({ columns: ["Title", "V"], rows: [["", "1"], ["", "2"]] });
+  const wizard = WIZARDS["transform-data"]!;
+  const ids = (a: Record<string, string | number>) =>
+    wizard.questions(a, table).filter(Boolean).map((q) => (q as Question).id);
+  // A unary function asks no constant question; an arithmetic one does.
+  deepStrictEqual(ids({ function: "log10" }), ["function"]);
+  deepStrictEqual(ids({ function: "y-times-k" }), ["function", "constant"]);
+  deepStrictEqual(ids({ function: "k-divided-by-y" }), ["function", "constant"]);
+  deepStrictEqual(wizard.finish({ function: "y-times-k", constant: 3 }, table), {
+    type: "transform-data",
+    params: { function: "y-times-k", constant: 3 },
+  });
+  deepStrictEqual(wizard.finish({ function: "log10" }, table), {
+    type: "transform-data",
+    params: { function: "log10" },
+  });
+});
+
 // ── Calculated Variables (v1.8, seq 156) ──────────────────────────────────
 // Prism 11's in-table formulas for Multiple Variables tables: type `=` in an
 // empty variable; the whole column computes live from the table's other
