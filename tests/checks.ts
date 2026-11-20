@@ -9097,6 +9097,25 @@ check("export: the Tauri write path allows .pdf/.tif/.tiff graph exports", () =>
 // real-Plotly end-to-end proof is owed on the Mac.
 const seq216Svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"><defs><clipPath id="xyplot"><rect x="80" y="20" width="500" height="400"/></clipPath></defs><rect x="0" y="0" width="640" height="480" fill="#ffffff"/><g clip-path="url(#xyplot)"><path d="M80,420 L580,420 L580,20" fill="none" stroke="#000000" stroke-width="1"/><path d="M100,400 L200,300 L300,250 L400,150" fill="none" stroke="#1f77b4" stroke-width="2"/><circle cx="100" cy="400" r="4" fill="#1f77b4" stroke="#ffffff" stroke-width="1"/><rect x="450" y="300" width="40" height="120" fill="#ff7f0e"/><path d="M100,400 A50,50 0 0 1 200,300" fill="none" stroke="#2ca02c"/><line x1="80" y1="420" x2="580" y2="420" stroke="#000000"/><text x="320" y="470" text-anchor="middle" font-family="Arial" font-size="12" fill="#000000">Dose (nM)</text><text x="320" y="40" text-anchor="middle" font-family="Arial" font-size="14" font-weight="bold" fill="#111111">Dose response</text></g><g transform="translate(500,60)"><rect x="0" y="0" width="16" height="16" fill="#1f77b4"/><text x="20" y="13" font-family="Arial" font-size="12" fill="#000000">Control</text></g></svg>`;
 
+/** A vector PDF's (single) content stream, inflated — the raw PDF text
+ *  hides it behind FlateDecode, so operator/text assertions read this
+ *  (byte-level search: the deflated stream is binary, string indices
+ *  would not line up). */
+const pdfContentStream = (pdf: Uint8Array): string => {
+  const find = (needle: string, from = 0) => {
+    const nb = new TextEncoder().encode(needle);
+    outer: for (let i = from; i + nb.length <= pdf.length; i++) {
+      for (let j = 0; j < nb.length; j++) if (pdf[i + j] !== nb[j]) continue outer;
+      return i;
+    }
+    return -1;
+  };
+  const start = find("stream\n") + "stream\n".length;
+  const end = find("\nendstream", start);
+  ok(start > 0 && end > start, "the PDF has one content stream");
+  return new TextDecoder().decode(inflateSync(pdf.subarray(start, end)));
+};
+
 check("seq 216: the export dialogs offer EPS/BMP and 100 DPI (formats + resolutions)", () => {
   deepStrictEqual(
     EXPORT_FORMATS.map((f) => f.value),
@@ -9220,26 +9239,35 @@ check("seq 216: vector PDF keeps the drawing vector (no image XObject)", () => {
   ok(!text.includes("/Subtype /Image"), "a vector PDF embeds no raster image");
   ok(!text.includes("/XObject"), "a vector PDF has no image XObject");
   ok(text.includes("/F1"), "text uses a base-14 font");
-  ok(text.includes("(Dose \\(nM\\))"), "text is drawn, parens escaped");
-  ok(text.includes("(Dose response)"), "the bold title is drawn");
-  // Vector operators: rect, path lines, the arc's curves, fill + stroke.
-  ok(/[\d.]+ [\d.]+ [\d.]+ [\d.]+ re/.test(text), "rect operator present");
-  ok(text.includes(" m ") || text.includes("\nm "), "moveto present");
-  ok(text.includes(" l ") || text.includes("\nl "), "lineto present");
-  ok(text.includes(" c ") || text.includes("\nc "), "curveto present (arc → cubics)");
-  ok(text.includes(" f") || text.includes(" f\n"), "fill present");
-  ok(text.includes(" S") || text.includes(" S\n"), "stroke present");
-  ok(text.includes("1 0 0 -1"), "the flipped text matrix keeps glyphs upright");
+  // The operators and the drawn text live in the FlateDecode content
+  // stream, so they are asserted on the inflated stream, not the raw PDF.
+  const stream = pdfContentStream(pdf);
+  ok(stream.includes("(Dose \\(nM\\))"), "text is drawn, parens escaped");
+  ok(stream.includes("(Dose response)"), "the bold title is drawn");
+  // Vector operators: the rects are drawn as paths (m/l), the arc's
+  // curves as cubics, plus fill + stroke. (Operators end their line, so
+  // the checks match " op\n", not " op ".)
+  ok(stream.includes("0 0 m"), "the background rect's path is present");
+  ok(stream.includes("450 300 m"), "the bar rect's path is present");
+  ok(stream.includes(" m\n"), "moveto present");
+  ok(stream.includes(" l\n"), "lineto present");
+  ok(stream.includes(" c\n"), "curveto present (arc → cubics)");
+  ok(stream.includes("\nf\n") || stream.includes("\nf*\n"), "fill present");
+  ok(stream.includes("\nS\n"), "stroke present");
+  ok(stream.includes("1 0 0 -1"), "the flipped text matrix keeps glyphs upright");
+  // A <g>'s clip applies once, to the group — descendants do not re-clip.
+  strictEqual((stream.match(/W n/g) ?? []).length, 1, "one clip for the clipped group");
 });
 
 check("seq 216: vector PDF in grayscale has no RGB operators; CMYK has CMYK operators", () => {
-  const gray = new TextDecoder().decode(svgToPdf(seq216Svg, { colorMode: "grayscale" }));
-  ok(!/ [\d.]+ [\d.]+ [\d.]+ rg/.test(gray), "grayscale PDF sets no RGB fill");
-  ok(!/ [\d.]+ [\d.]+ [\d.]+ RG/.test(gray), "grayscale PDF sets no RGB stroke");
-  ok(/ [\d.]+ g/.test(gray), "grayscale PDF sets gray fill");
-  const cmyk = new TextDecoder().decode(svgToPdf(seq216Svg, { colorMode: "cmyk" }));
-  ok(/ [\d.]+ [\d.]+ [\d.]+ [\d.]+ k/.test(cmyk), "CMYK PDF sets CMYK fill");
-  ok(!/ [\d.]+ [\d.]+ [\d.]+ rg/.test(cmyk), "CMYK PDF sets no RGB fill");
+  // Operators start their line, so the patterns anchor at a line start.
+  const gray = pdfContentStream(svgToPdf(seq216Svg, { colorMode: "grayscale" }));
+  ok(!/(^|\n)[\d.]+ [\d.]+ [\d.]+ rg(\n|$)/.test(gray), "grayscale PDF sets no RGB fill");
+  ok(!/(^|\n)[\d.]+ [\d.]+ [\d.]+ RG(\n|$)/.test(gray), "grayscale PDF sets no RGB stroke");
+  ok(/(^|\n)[\d.]+ g(\n|$)/.test(gray), "grayscale PDF sets gray fill");
+  const cmyk = pdfContentStream(svgToPdf(seq216Svg, { colorMode: "cmyk" }));
+  ok(/(^|\n)[\d.]+ [\d.]+ [\d.]+ [\d.]+ k(\n|$)/.test(cmyk), "CMYK PDF sets CMYK fill");
+  ok(!/(^|\n)[\d.]+ [\d.]+ [\d.]+ rg(\n|$)/.test(cmyk), "CMYK PDF sets no RGB fill");
 });
 
 check("seq 216: vector PDF refuses raster/gradient content instead of dropping it", () => {
