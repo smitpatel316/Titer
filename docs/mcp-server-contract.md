@@ -581,7 +581,7 @@ is on, §6); everything else is `false`. `idempotent_hint` is per-tool (e.g. `ti
 `titer_rename_node`, `titer_reorder_nodes` are idempotent; create/undo/
 redo/run tools are not).
 
-The allowlist (§12) groups the 52 tools differently — by what the user
+The allowlist (§12) groups the 56 tools differently — by what the user
 turns on, not by what they do. The two groupings overlap (e.g. the six
 `destructive_hint` tools form their own allowlist group); §12 is the
 one that decides what a client can see and call.
@@ -806,5 +806,5 @@ the same human-only boundary as enable/token (D4).
 - Antigravity's `mcp_config.json` is untouched: it keeps its 5-tool
   `enabledTools`. The server-side allowlist now makes that list real
   instead of advisory; the config file format does not change.
-- The server still *has* 52 tools. The allowlist decides which subset
+- The server still *has* 56 tools. The allowlist decides which subset
   a given client sees — it does not remove tools from the server.

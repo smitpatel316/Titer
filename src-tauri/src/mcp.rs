@@ -1346,8 +1346,16 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
     AllowlistGroup {
         id: "read_more",
         label: "Read more",
-        description: "Figures, info sheets, the activity log, job status and feedback.",
-        tools: &["titer_read_figure", "titer_read_info_sheet", "titer_read_activity", "titer_send_feedback"],
+        description: "Figures, info sheets, the activity log, job status and feedback — plus project discovery, search and analysis params.",
+        tools: &[
+            "titer_read_figure",
+            "titer_read_info_sheet",
+            "titer_read_activity",
+            "titer_send_feedback",
+            "titer_project_summary",
+            "titer_search",
+            "titer_get_analysis_params",
+        ],
     },
     AllowlistGroup {
         id: "project",
@@ -1371,9 +1379,10 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
     AllowlistGroup {
         id: "analyses",
         label: "Run analyses",
-        description: "Run and freeze analyses, simulate data, apply methods and the wand; check job status.",
+        description: "Run, re-run and freeze analyses, simulate data, apply methods and the wand; check job status.",
         tools: &[
             "titer_run_analysis",
+            "titer_rerun_analysis",
             "titer_freeze_analysis",
             "titer_simulate_data",
             "titer_apply_method",
@@ -8155,9 +8164,9 @@ mod tests {
     fn search_nodes_finds_by_name_and_type() {
         let snap = snapshot();
         let (found, total) = search_nodes(&snap, "dose", None);
-        assert_eq!(total, 2, "{found:?}");
+        assert_eq!(total, 3, "{found:?}");
         let ids: Vec<&str> = found.iter().map(|m| m["id"].as_str().unwrap()).collect();
-        assert_eq!(ids, vec!["t1", "a1"], "table then analysis, in listing order");
+        assert_eq!(ids, vec!["t1", "a1", "f1"], "table then analysis then figure, in listing order");
         assert_eq!(found[1]["parent_id"], "t1");
         assert_eq!(found[1]["parent_name"], "Dose-response");
         // Case-insensitive, and the kind filter narrows to tables only.
@@ -8813,7 +8822,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 52 tools, so it enables every group first.
+        // this test drives all 56 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -9841,7 +9850,7 @@ mod tests {
         state.lock().dir = Some(dir.clone());
         let session2 = mcp_initialize(&client, &url).await;
         let names2 = mcp_list_tool_names(&client, &url, &session2).await;
-        assert_eq!(names2.len(), 7, "five reads + two destructive tools: {names2:?}");
+        assert_eq!(names2.len(), 11, "five reads + six destructive tools: {names2:?}");
         assert!(names2.contains(&"titer_delete_node".to_string()), "delete appears: {names2:?}");
         assert!(names2.contains(&"titer_run_script".to_string()), "script appears: {names2:?}");
 
@@ -9873,16 +9882,25 @@ mod tests {
 
     #[test]
     fn allowlist_groups_cover_all_tools_once() {
-        // The inventory pin: every tool in exactly one group, 52 total.
+        // The inventory pin: every tool in exactly one group, 56 total.
         // A lane that adds a tool must assign it a group here, or this
         // fails — an ungrouped tool would otherwise be silently hidden.
+        // The count alone did not catch that (four tools shipped ungrouped
+        // while this still said 52), so the router cross-check below is
+        // the part that actually catches it.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 52, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 56, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
         assert!(all.iter().all(|t| t.starts_with("titer_")), "all tools are titer_*");
+        // Every tool the router advertises must be in exactly one group.
+        let listed = TiterMcpServer::new(job_state()).tool_router.list_all();
+        let mut routed: Vec<String> = listed.iter().map(|t| t.name.to_string()).collect();
+        routed.sort_unstable();
+        let grouped: Vec<String> = all.iter().map(|t| t.to_string()).collect();
+        assert_eq!(routed, grouped, "router tools and allowlist groups disagree — an ungrouped tool is silently hidden");
     }
 
     #[test]
