@@ -519,8 +519,8 @@ export function setSpinner(at: [number, number] | null) {
   spinner = spinner.then(() => invoke<void>("set_spinner", { at })).catch(() => {});
 }
 
-/** Titer's GitHub page, its releases, or Buy Me a Coffee, in the default browser. */
-export const openLink = (link: "github" | "releases" | "coffee") => void invoke("open_link", { link });
+/** Titer's GitHub page, its releases, the user guide, or Buy Me a Coffee, in the default browser. */
+export const openLink = (link: "github" | "releases" | "coffee" | "guide") => void invoke("open_link", { link });
 
 /** A pre-filled GitHub issue for one saved feedback entry, in the
  *  default browser. The shell only opens the fixed Titer issues/new

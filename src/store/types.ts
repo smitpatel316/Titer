@@ -1,7 +1,7 @@
 // Shared project-tree types — kept light so both the store and the table-type
 // modules can depend on it without creating a cycle.
 
-import type { AnalysisParams, AnalysisResult, AnalysisType } from "../stats/types";
+import type { AnalysisParams, AnalysisResult, AnalysisType, SimulationSpec } from "../stats/types";
 import type { SummaryFormat } from "../lib/summary-format";
 
 export type NodeType = "table" | "analysis" | "graph" | "figure" | "info";
@@ -659,6 +659,10 @@ export interface TableData {
   /** Provenance note (e.g. a simulated table's distribution + seed) — kept
    *  with the table in the .hlx file so the data's origin stays auditable. */
   notes?: string;
+  /** The spec a simulated table was drawn from (seq 243): kept with the
+   *  table so Simulate Again can re-run it after reopening. Omitted for
+   *  tables that weren't simulated. */
+  simulation?: SimulationSpec;
 }
 
 /** How a table computed from another transforms its values (lib/transform.ts). */

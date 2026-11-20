@@ -131,6 +131,64 @@ export function simulationNotes(spec: SimulationSpec): string {
   return `Simulated data: ${simulationSummary(spec)}. Same seed + same settings reproduce this table exactly.`;
 }
 
+/** The spec as a file stores it, or undefined when it isn't one: a
+ *  hand-edited spec with a bogus distribution, a missing count or an
+ *  impossible value is dropped on load instead of trusted (seq 243).
+ *  Only the spec's own fields survive — unknown keys are left out. */
+export function readSimulationSpec(v: unknown): SimulationSpec | undefined {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return undefined;
+  const raw = v as Record<string, unknown>;
+  if (typeof raw.distribution !== "string" || !(SIMULATION_DISTRIBUTIONS as readonly string[]).includes(raw.distribution))
+    return undefined;
+  if (raw.tableType !== "column" && raw.tableType !== "grouped" && raw.tableType !== "xy") return undefined;
+  const num = (k: string) => (typeof raw[k] === "number" ? (raw[k] as number) : undefined);
+  const spec = Object.fromEntries(
+    Object.entries({
+      distribution: raw.distribution as SimulationDistribution,
+      mean: num("mean"),
+      sd: num("sd"),
+      meanlog: num("meanlog"),
+      sdlog: num("sdlog"),
+      min: num("min"),
+      max: num("max"),
+      size: num("size"),
+      prob: num("prob"),
+      lambda: num("lambda"),
+      rate: num("rate"),
+      n: raw.n,
+      datasets: raw.datasets,
+      seed: raw.seed,
+      tableType: raw.tableType,
+    }).filter(([, value]) => value !== undefined),
+  ) as SimulationSpec;
+  return validateSimulationSpec(spec) === undefined ? spec : undefined;
+}
+
+/** Re-simulate a table (seq 243): `fresh` is a new draw of the same spec
+ *  (a new seed). Where the shape matches — same columns, same row count —
+ *  the old table's titles and (for XY) its X column stay, and only the
+ *  simulated values are swapped in, so the graph's series and the user's
+ *  row labels survive the re-run. A different shape replaces the old
+ *  table outright. */
+export function applyResimulation(oldData: TableData, fresh: TableData): TableData {
+  const sameShape =
+    oldData.columns.length === fresh.columns.length &&
+    oldData.columns.every((c, i) => c === fresh.columns[i]) &&
+    oldData.rows.length === fresh.rows.length;
+  if (!sameShape) return fresh;
+  const tableType = oldData.simulation?.tableType ?? fresh.simulation?.tableType;
+  const keepX = tableType === "xy";
+  return {
+    ...fresh,
+    rows: oldData.rows.map((oldRow, r) => {
+      const merged = [...(fresh.rows[r] ?? [])];
+      merged[0] = oldRow[0];
+      if (keepX) merged[1] = oldRow[1];
+      return merged;
+    }),
+  };
+}
+
 /** Draw the values for `spec` and build the new table. Column: one column
  *  per dataset ("Simulated 1"…). Grouped: one group per dataset, one
  *  replicate each ("A:Y1"…). XY: X evenly spaced 1..n, one Y series per
@@ -154,6 +212,9 @@ export async function simulateTableData(spec: SimulationSpec): Promise<TableData
         ...Array.from({ length: spec.datasets }, (_, d) => at(d, r)),
       ]),
       notes,
+      // The spec stays with the table, so Simulate Again can re-run it
+      // after reopening (seq 243) — the file round-trips it.
+      simulation: spec,
     };
   }
   if (spec.tableType === "xy") {
@@ -166,6 +227,7 @@ export async function simulateTableData(spec: SimulationSpec): Promise<TableData
         ...Array.from({ length: spec.datasets }, (_, d) => at(d, r)),
       ]),
       notes,
+      simulation: spec,
     };
   }
   const columns = ["Title", ...Array.from({ length: spec.datasets }, (_, d) => `Simulated ${d + 1}`)];
@@ -176,5 +238,6 @@ export async function simulateTableData(spec: SimulationSpec): Promise<TableData
       ...Array.from({ length: spec.datasets }, (_, d) => at(d, r)),
     ]),
     notes,
+    simulation: spec,
   };
 }

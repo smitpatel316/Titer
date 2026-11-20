@@ -93,6 +93,7 @@ import { isSummaryFormatValue, summarySubcolumns } from "./summary-format";
 import { groupRuns } from "./columns";
 import { regroupDropped, regroupTable, renestDropped, renestTable } from "../views/tables/table-data";
 import { readCalculated, recomputeCalculated } from "./calcvars";
+import { readSimulationSpec } from "../stats/simulation/simulate";
 import { transformTable } from "./transform";
 import {
   assignLabels,
@@ -127,7 +128,20 @@ export interface ProjectFilePayload {
 
 // ── Writing ──────────────────────────────────────────────────────────────
 
-export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeId, template, projectName, fileUnknowns, projectUnknowns }: ProjectFilePayload): string {
+export function serializeProjectFile({ nodes: rawNodes, rootOrder, childOrder, activeNodeId, template, projectName, fileUnknowns, projectUnknowns }: ProjectFilePayload): string {
+  // An analysis's frozen/orphaned flags only ever mean anything as `true`
+  // (the reader drops anything else): a re-pointed analysis carries
+  // `orphaned: false` in state, and writing it would make the next open
+  // report the file as updated. Leave the flags off unless true.
+  const nodes = Object.fromEntries(
+    Object.entries(rawNodes).map(([id, node]) => {
+      if (node.type !== "analysis") return [id, node];
+      const clean = { ...node };
+      if (clean.orphaned !== true) delete clean.orphaned;
+      if (clean.frozen !== true) delete clean.frozen;
+      return [id, clean];
+    }),
+  );
   // Unknown keys go back where they came from, under the known keys — a
   // hand-edited file can't smuggle a second `nodes` or `app` past the reader.
   const project: ProjectFilePayload = {
@@ -199,7 +213,7 @@ const NODE_KEYS = Object.keys({
 // prettier-ignore
 const DATA_KEYS = Object.keys({
   columns: 1, rows: 1, groups: 1, replicates: 1, subgroups: 1, rowGroups: 1, excluded: 1,
-  widths: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1,
+  widths: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1, simulation: 1,
 } satisfies Record<keyof TableData, 1>);
 
 // Graph options without a default, by the kind of value they hold.
@@ -617,6 +631,9 @@ function readData(
     // reads as SEM, the default, instead of carrying a bogus format.
     errorFormat: d.errorFormat === "sd" || d.errorFormat === "sem" ? d.errorFormat : undefined,
     calculated,
+    // A simulated table's spec survives only when it is a valid spec:
+    // a hand-edited one is dropped, so the table can't re-run on a lie.
+    simulation: readSimulationSpec(d.simulation),
   } as TableData);
   const regroupDroppedNames: string[] = [];
   // Where the groups start: an XY table's X column comes first — unless the
