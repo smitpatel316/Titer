@@ -9628,7 +9628,7 @@ check("multiple t tests report each row's t, df, raw P and corrected P", async (
     [10, 11, 12],
     [4, 5, 6],
     [2, 3, 4],
-    [1.5, 2.5, 3.5],
+    [1.5, 2.6, 3.4], // Paired diffs 0.5/0.6/0.4 — non-constant, so the paired t test runs.
   ];
   const data: TableData = {
     columns: ["Title", "A:1", "A:2", "A:3", "B:1", "B:2", "B:3"],
