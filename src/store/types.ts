@@ -589,6 +589,20 @@ export interface DrawingObject {
   groupId?: string;
 }
 
+/** What Arrange does to the selected drawing objects (seq 238): reorder
+ *  them in the stacking order, copy them, group/ungroup them, or delete
+ *  them. "delete" here is the Arrange menu's Delete, not the store's
+ *  deleteDrawingObject — same effect, one name for the menu. */
+export type ArrangeOp =
+  | "bring-to-front"
+  | "send-to-back"
+  | "bring-forward"
+  | "send-backward"
+  | "duplicate"
+  | "group"
+  | "ungroup"
+  | "delete";
+
 /** A sheet's highlight color in the Navigator: Prism lets a sheet be highlighted
  *  in a color of the user's choice, to mark it for review or draw a colleague's
  *  attention ("Highlight the pages that you want to review, or want a colleague

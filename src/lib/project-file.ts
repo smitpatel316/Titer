@@ -10,9 +10,12 @@
 
 import {
   DEFAULT_GRAPH_OPTIONS,
+  DRAWING_OBJECT_KINDS,
+  type DrawingObject,
   FILL_PATTERNS,
   GRAPH_CHOICES,
   GRAPH_LIMITS,
+  MAX_PICTURE_BYTES,
   MAX_REF_LINES,
   REF_LABEL_PLACES,
   clamp,
@@ -193,6 +196,7 @@ const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId", "proje
 const NODE_KEYS = Object.keys({
   id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, highlight: 1, tableType: 1, data: 1, transform: 1, notes: 1, tags: 1,
   analysisType: 1, analysisParams: 1, cachedResult: 1, frozen: 1, orphaned: 1, sourceTableName: 1, graphType: 1, graphOptions: 1,
+  frozenData: 1, frozenDataByGraph: 1, drawingObjects: 1,
   panels: 1, grid: 1, figureSize: 1, labelStyle: 1, figureTitle: 1, sharedLegend: 1, dpi: 1,
   info: 1,
 } satisfies Record<keyof ProjectNode, 1>);
@@ -1271,6 +1275,129 @@ function readFloatingNotes(raw: unknown, label: string, issues: ProjectIssue[]):
   return notes.length ? notes : undefined;
 }
 
+/** A frozen snapshot (seq 237): a table's data as it was when a graph was
+ *  frozen. Read leniently — columns + rows are the payload, the rest is
+ *  kept only when well-formed — because the snapshot is never edited, only
+ *  drawn from: a hand edit that breaks a field loses that field, not the
+ *  graph. `calculated` formulas and row-group bands are dropped: the rows
+ *  already hold the computed values, and a frozen graph never recomputes. */
+function readFrozenData(raw: unknown): TableData | undefined {
+  if (!isObj(raw)) return undefined;
+  const d = canonical(raw, DATA_KEYS);
+  if (!Array.isArray(d.columns) || !Array.isArray(d.rows)) return undefined;
+  const columns = d.columns.map((c) => cellText(c) ?? "");
+  if (!columns.length) return undefined;
+  const rows = d.rows.map((row) => {
+    const cells = Array.isArray(row) ? row.map((c) => cellText(c) || null) : [];
+    return cells.slice(0, columns.length);
+  });
+  const onCell = (k: unknown): k is string => {
+    const [r, c] = typeof k === "string" && /^\d+,\d+$/.test(k) ? k.split(",").map(Number) : [Infinity];
+    return r < rows.length && c < columns.length;
+  };
+  const widths = isObj(d.widths)
+    ? Object.fromEntries(
+        Object.entries(d.widths).filter(([name, w]) => columns.includes(name) && isFiniteNumber(w) && w > 0),
+      )
+    : {};
+  return defined({
+    columns,
+    rows,
+    groups: isCount(d.groups) ? (d.groups as number) : undefined,
+    replicates: isCount(d.replicates) ? (d.replicates as number) : undefined,
+    subgroups: isCount(d.subgroups) ? (d.subgroups as number) : undefined,
+    excluded: Array.isArray(d.excluded) ? d.excluded.filter(onCell) : undefined,
+    widths: Object.keys(widths).length ? widths : undefined,
+    freezeTitle: d.freezeTitle === true || undefined,
+    errorFormat: oneOf(["sd", "sem"] as const, d.errorFormat),
+    summaryFormat: isSummaryFormatValue(d.summaryFormat) ? d.summaryFormat : undefined,
+    notes: typeof d.notes === "string" && d.notes ? d.notes : undefined,
+  }) as TableData;
+}
+
+/** A figure's frozen snapshots (seq 237): each panel graph's parent table
+ *  data as it was when the figure was frozen, by graph id. */
+function readFrozenDataByGraph(raw: unknown): Record<string, TableData> | undefined {
+  if (!isObj(raw)) return undefined;
+  const out: Record<string, TableData> = {};
+  for (const [graphId, data] of Object.entries(raw)) {
+    const read = readFrozenData(data);
+    if (read) out[graphId] = read;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Text/drawing/picture objects (seq 238) as a file holds them, forgivingly:
+ *  an object with a kind this version doesn't know, no usable geometry, or
+ *  (pictures) no image data URL under the size cap is left out on its own;
+ *  the rest read as saved, with missing ids repaired. Unknown fields are
+ *  kept by the node's spread in `readNode` and written back on save. */
+function readDrawingObjects(raw: unknown, label: string, issues: ProjectIssue[]): DrawingObject[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) {
+    issues.push({
+      severity: "warning",
+      message: `Sheet “${label}” had drawing objects that couldn't be read; they were left out.`,
+    });
+    return undefined;
+  }
+  const seen = new Set<string>();
+  let dropped = 0;
+  const objects: DrawingObject[] = [];
+  for (const entry of raw) {
+    if (!isObj(entry) || !DRAWING_OBJECT_KINDS.includes(entry.kind as DrawingObject["kind"])) {
+      dropped++;
+      continue;
+    }
+    const kind = entry.kind as DrawingObject["kind"];
+    const id =
+      typeof entry.id === "string" && entry.id !== "" && !seen.has(entry.id)
+        ? entry.id
+        : `drawing_${Math.random().toString(36).slice(2, 10)}`;
+    if (seen.has(id)) {
+      dropped++;
+      continue;
+    }
+    seen.add(id);
+    if (!isFiniteNumber(entry.x) || !isFiniteNumber(entry.y) || !isFiniteNumber(entry.width) || !isFiniteNumber(entry.height) || entry.width <= 0 || entry.height <= 0) {
+      dropped++;
+      continue;
+    }
+    // A picture without its image is nothing to draw.
+    if (kind === "picture") {
+      const src = entry.src;
+      if (typeof src !== "string" || !src.startsWith("data:image/") || src.length > MAX_PICTURE_BYTES * 2) {
+        dropped++;
+        continue;
+      }
+    }
+    objects.push(
+      defined({
+        id,
+        kind,
+        x: Math.max(0, entry.x as number),
+        y: Math.max(0, entry.y as number),
+        width: entry.width as number,
+        height: entry.height as number,
+        text: typeof entry.text === "string" ? (entry.text as string) : undefined,
+        fontSize: isFiniteNumber(entry.fontSize) ? Math.max(6, Math.min(200, entry.fontSize as number)) : undefined,
+        color: typeof entry.color === "string" ? (entry.color as string) : undefined,
+        fill: typeof entry.fill === "string" ? (entry.fill as string) : undefined,
+        strokeWidth: isFiniteNumber(entry.strokeWidth) ? Math.max(0.5, entry.strokeWidth as number) : undefined,
+        src: typeof entry.src === "string" ? (entry.src as string) : undefined,
+        groupId: typeof entry.groupId === "string" && entry.groupId !== "" ? (entry.groupId as string) : undefined,
+      }) as DrawingObject,
+    );
+  }
+  if (dropped) {
+    issues.push({
+      severity: "warning",
+      message: `Sheet “${label}” had ${dropped === 1 ? "a drawing object" : `${dropped} drawing objects`} that couldn't be read as saved; ${dropped === 1 ? "it was" : "they were"} left out.`,
+    });
+  }
+  return objects.length ? objects : undefined;
+}
+
 const NODE_TYPES: NodeType[] = ["table", "analysis", "graph", "figure", "info"];
 
 /** An info sheet as a file holds it, forgivingly: constants read as names +
@@ -1448,18 +1575,51 @@ function readNode(
     // A figure may span tables, so it lives at the project root, never under one table.
     node.parentId = null;
     Object.assign(node, readFigure(n));
+    // A frozen figure (seq 237) draws each panel from its snapshot, and
+    // carries drawing objects like a graph (seq 238). Frozen with no
+    // snapshot to draw from is a corrupt file, not a frozen figure.
+    const frozenByGraph = readFrozenDataByGraph(n.frozenDataByGraph);
+    if (node.frozen === true && frozenByGraph) node.frozenDataByGraph = frozenByGraph;
+    else {
+      delete node.frozen;
+      delete node.frozenDataByGraph;
+    }
+    delete node.frozenData;
+    const figureObjects = readDrawingObjects(n.drawingObjects, node.name, issues);
+    if (figureObjects) node.drawingObjects = figureObjects;
+    else delete node.drawingObjects;
   } else {
     node.graphType = lower(n.graphType) as ProjectNode["graphType"];
     node.graphOptions = readOptions(n.graphOptions, node.name, issues);
     if (!isIn(GRAPHS, node.graphType) && (node.graphType as string) !== DOSE_GRAPH) {
       issues.push({ severity: "error", message: `Graph “${node.name}” uses a chart this version doesn't know.` });
     }
+    // A frozen graph (seq 237) draws from its snapshot, and carries
+    // drawing objects (seq 238). Frozen with no snapshot to draw from is
+    // a corrupt file, not a frozen graph.
+    const frozenData = readFrozenData(n.frozenData);
+    if (node.frozen === true && frozenData) node.frozenData = frozenData;
+    else {
+      delete node.frozen;
+      delete node.frozenData;
+    }
+    delete node.frozenDataByGraph;
+    const graphObjects = readDrawingObjects(n.drawingObjects, node.name, issues);
+    if (graphObjects) node.drawingObjects = graphObjects;
+    else delete node.drawingObjects;
   }
   if (type !== "table") delete node.transform; // a table's alone
   if (type !== "analysis") {
-    // Frozen / orphaned results belong to analyses only: a hand-edited file
-    // can't freeze a table or orphan a graph.
-    delete node.frozen;
+    // Orphaned results belong to analyses only: a hand-edited file can't
+    // orphan a graph. Frozen now belongs to analyses, graphs and figures
+    // alike (seq 237) — the graph/figure branches above already kept or
+    // dropped it — so only tables and info sheets lose it here.
+    if (type !== "graph" && type !== "figure") {
+      delete node.frozen;
+      delete node.frozenData;
+      delete node.frozenDataByGraph;
+      delete node.drawingObjects;
+    }
     delete node.orphaned;
     delete node.sourceTableName;
     delete node.cachedResult;
