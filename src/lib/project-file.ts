@@ -31,6 +31,7 @@ import {
   type Place,
   type PointStyle,
   type ProjectNode,
+  type ProjectScript,
   type RefLine,
   type RowGroup,
   SAME_AS_FILL,
@@ -117,6 +118,9 @@ export interface ProjectFilePayload {
   template?: TemplateInfo;
   /** The name a script's SetProjectName gave the project. Omitted when unset. */
   projectName?: string;
+  /** The project's saved Prism scripts (seq 228): a plain `.hlx` without
+   *  any omits the field, as it omits an unset projectName. */
+  scripts?: ProjectScript[];
   /** Unknown keys from a newer or hand-edited file (FF-F12): the file envelope's
    *  and the project's, kept verbatim and written back on save, so opening a
    *  newer file in this Titer doesn't silently lose its forward-compat data.
@@ -127,7 +131,7 @@ export interface ProjectFilePayload {
 
 // ── Writing ──────────────────────────────────────────────────────────────
 
-export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeId, template, projectName, fileUnknowns, projectUnknowns }: ProjectFilePayload): string {
+export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeId, template, projectName, scripts, fileUnknowns, projectUnknowns }: ProjectFilePayload): string {
   // Unknown keys go back where they came from, under the known keys — a
   // hand-edited file can't smuggle a second `nodes` or `app` past the reader.
   const project: ProjectFilePayload = {
@@ -137,6 +141,7 @@ export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeI
     childOrder,
     activeNodeId,
     ...(projectName ? { projectName } : {}),
+    ...(scripts?.length ? { scripts } : {}),
   };
   // The `template` block lives at the file level, beside `project` (plan 38):
   // a plain `.hlx` never carries one — only the template saver passes it.
@@ -188,7 +193,7 @@ const unknownsOf = (obj: Obj, known: readonly string[]): Obj => {
 // Every field Titer knows, per level. The `satisfies` checks make TypeScript
 // flag any field added to a type but not listed here.
 const FILE_KEYS = ["app", "schemaVersion", "savedAt", "template", "project"];
-const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId", "projectName"] satisfies (keyof ProjectFilePayload)[];
+const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId", "projectName", "scripts"] satisfies (keyof ProjectFilePayload)[];
 // prettier-ignore
 const NODE_KEYS = Object.keys({
   id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, highlight: 1, tableType: 1, data: 1, transform: 1, notes: 1, tags: 1,
@@ -1806,6 +1811,14 @@ export function parseProjectFile(
   );
   const activeNodeId = nodeOf(project.activeNodeId) ? (project.activeNodeId as string) : rootOrder[0];
   const projectName = typeof project.projectName === "string" && project.projectName !== "" ? project.projectName : undefined;
+  // The saved scripts (seq 228): a broken entry is dropped with a warning,
+  // never an error — the project still opens, and saving keeps the rest.
+  const { scripts, droppedScripts } = parseProjectScripts(project.scripts);
+  if (droppedScripts > 0)
+    issues.push({
+      severity: "warning",
+      message: `${droppedScripts === 1 ? "1 saved script" : `${droppedScripts} saved scripts`} couldn't be read and ${droppedScripts === 1 ? "was" : "were"} dropped.`,
+    });
 
   for (const node of Object.values(nodes)) {
     if (node.type === "figure") {
@@ -1870,14 +1883,48 @@ export function parseProjectFile(
     activeNodeId,
     ...(template ? { template } : {}),
     ...(projectName ? { projectName } : {}),
+    ...(scripts.length ? { scripts } : {}),
     ...(Object.keys(fileUnknowns).length ? { fileUnknowns } : {}),
     ...(Object.keys(projectUnknowns).length ? { projectUnknowns } : {}),
   };
   // `updated` compares what Titer knows only: carrying unknowns through is not
   // a repair, so a newer file that needed no repair still opens unedited.
-  const known = { nodes, rootOrder, childOrder, activeNodeId, projectName };
+  const known = { nodes, rootOrder, childOrder, activeNodeId, projectName, scripts };
   const filed = Object.fromEntries(PROJECT_KEYS.map((k) => [k, project[k]]));
   return { project: read, issues, updated: contents(known) !== contents(filed) };
+}
+
+/** The `scripts` block of a `.hlx` file (seq 228), validated: an entry needs
+ *  a string id, name and text — the hooks default off — and duplicate ids
+ *  keep their first copy. Returns the kept scripts and how many were dropped. */
+export function parseProjectScripts(value: unknown): { scripts: ProjectScript[]; droppedScripts: number } {
+  if (value === undefined) return { scripts: [], droppedScripts: 0 };
+  if (!Array.isArray(value)) return { scripts: [], droppedScripts: 1 };
+  const scripts: ProjectScript[] = [];
+  const seen = new Set<string>();
+  let droppedScripts = 0;
+  for (const entry of value) {
+    if (
+      !isObj(entry) ||
+      typeof entry.id !== "string" ||
+      entry.id === "" ||
+      typeof entry.name !== "string" ||
+      typeof entry.text !== "string" ||
+      seen.has(entry.id)
+    ) {
+      droppedScripts++;
+      continue;
+    }
+    seen.add(entry.id);
+    scripts.push({
+      id: entry.id,
+      name: entry.name,
+      text: entry.text,
+      runOnOpen: entry.runOnOpen === true,
+      runOnClose: entry.runOnClose === true,
+    });
+  }
+  return { scripts, droppedScripts };
 }
 
 // ── Dose-response graphs (before Titer 1.0.7) ───────────────────────────

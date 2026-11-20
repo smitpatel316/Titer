@@ -422,6 +422,67 @@ check("print settings default to Letter portrait, and the @page rule carries the
   }
 });
 
+// ── Scripts saved in the project (seq 228) ─────────────────────────────
+
+check("saved scripts round-trip through the file, and a broken entry is dropped with a warning", () => {
+  const withScripts = {
+    ...payload,
+    scripts: [
+      { id: "s1", name: "Morning", text: "RecalcAll", runOnOpen: true, runOnClose: false },
+      { id: "s2", name: "Nightly", text: "Save", runOnOpen: false, runOnClose: true },
+    ],
+  };
+  const text = serializeProjectFile(withScripts);
+  const reread = read(text);
+  deepStrictEqual(reread.project.scripts, withScripts.scripts);
+  strictEqual(reread.updated, false);
+  // No scripts at all: the field is omitted, and an old file still opens identical.
+  strictEqual(JSON.parse(serializeProjectFile(payload)).project.scripts, undefined);
+  strictEqual(read(serializeProjectFile(payload)).project.scripts, undefined);
+  const broken = JSON.parse(text) as { project: Record<string, unknown> };
+  broken.project.scripts = [
+    { id: "s1", name: "Morning", text: "RecalcAll", runOnOpen: true },
+    { id: "s1", name: "Dupe", text: "Beep" },
+    { name: "No id", text: "Beep" },
+    "not an object",
+  ];
+  const repaired = read(JSON.stringify(broken));
+  deepStrictEqual(repaired.project.scripts, [
+    { id: "s1", name: "Morning", text: "RecalcAll", runOnOpen: true, runOnClose: false },
+  ]);
+  strictEqual(repaired.updated, true);
+  ok(repaired.issues.some((i) => i.message.includes("3 saved scripts")));
+});
+
+check("editing the saved scripts is one undo step, and a script run keeps them", () => {
+  let s = reducer(makeInitialState(), {
+    type: "load",
+    nodes: payload.nodes,
+    rootOrder: payload.rootOrder,
+    childOrder: payload.childOrder,
+    activeNodeId: payload.activeNodeId,
+    filePath: null,
+  });
+  const script = { id: "s1", name: "Morning", text: "RecalcAll", runOnOpen: true, runOnClose: false };
+  s = reducer(s, { type: "setScripts", scripts: [script] });
+  deepStrictEqual(s.scripts, [script]);
+  strictEqual(s.isDirty, true);
+  strictEqual(s.past.at(-1)?.label, "Edit Scripts");
+  s = reducer(s, { type: "undo" });
+  strictEqual(s.scripts, undefined);
+  s = reducer(s, { type: "redo" });
+  deepStrictEqual(s.scripts, [script]);
+  // A script run replaces the content but leaves the saved scripts alone.
+  s = reducer(s, {
+    type: "applyScript",
+    nodes: payload.nodes,
+    rootOrder: payload.rootOrder,
+    childOrder: payload.childOrder,
+    activeNodeId: payload.activeNodeId,
+  });
+  deepStrictEqual(s.scripts, [script]);
+});
+
 // ── .hlx files ───────────────────────────────────────────────────────────
 
 check("a file Helix had to repair or bring up to date opens to be saved; a sound one doesn't", () => {

@@ -21,7 +21,7 @@ import { writePzfx } from "../lib/pzfx-write";
 import { serializeProjectFile } from "../lib/project-file";
 import { fileName, fileTitle } from "../lib/paths";
 import * as native from "../native";
-import type { ProjectNode } from "./types";
+import type { ProjectNode, ProjectScript } from "./types";
 
 /** The project as a document job sees it: the store state, nothing more. */
 export interface DocumentState {
@@ -30,6 +30,9 @@ export interface DocumentState {
   childOrder: Record<string, string[]>;
   activeNodeId: string | null;
   projectName?: string;
+  /** The project's saved Prism scripts (seq 228) — a save must carry them,
+   *  or an MCP save would silently drop what the GUI saved. */
+  scripts?: ProjectScript[];
   fileUnknowns?: Record<string, unknown>;
   projectUnknowns?: Record<string, unknown>;
   filePath: string | null;
@@ -66,6 +69,7 @@ export interface DocumentDeps {
     childOrder: Record<string, string[]>;
     activeNodeId: string | null;
     projectName?: string;
+    scripts?: ProjectScript[];
     fileUnknowns?: Record<string, unknown>;
     projectUnknowns?: Record<string, unknown>;
     filePath: string | null;
@@ -159,6 +163,7 @@ export async function buildSaveBytes(state: DocumentState, format: SaveFormat, v
     childOrder: state.childOrder,
     activeNodeId: state.activeNodeId,
     projectName: state.projectName,
+    scripts: state.scripts,
     fileUnknowns: state.fileUnknowns,
     projectUnknowns: state.projectUnknowns,
   };

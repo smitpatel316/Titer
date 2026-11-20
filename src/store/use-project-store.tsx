@@ -6,6 +6,7 @@ import {
   type InfoSheetData,
   type NodeType,
   type ProjectNode,
+  type ProjectScript,
   type SheetHighlight,
   type TableData,
   type TableType,
@@ -68,6 +69,8 @@ interface Content {
   childOrder: Record<string, string[]>;
   /** The script-set project name (v2 item 6). */
   projectName?: string;
+  /** The project's saved Prism scripts (seq 228). */
+  scripts?: ProjectScript[];
 }
 
 interface ProjectState extends Content {
@@ -139,6 +142,9 @@ type Action =
   | { type: "updateGraph"; id: string; options: GraphOptions; at: number }
   | { type: "setNotes"; id: string; notes: string; at: number }
   | { type: "setTags"; id: string; tags: TagColor[] }
+  /** Replace the project's saved scripts (seq 228) — the Run Script
+   *  dialog's Save/Delete and the hooks' checkboxes, one undo step. */
+  | { type: "setScripts"; scripts: ProjectScript[] }
   /** Batch Magic: several graphs at once, in one undo step. */
   | { type: "updateGraphs"; updates: { id: string; options: GraphOptions }[]; at: number }
   | { type: "updateInfoSheet"; id: string; info: InfoSheetData; at: number }
@@ -186,6 +192,7 @@ type Action =
       childOrder: Record<string, string[]>;
       activeNodeId: string | null;
       projectName?: string;
+      scripts?: ProjectScript[];
       fileUnknowns?: Record<string, unknown>;
       projectUnknowns?: Record<string, unknown>;
       filePath: string | null;
@@ -564,7 +571,8 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
     case "applyScript": {
       // One run, one change: the engine's whole resulting project replaces
       // the content (an absent projectName clears the old one — a run
-      // that drops it must not leave a stale copy behind).
+      // that drops it must not leave a stale copy behind). The saved
+      // scripts are not script output: a run leaves them as they were.
       const next: ProjectState = {
         ...state,
         nodes: action.nodes,
@@ -575,6 +583,13 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       };
       if (action.projectName) next.projectName = action.projectName;
       else delete next.projectName;
+      return next;
+    }
+    case "setScripts": {
+      if (JSON.stringify(state.scripts ?? []) === JSON.stringify(action.scripts)) return state;
+      const next = { ...state, isDirty: true };
+      if (action.scripts.length) next.scripts = action.scripts;
+      else delete next.scripts;
       return next;
     }
     case "openSelector":
@@ -629,6 +644,7 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         childOrder: action.childOrder,
         activeNodeId: action.activeNodeId,
         ...(action.projectName ? { projectName: action.projectName } : {}),
+        ...(action.scripts?.length ? { scripts: action.scripts } : {}),
         ...(action.fileUnknowns ? { fileUnknowns: action.fileUnknowns } : {}),
         ...(action.projectUnknowns ? { projectUnknowns: action.projectUnknowns } : {}),
         selector: null,
@@ -668,6 +684,7 @@ const UNDOABLE = new Set<Action["type"]>([
   "updateFloatingNotes",
   "setNotes",
   "setTags",
+  "setScripts",
   "setHighlight",
   "updateFigure",
   "applyScript",
@@ -705,6 +722,8 @@ function changeName(action: Action): string {
       return "Notes";
     case "setTags":
       return "Tags";
+    case "setScripts":
+      return "Edit Scripts";
     case "updateGraphs":
       return "Match Graphs";
     case "updateInfoSheet":
@@ -843,6 +862,8 @@ interface ProjectActions {
   setNotes: (id: string, notes: string) => void;
   /** An item's tags (none: no tag). */
   setTags: (id: string, tags: TagColor[]) => void;
+  /** Replace the project's saved scripts (seq 228). Undoable. */
+  setScripts: (scripts: ProjectScript[]) => void;
   /** Batch Magic: several graphs' options at once, in one undo step. */
   updateGraphs: (updates: { id: string; options: GraphOptions }[]) => void;
   /** Replaces a sheet's floating notes (an empty list clears them). */
@@ -865,6 +886,7 @@ interface ProjectActions {
     childOrder: Record<string, string[]>;
     activeNodeId: string | null;
     projectName?: string;
+    scripts?: ProjectScript[];
     fileUnknowns?: Record<string, unknown>;
     projectUnknowns?: Record<string, unknown>;
     /** null: a project not saved anywhere yet (the sample project). */
@@ -886,6 +908,8 @@ interface ProjectContextValue extends ProjectActions {
   activeTableId: string | null;
   /** The script-set project name (v2 item 6). */
   projectName?: string;
+  /** The project's saved Prism scripts (seq 228). */
+  scripts?: ProjectScript[];
   selector: ProjectState["selector"];
   filePath: string | null;
   isDirty: boolean;
@@ -1088,6 +1112,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       updateGraph: (id, options) => dispatch({ type: "updateGraph", id, options, at: Date.now() }),
       setNotes: (id, notes) => dispatch({ type: "setNotes", id, notes, at: Date.now() }),
       setTags: (id, tags) => dispatch({ type: "setTags", id, tags }),
+      setScripts: (scripts) => dispatch({ type: "setScripts", scripts }),
       updateGraphs: (updates) => dispatch({ type: "updateGraphs", updates, at: Date.now() }),
       updateFloatingNotes: (id, notes) => dispatch({ type: "updateFloatingNotes", id, notes, at: Date.now() }),
       setSheetHighlight: (id, highlight) => dispatch({ type: "setHighlight", id, highlight }),
@@ -1116,6 +1141,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       activeNode,
       activeTableId,
       projectName: state.projectName,
+      scripts: state.scripts,
       selector: state.selector,
       filePath: state.filePath,
       isDirty: state.isDirty,
