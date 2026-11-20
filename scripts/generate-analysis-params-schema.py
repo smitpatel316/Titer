@@ -138,7 +138,7 @@ GATES = {
     "nested-anova": ["Nested table with at least 3 data groups"],
     "enzyme-inhibition": ["Global models need X + at least 2 Y series (including an uninhibited one); Morrison needs X + 1 Y series and enzymeConcentration"],
     "dose-response-special": ["Every model needs X + at least 2 Y series (control + at least 1 shifted curve; full agonist + at least 1 partial agonist)"],
-    "monte-carlo": ["targetAnalysis is one of compare-two-groups, one-sample-t, descriptive-statistics, linear-regression, correlation"],
+    "monte-carlo": ["targetAnalysis is one of compare-two-groups, one-sample-t, descriptive-statistics, linear-regression, correlation, paired-t, one-way-anova"],
 }
 
 # ── *Params interfaces: fields, required/optional, doc comments ──────

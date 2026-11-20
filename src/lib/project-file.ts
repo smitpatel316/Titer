@@ -65,6 +65,7 @@ import {
   EXTRACT_REARRANGE_TARGETS,
   FRACTION_OF_TOTAL_FORMATS,
   FRACTION_OF_TOTAL_TOTALS,
+  MONTE_CARLO_SIMULATION_DISTRIBUTIONS,
   MONTE_CARLO_STATISTICS,
   MONTE_CARLO_TARGETS,
   NONLINEAR_MODELS,
@@ -364,13 +365,19 @@ const PARAMS = {
   // Monte Carlo simulation (plan 22): the target analysis + statistic are
   // choices; repeats/seed are numbers; the per-column simulated means/SDs
   // are numbers-by-name (the target's own options — equalVariance,
-  // hypotheticalValue, y, method — already have entries above).
+  // hypotheticalValue, y, method — already have entries above). Seq 204:
+  // the simulation distribution (gaussian/t) + its df, the P-value tails,
+  // and the paired-t difference mean/SD.
   targetAnalysis: MONTE_CARLO_TARGETS,
   summaryStatistic: MONTE_CARLO_STATISTICS,
   repeats: "number",
   seed: "number",
   groupMeans: "numbers-by-name",
   groupSds: "numbers-by-name",
+  simulationDistribution: MONTE_CARLO_SIMULATION_DISTRIBUTIONS,
+  simulationDf: "number",
+  differenceMean: "number",
+  differenceSd: "number",
   rout: "yes/no", x: "name",
   // Transform data (v2): which function to apply.
   function: TRANSFORM_FUNCTIONS,
@@ -880,7 +887,8 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   outliers: ["q", "method", "alpha", "iterate", "sets"],
   "monte-carlo": [
     "targetAnalysis", "summaryStatistic", "repeats", "seed", "groupMeans", "groupSds", "equalVariance",
-    "hypotheticalValue", "y", "method", "sets",
+    "hypotheticalValue", "y", "method", "tails", "simulationDistribution", "simulationDf", "differenceMean",
+    "differenceSd", "sets",
   ],
   "bland-altman": ["sets"],
   "roc-curve": ["truth", "score", "positive", "sets"],

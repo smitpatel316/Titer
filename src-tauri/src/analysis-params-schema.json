@@ -1078,7 +1078,9 @@
           "one-sample-t",
           "descriptive-statistics",
           "linear-regression",
-          "correlation"
+          "correlation",
+          "paired-t",
+          "one-way-anova"
         ],
         "required": true
       },
@@ -1091,7 +1093,8 @@
           "Mean",
           "Slope",
           "Y-intercept",
-          "r"
+          "r",
+          "F"
         ],
         "required": false
       },
@@ -1148,6 +1151,45 @@
         "required": false
       },
       {
+        "name": "tails",
+        "type": "string",
+        "enum": [
+          "two-sided",
+          "less",
+          "greater"
+        ],
+        "required": false,
+        "description": "P-value tails for the t-test targets (seq 204); two-sided by default."
+      },
+      {
+        "name": "simulationDistribution",
+        "type": "string",
+        "enum": [
+          "gaussian",
+          "t"
+        ],
+        "required": false,
+        "description": "What distribution the simulated values come from (seq 204)."
+      },
+      {
+        "name": "simulationDf",
+        "type": "number",
+        "required": false,
+        "description": "Degrees of freedom for a t simulation (seq 204); must exceed 2."
+      },
+      {
+        "name": "differenceMean",
+        "type": "number",
+        "required": false,
+        "description": "Paired-t only (seq 204): the mean difference to simulate — the differences' observed mean when omitted."
+      },
+      {
+        "name": "differenceSd",
+        "type": "number",
+        "required": false,
+        "description": "Paired-t only (seq 204): the SD of the differences to simulate — the differences' observed SD when omitted."
+      },
+      {
         "name": "sets",
         "type": "string[]",
         "required": false,
@@ -1155,7 +1197,7 @@
       }
     ],
     "gates": [
-      "targetAnalysis is one of compare-two-groups, one-sample-t, descriptive-statistics, linear-regression, correlation"
+      "targetAnalysis is one of compare-two-groups, one-sample-t, descriptive-statistics, linear-regression, correlation, paired-t, one-way-anova"
     ]
   },
   "multiple-logistic-regression": {

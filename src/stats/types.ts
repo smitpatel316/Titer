@@ -1089,24 +1089,31 @@ export interface SimulationSpec {
  *  10,000 (the wizard's max; a 10,000-repeat t-test power run is ~15–25 s). */
 export const MONTE_CARLO_REPEATS = { min: 10, max: 10_000 };
 
-/** The analyses a Monte Carlo run can repeat in v1 (plan 22, sub-task b):
- *  the ones whose per-repeat statistic has a one-call in-R `replicate()`
- *  form (see simulation/monte-carlo.ts). Grouped-table targets (two-way
- *  ANOVA…) are a follow-on — the wizard offers only these. */
+/** The analyses a Monte Carlo run can repeat (plan 22, sub-task b, extended
+ *  seq 204): the ones whose per-repeat statistic has a one-call in-R
+ *  `replicate()` form (see simulation/monte-carlo.ts). Paired-t repeats the
+ *  t test on the paired differences; one-way ANOVA repeats the F test on
+ *  the stacked groups. Grouped-table targets (two-way ANOVA…) are a
+ *  follow-on — the wizard offers only these. Prism repeats any analysis;
+ *  the rest of that gap (nonlinear regression, ANOVA on grouped tables…)
+ *  stays open — each needs its own in-R repeat form. */
 export const MONTE_CARLO_TARGETS = [
   "compare-two-groups",
   "one-sample-t",
   "descriptive-statistics",
   "linear-regression",
   "correlation",
+  "paired-t",
+  "one-way-anova",
 ] as const;
 export type MonteCarloTarget = (typeof MONTE_CARLO_TARGETS)[number];
 
 /** The statistics a Monte Carlo run can summarise, per target: "P value" and
- *  "Mean difference" (compare-two-groups), "P value" and "Mean"
+ *  "Mean difference" (compare-two-groups, paired-t), "P value" and "Mean"
  *  (one-sample-t), "Mean" (descriptive-statistics), "Slope" and
- *  "Y-intercept" (linear-regression), "r" (correlation). */
-export const MONTE_CARLO_STATISTICS = ["P value", "Mean difference", "Mean", "Slope", "Y-intercept", "r"] as const;
+ *  "Y-intercept" (linear-regression), "r" (correlation), "P value" and "F"
+ *  (one-way-anova). */
+export const MONTE_CARLO_STATISTICS = ["P value", "Mean difference", "Mean", "Slope", "Y-intercept", "r", "F"] as const;
 export type MonteCarloStatistic = (typeof MONTE_CARLO_STATISTICS)[number];
 /** Which statistic each target offers, in wizard order. */
 export const MONTE_CARLO_TARGET_STATISTICS: Record<MonteCarloTarget, MonteCarloStatistic[]> = {
@@ -1115,18 +1122,33 @@ export const MONTE_CARLO_TARGET_STATISTICS: Record<MonteCarloTarget, MonteCarloS
   "descriptive-statistics": ["Mean"],
   "linear-regression": ["Slope", "Y-intercept"],
   correlation: ["r"],
+  "paired-t": ["P value", "Mean difference"],
+  "one-way-anova": ["P value", "F"],
 };
+
+/** What distribution the simulated values come from (seq 204): Gaussian
+ *  (the usual bell curve) or Student's t (Prism's Simulate offers a t with
+ *  any df — wider scatter, more outliers). A t draw is scaled so the
+ *  simulated values have the SD the wizard asked for (df > 2, where the t
+ *  has a finite SD); Poisson / binomial simulation stays open. */
+export const MONTE_CARLO_SIMULATION_DISTRIBUTIONS = ["gaussian", "t"] as const;
+export type MonteCarloSimulationDistribution = (typeof MONTE_CARLO_SIMULATION_DISTRIBUTIONS)[number];
 
 /** Params for "monte-carlo" (plan 22, sub-task b): repeat `targetAnalysis`
  *  `repeats` times on simulated data and summarise `summaryStatistic`.
- *  The simulation is Gaussian per data column, with each column's mean/SD
- *  taken from `groupMeans`/`groupSds` when given, else from the column's
- *  observed mean/SD (a parametric bootstrap). The target's own options are
- *  flattened here (not nested as `targetParams`) so the .hlx reader already
- *  knows every key: `equalVariance` (compare-two-groups: Student vs Welch),
- *  `hypotheticalValue` (one-sample-t), `y` (descriptive-statistics /
- *  linear-regression: which column), `method` (correlation: Pearson /
- *  Spearman). Tails are two-sided in v1. */
+ *  The simulation is Gaussian per data column by default, or Student's t
+ *  with `simulationDf` degrees of freedom (seq 204), with each column's
+ *  mean/SD taken from `groupMeans`/`groupSds` when given, else from the
+ *  column's observed mean/SD (a parametric bootstrap). The target's own
+ *  options are flattened here (not nested as `targetParams`) so the .hlx
+ *  reader already knows every key: `equalVariance` (compare-two-groups:
+ *  Student vs Welch), `hypotheticalValue` (one-sample-t, and paired-t's
+ *  mean difference — the wizard leaves it at 0), `y`
+ *  (descriptive-statistics / linear-regression: which column), `method`
+ *  (correlation: Pearson / Spearman). `tails` is the P-value tails for the
+ *  t-test targets (compare-two-groups, one-sample-t, paired-t) — two-sided
+ *  by default, "less"/"greater" one-sided, following R's t.test
+ *  alternative on (first vs second) group; other targets ignore it. */
 export interface MonteCarloParams {
   targetAnalysis: MonteCarloTarget;
   summaryStatistic?: MonteCarloStatistic;
@@ -1141,6 +1163,18 @@ export interface MonteCarloParams {
   /** Which column (descriptive-statistics / linear-regression). */
   y?: string;
   method?: (typeof CORRELATION_METHODS)[number];
+  /** P-value tails for the t-test targets (seq 204); two-sided by default. */
+  tails?: (typeof TAILS)[number];
+  /** What distribution the simulated values come from (seq 204). */
+  simulationDistribution?: MonteCarloSimulationDistribution;
+  /** Degrees of freedom for a t simulation (seq 204); must exceed 2. */
+  simulationDf?: number;
+  /** Paired-t only (seq 204): the mean difference to simulate — the
+   *  differences' observed mean when omitted. */
+  differenceMean?: number;
+  /** Paired-t only (seq 204): the SD of the differences to simulate — the
+   *  differences' observed SD when omitted. */
+  differenceSd?: number;
 }
 
 /** One ROC point: at this threshold (a score value), predict positive iff

@@ -15838,6 +15838,80 @@ check("monteCarloRCode repeats the target inside R and returns the observed valu
     }),
     'set.seed(42);x<-c(1,2,3,4);v<-replicate(100,cor(x,rnorm(4,5,2),method="spearman"));o<-cor(x,c(2,4,6,8),method="spearman");c(o,v)',
   );
+  // Seq 204: paired-t repeats the t test on the simulated differences —
+  // the same R form as one-sample-t, with the differences as its one group.
+  strictEqual(
+    monteCarloRCode({
+      target: "paired-t",
+      statistic: "P value",
+      repeats: 1000,
+      seed: 42,
+      groups: [{ n: 3, mean: 0, sd: 1, observed: [-1, -1, -2] }],
+      hypotheticalValue: 0,
+    }),
+    "set.seed(42);v<-replicate(1000,t.test(rnorm(3,0,1),mu=0)$p.value);o<-t.test(c(-1,-1,-2),mu=0)$p.value;c(o,v)",
+  );
+  strictEqual(
+    monteCarloRCode({
+      target: "paired-t",
+      statistic: "Mean difference",
+      repeats: 1000,
+      seed: 42,
+      groups: [{ n: 3, mean: 0, sd: 1, observed: [-1, -1, -2] }],
+    }),
+    "set.seed(42);v<-replicate(1000,mean(rnorm(3,0,1)));o<-mean(c(-1,-1,-2));c(o,v)",
+  );
+  // Seq 204: one-way ANOVA stacks its groups into one vector + a factor
+  // and runs oneway.test on it — the repeat and the observed both need
+  // the braced block, whose last value is the statistic.
+  strictEqual(
+    monteCarloRCode({
+      target: "one-way-anova",
+      statistic: "P value",
+      repeats: 100,
+      seed: 42,
+      groups: [
+        { n: 3, mean: 2, sd: 1, observed: [1, 2, 3] },
+        { n: 3, mean: 5, sd: 1, observed: [4, 5, 6] },
+        { n: 3, mean: 8, sd: 1, observed: [7, 8, 9] },
+      ],
+    }),
+    "set.seed(42);v<-replicate(100,{v<-c(rnorm(3,2,1),rnorm(3,5,1),rnorm(3,8,1));grp<-factor(rep(1:3,c(3,3,3)));oneway.test(v~grp,var.equal=TRUE)$p.value});o<-{ov<-c(c(1,2,3),c(4,5,6),c(7,8,9));ogrp<-factor(rep(1:3,c(3,3,3)));oneway.test(ov~ogrp,var.equal=TRUE)$p.value};c(o,v)",
+  );
+  strictEqual(
+    monteCarloRCode({
+      target: "one-way-anova",
+      statistic: "F",
+      repeats: 100,
+      seed: 42,
+      groups: [
+        { n: 3, mean: 2, sd: 1, observed: [1, 2, 3] },
+        { n: 3, mean: 5, sd: 1, observed: [4, 5, 6] },
+        { n: 3, mean: 8, sd: 1, observed: [7, 8, 9] },
+      ],
+    }),
+    "set.seed(42);v<-replicate(100,{v<-c(rnorm(3,2,1),rnorm(3,5,1),rnorm(3,8,1));grp<-factor(rep(1:3,c(3,3,3)));oneway.test(v~grp,var.equal=TRUE)$statistic});o<-{ov<-c(c(1,2,3),c(4,5,6),c(7,8,9));ogrp<-factor(rep(1:3,c(3,3,3)));oneway.test(ov~ogrp,var.equal=TRUE)$statistic};c(o,v)",
+  );
+  // Seq 204: one-sided tails pass R's alternative through to both the
+  // repeats and the observed value.
+  strictEqual(
+    monteCarloRCode({ ...twoGroups, alternative: "less" }),
+    'set.seed(42);v<-replicate(1000,t.test(rnorm(3,0,1),rnorm(3,0.5,1),var.equal=TRUE,alternative="less")$p.value);o<-t.test(c(1,2,3),c(4,5,6),var.equal=TRUE,alternative="less")$p.value;c(o,v)',
+  );
+  // Seq 204: a t simulation draws mean + sd/√(df/(df−2)) · rt(n, df), so
+  // the simulated values carry the SD asked for (here 2/√(5/3)).
+  strictEqual(
+    monteCarloRCode({
+      target: "one-sample-t",
+      statistic: "Mean",
+      repeats: 100,
+      seed: 42,
+      groups: [{ n: 3, mean: 5, sd: 2, observed: [1, 2, 3] }],
+      simulationDistribution: "t",
+      simulationDf: 5,
+    }),
+    "set.seed(42);v<-replicate(100,mean(5+1.54919333848*rt(3,5)));o<-mean(c(1,2,3));c(o,v)",
+  );
 });
 
 check("percentile interpolates R-style (type 7)", () => {
@@ -15860,21 +15934,21 @@ check("the Monte Carlo wizard asks for the target, the simulation and the repeat
   const wizard = WIZARDS["monte-carlo"]!;
   deepStrictEqual(
     wizard.questions({}, table, "column").filter(Boolean).map((q) => (q as Question).id),
-    ["target", "statistic", "equalVariance", "mean:A", "sd:A", "mean:B", "sd:B", "repeats", "seed"],
+    ["target", "simulationDistribution", "statistic", "tails", "equalVariance", "mean:A", "sd:A", "mean:B", "sd:B", "repeats", "seed"],
   );
   deepStrictEqual(
     wizard
       .questions({ target: "compare-two-groups" }, table, "column")
       .filter(Boolean)
       .map((q) => (q as Question).id),
-    ["target", "statistic", "equalVariance", "mean:A", "sd:A", "mean:B", "sd:B", "repeats", "seed"],
+    ["target", "simulationDistribution", "statistic", "tails", "equalVariance", "mean:A", "sd:A", "mean:B", "sd:B", "repeats", "seed"],
   );
   deepStrictEqual(
     wizard
       .questions({ target: "descriptive-statistics" }, table, "column")
       .filter(Boolean)
       .map((q) => (q as Question).id),
-    ["target", "group", "mean:A", "sd:A", "repeats", "seed"],
+    ["target", "simulationDistribution", "group", "mean:A", "sd:A", "repeats", "seed"],
   );
   deepStrictEqual(
     wizard.finish(
@@ -15901,6 +15975,8 @@ check("the Monte Carlo wizard asks for the target, the simulation and the repeat
         seed: 42,
         groupMeans: { A: 0, B: 0.5 },
         groupSds: { A: 1, B: 1 },
+        simulationDistribution: "gaussian",
+        tails: "two-sided",
         equalVariance: true,
       },
     },
@@ -15917,7 +15993,7 @@ check("the Monte Carlo wizard asks for the target, the simulation and the repeat
   });
   deepStrictEqual(
     wizard.questions({}, xy, "xy").filter(Boolean).map((q) => (q as Question).id),
-    ["target", "statistic", "y", "mean:Y1", "sd:Y1", "repeats", "seed"],
+    ["target", "simulationDistribution", "statistic", "y", "mean:Y1", "sd:Y1", "repeats", "seed"],
   );
   deepStrictEqual(
     wizard.finish(
@@ -15934,8 +16010,287 @@ check("the Monte Carlo wizard asks for the target, the simulation and the repeat
         seed: 7,
         groupMeans: { Y1: 5 },
         groupSds: { Y1: 2 },
+        simulationDistribution: "gaussian",
         y: "Y1",
       },
+    },
+  );
+});
+
+check("the Monte Carlo wizard asks for the new targets, tails and t simulation (seq 204)", () => {
+  const table = readTable({
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["", "1", "2"],
+      ["", "2", "3"],
+      ["", "3", "5"],
+    ],
+  });
+  const wizard = WIZARDS["monte-carlo"]!;
+  const ids = (a: Record<string, string | number>, t: TableData | undefined = undefined) =>
+    wizard
+      .questions(a, t ? readTable(t) : table, "column")
+      .filter(Boolean)
+      .map((q) => (q as Question).id);
+  // Paired-t asks for the difference mean/SD (observed −1.33 ± 0.58), not
+  // per-column values — the repeats simulate the differences.
+  deepStrictEqual(ids({ target: "paired-t" }), [
+    "target",
+    "simulationDistribution",
+    "statistic",
+    "tails",
+    "differenceMean",
+    "differenceSd",
+    "repeats",
+    "seed",
+  ]);
+  deepStrictEqual(
+    wizard.finish(
+      {
+        target: "paired-t",
+        statistic: "P value",
+        tails: "less",
+        differenceMean: -1,
+        differenceSd: 0.5,
+        repeats: 1000,
+        seed: 42,
+      },
+      table,
+      "column",
+    ),
+    {
+      type: "monte-carlo",
+      params: {
+        targetAnalysis: "paired-t",
+        summaryStatistic: "P value",
+        repeats: 1000,
+        seed: 42,
+        groupMeans: {},
+        groupSds: {},
+        simulationDistribution: "gaussian",
+        tails: "less",
+        differenceMean: -1,
+        differenceSd: 0.5,
+      },
+    },
+  );
+  // A t simulation asks for its degrees of freedom, right after the
+  // distribution choice.
+  deepStrictEqual(ids({ target: "compare-two-groups", simulationDistribution: "t" }), [
+    "target",
+    "simulationDistribution",
+    "simulationDf",
+    "statistic",
+    "tails",
+    "equalVariance",
+    "mean:A",
+    "sd:A",
+    "mean:B",
+    "sd:B",
+    "repeats",
+    "seed",
+  ]);
+  // One-way ANOVA asks which data sets to repeat (3 columns: the sets
+  // question shows) and a mean/SD per group; no tails — the F test has none.
+  deepStrictEqual(
+    ids(
+      { target: "one-way-anova" },
+      {
+        columns: ["Title", "A", "B", "C"],
+        rows: [
+          ["", "1", "4", "7"],
+          ["", "2", "5", "8"],
+          ["", "3", "6", "9"],
+        ],
+      },
+    ),
+    [
+      "target",
+      "simulationDistribution",
+      "statistic",
+      "sets",
+      "mean:A",
+      "sd:A",
+      "mean:B",
+      "sd:B",
+      "mean:C",
+      "sd:C",
+      "repeats",
+      "seed",
+    ],
+  );
+  deepStrictEqual(
+    wizard.finish(
+      {
+        target: "one-way-anova",
+        statistic: "F",
+        sets: ["A", "B", "C"],
+        "mean:A": 2,
+        "sd:A": 1,
+        "mean:B": 5,
+        "sd:B": 1,
+        "mean:C": 8,
+        "sd:C": 1,
+        repeats: 100,
+        seed: 42,
+      },
+      readTable({
+        columns: ["Title", "A", "B", "C"],
+        rows: [
+          ["", "1", "4", "7"],
+          ["", "2", "5", "8"],
+          ["", "3", "6", "9"],
+        ],
+      }),
+      "column",
+    ),
+    {
+      type: "monte-carlo",
+      params: {
+        targetAnalysis: "one-way-anova",
+        summaryStatistic: "F",
+        repeats: 100,
+        seed: 42,
+        groupMeans: { A: 2, B: 5, C: 8 },
+        groupSds: { A: 1, B: 1, C: 1 },
+        simulationDistribution: "gaussian",
+        sets: ["A", "B", "C"],
+      },
+    },
+  );
+});
+
+check("Monte Carlo repeats a paired t test and a one-way ANOVA (seq 204)", async () => {
+  const paired: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["", "1", "2"],
+      ["", "2", "3"],
+      ["", "3", "5"],
+    ],
+  };
+  const pt = await runAnalysis("monte-carlo", paired, {
+    targetAnalysis: "paired-t",
+    summaryStatistic: "Mean difference",
+    repeats: 10,
+    seed: 42,
+  });
+  if ("error" in pt) throw new Error(pt.error);
+  strictEqual(pt.testType, "monte-carlo");
+  // The observed mean difference is the mean of A − B = (−1, −1, −2).
+  const observed = pt.stats.find((s) => s.label === "Observed (real data)")?.value;
+  ok(typeof observed === "number" && Math.abs(observed - -4 / 3) < 1e-12);
+  ok(!pt.stats.some((s) => s.label.startsWith("Power")));
+  ok(pt.notes.includes("Paired t test"));
+  // One-way ANOVA: groups 1–3, 4–6, 7–9 have F = 27 exactly.
+  const anova: TableData = {
+    columns: ["Title", "A", "B", "C"],
+    rows: [
+      ["", "1", "4", "7"],
+      ["", "2", "5", "8"],
+      ["", "3", "6", "9"],
+    ],
+  };
+  const av = await runAnalysis("monte-carlo", anova, {
+    targetAnalysis: "one-way-anova",
+    summaryStatistic: "F",
+    repeats: 10,
+    seed: 42,
+  });
+  if ("error" in av) throw new Error(av.error);
+  const fObserved = av.stats.find((s) => s.label === "Observed (real data)")?.value;
+  ok(typeof fObserved === "number" && Math.abs(fObserved - 27) < 1e-9);
+  ok(av.notes.includes("One-way ANOVA"));
+  // A P-value run reports power; a t simulation and one-sided tails are
+  // named in the notes.
+  const pv = await runAnalysis("monte-carlo", anova, {
+    targetAnalysis: "one-way-anova",
+    summaryStatistic: "P value",
+    repeats: 10,
+    seed: 42,
+  });
+  if ("error" in pv) throw new Error(pv.error);
+  ok(pv.stats.some((s) => s.label === "Power (% P < 0.05)"));
+  const tSim = await runAnalysis("monte-carlo", paired, {
+    targetAnalysis: "compare-two-groups",
+    summaryStatistic: "P value",
+    repeats: 10,
+    seed: 42,
+    simulationDistribution: "t",
+    simulationDf: 5,
+  });
+  if ("error" in tSim) throw new Error(tSim.error);
+  ok(tSim.notes.includes("Student's t with 5 degrees of freedom"));
+  const oneSided = await runAnalysis("monte-carlo", paired, {
+    targetAnalysis: "compare-two-groups",
+    summaryStatistic: "P value",
+    repeats: 10,
+    seed: 42,
+    tails: "less",
+  });
+  if ("error" in oneSided) throw new Error(oneSided.error);
+  ok(oneSided.notes.includes("one-sided (less)"));
+  // Errors name the problem instead of simulating something wrong.
+  deepStrictEqual(
+    await runAnalysis(
+      "monte-carlo",
+      { columns: ["Title", "A"], rows: [["", "1"], ["", "2"]] },
+      { targetAnalysis: "one-way-anova", repeats: 10, seed: 42 },
+    ),
+    { error: "Monte Carlo needs at least 2 data sets with values to repeat a one-way ANOVA." },
+  );
+  deepStrictEqual(
+    await runAnalysis(
+      "monte-carlo",
+      {
+        columns: ["Title", "A", "B"],
+        rows: [
+          ["", "5", "7"],
+          ["", "5", "7"],
+          ["", "5", "7"],
+        ],
+      },
+      { targetAnalysis: "one-way-anova", repeats: 10, seed: 42 },
+    ),
+    { error: "Each group's values are identical: there is no scatter within the groups to compare them on." },
+  );
+  deepStrictEqual(
+    await runAnalysis("monte-carlo", paired, {
+      targetAnalysis: "compare-two-groups",
+      repeats: 10,
+      seed: 42,
+      tails: "sideways",
+    } as unknown as MonteCarloParams),
+    { error: "“sideways” is not a tails choice — use “two-sided”, “less” or “greater”." },
+  );
+  deepStrictEqual(
+    await runAnalysis("monte-carlo", paired, {
+      targetAnalysis: "compare-two-groups",
+      repeats: 10,
+      seed: 42,
+      simulationDistribution: "t",
+      simulationDf: 2,
+    }),
+    {
+      error:
+        "The t simulation needs degrees of freedom greater than 2 — at df ≤ 2 the t distribution has no finite SD to simulate from.",
+    },
+  );
+  deepStrictEqual(
+    await runAnalysis(
+      "monte-carlo",
+      {
+        columns: ["Title", "A", "B"],
+        rows: [
+          ["", "1", "2"],
+          ["", "2", ""],
+        ],
+      },
+      { targetAnalysis: "paired-t", repeats: 10, seed: 42 },
+    ),
+    {
+      error:
+        "Monte Carlo needs at least 2 paired rows — rows where both data sets hold a value — to repeat a paired t test.",
     },
   );
 });
