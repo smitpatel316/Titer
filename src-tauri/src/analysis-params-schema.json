@@ -1241,11 +1241,24 @@
         "name": "correction",
         "type": "string",
         "enum": [
+          "holm-sidak",
           "holm",
+          "sidak",
+          "bonferroni",
           "fdr",
+          "fdr-bky",
+          "fdr-by",
           "none"
         ],
-        "default": "holm",
+        "default": "holm-sidak",
+        "required": false
+      },
+      {
+        "name": "q",
+        "type": "number",
+        "min": 0.01,
+        "max": 50.0,
+        "default": 5,
         "required": false
       },
       {

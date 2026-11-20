@@ -178,6 +178,17 @@ export function AnalysisResultsView({
   // Comparisons of means give their 95% CI (adjusted as their P is); ranks don't.
   // Correlations give theirs once the correlation engine emits them.
   const withCi = result.comparisons?.some((c) => c.low !== undefined) ?? false;
+  // Multiple-t-tests flags each row significant or not (corrected P against
+  // its threshold); other comparisons leave it unset, so the column only
+  // appears when a row carries a flag.
+  const withSignificant = result.comparisons?.some((c) => c.significant !== undefined) ?? false;
+  // Multiple-t-tests carries each row's t and df (the rank tests have
+  // neither) and its uncorrected P beside the corrected one — when a
+  // correction was applied the table shows both P values, as Prism does.
+  const withT = result.comparisons?.some((c) => c.t !== undefined) ?? false;
+  const withDf = result.comparisons?.some((c) => c.df !== undefined) ?? false;
+  const withAdjustedP =
+    result.comparisons?.some((c) => c.rawP !== undefined && c.rawP !== c.p) ?? false;
   const withCorrCi = result.correlations?.some((c) => c.low !== undefined) ?? false;
   const showP = headlineP != null && !Number.isNaN(headlineP);
   const groups = result.groups;
@@ -405,13 +416,25 @@ export function AnalysisResultsView({
             { label: "Comparison" },
             { label: result.comparisonsEffect ?? "Difference", numeric: true },
             ...(withCi ? [{ label: "95% CI", numeric: true }] : []),
+            ...(withT ? [{ label: "t", numeric: true }] : []),
+            ...(withDf ? [{ label: "df", numeric: true }] : []),
             { label: "P value", numeric: true },
+            ...(withAdjustedP ? [{ label: "Adjusted P value", numeric: true }] : []),
+            ...(withSignificant ? [{ label: "Significant?" }] : []),
           ]}
           rows={result.comparisons.map((c) => [
             c.group2 ? `${c.group1} vs. ${c.group2}` : c.group1,
             num(c.diff),
             ...(withCi ? [c.low == null && c.high == null ? "—" : `${num(c.low)} to ${num(c.high)}`] : []),
-            <P p={c.p} />,
+            ...(withT ? [num(c.t)] : []),
+            ...(withDf ? [num(c.df)] : []),
+            // The raw P, plain (no stars — a raw P below 0.05 is not
+            // significant once corrected); the adjusted P carries the
+            // significance styling. Without a correction the two are the
+            // same value, so only one P column shows.
+            withAdjustedP ? pValue(c.rawP) : <P p={c.p} />,
+            ...(withAdjustedP ? [<P p={c.p} />] : []),
+            ...(withSignificant ? [c.significant === undefined ? "—" : c.significant ? "Yes" : "No"] : []),
           ])}
         />
       )}

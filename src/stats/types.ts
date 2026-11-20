@@ -221,6 +221,22 @@ export const THREE_WAY_POSTHOCS = [...POSTHOCS, "dunnett", "games-howell", "fdr"
  *  effects — each level its own family). On a main effect the two are the same. */
 export const THREE_WAY_POSTHOC_SCOPES = ["term", "simple"] as const;
 export const CORRECTIONS = ["holm", "fdr", "none"] as const;
+/** The multiplicity corrections Prism's multiple-t-tests analysis offers
+ *  (Prism 11 Stats Guide, "Options for multiple t tests"). `holm` /
+ *  `fdr` are Titer's legacy values — plain Holm and Benjamini-Hochberg —
+ *  kept so saved files still load; the wizard offers the full Prism set
+ *  with Holm–Šídák first (Prism's recommended method). FDR methods take
+ *  the desired false discovery rate `q` (percent, default 5). */
+export const MULTIPLE_T_TEST_CORRECTIONS = [
+  "holm-sidak",
+  "holm",
+  "sidak",
+  "bonferroni",
+  "fdr",
+  "fdr-bky",
+  "fdr-by",
+  "none",
+] as const;
 export const CURVE_TESTS = ["logrank", "trend", "gehan"] as const;
 /** A contingency table's test: Fisher's exact test or the chi-square (Yates' or not) on a
  *  2 × 2, the chi-square or its test for trend (rows in order) on 2 columns. */
@@ -698,12 +714,17 @@ export interface NestedAnovaParams {
  *  correction across rows. `paired` runs a paired test, matching replicate columns
  *  by position between the 2 groups. `pooledSd` (parametric only) assumes every row
  *  shares one SD (pooled across rows) instead of estimating each row's independently
- *  — more power when that assumption holds. */
+ *  — more power when that assumption holds. `q` is the desired false discovery
+ *  rate in percent (default 5, range 0.01–50 like ROUT's Q); it only applies
+ *  to the FDR corrections (`fdr`, `fdr-bky`, `fdr-by`), where a row is
+ *  significant when its adjusted P is below Q — the family-wise methods
+ *  flag at adjusted P < 0.05 instead. */
 export interface MultipleTTestsParams {
   paired: boolean;
   gaussian: boolean;
   pooledSd: boolean;
-  correction: (typeof CORRECTIONS)[number];
+  correction: (typeof MULTIPLE_T_TEST_CORRECTIONS)[number];
+  q?: number;
 }
 
 /** Params for "binding-saturation" (XY table): which Y series is the total
@@ -1378,6 +1399,19 @@ export interface ComparisonRow {
   low?: number | null;
   high?: number | null;
   p: number | null;
+  /** The row's test statistic (a t test's t; the rank tests have none). */
+  t?: number | null;
+  /** Its degrees of freedom (a t test's df; the rank tests have none). */
+  df?: number | null;
+  /** The row's uncorrected P value — `p` is the multiplicity-corrected one
+   *  (multiple-t-tests only; the results view shows both when they differ). */
+  rawP?: number | null;
+  /** Whether this row's (already multiplicity-corrected, where the analysis
+   *  corrects) P value clears the analysis's significance threshold.
+   *  Only set by analyses that flag rows — multiple-t-tests sets it on
+   *  every row; the results view shows a Significant? column when any row
+   *  carries it. */
+  significant?: boolean;
 }
 
 /** A group at a row of a grouped table (`row`: its index in the table). */

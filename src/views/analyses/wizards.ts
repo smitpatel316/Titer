@@ -3644,10 +3644,29 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ["yes", "Yes — pool one shared SD across all rows"],
         ]),
       choice("correction", "Correct for running many comparisons at once?", [
-        ["holm", "Holm correction (recommended)"],
-        ["fdr", "False discovery rate (Benjamini-Hochberg)"],
+        ["holm-sidak", "Holm–Šídák (recommended)"],
+        ["holm", "Holm (step-down Bonferroni)"],
+        ["sidak", "Šídák–Bonferroni (single-step Šídák)"],
+        ["bonferroni", "Bonferroni–Dunn"],
+        ["fdr", "False discovery rate — Benjamini-Hochberg (BH)"],
+        ["fdr-bky", "False discovery rate — Benjamini-Krieger-Yekutieli two-stage (BKY)"],
+        ["fdr-by", "False discovery rate — Benjamini-Yekutieli (BY)"],
         ["none", "None — treat each row independently"],
       ]),
+      // The FDR methods need a Q: the desired false discovery rate. Only
+      // asked for those methods (the family-wise ones flag at P < 0.05).
+      (a.correction === "fdr" || a.correction === "fdr-bky" || a.correction === "fdr-by") && {
+        id: "q",
+        ask: "What false discovery rate do you want? A row counts as a discovery when its FDR-adjusted P value is below Q: a smaller Q flags fewer rows.",
+        kind: "number",
+        label: "Q (%) =",
+        initial: 5,
+        ...ROUT_Q,
+        // min/max alone are only HTML attributes — the wizard's Next gate
+        // reads `validate`, so without this an out-of-range Q sailed through.
+        validate: routQError,
+        step: 0.5,
+      },
     ],
     finish: (a) => ({
       type: "multiple-t-tests",
@@ -3655,7 +3674,12 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         paired: a.paired === "paired",
         gaussian: a.gaussian === "yes",
         pooledSd: a.gaussian === "yes" && a.pooled === "yes",
-        correction: a.correction as MultipleTTestsParams["correction"],
+        correction: (a.correction as MultipleTTestsParams["correction"] | undefined) ?? "holm-sidak",
+        // FDR params carry a q and the others don't, so each method's cached
+        // results keep their existing keys (as outliers does for q/alpha).
+        ...(a.correction === "fdr" || a.correction === "fdr-bky" || a.correction === "fdr-by"
+          ? { q: (a.q as number | undefined) ?? 5 }
+          : {}),
       }),
     }),
     // The per-row test's assumptions are the two-group ones (the multiple-comparison

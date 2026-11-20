@@ -31762,7 +31762,11 @@
      }
     ],
     "diff": -10,
-    "p": 0.001276083747
+    "rawP": 0.0002552167494,
+    "t": -12.24744871,
+    "df": 4,
+    "p": 0.001276083747,
+    "significant": true
    },
    {
     "group1": "Gene 2",
@@ -31778,7 +31782,11 @@
      }
     ],
     "diff": -0.2,
-    "p": 0.6366132443
+    "rawP": 0.6366132443,
+    "t": -0.5107539185,
+    "df": 3.969981238,
+    "p": 0.6366132443,
+    "significant": false
    },
    {
     "group1": "Gene 3",
@@ -31794,7 +31802,11 @@
      }
     ],
     "diff": 4.366666667,
-    "p": 0.002156673739
+    "rawP": 0.0005391684349,
+    "t": 12.7238448,
+    "df": 3.412086244,
+    "p": 0.002156673739,
+    "significant": true
    },
    {
     "group1": "Gene 4",
@@ -31810,7 +31822,11 @@
      }
     ],
     "diff": -2.833333333,
-    "p": 0.1420032412
+    "rawP": 0.07100162058,
+    "t": -2.794782784,
+    "df": 2.894291755,
+    "p": 0.1420032412,
+    "significant": false
    },
    {
     "group1": "Gene 5",
@@ -31826,7 +31842,11 @@
      }
     ],
     "diff": -4.466666667,
-    "p": 0.006506891372
+    "rawP": 0.002168963791,
+    "t": -14.79782449,
+    "df": 2.37010927,
+    "p": 0.006506891372,
+    "significant": true
    }
   ],
   "comparisonsLabel": "Per-row comparisons (A vs. B)",
@@ -31856,7 +31876,7 @@
     "value": 5
    },
    {
-    "label": "Significant rows (P < 0.05)",
+    "label": "Significant rows (adjusted P < 5%)",
     "value": 4
    }
   ],
@@ -31878,7 +31898,7 @@
     "n": 14
    }
   ],
-  "notes": "Unpaired t test (pooled SD across rows) at each row, FDR-corrected (Benjamini-Hochberg) across rows.",
+  "notes": "Unpaired t test (pooled SD across rows) at each row, FDR-corrected (Benjamini-Hochberg), Q = 5% across rows.",
   "comparisons": [
    {
     "group1": "Gene 1",
@@ -31894,7 +31914,11 @@
      }
     ],
     "diff": -10,
-    "p": 1.036025324e-11
+    "rawP": 2.072050647e-12,
+    "t": -15.85316219,
+    "df": 19,
+    "p": 1.036025324e-11,
+    "significant": true
    },
    {
     "group1": "Gene 2",
@@ -31910,7 +31934,11 @@
      }
     ],
     "diff": -0.2,
-    "p": 0.7546531923
+    "rawP": 0.7546531923,
+    "t": -0.3170632437,
+    "df": 19,
+    "p": 0.7546531923,
+    "significant": false
    },
    {
     "group1": "Gene 3",
@@ -31926,7 +31954,11 @@
      }
     ],
     "diff": 4.366666667,
-    "p": 0.000002231597888
+    "rawP": 0.000001338958733,
+    "t": 6.922547488,
+    "df": 19,
+    "p": 0.000002231597888,
+    "significant": true
    },
    {
     "group1": "Gene 4",
@@ -31942,7 +31974,11 @@
      }
     ],
     "diff": -2.833333333,
-    "p": 0.000920158679
+    "rawP": 0.0007361269432,
+    "t": -4.017524808,
+    "df": 19,
+    "p": 0.000920158679,
+    "significant": true
    },
    {
     "group1": "Gene 5",
@@ -31958,7 +31994,11 @@
      }
     ],
     "diff": -4.466666667,
-    "p": 0.000002231597888
+    "rawP": 9.76586744e-7,
+    "t": -7.08107911,
+    "df": 19,
+    "p": 0.000002231597888,
+    "significant": true
    }
   ],
   "comparisonsLabel": "Per-row comparisons (A vs. B)",
@@ -31977,7 +32017,7 @@
    "detail": "5 rows, each compared",
    "left": []
   },
-  "summary": "“A” and “B” differ significantly in 4 of 5 rows (each row's P value corrected for testing every row)."
+  "summary": "The data don't show a difference between “A” and “B” in any of the 5 rows (each row's P value corrected for testing every row)."
  },
  "multiple-t-tests twoGroups {\"paired\":true,\"gaussian\":true,\"pooledSd\":false,\"correction\":\"none\"}": {
   "testType": "multiple-t-tests",
@@ -32026,7 +32066,11 @@
      }
     ],
     "diff": -10,
-    "p": 0.003316758722
+    "rawP": 0.003316758722,
+    "t": -17.32050808,
+    "df": 2,
+    "p": 0.003316758722,
+    "significant": true
    },
    {
     "group1": "Gene 2",
@@ -32042,7 +32086,11 @@
      }
     ],
     "diff": -0.2,
-    "p": 0.07417990023
+    "rawP": 0.07417990023,
+    "t": -3.464101615,
+    "df": 2,
+    "p": 0.07417990023,
+    "significant": false
    },
    {
     "group1": "Gene 3",
@@ -32058,7 +32106,11 @@
      }
     ],
     "diff": 4.366666667,
-    "p": 0.001801541489
+    "rawP": 0.001801541489,
+    "t": 23.52829457,
+    "df": 2,
+    "p": 0.001801541489,
+    "significant": true
    },
    {
     "group1": "Gene 4",
@@ -32074,7 +32126,11 @@
      }
     ],
     "diff": -2,
-    "p": 0.2951672353
+    "rawP": 0.2951672353,
+    "t": -2,
+    "df": 1,
+    "p": 0.2951672353,
+    "significant": false
    },
    {
     "group1": "Gene 5",
@@ -32090,7 +32146,11 @@
      }
     ],
     "diff": -4.466666667,
-    "p": 0.005358710506
+    "rawP": 0.005358710506,
+    "t": -13.60563861,
+    "df": 2,
+    "p": 0.005358710506,
+    "significant": true
    }
   ],
   "comparisonsLabel": "Per-row comparisons (A vs. B)",
@@ -32158,7 +32218,9 @@
      }
     ],
     "diff": -10,
-    "p": 0.5
+    "rawP": 0.1,
+    "p": 0.5,
+    "significant": false
    },
    {
     "group1": "Gene 2",
@@ -32174,7 +32236,9 @@
      }
     ],
     "diff": -0.2,
-    "p": 0.7
+    "rawP": 0.7,
+    "p": 0.7,
+    "significant": false
    },
    {
     "group1": "Gene 3",
@@ -32190,7 +32254,9 @@
      }
     ],
     "diff": 4.366666667,
-    "p": 0.5
+    "rawP": 0.1,
+    "p": 0.5,
+    "significant": false
    },
    {
     "group1": "Gene 4",
@@ -32206,7 +32272,9 @@
      }
     ],
     "diff": -2.833333333,
-    "p": 0.5
+    "rawP": 0.2,
+    "p": 0.5,
+    "significant": false
    },
    {
     "group1": "Gene 5",
@@ -32222,7 +32290,9 @@
      }
     ],
     "diff": -4.466666667,
-    "p": 0.5
+    "rawP": 0.1,
+    "p": 0.5,
+    "significant": false
    }
   ],
   "comparisonsLabel": "Per-row comparisons (A vs. B)",
@@ -32252,7 +32322,7 @@
     "value": 5
    },
    {
-    "label": "Significant rows (P < 0.05)",
+    "label": "Significant rows (adjusted P < 5%)",
     "value": 0
    }
   ],
@@ -32274,7 +32344,7 @@
     "n": 14
    }
   ],
-  "notes": "Wilcoxon signed-rank test at each row, FDR-corrected (Benjamini-Hochberg) across rows.",
+  "notes": "Wilcoxon signed-rank test at each row, FDR-corrected (Benjamini-Hochberg), Q = 5% across rows.",
   "comparisons": [
    {
     "group1": "Gene 1",
@@ -32290,7 +32360,9 @@
      }
     ],
     "diff": -10,
-    "p": 0.3125
+    "rawP": 0.25,
+    "p": 0.3125,
+    "significant": false
    },
    {
     "group1": "Gene 2",
@@ -32306,7 +32378,9 @@
      }
     ],
     "diff": -0.2,
-    "p": 0.3125
+    "rawP": 0.25,
+    "p": 0.3125,
+    "significant": false
    },
    {
     "group1": "Gene 3",
@@ -32322,7 +32396,9 @@
      }
     ],
     "diff": 4.366666667,
-    "p": 0.3125
+    "rawP": 0.25,
+    "p": 0.3125,
+    "significant": false
    },
    {
     "group1": "Gene 4",
@@ -32338,7 +32414,9 @@
      }
     ],
     "diff": -2,
-    "p": 0.5
+    "rawP": 0.5,
+    "p": 0.5,
+    "significant": false
    },
    {
     "group1": "Gene 5",
@@ -32354,7 +32432,9 @@
      }
     ],
     "diff": -4.466666667,
-    "p": 0.3125
+    "rawP": 0.25,
+    "p": 0.3125,
+    "significant": false
    }
   ],
   "comparisonsLabel": "Per-row comparisons (A vs. B)",
@@ -32363,6 +32443,918 @@
     {
      "name": "A",
      "n": 14
+    },
+    {
+     "name": "B",
+     "n": 14
+    }
+   ],
+   "how": "vs",
+   "detail": "5 rows, each compared",
+   "left": []
+  },
+  "summary": "The data don't show a difference between “A” and “B” in any of the 5 rows (each row's P value corrected for testing every row)."
+ },
+ "multiple-t-tests twoGroups {\"paired\":false,\"gaussian\":true,\"pooledSd\":false,\"correction\":\"holm-sidak\"}": {
+  "testType": "multiple-t-tests",
+  "subtitle": "Multiple t tests",
+  "stats": [
+   {
+    "label": "Rows compared",
+    "value": 5
+   },
+   {
+    "label": "Significant rows (P < 0.05)",
+    "value": 3
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 11.34,
+    "sd": 10.00719741,
+    "sem": 2.583847261,
+    "median": 8.5,
+    "n": 15
+   },
+   {
+    "name": "B",
+    "mean": 12.64285714,
+    "sd": 10.65838163,
+    "sem": 2.84857231,
+    "median": 6.3,
+    "n": 14
+   }
+  ],
+  "notes": "Welch's t test (no equal-SD assumption) at each row, Holm–Šídák-corrected across rows.",
+  "comparisons": [
+   {
+    "group1": "Gene 1",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 0
+     }
+    ],
+    "diff": -10,
+    "rawP": 0.0002552167494,
+    "t": -12.24744871,
+    "df": 4,
+    "p": 0.001275432558,
+    "significant": true
+   },
+   {
+    "group1": "Gene 2",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 1
+     }
+    ],
+    "diff": -0.2,
+    "rawP": 0.6366132443,
+    "t": -0.5107539185,
+    "df": 3.969981238,
+    "p": 0.6366132443,
+    "significant": false
+   },
+   {
+    "group1": "Gene 3",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": 4.366666667,
+    "rawP": 0.0005391684349,
+    "t": 12.7238448,
+    "df": 3.412086244,
+    "p": 0.002154930151,
+    "significant": true
+   },
+   {
+    "group1": "Gene 4",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -2.833333333,
+    "rawP": 0.07100162058,
+    "t": -2.794782784,
+    "df": 2.894291755,
+    "p": 0.136962011,
+    "significant": false
+   },
+   {
+    "group1": "Gene 5",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -4.466666667,
+    "rawP": 0.002168963791,
+    "t": -14.79782449,
+    "df": 2.37010927,
+    "p": 0.006492788364,
+    "significant": true
+   }
+  ],
+  "comparisonsLabel": "Per-row comparisons (A vs. B)",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 15
+    },
+    {
+     "name": "B",
+     "n": 14
+    }
+   ],
+   "how": "vs",
+   "detail": "5 rows, each compared",
+   "left": []
+  },
+  "summary": "“A” and “B” differ significantly in 3 of 5 rows (each row's P value corrected for testing every row)."
+ },
+ "multiple-t-tests twoGroups {\"paired\":false,\"gaussian\":true,\"pooledSd\":false,\"correction\":\"sidak\"}": {
+  "testType": "multiple-t-tests",
+  "subtitle": "Multiple t tests",
+  "stats": [
+   {
+    "label": "Rows compared",
+    "value": 5
+   },
+   {
+    "label": "Significant rows (P < 0.05)",
+    "value": 3
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 11.34,
+    "sd": 10.00719741,
+    "sem": 2.583847261,
+    "median": 8.5,
+    "n": 15
+   },
+   {
+    "name": "B",
+    "mean": 12.64285714,
+    "sd": 10.65838163,
+    "sem": 2.84857231,
+    "median": 6.3,
+    "n": 14
+   }
+  ],
+  "notes": "Welch's t test (no equal-SD assumption) at each row, Šídák-corrected across rows.",
+  "comparisons": [
+   {
+    "group1": "Gene 1",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 0
+     }
+    ],
+    "diff": -10,
+    "rawP": 0.0002552167494,
+    "t": -12.24744871,
+    "df": 4,
+    "p": 0.001275432558,
+    "significant": true
+   },
+   {
+    "group1": "Gene 2",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 1
+     }
+    ],
+    "diff": -0.2,
+    "rawP": 0.6366132443,
+    "t": -0.5107539185,
+    "df": 3.969981238,
+    "p": 0.9936635579,
+    "significant": false
+   },
+   {
+    "group1": "Gene 3",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": 4.366666667,
+    "rawP": 0.0005391684349,
+    "t": 12.7238448,
+    "df": 3.412086244,
+    "p": 0.002692936715,
+    "significant": true
+   },
+   {
+    "group1": "Gene 4",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -2.833333333,
+    "rawP": 0.07100162058,
+    "t": -2.794782784,
+    "df": 2.894291755,
+    "p": 0.3080498912,
+    "significant": false
+   },
+   {
+    "group1": "Gene 5",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -4.466666667,
+    "rawP": 0.002168963791,
+    "t": -14.79782449,
+    "df": 2.37010927,
+    "p": 0.01079787684,
+    "significant": true
+   }
+  ],
+  "comparisonsLabel": "Per-row comparisons (A vs. B)",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 15
+    },
+    {
+     "name": "B",
+     "n": 14
+    }
+   ],
+   "how": "vs",
+   "detail": "5 rows, each compared",
+   "left": []
+  },
+  "summary": "“A” and “B” differ significantly in 3 of 5 rows (each row's P value corrected for testing every row)."
+ },
+ "multiple-t-tests twoGroups {\"paired\":false,\"gaussian\":true,\"pooledSd\":false,\"correction\":\"bonferroni\"}": {
+  "testType": "multiple-t-tests",
+  "subtitle": "Multiple t tests",
+  "stats": [
+   {
+    "label": "Rows compared",
+    "value": 5
+   },
+   {
+    "label": "Significant rows (P < 0.05)",
+    "value": 3
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 11.34,
+    "sd": 10.00719741,
+    "sem": 2.583847261,
+    "median": 8.5,
+    "n": 15
+   },
+   {
+    "name": "B",
+    "mean": 12.64285714,
+    "sd": 10.65838163,
+    "sem": 2.84857231,
+    "median": 6.3,
+    "n": 14
+   }
+  ],
+  "notes": "Welch's t test (no equal-SD assumption) at each row, Bonferroni-corrected across rows.",
+  "comparisons": [
+   {
+    "group1": "Gene 1",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 0
+     }
+    ],
+    "diff": -10,
+    "rawP": 0.0002552167494,
+    "t": -12.24744871,
+    "df": 4,
+    "p": 0.001276083747,
+    "significant": true
+   },
+   {
+    "group1": "Gene 2",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 1
+     }
+    ],
+    "diff": -0.2,
+    "rawP": 0.6366132443,
+    "t": -0.5107539185,
+    "df": 3.969981238,
+    "p": 1,
+    "significant": false
+   },
+   {
+    "group1": "Gene 3",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": 4.366666667,
+    "rawP": 0.0005391684349,
+    "t": 12.7238448,
+    "df": 3.412086244,
+    "p": 0.002695842174,
+    "significant": true
+   },
+   {
+    "group1": "Gene 4",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -2.833333333,
+    "rawP": 0.07100162058,
+    "t": -2.794782784,
+    "df": 2.894291755,
+    "p": 0.3550081029,
+    "significant": false
+   },
+   {
+    "group1": "Gene 5",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -4.466666667,
+    "rawP": 0.002168963791,
+    "t": -14.79782449,
+    "df": 2.37010927,
+    "p": 0.01084481895,
+    "significant": true
+   }
+  ],
+  "comparisonsLabel": "Per-row comparisons (A vs. B)",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 15
+    },
+    {
+     "name": "B",
+     "n": 14
+    }
+   ],
+   "how": "vs",
+   "detail": "5 rows, each compared",
+   "left": []
+  },
+  "summary": "“A” and “B” differ significantly in 3 of 5 rows (each row's P value corrected for testing every row)."
+ },
+ "multiple-t-tests twoGroups {\"paired\":false,\"gaussian\":true,\"pooledSd\":false,\"correction\":\"fdr-bky\",\"q\":5}": {
+  "testType": "multiple-t-tests",
+  "subtitle": "Multiple t tests",
+  "stats": [
+   {
+    "label": "Rows compared",
+    "value": 5
+   },
+   {
+    "label": "Significant rows (adjusted P < 5%)",
+    "value": 4
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 11.34,
+    "sd": 10.00719741,
+    "sem": 2.583847261,
+    "median": 8.5,
+    "n": 15
+   },
+   {
+    "name": "B",
+    "mean": 12.64285714,
+    "sd": 10.65838163,
+    "sem": 2.84857231,
+    "median": 6.3,
+    "n": 14
+   }
+  ],
+  "notes": "Welch's t test (no equal-SD assumption) at each row, FDR-corrected (Benjamini-Krieger-Yekutieli two-stage), Q = 5% across rows.",
+  "comparisons": [
+   {
+    "group1": "Gene 1",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 0
+     }
+    ],
+    "diff": -10,
+    "rawP": 0.0002552167494,
+    "t": -12.24744871,
+    "df": 4,
+    "p": 0.0005104334989,
+    "significant": true
+   },
+   {
+    "group1": "Gene 2",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 1
+     }
+    ],
+    "diff": -0.2,
+    "rawP": 0.6366132443,
+    "t": -0.5107539185,
+    "df": 3.969981238,
+    "p": 0.2546452977,
+    "significant": false
+   },
+   {
+    "group1": "Gene 3",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": 4.366666667,
+    "rawP": 0.0005391684349,
+    "t": 12.7238448,
+    "df": 3.412086244,
+    "p": 0.0005391684349,
+    "significant": true
+   },
+   {
+    "group1": "Gene 4",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -2.833333333,
+    "rawP": 0.07100162058,
+    "t": -2.794782784,
+    "df": 2.894291755,
+    "p": 0.03550081029,
+    "significant": true
+   },
+   {
+    "group1": "Gene 5",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -4.466666667,
+    "rawP": 0.002168963791,
+    "t": -14.79782449,
+    "df": 2.37010927,
+    "p": 0.00144597586,
+    "significant": true
+   }
+  ],
+  "comparisonsLabel": "Per-row comparisons (A vs. B)",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 15
+    },
+    {
+     "name": "B",
+     "n": 14
+    }
+   ],
+   "how": "vs",
+   "detail": "5 rows, each compared",
+   "left": []
+  },
+  "summary": "The data don't show a difference between “A” and “B” in any of the 5 rows (each row's P value corrected for testing every row)."
+ },
+ "multiple-t-tests twoGroups {\"paired\":false,\"gaussian\":true,\"pooledSd\":false,\"correction\":\"fdr-by\"}": {
+  "testType": "multiple-t-tests",
+  "subtitle": "Multiple t tests",
+  "stats": [
+   {
+    "label": "Rows compared",
+    "value": 5
+   },
+   {
+    "label": "Significant rows (adjusted P < 5%)",
+    "value": 3
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 11.34,
+    "sd": 10.00719741,
+    "sem": 2.583847261,
+    "median": 8.5,
+    "n": 15
+   },
+   {
+    "name": "B",
+    "mean": 12.64285714,
+    "sd": 10.65838163,
+    "sem": 2.84857231,
+    "median": 6.3,
+    "n": 14
+   }
+  ],
+  "notes": "Welch's t test (no equal-SD assumption) at each row, FDR-corrected (Benjamini-Yekutieli), Q = 5% across rows.",
+  "comparisons": [
+   {
+    "group1": "Gene 1",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 0
+     }
+    ],
+    "diff": -10,
+    "rawP": 0.0002552167494,
+    "t": -12.24744871,
+    "df": 4,
+    "p": 0.002913724556,
+    "significant": true
+   },
+   {
+    "group1": "Gene 2",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 1
+     }
+    ],
+    "diff": -0.2,
+    "rawP": 0.6366132443,
+    "t": -0.5107539185,
+    "df": 3.969981238,
+    "p": 1,
+    "significant": false
+   },
+   {
+    "group1": "Gene 3",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": 4.366666667,
+    "rawP": 0.0005391684349,
+    "t": 12.7238448,
+    "df": 3.412086244,
+    "p": 0.003077753149,
+    "significant": true
+   },
+   {
+    "group1": "Gene 4",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -2.833333333,
+    "rawP": 0.07100162058,
+    "t": -2.794782784,
+    "df": 2.894291755,
+    "p": 0.2026504588,
+    "significant": false
+   },
+   {
+    "group1": "Gene 5",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -4.466666667,
+    "rawP": 0.002168963791,
+    "t": -14.79782449,
+    "df": 2.37010927,
+    "p": 0.008254112204,
+    "significant": true
+   }
+  ],
+  "comparisonsLabel": "Per-row comparisons (A vs. B)",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 15
+    },
+    {
+     "name": "B",
+     "n": 14
+    }
+   ],
+   "how": "vs",
+   "detail": "5 rows, each compared",
+   "left": []
+  },
+  "summary": "The data don't show a difference between “A” and “B” in any of the 5 rows (each row's P value corrected for testing every row)."
+ },
+ "multiple-t-tests twoGroups {\"paired\":false,\"gaussian\":true,\"pooledSd\":false,\"correction\":\"fdr\",\"q\":1}": {
+  "testType": "multiple-t-tests",
+  "subtitle": "Multiple t tests",
+  "stats": [
+   {
+    "label": "Rows compared",
+    "value": 5
+   },
+   {
+    "label": "Significant rows (adjusted P < 1%)",
+    "value": 3
+   }
+  ],
+  "groups": [
+   {
+    "name": "A",
+    "mean": 11.34,
+    "sd": 10.00719741,
+    "sem": 2.583847261,
+    "median": 8.5,
+    "n": 15
+   },
+   {
+    "name": "B",
+    "mean": 12.64285714,
+    "sd": 10.65838163,
+    "sem": 2.84857231,
+    "median": 6.3,
+    "n": 14
+   }
+  ],
+  "notes": "Welch's t test (no equal-SD assumption) at each row, FDR-corrected (Benjamini-Hochberg), Q = 1% across rows.",
+  "comparisons": [
+   {
+    "group1": "Gene 1",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 0
+     },
+     {
+      "group": "B",
+      "row": 0
+     }
+    ],
+    "diff": -10,
+    "rawP": 0.0002552167494,
+    "t": -12.24744871,
+    "df": 4,
+    "p": 0.001276083747,
+    "significant": true
+   },
+   {
+    "group1": "Gene 2",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 1
+     },
+     {
+      "group": "B",
+      "row": 1
+     }
+    ],
+    "diff": -0.2,
+    "rawP": 0.6366132443,
+    "t": -0.5107539185,
+    "df": 3.969981238,
+    "p": 0.6366132443,
+    "significant": false
+   },
+   {
+    "group1": "Gene 3",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 2
+     },
+     {
+      "group": "B",
+      "row": 2
+     }
+    ],
+    "diff": 4.366666667,
+    "rawP": 0.0005391684349,
+    "t": 12.7238448,
+    "df": 3.412086244,
+    "p": 0.001347921087,
+    "significant": true
+   },
+   {
+    "group1": "Gene 4",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 3
+     },
+     {
+      "group": "B",
+      "row": 3
+     }
+    ],
+    "diff": -2.833333333,
+    "rawP": 0.07100162058,
+    "t": -2.794782784,
+    "df": 2.894291755,
+    "p": 0.08875202573,
+    "significant": false
+   },
+   {
+    "group1": "Gene 5",
+    "group2": "",
+    "cells": [
+     {
+      "group": "A",
+      "row": 4
+     },
+     {
+      "group": "B",
+      "row": 4
+     }
+    ],
+    "diff": -4.466666667,
+    "rawP": 0.002168963791,
+    "t": -14.79782449,
+    "df": 2.37010927,
+    "p": 0.003614939651,
+    "significant": true
+   }
+  ],
+  "comparisonsLabel": "Per-row comparisons (A vs. B)",
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A",
+     "n": 15
     },
     {
      "name": "B",
@@ -42301,7 +43293,11 @@
      }
     ],
     "diff": -1,
-    "p": 0.4963770762
+    "rawP": 0.2878641347,
+    "t": -1.224744871,
+    "df": 4,
+    "p": 0.4963770762,
+    "significant": false
    },
    {
     "group1": "Day 2",
@@ -42317,7 +43313,11 @@
      }
     ],
     "diff": -2,
-    "p": 0.4963770762
+    "rawP": 0.2481885381,
+    "t": -1.732050808,
+    "df": 1.684210526,
+    "p": 0.4963770762,
+    "significant": false
    },
    {
     "group1": "Day 3",
@@ -42333,7 +43333,11 @@
      }
     ],
     "diff": -3,
-    "p": 0.06393492339
+    "rawP": 0.02131164113,
+    "t": -3.674234614,
+    "df": 4,
+    "p": 0.06393492339,
+    "significant": false
    },
    {
     "group1": "Day 4",
@@ -42349,7 +43353,11 @@
      }
     ],
     "diff": -5,
-    "p": 0.01440893044
+    "rawP": 0.003602232609,
+    "t": -6.123724357,
+    "df": 4,
+    "p": 0.01440893044,
+    "significant": true
    },
    {
     "group1": "Day 5",
@@ -42365,7 +43373,11 @@
      }
     ],
     "diff": -7.333333333,
-    "p": 0.006233451284
+    "rawP": 0.001246690257,
+    "t": -8.315218406,
+    "df": 3.92,
+    "p": 0.006233451284,
+    "significant": true
    }
   ],
   "comparisonsLabel": "Per-row comparisons (C vs. A)",

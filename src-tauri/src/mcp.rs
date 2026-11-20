@@ -9909,6 +9909,8 @@ mod tests {
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
         assert!(all.iter().all(|t| t.starts_with("titer_")), "all tools are titer_*");
         // Every tool the router advertises must be in exactly one group.
+        // Four 1.7.4 tools once sat ungrouped — defined, routable, but
+        // never advertised or callable — while the count pin stayed green.
         let listed = TiterMcpServer::new(job_state()).tool_router.list_all();
         let mut routed: Vec<String> = listed.iter().map(|t| t.name.to_string()).collect();
         routed.sort_unstable();

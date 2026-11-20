@@ -2730,6 +2730,15 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["twoGroups", twoGroups, "multiple-t-tests", { paired: true, gaussian: true, pooledSd: false, correction: "none" }],
   ["twoGroups", twoGroups, "multiple-t-tests", { paired: false, gaussian: false, pooledSd: false, correction: "holm" }],
   ["twoGroups", twoGroups, "multiple-t-tests", { paired: true, gaussian: false, pooledSd: false, correction: "fdr" }],
+  // Seq 193: the new Prism corrections on the same table — Holm–Šídák (the
+  // default), Šídák, Bonferroni–Dunn, both FDR two-stage/single-stage
+  // variants, and FDR at a stricter Q.
+  ["twoGroups", twoGroups, "multiple-t-tests", { paired: false, gaussian: true, pooledSd: false, correction: "holm-sidak" }],
+  ["twoGroups", twoGroups, "multiple-t-tests", { paired: false, gaussian: true, pooledSd: false, correction: "sidak" }],
+  ["twoGroups", twoGroups, "multiple-t-tests", { paired: false, gaussian: true, pooledSd: false, correction: "bonferroni" }],
+  ["twoGroups", twoGroups, "multiple-t-tests", { paired: false, gaussian: true, pooledSd: false, correction: "fdr-bky", q: 5 }],
+  ["twoGroups", twoGroups, "multiple-t-tests", { paired: false, gaussian: true, pooledSd: false, correction: "fdr-by" }],
+  ["twoGroups", twoGroups, "multiple-t-tests", { paired: false, gaussian: true, pooledSd: false, correction: "fdr", q: 1 }],
   // Three-way ANOVA (plan 03): the ANOVA table, Tukey on A:B, the two-way
   // ANOVA on the same table (rowGroups must be ignored — no diff), and the
   // empty-cell / bands-don't-tile / no-residual-df errors.
