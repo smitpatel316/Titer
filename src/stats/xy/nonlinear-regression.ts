@@ -1385,7 +1385,7 @@ function comparisonRCode(
       ? `x<-c(x0,x1);y<-c(y0,y1);${spec.fit}`
       : `x<-c(x0,x1);y<-c(y0,y1);g<-rep(1:2,c(length(x0),length(x1)));c0<-coef(m0);c1<-coef(m1)\n` +
         `ms<-lapply(c(mean(c(c0[["${midpoint}"]],c1[["${midpoint}"]])),c0[["${midpoint}"]],c1[["${midpoint}"]]),` +
-        `function(s)tryCatch(nls(y~${indexed},start=list(${start}),control=nls.control(maxiter=200)),error=function(e)tryCatch(nls(y~${indexed},start=list(${start}),control=nls.control(maxiter=200,tol=1e-3)),error=function(e2)NULL))\n` +
+        `function(s)tryCatch(nls(y~${indexed},start=list(${start}),control=nls.control(maxiter=200)),error=function(e)tryCatch(nls(y~${indexed},start=list(${start}),control=nls.control(maxiter=200,tol=1e-3)),error=function(e2)NULL)))\n` +
         `ms<-Filter(Negate(is.null),ms);if(!length(ms))stop("no fit with a shared midpoint")\n` +
         `m<-ms[[which.min(sapply(ms,function(f)sum(residuals(f)^2)))]]`;
   // One set's fit, captured with its prefix (`a`/`b`) before the next fit overwrites `m`.
