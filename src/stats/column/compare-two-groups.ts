@@ -2,12 +2,14 @@
 // Welch's t, a paired t test, their lognormal forms, Mann-Whitney, or Wilcoxon signed-rank,
 // based on `paired` / `gaussian` / `equalVariance` / `ratio` / `lognormal` / `tails`. Mirrors GraphPad Prism's
 // cascade of questions instead of listing every variant as its own test.
-import type { CompareTwoGroupsParams, StatRow } from "../types";
+import type { Column, CompareTwoGroupsParams, StatRow } from "../types";
+import { levelsOf } from "../../lib/dataset";
 import {
   ciRows,
   dataGroups,
   declareGroups,
   identical,
+  missingColumn,
   noDifference,
   noScatter,
   matchedRowsNote,
@@ -116,6 +118,51 @@ function rCode(groups: Group[], p: CompareTwoGroupsParams): string {
   );
 }
 
+/** The two groups a Multiple Variables t test compares: the response variable's values
+ *  split by the grouping variable's levels, in first-appearance order — or what is wrong
+ *  with the assignment. Only the rows holding a response value and a level count; a row
+ *  with a blank level, or a non-numeric response, is left out, as pairUp leaves such
+ *  rows out of a paired test. */
+function splitByGroup(columns: Column[], p: CompareTwoGroupsParams): Group[] | { error: string } {
+  if (p.response === undefined)
+    return { error: "Pick a response variable — run the analysis again and choose the variables." };
+  if (p.groupBy === undefined)
+    return { error: "Pick a grouping variable — run the analysis again and choose the variables." };
+  if (p.paired)
+    return {
+      error:
+        "A paired t test compares two variables row by row — pick the two variables instead of a grouping variable.",
+    };
+  const response = columns.find((c) => c.name === p.response);
+  if (!response) return { error: missingColumn(p.response) };
+  if (!response.values.length) return { error: `“${p.response}” holds no numbers yet.` };
+  const groupBy = columns.find((c) => c.name === p.groupBy);
+  if (!groupBy) return { error: missingColumn(p.groupBy) };
+  const levels = levelsOf(groupBy);
+  if (levels.length < 2)
+    return {
+      error:
+        levels.length === 0
+          ? `“${p.groupBy}” holds no values — a grouping variable needs exactly two levels to compare.`
+          : `“${p.groupBy}” holds only “${levels[0]}” — a grouping variable needs exactly two levels to compare.`,
+    };
+  if (levels.length > 2)
+    return {
+      error: `“${p.groupBy}” has ${levels.length} levels (${levels.map((l) => `“${l}”`).join(", ")}) — a t test compares exactly two groups.`,
+    };
+  const at = (r: number) => groupBy.cells[r]?.trim();
+  const groups = levels.map((level) => ({
+    name: level,
+    values: response.rows.filter((r) => at(r) === level).map((r) => response.byRow[r]!),
+  }));
+  const empty = groups.find((g) => !g.values.length);
+  if (empty)
+    return {
+      error: `“${empty.name}” holds no “${p.response}” values — every group needs values to compare.`,
+    };
+  return groups;
+}
+
 export const compareTwoGroupsSpec: ColumnTestSpec<CompareTwoGroupsParams> = {
   testType: "compare-two-groups",
   minGroups: 2,
@@ -125,6 +172,16 @@ export const compareTwoGroupsSpec: ColumnTestSpec<CompareTwoGroupsParams> = {
   // A ratio, or a logarithm, is of values above 0.
   check: (columns, params) => {
     const p = withDefaults(params);
+    if (p.groupBy !== undefined || p.response !== undefined) {
+      const split = splitByGroup(columns, p);
+      if ("error" in split) return split.error;
+      if (!(p.gaussian && p.lognormal)) return undefined;
+      for (const g of split) {
+        const v = g.values.find((v) => v <= 0);
+        if (v !== undefined) return `The lognormal t test needs values above 0; “${g.name}” holds ${v}.`;
+      }
+      return undefined;
+    }
     if (!(p.gaussian && (p.paired ? p.ratio : p.lognormal))) return undefined;
     const two = dataGroups(columns).slice(0, 2);
     for (const g of p.paired ? pairedGroups(two) : two) {
@@ -133,9 +190,16 @@ export const compareTwoGroupsSpec: ColumnTestSpec<CompareTwoGroupsParams> = {
         return `The ${p.paired ? "ratio" : "lognormal"} t test needs values above 0; “${g.name}” holds ${v}.`;
     }
   },
-  // The first two columns holding data; paired, only rows where both have a value.
-  parseGroups: (columns, params) =>
-    withDefaults(params).paired ? pairedGroups(dataGroups(columns).slice(0, 2)) : dataGroups(columns),
+  // The first two columns holding data; paired, only rows where both have a value;
+  // a Multiple Variables assignment, the response split by the grouping variable.
+  parseGroups: (columns, params) => {
+    const p = withDefaults(params);
+    if (p.groupBy !== undefined || p.response !== undefined) {
+      const split = splitByGroup(columns, p);
+      return "error" in split ? [] : split;
+    }
+    return p.paired ? pairedGroups(dataGroups(columns).slice(0, 2)) : dataGroups(columns);
+  },
   checkGroups: (groups, params) => {
     const p = withDefaults(params);
     const [a, b] = groups;
@@ -238,7 +302,12 @@ export const compareTwoGroupsSpec: ColumnTestSpec<CompareTwoGroupsParams> = {
     return { mode: "difference", estimate, low, high, label: p.paired ? "Mean of differences" : "Difference between means" };
   },
   // Prism compares exactly two data sets: say which two, when the table has more.
+  // A Multiple Variables test's groups are levels of one variable, not columns —
+  // the table's other variables are not "not included" columns.
   notes: (params, groups, columns) => {
+    const p = withDefaults(params);
+    const rows = p.paired ? ` ${matchedRowsNote(dataGroups(columns).slice(0, 2))}` : "";
+    if (p.groupBy !== undefined || p.response !== undefined) return notes(p) + rows;
     const ignored = dataGroups(columns)
       .slice(2)
       .map((c) => c.name);
@@ -246,8 +315,6 @@ export const compareTwoGroupsSpec: ColumnTestSpec<CompareTwoGroupsParams> = {
       ? ` Compares “${groups[0].name}” and “${groups[1].name}”, the first two columns with data; ` +
         `not included: ${ignored.map((n) => `“${n}”`).join(", ")}.`
       : "";
-    const p = withDefaults(params);
-    const rows = p.paired ? ` ${matchedRowsNote(dataGroups(columns).slice(0, 2))}` : "";
     return notes(p) + rows + which;
   },
   subtitle: (params) => subtitle(withDefaults(params)),
