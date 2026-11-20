@@ -2,9 +2,9 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 56 tools: 18 read-only (list/read/job/
+// Settings → AI connections. 57 tools: 18 read-only (list/read/job/
 // activity/cloud reads + feedback + the three 1.7.4 discovery tools)
-// and 38 mutating, via the L0 Rust→frontend dispatch + job queue —
+// and 39 mutating, via the L0 Rust→frontend dispatch + job queue —
 // run-analysis, build-graph, export and cloud tools included (Phase 2).
 // By default only the 5 Phase 1 read tools are advertised or callable:
 // the server-side allowlist (contract §12, `ALLOWLIST_GROUPS` below)
@@ -47,7 +47,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 56 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 57 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -1359,7 +1359,14 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
         id: "project",
         label: "Open and save projects",
         description: "Create, open, save, close and import projects.",
-        tools: &["titer_create_project", "titer_open_project", "titer_save_project", "titer_close_project", "titer_import_prism"],
+        tools: &[
+            "titer_create_project",
+            "titer_open_project",
+            "titer_save_project",
+            "titer_close_project",
+            "titer_import_prism",
+            "titer_import_data_file",
+        ],
     },
     AllowlistGroup {
         id: "tables",
@@ -2178,8 +2185,8 @@ fn utf8_charset(content_type: &str) -> Option<String> {
 // half lives in the frontend dispatcher — Rust never serialises a project
 // (GAP-4). `titer_create_project` / `titer_open_project` need the app
 // handle; `titer_save_project` / `titer_import_prism` /
-// `titer_close_project` enqueue a job and wait for its outcome (see
-// `McpState::await_job`).
+// `titer_import_data_file` / `titer_close_project` enqueue a job and wait
+// for its outcome (see `McpState::await_job`).
 
 /// A project path's format, from its extension — or a plain refusal. URLs
 /// are never local paths: a tool arg that looks like one is refused
@@ -2201,6 +2208,24 @@ fn project_path_format(path: &str) -> Result<&'static str, String> {
         _ => Err(format!(
             "“{path}” is not a project file — open a .hlx or .pzt project, or import a .prism or .pzfx Prism file."
         )),
+    }
+}
+
+/// A data file's format, from its extension — or a plain refusal. URLs
+/// are never local paths: a tool arg that looks like one is refused
+/// outright, not fetched.
+fn data_file_format(path: &str) -> Result<(), String> {
+    if path.contains("://") || path.starts_with("http:") || path.starts_with("https:") {
+        return Err(format!("“{path}” is not a local file path — Titer opens files on this computer, not URLs."));
+    }
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    match ext.as_str() {
+        "csv" | "tsv" | "txt" | "xlsx" => Ok(()),
+        _ => Err(format!("“{path}” is not a data file — import a .csv, .tsv, .txt or .xlsx file.")),
     }
 }
 
@@ -2628,6 +2653,20 @@ pub struct FeedbackArgs {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct OpenProjectArgs {
     pub path: String,
+}
+
+/// A local data file to import as a table (.csv, .tsv, .txt or .xlsx).
+/// Never a URL.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ImportDataFileArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// A local file path (.csv, .tsv, .txt or .xlsx). Never a URL.
+    pub path: String,
+    /// The new table's name. Omit to name it for the file.
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -4696,6 +4735,58 @@ impl TiterMcpServer {
             }
             Err(e) => {
                 self.state.log_call("titer_import_prism", import_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Import a data file (`.csv` / `.tsv` / `.txt` / `.xlsx`) as a new
+    /// table in the open project — the same parsers as File ▸ Import Data
+    /// File…, minus the dialog. Always makes a new table, never appends
+    /// to the active table (MCP never prompts, so the append choice can't
+    /// be asked). The table is named for the file (or `name`), numbered
+    /// when a table already has it. `notes` carries the importer's
+    /// assumptions (header row, row titles, skipped sheets).
+    #[tool(
+        name = "titer_import_data_file",
+        description = "Import a data file (.csv, .tsv, .txt or .xlsx) as a new table in the open project — the same parsers as File ▸ Import Data File…, minus the dialog. Always makes a new table, never appends to the active table (MCP never prompts, so the append choice can't be asked). The table is named for the file (or name), numbered when a table already has it. notes carries the importer's assumptions (header row, row titles, skipped sheets).",
+        annotations(
+            title = "Import data file",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn import_data_file(
+        &self,
+        Parameters(args): Parameters<ImportDataFileArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let snapshots = self.state.snapshots();
+        let last = self.state.lock().last_published.clone();
+        let log_args = serde_json::json!({ "project_id": args.project_id, "path": args.path, "name": args.name });
+        let outcome: Result<serde_json::Value, String> = async {
+            data_file_format(&args.path)?;
+            if let Some(name) = &args.name {
+                if name.trim().is_empty() {
+                    return Err("The table name must not be empty.".into());
+                }
+            }
+            if !std::path::Path::new(&args.path).is_file() {
+                return Err(format!("No file at “{}” — check the path and ask again.", args.path));
+            }
+            let (id, _snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
+            self.run_table_job(&id, "import-data-file", serde_json::json!({ "path": args.path, "name": args.name }))
+                .await
+        }
+        .await;
+        match outcome {
+            Ok(out) => {
+                self.state.log_call("titer_import_data_file", log_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_import_data_file", log_args, false, Some(&e));
                 Err(e)
             }
         }
@@ -6829,10 +6920,10 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes up to 56 tools, gated by the allowlist in Settings → AI Connections \
+                It exposes up to 57 tools, gated by the allowlist in Settings → AI Connections \
                 (contract §12): by default only the 5 read tools below are enabled, and the user \
                 can enable more groups there — a tool that is not listed cannot be called. \
-                18 of the 56 are read-only and 38 change the open project. \
+                18 of the 57 are read-only and 39 change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_project_summary (the same discovery, as counts plus ids and names), \
                 titer_search (find a node by name), \
@@ -8874,8 +8965,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            56,
-            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + three L4 analysis tools (run, re-run, freeze) + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools + four L8 export tools + one feedback tool + three 1.7.4 discovery tools (params, search, summary): {names:?}"
+            57,
+            "five Phase 1 tools + three job tools + three L1 read-only tools + six L2 project tools + nine L3 table tools + three L4 analysis tools (run, re-run, freeze) + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools + four L8 export tools + one feedback tool + three 1.7.4 discovery tools (params, search, summary): {names:?}"
         );
         for name in ["titer_read_job", "titer_list_jobs", "titer_cancel_job"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -8888,6 +8979,7 @@ mod tests {
             "titer_open_project",
             "titer_save_project",
             "titer_import_prism",
+            "titer_import_data_file",
             "titer_close_project",
         ] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -9065,6 +9157,95 @@ mod tests {
         .await;
         assert_eq!(import_hlx["result"]["isError"], true);
         assert!(call_raw_text(&import_hlx).contains("not a Prism file"), "import hlx: {}", call_raw_text(&import_hlx));
+
+        // import-data-file (seq 155 MCP coverage): a Titer file is not a
+        // data file, a URL is refused, and a missing file fails before
+        // anything is enqueued.
+        let (import_hlx_data, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(100, "titer_import_data_file", json!({ "path": "/tmp/Dose.hlx" })),
+        )
+        .await;
+        assert_eq!(import_hlx_data["result"]["isError"], true);
+        assert!(
+            call_raw_text(&import_hlx_data).contains("not a data file"),
+            "import-data-file hlx: {}",
+            call_raw_text(&import_hlx_data)
+        );
+        let (import_url_data, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(101, "titer_import_data_file", json!({ "path": "https://example.com/Dose.csv" })),
+        )
+        .await;
+        assert_eq!(import_url_data["result"]["isError"], true);
+        assert!(
+            call_raw_text(&import_url_data).contains("not a local file path"),
+            "import-data-file url: {}",
+            call_raw_text(&import_url_data)
+        );
+        let (import_missing_data, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(102, "titer_import_data_file", json!({ "path": "/tmp/no-such-dose.csv" })),
+        )
+        .await;
+        assert_eq!(import_missing_data["result"]["isError"], true);
+        assert!(
+            call_raw_text(&import_missing_data).contains("No file at"),
+            "import-data-file missing: {}",
+            call_raw_text(&import_missing_data)
+        );
+        let (import_bad_name, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(103, "titer_import_data_file", json!({ "path": "/tmp/Dose.csv", "name": "  " })),
+        )
+        .await;
+        assert_eq!(import_bad_name["result"]["isError"], true);
+        assert!(
+            call_raw_text(&import_bad_name).contains("must not be empty"),
+            "import-data-file blank name: {}",
+            call_raw_text(&import_bad_name)
+        );
+        // import-data-file round trip, with the frontend simulated in-test:
+        // the completer stands in for the dispatcher (take + complete with
+        // the import's result), which the tool returns as its output.
+        let importer = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for job in importer.take_jobs("project-1") {
+                assert_eq!(job.action, "import-data-file");
+                let _ = importer.complete_job(
+                    "project-1",
+                    &job.job_id,
+                    JobStatus::Done,
+                    Some(json!({ "project_id": "project-1", "table_id": "table_abc", "name": "Dose 1", "table_type": "Column", "rows": 2, "data_columns": 2, "notes": ["The first row was read as column names."] })),
+                    None,
+                    None,
+                );
+            }
+        });
+        // The file must exist for the tool to enqueue the job — write a
+        // small CSV in the scratch dir the test owns.
+        std::fs::write("/tmp/titer-mcp-import-data.csv", "Sample,Control\nS1,1.5\nS2,1.7\n").expect("csv fixture");
+        let (imported, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(104, "titer_import_data_file", json!({ "path": "/tmp/titer-mcp-import-data.csv" })),
+        )
+        .await;
+        assert_eq!(call_text(&imported)["table_id"], "table_abc");
+        assert_eq!(call_text(&imported)["name"], "Dose 1");
+        assert_eq!(call_text(&imported)["rows"], 2);
+        assert_eq!(call_text(&imported)["data_columns"], 2);
+        let _ = std::fs::remove_file("/tmp/titer-mcp-import-data.csv");
         let (save_bad_format, _) = mcp_post(
             &client,
             &url,
@@ -9881,12 +10062,12 @@ mod tests {
 
     #[test]
     fn allowlist_groups_cover_all_tools_once() {
-        // The inventory pin: every tool in exactly one group, 56 total.
+        // The inventory pin: every tool in exactly one group, 57 total.
         // A lane that adds a tool must assign it a group here, or this
         // fails — an ungrouped tool would otherwise be silently hidden.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 56, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 57, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");

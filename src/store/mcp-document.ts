@@ -48,6 +48,10 @@ export interface DocumentIo {
   appVersion: () => Promise<string>;
   readPrismText: (path: string) => Promise<string>;
   readPrismBytes: (path: string) => Promise<Uint8Array>;
+  /** A data file's (`.csv`, `.tsv`, `.txt`) text, for import. */
+  readDataText: (path: string) => Promise<string>;
+  /** A data file's (`.xlsx`) bytes, for import — a ZIP, so text won't do. */
+  readDataBytes: (path: string) => Promise<Uint8Array>;
 }
 
 export const defaultDocumentIo: DocumentIo = {
@@ -55,6 +59,8 @@ export const defaultDocumentIo: DocumentIo = {
   appVersion: native.appVersion,
   readPrismText: native.readPrismText,
   readPrismBytes: native.readPrismBytes,
+  readDataText: native.readDataText,
+  readDataBytes: native.readDataBytes,
 };
 
 export interface DocumentDeps {
@@ -224,19 +230,19 @@ export function importWarnings(report: ConvertReport): string[] {
   return warnings;
 }
 
-/** How long a Prism file read may take before the import job fails instead
- *  of hanging (seq 248): a local read is well under this, even for a large
- *  `.prism` — a longer wait means the read is blocked, not slow. */
-export const PRISM_READ_TIMEOUT_MS = 60_000;
+/** How long a file read may take before the import job fails instead of
+ *  hanging (seq 248): a local read is well under this, even for a large
+ *  file — a longer wait means the read is blocked, not slow. */
+export const FILE_READ_TIMEOUT_MS = 60_000;
 
-/** Reads a Prism file, or fails after `PRISM_READ_TIMEOUT_MS` with the
- *  likely cause (seq 248): on macOS the first read of a file in
- *  Documents, Desktop or Downloads pops a permission prompt ("Titer would
- *  like to access…") and the read waits until it is answered — so an
- *  unanswered prompt used to wedge the whole app. The shell read is async
- *  now, so the app stays responsive; this timeout ends the job in ERROR
- *  instead of leaving it wedged in the serial job drain. */
-export async function readPrismWithTimeout<T>(read: () => Promise<T>, path: string): Promise<T> {
+/** Reads a file, or fails after `FILE_READ_TIMEOUT_MS` with the likely
+ *  cause (seq 248): on macOS the first read of a file in Documents,
+ *  Desktop or Downloads pops a permission prompt ("Titer would like to
+ *  access…") and the read waits until it is answered — so an unanswered
+ *  prompt used to wedge the whole app. The shell read is async now, so
+ *  the app stays responsive; this timeout ends the job in ERROR instead
+ *  of leaving it wedged in the serial job drain. */
+export async function readFileWithTimeout<T>(read: () => Promise<T>, path: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -249,13 +255,22 @@ export async function readPrismWithTimeout<T>(read: () => Promise<T>, path: stri
                 `“${fileName(path)}” couldn't be read in time — macOS may be waiting on a permission prompt for Documents, Desktop or Downloads. Answer the prompt (Allow), or move the file out of the protected folder and retry.`,
               ),
             ),
-          PRISM_READ_TIMEOUT_MS,
+          FILE_READ_TIMEOUT_MS,
         );
       }),
     ]);
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** A Prism file read, with the seq 248 timeout (see `readFileWithTimeout`). */
+export const PRISM_READ_TIMEOUT_MS = FILE_READ_TIMEOUT_MS;
+
+/** Reads a Prism file, or fails after `PRISM_READ_TIMEOUT_MS` with the
+ *  likely cause (seq 248) — see `readFileWithTimeout`. */
+export async function readPrismWithTimeout<T>(read: () => Promise<T>, path: string): Promise<T> {
+  return readFileWithTimeout(read, path);
 }
 
 /** The `import-prism` job: read a Prism file and load it as this window's
