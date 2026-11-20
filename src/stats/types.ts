@@ -407,6 +407,12 @@ export type NonlinearModel = (typeof NONLINEAR_MODELS)[number];
 
 /** Params for "nonlinear-regression" (XY table): which Y data set to fit, and which curve. */
 export type NonlinearWeightScheme = "none" | "1/y" | "1/y2" | "1/x" | "1/x2" | "1/sd2";
+/** The fitting method a nonlinear regression uses (seq 200, Prism's Method
+ *  tab): least squares (every point counts equally), robust (Tukey biweight
+ *  — an outlier-resistant refit), or Poisson (counts — maximum Poisson
+ *  likelihood, by iteratively reweighted least squares with weights 1/μ). */
+export const NONLINEAR_FIT_METHODS = ["least-squares", "robust", "poisson"] as const;
+export type NonlinearFitMethod = (typeof NONLINEAR_FIT_METHODS)[number];
 export interface NonlinearRegressionParams {
   /** Multiple Variables tables: the X variable (the Y variable is `y`). */
   x?: string;
@@ -445,6 +451,9 @@ export interface NonlinearRegressionParams {
    *  higher terms are far less collinear, so their standard errors shrink).
    *  Polynomials only; any other model refuses it. */
   centered?: boolean;
+  /** How the curve is fitted (seq 200): least squares (default), robust
+   *  (Tukey biweight), or Poisson (counts). */
+  fitMethod?: NonlinearFitMethod;
   /** Extra Y series for a shared-parameter (global) fit. nls models only. */
   globalY?: string[];
   /** Which parameters are shared across the global fit's series (omitted:

@@ -1386,6 +1386,17 @@
         "description": "Center the polynomial: fit powers of (X minus the mean of X) instead of powers of X. B0 becomes the fitted Y at the mean X; the fitted values and R² are unchanged. Polynomials only (quadratic through sextic)."
       },
       {
+        "name": "fitMethod",
+        "type": "string",
+        "enum": [
+          "least-squares",
+          "robust",
+          "poisson"
+        ],
+        "required": false,
+        "description": "How the curve is fitted: least squares (default — every point counts equally), robust regression (Tukey biweight — outliers barely move the fit), or Poisson maximum likelihood (for count data)."
+      },
+      {
         "name": "compareWith",
         "type": "string",
         "required": false,

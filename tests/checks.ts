@@ -4777,6 +4777,7 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
     "kind",
     "model",
     "weights",
+    "fitMethod",
     "compareWith",
     "compareModel",
     "global",
@@ -4790,6 +4791,7 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
       "kind",
       "model",
       "weights",
+      "fitMethod",
       "compareWith",
       "compareModel",
       "global",
@@ -4801,7 +4803,7 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
   );
   deepStrictEqual(
     asked({ y: "A", kind: "dose", model: "homologous-competition-logx" }).map((q) => q.id),
-    ["ys", "kind", "model", "weights", "compareWith", "compareModel", "global", "constrain", "ligandConcentration"],
+    ["ys", "kind", "model", "weights", "fitMethod", "compareWith", "compareModel", "global", "constrain", "ligandConcentration"],
   );
   ok(!asked({ y: "A", kind: "dose", model: "sigmoidal-4pl-logx" }).some((q) => q.id === "fitKi"));
   deepStrictEqual(
@@ -5351,6 +5353,153 @@ check("seq 201 centered polynomials in the curve wizard", () => {
   deepStrictEqual(
     wizard.finish({ ys: ["A"], kind: "other", model: "quadratic", centered: "no" }, twoY).params,
     { y: "A", model: "quadratic" },
+  );
+});
+
+// Seq 200: nonlinear fitting methods — least squares, robust (Tukey
+// biweight) and Poisson. Pins computed in Python (scipy) before writing:
+// the robust line pins come from a 25-round Tukey IRLS (c = 4.685, scale
+// 1.4826·MAD, tol 1e-6) and the Poisson exponential-growth pins from
+// scipy's MLE; the IRLS loop in fitModelSpec reproduces both to <1e-4.
+check("seq 200 nonlinear fitting methods: robust and Poisson", async () => {
+  const coef = (out: AnalysisResult, term: string) => out.coefficients?.find((c) => c.term === term)?.estimate;
+  const close = (got: number | null | undefined, want: number, eps: number) =>
+    got != null && Math.abs(got - want) < eps;
+  // Robust: a line through y = 2 + 3x with noise, plus one wild point
+  // (y = 100 at x = 9). Least squares chases it (slope ~6.86); the robust
+  // fit barely notices it (slope ~2.98, intercept ~2.07).
+  const xs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+  const ys = [2.1, 4.8, 8.3, 10.9, 14.2, 16.7, 20.1, 23.0, 25.8, 100];
+  const lineTable: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  };
+  const ls = await runAnalysis("nonlinear-regression", lineTable, { y: "Y", model: "line" });
+  ok(!("error" in ls), `least-squares line failed: ${"error" in ls ? ls.error : ""}`);
+  ok(close(coef(ls, "Slope"), 6.858788, 0.01), `LS slope should be ~6.8588, got ${coef(ls, "Slope")}`);
+  ok(close(coef(ls, "Intercept"), -8.274545, 0.01), `LS intercept should be ~-8.2745, got ${coef(ls, "Intercept")}`);
+  const robust = await runAnalysis("nonlinear-regression", lineTable, {
+    y: "Y",
+    model: "line",
+    fitMethod: "robust",
+  });
+  ok(!("error" in robust), `robust line failed: ${"error" in robust ? robust.error : ""}`);
+  ok(close(coef(robust, "Slope"), 2.980242, 0.01), `robust slope should be ~2.9802, got ${coef(robust, "Slope")}`);
+  ok(
+    close(coef(robust, "Intercept"), 2.068767, 0.01),
+    `robust intercept should be ~2.0688, got ${coef(robust, "Intercept")}`,
+  );
+  ok(
+    robust.notes?.includes("Robust fit") && robust.notes?.includes("Tukey biweight"),
+    `robust notes should name the method, got ${robust.notes}`,
+  );
+  // Poisson: counts growing exponentially (seed 3 Poisson draw around
+  // Y0·exp(K·x) with Y0 = 1.1, K = 0.6; the first count is 1, not 0 — a 0
+  // there would make the growth start Y0 = 0, which nls rejects as a
+  // singular gradient). The Poisson MLE (Y0 ~1.239, K ~0.571) sits well
+  // away from the least-squares fit (Y0 ~2.034, K ~0.490).
+  const px = [0, 1, 2, 3, 4, 5, 6, 7];
+  const py = [1, 2, 2, 5, 12, 31, 39, 61];
+  const countTable: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: px.map((x, i) => ["", String(x), String(py[i])]),
+  };
+  const poisson = await runAnalysis("nonlinear-regression", countTable, {
+    y: "Y",
+    model: "exponential-growth",
+    fitMethod: "poisson",
+  });
+  ok(!("error" in poisson), `Poisson growth failed: ${"error" in poisson ? poisson.error : ""}`);
+  ok(close(coef(poisson, "Y0"), 1.23853, 0.005), `Poisson Y0 should be ~1.2385, got ${coef(poisson, "Y0")}`);
+  ok(close(coef(poisson, "K"), 0.57059, 0.002), `Poisson K should be ~0.5706, got ${coef(poisson, "K")}`);
+  ok(poisson.notes?.includes("Poisson"), `Poisson notes should name the method, got ${poisson.notes}`);
+  const lsGrowth = await runAnalysis("nonlinear-regression", countTable, { y: "Y", model: "exponential-growth" });
+  ok(!("error" in lsGrowth), `LS growth failed: ${"error" in lsGrowth ? lsGrowth.error : ""}`);
+  ok(close(coef(lsGrowth, "Y0"), 2.03439, 0.01), `LS Y0 should be ~2.0344, got ${coef(lsGrowth, "Y0")}`);
+  ok(close(coef(lsGrowth, "K"), 0.48967, 0.005), `LS K should be ~0.4897, got ${coef(lsGrowth, "K")}`);
+  // Validation errors: a bogus method string, Poisson on negative Y, and
+  // the method combined with compareModel, compareWith, global and
+  // interpolation — each refused with a message that names the clash.
+  const badMethod = await runAnalysis("nonlinear-regression", lineTable, {
+    y: "Y",
+    model: "line",
+    fitMethod: "huber" as "robust",
+  });
+  ok("error" in badMethod && badMethod.error.includes("fitting method"), `bad method should be refused, got ${JSON.stringify(badMethod)}`);
+  const negTable: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      ["", "0", "1"],
+      ["", "1", "-2"],
+      ["", "2", "5"],
+    ],
+  };
+  const negPoisson = await runAnalysis("nonlinear-regression", negTable, {
+    y: "Y",
+    model: "line",
+    fitMethod: "poisson",
+  });
+  ok(
+    "error" in negPoisson && negPoisson.error.includes("counts"),
+    `Poisson on negative Y should be refused, got ${JSON.stringify(negPoisson)}`,
+  );
+  const withCompare = await runAnalysis("nonlinear-regression", lineTable, {
+    y: "Y",
+    model: "line",
+    fitMethod: "robust",
+    compareModel: "quadratic",
+  });
+  ok(
+    "error" in withCompare && withCompare.error.includes("comparing models"),
+    `robust + compareModel should be refused, got ${JSON.stringify(withCompare)}`,
+  );
+  const withInterp = await runAnalysis("nonlinear-regression", lineTable, {
+    y: "Y",
+    model: "line",
+    fitMethod: "robust",
+    interpolate: [50],
+  });
+  ok(
+    "error" in withInterp && withInterp.error.includes("interpolation"),
+    `robust + interpolation should be refused, got ${JSON.stringify(withInterp)}`,
+  );
+  // Several Y sets take the method too (two lines, both near the truth).
+  const multiTable: TableData = {
+    columns: ["Title", "X", "A", "B"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i]), String(2 + 3 * x + (i % 2 === 0 ? 0.2 : -0.2))]),
+  };
+  const multi = await runAnalysis("nonlinear-regression", multiTable, {
+    ys: ["A", "B"],
+    model: "line",
+    fitMethod: "robust",
+  });
+  ok(!("error" in multi), `robust multi-Y failed: ${"error" in multi ? multi.error : ""}`);
+  // Several Y sets carry their coefficients with a ` (Set)` suffix.
+  const slopeA = coef(multi, "Slope (A)");
+  const slopeB = coef(multi, "Slope (B)");
+  ok(slopeA != null && Math.abs(slopeA - 2.98) < 0.05, `robust multi-Y slope A should be ~2.98, got ${slopeA}`);
+  ok(slopeB != null && Math.abs(slopeB - 3) < 0.05, `robust multi-Y slope B should be ~3, got ${slopeB}`);
+});
+
+check("seq 200 fitting method in the curve wizard", () => {
+  const wizard = WIZARDS["nonlinear-regression"]!;
+  const twoY = readTable({ columns: ["Title", "X", "A", "B"], rows: [["", "1", "2", "3"]] });
+  const asked = (a: Record<string, string | string[]>) =>
+    wizard.questions(a, twoY).flatMap((q) => (q ? [q] : []));
+  const ids = (a: Record<string, string | string[]>) => asked(a).map((q) => q.id);
+  ok(ids({ kind: "other", model: "line" }).includes("fitMethod"), "line should ask about the fitting method");
+  ok(ids({ kind: "dose", model: "sigmoidal-4pl-logx" }).includes("fitMethod"), "dose-response should ask too");
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "line", fitMethod: "robust" }, twoY).params,
+    { y: "A", model: "line", fitMethod: "robust" },
+  );
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "line", fitMethod: "poisson" }, twoY).params,
+    { y: "A", model: "line", fitMethod: "poisson" },
+  );
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "line", fitMethod: "least-squares" }, twoY).params,
+    { y: "A", model: "line" },
   );
 });
 
@@ -6337,6 +6486,7 @@ check("a nonlinear regression on a Multiple Variables table names its X and Y", 
     "kind",
     "model",
     "weights",
+    "fitMethod",
     "rout",
     "compareModel",
     "constrain",

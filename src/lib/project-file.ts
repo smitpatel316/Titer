@@ -285,6 +285,8 @@ const PARAMS = {
   weights: ["none", "1/y", "1/y2", "1/x", "1/x2", "1/sd2"],
   // Seq 201: centered polynomials (fit powers of X − mean X).
   centered: "yes/no",
+  // Seq 200: the nonlinear fitting method (least squares / robust / Poisson).
+  fitMethod: ["least-squares", "robust", "poisson"],
   compareModel: [...NONLINEAR_MODELS],
   globalY: "names",
   sharedParams: "names",
@@ -895,7 +897,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "area-under-curve": ["baseline", "ignorePeaksBelow", "peaksAboveBaselineOnly", "sets"],
   "row-means-totals": ["ys", "x", "sets"],
   "nonlinear-regression": [
-    "x", "y", "ys", "model", "centered", "compareWith", "compare", "interpolate", "weights", "fixed", "bounds", "fixedConstants",
+    "x", "y", "ys", "model", "centered", "fitMethod", "compareWith", "compare", "interpolate", "weights", "fixed", "bounds", "fixedConstants",
     "boundsConstants", "compareModel", "globalY", "sharedParams", "ligandConcentration", "ligandKd",
     "ligandConcentrationConstant", "ligandKdConstant", "fitKi", "rout", "q", "ecx", "customEquation", "customParameters",
     "sets",

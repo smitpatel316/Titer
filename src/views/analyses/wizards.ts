@@ -2657,6 +2657,13 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             },
           },
         choice("weights", "Weight the points?", weightOptions),
+        // Seq 200: the fitting method — least squares, robust (outliers
+        // barely move the fit), or Poisson (counts).
+        choice("fitMethod", "How should the curve be fitted?", [
+          ["least-squares", "Least squares (recommended — every point counts equally)"],
+          ["robust", "Robust regression (Tukey biweight — outliers barely move the fit)"],
+          ["poisson", "Poisson (for counts — maximum Poisson likelihood)"],
+        ]),
         dose &&
           others.length > 0 &&
           choice("compareWith", "Compare this curve with another data set's?", [
@@ -2883,6 +2890,9 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             : {}),
           ...weights,
           ...(a.centered === "yes" ? { centered: true } : {}),
+          ...(a.fitMethod !== undefined && a.fitMethod !== "least-squares"
+            ? { fitMethod: a.fitMethod as NonlinearRegressionParams["fitMethod"] }
+            : {}),
           ...compareModel,
           ...global,
           ...sharedParams,
