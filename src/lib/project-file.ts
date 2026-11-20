@@ -65,6 +65,7 @@ import {
   EXTRACT_REARRANGE_TARGETS,
   FRACTION_OF_TOTAL_FORMATS,
   FRACTION_OF_TOTAL_TOTALS,
+  GOF_EXPECTED_MODES,
   MONTE_CARLO_STATISTICS,
   MONTE_CARLO_TARGETS,
   NONLINEAR_MODELS,
@@ -258,6 +259,7 @@ type ParamKind =
   | "number"
   | "name"
   | "names"
+  | "numbers"
   | "name-or-names"
   | "name-or-number"
   | "name-and-names"
@@ -338,6 +340,13 @@ const PARAMS = {
   // each runner validates its own.
   test: ["shapiro-wilk", "dagostino-pearson", "anderson-darling", "kolmogorov-smirnov", ...CONTINGENCY_TESTS],
   lognormal: "yes/no",
+  // Chi-square goodness of fit + binomial test (seq 195): how the expected
+  // distribution is given, the per-category values (counts or percentages,
+  // in row order), and the binomial's expected proportion for the first
+  // category (0–1).
+  expectedMode: GOF_EXPECTED_MODES,
+  expectedValues: "numbers",
+  expectedProportion: { min: 0, max: 1 },
   // Principal component analysis (plan 21): the matrix, and how many
   // components to report (0 = all).
   scale: ["correlation", "covariance"], components: "number",
@@ -838,6 +847,12 @@ function readParam(kind: ParamKind, v: unknown, report?: (dropped: number) => vo
     if (kept.length !== v.length) report?.(v.length - kept.length);
     return kept.length ? kept : undefined;
   }
+  if (kind === "numbers") {
+    if (!Array.isArray(v)) return undefined;
+    const kept = v.filter(isFiniteNumber);
+    if (kept.length !== v.length) report?.(v.length - kept.length);
+    return kept.length ? kept : undefined;
+  }
   return Array.isArray(kind) ? oneOf(kind, v) : within(v, kind as Limits);
 }
 
@@ -922,6 +937,8 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   survival: ["curveTest", "correction", "sets"],
   cox: ["reference", "sets"],
   "chi-square": ["test", "trendOrdered", "sets"],
+  "chi-square-gof": ["expectedMode", "expectedValues", "sets"],
+  "binomial-test": ["expectedProportion", "sets"],
   mcnemar: ["continuityCorrection", "sets"],
 };
 
@@ -961,6 +978,10 @@ function checkParamValue(kind: ParamKind, key: string, v: unknown): { value: unk
   if (kind === "names") {
     if (Array.isArray(v) && v.length && v.every((s) => typeof s === "string")) return { value: v };
     return bad("a list of column names");
+  }
+  if (kind === "numbers") {
+    if (Array.isArray(v) && v.length && v.every(isFiniteNumber)) return { value: v };
+    return bad("a list of numbers");
   }
   if (kind === "name-and-names") {
     if (

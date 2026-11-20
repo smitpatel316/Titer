@@ -2444,6 +2444,8 @@ const ANALYSIS_TYPES: &[&str] = &[
     "survival",
     "cox",
     "chi-square",
+    "chi-square-gof",
+    "binomial-test",
     "mcnemar",
 ];
 
@@ -2813,7 +2815,7 @@ pub struct RunAnalysisArgs {
     pub project_id: Option<String>,
     /// The table to analyse, as shown by titer_list_tables.
     pub table_id: String,
-    /// One of the 54 analysis types — never "compare-many-groups" or
+    /// One of the 56 analysis types — never "compare-many-groups" or
     /// "interpolate" (pass a concrete type instead; see the tool text).
     pub analysis_type: String,
     /// Params for that analysis (the AnalysisParams member for the type);
@@ -2861,7 +2863,7 @@ pub struct RerunAnalysisArgs {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct GetAnalysisParamsArgs {
-    /// One of the 53 analysis types — never "compare-many-groups" or
+    /// One of the 56 analysis types — never "compare-many-groups" or
     /// "interpolate" (pass a concrete type instead; see the tool text).
     pub analysis_type: String,
 }
@@ -8075,7 +8077,7 @@ mod tests {
     // ── 1.7.4 P0 tools ───────────────────────────────────────────────────
 
     #[test]
-    fn analysis_params_schema_covers_all_53_types() {
+    fn analysis_params_schema_covers_all_types() {
         let schema = serde_json::from_str::<serde_json::Value>(ANALYSIS_PARAMS_SCHEMA_JSON)
             .expect("analysis-params-schema.json parses");
         let obj = schema.as_object().expect("schema is an object keyed by type");
@@ -8636,8 +8638,8 @@ mod tests {
     // ── Analyses (L4) ────────────────────────────────────────────────────
 
     #[test]
-    fn validate_analysis_type_accepts_the_54_and_refuses_wizard_values() {
-        assert_eq!(ANALYSIS_TYPES.len(), 54, "one entry per AnalysisType: {ANALYSIS_TYPES:?}");
+    fn validate_analysis_type_accepts_all_and_refuses_wizard_values() {
+        assert_eq!(ANALYSIS_TYPES.len(), 56, "one entry per AnalysisType: {ANALYSIS_TYPES:?}");
         for t in [
             "descriptive-statistics",
             "anova",
@@ -8647,6 +8649,8 @@ mod tests {
             "binding-saturation",
             "hierarchical-clustering",
             "chi-square",
+            "chi-square-gof",
+            "binomial-test",
             "mcnemar",
             "cox-proportional-hazards",
         ] {

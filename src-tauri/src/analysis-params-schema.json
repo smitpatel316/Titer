@@ -172,6 +172,30 @@
       }
     ]
   },
+  "binomial-test": {
+    "label": "Binomial test",
+    "min_columns": 1,
+    "offered_on": [
+      "column"
+    ],
+    "params": [
+      {
+        "name": "expectedProportion",
+        "type": "number",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.5,
+        "required": false,
+        "description": "The first category's expected proportion (0–1); omitted: 0.5 (equal)."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
   "bland-altman": {
     "label": "Bland-Altman method comparison",
     "min_columns": 2,
@@ -218,9 +242,38 @@
         "required": false,
         "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
       }
+    ]
+  },
+  "chi-square-gof": {
+    "label": "Chi-square goodness of fit",
+    "min_columns": 1,
+    "offered_on": [
+      "column"
     ],
-    "requires_packages": [
-      "survival"
+    "params": [
+      {
+        "name": "expectedMode",
+        "type": "string",
+        "enum": [
+          "equal",
+          "counts",
+          "percent"
+        ],
+        "default": "equal",
+        "required": false
+      },
+      {
+        "name": "expectedValues",
+        "type": "number[]",
+        "required": false,
+        "description": "One per category, in row order — expected counts (`counts`) or percentages (`percent`); ignored for \"equal\"."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
     ]
   },
   "compare-two-groups": {
@@ -987,9 +1040,6 @@
         "required": false,
         "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
       }
-    ],
-    "requires_packages": [
-      "survival"
     ]
   },
   "mixed-effects": {
