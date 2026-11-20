@@ -126,7 +126,8 @@ function Steps({
     const input = (selector: string) => field.current?.querySelector<HTMLInputElement>(selector);
     (input("input:checked") ?? input("input"))?.focus();
   }, [step]);
-  const asked = (a: Answers) => wizard.questions(a, table, tableType).filter((q): q is Question => q !== false);
+  const asked = (a: Answers) =>
+    wizard.questions(a, table, tableType, data.rowGroups).filter((q): q is Question => q !== false);
   const q = asked(answers)[step];
   // A choice with no options (M18): nothing to pick, so the step is blocked
   // with an explanation — Next stays disabled (value is null) and the user

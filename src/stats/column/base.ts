@@ -284,6 +284,73 @@ export function adjustComparisonRows(rows: ComparisonRow[], method: PAdjustment)
   return rows.map((r, i) => ({ ...r, p: adjusted[i] }));
 }
 
+/** The FDR-approach methods Prism offers after an ANOVA: Benjamini-Hochberg
+ *  (BH), the two-stage Benjamini-Krieger-Yekutieli (BKY), Benjamini-Yekutieli (BY). */
+export type FdrMethod = "bh" | "bky" | "by";
+
+/** The FDR-adjusted P values (q-values) of a family's raw P values, in
+ *  TypeScript (the FDR approach's whole-family step-up needs the family sorted,
+ *  which R can't see one pair at a time — same reason Šídák / Holm–Šídák live
+ *  here). BH: for the i-th smallest P (i = 1…m), the min over k ≥ i of
+ *  `m·p_(k)/k`, capped at 1. BY: the same, times the m-th harmonic number
+ *  (valid under any dependence). BKY (two-stage): a first BH pass at level
+ *  Q/(1+Q) estimates how many of the m nulls are true (m₀ = m − rejections);
+ *  the BH formula then runs with m₀ in place of m — fewer true nulls, more
+ *  power than BH at the same Q. `qPercent` is the FDR threshold Q in percent
+ *  (BKY's first stage is the only part that needs it); null P values pass
+ *  through unadjusted. Pure arithmetic — no R, no package. Cross-checked
+ *  against R's p.adjust ("BH", "BY") in tests/checks.ts. */
+export function adjustFdrPValues(
+  ps: (number | null)[],
+  method: FdrMethod,
+  qPercent = 5,
+): (number | null)[] {
+  const m = ps.length;
+  const indexed = ps.map((p, i) => [p, i] as const).filter(([p]) => p != null);
+  const sorted = [...indexed].sort((a, b) => a[0]! - b[0]!);
+  const out: (number | null)[] = ps.map(() => null);
+  if (sorted.length === 0) return out;
+  // BY's dependence penalty: the m-th harmonic number.
+  const harmonic = method === "by" ? Array.from({ length: m }, (_, i) => 1 / (i + 1)).reduce((a, b) => a + b, 0) : 1;
+  // BKY stage 1: BH at Q/(1+Q) — how many of the m nulls look false.
+  let m0 = m;
+  if (method === "bky") {
+    const q1 = qPercent / 100 / (1 + qPercent / 100);
+    let rejections = 0;
+    sorted.forEach(([p], rank) => {
+      if (p! <= ((rank + 1) / m) * q1) rejections = rank + 1;
+    });
+    // All rejected in stage 1: at most one null can still be true.
+    m0 = Math.max(m - rejections, 1);
+  }
+  // Step-up: the adjusted value of the i-th smallest P is the smallest of
+  // `factor·m₀·p_(k)/k` over k ≥ i (scanning from the largest down, keeping the
+  // running minimum), capped at 1 — so the adjusted values never decrease as
+  // the raw P values grow.
+  let runningMin = Infinity;
+  for (let rank = sorted.length - 1; rank >= 0; rank--) {
+    const [p, i] = sorted[rank];
+    runningMin = Math.min(runningMin, Math.min(1, (harmonic * m0 * p!) / (rank + 1)));
+    out[i] = runningMin;
+  }
+  return ps.map((p, i) => (p == null ? null : out[i]));
+}
+
+/** Adjust a comparisons table's P values by the FDR approach (same rows back,
+ *  new P values) — the FDR counterpart of `adjustComparisonRows`. */
+export function adjustFdrComparisonRows(
+  rows: ComparisonRow[],
+  method: FdrMethod,
+  qPercent = 5,
+): ComparisonRow[] {
+  const adjusted = adjustFdrPValues(
+    rows.map((r) => r.p),
+    method,
+    qPercent,
+  );
+  return rows.map((r, i) => ({ ...r, p: adjusted[i] }));
+}
+
 /** The comparisons table: each pair's names, its difference of means and its P value,
  *  and its 95% CI (`lo_i_j`/`hi_i_j`) when the test computed one. */
 function buildComparisons(

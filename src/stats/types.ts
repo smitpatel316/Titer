@@ -185,12 +185,41 @@ export const ENZYME_INHIBITION_MODELS = [
 export const DOSE_RESPONSE_SPECIAL_MODELS = ["ec50-shift", "schild", "schild-slope-1", "operational-partial"] as const;
 export const CORRELATION_MODES = ["x-vs-every-y", "two-datasets", "matrix"] as const;
 export const TWO_WAY_DESIGNS = ["ordinary", "repeated-measures", "nonparametric"] as const;
-export const POSTHOC_TARGETS = ["groups", "rows"] as const;
+/** The FDR-approach methods Prism offers after an ANOVA: Benjamini-Hochberg,
+ *  the two-stage Benjamini-Krieger-Yekutieli, and Benjamini-Yekutieli. */
+export const FDR_METHODS = ["bh", "bky", "by"] as const;
+/** The false-discovery rate Q (%), the FDR approach's threshold: a comparison
+ *  is a discovery when its FDR-adjusted P falls below Q. Same range as ROUT's
+ *  Q (0.01–50%): below it almost nothing is ever a discovery, above it nearly
+ *  every comparison with P < 1 is. */
+export const FDR_Q = { min: 0.01, max: 50 };
+/** The FDR Q (%) must lie in 0.01–50 — shared by the wizard question and the
+ *  runners so both reject the same values with the same message. */
+export function fdrQError(q: number): string | undefined {
+  return q >= 0.01 && q <= 50 ? undefined : "Q must be between 0.01 and 50.";
+}
+/** What a two-way ANOVA's comparisons compare (seq 192): groups within each
+ *  row and rows within each group (the simple effects, as before), every cell
+ *  mean against every other cell mean, or the marginal means — the group means
+ *  averaged over rows (main effect of the groups) and the row means averaged
+ *  over groups (main effect of the rows). */
+export const POSTHOC_TARGETS = ["groups", "rows", "cells", "group-means", "row-means"] as const;
 /** A two-way ANOVA's comparisons: those of a repeated-measures one, and on the ordinary one
- *  each against a control (Dunnett) or every pair without equal SDs (Games-Howell). */
-const TWO_WAY_POSTHOCS = [...POSTHOCS, "dunnett", "games-howell"] as const;
+ *  each against a control (Dunnett) or every pair without equal SDs (Games-Howell); or the
+ *  FDR approach instead of a family-wise correction (raw P values, Benjamini-Hochberg /
+ *  Benjamini-Krieger-Yekutieli / Benjamini-Yekutieli adjusted, discoveries at Q%). */
+const TWO_WAY_POSTHOCS = [...POSTHOCS, "dunnett", "games-howell", "fdr"] as const;
 /** The terms a three-way ANOVA's post-hoc can follow up (one term only). */
 export const THREE_WAY_TERMS = ["A", "B", "C", "A:B", "A:C", "B:C", "A:B:C"] as const;
+/** A three-way ANOVA's comparisons: the full FWER suite (Tukey, Bonferroni,
+ *  Šídák, Holm–Šídák, Fisher's LSD), each against a control (Dunnett), every
+ *  pair without equal SDs (Games-Howell), or the FDR approach. */
+export const THREE_WAY_POSTHOCS = [...POSTHOCS, "dunnett", "games-howell", "fdr"] as const;
+/** How a three-way ANOVA's post-hoc treats an interaction term: `term`
+ *  compares all its level combinations as one family; `simple` compares the
+ *  first factor's levels within each level of the term's last factor (simple
+ *  effects — each level its own family). On a main effect the two are the same. */
+export const THREE_WAY_POSTHOC_SCOPES = ["term", "simple"] as const;
 export const CORRECTIONS = ["holm", "fdr", "none"] as const;
 export const CURVE_TESTS = ["logrank", "trend", "gehan"] as const;
 /** A contingency table's test: Fisher's exact test or the chi-square (Yates' or not) on a
@@ -604,13 +633,26 @@ export interface ExtractRearrangeParams {
  *  incomplete replicate columns are dropped), or "nonparametric" (Scheirer-Ray-Hare).
  *  `posthoc` (parametric designs only) pairwise-compares either groups within each
  *  row or rows within each group ("row means"), Tukey-, Bonferroni-, Šídák- or
- *  Holm–Šídák-corrected, or uncorrected (Fisher's LSD). */
+ *  Holm–Šídák-corrected, or uncorrected (Fisher's LSD); or every cell mean against
+ *  every other (`cells`), or the marginal group / row means (`group-means` /
+ *  `row-means`). `posthoc: "fdr"` runs the FDR approach instead of a family-wise
+ *  correction (see `fdrMethod` / `fdrQ`); Dunnett and Games-Howell are ordinary-design
+ *  only, and the cell / marginal-mean targets are ordinary-design only too. */
 export interface TwoWayAnovaParams {
   design: (typeof TWO_WAY_DESIGNS)[number];
   posthoc: (typeof TWO_WAY_POSTHOCS)[number];
-  /** Dunnett's control: a group (groups compared within each row) or a row, by its name. */
+  /** Dunnett's control, by its name: a group (groups compared within each row),
+   *  a row (rows within each group), a cell ("Group (Row)"), or a marginal group
+   *  / row mean. */
   control?: string;
   posthocTarget: (typeof POSTHOC_TARGETS)[number];
+  /** The FDR approach's method (`posthoc: "fdr"` only): Benjamini-Hochberg,
+   *  Benjamini-Krieger-Yekutieli (two-stage) or Benjamini-Yekutieli; omitted,
+   *  Benjamini-Hochberg. */
+  fdrMethod?: (typeof FDR_METHODS)[number];
+  /** The FDR approach's Q (%), the maximum false-discovery rate (`posthoc:
+   *  "fdr"` only); omitted, 5. */
+  fdrQ?: number;
   /** Repeated measures: false (new analyses) corrects the row and interaction effects by the
    *  Geisser-Greenhouse epsilon, and compares on each comparison's own error; absent (older
    *  files) or true, sphericity is assumed. */
@@ -619,13 +661,28 @@ export interface TwoWayAnovaParams {
 
 /** Params for "three-way-anova" on a Grouped table's column-groups × row
  *  position × row bands: ordinary (parametric) only. `posthoc` pairwise-compares
- *  the means of one term (`posthocTerm`, required when posthoc !== "none"),
- *  Tukey- or Bonferroni-corrected — the Šídák / Holm–Šídák / LSD options in
- *  POSTHOCS are not offered here, and the runner refuses them rather than
- *  silently running Bonferroni. */
+ *  the means of one term (`posthocTerm`, required when posthoc !== "none"):
+ *  Tukey, Bonferroni, Šídák, Holm–Šídák, Fisher's LSD, Dunnett (each against
+ *  `control`), Games-Howell, or the FDR approach (`fdrMethod` / `fdrQ`).
+ *  `posthocScope` splits an interaction term into simple effects (the first
+ *  factor's levels within each level of the term's last factor); on a main
+ *  effect it is the same as comparing the whole term. */
 export interface ThreeWayAnovaParams {
-  posthoc: (typeof POSTHOCS)[number];
+  posthoc: (typeof THREE_WAY_POSTHOCS)[number];
   posthocTerm?: (typeof THREE_WAY_TERMS)[number];
+  /** Interaction terms only: "term" (default) compares all the term's level
+   *  combinations as one family; "simple" compares simple effects. */
+  posthocScope?: (typeof THREE_WAY_POSTHOC_SCOPES)[number];
+  /** Dunnett's control: a level (or level combination) of the followed-up term,
+   *  by its result-table label — within each family when the scope is simple. */
+  control?: string;
+  /** The FDR approach's method (`posthoc: "fdr"` only): Benjamini-Hochberg,
+   *  Benjamini-Krieger-Yekutieli (two-stage) or Benjamini-Yekutieli; omitted,
+   *  Benjamini-Hochberg. */
+  fdrMethod?: (typeof FDR_METHODS)[number];
+  /** The FDR approach's Q (%), the maximum false-discovery rate (`posthoc:
+   *  "fdr"` only); omitted, 5. */
+  fdrQ?: number;
 }
 
 /** Params for "nested-anova" on a Nested table: optional post-hoc pairwise

@@ -2399,8 +2399,15 @@
         "name": "posthoc",
         "type": "string",
         "enum": [
+          "none",
           "tukey",
-          "bonferroni"
+          "bonferroni",
+          "sidak",
+          "holm-sidak",
+          "lsd",
+          "dunnett",
+          "games-howell",
+          "fdr"
         ],
         "default": "none",
         "required": false
@@ -2418,6 +2425,41 @@
           "A:B:C"
         ],
         "required": false
+      },
+      {
+        "name": "posthocScope",
+        "type": "string",
+        "enum": [
+          "term",
+          "simple"
+        ],
+        "required": false,
+        "description": "Interaction terms only: \"term\" (default) compares all the term's level combinations as one family; \"simple\" compares simple effects."
+      },
+      {
+        "name": "control",
+        "type": "string",
+        "required": false,
+        "description": "Dunnett's control: a level (or level combination) of the followed-up term, by its result-table label — within each family when the scope is simple."
+      },
+      {
+        "name": "fdrMethod",
+        "type": "string",
+        "enum": [
+          "bh",
+          "bky",
+          "by"
+        ],
+        "required": false,
+        "description": "The FDR approach's method (`posthoc: \"fdr\"` only): Benjamini-Hochberg, Benjamini-Krieger-Yekutieli (two-stage) or Benjamini-Yekutieli; omitted, Benjamini-Hochberg."
+      },
+      {
+        "name": "fdrQ",
+        "type": "number",
+        "min": 0.01,
+        "max": 50.0,
+        "required": false,
+        "description": "The FDR approach's Q (%), the maximum false-discovery rate (`posthoc: \"fdr\"` only); omitted, 5."
       },
       {
         "name": "sets",
@@ -2550,7 +2592,8 @@
           "holm-sidak",
           "lsd",
           "dunnett",
-          "games-howell"
+          "games-howell",
+          "fdr"
         ],
         "required": true
       },
@@ -2559,7 +2602,10 @@
         "type": "string",
         "enum": [
           "groups",
-          "rows"
+          "rows",
+          "cells",
+          "group-means",
+          "row-means"
         ],
         "required": true
       },
@@ -2568,6 +2614,31 @@
         "type": "boolean",
         "required": false,
         "description": "Repeated measures: false (new analyses) corrects the row and interaction effects by the Geisser-Greenhouse epsilon, and compares on each comparison's own error; absent (older files) or true, sphericity is assumed."
+      },
+      {
+        "name": "control",
+        "type": "string",
+        "required": false,
+        "description": "Dunnett's control, by its name: a group (groups compared within each row), a row (rows within each group), a cell (\"Group (Row)\"), or a marginal group / row mean."
+      },
+      {
+        "name": "fdrMethod",
+        "type": "string",
+        "enum": [
+          "bh",
+          "bky",
+          "by"
+        ],
+        "required": false,
+        "description": "The FDR approach's method (`posthoc: \"fdr\"` only): Benjamini-Hochberg, Benjamini-Krieger-Yekutieli (two-stage) or Benjamini-Yekutieli; omitted, Benjamini-Hochberg."
+      },
+      {
+        "name": "fdrQ",
+        "type": "number",
+        "min": 0.01,
+        "max": 50.0,
+        "required": false,
+        "description": "The FDR approach's Q (%), the maximum false-discovery rate (`posthoc: \"fdr\"` only); omitted, 5."
       },
       {
         "name": "sets",
