@@ -27,10 +27,12 @@ import {
   validateFigureSize,
 } from "../../lib/figure";
 import { useProjectStore } from "../../store/use-project-store";
+import { useZoom, ZOOM_LIMITS } from "../../store/use-zoom";
 import { fitZoom } from "../../store/use-layout";
 import { GRAPHS } from "../graphs";
-import { DEFAULT_GRAPH_OPTIONS, type FigurePanel, type ProjectNode, type Resolution } from "../../store/types";
+import { DEFAULT_GRAPH_OPTIONS, clamp, type FigurePanel, type ProjectNode, type Resolution } from "../../store/types";
 import { PanelPlot } from "./panel-plot";
+import { DrawingObjectsLayer } from "../../components/drawing-objects";
 import { copyFigureImage, saveFigureImage, sendFigureToOffice } from "./figure-export";
 import type { OfficeTarget } from "../../lib/office-export";
 import { EXPORT_FORMATS, saveGraphImage, type ExportFormat } from "../graphs/graph-export";
@@ -60,16 +62,47 @@ export function FigureView({ node }: { node: ProjectNode }) {
   const [sizeError, setSizeError] = React.useState<string | null>(null);
   // The drawn panel elements, for per-panel export (the graph's own export path).
   const plottedRef = React.useRef(new Map<string, HTMLElement>());
-  // The view-only fit, as in the graph view: the figure is scaled to the visible
-  // pane (the inspector is a flex sibling, so the pane narrows when it opens).
+  // The view-only zoom, shared with the View ▸ Zoom menu (seq 239): the
+  // figure is scaled to the visible pane until the user zooms by hand
+  // (Ctrl+scroll), which sets an explicit zoom; Reset returns to the fit.
   // The saved figure size never changes — fitting only scales the view.
   const canvasRef = React.useRef<HTMLDivElement>(null);
-  const [fit, setFit] = React.useState(1);
+  const { zoom, explicit: explicitZoom, setFit, setExplicit: setExplicitZoom } = useZoom(node.id);
+  const zoomRef = React.useRef(zoom);
+  zoomRef.current = zoom;
+
+  // A frozen figure (seq 237) draws each panel from its snapshot: the
+  // panels read their parent tables' data, so hand them the snapshot
+  // tables instead of the live ones. Exports still use the live data
+  // (the exporters render from the project, not the view).
+  const figureNodes = React.useMemo(() => {
+    if (!node.frozen || !node.frozenDataByGraph) return nodes;
+    const next = { ...nodes };
+    for (const [graphId, data] of Object.entries(node.frozenDataByGraph)) {
+      const graph = nodes[graphId];
+      const parent = graph?.parentId ? nodes[graph.parentId] : undefined;
+      if (parent) next[parent.id] = { ...parent, data };
+    }
+    return next;
+  }, [nodes, node.frozen, node.frozenDataByGraph]);
+
+  // Ctrl+scroll zooms by hand, as in the graph view (seq 239).
+  React.useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      setExplicitZoom(clamp(zoomRef.current * (1 - e.deltaY * 0.01), ZOOM_LIMITS));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   const graphs = Object.values(nodes).filter((n) => n.type === "graph");
   const available = graphs.filter((g) => !panels.some((p) => p.graphId === g.id));
-  const missing = missingPanels(panels, nodes);
-  const legend = sharedLegendCheck(panels, nodes);
+  const missing = missingPanels(panels, figureNodes);
+  const legend = sharedLegendCheck(panels, figureNodes);
   const dupes = duplicateLabels(panels);
 
   const addPanel = (graphId: string) => {
@@ -184,11 +217,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
   React.useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
-    const update = () =>
-      setFit((prev) => {
-        const next = fitZoom(el.clientWidth, el.clientHeight, widthPx, heightPx);
-        return next === prev ? prev : next;
-      });
+    const update = () => setFit(fitZoom(el.clientWidth, el.clientHeight, widthPx, heightPx));
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
@@ -426,15 +455,15 @@ export function FigureView({ node }: { node: ProjectNode }) {
                     Duplicate label{ dupes.length === 1 ? "" : "s" }: {dupes.join(", ")}.
                   </p>
                 )}
-                {/* The grid at its saved size, scaled by the fit: the wrapper takes the
+                {/* The grid at its saved size, scaled by the zoom: the wrapper takes the
                     scaled size, so the view scrolls to every edge of it. */}
-                <div style={{ width: widthPx * fit, height: heightPx * fit }}>
+                <div style={{ width: widthPx * zoom, height: heightPx * zoom }}>
                   <div
-                    className="grid bg-white shadow-sheet"
+                    className="relative grid bg-white shadow-sheet"
                     style={{
                       width: widthPx,
                       height: heightPx,
-                      transform: `scale(${fit})`,
+                      transform: `scale(${zoom})`,
                       transformOrigin: "0 0",
                       gridTemplateColumns: `repeat(${grid.cols}, 1fr)`,
                       gridTemplateRows: `repeat(${grid.rows}, 1fr)`,
@@ -469,7 +498,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
                           <>
                             <PanelPlot
                               graph={graph}
-                              nodes={nodes}
+                              nodes={figureNodes}
                               width={w}
                               height={h}
                               hideLegend={sharedLegend === "shared" && legend.ok}
@@ -502,6 +531,9 @@ export function FigureView({ node }: { node: ProjectNode }) {
                       </div>
                     );
                   })}
+                  {/* Drawing objects (seq 238), pinned to the figure in its own
+                      px: screen-only, like on a graph, never exported. */}
+                  <DrawingObjectsLayer node={node} zoom={zoom} />
                 </div>
                 </div>
                 {sharedLegend === "shared" && legend.entries && (
@@ -518,6 +550,16 @@ export function FigureView({ node }: { node: ProjectNode }) {
             </div>
           )}
         </div>
+        {explicitZoom !== null && (
+          <button
+            type="button"
+            onClick={() => setExplicitZoom(null)}
+            title="Reset zoom to fit"
+            className="absolute right-3 bottom-3 z-20 rounded-full bg-black/70 px-2.5 py-1 text-small text-white hover:bg-black/80"
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+        )}
       </div>
     </WithInspector>
   );

@@ -20,6 +20,7 @@ import {
 } from "../../store/types";
 import type { BindingKineticsParams, BindingSaturationParams, DoseResponseSpecialParams, EnzymeInhibitionParams, LinearRegressionParams, SimpleLogisticRegressionParams, NonlinearRegressionParams, CoxPHParams, PoissonRegressionParams, DemingRegressionParams } from "../../stats/types";
 import { useProjectStore } from "../../store/use-project-store";
+import { useZoom, ZOOM_LIMITS } from "../../store/use-zoom";
 import { groupsOf, isGrouped, readTable, splitXY, xyProblem, type Column } from "../../lib/dataset";
 import { summaryTableProblem } from "../../lib/summary-format";
 import { paletteOf } from "../../lib/palettes";
@@ -44,6 +45,7 @@ import { useStartAnalysis } from "../analyses/use-analysis-launcher";
 import { loadPlotly } from "./plotly";
 import { fitZoom } from "../../store/use-layout";
 import { AddFloatingNoteButton, FloatingNotesLayer } from "../../components/floating-notes";
+import { DrawingObjectsLayer } from "../../components/drawing-objects";
 import { addRegression } from "./regression-overlay";
 import { addDeming } from "./deming-overlay";
 import { addObservedFitted } from "./observed-fitted";
@@ -70,8 +72,8 @@ import { genesNamed, volcanoAxes, volcanoPair } from "./volcano";
 import { titleCase } from "../../lib/format";
 import { tooManyBins } from "../../lib/histogram";
 
-// The view's zoom, 25 % to 400 %, as in Pages; WebGL's resolution, which Plotly takes up to 4.
-const ZOOM = { min: 0.25, max: 4 };
+// WebGL's resolution, which Plotly takes up to 4. The zoom range lives in
+// the shared zoom store (src/store/use-zoom.tsx), 25 % to 400 % as in Pages.
 const GL_RATIO = { min: 1, max: 4 };
 
 type Size = { width: number; height: number };
@@ -82,7 +84,8 @@ export function GraphView({ node }: { node: ProjectNode }) {
   const type = node.graphType!;
   const family = GRAPHS[type].family;
   const parent = node.parentId ? nodes[node.parentId] : undefined;
-  const data = parent?.data;
+  // A frozen graph (seq 237) draws its snapshot, not the live table.
+  const data = node.frozen && node.frozenData ? node.frozenData : parent?.data;
   // Merged over the defaults, so options added after a file was saved have a value.
   const options = { ...DEFAULT_GRAPH_OPTIONS, ...node.graphOptions };
   // The project's info sheets, for the live `{{Constant}}` hooks below.
@@ -113,12 +116,11 @@ export function GraphView({ node }: { node: ProjectNode }) {
   // The saved size, and a live preview while dragging an axis.
   const size: Size = { width: options.width, height: options.height };
   const [drag, setDrag] = React.useState<Size | null>(null);
-  // The view-only fit: the sheet is scaled to the visible pane until the user
-  // zooms by hand (Ctrl+scroll/pinch), which sets an explicit zoom; Reset returns
-  // to the fit. The saved size never changes — fitting only scales the view.
-  const [fit, setFit] = React.useState(1);
-  const [explicitZoom, setExplicitZoom] = React.useState<number | null>(null);
-  const zoom = explicitZoom ?? fit;
+  // The view-only zoom, shared with the View ▸ Zoom menu (seq 239): the
+  // sheet is scaled to the visible pane until the user zooms by hand
+  // (Ctrl+scroll/pinch), which sets an explicit zoom; Reset returns to the
+  // fit. The saved size never changes — fitting only scales the view.
+  const { zoom, explicit: explicitZoom, fit, setFit, setExplicit: setExplicitZoom } = useZoom(node.id);
   const zoomRef = React.useRef(zoom);
   zoomRef.current = zoom;
   // The margins Plotly drew, which grow for long labels and place the resize grab
@@ -589,7 +591,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
           fx: (e.clientX - r.left) / r.width,
           fy: (e.clientY - r.top) / r.height,
         };
-      setExplicitZoom((z) => clamp((z ?? zoomRef.current) * (1 - e.deltaY * 0.01), ZOOM));
+      setExplicitZoom(clamp(zoomRef.current * (1 - e.deltaY * 0.01), ZOOM_LIMITS));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -904,11 +906,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
   React.useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
-    const update = () =>
-      setFit((prev) => {
-        const next = fitZoom(el.clientWidth, el.clientHeight, boxRef.current.width, boxRef.current.height);
-        return next === prev ? prev : next;
-      });
+    const update = () => setFit(fitZoom(el.clientWidth, el.clientHeight, boxRef.current.width, boxRef.current.height));
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
@@ -1057,6 +1055,9 @@ export function GraphView({ node }: { node: ProjectNode }) {
                       scaled sheet they zoom with it, and the exporters render the
                       Plotly figure only, so they never reach an exported image. */}
                   <FloatingNotesLayer node={node} />
+                  {/* Drawing objects (seq 238), the same way: pinned to the sheet,
+                      screen-only, never exported. */}
+                  <DrawingObjectsLayer node={node} zoom={zoom} />
                 </div>
               </div>
             </div>
