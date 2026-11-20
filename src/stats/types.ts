@@ -39,6 +39,7 @@ export type AnalysisType =
   | "enzyme-inhibition"
   | "dose-response-special"
   | "outliers"
+  | "p-value-stack"
   | "chi-square"
   | "survival"
   | "cox"
@@ -206,6 +207,43 @@ export const ROUT_Q = { min: 0.01, max: 50 };
  *  so both reject the same values with the same message. */
 export function routQError(q: number): string | undefined {
   return q >= 0.01 && q <= 50 ? undefined : "Q must be between 0.01 and 50.";
+}
+
+/** The methods "Analyze a stack of P values" offers (Prism Statistics Guide,
+ *  "How to: Analyzing a stack of P values"): the family-wise (statistical
+ *  significance) methods — Bonferroni-Dunn, Bonferroni-Šídák, Holm,
+ *  Holm–Šídák — and the false-discovery-rate methods — Benjamini–Hochberg,
+ *  Benjamini, Krieger and Yekutieli (adaptive two-stage), Benjamini–
+ *  Yekutieli. */
+export const P_VALUE_STACK_FWER_METHODS = ["bonferroni", "sidak", "holm", "holm-sidak"] as const;
+export const P_VALUE_STACK_FDR_METHODS = ["bh", "bky", "by"] as const;
+export const P_VALUE_STACK_METHODS = [...P_VALUE_STACK_FWER_METHODS, ...P_VALUE_STACK_FDR_METHODS] as const;
+export type PValueStackMethod = (typeof P_VALUE_STACK_METHODS)[number];
+/** Whether the method controls the false discovery rate (else it controls
+ *  the family-wise error rate). */
+export const isFdrPValueMethod = (method: string): boolean =>
+  (P_VALUE_STACK_FDR_METHODS as readonly string[]).includes(method);
+
+/** The family-wise alpha of a stack of P values must lie in 0.001–0.5, the
+ *  range the project file clamps it to: below that nothing is ever
+ *  significant, above it the family-wise claim is meaningless. Shared by the
+ *  wizard question and the runner so both reject the same values with the
+ *  same message. */
+export function pValueAlphaError(alpha: number): string | undefined {
+  return alpha >= 0.001 && alpha <= 0.5 ? undefined : "Alpha must be between 0.001 and 0.5.";
+}
+
+/** Params for "p-value-stack": Prism's "Analyze a stack of P values" — P
+ *  values computed elsewhere, entered in a column, adjusted for multiplicity.
+ *  `method` picks the correction (default Holm–Šídák, Prism's recommendation);
+ *  `q` is the FDR Q (%) for the FDR methods (default 5); `alpha` is the
+ *  family-wise significance level for the FWER methods (default 0.05). */
+export interface PValueStackParams {
+  method?: PValueStackMethod;
+  /** Desired false discovery rate, in percent (FDR methods only). */
+  q?: number;
+  /** Family-wise significance level (FWER methods only). */
+  alpha?: number;
 }
 
 /** Params for "compare-two-groups": resolves to Student/Welch t-test, paired
@@ -1229,6 +1267,7 @@ export type AnalysisParams = DataSetsParam &
     | ChiSquareParams
     | McNemarParams
     | OutliersParams
+    | PValueStackParams
     | ShapiroWilkParams
     | SurvivalParams
     | CoxParams
@@ -1746,6 +1785,18 @@ export interface PcaScoreRow {
   scores: (number | null)[];
 }
 
+/** One row of a "p-value-stack" result: the P value as entered, its rank
+ *  (1 = smallest; ties in entry order), its multiplicity-adjusted P value
+ *  (or q value, for the FDR methods), and whether it is flagged significant
+ *  (FWER methods) or a discovery (FDR methods). */
+export interface PValueRow {
+  label: string;
+  rank: number;
+  p: number | null;
+  adjusted: number | null;
+  flagged: boolean;
+}
+
 /** One fitted point of a smoother ("spline-lowess"): `y` is the fitted value
  *  at `x`; `observed` is the data's Y at that X, carried so the results view
  *  can show residuals without re-reading the table. */
@@ -1952,6 +2003,13 @@ export interface AnalysisResult {
   /** Optional parameter values ("plot-function"): one entry per generated
    *  curve — the values it was generated from, tabled in the results view. */
   parameterValues?: PlotFunctionParameterValues[];
+  /** Optional per-P-value rows ("p-value-stack"): one row per entered P
+   *  value, in entry order; `pValueAdjustedLabel` names the adjusted column
+   *  ("Adjusted P value" for the FWER methods, "q value" for the FDR ones)
+   *  and `pValueFlagLabel` the flag column ("Significant" / "Discovery"). */
+  pValueRows?: PValueRow[];
+  pValueAdjustedLabel?: string;
+  pValueFlagLabel?: string;
   /** Optional Monte Carlo summary ("monte-carlo"): the statistic's
    *  distribution across repeats, its 95% percentile interval, the
    *  estimated power (when the statistic is a P value), the observed
