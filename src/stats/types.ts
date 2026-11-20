@@ -316,6 +316,16 @@ export interface SimpleLogisticRegressionParams {
 export interface AreaUnderCurveParams {
   /** Baseline Y value the area is measured from (peaks are heights above it). */
   baseline: number;
+  /** Ignore peaks whose height is less than this percent of the distance from
+   *  the series' minimum to maximum Y (Prism's "Ignore peaks that are less
+   *  than __% of the distance from minimum to maximum Y"). 0 (or omitted)
+   *  keeps every peak. A "peak" is a maximal run of points above the
+   *  baseline; a peak under the threshold contributes no area. */
+  ignorePeaksBelow?: number;
+  /** Only peaks above the baseline count: area below the baseline is
+   *  ignored instead of counting as negative. Omitted/false keeps the usual
+   *  rule (area below the baseline is negative). */
+  peaksAboveBaselineOnly?: boolean;
 }
 
 /** The baseline definitions "remove-baseline" offers (Prism's Remove

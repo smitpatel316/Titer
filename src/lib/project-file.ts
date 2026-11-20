@@ -303,6 +303,8 @@ const PARAMS = {
   customEquation: "name",
   customParameters: "numbers-by-name",
   hypotheticalValue: "number", baseline: "number", q: ROUT_Q, lambda: "number", ecx: EC_ANYTHING,
+  // Area under the curve (seq 202): ignore peaks smaller than a % of the Y range.
+  ignorePeaksBelow: { min: 0, max: 100 }, peaksAboveBaselineOnly: "yes/no",
   // Remove baseline (v2): how the baseline is defined, and the values it needs.
   baselineMethod: REMOVE_BASELINE_METHODS, firstN: "number", controls: "names", constant: "number",
   // Normalize (v2): how each value is rescaled, and the values it needs.
@@ -888,7 +890,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "linear-regression": ["x", "y", "ys", "forceOrigin", "weights", "sets"],
   "deming-regression": ["y", "lambda", "sets"],
   "simple-logistic-regression": ["y", "sets"],
-  "area-under-curve": ["baseline", "sets"],
+  "area-under-curve": ["baseline", "ignorePeaksBelow", "peaksAboveBaselineOnly", "sets"],
   "row-means-totals": ["ys", "x", "sets"],
   "nonlinear-regression": [
     "x", "y", "ys", "model", "compareWith", "compare", "interpolate", "weights", "fixed", "bounds", "fixedConstants",

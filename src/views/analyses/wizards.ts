@@ -2150,8 +2150,26 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         label: "Baseline Y =",
         initial: 0,
       },
+      {
+        id: "ignorePeaksBelow",
+        ask: "Ignore peaks whose height is less than this percentage of the distance from the series' minimum to maximum Y? A peak smaller than that is left out of the area (0 keeps every peak).",
+        kind: "number",
+        label: "Ignore peaks smaller than ___% of the Y range =",
+        initial: 0,
+      },
+      choice("peaksAboveBaselineOnly", "Only count peaks above the baseline?", [
+        ["no", "No — area below the baseline counts as negative"],
+        ["yes", "Yes — only peaks above the baseline count; area below it is ignored"],
+      ]),
     ],
-    finish: (a) => ({ type: "area-under-curve", params: { baseline: a.baseline as number } }),
+    finish: (a) => ({
+      type: "area-under-curve",
+      params: {
+        baseline: a.baseline as number,
+        ...((a.ignorePeaksBelow as number) > 0 ? { ignorePeaksBelow: a.ignorePeaksBelow as number } : {}),
+        ...(a.peaksAboveBaselineOnly === "yes" ? { peaksAboveBaselineOnly: true } : {}),
+      },
+    }),
   },
 
   // Remove baseline (v2): subtract a baseline from a curve — Prism's Analyze >

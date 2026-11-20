@@ -14948,6 +14948,62 @@ check("m20 non-finite numeric params are refused with a clean error", async () =
   }
 });
 
+check("seq 202 AUC peak options: ignore small peaks, peaks above baseline only", async () => {
+  // Prism's AUC dialog: ignore peaks under X% of the Y range, and count only
+  // peaks above the baseline. Expected areas are hand-computed trapezoids
+  // (verified in Python before the check was written), not runner outputs:
+  // X 0..6, Y 0,1,0,5,0,2,0 — peaks of height 1, 5, 2 above baseline 0,
+  // Y range 5; default area 8.0.
+  const peaks: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "0", "0"],
+      [null, "1", "1"],
+      [null, "2", "0"],
+      [null, "3", "5"],
+      [null, "4", "0"],
+      [null, "5", "2"],
+      [null, "6", "0"],
+    ],
+  };
+  const areaOf = async (params: Record<string, unknown>) => {
+    const r = await runAnalysis("area-under-curve", peaks, params);
+    if ("error" in r) throw new Error(r.error);
+    return r.areas?.[0]?.area;
+  };
+  strictEqual(await areaOf({ baseline: 0 }), 8, "default AUC should be 8");
+  strictEqual(await areaOf({ baseline: 0, ignorePeaksBelow: 30 }), 7, "30% threshold (1.5) drops only the height-1 peak");
+  strictEqual(await areaOf({ baseline: 0, ignorePeaksBelow: 50 }), 5, "50% threshold (2.5) drops the height-1 and height-2 peaks");
+  strictEqual(await areaOf({ baseline: 0, ignorePeaksBelow: 0 }), 8, "0% keeps every peak");
+  // Baseline 1: heights -1,0,-1,4,-1,1,-1; default area 2.0; the 30% threshold
+  // (1.5 of the 5 range) drops the height-1 peak at X=5, area 1.0.
+  strictEqual(await areaOf({ baseline: 1 }), 2, "baseline 1 default AUC should be 2");
+  strictEqual(await areaOf({ baseline: 1, ignorePeaksBelow: 30 }), 1, "baseline 1 + 30% drops the height-1 peak");
+  // A dip below the baseline: X 0..4, Y 0,3,-2,3,0 — default 4.0 (the dip
+  // counts negative), peaks-above-baseline-only 6.0 (the dip counts zero).
+  const dip: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "0", "0"],
+      [null, "1", "3"],
+      [null, "2", "-2"],
+      [null, "3", "3"],
+      [null, "4", "0"],
+    ],
+  };
+  const dipArea = async (params: Record<string, unknown>) => {
+    const r = await runAnalysis("area-under-curve", dip, params);
+    if ("error" in r) throw new Error(r.error);
+    return r.areas?.[0]?.area;
+  };
+  strictEqual(await dipArea({ baseline: 0 }), 4, "dip default AUC should be 4");
+  strictEqual(await dipArea({ baseline: 0, peaksAboveBaselineOnly: true }), 6, "peaks-above-baseline-only should be 6");
+  // Out-of-range threshold is refused, not clamped.
+  const bad = await runAnalysis("area-under-curve", peaks, { baseline: 0, ignorePeaksBelow: 150 });
+  if (!("error" in bad) || !bad.error.includes("between 0 and 100"))
+    throw new Error(`ignorePeaksBelow=150: ${"error" in bad ? bad.error : "ran"}, expected a 0–100 error`);
+});
+
 check("m21 per-series R² is null, not NaN, when the evaluator returns NaN", async () => {
   // A global fit whose closed-form evaluator returns NaN (e.g. a log of a
   // negative fitted value) made rSquared return NaN — JSON renders it as
