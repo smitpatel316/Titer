@@ -5016,11 +5016,14 @@ check("logistic growth reports its inflection point with a 95% CI (seq 166)", as
   const out = await runAnalysis("nonlinear-regression", table, { y: "Y1", model: "logistic-growth" });
   ok(!("error" in out), `logistic-growth fit failed: ${"error" in out ? out.error : ""}`);
   const expected = (1 / 0.2) * Math.log(190 / 10);
-  const row = out.fit?.rows.find((r) => r.label === "Inflection point");
-  ok(row, `no "Inflection point" row — rows are: ${out.fit?.rows.map((r) => r.label).join(", ")}`);
-  const value = row?.values?.[0];
+  const rows = out.fit?.rows ?? [];
+  const at = rows.findIndex((r) => r.label === "Inflection point");
+  ok(at >= 0, `no "Inflection point" row — rows are: ${rows.map((r) => r.label).join(", ")}`);
+  const value = rows[at]?.values?.[0];
   ok(value != null && Math.abs(value - expected) < 0.05, `inflection point should be ~${expected.toFixed(3)}, got ${value}`);
-  const [lo, hi] = row?.ranges?.[0] ?? [null, null];
+  // The 95% CI is the row after the value (fitRows' convention, as
+  // conclusion.ts reads it) — on noiseless data it collapses onto it.
+  const [lo, hi] = rows[at + 1]?.ranges?.[0] ?? [null, null];
   ok(
     lo != null && hi != null && lo <= value! && value! <= hi && Math.abs(lo - value!) < 0.1 && Math.abs(hi - value!) < 0.1,
     `inflection 95% CI should collapse onto the value on noiseless data, got [${lo}, ${hi}] around ${value}`,
@@ -5089,6 +5092,56 @@ check("nonlinear regression ignores points outside a chosen X range (seq 166)", 
     wizard.finish({ ys: ["A"], kind: "other", model: "line", fitRange: "no" }, wTable).params,
     { y: "A", model: "line" },
   );
+});
+
+// Seq 166 + seq 292 (MCP coverage audit): the additions are reachable via
+// titer_run_analysis, not UI-only — create-analysis accepts fitXMin/fitXMax
+// (validateAnalysisParams + the generated schema), and the run's result
+// carries the inflection-point row while N reflects the fitted X range.
+check("MCP run-analysis reaches the seq 166 additions (seq 292)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const xs = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30];
+  const ys = xs.map((x) => (200 * 10) / (190 * Math.exp(-0.2 * x) + 10));
+  const made = await harness.run("job-166-table", "create-table", {
+    table_type: "xy",
+    columns: ["", "X", "Y1"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  harness.deps.createAnalysis = (parentId, analysisType, analysisParams) => {
+    harness.dispatch({
+      type: "create",
+      node: { id: "a166", type: "analysis", name: "Logistic growth", parentId, analysisType, analysisParams },
+    });
+    return "a166";
+  };
+  harness.deps.publishResult = () => {};
+  // create-analysis is the validator's gate: an unknown range key would be refused here.
+  const created = await harness.run("job-166-create", "create-analysis", {
+    table_id: tableId,
+    analysis_type: "nonlinear-regression",
+    params: { y: "Y1", model: "logistic-growth", fitXMax: 20 },
+  });
+  strictEqual((created.result as { analysis_id: string }).analysis_id, "a166");
+  strictEqual(
+    (harness.state().nodes["a166"]?.analysisParams as { fitXMax?: number } | undefined)?.fitXMax,
+    20,
+    "the node keeps the X-range bound, so the UI sees it too",
+  );
+  harness.sync();
+  const done = await harness.run("job-166-run", "run-analysis", { analysis_id: "a166" });
+  const outcome = done.result as AnalysisOutcome;
+  ok(!("error" in outcome), `MCP logistic-growth run failed: ${"error" in outcome ? outcome.error : ""}`);
+  const expected = (1 / 0.2) * Math.log(190 / 10);
+  const row = outcome.fit?.rows.find((r) => r.label === "Inflection point");
+  ok(row, `MCP result has no "Inflection point" row — rows are: ${outcome.fit?.rows.map((r) => r.label).join(", ")}`);
+  ok(
+    row?.values?.[0] != null && Math.abs(row.values[0] - expected) < 0.5,
+    `MCP inflection point should be ~${expected.toFixed(3)}, got ${row?.values?.[0]}`,
+  );
+  const n = outcome.fit?.rows.find((r) => r.label === "N")?.values?.[0];
+  ok(n === 11, `MCP fit with X ≤ 20 should count 11 points, got ${n}`);
 });
 
 // R3-12: a weighted model comparison must fit both models weighted, a
