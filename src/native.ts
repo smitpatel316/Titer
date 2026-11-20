@@ -182,6 +182,24 @@ export interface FeedbackEntry {
 /** The saved feedback entries (newest first). */
 export const mcpFeedback = () => invoke<FeedbackEntry[]>("mcp_feedback");
 
+/** One allowlist group as Settings shows it, with its current on/off state. */
+export interface McpAllowlistGroup {
+  id: string;
+  label: string;
+  description: string;
+  tools: string[];
+  enabled: boolean;
+}
+
+/** The tool-allowlist groups (contract §12) with their current on/off state. */
+export const mcpAllowlist = () => invoke<McpAllowlistGroup[]>("mcp_allowlist");
+
+/** Records the enabled allowlist groups (Settings → AI Connections).
+ *  Takes effect for MCP sessions started after the change — a connected
+ *  AI app picks it up when it reconnects. Returns the groups now in effect. */
+export const mcpSetAllowlist = (groups: string[]) =>
+  invoke<McpAllowlistGroup[]>("mcp_set_allowlist", { groups });
+
 /** The user's feedback-sharing choice, if they have made one: `true` Share,
  *  `false` Don't share, `null` never asked (fresh install or upgrade — the
  *  first-run prompt shows). Lives in the app-data `mcp/` folder, so it

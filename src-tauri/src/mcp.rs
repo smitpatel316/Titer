@@ -2,10 +2,13 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 52 tools: 15 read-only (list/read/job/
+// Settings → AI connections. 52 tools exist: 15 read-only (list/read/job/
 // activity/cloud reads + feedback) and 37 mutating, via the L0 Rust→frontend
 // dispatch + job queue — run-analysis, build-graph, export and cloud
-// tools included (Phase 2).
+// tools included (Phase 2). By default only the 5 Phase 1 read tools are
+// advertised or callable: the server-side allowlist (contract §12,
+// `ALLOWLIST_GROUPS` below) gates both `tools/list` and `tools/call`,
+// and the user enables more groups in Settings → AI Connections.
 //
 // Why rmcp, not tauri-plugin-mcp-commands — see the lane log
 // (~/workspace/.helix-v3-coord/v3-mcp-server.md) and
@@ -51,9 +54,9 @@ use rmcp::transport::streamable_http_server::{
     session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
 };
 use rmcp::{
-    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+    handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
     model::*,
-    schemars, tool, tool_handler, tool_router, Json, ServerHandler,
+    schemars, tool, tool_handler, tool_router, ErrorData, Json, RoleServer, ServerHandler,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -93,6 +96,17 @@ const FEEDBACK_CONSENT_FILE: &str = "feedback-consent.json";
 /// Written by `mcp_set_enabled` every time the user flips the toggle, read
 /// once at launch by `mcp_autostart_if_opted_in`.
 const OPT_IN_FILE: &str = "mcp-opt-in.json";
+
+/// The persisted tool-allowlist record: `{"groups": ["read", "analyses"],
+/// "ts": <unix seconds>}`. Written by `mcp_set_allowlist` every time the
+/// user flips a group toggle in Settings → AI Connections; read by every
+/// new MCP session (see `TiterMcpServer::new`), so a toggle change takes
+/// effect when the AI app reconnects. Same shape as the opt-in and
+/// feedback-consent records beside it, same 0700 directory, same
+/// owner-only (0600) file. Missing, unreadable, or malformed reads as the
+/// default — only the `read` group — so a fresh install advertises just
+/// the five Phase 1 read tools (docs/mcp-server-contract.md §12).
+const ALLOWLIST_FILE: &str = "mcp-allowlist.json";
 
 /// The feedback server: `POST {this}` with one saved entry's JSON, and it
 /// files a Plane issue for the Titer team. `TITER_FEEDBACK_URL` (when set,
@@ -1266,6 +1280,266 @@ pub async fn mcp_autostart_if_opted_in(app: AppHandle) {
     }
 }
 
+// ── Tool allowlist (v1.7.4) ─────────────────────────────────────────────
+// The audit (~/workspace/.helix-mcp-audit/MCP-AUDIT-REPORT.md §5) proved
+// the 5-tool `enabledTools` in Antigravity's config is advisory only: the
+// server advertised all 52 tools and any client could call them. The
+// allowlist makes that list real, server-side: `tools/list` advertises
+// only the allowed tools, and a call to any other tool is rejected with a
+// message naming the tool and its group (see `call_tool` below). The
+// stdio bridge is untouched — it stays a byte-forwarder (contract
+// §11.2) and naturally advertises only what the server advertises.
+//
+// Groups, not 52 checkboxes: every tool belongs to exactly one group
+// (the unit test `allowlist_groups_cover_all_tools_once` pins the
+// inventory), so the enabled groups fully determine the advertised set.
+// The `destructive` group holds the six `destructive_hint` tools, so a
+// user who turns on "Edit tables" still cannot have data replaced or
+// deleted until they also turn on "Destructive actions" — the two
+// decisions stay separate on purpose.
+
+/// One allowlist group: the toggle the user sees in Settings → AI
+/// Connections, and the tools it unlocks.
+struct AllowlistGroup {
+    id: &'static str,
+    label: &'static str,
+    description: &'static str,
+    tools: &'static [&'static str],
+}
+
+/// The five Phase 1 read tools, on by default — the same five
+/// `ANTIGRAVITY_ENABLED_TOOLS` below and in docs/antigravity.md.
+const ALLOWLIST_DEFAULT_GROUPS: &[&str] = &["read"];
+
+const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
+    AllowlistGroup {
+        id: "read",
+        label: "Read project data",
+        description: "List projects and tables; read summaries, results and graphs.",
+        tools: &[
+            "titer_list_projects",
+            "titer_list_tables",
+            "titer_read_table_summary",
+            "titer_read_results",
+            "titer_read_graph",
+        ],
+    },
+    AllowlistGroup {
+        id: "read_more",
+        label: "Read more",
+        description: "Figures, info sheets, the activity log, job status and feedback.",
+        tools: &["titer_read_figure", "titer_read_info_sheet", "titer_read_activity", "titer_send_feedback"],
+    },
+    AllowlistGroup {
+        id: "project",
+        label: "Open and save projects",
+        description: "Create, open, save and import projects.",
+        tools: &["titer_create_project", "titer_open_project", "titer_save_project", "titer_import_prism"],
+    },
+    AllowlistGroup {
+        id: "tables",
+        label: "Edit tables",
+        description: "Create, duplicate, rename and reorder tables; undo and redo.",
+        tools: &[
+            "titer_create_table",
+            "titer_duplicate_table_family",
+            "titer_rename_node",
+            "titer_reorder_nodes",
+            "titer_undo",
+            "titer_redo",
+        ],
+    },
+    AllowlistGroup {
+        id: "analyses",
+        label: "Run analyses",
+        description: "Run and freeze analyses, simulate data, apply methods and the wand; check job status.",
+        tools: &[
+            "titer_run_analysis",
+            "titer_freeze_analysis",
+            "titer_simulate_data",
+            "titer_apply_method",
+            "titer_apply_wand",
+            "titer_read_job",
+            "titer_list_jobs",
+            "titer_cancel_job",
+        ],
+    },
+    AllowlistGroup {
+        id: "graphs",
+        label: "Build graphs and figures",
+        description: "Build, update and clone graphs; make figures and info sheets.",
+        tools: &[
+            "titer_build_graph",
+            "titer_update_graph",
+            "titer_clone_graph",
+            "titer_create_figure",
+            "titer_update_figure",
+            "titer_create_info_sheet",
+            "titer_update_info_sheet",
+        ],
+    },
+    AllowlistGroup {
+        id: "export",
+        label: "Export",
+        description: "Export graphs, figures and tables to files.",
+        tools: &["titer_export_graph", "titer_export_figure", "titer_export_office", "titer_export_table_data"],
+    },
+    AllowlistGroup {
+        id: "cloud",
+        label: "Cloud (Box)",
+        description: "List, download and upload files in connected Box storage.",
+        tools: &[
+            "titer_cloud_status",
+            "titer_cloud_list",
+            "titer_cloud_metadata",
+            "titer_cloud_revisions",
+            "titer_cloud_download",
+            "titer_cloud_upload_new",
+            "titer_cloud_create_folder",
+            "titer_cloud_move",
+        ],
+    },
+    AllowlistGroup {
+        id: "destructive",
+        label: "Destructive actions",
+        description: "Replace or delete data, run scripts, close without saving, overwrite cloud files.",
+        tools: &[
+            "titer_write_table",
+            "titer_edit_table",
+            "titer_delete_node",
+            "titer_close_project",
+            "titer_run_script",
+            "titer_cloud_upload",
+        ],
+    },
+];
+
+/// The group a tool belongs to, if it is a real tool at all.
+fn allowlist_group_of(tool: &str) -> Option<&'static AllowlistGroup> {
+    ALLOWLIST_GROUPS.iter().find(|g| g.tools.contains(&tool))
+}
+
+/// The tools a set of enabled groups unlocks. Pure: unit-tested below.
+fn allowed_tools(groups: &HashSet<String>) -> HashSet<String> {
+    ALLOWLIST_GROUPS
+        .iter()
+        .filter(|g| groups.contains(g.id))
+        .flat_map(|g| g.tools.iter().map(|t| t.to_string()))
+        .collect()
+}
+
+/// The enabled groups from the persisted record: the `groups` array, with
+/// unknown ids dropped. Missing, unreadable, or malformed reads as the
+/// default (only `read`) — a fresh install advertises just the five Phase
+/// 1 read tools. An explicit empty array is honoured (nothing
+/// advertised); only a missing `groups` key falls back to the default.
+fn read_allowlist_groups(dir: &std::path::Path) -> HashSet<String> {
+    let default: HashSet<String> = ALLOWLIST_DEFAULT_GROUPS.iter().map(|g| g.to_string()).collect();
+    let Ok(text) = fs::read_to_string(dir.join(ALLOWLIST_FILE)) else {
+        return default;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return default;
+    };
+    let Some(groups) = value.get("groups").and_then(|v| v.as_array()) else {
+        return default;
+    };
+    groups
+        .iter()
+        .filter_map(|v| v.as_str())
+        .filter(|id| ALLOWLIST_GROUPS.iter().any(|g| g.id == *id))
+        .map(str::to_string)
+        .collect()
+}
+
+fn write_allowlist_file(dir: &std::path::Path, groups: &HashSet<String>) -> Result<(), String> {
+    let mut sorted: Vec<&String> = groups.iter().collect();
+    sorted.sort();
+    let record = serde_json::json!({ "groups": sorted, "ts": now_ts() });
+    let text = serde_json::to_string(&record).map_err(|e| e.to_string())?;
+    fs::write(dir.join(ALLOWLIST_FILE), text).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(dir.join(ALLOWLIST_FILE), fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+/// The tools this server may advertise and run, from the persisted
+/// record. No `mcp/` directory yet (tests, or a server started before
+/// any Settings visit) reads as the default — only the five read tools.
+fn load_allowlist(state: &McpState) -> HashSet<String> {
+    match state.dir() {
+        Some(dir) => allowed_tools(&read_allowlist_groups(&dir)),
+        None => allowed_tools(&ALLOWLIST_DEFAULT_GROUPS.iter().map(|g| g.to_string()).collect()),
+    }
+}
+
+/// The rejection a disallowed call gets: names the tool and the group
+/// that gates it, and points at the toggle that enables it. Returned as
+/// a tool-level error (`isError: true`) so the caller's client renders
+/// the message instead of an opaque protocol error.
+fn allowlist_rejection(tool: &str) -> String {
+    let group = allowlist_group_of(tool).map(|g| g.label).unwrap_or("unknown");
+    format!(
+        "“{tool}” is not enabled: it belongs to the “{group}” tool group, which is off. Only the read tools are on by default. To let your AI use it, turn “{group}” on in Titer → Settings → AI Connections, then reconnect your AI app."
+    )
+}
+
+/// One allowlist group as Settings shows it: id, label, description, the
+/// tools it unlocks, and whether it is on right now.
+#[derive(Serialize)]
+pub struct McpAllowlistGroup {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    pub tools: Vec<String>,
+    pub enabled: bool,
+}
+
+fn allowlist_groups_for_ui(enabled: &HashSet<String>) -> Vec<McpAllowlistGroup> {
+    ALLOWLIST_GROUPS
+        .iter()
+        .map(|g| McpAllowlistGroup {
+            id: g.id.to_string(),
+            label: g.label.to_string(),
+            description: g.description.to_string(),
+            tools: g.tools.iter().map(|t| t.to_string()).collect(),
+            enabled: enabled.contains(g.id),
+        })
+        .collect()
+}
+
+/// The allowlist groups with their current on/off state, for Settings →
+/// AI Connections to render as toggles.
+#[tauri::command]
+pub fn mcp_allowlist(app: AppHandle, state: State<McpState>) -> Result<Vec<McpAllowlistGroup>, String> {
+    let dir = state.ensure_dir(&app)?;
+    Ok(allowlist_groups_for_ui(&read_allowlist_groups(&dir)))
+}
+
+/// Records the user's allowlist choice (Settings → AI Connections).
+/// Unknown group ids are dropped; an empty list is a valid explicit
+/// choice (nothing advertised). Returns the groups now in effect. Takes
+/// effect for MCP sessions started after the change — a connected AI app
+/// picks it up when it reconnects.
+#[tauri::command]
+pub fn mcp_set_allowlist(
+    app: AppHandle,
+    state: State<'_, McpState>,
+    groups: Vec<String>,
+) -> Result<Vec<McpAllowlistGroup>, String> {
+    let dir = state.ensure_dir(&app)?;
+    let enabled: HashSet<String> =
+        groups.into_iter().filter(|g| ALLOWLIST_GROUPS.iter().any(|def| def.id == *g)).collect();
+    write_allowlist_file(&dir, &enabled)?;
+    let mut sorted: Vec<&String> = enabled.iter().collect();
+    sorted.sort();
+    state.log_event("allowlist_changed", serde_json::json!({ "groups": sorted }));
+    Ok(allowlist_groups_for_ui(&enabled))
+}
+
 // ── "Connect to Antigravity" (one-click stdio setup) ─────────────────────
 // The AI Connections dialog's button writes the stdio `titer` entry into
 // Antigravity's global config, so the user never pastes a token anywhere:
@@ -2202,6 +2476,10 @@ fn snapshot_node<'a>(snapshot: &'a serde_json::Value, id: &str, kind: &str) -> R
 pub struct TiterMcpServer {
     state: McpState,
     tool_router: ToolRouter<Self>,
+    /// The tools this session may advertise and run, from the persisted
+    /// allowlist (contract §12). Read once per session in `new()` — a
+    /// toggle change takes effect when the client reconnects.
+    allowed: HashSet<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -5896,6 +6174,11 @@ impl TiterMcpServer {
 impl TiterMcpServer {
     pub fn new(state: McpState) -> Self {
         let mut tool_router = Self::tools();
+        // The allowlist (contract §12): read once per session, so a toggle
+        // change in Settings applies when the client reconnects. A fresh
+        // state with no `mcp/` directory yet reads as the default — only
+        // the five Phase 1 read tools.
+        let allowed = load_allowlist(&state);
         // Inspector 2.13.0 discards tools whose outputSchema has no `type`
         // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
         // returns, so `tools/list` prints `{"tools": []}` even though the
@@ -5913,7 +6196,7 @@ impl TiterMcpServer {
             std::sync::Arc::make_mut(schema)
                 .insert("type".to_string(), serde_json::json!("object"));
         }
-        Self { state, tool_router }
+        Self { state, tool_router, allowed }
     }
 
     /// Enqueue a table job and wait for the frontend to run it, then return
@@ -6137,7 +6420,10 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes 52 tools: 15 read-only and 37 that change the open project. \
+                It exposes up to 52 tools, gated by the allowlist in Settings → AI Connections \
+                (contract §12): by default only the 5 read tools below are enabled, and the user \
+                can enable more groups there — a tool that is not listed cannot be called. \
+                15 of the 52 are read-only and 37 change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_list_tables, titer_read_table_summary (columns, row count, ranges, units; cell values \
                 only when include_values asks), titer_read_results (statistics, p-values, confidence \
@@ -6180,6 +6466,58 @@ impl ServerHandler for TiterMcpServer {
     /// locked 3.10; fixed 2026-11-14 in the v3/codex + v3/claude-code lanes.)
     fn supported_protocol_versions(&self) -> std::borrow::Cow<'static, [ProtocolVersion]> {
         std::borrow::Cow::Borrowed(SUPPORTED_PROTOCOL_VERSIONS)
+    }
+
+    /// The allowlist gate (contract §12): a call to a real tool that is
+    /// not enabled is rejected here, before the router ever sees it, with
+    /// a tool-level error naming the tool and the group that gates it —
+    /// the client renders the message, so the user learns which toggle to
+    /// flip. The rejection is written to the Activity log like any failed
+    /// call. Unknown names fall through to the router, which answers
+    /// "tool not found" for them. (Written out instead of relying on the
+    /// `#[tool_handler]`-generated `call_tool`: the macro only generates
+    /// it when the impl does not define one.)
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: rmcp::service::RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let name = request.name.as_ref();
+        if self.tool_router.get(name).is_some() && !self.allowed.contains(name) {
+            let message = allowlist_rejection(name);
+            self.state.log_call(
+                name,
+                request.arguments.clone().map(serde_json::Value::Object).unwrap_or(serde_json::Value::Null),
+                false,
+                Some(&message),
+            );
+            return Ok(CallToolResponse::Complete(CallToolResult::error(vec![ContentBlock::text(message)])));
+        }
+        let tcc = ToolCallContext::new(self, request, context);
+        self.tool_router.call(tcc).await
+    }
+
+    /// `tools/list` advertises only the allowed tools (contract §12) —
+    /// the other half of the gate, and the fix for the audit's §5 finding
+    /// (the server used to advertise all 52). Same cache-hint shape as
+    /// the `#[tool_handler]`-generated version, filtered to `self.allowed`.
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        context: rmcp::service::RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        let supports_cache_hints =
+            context.protocol_version().is_some_and(|version| version >= ProtocolVersion::V_2026_07_28);
+        let tools: Vec<Tool> =
+            self.tool_router.list_all().into_iter().filter(|t| self.allowed.contains(t.name.as_ref())).collect();
+        Ok(ListToolsResult {
+            result_type: Some(ResultType::COMPLETE),
+            tools,
+            meta: None,
+            next_cursor: None,
+            ttl_ms: supports_cache_hints.then_some(0),
+            cache_scope: supports_cache_hints.then_some(CacheScope::Public),
+        })
     }
 }
 
@@ -7841,6 +8179,15 @@ mod tests {
     #[tokio::test]
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
+        // The allowlist gates tools/list and tools/call (contract §12):
+        // this test drives all 52 tools, so it enables every group first.
+        // The default-allowlist behaviour is covered by
+        // `mcp_smoke_allowlist_default_over_http` below.
+        let allowlist_dir = allowlist_scratch_dir(
+            "all",
+            &ALLOWLIST_GROUPS.iter().map(|g| g.id).collect::<Vec<_>>(),
+        );
+        state.lock().dir = Some(allowlist_dir.clone());
         // The fixture project is the open, front project: the calls below
         // that omit project_id (create_table, delete_node) resolve to it.
         // A real publish would set this; the in-process server has no
@@ -8738,6 +9085,218 @@ mod tests {
         assert!(resp.status().is_success(), "DELETE closes the session: {}", resp.status());
         cancel.cancel();
         server.abort();
+        let _ = std::fs::remove_dir_all(&allowlist_dir);
+    }
+
+    /// A scratch `mcp/` dir for one test (pid + tag: tests run in parallel
+    /// in one process), with an allowlist record enabling the given groups.
+    /// Removed at the end of the test.
+    fn allowlist_scratch_dir(tag: &str, groups: &[&str]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("titer-mcp-allowlist-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("allowlist scratch dir");
+        let record = serde_json::json!({ "groups": groups, "ts": 0 });
+        std::fs::write(dir.join(ALLOWLIST_FILE), serde_json::to_string(&record).expect("allowlist json"))
+            .expect("allowlist record");
+        dir
+    }
+
+    /// The same initialize handshake the smoke test above uses, as one
+    /// call. Returns the session id.
+    async fn mcp_initialize(client: &reqwest::Client, url: &str) -> String {
+        let (init, session) = mcp_post(
+            client,
+            url,
+            None,
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": { "protocolVersion": "2025-11-25", "capabilities": {},
+                                "clientInfo": { "name": "allowlist-smoke", "version": "0" } } }),
+        )
+        .await;
+        assert_eq!(init["result"]["protocolVersion"], "2025-11-25");
+        let session = session.expect("session id");
+        let (notif, _) =
+            mcp_post(client, url, Some(&session), json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }))
+                .await;
+        assert!(notif.get("result").is_none() || notif["result"].is_null(), "notification gets no result: {notif}");
+        session
+    }
+
+    /// The tool names one session's `tools/list` advertises.
+    async fn mcp_list_tool_names(client: &reqwest::Client, url: &str, session: &str) -> Vec<String> {
+        let (list, _) = mcp_post(
+            client,
+            url,
+            Some(session),
+            json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} }),
+        )
+        .await;
+        list["result"]["tools"]
+            .as_array()
+            .expect("tools")
+            .iter()
+            .filter_map(|t| t["name"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    /// Starts the real router on a scratch port, as the smoke test above
+    /// does. Returns the base URL, the client, and the shutdown pieces.
+    async fn mcp_allowlist_harness(
+        state: McpState,
+    ) -> (String, reqwest::Client, CancellationToken, tokio::task::JoinHandle<()>) {
+        let cancel = CancellationToken::new();
+        let router = mcp_router(state, cancel.child_token());
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        (format!("http://127.0.0.1:{port}{MCP_PATH}"), reqwest::Client::new(), cancel, server)
+    }
+
+    #[tokio::test]
+    async fn mcp_smoke_allowlist_default_over_http() {
+        // No `mcp/` directory at all: the default allowlist — exactly the
+        // five Phase 1 read tools, nothing else. This is the audit's §5
+        // finding made into a test: the server must not advertise the
+        // destructive tools (or `titer_run_script`) to a fresh client.
+        let state = job_state();
+        state.lock().last_published = Some("project-1".to_string());
+        state.lock().token = Some(SMOKE_TOKEN.to_string());
+        let (url, client, cancel, server) = mcp_allowlist_harness(state.clone()).await;
+        let session = mcp_initialize(&client, &url).await;
+
+        let names = mcp_list_tool_names(&client, &url, &session).await;
+        assert_eq!(
+            names,
+            vec![
+                "titer_list_projects",
+                "titer_list_tables",
+                "titer_read_graph",
+                "titer_read_results",
+                "titer_read_table_summary",
+            ],
+            "default tools/list is exactly the five Phase 1 read tools: {names:?}"
+        );
+
+        // A disallowed call is rejected server-side with a message naming
+        // the tool and the toggle — not run, not "tool not found".
+        for tool in ["titer_delete_node", "titer_run_script"] {
+            let (resp, _) =
+                mcp_post(&client, &url, Some(&session), tools_call(3, tool, json!({ "project_id": "project-1" })))
+                    .await;
+            assert_eq!(resp["result"]["isError"], true, "{tool} must be rejected");
+            let text = call_raw_text(&resp);
+            assert!(text.contains(tool), "rejection names the tool: {text}");
+            assert!(text.contains("not enabled"), "rejection says it is not enabled: {text}");
+            assert!(text.contains("AI Connections"), "rejection points at the toggles: {text}");
+        }
+
+        // An allowed read still works through the same session.
+        let (listed, _) =
+            mcp_post(&client, &url, Some(&session), tools_call(4, "titer_list_projects", json!({}))).await;
+        assert_eq!(listed["result"]["isError"], false, "allowed read must succeed");
+        assert!(call_text(&listed)["projects"].is_array(), "list_projects shape: {}", call_raw_text(&listed));
+
+        // Toggle the `destructive` group on, then reconnect: a NEW session
+        // picks the change up (the server is built per session — contract
+        // §12), while the old session keeps its original allowlist.
+        let dir = allowlist_scratch_dir("destructive", &["read", "destructive"]);
+        state.lock().dir = Some(dir.clone());
+        let session2 = mcp_initialize(&client, &url).await;
+        let names2 = mcp_list_tool_names(&client, &url, &session2).await;
+        assert_eq!(names2.len(), 7, "five reads + two destructive tools: {names2:?}");
+        assert!(names2.contains(&"titer_delete_node".to_string()), "delete appears: {names2:?}");
+        assert!(names2.contains(&"titer_run_script".to_string()), "script appears: {names2:?}");
+
+        // The same call that was rejected now reaches the tool itself: no
+        // `node_id` was passed, so the tool fails on its own argument
+        // validation — and the error must NOT be the allowlist rejection.
+        let (resp, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session2),
+            tools_call(3, "titer_delete_node", json!({ "project_id": "project-1" })),
+        )
+        .await;
+        assert_eq!(resp["result"]["isError"], true, "delete without node_id must fail");
+        assert!(
+            !call_raw_text(&resp).contains("not enabled"),
+            "delete now passes the gate: {}",
+            call_raw_text(&resp)
+        );
+
+        // The first session is untouched by the toggle: it still lists 5.
+        let names_again = mcp_list_tool_names(&client, &url, &session).await;
+        assert_eq!(names_again.len(), 5, "existing session keeps its allowlist: {names_again:?}");
+
+        cancel.cancel();
+        server.abort();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn allowlist_groups_cover_all_tools_once() {
+        // The inventory pin: every tool in exactly one group, 52 total.
+        // A lane that adds a tool must assign it a group here, or this
+        // fails — an ungrouped tool would otherwise be silently hidden.
+        let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
+        all.sort_unstable();
+        assert_eq!(all.len(), 52, "tool inventory changed — assign the new tool a group: {all:?}");
+        let mut deduped = all.clone();
+        deduped.dedup();
+        assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
+        assert!(all.iter().all(|t| t.starts_with("titer_")), "all tools are titer_*");
+    }
+
+    #[test]
+    fn allowlist_default_is_the_five_read_tools() {
+        let groups: HashSet<String> = ALLOWLIST_DEFAULT_GROUPS.iter().map(|g| g.to_string()).collect();
+        let tools = allowed_tools(&groups);
+        let mut names: Vec<&str> = tools.iter().map(String::as_str).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            vec![
+                "titer_list_projects",
+                "titer_list_tables",
+                "titer_read_graph",
+                "titer_read_results",
+                "titer_read_table_summary",
+            ]
+        );
+    }
+
+    #[test]
+    fn allowlist_file_read_defaults_and_ignores_unknown_groups() {
+        let dir = allowlist_scratch_dir("read", &["read"]);
+        // Missing file: the default.
+        std::fs::remove_file(dir.join(ALLOWLIST_FILE)).expect("remove record");
+        assert_eq!(read_allowlist_groups(&dir), ["read".to_string()].into_iter().collect::<HashSet<_>>());
+        // Malformed JSON: the default, not an error.
+        std::fs::write(dir.join(ALLOWLIST_FILE), "not json").expect("garbage record");
+        assert_eq!(read_allowlist_groups(&dir), ["read".to_string()].into_iter().collect::<HashSet<_>>());
+        // Unknown group ids are dropped; known ones kept.
+        let record = serde_json::json!({ "groups": ["read", "no-such-group", "export"], "ts": 0 });
+        std::fs::write(dir.join(ALLOWLIST_FILE), serde_json::to_string(&record).expect("record json"))
+            .expect("record");
+        let groups = read_allowlist_groups(&dir);
+        assert!(groups.contains("read") && groups.contains("export"), "known groups kept: {groups:?}");
+        assert!(!groups.contains("no-such-group"), "unknown group dropped: {groups:?}");
+        // An explicit empty list means nothing — honoured, not defaulted.
+        let record = serde_json::json!({ "groups": [], "ts": 0 });
+        std::fs::write(dir.join(ALLOWLIST_FILE), serde_json::to_string(&record).expect("record json"))
+            .expect("record");
+        assert!(read_allowlist_groups(&dir).is_empty(), "empty groups means none");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn allowlist_rejection_names_tool_group_and_toggle() {
+        let message = allowlist_rejection("titer_delete_node");
+        assert!(message.contains("titer_delete_node"), "names the tool: {message}");
+        assert!(message.contains("Destructive actions"), "names the group: {message}");
+        assert!(message.contains("Settings → AI Connections"), "points at the toggle: {message}");
     }
 
     #[test]

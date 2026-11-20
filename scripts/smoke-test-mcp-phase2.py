@@ -7,6 +7,10 @@ Speaks Streamable HTTP directly (no bridge, no Claude Desktop sign-in):
 POST JSON-RPC, parse SSE `data:` lines. Exit 0 only if every check
 passes; prints a PASS/FAIL line per check.
 
+PREREQUISITE: in Titer, Settings → AI Connections, turn on every group
+under "What your AI can do" first — by default the server advertises
+only the 5 read tools (contract §12), and this smoke drives all 52.
+
 The script drives one deterministic flow on a fresh project it creates
 itself (no fixture ids — every id it needs comes from a tool's own
 output), plus the public `tests/testdata/survival.pzfx` fixture for the

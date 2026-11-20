@@ -546,6 +546,11 @@ is `false`. `idempotent_hint` is per-tool (e.g. `titer_save_project`,
 `titer_rename_node`, `titer_reorder_nodes` are idempotent; create/undo/
 redo/run tools are not).
 
+The allowlist (§12) groups the 52 tools differently — by what the user
+turns on, not by what they do. The two groupings overlap (e.g. the six
+`destructive_hint` tools form their own allowlist group); §12 is the
+one that decides what a client can see and call.
+
 ## 11. Smoke test (Phase 2) + open items
 
 ### 11.1 Live smoke — `scripts/smoke-test-mcp-phase2.py`
@@ -555,7 +560,10 @@ app** via a terminal CLI client (no Claude Desktop sign-in needed).
 It reads endpoint + token from `<app_data>/mcp/discovery.json`, speaks
 Streamable HTTP directly (initialize → tools/list → tools/call across
 all 52 tools), and prints a PASS/FAIL line per check; exit 0 only if
-every check passes. It drives one deterministic flow on a fresh project
+every check passes. **Prerequisite:** in Titer, Settings → AI
+Connections, turn on every group under "What your AI can do" first —
+by default the server advertises only the 5 read tools (§12), and this
+smoke drives all 52. It drives one deterministic flow on a fresh project
 it creates itself (no fixture ids — the ids it needs come from the
 tools' own outputs), plus the `tests/testdata/survival.pzfx` public
 fixture for the Prism-import step:
@@ -564,8 +572,9 @@ fixture for the Prism-import step:
 2. `python3 scripts/smoke-test-mcp-phase2.py <app_data>/mcp/discovery.json [--out-dir <dir>]`
    (default out dir: a fresh temp dir; exports/saves land there).
 3. `initialize` (`protocolVersion 2025-11-25`), then
-   `notifications/initialized`, then `tools/list` — expect all 52
-   tools, nothing else.
+   `notifications/initialized`, then `tools/list` — with every group on,
+   expect all 52 tools, nothing else (with only the default groups, §12
+   says 5).
 4. Create a project → create an XY table → write data → summary with
    values → edit/rename/reorder/undo/redo/duplicate → simulate a
    second table.
@@ -614,11 +623,16 @@ graphs (no linked-analysis overlays) must be identical; overlay graphs
 are expected to differ until the `buildGraphFigure` follow-up (§10.1).
 
 The in-process Rust smoke (`mcp_smoke_job_plumbing_over_http` in
-`src-tauri/src/mcp.rs`) is the other half: it asserts `tools/list`
-returns exactly 52 tools and drives the job plumbing + project/table/
+`src-tauri/src/mcp.rs`) is the other half: with every group enabled via
+its fixture allowlist record, it asserts `tools/list` returns exactly
+52 tools and drives the job plumbing + project/table/
 analysis/cloud/graph/composite/export tools over real HTTP with a
-completer task standing in for the frontend dispatcher. It does not
-replace the live smoke above (window-making tools fail plainly
+completer task standing in for the frontend dispatcher. A second
+in-process smoke (`mcp_smoke_allowlist_default_over_http`) covers §12:
+with no allowlist record it asserts `tools/list` returns exactly the 5
+default read tools, a disallowed call is rejected with the toggle
+message, and enabling the `destructive` group makes the tools appear
+for a new session. It does not replace the live smoke above (window-making tools fail plainly
 in-process — no Tauri app there — and the live app proves them end to
 end).
 
@@ -668,3 +682,88 @@ end).
 - The `.mcpb` bundle *contents* are the bridge lane's, but the bundle
   points at this contract: stdio → bridge binary → §2 discovery →
   §1 endpoint with §3 auth.
+
+## 12. Allowlist — which tools the server advertises (v1.7.4)
+
+The audit (Nov 2026) proved the 5-tool `enabledTools` in Antigravity's
+config was advisory only: the bridge is a byte-forwarder that never
+reads it (by design, §11.2), the server advertised all 52 tools, and
+Antigravity 2.33.0 enabled all of them — including the six destructive
+tools and `titer_run_script`. The only gate was Antigravity's Ask-mode
+approval. The allowlist makes the 5-tool list real, server-side.
+
+### 12.1 Default set
+
+By default only the five Phase 1 read tools are advertised or callable
+— the same five as Antigravity's `enabledTools` and the one-click
+"Connect to Antigravity" entry:
+
+`titer_list_projects`, `titer_list_tables`, `titer_read_table_summary`,
+`titer_read_results`, `titer_read_graph`.
+
+Everything else is hidden until the user turns its group on.
+
+### 12.2 Groups
+
+Nine toggles in Settings → AI Connections ("What your AI can do"),
+one per group. Every tool belongs to exactly one group (pinned by the
+`allowlist_groups_cover_all_tools_once` unit test — a lane that adds a
+tool must assign it a group, or the suite fails).
+
+| Group | Tools | On by default |
+|---|---|---|
+| Read project data (`read`) | `titer_list_projects`, `titer_list_tables`, `titer_read_table_summary`, `titer_read_results`, `titer_read_graph` | yes |
+| Read more (`read_more`) | `titer_read_figure`, `titer_read_info_sheet`, `titer_read_activity`, `titer_send_feedback` | no |
+| Open and save projects (`project`) | `titer_create_project`, `titer_open_project`, `titer_save_project`, `titer_import_prism` | no |
+| Edit tables (`tables`) | `titer_create_table`, `titer_duplicate_table_family`, `titer_rename_node`, `titer_reorder_nodes`, `titer_undo`, `titer_redo` | no |
+| Run analyses (`analyses`) | `titer_run_analysis`, `titer_freeze_analysis`, `titer_simulate_data`, `titer_apply_method`, `titer_apply_wand`, `titer_read_job`, `titer_list_jobs`, `titer_cancel_job` | no |
+| Build graphs and figures (`graphs`) | `titer_build_graph`, `titer_update_graph`, `titer_clone_graph`, `titer_create_figure`, `titer_update_figure`, `titer_create_info_sheet`, `titer_update_info_sheet` | no |
+| Export (`export`) | `titer_export_graph`, `titer_export_figure`, `titer_export_office`, `titer_export_table_data` | no |
+| Cloud (Box) (`cloud`) | `titer_cloud_status`, `titer_cloud_list`, `titer_cloud_metadata`, `titer_cloud_revisions`, `titer_cloud_download`, `titer_cloud_upload_new`, `titer_cloud_create_folder`, `titer_cloud_move` | no |
+| Destructive actions (`destructive`) | `titer_write_table`, `titer_edit_table`, `titer_delete_node`, `titer_close_project`, `titer_run_script`, `titer_cloud_upload` | no |
+
+The `destructive` group holds exactly the six `destructive_hint`
+tools (§10.3): turning on "Edit tables" does not by itself let an
+agent replace or delete data — that is a second, explicit decision.
+The job tools live in `analyses` because `titer_run_analysis` is the
+only tool that creates pollable jobs; the cloud reads live in `cloud`
+with the rest of Box, not in `read_more`.
+
+### 12.3 Enforcement points (defense in depth)
+
+1. **`tools/list` advertises only the allowed tools.** A client that
+   lists tools sees exactly the enabled groups' tools, nothing else.
+2. **A call to a disallowed tool is rejected server-side**, before the
+   tool runs, with a tool-level error (`isError: true`) naming the tool
+   and the group that gates it, and pointing at Settings → AI
+   Connections. A client must not be able to call a tool that isn't
+   listed. The rejection is written to the Activity log like any failed
+   call. An unknown tool name (not a real tool at all) still answers
+   "tool not found" — the allowlist message is only for real tools that
+   are off.
+
+### 12.4 Persistence and pickup
+
+The choice is persisted as `<app_data>/mcp/mcp-allowlist.json`
+(`{"groups": ["read", "analyses"], "ts": …}`, owner-only 0600, same
+directory and shape as the opt-in and feedback-consent records).
+Missing, unreadable, or malformed reads as the default (only `read`);
+unknown group ids are dropped; an explicit empty list means nothing is
+advertised. The server reads the record once per MCP session, so a
+toggle change applies when the AI app reconnects — an already-connected
+session keeps the allowlist it started with. Toggling the server off
+and on re-reads it too.
+
+No MCP tool can read or change the allowlist: the two Tauri commands
+(`mcp_allowlist`, `mcp_set_allowlist`) are app commands, not tools —
+the same human-only boundary as enable/token (D4).
+
+### 12.5 What did NOT change
+
+- The stdio bridge is untouched: it stays a byte-forwarder (§11.2)
+  and naturally advertises only what the server advertises.
+- Antigravity's `mcp_config.json` is untouched: it keeps its 5-tool
+  `enabledTools`. The server-side allowlist now makes that list real
+  instead of advisory; the config file format does not change.
+- The server still *has* 52 tools. The allowlist decides which subset
+  a given client sees — it does not remove tools from the server.
