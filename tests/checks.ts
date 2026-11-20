@@ -11153,8 +11153,10 @@ check("a stack of P values adjusts by every method and combines Fisher/Stouffer"
     });
   }
   // Fisher's and Stouffer's combined P values: SciPy combine_pvalues.
+  // Fisher's gammq is machine-precision (1e-12); Stouffer's normal CDF is
+  // Abramowitz & Stegun 7.1.26 (|ε| < 1.5e-7), so its pin is that bound.
   ok(Math.abs(fisherCombinedP(ps) - 2.8951988474790597e-5) < 1e-12);
-  ok(Math.abs(stoufferCombinedP(ps) - 1.8636593059677816e-5) < 1e-12);
+  ok(Math.abs(stoufferCombinedP(ps) - 1.8636593059677816e-5) < 2e-7);
   // The default run (no params) is Holm–Šídák at α = 0.05, through the
   // registry — two of the five adjusted P values are significant.
   const out = await runAnalysis("p-value-stack", data);
@@ -11165,7 +11167,7 @@ check("a stack of P values adjusts by every method and combines Fisher/Stouffer"
   strictEqual(stat("P values entered"), 5);
   strictEqual(stat("Significant (adjusted P ≤ 0.05)"), 2);
   ok(Math.abs((stat("Fisher's combined P value") as number) - 2.8951988474790597e-5) < 1e-12);
-  ok(Math.abs((stat("Stouffer's combined P value") as number) - 1.8636593059677816e-5) < 1e-12);
+  ok(Math.abs((stat("Stouffer's combined P value") as number) - 1.8636593059677816e-5) < 2e-7);
   strictEqual(out.pValueAdjustedLabel, "Adjusted P value");
   strictEqual(out.pValueFlagLabel, "Significant");
   // Benjamini–Hochberg at Q = 5% finds four discoveries (the q value of
