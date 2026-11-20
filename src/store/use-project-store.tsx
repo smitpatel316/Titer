@@ -962,6 +962,8 @@ interface ProjectContextValue extends ProjectActions {
   nodes: Record<string, ProjectNode>;
   /** The project-root items (tables, info sheets, figures) in sidebar order. */
   rootOrder: string[];
+  /** A table's children in sidebar order, by parent id. */
+  childOrder: Record<string, string[]>;
   activeNodeId: string | null;
   /** The sheets visited, oldest first (seq 240) — Previous Sheet walks back through it. */
   recentNodeIds: string[];
@@ -1197,6 +1199,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       ...actions,
       nodes: state.nodes,
       rootOrder: state.rootOrder,
+      childOrder: state.childOrder,
       activeNodeId: state.activeNodeId,
       recentNodeIds: state.recentNodeIds,
       activeNode,
