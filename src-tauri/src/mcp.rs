@@ -2415,6 +2415,7 @@ const ANALYSIS_TYPES: &[&str] = &[
     "mixed-effects",
     "shapiro-wilk",
     "kolmogorov-smirnov",
+    "one-sample-ks",
     "outliers",
     "monte-carlo",
     "bland-altman",

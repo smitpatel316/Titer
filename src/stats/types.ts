@@ -13,6 +13,7 @@ export type AnalysisType =
   | "friedman"
   | "shapiro-wilk"
   | "kolmogorov-smirnov"
+  | "one-sample-ks"
   | "correlation"
   | "linear-regression"
   | "deming-regression"
@@ -240,6 +241,41 @@ export interface OneSampleTParams {
   gaussian: boolean;
   /** The geometric mean tested: a t test of the logarithms against the value's. */
   lognormal?: boolean;
+}
+
+/** The theoretical distributions a one-sample Kolmogorov–Smirnov test can
+ *  compare a sample against (seq 170): base R's CDFs, no package needed. */
+export const KS_DISTRIBUTIONS = ["normal", "lognormal", "exponential", "uniform"] as const;
+export type OneSampleKsDistribution = (typeof KS_DISTRIBUTIONS)[number];
+
+/** Params for "one-sample-ks": compare each column against a theoretical
+ *  distribution. `paramsFrom` says where the distribution's parameters come
+ *  from: "specified" uses the entered values (the classical test — the
+ *  reference must be fully specified before seeing the data); "estimated"
+ *  fits them to the sample (then the P value is approximate and
+ *  anti-conservative, as with Prism's KS normality test). Only the chosen
+ *  distribution's parameters are read: `mean`/`sd` (normal),
+ *  `meanlog`/`sdlog` (lognormal), `rate` (exponential), `min`/`max`
+ *  (uniform). */
+export interface OneSampleKsParams {
+  distribution: OneSampleKsDistribution;
+  /** "specified": the entered parameters; "estimated": fitted to the sample. */
+  paramsFrom: "specified" | "estimated";
+  tails: (typeof TAILS)[number];
+  /** Normal mean (specified mode; default 0). */
+  mean?: number;
+  /** Normal SD (specified mode; default 1). */
+  sd?: number;
+  /** Lognormal mean of the logarithms (specified mode; default 0). */
+  meanlog?: number;
+  /** Lognormal SD of the logarithms (specified mode; default 1). */
+  sdlog?: number;
+  /** Exponential rate, mean = 1/rate (specified mode; default 1). */
+  rate?: number;
+  /** Uniform lower limit (specified mode; default 0). */
+  min?: number;
+  /** Uniform upper limit (specified mode; default 1). */
+  max?: number;
 }
 
 /** Params for "anova": optional post-hoc pairwise comparisons between groups. */
@@ -1238,6 +1274,7 @@ export type AnalysisParams = DataSetsParam &
     | McNemarParams
     | OutliersParams
     | ShapiroWilkParams
+    | OneSampleKsParams
     | SurvivalParams
     | CoxParams
     | FrequencyDistributionParams

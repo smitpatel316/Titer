@@ -65,6 +65,7 @@ import {
   EXTRACT_REARRANGE_TARGETS,
   FRACTION_OF_TOTAL_FORMATS,
   FRACTION_OF_TOTAL_TOTALS,
+  KS_DISTRIBUTIONS,
   MONTE_CARLO_STATISTICS,
   MONTE_CARLO_TARGETS,
   NONLINEAR_MODELS,
@@ -338,6 +339,12 @@ const PARAMS = {
   // also test the log-transformed values. `test` is shared with chi-square's
   // test choice (fisher/yates/chi-square/trend): the reader only sanitizes,
   // each runner validates its own.
+  // One-sample Kolmogorov–Smirnov test (seq 170): the theoretical
+  // distribution, where its parameters come from, and the parameters
+  // themselves — the reader only sanitizes, the runner validates its own.
+  distribution: KS_DISTRIBUTIONS,
+  paramsFrom: ["specified", "estimated"],
+  mean: "number", sd: "number", meanlog: "number", sdlog: "number", rate: "number", min: "number", max: "number",
   test: ["shapiro-wilk", "dagostino-pearson", "anderson-darling", "kolmogorov-smirnov", ...CONTINGENCY_TESTS],
   lognormal: "yes/no",
   // Principal component analysis (plan 21): the matrix, and how many
@@ -876,6 +883,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "mixed-effects": ["fixedFactors", "randomStructure", "subjectId", "subjectFactor", "interaction", "sets"],
   "shapiro-wilk": ["test", "lognormal", "sets"],
   "kolmogorov-smirnov": ["sets"],
+  "one-sample-ks": ["distribution", "paramsFrom", "mean", "sd", "meanlog", "sdlog", "rate", "min", "max", "tails", "sets"],
   outliers: ["q", "method", "alpha", "iterate", "sets"],
   "monte-carlo": [
     "targetAnalysis", "summaryStatistic", "repeats", "seed", "groupMeans", "groupSds", "equalVariance",

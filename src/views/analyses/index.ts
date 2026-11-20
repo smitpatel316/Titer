@@ -48,6 +48,7 @@ export const ANALYSIS_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<Analysi
     "one-sample-t",
     "shapiro-wilk",
     "kolmogorov-smirnov",
+    "one-sample-ks",
     "outliers",
     "transform",
     "monte-carlo",
