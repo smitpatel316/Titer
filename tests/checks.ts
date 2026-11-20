@@ -1349,6 +1349,53 @@ check("unknown file and project keys and unknown params survive a save, verbatim
   strictEqual(updated, false);
 });
 
+// Seq 158: the variables a Multiple Variables analysis assigns are kept params, so a
+// file round-trip keeps them — the reader's per-type lists must name them.
+check("a Multiple Variables analysis's assigned variables survive a file save", () => {
+  const file = JSON.parse(serializeProjectFile(payload)) as { project: ProjectFilePayload };
+  const put = (id: string, type: string, params: unknown) => {
+    file.project.nodes[id] = {
+      id,
+      type: "analysis",
+      name: id,
+      parentId: "t1",
+      analysisType: type,
+      analysisParams: params,
+    } as ProjectNode;
+    file.project.childOrder.t1 = [...file.project.childOrder.t1, id];
+  };
+  put("mv1", "compare-two-groups", {
+    paired: false,
+    gaussian: true,
+    equalVariance: true,
+    ratio: false,
+    tails: "two-sided",
+    response: "Score",
+    groupBy: "Group",
+  });
+  put("mv2", "nonlinear-regression", { x: "Dose", y: "Response", model: "line" });
+  put("mv3", "survival", { curveTest: "logrank", correction: "holm", time: "Time", status: "Status", groupBy: "Group" });
+  const { project, updated } = read(JSON.stringify(file));
+  deepStrictEqual(project.nodes.mv1.analysisParams, {
+    paired: false,
+    gaussian: true,
+    equalVariance: true,
+    ratio: false,
+    tails: "two-sided",
+    response: "Score",
+    groupBy: "Group",
+  });
+  deepStrictEqual(project.nodes.mv2.analysisParams, { x: "Dose", y: "Response", model: "line" });
+  deepStrictEqual(project.nodes.mv3.analysisParams, {
+    curveTest: "logrank",
+    correction: "holm",
+    time: "Time",
+    status: "Status",
+    groupBy: "Group",
+  });
+  strictEqual(updated, false);
+});
+
 // R2 M5: a dropped/invalid param value falls back to its runner default, and
 // says so — a hand-edited or cross-version value must not silently change the
 // test on re-run. Before the fix the reader left the key out and the runner
@@ -6136,10 +6183,87 @@ check("a linear regression takes two variables of a Multiple Variables table", a
   ok(note.startsWith("A: Y = ") && note.includes("<br>B: Y = "));
 });
 
+// Seq 158: a nonlinear regression from a Multiple Variables table names its X and Y
+// variables, and fits the same curve as the same X/Y in an XY table.
+check("a nonlinear regression on a Multiple Variables table names its X and Y", async () => {
+  const data: TableData = {
+    columns: ["Title", "Dose", "Response", "Other"],
+    rows: [
+      [null, "1", "2.1", "9"],
+      [null, "2", "4.0", "7"],
+      [null, "3", "6.2", "6"],
+      [null, "4", "7.9", "5"],
+      [null, "5", "10.1", "4"],
+    ],
+  };
+  const xy: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "1", "2.1"],
+      [null, "2", "4.0"],
+      [null, "3", "6.2"],
+      [null, "4", "7.9"],
+      [null, "5", "10.1"],
+    ],
+  };
+  const wizard = WIZARDS["nonlinear-regression"]!;
+  const questions = (a: Answers, type?: TableType) => wizard.questions(a, readTable(data), type);
+  const ids = (a: Answers, type?: TableType) => questions(a, type).flatMap((q) => (q ? [q.id] : []));
+  deepStrictEqual(ids({ x: "Dose", y: "Response", kind: "other", model: "line" }, "multiple"), [
+    "x",
+    "y",
+    "kind",
+    "model",
+    "weights",
+    "rout",
+    "compareModel",
+    "constrain",
+  ]);
+  // No 1/SD² weighting on a Multiple Variables table: there are no replicates.
+  const weights = questions({ x: "Dose", y: "Response" }, "multiple").find((q) => q && q.id === "weights");
+  ok(
+    weights && weights.kind === "choice" && weights.options.every((o) => o.value !== "1/sd2"),
+    "1/SD² must not be offered on a Multiple Variables table",
+  );
+  deepStrictEqual(
+    wizard.finish({ x: "Dose", y: "Response", kind: "other", model: "line" }, readTable(data), "multiple").params,
+    { y: "Response", x: "Dose", model: "line" },
+  );
+  const mv = await runAnalysis("nonlinear-regression", data, { x: "Dose", y: "Response", model: "line" });
+  const xyOut = await runAnalysis("nonlinear-regression", xy, { y: "Y", model: "line" });
+  if ("error" in mv) throw new Error(`MV nonlinear fit failed: ${mv.error}`);
+  if ("error" in xyOut) throw new Error(`XY nonlinear fit failed: ${xyOut.error}`);
+  deepStrictEqual(mv.coefficients, xyOut.coefficients);
+  deepStrictEqual(mv.fit?.rows, xyOut.fit?.rows);
+  // A renamed variable follows the params, and a gone one errors by name.
+  deepStrictEqual(
+    followTable(
+      { ...analysis, analysisType: "nonlinear-regression", analysisParams: { x: "Dose", y: "Response", model: "line" } },
+      { renamed: { Dose: "Concentration" } },
+      [],
+    ).analysisParams,
+    { x: "Concentration", y: "Response", model: "line" },
+  );
+  deepStrictEqual(await runAnalysis("nonlinear-regression", data, { x: "Gone", y: "Response", model: "line" }), {
+    error: missingColumn("Gone"),
+  });
+  // Comparing data sets and a global fit need the table's other Y series, so they are
+  // refused with a named X variable instead of fitting the wrong columns.
+  for (const params of [
+    { x: "Dose", y: "Response", model: "line", compareWith: "Other" },
+    { x: "Dose", y: "Response", model: "line", globalY: ["Other"] },
+  ] as AnalysisParams[]) {
+    const out = await runAnalysis("nonlinear-regression", data, params);
+    if (!("error" in out) || !out.error.includes("naming an X variable")) {
+      throw new Error(`expected a "naming an X variable" error, got ${JSON.stringify(out).slice(0, 200)}`);
+    }
+  }
+});
+
 check("a two-group test keeps only the answers to the questions it asked", () => {
   const table = readTable(treatments(["A", "B"]));
   const finish = (a: Answers) => WIZARDS["compare-two-groups"]!.finish({ tails: "two-sided", ...a }, table).params;
-  const unpaired = { paired: false, gaussian: true, equalVariance: true, ratio: false, tails: "two-sided" };
+  const unpaired = { paired: false, gaussian: true, equalVariance: true, ratio: false, tails: "two-sided" as const };
   // "ratio" answered while paired, then Back to unpaired: not a ratio test, nor a lognormal one.
   deepStrictEqual(finish({ paired: "unpaired", gaussian: "yes", ratio: "ratio" }), unpaired);
   deepStrictEqual(finish({ paired: "unpaired", gaussian: "yes", lognormal: "yes" }), { ...unpaired, lognormal: true });
@@ -6149,6 +6273,169 @@ check("a two-group test keeps only the answers to the questions it asked", () =>
     ratio: true,
   });
   deepStrictEqual(finish({ paired: "unpaired", gaussian: "no", lognormal: "yes" }), { ...unpaired, gaussian: false });
+});
+
+// Seq 158: a t test from a Multiple Variables table assigns its variables — unpaired, one
+// response variable split by a grouping variable's two levels; paired, two variables row
+// by row. Both run the same test as the same numbers in two columns, so the results
+// must match the Column-table run exactly.
+check("a two-group test on a Multiple Variables table assigns its variables", async () => {
+  const data: TableData = {
+    columns: ["Title", "Score", "Group"],
+    rows: [
+      [null, "2", "Control"],
+      [null, "4", "Control"],
+      [null, "6", "Control"],
+      [null, "8", "Control"],
+      [null, "3", "Drug"],
+      [null, "5", "Drug"],
+      [null, "9", "Drug"],
+      [null, "11", "Drug"],
+    ],
+  };
+  const columnData: TableData = {
+    columns: ["Title", "Control", "Drug"],
+    rows: [
+      [null, "2", "3"],
+      [null, "4", "5"],
+      [null, "6", "9"],
+      [null, "8", "11"],
+    ],
+  };
+  const wizard = WIZARDS["compare-two-groups"]!;
+  const ids = (a: Answers, type?: TableType) =>
+    wizard.questions(a, readTable(data), type).flatMap((q) => (q ? [q.id] : []));
+  deepStrictEqual(ids({}, "multiple"), ["paired", "response", "groupBy", "gaussian", "tails"]);
+  deepStrictEqual(ids({ paired: "unpaired", gaussian: "yes" }, "multiple"), [
+    "paired",
+    "response",
+    "groupBy",
+    "gaussian",
+    "lognormal",
+    "variance",
+    "tails",
+  ]);
+  deepStrictEqual(ids({ paired: "paired", gaussian: "yes" }, "multiple"), [
+    "paired",
+    "set1",
+    "set2",
+    "gaussian",
+    "ratio",
+    "tails",
+  ]);
+  const unpaired = { paired: false, gaussian: true, equalVariance: true, ratio: false, tails: "two-sided" as const };
+  deepStrictEqual(
+    wizard.finish(
+      { paired: "unpaired", gaussian: "yes", response: "Score", groupBy: "Group", variance: "equal", tails: "two-sided" },
+      readTable(data),
+      "multiple",
+    ).params,
+    { ...unpaired, response: "Score", groupBy: "Group" },
+  );
+  const run = async (mv: boolean, gaussian: boolean) => {
+    const params = {
+      paired: false,
+      gaussian,
+      equalVariance: true,
+      ratio: false,
+      tails: "two-sided",
+      ...(mv ? { response: "Score", groupBy: "Group" } : { sets: ["Control", "Drug"] }),
+    } as AnalysisParams;
+    return runAnalysis("compare-two-groups", mv ? data : columnData, params);
+  };
+  for (const gaussian of [true, false]) {
+    const mv = await run(true, gaussian);
+    const col = await run(false, gaussian);
+    if ("error" in mv) throw new Error(`MV t test failed: ${mv.error}`);
+    if ("error" in col) throw new Error(`Column t test failed: ${col.error}`);
+    deepStrictEqual(mv.stats, col.stats);
+    deepStrictEqual(mv.groups, col.groups);
+  }
+  // Paired, two variables: the same numbers as two columns, row by row.
+  const pairedData: TableData = {
+    columns: ["Title", "Before", "After"],
+    rows: [
+      [null, "2", "3"],
+      [null, "4", "5"],
+      [null, "6", "9"],
+      [null, "8", "11"],
+    ],
+  };
+  deepStrictEqual(
+    wizard.finish(
+      { paired: "paired", gaussian: "yes", set1: "Before", set2: "After", ratio: "diff", tails: "two-sided" },
+      readTable(pairedData),
+      "multiple",
+    ).params,
+    { paired: true, gaussian: true, equalVariance: true, ratio: false, tails: "two-sided", sets: ["Before", "After"] },
+  );
+  const mvPaired = await runAnalysis("compare-two-groups", pairedData, {
+    paired: true,
+    gaussian: true,
+    equalVariance: true,
+    ratio: false,
+    tails: "two-sided",
+    sets: ["Before", "After"],
+  });
+  const colPaired = await runAnalysis("compare-two-groups", columnData, {
+    paired: true,
+    gaussian: true,
+    equalVariance: true,
+    ratio: false,
+    tails: "two-sided",
+    sets: ["Control", "Drug"],
+  });
+  if ("error" in mvPaired) throw new Error(`MV paired t test failed: ${mvPaired.error}`);
+  if ("error" in colPaired) throw new Error(`Column paired t test failed: ${colPaired.error}`);
+  deepStrictEqual(mvPaired.stats, colPaired.stats);
+  // A renamed variable follows the params, and a gone one errors by name.
+  deepStrictEqual(
+    followTable(
+      {
+        ...analysis,
+        analysisType: "compare-two-groups",
+        analysisParams: { ...unpaired, response: "Score", groupBy: "Group" },
+      },
+      { renamed: { Score: "Result", Group: "Arm" } },
+      [],
+    ).analysisParams,
+    { ...unpaired, response: "Result", groupBy: "Arm" },
+  );
+  deepStrictEqual(await runAnalysis("compare-two-groups", data, { ...unpaired, response: "Score", groupBy: "Gone" }), {
+    error: missingColumn("Gone"),
+  });
+  const bad: [TableData, AnalysisParams, string][] = [
+    // A grouping variable with one level, and with three.
+    [
+      { columns: ["Title", "Score", "Group"], rows: [[null, "2", "Control"], [null, "4", "Control"]] },
+      { ...unpaired, response: "Score", groupBy: "Group" },
+      "exactly two levels",
+    ],
+    [
+      {
+        columns: ["Title", "Score", "Group"],
+        rows: [
+          [null, "2", "A"],
+          [null, "4", "B"],
+          [null, "6", "C"],
+        ],
+      },
+      { ...unpaired, response: "Score", groupBy: "Group" },
+      "has 3 levels",
+    ],
+    // A paired test cannot use a grouping variable.
+    [
+      data,
+      { ...unpaired, paired: true, response: "Score", groupBy: "Group" },
+      "compares two variables row by row",
+    ],
+  ];
+  for (const [table, params, message] of bad) {
+    const out = await runAnalysis("compare-two-groups", table, params);
+    if (!("error" in out) || !out.error.includes(message)) {
+      throw new Error(`expected an error mentioning "${message}", got ${JSON.stringify(out).slice(0, 200)}`);
+    }
+  }
 });
 
 check("analyses follow renamed columns", () => {
@@ -10176,10 +10463,14 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
   // The menu offers Descriptive statistics first on Multiple Variables
   // tables, Shapiro-Wilk and Linear regression after it (1.0.9: Shapiro-Wilk
   // is its own entry now, and two variables of a Multiple Variables table
-  // regress on each other), Principal component analysis after Multiple
-  // regression, K-means clustering after that, Outliers after that, Multiple
-  // logistic regression after that, Poisson regression after that, Cox
-  // after that, Extract and rearrange after that, and Plot a function last.
+  // regress on each other), Compare two groups after that (1.8: a response
+  // variable split by a grouping variable, or two variables paired),
+  // Principal component analysis after Multiple regression, Nonlinear
+  // regression after that (1.8: X and Y variables), K-means clustering after
+  // that, Hierarchical clustering after that, Outliers after that, Multiple logistic regression after that,
+  // Poisson regression after that, Cox after that, Survival after that (1.8:
+  // time, event-code and grouping variables), Extract and rearrange after
+  // that, and Plot a function last.
   deepStrictEqual(
     analysisOptionsForTable("multiple").map((o) => o.value),
     [
@@ -10187,7 +10478,9 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
       "shapiro-wilk",
       "correlation-matrix",
       "linear-regression",
+      "compare-two-groups",
       "multiple-regression",
+      "nonlinear-regression",
       "principal-component-analysis",
       "k-means",
       "hierarchical-clustering",
@@ -10195,6 +10488,7 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
       "multiple-logistic-regression",
       "poisson-regression",
       "cox-proportional-hazards",
+      "survival",
       "extract-rearrange",
       "transform",
       "plot-function",
@@ -14129,6 +14423,133 @@ check("the survival analysis refuses a time of 0, like Cox does", async () => {
   const neg = await runAnalysis("survival", negative, { curveTest: "logrank", correction: "holm" });
   if (!("error" in neg) || !neg.error.includes("must be positive")) {
     throw new Error(`expected a "must be positive" error for a negative time, got ${JSON.stringify(neg).slice(0, 200)}`);
+  }
+});
+
+// Seq 158: a survival analysis from a Multiple Variables table assigns its variables —
+// time, event codes, grouping — and compares the same curves as the same subjects in
+// a Survival table (the log-rank fixture above, one subject per row).
+check("a survival analysis on a Multiple Variables table assigns its variables", async () => {
+  const data: TableData = {
+    columns: ["Title", "Time", "Status", "Group"],
+    rows: [
+      [null, "3", "1", "Treated"],
+      [null, "5", "1", "Placebo"],
+      [null, "7", "0", "Treated"],
+      [null, "7", "1", "Placebo"],
+      [null, "8", "1", "Placebo"],
+      [null, "10", "1", "Treated"],
+      [null, "12", "0", "Placebo"],
+      [null, "15", "1", "Treated"],
+      [null, "15", "1", "Placebo"],
+      [null, "20", "0", "Treated"],
+    ],
+  };
+  const wizard = WIZARDS["survival"]!;
+  const ids = (a: Answers, table: TableData = data) =>
+    wizard.questions(a, readTable(table), "multiple").flatMap((q) => (q ? [q.id] : []));
+  deepStrictEqual(ids({}), ["time", "status", "groupBy", "curveTest"]);
+  deepStrictEqual(ids({ time: "Time", status: "Status", groupBy: "Group" }), ["time", "status", "groupBy", "curveTest"]);
+  deepStrictEqual(
+    wizard.finish({ time: "Time", status: "Status", groupBy: "Group", curveTest: "logrank" }, readTable(data), "multiple")
+      .params,
+    { curveTest: "logrank", correction: "holm", time: "Time", status: "Status", groupBy: "Group" },
+  );
+  // Three groups: the trend test and the correction question appear.
+  const three: TableData = {
+    columns: ["Title", "Time", "Status", "Group"],
+    rows: [
+      [null, "4", "1", "A"],
+      [null, "6", "1", "B"],
+      [null, "9", "1", "C"],
+    ],
+  };
+  deepStrictEqual(ids({ time: "Time", status: "Status", groupBy: "Group" }, three), [
+    "time",
+    "status",
+    "groupBy",
+    "curveTest",
+    "correction",
+  ]);
+  const curveTest = wizard
+    .questions({ time: "Time", status: "Status", groupBy: "Group" }, readTable(three), "multiple")
+    .find((q) => q && q.id === "curveTest");
+  ok(curveTest && curveTest.kind === "choice" && curveTest.options.some((o) => o.value === "trend"));
+  const out = await runAnalysis("survival", data, {
+    curveTest: "logrank",
+    correction: "holm",
+    time: "Time",
+    status: "Status",
+    groupBy: "Group",
+  });
+  if ("error" in out) throw new Error(`MV survival analysis failed: ${out.error}`);
+  const stat = (label: string) => out.stats.find((s) => s.label === label)?.value;
+  close(stat("Chi-square"), 0.528, 1e-3, "chi-square");
+  strictEqual(stat("df"), 1);
+  close(stat("P value"), 0.4674, 1e-3, "P value");
+  deepStrictEqual(
+    out.survivalGroups!.map((g) => [g.group, g.median, g.subjects]),
+    [
+      ["Treated", 15, 5],
+      ["Placebo", 8, 5],
+    ],
+  );
+  // A renamed variable follows the params, and a gone one errors by name.
+  deepStrictEqual(
+    followTable(
+      {
+        ...analysis,
+        analysisType: "survival",
+        analysisParams: { curveTest: "logrank", correction: "holm", time: "Time", status: "Status", groupBy: "Group" },
+      },
+      { renamed: { Group: "Arm" } },
+      [],
+    ).analysisParams,
+    { curveTest: "logrank", correction: "holm", time: "Time", status: "Status", groupBy: "Arm" },
+  );
+  deepStrictEqual(
+    await runAnalysis("survival", data, {
+      curveTest: "logrank",
+      correction: "holm",
+      time: "Time",
+      status: "Status",
+      groupBy: "Gone",
+    }),
+    { error: missingColumn("Gone") },
+  );
+  const bad: [TableData, string][] = [
+    // A code that isn't 0 or 1.
+    [
+      { columns: ["Title", "Time", "Status", "Group"], rows: [[null, "3", "2", "Treated"], [null, "5", "1", "Placebo"]] },
+      "enter 1 for an event, 0 for a censored subject",
+    ],
+    // A time of 0.
+    [
+      { columns: ["Title", "Time", "Status", "Group"], rows: [[null, "0", "1", "Treated"], [null, "5", "1", "Placebo"]] },
+      "must be positive",
+    ],
+    // A grouping variable with one level.
+    [
+      { columns: ["Title", "Time", "Status", "Group"], rows: [[null, "3", "1", "Treated"], [null, "5", "1", "Treated"]] },
+      "at least two levels",
+    ],
+    // No events anywhere.
+    [
+      { columns: ["Title", "Time", "Status", "Group"], rows: [[null, "3", "0", "Treated"], [null, "5", "0", "Placebo"]] },
+      "No events were recorded",
+    ],
+  ];
+  for (const [table, message] of bad) {
+    const badOut = await runAnalysis("survival", table, {
+      curveTest: "logrank",
+      correction: "holm",
+      time: "Time",
+      status: "Status",
+      groupBy: "Group",
+    });
+    if (!("error" in badOut) || !badOut.error.includes(message)) {
+      throw new Error(`expected an error mentioning "${message}", got ${JSON.stringify(badOut).slice(0, 200)}`);
+    }
   }
 });
 
