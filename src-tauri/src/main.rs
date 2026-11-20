@@ -30,7 +30,9 @@ use tauri::{
 use tauri_plugin_dialog::DialogExt;
 
 // In-app auto-update (v2, item 77): the download / verify / apply /
-// relaunch half. The check half lives in the frontend (src/updates.ts).
+// relaunch half, plus the channel-manifest fetch the webview can't do
+// (CORS — the channel host sends no Access-Control-Allow-Origin, P0 Nov
+// 19 2026). The check half lives in the frontend (src/updates.ts).
 mod updater;
 
 // v3 Phase 1: the in-process MCP server (off by default; see mcp.rs).
@@ -385,6 +387,34 @@ fn save_session(app: &AppHandle) {
     if let Some(file) = session_file(app) {
         let _ = file.parent().map(fs::create_dir_all);
         let _ = fs::write(file, text);
+    }
+}
+
+/// The `.hlx` project files among the command-line arguments (`titer
+/// file.hlx`): flags and anything that isn't an existing `.hlx` file are
+/// skipped, and paths are canonicalized so the window's stored path is
+/// absolute. The first argument is the program itself and is skipped.
+fn cli_project_files(args: impl Iterator<Item = String>) -> Vec<String> {
+    args.skip(1)
+        .filter(|arg| !arg.starts_with('-'))
+        .filter_map(|arg| {
+            let path = fs::canonicalize(&arg).ok()?;
+            let hlx =
+                path.extension().and_then(|ext| ext.to_str()).map(str::to_ascii_lowercase);
+            (hlx.as_deref() == Some("hlx") && path.is_file())
+                .then(|| path.to_string_lossy().into_owned())
+        })
+        .collect()
+}
+
+/// Opens the `.hlx` files passed on the command line, like the Finder's
+/// Opened event on macOS (which has no Linux twin — the argv was silently
+/// ignored, Q-77). Before restore_session, so a file the last session also
+/// held is opened once (`open` dedupes by path) and no blank window is made
+/// when a file was given.
+fn open_cli_args(app: &AppHandle) {
+    for path in cli_project_files(std::env::args()) {
+        let _ = open(app, None, Opening { path, untitled: false });
     }
 }
 
@@ -1006,6 +1036,27 @@ fn open_link(link: String) {
     }
 }
 
+/// A pre-filled GitHub issue for one saved feedback entry, in the
+/// default browser. The address is fixed (github.com/smitpatel316/Titer
+/// issues/new) — only the title/body query varies, and it is built by
+/// the dialog from the entry the user chose to send. Anything else is
+/// refused, so the page can't open an arbitrary URL.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn open_github_issue(url: String) {
+    const PREFIX: &str = "https://github.com/smitpatel316/Titer/issues/new?";
+    if !url.starts_with(PREFIX) {
+        return;
+    }
+    unsafe {
+        let Ok(text) = std::ffi::CString::new(url) else { return };
+        let url_obj: *mut AnyObject = objc2::msg_send![objc2::class!(NSString), stringWithUTF8String: text.as_ptr()];
+        let url_obj: *mut AnyObject = objc2::msg_send![objc2::class!(NSURL), URLWithString: url_obj];
+        let workspace: *mut AnyObject = objc2::msg_send![objc2::class!(NSWorkspace), sharedWorkspace];
+        let _: bool = objc2::msg_send![workspace, openURL: url_obj];
+    }
+}
+
 /// Quitting (Titer ▸ Quit, the Dock, the app switcher, logout) asks the app delegate
 /// `applicationShouldTerminate:`, which tao doesn't answer, so Titer would quit
 /// without asking to save. This answers "not now" and closes the project windows
@@ -1139,6 +1190,18 @@ fn open_link(link: String) {
         "coffee" => "https://www.buymeacoffee.com/smitpatel316",
         _ => return,
     };
+    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+}
+
+/// Linux: the same fixed GitHub-issue address as on macOS, opened with
+/// xdg-open. Only the title/body query varies; anything else is refused.
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn open_github_issue(url: String) {
+    const PREFIX: &str = "https://github.com/smitpatel316/Titer/issues/new?";
+    if !url.starts_with(PREFIX) {
+        return;
+    }
     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
 }
 
@@ -1337,7 +1400,17 @@ fn main() {
         .setup(|app| {
             ask_before_quitting(app.handle());
             show_menu_pictures();
+            open_cli_args(app.handle());
             restore_session(app.handle());
+            // MCP autostart: if the user previously opted in (persisted
+            // `mcp-opt-in.json` in <app_data>/mcp), start the local AI
+            // server so Antigravity can connect shortly after launch with
+            // no toggle-flip. Fresh installs and users who never opted in
+            // start with the server off (see mcp::mcp_autostart_if_opted_in).
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                mcp::mcp_autostart_if_opted_in(app_handle).await;
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1352,6 +1425,7 @@ fn main() {
             choose_method_file,
             cancel_quit,
             quit_app,
+            updater::fetch_channel_manifest,
             updater::download_update,
             updater::apply_update,
             read_text,
@@ -1365,6 +1439,7 @@ fn main() {
             set_recent_documents,
             accent_color,
             open_link,
+            open_github_issue,
             set_spinner,
             open_url,
             cloud_status,
@@ -1390,10 +1465,15 @@ fn main() {
             cancel_r,
             mcp::mcp_status,
             mcp::mcp_set_enabled,
+            mcp::mcp_connect_antigravity,
+            mcp::mcp_open_antigravity,
             mcp::mcp_token,
             mcp::mcp_regenerate_token,
             mcp::mcp_claude_code_command,
             mcp::mcp_activity,
+            mcp::mcp_feedback,
+            mcp::mcp_feedback_consent,
+            mcp::mcp_set_feedback_consent,
             mcp::mcp_publish_snapshot,
             mcp::mcp_publish_result,
             mcp::mcp_take_jobs,
@@ -1608,5 +1688,35 @@ mod tests {
         requests.sent.insert(2);
         requests.mark_starting();
         assert_eq!(requests.take_unsent().len(), 2, "a restart must re-send every waiting request");
+    }
+
+    // ── Q-77: files passed on the command line ───────────────────────────
+    #[test]
+    fn cli_project_files_picks_hlx_and_canonicalizes() {
+        let hlx = fixture("bom.hlx");
+        let found = cli_project_files(["titer".into(), hlx.to_string_lossy().into_owned()].into_iter());
+        assert_eq!(found.len(), 1, "one .hlx arg should be picked: {found:?}");
+        assert_eq!(found[0], fs::canonicalize(&hlx).unwrap().to_string_lossy(), "path should be absolute");
+    }
+
+    #[test]
+    fn cli_project_files_skips_flags_non_hlx_and_missing() {
+        let hlx = fixture("bom.hlx").to_string_lossy().into_owned();
+        let pzfx = fixture("column.pzfx").to_string_lossy().into_owned();
+        let missing = fixture("no-such-file.hlx").to_string_lossy().into_owned();
+        let found = cli_project_files(
+            ["titer".into(), "--verbose".into(), "-x".into(), pzfx, missing, hlx].into_iter(),
+        );
+        assert_eq!(found.len(), 1, "only the existing .hlx should survive: {found:?}");
+    }
+
+    #[test]
+    fn cli_project_files_accepts_uppercase_hlx() {
+        let hlx = fixture("bom.hlx");
+        let upper = hlx.with_extension("HLX");
+        let _ = fs::copy(&hlx, &upper);
+        let found = cli_project_files(["titer".into(), upper.to_string_lossy().into_owned()].into_iter());
+        let _ = fs::remove_file(&upper);
+        assert_eq!(found.len(), 1, ".HLX should be accepted: {found:?}");
     }
 }

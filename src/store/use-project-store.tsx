@@ -865,6 +865,10 @@ interface ProjectContextValue extends ProjectActions {
   selector: ProjectState["selector"];
   filePath: string | null;
   isDirty: boolean;
+  /** Monotonic content-revision counter, bumped on every mutating action.
+   *  The autosave engine (src/store/use-document.ts) subscribes to it to
+   *  restart its debounce timer on every edit. */
+  revision: number;
   /** What Undo and Redo would take back or replay ("Paste"), if anything. */
   undoName?: string;
   redoName?: string;
@@ -1089,6 +1093,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       selector: state.selector,
       filePath: state.filePath,
       isDirty: state.isDirty,
+      revision: state.revision,
       undoName: state.past.at(-1)?.label,
       redoName: state.future.at(-1)?.label,
     };

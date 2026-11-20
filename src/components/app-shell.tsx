@@ -10,6 +10,7 @@ import { UniversalModal } from "./universal-modal";
 import { Dialog } from "../ui/dialog";
 import { ConverterDialog } from "./converter-dialog";
 import { AiConnectionsDialog } from "./ai-connections-dialog";
+import { FeedbackConsentDialog } from "./feedback-consent-dialog";
 import { useMcpSnapshotPublisher } from "../store/mcp-publish";
 import { useMcpJobDispatcher } from "../store/mcp-dispatch";
 import { SavePromptDialog } from "./save-prompt-dialog";
@@ -18,6 +19,7 @@ import { ConflictDialog } from "./conflict-dialog";
 import { RemotePickerDialog } from "./remote-picker";
 import { CloudSettingsDialog } from "./cloud-settings";
 import { Button } from "../ui/controls";
+import { FloppyDiskIcon } from "@phosphor-icons/react";
 import { TABLE_TYPE_OPTIONS } from "../views/tables";
 import { TableDetail } from "../views/tables/table-detail";
 import { analysisOptionsForTable } from "../views/analyses";
@@ -51,7 +53,7 @@ export function AppShell() {
   const [fullscreen, setFullscreen] = React.useState(false);
   React.useEffect(() => onFullscreenChange(setFullscreen), []);
   const hidden = HIDDEN_SIDEBAR[fullscreen ? "fullscreen" : "window"];
-  const { nodes, selector, closeSelector, createTable, createGraph } = useProjectStore();
+  const { nodes, selector, closeSelector, createTable, createGraph, isDirty } = useProjectStore();
   const startAnalysis = useStartAnalysis();
   // The New Analysis / New Graph pickers list what fits the target table's type.
   const tableType = selector && "tableId" in selector ? (nodes[selector.tableId]?.tableType ?? "column") : "column";
@@ -65,6 +67,29 @@ export function AppShell() {
         className="flex min-w-0 flex-1 flex-col"
         style={{ "--toolbar-inset": sidebar ? "16px" : hidden.inset } as React.CSSProperties}
       >
+        {/* Save button (1.7.3): AppShell owns no toolbar of its own — every view
+            renders its own Toolbar — so the button lives in a slim strip above
+            the workspace, at the same left inset as the toolbars (room for the
+            traffic lights when the sidebar is hidden). A fixed overlay would
+            sit on top of the views' own toolbar buttons. Same action and
+            enablement as File ▸ Save: disabled while the project is clean,
+            and it never opens a dialog of its own — an untitled project falls
+            through to save()'s own save panel. */}
+        <div
+          data-tauri-drag-region
+          className="flex h-10 shrink-0 items-center gap-2 border-b border-separator pr-3 pl-[var(--toolbar-inset,16px)]"
+        >
+          <Button
+            disabled={!isDirty}
+            onClick={() => void documentActions.save()}
+            title="Save (CmdOrCtrl+S)"
+            aria-label="Save"
+            className="[&_svg]:size-4"
+          >
+            <FloppyDiskIcon />
+            Save
+          </Button>
+        </div>
         <Workspace />
       </main>
 
@@ -163,6 +188,8 @@ export function AppShell() {
       <ConverterDialog />
 
       <AiConnectionsDialog />
+
+      <FeedbackConsentDialog />
 
       <SavePromptDialog onChoose={(choice, remember) => documentActions.resolveSavePrompt(choice, remember)} />
 

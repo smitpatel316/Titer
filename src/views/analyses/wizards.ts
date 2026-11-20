@@ -3407,6 +3407,13 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
     checklist: () => CHECKLISTS["three-way-anova"],
   },
 
+  "nested-t-test": {
+    // Which two groups to compare: asked only when the table has more than
+    // two data sets (seq 246) — on a two-group table it runs at once.
+    questions: (a, table) => [...twoSets(a, table)],
+    finish: (a) => ({ type: "nested-t-test", params: withSets(a) }),
+  },
+
   "nested-anova": {
     questions: (_, table) => [
       ...someSets(table, 3),
