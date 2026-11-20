@@ -2,15 +2,18 @@
 // each band (B) and row bands (C), plus every interaction. Type III sums of
 // squares, like the two-way ANOVA: sum-to-zero contrasts + drop1 over the full
 // scope, with each term's F/Df/P pulled out by matching drop1's row names
-// (never by assumed row index). Post-hoc Tukey/Bonferroni on one chosen term
-// reuses the pooled-MSE + ptukey technique from the two-way ANOVA's runPosthoc
-// (q = sqrt(2)*|t|, t from the pooled-MSE two-sample statistic). No TukeyHSD call.
+// (never by assumed row index). Post-hoc on one chosen term reuses the
+// pooled-MSE + ptukey technique from the two-way ANOVA's runPosthoc
+// (q = sqrt(2)*|t|, t from the pooled-MSE two-sample statistic): the full
+// suite — Tukey, Bonferroni, Šídák, Holm–Šídák, Fisher's LSD, Dunnett,
+// Games-Howell, the FDR approach — over the whole term or its simple effects.
+// No TukeyHSD call.
 import type { AnalysisOutcome, Column, ComparisonRow, ThreeWayAnovaParams } from "../types";
 import { FDR_METHODS, THREE_WAY_POSTHOCS, THREE_WAY_POSTHOC_SCOPES, fdrQError } from "../types";
 import type { RowGroup } from "../../store/types";
 import { adjustFdrPValues, adjustPValues, describe, pairIndices, pRow, R_ADJUST, R_CRIT, R_PTUKEY, rStr, rVec, type FdrMethod } from "../column/base";
 import { evalNamedVector } from "../webr";
-import { flattenThreeWay, rowGroupBands, rowName } from "./base";
+import { flattenThreeWay, rowGroupBands, rowName, threeWayTermCells, type ThreeWayTermCell } from "./base";
 import { R_MAXIMUM_T } from "../column/anova";
 import { mean } from "../../lib/summary";
 
@@ -26,87 +29,6 @@ const FDR_LABEL: Record<FdrMethod, string> = {
   by: "Benjamini-Yekutieli",
 };
 const fdrLabel = (method: FdrMethod, q: number) => `FDR approach (${FDR_LABEL[method]}, Q = ${q}%)`;
-
-/** The cell means of one term: one entry per level (or level combination),
- *  with the values behind it, its result-table label, the label a Dunnett
- *  control is matched by inside a simple-effect family (`within` — the first
- *  factor's label: an A level for A:B, an A:B cell for A:B:C; for a whole-term
- *  family the control is matched by the full `label` instead), and the family
- *  a simple-effect split puts it in (`split` — the term's last factor's level). */
-interface TermCell {
-  label: string;
-  within: string;
-  split: string;
-  values: number[];
-}
-
-function termCells(
-  term: ThreeWayTerm,
-  flat: { values: number[]; a: string[]; b: string[]; c: string[] },
-  titles: (string | null)[],
-): TermCell[] {
-  const byKey = new Map<string, TermCell>();
-  const bLabel = (b: string) => rowName(titles, Number(b.slice(1)) - 1);
-  // Each component's key and label: [key, label, within-label]. The within
-  // label drops the term's last factor — so a Dunnett control names the level
-  // compared within each simple-effect family (an A level for A:B, an A:B cell
-  // for A:B:C), and the whole cell for a whole-term family.
-  const partsOf = (i: number): [string, string][] => {
-    const a = flat.a[i];
-    const b = flat.b[i];
-    const c = flat.c[i];
-    switch (term) {
-      case "A":
-        return [[a, a]];
-      case "B":
-        return [[b, bLabel(b)]];
-      case "C":
-        return [[c, c]];
-      case "A:B":
-        return [
-          [a, a],
-          [b, bLabel(b)],
-        ];
-      case "A:C":
-        return [
-          [a, a],
-          [c, c],
-        ];
-      case "B:C":
-        return [
-          [b, bLabel(b)],
-          [c, c],
-        ];
-      case "A:B:C":
-        return [
-          [a, a],
-          [b, bLabel(b)],
-          [c, c],
-        ];
-    }
-  };
-  const joinLabel = (parts: [string, string][], dropLast: boolean) => {
-    const kept = dropLast ? parts.slice(0, -1) : parts;
-    if (kept.length === 0) return parts[0][1];
-    const [first, ...rest] = kept.map(([, label]) => label);
-    return rest.length ? `${first} (${rest.join(", ")})` : first;
-  };
-  flat.values.forEach((v, i) => {
-    const parts = partsOf(i);
-    const key = parts.map(([k]) => k).join("\n");
-    const cell = byKey.get(key) ?? {
-      label: joinLabel(parts, false),
-      within: joinLabel(parts, true),
-      split: parts[parts.length - 1][0],
-      values: [] as number[],
-    };
-    cell.values.push(v);
-    byKey.set(key, cell);
-  });
-  // Keep the cells in first-seen order: A, B and C levels in table order, and
-  // interactions in the same (A, then B, then C) nesting as the flattened data.
-  return [...byKey.values()];
-}
 
 /** One pair the post-hoc compares: the two term cells, their difference and
  *  t (on the ANOVA's pooled MSE — or, for Games-Howell, the two cells' own
@@ -179,7 +101,7 @@ const ciHalf = (
 };
 
 async function runPosthoc(
-  cells: TermCell[],
+  cells: ThreeWayTermCell[],
   method: ThreeWayMethod,
   mse: number,
   dfResid: number,
@@ -191,10 +113,10 @@ async function runPosthoc(
   // factor (simple effects). On a main effect the split is the term itself,
   // so simple is the whole term.
   const families = scope === "simple" ? [...new Set(cells.map((c) => c.split))] : [""];
-  const familyOf = (c: TermCell) => (scope === "simple" ? families.indexOf(c.split) : 0);
+  const familyOf = (c: ThreeWayTermCell) => (scope === "simple" ? families.indexOf(c.split) : 0);
   // Dunnett's control is matched by the full cell label for a whole-term
   // family, by the first factor's label inside a simple-effect family.
-  const matchLabel = (c: TermCell) => (scope === "simple" ? c.within : c.label);
+  const matchLabel = (c: ThreeWayTermCell) => (scope === "simple" ? c.within : c.label);
   const pairs: PosthocPair[] = [];
   for (const family of families) {
     const members = cells.filter((c) => (scope === "simple" ? c.split === family : true));
@@ -456,7 +378,7 @@ export async function runThreeWayAnova(
     const qError = params?.fdrQ === undefined ? undefined : fdrQError(params.fdrQ);
     if (qError) return { error: qError };
   }
-  const cells = posthoc === "none" ? [] : termCells(posthocTerm, flat, titles);
+  const cells = posthoc === "none" ? [] : threeWayTermCells(posthocTerm, flat, titles);
   const comparisons =
     posthoc === "none"
       ? undefined

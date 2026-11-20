@@ -2,7 +2,7 @@
 // step, each answer choosing the next question. A wizard only declares its questions
 // and how the answers make the test's params; analysis-wizard.tsx asks them.
 // A test without an entry here runs as soon as it is picked.
-import { DOSE_MODELS, CONCENTRATION_UNITS, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel } from "../../stats/types";
+import { DOSE_MODELS, CONCENTRATION_UNITS, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, fdrQError, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel } from "../../stats/types";
 import type { PlotFunctionExtra, PlotFunctionModel } from "../../stats/types";
 import {
   PLOT_FUNCTION_DEFAULTS,
@@ -13,12 +13,12 @@ import {
   plotFunctionParams,
   plotFunctionXRange,
 } from "../../stats/xy/plot-function";
-import { hasXColumn, type TableType, type Transform } from "../../store/types";
+import { hasXColumn, type RowGroup, type TableType, type Transform } from "../../store/types";
 import { MODEL_LABEL, termLabel } from "../../stats/xy/nonlinear-regression";
 import { modelSpec } from "../../stats/xy/nonlinear-fit";
 import { parseCustomParameters, parseUserEquation } from "../../stats/xy/user-defined";
 import { dataGroups, incompleteRows, pairedGroups, pairIndices } from "../../stats/column/base";
-import { rowName } from "../../stats/grouped/base";
+import { flattenThreeWay, groupRows, rowGroupBands, rowName, threeWayTermCells } from "../../stats/grouped/base";
 import { distinctTruthValues } from "../../stats/column/roc-curve";
 
 const isDoseModel = (m: string) => (DOSE_MODELS as readonly string[]).includes(m);
@@ -117,8 +117,10 @@ export function parseUnknowns(text: string): { values: number[]; error?: string 
 }
 
 export interface Wizard {
-  /** Every question, given the answers so far (false: not asked with these answers). */
-  questions: (a: Answers, table: Dataset, type?: TableType) => (Question | false)[];
+  /** Every question, given the answers so far (false: not asked with these answers).
+   *  `rowGroups` is a grouped table's third-factor bands (the three-way ANOVA's
+   *  factor C): only the three-way wizard needs it, for its Dunnett-control options. */
+  questions: (a: Answers, table: Dataset, type?: TableType, rowGroups?: RowGroup[]) => (Question | false)[];
   /** The test to create, once every question is answered. */
   finish: (a: Answers, table: Dataset, type?: TableType) => { type: AnalysisType; params?: AnalysisParams };
 }
@@ -466,6 +468,27 @@ const round6 = (v: number) => Number(v.toPrecision(6));
 const dataRows = (table: Dataset) =>
   table.titles.flatMap((_, r) => (table.numeric.some((c) => c.byRow[r] != null) ? [rowName(table.titles, r)] : []));
 
+/** A grouped table's cells holding data, by the names results give them ("Group (Row)"). */
+const cellNames = (table: Dataset, groups: string[]) => {
+  const rows = groupRows(table.columns);
+  return groups.flatMap((group) =>
+    table.titles.flatMap((_, r) => (rows.get(group)?.[r]?.length ? [`${group} (${rowName(table.titles, r)})`] : [])),
+  );
+};
+
+/** A three-way term's Dunnett-control options, from the same cells the runner
+ *  compares: the whole term's cell labels, or — for simple effects — the first
+ *  factor's levels within each level of the term's last factor. Undefined when
+ *  the table has no row bands (the wizard cannot know factor C's levels). */
+const threeWayControlOptions = (a: Answers, table: Dataset, rowGroups?: RowGroup[]): string[] | undefined => {
+  const bands = rowGroupBands(rowGroups);
+  if (!bands) return undefined;
+  const term = (a.posthocTerm as string | undefined) ?? "A";
+  const cells = threeWayTermCells(term, flattenThreeWay(table.columns, bands), table.titles);
+  const simple = a.posthocScope === "simple" && term.includes(":");
+  return simple ? [...new Set(cells.map((c) => c.within))] : cells.map((c) => c.label);
+};
+
 /** Whether a grouped table holds replicates: a group with 2 values or more at a row. */
 const replicated = (table: Dataset) =>
   table.sets.some((s) => s.columns[0]?.byRow.some((_, r) => s.columns.filter((c) => c.byRow[r] != null).length > 1));
@@ -479,6 +502,36 @@ const withSets = <P extends object>(a: Answers, params?: P) => {
   const sets = chosenSets(a);
   return sets ? { ...params, sets } : params;
 };
+
+/** The FDR approach's follow-ups, asked when a post-hoc is the FDR approach:
+ *  which method, and at which Q (%) a comparison counts as a discovery. */
+const fdrQuestions = (a: Answers): (Question | false)[] => [
+  a.posthoc === "fdr" &&
+    choice("fdrMethod", "Which false-discovery-rate method?", [
+      ["bh", "Benjamini-Hochberg (recommended)"],
+      ["bky", "Benjamini-Krieger-Yekutieli (two-stage — more power)"],
+      ["by", "Benjamini-Yekutieli (valid under any dependence)"],
+    ]),
+  a.posthoc === "fdr" && {
+    id: "fdrQ",
+    ask: "At which false-discovery rate (Q) does a comparison count as a discovery?",
+    kind: "number",
+    label: "Q (%)",
+    initial: 5,
+    min: 0.01,
+    max: 50,
+    validate: fdrQError,
+  },
+];
+
+/** The FDR approach's params, from its answers (the runner's defaults when unanswered). */
+const fdrParams = (a: Answers) =>
+  a.posthoc === "fdr"
+    ? {
+        fdrMethod: (a.fdrMethod as "bh" | "bky" | "by" | undefined) ?? "bh",
+        fdrQ: (a.fdrQ as number | undefined) ?? 5,
+      }
+    : {};
 
 /** Whether the table is a Grouped one (column groups with replicate columns),
  *  for the wizards that serve both layouts (mixed-effects): multi-column
@@ -3337,6 +3390,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ...(a.design === "repeated-measures"
             ? []
             : ([["games-howell", "Yes — Games-Howell test (without assuming equal SDs)"]] as [string, string][])),
+          ["fdr", "Yes — False discovery rate (Benjamini-Hochberg)"],
         ]),
       replicated(table) &&
         a.design !== "nonparametric" &&
@@ -3345,11 +3399,28 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         choice("posthocTarget", "Compare which?", [
           ["groups", "Groups within each row"],
           ["rows", "Rows within each group"],
+          // Cell and marginal-mean comparisons need the ordinary design's
+          // pooled residual — a repeated-measures comparison has no single
+          // error term for them (see two-way-anova.ts).
+          ...(a.design === "repeated-measures"
+            ? []
+            : ([
+                ["cells", "Every cell mean against every other"],
+                ["group-means", "Group means, averaged over rows"],
+                ["row-means", "Row means, averaged over groups"],
+              ] as [string, string][])),
         ]),
       a.posthoc === "dunnett" &&
-        (a.posthocTarget === "rows"
+        (a.posthocTarget === "rows" || a.posthocTarget === "row-means"
           ? choice("control", "Which row is the control?", names(dataRows(table)))
-          : choice("control", "Which group is the control?", names(chosenSets(a) ?? setNames(table)))),
+          : a.posthocTarget === "cells"
+            ? choice(
+                "control",
+                "Which cell is the control?",
+                names(cellNames(table, chosenSets(a) ?? setNames(table))),
+              )
+            : choice("control", "Which group is the control?", names(chosenSets(a) ?? setNames(table)))),
+      ...fdrQuestions(a),
     ],
     finish: (a) => ({
       type: "two-way-anova",
@@ -3359,6 +3430,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         posthocTarget: (a.posthocTarget as TwoWayAnovaParams["posthocTarget"] | undefined) ?? "groups",
         ...(a.design === "repeated-measures" ? { sphericity: a.sphericity === "yes" } : {}),
         ...(a.posthoc === "dunnett" ? { control: a.control as string } : {}),
+        ...fdrParams(a),
       }),
     }),
     // The checklist follows the design: ordinary, repeated-measures, or rank-based.
@@ -3373,34 +3445,68 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
   },
 
   "three-way-anova": {
-    questions: (a, table) => [
-      ...someSets(table, 2),
-      choice("posthoc", "Run multiple comparisons? Only meaningful if the ANOVA is significant.", [
-        ["none", "No — just the ANOVA table"],
-        ["tukey", "Yes — Tukey's"],
-        ["bonferroni", "Yes — Bonferroni-corrected"],
-      ]),
-      a.posthoc !== "none" &&
-        choice(
-          "posthocTerm",
-          "Which term should the comparisons follow up? The wizard cannot know yet which terms will be significant — pick the one you most want to follow up.",
-          [
-            ["A", "Factor A (column groups)"],
-            ["B", "Factor B (rows)"],
-            ["C", "Factor C (row groups)"],
-            ["A:B", "Interaction A:B"],
-            ["A:C", "Interaction A:C"],
-            ["B:C", "Interaction B:C"],
-            ["A:B:C", "Interaction A:B:C"],
-          ],
-        ),
-    ],
+    questions: (a, table, _type, rowGroups) => {
+      const controlOptions = a.posthoc === "dunnett" ? threeWayControlOptions(a, table, rowGroups) : undefined;
+      return [
+        ...someSets(table, 2),
+        choice("posthoc", "Run multiple comparisons? Only meaningful if the ANOVA is significant.", [
+          ["none", "No — just the ANOVA table"],
+          ["tukey", "Yes — Tukey's"],
+          ["bonferroni", "Yes — Bonferroni-corrected"],
+          ["sidak", "Yes — Šídák-corrected"],
+          ["holm-sidak", "Yes — Holm–Šídák"],
+          ["lsd", "Yes — Fisher's LSD (uncorrected)"],
+          ["dunnett", "Yes, each against a control — Dunnett's test"],
+          ["games-howell", "Yes — Games-Howell test (without assuming equal SDs)"],
+          ["fdr", "Yes — False discovery rate (Benjamini-Hochberg)"],
+        ]),
+        a.posthoc !== "none" &&
+          choice(
+            "posthocTerm",
+            "Which term should the comparisons follow up? The wizard cannot know yet which terms will be significant — pick the one you most want to follow up.",
+            [
+              ["A", "Factor A (column groups)"],
+              ["B", "Factor B (rows)"],
+              ["C", "Factor C (row groups)"],
+              ["A:B", "Interaction A:B"],
+              ["A:C", "Interaction A:C"],
+              ["B:C", "Interaction B:C"],
+              ["A:B:C", "Interaction A:B:C"],
+            ],
+          ),
+        a.posthoc !== "none" &&
+          (a.posthocTerm as string | undefined)?.includes(":") &&
+          choice("posthocScope", "Compare the whole term, or its simple effects?", [
+            ["term", "The whole term — every level combination against every other"],
+            ["simple", "Simple effects — the first factor's levels within each level of the last factor"],
+          ]),
+        a.posthoc === "dunnett" &&
+          controlOptions !== undefined &&
+          choice(
+            "control",
+            a.posthocScope === "simple" && (a.posthocTerm as string | undefined)?.includes(":")
+              ? "Which level is the control (compared within each level of the last factor)?"
+              : (a.posthocTerm as string | undefined)?.includes(":")
+                ? "Which cell is the control?"
+                : "Which level is the control?",
+            names(controlOptions),
+          ),
+        ...fdrQuestions(a),
+      ];
+    },
     finish: (a) => ({
       type: "three-way-anova",
       params: withSets(a, {
         posthoc: (a.posthoc as ThreeWayAnovaParams["posthoc"] | undefined) ?? "none",
         ...(a.posthoc !== undefined && a.posthoc !== "none"
-          ? { posthocTerm: (a.posthocTerm as ThreeWayAnovaParams["posthocTerm"] | undefined) ?? "A" }
+          ? {
+              posthocTerm: (a.posthocTerm as ThreeWayAnovaParams["posthocTerm"] | undefined) ?? "A",
+              ...(a.posthocScope !== undefined
+                ? { posthocScope: a.posthocScope as ThreeWayAnovaParams["posthocScope"] }
+                : {}),
+              ...(a.posthoc === "dunnett" && a.control !== undefined ? { control: a.control as string } : {}),
+              ...fdrParams(a),
+            }
           : {}),
       }),
     }),
