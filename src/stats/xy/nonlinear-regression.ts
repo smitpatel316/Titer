@@ -807,7 +807,13 @@ function startingValues(
       return `Starting values: Amplitude = ${num((maxY - minY) / 2)}, Wavelength = ${num(wl)}, PhaseShift = 0, K = 0.1.`;
     }
     case "sinc": {
-      const wl = sineWavelength(xs, ys);
+      // The R start counts the sign changes of the raw Y (see modelSpec) —
+      // the demeaned count collapses on a sinc, whose mean sits above most
+      // of its lobes.
+      const signs = ys.map((v) => Math.sign(v));
+      let changes = 0;
+      for (let i = 1; i < signs.length; i++) if (signs[i] !== signs[i - 1]) changes++;
+      const wl = (2 * (Math.max(...xs) - Math.min(...xs))) / Math.max(1, changes);
       return `Starting values: Amplitude = ${num(maxY)}, Wavelength = ${num(wl)}.`;
     }
     case "michaelis-menten":

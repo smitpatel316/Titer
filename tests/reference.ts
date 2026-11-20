@@ -519,6 +519,113 @@ const classicX = table(
   ],
 );
 
+/** Classic-curves completion (1.8, B6): noiseless by construction on the
+ *  shared grid X = 0, 0.5, …, 12, so each fit must recover its generating
+ *  parameters. G2: sum of two Gaussians Amplitude1=100, Mean1=3, SD1=1,
+ *  Amplitude2=60, Mean2=8, SD2=1.5. L2: sum of two Lorentzians with the
+ *  same centres/widths. CP/CF/CC: cumulative Gaussians Mean=5, SD=1.5 as
+ *  percents (×100), fractions (×1) and counts (×200). SS: standard sine
+ *  Amplitude=5, Wavelength=4, PhaseShift=0.5. DS: damped sine, same plus
+ *  K=0.2. D3: three-phase decay Plateau=10, Span1=50, K1=1, Span2=30,
+ *  K2=0.1, Span3=20, K3=0.01. A2: two-phase association Y0=10, Span1=60,
+ *  K1=1, Span2=40, K2=0.1. PA: plateau association X0=5, Y0=10,
+ *  Plateau=100, K=0.3. */
+const classicB6X = table(
+  ["Title", "X", "G2", "L2", "CP", "CF", "CC", "SS", "DS", "D3", "A2", "PA"],
+  [
+    ["", "0", "1.1109396040", "12.0377358491", "0.0429060333", "0.0004290603", "0.0858120666", "2.3971276930", "2.3971276930", "110.0000000000", "10.0000000000", "10.0000000000"],
+    ["", "0.5", "4.3939169615", "16.1007957560", "0.1349898032", "0.0013498980", "0.2699796063", "4.7977481499", "4.3411820484", "88.7636653045", "35.5589834372", "10.0000000000"],
+    ["", "1", "13.5346481918", "22.6341463415", "0.3830380568", "0.0038303806", "0.7660761135", "4.3879128095", "3.5925191589", "75.3400912746", "51.7337368083", "10.0000000000"],
+    ["", "1.5", "32.4702656367", "33.8029386344", "0.9815328629", "0.0098153286", "1.9630657257", "1.4076976557", "1.0428480726", "66.6799860922", "62.1838713341", "10.0000000000"],
+    ["", "2", "60.6731937289", "53.5294117647", "2.2750131948", "0.0227501319", "4.5500263896", "-2.3971276930", "-1.6068427455", "60.9326602203", "69.1306528827", "10.0000000000"],
+    ["", "2.5", "88.3219218581", "84.1538461538", "4.7790352273", "0.0477903523", "9.5580704546", "-4.7977481499", "-2.9099813505", "56.9744716639", "73.9228687597", "10.0000000000"],
+    ["", "3", "100.2319552084", "104.9541284404", "9.1211219726", "0.0912112197", "18.2422439452", "-4.3879128095", "-2.4081376080", "54.1228107098", "77.3800470707", "10.0000000000"],
+    ["", "3.5", "88.9162300508", "86.0000000000", "15.8655253931", "0.1586552539", "31.7310507863", "-1.4076976557", "-0.6990419680", "51.9626201878", "80.0006334059", "10.0000000000"],
+    ["", "4", "62.3669960183", "57.3972602740", "25.2492537547", "0.2524925375", "50.4985075094", "2.3971276930", "1.0770989032", "50.2411721086", "82.0882598253", "10.0000000000"],
+    ["", "4.5", "36.4089584528", "40.0795755968", "36.9441340182", "0.3694413402", "73.8882680364", "4.7977481499", "1.9506188328", "48.8042440122", "83.8283341428", "10.0000000000"],
+    ["", "5", "21.6536453179", "32.0000000000", "50.0000000000", "0.5000000000", "100.0000000000", "4.3879128095", "1.6142229123", "47.5574056313", "85.3344967915", "10.0000000000"],
+    ["", "5.5", "19.3548258890", "29.6754563895", "63.0558659818", "0.6305586598", "126.1117319636", "1.4076976557", "0.4685818442", "46.4425358424", "86.6768012985", "22.5362821217"],
+    ["", "6", "25.7776370843", "31.6000000000", "74.7507462453", "0.7475074625", "149.5014924906", "-2.3971276930", "-0.7220009864", "45.4235773633", "87.8988094256", "33.3263601386"],
+    ["", "6.5", "36.6105886946", "37.5471698113", "84.1344746069", "0.8413447461", "168.2689492137", "-4.7977481499", "-1.3075389058", "44.4778945300", "89.0279625780", "42.6134663540"],
+    ["", "7", "48.0777904378", "47.4208144796", "90.8788780274", "0.9087887803", "181.7577560548", "-4.3879128095", "-1.0820459769", "43.5910296101", "90.0818749304", "50.6069527515"],
+    ["", "7.5", "56.7615746641", "58.7058823529", "95.2209647727", "0.9522096477", "190.4419295454", "-1.4076976557", "-0.3140998034", "42.7535205273", "91.0721528282", "57.4870102533"],
+    ["", "8", "60.0003726653", "63.8461538462", "97.7249868052", "0.9772498681", "195.4499736104", "2.3971276930", "0.4839717344", "41.9589689826", "92.0067136776", "63.4087306233"],
+    ["", "8.5", "56.7575951302", "57.2000000000", "99.0184671371", "0.9901846714", "198.0369342743", "4.7977481499", "0.8764695395", "41.2028670649", "92.8911946199", "68.5056025800"],
+    ["", "9", "48.0442456980", "44.2411642412", "99.6169619432", "0.9961696194", "199.2339238865", "4.3879128095", "0.7253171090", "40.4818839878", "93.7298090221", "72.8925209279"],
+    ["", "9.5", "36.3918396497", "32.3121387283", "99.8650101968", "0.9986501020", "199.7300203937", "1.4076976557", "0.2105473946", "39.7934319845", "94.5258679520", "76.6683765419"],
+    ["", "10", "24.6667374327", "23.6000000000", "99.9570939667", "0.9995709397", "199.9141879334", "-2.3971276930", "-0.3244159553", "39.1354015924", "95.2820983574", "79.9182855866"],
+    ["", "10.5", "14.9611325267", "17.6290778320", "99.9877133610", "0.9998771336", "199.9754267220", "-4.7977481499", "-0.5875151021", "38.5059997475", "96.0008378486", "82.7155082241"],
+    ["", "11", "8.1201169942", "13.5384615385", "99.9968328758", "0.9999683288", "199.9936657516", "-4.3879128095", "-0.4861945979", "37.9036503019", "96.6841545500", "85.1231000601"],
+    ["", "11.5", "3.9437117170", "10.6755325409", "99.9992656576", "0.9999926566", "199.9985313152", "-1.4076976557", "-0.1411341393", "37.3269324642", "97.3339214192", "87.1953335572"],
+    ["", "12", "1.7139300471", "8.6167724691", "99.9998469373", "0.9999984694", "199.9996938747", "2.3971276930", "0.2174625181", "36.7745423023", "97.9518628708", "88.9789214572"],
+  ],
+);
+
+/** Lognormal (Prism's "Log Gaussian"): X must be > 0, so its own grid
+ *  X = 0.5, 1, …, 12. A=100, GeoMean=5, GeoSD=2. */
+const lognormX = table(
+  ["Title", "X", "LN"],
+  [
+    ["", "0.5", "0.8030921879"],
+    ["", "1", "6.7496803424"],
+    ["", "1.5", "14.7490745762"],
+    ["", "2", "20.8692349264"],
+    ["", "2.5", "24.2612263885"],
+    ["", "3", "25.4063401181"],
+    ["", "3.5", "25.0284816499"],
+    ["", "4", "23.7375213540"],
+    ["", "4.5", "21.9669778523"],
+    ["", "5", "20.0000000000"],
+    ["", "5.5", "18.0107442793"],
+    ["", "6", "16.0999661167"],
+    ["", "6.5", "14.3210786672"],
+    ["", "7", "12.6979483690"],
+    ["", "7.5", "11.2366033060"],
+    ["", "8", "9.9327550833"],
+    ["", "8.5", "8.7765404039"],
+    ["", "9", "7.7554531787"],
+    ["", "9.5", "6.8561148013"],
+    ["", "10", "6.0653065971"],
+    ["", "10.5", "5.3705389800"],
+    ["", "11", "4.7603337433"],
+    ["", "11.5", "4.2243321718"],
+    ["", "12", "3.7533004805"],
+  ],
+);
+
+/** Sinc: centred at 0, so X = −6, −5.5, …, 6. Amplitude=10,
+ *  Wavelength=4 (zeros at X = ±2, ±4, ±6; Y = 10 at X = 0). */
+const sincX = table(
+  ["Title", "X", "SC"],
+  [
+    ["", "-6", "0"],
+    ["", "-5.5", "0.8184693783"],
+    ["", "-5", "1.2732395447"],
+    ["", "-4.5", "1.0003514624"],
+    ["", "-4", "0"],
+    ["", "-3.5", "-1.2861661659"],
+    ["", "-3", "-2.1220659079"],
+    ["", "-2.5", "-1.8006326323"],
+    ["", "-2", "0"],
+    ["", "-1.5", "3.0010543872"],
+    ["", "-1", "6.3661977237"],
+    ["", "-0.5", "9.0031631616"],
+    ["", "0", "10.0000000000"],
+    ["", "0.5", "9.0031631616"],
+    ["", "1", "6.3661977237"],
+    ["", "1.5", "3.0010543872"],
+    ["", "2", "0"],
+    ["", "2.5", "-1.8006326323"],
+    ["", "3", "-2.1220659079"],
+    ["", "3.5", "-1.2861661659"],
+    ["", "4", "0"],
+    ["", "4.5", "1.0003514624"],
+    ["", "5", "1.2732395447"],
+    ["", "5.5", "0.8184693783"],
+    ["", "6", "0"],
+  ],
+);
+
 /** A sine wave needs ≥ 5 points (4 parameters + 1) — this has 4. */
 const classicTooFew = table(
   ["Title", "X", "Y"],
@@ -2440,6 +2547,20 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["classicX", classicX, "nonlinear-regression", { y: "B", model: "boltzmann-sigmoid" }],
   ["classicX", classicX, "nonlinear-regression", { y: "L", model: "lorentzian" }],
   ["classicX", classicX, "nonlinear-regression", { y: "S", model: "sine-wave" }],
+  // Classic-curves completion (1.8, B6) — noiseless fixtures above; each
+  // fit must recover its generating parameters (asserted in checks.ts).
+  ["classicB6X", classicB6X, "nonlinear-regression", { y: "G2", model: "sum-of-two-gaussians" }],
+  ["classicB6X", classicB6X, "nonlinear-regression", { y: "L2", model: "sum-of-two-lorentzians" }],
+  ["classicB6X", classicB6X, "nonlinear-regression", { y: "CP", model: "cumulative-gaussian-percent" }],
+  ["classicB6X", classicB6X, "nonlinear-regression", { y: "CF", model: "cumulative-gaussian-fraction" }],
+  ["classicB6X", classicB6X, "nonlinear-regression", { y: "CC", model: "cumulative-gaussian-counts" }],
+  ["classicB6X", classicB6X, "nonlinear-regression", { y: "SS", model: "standard-sine-wave" }],
+  ["classicB6X", classicB6X, "nonlinear-regression", { y: "DS", model: "damped-sine-wave" }],
+  ["classicB6X", classicB6X, "nonlinear-regression", { y: "D3", model: "three-phase-decay" }],
+  ["classicB6X", classicB6X, "nonlinear-regression", { y: "A2", model: "two-phase-association" }],
+  ["classicB6X", classicB6X, "nonlinear-regression", { y: "PA", model: "plateau-association" }],
+  ["lognormX", lognormX, "nonlinear-regression", { y: "LN", model: "lognormal" }],
+  ["sincX", sincX, "nonlinear-regression", { y: "SC", model: "sinc" }],
   ["classicTooFew", classicTooFew, "nonlinear-regression", { model: "sine-wave" }],
   // Enzyme kinetics (plan 09) — noiseless fixtures A/A2/B/C, the noisy
   // CI fixture, and the negative-X / constant-X / too-few-points errors.
@@ -4353,11 +4474,12 @@ async function disagreements(): Promise<string[]> {
   const checkClassic = async (
     label: string,
     y: string,
-    model: "gaussian" | "boltzmann-sigmoid" | "lorentzian" | "sine-wave",
+    model: NonlinearModel,
     coefs: [string, number][],
     stats: [string, number][],
+    data: TableData = classicX,
   ) => {
-    const r = await runAnalysis("nonlinear-regression", classicX, { y, model });
+    const r = await runAnalysis("nonlinear-regression", data, { y, model });
     if ("error" in r) {
       out.push(`Classic curves ${label}: ${r.error}`);
       return null;
@@ -4379,18 +4501,19 @@ async function disagreements(): Promise<string[]> {
   const checkClassicOverlay = async (
     label: string,
     y: string,
-    model: "gaussian" | "boltzmann-sigmoid" | "lorentzian" | "sine-wave",
+    model: NonlinearModel,
     fit: AnalysisResult,
     rExpr: (p: Record<string, number>) => string,
+    data: TableData = classicX,
+    xs: number[] = [...Array(25)].map((_, i) => i * 0.5),
   ) => {
-    const fig = await scatterWithFittedCurve(classicX, y, model, fit);
+    const fig = await scatterWithFittedCurve(data, y, model, fit);
     const traces = fig.data as { mode?: string; x?: number[]; y?: number[] }[];
     const curve = traces.find((t) => t.mode === "lines" && t.x?.length === 101);
-    if (!curve || curve.x?.[0] !== 0 || curve.x?.at(-1) !== 12)
-      out.push(`Classic curves ${label} overlay: no 101-point curve over [0, 12]`);
+    if (!curve || curve.x?.[0] !== xs[0] || curve.x?.at(-1) !== xs.at(-1))
+      out.push(`Classic curves ${label} overlay: no 101-point curve over [${xs[0]}, ${xs.at(-1)}]`);
     const coefs: Record<string, number> = {};
     for (const c of fit.coefficients ?? []) if (c.estimate != null) coefs[c.term] = c.estimate;
-    const xs = [...Array(25)].map((_, i) => i * 0.5);
     const rY = await evalNamedVector(
       `x<-c(${xs.join(",")});yv<-${rExpr(coefs)};` + `c(${xs.map((_, i) => `y${i}=yv[${i + 1}]`).join(",")})`,
     );
@@ -4499,6 +4622,343 @@ async function disagreements(): Promise<string[]> {
       out.push(`Classic curves sine notes missing starts: ${fitS.notes}`);
     await checkClassicOverlay("sine wave", "S", "sine-wave", fitS, (p) =>
       `${p.Amplitude!.toPrecision(15)}*sin((2*pi*x/${p.Wavelength!.toPrecision(15)})+${p.PhaseShift!.toPrecision(15)})+${p.Baseline!.toPrecision(15)}`,
+    );
+  }
+  // Classic-curves completion (1.8, B6): the rest of Prism's Gaussian,
+  // Sine waves and Exponential families, on the noiseless fixtures above.
+  // Same tolerances as the v2 classics (parameters and derived rows 1e-3
+  // relative, R² 1e-6), and the same TS-vs-R overlay check per model.
+  const fitG2 = await checkClassic(
+    "sum of two gaussians",
+    "G2",
+    "sum-of-two-gaussians",
+    [
+      ["Amplitude1", 100],
+      ["Mean1", 3],
+      ["SD1", 1],
+      ["Amplitude2", 60],
+      ["Mean2", 8],
+      ["SD2", 1.5],
+    ],
+    [
+      ["Area", 476.2594],
+      ["R squared", 1],
+    ],
+    classicB6X,
+  );
+  if (fitG2) {
+    if (fitG2.equation !== "Y = 100·exp(−0.5·((X − 3)/1)²) + 60·exp(−0.5·((X − 8)/1.5)²)")
+      out.push(`Classic curves sum of two gaussians equation: ${fitG2.equation}`);
+    if (!fitG2.notes.includes("Starting values: Amplitude1 = 100.2, Mean1 = 3, SD1 = 2, Amplitude2 = 50.12, Mean2 = 6, SD2 = 2."))
+      out.push(`Classic curves sum of two gaussians notes missing starts: ${fitG2.notes}`);
+    await checkClassicOverlay(
+      "sum of two gaussians",
+      "G2",
+      "sum-of-two-gaussians",
+      fitG2,
+      (p) =>
+        `${p.Amplitude1!.toPrecision(15)}*exp(-0.5*((x-${p.Mean1!.toPrecision(15)})/${p.SD1!.toPrecision(15)})^2)+${p.Amplitude2!.toPrecision(15)}*exp(-0.5*((x-${p.Mean2!.toPrecision(15)})/${p.SD2!.toPrecision(15)})^2)`,
+      classicB6X,
+    );
+  }
+  const fitL2 = await checkClassic(
+    "sum of two lorentzians",
+    "L2",
+    "sum-of-two-lorentzians",
+    [
+      ["Amplitude1", 100],
+      ["Center1", 3],
+      ["Width1", 1],
+      ["Amplitude2", 60],
+      ["Center2", 8],
+      ["Width2", 1.5],
+    ],
+    [
+      ["Area", 596.9026],
+      ["R squared", 1],
+    ],
+    classicB6X,
+  );
+  if (fitL2) {
+    if (fitL2.equation !== "Y = 100/(1 + ((X − 3)/1)²) + 60/(1 + ((X − 8)/1.5)²)")
+      out.push(`Classic curves sum of two lorentzians equation: ${fitL2.equation}`);
+    if (!fitL2.notes.includes("Starting values: Amplitude1 = 105, Center1 = 3, Width1 = 2, Amplitude2 = 52.48, Center2 = 6, Width2 = 2."))
+      out.push(`Classic curves sum of two lorentzians notes missing starts: ${fitL2.notes}`);
+    await checkClassicOverlay(
+      "sum of two lorentzians",
+      "L2",
+      "sum-of-two-lorentzians",
+      fitL2,
+      (p) =>
+        `${p.Amplitude1!.toPrecision(15)}/(1+((x-${p.Center1!.toPrecision(15)})/${p.Width1!.toPrecision(15)})^2)+${p.Amplitude2!.toPrecision(15)}/(1+((x-${p.Center2!.toPrecision(15)})/${p.Width2!.toPrecision(15)})^2)`,
+      classicB6X,
+    );
+  }
+  const fitLN = await checkClassic(
+    "lognormal",
+    "LN",
+    "lognormal",
+    [
+      ["A", 100],
+      ["GeoMean", 5],
+      ["GeoSD", 2],
+    ],
+    [
+      ["Area", 173.7462],
+      ["Amplitude", 25.4307],
+      ["R squared", 1],
+    ],
+    lognormX,
+  );
+  if (fitLN) {
+    if (fitLN.equation !== "Y = (100/X)·exp(−0.5·(ln(X/5)/ln(2))²)")
+      out.push(`Classic curves lognormal equation: ${fitLN.equation}`);
+    if (!fitLN.notes.includes("Starting values: A = 76.22, GeoMean = 3, GeoSD = 2."))
+      out.push(`Classic curves lognormal notes missing starts: ${fitLN.notes}`);
+    await checkClassicOverlay(
+      "lognormal",
+      "LN",
+      "lognormal",
+      fitLN,
+      (p) =>
+        `(${p.A!.toPrecision(15)}/x)*exp(-0.5*(log(x/${p.GeoMean!.toPrecision(15)})/log(${p.GeoSD!.toPrecision(15)}))^2)`,
+      lognormX,
+      [...Array(24)].map((_, i) => 0.5 + i * 0.5),
+    );
+  }
+  for (const [label, y, model, total] of [
+    ["cumulative gaussian percent", "CP", "cumulative-gaussian-percent", "100·Φ((X − 5)/1.5)"],
+    ["cumulative gaussian fraction", "CF", "cumulative-gaussian-fraction", "Φ((X − 5)/1.5)"],
+    ["cumulative gaussian counts", "CC", "cumulative-gaussian-counts", "200·Φ((X − 5)/1.5)"],
+  ] as const) {
+    const fit = await checkClassic(
+      label,
+      y,
+      model,
+      [
+        ["Mean", 5],
+        ["SD", 1.5],
+        ...(model === "cumulative-gaussian-counts" ? [["Total", 200] as [string, number]] : []),
+      ],
+      [["R squared", 1]],
+      classicB6X,
+    );
+    if (fit) {
+      if (fit.equation !== `Y = ${total}`)
+        out.push(`Classic curves ${label} equation: ${fit.equation}`);
+      const starts =
+        model === "cumulative-gaussian-counts"
+          ? "Starting values: Mean = 6, SD = 3, Total = 200."
+          : "Starting values: Mean = 6, SD = 3.";
+      if (!fit.notes.includes(starts))
+        out.push(`Classic curves ${label} notes missing starts: ${fit.notes}`);
+      await checkClassicOverlay(
+        label,
+        y,
+        model,
+        fit,
+        (p) =>
+          model === "cumulative-gaussian-percent"
+            ? `100*pnorm((x-${p.Mean!.toPrecision(15)})/${p.SD!.toPrecision(15)})`
+            : model === "cumulative-gaussian-counts"
+              ? `${p.Total!.toPrecision(15)}*pnorm((x-${p.Mean!.toPrecision(15)})/${p.SD!.toPrecision(15)})`
+              : `pnorm((x-${p.Mean!.toPrecision(15)})/${p.SD!.toPrecision(15)})`,
+        classicB6X,
+      );
+    }
+  }
+  const fitSS = await checkClassic(
+    "standard sine wave",
+    "SS",
+    "standard-sine-wave",
+    [
+      ["Amplitude", 5],
+      ["Wavelength", 4],
+      ["PhaseShift", 0.5],
+    ],
+    [
+      ["Frequency", 0.25],
+      ["R squared", 1],
+    ],
+    classicB6X,
+  );
+  if (fitSS) {
+    if (fitSS.equation !== "Y = 5·sin((2π·X/4) + 0.5)")
+      out.push(`Classic curves standard sine equation: ${fitSS.equation}`);
+    if (!fitSS.notes.includes("Starting values: Amplitude = 4.798, Wavelength = 4, PhaseShift = 0."))
+      out.push(`Classic curves standard sine notes missing starts: ${fitSS.notes}`);
+    await checkClassicOverlay(
+      "standard sine wave",
+      "SS",
+      "standard-sine-wave",
+      fitSS,
+      (p) =>
+        `${p.Amplitude!.toPrecision(15)}*sin((2*pi*x/${p.Wavelength!.toPrecision(15)})+${p.PhaseShift!.toPrecision(15)})`,
+      classicB6X,
+    );
+  }
+  const fitDS = await checkClassic(
+    "damped sine wave",
+    "DS",
+    "damped-sine-wave",
+    [
+      ["Amplitude", 5],
+      ["Wavelength", 4],
+      ["PhaseShift", 0.5],
+      ["K", 0.2],
+    ],
+    [
+      ["Frequency", 0.25],
+      ["Half-life", 3.4657],
+      ["R squared", 1],
+    ],
+    classicB6X,
+  );
+  if (fitDS) {
+    if (fitDS.equation !== "Y = 5·exp(−0.2·X)·sin((2π·X/4) + 0.5)")
+      out.push(`Classic curves damped sine equation: ${fitDS.equation}`);
+    if (!fitDS.notes.includes("Starting values: Amplitude = 3.854, Wavelength = 4.8, PhaseShift = 0, K = 0.1."))
+      out.push(`Classic curves damped sine notes missing starts: ${fitDS.notes}`);
+    await checkClassicOverlay(
+      "damped sine wave",
+      "DS",
+      "damped-sine-wave",
+      fitDS,
+      (p) =>
+        `${p.Amplitude!.toPrecision(15)}*exp(-${p.K!.toPrecision(15)}*x)*sin((2*pi*x/${p.Wavelength!.toPrecision(15)})+${p.PhaseShift!.toPrecision(15)})`,
+      classicB6X,
+    );
+  }
+  const fitSC = await checkClassic(
+    "sinc",
+    "SC",
+    "sinc",
+    [
+      ["Amplitude", 10],
+      ["Wavelength", 4],
+    ],
+    [
+      ["Frequency", 0.25],
+      ["R squared", 1],
+    ],
+    sincX,
+  );
+  if (fitSC) {
+    if (fitSC.equation !== "Y = 10·sin(2π·X/4)/(2π·X/4)")
+      out.push(`Classic curves sinc equation: ${fitSC.equation}`);
+    if (!fitSC.notes.includes("Starting values: Amplitude = 10, Wavelength = 4.8."))
+      out.push(`Classic curves sinc notes missing starts: ${fitSC.notes}`);
+    await checkClassicOverlay(
+      "sinc",
+      "SC",
+      "sinc",
+      fitSC,
+      (p) =>
+        `ifelse(x==0,${p.Amplitude!.toPrecision(15)},${p.Amplitude!.toPrecision(15)}*sin(2*pi*x/${p.Wavelength!.toPrecision(15)})/(2*pi*x/${p.Wavelength!.toPrecision(15)}))`,
+      sincX,
+      [...Array(25)].map((_, i) => -6 + i * 0.5),
+    );
+  }
+  const fitD3 = await checkClassic(
+    "three-phase decay",
+    "D3",
+    "three-phase-decay",
+    [
+      ["Plateau", 10],
+      ["Span1", 50],
+      ["K1", 1],
+      ["Span2", 30],
+      ["K2", 0.1],
+      ["Span3", 20],
+      ["K3", 0.01],
+    ],
+    [
+      ["Half-life (fast)", 0.6931],
+      ["Half-life (medium)", 6.9315],
+      ["Half-life (slow)", 69.3147],
+      ["R squared", 1],
+    ],
+    classicB6X,
+  );
+  if (fitD3) {
+    if (fitD3.equation !== "Y = 10 + 50·exp(−1·X) + 30·exp(−0.1·X) + 20·exp(−0.01·X)")
+      out.push(`Classic curves three-phase decay equation: ${fitD3.equation}`);
+    if (!fitD3.notes.includes("Starting values: Plateau = 36.77, Span1 = 36.61, K1 = 1, Span2 = 21.97, K2 = 0.1, Span3 = 14.65, K3 = 0.01."))
+      out.push(`Classic curves three-phase decay notes missing starts: ${fitD3.notes}`);
+    await checkClassicOverlay(
+      "three-phase decay",
+      "D3",
+      "three-phase-decay",
+      fitD3,
+      (p) =>
+        `${p.Plateau!.toPrecision(15)}+${p.Span1!.toPrecision(15)}*exp(-${p.K1!.toPrecision(15)}*x)+${p.Span2!.toPrecision(15)}*exp(-${p.K2!.toPrecision(15)}*x)+${p.Span3!.toPrecision(15)}*exp(-${p.K3!.toPrecision(15)}*x)`,
+      classicB6X,
+    );
+  }
+  const fitA2 = await checkClassic(
+    "two-phase association",
+    "A2",
+    "two-phase-association",
+    [
+      ["Y0", 10],
+      ["Span1", 60],
+      ["K1", 1],
+      ["Span2", 40],
+      ["K2", 0.1],
+    ],
+    [
+      ["Half-life (fast)", 0.6931],
+      ["Half-life (slow)", 6.9315],
+      ["Span", 100],
+      ["R squared", 1],
+    ],
+    classicB6X,
+  );
+  if (fitA2) {
+    if (fitA2.equation !== "Y = 10 + 60·(1 − exp(−1·X)) + 40·(1 − exp(−0.1·X))")
+      out.push(`Classic curves two-phase association equation: ${fitA2.equation}`);
+    if (!fitA2.notes.includes("Starting values: Y0 = 10, Span1 = 52.77, K1 = 1, Span2 = 35.18, K2 = 0.1."))
+      out.push(`Classic curves two-phase association notes missing starts: ${fitA2.notes}`);
+    await checkClassicOverlay(
+      "two-phase association",
+      "A2",
+      "two-phase-association",
+      fitA2,
+      (p) =>
+        `${p.Y0!.toPrecision(15)}+${p.Span1!.toPrecision(15)}*(1-exp(-${p.K1!.toPrecision(15)}*x))+${p.Span2!.toPrecision(15)}*(1-exp(-${p.K2!.toPrecision(15)}*x))`,
+      classicB6X,
+    );
+  }
+  const fitPA = await checkClassic(
+    "plateau association",
+    "PA",
+    "plateau-association",
+    [
+      ["X0", 5],
+      ["Y0", 10],
+      ["Plateau", 100],
+      ["K", 0.3],
+    ],
+    [
+      ["Half-life", 2.3105],
+      ["Span", 90],
+      ["R squared", 1],
+    ],
+    classicB6X,
+  );
+  if (fitPA) {
+    if (fitPA.equation !== "Y = 10 for X < 5; Y = 10 + (100 − 10)·(1 − exp(−0.3·(X − 5))) for X ≥ 5")
+      out.push(`Classic curves plateau association equation: ${fitPA.equation}`);
+    if (!fitPA.notes.includes("Starting values: X0 = 6, Y0 = 10, Plateau = 88.98, K = 0.5."))
+      out.push(`Classic curves plateau association notes missing starts: ${fitPA.notes}`);
+    await checkClassicOverlay(
+      "plateau association",
+      "PA",
+      "plateau-association",
+      fitPA,
+      (p) =>
+        `ifelse(x<${p.X0!.toPrecision(15)},${p.Y0!.toPrecision(15)},${p.Y0!.toPrecision(15)}+(${p.Plateau!.toPrecision(15)}-${p.Y0!.toPrecision(15)})*(1-exp(-${p.K!.toPrecision(15)}*(x-${p.X0!.toPrecision(15)}))))`,
+      classicB6X,
     );
   }
   // The sine wave needs ≥ 5 points (4 parameters + 1) — this has 4.

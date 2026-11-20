@@ -869,10 +869,13 @@ export function modelSpec(
       // Y = Amplitude·sin(2π·X/Wavelength)/(2π·X/Wavelength), Y = Amplitude
       // at X = 0 (guide's IF(X=0,Amplitude,…)). ifelse evaluates both
       // branches, but the NaN in the unselected branch is discarded — the
-      // FOUR_X pattern.
+      // FOUR_X pattern. The Wavelength start counts the sign changes of
+      // the raw Y (each zero crossing is half a wavelength apart): the
+      // demeaned count the sine models use collapses here, because a
+      // sinc's mean sits above most of its lobes.
       return {
         kind: "nls",
-        fit: "m<-nls(y~ifelse(x==0,Amplitude,Amplitude*sin(2*pi*x/Wavelength)/(2*pi*x/Wavelength)),start=list(Amplitude=max(y),Wavelength=2*(max(x)-min(x))/max(1,sum(diff(sign(y-mean(y)))!=0))),algorithm=\"port\",lower=c(-Inf,0),control=nls.control(maxiter=200))",
+        fit: "m<-nls(y~ifelse(x==0,Amplitude,Amplitude*sin(2*pi*x/Wavelength)/(2*pi*x/Wavelength)),start=list(Amplitude=max(y),Wavelength=2*(max(x)-min(x))/max(1,sum(diff(sign(y))!=0))),algorithm=\"port\",lower=c(-Inf,0),control=nls.control(maxiter=200))",
         terms: ["Amplitude", "Wavelength"],
         derived: [overK("Frequency", "1", "Wavelength")],
         curveFn:
