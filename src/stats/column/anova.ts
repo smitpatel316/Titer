@@ -75,9 +75,11 @@ function comparisons(groups: Group[], p: AnovaParams): { setup: string; values: 
       values: [ph.assign, ...pairs.map(([i, j]) => ciAt(`${i}_${j}`, diff(i, j), pooled(i, j), "cv"))].join(","),
     };
   }
-  if (isIn(PAIR_CORRECTIONS, p.posthoc)) {
+  if (isIn(PAIR_CORRECTIONS, p.posthoc) && !(welch(p) && p.posthoc === "fdr")) {
     // The pairs compared (all, or those chosen), each t on the pooled SD, its P corrected
     // for them alone (`adj`), its CI from the same correction (`pa`).
+    // (The False Discovery Rate after Welch's ANOVA is the branch below, on
+    // Welch t tests — it must not fall through to this pooled-SD one.)
     const chosen = comparedPairs(groups, p.compared);
     // R's correction calls the uncorrected one `fisher`; Titer's name is `lsd`.
     const how = p.posthoc === "lsd" ? "fisher" : p.posthoc;
@@ -164,6 +166,15 @@ export const anovaSpec: ColumnTestSpec<AnovaParams> = {
     // forcing them onto the ordinary ANOVA must error, not silently run.
     if (!welch(p) && (p.posthoc === "games-howell" || p.posthoc === "t3")) {
       return `${p.posthoc === "games-howell" ? "Games-Howell" : "Dunnett's T3"} assumes unequal SDs (Welch's ANOVA). Create this analysis again to choose another.`;
+    }
+    // The test for linear trend is Prism's alternative to multiple comparisons,
+    // on the ordinary ANOVA alone: the wizard never offers it with Welch's or
+    // with a post-hoc, but a saved analysis could still ask for the combination.
+    if (trend(p) && welch(p)) {
+      return "The test for linear trend runs on the ordinary ANOVA; with unequal SDs (Welch's ANOVA) it is not offered. Create this analysis again to choose another.";
+    }
+    if (trend(p) && p.posthoc !== "none") {
+      return "The test for linear trend is an alternative to multiple comparisons, not an addition to them. Create this analysis again to choose one or the other.";
     }
     if (!welch(p)) {
       // With one value in every group there is no within-group variation:

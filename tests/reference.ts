@@ -2233,6 +2233,24 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["column", column, "anova", { posthoc: "none", equalSd: false }],
   ["column", column, "anova", { posthoc: "games-howell", equalSd: false }],
   ["column", column, "anova", { posthoc: "t3", equalSd: false }],
+  // One-way ANOVA completion (seq 191): the Brown-Forsythe ANOVA beside
+  // Welch's (its F*/df/P ride in the `equalSd: false` case above), the False
+  // Discovery Rate after the ordinary ANOVA (pooled-SD t tests) and after
+  // Welch's (Welch t tests — not the pooled ones), on chosen pairs, and the
+  // test for linear trend (four groups, so the nonlinear trend is reported
+  // too). Cross-checked independently (Python/scipy, same table): BF F*
+  // 6.8431928786, DFd 8.3859490433, p 0.01223340847; trend slope
+  // -0.6363690476, P linear 0.3896152218, P nonlinear 0.004971341621; the FDR
+  // adjusted P values against the Benjamini-Hochberg step-up on the raw
+  // t-test P values (ordinary 0.79835268, 0.05122812908, 0.1477243986,
+  // 0.06719275783, 0.1335269105, 0.008136882802; Welch 0.8303427966,
+  // 0.07870617267, 0.1811230884, 4.722754646e-05, 0.004831903377,
+  // 8.025459798e-05).
+  ["column", column, "anova", { posthoc: "fdr" }],
+  ["column", column, "anova", { posthoc: "fdr", equalSd: false }],
+  ["column", column, "anova", { posthoc: "fdr", compared: [pairKey("Control", "High"), pairKey("Low", "Sparse")] }],
+  ["column", column, "anova", { posthoc: "fdr", equalSd: false, compared: [pairKey("Control", "High"), pairKey("Low", "Sparse")] }],
+  ["column", column, "anova", { posthoc: "none", trend: true }],
   ["column", column, "kruskal-wallis", { posthoc: "dunn" }],
   ["column", column, "rm-anova"],
   ["column", column, "rm-anova", { posthoc: "tukey" }],
