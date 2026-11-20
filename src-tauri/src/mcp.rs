@@ -2,9 +2,9 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 56 tools: 18 read-only (list/read/job/
+// Settings → AI connections. 57 tools: 18 read-only (list/read/job/
 // activity/cloud reads + feedback + the three 1.7.4 discovery tools)
-// and 38 mutating, via the L0 Rust→frontend dispatch + job queue —
+// and 39 mutating, via the L0 Rust→frontend dispatch + job queue —
 // run-analysis, build-graph, export and cloud tools included (Phase 2).
 // By default only the 5 Phase 1 read tools are advertised or callable:
 // the server-side allowlist (contract §12, `ALLOWLIST_GROUPS` below)
@@ -47,7 +47,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 56 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 57 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -1309,7 +1309,7 @@ pub async fn mcp_autostart_if_opted_in(app: AppHandle) {
 // stdio bridge is untouched — it stays a byte-forwarder (contract
 // §11.2) and naturally advertises only what the server advertises.
 //
-// Groups, not 56 checkboxes: every tool belongs to exactly one group
+// Groups, not 57 checkboxes: every tool belongs to exactly one group
 // (the unit test `allowlist_groups_cover_all_tools_once` pins the
 // inventory), so the enabled groups fully determine the advertised set.
 // The `destructive` group holds the two tools that delete data or run
@@ -1384,6 +1384,7 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
             "titer_run_analysis",
             "titer_rerun_analysis",
             "titer_freeze_analysis",
+            "titer_repoint_analysis",
             "titer_simulate_data",
             "titer_apply_method",
             "titer_apply_wand",
@@ -2160,7 +2161,7 @@ async fn auth_middleware(
 /// the corruption hits every tool that returns non-ASCII text, not just
 /// transform-concentrations. Appending `; charset=utf-8` here, the one
 /// shared path every MCP response flows through, fixes the echo for all
-/// 56 tools. Returns the new header value, or `None` when the type is
+/// 57 tools. Returns the new header value, or `None` when the type is
 /// already labelled or is not one of the textual MCP response types.
 fn utf8_charset(content_type: &str) -> Option<String> {
     let lower = content_type.to_ascii_lowercase();
@@ -2900,6 +2901,19 @@ pub struct FreezeAnalysisArgs {
     pub frozen: bool,
 }
 
+/// Move an orphaned analysis under another table (seq 242).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RepointAnalysisArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The orphaned analysis node's id, as shown by titer_list_projects.
+    pub analysis_id: String,
+    /// The table to move the analysis under — it must offer the
+    /// analysis's test, or the error names the tables that do.
+    pub table_id: String,
+}
+
 // ── Cloud tools (L9) ──
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -3016,7 +3030,14 @@ pub struct UpdateGraphArgs {
     /// The graph node's id, as shown by titer_list_projects.
     pub graph_id: String,
     /// Partial GraphOptions to merge over the graph's current options.
-    pub options: serde_json::Value,
+    /// Omit when only changing the type (seq 244).
+    #[serde(default)]
+    pub options: Option<serde_json::Value>,
+    /// Change the graph's type (seq 244): must be offered for the graph's
+    /// table. Omit to keep the type. With no `options` the new type's
+    /// defaults apply, keeping the title and size.
+    #[serde(default)]
+    pub graph_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -5092,6 +5113,63 @@ impl TiterMcpServer {
         }
     }
 
+    /// Move an orphaned analysis under another table that offers its test
+    /// (seq 242): the saved results stay until the re-run lands, and the
+    /// orphan flag + source name go away. The table must offer the
+    /// analysis's test, or the error names the tables that do; a live
+    /// (non-orphaned) analysis cannot be re-pointed.
+    #[tool(
+        name = "titer_repoint_analysis",
+        description = "Move an orphaned analysis under another table that offers its test: the saved results stay until the re-run lands. The table must offer the analysis's test (otherwise the error names the tables that do); a live (non-orphaned) analysis cannot be re-pointed.",
+        annotations(
+            title = "Re-point analysis",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn repoint_analysis(
+        &self,
+        Parameters(args): Parameters<RepointAnalysisArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "analysis_id": args.analysis_id, "table_id": args.table_id });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            {
+                let snapshots = self.state.snapshots();
+                let snap = snapshots.get(&project_id).ok_or_else(|| {
+                    format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+                })?;
+                snapshot_node(snap, &args.analysis_id, "analysis")?;
+                snapshot_node(snap, &args.table_id, "table")?;
+            }
+            let job = self.state.enqueue_job(
+                &project_id,
+                "repoint-analysis",
+                serde_json::json!({ "analysis_id": args.analysis_id, "table_id": args.table_id }),
+                serde_json::json!({ "analysis_id": args.analysis_id }),
+            )?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The re-point finished without reporting.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Re-pointing the analysis failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_repoint_analysis", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_repoint_analysis", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
     // ── Graphs, figures, info sheets (L6, inventory §3.4) ──────────
     // Each tool enqueues a job for the target window's frontend
     // dispatcher (`build-graph`, `update-graph`, …) and waits for its
@@ -5153,10 +5231,14 @@ impl TiterMcpServer {
     }
 
     /// Change a graph's options: a partial GraphOptions merged over its
-    /// current options. Same validation as the build.
+    /// current options. Same validation as the build. Pass `graph_type`
+    /// (seq 244) to change the graph's type instead: it must be offered
+    /// for the graph's table, the new type's defaults apply (title and
+    /// size kept), and `options`, when given with it, merge over the
+    /// current options and apply to the new type.
     #[tool(
         name = "titer_update_graph",
-        description = "Change a graph's options: a partial GraphOptions merged over its current options (titles, axis limits, linked analyses, display choices). Same validation as titer_build_graph.",
+        description = "Change a graph's options: a partial GraphOptions merged over its current options (titles, axis limits, linked analyses, display choices). Same validation as titer_build_graph. Pass graph_type (a type offered for the graph's table) to change the graph's type instead: the new type's defaults apply, keeping the title and size; options, when given with graph_type, merge over the current options and apply to the new type.",
         annotations(
             title = "Update graph",
             read_only_hint = false,
@@ -5169,10 +5251,16 @@ impl TiterMcpServer {
         &self,
         Parameters(args): Parameters<UpdateGraphArgs>,
     ) -> Result<Json<serde_json::Value>, String> {
-        let call_args = serde_json::json!({ "project_id": args.project_id, "graph_id": args.graph_id });
+        let call_args = serde_json::json!({ "project_id": args.project_id, "graph_id": args.graph_id, "graph_type": args.graph_type });
         let result: Result<serde_json::Value, String> = async {
             let project_id = self.state.resolve_project(args.project_id.as_deref())?;
-            let job_args = serde_json::json!({ "graph_id": args.graph_id, "options": args.options });
+            let mut job_args = serde_json::json!({ "graph_id": args.graph_id });
+            if let Some(options) = &args.options {
+                job_args["options"] = options.clone();
+            }
+            if let Some(graph_type) = &args.graph_type {
+                job_args["graph_type"] = serde_json::Value::String(graph_type.clone());
+            }
             let job = self.state.enqueue_job(&project_id, "update-graph", job_args, serde_json::json!({}))?;
             let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
             if done.status == JobStatus::Done {
@@ -6591,8 +6679,8 @@ impl TiterMcpServer {
         // Inspector 2.13.0 discards tools whose outputSchema has no `type`
         // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
         // returns, so `tools/list` prints `{"tools": []}` even though the
-        // server returns all 56. Every tool returns a JSON object, so stamp
-        // `type: "object"` on all 56 output schemas here — the single choke
+        // server returns all 57. Every tool returns a JSON object, so stamp
+        // `type: "object"` on all 57 output schemas here — the single choke
         // point — instead of touching each tool. `Arc::make_mut`
         // clone-on-writes: rmcp caches the `Value` schema in a thread-local
         // cache shared by all tools, so the cached Arc must never be
@@ -6829,10 +6917,10 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes up to 56 tools, gated by the allowlist in Settings → AI Connections \
+                It exposes up to 57 tools, gated by the allowlist in Settings → AI Connections \
                 (contract §12): by default only the 5 read tools below are enabled, and the user \
                 can enable more groups there — a tool that is not listed cannot be called. \
-                18 of the 56 are read-only and 38 change the open project. \
+                18 of the 57 are read-only and 39 change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_project_summary (the same discovery, as counts plus ids and names), \
                 titer_search (find a node by name), \
@@ -8821,7 +8909,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 56 tools, so it enables every group first.
+        // this test drives all 57 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -8874,9 +8962,12 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            56,
-            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + three L4 analysis tools (run, re-run, freeze) + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools + four L8 export tools + one feedback tool + three 1.7.4 discovery tools (params, search, summary): {names:?}"
+            57,
+            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + three L4 analysis tools (run, re-run, freeze) + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools + four L8 export tools + one feedback tool + three 1.7.4 discovery tools (params, search, summary) + one 1.8 re-point tool: {names:?}"
         );
+        for name in ["titer_repoint_analysis"] {
+            assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
+        }
         for name in ["titer_read_job", "titer_list_jobs", "titer_cancel_job"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
@@ -9881,12 +9972,12 @@ mod tests {
 
     #[test]
     fn allowlist_groups_cover_all_tools_once() {
-        // The inventory pin: every tool in exactly one group, 56 total.
+        // The inventory pin: every tool in exactly one group, 57 total.
         // A lane that adds a tool must assign it a group here, or this
         // fails — an ungrouped tool would otherwise be silently hidden.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 56, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 57, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
@@ -9952,7 +10043,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 56, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 57, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema
