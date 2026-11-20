@@ -1483,25 +1483,42 @@ export interface FractionOfTotalColumn {
   rows: FractionOfTotalRow[];
 }
 
+/** How "row-means-totals" groups the values: `pooled` is one summary per row
+ *  across all the chosen data sets; `per-column` is one summary per row
+ *  within each chosen data set (Prism's "for each data set column"
+ *  option). */
+export const ROW_MEANS_SCOPES = ["pooled", "per-column"] as const;
+export type RowMeansScope = (typeof ROW_MEANS_SCOPES)[number];
+
 /** Params for "row-means-totals": which columns to summarise across each
  *  row (`ys`), and — for XY tables — the X column whose values label the
- *  result rows. */
+ *  result rows. `rowScope` is `pooled` unless the wizard chose
+ *  `per-column`. */
 export interface RowMeansTotalsParams {
   /** Omitted: every numeric column except `x` — the wizard always sets it. */
   ys?: string[];
   /** XY tables only: the X column, for the result rows' X values. */
   x?: string;
+  /** Omitted: `pooled` — one summary per row across the chosen data sets. */
+  rowScope?: RowMeansScope;
 }
 
 /** One row's summary ("row-means-totals"): the total, mean, SD, SEM, median,
  *  t-based 95% CI of the mean, %CV and geometric mean of the values that row
- *  holds across the chosen data sets. `row` is the row title, or the row
+ *  holds across the chosen data sets — plus the minimum, maximum, 25th and
+ *  75th percentiles, 10th and 90th percentiles, geometric SD and the t-based
+ *  95% CI of the geometric mean. `row` is the row title, or the row
  *  number when the table has none; `x` is the X value at that row (XY tables
- *  only). SD, SEM, CI and %CV are null on a one-value row; the geometric mean
- *  is null unless every value is above 0. */
+ *  only). `column` is the data set the summary is within, in per-column mode
+ *  only. SD, SEM, CI and %CV are null on a one-value row; the geometric mean,
+ *  geometric SD and geometric CI are null unless every value is above 0, and
+ *  the geometric SD/CI also need at least 2 values. Quartiles and
+ *  percentiles are R's type 6, the (n + 1)p method — the per-column
+ *  descriptives' method. */
 export interface RowMeansRow {
   row: string;
   x?: number | null;
+  column?: string;
   n: number;
   total: number;
   mean: number | null;
@@ -1512,6 +1529,15 @@ export interface RowMeansRow {
   ciHigh: number | null;
   cv: number | null;
   geoMean: number | null;
+  min: number | null;
+  max: number | null;
+  q1: number | null;
+  q3: number | null;
+  p10: number | null;
+  p90: number | null;
+  geoSd: number | null;
+  geoCiLow: number | null;
+  geoCiHigh: number | null;
 }
 
 /** One Y data set's derived curve ("smooth-differentiate-integrate"): the
@@ -1889,7 +1915,9 @@ export interface AnalysisResult {
   fractionsOfTotal?: FractionOfTotalColumn[];
   /** Optional per-row summaries ("row-means-totals"): one row per table
    *  row holding a value, with that row's total, mean, SD, SEM, 95% CI,
-   *  %CV, median and geometric mean across the chosen data sets. */
+   *  %CV, median, quartiles, min/max, percentiles and geometric mean/SD/CI
+   *  across the chosen data sets — or, in per-column mode, one row per
+   *  table row per data set. */
   rowMeans?: RowMeansRow[];
   /** Optional per-column outlier summary ("outliers"). */
   outlierGroups?: OutlierGroupRow[];

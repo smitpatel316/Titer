@@ -76,6 +76,7 @@ import {
   RANK_POSTHOCS,
   REMOVE_BASELINE_METHODS,
   ROUT_Q,
+  ROW_MEANS_SCOPES,
   SMOOTH_DIFF_INT_OPERATIONS,
   TAILS,
   THREE_WAY_TERMS,
@@ -313,6 +314,9 @@ const PARAMS = {
   // Fraction of total (v2): which total each value is divided by, and
   // whether the result is a fraction or a percent.
   totalBy: FRACTION_OF_TOTAL_TOTALS, format: FRACTION_OF_TOTAL_FORMATS,
+  // Row means and totals (1.8, seq 194): whether each row is summarised
+  // across all the chosen data sets together, or within each one.
+  rowScope: ROW_MEANS_SCOPES,
   alpha: { min: 0.001, max: 0.5 }, iterate: "yes/no",
   f: "number", spar: "number", df: "number",
   // Smooth, differentiate or integrate a curve (v2): the operation is a
@@ -889,7 +893,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "deming-regression": ["y", "lambda", "sets"],
   "simple-logistic-regression": ["y", "sets"],
   "area-under-curve": ["baseline", "sets"],
-  "row-means-totals": ["ys", "x", "sets"],
+  "row-means-totals": ["ys", "x", "rowScope", "sets"],
   "nonlinear-regression": [
     "x", "y", "ys", "model", "compareWith", "compare", "interpolate", "weights", "fixed", "bounds", "fixedConstants",
     "boundsConstants", "compareModel", "globalY", "sharedParams", "ligandConcentration", "ligandKd",

@@ -2144,6 +2144,16 @@
         "description": "XY tables only: the X column, for the result rows' X values."
       },
       {
+        "name": "rowScope",
+        "type": "string",
+        "enum": [
+          "pooled",
+          "per-column"
+        ],
+        "required": false,
+        "description": "Omitted: `pooled` — one summary per row across the chosen data sets."
+      },
+      {
         "name": "sets",
         "type": "string[]",
         "required": false,
