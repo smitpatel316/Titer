@@ -10470,7 +10470,8 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
   // that, Hierarchical clustering after that, Outliers after that, Multiple logistic regression after that,
   // Poisson regression after that, Cox after that, Survival after that (1.8:
   // time, event-code and grouping variables), Extract and rearrange after
-  // that, and Plot a function last.
+  // that, Select and transform after that (seq 177: a new Multiple Variables
+  // table from a subset of one), Transform after that, and Plot a function last.
   deepStrictEqual(
     analysisOptionsForTable("multiple").map((o) => o.value),
     [
@@ -10490,6 +10491,7 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
       "cox-proportional-hazards",
       "survival",
       "extract-rearrange",
+      "select-transform",
       "transform",
       "plot-function",
     ],
