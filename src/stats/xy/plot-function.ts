@@ -34,11 +34,14 @@ const GAUSSIAN_PARAMS = ["Amplitude", "Mean", "SD"] as const;
 /** The parameter names the wizard asks for, in order: the model's terms —
  *  plus "X0" for the segmental-linear hinge, which the fitter derives from
  *  the data (a breakpoint) instead of fitting, so the plotter asks for it
- *  outright. */
+ *  outright — and "XCenter" for the centered polynomials, derived the
+ *  same way (the mean of X). */
 export function plotFunctionParams(model: PlotFunctionModel): string[] {
   if (model === "gaussian") return [...GAUSSIAN_PARAMS];
   const terms = modelSpec(model).terms;
-  return model === "segmental-linear" ? [...terms, "X0"] : terms;
+  if (model === "segmental-linear") return [...terms, "X0"];
+  if (model.startsWith("centered-")) return [...terms, "XCenter"];
+  return terms;
 }
 
 /** The wizard's starting parameter values, per model: Prism's usual
@@ -47,16 +50,54 @@ export function plotFunctionParams(model: PlotFunctionModel): string[] {
 export const PLOT_FUNCTION_DEFAULTS: Record<PlotFunctionModel, Record<string, number>> = {
   line: { Intercept: 0, Slope: 1 },
   "semilog-line": { Intercept: 0, Slope: 1 },
+  "line-through-origin": { Slope: 1 },
+  "horizontal-line": { Mean: 0 },
+  "semilog-y-log": { Intercept: 0, Slope: 1 },
+  "log-log-line": { Intercept: 0, Slope: 1 },
+  "exponential-growth-log": { Intercept: 0, Slope: 1 },
   hyperbola: { Bmax: 100, Kd: 10 },
   quadratic: { B0: 0, B1: 1, B2: 0 },
   cubic: { B0: 0, B1: 1, B2: 0, B3: 0 },
   quartic: { B0: 0, B1: 1, B2: 0, B3: 0, B4: 0 },
   quintic: { B0: 0, B1: 1, B2: 0, B3: 0, B4: 0, B5: 0 },
+  sextic: { B0: 0, B1: 1, B2: 0, B3: 0, B4: 0, B5: 0, B6: 0 },
+  "centered-first": { B0: 0, B1: 1, XCenter: 0 },
+  "centered-second": { B0: 0, B1: 1, B2: 0, XCenter: 0 },
+  "centered-third": { B0: 0, B1: 1, B2: 0, B3: 0, XCenter: 0 },
+  "centered-fourth": { B0: 0, B1: 1, B2: 0, B3: 0, B4: 0, XCenter: 0 },
+  "centered-fifth": { B0: 0, B1: 1, B2: 0, B3: 0, B4: 0, B5: 0, XCenter: 0 },
+  "centered-sixth": { B0: 0, B1: 1, B2: 0, B3: 0, B4: 0, B5: 0, B6: 0, XCenter: 0 },
   "segmental-linear": { B0: 0, B1: 1, B2: 0, X0: 0 },
   "sigmoidal-4pl-logx": { Bottom: 0, Top: 100, LogEC50: 0, HillSlope: 1 },
   "sigmoidal-4pl-x": { Bottom: 0, Top: 100, EC50: 1, HillSlope: 1 },
   "agonist-3pl-logx": { Bottom: 0, Top: 100, LogEC50: 0 },
   "inhibitor-3pl-logx": { Bottom: 0, Top: 100, LogIC50: 0 },
+  "agonist-3pl-x": { Bottom: 0, Top: 100, EC50: 1 },
+  "inhibitor-3pl-x": { Bottom: 0, Top: 100, IC50: 1 },
+  "agonist-3pl-normalized-logx": { LogEC50: 0 },
+  "agonist-4pl-normalized-logx": { LogEC50: 0, HillSlope: 1 },
+  "agonist-3pl-normalized-x": { EC50: 1 },
+  "agonist-4pl-normalized-x": { EC50: 1, HillSlope: 1 },
+  "inhibitor-3pl-normalized-logx": { LogIC50: 0 },
+  "inhibitor-4pl-normalized-logx": { LogIC50: 0, HillSlope: 1 },
+  "inhibitor-3pl-normalized-x": { IC50: 1 },
+  "inhibitor-4pl-normalized-x": { IC50: 1, HillSlope: 1 },
+  "biphasic-logx": { Bottom: 0, Top: 100, LogEC50_1: -1, LogEC50_2: 1, nH1: 1, nH2: 1, Frac: 0.5 },
+  "biphasic-x": { Bottom: 0, Top: 100, EC50_1: 0.1, EC50_2: 10, nH1: 1, nH2: 1, Frac: 0.5 },
+  "bell-shaped-logx": { Plateau1: 100, Plateau2: 100, Dip: 0, LogEC50_1: -1, LogEC50_2: 1, nH1: 1, nH2: 1 },
+  "bell-shaped-x": { Plateau1: 100, Plateau2: 100, Dip: 0, EC50_1: 0.1, EC50_2: 10, nH1: 1, nH2: 1 },
+  "absolute-ic50-logx": { Bottom: 0, Top: 100, LogEC50: 0, HillSlope: 1 },
+  "absolute-ic50-x": { Bottom: 0, Top: 100, EC50: 1, HillSlope: 1 },
+  "pade-11": { A0: 1, A1: 1, B1: 1 },
+  "power-series": { A: 1, B: 1, C: 1, D: 2 },
+  "exponential-plateau": { Y0: 0, YM: 100, K: 0.1 },
+  "beta-growth-decay": { Wmax: 100, Te: 1, Tm: 0.5 },
+  "lq-fraction-surviving": { A: 0.1, B: 0.01 },
+  "lq-percent-surviving": { A: 0.1, B: 0.01 },
+  "lq-fraction-dead": { A: 0.1, B: 0.01 },
+  "lq-percent-dead": { A: 0.1, B: 0.01 },
+  "lq-count-alive": { A: 0.1, B: 0.01, Total: 100 },
+  "lq-count-dead": { A: 0.1, B: 0.01, Total: 100 },
   "asymmetric-5pl-logx": { Bottom: 0, Top: 100, LogEC50: 0, HillSlope: 1, S: 1 },
   "asymmetric-5pl-x": { Bottom: 0, Top: 100, EC50: 1, HillSlope: 1, S: 1 },
   "exponential-growth": { Y0: 1, K: 0.1 },
@@ -64,8 +105,11 @@ export const PLOT_FUNCTION_DEFAULTS: Record<PlotFunctionModel, Record<string, nu
   "gompertz-growth": { Y0: 1, YM: 100, K: 0.1 },
   "one-phase-decay": { Y0: 100, Plateau: 0, K: 0.1 },
   "two-phase-decay": { Plateau: 0, Span1: 50, K1: 1, Span2: 50, K2: 0.1 },
+  "three-phase-decay": { Plateau: 0, Span1: 50, K1: 1, Span2: 30, K2: 0.1, Span3: 20, K3: 0.01 },
   "plateau-decay": { X0: 5, Y0: 100, Plateau: 0, K: 0.1 },
   "one-phase-association": { Y0: 0, Plateau: 100, K: 0.1 },
+  "two-phase-association": { Y0: 0, Span1: 60, K1: 1, Span2: 40, K2: 0.1 },
+  "plateau-association": { X0: 5, Y0: 0, Plateau: 100, K: 0.1 },
   "michaelis-menten": { Vmax: 100, Km: 10 },
   "allosteric-sigmoidal": { Vmax: 100, Khalf: 10, HillSlope: 1 },
   "substrate-inhibition": { Vmax: 100, Km: 10, Ki: 100 },
@@ -76,6 +120,16 @@ export const PLOT_FUNCTION_DEFAULTS: Record<PlotFunctionModel, Record<string, nu
   "boltzmann-sigmoid": { Bottom: 0, Top: 100, V50: 0, Slope: 1 },
   lorentzian: { Amplitude: 100, Center: 0, Width: 1 },
   "sine-wave": { Amplitude: 1, Wavelength: 10, PhaseShift: 0, Baseline: 0 },
+  // 1.8 classic-curves completion (B6).
+  "sum-of-two-gaussians": { Amplitude1: 100, Mean1: -1, SD1: 1, Amplitude2: 60, Mean2: 2, SD2: 1.5 },
+  lognormal: { A: 100, GeoMean: 5, GeoSD: 2 },
+  "cumulative-gaussian-percent": { Mean: 0, SD: 1 },
+  "cumulative-gaussian-fraction": { Mean: 0, SD: 1 },
+  "cumulative-gaussian-counts": { Mean: 0, SD: 1, Total: 100 },
+  "sum-of-two-lorentzians": { Amplitude1: 100, Center1: -1, Width1: 1, Amplitude2: 60, Center2: 2, Width2: 1.5 },
+  "standard-sine-wave": { Amplitude: 1, Wavelength: 10, PhaseShift: 0 },
+  "damped-sine-wave": { Amplitude: 1, Wavelength: 10, PhaseShift: 0, K: 0.1 },
+  sinc: { Amplitude: 1, Wavelength: 10 },
 };
 
 /** The wizard's starting X range, per model: log-X curves need X > 0, raw

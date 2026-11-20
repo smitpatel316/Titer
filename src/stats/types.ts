@@ -93,6 +93,22 @@ export const DOSE_MODELS = [
   "inhibitor-3pl-logx",
   "asymmetric-5pl-logx",
   "asymmetric-5pl-x",
+  // 1.8 classic-curves completion (B6 §Dose-response Stimulation/Inhibition):
+  // the X-concentration 3PLs and the normalized (Bottom=0, Top=100) 3PL/4PLs.
+  "agonist-3pl-x",
+  "inhibitor-3pl-x",
+  "agonist-3pl-normalized-logx",
+  "agonist-4pl-normalized-logx",
+  "agonist-3pl-normalized-x",
+  "agonist-4pl-normalized-x",
+  "inhibitor-3pl-normalized-logx",
+  "inhibitor-4pl-normalized-logx",
+  "inhibitor-3pl-normalized-x",
+  "inhibitor-4pl-normalized-x",
+  // 1.8 classic-curves completion (B6 §Dose-response Special): the
+  // absolute-IC50 models are 4PLs (one midpoint), so they are dose models.
+  "absolute-ic50-logx",
+  "absolute-ic50-x",
   // Binding — Competition (plan 28): the one-site Fit logIC50 is the
   // inhibitor 3PL above; the two-site and homologous competition curves
   // are dose-response curves too, so they live here (wizard dose list,
@@ -115,6 +131,12 @@ export const NONLINEAR_MODELS = [
   ...DOSE_MODELS,
   "line",
   "semilog-line",
+  // 1.8 classic-curves completion (B6 §Lines): the remaining line forms —
+  // through the origin, horizontal, and the two log-Y lines.
+  "line-through-origin",
+  "horizontal-line",
+  "semilog-y-log",
+  "log-log-line",
   "hyperbola",
   "quadratic",
   "cubic",
@@ -123,12 +145,45 @@ export const NONLINEAR_MODELS = [
   "segmental-linear",
   "quartic",
   "quintic",
+  // 1.8 classic-curves completion (B6 §Polynomial): the sixth order
+  // polynomial and the centered polynomials (B0 is Y at the X mean, not
+  // at X = 0 — same curve as the uncentered same degree).
+  "sextic",
+  "centered-first",
+  "centered-second",
+  "centered-third",
+  "centered-fourth",
+  "centered-fifth",
+  "centered-sixth",
+  // 1.8 classic-curves completion (B6 §Dose-response Special, §Standard,
+  // §Growth, §Linear quadratic, §Classic): two midpoints, so NOT dose
+  // models (curve comparison and ECanything need a single midpoint).
+  "biphasic-logx",
+  "biphasic-x",
+  "bell-shaped-logx",
+  "bell-shaped-x",
+  "pade-11",
+  "power-series",
+  "exponential-plateau",
+  "beta-growth-decay",
+  "lq-fraction-surviving",
+  "lq-percent-surviving",
+  "lq-fraction-dead",
+  "lq-percent-dead",
+  "lq-count-alive",
+  "lq-count-dead",
   ...KINETIC_MODELS,
+  // 1.8 classic-curves completion (B6 §Growth #2): the log-population
+  // growth curve — the log-Y twin of exponential-growth.
+  "exponential-growth-log",
   // Exponential family (plan 08, 1/2: decay first; one-phase-decay is already in KINETIC_MODELS).
   "two-phase-decay",
+  "three-phase-decay",
   "plateau-decay",
   // Plan 08, 2/2: association (growth is already in KINETIC_MODELS).
   "one-phase-association",
+  "two-phase-association",
+  "plateau-association",
   // Plan 09: enzyme kinetics (substrate–velocity; michaelis-menten is
   // already in KINETIC_MODELS).
   "allosteric-sigmoidal",
@@ -140,6 +195,20 @@ export const NONLINEAR_MODELS = [
   "boltzmann-sigmoid",
   "lorentzian",
   "sine-wave",
+  // 1.8 classic-curves completion (B6 diff vs Prism 11.2.0's 152-model list):
+  // the rest of Prism's Gaussian family (sum of two Gaussians, Log Gaussian,
+  // the three cumulative Gaussians, sum of two Lorentzians) and its Sine
+  // waves family (standard sine, damped sine, sinc). Equations from Prism's
+  // Curve Fitting Guide (see modelSpec); B6 line refs in the lane report.
+  "sum-of-two-gaussians",
+  "lognormal",
+  "cumulative-gaussian-percent",
+  "cumulative-gaussian-fraction",
+  "cumulative-gaussian-counts",
+  "sum-of-two-lorentzians",
+  "standard-sine-wave",
+  "damped-sine-wave",
+  "sinc",
   // Plan 28: binding competition (two-site + homologous) — already in
   // DOSE_MODELS above, so they are covered by the spread; do NOT list them
   // again here (a duplicate entry double-runs every NONLINEAR_MODELS sweep

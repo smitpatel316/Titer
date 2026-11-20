@@ -3292,6 +3292,9 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ["boltzmann-sigmoid", "Boltzmann sigmoid"],
         ["lorentzian", "Lorentzian"],
         ["sine-wave", "Sine wave"],
+        // 1.8 classic-curves completion (B6 §Standard #10): the Pade
+        // approximant is Prism's tenth standard curve to interpolate.
+        ["pade-11", "Pade (1,1) approximant"],
       ]),
     ],
     finish: (a) => ({

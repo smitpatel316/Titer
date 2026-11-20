@@ -22,6 +22,35 @@ export const MODEL_LABEL: Record<NonlinearModel, string> = {
   "sigmoidal-4pl-x": "Sigmoidal, 4PL, X is concentration",
   "agonist-3pl-logx": "log(agonist) vs. response, standard slope (3PL)",
   "inhibitor-3pl-logx": "log(inhibitor) vs. response, standard slope (3PL)",
+  // 1.8 classic-curves completion (B6 §Dose-response Stimulation/Inhibition).
+  "agonist-3pl-x": "[Agonist] vs. response (three parameters)",
+  "inhibitor-3pl-x": "[Inhibitor] vs. response (three parameters)",
+  "agonist-3pl-normalized-logx": "log(agonist) vs. normalized response",
+  "agonist-4pl-normalized-logx": "log(agonist) vs. normalized response -- Variable slope",
+  "agonist-3pl-normalized-x": "[Agonist] vs. normalized response",
+  "agonist-4pl-normalized-x": "[Agonist] vs. normalized response -- Variable slope",
+  "inhibitor-3pl-normalized-logx": "log(inhibitor) vs. normalized response",
+  "inhibitor-4pl-normalized-logx": "log(inhibitor) vs. normalized response -- Variable slope",
+  "inhibitor-3pl-normalized-x": "[Inhibitor] vs. normalized response",
+  "inhibitor-4pl-normalized-x": "[Inhibitor] vs. normalized response -- Variable slope",
+  // 1.8 classic-curves completion (B6 §Dose-response Special, §Standard,
+  // §Growth, §Linear quadratic, §Classic).
+  "biphasic-logx": "Biphasic, X is log(concentration)",
+  "biphasic-x": "Biphasic, X is concentration",
+  "bell-shaped-logx": "Bell-shaped, X is log(concentration)",
+  "bell-shaped-x": "Bell-shaped, X is concentration",
+  "absolute-ic50-logx": "Absolute IC50, X is log(concentration)",
+  "absolute-ic50-x": "Absolute IC50, X is concentration",
+  "pade-11": "Pade (1,1) approximant",
+  "power-series": "Power series",
+  "exponential-plateau": "Exponential plateau",
+  "beta-growth-decay": "Beta growth then decay",
+  "lq-fraction-surviving": "Linear quadratic cell death (Y is fraction of cells surviving)",
+  "lq-percent-surviving": "Linear quadratic survival (Y is percentage)",
+  "lq-fraction-dead": "Linear quadratic cell death (Y is fraction of dead cells)",
+  "lq-percent-dead": "Linear quadratic survival (Y is percentage cells dead)",
+  "lq-count-alive": "Linear quadratic survival (Y is # alive cells)",
+  "lq-count-dead": "Linear quadratic survival (Y is # dead cells)",
   "asymmetric-5pl-logx": "Asymmetric sigmoidal, 5PL, X is log(concentration)",
   "asymmetric-5pl-x": "Asymmetric sigmoidal, 5PL, X is concentration",
   "semilog-line": "Semilog line",
@@ -32,15 +61,32 @@ export const MODEL_LABEL: Record<NonlinearModel, string> = {
   "segmental-linear": "Segmental linear regression (two segments)",
   quartic: "Fourth order polynomial (quartic)",
   quintic: "Fifth order polynomial (quintic)",
+  // 1.8 classic-curves completion (B6 §Lines, §Polynomial): the remaining
+  // line forms and the sixth-order / centered polynomials.
+  "line-through-origin": "Line through origin",
+  "horizontal-line": "Horizontal line",
+  "semilog-y-log": "Semilog line — X is linear, Y is log",
+  "log-log-line": "Log-log line — X and Y both log",
+  sextic: "Sixth order polynomial",
+  "centered-first": "Centered first order polynomial (straight line)",
+  "centered-second": "Centered second order polynomial (quadratic)",
+  "centered-third": "Centered third order polynomial (cubic)",
+  "centered-fourth": "Centered fourth order polynomial",
+  "centered-fifth": "Centered fifth order polynomial",
+  "centered-sixth": "Centered sixth order polynomial",
   "exponential-growth": "Exponential growth",
+  "exponential-growth-log": "Exponential growth with log(population)",
   "logistic-growth": "Logistic growth",
   "gompertz-growth": "Gompertz growth",
   "one-phase-decay": "One-phase decay",
   "michaelis-menten": "Michaelis-Menten",
   // Prism's "Exponential" family (plan 08).
   "two-phase-decay": "Two-phase decay",
+  "three-phase-decay": "Three-phase decay",
   "plateau-decay": "Plateau followed by one-phase decay",
   "one-phase-association": "One-phase association",
+  "two-phase-association": "Two-phase association",
+  "plateau-association": "Plateau followed by one-phase association",
   // Prism's "Enzyme kinetics — Substrate vs. velocity" (plan 09;
   // michaelis-menten's label already exists above).
   "allosteric-sigmoidal": "Allosteric sigmoidal",
@@ -51,6 +97,17 @@ export const MODEL_LABEL: Record<NonlinearModel, string> = {
   "boltzmann-sigmoid": "Boltzmann sigmoid",
   lorentzian: "Lorentzian",
   "sine-wave": "Sine wave",
+  // 1.8 classic-curves completion (B6): the rest of Prism's Gaussian
+  // family (B6 §Gaussian) and Sine waves family (B6 §Sine waves).
+  "sum-of-two-gaussians": "Sum of two Gaussians",
+  lognormal: "Lognormal",
+  "cumulative-gaussian-percent": "Cumulative Gaussian — Percents",
+  "cumulative-gaussian-fraction": "Cumulative Gaussian — Fraction",
+  "cumulative-gaussian-counts": "Cumulative Gaussian — Counts",
+  "sum-of-two-lorentzians": "Sum of two Lorentzians",
+  "standard-sine-wave": "Standard sine wave",
+  "damped-sine-wave": "Damped sine wave",
+  sinc: "Sinc()",
   // Prism's "Binding — Competition" (plan 28): two-site competition and
   // homologous competition. The one-site Fit logIC50 is the inhibitor 3PL
   // above; Fit Ki is a derived quantity on it (see modelSpec's opts).
@@ -67,8 +124,11 @@ export const MODEL_LABEL: Record<NonlinearModel, string> = {
 export const EXPONENTIAL_MODELS: NonlinearModel[] = [
   "one-phase-decay",
   "two-phase-decay",
+  "three-phase-decay",
   "plateau-decay",
   "one-phase-association",
+  "two-phase-association",
+  "plateau-association",
   "exponential-growth",
 ];
 
@@ -99,6 +159,17 @@ export const CLASSIC_MODELS: NonlinearModel[] = [
   "boltzmann-sigmoid",
   "lorentzian",
   "sine-wave",
+  // 1.8 classic-curves completion (B6): the rest of Prism's Gaussian and
+  // Sine waves families — same "port" fits, same result shape.
+  "sum-of-two-gaussians",
+  "lognormal",
+  "cumulative-gaussian-percent",
+  "cumulative-gaussian-fraction",
+  "cumulative-gaussian-counts",
+  "sum-of-two-lorentzians",
+  "standard-sine-wave",
+  "damped-sine-wave",
+  "sinc",
 ];
 
 /** A derived quantity, as R expressions of the fit (`cf`, its coefficients;
@@ -131,6 +202,22 @@ const sumOf = (a: string, b: string, label = "Span"): Derived => {
   return { label, expr: value, low: `${value}-q*${se}`, high: `${value}+q*${se}` };
 };
 const span = difference("Top", "Bottom");
+/** Span for a normalized curve: Bottom=0, Top=100 by construction, so the
+ *  span is the constant 100 (a derived row with no CI, like "X center"). */
+const span100: Derived = { label: "Span", expr: "100" };
+/** Absolute IC50: the X where the 4PL reads 50 in absolute units (not 50%
+ *  of the span) — valid only when Top > 50 > Bottom, else NA. The logx
+ *  form solves 10^((LogEC50−X)·H) = (Top−50)/(50−Bottom) and reports the
+ *  concentration (10^X), like the EC50 derived; the x form solves
+ *  (EC50/X)^H = (Top−50)/(50−Bottom). */
+const absoluteIC50Logx: Derived = {
+  label: "Absolute IC50",
+  expr: `ifelse(cf[["Top"]]>50 & 50>cf[["Bottom"]],10^(cf[["LogEC50"]]-log10((cf[["Top"]]-50)/(50-cf[["Bottom"]]))/cf[["HillSlope"]]),NA_real_)`,
+};
+const absoluteIC50X: Derived = {
+  label: "Absolute IC50",
+  expr: `ifelse(cf[["Top"]]>50 & 50>cf[["Bottom"]],cf[["EC50"]]*((50-cf[["Bottom"]])/(cf[["Top"]]-50))^(1/cf[["HillSlope"]]),NA_real_)`,
+};
 /** Ki from a log midpoint: Ki = 10^LogIC50 / D, where D = 1 + [L]/Kd is a
  *  constant the wizard supplies — so log Ki's SE is logIC50's SE, and the
  *  Ki CI is 10^ the logIC50 CI, over D. (Cheng–Prusoff; plan 28.) */
@@ -154,8 +241,12 @@ const kiFromLinear = (label: string, p: string, d: number): Derived => ({
 export function ecAnything(model: NonlinearModel, f: number): Derived {
   const logX = model.endsWith("-logx");
   const [log, raise] = logX ? ["log10", (e: string) => `10^(${e})`] : ["log", (e: string) => `exp(${e})`];
-  const mid = model.startsWith("inhibitor") ? "LogIC50" : logX ? "LogEC50" : "EC50";
-  const at = logX ? `b[["${mid}"]]` : `log(b[["EC50"]])`;
+  // 1.8: an inhibitor's midpoint is LogIC50 on log X but IC50 on raw X —
+  // the old code read LogIC50/EC50 for every inhibitor-x model, which no
+  // existing model hit (there was no inhibitor-x model); the normalized
+  // and 3PL X models below do.
+  const mid = model.startsWith("inhibitor") ? (logX ? "LogIC50" : "IC50") : logX ? "LogEC50" : "EC50";
+  const at = logX ? `b[["${mid}"]]` : `log(b[["${mid}"]])`;
   const hill = model.includes("3pl") ? "1" : `b[["HillSlope"]]`;
   // Its shift from the midpoint: log(F / (100 − F)) / Hill slope; a 5PL's asymmetry moves it.
   const shift = model.startsWith("asymmetric")
@@ -211,6 +302,15 @@ export interface ModelSpec {
    *  where allosteric-sigmoidal is NaN and Michaelis-Menten has its pole);
    *  their negative-X error still lives in prepareFit. */
   nonNegativeX?: boolean;
+  /** Log-Y curves (1.8, B6 §Lines #6–7, §Growth #2): log(Y) is undefined
+   *  at Y ≤ 0, so the fit drops those points (prepareFit, like the X
+   *  flags) — and the fit is on the log scale, so interpolation is
+   *  refused (the runner's lm predict() would return log-scale values). */
+  positiveY?: boolean;
+  /** True when the response is fitted on the log scale (log(Y) ~ …):
+   *  the curve on the raw scale is exp() of the lm fit, so the lm
+   *  predict() path (interpolation band inversion) must not run. */
+  logY?: boolean;
   /** nls models only: R defining `g<-function(xv,p)` — the curve evaluated at
    *  X `xv` with parameter vector `p` (named, as `coef(m)` reports them).
    *  Used for the confidence band (delta method) and inverse prediction. */
@@ -293,6 +393,33 @@ export function modelSpec(
   switch (model) {
     case "line":
       return { kind: "lm", fit: "m<-lm(y~x)", terms: ["Intercept", "Slope"] };
+    case "line-through-origin":
+      // B6 §Lines #3: Y = Slope·X, no intercept — lm without one.
+      return { kind: "lm", fit: "m<-lm(y~x-1)", terms: ["Slope"] };
+    case "horizontal-line":
+      // B6 §Lines #4: Y = Mean — lm on the intercept alone.
+      return { kind: "lm", fit: "m<-lm(y~1)", terms: ["Mean"] };
+    case "semilog-y-log":
+      // B6 §Lines #6: log(Y) = Intercept + Slope·X — the log-Y twin of
+      // semilog-line (which logs X, not Y). Y ≤ 0 points are dropped.
+      return { kind: "lm", fit: "m<-lm(log(y)~x)", terms: ["Intercept", "Slope"], positiveY: true, logY: true };
+    case "log-log-line":
+      // B6 §Lines #7: log(Y) = Intercept + Slope·log(X) — a power law
+      // Y = exp(Intercept)·X^Slope on the raw scale.
+      return {
+        kind: "lm",
+        fit: "m<-lm(log(y)~log(x))",
+        terms: ["Intercept", "Slope"],
+        positiveX: true,
+        positiveY: true,
+        logY: true,
+      };
+    case "exponential-growth-log":
+      // B6 §Growth #2: "Exponential growth with log(population)" — the
+      // same log(Y) ~ X fit as semilog-y-log, a separate entry because
+      // Prism lists it under Growth curves, not Lines (the
+      // Michaelis-Menten/hyperbola precedent: one equation, two names).
+      return { kind: "lm", fit: "m<-lm(log(y)~x)", terms: ["Intercept", "Slope"], positiveY: true, logY: true };
     case "quadratic":
       return { kind: "lm", fit: "m<-lm(y~x+I(x^2))", terms: ["B0", "B1", "B2"] };
     case "cubic":
@@ -308,6 +435,50 @@ export function modelSpec(
         fit: "m<-lm(y~x+I(x^2)+I(x^3)+I(x^4)+I(x^5))",
         terms: ["B0", "B1", "B2", "B3", "B4", "B5"],
       };
+    case "sextic":
+      // B6 §Polynomial #11: 6th order polynomial — one degree higher
+      // again, same lm pattern.
+      return {
+        kind: "lm",
+        fit: "m<-lm(y~x+I(x^2)+I(x^3)+I(x^4)+I(x^5)+I(x^6))",
+        terms: ["B0", "B1", "B2", "B3", "B4", "B5", "B6"],
+      };
+    case "centered-first":
+    case "centered-second":
+    case "centered-third":
+    case "centered-fourth":
+    case "centered-fifth":
+    case "centered-sixth": {
+      // B6 §Polynomial #2,4,6,8,10,12: the centered polynomials — same
+      // curve as the uncentered same degree, but fitted on X − mean(X),
+      // so B0 is Y at the X mean (not at X = 0) and the coefficients are
+      // far less collinear. `xc` is assigned in the fit string, then the
+      // lm formula reads it from the formula environment — never
+      // `I(x-mean(x))` directly, which would break predict() on newdata
+      // (the mean of a single new X is itself). The X center is a derived
+      // value, reported as a coefficient row like the segmental X0.
+      const degree =
+        model === "centered-first"
+          ? 1
+          : model === "centered-second"
+            ? 2
+            : model === "centered-third"
+              ? 3
+              : model === "centered-fourth"
+                ? 4
+                : model === "centered-fifth"
+                  ? 5
+                  : 6;
+      const powers = Array.from({ length: degree }, (_, i) =>
+        i === 0 ? "I(x-xc)" : `I((x-xc)^${i + 1})`,
+      ).join("+");
+      return {
+        kind: "lm",
+        fit: `xc<-mean(x);m<-lm(y~${powers})`,
+        terms: Array.from({ length: degree + 1 }, (_, i) => `B${i}`),
+        derived: [{ label: "X center", expr: "xc" }],
+      };
+    }
     case "segmental-linear":
       // Plan 29: continuous two-segment line (hinge), Y = B0 + B1·X +
       // B2·max(X − X0, 0): slope B1 below the breakpoint X0, B1+B2 above.
@@ -457,6 +628,598 @@ export function modelSpec(
         dose: { expr, midpoint: "LogIC50" },
       };
     }
+    case "agonist-3pl-x": {
+      // B6 Stim #5: [Agonist] vs. response (three parameters) — the
+      // raw-concentration twin of agonist-3pl-logx, Hill slope 1. Same
+      // X = 0 guard as FOUR_X (the vehicle point is Bottom).
+      const expr = "ifelse(x==0,Bottom,Bottom+(Top-Bottom)/(1+EC50/x))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(Bottom=min(y),Top=max(y),EC50=median(x[x>0]))")}`,
+        // Same port-then-relaxed retries as the 4PLs: Gauss-Newton stalls
+        // ("singular gradient" / "minFactor") on near-perfect 3PL fits.
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(Bottom=min(y),Top=max(y),EC50=median(x[x>0])),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(Bottom=min(y),Top=max(y),EC50=median(x[x>0]))")}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["Bottom", "Top", "EC50"],
+        derived: [span],
+        nonNegativeX: true,
+        curveFn:
+          'g<-function(xv,p) ifelse(xv==0,p[["Bottom"]],p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+p[["EC50"]]/xv))',
+        asymptotes: ["Bottom", "Top"],
+        dose: { expr, midpoint: "EC50" },
+      };
+    }
+    case "inhibitor-3pl-x": {
+      // B6 Inhib #5: [Inhibitor] vs. response (three parameters) —
+      // falling, Hill slope 1: Y=Bottom+(Top-Bottom)/(1+X/IC50). No X=0
+      // guard, unlike the agonist forms: the unguarded value at X = 0 is
+      // Top (no inhibitor, full response), which is correct, and (X/IC50)
+      // divides by no zero there. (Batch 3 wrongly guarded it to Bottom —
+      // the vehicle point then contradicted the curve, and the
+      // normalized-4PL twin's fit came back with IC50 null.)
+      const expr = "Bottom+(Top-Bottom)/(1+x/IC50)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(Bottom=min(y),Top=max(y),IC50=median(x[x>0]))")}`,
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(Bottom=min(y),Top=max(y),IC50=median(x[x>0])),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(Bottom=min(y),Top=max(y),IC50=median(x[x>0]))")}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["Bottom", "Top", "IC50"],
+        derived: [span],
+        nonNegativeX: true,
+        curveFn:
+          'g<-function(xv,p) p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+xv/p[["IC50"]])',
+        asymptotes: ["Bottom", "Top"],
+        dose: { expr, midpoint: "IC50" },
+      };
+    }
+    case "agonist-3pl-normalized-logx": {
+      // B6 Stim #3: log(agonist) vs. normalized response — Bottom=0,
+      // Top=100 hard-coded, so only LogEC50 is fitted.
+      const expr = "100/(1+10^(LogEC50-x))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(LogEC50=median(x))")}`,
+        // Same port-then-relaxed retries as the 4PLs: the 1-parameter
+        // normalized fits stall Gauss-Newton on noiseless data too.
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(LogEC50=median(x)),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(LogEC50=median(x))")}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["LogEC50"],
+        derived: [tenTo("EC50", "LogEC50"), span100],
+        curveFn: 'g<-function(xv,p) 100/(1+10^(p[["LogEC50"]]-xv))',
+        dose: { expr, midpoint: "LogEC50" },
+      };
+    }
+    case "agonist-4pl-normalized-logx": {
+      // B6 Stim #4: ... -- Variable slope. SIGN starts the slope on the
+      // curve's own side, as for the 4PLs.
+      const expr = "100/(1+10^((LogEC50-x)*HillSlope))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, `list(LogEC50=median(x),HillSlope=${SIGN})`)}`,
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(LogEC50=median(x),HillSlope=${SIGN}),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, `list(LogEC50=median(x),HillSlope=${SIGN})`)}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["LogEC50", "HillSlope"],
+        derived: [tenTo("EC50", "LogEC50"), span100],
+        curveFn: 'g<-function(xv,p) 100/(1+10^((p[["LogEC50"]]-xv)*p[["HillSlope"]]))',
+        dose: { expr, midpoint: "LogEC50" },
+      };
+    }
+    case "agonist-3pl-normalized-x": {
+      // B6 Stim #7: [Agonist] vs. normalized response.
+      const expr = "ifelse(x==0,0,100/(1+EC50/x))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(EC50=median(x[x>0]))")}`,
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(EC50=median(x[x>0])),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(EC50=median(x[x>0]))")}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["EC50"],
+        derived: [span100],
+        nonNegativeX: true,
+        curveFn: 'g<-function(xv,p) ifelse(xv==0,0,100/(1+p[["EC50"]]/xv))',
+        dose: { expr, midpoint: "EC50" },
+      };
+    }
+    case "agonist-4pl-normalized-x": {
+      // B6 Stim #8: ... -- Variable slope.
+      const expr = "ifelse(x==0,0,100/(1+(EC50/x)^HillSlope))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, `list(EC50=median(x[x>0]),HillSlope=${SIGN})`)}`,
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(EC50=median(x[x>0]),HillSlope=${SIGN}),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, `list(EC50=median(x[x>0]),HillSlope=${SIGN})`)}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["EC50", "HillSlope"],
+        derived: [span100],
+        nonNegativeX: true,
+        curveFn:
+          'g<-function(xv,p) ifelse(xv==0,0,100/(1+(p[["EC50"]]/xv)^p[["HillSlope"]]))',
+        dose: { expr, midpoint: "EC50" },
+      };
+    }
+    case "inhibitor-3pl-normalized-logx": {
+      // B6 Inhib #3: log(inhibitor) vs. normalized response.
+      const expr = "100/(1+10^(x-LogIC50))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(LogIC50=median(x))")}`,
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(LogIC50=median(x)),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(LogIC50=median(x))")}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["LogIC50"],
+        derived: [tenTo("IC50", "LogIC50"), span100],
+        curveFn: 'g<-function(xv,p) 100/(1+10^(xv-p[["LogIC50"]]))',
+        dose: { expr, midpoint: "LogIC50" },
+      };
+    }
+    case "inhibitor-4pl-normalized-logx": {
+      // B6 Inhib #4: ... -- Variable slope. The (x-LogIC50) form falls
+      // with HillSlope > 0 — SIGN would start it at −1 on falling data
+      // and flip the curve, so the start is 1 outright.
+      const expr = "100/(1+10^((x-LogIC50)*HillSlope))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(LogIC50=median(x),HillSlope=1)")}`,
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(LogIC50=median(x),HillSlope=1),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(LogIC50=median(x),HillSlope=1)")}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["LogIC50", "HillSlope"],
+        derived: [tenTo("IC50", "LogIC50"), span100],
+        curveFn: 'g<-function(xv,p) 100/(1+10^((xv-p[["LogIC50"]])*p[["HillSlope"]]))',
+        dose: { expr, midpoint: "LogIC50" },
+      };
+    }
+    case "inhibitor-3pl-normalized-x": {
+      // B6 Inhib #7: [Inhibitor] vs. normalized response. No X=0 guard:
+      // the unguarded value at X = 0 is 100 (no inhibitor, full
+      // response) — the Batch 3 guard to 0 contradicted the vehicle
+      // point (see inhibitor-3pl-x).
+      const expr = "100/(1+x/IC50)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(IC50=median(x[x>0]))")}`,
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(IC50=median(x[x>0])),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(IC50=median(x[x>0]))")}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["IC50"],
+        derived: [span100],
+        nonNegativeX: true,
+        curveFn: 'g<-function(xv,p) 100/(1+xv/p[["IC50"]])',
+        dose: { expr, midpoint: "IC50" },
+      };
+    }
+    case "inhibitor-4pl-normalized-x": {
+      // B6 Inhib #8: ... -- Variable slope. The (x/IC50) form falls with
+      // HillSlope > 0, so the start is 1 outright (see the logx twin).
+      // No X=0 guard, as for inhibitor-3pl-normalized-x.
+      const expr = "100/(1+(x/IC50)^HillSlope)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(IC50=median(x[x>0]),HillSlope=1)")}`,
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(IC50=median(x[x>0]),HillSlope=1),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(IC50=median(x[x>0]),HillSlope=1)")}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["IC50", "HillSlope"],
+        derived: [span100],
+        nonNegativeX: true,
+        curveFn:
+          'g<-function(xv,p) 100/(1+(xv/p[["IC50"]])^p[["HillSlope"]])',
+        dose: { expr, midpoint: "IC50" },
+      };
+    }
+    case "biphasic-logx": {
+      // B6 Special logx #2: two agonist phases on log X — Y=Bottom +
+      // Span·Frac/(1+10^((LogEC50_1−X)·nH1)) + Span·(1−Frac)/(1+10^((LogEC50_2−X)·nH2)).
+      // Two midpoints, so no dose field (comparison/ECanything need one).
+      const expr =
+        "Bottom+(Top-Bottom)*Frac/(1+10^((LogEC50_1-x)*nH1))+(Top-Bottom)*(1-Frac)/(1+10^((LogEC50_2-x)*nH2))";
+      const starts = "list(Bottom=min(y),Top=max(y),LogEC50_1=median(x)-1,LogEC50_2=median(x)+1,nH1=1,nH2=1,Frac=0.5)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, starts)}`,
+        retryFits: [
+          {
+            // Bounded port: an unbounded trial step can take EC50/nH
+            // negative, and (EC50/X)^nH on a negative base is NaN.
+            // nH > 0 keeps both phases rising; Frac stays in [0, 1].
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",lower=c(-Inf,-Inf,-Inf,-Inf,0,0,0),upper=c(Inf,Inf,Inf,Inf,Inf,Inf,1),control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, starts)}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["Bottom", "Top", "LogEC50_1", "LogEC50_2", "nH1", "nH2", "Frac"],
+        derived: [tenTo("EC50_1", "LogEC50_1"), tenTo("EC50_2", "LogEC50_2"), span],
+        curveFn:
+          'g<-function(xv,p) p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])*p[["Frac"]]/(1+10^((p[["LogEC50_1"]]-xv)*p[["nH1"]]))+(p[["Top"]]-p[["Bottom"]])*(1-p[["Frac"]])/(1+10^((p[["LogEC50_2"]]-xv)*p[["nH2"]]))',
+      };
+    }
+    case "biphasic-x": {
+      // B6 Special X #2: the raw-concentration twin — Y=Bottom +
+      // Span·Frac/(1+(EC50_1/X)^nH1) + Span·(1−Frac)/(1+(EC50_2/X)^nH2).
+      // At X = 0 both sections vanish, so the curve is its Bottom there.
+      const expr =
+        "ifelse(x==0,Bottom,Bottom+(Top-Bottom)*Frac/(1+(EC50_1/x)^nH1)+(Top-Bottom)*(1-Frac)/(1+(EC50_2/x)^nH2))";
+      const starts = "list(Bottom=min(y),Top=max(y),EC50_1=median(x[x>0])/10,EC50_2=median(x[x>0])*10,nH1=1,nH2=1,Frac=0.5)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, starts)}`,
+        retryFits: [
+          {
+            // Bounded port: EC50_1/EC50_2 and nH stay positive, Frac in
+            // [0, 1] — a negative EC50 makes (EC50/X)^nH NaN for
+            // fractional nH (see biphasic-logx).
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",lower=c(-Inf,-Inf,0,0,0,0,0),upper=c(Inf,Inf,Inf,Inf,Inf,Inf,1),control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, starts)}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["Bottom", "Top", "EC50_1", "EC50_2", "nH1", "nH2", "Frac"],
+        derived: [span],
+        nonNegativeX: true,
+        curveFn:
+          'g<-function(xv,p) ifelse(xv==0,p[["Bottom"]],p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])*p[["Frac"]]/(1+(p[["EC50_1"]]/xv)^p[["nH1"]])+(p[["Top"]]-p[["Bottom"]])*(1-p[["Frac"]])/(1+(p[["EC50_2"]]/xv)^p[["nH2"]]))',
+      };
+    }
+    case "bell-shaped-logx": {
+      // B6 Special logx #3: up then down — Y=Dip + Span1/(1+10^((LogEC50_1−X)·nH1))
+      // + Span2/(1+10^((X−LogEC50_2)·nH2)), Span1=Plateau1−Dip, Span2=Plateau2−Dip.
+      const expr =
+        "Dip+(Plateau1-Dip)/(1+10^((LogEC50_1-x)*nH1))+(Plateau2-Dip)/(1+10^((x-LogEC50_2)*nH2))";
+      const starts = "list(Plateau1=max(y),Plateau2=max(y),Dip=min(y),LogEC50_1=median(x)-1,LogEC50_2=median(x)+1,nH1=1,nH2=1)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, starts)}`,
+        retryFits: [
+          {
+            // Bounded port: nH1/nH2 stay positive (see biphasic-logx).
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",lower=c(-Inf,-Inf,-Inf,-Inf,-Inf,0,0),upper=c(Inf,Inf,Inf,Inf,Inf,Inf,Inf),control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, starts)}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["Plateau1", "Plateau2", "Dip", "LogEC50_1", "LogEC50_2", "nH1", "nH2"],
+        derived: [
+          tenTo("EC50_1", "LogEC50_1"),
+          tenTo("EC50_2", "LogEC50_2"),
+          difference("Plateau1", "Dip", "Span1"),
+          difference("Plateau2", "Dip", "Span2"),
+        ],
+        curveFn:
+          'g<-function(xv,p) p[["Dip"]]+(p[["Plateau1"]]-p[["Dip"]])/(1+10^((p[["LogEC50_1"]]-xv)*p[["nH1"]]))+(p[["Plateau2"]]-p[["Dip"]])/(1+10^((xv-p[["LogEC50_2"]])*p[["nH2"]]))',
+      };
+    }
+    case "bell-shaped-x": {
+      // B6 Special X #3: the raw-concentration twin — at X = 0 the first
+      // section vanishes and the second is whole, so the curve is Plateau2.
+      const expr =
+        "ifelse(x==0,Plateau2,Dip+(Plateau1-Dip)/(1+(EC50_1/x)^nH1)+(Plateau2-Dip)/(1+(x/EC50_2)^nH2))";
+      const starts = "list(Plateau1=max(y),Plateau2=max(y),Dip=min(y),EC50_1=median(x[x>0])/10,EC50_2=median(x[x>0])*10,nH1=1,nH2=1)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, starts)}`,
+        retryFits: [
+          {
+            // Bounded port: EC50_1/EC50_2 and nH stay positive (see
+            // biphasic-x — a negative EC50 makes (EC50/X)^nH NaN).
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",lower=c(-Inf,-Inf,-Inf,0,0,0,0),upper=c(Inf,Inf,Inf,Inf,Inf,Inf,Inf),control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, starts)}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["Plateau1", "Plateau2", "Dip", "EC50_1", "EC50_2", "nH1", "nH2"],
+        derived: [difference("Plateau1", "Dip", "Span1"), difference("Plateau2", "Dip", "Span2")],
+        nonNegativeX: true,
+        curveFn:
+          'g<-function(xv,p) ifelse(xv==0,p[["Plateau2"]],p[["Dip"]]+(p[["Plateau1"]]-p[["Dip"]])/(1+(p[["EC50_1"]]/xv)^p[["nH1"]])+(p[["Plateau2"]]-p[["Dip"]])/(1+(xv/p[["EC50_2"]])^p[["nH2"]]))',
+      };
+    }
+    case "absolute-ic50-logx": {
+      // B6 Special logx #11: the 4PL fit (same as sigmoidal-4pl-logx),
+      // reporting the X where Y = 50 in absolute units as well.
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(FOUR_LOG, `list(Bottom=min(y),Top=max(y),LogEC50=median(x),HillSlope=${SIGN})`)}`,
+        retryFits: [
+          {
+            fit: `m<-nls(y~${FOUR_LOG},start=list(Bottom=min(y),Top=max(y),LogEC50=median(x),HillSlope=${SIGN}),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(FOUR_LOG, `list(Bottom=min(y),Top=max(y),LogEC50=median(x),HillSlope=${SIGN})`)}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["Bottom", "Top", "LogEC50", "HillSlope"],
+        derived: [tenTo("EC50", "LogEC50"), span, absoluteIC50Logx],
+        curveFn:
+          'g<-function(xv,p) p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+10^((p[["LogEC50"]]-xv)*p[["HillSlope"]]))',
+        asymptotes: ["Bottom", "Top"],
+        dose: { expr: FOUR_LOG, midpoint: "LogEC50" },
+      };
+    }
+    case "absolute-ic50-x": {
+      // B6 Special X #11: the raw-concentration twin.
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(FOUR_X, `list(Bottom=min(y),Top=max(y),EC50=median(x[x>0]),HillSlope=${SIGN})`)}`,
+        retryFits: [
+          {
+            fit: `m<-nls(y~${FOUR_X},start=list(Bottom=min(y),Top=max(y),EC50=median(x[x>0]),HillSlope=${SIGN}),algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(FOUR_X, `list(Bottom=min(y),Top=max(y),EC50=median(x[x>0]),HillSlope=${SIGN})`)}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["Bottom", "Top", "EC50", "HillSlope"],
+        derived: [span, absoluteIC50X],
+        nonNegativeX: true,
+        curveFn:
+          'g<-function(xv,p) ifelse(xv==0,p[["Bottom"]],p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+(p[["EC50"]]/xv)^p[["HillSlope"]]))',
+        asymptotes: ["Bottom", "Top"],
+        dose: { expr: FOUR_X, midpoint: "EC50" },
+      };
+    }
+    case "pade-11": {
+      // B6 Standard #10: Y=(A0+A1·X)/(1+B1·X) — Prism's standard curve
+      // for interpolating when the curve plateaus at large concentrations.
+      // The guide's starts are all 1.0, but (1,1,1) makes the curve
+      // identically 1, so the Jacobian is singular there and nls dies
+      // with "singular gradient matrix at initial parameter estimates"
+      // on every dataset. Instead the starts linearize the equation:
+      // Y·(1+B1·X)=A0+A1·X, so with A0 the left-edge Y, (Y−A0) regressed
+      // on X and −X·Y (no intercept) gives (A1, B1) — exact on
+      // noiseless data. A plain list(...) start, so the fit rewriters
+      // still parse it.
+      const expr = "(A0+A1*x)/(1+B1*x)";
+      const lin = "lm(I(y-y[which.min(x)])~0+x+I(-x*y))";
+      const starts = `list(A0=y[which.min(x)],A1=coef(${lin})[[1]],B1=coef(${lin})[[2]])`;
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, starts)}`,
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, starts)}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["A0", "A1", "B1"],
+        nonNegativeX: true,
+        curveFn: 'g<-function(xv,p) (p[["A0"]]+p[["A1"]]*xv)/(1+p[["B1"]]*xv)',
+      };
+    }
+    case "power-series": {
+      // B6 Classic #13: Y=A·X^B + C·X^D. The starts scale the two terms
+      // to half the max Y at the max X, so neither starts orders of
+      // magnitude off the data (max(y)/2 each would be, for B=1/D=2).
+      const expr = "A*x^B+C*x^D";
+      const starts = "list(A=max(y)/(2*max(x)),B=1,C=max(y)/(2*max(x)^2),D=2)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, starts)}`,
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, starts)}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["A", "B", "C", "D"],
+        nonNegativeX: true,
+        curveFn: 'g<-function(xv,p) p[["A"]]*xv^p[["B"]]+p[["C"]]*xv^p[["D"]]',
+      };
+    }
+    case "exponential-plateau": {
+      // B6 Growth #3: Y=YM−(YM−Y0)·exp(−K·X) — the same shape as
+      // one-phase association, a separate entry by the codebase's
+      // precedent (different Prism parameter names).
+      const expr = "YM-(YM-Y0)*exp(-K*x)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, "list(Y0=y[which.min(x)],YM=max(y),K=0.5)")}`,
+        // Same port-then-relaxed retries as the 4PLs: Gauss-Newton
+        // stalls ("maxiter 200") on the noiseless plateau fit. The port
+        // retry bounds K > 0 — a negative K makes exp(−K·X) blow up.
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=list(Y0=y[which.min(x)],YM=max(y),K=0.5),algorithm="port",lower=c(-Inf,-Inf,0),control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, "list(Y0=y[which.min(x)],YM=max(y),K=0.5)")}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["Y0", "YM", "K"],
+        derived: [overK("Half-life", "log(2)", "K"), difference("YM", "Y0")],
+        curveFn: 'g<-function(xv,p) p[["YM"]]-(p[["YM"]]-p[["Y0"]])*exp(-p[["K"]]*xv)',
+      };
+    }
+    case "beta-growth-decay": {
+      // B6 Growth #6: Yin et al. 2003 — Y=Wmax·(1+(Te−X)/(Te−Tm))·(X/Te)^(Te/(Te−Tm)).
+      // The weight decays and reaches zero again at 2·Te−Tm.
+      const expr = "Wmax*(1+(Te-x)/(Te-Tm))*(x/Te)^(Te/(Te-Tm))";
+      const starts = "list(Wmax=max(y),Te=x[which.max(y)],Tm=x[which.max(y)]/2)";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(expr, starts)}`,
+        retryFits: [
+          {
+            fit: `m<-nls(y~${expr},start=${starts},algorithm="port",control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(expr, starts)}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: ["Wmax", "Te", "Tm"],
+        nonNegativeX: true,
+        curveFn:
+          'g<-function(xv,p) p[["Wmax"]]*(1+(p[["Te"]]-xv)/(p[["Te"]]-p[["Tm"]]))*(xv/p[["Te"]])^(p[["Te"]]/(p[["Te"]]-p[["Tm"]]))',
+      };
+    }
+    case "lq-fraction-surviving":
+    case "lq-percent-surviving":
+    case "lq-fraction-dead":
+    case "lq-percent-dead":
+    case "lq-count-alive":
+    case "lq-count-dead": {
+      // B6 §Linear quadratic: Y = exp(−(A·X+B·X²)), scaled to percent or
+      // counts, surviving or dead. "Total" (the count variants' N) is a
+      // fitted parameter — the guide's form for "# alive/dead cells" was
+      // not fetched, so the name is Titer's.
+      const form =
+        model === "lq-fraction-surviving"
+          ? "exp(-(A*x+B*x^2))"
+          : model === "lq-percent-surviving"
+            ? "100*exp(-(A*x+B*x^2))"
+            : model === "lq-fraction-dead"
+              ? "1-exp(-(A*x+B*x^2))"
+              : model === "lq-percent-dead"
+                ? "100*(1-exp(-(A*x+B*x^2)))"
+                : model === "lq-count-alive"
+                  ? "Total*exp(-(A*x+B*x^2))"
+                  : "Total*(1-exp(-(A*x+B*x^2)))";
+      const isCount = model === "lq-count-alive" || model === "lq-count-dead";
+      const starts = isCount ? "list(A=0.1,B=0.01,Total=max(y))" : "list(A=0.1,B=0.01)";
+      const gForm =
+        model === "lq-fraction-surviving"
+          ? "exp(-(p[[\"A\"]]*xv+p[[\"B\"]]*xv^2))"
+          : model === "lq-percent-surviving"
+            ? "100*exp(-(p[[\"A\"]]*xv+p[[\"B\"]]*xv^2))"
+            : model === "lq-fraction-dead"
+              ? "1-exp(-(p[[\"A\"]]*xv+p[[\"B\"]]*xv^2))"
+              : model === "lq-percent-dead"
+                ? "100*(1-exp(-(p[[\"A\"]]*xv+p[[\"B\"]]*xv^2)))"
+                : model === "lq-count-alive"
+                  ? "p[[\"Total\"]]*exp(-(p[[\"A\"]]*xv+p[[\"B\"]]*xv^2))"
+                  : "p[[\"Total\"]]*(1-exp(-(p[[\"A\"]]*xv+p[[\"B\"]]*xv^2)))";
+      return {
+        kind: "nls",
+        fit: `m<-${nls200(form, starts)}`,
+        // Same port-then-relaxed retries as the 4PLs: Gauss-Newton stalls
+        // ("maxiter 200") on the scaled percent/count variants, and an
+        // unbounded trial step can take A/B negative, where exp(−(A·X +
+        // B·X²)) blows up. A and B are killing rates, so both (and Total)
+        // stay ≥ 0 in the port retry.
+        retryFits: [
+          {
+            fit: `m<-nls(y~${form},start=${starts},algorithm="port",lower=${isCount ? "c(0,0,0)" : "c(0,0)"},control=nls.control(maxiter=200))`,
+            method: "port",
+          },
+          {
+            fit: `m<-${nls200Tol(form, starts)}`,
+            method: "relaxed tolerance",
+          },
+        ],
+        terms: isCount ? ["A", "B", "Total"] : ["A", "B"],
+        nonNegativeX: true,
+        curveFn: `g<-function(xv,p) ${gForm}`,
+      };
+    }
     case "asymmetric-5pl-logx": {
       // Prism's 5PL: the curve's asymmetry S (1 = the 4PL); it starts from the 4PL's fit.
       const expr = "Bottom+(Top-Bottom)/(1+10^((LogEC50+log10(2^(1/S)-1)/HillSlope-x)*HillSlope))^S";
@@ -535,6 +1298,21 @@ export function modelSpec(
         curveFn:
           'g<-function(xv,p) p[["Plateau"]]+p[["Span1"]]*exp(-p[["K1"]]*xv)+p[["Span2"]]*exp(-p[["K2"]]*xv)',
       };
+    case "three-phase-decay":
+      // Y = Plateau + Span1·exp(−K1·X) + Span2·exp(−K2·X) + Span3·exp(−K3·X).
+      // Prism's "Exponential" family, third decay phase (B6 §Exponential #4).
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~Plateau+Span1*exp(-K1*x)+Span2*exp(-K2*x)+Span3*exp(-K3*x),start=list(Plateau=min(y),Span1=0.5*(max(y)-min(y)),K1=1,Span2=0.3*(max(y)-min(y)),K2=0.1,Span3=0.2*(max(y)-min(y)),K3=0.01),algorithm=\"port\")",
+        terms: ["Plateau", "Span1", "K1", "Span2", "K2", "Span3", "K3"],
+        derived: [
+          overK("Half-life (fast)", "log(2)", "K1"),
+          overK("Half-life (medium)", "log(2)", "K2"),
+          overK("Half-life (slow)", "log(2)", "K3"),
+        ],
+        curveFn:
+          'g<-function(xv,p) p[["Plateau"]]+p[["Span1"]]*exp(-p[["K1"]]*xv)+p[["Span2"]]*exp(-p[["K2"]]*xv)+p[["Span3"]]*exp(-p[["K3"]]*xv)',
+      };
     case "plateau-decay":
       // Y = Y0 for X < X0; Y = Plateau + (Y0 − Plateau)·exp(−K·(X − X0)) after.
       return {
@@ -556,6 +1334,32 @@ export function modelSpec(
         derived: [overK("Half-life", "log(2)"), difference("Plateau", "Y0")],
         curveFn:
           'g<-function(xv,p) p[["Y0"]]+(p[["Plateau"]]-p[["Y0"]])*(1-exp(-p[["K"]]*xv))',
+      };
+    case "two-phase-association":
+      // Y = Y0 + Span1·(1 − exp(−K1·X)) + Span2·(1 − exp(−K2·X)).
+      // Prism's "Exponential" family (B6 §Exponential #7).
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~Y0+Span1*(1-exp(-K1*x))+Span2*(1-exp(-K2*x)),start=list(Y0=y[which.min(x)],Span1=0.6*(max(y)-min(y)),K1=1,Span2=0.4*(max(y)-min(y)),K2=0.1),algorithm=\"port\")",
+        terms: ["Y0", "Span1", "K1", "Span2", "K2"],
+        derived: [
+          overK("Half-life (fast)", "log(2)", "K1"),
+          overK("Half-life (slow)", "log(2)", "K2"),
+          sumOf("Span1", "Span2"),
+        ],
+        curveFn:
+          'g<-function(xv,p) p[["Y0"]]+p[["Span1"]]*(1-exp(-p[["K1"]]*xv))+p[["Span2"]]*(1-exp(-p[["K2"]]*xv))',
+      };
+    case "plateau-association":
+      // Y = Y0 for X < X0; Y = Y0 + (Plateau − Y0)·(1 − exp(−K·(X − X0)))
+      // after — the association twin of plateau-decay (B6 §Exponential #6).
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~ifelse(x<X0,Y0,Y0+(Plateau-Y0)*(1-exp(-K*(x-X0)))),start=list(X0=median(x),Y0=mean(y[x<median(x)]),Plateau=max(y),K=0.5),algorithm=\"port\")",
+        terms: ["X0", "Y0", "Plateau", "K"],
+        derived: [overK("Half-life", "log(2)"), difference("Plateau", "Y0")],
+        curveFn:
+          'g<-function(xv,p) ifelse(xv<p[["X0"]],p[["Y0"]],p[["Y0"]]+(p[["Plateau"]]-p[["Y0"]])*(1-exp(-p[["K"]]*(xv-p[["X0"]])))',
       };
     case "exponential-growth":
       // Prism's "Exponential growth": Y = Y0·exp(K·X).
@@ -669,6 +1473,149 @@ export function modelSpec(
           'g<-function(xv,p) p[["Amplitude"]]*sin((2*pi*xv/p[["Wavelength"]])+p[["PhaseShift"]])+p[["Baseline"]]',
       };
     }
+    // ── Gaussian family completion (1.8, B6 §Gaussian) ───────────────────
+    // Prism's remaining Gaussian models, Curve Fitting Guide equations
+    // (reg_how_to_gaussian.htm, reg_how_to_lognormal.htm, FAQ 1212 for the
+    // cumulative forms). Same "port" fitter as the v2 classics.
+    case "sum-of-two-gaussians": {
+      // Y = One + Two (B6: "Sum of two Gaussians: Y = One + Two").
+      // The starts take the taller peak first (Mean1 at max Y); the second
+      // peak starts at the median X with half the amplitude — Prism warns
+      // its own initial values for this model are unreliable, and the fit
+      // is start-sensitive on overlapping peaks.
+      const expr =
+        "Amplitude1*exp(-0.5*((x-Mean1)/SD1)^2)+Amplitude2*exp(-0.5*((x-Mean2)/SD2)^2)";
+      return {
+        kind: "nls",
+        fit: `m<-nls(y~${expr},start=list(Amplitude1=max(y),Mean1=x[which.max(y)],SD1=(max(x)-min(x))/6,Amplitude2=max(y)/2,Mean2=median(x),SD2=(max(x)-min(x))/6),algorithm="port",lower=c(-Inf,-Inf,0,-Inf,-Inf,0),control=nls.control(maxiter=200))`,
+        terms: ["Amplitude1", "Mean1", "SD1", "Amplitude2", "Mean2", "SD2"],
+        derived: [
+          {
+            label: "Area",
+            expr: 'ifelse(cf[["SD1"]]>0&cf[["SD2"]]>0,(cf[["Amplitude1"]]*cf[["SD1"]]+cf[["Amplitude2"]]*cf[["SD2"]])*sqrt(2*pi),NA_real_)',
+          },
+        ],
+        curveFn:
+          'g<-function(xv,p) p[["Amplitude1"]]*exp(-0.5*((xv-p[["Mean1"]])/p[["SD1"]])^2)+p[["Amplitude2"]]*exp(-0.5*((xv-p[["Mean2"]])/p[["SD2"]])^2)',
+      };
+    }
+    case "lognormal":
+      // Prism's "Log Gaussian": Y=(A/X)*exp(-0.5*(ln(X/GeoMean)/ln(GeoSD))^2).
+      // A is related to amplitude and area (guide: Amplitude =
+      // A/(GeoMean/exp(0.5*ln(GeoSD)^2)); Area = A*sqrt(2*pi)*ln(GeoSD)).
+      // X must be > 0 (ln X).
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~(A/x)*exp(-0.5*(log(x/GeoMean)/log(GeoSD))^2),start=list(A=max(y)*x[which.max(y)],GeoMean=x[which.max(y)],GeoSD=2),algorithm=\"port\",lower=c(0,0,1),control=nls.control(maxiter=200))",
+        terms: ["A", "GeoMean", "GeoSD"],
+        derived: [
+          {
+            label: "Area",
+            expr: 'ifelse(cf[["GeoSD"]]>1,cf[["A"]]*sqrt(2*pi)*log(cf[["GeoSD"]]),NA_real_)',
+          },
+          {
+            label: "Amplitude",
+            expr: 'ifelse(cf[["GeoMean"]]>0&cf[["GeoSD"]]>1,cf[["A"]]*exp(0.5*log(cf[["GeoSD"]])^2)/cf[["GeoMean"]],NA_real_)',
+          },
+        ],
+        positiveX: true,
+        curveFn:
+          'g<-function(xv,p) (p[["A"]]/xv)*exp(-0.5*(log(xv/p[["GeoMean"]])/log(p[["GeoSD"]]))^2)',
+      };
+    case "cumulative-gaussian-percent":
+      // Y = 100·Φ((X−Mean)/SD) — Prism's cumulative Gaussian for data
+      // expressed as percents (FAQ 1212: Top constrained to 100).
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~100*pnorm((x-Mean)/SD),start=list(Mean=median(x),SD=(max(x)-min(x))/4),algorithm=\"port\",lower=c(-Inf,0),control=nls.control(maxiter=200))",
+        terms: ["Mean", "SD"],
+        curveFn: 'g<-function(xv,p) 100*pnorm((xv-p[["Mean"]])/p[["SD"]])',
+      };
+    case "cumulative-gaussian-fraction":
+      // Y = Φ((X−Mean)/SD) — the fractions form (Top = 1).
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~pnorm((x-Mean)/SD),start=list(Mean=median(x),SD=(max(x)-min(x))/4),algorithm=\"port\",lower=c(-Inf,0),control=nls.control(maxiter=200))",
+        terms: ["Mean", "SD"],
+        curveFn: 'g<-function(xv,p) pnorm((xv-p[["Mean"]])/p[["SD"]])',
+      };
+    case "cumulative-gaussian-counts":
+      // Y = Total·Φ((X−Mean)/SD) — the counts form (Top = N, fitted).
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~Total*pnorm((x-Mean)/SD),start=list(Mean=median(x),SD=(max(x)-min(x))/4,Total=max(y)),algorithm=\"port\",lower=c(-Inf,0,0),control=nls.control(maxiter=200))",
+        terms: ["Mean", "SD", "Total"],
+        curveFn:
+          'g<-function(xv,p) p[["Total"]]*pnorm((xv-p[["Mean"]])/p[["SD"]])',
+      };
+    case "sum-of-two-lorentzians": {
+      // Y = Amplitude1/(1+((X−Center1)/Width1)²) + Amplitude2/(1+((X−Center2)/Width2)²)
+      // — the Lorentzian twin of the sum of two Gaussians (B6 §Gaussian #8).
+      const expr =
+        "Amplitude1/(1+((x-Center1)/Width1)^2)+Amplitude2/(1+((x-Center2)/Width2)^2)";
+      return {
+        kind: "nls",
+        fit: `m<-nls(y~${expr},start=list(Amplitude1=max(y),Center1=x[which.max(y)],Width1=(max(x)-min(x))/6,Amplitude2=max(y)/2,Center2=median(x),Width2=(max(x)-min(x))/6),algorithm="port",lower=c(-Inf,-Inf,0,-Inf,-Inf,0),control=nls.control(maxiter=200))`,
+        terms: ["Amplitude1", "Center1", "Width1", "Amplitude2", "Center2", "Width2"],
+        derived: [
+          {
+            label: "Area",
+            expr: 'ifelse(cf[["Width1"]]>0&cf[["Width2"]]>0,pi*(cf[["Amplitude1"]]*cf[["Width1"]]+cf[["Amplitude2"]]*cf[["Width2"]]),NA_real_)',
+          },
+        ],
+        curveFn:
+          'g<-function(xv,p) p[["Amplitude1"]]/(1+((xv-p[["Center1"]])/p[["Width1"]])^2)+p[["Amplitude2"]]/(1+((xv-p[["Center2"]])/p[["Width2"]])^2)',
+      };
+    }
+    // ── Sine waves completion (1.8, B6 §Sine waves) ──────────────────────
+    // Prism's remaining sine models, Curve Fitting Guide equations
+    // (reg_damped_sine_wave.htm, reg_sinc_wave.htm, reg_classic_sine.htm).
+    // The standard sine wave is the sine-wave equation with Baseline fixed
+    // at 0 (the guide: "in most cases, you will want to fix BASELINE to a
+    // constant value of zero") — its own entry, so the picker names it.
+    case "standard-sine-wave": {
+      // Y = Amplitude·sin((2π·X/Wavelength)+PhaseShift).
+      const start =
+        "list(Amplitude=(max(y)-min(y))/2,Wavelength=2*(max(x)-min(x))/max(1,sum(diff(sign(y-mean(y)))!=0)),PhaseShift=0)";
+      return {
+        kind: "nls",
+        fit: `m<-nls(y~Amplitude*sin((2*pi*x/Wavelength)+PhaseShift),start=${start},algorithm="port",lower=c(-Inf,0,-Inf),control=nls.control(maxiter=200))`,
+        terms: ["Amplitude", "Wavelength", "PhaseShift"],
+        derived: [overK("Frequency", "1", "Wavelength")],
+        curveFn:
+          'g<-function(xv,p) p[["Amplitude"]]*sin((2*pi*xv/p[["Wavelength"]])+p[["PhaseShift"]])',
+      };
+    }
+    case "damped-sine-wave": {
+      // Y = Amplitude·exp(−K·X)·sin((2π·X/Wavelength)+PhaseShift).
+      // Half-life = 0.693/K (guide). No Baseline in Prism's equation.
+      const start =
+        "list(Amplitude=(max(y)-min(y))/2,Wavelength=2*(max(x)-min(x))/max(1,sum(diff(sign(y-mean(y)))!=0)),PhaseShift=0,K=0.1)";
+      return {
+        kind: "nls",
+        fit: `m<-nls(y~Amplitude*exp(-K*x)*sin((2*pi*x/Wavelength)+PhaseShift),start=${start},algorithm="port",lower=c(-Inf,0,-Inf,0),control=nls.control(maxiter=200))`,
+        terms: ["Amplitude", "Wavelength", "PhaseShift", "K"],
+        derived: [overK("Frequency", "1", "Wavelength"), overK("Half-life", "log(2)", "K")],
+        curveFn:
+          'g<-function(xv,p) p[["Amplitude"]]*exp(-p[["K"]]*xv)*sin((2*pi*xv/p[["Wavelength"]])+p[["PhaseShift"]])',
+      };
+    }
+    case "sinc":
+      // Y = Amplitude·sin(2π·X/Wavelength)/(2π·X/Wavelength), Y = Amplitude
+      // at X = 0 (guide's IF(X=0,Amplitude,…)). ifelse evaluates both
+      // branches, but the NaN in the unselected branch is discarded — the
+      // FOUR_X pattern. The Wavelength start counts the sign changes of
+      // the raw Y (each zero crossing is half a wavelength apart): the
+      // demeaned count the sine models use collapses here, because a
+      // sinc's mean sits above most of its lobes.
+      return {
+        kind: "nls",
+        fit: "m<-nls(y~ifelse(x==0,Amplitude,Amplitude*sin(2*pi*x/Wavelength)/(2*pi*x/Wavelength)),start=list(Amplitude=max(y),Wavelength=2*(max(x)-min(x))/max(1,sum(diff(sign(y))!=0))),algorithm=\"port\",lower=c(-Inf,0),control=nls.control(maxiter=200))",
+        terms: ["Amplitude", "Wavelength"],
+        derived: [overK("Frequency", "1", "Wavelength")],
+        curveFn:
+          'g<-function(xv,p) ifelse(xv==0,p[["Amplitude"]],p[["Amplitude"]]*sin(2*pi*xv/p[["Wavelength"]])/(2*pi*xv/p[["Wavelength"]]))',
+      };
     // ── Enzyme kinetics (plan 09) ───────────────────────────────────────
     // All three fit with nls() algorithm "port" (nl2sol), like plan 08's
     // exponentials: the default Gauss-Newton fails to converge on
@@ -1244,6 +2191,8 @@ export function prepareFit(
   // undefined); a raw-concentration ratio curve keeps it — at X = 0 the
   // curve is its Bottom, so the vehicle point anchors Bottom (Prism fits
   // it too) — and drops only X < 0, where a fractional power is NaN in R.
+  // A log-Y curve drops its Y ≤ 0 points the same way (log(Y) is
+  // undefined there).
   let xs = complete.x;
   let ys = complete.y;
   if (spec.positiveX || spec.nonNegativeX) {
@@ -1257,10 +2206,17 @@ export function prepareFit(
       }
     });
   }
+  if (spec.positiveY) {
+    const kept = ys.filter((y) => y > 0);
+    const keptXs = xs.filter((_, i) => ys[i] > 0);
+    xs = keptXs;
+    ys = kept;
+  }
   if (xs.length < nParams + 1) {
     const scope = spec.positiveX ? " with X > 0" : spec.nonNegativeX ? " with X ≥ 0" : "";
+    const yScope = spec.positiveY ? " with Y > 0" : "";
     return {
-      error: `Not enough complete points${scope} (${xs.length}) to fit this curve; need at least ${nParams + 1}.`,
+      error: `Not enough complete points${scope}${yScope} (${xs.length}) to fit this curve; need at least ${nParams + 1}.`,
     };
   }
   if (ENZYME_MODELS.includes(model)) {
@@ -1277,7 +2233,7 @@ export function prepareFit(
     if (new Set(xs).size === 1)
       return { error: "All substrate concentrations are equal — Km cannot be estimated." };
   }
-  if (model === "plateau-decay") {
+  if (model === "plateau-decay" || model === "plateau-association") {
     // X0 (the breakpoint) is unidentifiable without data on both sides of
     // it — validate before calling nls(), not after it fails. R's median of
     // an even count is the mean of the two middle values.
@@ -1287,17 +2243,24 @@ export function prepareFit(
         ? sorted[(sorted.length - 1) / 2]
         : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
     if (!xs.some((x) => x < mid) || !xs.some((x) => x > mid)) {
-      return { error: "Plateau-followed-by-decay needs data on both sides of the breakpoint." };
+      return {
+        error: `${MODEL_LABEL[model]} needs data on both sides of the breakpoint.`,
+      };
     }
   }
   // The fitted points' rows, in fit order (plan 26: 1/SD² weights need the
   // row's replicate values, not just the fitted pair) — and, per point, the
   // Y column it came from (ROUT's outlier records name it exactly).
+  // The row filter mirrors the drops above: X by the X flag, Y by positiveY.
   const rows = complete.rows.filter(
-    (_, i) => (!spec.positiveX && !spec.nonNegativeX) || (spec.positiveX ? complete.x[i] > 0 : complete.x[i] >= 0),
+    (_, i) =>
+      ((!spec.positiveX && !spec.nonNegativeX) || (spec.positiveX ? complete.x[i] > 0 : complete.x[i] >= 0)) &&
+      (!spec.positiveY || complete.y[i] > 0),
   );
   const pointColumns = complete.columns.filter(
-    (_, i) => (!spec.positiveX && !spec.nonNegativeX) || (spec.positiveX ? complete.x[i] > 0 : complete.x[i] >= 0),
+    (_, i) =>
+      ((!spec.positiveX && !spec.nonNegativeX) || (spec.positiveX ? complete.x[i] > 0 : complete.x[i] >= 0)) &&
+      (!spec.positiveY || complete.y[i] > 0),
   );
   return { xCol, yCol, xs, ys, rows, columns: pointColumns };
 }

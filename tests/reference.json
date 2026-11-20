@@ -17706,7 +17706,7 @@
   "summary": "“E” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “E” (R²)."
  },
  "nonlinear-regression plateauOneSided {\"model\":\"plateau-decay\"}": {
-  "error": "Plateau-followed-by-decay needs data on both sides of the breakpoint."
+  "error": "Plateau followed by one-phase decay needs data on both sides of the breakpoint."
  },
  "nonlinear-regression expTooFew {\"model\":\"two-phase-decay\"}": {
   "error": "Not enough complete points (5) to fit this curve; need at least 6."
@@ -18228,6 +18228,6211 @@
    ]
   },
   "summary": "“S” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “S” (R²)."
+ },
+ "nonlinear-regression classicB6X {\"y\":\"G2\",\"model\":\"sum-of-two-gaussians\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Sum of two Gaussians",
+  "equation": "Y = 100·exp(−0.5·((X − 3)/1)²) + 60·exp(−0.5·((X − 8)/1.5)²)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "G2"
+   ],
+   "rows": [
+    {
+     "label": "Area",
+     "values": [
+      476.2593722
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.905119521e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.603546692e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      19
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "G2",
+    "mean": 38.05059079,
+    "sd": 28.47814173,
+    "sem": 5.695628346,
+    "median": 36.39183965,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Sum of two Gaussians\") of “G2” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: Amplitude1 = 100.2, Mean1 = 3, SD1 = 2, Amplitude2 = 50.12, Mean2 = 6, SD2 = 2.",
+  "coefficients": [
+   {
+    "term": "Amplitude1",
+    "estimate": 100,
+    "stdError": 1.896153086e-11,
+    "t": 5273835786000,
+    "p": 4.837324759e-231,
+    "low": 100,
+    "high": 100
+   },
+   {
+    "term": "Mean1",
+    "estimate": 3,
+    "stdError": 2.283990404e-13,
+    "t": 13134906320000,
+    "p": 1.428558672e-238,
+    "low": 3,
+    "high": 3
+   },
+   {
+    "term": "SD1",
+    "estimate": 1,
+    "stdError": 2.348096105e-13,
+    "t": 4258769467000,
+    "p": 2.809391052e-229,
+    "low": 1,
+    "high": 1
+   },
+   {
+    "term": "Amplitude2",
+    "estimate": 60,
+    "stdError": 1.569491356e-11,
+    "t": 3822894580000,
+    "p": 2.185529026e-228,
+    "low": 60,
+    "high": 60
+   },
+   {
+    "term": "Mean2",
+    "estimate": 8,
+    "stdError": 4.607930113e-13,
+    "t": 17361374420000,
+    "p": 7.12709808e-241,
+    "low": 8,
+    "high": 8
+   },
+   {
+    "term": "SD2",
+    "estimate": 1.5,
+    "stdError": 4.905031224e-13,
+    "t": 3058084509000,
+    "p": 1.51869487e-226,
+    "low": 1.5,
+    "high": 1.5
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "G2",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "L2",
+    "CP",
+    "CF",
+    "CC",
+    "SS",
+    "DS",
+    "D3",
+    "A2",
+    "PA"
+   ]
+  },
+  "summary": "“G2” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “G2” (R²)."
+ },
+ "nonlinear-regression classicB6X {\"y\":\"L2\",\"model\":\"sum-of-two-lorentzians\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Sum of two Lorentzians",
+  "equation": "Y = 100/(1 + ((X − 3)/1)²) + 60/(1 + ((X − 8)/1.5)²)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "L2"
+   ],
+   "rows": [
+    {
+     "label": "Area",
+     "values": [
+      596.9026042
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.943438832e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.646128109e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      19
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "L2",
+    "mean": 40.77193852,
+    "sd": 25.29545388,
+    "sem": 5.059090775,
+    "median": 33.80293863,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Sum of two Lorentzians\") of “L2” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: Amplitude1 = 105, Center1 = 3, Width1 = 2, Amplitude2 = 52.48, Center2 = 6, Width2 = 2.",
+  "coefficients": [
+   {
+    "term": "Amplitude1",
+    "estimate": 100,
+    "stdError": 2.364318074e-11,
+    "t": 4229549361000,
+    "p": 3.202011154e-229,
+    "low": 100,
+    "high": 100
+   },
+   {
+    "term": "Center1",
+    "estimate": 3,
+    "stdError": 2.406840688e-13,
+    "t": 12464472680000,
+    "p": 3.865506496e-238,
+    "low": 3,
+    "high": 3
+   },
+   {
+    "term": "Width1",
+    "estimate": 1,
+    "stdError": 3.822013873e-13,
+    "t": 2616421691000,
+    "p": 2.941464563e-225,
+    "low": 1,
+    "high": 1
+   },
+   {
+    "term": "Amplitude2",
+    "estimate": 60,
+    "stdError": 1.946776817e-11,
+    "t": 3082017388000,
+    "p": 1.309616356e-226,
+    "low": 60,
+    "high": 60
+   },
+   {
+    "term": "Center2",
+    "estimate": 8,
+    "stdError": 4.977185466e-13,
+    "t": 16073341160000,
+    "p": 3.083142564e-240,
+    "low": 8,
+    "high": 8
+   },
+   {
+    "term": "Width2",
+    "estimate": 1.5,
+    "stdError": 8.05387277e-13,
+    "t": 1862458028000,
+    "p": 1.876580955e-222,
+    "low": 1.5,
+    "high": 1.5
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "L2",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "G2",
+    "CP",
+    "CF",
+    "CC",
+    "SS",
+    "DS",
+    "D3",
+    "A2",
+    "PA"
+   ]
+  },
+  "summary": "“L2” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “L2” (R²)."
+ },
+ "nonlinear-regression classicB6X {\"y\":\"CP\",\"model\":\"cumulative-gaussian-percent\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Cumulative Gaussian — Percents",
+  "equation": "Y = 100·Φ((X − 5)/1.5)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "CP"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.77556065e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.771859492e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      23
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "CP",
+    "mean": 57.99934635,
+    "sd": 42.80586738,
+    "sem": 8.561173475,
+    "median": 74.75074625,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Cumulative Gaussian — Percents\") of “CP” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: Mean = 6, SD = 3.",
+  "coefficients": [
+   {
+    "term": "Mean",
+    "estimate": 5,
+    "stdError": 4.525680423e-13,
+    "t": 11048062460000,
+    "p": 7.597074193e-286,
+    "low": 5,
+    "high": 5
+   },
+   {
+    "term": "SD",
+    "estimate": 1.5,
+    "stdError": 6.400303513e-13,
+    "t": 2343638855000,
+    "p": 2.337444396e-270,
+    "low": 1.5,
+    "high": 1.5
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "CP",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "G2",
+    "L2",
+    "CF",
+    "CC",
+    "SS",
+    "DS",
+    "D3",
+    "A2",
+    "PA"
+   ]
+  },
+  "summary": "“CP” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “CP” (R²)."
+ },
+ "nonlinear-regression classicB6X {\"y\":\"CF\",\"model\":\"cumulative-gaussian-fraction\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Cumulative Gaussian — Fraction",
+  "equation": "Y = Φ((X − 5)/1.5)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "CF"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.990941012e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      2.057517471e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      23
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "CF",
+    "mean": 0.5799934635,
+    "sd": 0.4280586738,
+    "sem": 0.08561173475,
+    "median": 0.7475074625,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Cumulative Gaussian — Fraction\") of “CF” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: Mean = 6, SD = 3.",
+  "coefficients": [
+   {
+    "term": "Mean",
+    "estimate": 5,
+    "stdError": 4.87686811e-11,
+    "t": 102524814800,
+    "p": 4.237993588e-239,
+    "low": 5,
+    "high": 5
+   },
+   {
+    "term": "SD",
+    "estimate": 1.5,
+    "stdError": 6.896959844e-11,
+    "t": 21748712970,
+    "p": 1.303932867e-223,
+    "low": 1.5,
+    "high": 1.5
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "CF",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "G2",
+    "L2",
+    "CP",
+    "CC",
+    "SS",
+    "DS",
+    "D3",
+    "A2",
+    "PA"
+   ]
+  },
+  "summary": "“CF” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “CF” (R²)."
+ },
+ "nonlinear-regression classicB6X {\"y\":\"CC\",\"model\":\"cumulative-gaussian-counts\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Cumulative Gaussian — Counts",
+  "equation": "Y = 200·Φ((X − 5)/1.5)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "CC"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.95196455e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.917100835e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      22
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "CC",
+    "mean": 115.9986927,
+    "sd": 85.61173475,
+    "sem": 17.12234695,
+    "median": 149.5014925,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Cumulative Gaussian — Counts\") of “CC” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: Mean = 6, SD = 3, Total = 200.",
+  "coefficients": [
+   {
+    "term": "Mean",
+    "estimate": 5,
+    "stdError": 2.759171786e-13,
+    "t": 18121379850000,
+    "p": 2.052281522e-278,
+    "low": 5,
+    "high": 5
+   },
+   {
+    "term": "SD",
+    "estimate": 1.5,
+    "stdError": 3.728630606e-13,
+    "t": 4022924657000,
+    "p": 4.926323899e-264,
+    "low": 1.5,
+    "high": 1.5
+   },
+   {
+    "term": "Total",
+    "estimate": 200,
+    "stdError": 1.015133322e-11,
+    "t": 19701845620000,
+    "p": 3.260563656e-279,
+    "low": 200,
+    "high": 200
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "CC",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "G2",
+    "L2",
+    "CP",
+    "CF",
+    "SS",
+    "DS",
+    "D3",
+    "A2",
+    "PA"
+   ]
+  },
+  "summary": "“CC” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “CC” (R²)."
+ },
+ "nonlinear-regression classicB6X {\"y\":\"SS\",\"model\":\"standard-sine-wave\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Standard sine wave",
+  "equation": "Y = 5·sin((2π·X/4) + 0.5)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "SS"
+   ],
+   "rows": [
+    {
+     "label": "Frequency",
+     "values": [
+      0.25
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       0.25,
+       0.25
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.799103643e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.723695865e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      22
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "SS",
+    "mean": 0.09588510772,
+    "sd": 3.567891373,
+    "sem": 0.7135782745,
+    "median": 1.407697656,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Standard sine wave\") of “SS” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: Amplitude = 4.798, Wavelength = 4, PhaseShift = 0.",
+  "coefficients": [
+   {
+    "term": "Amplitude",
+    "estimate": 5,
+    "stdError": 8.014061586e-12,
+    "t": 623903366100,
+    "p": 3.16128396e-246,
+    "low": 5,
+    "high": 5
+   },
+   {
+    "term": "Wavelength",
+    "estimate": 4,
+    "stdError": 1.083498976e-12,
+    "t": 3691743222000,
+    "p": 3.261009353e-263,
+    "low": 4,
+    "high": 4
+   },
+   {
+    "term": "PhaseShift",
+    "estimate": 0.5,
+    "stdError": 3.069407848e-12,
+    "t": 162897869800,
+    "p": 2.139468156e-233,
+    "low": 0.5,
+    "high": 0.5
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "SS",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "G2",
+    "L2",
+    "CP",
+    "CF",
+    "CC",
+    "DS",
+    "D3",
+    "A2",
+    "PA"
+   ]
+  },
+  "summary": "“SS” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “SS” (R²)."
+ },
+ "nonlinear-regression classicB6X {\"y\":\"DS\",\"model\":\"damped-sine-wave\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Damped sine wave",
+  "equation": "Y = 5·exp(−0.2·X)·sin((2π·X/4) + 0.5)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "DS"
+   ],
+   "rows": [
+    {
+     "label": "Frequency",
+     "values": [
+      0.25
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       0.25,
+       0.25
+      ]
+     ]
+    },
+    {
+     "label": "Half-life",
+     "values": [
+      3.465735903
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       3.465735903,
+       3.465735903
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      3.279861489e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      2.259073191e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      21
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "DS",
+    "mean": 0.2563607449,
+    "sd": 1.681989543,
+    "sem": 0.3363979087,
+    "median": 0.2105473946,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Damped sine wave\") of “DS” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: Amplitude = 3.626, Wavelength = 4.8, PhaseShift = 0, K = 0.1.",
+  "coefficients": [
+   {
+    "term": "Amplitude",
+    "estimate": 5,
+    "stdError": 2.87332534e-11,
+    "t": 174014405200,
+    "p": 1.165938265e-223,
+    "low": 5,
+    "high": 5
+   },
+   {
+    "term": "Wavelength",
+    "estimate": 4,
+    "stdError": 4.478295211e-12,
+    "t": 893197034000,
+    "p": 1.409522678e-238,
+    "low": 4,
+    "high": 4
+   },
+   {
+    "term": "PhaseShift",
+    "estimate": 0.5,
+    "stdError": 5.738118426e-12,
+    "t": 87136577330,
+    "p": 2.370032739e-217,
+    "low": 0.5,
+    "high": 0.5
+   },
+   {
+    "term": "K",
+    "estimate": 0.2,
+    "stdError": 1.818119918e-12,
+    "t": 110003745100,
+    "p": 1.775856604e-219,
+    "low": 0.2,
+    "high": 0.2
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "DS",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "G2",
+    "L2",
+    "CP",
+    "CF",
+    "CC",
+    "SS",
+    "D3",
+    "A2",
+    "PA"
+   ]
+  },
+  "summary": "“DS” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “DS” (R²)."
+ },
+ "nonlinear-regression classicB6X {\"y\":\"D3\",\"model\":\"three-phase-decay\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Three-phase decay",
+  "equation": "Y = 10 + 50·exp(−1·X) + 30·exp(−0.1·X) + 20·exp(−0.01·X)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "D3"
+   ],
+   "rows": [
+    {
+     "label": "Half-life (fast)",
+     "values": [
+      0.6931471806
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       0.6931471648,
+       0.6931471963
+      ]
+     ]
+    },
+    {
+     "label": "Half-life (medium)",
+     "values": [
+      6.93147186
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       6.931411195,
+       6.931532527
+      ]
+     ]
+    },
+    {
+     "label": "Half-life (slow)",
+     "values": [
+      69.31475828
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       69.27038558,
+       69.35918786
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.242149027e-8
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      9.049018069e-15
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      18
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "D3",
+    "mean": 51.48605454,
+    "sd": 17.54840101,
+    "sem": 3.509680202,
+    "median": 45.42357736,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Three-phase decay\") of “D3” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: Plateau = 36.77, Span1 = 36.61, K1 = 1, Span2 = 21.97, K2 = 0.1, Span3 = 14.65, K3 = 0.01.",
+  "coefficients": [
+   {
+    "term": "Plateau",
+    "estimate": 9.999991081,
+    "stdError": 0.004557895108,
+    "t": 2193.993245,
+    "p": 2.651420087e-50,
+    "low": 9.990415298,
+    "high": 10.00956686
+   },
+   {
+    "term": "Span1",
+    "estimate": 50,
+    "stdError": 0.000001035271374,
+    "t": 48296515.55,
+    "p": 1.799878541e-128,
+    "low": 49.99999783,
+    "high": 50.00000218
+   },
+   {
+    "term": "K1",
+    "estimate": 1,
+    "stdError": 1.082882835e-8,
+    "t": 92346093.93,
+    "p": 1.542389404e-133,
+    "low": 0.9999999772,
+    "high": 1.000000023
+   },
+   {
+    "term": "Span2",
+    "estimate": 30.00000058,
+    "stdError": 0.0003037754026,
+    "t": 98757.17495,
+    "p": 4.607779916e-80,
+    "low": 29.99936238,
+    "high": 30.00063879
+   },
+   {
+    "term": "K2",
+    "estimate": 0.09999999921,
+    "stdError": 4.165929786e-7,
+    "t": 240042.4499,
+    "p": 5.25463636e-87,
+    "low": 0.09999912398,
+    "high": 0.1000008744
+   },
+   {
+    "term": "Span3",
+    "estimate": 20.00000833,
+    "stdError": 0.004253318417,
+    "t": 4702.212807,
+    "p": 2.912617913e-56,
+    "low": 19.99107244,
+    "high": 20.00894422
+   },
+   {
+    "term": "K3",
+    "estimate": 0.009999994197,
+    "stdError": 0.000003049004441,
+    "t": 3279.757177,
+    "p": 1.907967289e-53,
+    "low": 0.009993588477,
+    "high": 0.01000639992
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "D3",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "G2",
+    "L2",
+    "CP",
+    "CF",
+    "CC",
+    "SS",
+    "DS",
+    "A2",
+    "PA"
+   ]
+  },
+  "summary": "“D3” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “D3” (R²)."
+ },
+ "nonlinear-regression classicB6X {\"y\":\"A2\",\"model\":\"two-phase-association\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Two-phase association",
+  "equation": "Y = 10 + 60·(1 − exp(−1·X)) + 40·(1 − exp(−0.1·X))",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "A2"
+   ],
+   "rows": [
+    {
+     "label": "Half-life (fast)",
+     "values": [
+      0.6931471806
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       0.6931471806,
+       0.6931471806
+      ]
+     ]
+    },
+    {
+     "label": "Half-life (slow)",
+     "values": [
+      6.931471806
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       6.931471805,
+       6.931471806
+      ]
+     ]
+    },
+    {
+     "label": "Span",
+     "values": [
+      100
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       100,
+       100
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      3.190631249e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      2.036025553e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      20
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "A2",
+    "mean": 80.49303783,
+    "sd": 21.12262212,
+    "sem": 4.224524423,
+    "median": 87.89880943,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Two-phase association\") of “A2” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: Y0 = 10, Span1 = 52.77, K1 = 1, Span2 = 35.18, K2 = 0.1.",
+  "coefficients": [
+   {
+    "term": "Y0",
+    "estimate": 10,
+    "stdError": 3.074319257e-11,
+    "t": 325275261400,
+    "p": 1.026308444e-218,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "Span1",
+    "estimate": 60,
+    "stdError": 1.3847672e-10,
+    "t": 433285826100,
+    "p": 3.317484841e-221,
+    "low": 60,
+    "high": 60
+   },
+   {
+    "term": "K1",
+    "estimate": 1,
+    "stdError": 2.799354875e-12,
+    "t": 357225162500,
+    "p": 1.575642712e-219,
+    "low": 1,
+    "high": 1
+   },
+   {
+    "term": "Span2",
+    "estimate": 40,
+    "stdError": 1.630870496e-10,
+    "t": 245267788600,
+    "p": 2.907289558e-216,
+    "low": 40,
+    "high": 40
+   },
+   {
+    "term": "K2",
+    "estimate": 0.1,
+    "stdError": 1.566577848e-12,
+    "t": 63833406130,
+    "p": 1.430007178e-204,
+    "low": 0.1,
+    "high": 0.1
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A2",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "G2",
+    "L2",
+    "CP",
+    "CF",
+    "CC",
+    "SS",
+    "DS",
+    "D3",
+    "PA"
+   ]
+  },
+  "summary": "“A2” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “A2” (R²)."
+ },
+ "nonlinear-regression classicB6X {\"y\":\"PA\",\"model\":\"plateau-association\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Plateau followed by one-phase association",
+  "equation": "Y = 10 for X < 5; Y = 10 + (100 − 10)·(1 − exp(−0.3·(X − 5))) for X ≥ 5",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "PA"
+   ],
+   "rows": [
+    {
+     "label": "Half-life",
+     "values": [
+      2.310490602
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       2.310490602,
+       2.310490602
+      ]
+     ]
+    },
+    {
+     "label": "Span",
+     "values": [
+      90
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       90,
+       90
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      1.961941148e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      8.083347445e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      21
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "PA",
+    "mean": 40.87905805,
+    "sd": 31.96539269,
+    "sem": 6.393078538,
+    "median": 33.32636014,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Plateau followed by one-phase association\") of “PA” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: X0 = 6, Y0 = 11.04, Plateau = 88.98, K = 0.5.",
+  "coefficients": [
+   {
+    "term": "X0",
+    "estimate": 5,
+    "stdError": 9.628515651e-13,
+    "t": 5192908421000,
+    "p": 1.245491729e-254,
+    "low": 5,
+    "high": 5
+   },
+   {
+    "term": "Y0",
+    "estimate": 10,
+    "stdError": 5.915475136e-12,
+    "t": 1690481284000,
+    "p": 2.141643025e-244,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "Plateau",
+    "estimate": 100,
+    "stdError": 3.609645097e-11,
+    "t": 2770355459000,
+    "p": 6.694518822e-249,
+    "low": 100,
+    "high": 100
+   },
+   {
+    "term": "K",
+    "estimate": 0.3,
+    "stdError": 3.187641907e-13,
+    "t": 941134571400,
+    "p": 4.701955545e-239,
+    "low": 0.3,
+    "high": 0.3
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "PA",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "G2",
+    "L2",
+    "CP",
+    "CF",
+    "CC",
+    "SS",
+    "DS",
+    "D3",
+    "A2"
+   ]
+  },
+  "summary": "“PA” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “PA” (R²)."
+ },
+ "nonlinear-regression lognormX {\"y\":\"LN\",\"model\":\"lognormal\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Lognormal",
+  "equation": "Y = (100/X)·exp(−0.5·(ln(X/5)/ln(2))²)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "LN"
+   ],
+   "rows": [
+    {
+     "label": "Area",
+     "values": [
+      173.7462321
+     ]
+    },
+    {
+     "label": "Amplitude",
+     "values": [
+      25.43074259
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.957585316e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.83693529e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      21
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      24
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6.25,
+    "sd": 3.535533906,
+    "sem": 0.7216878365,
+    "median": 6.25,
+    "n": 24
+   },
+   {
+    "name": "LN",
+    "mean": 13.05969357,
+    "sd": 7.778771904,
+    "sem": 1.587835166,
+    "median": 11.96727584,
+    "n": 24
+   }
+  ],
+  "notes": "Least-squares fit (\"Lognormal\") of “LN” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: A = 76.22, GeoMean = 3, GeoSD = 2.",
+  "coefficients": [
+   {
+    "term": "A",
+    "estimate": 100,
+    "stdError": 4.91846e-11,
+    "t": 2033156720000,
+    "p": 4.439936974e-246,
+    "low": 100,
+    "high": 100
+   },
+   {
+    "term": "GeoMean",
+    "estimate": 5,
+    "stdError": 2.731071951e-12,
+    "t": 1830782964000,
+    "p": 4.01412298e-245,
+    "low": 5,
+    "high": 5
+   },
+   {
+    "term": "GeoSD",
+    "estimate": 2,
+    "stdError": 8.880205782e-13,
+    "t": 2252200061000,
+    "p": 5.178673165e-247,
+    "low": 2,
+    "high": 2
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "LN",
+     "n": 24
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": []
+  },
+  "summary": "“LN” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “LN” (R²)."
+ },
+ "nonlinear-regression sincX {\"y\":\"SC\",\"model\":\"sinc\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Sinc()",
+  "equation": "Y = 10·sin(2π·X/4)/(2π·X/4)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "SC"
+   ],
+   "rows": [
+    {
+     "label": "Frequency",
+     "values": [
+      0.25
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       0.25,
+       0.25
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      1.955603961e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      8.796089758e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      23
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 0,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 0,
+    "n": 25
+   },
+   {
+    "name": "SC",
+    "mean": 1.700288876,
+    "sd": 3.618768997,
+    "sem": 0.7237537994,
+    "median": 0.8184693783,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Sinc()\") of “SC” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: Amplitude = 10, Wavelength = 2.4.",
+  "coefficients": [
+   {
+    "term": "Amplitude",
+    "estimate": 10,
+    "stdError": 1.033287896e-11,
+    "t": 967784490300,
+    "p": 1.597048185e-261,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "Wavelength",
+    "estimate": 4,
+    "stdError": 2.256346093e-12,
+    "t": 1772777683000,
+    "p": 1.436080559e-267,
+    "low": 4,
+    "high": 4
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "SC",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": []
+  },
+  "summary": "“SC” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “SC” (R²)."
+ },
+ "nonlinear-regression specialB6X {\"y\":\"BP\",\"model\":\"biphasic-logx\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Biphasic, X is log(concentration)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "BP"
+   ],
+   "rows": [
+    {
+     "label": "EC50_1",
+     "values": [
+      0.1000000002
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       0.09999999975,
+       0.1000000007
+      ]
+     ]
+    },
+    {
+     "label": "EC50_2",
+     "values": [
+      10.00000003
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       9.99999998,
+       10.00000007
+      ]
+     ]
+    },
+    {
+     "label": "Span",
+     "values": [
+      100
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       99.99999999,
+       100
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      9.777819183e-9
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      5.736344878e-16
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      6
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      13
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 0,
+    "sd": 1.947220241,
+    "sem": 0.5400617249,
+    "median": 0,
+    "n": 13
+   },
+   {
+    "name": "BP",
+    "mean": 50,
+    "sd": 38.73151944,
+    "sem": 10.74219072,
+    "median": 50,
+    "n": 13
+   }
+  ],
+  "notes": "Least-squares fit (\"Biphasic, X is log(concentration)\") of “BP” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "Bottom",
+    "estimate": -2.259238845e-8,
+    "stdError": 8.775908132e-9,
+    "t": -2.574364739,
+    "p": 0.04208716458,
+    "low": -4.406626206e-8,
+    "high": -1.118514836e-9
+   },
+   {
+    "term": "Top",
+    "estimate": 100,
+    "stdError": 9.552725039e-9,
+    "t": 10468217140,
+    "p": 5.129410275e-59,
+    "low": 99.99999997,
+    "high": 100
+   },
+   {
+    "term": "LogEC50_1",
+    "estimate": -0.9999999989,
+    "stdError": 8.808485025e-10,
+    "t": -1135269000,
+    "p": 3.152906543e-53,
+    "low": -1.000000001,
+    "high": -0.9999999968
+   },
+   {
+    "term": "LogEC50_2",
+    "estimate": 1.000000001,
+    "stdError": 8.301509539e-10,
+    "t": 1204600195,
+    "p": 2.209256785e-53,
+    "low": 0.9999999991,
+    "high": 1.000000003
+   },
+   {
+    "term": "nH1",
+    "estimate": 0.9999999974,
+    "stdError": 9.947375999e-10,
+    "t": 1005290237,
+    "p": 6.539657203e-53,
+    "low": 0.9999999949,
+    "high": 0.9999999998
+   },
+   {
+    "term": "nH2",
+    "estimate": 1.000000001,
+    "stdError": 1.290760566e-9,
+    "t": 774737025,
+    "p": 3.121604683e-52,
+    "low": 0.9999999981,
+    "high": 1.000000004
+   },
+   {
+    "term": "Frac",
+    "estimate": 0.5000000009,
+    "stdError": 5.059082844e-10,
+    "t": 988321433.6,
+    "p": 7.242933355e-53,
+    "low": 0.4999999997,
+    "high": 0.5000000022
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "BP",
+     "n": 13
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "BL",
+    "AI"
+   ]
+  },
+  "summary": "“BP” runs between two plateaus, -2.259e-8 and 100, and is halfway between them at a concentration of — (the EC50; ). The curve accounts for 100% of the variation in “BP” (R²)."
+ },
+ "nonlinear-regression specialB6X {\"y\":\"BL\",\"model\":\"bell-shaped-logx\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Bell-shaped, X is log(concentration)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "BL"
+   ],
+   "rows": [
+    {
+     "label": "EC50_1",
+     "values": [
+      0.1
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       0.1,
+       0.1
+      ]
+     ]
+    },
+    {
+     "label": "EC50_2",
+     "values": [
+      10
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       10,
+       10
+      ]
+     ]
+    },
+    {
+     "label": "Span1",
+     "values": [
+      90
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       90,
+       90
+      ]
+     ]
+    },
+    {
+     "label": "Span2",
+     "values": [
+      70
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       70,
+       70
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      1.692700912e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.719141826e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      6
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      13
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 0,
+    "sd": 1.947220241,
+    "sem": 0.5400617249,
+    "median": 0,
+    "n": 13
+   },
+   {
+    "name": "BL",
+    "mean": 114.5591701,
+    "sd": 25.62248837,
+    "sem": 7.106399663,
+    "median": 106.2737263,
+    "n": 13
+   }
+  ],
+  "notes": "Least-squares fit (\"Bell-shaped, X is log(concentration)\") of “BL” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "Plateau1",
+    "estimate": 100,
+    "stdError": 1.665862374e-11,
+    "t": 6002896851000,
+    "p": 1.442575286e-75,
+    "low": 100,
+    "high": 100
+   },
+   {
+    "term": "Plateau2",
+    "estimate": 80,
+    "stdError": 1.665861242e-11,
+    "t": 4802320745000,
+    "p": 5.502965554e-75,
+    "low": 80,
+    "high": 80
+   },
+   {
+    "term": "Dip",
+    "estimate": 10,
+    "stdError": 1.097923454e-10,
+    "t": 91081030890,
+    "p": 1.182323027e-64,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "LogEC50_1",
+    "estimate": -1,
+    "stdError": 8.559757994e-13,
+    "t": -1168257328000,
+    "p": 2.655049916e-71,
+    "low": -1,
+    "high": -1
+   },
+   {
+    "term": "LogEC50_2",
+    "estimate": 1,
+    "stdError": 1.100540365e-12,
+    "t": 908644545400,
+    "p": 1.199332575e-70,
+    "low": 1,
+    "high": 1
+   },
+   {
+    "term": "nH1",
+    "estimate": 1,
+    "stdError": 1.281073892e-12,
+    "t": 780595097900,
+    "p": 2.983656723e-70,
+    "low": 1,
+    "high": 1
+   },
+   {
+    "term": "nH2",
+    "estimate": 1,
+    "stdError": 1.647097535e-12,
+    "t": 607128587500,
+    "p": 1.347782076e-69,
+    "low": 1,
+    "high": 1
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "BL",
+     "n": 13
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "BP",
+    "AI"
+   ]
+  },
+  "summary": "“BL” runs between two plateaus, — and —, and is halfway between them at a concentration of — (the EC50; ). The curve accounts for 100% of the variation in “BL” (R²)."
+ },
+ "nonlinear-regression specialB6X {\"y\":\"AI\",\"model\":\"absolute-ic50-logx\"}": {
+  "error": "This curve (\"Absolute IC50, X is log(concentration)\") could not be fitted to these data (singular gradient). Try another model or Y data set."
+ },
+ "nonlinear-regression specialXB6X {\"y\":\"BPX\",\"model\":\"biphasic-x\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Biphasic, X is concentration",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "BPX"
+   ],
+   "rows": [
+    {
+     "label": "Span",
+     "values": [
+      100
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       100,
+       100
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      5.452345017e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      2.080964633e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      7
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      14
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 103.1745714,
+    "sd": 270.6090297,
+    "sem": 72.32330535,
+    "median": 0.65,
+    "n": 14
+   },
+   {
+    "name": "BPX",
+    "mean": 46.26753648,
+    "sd": 39.5225666,
+    "sem": 10.56285023,
+    "median": 44.47815534,
+    "n": 14
+   }
+  ],
+  "notes": "Least-squares fit (\"Biphasic, X is concentration\") of “BPX” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "Bottom",
+    "estimate": 1.494827359e-19,
+    "stdError": 5.452345017e-11,
+    "t": 2.741622833e-9,
+    "p": 0.9999999979,
+    "low": -1.289274724e-10,
+    "high": 1.289274727e-10
+   },
+   {
+    "term": "Top",
+    "estimate": 100,
+    "stdError": 5.380157023e-11,
+    "t": 1858681811000,
+    "p": 3.446195079e-84,
+    "low": 100,
+    "high": 100
+   },
+   {
+    "term": "EC50_1",
+    "estimate": 0.1,
+    "stdError": 1.101104504e-12,
+    "t": 90817901170,
+    "p": 5.182925594e-75,
+    "low": 0.1,
+    "high": 0.1
+   },
+   {
+    "term": "EC50_2",
+    "estimate": 10,
+    "stdError": 1.054014718e-10,
+    "t": 94875335470,
+    "p": 3.816822201e-75,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "nH1",
+    "estimate": 1,
+    "stdError": 5.148604357e-12,
+    "t": 194227392700,
+    "p": 2.532805498e-77,
+    "low": 1,
+    "high": 1
+   },
+   {
+    "term": "nH2",
+    "estimate": 1,
+    "stdError": 7.302241365e-12,
+    "t": 136944254500,
+    "p": 2.923940214e-76,
+    "low": 1,
+    "high": 1
+   },
+   {
+    "term": "Frac",
+    "estimate": 0.5,
+    "stdError": 2.771923366e-12,
+    "t": 180380167100,
+    "p": 4.250633949e-77,
+    "low": 0.5,
+    "high": 0.5
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "BPX",
+     "n": 14
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "BLX",
+    "AIX"
+   ]
+  },
+  "summary": "“BPX” runs between two plateaus, 1.495e-19 and 100, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “BPX” (R²)."
+ },
+ "nonlinear-regression specialXB6X {\"y\":\"BLX\",\"model\":\"bell-shaped-x\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Bell-shaped, X is concentration",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "BLX"
+   ],
+   "rows": [
+    {
+     "label": "Span1",
+     "values": [
+      90
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       90,
+       90
+      ]
+     ]
+    },
+    {
+     "label": "Span2",
+     "values": [
+      70
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       70,
+       70
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      3.227323232e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      7.29093067e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      7
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      14
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 103.1745714,
+    "sd": 270.6090297,
+    "sem": 72.32330535,
+    "median": 0.65,
+    "n": 14
+   },
+   {
+    "name": "BLX",
+    "mean": 112.0583964,
+    "sd": 26.32073464,
+    "sem": 7.034512229,
+    "median": 104.2509004,
+    "n": 14
+   }
+  ],
+  "notes": "Least-squares fit (\"Bell-shaped, X is concentration\") of “BLX” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "Plateau1",
+    "estimate": 100,
+    "stdError": 3.201019218e-11,
+    "t": 3124004987000,
+    "p": 9.094800398e-86,
+    "low": 100,
+    "high": 100
+   },
+   {
+    "term": "Plateau2",
+    "estimate": 80,
+    "stdError": 2.250778248e-11,
+    "t": 3554326157000,
+    "p": 3.685311975e-86,
+    "low": 80,
+    "high": 80
+   },
+   {
+    "term": "Dip",
+    "estimate": 10,
+    "stdError": 1.927660676e-10,
+    "t": 51876350060,
+    "p": 2.612097093e-73,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "EC50_1",
+    "estimate": 0.1,
+    "stdError": 3.683274345e-13,
+    "t": 271497560700,
+    "p": 2.42892261e-78,
+    "low": 0.1,
+    "high": 0.1
+   },
+   {
+    "term": "EC50_2",
+    "estimate": 10,
+    "stdError": 4.661793068e-11,
+    "t": 214509735900,
+    "p": 1.26370628e-77,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "nH1",
+    "estimate": 1,
+    "stdError": 2.080949639e-12,
+    "t": 480549832400,
+    "p": 4.462787322e-80,
+    "low": 1,
+    "high": 1
+   },
+   {
+    "term": "nH2",
+    "estimate": 1,
+    "stdError": 3.152139553e-12,
+    "t": 317244837400,
+    "p": 8.166072986e-79,
+    "low": 1,
+    "high": 1
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "BLX",
+     "n": 14
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "BPX",
+    "AIX"
+   ]
+  },
+  "summary": "“BLX” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “BLX” (R²)."
+ },
+ "nonlinear-regression specialXB6X {\"y\":\"AIX\",\"model\":\"absolute-ic50-x\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Absolute IC50, X is concentration",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "AIX"
+   ],
+   "rows": [
+    {
+     "label": "Span",
+     "values": [
+      90
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       90,
+       90
+      ]
+     ]
+    },
+    {
+     "label": "Absolute IC50",
+     "values": [
+      0.8
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.19319786e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      4.810116853e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      10
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      14
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 103.1745714,
+    "sd": 270.6090297,
+    "sem": 72.32330535,
+    "median": 0.65,
+    "n": 14
+   },
+   {
+    "name": "AIX",
+    "mean": 51.63982523,
+    "sd": 40.34810318,
+    "sem": 10.78348416,
+    "median": 42.88461538,
+    "n": 14
+   }
+  ],
+  "notes": "Least-squares fit (\"Absolute IC50, X is concentration\") of “AIX” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "Bottom",
+    "estimate": 10,
+    "stdError": 1.063018361e-11,
+    "t": 940717523400,
+    "p": 4.53427905e-116,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "Top",
+    "estimate": 100,
+    "stdError": 1.215344234e-11,
+    "t": 8228121484000,
+    "p": 1.730189341e-125,
+    "low": 100,
+    "high": 100
+   },
+   {
+    "term": "EC50",
+    "estimate": 1,
+    "stdError": 8.102028802e-13,
+    "t": 1234258757000,
+    "p": 2.999427792e-117,
+    "low": 1,
+    "high": 1
+   },
+   {
+    "term": "Hill slope",
+    "estimate": 1,
+    "stdError": 7.172892017e-13,
+    "t": 1394137814000,
+    "p": 8.872449025e-118,
+    "low": 1,
+    "high": 1
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "AIX",
+     "n": 14
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "BPX",
+    "BLX"
+   ]
+  },
+  "summary": "“AIX” runs between two plateaus, 10 and 100, and is halfway between them when “X” is 1 (the EC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “AIX” (R²)."
+ },
+ "nonlinear-regression growthB6X {\"y\":\"PD\",\"model\":\"pade-11\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Pade (1,1) approximant",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "PD"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.652407954e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.54775895e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      22
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "PD",
+    "mean": 2.994957901,
+    "sd": 0.6635024396,
+    "sem": 0.1327004879,
+    "median": 3.25,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Pade (1,1) approximant\") of “PD” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "A0",
+    "estimate": 1,
+    "stdError": 2.369405574e-11,
+    "t": 42204678290,
+    "p": 1.715977816e-220,
+    "low": 0.9999999999,
+    "high": 1
+   },
+   {
+    "term": "A1",
+    "estimate": 2,
+    "stdError": 5.658830748e-11,
+    "t": 35342990260,
+    "p": 8.506919795e-219,
+    "low": 2,
+    "high": 2
+   },
+   {
+    "term": "B1",
+    "estimate": 0.5,
+    "stdError": 1.629392652e-11,
+    "t": 30686280520,
+    "p": 1.904018762e-217,
+    "low": 0.5,
+    "high": 0.5
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "PD",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "PS",
+    "EP",
+    "BG"
+   ]
+  },
+  "summary": "“PD” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “PD” (R²)."
+ },
+ "nonlinear-regression growthB6X {\"y\":\"PS\",\"model\":\"power-series\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Power series",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "PS"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      6.430387004e-13
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      8.683474175e-24
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      21
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "PS",
+    "mean": 36.5,
+    "sd": 30.02841536,
+    "sem": 6.005683072,
+    "median": 30,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Power series\") of “PS” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "A",
+    "estimate": 2,
+    "stdError": 4.175960326e-13,
+    "t": 4789317531000,
+    "p": 6.811119816e-254,
+    "low": 2,
+    "high": 2
+   },
+   {
+    "term": "B",
+    "estimate": 1,
+    "stdError": 4.510760918e-13,
+    "t": 2216920866000,
+    "p": 7.214575342e-247,
+    "low": 1,
+    "high": 1
+   },
+   {
+    "term": "C",
+    "estimate": 0.5,
+    "stdError": 6.035864828e-13,
+    "t": 828381705500,
+    "p": 6.856844557e-238,
+    "low": 0.5,
+    "high": 0.5
+   },
+   {
+    "term": "D",
+    "estimate": 2,
+    "stdError": 3.167056481e-13,
+    "t": 6315012101000,
+    "p": 2.046948216e-256,
+    "low": 2,
+    "high": 2
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "PS",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "PD",
+    "EP",
+    "BG"
+   ]
+  },
+  "summary": "“PS” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “PS” (R²)."
+ },
+ "nonlinear-regression growthB6X {\"y\":\"EP\",\"model\":\"exponential-plateau\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Exponential plateau",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "EP"
+   ],
+   "rows": [
+    {
+     "label": "Half-life",
+     "values": [
+      2.310490602
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       2.310490602,
+       2.310490602
+      ]
+     ]
+    },
+    {
+     "label": "Span",
+     "values": [
+      90
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       90,
+       90
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.904514956e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.855965569e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      22
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "EP",
+    "mean": 74.76283261,
+    "sd": 25.25870011,
+    "sem": 5.051740022,
+    "median": 85.12310006,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Exponential plateau\") of “EP” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "Y0",
+    "estimate": 10,
+    "stdError": 2.118318546e-11,
+    "t": 472072532200,
+    "p": 1.459663162e-243,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "YM",
+    "estimate": 100,
+    "stdError": 1.587659072e-11,
+    "t": 6298581462000,
+    "p": 2.565099561e-268,
+    "low": 100,
+    "high": 100
+   },
+   {
+    "term": "K",
+    "estimate": 0.3,
+    "stdError": 1.924444743e-13,
+    "t": 1558891213000,
+    "p": 5.629851529e-255,
+    "low": 0.3,
+    "high": 0.3
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "EP",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "PD",
+    "PS",
+    "BG"
+   ]
+  },
+  "summary": "“EP” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “EP” (R²)."
+ },
+ "nonlinear-regression growthB6X {\"y\":\"BG\",\"model\":\"beta-growth-decay\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Beta growth then decay",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "BG"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.544136831e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.423979087e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      22
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "BG",
+    "mean": 35.8078909,
+    "sd": 64.22132747,
+    "sem": 12.84426549,
+    "median": 50.42947065,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Beta growth then decay\") of “BG” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "Wmax",
+    "estimate": 100,
+    "stdError": 7.57741702e-12,
+    "t": 13197109220000,
+    "p": 2.197409011e-275,
+    "low": 100,
+    "high": 100
+   },
+   {
+    "term": "Te",
+    "estimate": 6,
+    "stdError": 3.270261796e-13,
+    "t": 18347154980000,
+    "p": 1.562905394e-278,
+    "low": 6,
+    "high": 6
+   },
+   {
+    "term": "Tm",
+    "estimate": 2,
+    "stdError": 5.609750637e-13,
+    "t": 3565220862000,
+    "p": 7.023330093e-263,
+    "low": 2,
+    "high": 2
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "BG",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "PD",
+    "PS",
+    "EP"
+   ]
+  },
+  "summary": "“BG” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “BG” (R²)."
+ },
+ "nonlinear-regression lqB6X {\"y\":\"FS\",\"model\":\"lq-fraction-surviving\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Linear quadratic cell death (Y is fraction of cells surviving)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "FS"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.46520409e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.397763177e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      23
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "FS",
+    "mean": 0.2267064641,
+    "sd": 0.2951035544,
+    "sem": 0.05902071089,
+    "median": 0.0804596067,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Linear quadratic cell death (Y is fraction of cells surviving)\") of “FS” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "A",
+    "estimate": 0.2999999999,
+    "stdError": 1.891838713e-11,
+    "t": 15857588590,
+    "p": 1.86540349e-220,
+    "low": 0.2999999999,
+    "high": 0.3
+   },
+   {
+    "term": "B",
+    "estimate": 0.02000000002,
+    "stdError": 5.212975185e-12,
+    "t": 3836580707,
+    "p": 2.789377944e-206,
+    "low": 0.02000000001,
+    "high": 0.02000000003
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "FS",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "PSV",
+    "FD",
+    "PDD",
+    "CA",
+    "CD"
+   ]
+  },
+  "summary": "“FS” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “FS” (R²)."
+ },
+ "nonlinear-regression lqB6X {\"y\":\"PSV\",\"model\":\"lq-percent-surviving\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Linear quadratic survival (Y is percentage)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "PSV"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      3.312897607e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      2.524316828e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      23
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "PSV",
+    "mean": 22.67064641,
+    "sd": 29.51035544,
+    "sem": 5.902071088,
+    "median": 8.045960675,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Linear quadratic survival (Y is percentage)\") of “PSV” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "A",
+    "estimate": 0.3,
+    "stdError": 2.542372854e-13,
+    "t": 1180000013000,
+    "p": 1.670863128e-263,
+    "low": 0.3,
+    "high": 0.3
+   },
+   {
+    "term": "B",
+    "estimate": 0.02,
+    "stdError": 7.005526593e-14,
+    "t": 285488888500,
+    "p": 2.49847683e-249,
+    "low": 0.02,
+    "high": 0.02
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "PSV",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "FS",
+    "FD",
+    "PDD",
+    "CA",
+    "CD"
+   ]
+  },
+  "summary": "“PSV” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “PSV” (R²)."
+ },
+ "nonlinear-regression lqB6X {\"y\":\"FD\",\"model\":\"lq-fraction-dead\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Linear quadratic cell death (Y is fraction of dead cells)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "FD"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.4652049e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.397764096e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      23
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "FD",
+    "mean": 0.7732935359,
+    "sd": 0.2951035544,
+    "sem": 0.05902071089,
+    "median": 0.9195403933,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Linear quadratic cell death (Y is fraction of dead cells)\") of “FD” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "A",
+    "estimate": 0.2999999999,
+    "stdError": 1.891839415e-11,
+    "t": 15857582710,
+    "p": 1.865419393e-220,
+    "low": 0.2999999999,
+    "high": 0.3
+   },
+   {
+    "term": "B",
+    "estimate": 0.02000000002,
+    "stdError": 5.212977152e-12,
+    "t": 3836579259,
+    "p": 2.789402156e-206,
+    "low": 0.02000000001,
+    "high": 0.02000000003
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "FD",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "FS",
+    "PSV",
+    "PDD",
+    "CA",
+    "CD"
+   ]
+  },
+  "summary": "“FD” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “FD” (R²)."
+ },
+ "nonlinear-regression lqB6X {\"y\":\"PDD\",\"model\":\"lq-percent-dead\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Linear quadratic survival (Y is percentage cells dead)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "PDD"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      3.312900462e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      2.524321178e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      23
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "PDD",
+    "mean": 77.32935359,
+    "sd": 29.51035544,
+    "sem": 5.902071088,
+    "median": 91.95403932,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Linear quadratic survival (Y is percentage cells dead)\") of “PDD” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "A",
+    "estimate": 0.3,
+    "stdError": 2.542374912e-13,
+    "t": 1179999057000,
+    "p": 1.670894234e-263,
+    "low": 0.3,
+    "high": 0.3
+   },
+   {
+    "term": "B",
+    "estimate": 0.02,
+    "stdError": 7.005532304e-14,
+    "t": 285488655700,
+    "p": 2.498523684e-249,
+    "low": 0.02,
+    "high": 0.02
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "PDD",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "FS",
+    "PSV",
+    "FD",
+    "CA",
+    "CD"
+   ]
+  },
+  "summary": "“PDD” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “PDD” (R²)."
+ },
+ "nonlinear-regression lqB6X {\"y\":\"CA\",\"model\":\"lq-count-alive\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Linear quadratic survival (Y is # alive cells)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "CA"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.880509528e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.825413731e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      22
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "CA",
+    "mean": 226.7064641,
+    "sd": 295.1035544,
+    "sem": 59.02071088,
+    "median": 80.45960675,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Linear quadratic survival (Y is # alive cells)\") of “CA” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "A",
+    "estimate": 0.3,
+    "stdError": 3.091621254e-14,
+    "t": 9703646576000,
+    "p": 1.904914081e-272,
+    "low": 0.3,
+    "high": 0.3
+   },
+   {
+    "term": "B",
+    "estimate": 0.02,
+    "stdError": 7.01164355e-15,
+    "t": 2852398280000,
+    "p": 9.50213271e-261,
+    "low": 0.02,
+    "high": 0.02
+   },
+   {
+    "term": "Total",
+    "estimate": 1000,
+    "stdError": 2.436212494e-11,
+    "t": 41047322530000,
+    "p": 3.163576899e-286,
+    "low": 1000,
+    "high": 1000
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "CA",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "FS",
+    "PSV",
+    "FD",
+    "PDD",
+    "CD"
+   ]
+  },
+  "summary": "“CA” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “CA” (R²)."
+ },
+ "nonlinear-regression lqB6X {\"y\":\"CD\",\"model\":\"lq-count-dead\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Linear quadratic survival (Y is # dead cells)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "CD"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.413396754e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.281386456e-20
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      22
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "CD",
+    "mean": 773.2935359,
+    "sd": 295.1035544,
+    "sem": 59.02071088,
+    "median": 919.5403933,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Linear quadratic survival (Y is # dead cells)\") of “CD” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "A",
+    "estimate": 0.3,
+    "stdError": 1.951631453e-14,
+    "t": 15371754720000,
+    "p": 7.665296008e-277,
+    "low": 0.3,
+    "high": 0.3
+   },
+   {
+    "term": "B",
+    "estimate": 0.02,
+    "stdError": 7.016865108e-15,
+    "t": 2850275685000,
+    "p": 9.659032914e-261,
+    "low": 0.02,
+    "high": 0.02
+   },
+   {
+    "term": "Total",
+    "estimate": 1000,
+    "stdError": 1.043887317e-11,
+    "t": 95795780260000,
+    "p": 2.528275522e-294,
+    "low": 1000,
+    "high": 1000
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "CD",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "FS",
+    "PSV",
+    "FD",
+    "PDD",
+    "CA"
+   ]
+  },
+  "summary": "“CD” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “CD” (R²)."
+ },
+ "nonlinear-regression doseLogB6X {\"y\":\"N3A\",\"model\":\"agonist-3pl-normalized-logx\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "log(agonist) vs. normalized response",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "N3A"
+   ],
+   "rows": [
+    {
+     "label": "EC50",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       1,
+       1
+      ]
+     ]
+    },
+    {
+     "label": "Span",
+     "values": [
+      100
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      1.626412543e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      3.174261313e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      12
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      13
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 0,
+    "sd": 1.947220241,
+    "sem": 0.5400617249,
+    "median": 0,
+    "n": 13
+   },
+   {
+    "name": "N3A",
+    "mean": 50,
+    "sd": 44.55645679,
+    "sem": 12.35773766,
+    "median": 50,
+    "n": 13
+   }
+  ],
+  "notes": "Least-squares fit (\"log(agonist) vs. normalized response\") of “N3A” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "LogEC50",
+    "estimate": 0,
+    "stdError": 1.856382309e-13,
+    "t": 0,
+    "p": 1,
+    "low": -4.044709593e-13,
+    "high": 4.044709593e-13
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "N3A",
+     "n": 13
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "N4A",
+    "N3I",
+    "N4I",
+    "N3B"
+   ]
+  },
+  "summary": "“N3A” runs between two plateaus, — and —, and is halfway between them at a concentration of 1 (the EC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N3A” (R²)."
+ },
+ "nonlinear-regression doseLogB6X {\"y\":\"N4A\",\"model\":\"agonist-4pl-normalized-logx\"}": {
+  "error": "This curve (\"log(agonist) vs. normalized response -- Variable slope\") could not be fitted to these data (singular gradient). Try another model or Y data set."
+ },
+ "nonlinear-regression doseLogB6X {\"y\":\"N3I\",\"model\":\"inhibitor-3pl-normalized-logx\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "log(inhibitor) vs. normalized response",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "N3I"
+   ],
+   "rows": [
+    {
+     "label": "IC50",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       1,
+       1
+      ]
+     ]
+    },
+    {
+     "label": "Span",
+     "values": [
+      100
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      1.626412543e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      3.174261313e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      12
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      13
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 0,
+    "sd": 1.947220241,
+    "sem": 0.5400617249,
+    "median": 0,
+    "n": 13
+   },
+   {
+    "name": "N3I",
+    "mean": 50,
+    "sd": 44.55645679,
+    "sem": 12.35773766,
+    "median": 50,
+    "n": 13
+   }
+  ],
+  "notes": "Least-squares fit (\"log(inhibitor) vs. normalized response\") of “N3I” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "LogIC50",
+    "estimate": 0,
+    "stdError": 1.85638229e-13,
+    "t": 0,
+    "p": 1,
+    "low": -4.044709549e-13,
+    "high": 4.044709549e-13
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "N3I",
+     "n": 13
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "N3A",
+    "N4A",
+    "N4I",
+    "N3B"
+   ]
+  },
+  "summary": "“N3I” runs between two plateaus, — and —, and is halfway between them at a concentration of 1 (the IC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N3I” (R²)."
+ },
+ "nonlinear-regression doseLogB6X {\"y\":\"N4I\",\"model\":\"inhibitor-4pl-normalized-logx\"}": {
+  "error": "This curve (\"log(inhibitor) vs. normalized response -- Variable slope\") could not be fitted to these data (singular gradient). Try another model or Y data set."
+ },
+ "nonlinear-regression doseLogB6X {\"y\":\"N3A\",\"model\":\"agonist-3pl-normalized-logx\",\"compareWith\":\"N3B\",\"compare\":\"ec50\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "log(agonist) vs. normalized response",
+  "stats": [
+   {
+    "label": "F",
+    "value": 2.965646769e+24
+   },
+   {
+    "label": "DFn",
+    "value": 1
+   },
+   {
+    "label": "DFd",
+    "value": 24
+   },
+   {
+    "label": "P value",
+    "value": 1.271784953e-278,
+    "p": true
+   }
+  ],
+  "fit": {
+   "sets": [
+    "N3A",
+    "N3B"
+   ],
+   "rows": [
+    {
+     "label": "EC50",
+     "values": [
+      1,
+      3.16227766
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       1,
+       1
+      ],
+      [
+       3.16227766,
+       3.16227766
+      ]
+     ]
+    },
+    {
+     "label": "Span",
+     "values": [
+      100,
+      100
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1,
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      1.626412543e-11,
+      1.946655505e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      3.174261313e-21,
+      4.547361187e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      12,
+      12
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      13,
+      13
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 0,
+    "sd": 1.947220241,
+    "sem": 0.5400617249,
+    "median": 0,
+    "n": 13
+   },
+   {
+    "name": "N3A",
+    "mean": 50,
+    "sd": 44.55645679,
+    "sem": 12.35773766,
+    "median": 50,
+    "n": 13
+   },
+   {
+    "name": "N3B",
+    "mean": 42.31780868,
+    "sd": 43.83961776,
+    "sem": 12.15892229,
+    "median": 24.02530734,
+    "n": 13
+   }
+  ],
+  "notes": "Least-squares fit (\"log(agonist) vs. normalized response\") of “N3A” and “N3B” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Extra sum-of-squares F test: Is the EC50 different between them? The EC50s differ.",
+  "coefficients": [
+   {
+    "term": "N3A — LogEC50",
+    "estimate": 0,
+    "stdError": 1.856382309e-13,
+    "t": 0,
+    "p": 1,
+    "low": -4.044709593e-13,
+    "high": 4.044709593e-13
+   },
+   {
+    "term": "N3B — LogEC50",
+    "estimate": 0.5,
+    "stdError": 2.221913485e-13,
+    "t": 2250312640000,
+    "p": 3.994709338e-143,
+    "low": 0.5,
+    "high": 0.5
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "N3A",
+     "n": 13
+    },
+    {
+     "name": "N3B",
+     "n": 13
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "N4A",
+    "N3I",
+    "N4I"
+   ]
+  },
+  "summary": "“N3A” and “N3B” reach half of their effect at different concentrations: their EC50s differ (extra sum-of-squares F test, P < 0.0001)."
+ },
+ "nonlinear-regression doseXB6X {\"y\":\"A3X\",\"model\":\"agonist-3pl-x\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "[Agonist] vs. response (three parameters)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "A3X"
+   ],
+   "rows": [
+    {
+     "label": "Span",
+     "values": [
+      100
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       100,
+       100
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      1.52445837e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      2.556370653e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      11
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      14
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 103.1745714,
+    "sd": 270.6090297,
+    "sem": 72.32330535,
+    "median": 0.65,
+    "n": 14
+   },
+   {
+    "name": "A3X",
+    "mean": 46.26647248,
+    "sd": 44.83122576,
+    "sem": 11.98164907,
+    "median": 36.53846154,
+    "n": 14
+   }
+  ],
+  "notes": "Least-squares fit (\"[Agonist] vs. response (three parameters)\") of “A3X” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "Bottom",
+    "estimate": -1.716973304e-20,
+    "stdError": 1.52445837e-11,
+    "t": -1.126284154e-9,
+    "p": 0.9999999991,
+    "low": -3.355310251e-11,
+    "high": 3.355310247e-11
+   },
+   {
+    "term": "Top",
+    "estimate": 100,
+    "stdError": 7.34588314e-12,
+    "t": 13613067090000,
+    "p": 4.222122108e-140,
+    "low": 100,
+    "high": 100
+   },
+   {
+    "term": "EC50",
+    "estimate": 1,
+    "stdError": 4.571953222e-13,
+    "t": 2187248975000,
+    "p": 2.291744422e-131,
+    "low": 1,
+    "high": 1
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "A3X",
+     "n": 14
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "I3X",
+    "N3AX",
+    "N4AX",
+    "N3IX",
+    "N4IX"
+   ]
+  },
+  "summary": "“A3X” runs between two plateaus, -1.717e-20 and 100, and is halfway between them when “X” is 1 (the EC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “A3X” (R²)."
+ },
+ "nonlinear-regression doseXB6X {\"y\":\"I3X\",\"model\":\"inhibitor-3pl-x\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "[Inhibitor] vs. response (three parameters)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "I3X"
+   ],
+   "rows": [
+    {
+     "label": "Span",
+     "values": [
+      100
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       100,
+       100
+      ]
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      7.746707265e-9
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      6.60126208e-16
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      11
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      14
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 103.1745714,
+    "sd": 270.6090297,
+    "sem": 72.32330535,
+    "median": 0.65,
+    "n": 14
+   },
+   {
+    "name": "I3X",
+    "mean": 53.73352752,
+    "sd": 44.83122576,
+    "sem": 11.98164907,
+    "median": 63.46153846,
+    "n": 14
+   }
+  ],
+  "notes": "Least-squares fit (\"[Inhibitor] vs. response (three parameters)\") of “I3X” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "Bottom",
+    "estimate": -1.242252408e-8,
+    "stdError": 4.333100902e-9,
+    "t": -2.866890102,
+    "p": 0.0153265556,
+    "low": -2.195961487e-8,
+    "high": -2.885433302e-9
+   },
+   {
+    "term": "Top",
+    "estimate": 100,
+    "stdError": 3.346649466e-9,
+    "t": 29880631660,
+    "p": 7.408991686e-111,
+    "low": 99.99999999,
+    "high": 100
+   },
+   {
+    "term": "IC50",
+    "estimate": 1,
+    "stdError": 2.269283725e-10,
+    "t": 4406676826,
+    "p": 1.032341541e-101,
+    "low": 0.9999999999,
+    "high": 1.000000001
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "I3X",
+     "n": 14
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "A3X",
+    "N3AX",
+    "N4AX",
+    "N3IX",
+    "N4IX"
+   ]
+  },
+  "summary": "“I3X” runs between two plateaus, -1.242e-8 and 100, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “I3X” (R²)."
+ },
+ "nonlinear-regression doseXB6X {\"y\":\"N3AX\",\"model\":\"agonist-3pl-normalized-x\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "[Agonist] vs. normalized response",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "N3AX"
+   ],
+   "rows": [
+    {
+     "label": "Span",
+     "values": [
+      100
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      1.33520985e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      2.317620946e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      13
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      14
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 103.1745714,
+    "sd": 270.6090297,
+    "sem": 72.32330535,
+    "median": 0.65,
+    "n": 14
+   },
+   {
+    "name": "N3AX",
+    "mean": 46.26647248,
+    "sd": 44.83122576,
+    "sem": 11.98164907,
+    "median": 36.53846154,
+    "n": 14
+   }
+  ],
+  "notes": "Least-squares fit (\"[Agonist] vs. normalized response\") of “N3AX” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "EC50",
+    "estimate": 1,
+    "stdError": 3.508656963e-13,
+    "t": 2850093385000,
+    "p": 4.614114473e-156,
+    "low": 1,
+    "high": 1
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "N3AX",
+     "n": 14
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "A3X",
+    "I3X",
+    "N4AX",
+    "N3IX",
+    "N4IX"
+   ]
+  },
+  "summary": "“N3AX” runs between two plateaus, — and —, and is halfway between them when “X” is 1 (the EC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N3AX” (R²)."
+ },
+ "nonlinear-regression doseXB6X {\"y\":\"N4AX\",\"model\":\"agonist-4pl-normalized-x\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "[Agonist] vs. normalized response -- Variable slope",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "N4AX"
+   ],
+   "rows": [
+    {
+     "label": "Span",
+     "values": [
+      100
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.884382492e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      9.983594833e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      12
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      14
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 103.1745714,
+    "sd": 270.6090297,
+    "sem": 72.32330535,
+    "median": 0.65,
+    "n": 14
+   },
+   {
+    "name": "N4AX",
+    "mean": 46.27734928,
+    "sd": 47.23953901,
+    "sem": 12.62529786,
+    "median": 32.05636008,
+    "n": 14
+   }
+  ],
+  "notes": "Least-squares fit (\"[Agonist] vs. normalized response -- Variable slope\") of “N4AX” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "EC50",
+    "estimate": 1,
+    "stdError": 6.166924996e-13,
+    "t": 1621553693000,
+    "p": 2.038090652e-141,
+    "low": 1,
+    "high": 1
+   },
+   {
+    "term": "Hill slope",
+    "estimate": 1.5,
+    "stdError": 1.247108835e-12,
+    "t": 1202781953000,
+    "p": 7.347788774e-140,
+    "low": 1.5,
+    "high": 1.5
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "N4AX",
+     "n": 14
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "A3X",
+    "I3X",
+    "N3AX",
+    "N3IX",
+    "N4IX"
+   ]
+  },
+  "summary": "“N4AX” runs between two plateaus, — and —, and is halfway between them when “X” is 1 (the EC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N4AX” (R²)."
+ },
+ "nonlinear-regression doseXB6X {\"y\":\"N3IX\",\"model\":\"inhibitor-3pl-normalized-x\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "[Inhibitor] vs. normalized response",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "N3IX"
+   ],
+   "rows": [
+    {
+     "label": "Span",
+     "values": [
+      100
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      1.334833043e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      2.316313029e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      13
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      14
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 103.1745714,
+    "sd": 270.6090297,
+    "sem": 72.32330535,
+    "median": 0.65,
+    "n": 14
+   },
+   {
+    "name": "N3IX",
+    "mean": 53.73352752,
+    "sd": 44.83122576,
+    "sem": 11.98164907,
+    "median": 63.46153846,
+    "n": 14
+   }
+  ],
+  "notes": "Least-squares fit (\"[Inhibitor] vs. normalized response\") of “N3IX” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "IC50",
+    "estimate": 1,
+    "stdError": 3.507666817e-13,
+    "t": 2850897911000,
+    "p": 4.597215718e-156,
+    "low": 1,
+    "high": 1
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "N3IX",
+     "n": 14
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "A3X",
+    "I3X",
+    "N3AX",
+    "N4AX",
+    "N4IX"
+   ]
+  },
+  "summary": "“N3IX” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “N3IX” (R²)."
+ },
+ "nonlinear-regression doseXB6X {\"y\":\"N4IX\",\"model\":\"inhibitor-4pl-normalized-x\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "[Inhibitor] vs. normalized response -- Variable slope",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "N4IX"
+   ],
+   "rows": [
+    {
+     "label": "Span",
+     "values": [
+      100
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.884492601e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      9.98435708e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      12
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      14
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 103.1745714,
+    "sd": 270.6090297,
+    "sem": 72.32330535,
+    "median": 0.65,
+    "n": 14
+   },
+   {
+    "name": "N4IX",
+    "mean": 53.72265072,
+    "sd": 47.23953901,
+    "sem": 12.62529786,
+    "median": 67.94363992,
+    "n": 14
+   }
+  ],
+  "notes": "Least-squares fit (\"[Inhibitor] vs. normalized response -- Variable slope\") of “N4IX” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "IC50",
+    "estimate": 1,
+    "stdError": 6.167160461e-13,
+    "t": 1621491781000,
+    "p": 2.039024665e-141,
+    "low": 1,
+    "high": 1
+   },
+   {
+    "term": "Hill slope",
+    "estimate": 1.5,
+    "stdError": 1.247156407e-12,
+    "t": 1202736074000,
+    "p": 7.351152905e-140,
+    "low": 1.5,
+    "high": 1.5
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "N4IX",
+     "n": 14
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "A3X",
+    "I3X",
+    "N3AX",
+    "N4AX",
+    "N3IX"
+   ]
+  },
+  "summary": "“N4IX” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “N4IX” (R²)."
+ },
+ "nonlinear-regression linesX {\"y\":\"LO\",\"model\":\"line-through-origin\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Line through origin",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "LO"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      4.053961296e-16
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      3.944304526e-30
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      24
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "LO",
+    "mean": 12,
+    "sd": 7.359800722,
+    "sem": 1.471960144,
+    "median": 12,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Line through origin\") of “LO” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "Slope",
+    "estimate": 2,
+    "stdError": 1.158274656e-17,
+    "t": 172670617400000000,
+    "p": 0,
+    "low": 2,
+    "high": 2
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "LO",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "HL",
+    "SL",
+    "LL",
+    "GL",
+    "SX",
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5",
+    "C6"
+   ]
+  },
+  "summary": "“LO” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “LO” (R²)."
+ },
+ "nonlinear-regression linesX {\"y\":\"HL\",\"model\":\"horizontal-line\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Horizontal line",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "HL"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      0
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.664535259e-15
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.703939555e-28
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      24
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "HL",
+    "mean": 7,
+    "sd": 0,
+    "sem": 0,
+    "median": 7,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Horizontal line\") of “HL” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "Mean",
+    "estimate": 7,
+    "stdError": 5.329070518e-16,
+    "t": 13135498910000000,
+    "p": 0,
+    "low": 7,
+    "high": 7
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "HL",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "LO",
+    "SL",
+    "LL",
+    "GL",
+    "SX",
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5",
+    "C6"
+   ]
+  },
+  "summary": "“HL” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 0% of the variation in “HL” (R²)."
+ },
+ "nonlinear-regression linesX {\"y\":\"SL\",\"model\":\"semilog-y-log\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Semilog line — X is linear, Y is log",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "SL"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      5.275589275e-12
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      6.401323706e-22
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      23
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "SL",
+    "mean": 20.52523931,
+    "sd": 20.54275174,
+    "sem": 4.108550349,
+    "median": 12.09929493,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Semilog line — X is linear, Y is log\") of “SL” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "Intercept",
+    "estimate": 0.6931471806,
+    "stdError": 2.048459284e-12,
+    "t": 338374887900,
+    "p": 5.01268343e-251,
+    "low": 0.6931471806,
+    "high": 0.6931471806
+   },
+   {
+    "term": "Slope",
+    "estimate": 0.3,
+    "stdError": 2.926370406e-13,
+    "t": 1025160723000,
+    "p": 4.246313979e-262,
+    "low": 0.3,
+    "high": 0.3
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "SL",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "LO",
+    "HL",
+    "LL",
+    "GL",
+    "SX",
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5",
+    "C6"
+   ]
+  },
+  "summary": "“SL” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “SL” (R²)."
+ },
+ "nonlinear-regression linesX {\"y\":\"LL\",\"model\":\"log-log-line\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Log-log line — X and Y both log",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "LL"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      3.683900677e-12
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      2.985647323e-22
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      22
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      24
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "LL",
+    "mean": 50.4467936,
+    "sd": 39.59641472,
+    "sem": 7.919282943,
+    "median": 44.09081537,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Log-log line — X and Y both log\") of “LL” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "Intercept",
+    "estimate": 1.098612289,
+    "stdError": 1.651394622e-12,
+    "t": 665263332000,
+    "p": 7.701686471e-247,
+    "low": 1.098612289,
+    "high": 1.098612289
+   },
+   {
+    "term": "Slope",
+    "estimate": 1.5,
+    "stdError": 9.249485872e-13,
+    "t": 1621711759000,
+    "p": 2.360609203e-255,
+    "low": 1.5,
+    "high": 1.5
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "LL",
+     "n": 24
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "LO",
+    "HL",
+    "SL",
+    "GL",
+    "SX",
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5",
+    "C6"
+   ]
+  },
+  "summary": "“LL” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “LL” (R²)."
+ },
+ "nonlinear-regression linesX {\"y\":\"GL\",\"model\":\"exponential-growth-log\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Exponential growth with log(population)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "GL"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      1.231189751e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      3.486404867e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      23
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "GL",
+    "mean": 4.253074582,
+    "sd": 2.983275469,
+    "sem": 0.5966550938,
+    "median": 3.320116923,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Exponential growth with log(population)\") of “GL” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "Intercept",
+    "estimate": 9.361045272e-12,
+    "stdError": 4.780588376e-12,
+    "t": 1.958136643,
+    "p": 0.06245185062,
+    "low": -5.283552533e-13,
+    "high": 1.92504458e-11
+   },
+   {
+    "term": "Slope",
+    "estimate": 0.2,
+    "stdError": 6.829411965e-13,
+    "t": 292850981900,
+    "p": 1.391084158e-249,
+    "low": 0.2,
+    "high": 0.2
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "GL",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "LO",
+    "HL",
+    "SL",
+    "LL",
+    "SX",
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5",
+    "C6"
+   ]
+  },
+  "summary": "“GL” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “GL” (R²)."
+ },
+ "nonlinear-regression linesX {\"y\":\"SX\",\"model\":\"sextic\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Sixth order polynomial",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "SX"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      8.457332578e-15
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.287476538e-27
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      18
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "SX",
+    "mean": 60.48429375,
+    "sd": 64.23780307,
+    "sem": 12.84756061,
+    "median": 31.8496,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Sixth order polynomial\") of “SX” on “X”. 95% CIs are asymptotic (from each parameter's standard error). A sixth order polynomial can overfit — it follows the noise as well as the trend, so prefer a lower order unless the extra terms are justified.",
+  "coefficients": [
+   {
+    "term": "B0",
+    "estimate": 10,
+    "stdError": 7.881127951e-15,
+    "t": 1268853908000000,
+    "p": 5.061956272e-262,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "B1",
+    "estimate": 2,
+    "stdError": 2.012838811e-14,
+    "t": 99362154050000,
+    "p": 4.12809436e-242,
+    "low": 2,
+    "high": 2
+   },
+   {
+    "term": "B2",
+    "estimate": 0.3,
+    "stdError": 1.578285573e-14,
+    "t": 19007966950000,
+    "p": 3.506594535e-229,
+    "low": 0.3,
+    "high": 0.3
+   },
+   {
+    "term": "B3",
+    "estimate": -0.05,
+    "stdError": 5.122349144e-15,
+    "t": -9761146418000,
+    "p": 5.684767246e-224,
+    "low": -0.05,
+    "high": -0.05
+   },
+   {
+    "term": "B4",
+    "estimate": 0.01,
+    "stdError": 7.895084058e-16,
+    "t": 12666109600000,
+    "p": 5.225757193e-226,
+    "low": 0.01,
+    "high": 0.01
+   },
+   {
+    "term": "B5",
+    "estimate": -0.001,
+    "stdError": 5.748657251e-17,
+    "t": -17395366540000,
+    "p": 1.729509936e-228,
+    "low": -0.001,
+    "high": -0.001
+   },
+   {
+    "term": "B6",
+    "estimate": 0.0001,
+    "stdError": 1.591170272e-18,
+    "t": 62846825220000,
+    "p": 1.572633028e-238,
+    "low": 0.0001,
+    "high": 0.0001
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "SX",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "LO",
+    "HL",
+    "SL",
+    "LL",
+    "GL",
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5",
+    "C6"
+   ]
+  },
+  "summary": "“SX” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “SX” (R²)."
+ },
+ "nonlinear-regression linesX {\"y\":\"C1\",\"model\":\"centered-first\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Centered first order polynomial (straight line)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "C1"
+   ],
+   "rows": [
+    {
+     "label": "X center",
+     "values": [
+      6
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      5.404363634e-16
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      6.717643646e-30
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      23
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "C1",
+    "mean": 10,
+    "sd": 7.359800722,
+    "sem": 1.471960144,
+    "median": 10,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Centered first order polynomial (straight line)\") of “C1” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "B0",
+    "estimate": 10,
+    "stdError": 1.080872727e-16,
+    "t": 92517830750000000,
+    "p": 0,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "B1",
+    "estimate": 2,
+    "stdError": 2.997801568e-17,
+    "t": 66715556530000000,
+    "p": 0,
+    "low": 2,
+    "high": 2
+   },
+   {
+    "term": "XCenter",
+    "estimate": 6,
+    "stdError": null,
+    "t": null,
+    "p": null,
+    "low": null,
+    "high": null
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "C1",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "LO",
+    "HL",
+    "SL",
+    "LL",
+    "GL",
+    "SX",
+    "C2",
+    "C3",
+    "C4",
+    "C5",
+    "C6"
+   ]
+  },
+  "summary": "“C1” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “C1” (R²)."
+ },
+ "nonlinear-regression linesX {\"y\":\"C2\",\"model\":\"centered-second\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Centered second order polynomial (quadratic)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "C2"
+   ],
+   "rows": [
+    {
+     "label": "X center",
+     "values": [
+      6
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      8.375313144e-16
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      1.543209146e-29
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      22
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "C2",
+    "mean": 16.5,
+    "sd": 9.444878462,
+    "sem": 1.888975692,
+    "median": 12.5,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Centered second order polynomial (quadratic)\") of “C2” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "B0",
+    "estimate": 10,
+    "stdError": 2.515963388e-16,
+    "t": 39746206350000000,
+    "p": 0,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "B1",
+    "estimate": 2,
+    "stdError": 4.645787845e-17,
+    "t": 43049748870000000,
+    "p": 0,
+    "low": 2,
+    "high": 2
+   },
+   {
+    "term": "B2",
+    "estimate": 0.5,
+    "stdError": 1.444073168e-17,
+    "t": 34624284360000000,
+    "p": 0,
+    "low": 0.5,
+    "high": 0.5
+   },
+   {
+    "term": "XCenter",
+    "estimate": 6,
+    "stdError": null,
+    "t": null,
+    "p": null,
+    "low": null,
+    "high": null
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "C2",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "LO",
+    "HL",
+    "SL",
+    "LL",
+    "GL",
+    "SX",
+    "C1",
+    "C3",
+    "C4",
+    "C5",
+    "C6"
+   ]
+  },
+  "summary": "“C2” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “C2” (R²)."
+ },
+ "nonlinear-regression linesX {\"y\":\"C3\",\"model\":\"centered-third\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Centered third order polynomial (cubic)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "C3"
+   ],
+   "rows": [
+    {
+     "label": "X center",
+     "values": [
+      6
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      1.347000159e-15
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      3.810259802e-29
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      21
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "C3",
+    "mean": 16.5,
+    "sd": 7.101707174,
+    "sem": 1.420341435,
+    "median": 16.4,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Centered third order polynomial (cubic)\") of “C3” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "B0",
+    "estimate": 10,
+    "stdError": 4.046419551e-16,
+    "t": 24713206020000000,
+    "p": 0,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "B1",
+    "estimate": 2,
+    "stdError": 1.878542185e-16,
+    "t": 10646553570000000,
+    "p": 0,
+    "low": 2,
+    "high": 2
+   },
+   {
+    "term": "B2",
+    "estimate": 0.5,
+    "stdError": 2.322500369e-17,
+    "t": 21528521870000000,
+    "p": 0,
+    "low": 0.5,
+    "high": 0.5
+   },
+   {
+    "term": "B3",
+    "estimate": -0.1,
+    "stdError": 7.381390719e-18,
+    "t": -13547582540000000,
+    "p": 0,
+    "low": -0.1,
+    "high": -0.1
+   },
+   {
+    "term": "XCenter",
+    "estimate": 6,
+    "stdError": null,
+    "t": null,
+    "p": null,
+    "low": null,
+    "high": null
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "C3",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "LO",
+    "HL",
+    "SL",
+    "LL",
+    "GL",
+    "SX",
+    "C1",
+    "C2",
+    "C4",
+    "C5",
+    "C6"
+   ]
+  },
+  "summary": "“C3” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “C3” (R²)."
+ },
+ "nonlinear-regression linesX {\"y\":\"C4\",\"model\":\"centered-fourth\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Centered fourth order polynomial",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "C4"
+   ],
+   "rows": [
+    {
+     "label": "X center",
+     "values": [
+      6
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      1.122971518e-14
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      2.522130062e-27
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      20
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "C4",
+    "mean": 22.571,
+    "sd": 14.52528588,
+    "sem": 2.905057176,
+    "median": 17.34375,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Centered fourth order polynomial\") of “C4” on “X”. 95% CIs are asymptotic (from each parameter's standard error). A fourth order polynomial can overfit — it follows the noise as well as the trend, so prefer a lower order unless the extra terms are justified.",
+  "coefficients": [
+   {
+    "term": "B0",
+    "estimate": 10,
+    "stdError": 4.227146107e-15,
+    "t": 2365662257000000,
+    "p": 5.987475858e-296,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "B1",
+    "estimate": 2,
+    "stdError": 1.566109221e-15,
+    "t": 1277050140000000,
+    "p": 1.355625137e-290,
+    "low": 2,
+    "high": 2
+   },
+   {
+    "term": "B2",
+    "estimate": 0.5,
+    "stdError": 6.85993305e-16,
+    "t": 728870087200000,
+    "p": 1.007618311e-285,
+    "low": 0.5,
+    "high": 0.5
+   },
+   {
+    "term": "B3",
+    "estimate": -0.1,
+    "stdError": 6.153742066e-17,
+    "t": -1625027486000000,
+    "p": 1.094168912e-292,
+    "low": -0.1,
+    "high": -0.1
+   },
+   {
+    "term": "B4",
+    "estimate": 0.02,
+    "stdError": 1.979251202e-17,
+    "t": 1010483156000000,
+    "p": 1.464593244e-288,
+    "low": 0.02,
+    "high": 0.02
+   },
+   {
+    "term": "XCenter",
+    "estimate": 6,
+    "stdError": null,
+    "t": null,
+    "p": null,
+    "low": null,
+    "high": null
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "C4",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "LO",
+    "HL",
+    "SL",
+    "LL",
+    "GL",
+    "SX",
+    "C1",
+    "C2",
+    "C3",
+    "C5",
+    "C6"
+   ]
+  },
+  "summary": "“C4” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “C4” (R²)."
+ },
+ "nonlinear-regression linesX {\"y\":\"C5\",\"model\":\"centered-fifth\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Centered fifth order polynomial",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "C5"
+   ],
+   "rows": [
+    {
+     "label": "X center",
+     "values": [
+      6
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      5.213999281e-15
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      5.165299814e-28
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      19
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "C5",
+    "mean": 22.571,
+    "sd": 16.73349357,
+    "sem": 3.346698715,
+    "median": 17.4641875,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Centered fifth order polynomial\") of “C5” on “X”. 95% CIs are asymptotic (from each parameter's standard error). A fifth order polynomial can overfit — it follows the noise as well as the trend, so prefer a lower order unless the extra terms are justified.",
+  "coefficients": [
+   {
+    "term": "B0",
+    "estimate": 10,
+    "stdError": 1.962679943e-15,
+    "t": 5095074230000000,
+    "p": 9.314314596e-288,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "B1",
+    "estimate": 2,
+    "stdError": 1.284116531e-15,
+    "t": 1557491046000000,
+    "p": 5.609512031e-278,
+    "low": 2,
+    "high": 2
+   },
+   {
+    "term": "B2",
+    "estimate": 0.5,
+    "stdError": 3.18509289e-16,
+    "t": 1569812930000000,
+    "p": 4.829482143e-278,
+    "low": 0.5,
+    "high": 0.5
+   },
+   {
+    "term": "B3",
+    "estimate": -0.1,
+    "stdError": 1.313087869e-16,
+    "t": -761563657300000,
+    "p": 4.493582219e-272,
+    "low": -0.1,
+    "high": -0.1
+   },
+   {
+    "term": "B4",
+    "estimate": 0.02,
+    "stdError": 9.189738271e-18,
+    "t": 2176340545000000,
+    "p": 9.731963935e-281,
+    "low": 0.02,
+    "high": 0.02
+   },
+   {
+    "term": "B5",
+    "estimate": -0.002,
+    "stdError": 2.986311466e-18,
+    "t": -669722506500000,
+    "p": 5.164255417e-271,
+    "low": -0.002,
+    "high": -0.002
+   },
+   {
+    "term": "XCenter",
+    "estimate": 6,
+    "stdError": null,
+    "t": null,
+    "p": null,
+    "low": null,
+    "high": null
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "C5",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "LO",
+    "HL",
+    "SL",
+    "LL",
+    "GL",
+    "SX",
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C6"
+   ]
+  },
+  "summary": "“C5” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “C5” (R²)."
+ },
+ "nonlinear-regression linesX {\"y\":\"C6\",\"model\":\"centered-sixth\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Centered sixth order polynomial",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "C6"
+   ],
+   "rows": [
+    {
+     "label": "X center",
+     "values": [
+      6
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      5.471085304e-15
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      5.387899392e-28
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      18
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      25
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 6,
+    "sd": 3.679900361,
+    "sem": 0.7359800722,
+    "median": 6,
+    "n": 25
+   },
+   {
+    "name": "C6",
+    "mean": 24.2549875,
+    "sd": 19.06966102,
+    "sem": 3.813932204,
+    "median": 17.83184063,
+    "n": 25
+   }
+  ],
+  "notes": "Least-squares fit (\"Centered sixth order polynomial\") of “C6” on “X”. 95% CIs are asymptotic (from each parameter's standard error). A sixth order polynomial can overfit — it follows the noise as well as the trend, so prefer a lower order unless the extra terms are justified.",
+  "coefficients": [
+   {
+    "term": "B0",
+    "estimate": 10,
+    "stdError": 2.411456878e-15,
+    "t": 4146870753000000,
+    "p": 2.797425838e-271,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "B1",
+    "estimate": 2,
+    "stdError": 1.347432308e-15,
+    "t": 1484304620000000,
+    "p": 3.008242693e-263,
+    "low": 2,
+    "high": 2
+   },
+   {
+    "term": "B2",
+    "estimate": 0.5,
+    "stdError": 7.657064392e-16,
+    "t": 652991766000000,
+    "p": 7.895668172e-257,
+    "low": 0.5,
+    "high": 0.5
+   },
+   {
+    "term": "B3",
+    "estimate": -0.1,
+    "stdError": 1.377832132e-16,
+    "t": -725777819400000,
+    "p": 1.178314254e-257,
+    "low": -0.1,
+    "high": -0.1
+   },
+   {
+    "term": "B4",
+    "estimate": 0.02,
+    "stdError": 5.477852851e-17,
+    "t": 365106558100000,
+    "p": 2.768051522e-252,
+    "low": 0.02,
+    "high": 0.02
+   },
+   {
+    "term": "B5",
+    "estimate": -0.002,
+    "stdError": 3.133557159e-18,
+    "t": -638252279600000,
+    "p": 1.190871319e-256,
+    "low": -0.002,
+    "high": -0.002
+   },
+   {
+    "term": "B6",
+    "estimate": 0.0002,
+    "stdError": 1.029334984e-18,
+    "t": 194300206600000,
+    "p": 2.361613685e-247,
+    "low": 0.0002,
+    "high": 0.0002
+   },
+   {
+    "term": "XCenter",
+    "estimate": 6,
+    "stdError": null,
+    "t": null,
+    "p": null,
+    "low": null,
+    "high": null
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "C6",
+     "n": 25
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "LO",
+    "HL",
+    "SL",
+    "LL",
+    "GL",
+    "SX",
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5"
+   ]
+  },
+  "summary": "“C6” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “C6” (R²)."
+ },
+ "nonlinear-regression linesDropX {\"y\":\"SL\",\"model\":\"semilog-y-log\"}": {
+  "testType": "nonlinear-regression",
+  "subtitle": "Semilog line — X is linear, Y is log",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "SL"
+   ],
+   "rows": [
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      7.06840658e-12
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      9.992474316e-23
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      2
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      4
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 2,
+    "sd": 1.58113883,
+    "sem": 0.7071067812,
+    "median": 2,
+    "n": 5
+   },
+   {
+    "name": "SL",
+    "mean": 3.580679057,
+    "sd": 2.487665861,
+    "sem": 1.112517994,
+    "median": 3.644237601,
+    "n": 5
+   }
+  ],
+  "notes": "Least-squares fit (\"Semilog line — X is linear, Y is log\") of “SL” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "Intercept",
+    "estimate": 0.6931471806,
+    "stdError": 8.656994708e-12,
+    "t": 80067876210,
+    "p": 1.559851956e-22,
+    "low": 0.6931471805,
+    "high": 0.6931471806
+   },
+   {
+    "term": "Slope",
+    "estimate": 0.3,
+    "stdError": 3.161087521e-12,
+    "t": 94904047420,
+    "p": 1.110274924e-22,
+    "low": 0.3,
+    "high": 0.3
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "SL",
+     "n": 4
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": []
+  },
+  "summary": "“SL” runs between two plateaus, — and —, and is halfway between them when “X” is — (the EC50; ). The curve accounts for 100% of the variation in “SL” (R²)."
  },
  "nonlinear-regression classicTooFew {\"model\":\"sine-wave\"}": {
   "error": "Not enough complete points (4) to fit this curve; need at least 5."
