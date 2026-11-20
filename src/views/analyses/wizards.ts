@@ -66,7 +66,7 @@ import type {
 } from "../../stats/types";
 import { parseInhibitorConcentration } from "../../stats/xy/enzyme-inhibition";
 import { columnFactorName } from "../../stats/mixed/mixed-effects";
-import { splitXY, type Dataset } from "../../lib/dataset";
+import { levelsOf, splitXY, type Dataset } from "../../lib/dataset";
 import { pairKey } from "../../lib/columns";
 import { constantRefName, isConstantRef } from "../../lib/info-sheets";
 
@@ -363,6 +363,32 @@ const fittedYs = (a: Answers) => {
 const yNames = (table: Dataset) => splitXY(table.columns).ys.map((c) => c.name);
 const dataNames = (table: Dataset) => table.numeric.map((c) => c.name);
 
+/** The levels of the named column (distinct non-blank cell texts, first-appearance
+ *  order) — a grouping variable's levels, or [] when the column is not there. */
+const levelsOfName = (table: Dataset, name: string | undefined): string[] => {
+  const column = name === undefined ? undefined : table.columns.find((c) => c.name === name);
+  return column ? levelsOf(column) : [];
+};
+
+/** The variables with exactly two levels — a t test's grouping-variable candidates. */
+const twoLevelNames = (table: Dataset, exclude?: string) =>
+  table.columns.filter((c) => c.name !== exclude && levelsOf(c).length === 2).map((c) => c.name);
+
+/** The variables with at least two levels — a survival analysis's grouping candidates. */
+const groupingNames = (table: Dataset, exclude?: (string | undefined)[]) =>
+  table.columns
+    .filter((c) => !(exclude ?? []).includes(c.name) && levelsOf(c).length >= 2)
+    .map((c) => c.name);
+
+/** The numeric variables holding only 0/1 — a survival analysis's event-code candidates
+ *  (or every numeric variable, when none is binary: the runner then says so). */
+const binaryNames = (table: Dataset, exclude?: string) => {
+  const binary = table.numeric
+    .filter((c) => c.name !== exclude && c.values.length > 0 && c.values.every((v) => v === 0 || v === 1))
+    .map((c) => c.name);
+  return binary.length > 0 ? binary : dataNames(table).filter((n) => n !== exclude);
+};
+
 // Which data sets a test runs on (`sets`), asked first as in Prism, and only when there
 // is a choice: columns, or a grouped table's groups, holding numbers.
 const setNames = (table: Dataset) =>
@@ -534,6 +560,45 @@ const fdrParams = (a: Answers) =>
         fdrQ: (a.fdrQ as number | undefined) ?? 5,
       }
     : {};
+
+/** The questions a two-group test asks after its groups are chosen: Gaussian or not,
+ *  how the groups are compared, and the tails — shared by the Column-table wizard and
+ *  the Multiple Variables wizard, whose group questions differ. */
+const twoGroupsTail = (a: Answers, first = "Group 1", second = "Group 2"): (Question | false)[] => {
+  const gaussian = a.gaussian === "yes";
+  return [
+    choice(
+      "gaussian",
+      GAUSSIAN,
+      [
+        ["yes", "Yes — use a parametric test"],
+        ["no", "No — use a non-parametric test"],
+      ],
+      true,
+    ),
+    gaussian &&
+      (a.paired === "paired"
+        ? choice("ratio", "How should the paired values be compared?", [
+            ["diff", "Compute differences (paired t test)"],
+            ["ratio", "Compute ratios (ratio t test) — for log-normal data"],
+          ])
+        : choice("lognormal", "How should the two groups be compared?", [
+            ["no", "Compare means (t test)"],
+            ["yes", "Compare geometric means (lognormal t test) — for log-normal data"],
+          ])),
+    gaussian &&
+      a.paired !== "paired" &&
+      choice("variance", "Assume the two groups have equal variances?", [
+        ["equal", a.lognormal === "yes" ? "Yes — lognormal t test" : "Yes — Student's t test"],
+        ["unequal", a.lognormal === "yes" ? "No — lognormal Welch's t test" : "No — Welch's t test"],
+      ]),
+    choice("tails", "One-tailed or two-tailed P value?", [
+      ["two-sided", "Two-tailed (recommended)"],
+      ["less", `One-tailed: expect ${first} < ${second}`],
+      ["greater", `One-tailed: expect ${first} > ${second}`],
+    ]),
+  ];
+};
 
 /** Whether the table is a Grouped one (column groups with replicate columns),
  *  for the wizards that serve both layouts (mixed-effects): multi-column
@@ -1223,45 +1288,44 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
   },
 
   "compare-two-groups": {
-    questions: (a, table) => {
+    questions: (a, table, type) => {
       const [first = "Group 1", second = "Group 2"] = chosenSets(a) ?? setNames(table);
-      const gaussian = a.gaussian === "yes";
+      // A Multiple Variables table assigns its variables: paired, two variables row by
+      // row; unpaired, one response variable split by a grouping variable's two levels.
+      // The paired question comes first here — it decides which variables are asked.
+      if (type === "multiple") {
+        const paired = a.paired === "paired";
+        const [g1 = "Group 1", g2 = "Group 2"] = levelsOfName(table, a.groupBy as string | undefined);
+        return [
+          choice("paired", PAIRED, [
+            ["unpaired", "Unpaired (independent groups)"],
+            ["paired", "Paired (matched samples)"],
+          ]),
+          ...(paired
+            ? [
+                choice("set1", "Which is the first variable?", names(dataNames(table))),
+                choice("set2", "Which is the second variable?", names(dataNames(table).filter((n) => n !== a.set1))),
+              ]
+            : [
+                choice("response", "Which variable holds the values to compare?", names(dataNames(table))),
+                choice(
+                  "groupBy",
+                  "Which variable defines the two groups?",
+                  names(twoLevelNames(table, a.response as string | undefined)),
+                  false,
+                  "No variable has exactly two levels yet — add a grouping variable with two values (for example “Control” and “Treated”).",
+                ),
+              ]),
+          ...twoGroupsTail(a, paired ? first : g1, paired ? second : g2),
+        ];
+      }
       return [
         ...twoSets(a, table),
         choice("paired", PAIRED, [
           ["unpaired", "Unpaired (independent groups)"],
           ["paired", "Paired (matched samples)"],
         ]),
-        choice(
-          "gaussian",
-          GAUSSIAN,
-          [
-            ["yes", "Yes — use a parametric test"],
-            ["no", "No — use a non-parametric test"],
-          ],
-          true,
-        ),
-        gaussian &&
-          (a.paired === "paired"
-            ? choice("ratio", "How should the paired values be compared?", [
-                ["diff", "Compute differences (paired t test)"],
-                ["ratio", "Compute ratios (ratio t test) — for log-normal data"],
-              ])
-            : choice("lognormal", "How should the two groups be compared?", [
-                ["no", "Compare means (t test)"],
-                ["yes", "Compare geometric means (lognormal t test) — for log-normal data"],
-              ])),
-        gaussian &&
-          a.paired !== "paired" &&
-          choice("variance", "Assume the two groups have equal variances?", [
-            ["equal", a.lognormal === "yes" ? "Yes — lognormal t test" : "Yes — Student's t test"],
-            ["unequal", a.lognormal === "yes" ? "No — lognormal Welch's t test" : "No — Welch's t test"],
-          ]),
-        choice("tails", "One-tailed or two-tailed P value?", [
-          ["two-sided", "Two-tailed (recommended)"],
-          ["less", `One-tailed: expect ${first} < ${second}`],
-          ["greater", `One-tailed: expect ${first} > ${second}`],
-        ]),
+        ...twoGroupsTail(a, first, second),
       ];
     },
     // An answer left from a question no longer asked (after Back) doesn't count.
@@ -1276,6 +1340,8 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ratio: paired && gaussian && a.ratio === "ratio",
           ...(!paired && gaussian && a.lognormal === "yes" ? { lognormal: true } : {}),
           tails: a.tails as CompareTwoGroupsParams["tails"],
+          ...(a.response !== undefined ? { response: a.response as string } : {}),
+          ...(a.groupBy !== undefined ? { groupBy: a.groupBy as string } : {}),
         }),
       };
     },
@@ -2536,14 +2602,20 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
   },
 
   "nonlinear-regression": {
-    questions: (a, table) => {
+    questions: (a, table, type) => {
+      const isMV = type === "multiple";
       const dose = a.kind !== "other";
       const models = (dose ? DOSE_MODELS : NONLINEAR_MODELS.filter((m) => !isDoseModel(m))).map(
         (m): [string, string] => [m, MODEL_LABEL[m]],
       );
       // One data set fitted can be compared with another's curve; several are each fitted.
-      const ys = (a.ys as string[] | undefined) ?? yNames(table).slice(0, 1);
-      const others = ys.length === 1 ? yNames(table).filter((n) => n !== ys[0]) : [];
+      // A Multiple Variables table names its X and Y variables instead, so there are no
+      // other Y data sets to compare with or fit globally — `others` stays empty and those
+      // questions hide, as they do on an XY table with one Y.
+      const ys = isMV
+        ? ((a.y as string | undefined) === undefined ? [] : [a.y as string])
+        : ((a.ys as string[] | undefined) ?? yNames(table).slice(0, 1));
+      const others = isMV ? [] : ys.length === 1 ? yNames(table).filter((n) => n !== ys[0]) : [];
       const modelName = String(a.model ?? "");
       const midpoint = modelName.startsWith("inhibitor")
         ? "IC50"
@@ -2554,14 +2626,15 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             : "EC50";
       // Plan 26: the weighting options (1/SD² only when the table has
       // replicates to take an SD over), the model comparison, the global
-      // fit, and the parameter constraints.
+      // fit, and the parameter constraints. A Multiple Variables fit has no
+      // replicates, so 1/SD² is not offered there.
       const weightOptions: [string, string][] = [
         ["none", "No weighting (recommended unless scatter grows with Y)"],
         ["1/y", "Weight by 1/Y"],
         ["1/y2", "Weight by 1/Y²"],
         ["1/x", "Weight by 1/X"],
         ["1/x2", "Weight by 1/X²"],
-        ...(yNames(table).length > 1 ? [["1/sd2", "Weight by 1/SD² (needs replicates)"] as [string, string]] : []),
+        ...(!isMV && yNames(table).length > 1 ? [["1/sd2", "Weight by 1/SD² (needs replicates)"] as [string, string]] : []),
       ];
       const terms = a.model
         ? a.model === "user-defined"
@@ -2572,7 +2645,12 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           : modelSpec(a.model as NonlinearModel).terms
         : [];
       return [
-        ysQuestion(table, "Which Y data sets should be fitted? Each is fitted on its own."),
+        ...(isMV
+          ? [
+              choice("x", "Which variable is X?", names(dataNames(table))),
+              choice("y", "Which variable is Y?", names(dataNames(table).filter((n) => n !== a.x))),
+            ]
+          : [ysQuestion(table, "Which Y data sets should be fitted? Each is fitted on its own.")]),
         choice("kind", "Which kind of curve?", [
           ["dose", "Dose-response (sigmoidal)"],
           ["other", "Another curve (line, polynomial, exponential, Michaelis-Menten…)"],
@@ -2821,6 +2899,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         type: "nonlinear-regression",
         params: {
           ...fittedYs(a),
+          ...(a.x !== undefined ? { x: a.x as string } : {}),
           model: a.model as NonlinearModel,
           ...custom,
           ...compare,
@@ -3764,9 +3843,34 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
   },
 
   survival: {
-    questions: (_, table) => {
-      const groups = splitXY(table.columns).ys.length;
+    questions: (a, table, type) => {
+      const isMV = type === "multiple";
+      // A Multiple Variables table assigns its variables: the time variable, the event-code
+      // variable and the grouping variable. The trend test and the correction only apply
+      // with more than two groups — the grouping variable's levels, once it is chosen.
+      const groups = isMV
+        ? levelsOfName(table, a.groupBy as string | undefined).length
+        : splitXY(table.columns).ys.length;
       return [
+        ...(isMV
+          ? [
+              choice("time", "Which variable holds the survival (follow-up) times?", names(dataNames(table))),
+              choice(
+                "status",
+                "Which variable holds the event codes? 1 = event occurred, 0 = censored.",
+                names(binaryNames(table, a.time as string | undefined)),
+              ),
+              choice(
+                "groupBy",
+                "Which variable defines the groups to compare?",
+                names(
+                  groupingNames(table, [a.time as string | undefined, a.status as string | undefined]),
+                ),
+                false,
+                "No variable has two or more levels yet — add a grouping variable (for example “Control” and “Treated”).",
+              ),
+            ]
+          : []),
         choice("curveTest", "Which test should compare the survival curves?", [
           ["logrank", "Log-rank (Mantel-Cox) test (recommended)"],
           ...(groups > 2
@@ -3787,6 +3891,9 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       params: {
         curveTest: a.curveTest as SurvivalParams["curveTest"],
         correction: (a.correction ?? "holm") as SurvivalParams["correction"],
+        ...(a.time !== undefined ? { time: a.time as string } : {}),
+        ...(a.status !== undefined ? { status: a.status as string } : {}),
+        ...(a.groupBy !== undefined ? { groupBy: a.groupBy as string } : {}),
       },
     }),
     checklist: () => CHECKLISTS["survival"],
