@@ -1885,8 +1885,39 @@ async function runGlobalNonlinear(
   };
 }
 
-export async function runNonlinearRegression(
+/** A Multiple Variables fit's two columns: the named X and Y variables, in that order —
+ *  so splitXY below reads them as an XY table's X and first Y. */
+function narrowToXY(
   columns: Column[],
+  params: NonlinearRegressionParams,
+): [Column, Column] | { error: string } {
+  const xCol = columns.find((c) => c.name === params.x);
+  if (!xCol) return { error: missingColumn(params.x!) };
+  if (!xCol.values.length) return { error: `“${params.x}” holds no numbers yet.` };
+  if (params.y === undefined)
+    return { error: "Pick a Y variable — run the analysis again and choose the variables." };
+  const yCol = columns.find((c) => c.name === params.y);
+  if (!yCol) return { error: missingColumn(params.y) };
+  if (!yCol.values.length) return { error: `“${params.y}” holds no numbers yet.` };
+  if (params.ys !== undefined && params.ys.length > 1)
+    return {
+      error: "Fitting several Y variables cannot be combined with naming an X variable — fit one Y variable at a time.",
+    };
+  if (params.compareWith !== undefined)
+    return {
+      error:
+        "Comparing two data sets' curves cannot be combined with naming an X variable yet — fit each Y variable on its own first.",
+    };
+  if (params.globalY !== undefined && params.globalY.length > 0)
+    return {
+      error:
+        "A global fit cannot be combined with naming an X variable yet — fit each Y variable on its own first.",
+    };
+  return [xCol, yCol];
+}
+
+export async function runNonlinearRegression(
+  columnsIn: Column[],
   params: NonlinearRegressionParams | undefined,
   titles: (string | null)[] = [],
 ): Promise<AnalysisOutcome> {
@@ -1894,6 +1925,18 @@ export async function runNonlinearRegression(
   if (!model || !Object.hasOwn(MODEL_LABEL, model)) return { error: "Choose a standard curve to fit." };
   // v2 item 23: the user types their own equation.
   const isUserDefinedModel = model === "user-defined";
+
+  // A Multiple Variables table names its X and Y variables (`x`, `y`): the fit runs on
+  // those two columns alone, so the rest of the runner — built on splitXY's
+  // first-column-is-X — works unchanged, interpolation included. Comparing data sets,
+  // a global fit and several Y variables need the table's other Y series, so they are
+  // refused here, plainly, instead of fitting the wrong columns.
+  let columns = columnsIn;
+  if (params?.x !== undefined) {
+    const narrowed = narrowToXY(columns, params);
+    if ("error" in narrowed) return narrowed;
+    columns = narrowed;
+  }
 
   const { x: xCol, ys: yCols } = splitXY(columns);
   // A Y data set's replicates pool (see datasetColumns): "Control" fits

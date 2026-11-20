@@ -293,6 +293,12 @@ export interface CompareTwoGroupsParams {
   lognormal?: boolean;
   /** "less"/"greater" follow R's t.test semantics: alternative on (col0 vs col1). */
   tails: (typeof TAILS)[number];
+  /** Multiple Variables tables, unpaired: the response variable, split into its two groups
+   *  by `groupBy`'s levels. A paired test on such a table names its two variables in `sets`
+   *  instead (the existing paired machinery, row by row). */
+  response?: string;
+  /** Multiple Variables tables, unpaired: the grouping variable whose two levels are the groups. */
+  groupBy?: string;
 }
 
 /** Params for "one-sample-t": tests each column against a hypothetical value —
@@ -459,6 +465,8 @@ export type NonlinearModel = (typeof NONLINEAR_MODELS)[number];
 /** Params for "nonlinear-regression" (XY table): which Y data set to fit, and which curve. */
 export type NonlinearWeightScheme = "none" | "1/y" | "1/y2" | "1/x" | "1/x2" | "1/sd2";
 export interface NonlinearRegressionParams {
+  /** Multiple Variables tables: the X variable (the Y variable is `y`). */
+  x?: string;
   /** Omitted defaults to the first Y data column. */
   y?: string;
   /** The Y data sets fitted, each on its own (`y` then unused; no comparison). */
@@ -1317,6 +1325,12 @@ export type AnalysisParams = DataSetsParam &
 export interface SurvivalParams {
   curveTest: (typeof CURVE_TESTS)[number];
   correction: (typeof CORRECTIONS)[number];
+  /** Multiple Variables tables: the follow-up-time variable, the event-code variable
+   *  (1 = event occurred, 0 = censored) and the grouping variable whose levels are the
+   *  groups compared. */
+  time?: string;
+  status?: string;
+  groupBy?: string;
 }
 
 /** Params for "cox" (Survival table): the group the others' hazards are compared to;
