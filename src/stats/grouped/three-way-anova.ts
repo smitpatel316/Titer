@@ -7,7 +7,7 @@
 // (q = sqrt(2)*|t|, t from the pooled-MSE two-sample statistic). No TukeyHSD call.
 import type { AnalysisOutcome, Column, ComparisonRow, ThreeWayAnovaParams } from "../types";
 import type { RowGroup } from "../../store/types";
-import { describe, pairIndices, pRow, rStr, rVec } from "../column/base";
+import { describe, effectSizeRow, pairIndices, pRow, R_EFFECT_CI, rStr, rVec } from "../column/base";
 import { evalNamedVector } from "../webr";
 import { flattenThreeWay, rowGroupBands, rowName } from "./base";
 import { mean } from "../../lib/summary";
@@ -145,22 +145,27 @@ export async function runThreeWayAnova(
   }
 
   const rFactor = (labels: string[]) => `factor(c(${labels.map(rStr).join(",")}))`;
-  const setup = `v<-${rVec(flat.values)};A<-${rFactor(flat.a)};B<-${rFactor(flat.b)};C<-${rFactor(flat.c)}`;
+  const setup = `${R_EFFECT_CI};v<-${rVec(flat.values)};A<-${rFactor(flat.a)};B<-${rFactor(flat.b)};C<-${rFactor(flat.c)}`;
   // Type III sums of squares (matches GraphPad Prism on unbalanced designs; on
   // balanced designs Type I = II = III, so nothing changes there). Base-R recipe:
   // sum-to-zero contrasts on the factors + drop1 over the full scope. Contrasts are
   // set on the factor objects (NOT global options()) so no other analysis is affected.
   // Each term is pulled out by matching drop1's row names — drop1 returns one row
   // per term in formula order ("<none>", "A", "B", "C", "A:B", "A:C", "B:C", "A:B:C").
+  // Partial eta squared (seq 161) per term, with its 95% CI from the term's F
+  // statistic's noncentrality (`etaCI`, N = total observations); each term's sum
+  // of squares is F·Df·MSE, so eta squared follows in TypeScript.
   const keyOf = (term: string) => term.replace(/:/g, "");
   const pick = (term: string, col: string) => `a$${col}[match("${term}",rn)]`;
   const rCode =
     `${setup};contrasts(A)<-"contr.sum";contrasts(B)<-"contr.sum";contrasts(C)<-"contr.sum";` +
     `f<-aov(v~A*B*C);a<-drop1(f,~.,test="F");dfr<-df.residual(f);mse<-deviance(f)/dfr;rn<-rownames(a);` +
+    `ec<-t(sapply(seq_along(c(${TERMS.map((t) => `"${t}"`).join(",")})),function(k)etaCI(a$"F value"[k+1],a$Df[k+1],dfr,length(v))));` +
     `c(${TERMS.map(
       (t) =>
         `${keyOf(t)}F=${pick(t, '"F value"')},${keyOf(t)}Df=${pick(t, "Df")},${keyOf(t)}P=${pick(t, '"Pr(>F)"')}`,
-    ).join(",")},dfResid=dfr,mse=mse)`;
+    ).join(",")},dfResid=dfr,mse=mse,` +
+    `${TERMS.map((t, k) => `${keyOf(t)}Lo=ec[${k + 1},1],${keyOf(t)}Hi=ec[${k + 1},2]`).join(",")})`;
 
   const v = await evalNamedVector(rCode);
   const effect = (term: string) => [
@@ -169,6 +174,22 @@ export async function runThreeWayAnova(
     pRow(`${term} P value`, v[`${keyOf(term)}P`] ?? null),
   ];
   const stats = [...TERMS.flatMap(effect), { label: "DFd (residual)", value: v.dfResid ?? null }];
+  // Each term's sum of squares is F·Df·MSE; the error's is MSE·DFd.
+  const ssError = (v.mse ?? NaN) * (v.dfResid ?? NaN);
+  const ssTerms = TERMS.map((t) => (v[`${keyOf(t)}F`] ?? NaN) * (v[`${keyOf(t)}Df`] ?? NaN) * (v.mse ?? NaN));
+  const ssTotal = ssTerms.reduce((s, x) => s + x, 0) + ssError;
+  const TERM_LABELS: Record<ThreeWayTerm, string> = {
+    A: "A — Group",
+    B: "B — Row",
+    C: "C — Row group",
+    "A:B": "A:B",
+    "A:C": "A:C",
+    "B:C": "B:C",
+    "A:B:C": "A:B:C",
+  };
+  const effectSizes = TERMS.map((t, k) =>
+    effectSizeRow(TERM_LABELS[t], ssTerms[k], ssError, ssTotal, v[`${keyOf(t)}Lo`], v[`${keyOf(t)}Hi`]),
+  );
   const groups = (
     await describe(aLevels.map((name) => ({ name, values: flat.values.filter((_, i) => flat.a[i] === name) })))
   ).groups;
@@ -202,6 +223,7 @@ export async function runThreeWayAnova(
     subtitle: "Ordinary three-way ANOVA",
     stats,
     groups,
+    effectSizes,
     notes,
     comparisons,
     comparisonsLabel: comparisons?.length

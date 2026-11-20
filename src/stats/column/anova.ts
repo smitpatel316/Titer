@@ -9,6 +9,7 @@ import {
   ciOf,
   comparedPairs,
   dataGroups,
+  effectSizeRow,
   groupsSetup,
   identical,
   pairIndices,
@@ -16,6 +17,7 @@ import {
   pRow,
   R_ADJUST,
   R_CRIT,
+  R_EFFECT_CI,
   R_PTUKEY,
   tukeyPosthocStatements,
   type ColumnTestSpec,
@@ -177,11 +179,15 @@ export const anovaSpec: ColumnTestSpec<AnovaParams> = {
     const g = groups.map((_, i) => `g${i}`);
     const logs = lognormal(p) ? `;${g.map((x) => `${x}<-log(${x})`).join(";")};v<-log(v)` : "";
     const setup =
-      `${groupsSetup(groups)}${logs};G<-list(${g.join(",")});` +
+      `${R_EFFECT_CI};${groupsSetup(groups)}${logs};G<-list(${g.join(",")});` +
       `n<-lengths(G);m<-sapply(G,mean);s2<-sapply(G,var);a<-summary(aov(v~gr))[[1]]`;
     const main = welch(p)
       ? `w<-oneway.test(v~gr,var.equal=FALSE);r<-c(F=unname(w$statistic),dfn=unname(w$parameter[1]),dfd=unname(w$parameter[2]),p=w$p.value)`
-      : `r<-c(F=a$"F value"[1],dfn=a$Df[1],dfd=a$Df[2],p=a$"Pr(>F)"[1],eta2=a$"Sum Sq"[1]/sum(a$"Sum Sq"));r["f"]<-sqrt(r["eta2"]/(1-r["eta2"]))`;
+      : // Partial eta squared (seq 161) equals eta squared here — one factor, so
+        // R² = η² = partial η² (Prism's ANOVA guide) — with its 95% CI from
+        // the F statistic's noncentrality (`etaCI`, N = total observations).
+        // Welch's has no sums-of-squares decomposition, so it reports none.
+        `ec<-etaCI(a$"F value"[1],a$Df[1],a$Df[2],sum(n));r<-c(F=a$"F value"[1],dfn=a$Df[1],dfd=a$Df[2],p=a$"Pr(>F)"[1],eta2=a$"Sum Sq"[1]/sum(a$"Sum Sq"),pLo=ec[1],pHi=ec[2],ssB=a$"Sum Sq"[1],ssE=a$"Sum Sq"[2]);r["f"]<-sqrt(r["eta2"]/(1-r["eta2"]))`;
     const geometric = lognormal(p) ? `;r<-c(r,setNames(exp(m),paste0("gm",0:${groups.length - 1})))` : "";
     if (p.posthoc === "none") return `${setup};${main}${geometric};r`;
     const ph = comparisons(groups, p);
@@ -210,6 +216,22 @@ export const anovaSpec: ColumnTestSpec<AnovaParams> = {
         ]),
     ...(lognormal(params) ? groups.map((g, i) => ({ label: `Geometric mean (${g.name})`, value: v[`gm${i}`] })) : []),
   ],
+  // One factor, so the single effect's partial eta squared is its eta
+  // squared (Prism: R² = η² = partial η² in one-way ANOVA). Welch's has no
+  // sums of squares, so it reports no effect-size table.
+  effectSizes: (v, _groups, params) =>
+    welch(params)
+      ? undefined
+      : [
+          effectSizeRow(
+            "Between groups",
+            v.ssB,
+            v.ssE,
+            (v.ssB ?? 0) + (v.ssE ?? 0),
+            v.pLo,
+            v.pHi,
+          ),
+        ],
   ratios: lognormal,
   posthoc: posthocOf,
   pairs: (groups, params) => {
@@ -223,7 +245,7 @@ export const anovaSpec: ColumnTestSpec<AnovaParams> = {
       ? `Compares the groups' geometric means: the ANOVA${welch(params) ? " (Welch's, without assuming equal SDs)" : ""} runs on the logarithms, which it assumes normal${welch(params) ? "" : " with equal variances"}; its comparisons are ratios of geometric means.`
       : (welch(params)
           ? "Compares means across groups without assuming equal SDs (Welch's ANOVA); assumes normal distributions."
-          : "Compares means across groups; assumes normal distributions with equal variances.") +
+          : "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor).") +
         (params?.posthoc === "lsd"
           ? " Fisher's LSD is uncorrected — only interpretable when the overall ANOVA was significant."
           : ""),

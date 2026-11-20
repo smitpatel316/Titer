@@ -3,7 +3,7 @@
 // lognormal form (the geometric mean: a t test of the logarithms against the value's),
 // or a Wilcoxon signed-rank test (non-parametric), Prism-wizard style.
 import type { OneSampleTParams } from "../types";
-import { ciRows, declareGroups, identical, pRow, R_HEDGES, rAlt, type ColumnTestSpec } from "./base";
+import { ciRows, declareGroups, identical, pRow, R_EFFECT_CI, R_HEDGES, rAlt, type ColumnTestSpec } from "./base";
 
 const DEFAULTS: OneSampleTParams = { hypotheticalValue: 0, tails: "two-sided", gaussian: true };
 
@@ -53,15 +53,23 @@ export const oneSampleTSpec: ColumnTestSpec<OneSampleTParams> = {
       return `${decl};${stmts.join(";")};c(${vals.join(",")})`;
     }
     const stmts = groups.map((_, i) => `tt${i}<-t.test(g${i},mu=${p.hypotheticalValue},alternative="${alt}")`);
+    // Effect size: the distance to the hypothetical value in SDs. Its 95%
+    // CI (and Hedges' g's) by noncentral-t inversion: t = d·√n, so the
+    // ncp's CI scales by 1/√n; one-tailed, the one-sided bound instead.
+    const tc = groups.map(
+      (_, i) =>
+        `tc${i}<-if("${alt}"=="two.sided")tci(tt${i}$statistic,tt${i}$parameter)else tci1(tt${i}$statistic,tt${i}$parameter,"${alt}");` +
+        `dLo${i}=tc${i}[1]/sqrt(length(g${i}));dHi${i}=tc${i}[2]/sqrt(length(g${i}))`,
+    );
     const vals = groups.map(
       (_, i) =>
         `t${i}=unname(tt${i}$statistic),df${i}=unname(tt${i}$parameter),p${i}=tt${i}$p.value,` +
         `md${i}=unname(tt${i}$estimate)-${p.hypotheticalValue},ci_lo${i}=tt${i}$conf.int[1],ci_hi${i}=tt${i}$conf.int[2],` +
-        // Effect size: the distance to the hypothetical value in SDs.
         `d${i}=(mean(g${i})-${p.hypotheticalValue})/sd(g${i}),` +
-        `g${i}=(mean(g${i})-${p.hypotheticalValue})/sd(g${i})*J(length(g${i})-1)`,
+        `g${i}=(mean(g${i})-${p.hypotheticalValue})/sd(g${i})*J(length(g${i})-1),` +
+        `dLo${i}=dLo${i},dHi${i}=dHi${i},gLo${i}=dLo${i}*J(length(g${i})-1),gHi${i}=dHi${i}*J(length(g${i})-1)`,
     );
-    return `${decl};${R_HEDGES};${stmts.join(";")};c(${vals.join(",")})`;
+    return `${decl};${R_HEDGES};${R_EFFECT_CI};${stmts.join(";")};${tc.join(";")};c(${vals.join(",")})`;
   },
   rows: (v, groups, params) => {
     const p = { ...DEFAULTS, ...params };
@@ -87,7 +95,9 @@ export const oneSampleTSpec: ColumnTestSpec<OneSampleTParams> = {
       { label: `${g.name} — Mean vs. hypothetical`, value: v[`md${i}`] },
       ...ciRows(p.tails, v[`ci_lo${i}`], v[`ci_hi${i}`], `${g.name} — `),
       { label: `${g.name} — Cohen's d`, value: v[`d${i}`] },
+      ...ciRows(p.tails, v[`dLo${i}`], v[`dHi${i}`], `${g.name} — Cohen's d `),
       { label: `${g.name} — Hedges' g`, value: v[`g${i}`] },
+      ...ciRows(p.tails, v[`gLo${i}`], v[`gHi${i}`], `${g.name} — Hedges' g `),
     ]);
   },
   notes: (params) => {

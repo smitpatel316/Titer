@@ -1330,12 +1330,31 @@ export interface ComparedCell {
 }
 
 /** A square correlation matrix: `r[i][j]` is the coefficient between variable i
- *  and j (symmetric, diagonal = 1), `p[i][j]` the matching P value. */
+ *  and j (symmetric, diagonal = 1), `p[i][j]` the matching P value, `lo[i][j]` /
+ *  `hi[i][j]` the coefficient's 95% CI (null where it is undefined: fewer than
+ *  4 pairs, or a perfect r). */
 interface CorrelationMatrix {
   variables: string[];
   r: (number | null)[][];
   p: (number | null)[][];
+  lo?: (number | null)[][];
+  hi?: (number | null)[][];
   label?: string;
+}
+
+/** One row of an ANOVA's effect-size table (seq 161): one effect's eta
+ *  squared (SS_effect / SS_total), partial eta squared (SS_effect /
+ *  (SS_effect + SS_error)), Cohen's f from the partial eta squared, and
+ *  the partial eta squared's 95% CI (noncentral-F inversion). Nulls where
+ *  the measure doesn't apply (e.g. the matching effect of a repeated-
+ *  measures ANOVA has an eta squared but no partial eta squared). */
+export interface EffectSizeRow {
+  effect: string;
+  eta2: number | null;
+  partialEta2: number | null;
+  cohensF: number | null;
+  partialEta2Lo: number | null;
+  partialEta2Hi: number | null;
 }
 
 /** One group of a survival analysis: its subjects, its events, and its median survival with
@@ -1851,6 +1870,8 @@ export interface AnalysisResult {
   comparisonsLabel?: string;
   /** Optional correlation matrix (Multiple Variables correlation matrix). */
   matrix?: CorrelationMatrix;
+  /** Optional ANOVA effect-size table (seq 161): one row per effect. */
+  effectSizes?: EffectSizeRow[];
   /** Optional regression coefficients table (multiple regression). */
   coefficients?: RegressionCoefficient[];
   /** A curve fit's best-fit values, one column per data set (two when curves are compared). */

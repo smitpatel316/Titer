@@ -348,6 +348,28 @@ export function AnalysisResultsView({
         />
       )}
 
+      {result.effectSizes && result.effectSizes.length > 0 && (
+        <Table
+          title="Effect sizes"
+          columns={[
+            { label: "Effect" },
+            { label: "Eta squared", numeric: true },
+            { label: "Partial eta squared", numeric: true },
+            { label: "Cohen's f", numeric: true },
+            { label: "Partial eta squared 95% CI", numeric: true },
+          ]}
+          rows={result.effectSizes.map((e) => [
+            e.effect,
+            num(e.eta2),
+            num(e.partialEta2),
+            num(e.cohensF),
+            e.partialEta2Lo == null && e.partialEta2Hi == null
+              ? "—"
+              : `${num(e.partialEta2Lo)} to ${num(e.partialEta2Hi)}`,
+          ])}
+        />
+      )}
+
       {result.transposed && (
         <Table
           title="Transposed table"
@@ -445,6 +467,22 @@ export function AnalysisResultsView({
               ),
             ])}
           />
+          {matrix.lo && matrix.hi && (
+            <Table
+              title="95% CIs of r"
+              columns={[{ label: "" }, ...matrix.variables.map((v) => ({ label: v, numeric: true }))]}
+              rows={matrix.variables.map((name, i) => [
+                name,
+                ...matrix.variables.map((_, j) =>
+                  i === j || (matrix.lo![i]?.[j] == null && matrix.hi![i]?.[j] == null) ? (
+                    <span className="text-secondary">—</span>
+                  ) : (
+                    `${num(matrix.lo![i]?.[j])} to ${num(matrix.hi![i]?.[j])}`
+                  ),
+                ),
+              ])}
+            />
+          )}
         </>
       )}
 

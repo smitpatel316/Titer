@@ -2,7 +2,7 @@
 // P value) between every pair of data-bearing variables, computed pairwise-complete.
 // Bespoke runner (not ColumnTestSpec) — its result is a matrix, not a scalar set.
 import type { AnalysisOutcome, Column, CorrelationParams } from "../types";
-import { dataGroups, describe, identical, pairIndices, rVec } from "../column/base";
+import { dataGroups, describe, identical, pairIndices, R_RCI, rVec } from "../column/base";
 import { pairUp } from "../../lib/dataset";
 import { evalNamedVector } from "../webr";
 
@@ -21,7 +21,10 @@ export async function runCorrelationMatrix(
 
   const pairs = pairIndices(vars.length);
   // One cor.test per pair, keyed by explicit r_i_j / p_i_j names (flat-map rule —
-  // no matrices cross the WebR boundary, only a named vector does).
+  // no matrices cross the WebR boundary, only a named vector does). Each pair
+  // also carries its r's 95% CI (seq 199 residual: the matrix showed r + p
+  // only) — `rci`, shared with the XY correlation runner: Pearson's from
+  // cor.test, Spearman's on Fisher's z.
   const stmts: string[] = [];
   const assigns: string[] = [];
   let blank = false;
@@ -33,16 +36,24 @@ export async function runCorrelationMatrix(
       continue;
     }
     const ct = `ct_${i}_${j}`;
-    stmts.push(`${ct}<-cor.test(${rVec(xs)},${rVec(ys)},method="${method}")`);
-    assigns.push(`r_${i}_${j}=unname(${ct}$estimate),p_${i}_${j}=${ct}$p.value`);
+    stmts.push(`${ct}<-cor.test(${rVec(xs)},${rVec(ys)},method="${method}");ci_${i}_${j}<-rci(${ct},${xs.length})`);
+    assigns.push(
+      `r_${i}_${j}=unname(${ct}$estimate),p_${i}_${j}=${ct}$p.value,lo_${i}_${j}=ci_${i}_${j}[1],hi_${i}_${j}=ci_${i}_${j}[2]`,
+    );
   }
 
-  const v = assigns.length ? await evalNamedVector(`${stmts.join(";")};c(${assigns.join(",")})`) : {};
+  const v = assigns.length
+    ? await evalNamedVector(`${R_RCI};${stmts.join(";")};c(${assigns.join(",")})`)
+    : {};
   const r: (number | null)[][] = vars.map((_, i) => vars.map((__, j) => (i === j ? 1 : null)));
   const p: (number | null)[][] = vars.map(() => vars.map(() => null));
+  const lo: (number | null)[][] = vars.map(() => vars.map(() => null));
+  const hi: (number | null)[][] = vars.map(() => vars.map(() => null));
   for (const [i, j] of pairs) {
     r[i][j] = r[j][i] = v[`r_${i}_${j}`] ?? null;
     p[i][j] = p[j][i] = v[`p_${i}_${j}`] ?? null;
+    lo[i][j] = lo[j][i] = v[`lo_${i}_${j}`] ?? null;
+    hi[i][j] = hi[j][i] = v[`hi_${i}_${j}`] ?? null;
   }
   const { groups: described } = await describe(vars);
   return {
@@ -54,9 +65,10 @@ export async function runCorrelationMatrix(
       (method === "spearman"
         ? "Spearman rank correlation between every pair of variables, computed on pairwise-complete rows; non-parametric, no linearity assumption."
         : "Pearson correlation between every pair of variables, computed on pairwise-complete rows; assumes linear relationships.") +
+      " Each r carries its 95% confidence interval." +
       (blank
         ? ` A blank cell: fewer than ${MIN_PAIRS} complete rows, or a variable whose values are identical on them.`
         : ""),
-    matrix: { variables: vars.map((c) => c.name), r, p, label: "Correlation matrix (r)" },
+    matrix: { variables: vars.map((c) => c.name), r, p, lo, hi, label: "Correlation matrix (r)" },
   };
 }

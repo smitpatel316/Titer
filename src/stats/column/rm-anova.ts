@@ -9,6 +9,7 @@ import { PAIR_CORRECTIONS, type RmAnovaParams } from "../types";
 import {
   ciOf,
   comparedPairs,
+  effectSizeRow,
   groupsSetup,
   matchedFit,
   matchedRowsNote,
@@ -18,6 +19,7 @@ import {
   pRow,
   R_ADJUST,
   R_CRIT,
+  R_EFFECT_CI,
   R_PTUKEY,
   type ColumnTestSpec,
 } from "./base";
@@ -61,9 +63,18 @@ export const rmAnovaSpec: ColumnTestSpec<RmAnovaParams> = {
       `ggd<-(${k - 1})*sum(C*C);e<-if(ggd>0)min(1,sum(diag(C))^2/ggd)else 1`;
     const main = corrected(params)
       ? `F=a$"F value"[1],dfn=e*a$Df[1],dfd=e*a$Df[3],p=pf(a$"F value"[1],e*a$Df[1],e*a$Df[3],lower.tail=FALSE),` +
-        `eta2=a$"Sum Sq"[1]/sum(a$"Sum Sq"),eps=e`
-      : `F=a$"F value"[1],dfn=a$Df[1],dfd=a$Df[3],p=a$"Pr(>F)"[1],eta2=a$"Sum Sq"[1]/sum(a$"Sum Sq")`;
-    const head = `${setup};${a};${corrected(params) ? gg : ""}`;
+        `eta2=a$"Sum Sq"[1]/sum(a$"Sum Sq"),eps=e,ssT=S[1],ssS=S[2],ssE=S[3],pLo=ec[1],pHi=ec[2]`
+      : `F=a$"F value"[1],dfn=a$Df[1],dfd=a$Df[3],p=a$"Pr(>F)"[1],eta2=a$"Sum Sq"[1]/sum(a$"Sum Sq"),` +
+        `ssT=S[1],ssS=S[2],ssE=S[3],pLo=ec[1],pHi=ec[2]`;
+    // The treatment effect's partial eta squared (seq 161) — SS_treatment /
+    // (SS_treatment + SS_residual) — with its 95% CI from the F statistic's
+    // noncentrality (`etaCI`, N = subjects × groups); the Geisser-Greenhouse
+    // correction, when on, uses the corrected degrees of freedom. Prism also
+    // reports the matching effect's R² (SS_subjects / SS_total).
+    const ec = corrected(params)
+      ? `ec<-etaCI(a$"F value"[1],e*a$Df[1],e*a$Df[3],${n * k})`
+      : `ec<-etaCI(a$"F value"[1],a$Df[1],a$Df[3],${n * k})`;
+    const head = `${R_EFFECT_CI};${setup};${a};${corrected(params) ? gg : ""};${ec}`;
     const posthoc = posthocIn(params);
     if (posthoc === "none") return `${head};c(${main})`;
     // The pairs compared: every pair for Tukey's, else all or those chosen. Each pair's |t|,
@@ -100,6 +111,13 @@ export const rmAnovaSpec: ColumnTestSpec<RmAnovaParams> = {
     pRow("P value", v.p),
     { label: "R squared (eta squared)", value: v.eta2 },
     ...(corrected(params) ? [{ label: "Geisser-Greenhouse epsilon", value: v.eps }] : []),
+  ],
+  // Treatment: partial eta squared (its R² is the eta squared above);
+  // Matching: Prism's R² for the subjects effect (SS_subjects / SS_total) —
+  // an eta squared, not a partial one, so its partial / f / CI stay null.
+  effectSizes: (v) => [
+    effectSizeRow("Treatment", v.ssT, v.ssE, (v.ssT ?? 0) + (v.ssS ?? 0) + (v.ssE ?? 0), v.pLo, v.pHi),
+    effectSizeRow("Matching (subjects)", v.ssS, null, (v.ssT ?? 0) + (v.ssS ?? 0) + (v.ssE ?? 0), null, null),
   ],
   posthoc: (params) => posthocOf({ posthoc: posthocIn(params) }),
   pairs: (groups, params) =>
