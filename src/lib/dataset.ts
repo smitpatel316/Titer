@@ -141,6 +141,23 @@ export function xyRows(x: Column, set: DataSet): { x: number[]; values: number[]
   };
 }
 
+/** Distinct non-blank cell texts of a column, in first-appearance order — a
+ *  grouping variable's levels (integer codes or text, e.g. "Female"/"Male").
+ *  The Multiple Variables analyses split their rows by these (a t test's two
+ *  groups, a survival analysis's groups), as Extract and rearrange does. */
+export function levelsOf(column: Column): string[] {
+  const seen = new Set<string>();
+  const levels: string[] = [];
+  for (const cell of column.cells) {
+    const t = cell?.trim();
+    if (t && !seen.has(t)) {
+      seen.add(t);
+      levels.push(t);
+    }
+  }
+  return levels;
+}
+
 /** The columns of one Y data set: the column itself, its replicate columns —
  *  "Control" → "Control_1", "Control_2", … (Prism's import) or "Control:Y1",
  *  "Control:Y2", … (a Titer table's sub-columns, grouped under the set) —
