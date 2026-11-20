@@ -18,7 +18,8 @@
           "lsd",
           "dunnett",
           "games-howell",
-          "t3"
+          "t3",
+          "fdr"
         ],
         "default": "none",
         "required": false
@@ -39,13 +40,19 @@
         "name": "compared",
         "type": "string[]",
         "required": false,
-        "description": "The pairs compared (`pairKey`), when not every pair: Bonferroni, Šídák, Holm-Šídák, Fisher's."
+        "description": "The pairs compared (`pairKey`), when not every pair: Bonferroni, Šídák, Holm-Šídák, Fisher's, False Discovery Rate."
       },
       {
         "name": "lognormal",
         "type": "boolean",
         "required": false,
         "description": "The groups' geometric means compared: the ANOVA and its comparisons run on the logarithms."
+      },
+      {
+        "name": "trend",
+        "type": "boolean",
+        "required": false,
+        "description": "Test for linear trend between the column means and their left-to-right order (columns in a natural order, equally spaced): the slope of the means against column number, and the P values for linear and (four or more groups) nonlinear trend."
       },
       {
         "name": "sets",
