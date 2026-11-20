@@ -59,7 +59,7 @@ it. A change applies the next time your AI app connects.
 | Discover projects and params | 3 | Project summaries, search, an analysis type's valid params |
 | Open and save projects | 5 | Create, open, save, close and import projects |
 | Edit tables | 8 | Create, write, edit, duplicate, rename and reorder tables; undo and redo |
-| Run analyses | 9 | Run and re-run analyses, simulate data, methods and the wand; job status |
+| Run analyses | 9 | Run, re-run and freeze analyses, simulate data, methods and the wand; job status |
 | Build graphs and figures | 7 | Build, update and clone graphs; make figures and info sheets |
 | Export | 4 | Export graphs, figures and tables to files |
 | Cloud (Box) | 9 | List, download and upload files in connected Box storage |
