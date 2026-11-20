@@ -378,7 +378,7 @@ export async function runMixedEffects(
     `conv=as.numeric(any(grepl("failed to converge",warns))),` +
     `unident=as.numeric(any(grepl("unidentifiable",warns))),` +
     `bound=as.numeric(any(grepl("singular|boundary",warns)))` +
-    `${dfMethod === "kenward-roger" ? ",krOk=kr$ok" : ""}))`;
+    `${dfMethod === "kenward-roger" ? ",krOk=kr$ok" : ""})`;
 
   let v: Awaited<ReturnType<typeof evalNamedVector>>;
   try {
