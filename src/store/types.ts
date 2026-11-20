@@ -614,6 +614,26 @@ export interface CalculatedVariable {
   error?: string;
 }
 
+/** One linked paste (Prism 11, seq 168): a block of this table's cells
+ *  pasted from a data file (CSV / TXT / XLSX) that stays linked to it, so
+ *  the table updates when the file changes. `row`/`col` anchor the block's
+ *  top-left cell; `rows`/`cols` are its shape as last pasted (a refresh
+ *  re-pastes the file into the same region, blanking cells the source no
+ *  longer covers). `autoUpdate` is Prism's "Automatically update Prism
+ *  when the data file is changed" checkbox — on, a changed source applies
+ *  on open; off, the user refreshes by hand. `sourcePath` is the file as
+ *  the OS names it (absolute); `sourceName` is its display name. */
+export interface LinkedPaste {
+  sourcePath: string;
+  sourceName: string;
+  kind: "csv" | "xlsx";
+  row: number;
+  col: number;
+  rows: number;
+  cols: number;
+  autoUpdate: boolean;
+}
+
 export interface TableData {
   columns: string[];
   rows: (string | null)[][];
@@ -622,6 +642,11 @@ export interface TableData {
    *  `recomputeCalculated`, so every analysis and graph reads them exactly
    *  like typed variables. Omitted when the table has none. */
   calculated?: CalculatedVariable[];
+  /** A linked paste (Prism 11, seq 168): this table's cells pasted from a
+   *  data file that stay linked to it — see `LinkedPaste`. Omitted when
+   *  the table holds no linked block. The link is Titer-local: the
+   *  `.prism` / `.pzfx` writers carry the values only, never the link. */
+  linkedPaste?: LinkedPaste;
   /** A table's error format: what its entered error values are — SD or SEM
    *  (Prism's "Changing a data table format": a table formatted for SEM whose
    *  values are really SD can be switched). It labels the table's summary
