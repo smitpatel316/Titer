@@ -9101,7 +9101,7 @@ const seq216Svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="4
  *  hides it behind FlateDecode, so operator/text assertions read this
  *  (byte-level search: the deflated stream is binary, string indices
  *  would not line up). */
-const pdfContentStream = (pdf: Uint8Array): string => {
+const pdfContentBytes = (pdf: Uint8Array): Uint8Array => {
   const find = (needle: string, from = 0) => {
     const nb = new TextEncoder().encode(needle);
     outer: for (let i = from; i + nb.length <= pdf.length; i++) {
@@ -9113,8 +9113,9 @@ const pdfContentStream = (pdf: Uint8Array): string => {
   const start = find("stream\n") + "stream\n".length;
   const end = find("\nendstream", start);
   ok(start > 0 && end > start, "the PDF has one content stream");
-  return new TextDecoder().decode(inflateSync(pdf.subarray(start, end)));
+  return inflateSync(pdf.subarray(start, end));
 };
+const pdfContentStream = (pdf: Uint8Array): string => new TextDecoder().decode(pdfContentBytes(pdf));
 
 check("seq 216: the export dialogs offer EPS/BMP and 100 DPI (formats + resolutions)", () => {
   deepStrictEqual(
@@ -9379,19 +9380,15 @@ check("seq 216: raster PDF in CMYK/Grayscale uses the matching colour space", ()
   const cmyk = pdfEncode({ width: 4, height: 3, rgba: fixtureRgba }, 1200, "cmyk");
   const cText = new TextDecoder().decode(cmyk);
   ok(cText.includes("/ColorSpace /DeviceCMYK"), "CMYK raster PDF");
-  const cStart = cText.indexOf("stream\n") + "stream\n".length;
-  const cEnd = cText.indexOf("\nendstream", cStart);
   deepStrictEqual(
-    new Uint8Array(inflateSync(cmyk.subarray(cStart, cEnd)).slice(0, 8)),
+    new Uint8Array(pdfContentBytes(cmyk).slice(0, 8)),
     new Uint8Array([0, 255, 255, 0, 255, 0, 255, 0]),
   );
   const gray = pdfEncode({ width: 4, height: 3, rgba: fixtureRgba }, 1200, "grayscale");
   const gText = new TextDecoder().decode(gray);
   ok(gText.includes("/ColorSpace /DeviceGray"), "grayscale raster PDF");
-  const gStart = gText.indexOf("stream\n") + "stream\n".length;
-  const gEnd = gText.indexOf("\nendstream", gStart);
   deepStrictEqual(
-    new Uint8Array(inflateSync(gray.subarray(gStart, gEnd)).slice(0, 4)),
+    new Uint8Array(pdfContentBytes(gray).slice(0, 4)),
     new Uint8Array([76, 150, 29, 255]),
   );
 });
