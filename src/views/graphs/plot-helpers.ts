@@ -2,6 +2,7 @@
 // draws (centers, errors), and the Plotly layout of each family.
 import {
   SAME_AS_FILL,
+  type AxisNumberFormat,
   type FillPattern,
   type GraphOptions,
   type GraphType,
@@ -645,6 +646,38 @@ export function curveXs(xs: number[], scale: GraphOptions["xScale"], steps: numb
     const t = lo + ((hi - lo) * i) / steps;
     return log ? 10 ** t : t;
   });
+}
+
+/** An axis number format as a Plotly `tickformat` string: fixed decimals
+ *  (".2f") or scientific (".2e"); automatic (or absent) draws Plotly's own
+ *  ticks. `decimals` clamps to 0–15 — beyond that Plotly would print noise. */
+export function numberTickformat(fmt: AxisNumberFormat | undefined): string | undefined {
+  if (!fmt || fmt.format === "auto") return undefined;
+  const decimals = Math.max(0, Math.min(15, Math.floor(fmt.decimals ?? 2)));
+  return `.${decimals}${fmt.format === "decimal" ? "f" : "e"}`;
+}
+
+/** Applies each axis's number format to a built figure's numeric linear
+ *  axes (see `numberTickformat`). Category axes, log axes (whose ticks are
+ *  the powers) and axes with custom tick placement keep their own labels,
+ *  so a format never fights a builder's ticks. Mutates the figure in
+ *  place — builders return a fresh figure per draw, and the graph view
+ *  already mutates it for overlays. */
+export function applyNumberFormats(fig: GraphFigure, options: GraphOptions): void {
+  const axes: [string, AxisNumberFormat | undefined][] = [
+    ["xaxis", options.xNumberFormat],
+    ["yaxis", options.yNumberFormat],
+    ["yaxis2", options.y2NumberFormat],
+  ];
+  for (const [key, fmt] of axes) {
+    const tickformat = numberTickformat(fmt);
+    if (!tickformat) continue;
+    const axis = fig.layout[key] as Record<string, unknown> | undefined;
+    if (!axis || typeof axis !== "object") continue;
+    if (axis.type === "category" || axis.type === "log") continue;
+    if (axis.tickmode === "array") continue;
+    axis.tickformat = tickformat;
+  }
 }
 
 /** A logarithmic axis: ticks at the powers of `base` (only those in range show), small

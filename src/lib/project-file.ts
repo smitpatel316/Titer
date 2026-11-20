@@ -16,6 +16,7 @@ import {
   MAX_REF_LINES,
   REF_LABEL_PLACES,
   clamp,
+  type AxisNumberFormat,
   type FigurePanel,
   FLOATING_NOTE_COLORS,
   type FloatingNote,
@@ -214,6 +215,7 @@ const OPTIONAL_OPTIONS = {
   volcanoX: "text", volcanoY: "text", volcanoLabel: "text", volcanoGroupA: "text", volcanoGroupB: "text", rightYDataset: "text", y2Label: "text",
   palette: "palette", series: "styles", points: "pointStyles", outlineColor: "color", pointOutlineColor: "color", errorColor: "color",
   legend: "place", note: "place", refLines: "refLines", sets: "texts",
+  xNumberFormat: "numberFormat", yNumberFormat: "numberFormat", y2NumberFormat: "numberFormat",
 } as const satisfies Record<OptionalOption, keyof typeof READ_OPTION>;
 // A graph's links to its analyses (FF-F13): the graph options that name a
 // sibling analysis node — the source of an overlay (significance brackets,
@@ -455,6 +457,20 @@ function readStyles(v: unknown): Record<string, SeriesStyle> | undefined {
 const readPlace = (v: unknown): Place | undefined =>
   isObj(v) && isFiniteNumber(v.x) && isFiniteNumber(v.y) ? { x: v.x, y: v.y } : undefined;
 
+/** An axis number format: `format` one of auto/decimal/scientific, `decimals`
+ *  a whole number 0–15. A broken value reads as no format rather than
+ *  breaking the open — an unknown format is not a format at all. */
+const readNumberFormat = (v: unknown): AxisNumberFormat | undefined => {
+  if (!isObj(v)) return undefined;
+  const format = oneOf(["auto", "decimal", "scientific"] as const, v.format);
+  if (!format) return undefined;
+  const decimals =
+    typeof v.decimals === "number" && Number.isInteger(v.decimals)
+      ? Math.max(0, Math.min(15, v.decimals))
+      : undefined;
+  return defined({ format, decimals });
+};
+
 /** Reference lines: each at a finite value, its dashes one of the list (else dashed), its
  *  thickness within the lines' limits, a color or none, a text or none; ten at most. */
 function readRefLines(v: unknown): RefLine[] | undefined {
@@ -516,6 +532,7 @@ const READ_OPTION = {
   styles: readStyles,
   pointStyles: readPointStyles,
   place: readPlace,
+  numberFormat: readNumberFormat,
   refLines: readRefLines,
   color: (v: unknown) => (isHex(v) ? v : undefined),
 };

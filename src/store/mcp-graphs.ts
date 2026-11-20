@@ -37,6 +37,7 @@ import {
   GRAPH_LIMITS,
   PALETTE_KINDS,
   REF_LABEL_PLACES,
+  type AxisNumberFormat,
   type FigureGrid,
   type FigureLabelStyle,
   type FigurePanel,
@@ -185,6 +186,9 @@ const LIMIT_FIELDS = Object.keys(GRAPH_LIMITS);
 const PLAIN_NUMBER_FIELDS = ["yMin", "yMax", "xMin", "xMax", "y2Min", "y2Max", "binWidth"];
 const POSITIVE_NUMBER_FIELDS = ["yStep", "xStep", "y2Step"];
 
+/** Axis number formats: `{ format, decimals? }` objects (see `AxisNumberFormat`). */
+const NUMBER_FORMAT_FIELDS = ["xNumberFormat", "yNumberFormat", "y2NumberFormat"];
+
 /** Boolean fields. */
 const BOOLEAN_FIELDS = [
   "bars",
@@ -259,6 +263,7 @@ const GRAPH_OPTION_KEYS = [
   ...LIMIT_FIELDS,
   ...PLAIN_NUMBER_FIELDS,
   ...POSITIVE_NUMBER_FIELDS,
+  ...NUMBER_FORMAT_FIELDS,
   ...BOOLEAN_FIELDS,
   ...STRING_FIELDS,
   ...LINK_FIELDS,
@@ -370,6 +375,26 @@ function validatedPlace(job: McpJob, name: string, value: unknown): { x: number;
   return { x: value.x, y: value.y };
 }
 
+/** An axis number format as the tool spells it: `{ format, decimals? }`
+ *  (see `AxisNumberFormat`). `format` omitted reads as "auto"; `decimals`
+ *  omitted reads as 2. Unknown fields are rejected. */
+function validatedNumberFormat(job: McpJob, key: string, value: unknown): AxisNumberFormat {
+  if (!isPlainObject(value)) throw jobErr(job, `option “${key}” must be an object { format?, decimals? }.`);
+  for (const field of Object.keys(value))
+    if (!["format", "decimals"].includes(field))
+      throw jobErr(job, `unknown number-format field “${field}” on “${key}” — use format or decimals.`);
+  const format = value.format ?? "auto";
+  if (typeof format !== "string" || !["auto", "decimal", "scientific"].includes(format))
+    throw jobErr(job, `option “${key}.format” must be one of: auto, decimal, scientific — got ${JSON.stringify(format)}.`);
+  const out: AxisNumberFormat = { format: format as AxisNumberFormat["format"] };
+  if (value.decimals !== undefined) {
+    if (typeof value.decimals !== "number" || !Number.isInteger(value.decimals) || value.decimals < 0 || value.decimals > 15)
+      throw jobErr(job, `option “${key}.decimals” must be a whole number from 0 to 15 — got ${JSON.stringify(value.decimals)}.`);
+    out.decimals = value.decimals;
+  }
+  return out;
+}
+
 /** Reference lines as the tool spells them: `{ value }` each, with the
  *  panel's defaults (`dash`, width 1) where left out. */
 function validatedRefLines(job: McpJob, value: unknown): RefLine[] {
@@ -448,6 +473,8 @@ function validateGraphOptions(
       if (!isFiniteNumber(value) || value <= 0)
         throw jobErr(job, `option “${key}” must be a positive number — got ${JSON.stringify(value)}.`);
       options[key] = value;
+    } else if (NUMBER_FORMAT_FIELDS.includes(key)) {
+      options[key] = validatedNumberFormat(job, key, value);
     } else if (BOOLEAN_FIELDS.includes(key)) {
       if (typeof value !== "boolean") throw jobErr(job, `option “${key}” must be a boolean — got ${JSON.stringify(value)}.`);
       options[key] = value;

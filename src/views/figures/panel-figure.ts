@@ -16,7 +16,7 @@ import { DEFAULT_GRAPH_OPTIONS, type ProjectNode } from "../../store/types";
 import { readTable } from "../../lib/dataset";
 import { infoSheetsOf, resolveGraphOptions } from "../../lib/info-sheets";
 import { GRAPHS, graphSeries, plotColumns, type GraphFigure } from "../graphs";
-import { paintOf } from "../graphs/plot-helpers";
+import { applyNumberFormats, paintOf } from "../graphs/plot-helpers";
 
 /** The panel's figure, or null when its graph has nothing to draw (no table,
  *  no numeric columns, or an unknown graph type). With `hideLegend`, the
@@ -41,5 +41,6 @@ export function buildPanelFigure(
   if (!columns.some((c) => c.values.length > 0)) return null;
   const paint = paintOf(options, graphSeries(graph.graphType, parent.data, parent.tableType, options).length);
   const fig = GRAPHS[graph.graphType].build(columns, options, paint, dataset.titles);
+  applyNumberFormats(fig, options);
   return opts.hideLegend ? { ...fig, layout: { ...fig.layout, showlegend: false } } : fig;
 }

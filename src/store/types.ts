@@ -126,6 +126,14 @@ export const GRAPH_LIMITS = {
   pcaY: { min: 1, max: 20 },
 } as const;
 
+/** An axis's number format (Prism's Format Axes "Number format"): automatic
+ *  (Plotly's own ticks), a fixed number of decimal places, or scientific
+ *  notation with that many decimals. `decimals` 0–15; omitted, 2. */
+export interface AxisNumberFormat {
+  format: "auto" | "decimal" | "scientific";
+  decimals?: number;
+}
+
 /**
  * Display options for a graph node. A superset across the families — each graph
  * module reads only the fields it needs (keeps the store flat + easy to extend).
@@ -188,6 +196,12 @@ export interface GraphOptions {
   y2Min?: number;
   y2Max?: number;
   y2Step?: number;
+  // Each axis's number format (see AxisNumberFormat): omitted = automatic.
+  // Applied to numeric linear axes only — category axes, log axes (whose
+  // ticks are the powers) and custom-tick axes keep their own labels.
+  xNumberFormat?: AxisNumberFormat;
+  yNumberFormat?: AxisNumberFormat;
+  y2NumberFormat?: AxisNumberFormat;
   // An axis limit hooked to an info constant (the constant's name, not its
   // value): resolved live in GraphView, so editing the constant moves the
   // axis. A hooked limit wins over its number above when it resolves.

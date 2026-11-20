@@ -25,6 +25,7 @@ import {
   MAX_REF_LINES,
   REF_LABEL_PLACES,
   SAME_AS_FILL,
+  type AxisNumberFormat,
   type GraphOptions,
   type GraphPalette,
   type PointStyle,
@@ -363,6 +364,9 @@ export function FormatPanel(props: Props) {
             "xMaxConstant",
             "xScale",
             "yScale",
+            "xNumberFormat",
+            "yNumberFormat",
+            "y2NumberFormat",
             "axisWidth",
             "refLines",
             "rightYDataset",
@@ -399,6 +403,13 @@ export function FormatPanel(props: Props) {
               onHookChange={(yMinConstant, yMaxConstant) => set({ yMinConstant, yMaxConstant })}
             />
           )}
+          {family !== "heatmap" && axesRangeInputs(graphType).y && (
+            <NumberFormat
+              axis="Y"
+              value={options.yNumberFormat}
+              onChange={(yNumberFormat) => set({ yNumberFormat })}
+            />
+          )}
           {family === "xy" && logScaleOffered(graphType).x && (
             <Scale
               axis="X"
@@ -409,18 +420,25 @@ export function FormatPanel(props: Props) {
           )}
           {(family === "xy" || family === "volcano" || family === "histogram" || family === "multiple") &&
             axesRangeInputs(graphType).x && (
-              <AxisRange
-                axis="X"
-                min={options.xMin}
-                max={options.xMax}
-                step={options.xStep}
-                log={family === "xy" && options.xScale !== "linear"}
-                minHook={options.xMinConstant}
-                maxHook={options.xMaxConstant}
-                constants={constantItems}
-                onChange={(xMin, xMax, xStep) => set({ xMin, xMax, xStep })}
-                onHookChange={(xMinConstant, xMaxConstant) => set({ xMinConstant, xMaxConstant })}
-              />
+              <>
+                <AxisRange
+                  axis="X"
+                  min={options.xMin}
+                  max={options.xMax}
+                  step={options.xStep}
+                  log={family === "xy" && options.xScale !== "linear"}
+                  minHook={options.xMinConstant}
+                  maxHook={options.xMaxConstant}
+                  constants={constantItems}
+                  onChange={(xMin, xMax, xStep) => set({ xMin, xMax, xStep })}
+                  onHookChange={(xMinConstant, xMaxConstant) => set({ xMinConstant, xMaxConstant })}
+                />
+                <NumberFormat
+                  axis="X"
+                  value={options.xNumberFormat}
+                  onChange={(xNumberFormat) => set({ xNumberFormat })}
+                />
+              </>
             )}
           {family === "xy" && seriesNames.length >= 2 && (
             <ColumnSelectRow
@@ -456,6 +474,11 @@ export function FormatPanel(props: Props) {
                 // y2MaxConstant in GraphOptions), so it offers no hooks:
                 // an empty list hides the hook rows, and this never fires.
                 onHookChange={() => {}}
+              />
+              <NumberFormat
+                axis="Right"
+                value={options.y2NumberFormat}
+                onChange={(y2NumberFormat) => set({ y2NumberFormat })}
               />
             </>
           )}
@@ -717,6 +740,45 @@ function RefLines({
       ))}
       {lines.length < MAX_REF_LINES && (
         <Button onClick={() => onChange([...lines, { value: at, dash: "dash", width: 1 }])}>Add Reference Line</Button>
+      )}
+    </>
+  );
+}
+
+/** An axis's number format: automatic, a fixed number of decimal places,
+ *  or scientific notation. Back to Automatic clears the format (the file
+ *  stays lean — an absent format reads as automatic). */
+function NumberFormat({
+  axis,
+  value,
+  onChange,
+}: {
+  axis: "X" | "Y" | "Right";
+  value: AxisNumberFormat | undefined;
+  onChange: (v: AxisNumberFormat | undefined) => void;
+}) {
+  const format = value?.format ?? "auto";
+  return (
+    <>
+      <Choice
+        label={`${axis} number format`}
+        value={format}
+        onChange={(f) => onChange(f === "auto" ? undefined : { format: f, decimals: value?.decimals ?? 2 })}
+        items={[
+          { value: "auto", label: "Automatic" },
+          { value: "decimal", label: "Decimal places" },
+          { value: "scientific", label: "Scientific" },
+        ]}
+      />
+      {format !== "auto" && (
+        <Stepper
+          label="Decimal places"
+          value={value?.decimals ?? 2}
+          min={0}
+          max={15}
+          step={1}
+          onChange={(decimals) => onChange({ format, decimals })}
+        />
       )}
     </>
   );

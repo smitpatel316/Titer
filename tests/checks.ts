@@ -139,7 +139,7 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, logScaleOffered, movedText, paintOf, perRowSummaryStats, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, applyNumberFormats, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, logScaleOffered, movedText, numberTickformat, paintOf, perRowSummaryStats, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -2885,6 +2885,157 @@ check("seq 223: MCP build-graph accepts grouped-bars-scatter; update-graph accep
   );
   strictEqual(updated[0]?.id, "graph_1");
   strictEqual(updated[0]?.options.groupLayout, "superimposed");
+});
+
+// seq 220: axis number format (decimal places / scientific notation).
+check("seq 220: numberTickformat maps a format to Plotly's tickformat", () => {
+  strictEqual(numberTickformat(undefined), undefined);
+  strictEqual(numberTickformat({ format: "auto" }), undefined);
+  strictEqual(numberTickformat({ format: "decimal", decimals: 2 }), ".2f");
+  strictEqual(numberTickformat({ format: "scientific", decimals: 3 }), ".3e");
+  strictEqual(numberTickformat({ format: "decimal" }), ".2f"); // decimals omitted: 2
+  strictEqual(numberTickformat({ format: "decimal", decimals: 0 }), ".0f");
+  strictEqual(numberTickformat({ format: "scientific", decimals: 99 }), ".15e"); // clamped to 15
+  strictEqual(numberTickformat({ format: "decimal", decimals: -4 }), ".0f");
+});
+
+const xyNumbers = (): TableData => ({
+  columns: ["Title", "X", "Y1", "Y2"],
+  rows: [
+    ["r1", "0.001", "1000", "2000"],
+    ["r2", "0.002", "3000", "4000"],
+    ["r3", "0.003", "5000", "6000"],
+  ],
+});
+
+check("seq 220: applyNumberFormats formats numeric axes and leaves category/log axes alone", () => {
+  // An XY scatter: both axes numeric, both formatted.
+  const xyOptions = {
+    ...newGraphOptions("xy-scatter"),
+    xNumberFormat: { format: "scientific", decimals: 1 } as const,
+    yNumberFormat: { format: "decimal", decimals: 0 } as const,
+  };
+  const xyFig = GRAPHS["xy-scatter"].build(readTable(xyNumbers()).columns, xyOptions, paintOf(xyOptions, 2));
+  applyNumberFormats(xyFig, xyOptions);
+  strictEqual((xyFig.layout.xaxis as { tickformat?: string }).tickformat, ".1e");
+  strictEqual((xyFig.layout.yaxis as { tickformat?: string }).tickformat, ".0f");
+  // Grouped bars: the Y (value) axis formats; the X (category) axis keeps its labels.
+  const barOptions = { ...newGraphOptions("grouped-bars"), yNumberFormat: { format: "decimal", decimals: 2 } as const };
+  const barFig = GRAPHS["grouped-bars"].build(
+    readTable(groupedNumbers()).columns,
+    barOptions,
+    paintOf(barOptions, 2),
+  );
+  applyNumberFormats(barFig, barOptions);
+  strictEqual((barFig.layout.yaxis as { tickformat?: string }).tickformat, ".2f");
+  strictEqual((barFig.layout.xaxis as { tickformat?: string }).tickformat, undefined);
+  // A log axis keeps its power ticks: the format never fights the builder.
+  const logOptions = {
+    ...newGraphOptions("xy-scatter"),
+    yScale: "log10" as const,
+    yNumberFormat: { format: "decimal", decimals: 2 } as const,
+  };
+  const logFig = GRAPHS["xy-scatter"].build(readTable(xyNumbers()).columns, logOptions, paintOf(logOptions, 2));
+  applyNumberFormats(logFig, logOptions);
+  strictEqual((logFig.layout.yaxis as { tickformat?: string }).tickformat, undefined);
+  strictEqual((logFig.layout.yaxis as { type?: string }).type, "log");
+  // Separated bars place their own category ticks: the X format stays off.
+  const sepOptions = {
+    ...newGraphOptions("grouped-bars"),
+    groupLayout: "separated" as const,
+    xNumberFormat: { format: "scientific", decimals: 2 } as const,
+  };
+  const sepFig = GRAPHS["grouped-bars"].build(
+    readTable(groupedNumbers()).columns,
+    sepOptions,
+    paintOf(sepOptions, 2),
+  );
+  applyNumberFormats(sepFig, sepOptions);
+  strictEqual((sepFig.layout.xaxis as { tickformat?: string }).tickformat, undefined);
+  // No format anywhere: the figure is untouched.
+  const plainFig = GRAPHS["xy-scatter"].build(
+    readTable(xyNumbers()).columns,
+    newGraphOptions("xy-scatter"),
+    paintOf(newGraphOptions("xy-scatter"), 2),
+  );
+  applyNumberFormats(plainFig, newGraphOptions("xy-scatter"));
+  strictEqual((plainFig.layout.xaxis as { tickformat?: string }).tickformat, undefined);
+  strictEqual((plainFig.layout.yaxis as { tickformat?: string }).tickformat, undefined);
+});
+
+check("seq 220: a number format survives a .hlx save/load round-trip; a broken one reads as none", () => {
+  const withFormat: ProjectFilePayload = {
+    ...payload,
+    nodes: {
+      ...payload.nodes,
+      g1: {
+        ...graph,
+        graphOptions: {
+          ...newGraphOptions("xy-scatter"),
+          xNumberFormat: { format: "decimal", decimals: 1 },
+          yNumberFormat: { format: "scientific", decimals: 3 },
+        },
+      },
+    },
+  };
+  const back = read(serializeProjectFile(withFormat)).project.nodes.g1!.graphOptions;
+  deepStrictEqual(back!.xNumberFormat, { format: "decimal", decimals: 1 });
+  deepStrictEqual(back!.yNumberFormat, { format: "scientific", decimals: 3 });
+  const broken = JSON.parse(serializeProjectFile(withFormat)) as { project: ProjectFilePayload };
+  (broken.project.nodes.g1!.graphOptions as unknown as Record<string, unknown>).yNumberFormat = { format: "percent" };
+  const reread = read(JSON.stringify(broken)).project.nodes.g1!.graphOptions;
+  strictEqual(reread!.yNumberFormat, undefined);
+  deepStrictEqual(reread!.xNumberFormat, { format: "decimal", decimals: 1 });
+});
+
+check("seq 220: MCP update-graph accepts a number format and rejects a bad one", () => {
+  const nodes: Record<string, ProjectNode> = {
+    table_1: {
+      id: "table_1",
+      type: "table",
+      name: "XY",
+      parentId: null,
+      tableType: "xy",
+      data: xyNumbers(),
+    },
+    graph_1: {
+      id: "graph_1",
+      type: "graph",
+      name: "Scatter",
+      parentId: "table_1",
+      graphType: "xy-scatter",
+      graphOptions: newGraphOptions("xy-scatter"),
+    },
+  };
+  const state = { nodes, rootOrder: ["table_1"], childOrder: { table_1: ["graph_1"] }, activeNodeId: "table_1" };
+  const updated: { id: string; options: GraphOptions }[] = [];
+  const deps: GraphJobDeps = {
+    getState: () => state,
+    updateGraph: (id, options) => {
+      updated.push({ id, options });
+    },
+  };
+  const job = (jobId: string, options: unknown) => ({
+    job_id: jobId,
+    project_id: "project-1",
+    action: "update-graph",
+    args: { graph_id: "graph_1", options },
+    status: "queued" as const,
+  });
+  executeUpdateGraph(job("job-220-ok", { xNumberFormat: { format: "scientific", decimals: 1 } }), deps);
+  deepStrictEqual(updated[0]?.options.xNumberFormat, { format: "scientific", decimals: 1 });
+  throws(
+    () => executeUpdateGraph(job("job-220-bad", { xNumberFormat: { format: "percent" } }), deps),
+    /must be one of: auto, decimal, scientific/,
+  );
+  throws(
+    () => executeUpdateGraph(job("job-220-range", { yNumberFormat: { format: "decimal", decimals: 16 } }), deps),
+    /whole number from 0 to 15/,
+  );
+  throws(
+    () => executeUpdateGraph(job("job-220-shape", { yNumberFormat: ".2f" }), deps),
+    /must be an object/,
+  );
 });
 
 check("summary subcolumns: the heatmap plots the Mean column, not the mean of Mean/SD/N", () => {
