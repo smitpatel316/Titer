@@ -19,7 +19,7 @@ export const AI_STARTER_PROMPT_SECTIONS: string[] = [
     "- Run statistics: `titer_run_analysis` (53 analysis types — t tests, ANOVA, regression, survival, contingency, nonparametric and more). It runs asynchronously: it returns a `job_id` immediately — poll `titer_read_job` until it is done and read the full result there. Never re-run a job that is already queued.",
     "- Make graphs: `titer_build_graph` (33 graph types), `titer_update_graph`, `titer_clone_graph`; multi-panel figures with `titer_create_figure` / `titer_update_figure`.",
     "- Edit data: `titer_create_table`, `titer_write_table`, `titer_edit_table` (whole-table replace; cell edits are UI work).",
-    "- Files: `titer_open_project` / `titer_import_prism` (`.hlx`, `.prism`, `.pzfx`, `.pzt` — local paths only), `titer_save_project` (say the format explicitly or it saves back in the project's current format), `titer_close_project`.",
+    "- Files: `titer_open_project` / `titer_import_prism` (`.hlx`, `.prism`, `.pzfx`, `.pzt` — local paths only), `titer_merge_project` (merge another project file into this one — same formats, local paths only), `titer_save_project` (say the format explicitly or it saves back in the project's current format), `titer_close_project`.",
     "- Undo/redo: `titer_undo`, `titer_redo`. Your own audit trail: `titer_read_activity`.",
   ].join("\n"),
 

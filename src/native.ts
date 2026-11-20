@@ -750,6 +750,23 @@ export async function onMethodFilePicked(handler: (path: string | null) => void)
   return getCurrentWebviewWindow().listen<string | null>("method-file-picked", ({ payload }) => handler(payload));
 }
 
+/** File ▸ Merge…: the Open panel for a project file (`.hlx`, `.pzt`,
+ *  `.prism` or `.pzfx`) to merge into this project. Non-blocking, like
+ *  `choosePrismFile`: the invoke returns at once, and the shell emits
+ *  "merge-file-picked" with the path, or null on Cancel, once the user
+ *  picks. A blocking picker here deadlocked the app (Nov 9, macOS +
+ *  Linux): it parked the main thread while the panel needed that thread
+ *  to process clicks. */
+export const chooseMergeFile = () => invoke("choose_merge_file");
+
+/** Calls `handler` once with the path picked in the Merge panel, or null
+ *  if the user cancelled. Await it before opening the panel so the pick
+ *  is never missed; it returns the unlisten function. */
+export async function onMergeFilePicked(handler: (path: string | null) => void) {
+  if (!isNative) return () => {};
+  return getCurrentWebviewWindow().listen<string | null>("merge-file-picked", ({ payload }) => handler(payload));
+}
+
 /** A Prism `.pzfx` file's text, for import. */
 export const readPrismText = (path: string) => invoke<string>("read_prism_text", { path });
 

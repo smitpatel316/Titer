@@ -15,6 +15,7 @@ import {
 } from "../lib/template";
 import { parsePzfx } from "../lib/pzfx";
 import { writePzfx } from "../lib/pzfx-write";
+import { formatMergeReport, mergeProjects } from "../lib/project-merge";
 import { convertPrism, formatReport } from "../lib/prism";
 import {
   importTabularFile,
@@ -29,6 +30,7 @@ import type { SavePromptChoice } from "../components/save-prompt-dialog";
 import * as native from "../native";
 import { loadRecents, MAX_RECENTS, saveRecents, recentKey, type RecentEntry } from "./recents";
 import { consumeMcpCloseAllowance } from "./mcp-document";
+import { importWarnings } from "./mcp-document";
 import { publishMcpSnapshotNow } from "./mcp-publish";
 import { openProjectsOrSay, sayGone } from "../menus";
 import { fileName, fileTitle } from "../lib/paths";
@@ -97,6 +99,12 @@ export function useDocument() {
   // notice is up.
   const [dataImported, setDataImported] = React.useState<string[] | null>(null);
   const dismissDataImported = () => setDataImported(null);
+  // The "Project Merged" notice, in-app for the same Quirk-2 reason: what
+  // File ▸ Merge brought in, and what was renamed, skipped or dropped —
+  // the same report the MCP tool returns. The report lines, null when no
+  // notice is up.
+  const [projectMerged, setProjectMerged] = React.useState<string[] | null>(null);
+  const dismissProjectMerged = () => setProjectMerged(null);
   // The window's title while the project isn't saved anywhere.
   const [untitled, setUntitled] = React.useState(UNTITLED);
   // Other windows change the list too: this one reads it again when it comes to the front.
@@ -1210,6 +1218,185 @@ export function useDocument() {
     }
   };
 
+  /** Appends `incoming`'s sheets to this project (File ▸ Merge, seq 180):
+   *  `mergeProjects` builds the merged content — every incoming sheet
+   *  renamed with Prism's asterisk, links remapped — and the store's
+   *  `mergeProject` applies it as one undo step. The current project's
+   *  sheets, names and active sheet are untouched. `warnings` (a Prism
+   *  conversion's issues, a `.hlx` read's repairs) ride along in the
+   *  notice, after the merge report. */
+  const mergeProjectContent = (
+    incoming: {
+      nodes: Record<string, ProjectNode>;
+      rootOrder: string[];
+      childOrder: Record<string, string[]>;
+      activeNodeId: string | null;
+    },
+    sourceName: string,
+    warnings: string[] = [],
+  ): void => {
+    const s = latest.current.get();
+    const merged = mergeProjects(
+      { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
+      incoming,
+      sourceName,
+    );
+    latest.current.mergeProject({
+      nodes: merged.nodes,
+      rootOrder: merged.rootOrder,
+      childOrder: merged.childOrder,
+      activeNodeId: merged.activeNodeId,
+    });
+    const lines = formatMergeReport(merged.report).split("\n");
+    if (warnings.length > 0) {
+      lines.push("", "Notes:", ...warnings.slice(0, 12).map((w) => `• ${w}`));
+      if (warnings.length > 12) lines.push(`…and ${warnings.length - 12} more.`);
+    }
+    // In-app, not native.alert: the native alert's OK button could not
+    // dismiss it on macOS (v1.6.0 Mac proof) — see `prismImported` above.
+    setProjectMerged(lines);
+  };
+
+  /** Merges the project file at `path` into this one. A `.hlx` / `.pzt`
+   *  file merges as a project; a `.prism` / `.pzfx` file is converted
+   *  first, then merged — the same converters File ▸ Import Prism File
+   *  uses. A file that can't be read or parsed says why, and nothing
+   *  merges. */
+  const mergeProjectFile = async (path: string): Promise<void> => {
+    const name = fileTitle(path);
+    if (path.toLowerCase().endsWith(".prism")) {
+      let bytes: Uint8Array;
+      try {
+        bytes = await native.readPrismBytes(path);
+      } catch {
+        report();
+        return native.alert("Couldn't Merge File", `“${fileName(path)}” couldn't be read.`, "error");
+      }
+      let converted;
+      try {
+        converted = await convertPrism(bytes, name);
+      } catch (err) {
+        report();
+        return native.alert(
+          "Couldn't Merge File",
+          err instanceof Error ? err.message : "This file couldn't be imported.",
+          "error",
+        );
+      }
+      return mergeProjectContent(converted.project, name, importWarnings(converted.report));
+    }
+    if (path.toLowerCase().endsWith(".pzfx")) {
+      let text: string;
+      try {
+        text = await native.readPrismText(path);
+      } catch {
+        report();
+        return native.alert("Couldn't Merge File", `“${fileName(path)}” couldn't be read.`, "error");
+      }
+      const imported = parsePzfx(text);
+      if (imported.tables.length === 0) {
+        report();
+        return native.alert(
+          "Couldn't Merge File",
+          imported.issues.map((i) => i.message).join("\n") || "No tables in this file could be imported.",
+          "error",
+        );
+      }
+      return mergeProjectContent(imported.project, name, imported.issues.map((i) => i.message));
+    }
+    let text: string;
+    try {
+      text = await native.readText(path);
+    } catch (err) {
+      report();
+      if (isGoneReadError(err)) return sayGone(path);
+      return native.alert(
+        "Couldn't Merge File",
+        `“${fileName(path)}” couldn't be read. It may be damaged, or in an encoding Titer can't read.`,
+        "error",
+      );
+    }
+    let parsed;
+    try {
+      parsed = parseProjectText(text);
+    } catch {
+      report();
+      return native.alert("Couldn't Merge File", "This file is damaged or isn't a valid Titer project.", "error");
+    }
+    if ("error" in parsed) {
+      report();
+      return native.alert("Couldn't Merge File", parsed.error, "error");
+    }
+    return mergeProjectContent(parsed.project, name, parsed.issues.map((i) => i.message));
+  };
+
+  /** File ▸ Merge…: pick a project file (`.hlx`, `.pzt`, `.prism` or
+   *  `.pzfx`) and merge it into this project. In the web build (no native
+   *  shell) the pick is a file input instead. */
+  const mergeProject = async (): Promise<void> => {
+    if (native.isNative) {
+      // Listen first, then open the panel: the shell emits
+      // "merge-file-picked" (path, or null on Cancel) when the user picks.
+      // The old sync invoke blocked the main thread and deadlocked the
+      // picker (Nov 9, macOS + Linux).
+      const off = await native.onMergeFilePicked((path) => {
+        off();
+        if (path) void mergeProjectFile(path);
+      });
+      await native.chooseMergeFile();
+      return;
+    }
+    const picked = await new Promise<{ name: string; data: ArrayBuffer | string } | null>((resolve) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".hlx,.pzt,.prism,.pzfx";
+      input.onchange = () => {
+        const file = input.files?.[0];
+        if (!file) return resolve(null);
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, data: reader.result as ArrayBuffer | string });
+        reader.onerror = () => resolve(null);
+        if (file.name.toLowerCase().endsWith(".prism")) reader.readAsArrayBuffer(file);
+        else reader.readAsText(file);
+      };
+      input.click();
+    });
+    if (!picked) return;
+    const name = picked.name.replace(/\.(hlx|pzt|prism|pzfx)$/i, "");
+    if (typeof picked.data !== "string") {
+      let converted;
+      try {
+        converted = await convertPrism(new Uint8Array(picked.data), name);
+      } catch (err) {
+        return native.alert(
+          "Couldn't Merge File",
+          err instanceof Error ? err.message : "This file couldn't be imported.",
+          "error",
+        );
+      }
+      return mergeProjectContent(converted.project, name, importWarnings(converted.report));
+    }
+    if (picked.name.toLowerCase().endsWith(".pzfx")) {
+      const imported = parsePzfx(picked.data);
+      if (imported.tables.length === 0) {
+        return native.alert(
+          "Couldn't Merge File",
+          imported.issues.map((i) => i.message).join("\n") || "No tables in this file could be imported.",
+          "error",
+        );
+      }
+      return mergeProjectContent(imported.project, name, imported.issues.map((i) => i.message));
+    }
+    let parsed;
+    try {
+      parsed = parseProjectText(picked.data);
+    } catch {
+      return native.alert("Couldn't Merge File", "This file is damaged or isn't a valid Titer project.", "error");
+    }
+    if ("error" in parsed) return native.alert("Couldn't Merge File", parsed.error, "error");
+    return mergeProjectContent(parsed.project, name, parsed.issues.map((i) => i.message));
+  };
+
   /** Puts an imported data file's table in the project (seq 155): a new
    *  table, or — when its shape matches the active table (same kind, same
    *  number of columns) — appended to that table, if the user picks it.
@@ -1523,6 +1710,9 @@ export function useDocument() {
     clearRecents,
     importPrism,
     importData,
+    mergeProject,
+    projectMerged,
+    dismissProjectMerged,
     projectUpdated,
     dismissProjectUpdated,
     templateNotice,

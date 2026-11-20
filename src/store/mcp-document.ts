@@ -18,7 +18,8 @@ import { convertPrism, type ConvertReport } from "../lib/prism";
 import { parsePzfx } from "../lib/pzfx";
 import { writePrism } from "../lib/prism-write";
 import { writePzfx } from "../lib/pzfx-write";
-import { serializeProjectFile } from "../lib/project-file";
+import { parseProjectText, serializeProjectFile } from "../lib/project-file";
+import { formatMergeReport, mergeProjects } from "../lib/project-merge";
 import { fileName, fileTitle } from "../lib/paths";
 import * as native from "../native";
 import type { ProjectNode } from "./types";
@@ -46,6 +47,7 @@ export interface DocumentState {
 export interface DocumentIo {
   writeFile: (path: string, data: string | Uint8Array) => Promise<unknown>;
   appVersion: () => Promise<string>;
+  readText: (path: string) => Promise<string>;
   readPrismText: (path: string) => Promise<string>;
   readPrismBytes: (path: string) => Promise<Uint8Array>;
 }
@@ -53,6 +55,7 @@ export interface DocumentIo {
 export const defaultDocumentIo: DocumentIo = {
   writeFile: native.writeFile,
   appVersion: native.appVersion,
+  readText: native.readText,
   readPrismText: native.readPrismText,
   readPrismBytes: native.readPrismBytes,
 };
@@ -295,6 +298,116 @@ export async function executeImportPrism(
   }
   deps.loadProject({ ...imported.project, filePath: null, edited: true });
   return { result: { imported_tables: imported.tables, warnings: imported.issues.map((i) => i.message) } };
+}
+
+// ── Merge ────────────────────────────────────────────────────────────────
+
+/** What the `merge-project` job needs: the project as it is now, the
+ *  store's `mergeProject` action (one undo step), and the file reads. */
+export interface MergeDeps {
+  getState: () => DocumentState;
+  /** The store's `mergeProject` (File ▸ Merge, seq 180). */
+  mergeProject: (doc: {
+    nodes: Record<string, ProjectNode>;
+    rootOrder: string[];
+    childOrder: Record<string, string[]>;
+    activeNodeId: string | null;
+  }) => void;
+  io: DocumentIo;
+}
+
+/** The `merge-project` job: read another project file and append its
+ *  sheets to this one — the same as File ▸ Merge, minus the dialog.
+ *  A `.hlx` / `.pzt` file merges as a project; a `.prism` / `.pzfx` file
+ *  is converted first, then merged (the import report's issues ride along
+ *  in `warnings`). Unlike an import, this never discards the project, so
+ *  a dirty project merges fine. Returns the merge report as the tool's
+ *  output (`merged_*` counts, the merged names, and what was renamed,
+ *  skipped or dropped — and why). */
+export async function executeMergeProject(
+  deps: MergeDeps,
+  args: { path: string },
+  projectId: string,
+): Promise<{ result: unknown }> {
+  const ext = extOf(args.path);
+  if (ext !== "hlx" && ext !== "pzt" && ext !== "prism" && ext !== "pzfx") {
+    throw new Error(
+      `“${fileName(args.path)}” is not a project file — merge a .hlx or .pzt project, or a .prism or .pzfx Prism file.`,
+    );
+  }
+  const sourceName = fileTitle(args.path);
+  let incoming: {
+    nodes: Record<string, ProjectNode>;
+    rootOrder: string[];
+    childOrder: Record<string, string[]>;
+    activeNodeId: string | null;
+  };
+  const warnings: string[] = [];
+  if (ext === "prism") {
+    const bytes = await readPrismWithTimeout(() => deps.io.readPrismBytes(args.path), args.path);
+    let converted;
+    try {
+      converted = await convertPrism(bytes, sourceName);
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : "This file couldn't be imported.");
+    }
+    incoming = converted.project;
+    warnings.push(...importWarnings(converted.report));
+  } else if (ext === "pzfx") {
+    const text = await readPrismWithTimeout(() => deps.io.readPrismText(args.path), args.path);
+    const imported = parsePzfx(text);
+    if (imported.tables.length === 0) {
+      throw new Error(imported.issues.map((i) => i.message).join("\n") || "No tables in this file could be imported.");
+    }
+    incoming = imported.project;
+    warnings.push(...imported.issues.map((i) => i.message));
+  } else {
+    let text: string;
+    try {
+      text = await deps.io.readText(args.path);
+    } catch {
+      throw new Error(`“${fileName(args.path)}” couldn't be read. It may be damaged, or in an encoding Titer can't read.`);
+    }
+    let parsed;
+    try {
+      parsed = parseProjectText(text);
+    } catch {
+      throw new Error("This file is damaged or isn't a valid Titer project.");
+    }
+    if ("error" in parsed) throw new Error(parsed.error);
+    incoming = parsed.project;
+    warnings.push(...parsed.issues.map((i) => i.message));
+  }
+  const state = deps.getState();
+  const merged = mergeProjects(
+    { nodes: state.nodes, rootOrder: state.rootOrder, childOrder: state.childOrder, activeNodeId: state.activeNodeId },
+    incoming,
+    sourceName,
+  );
+  deps.mergeProject({
+    nodes: merged.nodes,
+    rootOrder: merged.rootOrder,
+    childOrder: merged.childOrder,
+    activeNodeId: merged.activeNodeId,
+  });
+  const { report } = merged;
+  return {
+    result: {
+      project_id: projectId,
+      source: sourceName,
+      merged_tables: report.tables.length,
+      merged_analyses: report.analyses.length,
+      merged_graphs: report.graphs.length,
+      merged_figures: report.figures.length,
+      merged_info_sheets: report.infoSheets.length,
+      merged: [...report.tables, ...report.analyses, ...report.graphs, ...report.figures, ...report.infoSheets],
+      renamed: report.renamed,
+      skipped: report.skipped,
+      dropped: report.dropped,
+      warnings,
+      report: formatMergeReport(report),
+    },
+  };
 }
 
 // ── Close ────────────────────────────────────────────────────────────────

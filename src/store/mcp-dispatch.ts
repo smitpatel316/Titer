@@ -35,10 +35,12 @@ import {
   defaultDocumentIo,
   executeCloseProject,
   executeImportPrism,
+  executeMergeProject,
   executeSaveProject,
   type DocumentDeps,
   type DocumentIo,
   type DocumentState,
+  type MergeDeps,
 } from "./mcp-document";
 import {
   executeBuildGraph,
@@ -139,6 +141,9 @@ export interface JobDeps {
   }) => void;
   /** Load a project into the store (the import job replaces it). */
   loadProject?: DocumentDeps["loadProject"];
+  /** Append another project's sheets to this one, as one undo step (the
+   *  merge job — File ▸ Merge, seq 180). */
+  mergeProject?: MergeDeps["mergeProject"];
   /** Mark the project saved (the save job). */
   markSaved?: DocumentDeps["markSaved"];
   /** Headless document IO; defaults to the real native calls. */
@@ -171,6 +176,8 @@ export interface JobDeps {
     updateFigure: NonNullable<GraphJobDeps["updateFigure"]>;
     createInfoSheet: NonNullable<GraphJobDeps["createInfoSheet"]>;
     updateInfoSheet: NonNullable<GraphJobDeps["updateInfoSheet"]>;
+    /** Append another project's sheets, as one undo step (the merge job). */
+    mergeProject: MergeDeps["mergeProject"];
   };
   /** Wait for the store to settle after a dispatch, so a `getState()` read
    *  sees the dispatched change. In the app this is two macrotasks (React
@@ -220,6 +227,22 @@ function toGraphDeps(deps: JobDeps): GraphJobDeps {
     createInfoSheet: a?.createInfoSheet,
     updateInfoSheet: a?.updateInfoSheet,
     renameNode: a?.renameNode,
+  };
+}
+
+/** The merge job's deps, from the job deps — the merge action rides
+ *  L3's shared `actions` object (a harness that omits it gets the plain
+ *  "no store action" error from `needMergeProject` below). */
+function toMergeDeps(deps: JobDeps): MergeDeps {
+  return {
+    getState: deps.getState,
+    mergeProject:
+      deps.mergeProject ??
+      deps.actions?.mergeProject ??
+      (() => {
+        throw new Error("This window can't merge projects (no mergeProject).");
+      }),
+    io: deps.io ?? defaultDocumentIo,
   };
 }
 
@@ -927,6 +950,13 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       // same as File ▸ Import Prism File, minus the dialog.
       const args = (job.args ?? {}) as { path?: unknown };
       return executeImportPrism(toDocumentDeps(deps), { path: reqString(args.path, "path") }, job.project_id);
+    }
+    case "merge-project": {
+      // Seq 180: read another project file and append its sheets to this
+      // one — the same as File ▸ Merge, minus the dialog. Unlike an
+      // import, this never discards the project.
+      const args = (job.args ?? {}) as { path?: unknown };
+      return executeMergeProject(toMergeDeps(deps), { path: reqString(args.path, "path") }, job.project_id);
     }
     case "close-project": {
       // L2: settle the save question, then arm the close bypass — Rust

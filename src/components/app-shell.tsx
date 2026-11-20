@@ -48,6 +48,7 @@ export function AppShell() {
   useMcpJobDispatcher();
   const { projectUpdated, dismissProjectUpdated } = documentActions;
   const { prismImported, dismissPrismImported, dataImported, dismissDataImported } = documentActions;
+  const { projectMerged, dismissProjectMerged } = documentActions;
   const { templateNotice, dismissTemplateNotice } = documentActions;
   const { sidebar } = useLayout();
   const [fullscreen, setFullscreen] = React.useState(false);
@@ -176,6 +177,26 @@ export function AppShell() {
         description={
           <>
             {dataImported?.map((line, i) => (
+              <React.Fragment key={i}>
+                {line}
+                <br />
+              </React.Fragment>
+            ))}
+          </>
+        }
+      />
+
+      {/* The "Project Merged" notice (File ▸ Merge, seq 180), in-app for
+          the same Quirk-2 reason as "Prism File Imported" above. */}
+      <Dialog
+        open={projectMerged !== null}
+        onClose={dismissProjectMerged}
+        onReturn={dismissProjectMerged}
+        dismissLabel="OK"
+        title="Project Merged"
+        description={
+          <>
+            {projectMerged?.map((line, i) => (
               <React.Fragment key={i}>
                 {line}
                 <br />

@@ -545,7 +545,7 @@ const mergeIncoming = (): MergeInput => ({
     t1: { id: "t1", type: "table", name: "Doses", parentId: null, tableType: "column", data: mergeTableData([["A", "9"]]) },
     s2: { id: "s2", type: "table", name: "Table 1", parentId: null, tableType: "column", data: mergeTableData([["A", "8"]]) },
     st1: { id: "st1", type: "table", name: "Doses, Log10", parentId: null, tableType: "column", data: mergeTableData([["A", "0"]]), transform: { from: "t1", kind: "log10" } },
-    sa1: { id: "sa1", type: "analysis", name: "t test", parentId: "t1", analysisType: "t-test", analysisParams: { columns: ["Y1"] } as AnalysisParams },
+    sa1: { id: "sa1", type: "analysis", name: "t test", parentId: "t1", analysisType: "descriptive-statistics", analysisParams: { columns: ["Y1"] } as AnalysisParams },
     sg1: { id: "sg1", type: "graph", name: "Individual values", parentId: "t1", graphType: "individual", graphOptions: { ...newGraphOptions("individual"), regAnalysisId: "sa1", sigAnalysisId: "missing-analysis" } },
     sf1: { id: "sf1", type: "figure", name: "Layout 1", parentId: null, panels: [{ graphId: "sg1", label: "A", title: "", row: 0, col: 0, rowSpan: 1, colSpan: 1 }, { graphId: "missing-graph", graphName: "Gone", label: "B", title: "", row: 0, col: 1, rowSpan: 1, colSpan: 1 }], grid: { rows: 1, cols: 2 } },
     si1: { id: "si1", type: "info", name: "Info Sheet", parentId: null, info: { constants: [], notes: "", linkedTableId: "t1" } },
@@ -690,6 +690,86 @@ check("mergeProject is one undo step and leaves the project dirty", () => {
   deepStrictEqual(Object.keys(s.nodes).sort(), Object.keys(before.nodes).sort());
 });
 
+check("MCP merge-project merges a .hlx file's sheets into the project (seq 180)", async () => {
+  const harness = mcpLaggingHarness(true);
+  harness.sync();
+  const before = harness.state();
+  const fixture = serializeProjectFile(mergeIncoming());
+  const io = {
+    writeFile: () => Promise.resolve(undefined),
+    appVersion: () => Promise.resolve("1.8.0"),
+    readText: async () => fixture,
+    readPrismText: async () => "",
+    readPrismBytes: async () => new Uint8Array(),
+  };
+  const done = await executeJob(
+    { job_id: "job-merge", project_id: "project-1", action: "merge-project", args: { path: "/tmp/Other.hlx" }, status: "queued" },
+    { ...harness.deps, io },
+  );
+  const result = done.result as {
+    merged_tables: number;
+    merged_analyses: number;
+    merged_graphs: number;
+    merged_figures: number;
+    merged_info_sheets: number;
+    merged: string[];
+    renamed: unknown[];
+    dropped: string[];
+  };
+  strictEqual(result.merged_tables, 3);
+  strictEqual(result.merged_analyses, 2);
+  strictEqual(result.merged_graphs, 1);
+  strictEqual(result.merged_figures, 1);
+  strictEqual(result.merged_info_sheets, 1);
+  ok(result.merged.includes("* Doses"), "the merged names carry Prism's asterisk");
+  deepStrictEqual(result.renamed, []);
+  strictEqual(result.dropped.length, 2);
+  const after = harness.state();
+  strictEqual(after.rootOrder.length, before.rootOrder.length + 6);
+  strictEqual(after.activeNodeId, before.activeNodeId, "merging doesn't move the active sheet");
+  strictEqual(after.past.at(-1)?.label, "Merge Project");
+  ok(Object.values(after.nodes).some((n) => n.name === "* Doses" && n.type === "table"));
+});
+
+check("MCP merge-project merges a .pzfx file through the converter (seq 180)", async () => {
+  const harness = mcpLaggingHarness(true);
+  harness.sync();
+  const fixture = readFileSync("tests/testdata/column.pzfx", "utf8");
+  const io = {
+    writeFile: () => Promise.resolve(undefined),
+    appVersion: () => Promise.resolve("1.8.0"),
+    readText: async () => "",
+    readPrismText: async () => fixture,
+    readPrismBytes: async () => new Uint8Array(),
+  };
+  const done = await executeJob(
+    { job_id: "job-merge-pzfx", project_id: "project-1", action: "merge-project", args: { path: "/tmp/Column.pzfx" }, status: "queued" },
+    { ...harness.deps, io },
+  );
+  const result = done.result as { merged_tables: number; merged: string[] };
+  strictEqual(result.merged_tables, 1);
+  ok(result.merged[0].startsWith("* "), "the converted table merges with Prism's asterisk");
+  ok(Object.values(harness.state().nodes).some((n) => n.name === result.merged[0]));
+});
+
+check("MCP merge-project refuses a file that isn't a project (seq 180)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const io = {
+    writeFile: () => Promise.resolve(undefined),
+    appVersion: () => Promise.resolve("1.8.0"),
+    readText: async () => "",
+    readPrismText: async () => "",
+    readPrismBytes: async () => new Uint8Array(),
+  };
+  await rejects(
+    executeJob(
+      { job_id: "job-merge-bad", project_id: "project-1", action: "merge-project", args: { path: "/tmp/notes.txt" }, status: "queued" },
+      { ...harness.deps, io },
+    ),
+    /not a project file/,
+  );
+});
+
 check("remapGraphOptions keeps an estimation plot's t-test link when the analysis is cloned", () => {
   const options = { ...newGraphOptions("individual"), ttestAnalysisId: "a1" };
   const { options: kept, dropped } = remapGraphOptions(options, { a1: "a9" });
@@ -766,6 +846,7 @@ const mcpLaggingHarness = (withRevisionWait: boolean) => {
     updateFigure: neverUnused,
     createInfoSheet: neverUnused,
     updateInfoSheet: neverUnused,
+    mergeProject: (doc) => dispatch({ type: "mergeProject", ...doc }),
   };
   const deps: JobDeps = {
     getState: () => ({

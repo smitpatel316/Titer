@@ -2,9 +2,9 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 56 tools: 18 read-only (list/read/job/
+// Settings → AI connections. 57 tools: 18 read-only (list/read/job/
 // activity/cloud reads + feedback + the three 1.7.4 discovery tools)
-// and 38 mutating, via the L0 Rust→frontend dispatch + job queue —
+// and 39 mutating, via the L0 Rust→frontend dispatch + job queue —
 // run-analysis, build-graph, export and cloud tools included (Phase 2).
 // By default only the 5 Phase 1 read tools are advertised or callable:
 // the server-side allowlist (contract §12, `ALLOWLIST_GROUPS` below)
@@ -47,7 +47,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 56 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 57 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -1309,7 +1309,7 @@ pub async fn mcp_autostart_if_opted_in(app: AppHandle) {
 // stdio bridge is untouched — it stays a byte-forwarder (contract
 // §11.2) and naturally advertises only what the server advertises.
 //
-// Groups, not 56 checkboxes: every tool belongs to exactly one group
+// Groups, not 57 checkboxes: every tool belongs to exactly one group
 // (the unit test `allowlist_groups_cover_all_tools_once` pins the
 // inventory), so the enabled groups fully determine the advertised set.
 // The `destructive` group holds the two tools that delete data or run
@@ -1358,8 +1358,8 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
     AllowlistGroup {
         id: "project",
         label: "Open and save projects",
-        description: "Create, open, save, close and import projects.",
-        tools: &["titer_create_project", "titer_open_project", "titer_save_project", "titer_close_project", "titer_import_prism"],
+        description: "Create, open, save, close, import and merge projects.",
+        tools: &["titer_create_project", "titer_open_project", "titer_save_project", "titer_close_project", "titer_import_prism", "titer_merge_project"],
     },
     AllowlistGroup {
         id: "tables",
@@ -2160,7 +2160,7 @@ async fn auth_middleware(
 /// the corruption hits every tool that returns non-ASCII text, not just
 /// transform-concentrations. Appending `; charset=utf-8` here, the one
 /// shared path every MCP response flows through, fixes the echo for all
-/// 56 tools. Returns the new header value, or `None` when the type is
+/// 57 tools. Returns the new header value, or `None` when the type is
 /// already labelled or is not one of the textual MCP response types.
 fn utf8_charset(content_type: &str) -> Option<String> {
     let lower = content_type.to_ascii_lowercase();
@@ -2627,6 +2627,15 @@ pub struct FeedbackArgs {
 /// A local file path (.hlx, .pzt, .prism or .pzfx). Never a URL.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct OpenProjectArgs {
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct MergeProjectArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// A local file path (.hlx, .pzt, .prism or .pzfx). Never a URL.
     pub path: String,
 }
 
@@ -4701,6 +4710,64 @@ impl TiterMcpServer {
         }
     }
 
+    /// Merge another project file into this project (File ▸ Merge, seq
+    /// 180): a `.hlx` / `.pzt` file appends its sheets — each renamed with
+    /// an asterisk in front, Prism-style; a `.prism` / `.pzfx` file is
+    /// converted first, then merged. Links inside the merged sheets are
+    /// remapped to the new copies; links to sheets missing from the file
+    /// are dropped and named in `dropped`. The current project's sheets
+    /// are untouched, and the merge is one undo step. The path must be
+    /// local — never a URL — and the file must exist.
+    #[tool(
+        name = "titer_merge_project",
+        description = "Merge another project file into this project (File > Merge): .hlx / .pzt appends its sheets, each renamed with an asterisk in front (Prism-style); .prism / .pzfx is converted first, then merged. Links inside the merged sheets are remapped to the new copies; links to sheets missing from the file are dropped and named in dropped. The current project's sheets are untouched; one undo step. The path must be a local file, never a URL.",
+        annotations(
+            title = "Merge project",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn merge_project(
+        &self,
+        Parameters(args): Parameters<MergeProjectArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let merge_args = serde_json::json!({ "project_id": args.project_id, "path": args.path });
+        let result: Result<serde_json::Value, String> = async {
+            project_path_format(&args.path)?;
+            if !std::path::Path::new(&args.path).is_file() {
+                return Err(format!("No file at “{}” — check the path and ask again.", args.path));
+            }
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let job = self.state.enqueue_job(
+                &project_id,
+                "merge-project",
+                serde_json::json!({ "path": args.path }),
+                serde_json::json!({}),
+            )?;
+            // 60 s, not 30 s: a large `.prism` converts before it merges,
+            // like the open path's 60 s window.
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(60)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The merge finished without reporting what it merged.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "The merge failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_merge_project", merge_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_merge_project", merge_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
     /// Close a project window. `save` omitted refuses a dirty project
     /// (`{ needs_confirm: true, warning: "unsaved changes" }`); pass
     /// `save: "save"` to save first, or `save: "discard"` to drop the edits.
@@ -6591,8 +6658,8 @@ impl TiterMcpServer {
         // Inspector 2.13.0 discards tools whose outputSchema has no `type`
         // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
         // returns, so `tools/list` prints `{"tools": []}` even though the
-        // server returns all 56. Every tool returns a JSON object, so stamp
-        // `type: "object"` on all 56 output schemas here — the single choke
+        // server returns all 57. Every tool returns a JSON object, so stamp
+        // `type: "object"` on all 57 output schemas here — the single choke
         // point — instead of touching each tool. `Arc::make_mut`
         // clone-on-writes: rmcp caches the `Value` schema in a thread-local
         // cache shared by all tools, so the cached Arc must never be
@@ -6829,10 +6896,10 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes up to 56 tools, gated by the allowlist in Settings → AI Connections \
+                It exposes up to 57 tools, gated by the allowlist in Settings → AI Connections \
                 (contract §12): by default only the 5 read tools below are enabled, and the user \
                 can enable more groups there — a tool that is not listed cannot be called. \
-                18 of the 56 are read-only and 38 change the open project. \
+                18 of the 57 are read-only and 39 change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_project_summary (the same discovery, as counts plus ids and names), \
                 titer_search (find a node by name), \
@@ -8821,7 +8888,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 56 tools, so it enables every group first.
+        // this test drives all 57 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -8874,7 +8941,7 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            56,
+            57,
             "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + three L4 analysis tools (run, re-run, freeze) + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools + four L8 export tools + one feedback tool + three 1.7.4 discovery tools (params, search, summary): {names:?}"
         );
         for name in ["titer_read_job", "titer_list_jobs", "titer_cancel_job"] {
@@ -8888,6 +8955,7 @@ mod tests {
             "titer_open_project",
             "titer_save_project",
             "titer_import_prism",
+            "titer_merge_project",
             "titer_close_project",
         ] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -9091,6 +9159,27 @@ mod tests {
             "save closed project: {}",
             call_raw_text(&save_gone)
         );
+
+        // merge: a missing file and a URL are refused before anything is
+        // enqueued — the same guards as open, on the merge path.
+        let (merge_missing, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(100, "titer_merge_project", json!({ "path": "/tmp/no-such-project.hlx" })),
+        )
+        .await;
+        assert_eq!(merge_missing["result"]["isError"], true);
+        assert!(call_raw_text(&merge_missing).contains("No file at"), "merge missing: {}", call_raw_text(&merge_missing));
+        let (merge_url, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(101, "titer_merge_project", json!({ "path": "https://example.com/Dose.hlx" })),
+        )
+        .await;
+        assert_eq!(merge_url["result"]["isError"], true);
+        assert!(call_raw_text(&merge_url).contains("not a local file path"), "merge url: {}", call_raw_text(&merge_url));
 
         // ── L3: table-tool validation errors + a create round trip ──
         // L3 validation errors stay plain-language tool errors (isError),
@@ -9881,12 +9970,12 @@ mod tests {
 
     #[test]
     fn allowlist_groups_cover_all_tools_once() {
-        // The inventory pin: every tool in exactly one group, 56 total.
+        // The inventory pin: every tool in exactly one group, 57 total.
         // A lane that adds a tool must assign it a group here, or this
         // fails — an ungrouped tool would otherwise be silently hidden.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 56, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 57, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
@@ -9952,7 +10041,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 56, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 57, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema

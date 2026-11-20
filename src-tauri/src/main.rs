@@ -344,6 +344,25 @@ fn choose_method_file(app: AppHandle, window: WebviewWindow) {
     );
 }
 
+/// File ▸ Merge…: the Open panel for a project file (`.hlx`, `.pzt`,
+/// `.prism` or `.pzfx`) to merge into this project.
+/// Non-blocking, like choose_prism_file (a blocking picker deadlocked the
+/// app Nov 9): the event carries the path, or null on Cancel, so the page
+/// can unsubscribe either way.
+#[tauri::command]
+fn choose_merge_file(app: AppHandle, window: WebviewWindow) {
+    let label = window.label().to_string();
+    app.dialog()
+        .file()
+        .set_title("Merge Project")
+        .add_filter("Titer Project", &["hlx", "pzt"])
+        .add_filter("GraphPad Prism File", &["pzfx", "prism"])
+        .pick_file(move |file| {
+            let picked = file.and_then(|file| file.into_path().ok()).map(|path| path.to_string_lossy().into_owned());
+            let _ = app.emit_to(label.as_str(), "merge-file-picked", picked);
+        });
+}
+
 /// A window refused to close (its user chose Cancel): Titer doesn't quit after all.
 #[tauri::command]
 fn cancel_quit(projects: State<Projects>) {
@@ -1423,6 +1442,7 @@ fn main() {
             choose_prism_file,
             choose_data_file,
             choose_method_file,
+            choose_merge_file,
             cancel_quit,
             quit_app,
             updater::fetch_channel_manifest,
