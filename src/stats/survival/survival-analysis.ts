@@ -48,7 +48,9 @@ export async function runSurvival(columns: Column[], params: SurvivalParams | un
   // no `params`, or a file whose values were dropped on load — runs these
   // instead of crashing on `params.curveTest` (BUG-15).
   const p = { ...DEFAULTS, ...params };
-  const groups = survivalGroups(columns);
+  // A Multiple Variables table assigns its variables (`time`, `status`, `groupBy`); a
+  // Survival table reads them positionally (X = time, one column per group of codes).
+  const groups = survivalGroups(columns, p);
   if (!Array.isArray(groups)) return groups;
 
   const k = groups.length;

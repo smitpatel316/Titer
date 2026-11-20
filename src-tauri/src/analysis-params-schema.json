@@ -227,7 +227,8 @@
     "label": "Compare two groups",
     "min_columns": 2,
     "offered_on": [
-      "column"
+      "column",
+      "multiple"
     ],
     "params": [
       {
@@ -273,6 +274,18 @@
         "default": "two-sided",
         "required": false,
         "description": "\"less\"/\"greater\" follow R's t.test semantics: alternative on (col0 vs col1)."
+      },
+      {
+        "name": "response",
+        "type": "string",
+        "required": false,
+        "description": "Multiple Variables tables, unpaired: the response variable, split into its two groups by `groupBy`'s levels. A paired test on such a table names its two variables in `sets` instead (the existing paired machinery, row by row)."
+      },
+      {
+        "name": "groupBy",
+        "type": "string",
+        "required": false,
+        "description": "Multiple Variables tables, unpaired: the grouping variable whose two levels are the groups."
       },
       {
         "name": "sets",
@@ -1289,10 +1302,17 @@
     "label": "Nonlinear regression",
     "min_columns": 2,
     "offered_on": [
+      "multiple",
       "xy",
       "xy"
     ],
     "params": [
+      {
+        "name": "x",
+        "type": "string",
+        "required": false,
+        "description": "Multiple Variables tables: the X variable (the Y variable is `y`)."
+      },
       {
         "name": "y",
         "type": "string | string[]",
@@ -2349,6 +2369,7 @@
     "label": "Survival analysis",
     "min_columns": 3,
     "offered_on": [
+      "multiple",
       "survival"
     ],
     "params": [
@@ -2372,6 +2393,22 @@
           "none"
         ],
         "default": "holm",
+        "required": false
+      },
+      {
+        "name": "time",
+        "type": "string",
+        "required": false,
+        "description": "Multiple Variables tables: the follow-up-time variable, the event-code variable (1 = event occurred, 0 = censored) and the grouping variable whose levels are the groups compared."
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "groupBy",
+        "type": "string",
         "required": false
       },
       {
