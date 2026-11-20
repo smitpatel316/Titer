@@ -235,7 +235,7 @@ import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { decodePng, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
 import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
-import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnovaParams, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, SimulationSpec } from "../src/stats/types";
+import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnovaParams, ChiSquareGofParams, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, SimulationSpec } from "../src/stats/types";
 import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation/simulate";
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
 import { evaluate as evaluateCurve } from "../src/views/graphs/fitted-curve";
@@ -9971,6 +9971,221 @@ check("the 2x2 chi-square for reference is uncorrected, Fisher's exact unchanged
   if ("error" in out2) throw new Error(out2.error);
   const stat2 = (label: string) => out2.stats.find((s) => s.label === label)?.value;
   close(stat2("Chi-square (for reference)"), 0.7937, 1e-3, "uncorrected chi-square, second table");
+});
+
+// seq 195: chi-square goodness of fit + binomial test (Prism's Parts-of-whole
+// "Compare observed distribution with expected"). The numbers below are
+// cross-checked against R's chisq.test / binom.test via scipy, which uses
+// the same definitions (two-sided binomial P sums the outcomes no more
+// likely than the one observed; the CI is Clopper–Pearson).
+check("chi-square goodness of fit matches R on equal, counts and percent expectations", async () => {
+  // 100 die rolls, six faces: χ² = 1.4 on 5 df, P = 0.9243.
+  const die: TableData = {
+    columns: ["Title", "Rolls"],
+    rows: [
+      ["1", "16"],
+      ["2", "18"],
+      ["3", "14"],
+      ["4", "20"],
+      ["5", "17"],
+      ["6", "15"],
+    ],
+  };
+  const out = await runAnalysis("chi-square-gof", die);
+  if ("error" in out) throw new Error(out.error);
+  const stat = (label: string) => out.stats.find((s) => s.label === label)?.value;
+  close(stat("Chi-square"), 1.4, 1e-3, "die chi-square");
+  strictEqual(stat("df"), 5);
+  close(stat("P value"), 0.9243133, 1e-3, "die P value");
+  // The per-category table adds up to the statistic R reports, and names
+  // the categories from the row titles.
+  strictEqual(out.gofCategories?.length, 6);
+  close(
+    out.gofCategories!.reduce((a, r) => a + r.contribution, 0),
+    1.4,
+    1e-9,
+    "contributions add up to the chi-square",
+  );
+  deepStrictEqual(
+    out.gofCategories!.map((r) => r.category),
+    ["1", "2", "3", "4", "5", "6"],
+  );
+  close(out.gofCategories![0].expected, 100 / 6, 1e-9, "equal expected");
+  ok(out.notes?.includes("Every category expects 5 or more"), "no low-expected warning");
+  ok(out.notes?.includes("binomial test is the exact test") === false, "no binomial nudge with six categories");
+
+  // Mendel's 9:3:3:1 — 315:101:108:32 of 556: χ² = 0.4700, P = 0.9254.
+  const mendel: TableData = {
+    columns: ["Title", "Peas"],
+    rows: [
+      ["Round yellow", "315"],
+      ["Wrinkled yellow", "101"],
+      ["Round green", "108"],
+      ["Wrinkled green", "32"],
+    ],
+  };
+  const counts = await runAnalysis("chi-square-gof", mendel, {
+    expectedMode: "counts",
+    expectedValues: [312.75, 104.25, 104.25, 34.75],
+  });
+  if ("error" in counts) throw new Error(counts.error);
+  const statC = (label: string) => counts.stats.find((s) => s.label === label)?.value;
+  close(statC("Chi-square"), 0.47, 1e-3, "Mendel chi-square from counts");
+  close(statC("P value"), 0.9254259, 1e-3, "Mendel P value from counts");
+  close(counts.gofCategories![3].contribution, 0.2176259, 1e-6, "Mendel last contribution");
+  const percent = await runAnalysis("chi-square-gof", mendel, {
+    expectedMode: "percent",
+    expectedValues: [56.25, 18.75, 18.75, 6.25],
+  });
+  if ("error" in percent) throw new Error(percent.error);
+  const statP = (label: string) => percent.stats.find((s) => s.label === label)?.value;
+  close(statP("Chi-square"), 0.47, 1e-3, "Mendel chi-square from percentages");
+  close(statP("P value"), 0.9254259, 1e-3, "Mendel P value from percentages");
+});
+
+check("chi-square goodness of fit refuses bad expectations and bad counts", async () => {
+  const die: TableData = {
+    columns: ["Title", "Rolls"],
+    rows: [
+      ["1", "16"],
+      ["2", "18"],
+      ["3", "14"],
+      ["4", "20"],
+      ["5", "17"],
+      ["6", "15"],
+    ],
+  };
+  const err = async (params: ChiSquareGofParams) => {
+    const out = await runAnalysis("chi-square-gof", die, params);
+    if (!("error" in out)) throw new Error(`expected an error, got ${JSON.stringify(out.stats)}`);
+    return out.error;
+  };
+  ok((await err({ expectedMode: "counts", expectedValues: [50, 50] })).includes("don't match"), "wrong count of expected values");
+  ok(
+    (await err({ expectedMode: "counts", expectedValues: [10, 10, 10, 10, 10, 10] })).includes("must be the same"),
+    "counts must total the observed",
+  );
+  ok(
+    (await err({ expectedMode: "percent", expectedValues: [30, 30, 30, 0, 0, 0] })).includes("add up to 100"),
+    "percentages must add up to 100",
+  );
+  ok(
+    (await err({ expectedMode: "percent", expectedValues: [25, 25, 25, 25, 0, 0] })).includes("above 0"),
+    "a zero expectation is refused",
+  );
+  ok(
+    (await err({ expectedMode: "counts" })).includes("Enter the expected values"),
+    "counts mode with no values is refused",
+  );
+  const one: TableData = { columns: ["Title", "Counts"], rows: [["Only", "10"]] };
+  const out1 = await runAnalysis("chi-square-gof", one);
+  if (!("error" in out1)) throw new Error("expected a one-category error");
+  ok(out1.error.includes("at least 2 categories"), "one category is refused");
+  const frac: TableData = {
+    columns: ["Title", "Counts"],
+    rows: [
+      ["A", "2.5"],
+      ["B", "3"],
+    ],
+  };
+  const outFrac = await runAnalysis("chi-square-gof", frac);
+  if (!("error" in outFrac)) throw new Error("expected a fractional-count error");
+  ok(outFrac.error.includes("whole numbers"), "fractional counts are refused");
+});
+
+check("the binomial test matches R's binom.test, two- and one-tailed, with the Clopper-Pearson CI", async () => {
+  const coin: TableData = {
+    columns: ["Title", "Flips"],
+    rows: [
+      ["Heads", "8"],
+      ["Tails", "2"],
+    ],
+  };
+  const out = await runAnalysis("binomial-test", coin);
+  if ("error" in out) throw new Error(out.error);
+  const stat = (label: string) => out.stats.find((s) => s.label === label)?.value;
+  strictEqual(stat("Number of trials (n)"), 10);
+  strictEqual(stat("Observed in “Heads”"), 8);
+  close(stat("Expected in “Heads”"), 5, 1e-9, "expected heads");
+  close(stat("Observed proportion (“Heads”)"), 0.8, 1e-9, "observed proportion");
+  close(stat("P value (two-tailed)"), 0.109375, 1e-6, "two-tailed P");
+  close(stat("P value (one-tailed, fewer)"), 0.9892578, 1e-6, "one-tailed fewer P");
+  close(stat("P value (one-tailed, more)"), 0.0546875, 1e-6, "one-tailed more P");
+  close(stat("Observed proportion 95% CI lower"), 0.4439045, 1e-6, "CI lower");
+  close(stat("Observed proportion 95% CI upper"), 0.9747893, 1e-6, "CI upper");
+  // Against a 0.6 null the two-tailed P moves to 0.3335.
+  const out6 = await runAnalysis("binomial-test", coin, { expectedProportion: 0.6 });
+  if ("error" in out6) throw new Error(out6.error);
+  const stat6 = (label: string) => out6.stats.find((s) => s.label === label)?.value;
+  close(stat6("P value (two-tailed)"), 0.3335284, 1e-6, "two-tailed P against 0.6");
+  close(stat6("Expected in “Heads”"), 6, 1e-9, "expected heads against 0.6");
+  // Three categories is a goodness-of-fit table, not a binomial one.
+  const three: TableData = {
+    columns: ["Title", "Counts"],
+    rows: [
+      ["A", "8"],
+      ["B", "2"],
+      ["C", "5"],
+    ],
+  };
+  const err3 = await runAnalysis("binomial-test", three);
+  if (!("error" in err3)) throw new Error("expected a three-category error");
+  ok(err3.error.includes("exactly 2 categories"), "three categories are refused");
+  const bad = await runAnalysis("binomial-test", coin, { expectedProportion: 1.5 });
+  if (!("error" in bad)) throw new Error("expected a bad-proportion error");
+  ok(bad.error.includes("between 0 and 1"), "a proportion above 1 is refused");
+});
+
+check("the chi-square-gof and binomial wizards ask the expected distribution, then build the params", () => {
+  const die: TableData = {
+    columns: ["Title", "Rolls"],
+    rows: [
+      ["1", "16"],
+      ["2", "18"],
+      ["3", "14"],
+      ["4", "20"],
+      ["5", "17"],
+      ["6", "15"],
+    ],
+  };
+  const asked = (type: "chi-square-gof" | "binomial-test", a: Answers) =>
+    WIZARDS[type]!.questions(a, readTable(die)).flatMap((q) => (q ? [q.id] : []));
+  deepStrictEqual(asked("chi-square-gof", {}), ["expectedMode"]);
+  deepStrictEqual(asked("chi-square-gof", { expectedMode: "counts" }), ["expectedMode", "expectedValues"]);
+  deepStrictEqual(asked("chi-square-gof", { expectedMode: "percent" }), ["expectedMode", "expectedValues"]);
+  // "Equal" comes first: the wizard pre-selects the first option, so the
+  // equal-proportions run is the default.
+  const q = WIZARDS["chi-square-gof"]!.questions({}, readTable(die)).find((x) => x && x.id === "expectedMode");
+  ok(q && q.kind === "choice");
+  deepStrictEqual(
+    q.kind === "choice" ? q.options.map((o) => o.value) : [],
+    ["equal", "counts", "percent"],
+  );
+  deepStrictEqual(WIZARDS["chi-square-gof"]!.finish({}, readTable(die)), {
+    type: "chi-square-gof",
+    params: { expectedMode: "equal" },
+  });
+  deepStrictEqual(
+    WIZARDS["chi-square-gof"]!.finish(
+      { expectedMode: "percent", expectedValues: "56.25, 18.75, 18.75, 6.25" },
+      readTable(die),
+    ),
+    {
+      type: "chi-square-gof",
+      params: { expectedMode: "percent", expectedValues: [56.25, 18.75, 18.75, 6.25] },
+    },
+  );
+  deepStrictEqual(asked("binomial-test", {}), ["expectedProportion"]);
+  deepStrictEqual(WIZARDS["binomial-test"]!.finish({ expectedProportion: 0.6 }, readTable(die)), {
+    type: "binomial-test",
+    params: { expectedProportion: 0.6 },
+  });
+  // Both sit on Column tables, after Kolmogorov–Smirnov and before Outliers.
+  const columnOptions = analysisOptionsForTable("column").map((o) => o.value);
+  deepStrictEqual(
+    columnOptions.slice(columnOptions.indexOf("kolmogorov-smirnov"), columnOptions.indexOf("outliers") + 1),
+    ["kolmogorov-smirnov", "chi-square-gof", "binomial-test", "outliers"],
+  );
 });
 
 // BUG-REPORT #28 leg 3: prop.trend.test on a first row/column holding 0%
