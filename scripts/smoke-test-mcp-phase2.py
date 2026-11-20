@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Phase 2 live MCP smoke: initialize -> tools/list -> tools/call across
-all 52 tools against a running Titer MCP server.
+all 56 tools against a running Titer MCP server.
 
 Reads endpoint + token from <app_data>/mcp/discovery.json (argv[1]).
 Speaks Streamable HTTP directly (no bridge, no Claude Desktop sign-in):
@@ -36,12 +36,13 @@ import time
 import requests
 
 EXPECTED_TOOLS = [
-    # Phase 1 (5) + job tools (3) + L1 read-only (3)
+    # L1 read-only (3) + 1.7.4 discovery (3)
     "titer_list_projects", "titer_list_tables", "titer_read_table_summary",
     "titer_read_results", "titer_read_graph",
     "titer_read_job", "titer_list_jobs", "titer_cancel_job",
     "titer_read_figure", "titer_read_info_sheet", "titer_read_activity",
     "titer_send_feedback",
+    "titer_project_summary", "titer_search", "titer_get_analysis_params",
     # L2 project (5)
     "titer_create_project", "titer_open_project", "titer_save_project",
     "titer_import_prism", "titer_close_project",
@@ -49,8 +50,8 @@ EXPECTED_TOOLS = [
     "titer_create_table", "titer_write_table", "titer_edit_table",
     "titer_duplicate_table_family", "titer_rename_node", "titer_delete_node",
     "titer_reorder_nodes", "titer_undo", "titer_redo",
-    # L4 analyses (2)
-    "titer_run_analysis", "titer_freeze_analysis",
+    # L4 analyses (3)
+    "titer_run_analysis", "titer_rerun_analysis", "titer_freeze_analysis",
     # L6 graphs / figures / info sheets (7)
     "titer_build_graph", "titer_update_graph", "titer_clone_graph",
     "titer_create_figure", "titer_update_figure",
@@ -67,7 +68,7 @@ EXPECTED_TOOLS = [
     "titer_export_graph", "titer_export_figure", "titer_export_office",
     "titer_export_table_data",
 ]
-assert len(EXPECTED_TOOLS) == 52, len(EXPECTED_TOOLS)
+assert len(EXPECTED_TOOLS) == 56, len(EXPECTED_TOOLS)
 
 
 def main():
@@ -176,15 +177,15 @@ def main():
     check("initialize negotiates 2025-11-25",
           init["result"]["protocolVersion"] == "2025-11-25",
           init["result"]["protocolVersion"])
-    check("initialize instructions name 52 tools",
-          "52 tools" in init["result"].get("instructions", ""),
+    check("initialize instructions name 56 tools",
+          "56 tools" in init["result"].get("instructions", ""),
           init["result"].get("instructions", "")[:80])
     rpc("notifications/initialized", notif=True)
 
-    # 2. tools/list shows all 52 tools, one page
+    # 2. tools/list shows all 56 tools, one page
     lst = rpc("tools/list")
     names = [t["name"] for t in lst["result"]["tools"]]
-    check("tools/list returns 52 tools", len(names) == 52, f"{len(names)}")
+    check("tools/list returns 56 tools", len(names) == 56, f"{len(names)}")
     check("tools/list has no nextCursor", "nextCursor" not in lst["result"])
     for want in EXPECTED_TOOLS:
         check(f"tools/list has {want}", want in names)
@@ -289,6 +290,36 @@ def main():
     cancelled = tool("titer_cancel_job", {"job_id": job_id})
     check("cancel_job on a done job reports done", cancelled.get("status") == "done",
           json.dumps(cancelled)[:160])
+
+    # 7b. 1.7.4 P0 tools: params schema, search, rerun (awaited), summary
+    schema = tool("titer_get_analysis_params", {"analysis_type": "anova"})
+    posthoc = next((p for p in schema.get("params", []) if p["name"] == "posthoc"), None)
+    check("get_analysis_params anova lists posthoc with tukey",
+          posthoc is not None and "tukey" in (posthoc.get("enum") or []),
+          json.dumps(posthoc)[:200] if posthoc else "no posthoc")
+    gate = tool("titer_get_analysis_params", {"analysis_type": "three-way-anova"})
+    check("get_analysis_params three-way-anova carries its table gate",
+          bool(gate.get("gate")), gate.get("gate", "")[:120])
+    hit = tool("titer_search", {"project_id": pid, "query": "descriptive"})
+    check("search finds the run analysis by type",
+          any(m.get("id") == aid for m in hit.get("matches", [])),
+          json.dumps(hit.get("matches", []))[:200])
+    miss = tool("titer_search", {"project_id": pid, "query": "zzz-no-such-node"})
+    check("search miss returns no matches",
+          miss.get("matches") == [] and miss.get("total") == 0,
+          json.dumps(miss)[:160])
+    # The awaited rerun finishes inline (descriptive stats are fast) and
+    # reuses the same node — no duplicate analysis appears in the summary.
+    rerun = tool("titer_rerun_analysis", {"project_id": pid, "analysis_id": aid,
+                                          "await_result": True})
+    check("rerun_analysis awaited returns done inline",
+          rerun.get("status") == "done" and bool(rerun.get("result")),
+          json.dumps(rerun)[:200])
+    summary = tool("titer_project_summary", {"project_id": pid})
+    proj = next((p for p in summary.get("projects", []) if p["project_id"] == pid), None)
+    check("project_summary counts one analysis after the rerun",
+          proj is not None and proj.get("counts", {}).get("analysis") == 1,
+          json.dumps(proj)[:200] if proj else "no project")
 
     # 8. graphs / figures / info sheets
     graph = tool("titer_build_graph", {"project_id": pid, "table_id": tid_xy,

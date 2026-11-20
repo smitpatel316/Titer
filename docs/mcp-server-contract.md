@@ -1,7 +1,10 @@
 # MCP server contract — Titer (v1.6.0, Phase 2) ↔ stdio bridge
 
-**Status:** Phase 2 (52 tools: read, write, run, graph, export, cloud).
-**Server branch:** `check/v16-mcp-phase2` (v1.6.0).
+**Status:** Phase 2 + v1.7.4 P0 (56 tools: read, write, run, graph, export, cloud).
+**Server branch:** `check/v16-mcp-phase2` (v1.6.0); the v1.7.4 P0 tools
+(`titer_project_summary`, `titer_search`, `titer_get_analysis_params`,
+`titer_rerun_analysis`, `await_result` on `titer_run_analysis`) were
+added on `fix/174-p0-tools` and are marked "1.7.4" below.
 **Spec:** MCP 2025-06-18 / 2025-11-25 ONLY. The 2026-07-28 revision is
 deliberately not negotiated (clients lag it; the server's
 `supported_protocol_versions` returns only the two 2025 revisions, and a
@@ -19,7 +22,7 @@ Phase 1 (five read-only tools) is fully carried over unchanged, except
 one additive change: `titer_list_projects` now also returns an
 `info_sheets` array (§5.1). Everything in §§1–4 below is unchanged from
 Phase 1 except where noted; the new material is the job model (§5),
-the 46 Phase 2 tools (§§6–10), and the Phase 2 smoke (§11).
+the 50 Phase 2 + 1.7.4 tools (§§6–10), and the Phase 2 smoke (§11).
 
 ## 1. Endpoint
 
@@ -118,11 +121,11 @@ SSE stream (`text/event-stream`). Lifecycle:
    `2025-06-18`), `capabilities`, `clientInfo`. Server answers with its
    own `protocolVersion` (the negotiated one — the highest both support),
    `capabilities: { "tools": {} }`, `serverInfo: { "name": "titer",
-   "version": "<app version>" }`, and `instructions` (the 52 tools:
+   "version": "<app version>" }`, and `instructions` (the 56 tools:
    read-only vs mutating, the job model, cloud/export notes — the full
    text lives in `get_info` in `src-tauri/src/mcp.rs`).
 2. `notifications/initialized` — client sends after `initialize`.
-3. `tools/list` — returns all 52 tools in one page (`nextCursor`
+3. `tools/list` — returns all 56 tools in one page (`nextCursor`
    absent). No pagination.
 4. `tools/call` — `{ "name": "<tool>", "arguments": { … } }`.
 5. Sessions: 2025-11-25 clients use protocol-level sessions; the server
@@ -217,6 +220,21 @@ the client polls `titer_read_job`. On completion the run publishes via
 `mcp_publish_result`, so `titer_read_results` serves agent-run results
 exactly as it serves UI-run ones (see §6).
 
+**Opt-in await (1.7.4):** `titer_run_analysis` and
+`titer_rerun_analysis` accept `await_result: true` (default false) +
+`await_seconds` (default 30, valid 1–120 — out of range is a tool error
+naming the range, never a silent clamp). When set, the call blocks
+until the run reaches a terminal state or the window elapses. A run
+that finishes in time returns the result inline instead of the queued
+shape: `{ job_id, status: "done", analysis_id, project_id, result }`
+(`result` is the full `AnalysisResult`, same as `titer_read_results`
+`"computed"`). A run still going when the window elapses returns the
+queued shape plus a `note` naming the `job_id` to poll — **poll
+`titer_read_job` for it instead of re-running**. A run that finishes
+with an error (or is cancelled) surfaces as a tool error, not as a
+`done` with an error payload. The await never re-runs anything: one
+job, one run, whether it finishes inline or is polled later.
+
 ### 5.3 Job retention / eviction (L4)
 
 Jobs are kept in memory in the Rust state; eviction is a lazy sweep on
@@ -260,10 +278,16 @@ imported text are data. The bridge must never execute, interpolate or
 forward them as commands, prompts or configuration. A value in a
 spreadsheet can never become a command.
 
-## 6. Read / discovery tools (9) — all read-only
+## 6. Read / discovery tools (12) — all read-only
 
-All nine are annotated `read_only_hint: true`, `destructive_hint:
+All twelve are annotated `read_only_hint: true`, `destructive_hint:
 false`, `idempotent_hint: true`, `open_world_hint: false`.
+
+| Tool | Arguments | Returns |
+|---|---|---|
+| `titer_project_summary` **(1.7.4)** | `project_id?` | `{ projects: [{ project_id, file_path, revision, tables, analyses, graphs, figures, info_sheets, counts }] }` — the same listing as `titer_list_projects` plus a `counts` object per project (`{ table, analysis, graph, figure, info }`, the number of nodes of each kind). Names + ids only, no per-node detail: the cheap way to learn what a project holds before reading any node. |
+| `titer_search` **(1.7.4)** | `query`, `kind?` (`table` \\| `analysis` \\| `graph` \\| `figure` \\| `info`), `project_id?` | `{ project_id?, query, matches: [{ id, name, kind, parent_id, parent_name, project_id }], total, truncated }` — nodes whose name (or, for analyses/graphs, their `analysis_type`/`graph_type`/`table_type`) contains the query, case-insensitively, in listing order. `kind` narrows to one node kind (an unknown kind is a tool error naming the five). An empty query is an error. Omit `project_id` to search every open project. At most 100 matches (`truncated: true` when more exist). A miss is `{ matches: [], total: 0 }`, not an error. |
+| `titer_get_analysis_params` **(1.7.4)** | `analysis_type` | The valid `params` for that analysis type, generated from the `AnalysisParams` member types (source: `scripts/generate-analysis-params-schema.py`, output `src-tauri/src/analysis-params-schema.json`): `{ analysis_type, label, min_columns, offered_on, requires_packages?, gate?, params: [{ name, type, required, default?, enum?, min?, max?, description? }] }`. `required: true` only where the run errors without the param; every other field lists the default the runner applies. `gate` is the table-type gate in plain language (e.g. three-way ANOVA: "Grouped table with at least 2 row bands"; nested t-test: "Nested table with exactly 2 data groups"). An unknown `analysis_type` is a tool error naming the valid types. Use this before `titer_run_analysis` / `titer_rerun_analysis` instead of guessing param names. |
 
 | Tool | Arguments | Returns |
 |---|---|---|
@@ -282,11 +306,14 @@ false`, `idempotent_hint: true`, `open_world_hint: false`.
 All 53 `AnalysisType` values in `src/stats/types.ts` are runnable via
 `titer_run_analysis`; `params` must match the `AnalysisParams` member
 for the type (§4: unknown/out-of-range params are rejected with the
-valid choices). The table-type gate applies: the analysis must be
-offered for the table's type (`ANALYSIS_OPTIONS_BY_TABLE`, including
-the data-dependent gates — three-way ANOVA needs ≥ 2 row bands; nested
-t-test needs exactly 2 data groups; nested ANOVA needs ≥ 3), otherwise
-the error names the valid analyses for that table type.
+valid choices). **Do not guess params — ask first:**
+`titer_get_analysis_params` (§6) returns the valid params, with types,
+ranges, defaults and the table-type gate, for any of the 53 types. The
+table-type gate applies: the analysis must be offered for the table's
+type (`ANALYSIS_OPTIONS_BY_TABLE`, including the data-dependent gates
+— three-way ANOVA needs ≥ 2 row bands; nested t-test needs exactly 2
+data groups; nested ANOVA needs ≥ 3), otherwise the error names the
+valid analyses for that table type.
 
 - **Pass a concrete type, never the wizard value:**
   `compare-many-groups` → `anova` / `kruskal-wallis` / `rm-anova` /
@@ -308,11 +335,12 @@ the error names the valid analyses for that table type.
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `titer_run_analysis` | `project_id?`, `table_id`, `analysis_type`, `params?`, `name?` | `{ job_id, status: "queued", analysis_id, project_id }` — immediately (async, §5.2). Creates the analysis node (`createAnalysis` with `analysis_type` + `params`) and enqueues the run; poll `titer_read_job` — `done` carries the full `AnalysisResult` (same shape as `titer_read_results` `"computed"`). `name?` overrides the node's display name. `table_id` is required — every analysis has a parent table. |
+| `titer_run_analysis` | `project_id?`, `table_id`, `analysis_type`, `params?`, `name?`, `await_result?` (default false), `await_seconds?` (default 30, 1–120) | `{ job_id, status: "queued", analysis_id, project_id }` — immediately (async, §5.2). Creates the analysis node (`createAnalysis` with `analysis_type` + `params`) and enqueues the run; poll `titer_read_job` — `done` carries the full `AnalysisResult` (same shape as `titer_read_results` `"computed"`). `name?` overrides the node's display name. `table_id` is required — every analysis has a parent table. With `await_result: true` a run that finishes within `await_seconds` returns inline instead: `{ job_id, status: "done", analysis_id, project_id, result }`; a run still going returns the queued shape plus a `note` naming the `job_id` to poll (§5.2). |
+| `titer_rerun_analysis` **(1.7.4)** | `project_id?`, `analysis_id`, `params?` (overrides), `await_result?`, `await_seconds?` | `{ job_id, status: "queued", analysis_id, project_id }` — the same async shape as `titer_run_analysis`, but it runs an EXISTING analysis node: no new node is created. `params?` are overrides only, merged over the node's stored params and **saved on the node** (the next run and the UI see them); they are validated exactly like `titer_run_analysis` params — unknown/out-of-range keys are rejected naming the valid choices. A frozen analysis is refused ("unfreeze it with `titer_freeze_analysis`"); an orphaned analysis (its table was deleted) is refused — its params can't change. Same `await_result` / `await_seconds` semantics as `titer_run_analysis` (§5.2). This is the run path for method/wand-created analyses (see §11.3, now closed). |
 | `titer_freeze_analysis` | `project_id?`, `analysis_id`, `frozen` (boolean) | `{ project_id, analysis_id, frozen }`. A frozen result survives later data edits; unfreezing re-runs on next read. Undoable via `frozen: false` / `titer_undo`. |
 | `titer_simulate_data` | `project_id?`, `table_type` (`column` \| `grouped` \| `xy`), `distribution` (`gaussian` \| `lognormal` \| `uniform` \| `binomial` \| `poisson` \| `exponential`), `n` (values per dataset, ≥ 2), `datasets` (≥ 1), `seed` (integer), `mean?`/`sd?`, `meanlog?`/`sdlog?` (of the LOGGED values), `min?`/`max?`, `size?`/`prob?` (0–1), `lambda?`, `rate?` — flat args, no nested object; only the fields its distribution needs are read. | `{ project_id, table_id, rows, data_columns }` — the new table via `createSimulatedTable` ("Simulated data", numbered). `n`/`datasets`/`seed` must be whole numbers (20.0 is not one); the frontend validator (`validateSimulationSpec`, the same function the dialog uses) is the authority on ranges and per-distribution requirements, including the 100,000-value cap. Same seed + settings reproduces the table. Awaited (one webR round-trip), not polled. |
-| `titer_apply_method` | `project_id?`, `table_id`, `path` | `{ project_id, table_id, created: { analyses: string[], graphs: string[] } }` (+ `skipped` with reasons, `dropped_links` naming graph links to analyses that weren't applied). Applies a `.pzm` method file's analyses + graphs to the table (Rust reads the file — local paths only, `.pzm` required; the frontend parses it). Only what the table offers is applied. **The created analyses are nodes with params, not runs** — see the open item in §11. A method file with no analyses/graphs at all is an error; a method with some, none of which fit this table, is a successful no-op (`created` empty + `skipped`). |
-| `titer_apply_wand` | `project_id?`, `table_id`, `example_table_id`, `prefix?` | `{ project_id, table_id, created: { analyses: string[], graphs: string[] }, report }` — the existing `WandReport`. Analyse + graph this table like another table (one target table only). Example == target, example with no children, or target with no numeric data are reported as `skipped` entries, not errors. **Copied analyses are nodes with params, not runs** — see §11. |
+| `titer_apply_method` | `project_id?`, `table_id`, `path` | `{ project_id, table_id, created: { analyses: string[], graphs: string[] } }` (+ `skipped` with reasons, `dropped_links` naming graph links to analyses that weren't applied). Applies a `.pzm` method file's analyses + graphs to the table (Rust reads the file — local paths only, `.pzm` required; the frontend parses it). Only what the table offers is applied. **The created analyses are nodes with params, not runs** — run them with `titer_rerun_analysis` (§7; the §11.3 open item this closed in 1.7.4). A method file with no analyses/graphs at all is an error; a method with some, none of which fit this table, is a successful no-op (`created` empty + `skipped`). |
+| `titer_apply_wand` | `project_id?`, `table_id`, `example_table_id`, `prefix?` | `{ project_id, table_id, created: { analyses: string[], graphs: string[] }, report }` — the existing `WandReport`. Analyse + graph this table like another table (one target table only). Example == target, example with no children, or target with no numeric data are reported as `skipped` entries, not errors. **Copied analyses are nodes with params, not runs** — run them with `titer_rerun_analysis` (§7; the §11.3 open item this closed in 1.7.4). |
 | `titer_run_script` | `project_id?`, `script`, `confirm?` | `{ project_id, replaced: true, effects, effects_executed: false }` or `{ needs_confirm: true, warning }` (two-step confirm, §5.4). `script` is the script TEXT in Prism-script format (one command per line, `//` and `/* */` comments, `ForEach` loops with `%N`/`%S`, Prism coordinates: row 0 = title row, col −1 = row titles, col 0 = X, col ≥ 1 = Y sets). There is **no `path` form** — the UI dialog takes typed/pasted text, and so does this tool. The run replaces the current project content (tables, analyses, graphs, figures) as one Undo step; the old content survives as that Undo step but is not saved to disk. A run that hits an error changes nothing (the job errors with the log lines); a run that changes nothing applies no undo step. |
 
 **Script effects are reported, not executed.** `runScript` returns
@@ -526,18 +554,18 @@ explicit "Send to GitHub" click opens a pre-filled issue in the browser.
 
 | Group | Tools |
 |---|---|
-| Read / discovery (Phase 1 + L1) | 9 |
+| Read / discovery (Phase 1 + L1 + 1.7.4) | 12 |
 | Jobs (`titer_read_job`, `titer_list_jobs`, `titer_cancel_job`) | 3 |
 | Project / document | 5 |
 | Data tables | 9 |
-| Analyses (run + freeze + simulate + method + wand + script) | 6 |
+| Analyses (run + rerun + freeze + simulate + method + wand + script) | 7 |
 | Graphs / figures / info sheets | 7 |
 | Export | 4 |
 | Cloud | 9 |
-| **Total** | **52** |
+| **Total** | **56** |
 
-Annotations: 15 tools are `read_only_hint: true` (the 9 read tools +
-`read_job`/`list_jobs` + the 4 read-only cloud tools); the other 37
+Annotations: 18 tools are `read_only_hint: true` (the 12 read tools +
+`read_job`/`list_jobs` + the 4 read-only cloud tools); the other 38
 are mutating. `destructive_hint: true` on exactly six:
 `titer_write_table`, `titer_edit_table`, `titer_delete_node`,
 `titer_close_project`, `titer_run_script`, `titer_cloud_upload`.
@@ -554,7 +582,7 @@ The Phase 2 smoke runs against the **real server in a running Titer
 app** via a terminal CLI client (no Claude Desktop sign-in needed).
 It reads endpoint + token from `<app_data>/mcp/discovery.json`, speaks
 Streamable HTTP directly (initialize → tools/list → tools/call across
-all 52 tools), and prints a PASS/FAIL line per check; exit 0 only if
+all 56 tools), and prints a PASS/FAIL line per check; exit 0 only if
 every check passes. It drives one deterministic flow on a fresh project
 it creates itself (no fixture ids — the ids it needs come from the
 tools' own outputs), plus the `tests/testdata/survival.pzfx` public
@@ -564,7 +592,7 @@ fixture for the Prism-import step:
 2. `python3 scripts/smoke-test-mcp-phase2.py <app_data>/mcp/discovery.json [--out-dir <dir>]`
    (default out dir: a fresh temp dir; exports/saves land there).
 3. `initialize` (`protocolVersion 2025-11-25`), then
-   `notifications/initialized`, then `tools/list` — expect all 52
+   `notifications/initialized`, then `tools/list` — expect all 56
    tools, nothing else.
 4. Create a project → create an XY table → write data → summary with
    values → edit/rename/reorder/undo/redo/duplicate → simulate a
@@ -572,6 +600,13 @@ fixture for the Prism-import step:
 5. Run an analysis → poll `titer_read_job` until done → read the
    result via `titer_read_results` → freeze it. List jobs (recovery
    path); cancel an already-done job (reports `done`).
+5b. 1.7.4 tools on the same project: `titer_get_analysis_params`
+   (`anova` → `posthoc` lists `tukey`; `three-way-anova` carries its
+   table gate); `titer_search` (a hit by analysis type, a miss returns
+   `[]`); `titer_rerun_analysis` with `await_result: true` on the run
+   analysis (fast run returns `done` inline with the result);
+   `titer_project_summary` (counts one analysis after the rerun — no
+   duplicate node).
 6. Build a graph → update it → clone it → figure (create/update/read)
    → info sheet (create/update/read). Apply the wand from one table to
    another; apply a method file (missing-file error path — no fixture
@@ -615,7 +650,7 @@ are expected to differ until the `buildGraphFigure` follow-up (§10.1).
 
 The in-process Rust smoke (`mcp_smoke_job_plumbing_over_http` in
 `src-tauri/src/mcp.rs`) is the other half: it asserts `tools/list`
-returns exactly 52 tools and drives the job plumbing + project/table/
+returns exactly 56 tools and drives the job plumbing + project/table/
 analysis/cloud/graph/composite/export tools over real HTTP with a
 completer task standing in for the frontend dispatcher. It does not
 replace the live smoke above (window-making tools fail plainly
@@ -629,7 +664,7 @@ end).
 - Never add tools, prompts or resources of its own in front of the
   server: the bridge is a transport, not a server. It forwards stdio ↔
   Streamable HTTP and nothing else. It forwards whatever tools the
-  server lists — the 52 Phase 2 tools appear automatically via
+  server lists — the 56 Phase 2 + 1.7.4 tools appear automatically via
   `tools/list`; no bridge change was needed for Phase 2.
 - Never widen the bind (no `0.0.0.0`, no port forwarding, no tunnel).
 - Never log the token or table values.
@@ -640,14 +675,13 @@ end).
 
 ### 11.3 Open items (not decided by this contract)
 
-1. **No MCP run path for method/wand-created analyses.** Method/wand
-   create analysis *nodes* (params, not runs). `titer_run_analysis`
-   always creates a NEW analysis node; there is no "run this existing
-   analysis" tool. An agent that applies a method/wand and then wants
-   the results computed must re-create the analyses via
-   `titer_run_analysis`. Either a `titer_rerun_analysis`-style tool or
-   an auto-run option on apply is a follow-up decision for the scope
-   coordinator — this contract documents current behaviour only.
+1. **No MCP run path for method/wand-created analyses — CLOSED in
+   1.7.4.** Method/wand create analysis *nodes* (params, not runs).
+   `titer_rerun_analysis` (new in 1.7.4) runs an existing analysis
+   node — including a method/wand-created one — with optional param
+   overrides, in the same async job shape as `titer_run_analysis`.
+   `titer_run_analysis` still always creates a NEW node; the two tools
+   are the create-path and the re-run-path respectively.
 2. **Refused local-to-existing-remote upload.** `titer_cloud_upload`
    for a *local* project to an *existing* remote file is refused (no
    seen version to condition on). Enabling it needs an explicit
