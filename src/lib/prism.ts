@@ -435,6 +435,52 @@ const NONLINEAR_MODELS: Record<string, NonlinearModel> = {
   "Linear quadratic cell death (Y is fraction of dead cells)": "lq-fraction-dead",
   "Linear quadratic survival (Y is percentage cells dead)": "lq-percent-dead",
   "Linear quadratic survival (Y is # dead cells)": "lq-count-dead",
+  // 1.8 classic-curves completion (B6 coverage sweep): verbatim Model-tab
+  // names whose equation already ships as a single-curve model but had no
+  // reader key — the pre-existing models were mapped only under the name
+  // Prism writes in .prism files, which differs from the Model-tab name
+  // (e.g. "Straight line" for "Line", "One phase decay" for "One phase
+  // exponential decay"). Only names that are the same equation are added:
+  // the separate-analysis models (binding saturation/kinetics, enzyme
+  // inhibition, dose-response special) are NOT single-curve models and
+  // stay out of this map. ("Line", "Gaussian" and "Lognormal" are already
+  // keys above, unquoted — do not repeat them here.)
+  "Semilog line": "semilog-line",
+  "Hyperbola (X is concentration)": "hyperbola",
+  "One site binding (hyperbola)": "hyperbola",
+  "Asymmetric Sigmoidal, 5PL, X is log(concentration)": "asymmetric-5pl-logx",
+  "Asymmetric Sigmoidal, 5PL, X is concentration": "asymmetric-5pl-x",
+  "Asymmetric (five parameter), X is log(concentration)": "asymmetric-5pl-logx",
+  "Asymmetric (five parameter), X is concentration": "asymmetric-5pl-x",
+  "log(agonist) vs. response (three parameters)": "agonist-3pl-logx",
+  "[Agonist] vs. response -- Variable slope (four parameters)": "sigmoidal-4pl-x",
+  "log(inhibitor) vs. response (three parameters)": "inhibitor-3pl-logx",
+  "[Inhibitor] vs. response -- Variable slope (four parameters)": "sigmoidal-4pl-x",
+  "Gaussian distribution": "gaussian",
+  "Boltzmann sigmoidal": "boltzmann-sigmoid",
+  "Exponential growth equation": "exponential-growth",
+  "Exponential (Malthusian) growth": "exponential-growth",
+  "Exponential growth": "exponential-growth",
+  "Gompertz growth": "gompertz-growth",
+  "Logistic growth": "logistic-growth",
+  "Plateau followed by one phase decay": "plateau-decay",
+  "Michaelis-Menten": "michaelis-menten",
+  "Allosteric sigmoidal": "allosteric-sigmoidal",
+  "Substrate inhibition": "substrate-inhibition",
+  "Sigmoidal dose-response": "agonist-3pl-logx",
+  "Sigmoidal dose-response (variable slope)": "sigmoidal-4pl-logx",
+  "One site competition": "inhibitor-3pl-logx",
+  "Two site competition": "two-site-competition-logx",
+  "One site - Fit logIC50": "inhibitor-3pl-logx",
+  "Two sites - Fit logIC50": "two-site-competition-logx",
+  "One site -- Homologous": "homologous-competition-logx",
+  "One phase exponential decay": "one-phase-decay",
+  "Two phase exponential decay": "two-phase-decay",
+  "One phase exponential association": "one-phase-association",
+  "Two phase exponential association": "two-phase-association",
+  "Polynomial: Second Order (Y=A + B*X + C*X^2)": "quadratic",
+  "Polynomial: Third Order (Y=A + B*X + C*X^2 + D*X^3)": "cubic",
+  "Polynomial: Fourth Order (Y=A + B*X + C*X^2 + D*X^3 + E*X^4)": "quartic",
 };
 
 const genId = (type: string) => `${type}_${Math.random().toString(36).slice(2, 10)}`;
