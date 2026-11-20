@@ -81,7 +81,14 @@ export const logYOnly = (model: NonlinearModel) =>
   // the graph check below must compare log residuals, not raw ones.
   model === "user-defined" ? false : modelSpec(model).logY === true;
 export const nonNegativeXOnly = (model: NonlinearModel) =>
+  // The fit drops X < 0 points (pade-11, power-series, the LQ family):
+  // the graph check must skip them too, or it compares the drawn curve
+  // against R's Sum of squares over a different point set.
   model === "user-defined" ? false : modelSpec(model).nonNegativeX === true;
+export const positiveYOnly = (model: NonlinearModel) =>
+  // The fit drops Y <= 0 points (the log-Y models): same skip, and it
+  // keeps Math.log(y) off non-positive values in the log-Y branch.
+  model === "user-defined" ? false : modelSpec(model).positiveY === true;
 
 /** A parameter as results name it (its name in the equations otherwise). */
 const TERM_LABEL: Record<string, string> = { HillSlope: "Hill slope", S: "Asymmetry (S)" };

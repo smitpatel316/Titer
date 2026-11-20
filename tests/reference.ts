@@ -31,7 +31,13 @@ import { R_MAXIMUM_T } from "../src/stats/column/anova";
 import { R_GRUBBS } from "../src/stats/column/rout";
 import { addFittedCurves, evaluate as doseCurveAt, logisticAt } from "../src/views/graphs/fitted-curve";
 import { NONLINEAR_MODELS, type NonlinearModel } from "../src/stats/types";
-import { invertModel, logYOnly, positiveXOnly } from "../src/stats/xy/nonlinear-regression";
+import {
+  invertModel,
+  logYOnly,
+  nonNegativeXOnly,
+  positiveXOnly,
+  positiveYOnly,
+} from "../src/stats/xy/nonlinear-regression";
 import { ensurePackages, evalNamedVector, setPackageRepo, startR } from "../src/stats/webr";
 import { computeFrequencyBins, prettyBreaks } from "../src/stats/column/frequency-distribution";
 import { simulateTableData } from "../src/stats/simulation/simulate";
@@ -4180,6 +4186,18 @@ async function disagreements(): Promise<string[]> {
     "exponential-growth": [growth],
     "one-phase-decay": [decay],
     "michaelis-menten": [enzyme],
+    // 1.8 classic curves: the generic fallback is the wrong shape for
+    // these — doseLog's sigmoid cannot be a three-phase decay or a
+    // two-phase association (port convergence errors), has too few
+    // X >= 0 points for a power series and too few X > 0 for a
+    // lognormal, and a cumulative-Gaussian fraction on it is a
+    // singular-convergence failure. Each runs on its own fixture.
+    "three-phase-decay": [classicB6X, "D3"],
+    "two-phase-association": [classicB6X, "A2"],
+    "cumulative-gaussian-fraction": [classicB6X, "CF"],
+    "power-series": [growthB6X, "PS"],
+    lognormal: [lognormX, "LN"],
+    "pade-11": [growthB6X, "PD"],
     // The user-defined model needs its equation and starting values — without
     // them the fit is refused by design, so it runs on its own fixture with
     // the same equation and starts the checks.ts user-defined check uses.
@@ -4212,7 +4230,11 @@ async function disagreements(): Promise<string[]> {
     // drawn curve itself either way).
     const logY = logYOnly(model);
     const ss = pairs.x.reduce((sum, x, i) => {
+      // Skip the points the fit dropped (X <= 0 / X < 0 / Y <= 0),
+      // or the SS is over a different point set than R's.
       if (positiveXOnly(model) && x <= 0) return sum;
+      if (nonNegativeXOnly(model) && x < 0) return sum;
+      if (positiveYOnly(model) && pairs.y[i] <= 0) return sum;
       const curve = doseCurveAt(model, r.coefficients!, x, extra?.ligandConcentration, extra?.customEquation);
       const d = logY ? Math.log(pairs.y[i]) - Math.log(curve) : pairs.y[i] - curve;
       return sum + d * d;
