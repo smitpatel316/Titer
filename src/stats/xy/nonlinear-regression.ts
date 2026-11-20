@@ -75,6 +75,11 @@ export const positiveXOnly = (model: NonlinearModel) =>
   // v2 item 23: a user equation has no X restriction, and its spec cannot be built
   // without the equation — never call modelSpec on it bare.
   model === "user-defined" ? false : modelSpec(model).positiveX === true;
+export const logYOnly = (model: NonlinearModel) =>
+  // The fit is on log(Y) (semilog-y-log, log-log-line,
+  // exponential-growth-log): R's Sum of squares is on the log scale, so
+  // the graph check below must compare log residuals, not raw ones.
+  model === "user-defined" ? false : modelSpec(model).logY === true;
 export const nonNegativeXOnly = (model: NonlinearModel) =>
   model === "user-defined" ? false : modelSpec(model).nonNegativeX === true;
 

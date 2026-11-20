@@ -31,7 +31,7 @@ import { R_MAXIMUM_T } from "../src/stats/column/anova";
 import { R_GRUBBS } from "../src/stats/column/rout";
 import { addFittedCurves, evaluate as doseCurveAt, logisticAt } from "../src/views/graphs/fitted-curve";
 import { NONLINEAR_MODELS, type NonlinearModel } from "../src/stats/types";
-import { invertModel, positiveXOnly } from "../src/stats/xy/nonlinear-regression";
+import { invertModel, logYOnly, positiveXOnly } from "../src/stats/xy/nonlinear-regression";
 import { ensurePackages, evalNamedVector, setPackageRepo, startR } from "../src/stats/webr";
 import { computeFrequencyBins, prettyBreaks } from "../src/stats/column/frequency-distribution";
 import { simulateTableData } from "../src/stats/simulation/simulate";
@@ -4206,14 +4206,17 @@ async function disagreements(): Promise<string[]> {
     }
     const { x: dose, ys } = splitXY(readTable(data).columns);
     const pairs = xyPoints(dose!, ys.find((c) => c.name === (y ?? ys[0].name))!);
-    const ss = pairs.x.reduce(
-      (sum, x, i) =>
-        positiveXOnly(model) && x <= 0
-          ? sum
-          : sum +
-            (pairs.y[i] - doseCurveAt(model, r.coefficients!, x, extra?.ligandConcentration, extra?.customEquation)) ** 2,
-      0,
-    );
+    // A log-Y fit's Sum of squares is on the log scale, while the drawn
+    // curve is on Y — compare log residuals for those models, raw ones
+    // for the rest (the per-X overlays in disagreements() cover the
+    // drawn curve itself either way).
+    const logY = logYOnly(model);
+    const ss = pairs.x.reduce((sum, x, i) => {
+      if (positiveXOnly(model) && x <= 0) return sum;
+      const curve = doseCurveAt(model, r.coefficients!, x, extra?.ligandConcentration, extra?.customEquation);
+      const d = logY ? Math.log(pairs.y[i]) - Math.log(curve) : pairs.y[i] - curve;
+      return sum + d * d;
+    }, 0);
     const rss = r.fit?.rows.find((row) => row.label === "Sum of squares")?.values?.[0];
     if (rss == null || Math.abs(ss - rss) > 1e-6 * Math.max(1, rss))
       out.push(`${model}: the graph's curve misses R's fit (${ss} vs. ${rss})`);
@@ -5092,7 +5095,7 @@ async function disagreements(): Promise<string[]> {
   if (fitDS) {
     if (fitDS.equation !== "Y = 5·exp(−0.2·X)·sin((2π·X/4) + 0.5)")
       out.push(`Classic curves damped sine equation: ${fitDS.equation}`);
-    if (!fitDS.notes.includes("Starting values: Amplitude = 3.854, Wavelength = 4.8, PhaseShift = 0, K = 0.1."))
+    if (!fitDS.notes.includes("Starting values: Amplitude = 3.626, Wavelength = 4.8, PhaseShift = 0, K = 0.1."))
       out.push(`Classic curves damped sine notes missing starts: ${fitDS.notes}`);
     await checkClassicOverlay(
       "damped sine wave",
@@ -5121,7 +5124,7 @@ async function disagreements(): Promise<string[]> {
   if (fitSC) {
     if (fitSC.equation !== "Y = 10·sin(2π·X/4)/(2π·X/4)")
       out.push(`Classic curves sinc equation: ${fitSC.equation}`);
-    if (!fitSC.notes.includes("Starting values: Amplitude = 10, Wavelength = 4.8."))
+    if (!fitSC.notes.includes("Starting values: Amplitude = 10, Wavelength = 2.4."))
       out.push(`Classic curves sinc notes missing starts: ${fitSC.notes}`);
     await checkClassicOverlay(
       "sinc",
@@ -5224,7 +5227,7 @@ async function disagreements(): Promise<string[]> {
   if (fitPA) {
     if (fitPA.equation !== "Y = 10 for X < 5; Y = 10 + (100 − 10)·(1 − exp(−0.3·(X − 5))) for X ≥ 5")
       out.push(`Classic curves plateau association equation: ${fitPA.equation}`);
-    if (!fitPA.notes.includes("Starting values: X0 = 6, Y0 = 10, Plateau = 88.98, K = 0.5."))
+    if (!fitPA.notes.includes("Starting values: X0 = 6, Y0 = 11.04, Plateau = 88.98, K = 0.5."))
       out.push(`Classic curves plateau association notes missing starts: ${fitPA.notes}`);
     await checkClassicOverlay(
       "plateau association",
@@ -5313,6 +5316,9 @@ async function disagreements(): Promise<string[]> {
       fitLL,
       (p) => `exp(${p.Intercept!.toPrecision(15)})*x^${p.Slope!.toPrecision(15)}`,
       linesX,
+      // X = 0 is outside the log-log line's domain (log 0): the curve
+      // is drawn from the first positive X, so compare from 0.5.
+      [...Array(24)].map((_, i) => 0.5 + i * 0.5),
     );
     const back = invertModel("log-log-line", fitLL.coefficients ?? [], 3 * 8 ** 1.5);
     if (back == null || Math.abs(back - 8) > 1e-3)

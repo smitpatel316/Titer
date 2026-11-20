@@ -14,22 +14,22 @@ function coef(coefficients: RegressionCoefficient[], term: string): number {
   return coefficients.find((c) => c.term === term)?.estimate ?? NaN;
 }
 
-/** The error function, Abramowitz–Stegun 7.1.26 (|ε| < 1.5e-7) — the
- *  cumulative-Gaussian overlay needs Φ(z) = ½(1 + erf(z/√2)); R's pnorm
- *  is exact, this is only for drawing the curve. */
-function erf(x: number): number {
-  const sign = x < 0 ? -1 : 1;
-  const ax = Math.abs(x);
-  const t = 1 / (1 + 0.3275911 * ax);
-  const y =
-    1 -
-    (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t) *
-      Math.exp(-ax * ax);
-  return sign * y;
-}
-
-/** The standard normal CDF Φ(z). */
-const pnorm = (z: number): number => 0.5 * (1 + erf(z / Math.SQRT2));
+/** The standard normal CDF Φ(z), by Simpson integration of the density
+ *  from −10 (Φ(−10) ≈ 8e-24) — accurate to ~1e-10, where the
+ *  Abramowitz–Stegun erf (|ε| < 1.5e-7) left the cumulative-Gaussian
+ *  overlay ~6e-6 off R's exact pnorm on the percent scale, over the
+ *  overlay's 1e-6 tolerance. Drawing-only, like the erf was. */
+const pnorm = (z: number): number => {
+  if (z <= -10) return 0;
+  if (z >= 10) return 1;
+  const a = -10;
+  const n = 2000;
+  const h = (z - a) / n;
+  const pdf = (t: number) => Math.exp(-(t * t) / 2);
+  let s = pdf(a) + pdf(z);
+  for (let i = 1; i < n; i++) s += (i % 2 === 0 ? 2 : 4) * pdf(a + i * h);
+  return (s * h) / 3 / Math.sqrt(2 * Math.PI);
+};
 
 /** The fitted curve at `x`: the model's equation (nonlinear-regression.ts) with its coefficients.
  *  The homologous model also needs the radioligand concentration [L] (its
