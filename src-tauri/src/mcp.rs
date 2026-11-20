@@ -5121,7 +5121,8 @@ impl TiterMcpServer {
         &self,
         Parameters(args): Parameters<FreezeTableArgs>,
     ) -> Result<Json<serde_json::Value>, String> {
-        let freeze_args = serde_json::json!({ "project_id": args.project_id, "table_id": args.table_id, "frozen": args.frozen });
+        let freeze_args =
+            serde_json::json!({ "project_id": args.project_id, "table_id": args.table_id, "frozen": args.frozen });
         let result: Result<serde_json::Value, String> = async {
             let project_id = self.state.resolve_project(args.project_id.as_deref())?;
             {
