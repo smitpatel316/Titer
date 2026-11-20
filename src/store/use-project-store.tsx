@@ -1068,7 +1068,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           },
         });
         return id;
-      };
+      },
       setGraphSources: (id, sourceTableIds) =>
         dispatch({ type: "setGraphSources", id, sourceTableIds, at: Date.now() }),
       applyWand: (exampleId, targetIds, prefix) => {
