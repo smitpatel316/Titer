@@ -229,6 +229,8 @@ INTERFACE_TO_TYPE = {
     "SplineLowess": "spline-lowess",
     "SmoothDifferentiateIntegrate": "smooth-differentiate-integrate",
     "ChiSquare": "chi-square",
+    "ChiSquareGof": "chi-square-gof",
+    "BinomialTest": "binomial-test",
     "McNemar": "mcnemar",
     "Outliers": "outliers",
     "PValueStack": "p-value-stack",
@@ -330,8 +332,12 @@ IDX = read("src/stats/index.ts")
 ANALYSES = {}
 for m in re.finditer(r'"?([\w-]+)"?:\s*\{\s*label:\s*"([^"]+)",(.*?)\bminColumns:\s*(\d+)', IDX, re.S):
     typ, label, _mid, min_cols = m.group(1), m.group(2), m.group(3), int(m.group(4))
-    # requiredPackages follows minColumns in the entry; look just past it.
-    pkgs_m = re.search(r"requiredPackages:\s*(\[[^\]]*\])", IDX[m.end():m.end() + 300])
+    # requiredPackages follows minColumns in the entry; look just past it —
+    # but never past the entry's own closing brace, or the NEXT entry's
+    # packages leak in (mcnemar, cox and chi-square used to carry survival's).
+    tail = IDX[m.end():m.end() + 300]
+    tail = re.split(r" \}|\n  \},", tail, maxsplit=1)[0]
+    pkgs_m = re.search(r"requiredPackages:\s*(\[[^\]]*\])", tail)
     pkgs = pkgs_m.group(1) if pkgs_m else None
     ANALYSES[typ] = {"label": label, "min_columns": min_cols,
                      "packages": json.loads(pkgs.replace("'", '"')) if pkgs else []}
@@ -438,6 +444,8 @@ RUNNER_FALLBACKS = {
     ("mixed-effects", "randomStructure"): "intercept",
     ("poisson-regression", "quasi"): False,
     ("three-way-anova", "posthoc"): "none",
+    ("chi-square-gof", "expectedMode"): "equal",
+    ("binomial-test", "expectedProportion"): 0.5,
 }
 
 # Numeric limits the PARAMS table does not carry.
@@ -476,6 +484,7 @@ KIND_TO_TYPE = {
     "number": ("number", None),
     "name": ("string", None),
     "names": ("string[]", None),
+    "numbers": ("number[]", None),
     "name-or-names": ("string | string[]", None),
     "name-or-number": ("string | number", None),
     "name-and-names": ("object", "object with { name: string, levels: string[] }"),
@@ -557,8 +566,8 @@ for typ, keys in sorted(KEYS_BY_TYPE.items()):
         out["gates"] = GATES[typ]
     schema[typ] = out
 
-# Sanity: 55 types (54 + p-value-stack, seq 190), every key accounted for, offered_on non-empty.
-assert len(schema) == 55, f"{len(schema)} types, expected 55"
+# Sanity: 57 types (54 + p-value-stack seq 190 + chi-square-gof + binomial-test seq 195), every key accounted for, offered_on non-empty.
+assert len(schema) == 57, f"{len(schema)} types, expected 57"
 for typ, entry in schema.items():
     assert entry["offered_on"], f"{typ} offered on no table type"
     assert entry["min_columns"] is not None, f"{typ} has no min_columns"

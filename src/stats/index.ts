@@ -10,6 +10,8 @@ import type {
   RemoveBaselineParams,
   BindingKineticsParams,
   BindingSaturationParams,
+  BinomialTestParams,
+  ChiSquareGofParams,
   ChiSquareParams,
   CorrelationParams,
   CoxPHParams,
@@ -92,6 +94,8 @@ import { runPrincipalComponentAnalysis } from "./multiple/principal-component-an
 import { runKMeans } from "./multiple/k-means";
 import { runHierarchicalClustering } from "./multiple/hierarchical-clustering";
 import { runChiSquare } from "./contingency/chi-square";
+import { runChiSquareGof } from "./contingency/chi-square-gof";
+import { runBinomialTest } from "./contingency/binomial-test";
 import { runSurvival } from "./survival/survival-analysis";
 import { runCox } from "./survival/cox-regression";
 import { runMcNemar } from "./contingency/mcnemar";
@@ -351,6 +355,16 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     label: "Chi-square or Fisher's exact test",
     minColumns: 2,
     run: (c, p) => runChiSquare(c, p as ChiSquareParams),
+  },
+  "chi-square-gof": {
+    label: "Chi-square goodness of fit",
+    minColumns: 1,
+    run: (c, p, t) => runChiSquareGof(c, p as ChiSquareGofParams, t),
+  },
+  "binomial-test": {
+    label: "Binomial test",
+    minColumns: 1,
+    run: (c, p, t) => runBinomialTest(c, p as BinomialTestParams, t),
   },
   mcnemar: { label: "McNemar's test", minColumns: 2, run: (c, p) => runMcNemar(c, p as McNemarParams) },
   survival: {

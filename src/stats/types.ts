@@ -41,6 +41,8 @@ export type AnalysisType =
   | "outliers"
   | "p-value-stack"
   | "chi-square"
+  | "chi-square-gof"
+  | "binomial-test"
   | "survival"
   | "cox"
   | "mcnemar"
@@ -921,6 +923,32 @@ export interface McNemarParams {
   continuityCorrection?: boolean;
 }
 
+/** How "chi-square-gof" takes its expected values: "equal" (the same for
+ *  every category), "counts" (the expected counts, which must add up to the
+ *  observed total — fractional values are fine, as in Prism), or "percent"
+ *  (percentages, which must add up to 100). */
+export const GOF_EXPECTED_MODES = ["equal", "counts", "percent"] as const;
+export type GofExpectedMode = (typeof GOF_EXPECTED_MODES)[number];
+
+/** Params for "chi-square-gof" (Column table): the observed counts live in
+ *  one data set (`sets`, the wizard's choice — omitted: the table's only
+ *  data column), and the expected distribution is either equal for every
+ *  category or given per category, in row order, as counts or percentages. */
+export interface ChiSquareGofParams {
+  expectedMode?: GofExpectedMode;
+  /** One per category, in row order — expected counts (`counts`) or
+   *  percentages (`percent`); ignored for "equal". */
+  expectedValues?: number[];
+}
+
+/** Params for "binomial-test" (Column table): the observed counts live in
+ *  one data set (`sets` — omitted: the table's only data column), two rows
+ *  only, and the first row's expected proportion under the null. */
+export interface BinomialTestParams {
+  /** The first category's expected proportion (0–1); omitted: 0.5 (equal). */
+  expectedProportion?: number;
+}
+
 /** Params for "outliers" (Column table): ROUT-style outlier detection — each
  *  column is fit independently to a robust mean, and residuals are flagged
  *  outliers when their FDR-adjusted P falls below Q (Prism's "Q%", the
@@ -1358,6 +1386,8 @@ export type AnalysisParams = DataSetsParam &
     | CoxPHParams
     | MixedEffectsParams
     | ChiSquareParams
+    | ChiSquareGofParams
+    | BinomialTestParams
     | McNemarParams
     | OutliersParams
     | PValueStackParams
@@ -1594,6 +1624,17 @@ export interface PrunedRowsResult {
   columns: string[];
   kept: PrunedRowsRow[];
   pruned: PrunedRowsRow[];
+}
+
+/** One category of a "chi-square-gof" result: its observed count, the count
+ *  the expected distribution predicts, and its share of the chi-square
+ *  statistic, (O − E)² / E. `category` is the row title, or the row number
+ *  when the table has none. */
+export interface GoodnessOfFitCategoryRow {
+  category: string;
+  observed: number;
+  expected: number;
+  contribution: number;
 }
 
 /** One divided value ("fraction-of-total"): the original value, the total
@@ -2059,6 +2100,9 @@ export interface AnalysisResult {
   /** Optional kept and pruned rows ("prune-rows"): the kept rows, then
    *  the pruned rows listed so what was dropped stays visible. */
   prunedRows?: PrunedRowsResult;
+  /** Optional per-category observed vs. expected counts ("chi-square-gof"):
+   *  one row per category, with its share of the chi-square statistic. */
+  gofCategories?: GoodnessOfFitCategoryRow[];
   /** Optional per-column divided values ("fraction-of-total"): one table
    *  per column, each with the total divided by recorded. */
   fractionsOfTotal?: FractionOfTotalColumn[];

@@ -542,6 +542,24 @@ export function AnalysisResultsView({
         </>
       )}
 
+      {result.gofCategories && result.gofCategories.length > 0 && (
+        <Table
+          title="Observed vs. expected counts"
+          columns={[
+            { label: "Category" },
+            { label: "Observed", numeric: true },
+            { label: "Expected", numeric: true },
+            { label: "(O − E)² / E", numeric: true },
+          ]}
+          rows={result.gofCategories.map((r) => [
+            r.category,
+            num(r.observed),
+            num(r.expected),
+            num(r.contribution),
+          ])}
+        />
+      )}
+
       {result.fractionsOfTotal?.map((col) => {
         const hasX = col.rows.some((r) => r.x !== undefined);
         return (

@@ -2084,6 +2084,47 @@ const contingencyFractional = table(
     ["Dose 4", "14", "6"],
   ],
 );
+/** Chi-square goodness of fit + binomial test (seq 195): one column of
+ *  observed counts, one category per row. The die (100 rolls, equal
+ *  expectation: χ² = 1.4, P = 0.9243) and Mendel's 9:3:3:1 peas (315:101:
+ *  108:32 of 556: χ² = 0.4700, P = 0.9254); the coin (8 heads of 10) for
+ *  the binomial test, and the error paths (three categories for the
+ *  binomial, percentages that don't add up to 100 for the GOF). */
+const gofDie = table(
+  ["Title", "Rolls"],
+  [
+    ["1", "16"],
+    ["2", "18"],
+    ["3", "14"],
+    ["4", "20"],
+    ["5", "17"],
+    ["6", "15"],
+  ],
+);
+const gofMendel = table(
+  ["Title", "Peas"],
+  [
+    ["Round yellow", "315"],
+    ["Wrinkled yellow", "101"],
+    ["Round green", "108"],
+    ["Wrinkled green", "32"],
+  ],
+);
+const binomCoin = table(
+  ["Title", "Flips"],
+  [
+    ["Heads", "8"],
+    ["Tails", "2"],
+  ],
+);
+const binomThree = table(
+  ["Title", "Counts"],
+  [
+    ["A", "8"],
+    ["B", "2"],
+    ["C", "5"],
+  ],
+);
 /** An XY table whose X column is still empty. */
 const xyNoX = table(
   ["Title", "X", "Y1", "Y2"],
@@ -2935,6 +2976,18 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["contingency3", contingency3, "mcnemar"],
   ["mcnemarNoDiscordant", mcnemarNoDiscordant, "mcnemar"],
   ["contingencyFractional", contingencyFractional, "chi-square", { trendOrdered: true }],
+  // Chi-square goodness of fit + binomial test (seq 195): the die on equal
+  // proportions (default), Mendel's peas on entered counts and on
+  // percentages (same statistic both ways), the coin on the 0.5 default
+  // and on a 0.6 null, and the error paths (three categories for the
+  // binomial test, percentages that don't add up to 100 for the GOF).
+  ["gofDie", gofDie, "chi-square-gof"],
+  ["gofMendel", gofMendel, "chi-square-gof", { expectedMode: "counts", expectedValues: [312.75, 104.25, 104.25, 34.75] }],
+  ["gofMendel", gofMendel, "chi-square-gof", { expectedMode: "percent", expectedValues: [56.25, 18.75, 18.75, 6.25] }],
+  ["gofDie", gofDie, "chi-square-gof", { expectedMode: "percent", expectedValues: [20, 20, 20, 10, 10, 10] }],
+  ["binomCoin", binomCoin, "binomial-test"],
+  ["binomCoin", binomCoin, "binomial-test", { expectedProportion: 0.6 }],
+  ["binomThree", binomThree, "binomial-test"],
   ["xyNoX", xyNoX, "linear-regression", { forceOrigin: false }],
   ["xyNoX", xyNoX, "correlation", { method: "pearson", mode: "x-vs-every-y" }],
   // On the data sets chosen, in their order.

@@ -2,7 +2,7 @@
 // step, each answer choosing the next question. A wizard only declares its questions
 // and how the answers make the test's params; analysis-wizard.tsx asks them.
 // A test without an entry here runs as soon as it is picked.
-import { DOSE_MODELS, CONCENTRATION_UNITS, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, fdrQError, isFdrPValueMethod, pValueAlphaError, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel, type PValueStackParams } from "../../stats/types";
+import { DOSE_MODELS, CONCENTRATION_UNITS, GOF_EXPECTED_MODES, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, fdrQError, isFdrPValueMethod, pValueAlphaError, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel, type PValueStackParams } from "../../stats/types";
 import type { PlotFunctionExtra, PlotFunctionModel } from "../../stats/types";
 import {
   PLOT_FUNCTION_DEFAULTS,
@@ -33,6 +33,7 @@ import type {
   AnalysisType,
   BindingKineticsParams,
   BindingSaturationParams,
+  ChiSquareGofParams,
   ChiSquareParams,
   CompareTwoGroupsParams,
   CorrelationParams,
@@ -123,6 +124,25 @@ export interface Wizard {
   questions: (a: Answers, table: Dataset, type?: TableType, rowGroups?: RowGroup[]) => (Question | false)[];
   /** The test to create, once every question is answered. */
   finish: (a: Answers, table: Dataset, type?: TableType) => { type: AnalysisType; params?: AnalysisParams };
+}
+
+/** Parse a comma-separated list of expected values (chi-square goodness of
+ *  fit): every entry a finite number above 0 — a category the theory says
+ *  never occurs can't be tested this way (the runner says so too, and also
+ *  checks the counts add up to the observed total, the percentages to 100). */
+export function parseExpectedValues(text: string): { values: number[]; error?: string } {
+  const entries = text
+    .split(",")
+    .map((e) => e.trim())
+    .filter((e) => e !== "");
+  if (!entries.length)
+    return { values: [], error: "Enter the expected values, one per category, separated by commas." };
+  const bad = entries.find((e) => !Number.isFinite(Number(e)));
+  if (bad !== undefined)
+    return { values: [], error: `“${bad}” is not a number — enter the expected values separated by commas.` };
+  const values = entries.map(Number);
+  if (values.some((v) => v <= 0)) return { values: [], error: "Every expected value must be above 0." };
+  return { values };
 }
 
 /** Parse the spline's spar field: blank = automatic (GCV), otherwise a number
@@ -410,6 +430,21 @@ const someSets = (table: Dataset, min: number): Question[] => {
   if (sets.length <= min) return [];
   const ask = min > 1 ? `Choose the data sets to analyze (at least ${min}).` : "Choose the data sets to analyze.";
   return [{ id: "sets", ask, kind: "names", options: sets, min }];
+};
+
+/** The one data set a test reads, asked as a single choice only when there
+ *  is a choice: the observed-vs-expected tests (chi-square goodness of fit,
+ *  the binomial test) read exactly one data set — `someSets` would let the
+ *  user tick two and the runner would have to refuse them. */
+const oneSet = (table: Dataset): Question | false => {
+  const sets = setNames(table);
+  return sets.length > 1 && choice("set", "Which data set holds the observed counts?", names(sets));
+};
+
+/** `params` with the one data set answered (`oneSet` above). */
+const withOneSet = <P extends object>(a: Answers, params?: P) => {
+  const set = a.set as string | undefined;
+  return set !== undefined ? { ...params, sets: [set] } : params;
 };
 
 /** The answers of the data set questions `wizard` asks first, given the data sets to analyze
@@ -4272,6 +4307,75 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ...(a.test !== undefined ? { test: a.test as ChiSquareParams["test"] } : {}),
         trendOrdered: a.trendOrdered === "yes",
       },
+    }),
+  },
+
+  "chi-square-gof": {
+    questions: (a, table) => {
+      const mode = a.expectedMode as string | undefined;
+      return [
+        oneSet(table),
+        // "Equal" comes first: the wizard pre-selects the first option, so
+        // the equal-proportions run is the default, as in Prism. The options
+        // come from GOF_EXPECTED_MODES, so the wizard can never offer a mode
+        // the runner refuses.
+        choice(
+          "expectedMode",
+          "What distribution should the observed counts be compared with?",
+          GOF_EXPECTED_MODES.map(
+            (m): [string, string] => [
+              m,
+              {
+                equal: "Equal proportions — every category expected equally often",
+                counts: "Expected counts — enter one per category",
+                percent: "Expected percentages — enter one per category (they must add up to 100)",
+              }[m],
+            ],
+          ),
+        ),
+        (mode === "counts" || mode === "percent") && {
+          id: "expectedValues",
+          ask:
+            mode === "counts"
+              ? "Enter the expected counts, one per category in row order, separated by commas."
+              : "Enter the expected percentages, one per category in row order, separated by commas (they must add up to 100).",
+          kind: "text",
+          label: mode === "counts" ? "Expected counts" : "Expected percentages",
+          initial: "",
+          placeholder: "25, 25, 25, 25",
+          parse: (text: string) => parseExpectedValues(text),
+        },
+      ];
+    },
+    finish: (a) => ({
+      type: "chi-square-gof",
+      params: withOneSet(a, {
+        expectedMode: (a.expectedMode as ChiSquareGofParams["expectedMode"] | undefined) ?? "equal",
+        ...(a.expectedMode === "counts" || a.expectedMode === "percent"
+          ? { expectedValues: parseExpectedValues((a.expectedValues as string | undefined) ?? "").values }
+          : {}),
+      }),
+    }),
+  },
+
+  "binomial-test": {
+    questions: (_, table) => [
+      oneSet(table),
+      {
+        id: "expectedProportion",
+        ask: "What proportion do you expect in the first category (the first row)?",
+        kind: "number",
+        label: "Expected proportion (0–1)",
+        initial: 0.5,
+        min: 0,
+        max: 1,
+        validate: (v) =>
+          v >= 0 && v <= 1 ? undefined : "Enter a proportion between 0 and 1.",
+      },
+    ],
+    finish: (a) => ({
+      type: "binomial-test",
+      params: withOneSet(a, { expectedProportion: a.expectedProportion as number }),
     }),
   },
 
