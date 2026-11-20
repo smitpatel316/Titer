@@ -1395,7 +1395,10 @@ function ownStyle(context: SectionContext): React.ReactNode {
     />
   );
   const points = GRAPHS[graphType].points?.(options) && pointsGroup(context);
-  // Each row's groups side by side, or each group's rows in a block of its own.
+  // Each row's groups side by side, each group's rows in a block of its own,
+  // or every group's bar from the axis at the same x (Superimposed — a
+  // taller bar hides a shorter one behind it unless the fill is
+  // semi-transparent, so the Fill slider matters there).
   const groups = (
     <Choice
       label="Groups"
@@ -1404,6 +1407,7 @@ function ownStyle(context: SectionContext): React.ReactNode {
       items={[
         { value: "interleaved", label: "Interleaved" },
         { value: "separated", label: "Separated" },
+        { value: "superimposed", label: "Superimposed" },
       ]}
     />
   );
@@ -1521,6 +1525,14 @@ function ownStyle(context: SectionContext): React.ReactNode {
         <>
           {groups}
           {graphType === "grouped-scatter" ? points : shapes("Bars", options.groupLayout === "interleaved" && gap)}
+        </>
+      );
+    case "grouped-bars-scatter":
+      return (
+        <>
+          {groups}
+          {shapes("Bars", options.groupLayout === "interleaved" && gap)}
+          {points}
         </>
       );
     case "grouped-lines":

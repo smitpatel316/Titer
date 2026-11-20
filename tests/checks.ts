@@ -231,6 +231,11 @@ import {
   rowsToTable,
 } from "../src/lib/tabular-import";
 import { tableToXlsx } from "../src/store/mcp-export";
+import {
+  executeBuildGraph,
+  executeUpdateGraph,
+  type GraphJobDeps,
+} from "../src/store/mcp-graphs";
 import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { decodePng, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
@@ -2762,6 +2767,124 @@ check("summary subcolumns: interleaved scatter on a summary table draws centers,
   strictEqual(fig.data.length, 4);
   const traces = fig.data as { mode?: string; name?: string }[];
   ok(!traces.some((t) => t.mode === "markers" && (t.name === "A" || t.name === "B")));
+});
+
+// seq 223: superimposed bars + scatter-on-bars. A grouped table with real
+// numbers (2 groups × 2 replicates × 2 rows), so means and points are exact.
+const groupedNumbers = (): TableData => {
+  let t = newGroupedTable(2, 2); // A:Y1 A:Y2 B:Y1 B:Y2
+  t = writeBlock(
+    t,
+    0,
+    0,
+    [
+      ["r1", "1", "3", "10", "12"],
+      ["r2", "2", "4", "20", "22"],
+    ],
+    "grouped",
+  );
+  return t;
+};
+
+check("seq 223: superimposed grouped bars overlap at one x (barmode overlay, no gap)", () => {
+  const dataset = readTable(groupedNumbers());
+  const options = { ...newGraphOptions("grouped-bars"), groupLayout: "superimposed" as const };
+  const fig = GRAPHS["grouped-bars"].build(dataset.columns, options, paintOf(options, 2), dataset.titles);
+  strictEqual(fig.layout.barmode, "overlay");
+  strictEqual(fig.layout.bargroupgap, undefined);
+  const traces = fig.data as { name: string; y: (number | null)[]; error_y?: { array: number[] } }[];
+  deepStrictEqual(traces.map((t) => t.name), ["A", "B"]);
+  // Each bar still runs from the axis to its group's mean, with its error whisker.
+  deepStrictEqual(traces[0].y, [2, 3]);
+  deepStrictEqual(traces[1].y, [11, 21]);
+  deepStrictEqual(traces[0].error_y?.array, [1, 1]);
+  // Interleaved control: the same data, side by side, with the gap.
+  const plain = GRAPHS["grouped-bars"].build(
+    dataset.columns,
+    newGraphOptions("grouped-bars"),
+    paintOf(newGraphOptions("grouped-bars"), 2),
+    dataset.titles,
+  );
+  strictEqual(plain.layout.barmode, "group");
+  strictEqual(plain.layout.bargroupgap, 0.1);
+});
+
+check("seq 223: bars with individual points draws bars plus one points trace per group", () => {
+  ok(GRAPHS["grouped-bars-scatter"], "grouped-bars-scatter is registered");
+  const offered = GRAPH_OPTIONS_BY_TABLE.grouped.map((o) => o.value);
+  ok(offered.includes("grouped-bars-scatter"), "offered for grouped tables");
+  ok(GRAPH_OPTIONS_BY_TABLE.nested.map((o) => o.value).includes("grouped-bars-scatter"), "offered for nested tables");
+  const dataset = readTable(groupedNumbers());
+  const options = newGraphOptions("grouped-bars-scatter");
+  const fig = GRAPHS["grouped-bars-scatter"].build(dataset.columns, options, paintOf(options, 2), dataset.titles);
+  const traces = fig.data as { type: string; mode?: string; name: string; y: (number | null)[] }[];
+  deepStrictEqual(
+    traces.map((t) => `${t.type}/${t.mode ?? ""}`),
+    ["bar/", "bar/", "scatter/markers", "scatter/markers"],
+  );
+  deepStrictEqual(traces.map((t) => t.name), ["A", "B", "A", "B"]);
+  deepStrictEqual(traces[0].y, [2, 3]);
+  deepStrictEqual(traces[1].y, [11, 21]);
+  // The points are the replicates themselves, in table order.
+  deepStrictEqual(traces[2].y, [1, 3, 2, 4]);
+  deepStrictEqual(traces[3].y, [10, 12, 20, 22]);
+  // On a summary table there are no individual values: bars only.
+  const summary = readTable(summaryTable());
+  const summaryFig = GRAPHS["grouped-bars-scatter"].build(
+    summary.numeric,
+    options,
+    paintOf(options, 2),
+    summary.titles,
+    "mean-sd-n",
+  );
+  strictEqual(summaryFig.data.length, 2);
+  ok((summaryFig.data as { type: string }[]).every((t) => t.type === "bar"));
+});
+
+check("seq 223: MCP build-graph accepts grouped-bars-scatter; update-graph accepts groupLayout superimposed", () => {
+  const nodes: Record<string, ProjectNode> = {
+    table_1: {
+      id: "table_1",
+      type: "table",
+      name: "G",
+      parentId: null,
+      tableType: "grouped",
+      data: groupedNumbers(),
+    },
+    graph_1: {
+      id: "graph_1",
+      type: "graph",
+      name: "Bars",
+      parentId: "table_1",
+      graphType: "grouped-bars",
+      graphOptions: newGraphOptions("grouped-bars"),
+    },
+  };
+  const state = { nodes, rootOrder: ["table_1"], childOrder: { table_1: ["graph_1"] }, activeNodeId: "table_1" };
+  const created: { graphType: GraphType }[] = [];
+  const updated: { id: string; options: GraphOptions }[] = [];
+  const deps: GraphJobDeps = {
+    getState: () => state,
+    createGraph: (_parentId, graphType) => {
+      created.push({ graphType });
+      return "graph_2";
+    },
+    updateGraph: (id, options) => {
+      updated.push({ id, options });
+    },
+  };
+  const built = executeBuildGraph(
+    { job_id: "job-223-build", project_id: "project-1", action: "build-graph", args: { table_id: "table_1", graph_type: "grouped-bars-scatter" }, status: "queued" },
+    deps,
+  );
+  strictEqual((built.result as { graph_type: string }).graph_type, "grouped-bars-scatter");
+  strictEqual(created[0]?.graphType, "grouped-bars-scatter");
+  executeUpdateGraph(
+    { job_id: "job-223-update", project_id: "project-1", action: "update-graph", args: { graph_id: "graph_1", options: { groupLayout: "superimposed" } }, status: "queued" },
+    deps,
+  );
+  strictEqual(updated[0]?.id, "graph_1");
+  strictEqual(updated[0]?.options.groupLayout, "superimposed");
 });
 
 check("summary subcolumns: the heatmap plots the Mean column, not the mean of Mean/SD/N", () => {

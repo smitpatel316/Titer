@@ -26,6 +26,7 @@ export type GraphType =
   | "xy-bar"
   | "xy-area"
   | "grouped-bars"
+  | "grouped-bars-scatter"
   | "grouped-scatter"
   | "grouped-before-after"
   | "grouped-box"
@@ -72,7 +73,7 @@ export const GRAPH_CHOICES = {
   xyStyle: ["points", "line", "points+line"],
   xyReplicates: ["mean", "each"],
   pieValue: ["sum", "mean"],
-  groupLayout: ["interleaved", "separated"],
+  groupLayout: ["interleaved", "separated", "superimposed"],
   sigDisplay: ["stars", "pvalue", "letters"],
   regBand: ["confidence", "prediction"],
   residualsAs: ["x", "qq"],
@@ -151,8 +152,11 @@ export interface GraphOptions {
   pieValue: Choice<"pieValue">;
   pieShowPercent: boolean;
   // Grouped bars/scatter (interleaved bars, horizontal bars, interleaved scatter):
-  // interleave groups within each row, or give each group its own block of
-  // categories (Prism's "Separated" arrangement). Not offered for connected
+  // interleave groups within each row, give each group its own block of
+  // categories (Prism's "Separated" arrangement), or draw every group's bar
+  // from the axis to its value at the same x (Prism's "Superimposed" — a
+  // taller bar hides a shorter one behind it unless the fill is
+  // semi-transparent; see grouped-common.ts). Not offered for connected
   // lines (groups must share the same X axis to show interaction) or stacked
   // bars (stacking already combines groups per category).
   groupLayout: Choice<"groupLayout">;

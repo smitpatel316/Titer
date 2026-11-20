@@ -26,6 +26,7 @@ import { bubblePlot } from "./bubble-plot";
 import { xyBar } from "./xy-bar";
 import { xyArea } from "./xy-area";
 import { groupedBars } from "./grouped-bars";
+import { groupedBarsScatter } from "./grouped-bars-scatter";
 import { groupedScatter } from "./grouped-scatter";
 import { groupedBox } from "./grouped-box";
 import { groupedLines } from "./grouped-lines";
@@ -105,6 +106,7 @@ export const GRAPHS: Record<GraphType, GraphModule> = {
   "xy-bar": xyBar,
   "xy-area": xyArea,
   "grouped-bars": groupedBars,
+  "grouped-bars-scatter": groupedBarsScatter,
   "grouped-scatter": groupedScatter,
   "grouped-before-after": groupedBeforeAfter,
   "grouped-lines": groupedLines,
@@ -323,6 +325,7 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
     "grouped-before-after",
     "grouped-box",
     "grouped-bars",
+    "grouped-bars-scatter",
     "grouped-lines",
     "grouped-stacked",
     "grouped-hbars",
@@ -333,7 +336,7 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
   // grouped table's do — the grouped builders read the groups through
   // `groupsOf`, which takes a nested column's group prefix ("A" for
   // "A:S1:R1"), so bars, scatter and lines all draw from nested columns.
-  nested: optionsFor(["grouped-bars", "grouped-scatter", "grouped-lines"]),
+  nested: optionsFor(["grouped-bars", "grouped-bars-scatter", "grouped-scatter", "grouped-lines"]),
   multiple: optionsFor(["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "dendrogram", "elbow-plot", "silhouette-plot", "gap-plot", "survival"]),
   // Outcomes as series across the row categories, as Prism graphs contingency tables.
   contingency: optionsFor(["grouped-bars", "grouped-stacked", "grouped-hbars", "heatmap"]),
