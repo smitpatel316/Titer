@@ -25,6 +25,7 @@ import type {
   HclustParams,
   McNemarParams,
   MixedEffectsParams,
+  MultifactorAnovaParams,
   MultipleRegressionParams,
   MultipleLogisticRegressionParams,
   MultipleTTestsParams,
@@ -83,6 +84,7 @@ import { runMultipleTTests } from "./grouped/multiple-t-tests";
 import { runNestedTTest } from "./nested/nested-t-test";
 import { runNestedAnova } from "./nested/nested-anova";
 import { runCorrelationMatrix } from "./multiple/correlation-matrix";
+import { runMultifactorAnova } from "./multiple/multifactor-anova";
 import { runMultipleRegression } from "./multiple/multiple-regression";
 import { runMultipleLogisticRegression } from "./multiple/multiple-logistic-regression";
 import { runPoissonRegression } from "./multiple/poisson-regression";
@@ -314,6 +316,14 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     label: "Multiple regression",
     minColumns: 2,
     run: (c, p) => runMultipleRegression(c, p as MultipleRegressionParams),
+  },
+  "multifactor-anova": {
+    label: "Multifactor ANOVA",
+    // minColumns is a floor only: the response is the one numeric column a
+    // table can hold (the factors may be text), so a 2-column table runs —
+    // the runner validates the response and the factors itself.
+    minColumns: 1,
+    run: (c, p) => runMultifactorAnova(c, p as MultifactorAnovaParams),
   },
   "multiple-logistic-regression": {
     label: "Multiple logistic regression",

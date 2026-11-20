@@ -149,6 +149,26 @@ export function conclusionOf(
       );
     }
 
+    case "multifactor-anova": {
+      const Y = (p?.response as string | undefined) ?? "the response";
+      const terms = result.stats
+        .filter((s) => s.label.endsWith(" P value"))
+        .map((s) => ({ term: s.label.slice(0, -" P value".length), p: s.value }));
+      const yes = terms.filter((t) => sig(t.p));
+      const no = terms.filter((t) => !sig(t.p));
+      if (!yes.length)
+        return (
+          `The data don't show that any factor or interaction affects ${q(Y)}.` +
+          (differing.length ? pairsText() : "")
+        );
+      return (
+        `${list(yes.map((t) => t.term))} ${yes.length > 1 ? "affect" : "affects"} ${q(Y)} ` +
+        `(${yes.map((t) => P(t.p)).join(", ")}).` +
+        (no.length ? ` The data don't show an effect of ${list(no.map((t) => t.term))}.` : "") +
+        pairsText()
+      );
+    }
+
     case "multiple-t-tests": {
       const rows = stat("Rows compared");
       const k = stat("Significant rows (P < 0.05)");

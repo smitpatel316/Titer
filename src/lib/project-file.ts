@@ -319,7 +319,7 @@ const PARAMS = {
   // choice; window/order are numbers the runner validates (5/9/13, 2/3);
   // `baseline` already has an entry above.
   operation: SMOOTH_DIFF_INT_OPERATIONS, window: "number", order: "number", smoothResults: "yes/no", startValue: "number",
-  y: "name-or-names", y2: "name", ys: "names", dependent: "name", reference: "name", control: "name", compareWith: "name", datasets: "names", predictors: "names", sets: "names", compared: "names",
+  y: "name-or-names", y2: "name", ys: "names", dependent: "name", reference: "name", control: "name", compareWith: "name", datasets: "names", predictors: "names", sets: "names", compared: "names", factors: "names",
   // Transform concentrations (v2): the column to convert, and the units
   // it is in now vs. the units it is converted to.
   column: "name", fromUnit: CONCENTRATION_UNITS, toUnit: CONCENTRATION_UNITS,
@@ -911,6 +911,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "nested-anova": ["posthoc", "sets"],
   "correlation-matrix": ["method", "sets"],
   "multiple-regression": ["dependent", "predictors", "sets"],
+  "multifactor-anova": ["response", "factors", "posthoc", "posthocTerm", "sets"],
   "multiple-logistic-regression": ["dependent", "predictors", "sets"],
   "poisson-regression": ["dependent", "predictors", "quasi", "sets"],
   "principal-component-analysis": ["scale", "components", "sets"],
@@ -1054,7 +1055,13 @@ export function validateAnalysisParams(
       );
       continue;
     }
-    const checked = checkParamValue(PARAMS[key as ParamKey], key, value);
+    const checked = checkParamValue(
+      // A multifactor ANOVA's post-hoc term names its own factors
+      // ("Treatment:Time") — a free name, like the file reader's.
+      analysisType === "multifactor-anova" && key === "posthocTerm" ? "name" : PARAMS[key as ParamKey],
+      key,
+      value,
+    );
     if ("error" in checked) {
       errors.push(checked.error);
       continue;
@@ -1126,7 +1133,11 @@ function readParams(
   // it can't change what a test computes or reach R.
   const read = (k: string, v: unknown) => {
     if (!isIn(PARAMS, k)) return v;
-    const kind = PARAMS[k as ParamKey];
+    // A multifactor ANOVA's post-hoc term names its own factors
+    // ("Treatment:Time"), not one of the three-way ANOVA's fixed terms —
+    // read it as a free name; the runner checks it against the terms.
+    const kind =
+      analysisType === "multifactor-anova" && k === "posthocTerm" ? "name" : PARAMS[k as ParamKey];
     // FF-F16: a saved number outside its limits is brought within them on
     // load — warn, so the analysis doesn't silently re-run on different
     // parameters than the file specifies. The clamp itself stays: the
@@ -1148,7 +1159,7 @@ function readParams(
     // not a missing value: keep it, so a save keeps the file as it was.
     if ((k === "spar" || k === "df") && v === null) return null;
     let dropped = 0;
-    const value = readParam(PARAMS[k as ParamKey], v, (n) => {
+    const value = readParam(kind, v, (n) => {
       dropped = n;
     });
     if (dropped > 0) {

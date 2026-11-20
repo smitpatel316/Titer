@@ -131,6 +131,17 @@ export function analyzedOf(
         left: all.filter((n) => !described.some((g) => g.name === n)),
       };
     }
+    case "multifactor-anova": {
+      const response = (p?.response as string | undefined) ?? all[0];
+      const factors = (p?.factors as string[] | undefined) ?? [];
+      if (!response) return undefined;
+      const n = described.reduce((sum, g) => sum + (g.n ?? 0), 0);
+      return make(
+        [{ name: response, n }],
+        "list",
+        factors.length ? `by ${and(factors.map((f) => quoted(f)))}` : undefined,
+      );
+    }
     case "chi-square": {
       const rows = table.titles.filter((_, r) => table.columns.some((c) => c.byRow[r] != null)).length;
       return make(
