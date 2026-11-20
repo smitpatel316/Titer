@@ -145,11 +145,28 @@ fn prune_backups(dir: &Path, now: u64) {
             continue;
         }
         let stale = read_meta(dir, stem).map(|m| is_stale(m.saved_at_ms, now)).unwrap_or(true);
-        if stale {
+        // A sidecar with no snapshot is a crash between the snapshot delete
+        // and the sidecar delete (or a hand-removed file): nothing to offer.
+        let no_snapshot = !snapshot_path(dir, stem).exists();
+        if stale || no_snapshot {
             let _ = fs::remove_file(snapshot_path(dir, stem));
             let _ = fs::remove_file(meta_path(dir, stem));
         }
     }
+}
+
+/// Writes bytes to a temp file in the same directory and renames it over
+/// the target, so a crash mid-write leaves the old file, never half of one.
+/// The temp name keeps its own suffix (`.hlx.tmp`, `.json.tmp`), so the
+/// prune never mistakes it for an orphan snapshot.
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let tmp = path.with_file_name(format!("{}.tmp", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
+    fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    Ok(())
 }
 
 /// Writes (or overwrites) the project's backup: the snapshot first, then
@@ -162,37 +179,104 @@ pub fn write_backup(
     source_path: Option<&str>,
     bytes: &[u8],
 ) -> Result<BackupEntry, String> {
-    let _ = (data_dir, identity, display_name, source_path, bytes);
-    Err("not implemented".to_string())
+    let dir = backups_dir(data_dir);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let key = backup_key(identity);
+    let now = now_ms();
+    write_atomic(&snapshot_path(&dir, &key), bytes)?;
+    let meta = BackupMeta {
+        display_name: display_name.to_string(),
+        source_path: source_path.map(|s| s.to_string()),
+        saved_at_ms: now,
+    };
+    let meta_bytes = serde_json::to_string(&meta).map_err(|e| e.to_string())?;
+    write_atomic(&meta_path(&dir, &key), meta_bytes.as_bytes())?;
+    prune_backups(&dir, now);
+    Ok(BackupEntry {
+        key,
+        display_name: display_name.to_string(),
+        source_path: source_path.map(|s| s.to_string()),
+        saved_at_ms: now,
+        source_mtime_ms: source_mtime_ms(source_path),
+        size_bytes: bytes.len() as u64,
+    })
 }
 
 /// The backups on disk, newest first. Prunes stale and incomplete entries
 /// first, so the list never offers a backup that is already gone.
 pub fn list_backups(data_dir: &Path) -> Result<Vec<BackupEntry>, String> {
-    let _ = data_dir;
-    Err("not implemented".to_string())
+    let dir = backups_dir(data_dir);
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let now = now_ms();
+    prune_backups(&dir, now);
+    let mut entries = Vec::new();
+    let Ok(read) = fs::read_dir(&dir) else {
+        return Ok(entries);
+    };
+    for entry in read.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(stem) = name.strip_suffix(".json") else {
+            continue;
+        };
+        if !is_valid_key(stem) {
+            continue;
+        }
+        if let Some(meta) = read_meta(&dir, stem) {
+            entries.push(entry_from_meta(&dir, stem, &meta));
+        }
+    }
+    entries.sort_by(|a, b| b.saved_at_ms.cmp(&a.saved_at_ms));
+    Ok(entries)
 }
 
 /// The backup for one project identity, if it has one and it is still
 /// within the 4-day keep. A stale backup is deleted and reports as none —
 /// the frontend offers only what this returns.
 pub fn backup_status(data_dir: &Path, identity: &str) -> Result<Option<BackupEntry>, String> {
-    let _ = (data_dir, identity);
-    Err("not implemented".to_string())
+    let dir = backups_dir(data_dir);
+    let key = backup_key(identity);
+    let Some(meta) = read_meta(&dir, &key) else {
+        return Ok(None);
+    };
+    if is_stale(meta.saved_at_ms, now_ms()) {
+        let _ = fs::remove_file(snapshot_path(&dir, &key));
+        let _ = fs::remove_file(meta_path(&dir, &key));
+        return Ok(None);
+    }
+    // A sidecar with no snapshot offers nothing to restore: drop it.
+    if !snapshot_path(&dir, &key).exists() {
+        let _ = fs::remove_file(meta_path(&dir, &key));
+        return Ok(None);
+    }
+    Ok(Some(entry_from_meta(&dir, &key, &meta)))
 }
 
 /// One backup's snapshot bytes, for restoring. Only keys this module could
 /// have produced are accepted (see `is_valid_key`).
 pub fn read_backup(data_dir: &Path, key: &str) -> Result<Vec<u8>, String> {
-    let _ = (data_dir, key);
-    Err("not implemented".to_string())
+    if !is_valid_key(key) {
+        return Err(format!("invalid backup key: {key}"));
+    }
+    fs::read(snapshot_path(&backups_dir(data_dir), key)).map_err(|e| e.to_string())
 }
 
 /// Deletes a project's backup (both files). Missing is fine — closing a
 /// project that never backed up deletes nothing.
 pub fn delete_backup(data_dir: &Path, key: &str) -> Result<(), String> {
-    let _ = (data_dir, key);
-    Err("not implemented".to_string())
+    if !is_valid_key(key) {
+        return Err(format!("invalid backup key: {key}"));
+    }
+    let dir = backups_dir(data_dir);
+    for path in [snapshot_path(&dir, key), meta_path(&dir, key)] {
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
