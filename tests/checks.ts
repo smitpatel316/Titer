@@ -112,8 +112,18 @@ import {
   withoutColors,
 } from "../src/lib/palettes";
 import { deletePalette, keepPalette, loadMyPalettes } from "../src/store/my-palettes";
-import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
+import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, graphSeriesDataset, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
 import { datasetColumns, isGrouped, isNested, readTable, setColumns, splitXY, xyPoints, type Dataset } from "../src/lib/dataset";
+import {
+  mergeGraphTables,
+  mergedGraphData,
+  remapQualifiedOptions,
+  validateGraphSources,
+  type MergeInput,
+} from "../src/lib/multi-table";
+import { executeBuildGraph, executeUpdateGraph, type GraphJobDeps } from "../src/store/mcp-graphs";
+import { buildPanelFigure } from "../src/views/figures/panel-figure";
+import type { McpJob } from "../src/native";
 import { nestedMeans } from "../src/stats/nested/base";
 import { runNestedTTest } from "../src/stats/nested/nested-t-test";
 import { prepareFit } from "../src/stats/xy/nonlinear-fit";
@@ -18945,6 +18955,358 @@ check("import-155: the menu, picker, reader and drop route the new file types", 
   ok(rust.includes("read_data_bytes"), "shell has no data-bytes reader command");
   ok(isDataFilePath("lab.CSV") && isDataFilePath("lab.tsv") && isDataFilePath("lab.txt") && isDataFilePath("lab.xlsx"), "extension match misses a data type");
   ok(!isDataFilePath("lab.pzfx") && !isDataFilePath("lab.hlx"), "extension match takes a non-data file");
+});
+
+// ── One graph from multiple tables (#48) ──────────────────────────────
+// Prism: "You can plot data from multiple data tables on one graph" —
+// its flagship case is XY sets with different X values, each on its own
+// table. These pins drive the merge directly (no Mac, no Plotly): the
+// builders' traces are the proof the graph draws every table's data.
+
+const colTable = (name: string, values: Record<string, number[]>): MergeInput => ({
+  id: name === "Assay 1" ? "t1" : "t2",
+  name,
+  tableType: "column",
+  data: {
+    columns: ["Title", ...Object.keys(values)],
+    rows: [0, 1, 2].map((r) => [`r${r + 1}`, ...Object.values(values).map((v) => String(v[r]))]),
+  },
+});
+
+const xyTable = (name: string, xs: number[], ys: Record<string, number[]>): MergeInput => ({
+  id: name === "Assay 1" ? "t1" : "t2",
+  name,
+  tableType: "xy",
+  data: {
+    columns: ["Title", "X", ...Object.keys(ys)],
+    rows: xs.map((x, r) => [`r${r + 1}`, String(x), ...Object.values(ys).map((v) => String(v[r] ?? ""))]),
+  },
+});
+
+check("48: merging two Column tables concatenates their series, qualified by table name", () => {
+  const a = colTable("Assay 1", { Control: [1, 2, 3], Treated: [10, 20, 30] });
+  const b = colTable("Assay 2", { Control: [100, 200, 300], Treated: [1000, 2000, 3000] });
+  const { dataset, problem } = mergeGraphTables(a, [b]);
+  strictEqual(problem, undefined);
+  deepStrictEqual(
+    dataset.sets.map((s) => s.name),
+    ["Control", "Treated", "Assay 2 — Control", "Assay 2 — Treated"],
+  );
+  // A mean-and-error graph over the merge: one bar per series, each at
+  // its own column's mean — the second table's values are really drawn.
+  const options = newGraphOptions("mean-error");
+  const columns = plotColumns(dataset, "mean-error", options, "column");
+  const fig = GRAPHS["mean-error"].build(columns, options, paintOf(options, 4));
+  const ys = (fig.data as { y: number[] }[]).map((t) => t.y[0]);
+  deepStrictEqual(ys, [2, 20, 200, 2000]);
+  deepStrictEqual((fig.layout.xaxis as { ticktext: string[] }).ticktext, [
+    "Control",
+    "Treated",
+    "Assay 2 — Control",
+    "Assay 2 — Treated",
+  ]);
+});
+
+check("48: merging two XY tables with different X values plots each set against its own X", () => {
+  const a = xyTable("Assay 1", [0, 1, 2], { Y1: [10, 20, 30] });
+  const b = xyTable("Assay 2", [0.5, 1.5], { Y1: [15, 25] });
+  const { dataset, problem } = mergeGraphTables(a, [b]);
+  strictEqual(problem, undefined);
+  // The union X, sorted: 0, 0.5, 1, 1.5, 2.
+  deepStrictEqual(dataset.columns[0].values, [0, 0.5, 1, 1.5, 2]);
+  const options = newGraphOptions("xy-scatter");
+  const columns = plotColumns(dataset, "xy-scatter", options, "xy");
+  const fig = GRAPHS["xy-scatter"].build(columns, options, paintOf(options, 2));
+  const traces = fig.data as { name: string; x: number[]; y: number[] }[];
+  deepStrictEqual(
+    traces.map((t) => [t.name, t.x, t.y]),
+    [
+      ["Y1", [0, 1, 2], [10, 20, 30]],
+      ["Assay 2 — Y1", [0.5, 1.5], [15, 25]],
+    ],
+  );
+  // The series the Format panel offers are the merged ones.
+  deepStrictEqual(graphSeriesDataset("xy-scatter", dataset, "xy", options), ["Y1", "Assay 2 — Y1"]);
+});
+
+check("48: merging XY tables with the same X pairs by row, and a repeated X keeps every row", () => {
+  const a = xyTable("Assay 1", [0, 1, 1, 2], { Y1: [10, 20, 21, 30] });
+  const b = xyTable("Assay 2", [0, 1, 2], { Y1: [5, 6, 7] });
+  const { dataset, problem } = mergeGraphTables(a, [b]);
+  strictEqual(problem, undefined);
+  deepStrictEqual(dataset.columns[0].values, [0, 1, 1, 2]);
+  const options = newGraphOptions("xy-scatter");
+  const columns = plotColumns(dataset, "xy-scatter", options, "xy");
+  const fig = GRAPHS["xy-scatter"].build(columns, options, paintOf(options, 2));
+  const traces = fig.data as { name: string; x: number[]; y: number[] }[];
+  deepStrictEqual(traces[1].x, [0, 1, 2]);
+  deepStrictEqual(traces[1].y, [5, 6, 7]);
+  // The repeated X at 1 still carries both of the first table's points.
+  deepStrictEqual(traces[0].y, [10, 20, 21, 30]);
+});
+
+check("48: grouped tables must share row titles, and a mismatch is a problem, not a silent misalignment", () => {
+  const mk = (name: string, titles: string[]): MergeInput => ({
+    id: name === "Assay 1" ? "t1" : "t2",
+    name,
+    tableType: "grouped",
+    data: {
+      columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+      rows: titles.map((t, r) => [t, String(r + 1), String(r + 2), String(r + 3), String(r + 4)]),
+      groups: 2,
+      replicates: 2,
+    },
+  });
+  const a = mk("Assay 1", ["Day 1", "Day 2"]);
+  const same = mk("Assay 2", ["Day 1", "Day 2"]);
+  strictEqual(mergeGraphTables(a, [same]).problem, undefined);
+  deepStrictEqual(
+    mergeGraphTables(a, [same]).dataset.sets.map((s) => s.name),
+    ["A", "B", "Assay 2 — A", "Assay 2 — B"],
+  );
+  const off = mk("Assay 2", ["Day 1", "Day 3"]);
+  const { problem } = mergeGraphTables(a, [off]);
+  ok(problem?.includes("Day 2") && problem?.includes("Day 3"), `mismatch says which rows differ: ${problem}`);
+});
+
+check("48: a source of a different table type is refused, and a missing one is named", () => {
+  const table: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Assay 1",
+    parentId: null,
+    tableType: "column",
+    data: colTable("Assay 1", { Control: [1, 2, 3] }).data,
+  };
+  const xy: ProjectNode = {
+    id: "t2",
+    type: "table",
+    name: "Doses",
+    parentId: null,
+    tableType: "xy",
+    data: xyTable("Doses", [0, 1], { Y1: [1, 2] }).data,
+  };
+  const nodes = { t1: table, t2: xy };
+  const errors = validateGraphSources(table, ["t2"], nodes);
+  strictEqual(errors.length, 1);
+  ok(errors[0].includes("XY") && errors[0].includes("Column"), errors[0]);
+  ok(validateGraphSources(table, ["tX"], nodes)[0].includes("tX"));
+  ok(validateGraphSources(table, ["t1"], nodes)[0].includes("already"));
+  deepStrictEqual(validateGraphSources(table, [], nodes), []);
+});
+
+check("48: MCP build-graph with source_table_ids creates the graph with its sources; update-graph changes them", () => {
+  const t1: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Assay 1",
+    parentId: null,
+    tableType: "column",
+    data: colTable("Assay 1", { Control: [1, 2, 3] }).data,
+  };
+  const t2: ProjectNode = {
+    id: "t2",
+    type: "table",
+    name: "Assay 2",
+    parentId: null,
+    tableType: "column",
+    data: colTable("Assay 2", { Control: [4, 5, 6] }).data,
+  };
+  const nodes: Record<string, ProjectNode> = { t1, t2 };
+  const created: { parentId: string; graphType: string; sourceTableIds?: string[] }[] = [];
+  const sourced: { id: string; sourceTableIds: string[] }[] = [];
+  const deps: GraphJobDeps = {
+    getState: () => ({ nodes, rootOrder: ["t1", "t2"], childOrder: {}, activeNodeId: null }),
+    createGraph: (parentId, graphType, _options, sourceTableIds) => {
+      created.push({ parentId, graphType, sourceTableIds });
+      return "g1";
+    },
+    setGraphSources: (id, sourceTableIds) => {
+      sourced.push({ id, sourceTableIds });
+    },
+    renameNode: () => {},
+  };
+  const job = (args: unknown): McpJob => ({ job_id: "j1", project_id: "p", action: "build-graph", args, status: "queued" });
+  const out = executeBuildGraph(job({ table_id: "t1", graph_type: "mean-error", source_table_ids: ["t2"] }), deps);
+  deepStrictEqual(out.result.source_table_ids, ["t2"]);
+  deepStrictEqual(created[0]?.sourceTableIds, ["t2"]);
+  const updated = executeUpdateGraph(
+    { ...job({ graph_id: "g1", source_table_ids: [] }), action: "update-graph" },
+    deps,
+  );
+  deepStrictEqual(updated.result.source_table_ids, []);
+  deepStrictEqual(sourced, [{ id: "g1", sourceTableIds: [] }]);
+  throws(
+    () => executeBuildGraph(job({ table_id: "t1", graph_type: "mean-error", source_table_ids: ["tX"] }), deps),
+    /no table with id “tX”/,
+  );
+});
+
+check("48: source tables round-trip through .hlx, and a dangling source is repaired on load", () => {
+  const t1: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Assay 1",
+    parentId: null,
+    tableType: "column",
+    data: colTable("Assay 1", { Control: [1, 2, 3] }).data,
+  };
+  const t2: ProjectNode = {
+    id: "t2",
+    type: "table",
+    name: "Assay 2",
+    parentId: null,
+    tableType: "column",
+    data: colTable("Assay 2", { Control: [4, 5, 6] }).data,
+  };
+  const g1: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Plot",
+    parentId: "t1",
+    graphType: "mean-error",
+    graphOptions: newGraphOptions("mean-error"),
+    sourceTableIds: ["t2"],
+  };
+  const payload: ProjectFilePayload = {
+    nodes: { t1, t2, g1 },
+    rootOrder: ["t1", "t2"],
+    childOrder: { t1: ["g1"] },
+    activeNodeId: "g1",
+  };
+  const kept = read(serializeProjectFile(payload));
+  strictEqual(kept.updated, false);
+  deepStrictEqual(kept.project.nodes.g1.sourceTableIds, ["t2"]);
+  // A file naming a table that isn't there: the source is dropped, once,
+  // with a warning — the graph still opens on its primary table.
+  const dangling = JSON.parse(serializeProjectFile(payload)) as { project: ProjectFilePayload };
+  dangling.project.nodes.g1.sourceTableIds = ["tX"];
+  const repaired = read(JSON.stringify(dangling));
+  strictEqual(repaired.updated, true);
+  strictEqual(repaired.project.nodes.g1.sourceTableIds, undefined);
+  ok(repaired.issues.some((i) => i.message.includes("source table")), JSON.stringify(repaired.issues));
+});
+
+check("48: renaming a source table re-qualifies the graph, and deleting it drops the source", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "t2",
+      type: "table",
+      name: "Assay 2",
+      parentId: null,
+      tableType: "column",
+      data: colTable("Assay 2", { Control: [4, 5, 6] }).data,
+    },
+  });
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "g1",
+      type: "graph",
+      name: "Plot",
+      parentId: t1,
+      graphType: "mean-error",
+      graphOptions: { ...newGraphOptions("mean-error"), sets: ["Assay 2 — Control"] },
+      sourceTableIds: ["t2"],
+    },
+  });
+  // The initial state's first table is a Column table, the same type as
+  // the source, so the graph is valid on its primary.
+  s = reducer(s, { type: "rename", id: "t2", name: "Assay Two" });
+  deepStrictEqual(s.nodes.g1.graphOptions?.sets, ["Assay Two — Control"]);
+  s = reducer(s, { type: "remove", id: "t2" });
+  strictEqual(s.nodes.g1.sourceTableIds, undefined);
+  ok(s.nodes.g1, "the graph survives its extra table's deletion");
+});
+
+check("48: the headless panel figure draws the merged dataset, so exports show every table", () => {
+  const t1: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Assay 1",
+    parentId: null,
+    tableType: "xy",
+    data: xyTable("Assay 1", [0, 1, 2], { Y1: [10, 20, 30] }).data,
+  };
+  const t2: ProjectNode = {
+    id: "t2",
+    type: "table",
+    name: "Assay 2",
+    parentId: null,
+    tableType: "xy",
+    data: xyTable("Assay 2", [0.5, 1.5], { Y1: [15, 25] }).data,
+  };
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Plot",
+    parentId: "t1",
+    graphType: "xy-scatter",
+    graphOptions: newGraphOptions("xy-scatter"),
+    sourceTableIds: ["t2"],
+  };
+  const fig = buildPanelFigure(graph, { t1, t2, g1: graph });
+  ok(fig, "a multi-table graph has a panel figure");
+  const traces = fig!.data as { name: string; x: number[]; y: number[] }[];
+  deepStrictEqual(
+    traces.map((t) => [t.name, t.x, t.y]),
+    [
+      ["Y1", [0, 1, 2], [10, 20, 30]],
+      ["Assay 2 — Y1", [0.5, 1.5], [15, 25]],
+    ],
+  );
+  // A merge problem draws nothing offscreen; the graph's own view says why.
+  const bad: ProjectNode = { ...graph, sourceTableIds: ["tX"] };
+  strictEqual(buildPanelFigure(bad, { t1, t2, g1: bad }), null);
+});
+
+check("48: remapping qualified options follows a table rename and nothing else", () => {
+  const options = {
+    ...newGraphOptions("mean-error"),
+    sets: ["Control", "Assay 2 — Control"],
+    series: { "Assay 2 — Control": { color: "#D55E00" } },
+    rightYDataset: "Assay 2 — Control",
+  };
+  const remapped = remapQualifiedOptions(options, "Assay 2", "Assay Two");
+  deepStrictEqual(remapped?.sets, ["Control", "Assay Two — Control"]);
+  deepStrictEqual(Object.keys(remapped?.series ?? {}), ["Assay Two — Control"]);
+  strictEqual(remapped?.rightYDataset, "Assay Two — Control");
+  strictEqual(remapQualifiedOptions(options, "Assay 3", "Assay Three"), undefined);
+  // The merged view of a graph node resolves its sources from the nodes.
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Plot",
+    parentId: "t1",
+    graphType: "mean-error",
+    graphOptions: newGraphOptions("mean-error"),
+    sourceTableIds: ["t2"],
+  };
+  const t1: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Assay 1",
+    parentId: null,
+    tableType: "column",
+    data: colTable("Assay 1", { Control: [1, 2, 3] }).data,
+  };
+  const t2: ProjectNode = {
+    id: "t2",
+    type: "table",
+    name: "Assay 2",
+    parentId: null,
+    tableType: "column",
+    data: colTable("Assay 2", { Control: [4, 5, 6] }).data,
+  };
+  const merged = mergedGraphData(graph, { t1, t2, g1: graph });
+  strictEqual(merged?.problem, undefined);
+  deepStrictEqual(
+    merged?.dataset.sets.map((s) => s.name),
+    ["Control", "Assay 2 — Control"],
+  );
 });
 
 // ── Run ──────────────────────────────────────────────────────────────────
