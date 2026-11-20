@@ -1162,8 +1162,28 @@ export interface RocPoint {
  *  canonical example (mean 0, SD 1, amplitude 100 over X −3..3), which the
  *  fitter does not offer, so it lives here only. A user-defined equation is
  *  NOT plottable: the wizard has no equation input, and its spec can't be
- *  built without one (modelSpec throws), so it is excluded here. */
-export type PlotFunctionModel = Exclude<NonlinearModel, "user-defined"> | "gaussian";
+ *  built without one (modelSpec throws), so it is excluded here.
+ *  Seq 203: the statistical distributions Prism's Plot a function also
+ *  plots (FAQ 1578) — the normal (z), Student's t, F and chi-square
+ *  densities, and the binomial + Poisson mass functions. */
+export type PlotFunctionModel = Exclude<NonlinearModel, "user-defined"> | PlotFunctionDistribution;
+
+/** The statistical distributions "plot-function" can plot (Prism's Plot a
+ *  function, FAQ 1578): the normal (z), Student's t, F and chi-square
+ *  densities, and the binomial + Poisson mass functions. */
+export const PLOT_FUNCTION_DISTRIBUTIONS = [
+  "normal-distribution",
+  "t-distribution",
+  "f-distribution",
+  "chi-square-distribution",
+  "binomial-distribution",
+  "poisson-distribution",
+] as const;
+export type PlotFunctionDistribution = (typeof PLOT_FUNCTION_DISTRIBUTIONS)[number];
+/** The discrete distributions (binomial, Poisson): their X grid is the
+ *  whole numbers in the range, one point each — the line-segments setting
+ *  does not apply to them. */
+export const PLOT_FUNCTION_DISCRETE_DISTRIBUTIONS = ["binomial-distribution", "poisson-distribution"] as const;
 
 /** What "plot-function" plots alongside the function itself (Prism's Options
  *  tab): its first derivative, its second derivative, or its integral — one

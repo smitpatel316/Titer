@@ -185,6 +185,7 @@ import {
   sturgesCount,
 } from "../src/stats/column/frequency-distribution";
 import { transformValue } from "../src/stats/column/transform-data";
+import { binomialPmf, chiSquarePdf, fPdf, normalPdf, poissonPmf, tPdf } from "../src/stats/distributions";
 import {
   concentrationFactor,
   convertConcentration,
@@ -12748,6 +12749,249 @@ check("plot a function params survive a .hlx round-trip; a bogus equation is dro
   deepStrictEqual(
     (read(JSON.stringify(bogusCurve)).project.nodes.a1.analysisParams as { curves?: unknown } | undefined)?.curves,
     [{ label: "Gaussian", params: { Amplitude: 100, Mean: 0, SD: 1 } }],
+  );
+});
+
+// ── Plot-a-function distributions (v1.8, seq 203) ───────────────────────
+// Prism's Plot a function plots the normal (z), Student's t, F and
+// chi-square densities and the binomial + Poisson mass functions (FAQ 1578).
+// The densities are pinned against Python's math.lgamma-derived values,
+// plus the normalisation sums (a wrong log-gamma breaks those).
+
+check("the distribution densities and masses match reference values (seq 203)", () => {
+  const close = (got: number, want: number) => Math.abs(got - want) < 1e-12;
+  ok(close(normalPdf(0, 0, 1), 0.3989422804014327));
+  ok(close(normalPdf(2, 1, 2), 0.17603266338214976));
+  ok(close(normalPdf(1, 0, 1), 0.24197072451914337));
+  ok(close(tPdf(0, 10), 0.3891083839660314));
+  ok(close(tPdf(1, 10), 0.23036198922913875));
+  ok(close(tPdf(2, 3), 0.06750966066389294));
+  ok(close(chiSquarePdf(1, 2), 0.3032653298563167));
+  ok(close(chiSquarePdf(3, 5), 0.15418032980376922));
+  ok(close(fPdf(1, 5, 10), 0.4954797834866393));
+  ok(close(fPdf(0.5, 5, 10), 0.6876070027706241));
+  ok(close(fPdf(3, 2, 20), 0.055798577143389094));
+  ok(close(binomialPmf(10, 20, 0.5), 0.17619705200195354));
+  ok(close(binomialPmf(0, 20, 0.5), 9.5367431640625e-07));
+  ok(close(binomialPmf(3, 10, 0.3), 0.26682793199999943));
+  ok(close(poissonPmf(3, 5), 0.14037389581428045));
+  ok(close(poissonPmf(0, 5), 0.006737946999085467));
+  ok(close(poissonPmf(10, 5), 0.018132788707821885));
+  // The masses sum to 1 (binomial exactly, Poisson to its tail).
+  const binomSum = Array.from({ length: 21 }, (_, k) => binomialPmf(k, 20, 0.5)).reduce((s, v) => s + v, 0);
+  ok(close(binomSum, 1));
+  const poisSum = Array.from({ length: 31 }, (_, k) => poissonPmf(k, 5)).reduce((s, v) => s + v, 0);
+  ok(Math.abs(poisSum - 1) < 1e-9);
+  // Out-of-domain inputs are NaN, never a made-up number — except the
+  // F / chi-square density at 0, which is 0 (df > 2), 1/2 (chi-square
+  // df = 2), or diverges (df < 2: Infinity, plotted as a blank).
+  strictEqual(normalPdf(0, 0, 0), NaN);
+  strictEqual(tPdf(0, 0), NaN);
+  strictEqual(chiSquarePdf(-1, 5), NaN);
+  strictEqual(chiSquarePdf(0, 5), 0);
+  strictEqual(chiSquarePdf(0, 2), 0.5);
+  strictEqual(chiSquarePdf(0, 1), Infinity);
+  strictEqual(fPdf(-1, 5, 10), NaN);
+  strictEqual(fPdf(0, 5, 10), 0);
+  strictEqual(fPdf(0, 1, 10), Infinity);
+  strictEqual(binomialPmf(21, 20, 0.5), NaN);
+  strictEqual(binomialPmf(10.5, 20, 0.5), NaN);
+  strictEqual(binomialPmf(1, 10, 1), NaN);
+  strictEqual(poissonPmf(-1, 5), NaN);
+  strictEqual(poissonPmf(1, 0), NaN);
+});
+
+check("plot a function plots Prism's statistical distributions (seq 203)", async () => {
+  const empty: TableData = { columns: ["Title", "X", "Y1"], rows: [] };
+  const close = (got: (number | null)[], want: number[]) =>
+    got.length === want.length &&
+    got.every((g, i) => g != null && Math.abs(g - want[i]) < 1e-12);
+  // The standard normal over −4..4: the peak is 1/√(2π), the tails ~0.
+  const normal = await runAnalysis("plot-function", empty, {
+    equation: "normal-distribution",
+    xMin: -4,
+    xMax: 4,
+    segments: 10,
+    curves: [{ label: "z", params: { Mean: 0, SD: 1 } }],
+  });
+  if ("error" in normal) throw new Error(normal.error);
+  deepStrictEqual(
+    normal.generatedCurves!.x,
+    Array.from({ length: 11 }, (_, i) => -4 + (8 * i) / 10),
+  );
+  const ny = normal.generatedCurves!.curves[0].y;
+  ok(close(ny, normal.generatedCurves!.x.map((v) => normalPdf(v, 0, 1))));
+  ok(ny[5] != null && Math.abs(ny[5] - 0.3989422804014327) < 1e-15);
+  ok(ny[0] != null && ny[0] < 0.001);
+  ok(normal.summary.includes("from the Normal distribution,"));
+  ok(normal.notes.includes("probability density"));
+  // A t with 10 df peaks a touch lower than the normal at 0.
+  const t = await runAnalysis("plot-function", empty, {
+    equation: "t-distribution",
+    xMin: 0,
+    xMax: 0,
+    segments: 10,
+    curves: [{ label: "t10", params: { DF: 10 } }],
+  });
+  if (!("error" in t) || !t.error.includes("must be below"))
+    throw new Error(`expected the empty-range error, got ${JSON.stringify(t)}`);
+  const t2 = await runAnalysis("plot-function", empty, {
+    equation: "t-distribution",
+    xMin: -2,
+    xMax: 2,
+    segments: 10,
+    curves: [{ label: "t10", params: { DF: 10 } }],
+  });
+  if ("error" in t2) throw new Error(t2.error);
+  ok(close(t2.generatedCurves!.curves[0].y, t2.generatedCurves!.x.map((v) => tPdf(v, 10))));
+  ok(t2.generatedCurves!.curves[0].y[5] != null && Math.abs(t2.generatedCurves!.curves[0].y[5]! - 0.3891083839660314) < 1e-15);
+  // The binomial is discrete: one point per whole number, and the masses
+  // sum to 1 — the line-segments setting does not apply to it.
+  const binom = await runAnalysis("plot-function", empty, {
+    equation: "binomial-distribution",
+    xMin: 0,
+    xMax: 20,
+    segments: 150,
+    curves: [{ label: "B(20, 0.5)", params: { N: 20, P: 0.5 } }],
+  });
+  if ("error" in binom) throw new Error(binom.error);
+  deepStrictEqual(binom.generatedCurves!.x, Array.from({ length: 21 }, (_, i) => i));
+  strictEqual(binom.generatedCurves!.curves[0].y[10], binomialPmf(10, 20, 0.5));
+  const mass = binom.generatedCurves!.curves[0].y.reduce((s, v) => s + (v ?? 0), 0);
+  ok(Math.abs(mass - 1) < 1e-12);
+  deepStrictEqual(
+    binom.stats.map((s) => [s.label, s.value]),
+    [
+      ["X values", 21],
+      ["Curves", 1],
+    ],
+  );
+  ok(binom.notes.includes("probability of exactly that many successes"));
+  // The Poisson over 0..20 carries all but ~1e-9 of its mass at λ = 5.
+  const pois = await runAnalysis("plot-function", empty, {
+    equation: "poisson-distribution",
+    xMin: 0,
+    xMax: 20,
+    segments: 150,
+    curves: [{ label: "Pois(5)", params: { Lambda: 5 } }],
+  });
+  if ("error" in pois) throw new Error(pois.error);
+  strictEqual(pois.generatedCurves!.curves[0].y[3], poissonPmf(3, 5));
+  const poisMass = pois.generatedCurves!.curves[0].y.reduce((s, v) => s + (v ?? 0), 0);
+  ok(Math.abs(poisMass - 0.999999918907495) < 1e-12);
+  // Validation names the bad parameter instead of plotting nonsense.
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, {
+      equation: "binomial-distribution",
+      xMin: 0,
+      xMax: 20,
+      curves: [{ label: "B", params: { N: 0, P: 0.5 } }],
+    }),
+    { error: "“B”: the binomial's number of trials N must be a whole number of 1 or more." },
+  );
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, {
+      equation: "binomial-distribution",
+      xMin: 0,
+      xMax: 20,
+      curves: [{ label: "B", params: { N: 20, P: 1.5 } }],
+    }),
+    { error: "“B”: the binomial's probability P must be between 0 and 1." },
+  );
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, {
+      equation: "t-distribution",
+      xMin: -4,
+      xMax: 4,
+      curves: [{ label: "t", params: { DF: 0 } }],
+    }),
+    { error: "“t”: the t distribution's degrees of freedom must be greater than 0." },
+  );
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, {
+      equation: "normal-distribution",
+      xMin: -4,
+      xMax: 4,
+      curves: [{ label: "z", params: { Mean: 0, SD: 0 } }],
+    }),
+    { error: "“z”: the normal distribution's SD must be greater than 0." },
+  );
+  deepStrictEqual(
+    await runAnalysis("plot-function", empty, {
+      equation: "poisson-distribution",
+      xMin: 0.2,
+      xMax: 0.8,
+      curves: [{ label: "P", params: { Lambda: 5 } }],
+    }),
+    { error: "A discrete distribution needs an X range holding at least 2 whole numbers — 0.2 to 0.8 holds 0." },
+  );
+});
+
+check("plot a function wizard offers the distributions with their parameters (seq 203)", () => {
+  const empty: TableData = { columns: ["Title", "X", "Y1"], rows: [] };
+  const table = readTable(empty);
+  const wizard = WIZARDS["plot-function"]!;
+  const first = wizard.questions({}, table).filter(Boolean)[0] as Question & {
+    options: { value: string }[];
+  };
+  for (const d of [
+    "normal-distribution",
+    "t-distribution",
+    "f-distribution",
+    "chi-square-distribution",
+    "binomial-distribution",
+    "poisson-distribution",
+  ])
+    ok(first.options.some((o) => o.value === d), `equation choice misses ${d}`);
+  const asked = (a: Record<string, string | number> = {}) =>
+    wizard.questions(a, table).flatMap((q) => (q ? [q.id] : []));
+  deepStrictEqual(asked({ equation: "t-distribution" }), [
+    "equation",
+    "xMin",
+    "xMax",
+    "segments",
+    "extra",
+    "curves",
+    "curve1_label",
+    "curve1_DF",
+  ]);
+  deepStrictEqual(asked({ equation: "binomial-distribution" }), [
+    "equation",
+    "xMin",
+    "xMax",
+    "segments",
+    "extra",
+    "curves",
+    "curve1_label",
+    "curve1_N",
+    "curve1_P",
+  ]);
+  deepStrictEqual(
+    wizard.finish(
+      {
+        equation: "f-distribution",
+        xMin: 0,
+        xMax: 5,
+        segments: 150,
+        extra: "none",
+        curves: 1,
+        curve1_label: "F",
+        curve1_DF1: 5,
+        curve1_DF2: 10,
+      },
+      table,
+    ),
+    {
+      type: "plot-function",
+      params: {
+        equation: "f-distribution",
+        xMin: 0,
+        xMax: 5,
+        segments: 150,
+        curves: [{ label: "F", params: { DF1: 5, DF2: 10 } }],
+        extra: "none",
+      },
+    },
   );
 });
 

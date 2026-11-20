@@ -121,9 +121,12 @@ ENUM_OVERRIDES = {
     # Linear regression never sees replicate columns, so 1/sd2 is not
     # offered (types.ts LinearRegressionParams.weights).
     ("linear-regression", "weights"): ["none", "1/y", "1/y2", "1/x", "1/x2"],
-    # Plot a function cannot plot a user-defined equation (types.ts).
+    # Plot a function cannot plot a user-defined equation (types.ts);
+    # the distributions (seq 203) are appended after the models. The
+    # "gaussian" is already in NONLINEAR_MODELS — do not append it again
+    # (the old override did, and the schema carried it twice).
     ("plot-function", "equation"): [m for m in ARRAYS["NONLINEAR_MODELS"]
-                                     if m != "user-defined"] + ["gaussian"],
+                                     if m != "user-defined"] + ARRAYS["PLOT_FUNCTION_DISTRIBUTIONS"],
     ("plot-function", "extra"): ["none", "first-derivative",
                                  "second-derivative", "integral"],
 }

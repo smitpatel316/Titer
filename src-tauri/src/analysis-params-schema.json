@@ -1803,7 +1803,12 @@
           "boltzmann-sigmoid",
           "lorentzian",
           "sine-wave",
-          "gaussian"
+          "normal-distribution",
+          "t-distribution",
+          "f-distribution",
+          "chi-square-distribution",
+          "binomial-distribution",
+          "poisson-distribution"
         ],
         "required": true
       },

@@ -71,6 +71,7 @@ import {
   NORMALIZE_HUNDRED_DEFS,
   NORMALIZE_METHODS,
   NORMALIZE_ZERO_DEFS,
+  PLOT_FUNCTION_DISTRIBUTIONS,
   POSTHOC_TARGETS,
   PRUNE_ROWS_CONDITIONS,
   RANK_POSTHOCS,
@@ -376,7 +377,7 @@ const PARAMS = {
   // Plot a function (v2): the equation, the X range, how many line segments
   // draw each curve, the extra series, and the curves themselves (each a
   // label + its parameter values, read by the "plot-curves" kind below).
-  equation: [...NONLINEAR_MODELS, "gaussian"],
+  equation: [...NONLINEAR_MODELS, ...PLOT_FUNCTION_DISTRIBUTIONS],
   xMin: "number",
   xMax: "number",
   segments: { min: 10, max: 1000 },

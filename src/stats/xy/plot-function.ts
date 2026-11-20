@@ -2,19 +2,35 @@
 // curves from an equation + parameters, no data analysed. Pure TypeScript —
 // no R: the nonlinear models evaluate through the same `evaluate()` the
 // fitted-curve overlay uses, and the Gaussian (Prism's canonical example,
-// which the fitter does not offer) evaluates here.
+// which the fitter does not offer) evaluates here. Seq 203 adds Prism's
+// statistical distributions (FAQ 1578): the normal (z), Student's t, F and
+// chi-square densities and the binomial + Poisson mass functions, from
+// `../distributions` (log-gamma only, no R).
 import type {
   AnalysisOutcome,
   GeneratedCurve,
   NonlinearModel,
+  PlotFunctionDistribution,
   PlotFunctionExtra,
   PlotFunctionModel,
   PlotFunctionParams,
 } from "../types";
+import { PLOT_FUNCTION_DISCRETE_DISTRIBUTIONS, PLOT_FUNCTION_DISTRIBUTIONS } from "../types";
+import { binomialPmf, chiSquarePdf, fPdf, normalPdf, poissonPmf, tPdf } from "../distributions";
 import { modelSpec } from "./nonlinear-fit";
 import { MODEL_LABEL, nonNegativeXOnly, positiveXOnly, termLabel } from "./nonlinear-regression";
 import { evaluate } from "../../views/graphs/fitted-curve";
 import { NONLINEAR_MODELS } from "../types";
+
+/** Whether the model is one of Prism's statistical distributions (seq 203),
+ *  rather than a curve equation. */
+export const isDistributionModel = (model: PlotFunctionModel): model is PlotFunctionDistribution =>
+  (PLOT_FUNCTION_DISTRIBUTIONS as readonly string[]).includes(model);
+
+/** Whether the distribution is discrete (binomial, Poisson): its X grid is
+ *  the whole numbers in the range, one point each. */
+export const isDiscreteDistribution = (model: PlotFunctionModel): boolean =>
+  (PLOT_FUNCTION_DISCRETE_DISTRIBUTIONS as readonly string[]).includes(model);
 
 /** The equations the wizard offers, in Prism's spirit: the fitter's whole
  *  library (which now includes the Gaussian and the other classic curves).
@@ -22,20 +38,45 @@ import { NONLINEAR_MODELS } from "../types";
  *  to plot (see PlotFunctionModel). */
 export const PLOT_FUNCTION_MODELS: PlotFunctionModel[] = [
   ...NONLINEAR_MODELS.filter((m): m is Exclude<NonlinearModel, "user-defined"> => m !== "user-defined"),
+  ...PLOT_FUNCTION_DISTRIBUTIONS,
 ];
 
 /** The equation's plain-language name, as the wizard, the results and the graph note show it. */
 const { "user-defined": _unplottable, ...PLOTTABLE_LABELS } = MODEL_LABEL;
-export const PLOT_FUNCTION_LABEL: Record<PlotFunctionModel, string> = { ...PLOTTABLE_LABELS, gaussian: "Gaussian" };
+export const PLOT_FUNCTION_LABEL: Record<PlotFunctionModel, string> = {
+  ...PLOTTABLE_LABELS,
+  gaussian: "Gaussian",
+  "normal-distribution": "Normal distribution",
+  "t-distribution": "Student's t distribution",
+  "f-distribution": "F distribution",
+  "chi-square-distribution": "Chi-square distribution",
+  "binomial-distribution": "Binomial distribution",
+  "poisson-distribution": "Poisson distribution",
+};
 
 /** A Gaussian's parameters, in the order the wizard asks them. */
 const GAUSSIAN_PARAMS = ["Amplitude", "Mean", "SD"] as const;
+
+/** The distribution parameters, in the order the wizard asks them (seq 203):
+ *  the normal's mean/SD (default 0/1: the standard normal, z), the t and
+ *  chi-square degrees of freedom, the F numerator/denominator degrees of
+ *  freedom, the binomial's trials n and success probability p, the Poisson's
+ *  mean λ. */
+const DISTRIBUTION_PARAMS: Record<PlotFunctionDistribution, readonly string[]> = {
+  "normal-distribution": ["Mean", "SD"],
+  "t-distribution": ["DF"],
+  "f-distribution": ["DF1", "DF2"],
+  "chi-square-distribution": ["DF"],
+  "binomial-distribution": ["N", "P"],
+  "poisson-distribution": ["Lambda"],
+};
 
 /** The parameter names the wizard asks for, in order: the model's terms —
  *  plus "X0" for the segmental-linear hinge, which the fitter derives from
  *  the data (a breakpoint) instead of fitting, so the plotter asks for it
  *  outright. */
 export function plotFunctionParams(model: PlotFunctionModel): string[] {
+  if (isDistributionModel(model)) return [...DISTRIBUTION_PARAMS[model]];
   if (model === "gaussian") return [...GAUSSIAN_PARAMS];
   const terms = modelSpec(model).terms;
   return model === "segmental-linear" ? [...terms, "X0"] : terms;
@@ -76,12 +117,29 @@ export const PLOT_FUNCTION_DEFAULTS: Record<PlotFunctionModel, Record<string, nu
   "boltzmann-sigmoid": { Bottom: 0, Top: 100, V50: 0, Slope: 1 },
   lorentzian: { Amplitude: 100, Center: 0, Width: 1 },
   "sine-wave": { Amplitude: 1, Wavelength: 10, PhaseShift: 0, Baseline: 0 },
+  // Distributions (seq 203): the standard normal, a t with 10 df, an
+  // F(5, 10), a chi-square with 5 df, a binomial with 20 trials at p = 0.5,
+  // a Poisson with mean 5.
+  "normal-distribution": { Mean: 0, SD: 1 },
+  "t-distribution": { DF: 10 },
+  "f-distribution": { DF1: 5, DF2: 10 },
+  "chi-square-distribution": { DF: 5 },
+  "binomial-distribution": { N: 20, P: 0.5 },
+  "poisson-distribution": { Lambda: 5 },
 };
 
 /** The wizard's starting X range, per model: log-X curves need X > 0, raw
- *  concentration curves X ≥ 0, everything else any X. */
+ *  concentration curves X ≥ 0, everything else any X. Distributions (seq
+ *  203): the normal and t over −4..4 (the standard normal's mass), the F
+ *  over 0..5 and the chi-square over 0..20 (their right tails), the discrete
+ *  ones over 0..20 (the binomial's 0..N at its default N, the Poisson's
+ *  mass at its default λ). */
 export function plotFunctionXRange(model: PlotFunctionModel): [number, number] {
   if (model === "gaussian") return [-3, 3];
+  if (model === "normal-distribution" || model === "t-distribution") return [-4, 4];
+  if (model === "f-distribution") return [0, 5];
+  if (model === "chi-square-distribution") return [0, 20];
+  if (model === "binomial-distribution" || model === "poisson-distribution") return [0, 20];
   if (positiveXOnly(model)) return [0.1, 10];
   if (nonNegativeXOnly(model)) return [0, 10];
   return [-10, 10];
@@ -95,7 +153,8 @@ export const PLOT_FUNCTION_SEGMENTS = { default: 150, min: 10, max: 1000 };
  *  curve, so more than 8 is a chore to step through. */
 export const PLOT_FUNCTION_MAX_CURVES = 8;
 
-/** The equation at `x`: the Gaussian here, the fitter's models through
+/** The equation at `x`: the Gaussian here, the distributions (seq 203)
+ *  through their density / mass functions, the fitter's models through
  *  `evaluate()` (its coefficients take the display names — "Hill slope",
  *  not "HillSlope" — so the params are renamed on the way in). A value the
  *  equation cannot give (a log at X ≤ 0, a pole) is NaN, never thrown. */
@@ -111,6 +170,12 @@ export function evaluatePlotFunction(
     const z = (x - params.Mean) / sd;
     return params.Amplitude * Math.exp(-0.5 * z * z);
   }
+  if (model === "normal-distribution") return normalPdf(x, params.Mean, params.SD);
+  if (model === "t-distribution") return tPdf(x, params.DF);
+  if (model === "f-distribution") return fPdf(x, params.DF1, params.DF2);
+  if (model === "chi-square-distribution") return chiSquarePdf(x, params.DF);
+  if (model === "binomial-distribution") return binomialPmf(x, params.N, params.P);
+  if (model === "poisson-distribution") return poissonPmf(x, params.Lambda);
   return evaluate(
     model,
     Object.entries(params).map(([term, estimate]) => ({
@@ -230,13 +295,47 @@ export async function runPlotFunction(
     }
     if (model === "gaussian" && curve.params.SD <= 0)
       return { error: `“${label}”: the Gaussian's SD must be greater than 0.` };
+    // Distributions (seq 203): the parameters a density / mass function
+    // needs to exist — a non-positive SD or df, a non-whole N, a p outside
+    // (0, 1), a non-positive λ.
+    if (model === "normal-distribution" && curve.params.SD <= 0)
+      return { error: `“${label}”: the normal distribution's SD must be greater than 0.` };
+    if ((model === "t-distribution" || model === "chi-square-distribution") && curve.params.DF <= 0)
+      return {
+        error: `“${label}”: the ${model === "t-distribution" ? "t" : "chi-square"} distribution's degrees of freedom must be greater than 0.`,
+      };
+    if (model === "f-distribution" && (curve.params.DF1 <= 0 || curve.params.DF2 <= 0))
+      return { error: `“${label}”: the F distribution's degrees of freedom must both be greater than 0.` };
+    if (model === "binomial-distribution") {
+      if (!Number.isInteger(curve.params.N) || curve.params.N < 1)
+        return { error: `“${label}”: the binomial's number of trials N must be a whole number of 1 or more.` };
+      if (curve.params.P <= 0 || curve.params.P >= 1)
+        return { error: `“${label}”: the binomial's probability P must be between 0 and 1.` };
+    }
+    if (model === "poisson-distribution" && curve.params.Lambda <= 0)
+      return { error: `“${label}”: the Poisson's mean λ must be greater than 0.` };
   }
   const extra = params.extra ?? "none";
   if (extra !== "none" && extra !== "first-derivative" && extra !== "second-derivative" && extra !== "integral")
     return { error: `“${String(extra)}” is not something this analysis can plot alongside the function.` };
 
+  // The X grid: evenly spaced for a curve equation; the whole numbers in
+  // the range for a discrete distribution (one point per whole number —
+  // the line-segments setting does not apply to them, and a range holding
+  // fewer than 2 whole numbers plots nothing).
+  const discrete = isDiscreteDistribution(model);
   const x: number[] = [];
-  for (let i = 0; i <= segments; i++) x.push(xMin + ((xMax - xMin) * i) / segments);
+  if (discrete) {
+    const lo = Math.max(0, Math.ceil(xMin));
+    const hi = Math.floor(xMax);
+    if (hi - lo + 1 < 2)
+      return {
+        error: `A discrete distribution needs an X range holding at least 2 whole numbers — ${xMin} to ${xMax} holds ${Math.max(0, hi - lo + 1)}.`,
+      };
+    for (let v = lo; v <= hi; v++) x.push(v);
+  } else {
+    for (let i = 0; i <= segments; i++) x.push(xMin + ((xMax - xMin) * i) / segments);
+  }
   const generated: GeneratedCurve[] = curves.map((curve, i) => {
     const label = curve.label?.trim() ? curve.label.trim() : `Curve ${i + 1}`;
     const y = x.map((x0) => {
@@ -248,15 +347,20 @@ export async function runPlotFunction(
   const curveWord = generated.length === 1 ? "curve" : "curves";
   const extraWord =
     extra === "none" ? "" : `, with its ${EXTRA_LABEL[extra].toLowerCase()} plotted alongside`;
+  const gridWord = discrete
+    ? `one point per whole number from ${x[0]} to ${x[x.length - 1]}`
+    : `X from ${xMin} to ${xMax} in ${segments} line segments`;
   return {
     testType: "plot-function",
     subtitle: PLOT_FUNCTION_LABEL[model],
     summary:
-      `Generated ${generated.length} ${curveWord} from the ${PLOT_FUNCTION_LABEL[model]} equation, ` +
-      `X from ${xMin} to ${xMax} in ${segments} line segments${extraWord}. ` +
+      `Generated ${generated.length} ${curveWord} from the ${PLOT_FUNCTION_LABEL[model]}${isDistributionModel(model) ? "" : " equation"}, ` +
+      `${gridWord}${extraWord}. ` +
       `No data was analysed — the curves come from the parameter values below.`,
     stats: [
-      { label: "Line segments", value: segments },
+      ...(discrete
+        ? [{ label: "X values", value: x.length }]
+        : [{ label: "Line segments", value: segments }]),
       { label: "Curves", value: generated.length },
     ],
     groups: [],
@@ -264,7 +368,12 @@ export async function runPlotFunction(
       "The curve is a set of X and Y coordinates joined by line segments — zooming into part of it " +
       "can look coarse, so re-run with more line segments when plotting only part of the range. " +
       "A blank Y is a point the equation cannot give (a logarithm at X ≤ 0, a pole); " +
-      "the graph leaves a gap there instead of joining across it.",
+      "the graph leaves a gap there instead of joining across it." +
+      (isDistributionModel(model)
+        ? discrete
+          ? " Y is the probability of exactly that many successes or events — the values sum to 1."
+          : " Y is the probability density — the area under the curve is 1."
+        : ""),
     generatedCurves: { x, curves: generated },
     parameterValues: curves.map((curve, i) => ({
       label: curve.label?.trim() ? curve.label.trim() : `Curve ${i + 1}`,
