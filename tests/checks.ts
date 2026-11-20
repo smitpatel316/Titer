@@ -12150,18 +12150,25 @@ check("row means and totals per-column mode summarises each row within each data
   };
   const xyOut = await runAnalysis("row-means-totals", xy, { ys: ["Y1", "Y2"], x: "Time", rowScope: "per-column" });
   if ("error" in xyOut) throw new Error(xyOut.error);
+  // The geometric mean is exp(mean(log(x))) from R, so a single value comes
+  // back a few ulps off itself (10.000000000000002 for 10) — pin it to 1e-9
+  // like the pooled checks do, not exact like the rest of the row.
   deepStrictEqual(
-    xyOut.rowMeans?.map((r) => [r.row, r.column, r.x, r.n, r.total, r.mean, r.sd, r.geoMean, r.min, r.max]),
+    xyOut.rowMeans?.map((r) => [r.row, r.column, r.x, r.n, r.total, r.mean, r.sd, r.min, r.max]),
     [
-      ["Row 1", "Y1", 0, 1, 10, 10, null, 10, 10, 10],
-      ["Row 1", "Y2", 0, 1, 30, 30, null, 30, 30, 30],
-      ["Row 2", "Y1", 1, 1, 30, 30, null, 30, 30, 30],
-      ["Row 2", "Y2", 1, 1, 20, 20, null, 20, 20, 20],
-      ["Row 3", "Y1", 2, 1, 5, 5, null, 5, 5, 5],
-      ["Row 4", "Y1", 3, 1, 0, 0, null, null, 0, 0],
-      ["Row 4", "Y2", 3, 1, 4, 4, null, 4, 4, 4],
+      ["Row 1", "Y1", 0, 1, 10, 10, null, 10, 10],
+      ["Row 1", "Y2", 0, 1, 30, 30, null, 30, 30],
+      ["Row 2", "Y1", 1, 1, 30, 30, null, 30, 30],
+      ["Row 2", "Y2", 1, 1, 20, 20, null, 20, 20],
+      ["Row 3", "Y1", 2, 1, 5, 5, null, 5, 5],
+      ["Row 4", "Y1", 3, 1, 0, 0, null, 0, 0],
+      ["Row 4", "Y2", 3, 1, 4, 4, null, 4, 4],
     ],
   );
+  const xyGeoMean: (number | null)[] = [10, 30, 30, 20, 5, null, 4];
+  xyOut.rowMeans?.forEach((r, i) => {
+    ok(close(r.geoMean, xyGeoMean[i]), `cell ${i}: got geoMean ${r.geoMean}, want ${xyGeoMean[i]}`);
+  });
   // Row 3 has no Y2 value, so it gets no Y2 summary; every cell's
   // geometric SD/CI is null on a single value.
   ok(xyOut.rowMeans?.every((r) => r.geoSd == null && r.geoCiLow == null && r.geoCiHigh == null));
