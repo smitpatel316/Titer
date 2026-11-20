@@ -126,6 +126,7 @@ import { kruskalWallisSpec } from "../src/stats/column/kruskal-wallis";
 import { anovaSpec } from "../src/stats/column/anova";
 import { dagostinoPearson } from "../src/stats/column/shapiro-wilk";
 import { runRout } from "../src/stats/column/rout";
+import { adjustStackPValues, fisherCombinedP, runPValueStack, stoufferCombinedP } from "../src/stats/column/p-values";
 import {
   CHECKLIST_KEYS,
   CHECKLISTS,
@@ -1633,6 +1634,11 @@ check("a cross-family choice value falls back to the default", () => {
   deepStrictEqual(paramsOf(threeWay, "m7k"), { posthoc: "sidak" });
   const spline = withAnalysis("m7l", "spline-lowess", { method: "pearson" });
   deepStrictEqual(paramsOf(spline, "m7l"), { method: "pearson" });
+  const pStack = withAnalysis("m7m", "p-value-stack", { method: "pearson", alpha: 0.05 });
+  deepStrictEqual(paramsOf(pStack, "m7m"), { method: "pearson", alpha: 0.05 });
+  const pStackOwn = withAnalysis("m7n", "p-value-stack", { method: "bh", q: 1 });
+  deepStrictEqual(paramsOf(pStackOwn, "m7n"), { method: "bh", q: 1 });
+  strictEqual(pStackOwn.issues.length, 0);
 });
 
 // Quirk 2: the "Project Updated" notice must not go through the native dialog —
@@ -11096,6 +11102,150 @@ check("the outliers wizard rejects an out-of-range ROUT Q, and the runner refuse
   deepStrictEqual(await runRout(columns, { q: 100 }), { error: "Q must be between 0.01 and 50." });
   ok(!("error" in (await runRout(columns, { q: 1 }))));
   ok(!("error" in (await runRout(columns, { q: 50 }))));
+});
+
+// ── Stack of P values (seq 190) ──────────────────────────────────────────
+// P values computed elsewhere, adjusted for multiplicity — every method
+// against hand-computed values, and the two combined P values against
+// SciPy's combine_pvalues on the same stack.
+check("a stack of P values adjusts by every method and combines Fisher/Stouffer", async () => {
+  const data: TableData = {
+    columns: ["Title", "P"],
+    rows: [
+      [null, "0.001"],
+      [null, "0.01"],
+      [null, "0.02"],
+      [null, "0.04"],
+      [null, "0.5"],
+    ],
+  };
+  const columns = readTable(data).columns;
+  const ps = [0.001, 0.01, 0.02, 0.04, 0.5];
+  // The stack is already in ascending order, so the rows come back in entry
+  // order and the adjusted values below are the sorted ones.
+  const methods = ["bonferroni", "sidak", "holm", "holm-sidak", "bh", "bky", "by"] as const;
+  const expected: Record<(typeof methods)[number], number[]> = {
+    bonferroni: [0.005, 0.05, 0.1, 0.2, 1],
+    sidak: [0.00499001, 0.0490099501, 0.0960792032, 0.1846273024, 0.96875],
+    holm: [0.005, 0.04, 0.06, 0.08, 0.5],
+    "holm-sidak": [0.00499001, 0.03940399, 0.058808, 0.0784, 0.5],
+    bh: [0.005, 0.025, 0.0333333333, 0.05, 0.5],
+    bky: [0.0021, 0.0105, 0.014, 0.021, 0.21],
+    by: [0.0114166667, 0.0570833333, 0.0761111111, 0.1141666667, 1],
+  };
+  for (const method of methods) {
+    const want = expected[method];
+    deepStrictEqual(
+      adjustStackPValues(ps, method, 0.05).map((v) => (v == null ? null : +v.toFixed(10))),
+      want.map((v) => +v.toFixed(10)),
+      `${method} adjustment`,
+    );
+    const out = await runPValueStack(columns, { method, q: 5, alpha: 0.05 });
+    ok(!("error" in out), `${method} should run`);
+    if ("error" in out) throw new Error("unreachable");
+    deepStrictEqual(
+      out.pValueRows!.map((r) => r.rank),
+      [1, 2, 3, 4, 5],
+      `${method} ranks`,
+    );
+    out.pValueRows!.forEach((r, i) => {
+      ok(Math.abs(r.adjusted! - want[i]!) < 1e-9, `${method}[${i}]: got ${r.adjusted}, want ${want[i]}`);
+    });
+  }
+  // Fisher's and Stouffer's combined P values: SciPy combine_pvalues.
+  ok(Math.abs(fisherCombinedP(ps) - 2.8951988474790597e-5) < 1e-12);
+  ok(Math.abs(stoufferCombinedP(ps) - 1.8636593059677816e-5) < 1e-12);
+  // The default run (no params) is Holm–Šídák at α = 0.05, through the
+  // registry — two of the five adjusted P values are significant.
+  const out = await runAnalysis("p-value-stack", data);
+  ok(!("error" in out));
+  if ("error" in out) throw new Error("unreachable");
+  strictEqual(out.subtitle, "Stack of P values — Holm–Šídák (α = 0.05)");
+  const stat = (label: string) => out.stats.find((s) => s.label === label)?.value;
+  strictEqual(stat("P values entered"), 5);
+  strictEqual(stat("Significant (adjusted P ≤ 0.05)"), 2);
+  ok(Math.abs((stat("Fisher's combined P value") as number) - 2.8951988474790597e-5) < 1e-12);
+  ok(Math.abs((stat("Stouffer's combined P value") as number) - 1.8636593059677816e-5) < 1e-12);
+  strictEqual(out.pValueAdjustedLabel, "Adjusted P value");
+  strictEqual(out.pValueFlagLabel, "Significant");
+  // Benjamini–Hochberg at Q = 5% finds four discoveries (the q value of
+  // exactly 0.05 counts).
+  const bh = await runPValueStack(columns, { method: "bh", q: 5 });
+  ok(!("error" in bh));
+  if ("error" in bh) throw new Error("unreachable");
+  strictEqual(bh.stats.find((s) => s.label === "Discoveries (q ≤ 5%)")?.value, 4);
+  strictEqual(bh.pValueAdjustedLabel, "q value");
+  strictEqual(bh.pValueFlagLabel, "Discovery");
+  // Errors: a value outside 0–1, an unknown method, an out-of-range level.
+  const bad = readTable({
+    columns: ["Title", "P"],
+    rows: [
+      [null, "0.01"],
+      [null, "1.5"],
+    ],
+  }).columns;
+  deepStrictEqual(await runPValueStack(bad, { method: "holm-sidak" }), {
+    error: "“Row 2” is 1.5, not a P value — enter P values between 0 and 1.",
+  });
+  deepStrictEqual(await runPValueStack(columns, { method: "bogus" } as never), {
+    error: "Unknown P-value method: “bogus”.",
+  });
+  deepStrictEqual(await runPValueStack(columns, { method: "holm", alpha: 99 }), {
+    error: "Alpha must be between 0.001 and 0.5.",
+  });
+  deepStrictEqual(await runPValueStack(columns, { method: "bh", q: 99 }), {
+    error: "Q must be between 0.01 and 50.",
+  });
+  deepStrictEqual(await runPValueStack([], { method: "holm-sidak" }), {
+    error: "This needs at least 1 column containing numeric data.",
+  });
+});
+
+check("the stack-of-P-values wizard asks for alpha or Q by method family", () => {
+  const table = readTable({
+    columns: ["Title", "P"],
+    rows: [
+      [null, "0.001"],
+      [null, "0.01"],
+    ],
+  });
+  const wizard = WIZARDS["p-value-stack"]!;
+  const qs = (a: Answers) =>
+    wizard.questions(a, table).filter((q): q is Question => q !== false);
+  const byId = (a: Answers, id: string) => qs(a).find((q) => q.id === id);
+  const method = byId({}, "method")!;
+  ok(method.kind === "choice");
+  if (method.kind === "choice") {
+    deepStrictEqual(
+      method.options.map((o) => o.value),
+      ["holm-sidak", "holm", "bonferroni", "sidak", "bh", "bky", "by"],
+    );
+  }
+  // Before the method is answered the family-wise question shows (Holm–Šídák
+  // is the default); picking an FDR method swaps it for Q.
+  ok(byId({}, "alpha"));
+  strictEqual(byId({}, "q"), undefined);
+  ok(byId({ method: "bh" }, "q"));
+  strictEqual(byId({ method: "bh" }, "alpha"), undefined);
+  const alpha = byId({}, "alpha")!;
+  if (alpha.kind === "number") {
+    strictEqual(alpha.validate?.(0), "Alpha must be between 0.001 and 0.5.");
+    strictEqual(alpha.validate?.(0.05), undefined);
+  }
+  // finish keeps only the level its own family uses; unanswered, the
+  // Holm–Šídák default with α = 0.05.
+  deepStrictEqual(wizard.finish({ method: "bh", q: 1 }, table), {
+    type: "p-value-stack",
+    params: { method: "bh", q: 1 },
+  });
+  deepStrictEqual(wizard.finish({ method: "holm", alpha: 0.01 }, table), {
+    type: "p-value-stack",
+    params: { method: "holm", alpha: 0.01 },
+  });
+  deepStrictEqual(wizard.finish({}, table), {
+    type: "p-value-stack",
+    params: { method: "holm-sidak", alpha: 0.05 },
+  });
 });
 
 check("the multiple logistic regression wizard offers only 0/1 columns as the outcome", () => {
