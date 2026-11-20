@@ -157,8 +157,11 @@ export async function runMultipleTTests(
   }
 
   // Each row's test and its difference of means in R; the raw P values come
-  // back and the correction across rows is TypeScript (see above). Pooled:
-  // one SD across every row (a single error term), each row's t on it.
+  // back and the correction across rows is TypeScript (see above). A Gaussian
+  // row returns its P, t statistic and df together (one tryCatch per row — a
+  // constant row gives NA for all three instead of aborting the analysis);
+  // the rank tests have no t or df, so they return P only. Pooled: one SD
+  // across every row (a single error term), each row's t on it.
   const a = (r: number) => rVec(rowsA[r]);
   const b = (r: number) => rVec(rowsB[r]);
   const test = (r: number) =>
@@ -166,7 +169,7 @@ export async function runMultipleTTests(
       ? // A row constant in both groups (say [5,5,5] vs [5,5,5]) makes t.test
         // error "data are essentially constant" and abort the whole multi-row
         // analysis: that row's P is open instead, the other rows complete.
-        `tryCatch(t.test(${a(r)},${b(r)},paired=${rBool(params.paired)})$p.value,error=function(e) NA_real_)`
+        `tryCatch({tt<-t.test(${a(r)},${b(r)},paired=${rBool(params.paired)});c(tt$p.value,unname(tt$statistic),unname(tt$parameter))},error=function(e)c(NA_real_,NA_real_,NA_real_))`
       : // wilcox.test warns of ties: the warning is the call's, so it wraps the call.
         `suppressWarnings(wilcox.test(${a(r)},${b(r)},paired=${rBool(params.paired)}))$p.value`;
   const pooled = params.gaussian && params.pooledSd;
@@ -176,11 +179,20 @@ export async function runMultipleTTests(
 ss<-if(is.null(D))sum(mapply(function(x,y)sum((x-mean(x))^2)+sum((y-mean(y))^2),A,B)) else sum(sapply(D,function(d)sum((d-mean(d))^2)))
 dfp<-if(is.null(D))sum(lengths(A)+lengths(B)-2) else sum(lengths(D)-1)
 se2<-if(is.null(D))1/lengths(A)+1/lengths(B) else 1/lengths(D)
-pr<-2*pt(-abs(mapply(function(x,y)mean(x)-mean(y),A,B)/sqrt(ss/dfp*se2)),dfp)`
-    : `pr<-c(${testable.map(test).join(",")})`;
+pr<-2*pt(-abs(mapply(function(x,y)mean(x)-mean(y),A,B)/sqrt(ss/dfp*se2)),dfp)
+tv<-mapply(function(x,y)mean(x)-mean(y),A,B)/sqrt(ss/dfp*se2);dfv<-rep(dfp,length(A))`
+    : params.gaussian
+      ? `M<-cbind(${testable.map(test).join(",")});pr<-M[1,];tv<-M[2,];dfv<-M[3,]`
+      : `pr<-c(${testable.map(test).join(",")})`;
   const v = await evalNamedVector(
     `${raw}\n` +
-      `c(${testable.map((r, i) => `p_${i}=pr[${i + 1}],d_${i}=mean(${a(r)})-mean(${b(r)})`).join(",")})`,
+      `c(${testable
+        .map((r, i) =>
+          params.gaussian
+            ? `p_${i}=pr[${i + 1}],t_${i}=tv[${i + 1}],df_${i}=dfv[${i + 1}],d_${i}=mean(${a(r)})-mean(${b(r)})`
+            : `p_${i}=pr[${i + 1}],d_${i}=mean(${a(r)})-mean(${b(r)})`,
+        )
+        .join(",")})`,
   );
   if (pooled && v.p_0 == null && testable.length) {
     return { error: "Not enough replicate values to pool a shared SD across rows." };
@@ -198,6 +210,13 @@ pr<-2*pt(-abs(mapply(function(x,y)mean(x)-mean(y),A,B)/sqrt(ss/dfp*se2)),dfp)`
       { group: name2, row: r },
     ] as [ComparedCell, ComparedCell],
     diff: v[`d_${i}`] ?? null,
+    // The uncorrected P beside the corrected one in `p` — the results view
+    // shows both when they differ (a correction was applied).
+    rawP: rawP[i],
+    // A t test's statistic and degrees of freedom — Welch's df differs row
+    // to row, the pooled path shares one df across rows; the rank tests
+    // have neither, so they leave both keys off.
+    ...(params.gaussian ? { t: v[`t_${i}`] ?? null, df: v[`df_${i}`] ?? null } : {}),
     p: adjustedP[i],
     significant: significant[i],
   }));

@@ -9614,8 +9614,109 @@ check("multiple t tests run every Prism correction and flag significance against
   );
 });
 
-check("multiple t tests refuse an unknown correction instead of running it", async () => {
+// Multiple-t-tests corrections (seq 193): each row reports its own t, df,
+// raw P and corrected P — pinned against R's t.test / wilcox.test computed
+// independently in the test, not against the runner's own numbers.
+check("multiple t tests report each row's t, df, raw P and corrected P", async () => {
+  const rowsA = [
+    [1, 2, 3],
+    [1, 2, 3],
+    [1, 2, 3],
+    [1, 2, 3],
+  ];
+  const rowsB = [
+    [10, 11, 12],
+    [4, 5, 6],
+    [2, 3, 4],
+    [1.5, 2.5, 3.5],
+  ];
   const data: TableData = {
+    columns: ["Title", "A:1", "A:2", "A:3", "B:1", "B:2", "B:3"],
+    rows: rowsA.map((a, i) => [`r${i + 1}`, ...a.map(String), ...rowsB[i].map(String)]),
+  };
+  const run = async (params: Record<string, unknown>) => {
+    const out = await runAnalysis("multiple-t-tests", data, params as never);
+    if ("error" in out) throw new Error(out.error);
+    return out;
+  };
+  const close = (got: number | null | undefined, want: number | null | undefined, label: string) => {
+    ok(
+      got != null && want != null && Math.abs(got - want) < 1e-9,
+      `${label}: ${got}, R: ${want}`,
+    );
+  };
+  // Welch's t test per row, unpaired and paired.
+  for (const paired of [false, true]) {
+    const setup = rowsA
+      .map((a, i) => `tt${i}<-t.test(c(${a.join(",")}),c(${rowsB[i].join(",")}),paired=${paired ? "TRUE" : "FALSE"})`)
+      .join(";");
+    const want = await evalNamedVector(
+      `${setup};c(${rowsA.map((_, i) => `t_${i}=unname(tt${i}$statistic),df_${i}=unname(tt${i}$parameter),p_${i}=tt${i}$p.value`).join(",")})`,
+    );
+    const out = await run({ gaussian: true, pooledSd: false, paired, correction: "holm-sidak" });
+    const rawP = out.comparisons!.map((c) => c.rawP);
+    const adjusted = adjustMultipleTTestPValues(rawP, "holm-sidak");
+    out.comparisons!.forEach((c, i) => {
+      close(c.t, want[`t_${i}`], `paired=${paired} row ${i} t`);
+      close(c.df, want[`df_${i}`], `paired=${paired} row ${i} df`);
+      close(c.rawP, want[`p_${i}`], `paired=${paired} row ${i} raw P`);
+      close(c.p, adjusted[i], `paired=${paired} row ${i} corrected P`);
+    });
+  }
+  // Pooled SD: one shared df across rows (4 rows × (3 + 3 − 2) = 16) and each
+  // row's t on the pooled standard error — pinned from the definition, not
+  // from the runner's formula.
+  {
+    const setup = `A<-list(${rowsA.map((a) => `c(${a.join(",")})`).join(",")});B<-list(${rowsB.map((b) => `c(${b.join(",")})`).join(",")});ss<-sum(mapply(function(x,y)sum((x-mean(x))^2)+sum((y-mean(y))^2),A,B));sp<-sqrt(ss/16)`;
+    const want = await evalNamedVector(
+      `${setup};c(${rowsA.map((_, i) => `t_${i}=(mean(A[[${i + 1}]])-mean(B[[${i + 1}]]))/(sp*sqrt(1/3+1/3))`).join(",")})`,
+    );
+    const out = await run({ gaussian: true, pooledSd: true, paired: false, correction: "bonferroni" });
+    out.comparisons!.forEach((c, i) => {
+      strictEqual(c.df, 16, `pooled row ${i} df`);
+      close(c.t, want[`t_${i}`], `pooled row ${i} t`);
+    });
+  }
+  // The rank tests have no t or df, but still report the raw P beside the
+  // corrected one.
+  {
+    const want = await evalNamedVector(
+      `c(${rowsA.map((a, i) => `p_${i}=suppressWarnings(wilcox.test(c(${a.join(",")}),c(${rowsB[i].join(",")}))) $p.value`).join(",")})`,
+    );
+    const out = await run({ gaussian: false, pooledSd: false, paired: false, correction: "holm" });
+    const rawP = out.comparisons!.map((c) => c.rawP);
+    const adjusted = adjustMultipleTTestPValues(rawP, "holm");
+    out.comparisons!.forEach((c, i) => {
+      strictEqual(c.t, undefined, `wilcox row ${i} has no t`);
+      strictEqual(c.df, undefined, `wilcox row ${i} has no df`);
+      close(c.rawP, want[`p_${i}`], `wilcox row ${i} raw P`);
+      close(c.p, adjusted[i], `wilcox row ${i} corrected P`);
+    });
+  }
+  // A constant row has no test at all: t, df and both P values stay open
+  // while the other rows complete.
+  {
+    const constData: TableData = {
+      columns: ["Title", "A:1", "A:2", "A:3", "B:1", "B:2", "B:3"],
+      rows: [
+        ["r1", "5", "5", "5", "5", "5", "5"],
+        ["r2", "1", "2", "3", "4", "5", "6"],
+      ],
+    };
+    const out = await runAnalysis("multiple-t-tests", constData, {
+      gaussian: true,
+      pooledSd: false,
+      paired: false,
+      correction: "holm-sidak",
+    } as never);
+    if ("error" in out) throw new Error(out.error);
+    const [c0, c1] = out.comparisons!;
+    ok(c0.t == null && c0.df == null && c0.rawP == null && c0.p == null, "constant row stays open");
+    ok(c1.t != null && c1.df != null && c1.rawP != null && c1.p != null, "other row completes");
+  }
+});
+
+check("multiple t tests refuse an unknown correction instead of running it", async () => {  const data: TableData = {
     columns: ["Title", "A:1", "A:2", "A:3", "B:1", "B:2", "B:3"],
     rows: [
       ["r1", "1", "2", "3", "4", "5", "6"],

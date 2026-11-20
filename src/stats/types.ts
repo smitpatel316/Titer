@@ -1328,6 +1328,13 @@ export interface ComparisonRow {
   low?: number | null;
   high?: number | null;
   p: number | null;
+  /** The row's test statistic (a t test's t; the rank tests have none). */
+  t?: number | null;
+  /** Its degrees of freedom (a t test's df; the rank tests have none). */
+  df?: number | null;
+  /** The row's uncorrected P value — `p` is the multiplicity-corrected one
+   *  (multiple-t-tests only; the results view shows both when they differ). */
+  rawP?: number | null;
   /** Whether this row's (already multiplicity-corrected, where the analysis
    *  corrects) P value clears the analysis's significance threshold.
    *  Only set by analyses that flag rows — multiple-t-tests sets it on
