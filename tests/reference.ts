@@ -626,6 +626,71 @@ const sincX = table(
   ],
 );
 
+/** Lines / Polynomials completion (1.8, B6): noiseless by construction
+ *  on the shared grid X = 0, 0.5, …, 12. LO: line through origin Slope=2.
+ *  HL: horizontal line Mean=7 (constant Y, so its R² is undefined). SL:
+ *  semilog Y-log Intercept=ln 2, Slope=0.3 (Y = 2·exp(0.3·X)). LL:
+ *  log-log line Intercept=ln 3, Slope=1.5 (Y = 3·X^1.5; the X = 0 row
+ *  is dropped — log(0) is undefined — so its Y there is arbitrary). GL:
+ *  exponential growth with log(population) Intercept=0, Slope=0.2.
+ *  SX: sixth order polynomial B0=10, B1=2, B2=0.3, B3=-0.05, B4=0.01,
+ *  B5=-0.001, B6=0.0001. C1–C6: centered polynomials on X − 6 (the X
+ *  mean), B0=10, B1=2, B2=0.5, B3=-0.1, B4=0.02, B5=-0.002,
+ *  B6=0.0002, one degree higher each. */
+const linesX = table(
+  ["Title", "X", "LO", "HL", "SL", "LL", "GL", "SX", "C1", "C2", "C3", "C4", "C5", "C6"],
+  [
+    ["", "0", "0.0000000000", "7.0000000000", "2.0000000000", "1.0000000000", "1.0000000000", "10.0000000000", "-2.0000000000", "16.0000000000", "37.6000000000", "63.5200000000", "79.0720000000", "88.4032000000"],
+    ["", "0.5", "1.0000000000", "7.0000000000", "2.3236684855", "1.0606601718", "1.1051709181", "11.0693453125", "-1.0000000000", "14.1250000000", "30.7625000000", "49.0637500000", "59.1294375000", "64.6655656250"],
+    ["", "1", "2.0000000000", "7.0000000000", "2.6997176152", "3.0000000000", "1.2214027582", "12.2591000000", "0.0000000000", "12.5000000000", "25.0000000000", "37.5000000000", "43.7500000000", "46.8750000000"],
+    ["", "1.5", "3.0000000000", "7.0000000000", "3.1366243710", "5.5113519213", "1.3498588076", "13.5504203125", "1.0000000000", "11.1250000000", "20.2375000000", "28.4387500000", "32.1293125000", "33.7900656250"],
+    ["", "2", "4.0000000000", "7.0000000000", "3.6442376008", "8.4852813742", "1.4918246976", "14.9344000000", "2.0000000000", "10.0000000000", "16.4000000000", "21.5200000000", "23.5680000000", "24.3872000000"],
+    ["", "2.5", "5.0000000000", "7.0000000000", "4.2340000332", "11.8585412256", "1.6487212707", "16.4111328125", "3.0000000000", "9.1250000000", "13.4125000000", "16.4137500000", "17.4641875000", "17.8318406250"],
+    ["", "3", "6.0000000000", "7.0000000000", "4.9192062223", "15.5884572681", "1.8221188004", "17.9899000000", "4.0000000000", "8.5000000000", "11.2000000000", "12.8200000000", "13.3060000000", "13.4518000000"],
+    ["", "3.5", "7.0000000000", "7.0000000000", "5.7153022361", "19.6437012806", "2.0137527075", "19.6904828125", "5.0000000000", "8.1250000000", "9.6875000000", "10.4687500000", "10.6640625000", "10.7128906250"],
+    ["", "4", "8.0000000000", "7.0000000000", "6.6402338455", "24.0000000000", "2.2255409285", "21.5456000000", "6.0000000000", "8.0000000000", "8.8000000000", "9.1200000000", "9.1840000000", "9.1968000000"],
+    ["", "4.5", "9.0000000000", "7.0000000000", "7.7148510614", "28.6378246381", "2.4596031112", "23.6044703125", "7.0000000000", "8.1250000000", "8.4625000000", "8.5637500000", "8.5789375000", "8.5812156250"],
+    ["", "5", "10.0000000000", "7.0000000000", "8.9633781407", "33.5410196625", "2.7182818285", "25.9375000000", "8.0000000000", "8.5000000000", "8.6000000000", "8.6200000000", "8.6220000000", "8.6222000000"],
+    ["", "5.5", "11.0000000000", "7.0000000000", "10.4139596544", "38.6959300185", "3.0041660239", "28.6420953125", "9.0000000000", "9.1250000000", "9.1375000000", "9.1387500000", "9.1388125000", "9.1388156250"],
+    ["", "6", "12.0000000000", "7.0000000000", "12.0992949288", "44.0908153701", "3.3201169227", "31.8496000000", "10.0000000000", "10.0000000000", "10.0000000000", "10.0000000000", "10.0000000000", "10.0000000000"],
+    ["", "6.5", "13.0000000000", "7.0000000000", "14.0573751612", "49.7154402575", "3.6692966676", "35.7333578125", "11.0000000000", "11.1250000000", "11.1125000000", "11.1137500000", "11.1136875000", "11.1136906250"],
+    ["", "7", "14.0000000000", "7.0000000000", "16.3323398251", "55.5607775324", "4.0551999668", "40.5179000000", "12.0000000000", "12.5000000000", "12.4000000000", "12.4200000000", "12.4180000000", "12.4182000000"],
+    ["", "7.5", "15.0000000000", "7.0000000000", "18.9754716727", "61.6187877193", "4.4816890703", "46.4892578125", "13.0000000000", "14.1250000000", "13.7875000000", "13.8887500000", "13.8735625000", "13.8758406250"],
+    ["", "8", "16.0000000000", "7.0000000000", "22.0463527613", "67.8822509939", "4.9530324244", "54.0064000000", "14.0000000000", "16.0000000000", "15.2000000000", "15.5200000000", "15.4560000000", "15.4688000000"],
+    ["", "8.5", "17.0000000000", "7.0000000000", "25.6142075653", "74.3446366593", "5.4739473917", "63.5137953125", "15.0000000000", "18.1250000000", "16.5625000000", "17.3437500000", "17.1484375000", "17.1972656250"],
+    ["", "9", "18.0000000000", "7.0000000000", "29.7594634497", "81.0000000000", "6.0496474644", "75.5551000000", "16.0000000000", "20.5000000000", "17.8000000000", "19.4200000000", "18.9340000000", "19.0798000000"],
+    ["", "9.5", "19.0000000000", "7.0000000000", "34.5755636811", "87.8428995423", "6.6858944423", "90.7879703125", "17.0000000000", "23.1250000000", "18.8375000000", "21.8387500000", "20.7883125000", "21.1559656250"],
+    ["", "10", "20.0000000000", "7.0000000000", "40.1710738464", "94.8683298051", "7.3890560989", "110.0000000000", "18.0000000000", "26.0000000000", "19.6000000000", "24.7200000000", "22.6720000000", "23.4912000000"],
+    ["", "10.5", "21.0000000000", "7.0000000000", "46.6721291619", "102.0716659999", "8.1661699126", "134.1257828125", "19.0000000000", "29.1250000000", "20.0125000000", "28.2137500000", "24.5231875000", "26.1839406250"],
+    ["", "11", "22.0000000000", "7.0000000000", "54.2252778413", "109.4486180817", "9.0250134994", "164.2651000000", "20.0000000000", "32.5000000000", "20.0000000000", "32.5000000000", "26.2500000000", "29.3750000000"],
+    ["", "11.5", "23.0000000000", "7.0000000000", "63.0007846175", "116.9951922089", "9.9741824548", "201.7022328125", "21.0000000000", "36.1250000000", "19.4875000000", "37.7887500000", "27.7230625000", "33.2591906250"],
+    ["", "12", "24.0000000000", "7.0000000000", "73.1964688874", "124.7076581450", "11.0231763806", "247.9264000000", "22.0000000000", "40.0000000000", "18.4000000000", "44.3200000000", "28.7680000000", "38.0992000000"],
+  ],
+);
+
+/** Semilog-Y drop rule: the X = 0 row holds Y = 0 (log undefined) and is
+ *  dropped; the remaining points are the SL curve (Intercept=ln 2,
+ *  Slope=0.3), which the fit must still recover. */
+const linesDropX = table(
+  ["Title", "X", "SL"],
+  [
+    ["", "0", "0"],
+    ["", "1", "2.6997176152"],
+    ["", "2", "3.6442376008"],
+    ["", "3", "4.9192062223"],
+    ["", "4", "6.6402338455"],
+  ],
+);
+
+/** Semilog-Y too-few: every Y is ≤ 0, so nothing is left to fit. */
+const linesAllZeroY = table(
+  ["Title", "X", "SL"],
+  [
+    ["", "0", "0"],
+    ["", "1", "0"],
+    ["", "2", "-1"],
+  ],
+);
 /** A sine wave needs ≥ 5 points (4 parameters + 1) — this has 4. */
 const classicTooFew = table(
   ["Title", "X", "Y"],
@@ -2561,6 +2626,19 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
   ["classicB6X", classicB6X, "nonlinear-regression", { y: "PA", model: "plateau-association" }],
   ["lognormX", lognormX, "nonlinear-regression", { y: "LN", model: "lognormal" }],
   ["sincX", sincX, "nonlinear-regression", { y: "SC", model: "sinc" }],
+  ["linesX", linesX, "nonlinear-regression", { y: "LO", model: "line-through-origin" }],
+  ["linesX", linesX, "nonlinear-regression", { y: "HL", model: "horizontal-line" }],
+  ["linesX", linesX, "nonlinear-regression", { y: "SL", model: "semilog-y-log" }],
+  ["linesX", linesX, "nonlinear-regression", { y: "LL", model: "log-log-line" }],
+  ["linesX", linesX, "nonlinear-regression", { y: "GL", model: "exponential-growth-log" }],
+  ["linesX", linesX, "nonlinear-regression", { y: "SX", model: "sextic" }],
+  ["linesX", linesX, "nonlinear-regression", { y: "C1", model: "centered-first" }],
+  ["linesX", linesX, "nonlinear-regression", { y: "C2", model: "centered-second" }],
+  ["linesX", linesX, "nonlinear-regression", { y: "C3", model: "centered-third" }],
+  ["linesX", linesX, "nonlinear-regression", { y: "C4", model: "centered-fourth" }],
+  ["linesX", linesX, "nonlinear-regression", { y: "C5", model: "centered-fifth" }],
+  ["linesX", linesX, "nonlinear-regression", { y: "C6", model: "centered-sixth" }],
+  ["linesDropX", linesDropX, "nonlinear-regression", { y: "SL", model: "semilog-y-log" }],
   ["classicTooFew", classicTooFew, "nonlinear-regression", { model: "sine-wave" }],
   // Enzyme kinetics (plan 09) — noiseless fixtures A/A2/B/C, the noisy
   // CI fixture, and the negative-X / constant-X / too-few-points errors.
@@ -4961,6 +5039,225 @@ async function disagreements(): Promise<string[]> {
       classicB6X,
     );
   }
+  // Lines / Polynomials completion (1.8, B6): lm fits on the noiseless
+  // linesX fixture — each fit recovers its generating parameters, the TS
+  // overlay evaluator matches R on the same grid, and the closed-form
+  // inverses read X back off Y. The horizontal line's Y is constant, so
+  // its R² is undefined — no R² assertion for it (its reference case
+  // records whatever R returns).
+  const fitLO = await checkClassic(
+    "line through origin",
+    "LO",
+    "line-through-origin",
+    [["Slope", 2]],
+    [["R squared", 1]],
+    linesX,
+  );
+  if (fitLO) {
+    await checkClassicOverlay("line through origin", "LO", "line-through-origin", fitLO, (p) => `${p.Slope!.toPrecision(15)}*x`, linesX);
+    if (invertModel("line-through-origin", fitLO.coefficients ?? [], 10) == null)
+      out.push(`Classic curves line through origin inverse at Y=10 returned null`);
+    else if (Math.abs(invertModel("line-through-origin", fitLO.coefficients ?? [], 10)! - 5) > 1e-3)
+      out.push(`Classic curves line through origin inverse at Y=10: ${invertModel("line-through-origin", fitLO.coefficients ?? [], 10)}, expected 5`);
+  }
+  const fitHL = await checkClassic("horizontal line", "HL", "horizontal-line", [["Mean", 7]], [], linesX);
+  if (fitHL) {
+    await checkClassicOverlay(
+      "horizontal line",
+      "HL",
+      "horizontal-line",
+      fitHL,
+      (p) => `rep(${p.Mean!.toPrecision(15)},length(x))`,
+      linesX,
+    );
+    if (invertModel("horizontal-line", fitHL.coefficients ?? [], 7) !== null)
+      out.push(`Classic curves horizontal line inverse should be null`);
+  }
+  const fitSL = await checkClassic(
+    "semilog Y-log",
+    "SL",
+    "semilog-y-log",
+    [
+      ["Intercept", 0.6931],
+      ["Slope", 0.3],
+    ],
+    [["R squared", 1]],
+    linesX,
+  );
+  if (fitSL) {
+    await checkClassicOverlay(
+      "semilog Y-log",
+      "SL",
+      "semilog-y-log",
+      fitSL,
+      (p) => `exp(${p.Intercept!.toPrecision(15)}+${p.Slope!.toPrecision(15)}*x)`,
+      linesX,
+    );
+    const back = invertModel("semilog-y-log", fitSL.coefficients ?? [], 2 * Math.exp(1.5));
+    if (back == null || Math.abs(back - 5) > 1e-3)
+      out.push(`Classic curves semilog Y-log inverse at Y=2·exp(1.5): ${back}, expected 5`);
+  }
+  const fitLL = await checkClassic(
+    "log-log line",
+    "LL",
+    "log-log-line",
+    [
+      ["Intercept", 1.0986],
+      ["Slope", 1.5],
+    ],
+    [["R squared", 1]],
+    linesX,
+  );
+  if (fitLL) {
+    await checkClassicOverlay(
+      "log-log line",
+      "LL",
+      "log-log-line",
+      fitLL,
+      (p) => `exp(${p.Intercept!.toPrecision(15)})*x^${p.Slope!.toPrecision(15)}`,
+      linesX,
+    );
+    const back = invertModel("log-log-line", fitLL.coefficients ?? [], 3 * 8 ** 1.5);
+    if (back == null || Math.abs(back - 8) > 1e-3)
+      out.push(`Classic curves log-log line inverse at Y=3·8^1.5: ${back}, expected 8`);
+  }
+  const fitGL = await checkClassic(
+    "exponential growth with log(population)",
+    "GL",
+    "exponential-growth-log",
+    [
+      ["Intercept", 0],
+      ["Slope", 0.2],
+    ],
+    [["R squared", 1]],
+    linesX,
+  );
+  if (fitGL) {
+    await checkClassicOverlay(
+      "exponential growth with log(population)",
+      "GL",
+      "exponential-growth-log",
+      fitGL,
+      (p) => `exp(${p.Intercept!.toPrecision(15)}+${p.Slope!.toPrecision(15)}*x)`,
+      linesX,
+    );
+    const back = invertModel("exponential-growth-log", fitGL.coefficients ?? [], Math.exp(1));
+    if (back == null || Math.abs(back - 5) > 1e-3)
+      out.push(`Classic curves exponential growth log inverse at Y=exp(1): ${back}, expected 5`);
+  }
+  const fitSX = await checkClassic(
+    "sixth order polynomial",
+    "SX",
+    "sextic",
+    [
+      ["B0", 10],
+      ["B1", 2],
+      ["B2", 0.3],
+      ["B3", -0.05],
+      ["B4", 0.01],
+      ["B5", -0.001],
+      ["B6", 0.0001],
+    ],
+    [["R squared", 1]],
+    linesX,
+  );
+  if (fitSX) {
+    await checkClassicOverlay(
+      "sixth order polynomial",
+      "SX",
+      "sextic",
+      fitSX,
+      (p) =>
+        `${p.B0!.toPrecision(15)}+${p.B1!.toPrecision(15)}*x+${p.B2!.toPrecision(15)}*x^2+${p.B3!.toPrecision(15)}*x^3+${p.B4!.toPrecision(15)}*x^4+${p.B5!.toPrecision(15)}*x^5+${p.B6!.toPrecision(15)}*x^6`,
+      linesX,
+    );
+    if (!fitSX.notes.includes("A sixth order polynomial can overfit"))
+      out.push(`Classic curves sextic notes missing overfit caution: ${fitSX.notes}`);
+  }
+  // Centered polynomials: same curve family as the uncentered same degree,
+  // but B0 is Y at the X mean (6 here) — and the X center is reported both
+  // as a derived row ("X center") and as the XCenter coefficient row.
+  const centeredCoefs: [string, [string, number][], string][] = [
+    ["first", [["B0", 10], ["B1", 2]], ""],
+    ["second", [["B0", 10], ["B1", 2], ["B2", 0.5]], ""],
+    ["third", [["B0", 10], ["B1", 2], ["B2", 0.5], ["B3", -0.1]], ""],
+    ["fourth", [["B0", 10], ["B1", 2], ["B2", 0.5], ["B3", -0.1], ["B4", 0.02]], ""],
+    [
+      "fifth",
+      [["B0", 10], ["B1", 2], ["B2", 0.5], ["B3", -0.1], ["B4", 0.02], ["B5", -0.002]],
+      "",
+    ],
+    [
+      "sixth",
+      [["B0", 10], ["B1", 2], ["B2", 0.5], ["B3", -0.1], ["B4", 0.02], ["B5", -0.002], ["B6", 0.0002]],
+      "sixth",
+    ],
+  ];
+  for (const [degree, coefs, overfit] of centeredCoefs) {
+    const model = `centered-${degree}` as NonlinearModel;
+    const y = `C${["first", "second", "third", "fourth", "fifth", "sixth"].indexOf(degree) + 1}`;
+    const fit = await checkClassic(
+      `centered ${degree} order polynomial`,
+      y,
+      model,
+      [...coefs, ["XCenter", 6]],
+      [
+        ["X center", 6],
+        ["R squared", 1],
+      ],
+      linesX,
+    );
+    if (fit) {
+      const terms = coefs.map(([t]) => t);
+      await checkClassicOverlay(
+        `centered ${degree} order polynomial`,
+        y,
+        model,
+        fit,
+        (p) => {
+          let expr = `${p.B0!.toPrecision(15)}+${p.B1!.toPrecision(15)}*(x-${p.XCenter!.toPrecision(15)})`;
+          for (let i = 2; i < terms.length; i++)
+            expr += `+${p[`B${i}`]!.toPrecision(15)}*(x-${p.XCenter!.toPrecision(15)})^${i}`;
+          return expr;
+        },
+        linesX,
+      );
+      if (overfit && !fit.notes.includes("A sixth order polynomial can overfit"))
+        out.push(`Classic curves centered sixth notes missing overfit caution: ${fit.notes}`);
+    }
+  }
+  // Log-Y rules: a Y ≤ 0 point is dropped before the fit (linesDropX holds
+  // Y = 0 at X = 0), nothing is left to fit when all Y ≤ 0, and
+  // interpolation is refused outright (the lm predict path is log-scale).
+  const fitDrop = await checkClassic(
+    "semilog Y-log with a Y = 0 point dropped",
+    "SL",
+    "semilog-y-log",
+    [
+      ["Intercept", 0.6931],
+      ["Slope", 0.3],
+    ],
+    [["R squared", 1]],
+    linesDropX,
+  );
+  if (fitDrop) {
+    const n = fitDrop.fit?.rows.find((row) => row.label === "N")?.values?.[0];
+    if (n !== 4) out.push(`Classic curves semilog Y-log drop: N=${n}, expected 4 (one point dropped)`);
+  }
+  const allZero = await runAnalysis("nonlinear-regression", linesAllZeroY, { y: "SL", model: "semilog-y-log" });
+  if (!("error" in allZero) || !allZero.error.includes("with Y > 0"))
+    out.push(
+      `Classic curves semilog Y-log all-zero: ${"error" in allZero ? allZero.error : "ran without error"}, expected an error naming Y > 0`,
+    );
+  const interpRefused = await runAnalysis("nonlinear-regression", linesX, {
+    y: "SL",
+    model: "semilog-y-log",
+    interpolate: true,
+  });
+  if (!("error" in interpRefused) || !interpRefused.error.includes("log-Y"))
+    out.push(
+      `Classic curves semilog Y-log interpolate: ${"error" in interpRefused ? interpRefused.error : "ran without error"}, expected a log-Y refusal`,
+    );
   // The sine wave needs ≥ 5 points (4 parameters + 1) — this has 4.
   const classicFew = await runAnalysis("nonlinear-regression", classicTooFew, { model: "sine-wave" });
   if (!("error" in classicFew) || !classicFew.error.includes("need at least 5"))
