@@ -333,6 +333,8 @@ const PARAMS = {
   posthocTerm: THREE_WAY_TERMS,
   truth: "name", score: "name", positive: "name-or-number",
   time: "name", status: "name", covariates: "names", stratifyBy: "name", ties: ["efron", "breslow"],
+  // A Multiple Variables t test's response split, and a survival analysis's groups.
+  groupBy: "name",
   // Normality tests (plan 23): which of the four tests, and whether to
   // also test the log-transformed values. `test` is shared with chi-square's
   // test choice (fisher/yates/chi-square/trend): the reader only sanitizes,
@@ -870,7 +872,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   ],
   transpose: ["sets"],
   "prune-rows": ["ys", "x", "condition", "threshold", "low", "high", "sets"],
-  "compare-two-groups": ["paired", "gaussian", "equalVariance", "ratio", "lognormal", "tails", "sets"],
+  "compare-two-groups": ["paired", "gaussian", "equalVariance", "ratio", "lognormal", "tails", "response", "groupBy", "sets"],
   "one-sample-t": ["hypotheticalValue", "tails", "gaussian", "lognormal", "sets"],
   anova: ["posthoc", "equalSd", "control", "compared", "lognormal", "sets"],
   "kruskal-wallis": ["posthoc", "sets"],
@@ -894,7 +896,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "area-under-curve": ["baseline", "sets"],
   "row-means-totals": ["ys", "x", "sets"],
   "nonlinear-regression": [
-    "y", "ys", "model", "compareWith", "compare", "interpolate", "weights", "fixed", "bounds", "fixedConstants",
+    "x", "y", "ys", "model", "compareWith", "compare", "interpolate", "weights", "fixed", "bounds", "fixedConstants",
     "boundsConstants", "compareModel", "globalY", "sharedParams", "ligandConcentration", "ligandKd",
     "ligandConcentrationConstant", "ligandKdConstant", "fitKi", "rout", "q", "ecx", "customEquation", "customParameters",
     "sets",
@@ -924,7 +926,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
     "target", "x", "response", "grouping", "subject", "rowTitles", "rowFactor", "columnFactor", "rowVariable",
     "outcome", "count", "prefixNames", "completeRows", "sets",
   ],
-  survival: ["curveTest", "correction", "sets"],
+  survival: ["curveTest", "correction", "time", "status", "groupBy", "sets"],
   cox: ["reference", "sets"],
   "chi-square": ["test", "trendOrdered", "sets"],
   mcnemar: ["continuityCorrection", "sets"],

@@ -55,7 +55,9 @@ export async function runSurvival(columns: Column[], params: SurvivalParams | un
   if (!Object.hasOwn(CORRECTION_METHOD, p.correction)) {
     return { error: `Unknown survival correction "${p.correction}".` };
   }
-  const groups = survivalGroups(columns);
+  // A Multiple Variables table assigns its variables (`time`, `status`, `groupBy`); a
+  // Survival table reads them positionally (X = time, one column per group of codes).
+  const groups = survivalGroups(columns, p);
   if (!Array.isArray(groups)) return groups;
 
   const k = groups.length;
