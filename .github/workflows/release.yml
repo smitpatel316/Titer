@@ -1,8 +1,11 @@
 # Builds Titer for a release: pushing a version tag (v1.1.0) runs the checks, then
 # builds the two DMGs (Apple Silicon, Intel) on GitHub's Macs and attaches them to a
-# draft release of that tag, with what Helix updates itself from: each app as a signed
-# `.app.tar.gz` and `latest.json`, which names them. Publishing the draft is what
-# "Check for Updates" sees.
+# draft release of that tag. "Check for Updates" does NOT read this release: it
+# reads the channel manifest at titer.smitpatel.net/channel/version.json, which
+# scripts/publish-v1.2.py writes (asset first, manifest last) after the draft is
+# published. There is no updater plugin and no latest.json — the app updates
+# itself with its own channel check (src/updates.ts) and shell commands
+# (src-tauri/src/updater.rs).
 name: Release
 
 on:
@@ -34,7 +37,7 @@ jobs:
     permissions:
       contents: write # to create the release and upload the DMGs
     strategy:
-      max-parallel: 1 # each build adds its Mac to the release's latest.json: one at a time
+      max-parallel: 1 # the two builds attach their DMGs to the same draft release: one at a time
       matrix:
         target: [aarch64-apple-darwin, x86_64-apple-darwin]
     steps:
@@ -61,15 +64,12 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # The key Helix checks an update against (its public half is in tauri.conf.json).
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Titer ${{ github.ref_name }}
           releaseDraft: true
           tauriScript: npx tauri
-          args: --target ${{ matrix.target }} --config src-tauri/tauri.release.conf.json
+          args: --target ${{ matrix.target }}
           releaseBody: |
             Download the DMG for your Mac: **aarch64** for Apple Silicon (M1 and later), **x64** for Intel.
             Open it and drag Titer into the Applications folder.

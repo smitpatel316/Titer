@@ -497,6 +497,13 @@ export const openGithubIssue = (url: string) => invoke<void>("open_github_issue"
 // ── Updates ──────────────────────────────────────────────────────────────
 // The shell side lives in src-tauri/src/updater.rs.
 
+/** Fetches the channel manifest through the shell's curl, not the
+ *  webview's fetch: the webview enforces CORS and the channel host sends
+ *  no Access-Control-Allow-Origin, so the in-page fetch failed fast while
+ *  curl answered 200 (P0, Nov 19 2026). Returns the manifest body text. */
+export const fetchChannelManifestText = (url: string) =>
+  invoke<string>("fetch_channel_manifest", { url });
+
 /** Downloads the update asset to a temp file and checks its size and
  *  sha256 against the manifest; the temp path. */
 export const downloadUpdate = (url: string, sha256: string, size: number) =>

@@ -30,7 +30,9 @@ use tauri::{
 use tauri_plugin_dialog::DialogExt;
 
 // In-app auto-update (v2, item 77): the download / verify / apply /
-// relaunch half. The check half lives in the frontend (src/updates.ts).
+// relaunch half, plus the channel-manifest fetch the webview can't do
+// (CORS — the channel host sends no Access-Control-Allow-Origin, P0 Nov
+// 19 2026). The check half lives in the frontend (src/updates.ts).
 mod updater;
 
 // v3 Phase 1: the in-process MCP server (off by default; see mcp.rs).
@@ -1370,6 +1372,7 @@ fn main() {
             choose_method_file,
             cancel_quit,
             quit_app,
+            updater::fetch_channel_manifest,
             updater::download_update,
             updater::apply_update,
             read_text,
