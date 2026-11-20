@@ -34,6 +34,16 @@ import { highlightStyle, searchProject } from "../src/lib/project-search";
 import { kaplanMeier } from "../src/lib/kaplan-meier";
 import { transformTable } from "../src/lib/transform";
 import {
+  MAX_SERIES_VALUES,
+  fillSeries,
+  formatSeriesValue,
+  generateSeries,
+  generateXSeries,
+  seriesTargetHasValues,
+  validateSeriesSpec,
+  type SeriesSpec,
+} from "../src/lib/series";
+import {
   addCalculatedVariable,
   parseFormula,
   recomputeCalculated,
@@ -2860,6 +2870,124 @@ check("clearing an excluded cell drops its exclusion, so no phantom * and no aut
   deepStrictEqual(kept.excluded, ["0,1"]);
 });
 
+check("Create Series fills a column with an arithmetic series, formatted without float noise (seq 169)", () => {
+  deepStrictEqual(generateSeries({ count: 5, first: 0, mode: "arithmetic", step: 1 }), [0, 1, 2, 3, 4]);
+  deepStrictEqual(generateSeries({ count: 4, first: 10, mode: "arithmetic", step: -2.5 }), [10, 7.5, 5, 2.5]);
+  // 0.1 steps must read 0.1, 0.2 — never 0.30000000000000004.
+  deepStrictEqual(
+    generateSeries({ count: 3, first: 0, mode: "arithmetic", step: 0.1 }).map(formatSeriesValue),
+    ["0", "0.1", "0.2"],
+  );
+  deepStrictEqual(generateSeries({ count: 4, first: 2, mode: "geometric", step: 3 }), [2, 6, 18, 54]);
+  deepStrictEqual(generateSeries({ count: 1, first: 7, mode: "arithmetic", step: 1 }), [7]);
+});
+
+check("Create Series refuses an unusable spec, naming the problem (seq 169)", () => {
+  const bad: [SeriesSpec, RegExp][] = [
+    [{ count: 0, first: 0, mode: "arithmetic", step: 1 }, /at least 1/],
+    [{ count: MAX_SERIES_VALUES + 1, first: 0, mode: "arithmetic", step: 1 }, /at most/],
+    [{ count: 2.5, first: 0, mode: "arithmetic", step: 1 }, /whole number/],
+    [{ count: 3, first: Number.NaN, mode: "arithmetic", step: 1 }, /first value/],
+    [{ count: 3, first: 0, mode: "arithmetic", step: Number.POSITIVE_INFINITY }, /step/],
+    [{ count: 2, first: 1e308, mode: "arithmetic", step: 1e308 }, /overflow/],
+    [{ count: 3, first: 0, mode: "geometric", step: 0 }, /factor.*0|0.*factor/],
+  ];
+  for (const [spec, re] of bad) {
+    strictEqual(validateSeriesSpec(spec) === null, false, `no error for ${JSON.stringify(spec)}`);
+    ok(re.test(validateSeriesSpec(spec)!), `error for ${JSON.stringify(spec)} should match ${re}`);
+    throws(() => generateSeries(spec), re);
+  }
+  strictEqual(validateSeriesSpec({ count: 5, first: 0, mode: "arithmetic", step: 1 }), null);
+});
+
+check("Create Series writes into one column from a start row, growing the table, keeping the rest (seq 169)", () => {
+  const t = writeBlock(newTable("xy", 2), 0, 0, [["r1", "9", "6"], ["r2", "8", "5"]], "xy");
+  const filled = fillSeries(t, 1, 1, generateSeries({ count: 3, first: 0, mode: "arithmetic", step: 10 }));
+  deepStrictEqual(
+    filled.rows.map((r) => r.slice(0, 3)),
+    [["r1", "9", "6"], ["r2", "0", "5"], [null, "10", null], [null, "20", null]],
+  );
+  strictEqual(filled.rows.length, 4);
+  // The Y values and row titles are untouched; only the X column changed.
+  deepStrictEqual(filled.rows.map((r) => r[2]), ["6", "5", null, null]);
+  // A stored row past the series keeps its X value.
+  const kept = fillSeries(t, 1, 0, [100]);
+  strictEqual(kept.rows[0][1], "100");
+  strictEqual(kept.rows[1][1], "8");
+});
+
+check("X values as a series fills an XY table's X column for its stored rows (seq 169)", () => {
+  const t = writeBlock(newTable("xy", 1), 0, 0, [["r1", "9", "6"], ["r2", "8", "5"], ["r3", "7", "4"]], "xy");
+  const next = generateXSeries(t, 1, 2);
+  deepStrictEqual(next.rows.map((r) => r[1]), ["1", "3", "5"]);
+  deepStrictEqual(next.rows.map((r) => r[2]), ["6", "5", "4"]);
+  // No stored rows: nothing to fill, and no undo entry behind it.
+  const empty = newTable("xy", 1);
+  strictEqual(generateXSeries(empty, 0, 1), empty);
+  ok(seriesTargetHasValues(t, 1, 0, 3));
+  ok(!seriesTargetHasValues(newTable("xy", 1), 1, 0, 3));
+  ok(!seriesTargetHasValues(t, 1, 3, 2));
+});
+
+check("titer_edit_table generate-series fills a column through MCP, with the dialog's defaults (seq 169)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const created = await harness.run("job-169a", "create-table", {
+    table_type: "xy",
+    name: "Doses",
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["r1", 0, 1],
+      ["r2", 1, 2],
+      ["r3", 2, 3],
+    ],
+  });
+  const tid = (created.result as { table_id: string }).table_id;
+  const data = () => harness.state().nodes[tid]?.data!;
+  harness.sync();
+  // Explicit geometric series into the X column.
+  await harness.run("job-169b", "edit-table", {
+    table_id: tid,
+    op: "generate-series",
+    column: 1,
+    at: 0,
+    count: 3,
+    first: 2,
+    mode: "geometric",
+    step: 3,
+  });
+  deepStrictEqual(data().rows.map((r) => r[1]), ["2", "6", "18"]);
+  deepStrictEqual(data().rows.map((r) => r[2]), ["1", "2", "3"]);
+  // Defaults: the X column, from row 0, for the stored rows.
+  harness.sync();
+  await harness.run("job-169c", "edit-table", { table_id: tid, op: "generate-series", first: 10, step: 10 });
+  deepStrictEqual(data().rows.map((r) => r[1]), ["10", "20", "30"]);
+  // Refusals name the problem and leave the table untouched.
+  harness.sync();
+  await rejects(
+    harness.run("job-169d", "edit-table", { table_id: tid, op: "generate-series", count: 0 }),
+    /at least 1/,
+  );
+  await rejects(
+    harness.run("job-169e", "edit-table", { table_id: tid, op: "generate-series", mode: "logarithmic" }),
+    /arithmetic.*geometric|geometric.*arithmetic/,
+  );
+  deepStrictEqual(data().rows.map((r) => r[1]), ["10", "20", "30"]);
+});
+
+check("Create Series is wired into the grid menu, the X panel and titer_edit_table (seq 169)", () => {
+  const menu = readFileSync("src/views/tables/grid-menu.ts", "utf8");
+  ok(/Create Series/.test(menu), "grid menu doesn't offer Create Series");
+  const grid = readFileSync("src/views/tables/grid.tsx", "utf8");
+  ok(/CreateSeriesDialog/.test(grid), "grid doesn't open the Create Series dialog");
+  const view = readFileSync("src/views/tables/table-view.tsx", "utf8");
+  ok(/XSeriesPanel|Generate X|generateXSeries/.test(view), "table view has no X-as-series panel");
+  const dispatch = readFileSync("src/store/mcp-dispatch.ts", "utf8");
+  ok(/generate-series/.test(dispatch), "mcp-dispatch doesn't handle generate-series");
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(/generate-series/.test(mcp), "titer_edit_table doesn't document generate-series");
+  ok(/first/.test(mcp) && /step/.test(mcp), "titer_edit_table has no series first/step args");
+});
+
 check("more groups and sub-columns add empty ones after the data", () => {
   const t = regroupTable(grouped(), 3, 4);
   deepStrictEqual(t.columns.slice(1, 5), ["A:Y1", "A:Y2", "A:Y3", "A:Y4"]);
@@ -3053,6 +3181,7 @@ check("renaming a nested table's top-level group renames all its sub-columns, an
       renameGroup: (c) => {
         groupColumn = c;
       },
+      createSeries: () => {},
       showGroups: () => {},
     });
   const items = menu(nested(), "nested");

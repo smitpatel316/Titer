@@ -12,7 +12,7 @@ import {
 import type { TableMove } from "../../store/references";
 import { useProjectActions } from "../../store/use-project-store";
 import { Row, Section, Stepper, WithInspector } from "../../components/inspector";
-import { Button, Input, RadioList, Select } from "../../ui/controls";
+import { Button, Input, NumberInput, RadioList, Select } from "../../ui/controls";
 import { useLayout } from "../../store/use-layout";
 import { ColumnsIcon, MinusIcon, PlusIcon } from "@phosphor-icons/react";
 import { Grid } from "./grid";
@@ -39,6 +39,7 @@ import {
   setCalculatedFormula,
 } from "../../lib/calcvars";
 import { SUMMARY_FORMATS, summaryFormatOf, summarySubcolumns, type SummaryFormat } from "../../lib/summary-format";
+import { MAX_SERIES_VALUES, generateXSeries, validateSeriesSpec } from "../../lib/series";
 import { seriesKeyOf } from "../../lib/columns";
 import { confirmDelete } from "../../native";
 import { AddFloatingNoteButton, FloatingNotesLayer } from "../../components/floating-notes";
@@ -82,6 +83,7 @@ export function TableView({ node }: { node: ProjectNode }) {
         settings={
           <>
             <ReplicatesPanel data={data} update={update} />
+            <XSeriesPanel data={data} update={update} />
             <FormatPanel data={data} update={update} />
           </>
         }
@@ -140,6 +142,57 @@ export function TableView({ node }: { node: ProjectNode }) {
     >
       {sheet}
     </WithInspector>
+  );
+}
+
+/** An XY table's X column as a series (Prism: Format Data Table → generate
+ *  X values): an arithmetic series over the table's stored rows. Prism's
+ *  version deletes existing X values without asking; this one asks first
+ *  when X values would be replaced (Undo brings them back either way). */
+function XSeriesPanel({ data, update }: { data: TableData; update: (next: TableData, label: string) => void }) {
+  const [first, setFirst] = React.useState<number | null>(0);
+  const [step, setStep] = React.useState<number | null>(1);
+  const rows = data.rows.length;
+  const hasX = data.rows.some((row) => row[1] != null);
+  const problem =
+    rows === 0
+      ? null
+      : first === null || step === null
+        ? "Fill in both fields."
+        : validateSeriesSpec({ count: rows, first, mode: "arithmetic", step });
+  const generate = async () => {
+    if (problem || first === null || step === null) return;
+    if (
+      hasX &&
+      !(await confirmDelete(
+        "Replace the X values?",
+        "The series overwrites every X value in this table. You can undo this.",
+      ))
+    )
+      return;
+    update(generateXSeries(data, first, step), "Generate X Values as a Series");
+  };
+  return (
+    <Section title="X Values as a Series" icon={<ColumnsIcon />}>
+      <Row label="Start">
+        <NumberInput value={first} aria-label="Series start value" onChange={setFirst} />
+      </Row>
+      <Row label="Increment">
+        <NumberInput value={step} aria-label="Series increment" onChange={setStep} />
+      </Row>
+      <Button variant="accent" disabled={rows === 0 || problem !== null} onClick={() => void generate()}>
+        Generate X Values
+      </Button>
+      {rows === 0 ? (
+        <p className="text-small text-secondary">Add rows to the table first — the series fills one X per row.</p>
+      ) : (
+        <p className="text-small text-secondary">
+          Fills the X column with {rows} values, {first ?? "…"} onwards in steps of {step ?? "…"}. A series runs at
+          most {MAX_SERIES_VALUES.toLocaleString()} values.
+        </p>
+      )}
+      {problem && <p className="text-small text-red-600">{problem}</p>}
+    </Section>
   );
 }
 

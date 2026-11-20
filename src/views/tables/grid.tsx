@@ -16,6 +16,8 @@ import { isGrouped, isNested, leadOf } from "../../lib/dataset";
 import { alert, popupMenu } from "../../native";
 import { XIcon } from "@phosphor-icons/react";
 import { cn, IconButton } from "../../ui/controls";
+import { CreateSeriesDialog, type CreateSeriesTarget } from "../../components/create-series-dialog";
+import { fillSeries, generateSeries, type SeriesSpec } from "../../lib/series";
 import { gridMenu, type MenuZone } from "./grid-menu";
 import {
   columnsBeyond,
@@ -166,6 +168,8 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
   const [view, setView] = React.useState({ top: 0, left: 0, width: 800, height: 600 });
   const [sel, setSel] = React.useState<Selection>({ anchor: { r: 0, c: 1 }, focus: { r: 0, c: 1 } });
   const [editing, setEditingState] = React.useState<Editing | null>(null);
+  // Create Series' target: the selection's top-left cell, set from the menu.
+  const [series, setSeries] = React.useState<{ c: number; r: number; count: number } | null>(null);
   // Mirrors `editing` for finishEdit, which runs twice when saving also blurs the editor.
   const editingRef = React.useRef(editing);
   const setEditing = (next: Editing | null) => {
@@ -550,7 +554,23 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
       setSel({ anchor, focus });
       g = toRange({ anchor, focus });
     }
-    void popupMenu(gridMenu({ data, type, zone, range: g, update, rename: startRename, renameGroup: startRenameGroup, showGroups }));
+    void popupMenu(gridMenu({ data, type, zone, range: g, update, rename: startRename, renameGroup: startRenameGroup, createSeries: (r) => setSeries({ c: r.c0, r: r.r0, count: r.r1 - r.r0 + 1 }), showGroups }));
+  };
+
+  /** The Create Series dialog's target, or null when it is closed. */
+  const seriesTarget: CreateSeriesTarget | null = series
+    ? {
+        columnName: data.columns[series.c] ?? `Column ${series.c}`,
+        startRow: series.r,
+        selectedRows: series.count,
+        overwritesFor: (count: number) =>
+          data.rows.slice(series.r, series.r + count).filter((row) => row?.[series.c] != null).length,
+      }
+    : null;
+  const runSeries = (spec: SeriesSpec, startRow: number) => {
+    if (!series) return;
+    update(fillSeries(data, series.c, startRow, generateSeries(spec)), "Create Series");
+    setSeries(null);
   };
 
   /** Drag a header's right edge to resize its column; double-click it to fit the content. */
@@ -860,6 +880,7 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
           </IconButton>
         </div>
       )}
+      <CreateSeriesDialog open={series !== null} target={seriesTarget} onClose={() => setSeries(null)} onGenerate={runSeries} />
     </div>
   );
 }

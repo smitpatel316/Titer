@@ -2737,8 +2737,8 @@ pub struct EditTableArgs {
     /// The grid-menu op: insert-rows, delete-rows, insert-columns,
     /// delete-columns, rename-column, rename-group, exclude-cells,
     /// include-cells, freeze-title, convert-comma-decimals,
-    /// add-calculated-variable, set-calculated-variable or
-    /// remove-calculated-variable.
+    /// add-calculated-variable, set-calculated-variable,
+    /// remove-calculated-variable or generate-series.
     pub op: String,
     /// insert/delete-rows, insert/delete-columns: the 0-based row or
     /// column to act at (rows and columns are 0-based; column 0 holds the
@@ -2764,6 +2764,17 @@ pub struct EditTableArgs {
     /// (with or without its leading `=`), e.g. `=Dose * 2`.
     #[serde(default)]
     pub formula: Option<String>,
+    /// generate-series: the first value (default 0). Omit for the dialog's
+    /// default.
+    #[serde(default)]
+    pub first: Option<f64>,
+    /// generate-series: the step added each time (arithmetic) or the factor
+    /// multiplied by each time (geometric); default 1.
+    #[serde(default)]
+    pub step: Option<f64>,
+    /// generate-series: "arithmetic" (default) or "geometric".
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -4096,7 +4107,7 @@ impl TiterMcpServer {
     /// the row-title column, convert decimal commas to points.
     #[tool(
         name = "titer_edit_table",
-        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable or remove-calculated-variable. Rows and columns are 0-based; column 0 holds the row titles. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column.",
+        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable or generate-series. Rows and columns are 0-based; column 0 holds the row titles. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. generate-series { column, at, count, first, mode, step } fills a column with an arithmetic series (add step, default) or a geometric one (multiply by step): column defaults to the X column (1) on XY and Survival tables, at defaults to row 0, count to the table's stored rows, first to 0, step to 1; at most 10,000 values.",
         annotations(
             title = "Edit table",
             read_only_hint = false,
@@ -4121,6 +4132,9 @@ impl TiterMcpServer {
             "name": args.name,
             "cells": args.cells.as_ref().map(|c| c.len()),
             "frozen": args.frozen,
+            "first": args.first,
+            "step": args.step,
+            "mode": args.mode,
         });
         let outcome: Result<serde_json::Value, String> = async {
             let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
@@ -4149,6 +4163,7 @@ impl TiterMcpServer {
                 "add-calculated-variable",
                 "set-calculated-variable",
                 "remove-calculated-variable",
+                "generate-series",
             ];
             if !OPS.contains(&args.op.as_str()) {
                 return Err(format!("No edit op “{}” — the ops are {}.", args.op, OPS.join(", ")));
@@ -4193,6 +4208,8 @@ impl TiterMcpServer {
                     Some(n) if !n.trim().is_empty() => {}
                     _ => return Err(format!("op {} needs a non-empty name.", args.op)),
                 },
+                // generate-series needs nothing: column, at, count, first,
+                // mode and step all have dispatcher defaults.
                 _ => {}
             }
             self.run_table_job(
@@ -4208,6 +4225,9 @@ impl TiterMcpServer {
                     "cells": args.cells,
                     "frozen": args.frozen,
                     "formula": args.formula,
+                    "first": args.first,
+                    "step": args.step,
+                    "mode": args.mode,
                 }),
             )
             .await
