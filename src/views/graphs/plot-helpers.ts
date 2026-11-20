@@ -476,7 +476,26 @@ export function xyDrawn(
   x: Column,
   set: DataSet,
   options: GraphOptions,
+  summary: SummaryFormat = "replicates",
 ): { x: number[]; y: number[]; keys?: string[]; errors?: number[] } {
+  // A summary table's Y set holds its stored Mean (and error) columns, not
+  // replicates: the drawn points are the Means, with the stored error
+  // converted to the graph's error kind — averaging Mean/SD/N as replicates
+  // would be silently wrong. This holds whatever `xyReplicates` says.
+  if (summary !== "replicates") {
+    const meanCol = set.columns.find((c) => summarySuffix(c.name) === "Mean");
+    if (!meanCol) return { x: [], y: [] };
+    const rows = x.rows.filter((r) => meanCol.byRow[r] != null);
+    return {
+      x: rows.map((r) => x.byRow[r]!),
+      y: rows.map((r) => meanCol.byRow[r]!),
+      ...(options.error === "none"
+        ? {}
+        : {
+            errors: rows.map((r) => summaryErrorAt(set.columns, r, summary, options.error).error ?? 0),
+          }),
+    };
+  }
   if (set.columns.length === 1 || options.xyReplicates === "each") {
     const points = xyPoints(x, set);
     return { x: points.x, y: points.y, keys: points.rows.map((r, i) => pointKeyOf(points.columns[i], r)) };
@@ -945,6 +964,66 @@ export function perRowStats(
   return { center: c, error: e };
 }
 
+/** A column name's sub-column suffix — the part after the last ":"
+ *  ("Mean" for "A:Mean" and for a nested "A:S1:Mean"; the whole name
+ *  when there is no ":"). */
+const summarySuffix = (name: string) => name.slice(name.lastIndexOf(":") + 1);
+
+/** One summary group's stored error at one row, converted to the graph's
+ *  error kind exactly via N when N is present (SD ↔ SEM), or the 95% CI
+ *  half-width (t × SEM) when N ≥ 2. A conversion that needs an N the
+ *  format doesn't store has no error bar — a null there, never a guessed
+ *  number. `errorMinus` carries the lower side for the asymmetric formats
+ *  (Mean, +error, −error and Mean, upper, lower limits), whose upper and
+ *  lower errors differ; null for the symmetric ones (and when the Mean
+ *  itself is missing at that row). */
+export function summaryErrorAt(
+  cols: Column[],
+  r: number,
+  format: SummaryFormat,
+  error: GraphOptions["error"],
+): { error: number | null; errorMinus: number | null } {
+  const def = summaryFormatDef(format);
+  const col = (suffix: string) => cols.find((c) => summarySuffix(c.name) === suffix);
+  const m = col("Mean")?.byRow[r] ?? null;
+  if (m == null || error === "none") return { error: null, errorMinus: null };
+  const n = col("N")?.byRow[r] ?? null;
+  if (def.errorKind === "plus-minus") {
+    return { error: col("+error")?.byRow[r] ?? null, errorMinus: col("−error")?.byRow[r] ?? null };
+  }
+  if (def.errorKind === "upper-lower") {
+    const upper = col("Upper limit")?.byRow[r] ?? null;
+    const lower = col("Lower limit")?.byRow[r] ?? null;
+    return {
+      error: upper == null ? null : upper - m,
+      errorMinus: lower == null ? null : m - lower,
+    };
+  }
+  // The stored error, as an SD: SD itself, SEM × √N, or CV% of the mean.
+  const stored =
+    def.errorKind === "sd"
+      ? col("SD")?.byRow[r] ?? null
+      : def.errorKind === "sem"
+        ? col("SEM")?.byRow[r] ?? null
+        : col("CV")?.byRow[r] ?? null;
+  const asSd =
+    stored == null
+      ? null
+      : def.errorKind === "sem"
+        ? n == null
+          ? null
+          : stored * Math.sqrt(n)
+        : def.errorKind === "cv"
+          ? (stored / 100) * m
+          : stored;
+  const asSem = asSd == null ? null : def.errorKind === "sem" ? stored : n == null ? null : asSd / Math.sqrt(n);
+  return {
+    error:
+      error === "sd" ? asSd : error === "sem" ? asSem : n == null || n < 2 || asSem == null ? null : tCrit95(n - 1) * asSem,
+    errorMinus: null,
+  };
+}
+
 /** Per-row center and error for one group of a summary table: the center is
  *  the stored Mean; the error is the stored error, converted to the graph's
  *  error kind exactly via N when N is present (SD ↔ SEM), or the 95% CI
@@ -953,61 +1032,32 @@ export function perRowStats(
  *  there, never a guessed number. `errorMinus` carries the lower side for the
  *  asymmetric formats (Mean, +error, −error and Mean, upper, lower limits),
  *  whose upper and lower errors differ; it is null for the symmetric ones.
- *  `center[r]` is null where the group has no Mean in that row. */
+ *  `center[r]` is null where the group has no Mean in that row.
+ *  A group holding several Mean columns (a nested table's subgroups) is
+ *  read as the subgroup Means themselves: the center is their mean or
+ *  median, the error their SD/SEM/CI — the nested pooling the replicate
+ *  graphs already do, applied to the stored Means. */
 export function perRowSummaryStats(
   cols: Column[],
   rows: number,
   format: SummaryFormat,
   error: GraphOptions["error"],
 ): { center: (number | null)[]; error: (number | null)[] | null; errorMinus: (number | null)[] | null } {
-  const def = summaryFormatDef(format);
-  const suffixOf = (name: string) => name.slice(name.indexOf(":") + 1);
-  const col = (suffix: string) => cols.find((c) => suffixOf(c.name) === suffix);
-  const meanCol = col("Mean");
-  const nCol = col("N");
-  const center: (number | null)[] = [];
+  const meanCols = cols.filter((c) => summarySuffix(c.name) === "Mean");
+  if (meanCols.length > 1) {
+    const stats = perRowStats(meanCols, rows, "mean", error);
+    return { ...stats, errorMinus: null };
+  }
   const err: (number | null)[] | null = error === "none" ? null : [];
   const errMinus: (number | null)[] | null = error === "none" ? null : [];
+  const center: (number | null)[] = [];
   for (let r = 0; r < rows; r++) {
-    const m = meanCol?.byRow[r] ?? null;
+    const m = meanCols[0]?.byRow[r] ?? null;
     center.push(m);
     if (!err || !errMinus) continue;
-    if (m == null) {
-      err.push(null);
-      errMinus.push(null);
-      continue;
-    }
-    const n = nCol?.byRow[r] ?? null;
-    if (def.errorKind === "plus-minus") {
-      err.push(col("+error")?.byRow[r] ?? null);
-      errMinus.push(col("−error")?.byRow[r] ?? null);
-      continue;
-    }
-    if (def.errorKind === "upper-lower") {
-      const upper = col("Upper limit")?.byRow[r] ?? null;
-      const lower = col("Lower limit")?.byRow[r] ?? null;
-      err.push(upper == null ? null : upper - m);
-      errMinus.push(lower == null ? null : m - lower);
-      continue;
-    }
-    // The stored error, as an SD: SD itself, SEM × √N, or CV% of the mean.
-    const stored = def.errorKind === "sd" ? col("SD")?.byRow[r] ?? null : def.errorKind === "sem" ? col("SEM")?.byRow[r] ?? null : col("CV")?.byRow[r] ?? null;
-    const asSd =
-      stored == null
-        ? null
-        : def.errorKind === "sem"
-          ? n == null
-            ? null
-            : stored * Math.sqrt(n)
-          : def.errorKind === "cv"
-            ? (stored / 100) * m
-            : stored;
-    const asSem =
-      asSd == null ? null : def.errorKind === "sem" ? stored : n == null ? null : asSd / Math.sqrt(n);
-    err.push(
-      error === "sd" ? asSd : error === "sem" ? asSem : n == null || n < 2 || asSem == null ? null : tCrit95(n - 1) * asSem,
-    );
-    errMinus.push(null);
+    const { error: e, errorMinus: em } = summaryErrorAt(cols, r, format, error);
+    err.push(e);
+    errMinus.push(em);
   }
   return { center, error: err, errorMinus: errMinus?.every((v) => v == null) ? null : errMinus };
 }
@@ -1028,9 +1078,25 @@ export function centerColumn({ name, columns }: DataSet, center: GraphOptions["c
 }
 
 /** A data set's Mean column (a summary table's group), if it has one — what a
- *  heatmap plots, instead of `centerColumn` (which would average Mean/SD/N). */
-export function summaryMeanColumn({ columns }: DataSet): Column | undefined {
-  return columns.find((c) => c.name.slice(c.name.indexOf(":") + 1) === "Mean");
+ *  heatmap plots, instead of `centerColumn` (which would average Mean/SD/N).
+ *  Several Mean columns (a nested table's subgroups) read as one column of
+ *  their per-row mean, the nested pooling the replicate graphs already do. */
+export function summaryMeanColumn({ name, columns }: DataSet): Column | undefined {
+  const meanCols = columns.filter((c) => summarySuffix(c.name) === "Mean");
+  if (meanCols.length === 0) return undefined;
+  if (meanCols.length === 1) return meanCols[0];
+  const byRow = meanCols[0].byRow.map((_, r) => {
+    const vs = meanCols.flatMap((c) => (c.byRow[r] == null ? [] : [c.byRow[r]!]));
+    return vs.length ? mean(vs) : null;
+  });
+  const rows = byRow.flatMap((v, r) => (v == null ? [] : [r]));
+  return {
+    name,
+    cells: byRow.map((v) => (v == null ? null : String(v))),
+    byRow,
+    values: rows.map((r) => byRow[r]!),
+    rows,
+  };
 }
 
 /** Horizontal offset of group `g` within a row's slot, so interleaved scatter

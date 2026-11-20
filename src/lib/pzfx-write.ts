@@ -88,6 +88,7 @@ const GROUPED_SUMMARY_YFORMAT: Record<Exclude<SummaryFormat, "replicates">, stri
   "mean-cv-n": "CVN",
   "mean-sd": "SD",
   "mean-sem": "SE",
+  "mean-cv": "CV",
   "mean-plus-minus": "low-high",
   "mean-upper-lower": "upper-lower-limits",
 };

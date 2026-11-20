@@ -5,6 +5,7 @@
 import type { GraphOptions } from "../../store/types";
 import type { GraphModule, GraphFigure } from ".";
 import { splitXY, type Column } from "../../lib/dataset";
+import type { SummaryFormat } from "../../lib/summary-format";
 import { addNote, rightYDataset, seriesMarker, seriesPoints, xyDrawn, xyLayout, type Paint } from "./plot-helpers";
 
 /** The most points an XY scatter draws in total. An SVG `scatter` trace costs
@@ -17,7 +18,7 @@ import { addNote, rightYDataset, seriesMarker, seriesPoints, xyDrawn, xyLayout, 
  *  is stride-sampled and the figure says so. */
 export const XY_SCATTER_MAX_POINTS = 5000;
 
-function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFigure {
+function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?: (string | null)[], summary?: SummaryFormat): GraphFigure {
   const { x: xCol, ys } = splitXY(columns);
   if (!xCol || ys.length === 0) return { data: [], layout: xyLayout(options, columns[0]?.name ?? "X", 0) };
 
@@ -25,7 +26,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
   // Replicates as their center (or each value) per `xyReplicates`; then the cap
   // is on the total plotted, so the stride is shared — each series keeps its
   // shape and the total stays at the cap.
-  const drawn = ys.map((set) => xyDrawn(xCol, set, options));
+  const drawn = ys.map((set) => xyDrawn(xCol, set, options, summary));
   const right = rightYDataset(options, ys.map((y) => y.name));
   const total = drawn.reduce((sum, d) => sum + d.x.length, 0);
   const stride = total > XY_SCATTER_MAX_POINTS ? Math.ceil(total / XY_SCATTER_MAX_POINTS) : 1;

@@ -471,11 +471,156 @@ export function applySummaryFormatLoses(data: TableData, format: SummaryFormat):
   );
 }
 
-/** Sets how many replicates each Y data set of an XY table holds: one column each, named
- *  for its data set, or (2 and more) sub-columns "A:Y1", "A:Y2"… under its name. Every
- *  value stays in its data set (the first replicate is the single column). A column still
- *  named as a new one is ("Y2", the second) takes the letter of its place, as a grouped
- *  table's groups do ("B"); a ":" in a name, which would split it, becomes "-" (`renamed`). */
+/** Switches an XY table's Y sub-column format (raw replicates, or
+ *  pre-calculated summaries) — the XY twin of `applySummaryFormat`.
+ *  An XY table's Y data sets sit after its X column (lead 2), or right
+ *  after Title when the X is itself grouped-shaped (lead 1, pre-1.0.9
+ *  files). A table with one column per Y data set has no sets yet: each
+ *  Y column becomes a set of its own (its name, sanitised the way
+ *  `replicateXY` names sets), so picking a summary format on it widens
+ *  each set to the format's width instead of failing. Positional, like
+ *  the grouped version: every value stays in its data set's slot, and
+ *  narrowing to a shorter format drops only the slots past its width. */
+export function applySummaryFormatXY(data: TableData, format: SummaryFormat): TableData {
+  const lead = data.columns[1]?.includes(":") ? 1 : 2;
+  const oldWidth = data.replicates ?? 1;
+  const newWidth = format === "replicates" ? oldWidth : summarySubcolumns(format).length;
+  // The data sets' keys: the grouped runs when the table already has
+  // sets, else one set per Y column (sanitised set names).
+  let keys: string[];
+  if (data.groups && data.replicates) {
+    keys = groupRunKeys(data.columns, lead).slice(0, data.groups);
+    for (let i = keys.length; keys.length < data.groups; i++)
+      if (!keys.includes(columnLetter(i))) keys.push(columnLetter(i));
+  } else {
+    keys = [];
+    const ys = data.columns.slice(lead);
+    ys.forEach((n, i) => {
+      let name = n === columnLabel("xy", i + 1) ? columnLetter(i) : n.replaceAll(":", "-");
+      for (let k = i; keys.includes(name) || ys.slice(i + 1).includes(name); k++) name = columnLetter(k + 1);
+      keys.push(name);
+    });
+  }
+  const columns = [...data.columns.slice(0, lead), ...subColumns(keys, newWidth, format)];
+  const at = (c: number): number | null => {
+    const slot = c - lead;
+    const g = Math.floor(slot / oldWidth);
+    const s = slot % oldWidth;
+    return s < newWidth ? lead + g * newWidth + s : null;
+  };
+  return {
+    ...data,
+    columns,
+    rows: data.rows.map((row) =>
+      columns.map((_, c) => {
+        if (c < lead) return row[c] ?? null;
+        const slot = c - lead;
+        const g = Math.floor(slot / newWidth);
+        const s = slot % newWidth;
+        const from = lead + g * oldWidth + s;
+        return from < data.columns.length ? (row[from] ?? null) : null;
+      }),
+    ),
+    groups: keys.length,
+    replicates: newWidth,
+    summaryFormat: format === "replicates" ? undefined : format,
+    excluded: remapExcluded(data, (r, c) => {
+      if (c < lead) return [r, c];
+      const to = at(c);
+      return to === null ? null : [r, to];
+    }),
+    widths: widthsOf(data.widths, columns),
+  };
+}
+
+/** Whether switching an XY table to `format` deletes a value: a
+ *  sub-column past the new format's width holding one. */
+export function applySummaryFormatXYLoses(data: TableData, format: SummaryFormat): boolean {
+  const lead = data.columns[1]?.includes(":") ? 1 : 2;
+  const oldWidth = data.replicates ?? 1;
+  const newWidth = format === "replicates" ? oldWidth : summarySubcolumns(format).length;
+  if (newWidth >= oldWidth) return false;
+  return data.columns.some(
+    (_, c) => c >= lead && (c - lead) % oldWidth >= newWidth && data.rows.some((row) => row[c]),
+  );
+}
+
+/** Switches a nested table's sub-column format (raw replicates, or
+ *  pre-calculated summaries) — the nested twin of `applySummaryFormat`.
+ *  Every subgroup of every group gets the format's sub-columns
+ *  ("A:S1:Mean", "A:S1:SD", "A:S1:N"), positional like the others: a
+ *  value stays in its (group, subgroup) slot, and narrowing drops only
+ *  the slots past the new width. */
+export function applySummaryFormatNested(data: TableData, format: SummaryFormat): TableData {
+  const groups = data.groups!;
+  const subgroups = data.subgroups!;
+  const oldWidth = data.replicates!;
+  const newWidth = format === "replicates" ? oldWidth : summarySubcolumns(format).length;
+  const keys = [...new Set(data.columns.slice(1).map(seriesKeyOf))].slice(0, groups);
+  for (let i = keys.length; keys.length < groups; i++) if (!keys.includes(columnLetter(i))) keys.push(columnLetter(i));
+  const subsOf = (key: string): string[] => {
+    const subs = [
+      ...new Set(
+        data.columns
+          .slice(1)
+          .filter((n) => seriesKeyOf(n) === key)
+          .map((n) => n.split(":")[1] ?? ""),
+      ),
+    ].filter(Boolean);
+    for (let i = subs.length; subs.length < subgroups; i++) if (!subs.includes(`S${i + 1}`)) subs.push(`S${i + 1}`);
+    return subs.slice(0, subgroups);
+  };
+  const names = (key: string, sub: string): string[] =>
+    format === "replicates"
+      ? Array.from({ length: newWidth }, (_, r) => `${key}:${sub}:R${r + 1}`)
+      : summarySubcolumns(format).map((s) => `${key}:${sub}:${s}`);
+  const columns = ["Title", ...keys.flatMap((key) => subsOf(key).flatMap((sub) => names(key, sub)))];
+  const perGroup = subgroups * oldWidth;
+  const newPerGroup = subgroups * newWidth;
+  const at = (c: number): number | null => {
+    const slot = c - 1;
+    const g = Math.floor(slot / perGroup);
+    const rem = slot % perGroup;
+    const s = Math.floor(rem / oldWidth);
+    const r = rem % oldWidth;
+    return r < newWidth ? 1 + g * newPerGroup + s * newWidth + r : null;
+  };
+  return {
+    ...data,
+    columns,
+    rows: data.rows.map((row) =>
+      columns.map((_, c) => {
+        if (c === 0) return row[0] ?? null;
+        const slot = c - 1;
+        const g = Math.floor(slot / newPerGroup);
+        const rem = slot % newPerGroup;
+        const s = Math.floor(rem / newWidth);
+        const r = rem % newWidth;
+        const from = 1 + g * perGroup + s * oldWidth + r;
+        return from < data.columns.length ? (row[from] ?? null) : null;
+      }),
+    ),
+    groups,
+    subgroups,
+    replicates: newWidth,
+    summaryFormat: format === "replicates" ? undefined : format,
+    excluded: remapExcluded(data, (r, c) => {
+      const to = c === 0 ? 0 : at(c);
+      return to === null ? null : [r, to];
+    }),
+    widths: widthsOf(data.widths, columns),
+  };
+}
+
+/** Whether switching a nested table to `format` deletes a value. */
+export function applySummaryFormatNestedLoses(data: TableData, format: SummaryFormat): boolean {
+  const oldWidth = data.replicates!;
+  const newWidth = format === "replicates" ? oldWidth : summarySubcolumns(format).length;
+  if (newWidth >= oldWidth) return false;
+  return data.columns.some(
+    (_, c) => c >= 1 && (c - 1) % oldWidth >= newWidth && data.rows.some((row) => row[c]),
+  );
+}
 export function replicateXY(data: TableData, replicates: number): { data: TableData; renamed: Record<string, string> } {
   const renamed: Record<string, string> = {};
   if (isGrouped(data)) {
@@ -539,7 +684,14 @@ export function renestTable(data: TableData, groups: number, subgroups: number, 
   const columns = [
     "Title",
     ...keys.flatMap((key) =>
-      subsOf(key).flatMap((sub) => Array.from({ length: replicates }, (_, r) => `${key}:${sub}:R${r + 1}`)),
+      // A summary table's subgroups keep their summary names ("A:S1:Mean"…),
+      // so a load-time rebuild or a group-count change never renames them
+      // back to "A:S1:R1" (the name-based mapping then still finds them).
+      subsOf(key).flatMap((sub) =>
+        summaryFormatOf(data) === "replicates"
+          ? Array.from({ length: replicates }, (_, r) => `${key}:${sub}:R${r + 1}`)
+          : summarySubcolumns(summaryFormatOf(data)).map((s) => `${key}:${sub}:${s}`),
+      ),
     ),
   ];
   const from = columns.map((name, c) => (c === 0 ? 0 : data.columns.indexOf(name)));

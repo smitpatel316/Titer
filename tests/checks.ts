@@ -66,6 +66,10 @@ import {
   addRowGroup,
   applySummaryFormat,
   applySummaryFormatLoses,
+  applySummaryFormatNested,
+  applySummaryFormatNestedLoses,
+  applySummaryFormatXY,
+  applySummaryFormatXYLoses,
   changeErrorFormat,
   columnsBeyond,
   defaultRowGroups,
@@ -139,7 +143,7 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, logScaleOffered, movedText, paintOf, perRowSummaryStats, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, legendRightMargin, legendWidthPx, logScaleOffered, movedText, paintOf, perRowSummaryStats, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, withCaps, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -2746,6 +2750,307 @@ check("summary subcolumns: grouped bars draw the mean with the stored error (SEM
   deepStrictEqual(traces[0].error_y?.array, [1, 1.5]);
   deepStrictEqual(traces[1].y, [20, 22]);
   deepStrictEqual(traces[1].error_y?.array, [4 / 3, 2]);
+});
+
+// ── Summary sub-columns on XY and nested tables (seq 208) ─────────────────
+
+/** An XY table with two replicate data sets (A, B) and a shared X. */
+const xyReplicates = (): TableData => ({
+  columns: ["Title", "X", "A:Y1", "A:Y2", "A:Y3", "B:Y1", "B:Y2", "B:Y3"],
+  rows: [
+    [null, "1", "10", "12", "14", "20", "22", "24"],
+    [null, "2", "11", "13", "15", "21", "23", "25"],
+  ],
+  groups: 2,
+  replicates: 3,
+});
+
+/** The same XY table holding pre-calculated summaries instead of replicates. */
+const xySummary = (): TableData => ({
+  columns: ["Title", "X", "A:Mean", "A:SD", "A:N", "B:Mean", "B:SD", "B:N"],
+  rows: [
+    [null, "1", "10", "2", "4", "20", "4", "9"],
+    [null, "2", "12", "3", "4", "22", "6", "9"],
+  ],
+  groups: 2,
+  replicates: 3,
+  summaryFormat: "mean-sd-n",
+});
+
+/** A nested table holding pre-calculated summaries (Mean, SD, N per subgroup). */
+const nestedSummary = (): TableData => ({
+  columns: [
+    "Title",
+    "A:S1:Mean", "A:S1:SD", "A:S1:N",
+    "A:S2:Mean", "A:S2:SD", "A:S2:N",
+    "B:S1:Mean", "B:S1:SD", "B:S1:N",
+    "B:S2:Mean", "B:S2:SD", "B:S2:N",
+  ],
+  rows: [
+    ["r1", "10", "2", "4", "20", "4", "9", "30", "6", "16", "40", "8", "25"],
+    ["r2", "12", "3", "4", "22", "6", "9", "32", "6", "16", "42", "8", "25"],
+  ],
+  groups: 2,
+  subgroups: 2,
+  replicates: 3,
+  summaryFormat: "mean-sd-n",
+});
+
+check("seq 208: an XY table's sub-column format turns each Y data set into Mean/SD/N columns", () => {
+  const t = applySummaryFormatXY(xyReplicates(), "mean-sd-n");
+  deepStrictEqual(t.columns, ["Title", "X", "A:Mean", "A:SD", "A:N", "B:Mean", "B:SD", "B:N"]);
+  deepStrictEqual(t.rows[0], [null, "1", "10", "12", "14", "20", "22", "24"]);
+  strictEqual(t.replicates, 3);
+  strictEqual(t.summaryFormat, "mean-sd-n");
+  strictEqual(summaryFormatOf(t), "mean-sd-n");
+  // Narrowing to Mean, SD drops the N column; back to Replicates restores Y names.
+  const narrow = applySummaryFormatXY(t, "mean-sd");
+  deepStrictEqual(narrow.columns, ["Title", "X", "A:Mean", "A:SD", "B:Mean", "B:SD"]);
+  deepStrictEqual(narrow.rows[0], [null, "1", "10", "12", "20", "22"]);
+  const back = applySummaryFormatXY(narrow, "replicates");
+  deepStrictEqual(back.columns, ["Title", "X", "A:Y1", "A:Y2", "B:Y1", "B:Y2"]);
+  deepStrictEqual(back.rows[0], [null, "1", "10", "12", "20", "22"]);
+  strictEqual(back.summaryFormat, undefined);
+});
+
+check("seq 208: an XY table with one column per Y data set gains a set per column on picking a format", () => {
+  const plain: TableData = {
+    columns: ["Title", "X", "Control", "Treated"],
+    rows: [
+      [null, "1", "10", "20"],
+      [null, "2", "11", "21"],
+    ],
+  };
+  const t = applySummaryFormatXY(plain, "mean-sd");
+  deepStrictEqual(t.columns, ["Title", "X", "Control:Mean", "Control:SD", "Treated:Mean", "Treated:SD"]);
+  strictEqual(t.groups, 2);
+  strictEqual(t.replicates, 2);
+  // Narrowing only asks when a dropped sub-column holds values.
+  strictEqual(applySummaryFormatXYLoses(xySummary(), "mean-sd"), true); // the N column holds values
+  strictEqual(applySummaryFormatXYLoses(xySummary(), "mean-sem-n"), false); // same width
+  strictEqual(applySummaryFormatXYLoses(xySummary(), "replicates"), false);
+});
+
+check("seq 208: Mean, CV is a summary format on grouped tables, and CV converts to SD via the mean", () => {
+  const t = applySummaryFormat(grouped(), "mean-cv");
+  deepStrictEqual(t.columns, ["Title", "A:Mean", "A:CV", "Treated:Mean", "Treated:CV"]);
+  strictEqual(t.summaryFormat, "mean-cv");
+  // CV 20% of mean 10 is an SD of 2; with no N stored there is no SEM or CI.
+  const cv: TableData = {
+    columns: ["Title", "A:Mean", "A:CV"],
+    rows: [["r1", "10", "20"]],
+    groups: 1,
+    replicates: 2,
+    summaryFormat: "mean-cv",
+  };
+  deepStrictEqual(perRowSummaryStats(readTable(cv).sets[0].columns, 1, "mean-cv", "sd"), {
+    center: [10],
+    error: [2],
+    errorMinus: null,
+  });
+  deepStrictEqual(perRowSummaryStats(readTable(cv).sets[0].columns, 1, "mean-cv", "sem").error, [null]);
+  deepStrictEqual(perRowSummaryStats(readTable(cv).sets[0].columns, 1, "mean-cv", "ci").error, [null]);
+});
+
+check("seq 208: a nested table's sub-column format renames every subgroup's columns in place", () => {
+  const t = applySummaryFormatNested(nested(), "mean-sd-n");
+  deepStrictEqual(t.columns, [
+    "Title",
+    "A:S1:Mean", "A:S1:SD", "A:S1:N",
+    "A:S2:Mean", "A:S2:SD", "A:S2:N",
+    "B:S1:Mean", "B:S1:SD", "B:S1:N",
+    "B:S2:Mean", "B:S2:SD", "B:S2:N",
+  ]);
+  deepStrictEqual(t.rows[0], ["r1", "a11", "a12", "a21", "a22", "b11", "b12", "b21", "b22"]);
+  strictEqual(t.summaryFormat, "mean-sd-n");
+  // Narrowing drops the N column of every subgroup; back to Replicates restores R names.
+  const narrow = applySummaryFormatNested(t, "mean-sd");
+  deepStrictEqual(narrow.columns.slice(1, 5), ["A:S1:Mean", "A:S1:SD", "A:S2:Mean", "A:S2:SD"]);
+  const back = applySummaryFormatNested(narrow, "replicates");
+  deepStrictEqual(back.columns.slice(0, 5), ["Title", "A:S1:R1", "A:S1:R2", "A:S2:R1", "A:S2:R2"]);
+  strictEqual(back.summaryFormat, undefined);
+  strictEqual(applySummaryFormatNestedLoses(t, "mean-sd"), true); // the N columns hold values
+  strictEqual(applySummaryFormatNestedLoses(t, "mean-sem-n"), false);
+});
+
+check("seq 208: renesting a nested summary table keeps its summary names", () => {
+  const t = renestTable(applySummaryFormatNested(nested(), "mean-sd-n"), 3, 2, 3);
+  deepStrictEqual(t.columns.slice(-6), ["C:S1:Mean", "C:S1:SD", "C:S1:N", "C:S2:Mean", "C:S2:SD", "C:S2:N"]);
+  strictEqual(t.summaryFormat, "mean-sd-n");
+});
+
+check("seq 208: an XY summary table survives a save and reload, and a mismatched format is dropped", () => {
+  for (const data of [xySummary(), nestedSummary()]) {
+    const type = data.subgroups === undefined ? "xy" : "nested";
+    const file: ProjectFilePayload = {
+      nodes: { t1: { id: "t1", type: "table", name: "Summary", parentId: null, tableType: type, data } },
+      rootOrder: ["t1"],
+      childOrder: { t1: [] },
+      activeNodeId: "t1",
+    };
+    const { project, updated } = read(serializeProjectFile(file));
+    strictEqual(updated, false);
+    const back = project.nodes.t1.data!;
+    strictEqual(back.summaryFormat, "mean-sd-n");
+    deepStrictEqual(back.columns, data.columns);
+    deepStrictEqual(back.rows, data.rows);
+  }
+  const file: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "Mismatch",
+        parentId: null,
+        tableType: "nested",
+        data: { ...nested(), summaryFormat: "mean-sd-n" },
+      },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const { project } = read(serializeProjectFile(file));
+  strictEqual(project.nodes.t1.data!.summaryFormat, undefined);
+});
+
+check("seq 208: XY bars on a summary table draw the stored Means with the converted error, never the average of Mean/SD/N", () => {
+  const dataset = readTable(xySummary());
+  const options = newGraphOptions("xy-bar");
+  const fig = GRAPHS["xy-bar"].build(dataset.columns, options, paintOf(options, 2), dataset.titles, "mean-sd-n");
+  const traces = fig.data as { name: string; y: number[]; error_y?: { array: number[] } }[];
+  deepStrictEqual(traces.map((t) => t.name), ["A", "B"]);
+  deepStrictEqual(traces[0].y, [10, 12]);
+  deepStrictEqual(traces[0].error_y?.array, [1, 1.5]); // SD 2/√4, 3/√4
+  deepStrictEqual(traces[1].y, [20, 22]);
+  deepStrictEqual(traces[1].error_y?.array, [4 / 3, 2]); // SD 4/√9, 6/√9
+  // The same values come out of xyDrawn directly, even with xyReplicates "each".
+  const { x: xCol, ys } = splitXY(dataset.columns);
+  const drawn = xyDrawn(xCol, ys[0], { ...newGraphOptions("xy-scatter"), xyReplicates: "each" }, "mean-sd-n");
+  deepStrictEqual(drawn, { x: [1, 2], y: [10, 12], errors: [1, 1.5] });
+});
+
+check("seq 208: a nested summary table's subgroup Means pool like replicates (mean of Means, SD of Means)", () => {
+  const { sets } = readTable(nestedSummary());
+  // Group A: subgroup Means 10 and 20 in row 1 → center 15, SD √50; row 2: 12 and 22 → 17.
+  deepStrictEqual(perRowSummaryStats(sets[0].columns, 2, "mean-sd-n", "sd"), {
+    center: [15, 17],
+    error: [Math.sqrt(50), Math.sqrt(50)],
+    errorMinus: null,
+  });
+  deepStrictEqual(perRowSummaryStats(sets[0].columns, 2, "mean-sd-n", "sem").error, [
+    Math.sqrt(50) / Math.sqrt(2),
+    Math.sqrt(50) / Math.sqrt(2),
+  ]);
+  // The heatmap's Mean column is the per-row mean of the subgroup Means.
+  const meanCol = summaryMeanColumn(sets[0]);
+  deepStrictEqual(meanCol?.byRow, [15, 17]);
+});
+
+check("seq 208: mean-and-error on a nested summary table plots one point per subgroup, from the Mean columns only", () => {
+  const dataset = readTable(nestedSummary());
+  const options = newGraphOptions("mean-error");
+  const fig = GRAPHS["mean-error"].build(
+    dataset.numeric,
+    options,
+    paintOf(options, 4),
+    dataset.titles,
+    "mean-sd-n",
+  );
+  const traces = fig.data as { y: (number | null)[]; error_y?: { array: (number | null)[] } }[];
+  strictEqual(traces.length, 4); // A:S1, A:S2, B:S1, B:S2 — no SD/N traces
+  // One point per subgroup: the center of that subgroup's Mean column across
+  // rows (11 = mean of 10 and 12), with its SEM.
+  deepStrictEqual(traces.map((t) => t.y), [[11], [21], [31], [41]]);
+  deepStrictEqual(traces.map((t) => t.error_y?.array), [[1], [1], [1], [1]]);
+  const layout = fig.layout as { xaxis?: { ticktext?: string[] } };
+  deepStrictEqual(layout.xaxis?.ticktext, ["A:S1", "A:S2", "B:S1", "B:S2"]);
+});
+
+check("seq 208 MCP: set-summary-format renames an XY table's sub-columns, and bad formats are refused", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-208-table", "create-table", {
+    table_type: "xy",
+    columns: ["", "X", "A:Y1", "A:Y2", "A:Y3", "B:Y1", "B:Y2", "B:Y3"],
+    rows: [
+      ["", 1, 10, 12, 14, 20, 22, 24],
+      ["", 2, 11, 13, 15, 21, 23, 25],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  const done = await harness.run("job-208-format", "edit-table", {
+    table_id: tableId,
+    op: "set-summary-format",
+    format: "mean-sd-n",
+  });
+  strictEqual((done.result as { summary_format: string }).summary_format, "mean-sd-n");
+  deepStrictEqual(harness.state().nodes[tableId]?.data?.columns, [
+    "",
+    "X",
+    "A:Mean",
+    "A:SD",
+    "A:N",
+    "B:Mean",
+    "B:SD",
+    "B:N",
+  ]);
+  // Already that format: a no-op success, still reporting the format.
+  const again = await harness.run("job-208-again", "edit-table", {
+    table_id: tableId,
+    op: "set-summary-format",
+    format: "mean-sd-n",
+  });
+  strictEqual((again.result as { summary_format: string }).summary_format, "mean-sd-n");
+  // Back to replicates restores the Y names.
+  await harness.run("job-208-back", "edit-table", {
+    table_id: tableId,
+    op: "set-summary-format",
+    format: "replicates",
+  });
+  deepStrictEqual(harness.state().nodes[tableId]?.data?.columns, [
+    "",
+    "X",
+    "A:Y1",
+    "A:Y2",
+    "A:Y3",
+    "B:Y1",
+    "B:Y2",
+    "B:Y3",
+  ]);
+  await rejects(
+    harness.run("job-208-bad", "edit-table", { table_id: tableId, op: "set-summary-format", format: "mean-foo" }),
+    /has no sub-column format/,
+  );
+  const column = await harness.run("job-208-column", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B"],
+    rows: [["r1", 1, 2]],
+  });
+  harness.sync();
+  await rejects(
+    harness.run("job-208-wrong-type", "edit-table", {
+      table_id: (column.result as { table_id: string }).table_id,
+      op: "set-summary-format",
+      format: "mean-sd",
+    }),
+    /only grouped, xy and nested tables have sub-columns/,
+  );
+});
+
+check("seq 208 MCP: a nested table written with summary columns is detected as a summary table", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-208-nested", "create-table", {
+    table_type: "nested",
+    columns: [
+      "",
+      "A:S1:Mean", "A:S1:SD", "A:S1:N",
+      "A:S2:Mean", "A:S2:SD", "A:S2:N",
+    ],
+    rows: [["r1", 10, 2, 4, 20, 4, 9]],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  strictEqual(harness.state().nodes[tableId]?.data?.summaryFormat, "mean-sd-n");
 });
 
 check("summary subcolumns: interleaved scatter on a summary table draws centers, not points", () => {

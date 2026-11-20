@@ -2737,7 +2737,7 @@ pub struct EditTableArgs {
     /// The grid-menu op: insert-rows, delete-rows, insert-columns,
     /// delete-columns, rename-column, rename-group, exclude-cells,
     /// include-cells, freeze-title, convert-comma-decimals,
-    /// add-calculated-variable, set-calculated-variable or
+    /// set-summary-format, add-calculated-variable, set-calculated-variable or
     /// remove-calculated-variable.
     pub op: String,
     /// insert/delete-rows, insert/delete-columns: the 0-based row or
@@ -2764,6 +2764,11 @@ pub struct EditTableArgs {
     /// (with or without its leading `=`), e.g. `=Dose * 2`.
     #[serde(default)]
     pub formula: Option<String>,
+    /// set-summary-format: the sub-column format — replicates, mean-sd-n,
+    /// mean-sem-n, mean-sd, mean-sem, mean-cv-n, mean-cv, mean-plus-minus
+    /// or mean-upper-lower (grouped, xy and nested tables only).
+    #[serde(default)]
+    pub format: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -4096,7 +4101,7 @@ impl TiterMcpServer {
     /// the row-title column, convert decimal commas to points.
     #[tool(
         name = "titer_edit_table",
-        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable or remove-calculated-variable. Rows and columns are 0-based; column 0 holds the row titles. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column.",
+        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, set-summary-format, add-calculated-variable, set-calculated-variable or remove-calculated-variable. Rows and columns are 0-based; column 0 holds the row titles. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. set-summary-format { format } changes a grouped, xy or nested table's sub-column format between raw replicates and pre-calculated summaries (mean-sd-n, mean-sem-n, mean-sd, mean-sem, mean-cv-n, mean-cv, mean-plus-minus, mean-upper-lower, or replicates); values stay in their group's slot.",
         annotations(
             title = "Edit table",
             read_only_hint = false,
@@ -4121,6 +4126,7 @@ impl TiterMcpServer {
             "name": args.name,
             "cells": args.cells.as_ref().map(|c| c.len()),
             "frozen": args.frozen,
+            "format": args.format,
         });
         let outcome: Result<serde_json::Value, String> = async {
             let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
@@ -4146,6 +4152,7 @@ impl TiterMcpServer {
                 "include-cells",
                 "freeze-title",
                 "convert-comma-decimals",
+                "set-summary-format",
                 "add-calculated-variable",
                 "set-calculated-variable",
                 "remove-calculated-variable",
@@ -4189,6 +4196,28 @@ impl TiterMcpServer {
                         _ => return Err(format!("op {} needs a non-empty formula.", args.op)),
                     }
                 }
+                "set-summary-format" => {
+                    const FORMATS: &[&str] = &[
+                        "replicates",
+                        "mean-sd-n",
+                        "mean-sem-n",
+                        "mean-sd",
+                        "mean-sem",
+                        "mean-cv-n",
+                        "mean-cv",
+                        "mean-plus-minus",
+                        "mean-upper-lower",
+                    ];
+                    match &args.format {
+                        Some(f) if FORMATS.contains(&f.as_str()) => {}
+                        _ => {
+                            return Err(format!(
+                                "op set-summary-format needs format, one of: {}.",
+                                FORMATS.join(", ")
+                            ))
+                        }
+                    }
+                }
                 "remove-calculated-variable" => match &args.name {
                     Some(n) if !n.trim().is_empty() => {}
                     _ => return Err(format!("op {} needs a non-empty name.", args.op)),
@@ -4208,6 +4237,7 @@ impl TiterMcpServer {
                     "cells": args.cells,
                     "frozen": args.frozen,
                     "formula": args.formula,
+                    "format": args.format,
                 }),
             )
             .await

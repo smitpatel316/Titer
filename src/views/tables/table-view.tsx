@@ -20,6 +20,10 @@ import {
   addRowGroup,
   applySummaryFormat,
   applySummaryFormatLoses,
+  applySummaryFormatNested,
+  applySummaryFormatNestedLoses,
+  applySummaryFormatXY,
+  applySummaryFormatXYLoses,
   changeErrorFormat,
   defaultRowGroups,
   regroupLoses,
@@ -324,6 +328,29 @@ function GroupsPanel({ data, update }: { data: TableData; update: (next: TableDa
       }
       update(renestTable(data, g, s, r), "Change Groups");
     };
+    // The sub-columns' format, as on a grouped table: raw replicates, or
+    // pre-calculated summaries (mean / SD or SEM / N…) entered instead of
+    // replicates, one set per subgroup ("A:S1:Mean", "A:S1:SD", "A:S1:N").
+    const format = summaryFormatOf(data);
+    const formatWidth = format === "replicates" ? replicates : summarySubcolumns(format).length;
+    const changeFormat = async (next: SummaryFormat) => {
+      if (next === format) return;
+      if (applySummaryFormatNestedLoses(data, next)) {
+        const newWidth = next === "replicates" ? replicates : summarySubcolumns(next).length;
+        const dropped = data.columns
+          .slice(1, 1 + replicates)
+          .map((n) => n.slice(n.lastIndexOf(":") + 1))
+          .slice(newWidth);
+        if (
+          !(await confirmDelete(
+            `Delete sub-column ${dropped.map((s) => `“${s}”`).join(", ")} of each subgroup?`,
+            DELETED,
+          ))
+        )
+          return;
+      }
+      update(applySummaryFormatNested(data, next), "Change Sub-column Format");
+    };
     return (
       <Section title="Groups" icon={<ColumnsIcon />}>
         <Stepper
@@ -340,10 +367,23 @@ function GroupsPanel({ data, update }: { data: TableData; update: (next: TableDa
           step={1}
           onChange={(s) => void renest(groups, s, replicates)}
         />
+        {/* A summary format's width is fixed — the Replicates stepper is
+          pinned to it (min = max = its width, so both buttons disable) —
+          and narrowing to a shorter format asks first when a sub-column
+          past its width holds values. */}
+        <div className="flex items-center justify-between">
+          <span className="text-small text-secondary">Sub-column format</span>
+          <Select
+            value={format}
+            onChange={(f) => void changeFormat(f)}
+            options={SUMMARY_FORMATS.map((f) => ({ value: f.value, label: f.label }))}
+          />
+        </div>
         <Stepper
           label="Replicates"
           value={replicates}
-          {...GROUPED_LIMITS.nested.replicates}
+          min={format === "replicates" ? GROUPED_LIMITS.nested.replicates.min : formatWidth}
+          max={format === "replicates" ? GROUPED_LIMITS.nested.replicates.max : formatWidth}
           step={1}
           onChange={(r) => void renest(groups, subgroups, r)}
         />
@@ -499,9 +539,53 @@ function ReplicatesPanel({
       renamed,
     );
   };
+  // The Y sub-columns' format: raw replicates, or pre-calculated summaries
+  // (mean / SD or SEM / N…) entered instead of replicates, one set per Y
+  // data set ("A:Mean", "A:SD", "A:N"). A summary format's width is fixed —
+  // the Replicates stepper is pinned to it — and narrowing to a shorter
+  // format asks first when a sub-column past its width holds values. A
+  // table with one column per Y data set has no sets yet: picking a format
+  // makes each Y column a set of its own.
+  const format = summaryFormatOf(data);
+  const formatWidth = format === "replicates" ? replicates : summarySubcolumns(format).length;
+  const changeFormat = async (next: SummaryFormat) => {
+    if (next === format) return;
+    if (applySummaryFormatXYLoses(data, next)) {
+      const lead = data.columns[1]?.includes(":") ? 1 : 2;
+      const oldWidth = data.replicates ?? 1;
+      const newWidth = next === "replicates" ? oldWidth : summarySubcolumns(next).length;
+      const dropped = data.columns
+        .slice(lead, lead + oldWidth)
+        .map((n) => n.slice(n.indexOf(":") + 1))
+        .slice(newWidth);
+      if (
+        !(await confirmDelete(
+          `Delete sub-column ${dropped.map((s) => `“${s}”`).join(", ")} of each data set?`,
+          DELETED,
+        ))
+      )
+        return;
+    }
+    update(applySummaryFormatXY(data, next), "Change Sub-column Format");
+  };
   return (
     <Section title="Replicates" icon={<ColumnsIcon />}>
-      <Stepper label="Replicates" value={replicates} {...GROUPED_LIMITS.replicates} step={1} onChange={replicate} />
+      <div className="flex items-center justify-between">
+        <span className="text-small text-secondary">Sub-column format</span>
+        <Select
+          value={format}
+          onChange={(f) => void changeFormat(f)}
+          options={SUMMARY_FORMATS.map((f) => ({ value: f.value, label: f.label }))}
+        />
+      </div>
+      <Stepper
+        label="Replicates"
+        value={replicates}
+        min={format === "replicates" ? GROUPED_LIMITS.replicates.min : formatWidth}
+        max={format === "replicates" ? GROUPED_LIMITS.replicates.max : formatWidth}
+        step={1}
+        onChange={replicate}
+      />
       {isGrouped(data) && (
         <Stepper
           label="Data sets"

@@ -626,17 +626,19 @@ function readData(
   const kind = lead === 2 ? "xy" : "grouped";
   // A summary format survives only when it fits its columns: a known format,
   // whose width is the table's sub-column count, with every group's suffixes
-  // in its order ("A:Mean", "A:SD", "A:N"). Anything else is a stale or
-  // hand-edited value — dropped, so the columns read as plain replicates and
-  // the load-time rebuild below can put the names straight.
-  if (isGrouped(data) && data.summaryFormat !== undefined) {
+  // in its order ("A:Mean", "A:SD", "A:N" — a nested table's "A:S1:Mean"…).
+  // Anything else is a stale or hand-edited value — dropped, so the columns
+  // read as plain replicates and the load-time rebuild below can put the
+  // names straight. The suffix is the part after the LAST ":" (a nested
+  // sub-column's middle part is its subgroup, not its format).
+  if ((isGrouped(data) || isNested(data)) && data.summaryFormat !== undefined) {
     const format = data.summaryFormat;
     const subs = isSummaryFormatValue(format) ? summarySubcolumns(format) : [];
     const fits =
       subs.length === data.replicates &&
       columns
         .slice(lead)
-        .every((name, i) => name.slice(name.indexOf(":") + 1) === subs[i % subs.length]);
+        .every((name, i) => name.slice(name.lastIndexOf(":") + 1) === subs[i % subs.length]);
     if (!fits) data = defined({ ...data, summaryFormat: undefined });
   }
   if (isGrouped(data) && columns.length > lead) {
