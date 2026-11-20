@@ -63,7 +63,7 @@ function edit(command: EditCommand) {
 export function useAppMenu(doc: DocumentActions) {
   const store = useProjectStore();
   const startAnalysis = useStartAnalysis();
-  const { sidebar, inspector, panel, inspectorHere, settingsHere, setLayout, setOpenSections, setFoldedTables } =
+  const { sidebar, inspector, panel, inspectorHere, settingsHere, gallery, setLayout, setOpenSections, setFoldedTables } =
     useLayout();
   // What the right panel shows, if shown: the note, or the settings where there are some.
   const shown = !inspector ? null : panel === "settings" && settingsHere ? "settings" : "notes";
@@ -420,6 +420,12 @@ export function useAppMenu(doc: DocumentActions) {
             accelerator: "CmdOrCtrl+B",
             action: () => setLayout({ sidebar: !sidebar }),
           },
+          // Seq 229: the Gallery shows every graph on one sheet.
+          {
+            text: "Gallery",
+            checked: gallery,
+            action: () => setLayout({ gallery: !gallery }),
+          },
           panelItem("notes", "Notes", "CmdOrCtrl+Alt+N", inspectorHere),
           panelItem("settings", "Inspector", "CmdOrCtrl+Alt+I", settingsHere),
           sep,
@@ -466,6 +472,7 @@ export function useAppMenu(doc: DocumentActions) {
     doc.recents,
     theme,
     sidebar,
+    gallery,
     inspector,
     typing,
     undoName,

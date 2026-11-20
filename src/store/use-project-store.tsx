@@ -873,8 +873,10 @@ interface ProjectActions {
 
 interface ProjectContextValue extends ProjectActions {
   nodes: Record<string, ProjectNode>;
-  /** The project-root items (tables, info sheets, figures) in sidebar order. */
+  /** The tables, in sidebar order. */
   rootOrder: string[];
+  /** Each table's analyses and graphs, in sidebar order. */
+  childOrder: Record<string, string[]>;
   activeNodeId: string | null;
   activeNode: ProjectNode | null;
   activeTableId: string | null;
@@ -1105,6 +1107,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       ...actions,
       nodes: state.nodes,
       rootOrder: state.rootOrder,
+      childOrder: state.childOrder,
       activeNodeId: state.activeNodeId,
       activeNode,
       activeTableId,

@@ -17,6 +17,8 @@ interface Layout {
   inspectorWidth: number;
   /** What the right panel shows: the item's note, or its settings (where it has some). */
   panel: "notes" | "settings";
+  /** The Gallery view (seq 229): every graph on one sheet, instead of the active item. */
+  gallery: boolean;
 }
 
 const KEY = "titer.layout";
@@ -26,6 +28,7 @@ const INITIAL: Layout = {
   inspector: true,
   inspectorWidth: INSPECTOR_WIDTH.initial,
   panel: "settings",
+  gallery: false,
 };
 
 export const clampWidth = (width: number, limits: Limits) => Math.round(clamp(width, limits));
@@ -43,6 +46,7 @@ function load(): Layout {
           ? clampWidth(saved.inspectorWidth, INSPECTOR_WIDTH)
           : INITIAL.inspectorWidth,
       panel: saved.panel === "notes" ? "notes" : "settings",
+      gallery: saved.gallery === true,
     };
   } catch {
     return INITIAL;

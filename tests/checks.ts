@@ -31,6 +31,7 @@ import {
   type TemplateInfo,
 } from "../src/lib/template";
 import { highlightStyle, searchProject } from "../src/lib/project-search";
+import { galleryItems } from "../src/lib/gallery";
 import { kaplanMeier } from "../src/lib/kaplan-meier";
 import { transformTable } from "../src/lib/transform";
 import {
@@ -372,6 +373,25 @@ check("a transposed block pastes at the selection's top-left, growing the table"
   strictEqual(pasted.rows[1][0], "r2");
   strictEqual(pasted.rows[0][1], "1");
   strictEqual(pasted.rows[1][1], "2");
+});
+
+// ── Gallery (seq 229) ────────────────────────────────────────────────────
+
+check("the gallery lists every graph in sidebar order, with its chart and table", () => {
+  const nodes = {
+    t1: { id: "t1", type: "table", name: "Dose", parentId: null, tableType: "xy" },
+    t2: { id: "t2", type: "table", name: "Growth", parentId: null, tableType: "column" },
+    g1: { id: "g1", type: "graph", name: "Scatter", parentId: "t1", graphType: "xy-scatter", graphOptions: {} },
+    g2: { id: "g2", type: "graph", name: "Boxes", parentId: "t2", graphType: "box-violin", graphOptions: {} },
+    g3: { id: "g3", type: "graph", name: "Heat", parentId: "t1", graphType: "heatmap", graphOptions: {} },
+    a1: { id: "a1", type: "analysis", name: "t-test", parentId: "t1", analysisType: "compare-two-groups" },
+  } as unknown as Record<string, ProjectNode>;
+  deepStrictEqual(galleryItems(nodes, ["t1", "t2"], { t1: ["g1", "a1", "g3"], t2: ["g2"] }), [
+    { id: "g1", name: "Scatter", graphLabel: "Scatter or line", tableName: "Dose" },
+    { id: "g3", name: "Heat", graphLabel: "Heatmap", tableName: "Dose" },
+    { id: "g2", name: "Boxes", graphLabel: "Box and violin", tableName: "Growth" },
+  ]);
+  deepStrictEqual(galleryItems(nodes, ["t1"], { t1: ["a1"] }), []);
 });
 
 // ── .hlx files ───────────────────────────────────────────────────────────
@@ -13334,7 +13354,7 @@ check("My Palettes keep, replace and delete palettes; a gradient of few colors b
 });
 
 check("a narrow window narrows the sidebar for the inspector only where there is one", () => {
-  const layout = { sidebar: true, sidebarWidth: 224, inspector: true, inspectorWidth: 256 };
+  const layout = { sidebar: true, sidebarWidth: 224, inspector: true, inspectorWidth: 256, gallery: false };
   deepStrictEqual(fitWidths(layout, 700, true), { sidebarWidth: 180, inspectorWidth: 220 });
   strictEqual(fitWidths(layout, 700, false).sidebarWidth, 224);
 });
