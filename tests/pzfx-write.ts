@@ -14,8 +14,10 @@
 //       MostRecentVersion/Login, never YFormat=""
 //   W4  a minimal one-table project writes exactly the required elements
 //       (including the empty <Template>)
-//   W5  refusals: Nested / Multiple / mixed-format tables and a project
-//       with no tables refuse the whole write, naming the table
+//   W5  refusals: a project with no tables refuses the whole write
+//   W15 (seq 163): nested/multiple tables write as OneWay (Column) tables
+//       and mixed-format tables split into one table per Y format —
+//       the whole write no longer fails on them (see below).
 //   W6  every written file validates against the Prism 8 Mac XSD
 //       (namespace-stripped copy — see below); the source
 //       twoway_empty_yformat.pzfx must FAIL it (negative control)
@@ -565,6 +567,280 @@ check("W4 BUG-21: empty <Template> is the last child, carrying no blob", () => {
   ok(!/<Template[^>]*>[^<]+<\/Template>/.test(xml), "Template carries no blob content");
 });
 
+// ── W15 (seq 163): nested/multiple + mixed-format write ──────────────
+// Mirrors tests/prism-write.ts W15 (seq 162) for the .pzfx writer, plus the
+// mixed-format split seq 163 adds: a nested or Multiple Variables table
+// writes as a OneWay (Column) table with all values and column names
+// verbatim (only the table type is lost, disclosed in the report), a
+// project mixing table formats writes every table, and a table whose
+// datasets mix Y formats splits into one table per format —
+// "Name (SDN)", "Name (replicates)" — with all values preserved and the
+// split disclosed, instead of refusing the whole write. Fixtures are
+// generated, never Mansi's files. Round-trip contract: columns + rows +
+// excluded cells identical within each written table; a split table's
+// pieces together hold every original value.
+
+const nestedData163 = {
+  columns: ["Title", "A:S1:R1", "A:S1:R2", "A:S2:R1", "A:S2:R2", "B:S1:R1", "B:S1:R2", "B:S2:R1", "B:S2:R2"],
+  rows: [
+    ["Day 1", "10", "11", "12", "13", "20", "21", "22", "23"],
+    ["Day 2", "14", "15", "16", "17", "24", "25", "26", "27"],
+  ],
+  groups: 2,
+  subgroups: 2,
+  replicates: 2,
+  excluded: ["0,1"],
+};
+const multiData163 = {
+  columns: ["Title", "Age", "Weight", "Score"],
+  rows: [
+    [null, "34", "72.5", "88"],
+    [null, "29", "68.0", "91"],
+  ],
+};
+const seq163Project = {
+  nodes: {
+    t_nested: {
+      id: "t_nested",
+      type: "table",
+      name: "Nested data",
+      parentId: null,
+      tableType: "nested",
+      data: nestedData163,
+    },
+    t_multi: {
+      id: "t_multi",
+      type: "table",
+      name: "Multi var",
+      parentId: null,
+      tableType: "multiple",
+      data: multiData163,
+    },
+    t_col: {
+      id: "t_col",
+      type: "table",
+      name: "Plain",
+      parentId: null,
+      tableType: "column",
+      data: { columns: ["Title", "C"], rows: [[null, "5"]] },
+    },
+    t_xy: {
+      id: "t_xy",
+      type: "table",
+      name: "XY data",
+      parentId: null,
+      tableType: "xy",
+      data: {
+        columns: ["Title", "X", "Y_1", "Y_2"],
+        rows: [
+          [null, "1", "10", "20"],
+          [null, "2", "11", "21"],
+        ],
+      },
+    },
+    a_nested_t: {
+      id: "a_nested_t",
+      type: "analysis",
+      name: "Nested t test",
+      parentId: "t_nested",
+      analysisType: "nested-t-test",
+      analysisParams: {},
+    },
+  },
+  rootOrder: ["t_nested", "t_multi", "t_col", "t_xy"],
+  childOrder: { t_nested: ["a_nested_t"], t_multi: [], t_col: [], t_xy: [], a_nested_t: [] },
+  activeNodeId: "t_nested",
+};
+const seq163Written = writePzfx(seq163Project as never, APP_VERSION);
+const seq163Xml = xmlOf(seq163Written);
+const seq163Back = parsePzfx(seq163Xml);
+const seq163BackTables = tablesOf(seq163Back.project);
+const seq163ByName = (name: string) => seq163BackTables.find((t) => t.name === name);
+const seq163Warnings = seq163Written.report.issues.filter((i) => i.severity === "warning").map((i) => i.message);
+
+check("W15a nested table writes as OneWay, values verbatim (seq 163)", () => {
+  const back = seq163ByName("Nested data");
+  strictEqual((seq163Xml.match(/TableType="OneWay"/g) ?? []).length, 3, "nested + multiple + plain are OneWay");
+  strictEqual(back?.tableType, "column", "reads back as Column");
+  strictEqual(JSON.stringify(back?.data?.columns), JSON.stringify(nestedData163.columns), "columns verbatim");
+  strictEqual(JSON.stringify(back?.data?.rows), JSON.stringify(nestedData163.rows), "rows verbatim");
+  strictEqual(JSON.stringify(back?.data?.excluded ?? []), JSON.stringify(nestedData163.excluded), "excluded cell kept");
+});
+
+check("W15b multiple table writes as OneWay, values verbatim (seq 163)", () => {
+  const back = seq163ByName("Multi var");
+  strictEqual(back?.tableType, "column", "reads back as Column");
+  strictEqual(JSON.stringify(back?.data?.columns), JSON.stringify(multiData163.columns), "columns verbatim");
+  strictEqual(JSON.stringify(back?.data?.rows), JSON.stringify(multiData163.rows), "rows verbatim");
+});
+
+check("W15c mixed-format project writes all four tables (seq 163)", () => {
+  strictEqual(
+    JSON.stringify(seq163Written.report.tables),
+    JSON.stringify(["Nested data", "Multi var", "Plain", "XY data"]),
+    "report lists all four",
+  );
+  strictEqual(seq163BackTables.length, 4, "all four tables round-trip");
+  strictEqual(seq163ByName("XY data")?.tableType, "xy", "XY table keeps its type");
+  const res = validateXml(seq163Xml);
+  ok(res.valid, `mixed-format project validates (${res.mechanism}: ${res.detail || "INVALID"})`);
+});
+
+check("W15d flattening is disclosed in the report, naming each table (seq 163)", () => {
+  ok(
+    seq163Warnings.some(
+      (m) => m.includes("“Nested data”") && m.includes("Nested table") && m.includes("OneWay"),
+    ),
+    "nested warning names the table and OneWay",
+  );
+  ok(
+    seq163Warnings.some(
+      (m) => m.includes("“Multi var”") && m.includes("Multiple variables table") && m.includes("OneWay"),
+    ),
+    "multiple warning names the table and OneWay",
+  );
+  ok(!seq163Warnings.some((m) => m.includes("“Plain”") || m.includes("“XY data”")), "no warning for plain/XY tables");
+});
+
+check("W15e nested t test is registered, not written (seq 163)", () => {
+  ok(
+    seq163Written.report.analysesNotWritten.some(
+      (s) => s.startsWith("Nested t test") && s.includes("nested-t-test"),
+    ),
+    seq163Written.report.analysesNotWritten.join(" | "),
+  );
+});
+
+check("W15f mixed-format column table splits into one table per Y format (seq 163)", () => {
+  const written = writePzfx(
+    refusalProject("column", "Mixed formats", ["Title", "A_MEAN", "A_SD", "A_N", "B_1", "B_2"], [[null, "1", "2", "3", "4", "5"]]),
+    APP_VERSION,
+  );
+  const xml = xmlOf(written);
+  strictEqual(
+    JSON.stringify(written.report.tables),
+    JSON.stringify(["Mixed formats (SDN)", "Mixed formats (replicates)"]),
+    "one table per format, suffixed",
+  );
+  const back = parsePzfx(xml);
+  const tables = tablesOf(back.project);
+  strictEqual(tables.length, 2, "two tables back");
+  const sdn = tables.find((t) => t.name === "Mixed formats (SDN)");
+  const reps = tables.find((t) => t.name === "Mixed formats (replicates)");
+  strictEqual(JSON.stringify(sdn?.data?.columns), JSON.stringify(["Title", "A_MEAN", "A_SD", "A_N"]), "SDN columns");
+  strictEqual(JSON.stringify(sdn?.data?.rows), JSON.stringify([[null, "1", "2", "3"]]), "SDN values");
+  strictEqual(JSON.stringify(reps?.data?.columns), JSON.stringify(["Title", "B_1", "B_2"]), "replicates columns");
+  strictEqual(JSON.stringify(reps?.data?.rows), JSON.stringify([[null, "4", "5"]]), "replicates values");
+  ok(xml.includes('YFormat="SDN"'), "SDN table carries YFormat=SDN");
+  ok(xml.includes('Replicates="2"'), "replicates table carries Replicates=2");
+  ok(
+    written.report.issues.some((i) => i.message.includes("“Mixed formats”") && i.message.includes("2 tables")),
+    "split is disclosed in the report",
+  );
+  const res = validateXml(xml);
+  ok(res.valid, `split file validates (${res.mechanism}: ${res.detail || "INVALID"})`);
+});
+
+check("W15g grouped table mixing summary and replicate groups splits (seq 163)", () => {
+  const written = writePzfx(
+    syntheticProject(
+      {
+        table_1: {
+          id: "table_1",
+          type: "table",
+          name: "Grouped mixed",
+          parentId: null,
+          tableType: "grouped",
+          data: {
+            columns: ["Title", "A:Mean", "A:SD", "A:N", "B:Y1", "B:Y2"],
+            rows: [[null, "1", "2", "3", "4", "5"]],
+            groups: 2,
+            replicates: 3,
+          },
+        },
+      },
+      ["table_1"],
+    ),
+    APP_VERSION,
+  );
+  const xml = xmlOf(written);
+  strictEqual(
+    JSON.stringify(written.report.tables),
+    JSON.stringify(["Grouped mixed (SDN)", "Grouped mixed (replicates)"]),
+    "one TwoWay per group shape",
+  );
+  strictEqual((xml.match(/TableType="TwoWay"/g) ?? []).length, 2, "both splits are TwoWay");
+  const back = parsePzfx(xml);
+  const tables = tablesOf(back.project);
+  const sdn = tables.find((t) => t.name === "Grouped mixed (SDN)");
+  const reps = tables.find((t) => t.name === "Grouped mixed (replicates)");
+  strictEqual(sdn?.tableType, "column", "summary split reads back as Column");
+  strictEqual(JSON.stringify(sdn?.data?.columns), JSON.stringify(["Title", "A_MEAN", "A_SD", "A_N"]), "SDN columns");
+  strictEqual(JSON.stringify(sdn?.data?.rows), JSON.stringify([[null, "1", "2", "3"]]), "SDN values");
+  strictEqual(reps?.tableType, "grouped", "replicates split stays Grouped");
+  strictEqual(JSON.stringify(reps?.data?.columns), JSON.stringify(["Title", "B:Y1", "B:Y2"]), "replicates columns");
+  strictEqual(JSON.stringify(reps?.data?.rows), JSON.stringify([[null, "4", "5"]]), "replicates values");
+  ok(
+    written.report.issues.some((i) => i.message.includes("“Grouped mixed”") && i.message.includes("2 tables")),
+    "split is disclosed in the report",
+  );
+  const res = validateXml(xml);
+  ok(res.valid, `split file validates (${res.mechanism}: ${res.detail || "INVALID"})`);
+});
+
+check("W15h mixed-format XY table splits, sharing X (seq 163)", () => {
+  const written = writePzfx(
+    syntheticProject(
+      {
+        table_1: {
+          id: "table_1",
+          type: "table",
+          name: "XY mixed",
+          parentId: null,
+          tableType: "xy",
+          data: {
+            columns: ["Title", "X", "T_MEAN", "T_SD", "U_1", "U_2"],
+            rows: [
+              [null, "1", "10", "2", "30", "40"],
+              [null, "2", "20", "3", "50", "60"],
+            ],
+            errorFormat: "sd",
+          },
+        },
+      },
+      ["table_1"],
+    ),
+    APP_VERSION,
+  );
+  const xml = xmlOf(written);
+  strictEqual(
+    JSON.stringify(written.report.tables),
+    JSON.stringify(["XY mixed (SD)", "XY mixed (replicates)"]),
+    "one XY table per format",
+  );
+  const back = parsePzfx(xml);
+  const tables = tablesOf(back.project);
+  strictEqual(tables.length, 2, "two tables back");
+  const sd = tables.find((t) => t.name === "XY mixed (SD)");
+  const reps = tables.find((t) => t.name === "XY mixed (replicates)");
+  strictEqual(sd?.tableType, "xy", "SD split stays XY");
+  strictEqual(JSON.stringify(sd?.data?.columns), JSON.stringify(["Title", "X", "T_MEAN", "T_SD"]), "SD columns + X");
+  strictEqual(
+    JSON.stringify(sd?.data?.rows),
+    JSON.stringify([[null, "1", "10", "2"], [null, "2", "20", "3"]]),
+    "SD values",
+  );
+  strictEqual(reps?.tableType, "xy", "replicates split stays XY");
+  strictEqual(JSON.stringify(reps?.data?.columns), JSON.stringify(["Title", "X", "U_1", "U_2"]), "replicates columns + X");
+  strictEqual(
+    JSON.stringify(reps?.data?.rows),
+    JSON.stringify([[null, "1", "30", "40"], [null, "2", "50", "60"]]),
+    "replicates values",
+  );
+  const res = validateXml(xml);
+  ok(res.valid, `split file validates (${res.mechanism}: ${res.detail || "INVALID"})`);
+});
+
 // ── W5 — refusals ──────────────────────────────────────────────────────
 
 const refusalProject = (tableType: TableType, name: string, columns: string[], rows: (string | null)[][]) =>
@@ -582,64 +858,10 @@ const refusalProject = (tableType: TableType, name: string, columns: string[], r
     ["table_1"],
   );
 
-check("W5 Nested table refuses the whole write, naming the table", () => {
-  throws(
-    () => writePzfx(refusalProject("nested", "Nested data", ["Title", "A"], [[null, "1"]]), APP_VERSION),
-    (err: unknown) => err instanceof Error && err.message.includes("Nested data") && err.message.includes("Prism has no matching"),
-  );
-});
-
-check("W5 Multiple variables table refuses the whole write, naming the table", () => {
-  throws(
-    () => writePzfx(refusalProject("multiple", "Multi var", ["Title", "A"], [[null, "1"]]), APP_VERSION),
-    (err: unknown) =>
-      err instanceof Error && err.message.includes("Multi var") && err.message.includes("Prism has no matching"),
-  );
-});
-
 check("W5 project with no tables refuses", () => {
   throws(
     () => writePzfx(syntheticProject({}, []), APP_VERSION),
     (err: unknown) => err instanceof Error && err.message.includes("no data tables"),
-  );
-});
-
-check("W5 mixed-format table refuses, naming the table", () => {
-  throws(
-    () =>
-      writePzfx(
-        refusalProject("column", "Mixed formats", ["Title", "A_MEAN", "A_SD", "A_N", "B_1", "B_2"], [[null, "1", "2", "3", "4", "5"]]),
-        APP_VERSION,
-      ),
-    (err: unknown) => err instanceof Error && err.message.includes("Mixed formats") && err.message.includes("one Y format"),
-  );
-});
-
-check("W5 grouped table mixing summary and replicate groups refuses", () => {
-  throws(
-    () =>
-      writePzfx(
-        syntheticProject(
-          {
-            table_1: {
-              id: "table_1",
-              type: "table",
-              name: "Grouped mixed",
-              parentId: null,
-              tableType: "grouped",
-              data: {
-                columns: ["Title", "A:Mean", "A:SD", "A:N", "B:Y1", "B:Y2"],
-                rows: [[null, "1", "2", "3", "4", "5"]],
-                groups: 2,
-                replicates: 3,
-              },
-            },
-          },
-          ["table_1"],
-        ),
-        APP_VERSION,
-      ),
-    (err: unknown) => err instanceof Error && err.message.includes("Grouped mixed") && err.message.includes("one Y format"),
   );
 });
 
