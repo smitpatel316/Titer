@@ -20,7 +20,7 @@ import { writePrism } from "../lib/prism-write";
 import { writePzfx } from "../lib/pzfx-write";
 import { parseProjectText, serializeProjectFile } from "../lib/project-file";
 import { formatMergeReport, mergeProjects } from "../lib/project-merge";
-import { fileName, fileTitle } from "../lib/paths";
+import { fileName, fileTitle, sameFilePath } from "../lib/paths";
 import * as native from "../native";
 import type { ProjectNode } from "./types";
 
@@ -335,6 +335,12 @@ export async function executeMergeProject(
       `“${fileName(args.path)}” is not a project file — merge a .hlx or .pzt project, or a .prism or .pzfx Prism file.`,
     );
   }
+  // Prism's rule: the file to merge "must not be open" — merging this
+  // window's own file would duplicate every sheet under an asterisk.
+  const openPath = deps.getState().filePath;
+  if (openPath && sameFilePath(openPath, args.path)) {
+    throw new Error(`“${fileName(args.path)}” is already open in this window — merge a file that isn't open.`);
+  }
   const sourceName = fileTitle(args.path);
   let incoming: {
     nodes: Record<string, ProjectNode>;
@@ -379,6 +385,12 @@ export async function executeMergeProject(
     warnings.push(...parsed.issues.map((i) => i.message));
   }
   const state = deps.getState();
+  // A converted Prism file can come back with no sheets at all (the .hlx
+  // and .pzfx readers refuse empties themselves, above): nothing to merge
+  // is a refusal, not a "Merged 0 sheets" report.
+  if (Object.keys(incoming.nodes).length === 0) {
+    throw new Error(`“${fileName(args.path)}” has no sheets to merge.`);
+  }
   const merged = mergeProjects(
     { nodes: state.nodes, rootOrder: state.rootOrder, childOrder: state.childOrder, activeNodeId: state.activeNodeId },
     incoming,

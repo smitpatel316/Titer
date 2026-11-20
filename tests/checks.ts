@@ -785,6 +785,50 @@ check("MCP merge-project refuses a file that isn't a project (seq 180)", async (
   );
 });
 
+check("MCP merge-project refuses the file already open in this window (seq 180)", async () => {
+  const io = {
+    writeFile: () => Promise.resolve(undefined),
+    appVersion: () => Promise.resolve("1.8.0"),
+    readText: async () => "",
+    readPrismText: async () => "",
+    readPrismBytes: async () => new Uint8Array(),
+  };
+  // The same path, and the same file spelled with different case (a
+  // macOS picker can return either): Prism's rule is the file to merge
+  // "must not be open".
+  for (const mergePath of ["/tmp/Other.hlx", "/tmp/OTHER.HLX"]) {
+    const harness = mcpLaggingHarness(true);
+    harness.dispatch({ type: "markSaved", filePath: "/tmp/Other.hlx", savedRevision: harness.state().revision });
+    harness.sync();
+    await rejects(
+      executeJob(
+        { job_id: "job-merge-open", project_id: "project-1", action: "merge-project", args: { path: mergePath }, status: "queued" },
+        { ...harness.deps, io },
+      ),
+      /already open in this window/,
+    );
+  }
+});
+
+check("MCP merge-project refuses a file with no sheets (seq 180)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const fixture = serializeProjectFile({ nodes: {}, rootOrder: [], childOrder: {}, activeNodeId: null });
+  const io = {
+    writeFile: () => Promise.resolve(undefined),
+    appVersion: () => Promise.resolve("1.8.0"),
+    readText: async () => fixture,
+    readPrismText: async () => "",
+    readPrismBytes: async () => new Uint8Array(),
+  };
+  await rejects(
+    executeJob(
+      { job_id: "job-merge-empty", project_id: "project-1", action: "merge-project", args: { path: "/tmp/Empty.hlx" }, status: "queued" },
+      { ...harness.deps, io },
+    ),
+    /no readable data tables/,
+  );
+});
+
 check("remapGraphOptions keeps an estimation plot's t-test link when the analysis is cloned", () => {
   const options = { ...newGraphOptions("individual"), ttestAnalysisId: "a1" };
   const { options: kept, dropped } = remapGraphOptions(options, { a1: "a9" });

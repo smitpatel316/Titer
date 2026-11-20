@@ -33,7 +33,7 @@ import { consumeMcpCloseAllowance } from "./mcp-document";
 import { importWarnings } from "./mcp-document";
 import { publishMcpSnapshotNow } from "./mcp-publish";
 import { openProjectsOrSay, sayGone } from "../menus";
-import { fileName, fileTitle } from "../lib/paths";
+import { fileName, fileTitle, sameFilePath } from "../lib/paths";
 import {
   base64ToBytes,
   bytesToBase64,
@@ -1235,6 +1235,14 @@ export function useDocument() {
     sourceName: string,
     warnings: string[] = [],
   ): void => {
+    // A converted Prism file can come back with no sheets at all (the .hlx
+    // and .pzfx readers refuse empties themselves, in `mergeProjectFile`):
+    // nothing to merge is an alert, not a "Merged 0 sheets" notice.
+    if (Object.keys(incoming.nodes).length === 0) {
+      report();
+      void native.alert("Nothing to Merge", `“${sourceName}” has no sheets to merge.`, "error");
+      return;
+    }
     const s = latest.current.get();
     const merged = mergeProjects(
       { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
@@ -1263,6 +1271,17 @@ export function useDocument() {
    *  uses. A file that can't be read or parsed says why, and nothing
    *  merges. */
   const mergeProjectFile = async (path: string): Promise<void> => {
+    // Prism's rule: the file to merge "must not be open" — merging this
+    // window's own file would duplicate every sheet under an asterisk.
+    const open = latest.current.get().filePath;
+    if (open && sameFilePath(open, path)) {
+      report();
+      return native.alert(
+        "Already Open",
+        `“${fileName(path)}” is already open in this window — merge a file that isn't open.`,
+        "error",
+      );
+    }
     const name = fileTitle(path);
     if (path.toLowerCase().endsWith(".prism")) {
       let bytes: Uint8Array;
