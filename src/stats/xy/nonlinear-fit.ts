@@ -647,8 +647,13 @@ export function modelSpec(
     }
     case "inhibitor-3pl-x": {
       // B6 Inhib #5: [Inhibitor] vs. response (three parameters) —
-      // falling, Hill slope 1: Y=Bottom+(Top-Bottom)/(1+X/IC50).
-      const expr = "ifelse(x==0,Bottom,Bottom+(Top-Bottom)/(1+x/IC50))";
+      // falling, Hill slope 1: Y=Bottom+(Top-Bottom)/(1+X/IC50). No X=0
+      // guard, unlike the agonist forms: the unguarded value at X = 0 is
+      // Top (no inhibitor, full response), which is correct, and (X/IC50)
+      // divides by no zero there. (Batch 3 wrongly guarded it to Bottom —
+      // the vehicle point then contradicted the curve, and the
+      // normalized-4PL twin's fit came back with IC50 null.)
+      const expr = "Bottom+(Top-Bottom)/(1+x/IC50)";
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, "list(Bottom=min(y),Top=max(y),IC50=median(x[x>0]))")}`,
@@ -656,7 +661,7 @@ export function modelSpec(
         derived: [span],
         nonNegativeX: true,
         curveFn:
-          'g<-function(xv,p) ifelse(xv==0,p[["Bottom"]],p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+xv/p[["IC50"]]))',
+          'g<-function(xv,p) p[["Bottom"]]+(p[["Top"]]-p[["Bottom"]])/(1+xv/p[["IC50"]])',
         asymptotes: ["Bottom", "Top"],
         dose: { expr, midpoint: "IC50" },
       };
@@ -741,22 +746,26 @@ export function modelSpec(
       };
     }
     case "inhibitor-3pl-normalized-x": {
-      // B6 Inhib #7: [Inhibitor] vs. normalized response.
-      const expr = "ifelse(x==0,0,100/(1+x/IC50))";
+      // B6 Inhib #7: [Inhibitor] vs. normalized response. No X=0 guard:
+      // the unguarded value at X = 0 is 100 (no inhibitor, full
+      // response) — the Batch 3 guard to 0 contradicted the vehicle
+      // point (see inhibitor-3pl-x).
+      const expr = "100/(1+x/IC50)";
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, "list(IC50=median(x[x>0]))")}`,
         terms: ["IC50"],
         derived: [span100],
         nonNegativeX: true,
-        curveFn: 'g<-function(xv,p) ifelse(xv==0,0,100/(1+xv/p[["IC50"]]))',
+        curveFn: 'g<-function(xv,p) 100/(1+xv/p[["IC50"]])',
         dose: { expr, midpoint: "IC50" },
       };
     }
     case "inhibitor-4pl-normalized-x": {
       // B6 Inhib #8: ... -- Variable slope. The (x/IC50) form falls with
       // HillSlope > 0, so the start is 1 outright (see the logx twin).
-      const expr = "ifelse(x==0,0,100/(1+(x/IC50)^HillSlope))";
+      // No X=0 guard, as for inhibitor-3pl-normalized-x.
+      const expr = "100/(1+(x/IC50)^HillSlope)";
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, "list(IC50=median(x[x>0]),HillSlope=1)")}`,
@@ -764,7 +773,7 @@ export function modelSpec(
         derived: [span100],
         nonNegativeX: true,
         curveFn:
-          'g<-function(xv,p) ifelse(xv==0,0,100/(1+(xv/p[["IC50"]])^p[["HillSlope"]]))',
+          'g<-function(xv,p) 100/(1+(xv/p[["IC50"]])^p[["HillSlope"]])',
         dose: { expr, midpoint: "IC50" },
       };
     }

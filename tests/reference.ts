@@ -5692,7 +5692,7 @@ async function disagreements(): Promise<string[]> {
       "N3IX",
       "inhibitor-3pl-normalized-x",
       fitN3IX,
-      (p) => `ifelse(x==0,0,100/(1+x/${p.IC50!.toPrecision(15)}))`,
+      (p) => `100/(1+x/${p.IC50!.toPrecision(15)})`,
       doseXB6X,
       doseXXs,
     );
@@ -5718,7 +5718,7 @@ async function disagreements(): Promise<string[]> {
       "N4IX",
       "inhibitor-4pl-normalized-x",
       fitN4IX,
-      (p) => `ifelse(x==0,0,100/(1+(x/${p.IC50!.toPrecision(15)})^${p.HillSlope!.toPrecision(15)}))`,
+      (p) => `100/(1+(x/${p.IC50!.toPrecision(15)})^${p.HillSlope!.toPrecision(15)})`,
       doseXB6X,
       doseXXs,
     );
