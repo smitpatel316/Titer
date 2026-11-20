@@ -566,7 +566,10 @@ check("merging a project appends its sheets with Prism's asterisk and keeps ever
   const types = merged.rootOrder.map((id) => merged.nodes[id].type);
   strictEqual(types.join(","), "table,table,table,table,table,info,info,figure,figure,analysis");
   const incomingIds = Object.keys(incoming.nodes);
-  const mergedIncoming = merged.rootOrder.filter((id) => !current.nodes[id]);
+  // Every incoming sheet (roots and children) is in the merged project
+  // under a fresh id — counted over the nodes, not the root order, which
+  // lists roots only.
+  const mergedIncoming = Object.keys(merged.nodes).filter((id) => !current.nodes[id]);
   strictEqual(mergedIncoming.length, incomingIds.length);
   for (const id of mergedIncoming) ok(!incomingIds.includes(id), `incoming id ${id} was reused — merge must mint fresh ids`);
   const byName = new Map(Object.values(merged.nodes).map((n) => [n.name, n]));
@@ -618,7 +621,7 @@ check("merging a project appends its sheets with Prism's asterisk and keeps ever
   strictEqual(merged.report.skipped.length, 0);
   strictEqual(merged.report.dropped.length, 2);
   ok(merged.report.dropped.some((d) => d.includes("missing-analysis")), "the dropped graph link is named");
-  ok(merged.report.dropped.some((d) => d.includes("missing-graph")), "the dropped figure panel is named");
+  ok(merged.report.dropped.some((d) => d.includes("Gone")), "the dropped figure panel is named by its graph's name");
   // The report reads as the merge notice.
   const lines = formatMergeReport(merged.report).split("\n");
   strictEqual(lines[0], `Merged 8 sheets from “Other.hlx”:`);
