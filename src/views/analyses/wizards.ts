@@ -4012,7 +4012,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       params: withOneSet(a, {
         expectedMode: (a.expectedMode as ChiSquareGofParams["expectedMode"] | undefined) ?? "equal",
         ...(a.expectedMode === "counts" || a.expectedMode === "percent"
-          ? { expectedValues: parseExpectedValues(a.expectedValues as string).values }
+          ? { expectedValues: parseExpectedValues((a.expectedValues as string | undefined) ?? "").values }
           : {}),
       }),
     }),
