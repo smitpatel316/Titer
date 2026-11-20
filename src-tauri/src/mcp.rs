@@ -1763,7 +1763,9 @@ pub struct EditTableArgs {
     pub table_id: String,
     /// The grid-menu op: insert-rows, delete-rows, insert-columns,
     /// delete-columns, rename-column, rename-group, exclude-cells,
-    /// include-cells, freeze-title or convert-comma-decimals.
+    /// include-cells, freeze-title, convert-comma-decimals,
+    /// add-calculated-variable, set-calculated-variable or
+    /// remove-calculated-variable.
     pub op: String,
     /// insert/delete-rows, insert/delete-columns: the 0-based row or
     /// column to act at (rows and columns are 0-based; column 0 holds the
@@ -1785,6 +1787,10 @@ pub struct EditTableArgs {
     /// freeze-title: whether the row-title column stays visible scrolling.
     #[serde(default)]
     pub frozen: Option<bool>,
+    /// add-calculated-variable / set-calculated-variable: the formula
+    /// (with or without its leading `=`), e.g. `=Dose * 2`.
+    #[serde(default)]
+    pub formula: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -2815,7 +2821,7 @@ impl TiterMcpServer {
     /// the row-title column, convert decimal commas to points.
     #[tool(
         name = "titer_edit_table",
-        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title or convert-comma-decimals. Rows and columns are 0-based; column 0 holds the row titles.",
+        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable or remove-calculated-variable. Rows and columns are 0-based; column 0 holds the row titles. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column.",
         annotations(
             title = "Edit table",
             read_only_hint = false,
@@ -2865,6 +2871,9 @@ impl TiterMcpServer {
                 "include-cells",
                 "freeze-title",
                 "convert-comma-decimals",
+                "add-calculated-variable",
+                "set-calculated-variable",
+                "remove-calculated-variable",
             ];
             if !OPS.contains(&args.op.as_str()) {
                 return Err(format!("No edit op “{}” — the ops are {}.", args.op, OPS.join(", ")));
@@ -2895,6 +2904,20 @@ impl TiterMcpServer {
                         return Err("op freeze-title needs frozen (true or false).".into());
                     }
                 }
+                "add-calculated-variable" | "set-calculated-variable" => {
+                    match &args.name {
+                        Some(n) if !n.trim().is_empty() => {}
+                        _ => return Err(format!("op {} needs a non-empty name.", args.op)),
+                    }
+                    match &args.formula {
+                        Some(f) if !f.trim().is_empty() => {}
+                        _ => return Err(format!("op {} needs a non-empty formula.", args.op)),
+                    }
+                }
+                "remove-calculated-variable" => match &args.name {
+                    Some(n) if !n.trim().is_empty() => {}
+                    _ => return Err(format!("op {} needs a non-empty name.", args.op)),
+                },
                 _ => {}
             }
             self.run_table_job(
@@ -2909,6 +2932,7 @@ impl TiterMcpServer {
                     "name": args.name,
                     "cells": args.cells,
                     "frozen": args.frozen,
+                    "formula": args.formula,
                 }),
             )
             .await

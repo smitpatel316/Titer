@@ -33,6 +33,14 @@ import {
 import { highlightStyle, searchProject } from "../src/lib/project-search";
 import { kaplanMeier } from "../src/lib/kaplan-meier";
 import { transformTable } from "../src/lib/transform";
+import {
+  addCalculatedVariable,
+  parseFormula,
+  recomputeCalculated,
+  removeCalculatedVariable,
+  renameVariableInFormula,
+  setCalculatedFormula,
+} from "../src/lib/calcvars";
 import { writePrism } from "../src/lib/prism-write";
 import {
   infoSheetsOf,
@@ -72,6 +80,7 @@ import {
   regroupLoses,
   regroupTable,
   removeRowGroup,
+  renameColumn,
   renameGroup,
   renameSubgroup,
   renestLoses,
@@ -14137,6 +14146,303 @@ check("transform-data returns log10 values as a results sheet and never touches 
   const few = await runAnalysis("transform-data", table([]), { function: "log10" });
   if (!("error" in few) || !few.error.includes("at least 1 column"))
     throw new Error(`expected the no-data error, got ${JSON.stringify(few)}`);
+});
+
+// ── Calculated Variables (v1.8, seq 156) ──────────────────────────────────
+// Prism 11's in-table formulas for Multiple Variables tables: type `=` in an
+// empty variable; the whole column computes live from the table's other
+// variables and is usable in analyses like a typed one. Prism 11.2's window
+// functions (OVER / WHERE / ORDER BY / ROWS) are deliberately NOT here —
+// Pro-gated and licence-blocked, built from docs only if ever built.
+
+const mvTable = (columns: string[], rows: (string | null)[][]): TableData => ({ columns, rows });
+
+const calcValues = (data: TableData, name: string): (string | null)[] => {
+  const c = data.columns.indexOf(name);
+  return data.rows.map((row) => row[c] ?? null);
+};
+
+check("calcvars: arithmetic, precedence and parentheses follow the formula, whole-variable", () => {
+  const base = mvTable(["Title", "A", "B"], [
+    [null, "2", "3"],
+    [null, "4", "5"],
+    [null, "10", "2"],
+  ]);
+  const added = addCalculatedVariable(base, "C", "A + B * 2");
+  if ("error" in added) throw new Error(added.error);
+  deepStrictEqual(calcValues(added.data, "C"), ["8", "14", "14"]);
+  const paren = addCalculatedVariable(base, "D", "(A + B) * 2");
+  if ("error" in paren) throw new Error(paren.error);
+  deepStrictEqual(calcValues(paren.data, "D"), ["10", "18", "24"]);
+  const power = addCalculatedVariable(base, "E", "A ^ 2 + B");
+  if ("error" in power) throw new Error(power.error);
+  deepStrictEqual(calcValues(power.data, "E"), ["7", "21", "102"]);
+  const scaled = addCalculatedVariable(base, "F", "[A] * 0.5 - B / 2");
+  if ("error" in scaled) throw new Error(scaled.error);
+  deepStrictEqual(calcValues(scaled.data, "F"), ["-0.5", "-0.5", "4"]);
+});
+
+check("calcvars: a row shorter than its columns still gets the new column in the right place", () => {
+  // A hand-edited file can hold a row shorter than its columns; appending
+  // the calculated column must pad it, not land the value mid-row.
+  const ragged = mvTable(["Title", "A"], [
+    [null, "2"],
+    [null],
+  ]);
+  const added = addCalculatedVariable(ragged, "B", "A * 2");
+  if ("error" in added) throw new Error(added.error);
+  deepStrictEqual(added.data.rows, [
+    [null, "2", "4"],
+    [null, null, null],
+  ]);
+  deepStrictEqual(calcValues(added.data, "B"), ["4", null]);
+});
+
+check("calcvars: functions, comparisons and IF run row by row; aggregates broadcast", () => {
+  const base = mvTable(["Title", "Dose", "Response"], [
+    [null, "1", "10"],
+    [null, "4", "20"],
+    [null, "9", "30"],
+  ]);
+  const log = addCalculatedVariable(base, "LogDose", "LOG10(Dose)");
+  if ("error" in log) throw new Error(log.error);
+  deepStrictEqual(calcValues(log.data, "LogDose"), ["0", "0.6020599913", "0.9542425094"]);
+  const root = addCalculatedVariable(base, "Root", "SQRT(Dose) + ABS(Response - 25)");
+  if ("error" in root) throw new Error(root.error);
+  deepStrictEqual(calcValues(root.data, "Root"), ["16", "7", "8"]);
+  const hi = addCalculatedVariable(base, "Hi", "IF(Response > 15, 1, 0)");
+  if ("error" in hi) throw new Error(hi.error);
+  deepStrictEqual(calcValues(hi.data, "Hi"), ["0", "1", "1"]);
+  const mean = addCalculatedVariable(base, "MeanResp", "MEAN(Response)");
+  if ("error" in mean) throw new Error(mean.error);
+  deepStrictEqual(calcValues(mean.data, "MeanResp"), ["20", "20", "20"]);
+  const centered = addCalculatedVariable(base, "Centred", "Response - MEAN(Response)");
+  if ("error" in centered) throw new Error(centered.error);
+  deepStrictEqual(calcValues(centered.data, "Centred"), ["-10", "0", "10"]);
+  const rounded = addCalculatedVariable(base, "Rounded", "ROUND(Response / 7, 1)");
+  if ("error" in rounded) throw new Error(rounded.error);
+  deepStrictEqual(calcValues(rounded.data, "Rounded"), ["1.4", "2.9", "4.3"]);
+  // A bracketed name with a space reads like a bare one.
+  const spaced = mvTable(["Title", "Drug dose", "Effect"], [
+    [null, "2", "5"],
+    [null, "3", "7"],
+  ]);
+  const byName = addCalculatedVariable(spaced, "Total", "[Drug dose] + Effect");
+  if ("error" in byName) throw new Error(byName.error);
+  deepStrictEqual(calcValues(byName.data, "Total"), ["7", "10"]);
+});
+
+check("calcvars: a missing source blanks its row, and domain errors blank theirs — never the variable", () => {
+  const base = mvTable(["Title", "A", "B"], [
+    [null, "2", "4"],
+    [null, null, "4"],
+    [null, "8", "0"],
+    [null, "-1", "4"],
+  ]);
+  const ratio = addCalculatedVariable(base, "Ratio", "A / B");
+  if ("error" in ratio) throw new Error(ratio.error);
+  deepStrictEqual(calcValues(ratio.data, "Ratio"), ["0.5", null, null, "-0.25"]);
+  const root = addCalculatedVariable(base, "Root", "SQRT(A)");
+  if ("error" in root) throw new Error(root.error);
+  deepStrictEqual(calcValues(root.data, "Root"), ["1.414213562", null, "2.828427125", null]);
+  const log = addCalculatedVariable(base, "Log", "LOG10(B - 4)");
+  if ("error" in log) throw new Error(log.error);
+  deepStrictEqual(calcValues(log.data, "Log"), [null, null, null, null]);
+  strictEqual(log.data.calculated?.[0].error, undefined);
+});
+
+check("calcvars: an unknown variable, a bad formula and a circular reference error the variable, not the table", () => {
+  const base = mvTable(["Title", "A"], [
+    [null, "1"],
+    [null, "2"],
+  ]);
+  const unknown = addCalculatedVariable(base, "B", "A + Missing");
+  deepStrictEqual(unknown, { error: "unknown variable “Missing” — the table has no variable with that name." });
+  const bad = addCalculatedVariable(base, "B", "A +");
+  ok("error" in bad && bad.error.includes("could not be read"), JSON.stringify(bad));
+  const noFn = addCalculatedVariable(base, "B", "BOGUS(A)");
+  ok("error" in noFn && noFn.error.includes("no function"), JSON.stringify(noFn));
+  // A circular reference, built by hand (the add path rejects a formula
+  // naming a variable that does not exist yet, so a cycle can only arrive
+  // through a file or a rename — the recompute still names it).
+  const cyclic = recomputeCalculated({
+    ...base,
+    columns: ["Title", "A", "B", "C"],
+    rows: [
+      [null, "1", null, null],
+      [null, "2", null, null],
+    ],
+    calculated: [
+      { name: "B", formula: "C + 1" },
+      { name: "C", formula: "B + 1" },
+    ],
+  });
+  deepStrictEqual(calcValues(cyclic, "B"), [null, null]);
+  ok(cyclic.calculated?.[0].error?.includes("circular reference"), JSON.stringify(cyclic.calculated));
+  ok(cyclic.calculated?.[1].error?.includes("circular reference"), JSON.stringify(cyclic.calculated));
+  // A formula that cannot run blanks its column but leaves the other
+  // variable — and the source values — exactly where they were.
+  const mixed = recomputeCalculated({
+    ...base,
+    columns: ["Title", "A", "B", "C"],
+    rows: [
+      [null, "1", null, null],
+      [null, "2", null, null],
+    ],
+    calculated: [
+      { name: "B", formula: "A * 2" },
+      { name: "C", formula: "Nope + 1" },
+    ],
+  });
+  deepStrictEqual(calcValues(mixed, "B"), ["2", "4"]);
+  deepStrictEqual(calcValues(mixed, "C"), [null, null]);
+  ok(mixed.calculated?.[1].error?.includes("unknown variable"), JSON.stringify(mixed.calculated));
+  // A formula may use another calculated variable; its values follow.
+  const chained = addCalculatedVariable(mixed, "D", "B + C");
+  // C errored, so D records the dependency error rather than computing.
+  if ("error" in chained) throw new Error(`expected D to be added with a recorded error, got ${chained.error}`);
+  ok(
+    chained.data.calculated?.find((v) => v.name === "D")?.error?.includes("could not be calculated"),
+    JSON.stringify(chained.data.calculated),
+  );
+  deepStrictEqual(calcValues(chained.data, "D"), [null, null]);
+  const chain = addCalculatedVariable(mixed, "D", "B * 10");
+  if ("error" in chain) throw new Error(chain.error);
+  deepStrictEqual(calcValues(chain.data, "D"), ["20", "40"]);
+  // A variable cannot refer to itself.
+  const self = setCalculatedFormula(chain.data, "D", "D + 1");
+  deepStrictEqual(self, { error: "“D” refers to itself — a calculated variable cannot use its own values." });
+});
+
+check("calcvars: edits to a source recompute the variable, and renames follow the formula", () => {
+  const base = mvTable(["Title", "A", "B"], [
+    [null, "2", "3"],
+    [null, "4", "5"],
+  ]);
+  const added = addCalculatedVariable(base, "C", "A + B");
+  if ("error" in added) throw new Error(added.error);
+  // Typing a new source value recomputes the column (the store's updateTable
+  // runs the same recompute — here, the pure function it calls).
+  const edited = recomputeCalculated(writeBlock(added.data, 0, 1, [["10"]], "multiple"));
+  deepStrictEqual(calcValues(edited, "C"), ["13", "9"]);
+  // Renaming a source rewrites the formula, so the values do not change.
+  const renamed = recomputeCalculated(renameColumn(edited, 1, "Dose"));
+  strictEqual(renamed.calculated?.[0].formula, "Dose + B");
+  deepStrictEqual(calcValues(renamed, "C"), ["13", "9"]);
+  // Renaming the calculated variable itself renames its entry, and a formula
+  // using it follows.
+  const withUser = addCalculatedVariable(renamed, "Total", "C * 2");
+  if ("error" in withUser) throw new Error(withUser.error);
+  const renamedCalc = recomputeCalculated(renameColumn(withUser.data, 3, "Sum"));
+  deepStrictEqual(
+    renamedCalc.calculated?.map((v) => `${v.name}=${v.formula}`),
+    ["Sum=Dose + B", "Total=Sum * 2"],
+  );
+  deepStrictEqual(calcValues(renamedCalc, "Total"), ["26", "18"]);
+  // Renaming inside brackets, and never inside a function call.
+  strictEqual(renameVariableInFormula("[Old name] + SUM(Old)", "Old name", "New name"), "[New name] + SUM(Old)");
+  strictEqual(renameVariableInFormula("Old + Old2", "Old", "New"), "New + Old2");
+  // Deleting a source column errors the formula (values blank, reason kept);
+  // deleting the calculated column drops its definition with it.
+  const dropped = recomputeCalculated(deleteColumns(renamedCalc, 1, 1));
+  ok(dropped.calculated?.[0].error?.includes("unknown variable"), JSON.stringify(dropped.calculated));
+  deepStrictEqual(calcValues(dropped, "Sum"), [null, null]);
+  const gone = removeCalculatedVariable(dropped, "Total");
+  strictEqual(gone.columns.includes("Total"), false);
+  deepStrictEqual(
+    gone.calculated?.map((v) => v.name),
+    ["Sum"],
+  );
+  // parseFormula names the problem for the panel's error text.
+  const unparsable = parseFormula("A +");
+  ok("error" in unparsable && unparsable.error.includes("could not be read"), JSON.stringify(unparsable));
+  ok("ast" in parseFormula("A + B"));
+});
+
+check("calcvars: a calculated variable reads as a column to analyses, and a regression fits it", async () => {
+  const base = mvTable(["Title", "X1", "X2"], [
+    [null, "1", "0"],
+    [null, "2", "1"],
+    [null, "3", "0"],
+    [null, "4", "1"],
+    [null, "5", "2"],
+    [null, "6", "1"],
+    [null, "7", "0"],
+    [null, "8", "2"],
+  ]);
+  const added = addCalculatedVariable(base, "Sum", "X1 + X2");
+  if ("error" in added) throw new Error(added.error);
+  const data = added.data;
+  // The shared reading analyses use: the calculated column is numeric, with
+  // the right values, so predictor selection sees it exactly like a typed one.
+  const dataset = readTable(data);
+  deepStrictEqual(
+    dataset.numeric.map((c) => c.name),
+    ["X1", "X2", "Sum"],
+  );
+  deepStrictEqual(dataset.columns.find((c) => c.name === "Sum")?.values, [1, 3, 3, 5, 7, 7, 7, 10]);
+  const chosen = selectPredictors(dataset.columns, { dependent: "Sum", predictors: ["X1", "X2"] });
+  strictEqual(chosen.dep?.name, "Sum");
+  deepStrictEqual(
+    chosen.predictors.map((c) => c.name),
+    ["X1", "X2"],
+  );
+  // And R fits it: Sum = X1 + X2 exactly, so R² is 1 and both slopes are 1.
+  const out = await runAnalysis("multiple-regression", data, { dependent: "Sum", predictors: ["X1", "X2"] });
+  if ("error" in out) throw new Error(out.error);
+  const close = (got: number | null | undefined, want: number) => got != null && Math.abs(got - want) < 1e-9;
+  ok(close(out.stats.find((s) => s.label === "R squared")?.value, 1), JSON.stringify(out.stats));
+  const byTerm = new Map((out.coefficients ?? []).map((c) => [c.term, c.estimate]));
+  ok(close(byTerm.get("Intercept"), 0), JSON.stringify(out.coefficients));
+  ok(close(byTerm.get("X1"), 1), JSON.stringify(out.coefficients));
+  ok(close(byTerm.get("X2"), 1), JSON.stringify(out.coefficients));
+});
+
+check("calcvars: formulas and values round-trip through .hlx, and a stale value is recomputed on load", () => {
+  const base = mvTable(["Title", "A", "B"], [
+    [null, "2", "3"],
+    [null, "4", "5"],
+  ]);
+  const added = addCalculatedVariable(base, "C", "A + B");
+  if ("error" in added) throw new Error(added.error);
+  const payload: ProjectFilePayload = {
+    nodes: {
+      t1: { id: "t1", type: "table", name: "MV", parentId: null, tableType: "multiple", data: added.data },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const parsed = read(serializeProjectFile(payload));
+  strictEqual(parsed.updated, false);
+  const loaded = parsed.project.nodes.t1 as ProjectNode;
+  deepStrictEqual(loaded.data?.calculated, [{ name: "C", formula: "A + B" }]);
+  deepStrictEqual(calcValues(loaded.data!, "C"), ["5", "9"]);
+  // A hand-edited file holding a stale value for the calculated column opens
+  // with the formula's value, not the stored one.
+  const stale = JSON.parse(serializeProjectFile(payload)) as Record<string, unknown>;
+  const staleNodes = (stale.project as Record<string, unknown>).nodes as Record<string, Record<string, unknown>>;
+  const staleData = staleNodes.t1.data as Record<string, unknown>;
+  staleData.rows = [
+    [null, "2", "3", "999"],
+    [null, "4", "5", "999"],
+  ];
+  const repaired = read(JSON.stringify(stale));
+  deepStrictEqual(calcValues((repaired.project.nodes.t1 as ProjectNode).data!, "C"), ["5", "9"]);
+  // A broken entry is dropped on its own; a table without formulas stays clean.
+  const broken = JSON.parse(serializeProjectFile(payload)) as Record<string, unknown>;
+  const brokenNodes = (broken.project as Record<string, unknown>).nodes as Record<string, Record<string, unknown>>;
+  (brokenNodes.t1.data as Record<string, unknown>).calculated = [
+    { name: "C", formula: "A + B" },
+    { name: "Ghost", formula: "A" },
+    { name: "C", formula: "A" },
+    42,
+  ];
+  const fixed = read(JSON.stringify(broken));
+  deepStrictEqual((fixed.project.nodes.t1 as ProjectNode).data?.calculated, [{ name: "C", formula: "A + B" }]);
+  const plain = read(serializeProjectFile({ ...payload, nodes: { t1: { ...payload.nodes.t1, data: base } } }));
+  strictEqual(plain.project.nodes.t1.data?.calculated, undefined);
+  ok(!serializeProjectFile({ ...payload, nodes: { t1: { ...payload.nodes.t1, data: base } } }).includes("calculated"));
 });
 
 // ── Simulate data + Monte Carlo (plan 22) ───────────────────────────────

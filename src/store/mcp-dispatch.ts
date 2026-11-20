@@ -73,6 +73,12 @@ import { useProjectActions, useProjectStore } from "./use-project-store";
 import type { ProjectNode, RowGroup, TableData, TableType } from "./types";
 import type { TableMove } from "./references";
 import { isGrouped, isNested, leadOf } from "../lib/dataset";
+import {
+  addCalculatedVariable,
+  isCalculatedColumn,
+  removeCalculatedVariable,
+  setCalculatedFormula,
+} from "../lib/calcvars";
 import { seriesKeyOf } from "../lib/columns";
 import { SUMMARY_FORMATS, summarySubcolumns, type SummaryFormat } from "../lib/summary-format";
 import {
@@ -615,6 +621,13 @@ function buildTableData(
   if (base.errorFormat) data.errorFormat = base.errorFormat;
   if (base.freezeTitle) data.freezeTitle = true;
   if (base.notes) data.notes = base.notes;
+  // A replace keeps the formulas whose column survives: the store's
+  // recompute materializes their values over whatever the call passed for
+  // those columns, so a formula always rules its column.
+  if (base.calculated) {
+    const kept = base.calculated.filter((v) => columns.includes(v.name));
+    if (kept.length) data.calculated = kept;
+  }
   return data;
 }
 
@@ -1114,10 +1127,38 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           next = convertCommaDecimals(data);
           break;
         }
+        case "add-calculated-variable":
+        case "set-calculated-variable":
+        case "remove-calculated-variable": {
+          // Calculated Variables (Prism 11, seq 156): Multiple Variables
+          // tables only — the formula core lives in lib/calcvars.ts.
+          if (type !== "multiple") {
+            throw jobErr(job, `cannot use ${op} — calculated variables only exist in Multiple Variables tables, and this is a ${type} table.`);
+          }
+          const name = argString(job, job.args, "name");
+          if (op === "remove-calculated-variable") {
+            if (!isCalculatedColumn(data, name)) {
+              throw jobErr(job, `has no calculated variable named “${name}” — ask titer_list_tables for the table's variables first.`);
+            }
+            label = "Remove Calculated Variable";
+            next = removeCalculatedVariable(data, name);
+            break;
+          }
+          const formula = argString(job, job.args, "formula");
+          const bare = formula.startsWith("=") ? formula.slice(1) : formula;
+          const res =
+            op === "add-calculated-variable"
+              ? addCalculatedVariable(data, name, bare)
+              : setCalculatedFormula(data, name, bare);
+          if ("error" in res) throw jobErr(job, res.error);
+          label = op === "add-calculated-variable" ? "Add Calculated Variable" : "Edit Calculated Variable";
+          next = res.data;
+          break;
+        }
         default:
           throw jobErr(
             job,
-            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals.`,
+            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable.`,
           );
       }
       if (next === null) {

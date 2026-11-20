@@ -33,6 +33,14 @@ import {
   writeBlock,
   type Range,
 } from "./table-data";
+import {
+  calculatedVariable,
+  formulaOfText,
+  isCalculatedColumn,
+  isFormulaText,
+  makeCalculatedVariable,
+  setCalculatedFormula,
+} from "../../lib/calcvars";
 
 const ROW_H = 24;
 const HEAD_H = 26;
@@ -246,9 +254,16 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
     );
   };
 
-  const startEdit = (r: number, c: number, value = data.rows[r]?.[c] ?? "", typed = false) => {
+  const startEdit = (r: number, c: number, value?: string, typed = false) => {
+    // A calculated variable edits as its formula, not as the computed value
+    // in the cell — typing over the value would throw the formula away.
+    const shown =
+      value ??
+      (isCalculatedColumn(data, data.columns[c])
+        ? `=${calculatedVariable(data, data.columns[c])!.formula}`
+        : (data.rows[r]?.[c] ?? ""));
     reveal({ r, c });
-    setEditing({ kind: "cell", r, c, value, typed });
+    setEditing({ kind: "cell", r, c, value: shown, typed });
     focusGrid();
   };
   const startRename = (c: number) => {
@@ -280,10 +295,39 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
   const finishEdit = (cancel: boolean, dr = 0, dc = 0) => {
     const ed = editingRef.current;
     if (!ed) return;
-    editingRef.current = null;
     const value = ed.value.trim();
+    if (!cancel && ed.kind === "cell" && type === "multiple" && isFormulaText(value)) {
+      // Prism's `=` gesture: a formula typed into a Multiple Variables table
+      // becomes (or edits) a calculated variable instead of a typed value.
+      // An invalid formula stays in the editor, with the problem named, so
+      // the typed formula is never lost to a silent literal write.
+      const name = data.columns[ed.c];
+      const existing = name !== undefined ? calculatedVariable(data, name) : undefined;
+      const columnEmpty =
+        ed.c >= 1 && ed.c < data.columns.length && data.rows.every((row) => row[ed.c] == null);
+      if (name !== undefined && (existing || columnEmpty)) {
+        const res = existing
+          ? setCalculatedFormula(data, name, formulaOfText(value))
+          : makeCalculatedVariable(data, name, formulaOfText(value));
+        if ("data" in res) {
+          editingRef.current = null;
+          update(res.data, existing ? "Edit Calculated Variable" : "Add Calculated Variable");
+          move(dr, dc, false, { r: ed.r, c: ed.c });
+          setEditing(null);
+          focusGrid();
+          return;
+        }
+        void alert("That formula could not be used", res.error, "error");
+        return;
+      }
+    }
+    editingRef.current = null;
     if (!cancel && ed.kind === "cell") {
-      if (value !== (data.rows[ed.r]?.[ed.c] ?? "")) write(ed.r, ed.c, [[value || null]], "Typing");
+      // A calculated column's values are computed, never typed: a plain
+      // value typed into one is left alone (its formula still rules), and
+      // only a `=` formula above rewrites it.
+      if (!isCalculatedColumn(data, data.columns[ed.c]) && value !== (data.rows[ed.r]?.[ed.c] ?? ""))
+        write(ed.r, ed.c, [[value || null]], "Typing");
       move(dr, dc, false, { r: ed.r, c: ed.c });
     }
     if (!cancel && ed.kind === "column") {
@@ -598,7 +642,16 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
       onDoubleClick={() => startRename(c)}
       onContextMenu={(e) => showMenu(e, "column")}
     >
-      <span className="truncate">{headers[c]}</span>
+      <span
+        className="truncate"
+        title={
+          isCalculatedColumn(data, data.columns[c])
+            ? `Calculated variable: =${calculatedVariable(data, data.columns[c])!.formula}`
+            : undefined
+        }
+      >
+        {isCalculatedColumn(data, data.columns[c]) ? `ƒx ${headers[c]}` : headers[c]}
+      </span>
       {resizeHandle(c)}
     </div>
   );

@@ -1,5 +1,6 @@
 // A data table: the grid, and (grouped tables) the Groups panel. Every edit goes to
 // the project store, which keeps the Undo history for the whole project.
+import * as React from "react";
 import {
   GROUPED_LIMITS,
   tableErrorFormat,
@@ -32,6 +33,11 @@ import {
   setRowGroupName,
 } from "./table-data";
 import { isGrouped, isNested } from "../../lib/dataset";
+import {
+  addCalculatedVariable,
+  removeCalculatedVariable,
+  setCalculatedFormula,
+} from "../../lib/calcvars";
 import { SUMMARY_FORMATS, summaryFormatOf, summarySubcolumns, type SummaryFormat } from "../../lib/summary-format";
 import { seriesKeyOf } from "../../lib/columns";
 import { confirmDelete } from "../../native";
@@ -98,6 +104,19 @@ export function TableView({ node }: { node: ProjectNode }) {
       </WithInspector>
     );
   }
+  if (node.tableType === "multiple") {
+    return (
+      <WithInspector
+        title={node.name}
+        tag={tag}
+        node={node}
+        settings={<CalculatedVariablesPanel data={data} update={update} />}
+        actions={<AddFloatingNoteButton node={node} />}
+      >
+        {sheet}
+      </WithInspector>
+    );
+  }
   if (!isGrouped(data) && !isNested(data)) {
     // No settings of its own: the right panel shows the table's note only.
     return (
@@ -150,6 +169,134 @@ function FormatPanel({ data, update }: { data: TableData; update: (next: TableDa
         The error values in this table are{" "}
         {format === "sd" ? "standard deviations" : "standard errors of the mean"}. Graphs made from this table
         use it for their error bars.
+      </p>
+    </Section>
+  );
+}
+
+/** A Multiple Variables table's calculated variables (Prism 11, seq 156):
+ *  whole-variable formulas that live in the table and update when a source
+ *  value changes. Each one lists its formula (and its error, when it cannot
+ *  run); the add form and the per-variable edit take a formula with or
+ *  without its leading `=`. Removing one deletes its column and its values
+ *  (Undo brings them back). */
+function CalculatedVariablesPanel({
+  data,
+  update,
+}: {
+  data: TableData;
+  update: (next: TableData, label: string) => void;
+}) {
+  const vars = data.calculated ?? [];
+  const [name, setName] = React.useState("");
+  const [formula, setFormula] = React.useState("");
+  const [addError, setAddError] = React.useState<string | null>(null);
+  const [editing, setEditing] = React.useState<string | null>(null);
+  const [editFormula, setEditFormula] = React.useState("");
+  const [editError, setEditError] = React.useState<string | null>(null);
+  // A formula as typed, with or without its leading `=`.
+  const bare = (text: string) => (text.startsWith("=") ? text.slice(1) : text);
+  const add = () => {
+    const res = addCalculatedVariable(data, name, bare(formula));
+    if ("error" in res) {
+      setAddError(res.error);
+      return;
+    }
+    update(res.data, "Add Calculated Variable");
+    setName("");
+    setFormula("");
+    setAddError(null);
+  };
+  const saveEdit = (variable: string) => {
+    const res = setCalculatedFormula(data, variable, bare(editFormula));
+    if ("error" in res) {
+      setEditError(res.error);
+      return;
+    }
+    update(res.data, "Edit Calculated Variable");
+    setEditing(null);
+    setEditError(null);
+  };
+  const remove = async (variable: string) => {
+    if (
+      !(await confirmDelete(
+        `Delete calculated variable “${variable}”?`,
+        "Its column and its values will be deleted too. You can undo this.",
+      ))
+    )
+      return;
+    update(removeCalculatedVariable(data, variable), "Remove Calculated Variable");
+  };
+  return (
+    <Section title="Calculated Variables" icon={<ColumnsIcon />}>
+      {vars.map((v) => (
+        <div key={v.name} className="flex flex-col gap-1 border-b border-separator pb-2 last:border-0 last:pb-0">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-regular font-medium">{v.name}</span>
+            <span className="flex gap-1">
+              <Button
+                size="small"
+                onClick={() => {
+                  setEditing(v.name);
+                  setEditFormula(`=${v.formula}`);
+                  setEditError(null);
+                }}
+              >
+                Edit
+              </Button>
+              <Button size="small" onClick={() => void remove(v.name)}>
+                Remove
+              </Button>
+            </span>
+          </div>
+          {editing === v.name ? (
+            <>
+              <Input
+                value={editFormula}
+                aria-label={`Formula for ${v.name}`}
+                onChange={(e) => setEditFormula(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveEdit(v.name);
+                  else if (e.key === "Escape") setEditing(null);
+                }}
+              />
+              <div className="flex gap-1">
+                <Button size="small" variant="accent" onClick={() => saveEdit(v.name)}>
+                  Save
+                </Button>
+                <Button size="small" onClick={() => setEditing(null)}>
+                  Cancel
+                </Button>
+              </div>
+              {editError && <p className="text-small text-red-600">{editError}</p>}
+            </>
+          ) : (
+            <span className="text-small text-secondary">={v.formula}</span>
+          )}
+          {v.error && <p className="text-small text-red-600">{v.error}</p>}
+        </div>
+      ))}
+      <div className="flex flex-col gap-1">
+        <Input value={name} placeholder="New variable name" aria-label="New variable name" onChange={(e) => setName(e.target.value)} />
+        <Input
+          value={formula}
+          placeholder="=A + B"
+          aria-label="New variable formula"
+          onChange={(e) => setFormula(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") add();
+          }}
+        />
+        <div>
+          <Button variant="accent" onClick={add} disabled={!name.trim() || !formula.trim()}>
+            Add Calculated Variable
+          </Button>
+        </div>
+        {addError && <p className="text-small text-red-600">{addError}</p>}
+      </div>
+      <p className="text-small text-secondary">
+        Type `=` in an empty variable in the grid, or add one here. Values update live when a source changes, and a
+        calculated variable can be used in any analysis like a typed variable.
       </p>
     </Section>
   );
