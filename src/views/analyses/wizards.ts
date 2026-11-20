@@ -2,7 +2,7 @@
 // step, each answer choosing the next question. A wizard only declares its questions
 // and how the answers make the test's params; analysis-wizard.tsx asks them.
 // A test without an entry here runs as soon as it is picked.
-import { DOSE_MODELS, CONCENTRATION_UNITS, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, fdrQError, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel } from "../../stats/types";
+import { DOSE_MODELS, CONCENTRATION_UNITS, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, fdrQError, isFdrPValueMethod, pValueAlphaError, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel, type PValueStackParams } from "../../stats/types";
 import type { PlotFunctionExtra, PlotFunctionModel } from "../../stats/types";
 import {
   PLOT_FUNCTION_DEFAULTS,
@@ -1742,6 +1742,62 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           method === "grubbs"
             ? { method, alpha: (a.alpha as number | undefined) ?? 0.05, iterate: a.iterate !== "no" }
             : { q: (a.q as number | undefined) ?? 1 },
+        ),
+      };
+    },
+  },
+
+  // "Analyze a stack of P values" (seq 190): P values computed elsewhere,
+  // entered in a column, adjusted for multiplicity. The method picks the
+  // family: the FWER methods ask for alpha, the FDR methods for Q — the
+  // other level is never asked, so a cached result keeps only its own key
+  // (the outliers ROUT/Grubbs split does the same).
+  "p-value-stack": {
+    questions: (a, table) => [
+      ...someSets(table, 1),
+      choice("method", "How should the P values be adjusted for multiple comparisons?", [
+        ["holm-sidak", "Holm–Šídák (recommended — step-down, controls the family-wise error rate)"],
+        ["holm", "Holm (step-down Bonferroni)"],
+        ["bonferroni", "Bonferroni-Dunn (single-step)"],
+        ["sidak", "Bonferroni-Šídák (single-step)"],
+        ["bh", "Benjamini–Hochberg (false discovery rate)"],
+        ["bky", "Benjamini, Krieger and Yekutieli (adaptive two-stage false discovery rate)"],
+        ["by", "Benjamini–Yekutieli (false discovery rate, any dependence)"],
+      ]),
+      // Before the method is answered the alpha question shows (Holm–Šídák
+      // is the default — the first option); picking an FDR method swaps it
+      // for Q on the next step.
+      !isFdrPValueMethod((a.method as string | undefined) ?? "") && {
+        id: "alpha",
+        ask: "How strict should the family-wise test be? A P value is significant when its adjusted P value is below alpha.",
+        kind: "number",
+        label: "Significance level (alpha) =",
+        initial: 0.05,
+        min: 0.001,
+        max: 0.5,
+        step: 0.01,
+        validate: pValueAlphaError,
+      },
+      isFdrPValueMethod((a.method as string | undefined) ?? "") && {
+        id: "q",
+        ask: "How strict should the search be? A P value is a discovery when its q value is below Q: a smaller Q finds fewer.",
+        kind: "number",
+        label: "Q (%) =",
+        initial: 5,
+        ...ROUT_Q,
+        validate: routQError,
+        step: 0.5,
+      },
+    ],
+    finish: (a) => {
+      const method = (a.method as PValueStackParams["method"] | undefined) ?? "holm-sidak";
+      return {
+        type: "p-value-stack",
+        params: withSets(
+          a,
+          isFdrPValueMethod(method)
+            ? { method, q: (a.q as number | undefined) ?? 5 }
+            : { method, alpha: (a.alpha as number | undefined) ?? 0.05 },
         ),
       };
     },

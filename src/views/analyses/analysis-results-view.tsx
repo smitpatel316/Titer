@@ -679,6 +679,26 @@ export function AnalysisResultsView({
         />
       )}
 
+      {result.pValueRows && result.pValueRows.length > 0 && (
+        <Table
+          title="Stack of P values"
+          columns={[
+            { label: "" },
+            { label: "Rank", numeric: true },
+            { label: "P value", numeric: true },
+            { label: result.pValueAdjustedLabel ?? "Adjusted P value", numeric: true },
+            { label: result.pValueFlagLabel ?? "Significant" },
+          ]}
+          rows={result.pValueRows.map((r) => [
+            r.label,
+            r.rank,
+            <P p={r.p} />,
+            r.adjusted == null ? "—" : <P p={r.adjusted} />,
+            r.flagged ? "Yes" : "—",
+          ])}
+        />
+      )}
+
       {result.survivalGroups && result.survivalGroups.length > 0 && (
         <Table
           title="Survival by group"

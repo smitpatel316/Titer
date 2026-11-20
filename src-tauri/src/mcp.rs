@@ -2424,6 +2424,7 @@ const ANALYSIS_TYPES: &[&str] = &[
     "shapiro-wilk",
     "kolmogorov-smirnov",
     "outliers",
+    "p-value-stack",
     "monte-carlo",
     "bland-altman",
     "roc-curve",
@@ -8658,8 +8659,8 @@ mod tests {
     // ── Analyses (L4) ────────────────────────────────────────────────────
 
     #[test]
-    fn validate_analysis_type_accepts_the_54_and_refuses_wizard_values() {
-        assert_eq!(ANALYSIS_TYPES.len(), 54, "one entry per AnalysisType: {ANALYSIS_TYPES:?}");
+    fn validate_analysis_type_accepts_the_55_and_refuses_wizard_values() {
+        assert_eq!(ANALYSIS_TYPES.len(), 55, "one entry per AnalysisType: {ANALYSIS_TYPES:?}");
         for t in [
             "descriptive-statistics",
             "anova",
@@ -8671,6 +8672,7 @@ mod tests {
             "chi-square",
             "mcnemar",
             "cox-proportional-hazards",
+            "p-value-stack",
         ] {
             assert!(validate_analysis_type(t).is_ok(), "{t}");
         }

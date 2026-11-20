@@ -1779,6 +1779,54 @@
       }
     ]
   },
+  "p-value-stack": {
+    "label": "Analyze a stack of P values",
+    "min_columns": 1,
+    "offered_on": [
+      "column"
+    ],
+    "params": [
+      {
+        "name": "method",
+        "type": "string",
+        "enum": [
+          "bonferroni",
+          "sidak",
+          "holm",
+          "holm-sidak",
+          "bh",
+          "bky",
+          "by"
+        ],
+        "default": "holm-sidak",
+        "required": false
+      },
+      {
+        "name": "q",
+        "type": "number",
+        "min": 0.01,
+        "max": 50.0,
+        "default": 5,
+        "required": false,
+        "description": "Desired false discovery rate, in percent (FDR methods only)."
+      },
+      {
+        "name": "alpha",
+        "type": "number",
+        "min": 0.001,
+        "max": 0.5,
+        "default": 0.05,
+        "required": false,
+        "description": "Family-wise significance level (FWER methods only)."
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
   "plot-function": {
     "label": "Plot a function",
     "min_columns": 0,

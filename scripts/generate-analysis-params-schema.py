@@ -109,6 +109,7 @@ ENUM_OVERRIDES = {
     ("monte-carlo", "method"): ARRAYS["CORRELATION_METHODS"],
     ("spline-lowess", "method"): ["spline", "lowess"],
     ("outliers", "method"): ["rout", "grubbs"],
+    ("p-value-stack", "method"): ARRAYS["P_VALUE_STACK_METHODS"],
     ("shapiro-wilk", "test"): ARRAYS["NORMALITY_TESTS"],
     ("chi-square", "test"): ARRAYS["CONTINGENCY_TESTS"],
     ("anova", "posthoc"): ARRAYS["ANOVA_POSTHOCS"],
@@ -230,6 +231,7 @@ INTERFACE_TO_TYPE = {
     "ChiSquare": "chi-square",
     "McNemar": "mcnemar",
     "Outliers": "outliers",
+    "PValueStack": "p-value-stack",
     "ShapiroWilk": "shapiro-wilk",
     "FrequencyDistribution": "frequency-distribution",
     "TransformData": "transform-data",
@@ -555,8 +557,8 @@ for typ, keys in sorted(KEYS_BY_TYPE.items()):
         out["gates"] = GATES[typ]
     schema[typ] = out
 
-# Sanity: 54 types (53 + hierarchical-clustering, seq 160), every key accounted for, offered_on non-empty.
-assert len(schema) == 54, f"{len(schema)} types, expected 54"
+# Sanity: 55 types (54 + p-value-stack, seq 190), every key accounted for, offered_on non-empty.
+assert len(schema) == 55, f"{len(schema)} types, expected 55"
 for typ, entry in schema.items():
     assert entry["offered_on"], f"{typ} offered on no table type"
     assert entry["min_columns"] is not None, f"{typ} has no min_columns"

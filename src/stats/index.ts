@@ -34,6 +34,7 @@ import type {
   SimpleLogisticRegressionParams,
   NonlinearRegressionParams,
   OutliersParams,
+  PValueStackParams,
   SurvivalParams,
   CoxParams,
   PoissonRegressionParams,
@@ -61,6 +62,7 @@ import { friedmanSpec } from "./column/friedman";
 import { shapiroWilkSpec } from "./column/shapiro-wilk";
 import { kolmogorovSmirnovSpec } from "./column/kolmogorov-smirnov";
 import { runOutliers } from "./column/rout";
+import { runPValueStack } from "./column/p-values";
 import { runXYCorrelation } from "./xy/correlation";
 import { linearRegressionSpec, runLinearRegressions } from "./xy/linear-regression";
 import { demingRegressionSpec } from "./xy/deming-regression";
@@ -186,6 +188,11 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
   ),
   "kolmogorov-smirnov": spec("Kolmogorov-Smirnov test", kolmogorovSmirnovSpec),
   outliers: { label: "Identify outliers", minColumns: 1, run: (c, p) => runOutliers(c, p as OutliersParams) },
+  "p-value-stack": {
+    label: "Analyze a stack of P values",
+    minColumns: 1,
+    run: (c, p) => runPValueStack(c, p as PValueStackParams),
+  },
   correlation: { label: "Correlation", minColumns: 2, run: (c, p) => runXYCorrelation(c, p as XYCorrelationParams) },
   "linear-regression": {
     ...spec("Linear regression", linearRegressionSpec),
