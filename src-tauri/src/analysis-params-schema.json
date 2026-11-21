@@ -468,7 +468,7 @@
         "name": "covariates",
         "type": "string[]",
         "required": false,
-        "description": "Omitted (or empty — see the runner) defaults to all remaining data columns."
+        "description": "Omitted (or empty — see the runner) defaults to all remaining data columns. A text column is a categorical covariate, dummy-coded with its first level as the reference (coefficients named Variable[Level]); a text column with a single level is left out (explicitly choosing one errors)."
       },
       {
         "name": "ties",
@@ -1331,7 +1331,8 @@
       {
         "name": "predictors",
         "type": "string[]",
-        "required": false
+        "required": false,
+        "description": "A text column is a categorical predictor, dummy-coded with its first level as the reference (coefficients named Variable[Level]); a text column with a single level is left out (explicitly choosing one errors)."
       },
       {
         "name": "sets",
@@ -1356,7 +1357,8 @@
       {
         "name": "predictors",
         "type": "string[]",
-        "required": false
+        "required": false,
+        "description": "A text column is a categorical predictor, dummy-coded with its first level as the reference (coefficients named Variable[Level]); a text column with a single level is left out (explicitly choosing one errors)."
       },
       {
         "name": "sets",
@@ -2348,7 +2350,8 @@
       {
         "name": "predictors",
         "type": "string[]",
-        "required": false
+        "required": false,
+        "description": "A text column is a categorical predictor, dummy-coded with its first level as the reference (coefficients named Variable[Level]); a text column with a single level is left out (explicitly choosing one errors)."
       },
       {
         "name": "quasi",

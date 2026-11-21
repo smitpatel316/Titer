@@ -56,7 +56,22 @@ export type GraphType =
   | "bubble-plot"
   | "histogram"
   | "qq-plot"
-  | "residuals";
+  | "residuals"
+  // Multiple Variables kinds (Prism 11.1 gallery, seq 209): Prism-named
+  // variants of shapes Titer already draws for other tables — a strip plot
+  // is Individual values, a summary symbol / bar chart is Mean-or-median-
+  // and-error as points / bars, box-and-whisker / violin are Box-and-violin
+  // with kind box / violin, and the before-after pair reuses Before-and-after
+  // (with bars for the bar-and-strip variant). Distinct types so the picker
+  // shows Prism's names with Prism's defaults (mean + SD error bars).
+  | "mv-strip-plot"
+  | "mv-summary-symbol"
+  | "mv-bar-strip"
+  | "mv-before-after-bar-strip"
+  | "mv-before-after-strip"
+  | "mv-box-whisker"
+  | "mv-violin"
+  | "mv-bar-chart";
 
 /** The choices of a graph's options, one list each: the types come from them, and a
  *  file's value outside them is read as the option's default. */

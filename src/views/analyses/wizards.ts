@@ -458,6 +458,15 @@ const fittedYs = (a: Answers) => {
 const yNames = (table: Dataset) => splitXY(table.columns).ys.map((c) => c.name);
 const dataNames = (table: Dataset) => table.numeric.map((c) => c.name);
 
+/** The variables usable as regression predictors / Cox covariates: numeric
+ *  columns, plus text columns with at least two levels — a text column is
+ *  dummy-coded (seq 224), so a single-level text column cannot be a
+ *  predictor and is not offered. */
+const predictorNames = (table: Dataset, exclude?: string) =>
+  table.columns
+    .filter((c) => c.name !== exclude && (c.values.length > 0 || levelsOf(c).length >= 2))
+    .map((c) => c.name);
+
 /** The levels of the named column (distinct non-blank cell texts, first-appearance
  *  order) — a grouping variable's levels, or [] when the column is not there. */
 const levelsOfName = (table: Dataset, name: string | undefined): string[] => {
@@ -4291,7 +4300,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         id: "predictors",
         ask: "Which variables are the predictors?",
         kind: "names",
-        options: dataNames(table).filter((n) => n !== a.dependent),
+        options: predictorNames(table, a.dependent as string | undefined),
       },
     ],
     finish: (a) => ({
@@ -4797,7 +4806,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           id: "predictors",
           ask: "Choose which variables to include as predictors.",
           kind: "names",
-          options: dataNames(table).filter((n) => n !== a.dependent),
+          options: predictorNames(table, a.dependent as string | undefined),
         },
       ];
     },
@@ -4814,7 +4823,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         id: "predictors",
         ask: "Choose which variables to include as predictors.",
         kind: "names",
-        options: dataNames(table).filter((n) => n !== a.dependent),
+        options: predictorNames(table, a.dependent as string | undefined),
       },
       choice(
         "quasi",
@@ -4933,7 +4942,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       const all = dataNames(table);
       const time = (a.time as string | undefined) ?? all[0];
       const status = (a.status as string | undefined) ?? all.filter((n) => n !== time)[0];
-      const remaining = all.filter((n) => n !== time && n !== status);
+      const remaining = predictorNames(table).filter((n) => n !== time && n !== status);
       // Only binary (exactly two distinct values) covariates can stratify
       // the survival curves — among the covariates chosen so far.
       const chosenCovariates = (a.covariates as string[] | undefined) ?? remaining;

@@ -752,6 +752,9 @@ export interface XYCorrelationParams {
  *  empty) falls back to every other data-bearing variable. */
 export interface MultipleRegressionParams {
   dependent: string;
+  /** A text column is a categorical predictor, dummy-coded with its first level as the reference
+   *  (coefficients named Variable[Level]); a text column with a single level is left out
+   *  (explicitly choosing one errors). */
   predictors?: string[];
 }
 
@@ -762,6 +765,9 @@ export interface MultipleRegressionParams {
  *  params stay type-checked per analysis. */
 export interface MultipleLogisticRegressionParams {
   dependent: string;
+  /** A text column is a categorical predictor, dummy-coded with its first level as the reference
+   *  (coefficients named Variable[Level]); a text column with a single level is left out
+   *  (explicitly choosing one errors). */
   predictors?: string[];
 }
 
@@ -772,6 +778,9 @@ export interface MultipleLogisticRegressionParams {
  *  scaled by sqrt(Pearson dispersion) — for overdispersed counts. */
 export interface PoissonRegressionParams {
   dependent: string;
+  /** A text column is a categorical predictor, dummy-coded with its first level as the reference
+   *  (coefficients named Variable[Level]); a text column with a single level is left out
+   *  (explicitly choosing one errors). */
   predictors?: string[];
   quasi: boolean;
 }
@@ -1431,7 +1440,10 @@ export interface CoxPHParams {
   time?: string;
   /** Omitted defaults to the second data column. */
   status?: string;
-  /** Omitted (or empty — see the runner) defaults to all remaining data columns. */
+  /** Omitted (or empty — see the runner) defaults to all remaining data columns.
+   *  A text column is a categorical covariate, dummy-coded with its first level
+   *  as the reference (coefficients named Variable[Level]); a text column with a
+   *  single level is left out (explicitly choosing one errors). */
   covariates?: string[];
   ties?: "efron" | "breslow";
   stratifyBy?: string;

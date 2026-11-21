@@ -14,7 +14,16 @@ import type {
   RegressionCoefficient,
   StatRow,
 } from "../types";
-import { dataGroups, describe, pairedGroups, pRow, rVec } from "../column/base";
+import { describe, pRow, rVec } from "../column/base";
+import {
+  anyValueRows,
+  categoricalPredictorsNote,
+  completeRowsDroppingEmptyText,
+  droppedNoCompleteNote,
+  expandDesign,
+  type DesignColumn,
+} from "../multiple/predictors";
+import { levelsOf } from "../../lib/dataset";
 import { evalNamedVector } from "../webr";
 import { num } from "../../lib/format";
 
@@ -37,8 +46,11 @@ export async function runCoxPH(
   columns: Column[],
   params: CoxPHParams | undefined,
 ): Promise<AnalysisOutcome> {
-  const vars = dataGroups(columns);
-  if (vars.length < 3) {
+  // Usable columns: numeric, or text with levels — a text column is a
+  // categorical covariate, dummy-coded (seq 224).
+  const usable = columns.filter((c) => c.values.length > 0 || levelsOf(c).length > 0);
+  const vars = usable.filter((c) => c.values.length > 0);
+  if (usable.length < 3) {
     return { error: "Cox regression needs a time column, a status column and at least one covariate." };
   }
   const resolve = (name: string | undefined, fallback: Column | undefined, role: string): Column | { error: string } => {
@@ -59,30 +71,34 @@ export async function runCoxPH(
   if (chosen !== undefined && chosen.length === 0) {
     return { error: "Cox regression needs at least one covariate — choose one or more columns." };
   }
-  const covariates = (chosen && chosen.length > 0
-    ? chosen.map((name) => vars.find((c) => c.name === name) ?? columns.find((c) => c.name === name))
-    : vars.filter((c) => c !== timeCol && c !== statusCol)
+  const explicit = chosen !== undefined && chosen.length > 0;
+  const covariateCols = (explicit
+    ? chosen.map((name) => columns.find((c) => c.name === name))
+    : usable.filter((c) => c !== timeCol && c !== statusCol)
   ).filter((c): c is Column => c !== undefined);
-  if (chosen !== undefined && covariates.length < chosen.length) {
-    const missing = chosen.find((name) => !covariates.some((c) => c.name === name));
+  if (explicit && covariateCols.length < chosen.length) {
+    const missing = chosen.find((name) => !covariateCols.some((c) => c.name === name));
     return { error: `The column “${missing}” is no longer in the table. Create this analysis again to choose another.` };
   }
-  const badCovariate = covariates.find((c) => !c.values.length);
-  if (badCovariate) {
+  const emptyCovariate = covariateCols.find((c) => c.values.length === 0 && levelsOf(c).length === 0);
+  if (emptyCovariate) {
     return {
-      error: `Multi-level categorical covariates are not yet supported — use a 0/1 column. “${badCovariate.name}” holds no numbers.`,
+      error: `“${emptyCovariate.name}” holds no numbers or text — it cannot be a covariate.`,
     };
   }
-  if (covariates.length === 0) {
+  if (covariateCols.length === 0) {
     return { error: "Cox regression needs at least one covariate — choose one or more columns." };
   }
-  if (covariates.some((c) => c === timeCol || c === statusCol)) {
+  if (covariateCols.some((c) => c === timeCol || c === statusCol)) {
     return { error: "The time, status and covariate columns must all be different columns." };
   }
 
-  // Complete cases: the rows where every variable used has a value.
-  const used = [timeCol, statusCol, ...covariates];
-  const subjectRows = new Set(used.flatMap((c) => c.rows));
+  // Complete cases: the rows where every variable used has a value — a
+  // text covariate's rows are its non-blank cells. Text covariates expand
+  // to dummy columns (one per non-reference level, first level the
+  // reference — Prism's dummy coding, seq 224).
+  const used = [timeCol, statusCol, ...covariateCols];
+  const subjectRows = new Set(anyValueRows(used));
   const total = subjectRows.size;
   const badTime = nonNumericCell(timeCol, subjectRows);
   if (badTime !== null) {
@@ -94,19 +110,26 @@ export async function runCoxPH(
       error: `“${statusCol.name}” holds “${badStatus}”, but survival codes must be 1 (event) or 0 (censored).`,
     };
   }
-  const aligned = pairedGroups(used).map((g) => g.values);
-  const n = aligned[0].length;
-  const times = aligned[0];
-  const status = aligned[1];
-  const p = covariates.length;
+  const { rows, kept, droppedNoComplete } = completeRowsDroppingEmptyText([timeCol, statusCol], covariateCols);
+  const expanded = expandDesign(kept, rows, explicit, "covariate");
+  if (expanded.error) return { error: expanded.error };
+  const droppedNoCompleteAll = [...droppedNoComplete, ...expanded.droppedNoComplete];
+  const design: DesignColumn[] = expanded.design;
+  if (design.length === 0) {
+    return { error: "Cox regression needs at least one covariate — choose one or more columns." };
+  }
+  const times = rows.map((r) => timeCol.byRow[r]!);
+  const status = rows.map((r) => statusCol.byRow[r]!);
+  const n = rows.length;
+  const p = design.length;
   // A covariate with no variation cannot be fit (coxph would return NA).
   // The check runs on the complete cases, not the raw columns — a covariate
   // can vary only on rows another used column leaves blank, and be constant
   // once those rows are dropped.
   if (n > 0) {
-    const constantIdx = aligned.slice(2).findIndex((col) => col.every((v) => v === col[0]));
+    const constantIdx = design.findIndex((d) => d.values.every((v) => v === d.values[0]));
     if (constantIdx >= 0) {
-      return { error: `Covariate “${covariates[constantIdx].name}” has no variation.` };
+      return { error: `Covariate “${design[constantIdx].source}” has no variation.` };
     }
   }
   const badTimeValue = times.find((t) => t <= 0);
@@ -134,9 +157,9 @@ export async function runCoxPH(
   const decls = [
     `time<-${rVec(times)}`,
     `status<-${rVec(status)}`,
-    ...covariates.map((_, i) => `x${i}<-${rVec(aligned[i + 2])}`),
+    ...design.map((d, i) => `x${i}<-${rVec(d.values)}`),
   ];
-  const formula = `survival::Surv(time,status)~${covariates.map((_, i) => `x${i}`).join("+")}`;
+  const formula = `survival::Surv(time,status)~${design.map((_, i) => `x${i}`).join("+")}`;
   // Each coefficient row pulled from summary()'s coefficient matrix by explicit
   // index → keyed names, so extraction never depends on order. coxph warnings
   // (e.g. separation / monotone likelihood) are collected, not muffled away:
@@ -175,17 +198,17 @@ export async function runCoxPH(
   // A coefficient coxph could not estimate (NA — perfectly collinear
   // covariates, or separation / monotone likelihood) is an error, not a
   // fabricated hazard ratio.
-  const unestimable = covariates.find((_, i) => v[`b${i}`] == null);
+  const unestimable = design.find((_, i) => v[`b${i}`] == null);
   if (unestimable) {
     return {
       error:
-        `Cox regression could not estimate a coefficient for “${unestimable.name}” — ` +
+        `Cox regression could not estimate a coefficient for “${unestimable.term}” — ` +
         "it is collinear with another covariate, or the data separate the outcome (all events in one group). " +
         "Drop or recode the covariate and try again.",
     };
   }
-  const coefficients: RegressionCoefficient[] = covariates.map((c, i) => ({
-    term: c.name,
+  const coefficients: RegressionCoefficient[] = design.map((d, i) => ({
+    term: d.term,
     estimate: v[`b${i}`] ?? null,
     stdError: v[`se${i}`] ?? null,
     // The Wald z goes in the `t` field (the results view labels the column
@@ -196,7 +219,15 @@ export async function runCoxPH(
     low: v[`lo${i}`] ?? null,
     high: v[`hi${i}`] ?? null,
   }));
-  const described: GroupDescriptives[] = (await describe(pairedGroups(used))).groups;
+  // Descriptives on the complete cases, as pairedGroups(used) gave them for
+  // numeric-only fits — time, status, and the numeric covariates.
+  const described: GroupDescriptives[] = (
+    await describe([
+      { name: timeCol.name, values: times },
+      { name: statusCol.name, values: status },
+      ...design.filter((d) => d.kind === "numeric").map((d) => ({ name: d.source, values: d.values })),
+    ])
+  ).groups;
   const stats: StatRow[] = [
     { label: "Concordance", value: v.conc ?? null },
     { label: "Concordance SE", value: v.concse ?? null },
@@ -217,11 +248,13 @@ export async function runCoxPH(
   const eventsPerCovariate = events / p;
   const notes =
     `Cox proportional-hazards regression of survival in “${timeCol.name}” (status “${statusCol.name}”: ` +
-    `1 = event, 0 = censored) on ${p} covariate(s): ${covariates.map((c) => c.name).join(", ")}. ` +
+    `1 = event, 0 = censored) on ${p} covariate(s): ${covariateCols.map((c) => c.name).join(", ")}. ` +
     `Ties handled by the ${ties === "efron" ? "Efron" : "Breslow"} method. ` +
     `Covariates were entered as recorded (no centring — centring does not change a Cox slope, and the model has no intercept). ` +
     `Log partial likelihood ${num(v.ll1)} (vs ${num(v.ll0)} at β = 0). ` +
     `Proportional-hazards assumption not tested in this version — see sub-task 3 (diagnostics).` +
+    categoricalPredictorsNote(expanded.categorical, expanded.singleLevel, "covariate") +
+    droppedNoCompleteNote(droppedNoCompleteAll) +
     (dropped > 0 ? ` ${dropped} row${dropped === 1 ? "" : "s"} left out for missing data (${n} complete of ${total}).` : "") +
     (eventsPerCovariate < 10
       ? ` Only ${events} event${events === 1 ? "" : "s"} for ${p} covariate(s) (${num(eventsPerCovariate)} per covariate) — fewer than 10 per covariate, so hazard ratios are imprecise.`
