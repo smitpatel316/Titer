@@ -975,9 +975,12 @@ const ROWS: Row[] = [
   {
     item: "177",
     title: "MV Select and transform",
-    status: "gap",
-    note: "Not built. No select-and-transform type.",
-    checks: [{ kind: "sourceContainsRe", scope: "src", re: "select-?and-?transform" }],
+    status: "covered",
+    note: "Merged on check/v18: select-transform analysis type (columns/transforms/equations/rowRange/rowFilter/columnFilter/sets) on Multiple Variables tables — type + runner + MCP schema (61 types), wizard, pinned in checks.ts. Check corrected: the implementation's type is select-transform, not select-and-transform, so the old regex (which required 'and') never matched.",
+    checks: [
+      { kind: "analysis", type: "select-transform" },
+      { kind: "analysisOffering", table: "multiple", type: "select-transform" },
+    ],
   },
   {
     item: "180",
@@ -1005,16 +1008,25 @@ const ROWS: Row[] = [
   {
     item: "198",
     title: "Multiple-regression diagnostics",
-    status: "gap",
-    note: "No VIF/AICc/ANOVA-table/covariance in src/stats/multiple/; params are only dependent/predictors/sets.",
-    checks: [{ kind: "hasExtraParam", type: "multiple-regression", known: ["dependent", "predictors", "sets"] }],
+    status: "covered",
+    note: "Merged on check/v18 (batch-analyses-a): the multiple-regression runner returns VIF per predictor, the ANOVA table, AIC/AICc and the coefficients' covariance matrix (pinned against R in checks.ts, seq 198 pin). Check corrected: diagnostics are outcome fields, not schema params — the params stay dependent/predictors/sets, so hasExtraParam could never see them.",
+    checks: [
+      { kind: "sourceContains", file: "src/stats/multiple/multiple-regression.ts", text: "vif" },
+      { kind: "sourceContains", file: "src/stats/multiple/multiple-regression.ts", text: "anovaTable" },
+      { kind: "sourceContains", file: "src/stats/multiple/multiple-regression.ts", text: "covariance" },
+      { kind: "sourceContains", file: "src/stats/multiple/multiple-regression.ts", text: "AICc" },
+    ],
   },
   {
     item: "200",
     title: "Nonlinear fitting methods",
-    status: "gap",
-    note: "No method param in the nonlinear-regression schema (weights/rout/interpolate exist; least-squares vs robust vs Poisson choice absent).",
-    checks: [{ kind: "analysisParam", type: "nonlinear-regression", param: "method" }],
+    status: "covered",
+    note: "Merged on check/v18: fitMethod param (least-squares/robust/poisson) on nonlinear-regression — schema, wizard, runner (robust IRLS warm-start refits, Poisson log-link; pinned in checks.ts). Check corrected: the implementation's param is fitMethod, not method.",
+    checks: [
+      { kind: "analysisParamEnum", type: "nonlinear-regression", param: "fitMethod", value: "least-squares" },
+      { kind: "analysisParamEnum", type: "nonlinear-regression", param: "fitMethod", value: "robust" },
+      { kind: "analysisParamEnum", type: "nonlinear-regression", param: "fitMethod", value: "poisson" },
+    ],
   },
   {
     item: "201",
@@ -1159,9 +1171,12 @@ const ROWS: Row[] = [
   {
     item: "218",
     title: "Legacy .pzf import",
-    status: "gap",
-    note: "Not built. titer_import_prism rejects non-prism/pzfx; zero .pzf hits in the open path.",
-    checks: [{ kind: "toolNameMatches", re: "pzf" }],
+    status: "covered",
+    note: "Merged on check/v18: legacy .pzf import (Prism 4/5 binary, src/lib/pzf.ts; public Zenodo fixtures pinned in checks.ts incl. the MCP import-prism pin) wired through titer_import_prism / titer_open_project / titer_cloud_download — .pzf is import-only, no save format. Check corrected: no tool is named *pzf*; the surface is titer_import_prism accepting .pzf.",
+    checks: [
+      { kind: "sourceContains", file: "mcp.rs", text: "Import a Prism file (.prism / .pzfx / .pzf)" },
+      { kind: "sourceContains", file: "mcp.rs", text: '"pzf" => Ok("pzf")' },
+    ],
   },
   {
     item: "219",
