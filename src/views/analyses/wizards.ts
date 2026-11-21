@@ -2,7 +2,7 @@
 // step, each answer choosing the next question. A wizard only declares its questions
 // and how the answers make the test's params; analysis-wizard.tsx asks them.
 // A test without an entry here runs as soon as it is picked.
-import { DOSE_MODELS, CONCENTRATION_UNITS, GOF_EXPECTED_MODES, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, MULTIFACTOR_MAX_FACTORS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, fdrQError, isFdrPValueMethod, pValueAlphaError, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloParams, type MonteCarloSimulationDistribution, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel, type PValueStackParams } from "../../stats/types";
+import { DOSE_MODELS, CONCENTRATION_UNITS, GOF_EXPECTED_MODES, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, MULTIFACTOR_MAX_FACTORS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, SELECT_TRANSFORM_KINDS, SELECT_TRANSFORM_NEEDS_K, fdrQError, isFdrPValueMethod, pValueAlphaError, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloParams, type MonteCarloSimulationDistribution, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel, type PValueStackParams, type SelectTransformKind, type SelectTransformOperator } from "../../stats/types";
 import type { PlotFunctionExtra, PlotFunctionModel } from "../../stats/types";
 import {
   PLOT_FUNCTION_DEFAULTS,
@@ -56,6 +56,8 @@ import type {
   FractionOfTotalParams,
   PlotFunctionParams,
   RowMeansTotalsParams,
+  SelectTransformParams,
+  SelectTransformSpec,
   SurvivalParams,
   CoxParams,
   HclustParams,
@@ -319,6 +321,74 @@ export function parseGroupLevels(text: string, rowCount: number): { values: stri
   }
   return { values: levels };
 }
+
+/** Parse a "Name = formula" equation answer (select-transform): blank = no
+ *  equation; otherwise both sides must be there (the runner re-checks the
+ *  formula itself, so a bad formula still fails clearly at run time). */
+export function parseSelectTransformEquation(text: string): { error?: string } {
+  const t = text.trim();
+  if (t === "") return {};
+  const eq = t.indexOf("=");
+  if (eq <= 0 || eq === t.length - 1)
+    return {
+      error: `“${t}” needs a name and a formula — write it as “Name = formula”, e.g. “BMI = Weight / Height^2”.`,
+    };
+  return {};
+}
+
+/** Split a validated "Name = formula" equation answer into its two sides. */
+const splitSelectTransformEquation = (text: string): { name: string; formula: string } => {
+  const eq = text.indexOf("=");
+  return { name: text.slice(0, eq).trim(), formula: text.slice(eq + 1).trim() };
+};
+
+/** What the wizard calls each select-transform kind. */
+const selectTransformKindLabel = (kind: SelectTransformKind): string => {
+  switch (kind) {
+    case "log10":
+      return "Logarithm, base 10";
+    case "ln":
+      return "Natural logarithm (ln)";
+    case "log2":
+      return "Logarithm, base 2";
+    case "reciprocal":
+      return "Reciprocal (1/Y)";
+    case "sqrt":
+      return "Square root";
+    case "square":
+      return "Square (Y²)";
+    case "exp":
+      return "e^Y";
+    case "pow10":
+      return "10^Y";
+    case "negate":
+      return "Negate (−Y)";
+    case "abs":
+      return "Absolute value (|Y|)";
+    case "multiply":
+      return "Multiply by K (Y×K)";
+    case "divide":
+      return "Divide by K (Y/K)";
+    case "add":
+      return "Add K (Y+K)";
+    case "subtract":
+      return "Subtract K (Y−K)";
+    case "power":
+      return "Raise to the power K (Y^K)";
+    case "round":
+      return "Round to K decimal places";
+    case "min":
+      return "Minimum of the variable";
+    case "max":
+      return "Maximum of the variable";
+    case "mean":
+      return "Mean of the variable";
+    case "stdev":
+      return "Standard deviation of the variable";
+    case "stderr":
+      return "Standard error of the variable";
+  }
+};
 
 export interface Wizard {
   /** Every question, given the answers so far (false: not asked with these answers).
@@ -4422,6 +4492,226 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             },
           };
       }
+    },
+  },
+
+  "select-transform": {
+    questions: (a, table) => {
+      const all = table.columns.map((c) => c.name);
+      const numeric = dataNames(table);
+      const rowCount = Math.max(1, table.titles.length);
+      /** An optional pick: "None" first, so the wizard defaults to leaving it out. */
+      const optional = (id: string, ask: string, options: string[], noneLabel: string): Question =>
+        choice(id, ask, [["none", noneLabel], ...options.map((n): [string, string] => [n, n])]);
+      /** An optional answer: blank, or "None", counts as not picked. */
+      const picked = (id: string): string | undefined => {
+        const v = a[id] as string | undefined;
+        return v === undefined || v === "" || v === "none" ? undefined : v;
+      };
+      const operatorChoices: [string, string][] = [
+        [">", "Greater than"],
+        ["<", "Less than"],
+        ["=", "Equal to"],
+        [">=", "Greater than or equal to"],
+        ["<=", "Less than or equal to"],
+        ["!=", "Not equal to"],
+        ["is-not-missing", "Is not missing — the variable has a value"],
+      ];
+      const valueVariable = picked("valueFilterVariable");
+      const valueOperator = a.valueFilterOperator as string | undefined;
+      const columnVariable = picked("columnFilterVariable");
+      // One transform block per "yes" to the previous block's "another?"
+      // question; the first block is always asked. A transform needs numbers,
+      // so only the numeric variables are offered as its source.
+      const transformBlocks: (Question | false)[] = [];
+      for (let i = 0; ; i++) {
+        if (i > 0 && a[`transform${i - 1}Another`] !== "yes") break;
+        const variable = picked(`transform${i}Variable`);
+        const kind = a[`transform${i}Kind`] as string | undefined;
+        transformBlocks.push(
+          optional(
+            `transform${i}Variable`,
+            i === 0 ? "Transform a variable into a new one?" : "Transform another variable into a new one?",
+            numeric,
+            "None — no transforms",
+          ),
+          variable !== undefined &&
+            choice(
+              `transform${i}Kind`,
+              `How should “${variable}” be transformed?`,
+              SELECT_TRANSFORM_KINDS.map((k): [string, string] => [k, selectTransformKindLabel(k)]),
+            ),
+          variable !== undefined &&
+            kind !== undefined &&
+            (SELECT_TRANSFORM_NEEDS_K as readonly string[]).includes(kind) && {
+              id: `transform${i}K`,
+              ask: `What constant K does the “${kind}” transform use?`,
+              kind: "number",
+              label: "K =",
+              initial: 1,
+            },
+          variable !== undefined && {
+            id: `transform${i}Title`,
+            ask: `What should the new variable be called? Leave it blank for the transform's own name (“${kind ?? "log10"}(${variable})”).`,
+            kind: "text",
+            label: "New variable name",
+            initial: "",
+            parse: () => ({}),
+          },
+          variable !== undefined &&
+            choice(`transform${i}Another`, "Transform another variable?", [
+              ["no", "No — that's all the transforms"],
+              ["yes", "Yes — transform another variable"],
+            ]),
+        );
+      }
+      // One equation block per "yes" to the previous block's "another?"
+      // question; the first block is always asked. An equation is "Name =
+      // formula" over the table's variables (and transformed columns).
+      const equationBlocks: (Question | false)[] = [];
+      for (let i = 0; ; i++) {
+        if (i > 0 && a[`equation${i - 1}Another`] !== "yes") break;
+        const text = (a[`equation${i}`] as string | undefined) ?? "";
+        equationBlocks.push(
+          {
+            id: `equation${i}`,
+            ask:
+              i === 0
+                ? "Add a new variable from an equation? Write it as “Name = formula”, e.g. “BMI = Weight / Height^2” — or leave it blank for none."
+                : "Add another new variable from an equation? Write it as “Name = formula” — or leave it blank for none.",
+            kind: "text",
+            label: "Name = formula",
+            initial: "",
+            placeholder: "BMI = Weight / Height^2",
+            parse: parseSelectTransformEquation,
+          },
+          text.trim() !== "" &&
+            choice(`equation${i}Another`, "Add another equation?", [
+              ["no", "No — that's all the equations"],
+              ["yes", "Yes — add another equation"],
+            ]),
+        );
+      }
+      return [
+        { id: "columns", ask: "Which variables go in the new table?", kind: "names", options: all, min: 1 },
+        choice("rowScope", "Which rows go in the new table?", [
+          ["all", "All rows"],
+          ["range", "Only rows … to …"],
+        ]),
+        a.rowScope === "range" && {
+          id: "firstRow",
+          ask: "Which is the first row to keep?",
+          kind: "number",
+          label: "First row",
+          initial: 1,
+          min: 1,
+          max: rowCount,
+        },
+        a.rowScope === "range" && {
+          id: "lastRow",
+          ask: "Which is the last row to keep?",
+          kind: "number",
+          label: "Last row",
+          initial: rowCount,
+          min: 1,
+          max: rowCount,
+        },
+        optional(
+          "valueFilterVariable",
+          "Keep only rows where a variable compares to a value?",
+          all,
+          "None — keep every row",
+        ),
+        valueVariable !== undefined &&
+          choice("valueFilterOperator", `How should “${valueVariable}” compare to the value?`, operatorChoices),
+        valueVariable !== undefined &&
+          (valueOperator === undefined || valueOperator !== "is-not-missing") && {
+            id: "valueFilterValue",
+            ask: `Keep rows where “${valueVariable}” is ${valueOperator ?? ">"} what value?`,
+            kind: "number",
+            label: "Value",
+            initial: 0,
+          },
+        optional(
+          "columnFilterVariable",
+          "Keep only rows where one variable compares to another?",
+          all,
+          "None — no comparison",
+        ),
+        columnVariable !== undefined &&
+          choice(
+            "columnFilterOperator",
+            `How should “${columnVariable}” compare to the other variable?`,
+            operatorChoices.filter(([v]) => v !== "is-not-missing"),
+          ),
+        columnVariable !== undefined &&
+          choice(
+            "columnFilterOther",
+            `Which variable should “${columnVariable}” be compared to?`,
+            names(all.filter((n) => n !== columnVariable)),
+          ),
+        ...transformBlocks,
+        ...equationBlocks,
+      ];
+    },
+    finish: (a) => {
+      /** An optional answer: blank, or "None", counts as not picked. */
+      const picked = (id: string): string | undefined => {
+        const v = a[id] as string | undefined;
+        return v === undefined || v === "" || v === "none" ? undefined : v;
+      };
+      const transforms: SelectTransformParams["transforms"] = [];
+      for (let i = 0; ; i++) {
+        if (i > 0 && a[`transform${i - 1}Another`] !== "yes") break;
+        const variable = picked(`transform${i}Variable`);
+        if (variable === undefined) break;
+        const kind = a[`transform${i}Kind`] as SelectTransformSpec["kind"];
+        const title = (a[`transform${i}Title`] as string | undefined)?.trim();
+        const needsK = (SELECT_TRANSFORM_NEEDS_K as readonly string[]).includes(kind);
+        transforms.push({
+          variable,
+          kind,
+          ...(needsK ? { k: a[`transform${i}K`] as number } : {}),
+          ...(title ? { title } : {}),
+        });
+      }
+      const equations: SelectTransformParams["equations"] = [];
+      for (let i = 0; ; i++) {
+        if (i > 0 && a[`equation${i - 1}Another`] !== "yes") break;
+        const text = (a[`equation${i}`] as string | undefined)?.trim() ?? "";
+        if (text === "") break;
+        equations.push(splitSelectTransformEquation(text));
+      }
+      const valueVariable = picked("valueFilterVariable");
+      const valueOperator = a.valueFilterOperator as SelectTransformOperator | undefined;
+      const columnVariable = picked("columnFilterVariable");
+      const params: SelectTransformParams = {
+        columns: (a.columns as string[] | undefined) ?? [],
+        ...(a.rowScope === "range"
+          ? { rowRange: { first: a.firstRow as number, last: a.lastRow as number } }
+          : {}),
+        ...(valueVariable !== undefined && valueOperator !== undefined
+          ? {
+              rowFilter: {
+                variable: valueVariable,
+                operator: valueOperator,
+                ...(valueOperator === "is-not-missing" ? {} : { value: a.valueFilterValue as number }),
+              },
+            }
+          : {}),
+        ...(columnVariable !== undefined
+          ? {
+              columnFilter: {
+                variable: columnVariable,
+                operator: a.columnFilterOperator as SelectTransformOperator,
+                otherVariable: a.columnFilterOther as string,
+              },
+            }
+          : {}),
+        ...(transforms.length ? { transforms } : {}),
+        ...(equations.length ? { equations } : {}),
+      };
+      return { type: "select-transform", params };
     },
   },
 

@@ -59,6 +59,7 @@ export type AnalysisType =
   | "normalize"
   | "transpose"
   | "extract-rearrange"
+  | "select-transform"
   | "prune-rows"
   | "fraction-of-total"
   | "row-means-totals"
@@ -866,6 +867,116 @@ export interface ExtractRearrangeParams {
   completeRows?: boolean;
 }
 
+/** The per-variable transforms "select-transform" offers (Prism 10 User
+ *  Guide, "Select and transform multiple variable tables", and Prism 8's
+ *  "Transform data" standard functions): the seven Transform-data functions
+ *  (`log10`, `ln`, `log2`, `sqrt`, `reciprocal`, `exp`, `square`), the
+ *  unit-change arithmetic (`multiply`, `divide`, `add`, `subtract`, `power`,
+ *  `round`, `pow10`, `negate`, `abs`) and Prism 10's whole-variable
+ *  summaries (`min`, `max`, `mean`, `stdev`, `stderr` — one value per row).
+ *  `multiply`, `divide`, `add`, `subtract`, `power` and `round` take the
+ *  constant K (`round`: whole digits, 0–10). NOT offered: z-score, rank,
+ *  logit/probit (Transform-data-only) and the text transforms
+ *  (CONCATENATE, IF) — a text engine is a separate item. */
+export const SELECT_TRANSFORM_KINDS = [
+  "log10",
+  "ln",
+  "log2",
+  "reciprocal",
+  "sqrt",
+  "square",
+  "exp",
+  "pow10",
+  "negate",
+  "abs",
+  "multiply",
+  "divide",
+  "add",
+  "subtract",
+  "power",
+  "round",
+  "min",
+  "max",
+  "mean",
+  "stdev",
+  "stderr",
+] as const;
+export type SelectTransformKind = (typeof SELECT_TRANSFORM_KINDS)[number];
+
+/** Whether a transform kind needs the constant K. */
+export const SELECT_TRANSFORM_NEEDS_K: readonly SelectTransformKind[] = [
+  "multiply",
+  "divide",
+  "add",
+  "subtract",
+  "power",
+  "round",
+];
+
+/** The row comparisons "select-transform" offers (Prism's Select rows tab):
+ *  greater / less / equal, with `>=`, `<=`, `!=` alongside, and
+ *  `is-not-missing` (Prism 10: keep rows where the variable has a value). */
+export const SELECT_TRANSFORM_OPERATORS = [">", "<", "=", ">=", "<=", "!=", "is-not-missing"] as const;
+export type SelectTransformOperator = (typeof SELECT_TRANSFORM_OPERATORS)[number];
+
+/** One per-variable transform: which variable, which transform, the
+ *  constant K when the transform needs one, and the new column's title
+ *  (omitted: the transform's own name, e.g. "log10(Score)" — as Prism
+ *  names an untitled transform by its definition). */
+export interface SelectTransformSpec {
+  variable: string;
+  kind: SelectTransformKind;
+  k?: number;
+  title?: string;
+}
+
+/** One equation: the new variable's name and its formula over the table's
+ *  variables (the Calculated Variables formula language — `Weight /
+ *  Height^2`, `LOG10(Concentration)`, `IF(Group = 1, A, B)` — which may
+ *  also name a transformed column). */
+export interface SelectTransformEquation {
+  name: string;
+  formula: string;
+}
+
+/** A row-number range, 1-based and inclusive on both ends. */
+export interface SelectTransformRowRange {
+  first: number;
+  last: number;
+}
+
+/** Keep only rows where a variable's value compares to a number — or, for
+ *  `is-not-missing`, where it has a value at all (`value` is not read). */
+export interface SelectTransformRowFilter {
+  variable: string;
+  operator: SelectTransformOperator;
+  value?: number;
+}
+
+/** Keep only rows where one variable compares to another. */
+export interface SelectTransformColumnFilter {
+  variable: string;
+  operator: SelectTransformOperator;
+  otherVariable: string;
+}
+
+/** Params for "select-transform": which variables to keep (`columns`, in
+ *  order — omitted: all of them), the per-variable transforms and the
+ *  equations (each a new column, appended in order after the kept ones),
+ *  and the row selection (a range, a value comparison, a column comparison
+ *  — every criterion given must hold). All three tabs are optional: with
+ *  nothing given, the new table is the source table as it stands. A
+ *  transform's source need not be among `columns` — only its new column
+ *  lands in the output. */
+export interface SelectTransformParams {
+  columns?: string[];
+  transforms?: SelectTransformSpec[];
+  equations?: SelectTransformEquation[];
+  rowRange?: SelectTransformRowRange;
+  rowFilter?: SelectTransformRowFilter;
+  columnFilter?: SelectTransformColumnFilter;
+}
+
 /** Params for "two-way-anova" on a Grouped table's column-groups × row position:
  *  "ordinary" (parametric, independent samples), "repeated-measures" (parametric,
  *  matched by row — each replicate column is the same subject across every row;
@@ -1634,6 +1745,7 @@ export type AnalysisParams = DataSetsParam &
     | KMeansParams
     | HclustParams
     | ExtractRearrangeParams
+    | SelectTransformParams
     | SplineLowessParams
     | SmoothDifferentiateIntegrateParams
     | CoxPHParams
@@ -2121,13 +2233,15 @@ export interface NormalizedColumn {
   referenceDescription: string;
   rows: NormalizedRow[];
 }
-/** The extracted table ("extract-rearrange"): the new table's type and its
- *  data — a real table the user can create (via "Create table" in the
- *  results view) and then graph or analyse. `table` carries `groups` /
- *  `replicates` where the target type needs them (XY with subjects,
- *  Grouped), so the created table reads back as that type. */
+/** The extracted table ("extract-rearrange" / "select-transform"): the new
+ *  table's type and its data — a real table the user can create (via
+ *  "Create table" in the results view) and then graph or analyse. `table`
+ *  carries `groups` / `replicates` where the target type needs them (XY
+ *  with subjects, Grouped), so the created table reads back as that type.
+ *  A select-transform builds a Multiple Variables table, so "multiple" is
+ *  a table type here too. */
 export interface ExtractedTable {
-  tableType: ExtractRearrangeTarget;
+  tableType: ExtractRearrangeTarget | "multiple";
   table: TableData;
 }
 

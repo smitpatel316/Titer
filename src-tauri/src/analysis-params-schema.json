@@ -2657,6 +2657,56 @@
       }
     ]
   },
+  "select-transform": {
+    "label": "Select and transform",
+    "min_columns": 1,
+    "offered_on": [
+      "multiple"
+    ],
+    "params": [
+      {
+        "name": "columns",
+        "type": "string[]",
+        "required": false
+      },
+      {
+        "name": "transforms",
+        "type": "array",
+        "value_shape": "list of { variable: string, kind: string, k?: number, title?: string }",
+        "required": false
+      },
+      {
+        "name": "equations",
+        "type": "array",
+        "value_shape": "list of { name: string, formula: string }",
+        "required": false
+      },
+      {
+        "name": "rowRange",
+        "type": "object",
+        "value_shape": "object with { first: number, last: number } (1-based inclusive row range)",
+        "required": false
+      },
+      {
+        "name": "rowFilter",
+        "type": "object",
+        "value_shape": "object with { variable: string, operator: string, value?: number }",
+        "required": false
+      },
+      {
+        "name": "columnFilter",
+        "type": "object",
+        "value_shape": "object with { variable: string, operator: string, otherVariable: string }",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
   "shapiro-wilk": {
     "label": "Normality tests",
     "min_columns": 1,

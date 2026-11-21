@@ -92,7 +92,8 @@ for needed in ["TAILS", "ANOVA_POSTHOCS", "RANK_POSTHOCS", "NONLINEAR_MODELS",
                "NORMALITY_TESTS", "MONTE_CARLO_TARGETS",
                "MONTE_CARLO_STATISTICS", "TWO_WAY_POSTHOCS",
                "THREE_WAY_POSTHOCS", "FDR_METHODS",
-               "THREE_WAY_POSTHOC_SCOPES"]:
+               "THREE_WAY_POSTHOC_SCOPES", "SELECT_TRANSFORM_KINDS",
+               "SELECT_TRANSFORM_OPERATORS"]:
     assert needed in ARRAYS, f"choice list {needed} not parsed"
 POSTHOCS = ARRAYS["POSTHOCS"]  # the six base post-hoc choices
 TWO_WAY_POSTHOCS = ARRAYS["TWO_WAY_POSTHOCS"]  # + Dunnett, Games-Howell, FDR (seq 192)
@@ -231,6 +232,7 @@ INTERFACE_TO_TYPE = {
     "KMeans": "k-means",
     "Hclust": "hierarchical-clustering",
     "ExtractRearrange": "extract-rearrange",
+    "SelectTransform": "select-transform",
     "TwoWayAnova": "two-way-anova",
     "ThreeWayAnova": "three-way-anova",
     "MultifactorAnova": "multifactor-anova",
@@ -512,6 +514,11 @@ KIND_TO_TYPE = {
     "texts-by-name": ("object", "object mapping a name to text"),
     "text-pairs-by-name": ("object", "object mapping a name to a [first, second] text pair"),
     "plot-curves": ("array", "list of { label: string, params: { <parameter name>: number } }"),
+    "transforms": ("array", "list of { variable: string, kind: string, k?: number, title?: string }"),
+    "equations": ("array", "list of { name: string, formula: string }"),
+    "row-range": ("object", "object with { first: number, last: number } (1-based inclusive row range)"),
+    "row-filter": ("object", "object with { variable: string, operator: string, value?: number }"),
+    "column-filter": ("object", "object with { variable: string, operator: string, otherVariable: string }"),
 }
 
 SETS_DESC = ("Data sets (columns, or a grouped table's groups) the analysis "
@@ -585,8 +592,8 @@ for typ, keys in sorted(KEYS_BY_TYPE.items()):
         out["gates"] = GATES[typ]
     schema[typ] = out
 
-# Sanity: 59 types (54 + p-value-stack seq 190 + chi-square-gof + binomial-test seq 195 + one-sample-ks seq 170 + multifactor-anova seq 157), every key accounted for, offered_on non-empty.
-assert len(schema) == 59, f"{len(schema)} types, expected 59"
+# Sanity: 60 types (59 + select-transform, seq 177), every key accounted for, offered_on non-empty.
+assert len(schema) == 60, f"{len(schema)} types, expected 60"
 for typ, entry in schema.items():
     assert entry["offered_on"], f"{typ} offered on no table type"
     assert entry["min_columns"] is not None, f"{typ} has no min_columns"
