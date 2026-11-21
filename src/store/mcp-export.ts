@@ -979,11 +979,19 @@ export async function tableToXlsx(data: TableData, name: string): Promise<Uint8A
  *
  *  What it cannot express it refuses, plainly, instead of silently
  *  rewriting: a Nested or Multiple-variables table (Prism has no matching
- *  type) and a grouped table mixing Y formats — those errors come from
- *  `writePzfx` itself, naming the table. An empty table is refused here:
- *  the writer skips rowless tables (a re-import would drop them), so
+ *  type) and a grouped table mixing Y formats. The type refusal is made
+ *  here, not in `writePzfx`: the whole-project writer deliberately
+ *  rewrites a nested/MV table as OneWay with a warning, so one such table
+ *  cannot sink a whole project save — but a single-table Prism XML export
+ *  must not silently change the table's kind. An empty table is refused
+ *  here: the writer skips rowless tables (a re-import would drop them), so
  *  there would be nothing to write. */
 export function tableToXml(data: TableData, name: string, tableType: ProjectNode["tableType"] = "column"): Uint8Array {
+  if (tableType === "nested" || tableType === "multiple") {
+    throw new Error(
+      `“${name}” is a ${tableType === "nested" ? "Nested" : "Multiple variables"} table — Prism XML has no matching table type for it, so it can't be written as Prism XML.`,
+    );
+  }
   if (!data || data.columns.length < 2) {
     throw new Error(`“${name}” holds no data columns to write as Prism XML — add a data column first.`);
   }
