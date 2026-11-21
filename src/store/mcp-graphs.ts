@@ -2,7 +2,12 @@
 // inventory §3.4): the seven tools `titer_build_graph`,
 // `titer_update_graph`, `titer_clone_graph`, `titer_create_figure`,
 // `titer_update_figure`, `titer_create_info_sheet` and
-// `titer_update_info_sheet`.
+// `titer_update_info_sheet` — plus the 1.8.0 menus-batch tools
+// `titer_freeze_graph`, `titer_freeze_figure`,
+// `titer_add_drawing_object`, `titer_update_drawing_object`,
+// `titer_delete_drawing_object` and `titer_arrange_drawing_objects`
+// (seq 237/238). `titer_clone_analysis` / `titer_clone_figure` (seq 236)
+// live in mcp-dispatch.ts, on the generic `duplicateNode` store action.
 //
 // The dispatcher is the authority here, not Rust: it has the live store
 // and `GRAPH_OPTIONS_BY_TABLE`, so it validates the graph type against
@@ -36,12 +41,16 @@ import { MAX_INFO_CONSTANTS, MAX_INFO_SHEETS, allConstantNames, newConstantId } 
 import type { McpJob } from "../native";
 import {
   DEFAULT_GRAPH_OPTIONS,
+  DRAWING_OBJECT_KINDS,
   FILL_PATTERNS,
   GRAPH_CHOICES,
   GRAPH_LIMITS,
+  MAX_PICTURE_BYTES,
   PALETTE_KINDS,
   REF_LABEL_PLACES,
+  type ArrangeOp,
   type AxisNumberFormat,
+  type DrawingObject,
   type FigureGrid,
   type FigureLabelStyle,
   type FigurePanel,
@@ -99,6 +108,17 @@ export interface GraphJobDeps {
   createInfoSheet?: (linkedTableId?: string | null) => string;
   updateInfoSheet?: (id: string, info: InfoSheetData) => void;
   renameNode?: (id: string, name: string) => void;
+  /** Freeze (or unfreeze) a graph or a figure (seq 237). */
+  setGraphFrozen?: (id: string, kind: "graph" | "figure", frozen: boolean) => void;
+  /** Drawing objects on a graph or figure sheet (seq 238). */
+  addDrawingObject?: (nodeId: string, object: DrawingObject) => void;
+  updateDrawingObject?: (
+    nodeId: string,
+    objectId: string,
+    patch: Partial<Omit<DrawingObject, "id" | "kind">>,
+  ) => void;
+  deleteDrawingObject?: (nodeId: string, objectId: string) => void;
+  arrangeDrawingObjects?: (nodeId: string, op: ArrangeOp, objectIds: string[]) => void;
 }
 
 /** What one graph job reports: the tool's output, and what it created
@@ -1077,4 +1097,228 @@ export function executeUpdateInfoSheet(job: McpJob, deps: GraphJobDeps): GraphJo
 
   need(job, deps.updateInfoSheet, "update an info sheet")(infoSheetId, { constants, notes, linkedTableId });
   return { result: { project_id: job.project_id, info_sheet_id: infoSheetId } };
+}
+
+/** A new drawing object's id, like the store's `genId` (seq 238). */
+function newDrawingId() {
+  return `drawing_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+const ARRANGE_OPS: ArrangeOp[] = [
+  "bring-to-front",
+  "send-to-back",
+  "bring-forward",
+  "send-backward",
+  "duplicate",
+  "group",
+  "ungroup",
+  "delete",
+];
+
+/** A graph or figure node, or a plain error naming what was asked for. */
+function drawingSheet(job: McpJob, state: GraphJobState, nodeId: string): ProjectNode {
+  const node = state.nodes[nodeId];
+  if (!node)
+    throw jobErr(job, `no sheet with id “${nodeId}” — run titer_list_projects to see the graphs and figures.`);
+  if (node.type !== "graph" && node.type !== "figure")
+    throw jobErr(job, `“${node.name}” is a ${node.type}, not a graph or a figure — drawing objects live on graphs and figures.`);
+  return node;
+}
+
+/** A drawing object of `node`, or a plain error. */
+function drawingObject(job: McpJob, node: ProjectNode, objectId: string): DrawingObject {
+  const object = (node.drawingObjects ?? []).find((o) => o.id === objectId);
+  if (!object)
+    throw jobErr(job, `“${node.name}” has no drawing object “${objectId}” — add one with titer_add_drawing_object first.`);
+  return object;
+}
+
+/** `titer_freeze_graph`: freeze (or unfreeze) a graph — a frozen graph
+ *  draws its snapshot while the live data keep changing. */
+export function executeFreezeGraph(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
+  const args = argsOf(job);
+  const graphId = reqStr(job, args, "graph_id");
+  if (typeof args.frozen !== "boolean") throw jobErr(job, `“frozen” must be true or false.`);
+  const state = deps.getState();
+  const node = state.nodes[graphId];
+  if (!node) throw jobErr(job, `no graph with id “${graphId}” — run titer_list_projects to see the graphs.`);
+  if (node.type !== "graph") throw jobErr(job, `“${node.name}” is a ${node.type}, not a graph.`);
+  if (args.frozen === true) {
+    const parent = node.parentId ? state.nodes[node.parentId] : undefined;
+    if (!parent?.data) {
+      throw jobErr(job, `graph “${node.name}” has no data table to freeze from.`);
+    }
+  }
+  need(job, deps.setGraphFrozen, "freeze a graph")(graphId, "graph", args.frozen as boolean);
+  return { result: { project_id: job.project_id, graph_id: graphId, frozen: args.frozen } };
+}
+
+/** `titer_freeze_figure`: freeze (or unfreeze) a figure — a frozen
+ *  figure draws each panel from its snapshot. */
+export function executeFreezeFigure(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
+  const args = argsOf(job);
+  const figureId = reqStr(job, args, "figure_id");
+  if (typeof args.frozen !== "boolean") throw jobErr(job, `“frozen” must be true or false.`);
+  const state = deps.getState();
+  const node = state.nodes[figureId];
+  if (!node) throw jobErr(job, `no figure with id “${figureId}” — run titer_list_projects to see the figures.`);
+  if (node.type !== "figure") throw jobErr(job, `“${node.name}” is a ${node.type}, not a figure.`);
+  if (args.frozen === true) {
+    const hasData = (node.panels ?? []).some((panel) => {
+      const graph = state.nodes[panel.graphId];
+      const parent = graph?.parentId ? state.nodes[graph.parentId] : undefined;
+      return Boolean(parent?.data);
+    });
+    if (!hasData) {
+      throw jobErr(job, `figure “${node.name}” has no panel with a data table to freeze from.`);
+    }
+  }
+  need(job, deps.setGraphFrozen, "freeze a figure")(figureId, "figure", args.frozen as boolean);
+  return { result: { project_id: job.project_id, figure_id: figureId, frozen: args.frozen } };
+}
+
+/** A drawing object's fields as a job holds them: the kind and geometry
+ *  required, the rest only when well-formed. A picture needs its image
+ *  as a data URL under the cap, like the Insert Picture picker. */
+function validateDrawingObject(job: McpJob, raw: unknown): DrawingObject {
+  if (!isPlainObject(raw)) throw jobErr(job, `“object” must be an object { kind, x, y, width, height, ... }.`);
+  const kind = raw.kind;
+  if (typeof kind !== "string" || !(DRAWING_OBJECT_KINDS as readonly string[]).includes(kind))
+    throw jobErr(job, `“object.kind” must be one of ${DRAWING_OBJECT_KINDS.join(", ")}.`);
+  const num = (name: string, min?: number): number => {
+    const value = raw[name];
+    if (typeof value !== "number" || !Number.isFinite(value) || (min !== undefined && value < min))
+      throw jobErr(job, `“object.${name}” must be a finite number${min !== undefined ? ` of at least ${min}` : ""}.`);
+    return value;
+  };
+  const x = num("x");
+  const y = num("y");
+  const width = num("width", 1);
+  const height = num("height", 1);
+  const object: DrawingObject = { id: newDrawingId(), kind: kind as DrawingObject["kind"], x, y, width, height };
+  if (raw.text !== undefined) {
+    if (typeof raw.text !== "string") throw jobErr(job, `“object.text” must be a string.`);
+    object.text = raw.text;
+  }
+  if (raw.fontSize !== undefined) {
+    if (typeof raw.fontSize !== "number" || !Number.isFinite(raw.fontSize) || raw.fontSize < 6 || raw.fontSize > 200)
+      throw jobErr(job, `“object.fontSize” must be a number from 6 to 200.`);
+    object.fontSize = raw.fontSize;
+  }
+  for (const key of ["color", "fill"] as const) {
+    if (raw[key] !== undefined) {
+      if (typeof raw[key] !== "string") throw jobErr(job, `“object.${key}” must be a string.`);
+      object[key] = raw[key] as string;
+    }
+  }
+  if (raw.strokeWidth !== undefined) {
+    if (typeof raw.strokeWidth !== "number" || !Number.isFinite(raw.strokeWidth) || raw.strokeWidth <= 0)
+      throw jobErr(job, `“object.strokeWidth” must be a positive number.`);
+    object.strokeWidth = raw.strokeWidth;
+  }
+  if (raw.src !== undefined) {
+    if (typeof raw.src !== "string" || !raw.src.startsWith("data:image/") || raw.src.length * 0.75 > MAX_PICTURE_BYTES)
+      throw jobErr(
+        job,
+        `“object.src” must be an image data URL under ${Math.round(MAX_PICTURE_BYTES / 1_000_000)} MB.`,
+      );
+    object.src = raw.src;
+  }
+  if (kind === "picture" && object.src === undefined)
+    throw jobErr(job, `a picture object needs “src” — its image as a data URL.`);
+  if (raw.groupId !== undefined) {
+    if (typeof raw.groupId !== "string" || raw.groupId === "")
+      throw jobErr(job, `“object.groupId” must be a non-empty string.`);
+    object.groupId = raw.groupId;
+  }
+  return object;
+}
+
+/** `titer_add_drawing_object`: a text/drawing/picture object on a graph
+ *  or figure sheet. The id is assigned here and returned. */
+export function executeAddDrawingObject(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
+  const args = argsOf(job);
+  const nodeId = reqStr(job, args, "node_id");
+  if (args.object === undefined) throw jobErr(job, `needs “object” — the drawing object to add.`);
+  const object = validateDrawingObject(job, args.object);
+  const state = deps.getState();
+  drawingSheet(job, state, nodeId);
+  need(job, deps.addDrawingObject, "add a drawing object")(nodeId, object);
+  return {
+    result: { project_id: job.project_id, node_id: nodeId, object_id: object.id },
+    created: { object_id: object.id },
+  };
+}
+
+/** The patch fields `titer_update_drawing_object` accepts, and their
+ *  validation — the same rules as the add, minus kind (which never
+ *  changes) and id. */
+const DRAWING_PATCH_FIELDS = ["x", "y", "width", "height", "text", "fontSize", "color", "fill", "strokeWidth", "src", "groupId"] as const;
+
+function validateDrawingPatch(job: McpJob, raw: unknown): Partial<Omit<DrawingObject, "id" | "kind">> {
+  if (!isPlainObject(raw)) throw jobErr(job, `“patch” must be an object { ...fields to change }.`);
+  for (const key of Object.keys(raw)) {
+    if (!(DRAWING_PATCH_FIELDS as readonly string[]).includes(key))
+      throw jobErr(job, `unknown drawing field “${key}” — use ${DRAWING_PATCH_FIELDS.join(", ")}.`);
+  }
+  // Reuse the add's validation: a full object built from the patch's
+  // fields, with dummy geometry, then only the patched fields kept.
+  const probe = validateDrawingObject(job, {
+    kind: "rect",
+    x: 0,
+    y: 0,
+    width: 1,
+    height: 1,
+    ...raw,
+  });
+  const patch: Partial<Omit<DrawingObject, "id" | "kind">> = {};
+  for (const key of DRAWING_PATCH_FIELDS) {
+    if (raw[key] !== undefined) (patch as Record<string, unknown>)[key] = probe[key];
+  }
+  return patch;
+}
+
+/** `titer_update_drawing_object`: change one drawing object. */
+export function executeUpdateDrawingObject(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
+  const args = argsOf(job);
+  const nodeId = reqStr(job, args, "node_id");
+  const objectId = reqStr(job, args, "object_id");
+  if (args.patch === undefined) throw jobErr(job, `needs “patch” — the drawing fields to change.`);
+  const patch = validateDrawingPatch(job, args.patch);
+  if (!Object.keys(patch).length) throw jobErr(job, `“patch” changes nothing — pass a field to change.`);
+  const state = deps.getState();
+  const node = drawingSheet(job, state, nodeId);
+  drawingObject(job, node, objectId);
+  need(job, deps.updateDrawingObject, "update a drawing object")(nodeId, objectId, patch);
+  return { result: { project_id: job.project_id, node_id: nodeId, object_id: objectId } };
+}
+
+/** `titer_delete_drawing_object`: delete one drawing object. */
+export function executeDeleteDrawingObject(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
+  const args = argsOf(job);
+  const nodeId = reqStr(job, args, "node_id");
+  const objectId = reqStr(job, args, "object_id");
+  const state = deps.getState();
+  const node = drawingSheet(job, state, nodeId);
+  drawingObject(job, node, objectId);
+  need(job, deps.deleteDrawingObject, "delete a drawing object")(nodeId, objectId);
+  return { result: { project_id: job.project_id, node_id: nodeId, object_id: objectId, deleted: true } };
+}
+
+/** `titer_arrange_drawing_objects`: reorder, copy, group/ungroup or
+ *  delete the selected drawing objects. */
+export function executeArrangeDrawingObjects(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
+  const args = argsOf(job);
+  const nodeId = reqStr(job, args, "node_id");
+  const op = reqStr(job, args, "op");
+  if (!(ARRANGE_OPS as readonly string[]).includes(op))
+    throw jobErr(job, `“op” must be one of ${ARRANGE_OPS.join(", ")}.`);
+  if (!Array.isArray(args.object_ids) || !args.object_ids.length || !args.object_ids.every((v) => typeof v === "string"))
+    throw jobErr(job, `“object_ids” must be a non-empty list of drawing object ids.`);
+  const objectIds = [...(args.object_ids as string[])];
+  const state = deps.getState();
+  const node = drawingSheet(job, state, nodeId);
+  for (const id of objectIds) drawingObject(job, node, id);
+  need(job, deps.arrangeDrawingObjects, "arrange drawing objects")(nodeId, op as ArrangeOp, objectIds);
+  return { result: { project_id: job.project_id, node_id: nodeId, op, object_ids: objectIds } };
 }

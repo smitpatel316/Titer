@@ -620,6 +620,58 @@ export interface FloatingNote {
   y: number;
 }
 
+/** A drawing object on a graph or figure sheet (seq 238): a text box, a
+ *  shape, a line/arrow, or a picture — Prism's Insert Text / Picture /
+ *  Drawing, rendered as a DOM layer over the sheet (like floating notes).
+ *  `x`/`y`/`width`/`height` are px from the sheet's top-left, in the
+ *  sheet's own px, so objects zoom with the sheet. Array order is the
+ *  stacking order (last drawn on top); Arrange reorders it. Objects are
+ *  screen-only for now: the exporters render the Plotly figure, never this
+ *  DOM layer (see floating-notes.tsx) — export inclusion is a follow-up. */
+export type DrawingObjectKind = "text" | "rect" | "ellipse" | "line" | "arrow" | "picture";
+export const DRAWING_OBJECT_KINDS: DrawingObjectKind[] = ["text", "rect", "ellipse", "line", "arrow", "picture"];
+
+/** A picture object holds its image as a data URL, so the `.hlx` file stays
+ *  self-contained; pictures over this many bytes are refused at insert. */
+export const MAX_PICTURE_BYTES = 5_000_000;
+
+export interface DrawingObject {
+  id: string;
+  kind: DrawingObjectKind;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Text objects only: the text shown. */
+  text?: string;
+  /** Text objects only: font size in px (default 14). */
+  fontSize?: number;
+  /** The ink: a text object's color, or a shape/line's stroke. */
+  color?: string;
+  /** Shapes only: fill color, or "none" for unfilled. */
+  fill?: string;
+  /** Shapes/lines only: stroke width in px (default 1.5). */
+  strokeWidth?: number;
+  /** Pictures only: the image as a data URL (PNG/JPEG/GIF/WebP). */
+  src?: string;
+  /** Objects in a group share this id (Arrange > Group); omitted when ungrouped. */
+  groupId?: string;
+}
+
+/** What Arrange does to the selected drawing objects (seq 238): reorder
+ *  them in the stacking order, copy them, group/ungroup them, or delete
+ *  them. "delete" here is the Arrange menu's Delete, not the store's
+ *  deleteDrawingObject — same effect, one name for the menu. */
+export type ArrangeOp =
+  | "bring-to-front"
+  | "send-to-back"
+  | "bring-forward"
+  | "send-backward"
+  | "duplicate"
+  | "group"
+  | "ungroup"
+  | "delete";
+
 /** A sheet's highlight color in the Navigator: Prism lets a sheet be highlighted
  *  in a color of the user's choice, to mark it for review or draw a colleague's
  *  attention ("Highlight the pages that you want to review, or want a colleague
@@ -842,10 +894,19 @@ export interface ProjectNode {
    *  Written to the `.hlx` file with the node, so the results survive a
    *  save and reload. */
   cachedResult?: AnalysisResult;
-  /** Frozen — an analysis shows `cachedResult` and stops auto-updating
-   *  when the data change; a table can't be edited until unfrozen
-   *  (Prism's Freeze Sheet, seq 165). Analysis and table nodes only. */
+  /** Frozen — the sheet stops auto-updating when the data change (Prism's
+   *  freeze button). Analyses show `cachedResult`; graphs and figures show
+   *  their frozen data snapshot instead of the live table (seq 237). */
   frozen?: boolean;
+  /** Graph nodes only: the parent table's data as it was when the graph was
+   *  frozen — what a frozen graph draws. Omitted when unfrozen. */
+  frozenData?: TableData;
+  /** Figure nodes only: each panel graph's parent table data as it was when
+   *  the figure was frozen, by graph id. Omitted when unfrozen. */
+  frozenDataByGraph?: Record<string, TableData>;
+  /** Graph and figure nodes only: the text/drawing/picture objects on the
+   *  sheet (seq 238), in stacking order. Omitted when the sheet has none. */
+  drawingObjects?: DrawingObject[];
   /** Analysis nodes only: orphaned — the source table was deleted, so the
    *  results stay as they were and the analysis parameters cannot be changed
    *  (Prism's orphaned results). The node lives at the project root. */

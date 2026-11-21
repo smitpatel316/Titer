@@ -30,6 +30,10 @@ import type {
 /** False when the UI runs in a plain browser (`npm run web`, for development) or in the tests. */
 export const isNative = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+/** True on macOS (the Mac-only menu items, like Close All, hang off this). */
+export const isMac =
+  typeof navigator !== "undefined" && /Mac/.test(navigator.platform ?? navigator.userAgent ?? "");
+
 const win = () => getCurrentWindow();
 
 // ── Dialogs ────────────────────────────────────────────────────────────
@@ -615,6 +619,11 @@ export const applyUpdate = (path: string, version: string) =>
 /** Quits through the normal flow, as Titer ▸ Quit does: each project
  *  window asks about its unsaved changes first. */
 export const quitApp = () => invoke("quit_app");
+
+/** Closes every project window through the normal flow (seq 235): each
+ *  asks about its unsaved changes first, a Cancel stops the sequence,
+ *  and Titer itself stays open. */
+export const closeAll = () => invoke("close_all");
 
 /** Opens a URL in the default browser. Only provider authorize hosts are
  *  allowed (the shell refuses anything else) — used for OAuth sign-in, so

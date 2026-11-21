@@ -2,9 +2,9 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 60 tools: 19 read-only (list/read/job/
+// Settings → AI connections. 70 tools: 19 read-only (list/read/job/
 // activity/cloud reads + feedback + the three 1.7.4 discovery tools + the 1.8 backup list + refresh-linked-data)
-// and 41 mutating, via the L0 Rust→frontend dispatch + job queue —
+// and 51 mutating, via the L0 Rust→frontend dispatch + job queue —
 // run-analysis, build-graph, export and cloud tools included (Phase 2).
 // By default only the 5 Phase 1 read tools are advertised or callable:
 // the server-side allowlist (contract §12, `ALLOWLIST_GROUPS` below)
@@ -47,7 +47,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 60 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 70 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -1310,7 +1310,7 @@ pub async fn mcp_autostart_if_opted_in(app: AppHandle) {
 // stdio bridge is untouched — it stays a byte-forwarder (contract
 // §11.2) and naturally advertises only what the server advertises.
 //
-// Groups, not 60 checkboxes: every tool belongs to exactly one group
+// Groups, not 70 checkboxes: every tool belongs to exactly one group
 // (the unit test `allowlist_groups_cover_all_tools_once` pins the
 // inventory), so the enabled groups fully determine the advertised set.
 // The `destructive` group holds the two tools that delete data or run
@@ -1398,6 +1398,7 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
             "titer_run_analysis",
             "titer_rerun_analysis",
             "titer_freeze_analysis",
+            "titer_clone_analysis",
             "titer_simulate_data",
             "titer_apply_method",
             "titer_apply_wand",
@@ -1409,11 +1410,18 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
     AllowlistGroup {
         id: "graphs",
         label: "Build graphs and figures",
-        description: "Build, update and clone graphs; make figures and info sheets.",
+        description: "Build, update and clone graphs; make figures and info sheets; freeze graphs and figures; draw on them.",
         tools: &[
             "titer_build_graph",
             "titer_update_graph",
             "titer_clone_graph",
+            "titer_clone_figure",
+            "titer_freeze_graph",
+            "titer_freeze_figure",
+            "titer_add_drawing_object",
+            "titer_update_drawing_object",
+            "titer_delete_drawing_object",
+            "titer_arrange_drawing_objects",
             "titer_create_figure",
             "titer_update_figure",
             "titer_create_info_sheet",
@@ -2180,7 +2188,7 @@ async fn auth_middleware(
 /// the corruption hits every tool that returns non-ASCII text, not just
 /// transform-concentrations. Appending `; charset=utf-8` here, the one
 /// shared path every MCP response flows through, fixes the echo for all
-/// 60 tools. Returns the new header value, or `None` when the type is
+/// 70 tools. Returns the new header value, or `None` when the type is
 /// already labelled or is not one of the textual MCP response types.
 fn utf8_charset(content_type: &str) -> Option<String> {
     let lower = content_type.to_ascii_lowercase();
@@ -2531,6 +2539,18 @@ fn snapshot_node<'a>(snapshot: &'a serde_json::Value, id: &str, kind: &str) -> R
     let actual = node.get("type").and_then(|v| v.as_str()).unwrap_or("node");
     if actual != kind {
         return Err(format!("“{id}” is not a {kind} (it is a {actual})."));
+    }
+    Ok(node)
+}
+
+/// A snapshot node that is a graph or a figure — drawing objects (seq 238)
+/// live on either — or a plain refusal naming what it is instead.
+fn snapshot_sheet<'a>(snapshot: &'a serde_json::Value, id: &str) -> Result<&'a serde_json::Value, String> {
+    let node = find_node(snapshot, id)
+        .ok_or_else(|| format!("No node with id “{id}” in this project. Ask titer_list_projects for the ids."))?;
+    let actual = node.get("type").and_then(|v| v.as_str()).unwrap_or("node");
+    if actual != "graph" && actual != "figure" {
+        return Err(format!("“{id}” is not a graph or a figure (it is a {actual})."));
     }
     Ok(node)
 }
@@ -3033,6 +3053,21 @@ pub struct FreezeTableArgs {
     pub table_id: String,
     /// true freezes (the table can't be edited), false unfreezes it.
     pub frozen: bool,
+pub struct CloneAnalysisArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The analysis node's id, as shown by titer_list_projects.
+    pub analysis_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CloneFigureArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The figure node's id, as shown by titer_list_projects.
+    pub figure_id: String,
 }
 
 // ── Cloud tools (L9) ──
@@ -3178,6 +3213,82 @@ pub struct CloneGraphArgs {
     /// clone defaults). Omit to clear the Y values only.
     #[serde(default)]
     pub options: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct FreezeGraphArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The graph node's id, as shown by titer_list_projects.
+    pub graph_id: String,
+    /// true freezes (the graph draws its snapshot while the data change),
+    /// false unfreezes (it draws live again).
+    pub frozen: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct FreezeFigureArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The figure node's id, as shown by titer_list_projects.
+    pub figure_id: String,
+    /// true freezes (each panel draws its snapshot), false unfreezes.
+    pub frozen: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AddDrawingObjectArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The graph or figure node's id, as shown by titer_list_projects.
+    pub node_id: String,
+    /// The object: { kind, x, y, width, height, text?, fontSize?,
+    /// color?, fill?, strokeWidth?, src? }. kind is text, rect, ellipse,
+    /// line, arrow or picture; x/y/width/height are sheet px; a picture
+    /// needs src as an image data URL under 5 MB.
+    pub object: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpdateDrawingObjectArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The graph or figure node's id, as shown by titer_list_projects.
+    pub node_id: String,
+    /// The drawing object's id, as shown by titer_add_drawing_object.
+    pub object_id: String,
+    /// The fields to change (x, y, width, height, text, fontSize, color,
+    /// fill, strokeWidth, src, groupId).
+    pub patch: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteDrawingObjectArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The graph or figure node's id, as shown by titer_list_projects.
+    pub node_id: String,
+    /// The drawing object's id, as shown by titer_add_drawing_object.
+    pub object_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ArrangeDrawingObjectsArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The graph or figure node's id, as shown by titer_list_projects.
+    pub node_id: String,
+    /// What to do: bring-to-front, send-to-back, bring-forward,
+    /// send-backward, duplicate, group, ungroup or delete.
+    pub op: String,
+    /// The drawing object ids to act on.
+    pub object_ids: Vec<String>,
 }
 
 /// A multi-panel figure: the graphs, and the figure's grid/title shape.
@@ -5695,6 +5806,115 @@ pub struct CreateProjectArgs {
         }
     }
 
+    /// Clone an analysis: the sheet and nothing else (seq 236) — the
+    /// clone takes a fresh id and a uniquified name and lands right after
+    /// its source. A table's children are not copied; Duplicate Family is
+    /// the tool for that.
+    #[tool(
+        name = "titer_clone_analysis",
+        description = "Clone an analysis: the sheet and nothing else, right after its source with a fresh id and a uniquified name.",
+        annotations(
+            title = "Clone analysis",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn clone_analysis(
+        &self,
+        Parameters(args): Parameters<CloneAnalysisArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "analysis_id": args.analysis_id });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            {
+                let snapshots = self.state.snapshots();
+                let snap = snapshots.get(&project_id).ok_or_else(|| {
+                    format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+                })?;
+                snapshot_node(snap, &args.analysis_id, "analysis")?;
+            }
+            let job = self.state.enqueue_job(
+                &project_id,
+                "clone-analysis",
+                serde_json::json!({ "analysis_id": args.analysis_id }),
+                serde_json::json!({ "analysis_id": args.analysis_id }),
+            )?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The analysis clone finished without reporting its analysis.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Cloning the analysis failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_clone_analysis", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_clone_analysis", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Clone a figure: the sheet and nothing else (seq 236) — the clone
+    /// takes a fresh id and a uniquified name and lands right after its
+    /// source, its panels still pointing at the same graphs.
+    #[tool(
+        name = "titer_clone_figure",
+        description = "Clone a figure: the sheet and nothing else, right after its source with a fresh id and a uniquified name; its panels still point at the same graphs.",
+        annotations(
+            title = "Clone figure",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn clone_figure(
+        &self,
+        Parameters(args): Parameters<CloneFigureArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "figure_id": args.figure_id });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            {
+                let snapshots = self.state.snapshots();
+                let snap = snapshots.get(&project_id).ok_or_else(|| {
+                    format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+                })?;
+                snapshot_node(snap, &args.figure_id, "figure")?;
+            }
+            let job = self.state.enqueue_job(
+                &project_id,
+                "clone-figure",
+                serde_json::json!({ "figure_id": args.figure_id }),
+                serde_json::json!({ "figure_id": args.figure_id }),
+            )?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The figure clone finished without reporting its figure.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Cloning the figure failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_clone_figure", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_clone_figure", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
     // ── Graphs, figures, info sheets (L6, inventory §3.4) ──────────
     // Each tool enqueues a job for the target window's frontend
     // dispatcher (`build-graph`, `update-graph`, …) and waits for its
@@ -5851,6 +6071,324 @@ pub struct CreateProjectArgs {
             }
             Err(e) => {
                 self.state.log_call("titer_clone_graph", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Freeze (or unfreeze) a graph (seq 237): a frozen graph draws its
+    /// snapshot while the data change; unfreezing draws live again.
+    #[tool(
+        name = "titer_freeze_graph",
+        description = "Freeze (or unfreeze) a graph: a frozen graph draws its snapshot while the data change; unfreezing draws live again.",
+        annotations(
+            title = "Freeze graph",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn freeze_graph(
+        &self,
+        Parameters(args): Parameters<FreezeGraphArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "graph_id": args.graph_id, "frozen": args.frozen });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            {
+                let snapshots = self.state.snapshots();
+                let snap = snapshots.get(&project_id).ok_or_else(|| {
+                    format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+                })?;
+                snapshot_node(snap, &args.graph_id, "graph")?;
+            }
+            let job = self.state.enqueue_job(
+                &project_id,
+                "freeze-graph",
+                serde_json::json!({ "graph_id": args.graph_id, "frozen": args.frozen }),
+                serde_json::json!({ "graph_id": args.graph_id }),
+            )?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The graph freeze finished without reporting.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Freezing the graph failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_freeze_graph", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_freeze_graph", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Freeze (or unfreeze) a figure (seq 237): a frozen figure draws
+    /// each panel from its snapshot.
+    #[tool(
+        name = "titer_freeze_figure",
+        description = "Freeze (or unfreeze) a figure: a frozen figure draws each panel from its snapshot; unfreezing draws live again.",
+        annotations(
+            title = "Freeze figure",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn freeze_figure(
+        &self,
+        Parameters(args): Parameters<FreezeFigureArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "figure_id": args.figure_id, "frozen": args.frozen });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            {
+                let snapshots = self.state.snapshots();
+                let snap = snapshots.get(&project_id).ok_or_else(|| {
+                    format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+                })?;
+                snapshot_node(snap, &args.figure_id, "figure")?;
+            }
+            let job = self.state.enqueue_job(
+                &project_id,
+                "freeze-figure",
+                serde_json::json!({ "figure_id": args.figure_id, "frozen": args.frozen }),
+                serde_json::json!({ "figure_id": args.figure_id }),
+            )?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The figure freeze finished without reporting.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Freezing the figure failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_freeze_figure", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_freeze_figure", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Add a text/drawing/picture object to a graph or figure sheet
+    /// (seq 238). The id is assigned by the frontend and returned.
+    #[tool(
+        name = "titer_add_drawing_object",
+        description = "Add a text/drawing/picture object to a graph or figure sheet: object is { kind, x, y, width, height, text?, fontSize?, color?, fill?, strokeWidth?, src? }; kind is text, rect, ellipse, line, arrow or picture; x/y/width/height are sheet px; a picture needs src as an image data URL under 5 MB. Returns the new object_id.",
+        annotations(
+            title = "Add drawing object",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn add_drawing_object(
+        &self,
+        Parameters(args): Parameters<AddDrawingObjectArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "node_id": args.node_id, "object_given": true });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            {
+                let snapshots = self.state.snapshots();
+                let snap = snapshots.get(&project_id).ok_or_else(|| {
+                    format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+                })?;
+                snapshot_sheet(snap, &args.node_id)?;
+            }
+            let job = self.state.enqueue_job(
+                &project_id,
+                "add-drawing-object",
+                serde_json::json!({ "node_id": args.node_id, "object": args.object }),
+                serde_json::json!({ "node_id": args.node_id }),
+            )?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "Adding the drawing object finished without reporting it.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Adding the drawing object failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_add_drawing_object", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_add_drawing_object", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Change one drawing object (seq 238): `patch` is the fields to
+    /// change (x, y, width, height, text, fontSize, color, fill,
+    /// strokeWidth, src, groupId).
+    #[tool(
+        name = "titer_update_drawing_object",
+        description = "Change one drawing object on a graph or figure sheet: patch is the fields to change (x, y, width, height, text, fontSize, color, fill, strokeWidth, src, groupId).",
+        annotations(
+            title = "Update drawing object",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn update_drawing_object(
+        &self,
+        Parameters(args): Parameters<UpdateDrawingObjectArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "node_id": args.node_id, "object_id": args.object_id, "patch_given": true });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            {
+                let snapshots = self.state.snapshots();
+                let snap = snapshots.get(&project_id).ok_or_else(|| {
+                    format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+                })?;
+                snapshot_sheet(snap, &args.node_id)?;
+            }
+            let job = self.state.enqueue_job(
+                &project_id,
+                "update-drawing-object",
+                serde_json::json!({ "node_id": args.node_id, "object_id": args.object_id, "patch": args.patch }),
+                serde_json::json!({ "node_id": args.node_id, "object_id": args.object_id }),
+            )?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "Updating the drawing object finished without reporting.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Updating the drawing object failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_update_drawing_object", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_update_drawing_object", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Delete one drawing object (seq 238).
+    #[tool(
+        name = "titer_delete_drawing_object",
+        description = "Delete one drawing object from a graph or figure sheet.",
+        annotations(
+            title = "Delete drawing object",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn delete_drawing_object(
+        &self,
+        Parameters(args): Parameters<DeleteDrawingObjectArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "node_id": args.node_id, "object_id": args.object_id });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            {
+                let snapshots = self.state.snapshots();
+                let snap = snapshots.get(&project_id).ok_or_else(|| {
+                    format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+                })?;
+                snapshot_sheet(snap, &args.node_id)?;
+            }
+            let job = self.state.enqueue_job(
+                &project_id,
+                "delete-drawing-object",
+                serde_json::json!({ "node_id": args.node_id, "object_id": args.object_id }),
+                serde_json::json!({ "node_id": args.node_id, "object_id": args.object_id }),
+            )?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "Deleting the drawing object finished without reporting.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Deleting the drawing object failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_delete_drawing_object", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_delete_drawing_object", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Rearrange drawing objects (seq 238): bring-to-front, send-to-back,
+    /// bring-forward, send-backward, duplicate, group, ungroup or delete.
+    #[tool(
+        name = "titer_arrange_drawing_objects",
+        description = "Arrange drawing objects on a graph or figure sheet: op is bring-to-front, send-to-back, bring-forward, send-backward, duplicate, group, ungroup or delete; object_ids are the objects to act on.",
+        annotations(
+            title = "Arrange drawing objects",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn arrange_drawing_objects(
+        &self,
+        Parameters(args): Parameters<ArrangeDrawingObjectsArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "node_id": args.node_id, "op": args.op, "object_ids": args.object_ids });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            {
+                let snapshots = self.state.snapshots();
+                let snap = snapshots.get(&project_id).ok_or_else(|| {
+                    format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+                })?;
+                snapshot_sheet(snap, &args.node_id)?;
+            }
+            let job = self.state.enqueue_job(
+                &project_id,
+                "arrange-drawing-objects",
+                serde_json::json!({ "node_id": args.node_id, "op": args.op, "object_ids": args.object_ids }),
+                serde_json::json!({ "node_id": args.node_id, "op": args.op }),
+            )?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "Arranging the drawing objects finished without reporting.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Arranging the drawing objects failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_arrange_drawing_objects", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_arrange_drawing_objects", call_args, false, Some(&e));
                 Err(e)
             }
         }
@@ -7320,8 +7858,8 @@ impl TiterMcpServer {
         // Inspector 2.13.0 discards tools whose outputSchema has no `type`
         // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
         // returns, so `tools/list` prints `{"tools": []}` even though the
-        // server returns all 60. Every tool returns a JSON object, so stamp
-        // `type: "object"` on all 60 output schemas here — the single choke
+        // server returns all 70. Every tool returns a JSON object, so stamp
+        // `type: "object"` on all 70 output schemas here — the single choke
         // point — instead of touching each tool. `Arc::make_mut`
         // clone-on-writes: rmcp caches the `Value` schema in a thread-local
         // cache shared by all tools, so the cached Arc must never be
@@ -7620,10 +8158,10 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes up to 60 tools, gated by the allowlist in Settings → AI Connections \
+                It exposes up to 70 tools, gated by the allowlist in Settings → AI Connections \
                 (contract §12): by default only the 6 read tools below are enabled, and the user \
                 can enable more groups there — a tool that is not listed cannot be called. \
-                19 of the 60 are read-only and 40 change the open project. \
+                19 of the 70 are read-only and 51 change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_project_summary (the same discovery, as counts plus ids and names), \
                 titer_search (find a node by name), \
@@ -9338,6 +9876,15 @@ mod tests {
                             "rows": [["1", "5", "6"], ["2", "7", "8"], ["3", "9", "10"]],
                         }
                     },
+                    "g1": {
+                        "id": "g1", "type": "graph", "name": "Dose graph",
+                        "parentId": "t1", "graphType": "scatter"
+                    },
+                    "f1": {
+                        "id": "f1", "type": "figure", "name": "Figure 1",
+                        "parentId": null,
+                        "panels": [{ "graphId": "g1", "row": 0, "col": 0 }]
+                    },
                 },
             }),
         );
@@ -9674,7 +10221,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 60 tools, so it enables every group first.
+        // this test drives all 70 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -9727,8 +10274,11 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            60,
-            "five Phase 1 tools + three job tools + three L1 read-only tools + seven L2 project tools + ten L3 table tools + three L4 analysis tools (run, re-run, freeze) +
+        assert_eq!(
+            names.len(),
+            70,
+            "six read tools + four read-more tools + three discovery tools + seven project tools + ten table tools + ten analysis tools (incl. three job tools) + fourteen graph/figure/info-sheet/drawing tools + five export tools + nine cloud tools + two destructive tools: {names:?}"
+        );
         );
         for name in ["titer_list_backups"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -9764,7 +10314,18 @@ mod tests {
         ] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
-        for name in ["titer_run_analysis", "titer_rerun_analysis", "titer_freeze_analysis"] {
+        for name in ["titer_run_analysis", "titer_rerun_analysis", "titer_freeze_analysis", "titer_clone_analysis"] {
+            assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
+        }
+        for name in [
+            "titer_clone_figure",
+            "titer_freeze_graph",
+            "titer_freeze_figure",
+            "titer_add_drawing_object",
+            "titer_update_drawing_object",
+            "titer_delete_drawing_object",
+            "titer_arrange_drawing_objects",
+        ] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
         for name in ["titer_get_analysis_params", "titer_search", "titer_project_summary"] {
@@ -10361,6 +10922,58 @@ mod tests {
             call_raw_text(&freeze_gone)
         );
 
+        // freeze-graph (seq 237): the completer answers the freeze-graph
+        // job; the tool returns the flag. Freezing an unknown graph is a
+        // plain error before anything is enqueued.
+        let graph_freezer = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            for job in graph_freezer.take_jobs("project-1") {
+                if job.action != "freeze-graph" {
+                    continue;
+                }
+                let _ = graph_freezer.complete_job(
+                    "project-1",
+                    &job.job_id,
+                    JobStatus::Done,
+                    Some(json!({ "project_id": "project-1", "graph_id": "g1", "frozen": true })),
+                    None,
+                    Some(json!({ "graph_id": "g1" })),
+                );
+            }
+        });
+        let (graph_frozen, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                30,
+                "titer_freeze_graph",
+                json!({ "project_id": "project-1", "graph_id": "g1", "frozen": true }),
+            ),
+        )
+        .await;
+        assert_eq!(call_text(&graph_frozen)["frozen"], true);
+        assert_eq!(call_text(&graph_frozen)["graph_id"], "g1");
+        assert_eq!(call_text(&graph_frozen)["project_id"], "project-1");
+        let (graph_gone, _) = mcp_post(
+            &client,
+            &url,
+            Some(&session),
+            tools_call(
+                31,
+                "titer_freeze_graph",
+                json!({ "project_id": "project-1", "graph_id": "g9", "frozen": true }),
+            ),
+        )
+        .await;
+        assert_eq!(graph_gone["result"]["isError"], true);
+        assert!(
+            call_raw_text(&graph_gone).contains("No node with id"),
+            "freeze-graph unknown: {}",
+            call_raw_text(&graph_gone)
+        );
+
         // A create job that fails (the frontend's param validation, e.g.)
         // surfaces its error as the tool's error — no run is enqueued.
         let failer = state.clone();
@@ -10851,7 +11464,7 @@ mod tests {
 
     #[test]
     fn allowlist_groups_cover_all_tools_once() {
-        // The inventory pin: every tool in exactly one group, 60 total.
+        // The inventory pin: every tool in exactly one group, 70 total.
         // A lane that adds a tool must assign it a group here, or this
         // fails — an ungrouped tool would otherwise be silently hidden.
         // The count alone did not catch that (four tools shipped ungrouped
@@ -10859,7 +11472,7 @@ mod tests {
         // the part that actually catches it.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 60, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 70, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
@@ -10934,7 +11547,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 60, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 70, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema

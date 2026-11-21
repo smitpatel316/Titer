@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useProjectStore, type ProjectNode } from "./use-project-store";
 import { parseProjectText, serializeProjectFile, PROJECT_FILE_EXTENSION } from "../lib/project-file";
+import { extractFamily } from "../lib/family";
 import {
   extractMethod,
   formatMethodReport,
@@ -759,6 +760,67 @@ export function useDocument() {
       await native.alert(
         "Couldn't Save Project",
         `“${name}” couldn't be saved there (${err}). Try Save As… another folder.`,
+        "error",
+      );
+      return false;
+    }
+  };
+
+  // ── Save a Copy / Save Family As (seq 233/234) ───────────────────────
+  // Both write a `.hlx` file and leave this window exactly as it was: the
+  // current file path, the dirty flag and the revision are untouched, so
+  // the next Save still goes to the file this project came from. A copy is
+  // the whole project; a family is one table's family (see lib/family.ts).
+  // Neither prompts for a format (a `.prism`-origin project copies as
+  // `.hlx`, like Save As would after the prompt) and neither clears the
+  // Prism-origin nudge — the next real Save still asks, as before.
+  const saveCopy = async (): Promise<boolean> => {
+    const target = await native.pickSavePath(
+      "Save a Copy",
+      filePath ? `${fileTitle(filePath)} copy.${PROJECT_FILE_EXTENSION}` : `${untitled} copy.${PROJECT_FILE_EXTENSION}`,
+      "Titer Project",
+      PROJECT_FILE_EXTENSION,
+    );
+    if (!target) return false;
+    const s = latest.current.get();
+    try {
+      await native.writeFile(target, serializeProjectFile(s));
+      addRecent({ kind: "local", path: target });
+      return true;
+    } catch (err) {
+      await native.alert(
+        "Couldn't Save a Copy",
+        `“${fileName(target)}” couldn't be saved there (${err}). Try another folder.`,
+        "error",
+      );
+      return false;
+    }
+  };
+
+  const saveFamilyAs = async (): Promise<boolean> => {
+    const s = latest.current.get();
+    // The active table: the active node itself, or its parent (as the
+    // store's `activeTableId` derives it — the state holds only the node).
+    const activeNode = s.activeNodeId ? s.nodes[s.activeNodeId] : undefined;
+    const tableId = activeNode ? (activeNode.type === "table" ? activeNode.id : activeNode.parentId) : null;
+    const family = tableId ? extractFamily(s, tableId) : null;
+    if (!family) return false;
+    const table = s.nodes[tableId!];
+    const target = await native.pickSavePath(
+      "Save Family As",
+      `${(table?.name ?? "Family").replaceAll("/", "-")}.${PROJECT_FILE_EXTENSION}`,
+      "Titer Project",
+      PROJECT_FILE_EXTENSION,
+    );
+    if (!target) return false;
+    try {
+      await native.writeFile(target, serializeProjectFile(family));
+      addRecent({ kind: "local", path: target });
+      return true;
+    } catch (err) {
+      await native.alert(
+        "Couldn't Save Family",
+        `“${fileName(target)}” couldn't be saved there (${err}). Try another folder.`,
         "error",
       );
       return false;
@@ -2276,6 +2338,8 @@ export function useDocument() {
 
   return {
     save,
+    saveCopy,
+    saveFamilyAs,
     saveTemplate,
     applyMethod,
     applyTemplate,

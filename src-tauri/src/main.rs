@@ -78,6 +78,13 @@ struct ProjectWindows {
     /// the sequence. Cleared when that window is destroyed, or by
     /// `cancel_quit`.
     quit_closing: Option<String>,
+    /// A close-all-driven close is in flight (seq 235, File ▸ Close All):
+    /// like `quit_closing`, but the label of the project window that has
+    /// been asked to close while Titer waits for its answer. Cleared when
+    /// that window is destroyed, or by `cancel_quit`. Unlike a quit, Titer
+    /// itself stays open when the last one goes.
+    closing_all: bool,
+    close_all_closing: Option<String>,
 }
 
 impl Opening {
@@ -332,6 +339,32 @@ fn close_next_project_window(app: &AppHandle) -> bool {
     true
 }
 
+/// Asks ONE project window to close (the lowest label), as the next step of a
+/// close-all: the same one-at-a-time rule as a quit (asking all of them at
+/// once raced their native save dialogs — bugfix/quit-save-dialog).
+/// Returns false when there is no window to close, one is already being
+/// closed, or no close-all is in flight.
+fn close_next_for_close_all(app: &AppHandle) -> bool {
+    let Some(label) = project_labels(app).into_iter().next() else {
+        return false;
+    };
+    let Some(window) = app.get_webview_window(&label) else {
+        return false;
+    };
+    // Check and set under one lock, as the quit's version does: a `cancel_quit`
+    // that landed after the close-all was marked must stop the sequence
+    // before another window is asked.
+    let state = app.state::<Projects>();
+    let mut projects = state.0.lock().unwrap();
+    if !projects.closing_all || projects.close_all_closing.is_some() {
+        return false;
+    }
+    projects.close_all_closing = Some(label);
+    drop(projects);
+    let _ = window.close();
+    true
+}
+
 /// Analysis ▸ Apply Method…: the Open panel for a method file (`.pzm`).
 /// Non-blocking, like choose_prism_file (a blocking picker deadlocked the
 /// app Nov 9): the event carries the path, or null on Cancel, so the page
@@ -367,11 +400,33 @@ fn choose_merge_file(app: AppHandle, window: WebviewWindow) {
 }
 
 /// A window refused to close (its user chose Cancel): Titer doesn't quit after all.
+/// The same cancel stops a close-all in flight, so the rest stay open.
 #[tauri::command]
 fn cancel_quit(projects: State<Projects>) {
     let mut projects = projects.0.lock().unwrap();
     projects.quitting = false;
     projects.quit_closing = None;
+    projects.closing_all = false;
+    projects.close_all_closing = None;
+}
+
+/// Closes every project window through the normal flow (seq 235), as File ▸
+/// Close All does: mark the close-all, close the project windows one at a
+/// time (each asks about its unsaved changes), and Titer stays open once
+/// the last one is gone. A window whose user cancels the close calls
+/// `cancel_quit`, which clears the flag, so the rest stay open. A quit in
+/// flight wins over a close-all.
+#[tauri::command]
+fn close_all(app: AppHandle) {
+    {
+        let state = app.state::<Projects>();
+        let mut projects = state.0.lock().unwrap();
+        if projects.quitting {
+            return;
+        }
+        projects.closing_all = true;
+    }
+    let _ = close_next_for_close_all(&app);
 }
 
 /// Quits through the normal flow, as the macOS quit hook does: mark the
@@ -379,9 +434,16 @@ fn cancel_quit(projects: State<Projects>) {
 /// unsaved changes), and the run loop ends Titer once the last one is gone.
 /// Used by the updater after staging a relaunch. A window whose user cancels
 /// the quit calls `cancel_quit`, which clears the flag, so Titer stays.
+/// A close-all in flight is abandoned first — the quit takes over the sequence.
 #[tauri::command]
 fn quit_app(app: AppHandle) {
-    app.state::<Projects>().0.lock().unwrap().quitting = true;
+    {
+        let state = app.state::<Projects>();
+        let mut projects = state.0.lock().unwrap();
+        projects.closing_all = false;
+        projects.close_all_closing = None;
+        projects.quitting = true;
+    }
     if !close_next_project_window(&app) && project_labels(&app).is_empty() {
         app.exit(0);
     }
@@ -1223,7 +1285,15 @@ fn ask_before_quitting_macos(app: &AppHandle) {
         if !windows_exist {
             return 1; // NSTerminateNow
         }
-        app.state::<Projects>().0.lock().unwrap().quitting = true;
+        // A close-all in flight is abandoned first — the quit takes over
+        // the sequence (see `quit_app`).
+        {
+            let state = app.state::<Projects>();
+            let mut projects = state.0.lock().unwrap();
+            projects.closing_all = false;
+            projects.close_all_closing = None;
+            projects.quitting = true;
+        }
         // One window at a time: asking all of them at once raced their
         // native save dialogs (bugfix/quit-save-dialog). The Destroyed
         // handler asks the next one once this one is gone.
@@ -1564,6 +1634,7 @@ fn main() {
             choose_method_file,
             choose_merge_file,
             cancel_quit,
+            close_all,
             quit_app,
             updater::fetch_channel_manifest,
             updater::download_update,
@@ -1650,12 +1721,18 @@ fn main() {
                 projects.documents.remove(&label);
                 projects.openings.remove(&label);
                 let quitting = projects.quitting;
+                let closing_all = projects.closing_all;
                 // Only the window the quit sequence asked to close advances
                 // it; a window the user closed by hand meanwhile leaves the
-                // sequence waiting on its own window's answer.
+                // sequence waiting on its own window's answer. The same
+                // rule holds for a close-all (seq 235).
                 let advance = quitting && projects.quit_closing.as_deref() == Some(label.as_str());
+                let advance_all = closing_all && projects.close_all_closing.as_deref() == Some(label.as_str());
                 if advance {
                     projects.quit_closing = None;
+                }
+                if advance_all {
+                    projects.close_all_closing = None;
                 }
                 drop(projects);
                 // BUG-22: the MCP snapshot registry is Rust-side state too —
@@ -1669,6 +1746,11 @@ fn main() {
                     if quitting {
                         app.exit(0);
                     } else {
+                        // The last window of a close-all is gone: the
+                        // sequence ends (Titer stays open, unlike a quit).
+                        if closing_all {
+                            app.state::<Projects>().0.lock().unwrap().closing_all = false;
+                        }
                         // Titer stays open: the engine window sets the menu bar for no window.
                         let _ = app.emit_to("engine", "no-windows", ());
                     }
@@ -1677,6 +1759,11 @@ fn main() {
                     // (close_next_project_window re-checks `quitting`, so a
                     // cancel that landed meanwhile stops the sequence.)
                     let _ = close_next_project_window(app);
+                } else if advance_all {
+                    // The close-all's current window is gone: ask the next one.
+                    // (close_next_for_close_all re-checks `closing_all`, so a
+                    // cancel that landed meanwhile stops the sequence.)
+                    let _ = close_next_for_close_all(app);
                 }
             }
             // A click on the Dock icon while no window is open: a new project.

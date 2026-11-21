@@ -31,9 +31,10 @@
 // (binomial-test), 203 (distribution equations), 204 (tails + targets),
 // 205 (arithmetic transforms), 206 (column math), 228 (scripts in
 // project file + runOnOpen), 230 (paste-transposed edit op), Mansi-3
-// (sigDisplay pvalue-eq). Counts moved with the tip: 60 tools (was 57; 58
-// since seq 226 list-backups; 59 since seq 168 refresh-linked-data; 60
-// since seq 180 merge-project),
+// (sigDisplay pvalue-eq). Counts moved with the tip: 70 tools (was 57
+// per the old pin, which lagged the registry by two since seq 179
+// export-all-graphs — the registry was 62, not 60, after seq 180
+// merge-project; 70 since seq 232–239 menus batch B),
 // 61 AnalysisType variants / schema keys / runner keys (was 54; 60 since
 // seq 177 select-transform; 61 since #46 compare-slopes).
 // ONE correction vs the audit stands: row 178 said GAP, but Compact
@@ -250,7 +251,7 @@ const scopeText = (scope: string): string => {
   }
 };
 
-const EXPECTED_TOOL_COUNT = 60;
+const EXPECTED_TOOL_COUNT = 70;
 const EXPECTED_ANALYSIS_TYPES = 61;
 const META_OFFERINGS = new Set(["compare-many-groups", "interpolate", "transform"]);
 
@@ -721,7 +722,7 @@ const ROWS: Row[] = [
     item: "1.7.4 allowlist",
     title: "1.7.4 allowlist groups",
     status: "covered",
-    note: "10 groups covering all 60 tools exactly once; default = read group only.",
+    note: "10 groups covering all 70 tools exactly once; default = read group only.",
     checks: [{ kind: "invariant", name: "allowlist" }],
   },
   {
@@ -1228,22 +1229,22 @@ const ROWS: Row[] = [
   {
     item: "236",
     title: "Duplicate Current Sheet",
-    status: "gap",
-    note: "Partial: tables ✓ (duplicate_table_family), graphs ✓ (clone_graph); analyses ✗ (no clone_analysis) and figures ✗ (no clone_figure).",
+    status: "covered",
+    note: "Merged on check/v18: Duplicate Current Sheet (duplicateNode — one sheet, nothing else, right after its source) + titer_clone_analysis / titer_clone_figure through the job queue; tables already had duplicate_table_family, graphs clone_graph.",
     checks: [{ kind: "sourceContainsRe", scope: "src", re: "clone_analysis|clone_figure" }],
   },
   {
     item: "237",
     title: "Freeze/Unfreeze graphs",
-    status: "gap",
-    note: "Not built. No freeze-graph feature (only titer_freeze_analysis for analyses).",
+    status: "covered",
+    note: "Merged on check/v18: setGraphFrozen — freezing a graph snapshots the table data it draws (editing the table leaves the snapshot alone); freezing a figure snapshots each panel's table; unfreezing clears it; survives save/load, and a frozen node with no snapshot is unfrozen on load. titer_freeze_graph / titer_freeze_figure through the job queue.",
     checks: [{ kind: "sourceContainsRe", scope: "src", re: "freeze-?graph" }],
   },
   {
     item: "238",
     title: "Text/drawing/picture objects + Arrange",
-    status: "gap",
-    note: "Not built. No objects support.",
+    status: "covered",
+    note: "Merged on check/v18: drawing objects on graph/figure sheets (text, rect, line, arrow, ellipse, image) — add, move, edit, group/ungroup, bring-forward/send-backward, duplicate, delete; titer_add_drawing_object / titer_update_drawing_object / titer_delete_drawing_object / titer_arrange_drawing_objects through the job queue; persisted in the project file.",
     checks: [{ kind: "sourceContainsRe", scope: "src", re: "drawingObject|textObject|pictureObject" }],
   },
   {
