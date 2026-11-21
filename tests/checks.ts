@@ -17276,6 +17276,153 @@ check("an imported project round-trips through the .hlx format", () => {
   ]);
 });
 
+import { parsePzf } from "../src/lib/pzf";
+
+// ── Prism (.pzf) import, seq 218 ───────────────────────────────────────
+// The legacy binary format Prism 4/5 wrote (magic `PCFFGRA4`). No public
+// spec exists and no open-source reader reads it — the grammar below was
+// reverse-engineered from the two real files in tests/testdata/, byte by
+// byte, and cross-checked against the files' own stored results (the WT
+// control normalises to exactly 100, and the stored ANOVA F matches the
+// data only when the struck-through value is excluded — see the pins).
+//
+// Fixtures (public data, downloaded from Zenodo; md5s verified against the
+// record pages — the record pages state no file licence, so none is claimed
+// here; both source papers are CC-BY journals):
+//   aggregates-size.pzf — "aggregates size.pzf", Zenodo record 4106643
+//     (Identification and Characterization of Planktonic Biofilm-Like
+//     Aggregates in Infected Synovial Fluids From Joint Infections,
+//     Frontiers, 2020), md5 66265d2960c7a5c984631c4771821865.
+//   ert-in-vitro.pzf — "ERT in vitro.pzf", Zenodo record 21069028
+//     (Data from: PLGA‑encapsulated cross‑linked GALC aggregates…,
+//     Int J Biomaterials 2026), md5 cbf73cc1f64c29d887c0388d029e0f3d.
+
+const pzfFile = (name: string) => parsePzf(readFileSync(new URL(`./testdata/${name}.pzf`, import.meta.url)));
+const pzfTable = (imported: ReturnType<typeof parsePzf>, name: string) => {
+  const node = imported.project.rootOrder.map((id) => imported.project.nodes[id]).find((n) => n?.type === "table" && n.name === name);
+  if (!node || node.type !== "table") throw new Error(`${name}: no table node`);
+  return node;
+};
+const pzfColSum = (table: ReturnType<typeof pzfTable>, ci: number) =>
+  table.data!.rows.reduce((sum, row) => sum + (row[ci] == null ? 0 : Number(row[ci])), 0);
+
+check(".pzf import reads a Column table (aggregates size)", () => {
+  const imported = pzfFile("aggregates-size");
+  ok(!imported.issues.some((i) => i.severity === "error"), "no errors");
+  deepStrictEqual(imported.tables, ["Data 1"]);
+  const table = pzfTable(imported, "Data 1");
+  strictEqual(table.tableType, "column");
+  deepStrictEqual(table.data!.columns, ["Title", "Sau1", "Sau2", "Sau3", "Sau4", "Slugd"]);
+  strictEqual(table.data!.rows.length, 67);
+  deepStrictEqual(table.data!.rows[0], [null, "4", "7", "10", "21", "1"]);
+  strictEqual(pzfColSum(table, 1), 141);
+  strictEqual(pzfColSum(table, 2), 237);
+  strictEqual(pzfColSum(table, 3), 89);
+  strictEqual(pzfColSum(table, 4), 529);
+  strictEqual(pzfColSum(table, 5), 163);
+  ok(imported.issues.some((i) => i.message.includes("doesn't record the table type")), "says the table type is unverified");
+  deepStrictEqual(imported.infoSheets, ["Project info 1"]);
+  const info = imported.project.rootOrder.map((id) => imported.project.nodes[id]).find((n) => n?.type === "info");
+  strictEqual(info?.info?.constants.length, 6);
+  strictEqual(info?.info?.constants.find((c) => c.name === "Experiment Date")?.value, "25/03/2020");
+});
+
+check(".pzf import reads three tables with excluded cells (ERT)", () => {
+  const imported = pzfFile("ert-in-vitro");
+  ok(!imported.issues.some((i) => i.severity === "error"), "no errors");
+  deepStrictEqual(imported.tables, ["Exp 2 norm", "Exp 1 + 2 norm", "Exp 1 norm"]);
+  const combined = pzfTable(imported, "Exp 1 + 2 norm");
+  // Trailing spaces in titles are preserved, never trimmed (BUG-4/BUG-7).
+  deepStrictEqual(combined.data!.columns, [
+    "Title",
+    "NPs-CLEAs D1 ",
+    "NPs-CLEAs D2",
+    "NPs-CLEAs D3",
+    "NPs-CLEAs D4",
+    "GALC 1",
+    "GALC 2",
+    "GALC 3",
+    "GALC 4",
+    "HOM NT",
+    "WT",
+  ]);
+  strictEqual(combined.data!.rows.length, 7);
+  strictEqual(combined.data!.rows[0]![5], "9281.938");
+  strictEqual(combined.data!.rows[1]![5], "23866.54");
+  // The struck-through value stays in the table but excluded from analysis:
+  // row 1 of GALC 1 (the 5th data column) is excluded.
+  ok(combined.data!.excluded?.includes("1,5"), `excluded should hold 1,5, got ${combined.data!.excluded}`);
+  // The WT control normalises to 100 — a wrong parse would give a random
+  // mean. The stored f32s land within 4e-6 of it (the values are 74.132,
+  // 125.868, 100.867, 99.133 to 3 decimals), so the tolerance is 1e-5.
+  const wt = combined.data!.rows.map((r) => (r[10] == null ? null : Number(r[10]))).filter((v): v is number => v != null);
+  close(wt.reduce((a, b) => a + b, 0) / wt.length, 100, 1e-5, "WT mean");
+  // The GALC 1 mean excluding the struck-through value is 9743.872; with
+  // the struck value in it would be 13274.539 — so this pins flag 3 =
+  // excluded, which the stored ANOVA F (21.9297) independently confirms.
+  const galc1 = combined.data!.rows.map((r) => (r[5] == null ? null : Number(r[5]))).filter((v): v is number => v != null);
+  const excluded = new Set(combined.data!.excluded?.map((e) => Number(e.split(",")[0])));
+  const kept = combined.data!.rows
+    .map((r, i) => (excluded.has(i) || r[5] == null ? null : Number(r[5])))
+    .filter((v): v is number => v != null);
+  close(kept.reduce((a, b) => a + b, 0) / kept.length, 9743.872, 0.01, "GALC 1 mean without the struck value");
+  strictEqual(galc1.length, 4, "GALC 1 has four present values");
+  // Cross-table identity: the same measurements appear bit-identical in two
+  // tables each — a wrong parse could not reproduce identical values across
+  // independent copies.
+  const exp1 = pzfTable(imported, "Exp 1 norm");
+  const exp2 = pzfTable(imported, "Exp 2 norm");
+  deepStrictEqual(exp1.data!.rows.slice(0, 2).map((r) => r[1]), combined.data!.rows.slice(0, 2).map((r) => r[1]));
+  deepStrictEqual(exp2.data!.rows.map((r) => r[1]), combined.data!.rows.slice(5, 7).map((r) => r[1]));
+  // Ragged columns pad with null: HOM NT has 4 values in Exp 1, the rest 2.
+  strictEqual(exp1.data!.rows.length, 4);
+  strictEqual(exp1.data!.rows[3]![9], "-149.354");
+  strictEqual(exp1.data!.rows[2]![10], null);
+  deepStrictEqual(imported.infoSheets, ["Project info 1"]);
+  const info = imported.project.rootOrder.map((id) => imported.project.nodes[id]).find((n) => n?.type === "info");
+  strictEqual(info?.info?.constants.find((c) => c.name === "Experiment Date")?.value, "Apr-03-2025");
+});
+
+check(".pzf import refuses files that aren't .pzf", () => {
+  const bad = (bytes: Uint8Array, what: string) => {
+    const imported = parsePzf(bytes);
+    strictEqual(imported.tables.length, 0, what);
+    ok(imported.issues.some((i) => i.severity === "error"), what);
+  };
+  bad(new Uint8Array([1, 2, 3]), "random bytes");
+  bad(new TextEncoder().encode("hello, this is not a Prism file"), "plain text");
+  // A .pzfx file (XML) is not a .pzf file, and vice versa.
+  bad(new TextEncoder().encode(readFileSync("tests/testdata/column.pzfx", "utf8")), "a .pzfx file");
+  // A compact .pzf is a ZIP archive — named plainly, not parsed as binary.
+  bad(new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]), "compact (ZIP) .pzf");
+  // Magic alone, no tables: an error, not a crash and not an empty project.
+  const magicOnly = parsePzf(new TextEncoder().encode("PCFFGRA4"));
+  strictEqual(magicOnly.tables.length, 0);
+  ok(magicOnly.issues.some((i) => i.severity === "error" && i.message.includes("No tables in this file could be imported")), "magic only");
+  // Truncated mid-file: the tables that survive parse, the rest is an error.
+  const truncated = parsePzf(new Uint8Array(readFileSync(new URL("./testdata/aggregates-size.pzf", import.meta.url)).subarray(0, 1000)));
+  strictEqual(truncated.tables.length, 0);
+  ok(truncated.issues.some((i) => i.severity === "error"), "truncated file errors");
+  // Truncated mid-column (Sau1's records end at 14358): the file ends
+  // mid-column, so the whole file is refused as damaged — never a partial
+  // table that silently drops columns.
+  const cutColumn = parsePzf(new Uint8Array(readFileSync(new URL("./testdata/aggregates-size.pzf", import.meta.url)).subarray(0, 14200)));
+  strictEqual(cutColumn.tables.length, 0);
+  ok(cutColumn.issues.some((i) => i.severity === "error" && i.message.includes("damaged")), "cut mid-column is refused as damaged");
+});
+
+check(".pzf import round-trips through the .hlx format", () => {
+  const imported = pzfFile("aggregates-size");
+  const serialized = serializeProjectFile(imported.project);
+  const reparsed = parseProjectFile(JSON.parse(serialized));
+  if ("error" in reparsed) throw new Error(reparsed.error);
+  const node = reparsed.project.nodes[reparsed.project.rootOrder[0]];
+  if (!node || node.type !== "table") throw new Error("no table after round-trip");
+  deepStrictEqual(node.data!.columns, ["Title", "Sau1", "Sau2", "Sau3", "Sau4", "Slugd"]);
+  strictEqual(node.data!.rows.length, 67);
+  deepStrictEqual(node.data!.rows[0], [null, "4", "7", "10", "21", "1"]);
+});
+
 // ── Survival (log-rank) ────────────────────────────────────────────────
 // Expected numbers were computed independently in Python (first-principles
 // O−E/V plus scipy's chi-square tail), not from this code.
