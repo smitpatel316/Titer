@@ -922,9 +922,9 @@ const ROWS: Row[] = [
   {
     item: "165",
     title: "Freeze/Unfreeze tables",
-    status: "gap",
-    note: "Not built. (Freeze-title ROW is different — exposed via titer_edit_table freeze-title op.)",
-    checks: [{ kind: "sourceContainsRe", scope: "src", re: "freezeTable|freeze_table|unfreezeTable" }],
+    status: "covered",
+    note: "Merged on check/v18: frozen flag on table/analysis nodes (persisted in the project file, dropped from non-table/non-analysis sheets), titer_freeze_table + titer_freeze_analysis tools, menu/grid edit gating. (Freeze-title ROW is different — exposed via titer_edit_table freeze-title op.)",
+    checks: [{ kind: "tools", tools: ["titer_freeze_table"] }],
   },
   {
     item: "166",

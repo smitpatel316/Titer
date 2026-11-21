@@ -54,6 +54,7 @@ EXPECTED_TOOLS = [
     "titer_import_prism", "titer_import_data_file", "titer_close_project",
     # L3 tables (9)
     "titer_create_table", "titer_write_table", "titer_edit_table",
+    "titer_freeze_table",
     "titer_duplicate_table_family", "titer_rename_node", "titer_delete_node",
     "titer_reorder_nodes", "titer_undo", "titer_redo",
     # L4 analyses (3)
@@ -289,6 +290,9 @@ def main():
     frozen = tool("titer_freeze_analysis", {"project_id": pid, "analysis_id": aid, "frozen": True})
     check("freeze_analysis", frozen.get("frozen") is True)
     tool("titer_freeze_analysis", {"project_id": pid, "analysis_id": aid, "frozen": False})
+    ftab = tool("titer_freeze_table", {"project_id": pid, "table_id": tid_col, "frozen": True})
+    check("freeze_table", ftab.get("frozen") is True)
+    tool("titer_freeze_table", {"project_id": pid, "table_id": tid_col, "frozen": False})
     jobs = tool("titer_list_jobs", {"project_id": pid})
     check("list_jobs includes the run job",
           any(j.get("job_id") == job_id for j in jobs.get("jobs", [])),

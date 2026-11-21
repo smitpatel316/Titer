@@ -40,9 +40,11 @@ interface MenuContext {
   renameGroup: (column: number) => void;
   /** Shows a grouped table's Groups panel. */
   showGroups: () => void;
+  /** The table is frozen: the mutating items are disabled (seq 165). */
+  tableFrozen?: boolean;
 }
 
-export function gridMenu({ data, type, zone, range, update, rename, renameGroup, showGroups }: MenuContext): MenuItems {
+export function gridMenu({ data, type, zone, range, update, rename, renameGroup, showGroups, tableFrozen }: MenuContext): MenuItems {
   const nested = isNested(data);
   const grouped = isGrouped(data) || nested;
   const rows = range.r1 - range.r0 + 1;
@@ -53,7 +55,12 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
   const onCells = zone !== "row" && range.c0 < data.columns.length;
   const exclude = isRangeExcluded(data, range) ? "Include in Analysis" : "Exclude from Analysis";
   const items: Item[] = [
-    { text: exclude, accelerator: "CmdOrCtrl+E", action: () => update(toggleExcluded(data, range), exclude) },
+    {
+      text: exclude,
+      accelerator: "CmdOrCtrl+E",
+      enabled: !tableFrozen,
+      action: () => update(toggleExcluded(data, range), exclude),
+    },
     SEPARATOR,
     { item: "Cut" },
     { item: "Copy" },
@@ -65,6 +72,7 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
       SEPARATOR,
       {
         text: `Insert ${plural(rows, "Row")} Above`,
+        enabled: !tableFrozen,
         action: () =>
           update(insertRows(data, range.r0, rows), `Insert ${plural(rows, "Row")}`, {
             rows: rowsInserted(range.r0, rows),
@@ -72,6 +80,7 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
       },
       {
         text: `Insert ${plural(rows, "Row")} Below`,
+        enabled: !tableFrozen,
         action: () =>
           update(insertRows(data, range.r1 + 1, rows), `Insert ${plural(rows, "Row")}`, {
             rows: rowsInserted(range.r1 + 1, rows),
@@ -85,10 +94,12 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
       SEPARATOR,
       {
         text: `Insert ${plural(cols, "Column")} Left`,
+        enabled: !tableFrozen,
         action: () => update(insertColumns(data, firstData, cols, type), `Insert ${plural(cols, "Column")}`),
       },
       {
         text: `Insert ${plural(cols, "Column")} Right`,
+        enabled: !tableFrozen,
         action: () => update(insertColumns(data, range.c1 + 1, cols, type), `Insert ${plural(cols, "Column")}`),
       },
     );
@@ -102,6 +113,7 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
           : grouped && range.c0 >= leadOf(data)
             ? (type === "xy" ? "Rename Data Set" : "Rename Group")
             : "Rename Column",
+      enabled: !tableFrozen,
       action: () => rename(range.c0),
     });
     // A Nested table has two renameable levels: the subgroup above, and the
@@ -109,6 +121,7 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
     if (nested && range.c0 > 0) {
       items.push({
         text: "Rename Group",
+        enabled: !tableFrozen,
         action: () => renameGroup(range.c0),
       });
     }
@@ -118,6 +131,7 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
     items.push(SEPARATOR, {
       text: "Keep Visible When Scrolling",
       checked: Boolean(data.freezeTitle),
+      enabled: !tableFrozen,
       action: () => update({ ...data, freezeTitle: data.freezeTitle ? undefined : true }, "Keep Visible"),
     });
   }
@@ -129,6 +143,7 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
     const text = `Delete ${plural(rows, "Row")}`;
     items.push(SEPARATOR, {
       text,
+      enabled: !tableFrozen,
       action: () => update(deleteRows(data, range.r0, rows), text, { rows: rowsDeleted(range.r0, rows) }),
     });
   }
@@ -136,12 +151,13 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
     const count = Math.min(range.c1, data.columns.length - 1) - firstData + 1;
     items.push(SEPARATOR, {
       text: `Delete ${plural(count, "Column")}`,
+      enabled: !tableFrozen,
       action: () => update(deleteColumns(data, firstData, count), `Delete ${plural(count, "Column")}`),
     });
   }
   if (hasCommaDecimals(data)) {
     const text = "Convert Decimal Commas to Points";
-    items.push(SEPARATOR, { text, action: () => update(convertCommaDecimals(data), text) });
+    items.push(SEPARATOR, { text, enabled: !tableFrozen, action: () => update(convertCommaDecimals(data), text) });
   }
   return items;
 }

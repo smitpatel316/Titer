@@ -766,8 +766,9 @@ export interface ProjectNode {
    *  Written to the `.hlx` file with the node, so the results survive a
    *  save and reload. */
   cachedResult?: AnalysisResult;
-  /** Analysis nodes only: frozen — the sheet shows `cachedResult` and stops
-   *  auto-updating when the data change (Prism's freeze button). */
+  /** Frozen — an analysis shows `cachedResult` and stops auto-updating
+   *  when the data change; a table can't be edited until unfrozen
+   *  (Prism's Freeze Sheet, seq 165). Analysis and table nodes only. */
   frozen?: boolean;
   /** Analysis nodes only: orphaned — the source table was deleted, so the
    *  results stay as they were and the analysis parameters cannot be changed

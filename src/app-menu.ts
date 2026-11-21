@@ -114,6 +114,9 @@ export function useAppMenu(doc: DocumentActions) {
   }, []);
   const tableType = activeTableId ? nodes[activeTableId]?.tableType : undefined;
   const hasTable = activeTableId !== null;
+  // A frozen table takes no data edits (seq 165): the Edit menu's mutating
+  // items go quiet while it is frozen, and the Freeze item below flips it.
+  const activeTableFrozen = activeTableId ? Boolean(nodes[activeTableId]?.frozen) : false;
   // Wand needs an example: another table with ≥ 1 analysis or graph child.
   const wandAvailable = Object.values(nodes).some(
     (n) =>
@@ -267,7 +270,7 @@ export function useAppMenu(doc: DocumentActions) {
           { item: "Copy" },
           { item: "Paste" },
           sep,
-          { text: "Delete", enabled: hasTable, action: () => edit("delete") },
+          { text: "Delete", enabled: hasTable && !activeTableFrozen, action: () => edit("delete") },
           { text: "Select All", accelerator: "CmdOrCtrl+A", action: () => edit("select-all") },
           // Seq 231: the keys already select this way in the grid (Shift+Space
           // the rows, Ctrl+Space the columns); the menu names them.
@@ -285,22 +288,28 @@ export function useAppMenu(doc: DocumentActions) {
           },
           sep,
           // Seq 230: Paste Special offers Values / Transpose; Paste Transposed
-          // swaps the clipboard block's rows and columns at once.
+          // swaps the clipboard block's rows and columns at once. Both write
+          // data, so a frozen table disables them like Fill Down (seq 165).
           {
             text: "Paste Special…",
-            enabled: hasTable,
+            enabled: hasTable && !activeTableFrozen,
             action: () => edit("paste-special"),
           },
           {
             text: "Paste Transposed",
             accelerator: "CmdOrCtrl+Shift+V",
-            enabled: hasTable,
+            enabled: hasTable && !activeTableFrozen,
             action: () => edit("paste-transpose"),
           },
           sep,
-          { text: "Fill Down", accelerator: "CmdOrCtrl+D", enabled: hasTable, action: () => edit("fill-down") },
+          { text: "Fill Down", accelerator: "CmdOrCtrl+D", enabled: hasTable && !activeTableFrozen, action: () => edit("fill-down") },
           sep,
-          { text: "Exclude / Include", accelerator: "CmdOrCtrl+E", enabled: hasTable, action: () => edit("exclude") },
+          {
+            text: "Exclude / Include",
+            accelerator: "CmdOrCtrl+E",
+            enabled: hasTable && !activeTableFrozen,
+            action: () => edit("exclude"),
+          },
           sep,
           { text: "Find…", accelerator: "CmdOrCtrl+F", enabled: hasTable, action: () => edit("find") },
           { text: "Find Next", accelerator: "CmdOrCtrl+G", enabled: hasTable, action: () => edit("find-next") },
@@ -309,6 +318,14 @@ export function useAppMenu(doc: DocumentActions) {
             accelerator: "CmdOrCtrl+Shift+G",
             enabled: hasTable,
             action: () => edit("find-previous"),
+          },
+          sep,
+          {
+            // Prism's Edit ▸ Freeze Sheet (seq 165): a frozen table takes no
+            // data edits until unfrozen.
+            text: activeNode?.type === "table" && activeNode.frozen ? "Unfreeze Table" : "Freeze Table",
+            enabled: activeNode?.type === "table",
+            action: run((l, id) => l.store.setTableFrozen(id, !l.store.nodes[id]?.frozen)),
           },
         ],
       },
@@ -483,6 +500,8 @@ export function useAppMenu(doc: DocumentActions) {
     focused,
     tableType,
     hasTable,
+    activeTableFrozen,
+    activeNode?.frozen,
     wandAvailable,
     analysisKey,
     activeNodeId !== null,

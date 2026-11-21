@@ -146,11 +146,21 @@ export interface ProjectFilePayload {
 // ── Writing ──────────────────────────────────────────────────────────────
 
 export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeId, template, projectName, scripts, fileUnknowns, projectUnknowns }: ProjectFilePayload): string {
+  // A sheet only carries the flags that belong to its kind (seq 165): a
+  // frozen flag on a graph is dropped here, not written and dropped again
+  // on load — otherwise every save/load round-trip would read as updated.
+  const cleanNodes = Object.fromEntries(
+    Object.entries(nodes).map(([id, node]) => {
+      const next = { ...node };
+      if (next.type !== "table" && next.type !== "analysis") delete next.frozen;
+      return [id, next];
+    }),
+  );
   // Unknown keys go back where they came from, under the known keys — a
   // hand-edited file can't smuggle a second `nodes` or `app` past the reader.
   const project: ProjectFilePayload = {
     ...projectUnknowns,
-    nodes,
+    nodes: cleanNodes,
     rootOrder,
     childOrder,
     activeNodeId,
@@ -1639,6 +1649,10 @@ function readNode(
     node.parentId = null;
     node.transform = readTransform(n.transform);
     if (!node.transform) delete node.transform;
+    // A frozen table stays frozen (seq 165): the flag only ever means
+    // anything as `true` — anything else is a hand edit, dropped rather
+    // than trusted.
+    if (node.frozen !== true) delete node.frozen;
     // A file's stored values are never trusted for a calculated variable:
     // recompute them from the formula on load, so a hand-edited file or an
     // older save still opens with live values (and a broken formula reads
@@ -1699,9 +1713,10 @@ function readNode(
   }
   if (type !== "table") delete node.transform; // a table's alone
   if (type !== "analysis") {
-    // Frozen / orphaned results belong to analyses only: a hand-edited file
-    // can't freeze a table or orphan a graph.
-    delete node.frozen;
+    // Frozen results belong to analyses and tables only: a hand-edited file
+    // can't freeze a graph or orphan one (a table's frozen flag was checked
+    // in its own branch above).
+    if (type !== "table") delete node.frozen;
     delete node.orphaned;
     delete node.sourceTableName;
     delete node.cachedResult;

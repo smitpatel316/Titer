@@ -1374,11 +1374,12 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
     AllowlistGroup {
         id: "tables",
         label: "Edit tables",
-        description: "Create, write, edit, duplicate, rename and reorder tables; undo and redo.",
+        description: "Create, write, edit, freeze, duplicate, rename and reorder tables; undo and redo.",
         tools: &[
             "titer_create_table",
             "titer_write_table",
             "titer_edit_table",
+            "titer_freeze_table",
             "titer_duplicate_table_family",
             "titer_rename_node",
             "titer_reorder_nodes",
@@ -2963,6 +2964,17 @@ pub struct FreezeAnalysisArgs {
     pub analysis_id: String,
     /// true freezes (the result survives later data edits), false unfreezes
     /// (it re-runs on next read).
+    pub frozen: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct FreezeTableArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The table node's id, as shown by titer_list_tables.
+    pub table_id: String,
+    /// true freezes (the table can't be edited), false unfreezes it.
     pub frozen: bool,
 }
 
@@ -5304,6 +5316,60 @@ impl TiterMcpServer {
         }
     }
 
+    /// Freeze (or unfreeze) a data table: a frozen table can't be edited
+    /// until unfrozen (seq 165 — Prism's Edit ▸ Freeze Sheet).
+    #[tool(
+        name = "titer_freeze_table",
+        description = "Freeze (or unfreeze) a data table: a frozen table can't be edited until unfrozen.",
+        annotations(
+            title = "Freeze table",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn freeze_table(
+        &self,
+        Parameters(args): Parameters<FreezeTableArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let freeze_args =
+            serde_json::json!({ "project_id": args.project_id, "table_id": args.table_id, "frozen": args.frozen });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            {
+                let snapshots = self.state.snapshots();
+                let snap = snapshots.get(&project_id).ok_or_else(|| {
+                    format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+                })?;
+                snapshot_node(snap, &args.table_id, "table")?;
+            }
+            let job = self.state.enqueue_job(
+                &project_id,
+                "freeze-table",
+                serde_json::json!({ "table_id": args.table_id, "frozen": args.frozen }),
+                serde_json::json!({ "table_id": args.table_id }),
+            )?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The freeze finished without reporting.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Freezing the table failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_freeze_table", freeze_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_freeze_table", freeze_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
     // ── Graphs, figures, info sheets (L6, inventory §3.4) ──────────
     // Each tool enqueues a job for the target window's frontend
     // dispatcher (`build-graph`, `update-graph`, …) and waits for its
@@ -7131,7 +7197,7 @@ impl ServerHandler for TiterMcpServer {
                 feedback sharing in Settings → AI Connections), \
                 titer_read_job, titer_list_jobs, and the cloud reads titer_cloud_status, titer_cloud_list, \
                 titer_cloud_metadata, titer_cloud_revisions. \
-                Mutating tools change the project: create/open/save/import/close projects, create/write/edit/ \
+                Mutating tools change the project: create/open/save/import/close projects, create/write/edit/freeze/ \
                 duplicate/rename/delete/reorder tables, undo/redo, run, re-run and freeze analyses, build/update/clone \
                 graphs, make figures and info sheets, simulate data, apply methods and the wand, run scripts, \
                 export graphs/figures/tables, and use Box cloud storage. \
@@ -9242,6 +9308,7 @@ mod tests {
             "titer_create_table",
             "titer_write_table",
             "titer_edit_table",
+            "titer_freeze_table",
             "titer_duplicate_table_family",
             "titer_rename_node",
             "titer_delete_node",

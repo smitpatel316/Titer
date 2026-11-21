@@ -12,9 +12,9 @@ import {
 import type { TableMove } from "../../store/references";
 import { useProjectActions } from "../../store/use-project-store";
 import { Row, Section, Stepper, WithInspector } from "../../components/inspector";
-import { Button, Input, RadioList, Select } from "../../ui/controls";
+import { Button, IconButton, Input, RadioList, Select } from "../../ui/controls";
 import { useLayout } from "../../store/use-layout";
-import { ColumnsIcon, MinusIcon, PlusIcon } from "@phosphor-icons/react";
+import { ColumnsIcon, MinusIcon, PlusIcon, SnowflakeIcon } from "@phosphor-icons/react";
 import { Grid } from "./grid";
 import {
   addRowGroup,
@@ -48,23 +48,42 @@ import { TABLES } from ".";
 
 export function TableView({ node }: { node: ProjectNode }) {
   const data = node.data!;
-  const { updateTable } = useProjectActions();
+  const { updateTable, setTableFrozen } = useProjectActions();
   const update = (next: TableData, label: string, move?: TableMove) => {
     if (next !== data) updateTable(node.id, next, label, move);
   };
   const { setLayout } = useLayout();
-  const tag = TABLES[node.tableType ?? "column"].label;
+  const tag = TABLES[node.tableType ?? "column"].label + (node.frozen ? " · Frozen" : "");
+  // The freeze toggle, next to the floating-note button on every table kind
+  // (seq 165 — the same snowflake the analysis view uses for its results).
+  const actions = (
+    <>
+      <IconButton
+        aria-label={node.frozen ? "Unfreeze table" : "Freeze table"}
+        onClick={() => setTableFrozen(node.id, !node.frozen)}
+      >
+        <SnowflakeIcon weight={node.frozen ? "fill" : "regular"} />
+      </IconButton>
+      <AddFloatingNoteButton node={node} />
+    </>
+  );
   const grid = (
     <Grid
       data={data}
       type={node.tableType ?? "column"}
       update={update}
       showGroups={() => setLayout({ inspector: true })}
+      tableFrozen={node.frozen}
     />
   );
   // The sheet the notes pin to: the grid fills it, and the layer covers it.
   const sheet = (
     <div className="relative flex min-h-0 flex-1 flex-col">
+      {node.frozen && (
+        <p className="border-b border-separator bg-control px-8 py-2 text-regular text-secondary">
+          Frozen — this table can't be edited until unfrozen.
+        </p>
+      )}
       {grid}
       <FloatingNotesLayer node={node} />
     </div>
@@ -85,7 +104,7 @@ export function TableView({ node }: { node: ProjectNode }) {
             <FormatPanel data={data} update={update} />
           </>
         }
-        actions={<AddFloatingNoteButton node={node} />}
+        actions={actions}
       >
         {sheet}
       </WithInspector>
@@ -98,7 +117,7 @@ export function TableView({ node }: { node: ProjectNode }) {
         tag={tag}
         node={node}
         settings={<FormatPanel data={data} update={update} />}
-        actions={<AddFloatingNoteButton node={node} />}
+        actions={actions}
       >
         {sheet}
       </WithInspector>
@@ -111,7 +130,7 @@ export function TableView({ node }: { node: ProjectNode }) {
         tag={tag}
         node={node}
         settings={<CalculatedVariablesPanel data={data} update={update} />}
-        actions={<AddFloatingNoteButton node={node} />}
+        actions={actions}
       >
         {sheet}
       </WithInspector>
@@ -120,7 +139,7 @@ export function TableView({ node }: { node: ProjectNode }) {
   if (!isGrouped(data) && !isNested(data)) {
     // No settings of its own: the right panel shows the table's note only.
     return (
-      <WithInspector title={node.name} tag={tag} node={node} actions={<AddFloatingNoteButton node={node} />}>
+      <WithInspector title={node.name} tag={tag} node={node} actions={actions}>
         {sheet}
       </WithInspector>
     );
@@ -136,7 +155,7 @@ export function TableView({ node }: { node: ProjectNode }) {
           <FormatPanel data={data} update={update} />
         </>
       }
-      actions={<AddFloatingNoteButton node={node} />}
+      actions={actions}
     >
       {sheet}
     </WithInspector>
