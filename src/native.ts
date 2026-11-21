@@ -186,10 +186,6 @@ export const backupRead = (key: string) => invoke<string>("backup_read", { key }
 /** Deletes a project's backup. Missing is fine. */
 export const backupDelete = (key: string) => invoke<void>("backup_delete", { key });
 
-/** This window's label ("project-1", "project-2"…), for the untitled
- *  backup's stable id. "web" outside the shell. */
-export const windowLabel = () => (isNative ? getCurrentWebviewWindow().label : "web");
-
 // ── AI connections (v3 Phase 1: the in-process MCP server) ─────────────
 // The server is off by default and starts only from Settings → AI
 // connections. These are the app's own commands — no MCP tool can call
@@ -835,6 +831,17 @@ export function onNoWindows(handler: () => void) {
   if (!isNative) return () => {};
   const off = getCurrentWebviewWindow().listen("no-windows", handler);
   return () => void off.then((f) => f());
+}
+
+/** This window's label ("project-1", "project-2"…), or null outside the
+ *  shell. The Welcome dialog auto-shows only on the first project window. */
+export function windowLabel(): string | null {
+  if (!isNative) return null;
+  try {
+    return getCurrentWebviewWindow().label;
+  } catch {
+    return null;
+  }
 }
 
 /** Calls `handler` with what this window should open: once its page is ready, and

@@ -4655,10 +4655,30 @@ impl TiterMcpServer {
     // writers build the bytes) and wait for the job's outcome — these tools
     // return their result, not a job id.
 
-    /// Open a new blank project window — the agent's blank page.
+/// A built-in template id (seq 167). The list lives in
+/// `src/lib/templates.ts` — the gallery, the Welcome dialog and this tool
+/// all ride it; keep this doc comment in step with it.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CreateProjectArgs {
+    /// Start from a built-in template instead of a blank Column table:
+    /// blank-column, blank-xy, blank-grouped, blank-nested,
+    /// blank-multiple, blank-contingency, blank-survival,
+    /// example-dose-response, example-two-group, example-survival or
+    /// example-contingency. Omit for a blank Column table.
+    #[serde(default)]
+    pub template: Option<String>,
+}
+
+    /// Open a new project window — the agent's blank page. Pass `template`
+    /// to start from a built-in template instead of a blank Column table
+    /// (seq 167): blank-column, blank-xy, blank-grouped, blank-nested,
+    /// blank-multiple, blank-contingency, blank-survival, or a worked
+    /// example — example-dose-response, example-two-group, example-survival,
+    /// example-contingency. The template replaces the new window's untouched
+    /// table, so the project holds one table.
     #[tool(
         name = "titer_create_project",
-        description = "Open a new blank project window and return its project_id (the window label, for the other tools).",
+        description = "Open a new project window and return its project_id (the window label, for the other tools). Without template, a blank Column table. With template, start from a built-in template instead: blank-column, blank-xy, blank-grouped, blank-nested, blank-multiple, blank-contingency, blank-survival, example-dose-response, example-two-group, example-survival or example-contingency.",
         annotations(
             title = "Create project",
             read_only_hint = false,
@@ -4667,7 +4687,11 @@ impl TiterMcpServer {
             open_world_hint = false
         )
     )]
-    async fn create_project(&self) -> Result<Json<serde_json::Value>, String> {
+    async fn create_project(
+        &self,
+        Parameters(args): Parameters<CreateProjectArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let log_args = serde_json::json!({ "template": args.template });
         let result: Result<serde_json::Value, String> = async {
             let app = app_handle_or_err(&self.state)?;
             let label = create_blank_window(&app)?;
@@ -4676,16 +4700,38 @@ impl TiterMcpServer {
                     "The new project window ({label}) did not report back within 10s — it may still be opening. Ask titer_list_projects for the open projects."
                 ));
             }
-            Ok(serde_json::json!({ "project_id": label, "file_path": serde_json::Value::Null, "blank": true }))
+            match args.template.as_deref() {
+                None => Ok(serde_json::json!({ "project_id": label, "file_path": serde_json::Value::Null, "blank": true })),
+                Some(template) => {
+                    // The template applies in the new window, through the
+                    // same `apply-template` job the Welcome dialog's plan
+                    // drives — no second implementation.
+                    let job = self.state.enqueue_job(
+                        &label,
+                        "apply-template",
+                        serde_json::json!({ "template_id": template }),
+                        serde_json::json!({}),
+                    )?;
+                    let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+                    if done.status == JobStatus::Done {
+                        done.result
+                            .ok_or_else(|| "The template applied without reporting its table.".to_string())
+                    } else {
+                        Err(done
+                            .error
+                            .unwrap_or_else(|| "Applying the template failed.".to_string()))
+                    }
+                }
+            }
         }
         .await;
         match result {
             Ok(out) => {
-                self.state.log_call("titer_create_project", serde_json::json!({}), true, None);
+                self.state.log_call("titer_create_project", log_args, true, None);
                 Ok(Json(out))
             }
             Err(e) => {
-                self.state.log_call("titer_create_project", serde_json::json!({}), false, Some(&e));
+                self.state.log_call("titer_create_project", log_args, false, Some(&e));
                 Err(e)
             }
         }

@@ -940,9 +940,9 @@ const ROWS: Row[] = [
   {
     item: "167",
     title: "Template gallery / Welcome dialog",
-    status: "gap",
-    note: "No template param on titer_create_project; gallery not exposed via MCP.",
-    checks: [{ kind: "structContains", struct: "ProjectArgs", text: "template" }],
+    status: "covered",
+    note: "Merged on check/v18: built-in templates (blank + example projects) via the template? arg on titer_create_project and the Welcome dialog on first launch.",
+    checks: [{ kind: "structContains", struct: "CreateProjectArgs", text: "template" }],
   },
   {
     item: "168",

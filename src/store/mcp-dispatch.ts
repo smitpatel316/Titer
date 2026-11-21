@@ -30,6 +30,7 @@ import { parseProjectText, validateAnalysisParams } from "../lib/project-file";
 import { fileName, fileTitle } from "../lib/paths";
 import { importTabularFile } from "../lib/tabular-import";
 import { extractMethod, methodForTable, remapGraphOptions } from "../lib/template";
+import { TEMPLATES, planTemplateApply, templateById } from "../lib/templates";
 import { runScript } from "../lib/prism-script";
 import type { WandReport } from "../lib/wand";
 import { analysisOptionsForTable, analysisTypesOfferedForTable, countDataGroups, hasRowGroups } from "../views/analyses";
@@ -1640,6 +1641,59 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           dropped_links: droppedLinks,
         },
         created: { table_id: tableId },
+      };
+    }
+    case "apply-template": {
+      // L2: start from a built-in template (seq 167) — the same plan the
+      // Welcome dialog applies in the UI (`planTemplateApply`): a fresh
+      // window's untouched table is replaced, anywhere else the template
+      // adds a table. The graphs are nodes with defaults, not runs (as in
+      // the UI — they draw when viewed).
+      const actions = tableActions(job, deps);
+      const templateId = argString(job, job.args, "template_id");
+      const template = templateById(templateId);
+      if (!template) {
+        throw jobErr(
+          job,
+          `has no template “${templateId}” — the templates are ${TEMPLATES.map((t) => t.id).join(", ")}.`,
+        );
+      }
+      const preState = deps.getState();
+      const before = new Set(preState.rootOrder);
+      const beforeRevision = preState.revision;
+      const plan = planTemplateApply(template, {
+        nodes: preState.nodes,
+        rootOrder: preState.rootOrder,
+        childOrder: preState.childOrder,
+      });
+      if (plan.replaceTableId) actions.removeNode(plan.replaceTableId);
+      actions.createTableWithData(plan.table.tableType, plan.table.data, plan.table.name);
+      await settleAfterDispatch(deps, beforeRevision);
+      const after = deps.getState();
+      const createdId =
+        after.activeNodeId && !before.has(after.activeNodeId) && after.nodes[after.activeNodeId]?.type === "table"
+          ? after.activeNodeId
+          : after.rootOrder.find((id) => !before.has(id) && after.nodes[id]?.type === "table");
+      if (!createdId) {
+        throw jobErr(job, "applied the template but its table's id could not be read back — ask titer_list_tables for the new table.");
+      }
+      const created = after.nodes[createdId]!;
+      const graphIds: string[] = [];
+      for (const g of plan.graphs) graphIds.push(actions.createGraph(createdId, g.graphType, g.options));
+      return {
+        result: {
+          project_id: job.project_id,
+          template_id: template.id,
+          template_name: template.name,
+          table_id: createdId,
+          name: created.name,
+          table_type: TABLES[plan.table.tableType].label,
+          rows: created.data?.rows.length ?? 0,
+          data_columns: (created.data?.columns.length ?? 1) - 1,
+          graphs: graphIds,
+          replaced_pristine_table: plan.replaceTableId !== null,
+        },
+        created: { table_id: createdId },
       };
     }
     case "apply-wand": {

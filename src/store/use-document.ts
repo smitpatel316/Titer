@@ -13,6 +13,7 @@ import {
   type TemplateInfo,
   type TemplateKind,
 } from "../lib/template";
+import { WELCOME_KEY, planTemplateApply, shouldShowWelcome, templateById } from "../lib/templates";
 import { parsePzfx, type PzfxImport } from "../lib/pzfx";
 import { parsePzf } from "../lib/pzf";
 import { writePzfx } from "../lib/pzfx-write";
@@ -94,6 +95,14 @@ export function useDocument() {
   // native dialog's window lingered on macOS after dismissal (Quirk 2).
   const [templateNotice, setTemplateNotice] = React.useState<TemplateInfo | null>(null);
   const dismissTemplateNotice = () => setTemplateNotice(null);
+  // The Welcome dialog (seq 167): whether this window opened a file — a
+  // file window never auto-shows it — and whether it is showing. Decided
+  // once, shortly after mount (see the effect by the other mount effects).
+  const openedFile = React.useRef(false);
+  const [welcomeOpen, setWelcomeOpen] = React.useState(false);
+  const welcomeDecided = React.useRef(false);
+  const openWelcome = () => setWelcomeOpen(true);
+  const closeWelcome = () => setWelcomeOpen(false);
   // The "Prism File Imported" notice, shown in-app rather than as a native
   // dialog: the native alert's OK button could not dismiss it on macOS
   // (v1.6.0 Mac proof) — it is the second native sheet on the window in
@@ -396,6 +405,8 @@ export function useDocument() {
    *  `.prism` — the open keeps its remote handle, unlike a local import,
    *  which starts untitled. Same for a `.pzfx` file. */
   const loadRemote = async (handle: RemoteHandle): Promise<void> => {
+    // A file is coming into this window — the Welcome dialog never auto-shows here.
+    openedFile.current = true;
     const recent: RecentEntry = {
       kind: "remote",
       provider: handle.provider,
@@ -897,7 +908,7 @@ export function useDocument() {
     if (remote) {
       return { identity: backupIdentity({ remote }), displayName: backupDisplayName({ remote }), sourcePath: null };
     }
-    const id = untitledBackupId(native.windowLabel());
+    const id = untitledBackupId(native.windowLabel() ?? "web");
     return {
       identity: backupIdentity({ untitledId: id }),
       displayName: backupDisplayName({ untitledId: id, untitledName: untitled }),
@@ -1443,6 +1454,8 @@ export function useDocument() {
 
   /** Opens a project file in this window; `untitled`, as a new document named after it. */
   const load = async (path: string, untitled: boolean) => {
+    // A file is coming into this window — the Welcome dialog never auto-shows here.
+    openedFile.current = true;
     let text: string;
     try {
       text = await native.readText(path);
@@ -1900,6 +1913,27 @@ export function useDocument() {
     await applyMethodText(picked.data, picked.name.replace(/\.pzm$/i, ""));
   };
 
+  /** Start from a built-in template (Welcome dialog / File ▸ Welcome…): the
+   *  plan replaces the fresh window's untouched table and adds one anywhere
+   *  else, then opens the template's graphs under the new table. An unknown
+   *  id says so instead of opening a blank table. */
+  const applyTemplate = (templateId: string) => {
+    const template = templateById(templateId);
+    if (!template) {
+      void native.alert("Couldn't Open Template", `There's no built-in template “${templateId}”.`, "error");
+      return;
+    }
+    const s = latest.current.get();
+    const plan = planTemplateApply(template, {
+      nodes: s.nodes,
+      rootOrder: s.rootOrder,
+      childOrder: s.childOrder,
+    });
+    if (plan.replaceTableId) latest.current.removeNode(plan.replaceTableId);
+    const tableId = latest.current.createTableWithData(plan.table.tableType, plan.table.data, plan.table.name);
+    for (const g of plan.graphs) latest.current.createGraph(tableId, g.graphType, g.options);
+  };
+
   const openPaths = (paths: string[]) => {
     // A `.pzt` opens as a project (the shell forgets its name — see
     // `opening_for` in main.rs); a `.pzm` applies to the active table.
@@ -1960,10 +1994,45 @@ export function useDocument() {
   React.useEffect(() => native.onDrop((paths) => handlers.current.openPaths(paths)), []);
   React.useEffect(() => native.onOpening(({ path, untitled }) => void handlers.current.load(path, untitled)), []);
 
+  // ── Welcome dialog auto-show (seq 167) ─────────────────────────────────
+  // Decided once, shortly after mount: only the first project window (a
+  // Cmd+N / MCP window must not pop it over work), only while the project
+  // is still blank, and only while the setting says to show it. The delay
+  // gives the shell's opening a chance to arrive — take_opening resolves
+  // within milliseconds of mount, and load() marks openedFile synchronously
+  // on entry, so a file window never sees the dialog.
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      if (welcomeDecided.current) return;
+      welcomeDecided.current = true;
+      const firstWindow = !native.isNative || native.windowLabel() === "project-1";
+      let stored: unknown = null;
+      try {
+        stored = typeof localStorage === "undefined" ? null : localStorage.getItem(WELCOME_KEY);
+      } catch {
+        stored = null;
+      }
+      const s = latest.current.get();
+      if (
+        firstWindow &&
+        shouldShowWelcome(stored, openedFile.current) &&
+        !s.filePath &&
+        !s.isDirty
+      ) {
+        setWelcomeOpen(true);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, []);
+
   return {
     save,
     saveTemplate,
     applyMethod,
+    applyTemplate,
+    welcomeOpen,
+    openWelcome,
+    closeWelcome,
     title,
     recents,
     forgetRecent,
