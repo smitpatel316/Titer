@@ -280,6 +280,121 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
     ),
     seq162Written.report.analysesNotWritten.join(" | "),
   );
+  // W17 (seq 303): a Nested table whose columns form uniform replicate
+  // groups ("Group A_1"… — the shape the reader produces from a real
+  // nested file, and the shape the 1.8.0 re-proof gate builds) writes as
+  // format "nested" with replicatesCount, mirroring the grouped mapping
+  // and the verified syn-nested-a layout (one y_replicates dataset per
+  // group, one replicate range per run). The fixture is generated, never
+  // Mansi's files. A nested table whose columns do NOT form uniform
+  // replicate groups (the W15 "A:S1:R1" shape) still flattens to Column
+  // with the warning — W15a/W15d pin that fallback.
+  const nested303Data = {
+    columns: ["Title", "Group A_1", "Group A_2", "Group A_3", "Group B_1", "Group B_2", "Group B_3"],
+    rows: [
+      ["Subject 1", "19.5628", "20.9799", "20.4958", "27.258", "29.1169", "26.0203"],
+      ["Subject 2", "18.7037", "20.7438", "20.1286", "27.3459", "25.4777", "26.6056"],
+      ["Subject 3", "22.2965", "17.7747", "20.2864", "27.9999", "27.2516", "25.6835"],
+      ["Subject 4", "20.5919", "23.5256", "18.599", "27.0333", "26.5249", "28.8154"],
+      ["Subject 5", null, null, null, null, null, null],
+      ["Subject 6", null, null, null, null, null, null],
+      ["Subject 7", null, null, null, null, null, null],
+      ["Subject 8", null, null, null, null, null, null],
+    ],
+    groups: 2,
+    subgroups: 3,
+    replicates: 3,
+    excluded: ["0,1"],
+  };
+  const seq303Project = {
+    nodes: {
+      t_nested303: {
+        id: "t_nested303",
+        type: "table",
+        name: "Nested 303",
+        parentId: null,
+        tableType: "nested",
+        data: nested303Data,
+      },
+    },
+    rootOrder: ["t_nested303"],
+    childOrder: { t_nested303: [] },
+    activeNodeId: "t_nested303",
+  };
+  const seq303Written = await writePrism(seq303Project as never, "1.0.7");
+  const seq303Zip = await JSZip.loadAsync(seq303Written.bytes);
+  const seq303SheetPath = Object.keys(seq303Zip.files).find(
+    (p) => p.startsWith("data/sheets/") && p.endsWith("sheet.json") && !seq303Zip.files[p].dir,
+  )!;
+  const seq303Sheet = JSON.parse(await seq303Zip.file(seq303SheetPath)!.async("string")) as {
+    title?: string;
+    table?: {
+      format?: string;
+      dataFormat?: string;
+      replicatesCount?: number;
+      dataSets?: string[];
+      "@class"?: string;
+      rowTitlesDataSet?: string;
+    };
+  };
+  type Seq303Set = {
+    format?: string;
+    title?: string;
+    "replicate ranges"?: {
+      range?: string;
+      replicate?: { firstRow?: number; lastRow?: number; cellAttributes?: { rows?: string; attributes?: string[] }[] };
+    }[];
+  };
+  const seq303Sets: Seq303Set[] = [];
+  for (const uid of seq303Sheet.table?.dataSets ?? []) {
+    seq303Sets.push(JSON.parse(await seq303Zip.file(`data/sets/${uid}.json`)!.async("string")) as Seq303Set);
+  }
+  const groupA303 = seq303Sets.find((s) => s.title === "Group A");
+  const groupB303 = seq303Sets.find((s) => s.title === "Group B");
+  check(
+    "W17a nested table writes format nested + replicatesCount 3 (seq 303)",
+    seq303Sheet.table?.format === "nested" &&
+      seq303Sheet.table?.dataFormat === "y_replicates" &&
+      seq303Sheet.table?.replicatesCount === 3 &&
+      seq303Sheet.table?.["@class"] === "DataTable" &&
+      (seq303Sheet.table?.dataSets?.length ?? 0) === 2 &&
+      !!seq303Sheet.table?.rowTitlesDataSet &&
+      groupA303?.format === "y_replicates" &&
+      groupB303?.format === "y_replicates" &&
+      JSON.stringify(groupA303?.["replicate ranges"]?.map((r) => r.range)) === JSON.stringify(["0", "1~2"]) &&
+      JSON.stringify(groupB303?.["replicate ranges"]?.map((r) => r.range)) === JSON.stringify(["0~2"]) &&
+      (groupA303?.["replicate ranges"]?.every((r) => r.replicate?.firstRow === 0 && r.replicate?.lastRow === 3) ??
+        false) &&
+      (groupB303?.["replicate ranges"]?.every((r) => r.replicate?.firstRow === 0 && r.replicate?.lastRow === 3) ??
+        false),
+    `format ${seq303Sheet.table?.format}/${seq303Sheet.table?.dataFormat}/rc=${seq303Sheet.table?.replicatesCount}; A ranges ${JSON.stringify(groupA303?.["replicate ranges"]?.map((r) => r.range))}, B ranges ${JSON.stringify(groupB303?.["replicate ranges"]?.map((r) => r.range))}`,
+  );
+  check(
+    "W17b nested excluded cell rides the split replicate range (seq 303)",
+    JSON.stringify(groupA303?.["replicate ranges"]?.[0]?.replicate?.cellAttributes) ===
+      JSON.stringify([{ rows: "0", attributes: ["EXCLUDED"] }]) &&
+      (groupA303?.["replicate ranges"]?.[1]?.replicate?.cellAttributes ?? []).length === 0 &&
+      (groupB303?.["replicate ranges"]?.[0]?.replicate?.cellAttributes ?? []).length === 0,
+    `A[0] attrs ${JSON.stringify(groupA303?.["replicate ranges"]?.[0]?.replicate?.cellAttributes)}, A[1] attrs ${JSON.stringify(groupA303?.["replicate ranges"]?.[1]?.replicate?.cellAttributes)}, B[0] attrs ${JSON.stringify(groupB303?.["replicate ranges"]?.[0]?.replicate?.cellAttributes)}`,
+  );
+  const seq303Back = await convertPrism(seq303Written.bytes, "seq303-round-trip.prism");
+  const seq303BackTables = seq303Back.project.rootOrder
+    .map((id) => seq303Back.project.nodes[id])
+    .filter((n) => n?.type === "table");
+  const back303 = seq303BackTables.find((t) => t.name === "Nested 303");
+  check(
+    "W17c nested round-trips verbatim; reader still maps nested to Column (seq 303)",
+    back303?.tableType === "column" &&
+      JSON.stringify(back303?.data?.columns) === JSON.stringify(nested303Data.columns) &&
+      JSON.stringify(back303?.data?.rows) === JSON.stringify(nested303Data.rows) &&
+      JSON.stringify(back303?.data?.excluded ?? []) === JSON.stringify(nested303Data.excluded),
+    `back type ${back303?.tableType}, columns ${JSON.stringify(back303?.data?.columns)}, excluded ${JSON.stringify(back303?.data?.excluded)}`,
+  );
+  check(
+    "W17d no Column-flattening warning for a genuine nested table (seq 303)",
+    !seq303Written.report.issues.some((i) => i.message.includes("Nested 303") && i.message.includes("Column table")),
+    seq303Written.report.issues.map((i) => i.message).join(" | ") || "(no issues)",
+  );
   // W7 (BUG-9): a mixed-format xy table round-trips with its MEAN/SD/N
   // names intact. The writer groups Ya/Yb into y_sd_n datasets but the
   // "XX error" column is y_single, so the table-level dataFormat is
