@@ -36,7 +36,16 @@ import {
   type ExportFormat,
 } from "../views/graphs/graph-export";
 import { largestAt, PX_PER_INCH, withDpi } from "../lib/image-dpi";
-import { decodePng, pdfEncode, tiffEncode } from "../lib/raster-export";
+import { bmpEncode, decodePng, pdfEncode, tiffEncode } from "../lib/raster-export";
+import {
+  grayscaleFigure,
+  svgToEps,
+  svgToPdf,
+  validateExportColorMode,
+  VectorExportError,
+  type ColorMode,
+} from "../lib/vector-export";
+import { DEFAULT_FIGURE_SIZE, validateFigureSize } from "../lib/figure";
 import {
   buildOfficeDocument,
   officeExtension,
@@ -126,6 +135,8 @@ export const EXPORT_EXTENSION: Record<ExportFormat, string> = {
   svg: "svg",
   pdf: "pdf",
   tiff: "tiff",
+  eps: "eps",
+  bmp: "bmp",
 };
 
 /** A node name as a file stem: path separators, Windows-illegal
@@ -190,7 +201,10 @@ export function exportPixelSize(
   format: ExportFormat,
   dpi: number,
 ): { widthPx: number; heightPx: number; capped: boolean; reason?: string; draw96: { width: number; height: number } } {
-  if (format === "svg") return { widthPx: size96.width, heightPx: size96.height, capped: false, draw96: size96 };
+  // SVG/EPS/vector PDF have no DPI: their size is the 96-DPI layout size,
+  // never capped.
+  if (format === "svg" || format === "eps" || format === "pdf")
+    return { widthPx: size96.width, heightPx: size96.height, capped: false, draw96: size96 };
   const most = largestAt(size96, dpi);
   const capped = most.width < size96.width || most.height < size96.height;
   const widthPx = Math.round((most.width * dpi) / PX_PER_INCH);
@@ -210,15 +224,20 @@ const WHITE = { paper_bgcolor: "#ffffff", plot_bgcolor: "#ffffff" };
 
 /** One graph as image bytes, drawn offscreen — the GUI's `toImage` path
  *  (`graph-export.ts`) with the mounted element replaced by a detached
- *  div, exactly as the figure export's `panelImage` does. PDF/TIFF are
- *  built from the PNG Plotly draws (it has no PDF/TIFF output). */
+ *  div, exactly as the figure export's `panelImage` does. PDF is true
+ *  vector (the SVG Plotly draws, converted); when the drawing has
+ *  content the converter cannot draw it falls back to the raster PDF
+ *  and reports `vector: false`. EPS is true vector, no fallback. BMP is
+ *  the PNG re-encoded. Grayscale is drawn gray (the figure is walked
+ *  before Plotly draws); CMYK is applied at emit time. */
 export async function renderGraphImage(
   graph: ProjectNode,
   nodes: Record<string, ProjectNode>,
   format: ExportFormat,
   dpi: Resolution,
   size96: { width: number; height: number },
-): Promise<{ bytes: Uint8Array; widthPx: number; heightPx: number; capped: boolean; reason?: string }> {
+  colorMode: ColorMode = "color",
+): Promise<{ bytes: Uint8Array; widthPx: number; heightPx: number; capped: boolean; reason?: string; vector: boolean }> {
   const fig = buildPanelFigure(graph, nodes);
   if (!fig) {
     throw new Error(
@@ -234,22 +253,42 @@ export async function renderGraphImage(
     const Plotly = await loadPlotly();
     await Plotly.react(el, fig.data, { ...fig.layout, ...draw96 }, { displayModeBar: false, scrollZoom: false, doubleClick: false });
     const drawn = el as unknown as { data: unknown[]; layout: object };
-    // PDF/TIFF panels are drawn as PNG (Plotly has no PDF/TIFF output).
-    const drawnFormat = format === "pdf" || format === "tiff" ? "png" : format;
+    // EPS is drawn as SVG (Plotly has no EPS output); PDF/TIFF/BMP are
+    // built from the PNG Plotly draws (it has no PDF/TIFF/BMP output).
+    const drawnFormat = format === "eps" ? "svg" : format === "pdf" || format === "tiff" || format === "bmp" ? "png" : format;
     const layout =
-      drawnFormat === "jpeg" || format === "pdf" || format === "tiff" ? { ...drawn.layout, ...WHITE } : drawn.layout;
-    const figure = { data: vectorTraces(withoutSelection(drawn.data)), layout };
-    const scale = format === "svg" ? 1 : Number(dpi) / PX_PER_INCH;
+      drawnFormat === "jpeg" || format === "pdf" || format === "tiff" || format === "eps" || format === "bmp"
+        ? { ...drawn.layout, ...WHITE }
+        : drawn.layout;
+    const figure =
+      colorMode === "grayscale"
+        ? grayscaleFigure({ data: vectorTraces(withoutSelection(drawn.data)), layout })
+        : { data: vectorTraces(withoutSelection(drawn.data)), layout };
+    const vector = format === "svg" || format === "eps" || format === "pdf";
+    const scale = vector ? 1 : Number(dpi) / PX_PER_INCH;
     const url = await Plotly.toImage(figure, { format: drawnFormat, ...draw96, scale });
     const image = await (await fetch(url)).blob();
     if (format === "svg") {
-      return { bytes: new TextEncoder().encode(await image.text()), ...dims };
+      return { bytes: new TextEncoder().encode(await image.text()), ...dims, vector: true };
     }
-    const png = new Uint8Array(await image.arrayBuffer());
-    if (format === "pdf") return { bytes: pdfEncode(decodePng(png), Number(dpi)), ...dims };
-    if (format === "tiff") return { bytes: tiffEncode(decodePng(png), Number(dpi)), ...dims };
-    const stamped = await withDpi(png, format as "png" | "jpeg", Number(dpi)).arrayBuffer();
-    return { bytes: new Uint8Array(stamped), ...dims };
+    // The blob's body reads once: take the bytes, derive the SVG text
+    // (vector formats) and the PNG (raster formats / the PDF fallback).
+    const bytes = new Uint8Array(await image.arrayBuffer());
+    if (format === "eps") {
+      return { bytes: svgToEps(new TextDecoder().decode(bytes), { colorMode }), ...dims, vector: true };
+    }
+    if (format === "pdf") {
+      try {
+        return { bytes: svgToPdf(new TextDecoder().decode(bytes), { colorMode }), ...dims, vector: true };
+      } catch (err) {
+        if (!(err instanceof VectorExportError)) throw err;
+        return { bytes: pdfEncode(decodePng(bytes), Number(dpi), colorMode), ...dims, vector: false };
+      }
+    }
+    if (format === "bmp") return { bytes: bmpEncode(decodePng(bytes), Number(dpi)), ...dims, vector: false };
+    if (format === "tiff") return { bytes: tiffEncode(decodePng(bytes), Number(dpi), colorMode), ...dims, vector: false };
+    const stamped = await withDpi(bytes, format as "png" | "jpeg", Number(dpi)).arrayBuffer();
+    return { bytes: new Uint8Array(stamped), ...dims, vector: false };
   } finally {
     void loadPlotly().then((Plotly) => Plotly.purge(el));
     el.remove();
@@ -262,14 +301,14 @@ export async function renderGraphImage(
 export async function executeExportGraph(job: McpJob, deps: ExportJobDeps): Promise<ExportJobOutcome> {
   const args = argsOf(job);
   const graphId = reqStr(job, args, "graph_id");
-  const { format, dpi } = exportFormatDpi(job, args);
+  const { format, dpi, colorMode } = exportFormatDpi(job, args);
   const path = reqStr(job, args, "path");
   const widthIn = optNum(job, args, "width_in");
   const heightIn = optNum(job, args, "height_in");
   const state = deps.getState();
   const graph = graphNode(job, state, graphId);
   const size96 = graphDrawSize(graph, widthIn, heightIn);
-  const out = await renderGraphImage(graph, state.nodes, format, dpi, size96);
+  const out = await renderGraphImage(graph, state.nodes, format, dpi, size96, colorMode);
   const ext = EXPORT_EXTENSION[format];
   const io = deps.io ?? defaultExportIo;
   await io.writeFile(ensureSaveExtension(path, ext), out.bytes);
@@ -278,6 +317,8 @@ export async function executeExportGraph(job: McpJob, deps: ExportJobDeps): Prom
     graph_id: graphId,
     format,
     dpi,
+    color_mode: colorMode,
+    vector: out.vector,
     path,
     width_px: out.widthPx,
     height_px: out.heightPx,
@@ -309,9 +350,14 @@ function tableNode(job: McpJob, state: ExportJobState, tableId: string): Project
   return node;
 }
 
-/** `format` / `dpi` args, validated the same way for graph and figure
- *  exports (Rust validates them too; the dispatcher is the authority). */
-function exportFormatDpi(job: McpJob, args: Record<string, unknown>): { format: ExportFormat; dpi: Resolution } {
+/** `format` / `dpi` / `color_mode` args, validated the same way for graph
+ *  and figure exports (Rust validates them too; the dispatcher is the
+ *  authority). CMYK exists only for EPS, PDF and TIFF — the other
+ *  formats have no CMYK form. */
+function exportFormatDpi(
+  job: McpJob,
+  args: Record<string, unknown>,
+): { format: ExportFormat; dpi: Resolution; colorMode: ColorMode } {
   const formatRaw = reqStr(job, args, "format");
   if (!EXPORT_FORMATS.some((f) => f.value === formatRaw)) {
     throw jobErr(job, `has no export format “${formatRaw}” — the formats are ${EXPORT_FORMATS.map((f) => f.value).join(", ")}.`);
@@ -320,24 +366,48 @@ function exportFormatDpi(job: McpJob, args: Record<string, unknown>): { format: 
   if (!(RESOLUTIONS as readonly string[]).includes(dpiRaw)) {
     throw jobErr(job, `has no resolution “${dpiRaw}” — the resolutions are ${RESOLUTIONS.join(", ")} DPI.`);
   }
-  return { format: formatRaw as ExportFormat, dpi: dpiRaw as Resolution };
+  const colorModeRaw = optStr(job, args, "color_mode") ?? "color";
+  if (colorModeRaw !== "color" && colorModeRaw !== "grayscale" && colorModeRaw !== "cmyk") {
+    throw jobErr(job, `has no colour mode “${colorModeRaw}” — the colour modes are color, grayscale, cmyk.`);
+  }
+  try {
+    validateExportColorMode(formatRaw, colorModeRaw as ColorMode);
+  } catch (err) {
+    throw jobErr(job, (err as Error).message);
+  }
+  return { format: formatRaw as ExportFormat, dpi: dpiRaw as Resolution, colorMode: colorModeRaw as ColorMode };
 }
 
 /** `export-figure`: render one figure offscreen and write the file —
  *  the figure export's own `renderFigureRaster` / `renderFigureSvg`,
  *  which already render each panel offscreen, so no new render path is
  *  needed here. `missing` counts panels whose graph could not be drawn
- *  (reported, not hidden); a figure with no panels is a plain error. */
+ *  (reported, not hidden); a figure with no panels is a plain error.
+ *  `width_in` / `height_in` override the figure's size (one derives the
+ *  other from the saved aspect ratio). PDF is true vector (the composed
+ *  SVG, converted); when a panel has content the converter cannot draw
+ *  it falls back to the raster PDF and reports `vector: false`. */
 export async function executeExportFigure(job: McpJob, deps: ExportJobDeps): Promise<ExportJobOutcome> {
   const args = argsOf(job);
   const figureId = reqStr(job, args, "figure_id");
-  const { format, dpi } = exportFormatDpi(job, args);
+  const { format, dpi, colorMode } = exportFormatDpi(job, args);
   const path = reqStr(job, args, "path");
+  const widthIn = optNum(job, args, "width_in");
+  const heightIn = optNum(job, args, "height_in");
   const state = deps.getState();
   const figure = figureNode(job, state, figureId);
   if (!figure.panels?.length) {
     throw jobErr(job, `cannot export figure “${figure.name}” — add a panel first.`);
   }
+  const savedSize = figure.figureSize ?? DEFAULT_FIGURE_SIZE;
+  const override = { widthIn: widthIn ?? savedSize.widthIn, heightIn: heightIn ?? savedSize.heightIn };
+  if (widthIn !== undefined && heightIn === undefined)
+    override.heightIn = (widthIn * savedSize.heightIn) / savedSize.widthIn;
+  if (heightIn !== undefined && widthIn === undefined)
+    override.widthIn = (heightIn * savedSize.widthIn) / savedSize.heightIn;
+  const checked = validateFigureSize(override);
+  if (!checked.size) throw jobErr(job, checked.reason ?? "has a figure size outside the limits.");
+  const sized = { ...figure, figureSize: checked.size };
   const ext = EXPORT_EXTENSION[format];
   let bytes: Uint8Array;
   let widthPx: number;
@@ -345,14 +415,41 @@ export async function executeExportFigure(job: McpJob, deps: ExportJobDeps): Pro
   let missing: number;
   let capped = false;
   let reason: string | undefined;
+  let vector = false;
   if (format === "svg") {
-    const out = await renderFigureSvg(figure, state.nodes, dpi);
+    const out = await renderFigureSvg(sized, state.nodes, dpi, colorMode);
     bytes = new TextEncoder().encode(out.svg);
     widthPx = out.width;
     heightPx = out.height;
     missing = out.missing;
+    vector = true;
+  } else if (format === "eps") {
+    const out = await renderFigureSvg(sized, state.nodes, dpi, colorMode);
+    bytes = svgToEps(out.svg, { colorMode });
+    widthPx = out.width;
+    heightPx = out.height;
+    missing = out.missing;
+    vector = true;
+  } else if (format === "pdf") {
+    const svgOut = await renderFigureSvg(sized, state.nodes, dpi, colorMode);
+    missing = svgOut.missing;
+    widthPx = svgOut.width;
+    heightPx = svgOut.height;
+    try {
+      bytes = svgToPdf(svgOut.svg, { colorMode });
+      vector = true;
+    } catch (err) {
+      if (!(err instanceof VectorExportError)) throw err;
+      const out = await renderFigureRaster(sized, state.nodes, "pdf", dpi, colorMode);
+      bytes = new Uint8Array(await out.blob.arrayBuffer());
+      widthPx = out.width;
+      heightPx = out.height;
+      missing = out.missing;
+      capped = out.capped;
+      reason = out.reason;
+    }
   } else {
-    const out = await renderFigureRaster(figure, state.nodes, format, dpi);
+    const out = await renderFigureRaster(sized, state.nodes, format, dpi, colorMode);
     bytes = new Uint8Array(await out.blob.arrayBuffer());
     widthPx = out.width;
     heightPx = out.height;
@@ -367,6 +464,8 @@ export async function executeExportFigure(job: McpJob, deps: ExportJobDeps): Pro
     figure_id: figureId,
     format,
     dpi,
+    color_mode: colorMode,
+    vector,
     path,
     width_px: widthPx,
     height_px: heightPx,

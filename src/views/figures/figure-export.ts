@@ -8,7 +8,8 @@ import { loadPlotly } from "../graphs/plotly";
 import { withoutSelection } from "../graphs/selection";
 import { vectorTraces } from "../graphs/plot-helpers";
 import { PX_PER_INCH, withDpi } from "../../lib/image-dpi";
-import { decodePng, pdfEncode, tiffEncode } from "../../lib/raster-export";
+import { bmpEncode, decodePng, pdfEncode, tiffEncode } from "../../lib/raster-export";
+import { grayscaleFigure, svgToEps, svgToPdf, VectorExportError, type ColorMode } from "../../lib/vector-export";
 import {
   composeFigureSvg,
   figureExportSize,
@@ -24,7 +25,7 @@ import type { ExportFormat, Resolution } from "../graphs/graph-export";
 import { buildOfficeDocument, officeDialogTitle, officeExtension, type OfficeTarget } from "../../lib/office-export";
 import type { FigurePanel, ProjectNode } from "../../store/types";
 
-const EXTENSION: Record<ExportFormat, string> = { png: "png", jpeg: "jpg", svg: "svg", pdf: "pdf", tiff: "tiff" };
+const EXTENSION: Record<ExportFormat, string> = { png: "png", jpeg: "jpg", svg: "svg", pdf: "pdf", tiff: "tiff", eps: "eps", bmp: "bmp" };
 let lastFolder: string | null = null;
 const reason = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -32,7 +33,9 @@ type Size = { width: number; height: number };
 
 /** A panel drawn at `size`, as an image blob (raster at `dpi`, or SVG).
  *  With `hideLegend`, the panel draws no legend of its own — the figure's
- *  one shared legend (drawn below the grid by the caller) replaces it. */
+ *  one shared legend (drawn below the grid by the caller) replaces it.
+ *  Grayscale walks the panel's figure before Plotly draws it (the one
+ *  grayscale mechanism — it covers the raster path and the SVG path). */
 async function panelImage(
   graph: ProjectNode,
   nodes: Record<string, ProjectNode>,
@@ -40,9 +43,11 @@ async function panelImage(
   format: ExportFormat,
   dpi: Resolution,
   hideLegend: boolean,
+  colorMode: ColorMode = "color",
 ): Promise<Blob | null> {
-  const fig = buildPanelFigure(graph, nodes, { hideLegend });
-  if (!fig) return null;
+  const built = buildPanelFigure(graph, nodes, { hideLegend });
+  if (!built) return null;
+  const fig = colorMode === "grayscale" ? grayscaleFigure(built) : built;
   const el = document.createElement("div");
   el.style.cssText = "position:fixed;left:-10000px;top:0;visibility:hidden;";
   document.body.appendChild(el);
@@ -61,11 +66,11 @@ async function panelImage(
       { displayModeBar: false, scrollZoom: false, doubleClick: false },
     );
     const drawn = el as unknown as { data: unknown[]; layout: object };
-    // PDF/TIFF panels are drawn as PNG (Plotly has no PDF/TIFF output); the
+    // PDF/TIFF/BMP panels are drawn as PNG (Plotly has no PDF/TIFF/BMP output); the
     // figure's raster path encodes the composited canvas, not the panel.
-    const drawnFormat = format === "pdf" || format === "tiff" ? "png" : format;
+    const drawnFormat = format === "pdf" || format === "tiff" || format === "bmp" ? "png" : format;
     const layout =
-      drawnFormat === "jpeg" || format === "pdf" || format === "tiff"
+      drawnFormat === "jpeg" || format === "pdf" || format === "tiff" || format === "bmp"
         ? { ...drawn.layout, paper_bgcolor: "#ffffff", plot_bgcolor: "#ffffff" }
         : drawn.layout;
     const figure = { data: vectorTraces(withoutSelection(drawn.data)), layout };
@@ -110,12 +115,14 @@ function figureOf(figure: ProjectNode) {
 
 /** The whole figure as a PNG/JPEG blob, composited on canvas: panel images
  *  in grid order, labels and titles as text, the figure title above the grid,
- *  and the shared legend (when valid) centred below it. */
+ *  and the shared legend (when valid) centred below it. PDF/TIFF/BMP are
+ *  encoded from the composited canvas PNG. */
 export async function renderFigureRaster(
   figure: ProjectNode,
   nodes: Record<string, ProjectNode>,
-  format: "png" | "jpeg" | "pdf" | "tiff",
+  format: "png" | "jpeg" | "pdf" | "tiff" | "bmp",
   dpi: Resolution,
+  colorMode: ColorMode = "color",
 ): Promise<{ blob: Blob; missing: number; capped: boolean; reason?: string; width: number; height: number }> {
   const g = geometry(figure, dpi);
   const legend =
@@ -145,7 +152,7 @@ export async function renderFigureRaster(
     const graph = nodes[rect.panel.graphId];
     const y = rect.y + g.titleStrip;
     if (graph) {
-      const image = await panelImage(graph, nodes, { width: rect.width, height: rect.height }, format, dpi, legend.ok);
+      const image = await panelImage(graph, nodes, { width: rect.width, height: rect.height }, format, dpi, legend.ok, colorMode);
       if (image) {
         const bitmap = await createImageBitmap(image);
         ctx.drawImage(bitmap, rect.x, y, rect.width, rect.height);
@@ -190,19 +197,21 @@ export async function renderFigureRaster(
       x += widths[i] + gap;
     });
   }
-  // PDF/TIFF are encoded from the composited canvas PNG (canvas has no
-  // PDF/TIFF output); PNG/JPEG keep their existing paths unchanged.
-  const rasterFormat = format === "pdf" || format === "tiff" ? "png" : format;
+  // PDF/TIFF/BMP are encoded from the composited canvas PNG (canvas has no
+  // PDF/TIFF/BMP output); PNG/JPEG keep their existing paths unchanged.
+  const rasterFormat = format === "pdf" || format === "tiff" || format === "bmp" ? "png" : format;
   const blob = await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't draw the figure."))), `image/${rasterFormat}`),
   );
   const png = new Uint8Array(await blob.arrayBuffer());
   const stamped =
     format === "pdf"
-      ? new Blob([pdfEncode(decodePng(png), Number(dpi)) as BlobPart], { type: "application/pdf" })
+      ? new Blob([pdfEncode(decodePng(png), Number(dpi), colorMode) as BlobPart], { type: "application/pdf" })
       : format === "tiff"
-        ? new Blob([tiffEncode(decodePng(png), Number(dpi)) as BlobPart], { type: "image/tiff" })
-        : withDpi(png, rasterFormat, Number(dpi));
+        ? new Blob([tiffEncode(decodePng(png), Number(dpi), colorMode) as BlobPart], { type: "image/tiff" })
+        : format === "bmp"
+          ? new Blob([bmpEncode(decodePng(png), Number(dpi)) as BlobPart], { type: "image/bmp" })
+          : withDpi(png, rasterFormat, Number(dpi));
   return { blob: stamped, missing: missing.length, capped: g.exported.capped, reason: g.exported.reason, width, height };
 }
 
@@ -214,6 +223,7 @@ export async function renderFigureSvg(
   figure: ProjectNode,
   nodes: Record<string, ProjectNode>,
   dpi: Resolution,
+  colorMode: ColorMode = "color",
 ): Promise<{ svg: string; missing: number; width: number; height: number }> {
   const g = geometry(figure, dpi);
   const legend =
@@ -222,7 +232,7 @@ export async function renderFigureSvg(
   for (const rect of g.rects) {
     const graph = nodes[rect.panel.graphId];
     if (!graph) continue;
-    const image = await panelImage(graph, nodes, { width: rect.width, height: rect.height }, "svg", dpi, legend.ok);
+    const image = await panelImage(graph, nodes, { width: rect.width, height: rect.height }, "svg", dpi, legend.ok, colorMode);
     if (image) composed.push({ panel: rect.panel, svg: await image.text() });
   }
   const { svg, missing } = composeFigureSvg(composed, figureOf(figure), legend.ok ? legend.entries : undefined);
@@ -242,6 +252,7 @@ export async function saveFigureImage(
   format: ExportFormat,
   dpi: Resolution,
   name: string,
+  colorMode: ColorMode = "color",
 ) {
   if (!figure.panels?.length) return alert("Couldn't Export the Figure", "Add a panel first.", "error");
   const g = geometry(figure, dpi);
@@ -252,12 +263,35 @@ export async function saveFigureImage(
     let missing = 0;
     let capped = false;
     let capReason: string | undefined;
+    let vector = false;
     if (format === "svg") {
-      const out = await renderFigureSvg(figure, nodes, dpi);
+      const out = await renderFigureSvg(figure, nodes, dpi, colorMode);
       bytes = new TextEncoder().encode(out.svg);
       missing = out.missing;
+      vector = true;
+    } else if (format === "eps") {
+      const out = await renderFigureSvg(figure, nodes, dpi, colorMode);
+      bytes = svgToEps(out.svg, { colorMode });
+      missing = out.missing;
+      vector = true;
+    } else if (format === "pdf") {
+      // True vector when the composed SVG converts; the raster PDF when a
+      // panel has content the converter cannot draw.
+      const svgOut = await renderFigureSvg(figure, nodes, dpi, colorMode);
+      missing = svgOut.missing;
+      try {
+        bytes = svgToPdf(svgOut.svg, { colorMode });
+        vector = true;
+      } catch (err) {
+        if (!(err instanceof VectorExportError)) throw err;
+        const out = await renderFigureRaster(figure, nodes, "pdf", dpi, colorMode);
+        bytes = new Uint8Array(await out.blob.arrayBuffer());
+        missing = out.missing;
+        capped = out.capped;
+        capReason = out.reason;
+      }
     } else {
-      const out = await renderFigureRaster(figure, nodes, format, dpi);
+      const out = await renderFigureRaster(figure, nodes, format, dpi, colorMode);
       bytes = new Uint8Array(await out.blob.arrayBuffer());
       missing = out.missing;
       capped = out.capped;
@@ -275,6 +309,12 @@ export async function saveFigureImage(
     if (!path) return;
     lastFolder = path.slice(0, path.lastIndexOf("/"));
     await writeFile(path, bytes);
+    if (format === "pdf" && !vector)
+      await alert(
+        "Exported as a Raster PDF",
+        "A panel has content that can't be drawn as vectors (an image or gradient fill), so the figure was exported as a raster PDF instead of a vector one.",
+        "warning",
+      );
     if (missing)
       await alert(
         "Figure Exported",
@@ -287,13 +327,20 @@ export async function saveFigureImage(
 }
 
 /** Starts the clipboard write inside the click, with a promised image, as
- *  WebKit requires. Clipboard images must be raster: always PNG. */
-export function copyFigureImage(figure: ProjectNode, nodes: Record<string, ProjectNode>, dpi: Resolution) {
+ *  WebKit requires. Clipboard images must be raster: always PNG. Grayscale
+ *  applies; CMYK falls back to colour (the clipboard has no CMYK). */
+export function copyFigureImage(
+  figure: ProjectNode,
+  nodes: Record<string, ProjectNode>,
+  dpi: Resolution,
+  colorMode: ColorMode = "color",
+) {
   if (!figure.panels?.length) return void alert("Couldn't Copy the Figure", "Add a panel first.", "error");
+  const mode = colorMode === "cmyk" ? "color" : colorMode;
   navigator.clipboard
     .write([
       new ClipboardItem({
-        "image/png": renderFigureRaster(figure, nodes, "png", dpi).then((out) => out.blob),
+        "image/png": renderFigureRaster(figure, nodes, "png", dpi, mode).then((out) => out.blob),
       }),
     ])
     .catch((err) => alert("Couldn't Copy the Figure", reason(err), "error"));
