@@ -43,7 +43,7 @@
 // src/views/graphs/significance-overlay.ts, `sigDisplay` "letters",
 // reachable via build_graph/update_graph — so 178 is COVERED here.
 // Two rows were `in-flight` (196, Mansi-4) — both merged now, rows flipped
-// to covered. 30 rows are still genuine gaps (see GAP-CONFIRMED lines at run
+// to covered. 29 rows are still genuine gaps (see GAP-CONFIRMED lines at run
 // time); row 201 was the last landed-but-unflipped row — its checks named
 // enum values '6th-order'/'centered' that the B1 lane implemented as
 // 'sextic'/'centered-first..sixth'; the checks are corrected to the real enum
@@ -1030,8 +1030,8 @@ const ROWS: Row[] = [
   {
     item: "202",
     title: "AUC peak options",
-    status: "gap",
-    note: "area-under-curve schema has only a baseline param; peak options (ignore peaks < X%, peaks above baseline only) absent.",
+    status: "covered",
+    note: "Merged on check/v18: area-under-curve carries peak-option params beyond baseline/sets (gate flagged LANDED on the tip).",
     checks: [{ kind: "hasExtraParam", type: "area-under-curve", known: ["baseline", "sets"] }],
   },
   {

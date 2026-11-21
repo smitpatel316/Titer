@@ -8652,6 +8652,7 @@ check("every analysis checklist is complete and the coverage boundary holds", ()
     withChecklist.map(([name]) => name).sort(),
     [
       "compare-many-groups",
+      "compare-slopes",
       "compare-two-groups",
       "correlation",
       "correlation-matrix",
@@ -18332,7 +18333,7 @@ check("the Cox wizard asks time, status, covariates, stratifier and ties, with b
   // the bubble plot, and survival curves.
   deepStrictEqual(
     GRAPH_OPTIONS_BY_TABLE["multiple"].map((o) => o.value),
-    ["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "dendrogram", "elbow-plot", "silhouette-plot", "gap-plot", "survival"],
+    ["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "mv-strip-plot", "mv-summary-symbol", "mv-bar-strip", "mv-before-after-bar-strip", "mv-before-after-strip", "mv-box-whisker", "mv-violin", "mv-bar-chart", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "dendrogram", "elbow-plot", "silhouette-plot", "gap-plot", "survival"],
   );
   // Renaming a column follows the Cox analysis's params.
   const renamed = followTable(
