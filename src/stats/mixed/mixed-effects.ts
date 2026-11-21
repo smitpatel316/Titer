@@ -1,8 +1,11 @@
 // Mixed-effects model — Prism's repeated-measures analysis that tolerates
 // missing values: every observed cell stays in the fit (unlike
 // repeated-measures ANOVA, which drops a subject entirely when any of its
-// values is missing). Fit with lme4::lmer, Satterthwaite p-values from
-// lmerTest::lmer (plan 00 provisions both packages). Bespoke async runner
+// values is missing). Fit with lme4::lmer (plan 00 provisions lme4 and
+// lmerTest); the denominator degrees of freedom behind the P values follow
+// `dfMethod` (seq 181): Satterthwaite from lmerTest::lmer (the default when
+// the param is omitted), Kenward-Roger from pbkrtest::vcovAdj +
+// get_Lb_ddf, or the Legacy design DF. Bespoke async runner
 // (not a ColumnTestSpec) — it needs the long-format reshaping in TypeScript
 // (build y / time / subject vectors from the wide table), one R call, and a
 // coefficients table + variance components. v1: random intercept only,
@@ -14,6 +17,7 @@ import type {
   AnalysisOutcome,
   Column,
   GroupDescriptives,
+  MixedEffectsDfMethod,
   MixedEffectsParams,
   RegressionCoefficient,
   StatRow,
@@ -21,7 +25,7 @@ import type {
 } from "../types";
 import { dataGroups, describe, rStr, rVec } from "../column/base";
 import { groupsOf } from "../../lib/dataset";
-import { evalNamedVector } from "../webr";
+import { ensurePackages, evalNamedVector } from "../webr";
 import { num } from "../../lib/format";
 
 /** The user-facing error when the lme4/lmerTest packages cannot be loaded —
@@ -29,6 +33,12 @@ import { num } from "../../lib/format";
  *  requiredPackages first), but a direct runner call still fails clearly. */
 export const MIXED_EFFECTS_PACKAGE_ERROR =
   "The lme4 / lmerTest R packages are not available in this build — see plan 00.";
+
+/** The user-facing error when pbkrtest cannot be loaded for a
+ *  Kenward-Roger fit — the runner only ensures it lazily, when the method
+ *  is chosen, so a Satterthwaite or Legacy fit never pays for it. */
+export const MIXED_EFFECTS_KR_PACKAGE_ERROR =
+  "The pbkrtest R package is not available in this build, so Kenward-Roger degrees of freedom cannot be calculated — choose Satterthwaite instead.";
 
 /** One long-format observation: `tm` is the numeric time/condition index
  *  (0-based column or row), `subj` identifies the subject (table row, or
@@ -246,11 +256,53 @@ export async function runMixedEffects(
   const equation = `y ~ ${fixedPart} + (1 | subject)`;
   const formula = grpLevels == null ? "y~tm+(1|subj)" : interaction ? "y~grp*tm+(1|subj)" : "y~grp+tm+(1|subj)";
 
+  // ── Denominator DF (seq 181) ───────────────────────────────────────────
+  // Omitted keeps "satterthwaite" — Titer's behaviour until now, so saved
+  // analyses and the reference pins don't move; the wizard always sets the
+  // method explicitly (defaulting to Prism's default, Kenward-Roger).
+  const dfMethod: MixedEffectsDfMethod = params?.dfMethod ?? "satterthwaite";
+  // Legacy DF — Prism's "within cells" term: n − p − (s − 1), with n the
+  // observations used, p the fixed-effect parameters (terms.length) and s
+  // the subjects. Complete + balanced this is (s−1)(a−1) for a one-way
+  // design; Prism's table gives every test in a two-way-with-matching
+  // design the same within-cells term, so one DF serves every coefficient.
+  const legacyDf = obs.length - terms.length - (subjectCount - 1);
+  if (dfMethod === "legacy" && legacyDf < 1) {
+    return {
+      error:
+        `The Legacy denominator degrees of freedom are ${legacyDf} for this design — ` +
+        `too few observations for the number of fixed effects and subjects. ` +
+        `Choose Satterthwaite or Kenward-Roger instead.`,
+    };
+  }
+  // Kenward-Roger needs pbkrtest, ensured lazily here — a Satterthwaite or
+  // Legacy fit never pays for the install. runAnalysis already ensured
+  // lme4/lmerTest; ensurePackages is idempotent for those.
+  if (dfMethod === "kenward-roger") {
+    try {
+      await ensurePackages(["pbkrtest"]);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      if (/not in (the )?registry|not in (the )?repo|no package called/i.test(detail)) {
+        return { error: MIXED_EFFECTS_KR_PACKAGE_ERROR };
+      }
+      return {
+        error:
+          `Kenward-Roger degrees of freedom need the pbkrtest R package, which could not be loaded ` +
+          `(${detail}) — choose Satterthwaite instead.`,
+      };
+    }
+  }
+
   // ── One R call ─────────────────────────────────────────────────────────
   // lmerTest::lmer (not library(lmerTest)) — summary() on its fit carries
   // the Satterthwaite df + p column; plain lmer's summary has 3 columns, so
   // the extraction branches on ncol(co) and reports p = null if lmerTest
   // ever stops providing it, rather than substituting lm p-values.
+  // Kenward-Roger (pbkrtest::vcovAdj + get_Lb_ddf, one unit contrast per
+  // coefficient) runs inside tryCatch: when it cannot be computed — a
+  // singular fit, a variance estimated at zero — the Legacy DF takes over,
+  // exactly as Prism falls back to Legacy there, and the notes say so.
   // evalNamedVector returns numbers only, so warnings are classified into
   // flags (converged / unidentifiable / boundary) instead of quoted verbatim.
   const decls = [
@@ -276,15 +328,46 @@ export async function runMixedEffects(
   if (interaction && grpLevels) {
     for (const lv of grpLevels.slice(1)) coefNames.push(`grp${lv}:tm`);
   }
+  // The per-coefficient extraction, per DF method. The t statistic is the
+  // same estimate/SE ratio in every method; only the SE (Kenward-Roger
+  // adjusts it), the DF and the P value change. `d` is the denominator DF
+  // behind `p`, reported per coefficient (Prism: each comparison gets its
+  // own DF under Satterthwaite / Kenward-Roger).
   const coefKeys = terms.map((_, i) => {
     const r = i + 1;
-    return `e${r}=if(!is.na(ix[${r}]))co[ix[${r}],1] else NA_real_,se${r}=if(!is.na(ix[${r}]))co[ix[${r}],2] else NA_real_,t${r}=if(!is.na(ix[${r}]))co[ix[${r}],if(nc>=5)4 else 3] else NA_real_,p${r}=if(!is.na(ix[${r}]))if(nc>=5)co[ix[${r}],5] else NA_real_ else NA_real_`;
+    const est = `e${r}=if(!is.na(ix[${r}]))co[ix[${r}],1] else NA_real_`;
+    const seSatt = `se${r}=if(!is.na(ix[${r}]))co[ix[${r}],2] else NA_real_`;
+    const tSatt = `t${r}=if(!is.na(ix[${r}]))co[ix[${r}],if(nc>=5)4 else 3] else NA_real_`;
+    const pSatt = `p${r}=if(!is.na(ix[${r}]))if(nc>=5)co[ix[${r}],5] else NA_real_ else NA_real_`;
+    const dSatt = `d${r}=if(!is.na(ix[${r}]))if(nc>=5)co[ix[${r}],3] else NA_real_ else NA_real_`;
+    const pLegacyVal = `if(!is.na(ix[${r}]))2*stats::pt(-abs(co[ix[${r}],if(nc>=5)4 else 3]),${legacyDf}) else NA_real_`;
+    const dLegacyVal = `if(!is.na(ix[${r}]))${legacyDf} else NA_real_`;
+    if (dfMethod === "legacy") return [est, seSatt, tSatt, `p${r}=${pLegacyVal}`, `d${r}=${dLegacyVal}`].join(",");
+    if (dfMethod === "kenward-roger") {
+      // kr$ok==1: adjusted SE + KR ddf; kr$ok==0: the Legacy fallback
+      // (Prism's rule when the KR correction cannot be computed).
+      const seKr = `se${r}=if(kr$ok==1&&!is.na(ix[${r}]))sqrt(kr$Va[ix[${r}],ix[${r}]]) else if(!is.na(ix[${r}]))co[ix[${r}],2] else NA_real_`;
+      const tKr = `t${r}=if(kr$ok==1&&!is.na(ix[${r}]))co[ix[${r}],1]/sqrt(kr$Va[ix[${r}],ix[${r}]]) else if(!is.na(ix[${r}]))co[ix[${r}],if(nc>=5)4 else 3] else NA_real_`;
+      const pKr = `p${r}=if(kr$ok==1&&!is.na(ix[${r}]))2*stats::pt(-abs(co[ix[${r}],1]/sqrt(kr$Va[ix[${r}],ix[${r}]])),kr$dd[ix[${r}]]) else ${pLegacyVal}`;
+      const dKr = `d${r}=if(kr$ok==1&&!is.na(ix[${r}]))kr$dd[ix[${r}]] else ${dLegacyVal}`;
+      return [est, seKr, tKr, pKr, dKr].join(",");
+    }
+    return [est, seSatt, tSatt, pSatt, dSatt].join(",");
   });
+  // Kenward-Roger setup: one unit contrast per fixed effect, each with its
+  // own adjusted DF (get_Lb_ddf). Warnings muffled like the fit's; any
+  // error lands in ok=0 and the extraction above falls back to Legacy.
+  const krSetup =
+    dfMethod === "kenward-roger"
+      ? `nf<-length(lme4::fixef(m));` +
+        `kr<-tryCatch(withCallingHandlers({Va<-pbkrtest::vcovAdj(m);dd<-sapply(seq_len(nf),function(j){L<-rep(0,nf);L[j]<-1;pbkrtest::get_Lb_ddf(m,L)});list(ok=1,Va=Va,dd=dd)},warning=function(w)invokeRestart("muffleWarning")),error=function(e)list(ok=0));`
+      : "";
   const code =
     `${decls.join(";")};warns<-c();` +
     `m<-withCallingHandlers(lmerTest::lmer(${formula},REML=TRUE),` +
     `warning=function(w){warns<<-c(warns,conditionMessage(w));invokeRestart("muffleWarning")});` +
     `s<-summary(m);co<-s$coefficients;nc<-ncol(co);ix<-match(c(${coefNames.map(rStr).join(",")}),rownames(co));` +
+    krSetup +
     `vc<-as.data.frame(lme4::VarCorr(m));` +
     `c(${coefKeys.join(",")},` +
     `sv=vc$vcov[vc$grp=="subj"],ssd=vc$sdcor[vc$grp=="subj"],` +
@@ -294,7 +377,8 @@ export async function runMixedEffects(
     `singular=as.numeric(lme4::isSingular(m)),nwarn=length(warns),` +
     `conv=as.numeric(any(grepl("failed to converge",warns))),` +
     `unident=as.numeric(any(grepl("unidentifiable",warns))),` +
-    `bound=as.numeric(any(grepl("singular|boundary",warns))))`;
+    `bound=as.numeric(any(grepl("singular|boundary",warns)))` +
+    `${dfMethod === "kenward-roger" ? ",krOk=kr$ok" : ""})`;
 
   let v: Awaited<ReturnType<typeof evalNamedVector>>;
   try {
@@ -303,6 +387,9 @@ export async function runMixedEffects(
     const detail = err instanceof Error ? err.message : String(err);
     if (/there is no package called|package.*lme4|lme4.*package|lmerTest/i.test(detail)) {
       return { error: MIXED_EFFECTS_PACKAGE_ERROR };
+    }
+    if (dfMethod === "kenward-roger" && /pbkrtest/i.test(detail)) {
+      return { error: MIXED_EFFECTS_KR_PACKAGE_ERROR };
     }
     return { error: detail };
   }
@@ -313,6 +400,7 @@ export async function runMixedEffects(
     stdError: v[`se${i + 1}`] ?? null,
     t: v[`t${i + 1}`] ?? null,
     p: v[`p${i + 1}`] ?? null,
+    df: v[`d${i + 1}`] ?? null,
   }));
   const varianceComponents: VarianceComponent[] = [
     { group: "Subject", component: "Intercept", variance: v.sv ?? null, sd: v.ssd ?? null },
@@ -334,11 +422,30 @@ export async function runMixedEffects(
   const perSubject = new Map<number, number>();
   for (const o of obs) perSubject.set(o.subj, (perSubject.get(o.subj) ?? 0) + 1);
   const singles = [...perSubject.values()].filter((n) => n === 1).length;
+  // The fit never changes with the DF method — only the reference
+  // distribution behind the P values. The Satterthwaite sentence is kept
+  // verbatim (the reference test pins it); the other two name their engine.
+  const dfNote =
+    dfMethod === "legacy"
+      ? "P-values by the Legacy method — denominator degrees of freedom from the design (the matching repeated-measures ANOVA error term)."
+      : dfMethod === "kenward-roger"
+        ? "P-values by the Kenward-Roger approximation (pbkrtest) — standard errors adjusted for the estimated variance components."
+        : "P-values by Satterthwaite's approximation (lmerTest).";
   const notesParts = [
     `Mixed-effects model: ${equation}. Random intercept per subject, fitted by restricted maximum likelihood (REML).`,
-    "P-values by Satterthwaite's approximation (lmerTest).",
+    dfNote,
     `${obs.length} of ${total} observations used (${dropped} observation${dropped === 1 ? "" : "s"} dropped as missing).`,
   ];
+  if (dfMethod === "kenward-roger" && v.krOk === 0) {
+    notesParts.push(
+      "Kenward-Roger could not be computed for this fit, so the Legacy degrees of freedom were used instead — as Prism does when a variance component is estimated at zero.",
+    );
+  }
+  if (dfMethod === "legacy" && dropped > 0) {
+    notesParts.push(
+      "The Legacy method is not reliable with missing values — Satterthwaite or Kenward-Roger is recommended.",
+    );
+  }
   if (singles > 0) {
     notesParts.push(
       `${singles} subject${singles === 1 ? " has" : "s have"} only a single observation and contribute${singles === 1 ? "s" : ""} no within-subject information.`,

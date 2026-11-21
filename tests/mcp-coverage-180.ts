@@ -987,10 +987,9 @@ const ROWS: Row[] = [
   {
     item: "181",
     title: "Mixed-effects DF choice",
-    status: "gap",
-    note: "Param missing; Satterthwaite hardcoded (types.ts comment). No satterthwaite/kenward/df-method in the runner.",
+    status: "covered",
+    note: "Merged on check/v18: dfMethod param (legacy / satterthwaite / kenward-roger) on mixed-effects — runner, wizard (defaults kenward-roger, Prism's default) and schema. Check corrected: the implementation's param is dfMethod, not df.",
     checks: [
-      { kind: "analysisParam", type: "mixed-effects", param: "df" },
       { kind: "analysisParam", type: "mixed-effects", param: "dfMethod" },
     ],
   },

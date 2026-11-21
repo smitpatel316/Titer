@@ -1200,6 +1200,17 @@
         "description": "Include the subject-factor × column-factor interaction (default false; Grouped tables default it on — see the wizard)."
       },
       {
+        "name": "dfMethod",
+        "type": "string",
+        "enum": [
+          "legacy",
+          "satterthwaite",
+          "kenward-roger"
+        ],
+        "required": false,
+        "description": "How the denominator degrees of freedom behind the P values are calculated (seq 181 — Prism offers all three; Titer previously offered none and always used Satterthwaite). Omitted keeps \"satterthwaite\", so saved analyses and the reference pins don't move; the wizard always sets it, defaulting to \"kenward-roger\" (Prism's default)."
+      },
+      {
         "name": "sets",
         "type": "string[]",
         "required": false,

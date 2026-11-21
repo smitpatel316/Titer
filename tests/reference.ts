@@ -7176,6 +7176,12 @@ async function disagreements(): Promise<string[]> {
       close(mixStat(mix, "Observations dropped as missing"), 0, 0, "balanced dropped");
       close(mixStat(mix, "Subjects (groups)"), 6, 0, "balanced subjects");
       close(mixStat(mix, "Residual DF"), 19, 0, "balanced residual DF");
+      // seq 181: the default (omitted dfMethod) is Satterthwaite, and the
+      // per-coefficient DF is reported — the treatment term's effective DF
+      // is ~4 (between-subject information), the time term's ~17.
+      close(mixCoef(mix, "Intercept")?.df, 4.0814, 1e-3, "balanced intercept Satterthwaite DF");
+      close(mixCoef(mix, "Treatment (Treated vs Control)")?.df, 4.0, 1e-3, "balanced treatment Satterthwaite DF");
+      close(mixCoef(mix, "T")?.df, 17.0, 1e-3, "balanced time Satterthwaite DF");
       if (mix.equation !== "y ~ Treatment + T + (1 | subject)")
         out.push(`Mixed-effects balanced equation: ${mix.equation}`);
       if (mix.subtitle !== "Mixed-effects model (random intercept)")
@@ -7184,6 +7190,65 @@ async function disagreements(): Promise<string[]> {
         out.push(`Mixed-effects balanced notes: Satterthwaite sentence missing`);
       if (!mix.notes.includes("0 observations dropped as missing"))
         out.push(`Mixed-effects balanced notes: explicit 0-dropped sentence missing — ${mix.notes}`);
+    }
+    // seq 181: the denominator-DF choice. The fit never changes with the
+    // method — estimates and variances are identical; only the DF and the
+    // P values move. Legacy DF is the design count n − p − (s − 1) =
+    // 24 − 3 − 5 = 16 for every term (Prism's within-cells term, which its
+    // table gives to both main effects in a two-way-with-matching design);
+    // Kenward-Roger agrees with Satterthwaite to ~1e-6 on this complete,
+    // balanced table, as Prism says it should.
+    for (const method of ["legacy", "kenward-roger"] as const) {
+      const mixDf = await runAnalysis("mixed-effects", mixedBalanced, { ...mixedColumnParams, dfMethod: method });
+      if ("error" in mixDf) {
+        out.push(`Mixed-effects ${method}: ${mixDf.error}`);
+        continue;
+      }
+      close(mixCoef(mixDf, "Intercept")?.estimate, 10.1926, 1e-3, `${method} intercept (fit unchanged)`);
+      close(
+        mixCoef(mixDf, "Treatment (Treated vs Control)")?.estimate,
+        4.9656,
+        1e-3,
+        `${method} treatment (fit unchanged)`,
+      );
+      if (method === "legacy") {
+        close(mixCoef(mixDf, "Intercept")?.df, 16, 0, "legacy intercept DF");
+        close(mixCoef(mixDf, "Treatment (Treated vs Control)")?.df, 16, 0, "legacy treatment DF");
+        close(mixCoef(mixDf, "T")?.df, 16, 0, "legacy time DF");
+        rel(mixCoef(mixDf, "Treatment (Treated vs Control)")?.p, 0.0027776, 1e-3, "legacy treatment p");
+        rel(mixCoef(mixDf, "T")?.p, 1.6255e-13, 1e-3, "legacy time p");
+        if (!mixDf.notes.includes("P-values by the Legacy method"))
+          out.push(`Mixed-effects legacy notes: Legacy sentence missing — ${mixDf.notes}`);
+      } else {
+        close(mixCoef(mixDf, "Treatment (Treated vs Control)")?.df, 4.0, 1e-3, "kenward-roger treatment DF");
+        close(mixCoef(mixDf, "T")?.df, 17.0, 1e-3, "kenward-roger time DF");
+        rel(mixCoef(mixDf, "Treatment (Treated vs Control)")?.p, 0.0242158, 1e-3, "kenward-roger treatment p");
+        rel(mixCoef(mixDf, "T")?.p, 4.5688e-14, 1e-3, "kenward-roger time p");
+        close(
+          mixCoef(mixDf, "Treatment (Treated vs Control)")?.stdError,
+          1.4064,
+          1e-3,
+          "kenward-roger treatment SE",
+        );
+        if (!mixDf.notes.includes("P-values by the Kenward-Roger approximation (pbkrtest)"))
+          out.push(`Mixed-effects kenward-roger notes: Kenward-Roger sentence missing — ${mixDf.notes}`);
+      }
+    }
+    // One cell blanked, Legacy: the design DF drops by one (23 − 3 − 5 =
+    // 15), and the notes warn that Legacy is not reliable with missing
+    // values — Prism's warning, in Titer's words.
+    const mixMissLegacy = await runAnalysis("mixed-effects", mixedMissing, {
+      ...mixedColumnParams,
+      dfMethod: "legacy",
+    });
+    if ("error" in mixMissLegacy) {
+      out.push(`Mixed-effects missing-cell legacy: ${mixMissLegacy.error}`);
+    } else {
+      close(mixCoef(mixMissLegacy, "Intercept")?.df, 15, 0, "missing-cell legacy intercept DF");
+      close(mixCoef(mixMissLegacy, "Treatment (Treated vs Control)")?.df, 15, 0, "missing-cell legacy treatment DF");
+      close(mixCoef(mixMissLegacy, "T")?.df, 15, 0, "missing-cell legacy time DF");
+      if (!mixMissLegacy.notes.includes("not reliable with missing values"))
+        out.push(`Mixed-effects missing-cell legacy notes: missing-values warning missing — ${mixMissLegacy.notes}`);
     }
     // One cell blanked: 23 observations, no subject dropped, treatment within ±0.1 of 5.0.
     const mixMiss = await runAnalysis("mixed-effects", mixedMissing, mixedColumnParams);
@@ -7245,14 +7310,14 @@ async function disagreements(): Promise<string[]> {
     // two-factor reference fit — that is the GUI path to the pinned values.
     const mixAsked = (a: Record<string, string | string[]>, data: TableData) =>
       WIZARDS["mixed-effects"]!.questions(a, readTable(data)).flatMap((q) => (q ? [q.id] : []));
-    if (JSON.stringify(mixAsked({}, mixedBalanced)) !== JSON.stringify(["sets", "matched", "groups"]))
+    if (JSON.stringify(mixAsked({}, mixedBalanced)) !== JSON.stringify(["sets", "matched", "dfMethod", "groups"]))
       out.push(`Mixed-effects wizard (column): ${JSON.stringify(mixAsked({}, mixedBalanced))}`);
     if (
       JSON.stringify(mixAsked({ groups: "yes" }, mixedBalanced)) !==
-      JSON.stringify(["sets", "matched", "groups", "groupName", "groupLevels"])
+      JSON.stringify(["sets", "matched", "dfMethod", "groups", "groupName", "groupLevels"])
     )
       out.push(`Mixed-effects wizard (column, groups): ${JSON.stringify(mixAsked({ groups: "yes" }, mixedBalanced))}`);
-    if (JSON.stringify(mixAsked({}, grouped)) !== JSON.stringify(["matched", "interaction"]))
+    if (JSON.stringify(mixAsked({}, grouped)) !== JSON.stringify(["matched", "interaction", "dfMethod"]))
       out.push(`Mixed-effects wizard (grouped): ${JSON.stringify(mixAsked({}, grouped))}`);
     const mixSetsQ = WIZARDS["mixed-effects"]!.questions({}, readTable(mixedBalanced))[0];
     if (!mixSetsQ || mixSetsQ.kind !== "names" || mixSetsQ.min !== 3)
@@ -7265,7 +7330,13 @@ async function disagreements(): Promise<string[]> {
       JSON.stringify(mixColFinished) !==
       JSON.stringify({
         type: "mixed-effects",
-        params: { subjectId: "row", randomStructure: "intercept", fixedFactors: ["T"], sets: ["T0", "T1", "T2", "T3"] },
+        params: {
+          subjectId: "row",
+          randomStructure: "intercept",
+          fixedFactors: ["T"],
+          dfMethod: "kenward-roger",
+          sets: ["T0", "T1", "T2", "T3"],
+        },
       })
     )
       out.push(`Mixed-effects wizard finish (column): ${JSON.stringify(mixColFinished)}`);
@@ -7291,6 +7362,7 @@ async function disagreements(): Promise<string[]> {
             name: "Treatment",
             levels: ["Control", "Control", "Control", "Treated", "Treated", "Treated"],
           },
+          dfMethod: "kenward-roger",
           sets: ["T0", "T1", "T2", "T3"],
         },
       })
@@ -7330,6 +7402,7 @@ async function disagreements(): Promise<string[]> {
           randomStructure: "intercept",
           fixedFactors: ["Group", "Row"],
           interaction: true,
+          dfMethod: "kenward-roger",
         },
       })
     )
