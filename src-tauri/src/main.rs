@@ -575,6 +575,65 @@ fn write_atomically(path: &Path, data: &[u8]) -> Result<(), String> {
     })
 }
 
+/// Send to Keynote (seq 217): runs the AppleScript the page built
+/// (`buildKeynoteScript` in src/lib/office-export.ts) in Keynote via
+/// `osascript`, so Keynote makes the presentation and saves the real .key
+/// at `path`. macOS only — anywhere else this refuses outright, before
+/// touching anything (the menu hides the item there, and the MCP tool
+/// refuses the target there first). The script goes in a temp file, not
+/// an `osascript -e` argument, so no shell quoting is involved; the temp
+/// script and the temp PNG the page wrote are deleted once osascript
+/// finishes, whatever it reports. Async, on the blocking pool: osascript
+/// can take seconds while Keynote launches, and a save into ~/Documents
+/// or ~/Desktop can block on a macOS TCC consent prompt (same class as
+/// seq 248's `write_file`).
+#[tauri::command]
+async fn send_to_keynote(script: String, png_path: String, path: String) -> Result<String, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (&script, &png_path, &path);
+        return Err("Send to Keynote needs macOS with Keynote installed — this build cannot drive Keynote.".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        tokio::task::spawn_blocking(move || send_to_keynote_blocking(&script, &png_path, &path))
+            .await
+            .map_err(|e| e.to_string())?
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn send_to_keynote_blocking(script: &str, png_path: &str, path: &str) -> Result<String, String> {
+    use std::io::Write;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let script_path = std::env::temp_dir().join(format!("titer-keynote-{stamp}.applescript"));
+    // Write through a handle so a short write is retried, not silent.
+    let out = (|| -> Result<std::process::Output, String> {
+        let mut script_file = std::fs::File::create(&script_path)
+            .map_err(|e| format!("Couldn't write the Keynote script: {e}"))?;
+        script_file
+            .write_all(script.as_bytes())
+            .and_then(|()| script_file.sync_all())
+            .map_err(|e| format!("Couldn't write the Keynote script: {e}"))?;
+        drop(script_file);
+        std::process::Command::new("osascript")
+            .arg(&script_path)
+            .output()
+            .map_err(|e| format!("Couldn't run osascript (is Keynote installed?): {e}"))
+    })();
+    let _ = std::fs::remove_file(&script_path);
+    let _ = std::fs::remove_file(png_path);
+    let out = out?;
+    if !out.status.success() {
+        let detail = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("Keynote couldn't make the presentation: {}", detail.trim()));
+    }
+    Ok(path.to_string())
+}
+
 // ── My Palettes ──────────────────────────────────────────────────────────
 // The palettes made on this Mac, for every project and window: JSON in Titer's data
 // folder, read and checked by the page (src/store/my-palettes.ts).
@@ -1434,6 +1493,7 @@ fn main() {
             read_data_text,
             read_data_bytes,
             write_file,
+            send_to_keynote,
             read_my_palettes,
             write_my_palettes,
             set_recent_documents,

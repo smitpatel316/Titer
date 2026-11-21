@@ -1,5 +1,5 @@
 // Saving a graph as an image file, or copying it to the clipboard.
-import { alert, pickSavePath, writeFile } from "../../native";
+import { alert, handoffPngToKeynote, pickSavePath, writeFile } from "../../native";
 import { buildOfficeDocument, officeDialogTitle, officeExtension, pngSize, type OfficeTarget } from "../../lib/office-export";
 import { loadPlotly } from "./plotly";
 import { withoutSelection } from "./selection";
@@ -89,11 +89,14 @@ export function copyGraphImage(el: HTMLElement, size: Size, dpi: Resolution) {
     .catch((err) => alert("Couldn't Copy the Graph", reason(err), "error"));
 }
 
-/** One-click Send to Word / PowerPoint (v2 item 19): the graph as a PNG at
- *  `dpi`, embedded at its physical size in a real .docx / .pptx file. There
- *  is no COM automation on Mac/Linux, so the file — not a live app handoff —
- *  is the cross-platform form of Prism's one-click export; the user opens it
- *  in Word/PowerPoint. */
+/** One-click Send to Word / PowerPoint / Keynote (v2 item 19, seq 217):
+ *  the graph as a PNG at `dpi`, embedded at its physical size in a real
+ *  .docx / .pptx file. There is no COM automation on Mac/Linux, so the
+ *  file — not a live app handoff — is the cross-platform form of Prism's
+ *  one-click export; the user opens it in Word/PowerPoint. Keynote is
+ *  the exception: no file-side .key exists (see office-export.ts), so
+ *  Keynote takes Prism's own route — the PNG is handed to Keynote on
+ *  macOS, which makes the presentation and saves the real .key. */
 export async function sendGraphToOffice(el: HTMLElement, size: Size, target: OfficeTarget, dpi: Resolution, name: string) {
   const title = officeDialogTitle(target);
   const why = tooLarge(size, dpi);
@@ -103,6 +106,18 @@ export async function sendGraphToOffice(el: HTMLElement, size: Size, target: Off
     const bytes = new Uint8Array(await image.arrayBuffer());
     const dims = pngSize(bytes);
     if (!dims) throw new Error("Couldn't draw the graph as a PNG image.");
+    if (target === "keynote") {
+      const path = await pickSavePath(
+        title,
+        lastFolder ? `${lastFolder}/${name}.key` : `${name}.key`,
+        "Keynote Presentation",
+        "key",
+      );
+      if (!path) return;
+      lastFolder = path.slice(0, path.lastIndexOf("/"));
+      await handoffPngToKeynote(bytes, name, path, dims.widthPx, dims.heightPx, Number(dpi));
+      return;
+    }
     const doc = await buildOfficeDocument(target, {
       png: bytes,
       title: name,
