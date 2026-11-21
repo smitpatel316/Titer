@@ -12952,10 +12952,12 @@ check("the chi-square-gof and binomial wizards ask the expected distribution, th
     params: { expectedProportion: 0.6 },
   });
   // Both sit on Column tables, after Kolmogorov–Smirnov and before Outliers.
+  // The one-sample KS sits between them and chi-square-gof (seq 170: right
+  // after the two-sample KS), so the slice names it too.
   const columnOptions = analysisOptionsForTable("column").map((o) => o.value);
   deepStrictEqual(
     columnOptions.slice(columnOptions.indexOf("kolmogorov-smirnov"), columnOptions.indexOf("outliers") + 1),
-    ["kolmogorov-smirnov", "chi-square-gof", "binomial-test", "outliers"],
+    ["kolmogorov-smirnov", "one-sample-ks", "chi-square-gof", "binomial-test", "outliers"],
   );
 });
 
