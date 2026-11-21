@@ -2330,7 +2330,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             )
           : [];
       const { mean: diffMean, sd: diffSd } = meanSd(pairedDiff);
-      const simQuestions =
+      const simQuestions: (Question | false)[] =
         target === "paired-t"
           ? [
               {
@@ -2346,7 +2346,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
                 kind: "number",
                 label: "SD of the differences",
                 initial: round6(diffSd),
-                validate: (v) => (v > 0 ? undefined : "The SD must be greater than 0."),
+                validate: (v: number) => (v > 0 ? undefined : "The SD must be greater than 0."),
               },
             ]
           : groupNames.flatMap((name): (Question | false)[] => {
@@ -2387,7 +2387,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           kind: "number",
           label: "Degrees of freedom",
           initial: 5,
-          validate: (v) =>
+          validate: (v: number) =>
             v > 2
               ? undefined
               : "Degrees of freedom must be greater than 2 — at df ≤ 2 the t distribution has no finite SD to simulate from.",

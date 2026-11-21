@@ -15668,7 +15668,7 @@ check("plot a function plots Prism's statistical distributions (seq 203)", async
   ok(close(ny, normal.generatedCurves!.x.map((v) => normalPdf(v, 0, 1))));
   ok(ny[5] != null && Math.abs(ny[5] - 0.3989422804014327) < 1e-15);
   ok(ny[0] != null && ny[0] < 0.001);
-  ok(normal.summary.includes("from the Normal distribution,"));
+  ok(normal.summary?.includes("from the Normal distribution,"));
   ok(normal.notes.includes("probability density"));
   // A t with 10 df peaks a touch lower than the normal at 0.
   const t = await runAnalysis("plot-function", empty, {
@@ -15702,7 +15702,7 @@ check("plot a function plots Prism's statistical distributions (seq 203)", async
   if ("error" in binom) throw new Error(binom.error);
   deepStrictEqual(binom.generatedCurves!.x, Array.from({ length: 21 }, (_, i) => i));
   strictEqual(binom.generatedCurves!.curves[0].y[10], binomialPmf(10, 20, 0.5));
-  const mass = binom.generatedCurves!.curves[0].y.reduce((s, v) => s + (v ?? 0), 0);
+  const mass = binom.generatedCurves!.curves[0].y.reduce<number>((s, v) => s + (v ?? 0), 0);
   ok(Math.abs(mass - 1) < 1e-12);
   deepStrictEqual(
     binom.stats.map((s) => [s.label, s.value]),
@@ -15722,7 +15722,7 @@ check("plot a function plots Prism's statistical distributions (seq 203)", async
   });
   if ("error" in pois) throw new Error(pois.error);
   strictEqual(pois.generatedCurves!.curves[0].y[3], poissonPmf(3, 5));
-  const poisMass = pois.generatedCurves!.curves[0].y.reduce((s, v) => s + (v ?? 0), 0);
+  const poisMass = pois.generatedCurves!.curves[0].y.reduce<number>((s, v) => s + (v ?? 0), 0);
   ok(Math.abs(poisMass - 0.999999918907495) < 1e-12);
   // Validation names the bad parameter instead of plotting nonsense.
   deepStrictEqual(
@@ -22598,7 +22598,7 @@ check("mcp import-data-file: a CSV imports as a new table named for the file, wi
     "/tmp/Dose.csv": "Sample,Control,Treated\nS1,1.5,2.5\nS2,1.7,2.9\n",
   });
   const done = await harness.run("job-mcp-csv", "import-data-file", { path: "/tmp/Dose.csv" });
-  const result = done.result as { table_id: string; name: string; table_type: string; rows: number; data_columns: number; notes: string[] };
+  const result = done.result as { project_id: string; table_id: string; name: string; table_type: string; rows: number; data_columns: number; notes: string[] };
   strictEqual(result.project_id, "project-1");
   // Root tables are numbered by the store ("Dose 1"), as the UI import
   // does — the tool returns the name the table actually got.
