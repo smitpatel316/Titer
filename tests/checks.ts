@@ -9059,13 +9059,16 @@ check("PDF export at 1200 DPI is one page at printed size with a Flate image (it
   deepStrictEqual(new Uint8Array(inflateSync(pdf.subarray(start, end))), fixtureRgb);
 });
 
+// seq 216: the lists grew — EPS/BMP formats and 100 DPI (the seq 216 pin
+// below covers the same lists from the publication angle; this one keeps
+// the item-20 framing).
 check("the export dialogs offer PDF/TIFF and 900/1200 DPI (item 20)", () => {
   deepStrictEqual(
     EXPORT_FORMATS.map((f) => f.value),
-    ["png", "jpeg", "svg", "pdf", "tiff"],
+    ["png", "jpeg", "svg", "pdf", "tiff", "eps", "bmp"],
   );
-  deepStrictEqual([...RESOLUTIONS], ["150", "300", "600", "900", "1200"]);
-  deepStrictEqual(FIGURE_RESOLUTIONS, ["150", "300", "600", "900", "1200"]);
+  deepStrictEqual([...RESOLUTIONS], ["100", "150", "300", "600", "900", "1200"]);
+  deepStrictEqual(FIGURE_RESOLUTIONS, ["100", "150", "300", "600", "900", "1200"]);
   // The figure dialog renders the shared list, so it offers PDF/TIFF too.
   ok(readFileSync("src/views/figures/figure-view.tsx", "utf8").includes("options={EXPORT_FORMATS}"));
 });
@@ -9082,7 +9085,7 @@ check("export: the Tauri write path allows .pdf/.tif/.tiff graph exports", () =>
   const main = readFileSync("src-tauri/src/main.rs", "utf8");
   const allowed = writeFileAllowlist(main);
   ok(allowed !== "", "write_file must gate on a check_extension allowlist");
-  for (const ext of ["pdf", "tif", "tiff"]) {
+  for (const ext of ["pdf", "tif", "tiff", "eps"]) {
     ok(new RegExp(`"${ext}"`).test(allowed), `write_file allowlist must include .${ext}`);
   }
 });

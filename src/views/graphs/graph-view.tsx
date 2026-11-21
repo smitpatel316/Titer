@@ -964,10 +964,10 @@ export function GraphView({ node }: { node: ProjectNode }) {
             else openSelector({ kind: "new-analysis", tableId: node.parentId, forGraph });
           }}
           canExport={hasData}
-          onSave={(format, dpi) =>
-            plottedRef.current && saveGraphImage(plottedRef.current, size, format, dpi, node.name)
+          onSave={(format, dpi, colorMode) =>
+            plottedRef.current && saveGraphImage(plottedRef.current, size, format, dpi, node.name, colorMode)
           }
-          onCopy={(dpi) => plottedRef.current && copyGraphImage(plottedRef.current, size, dpi)}
+          onCopy={(dpi, colorMode) => plottedRef.current && copyGraphImage(plottedRef.current, size, dpi, colorMode)}
           onSendToOffice={(target, dpi) =>
             plottedRef.current && sendGraphToOffice(plottedRef.current, size, target, dpi, node.name)
           }

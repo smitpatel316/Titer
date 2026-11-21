@@ -33,6 +33,7 @@ import {
 } from "../../store/types";
 import { GRAPHS, hasValueAxis, newGraphOptions } from ".";
 import { EXPORT_FORMATS, RESOLUTIONS, type ExportFormat, type Resolution } from "./graph-export";
+import { COLOR_MODES, type ColorMode } from "../../lib/vector-export";
 import type { OfficeTarget } from "../../lib/office-export";
 import {
   Choice,
@@ -73,8 +74,8 @@ interface Props extends SectionContext {
   setSeriesStyle: (key: string, style: SeriesStyle) => void;
   selection?: Selection;
   canExport: boolean;
-  onSave: (format: ExportFormat, dpi: Resolution) => void;
-  onCopy: (dpi: Resolution) => void;
+  onSave: (format: ExportFormat, dpi: Resolution, colorMode: ColorMode) => void;
+  onCopy: (dpi: Resolution, colorMode: ColorMode) => void;
   /** The table's series, in order: each shown one takes its place's color. */
   allSeries: string[];
   /** Where a new reference line goes: the middle of the value axis as drawn. */
@@ -121,16 +122,17 @@ const EXPORT_KEY = "titer.graph.export";
 
 /** The sections, in their one order (each shown only when it has something for the graph). */
 export const SECTIONS = ["Statistics", "Data", "Style", "Series", "Selected points", "Text", "Axes", "Match", "Export"];
-type ExportChoice = { format: ExportFormat; dpi: Resolution };
+type ExportChoice = { format: ExportFormat; dpi: Resolution; colorMode: ColorMode };
 function readExport(): ExportChoice {
   try {
     const saved = JSON.parse(localStorage.getItem(EXPORT_KEY) ?? "{}");
     return {
       format: EXPORT_FORMATS.some((f) => f.value === saved.format) ? saved.format : "png",
       dpi: RESOLUTIONS.includes(saved.dpi) ? saved.dpi : "300",
+      colorMode: COLOR_MODES.some((m) => m.value === saved.colorMode) ? saved.colorMode : "color",
     };
   } catch {
-    return { format: "png", dpi: "300" };
+    return { format: "png", dpi: "300", colorMode: "color" };
   }
 }
 
@@ -535,10 +537,30 @@ export function FormatPanel(props: Props) {
         <Choice
           label="Format"
           value={exported.format}
-          onChange={(format) => chooseExport({ format })}
+          onChange={(format) =>
+            chooseExport({
+              format,
+              // CMYK has no form for PNG/JPEG/SVG/BMP: picking one of
+              // those drops the colour back to Color.
+              ...(exported.colorMode === "cmyk" && format !== "eps" && format !== "pdf" && format !== "tiff"
+                ? { colorMode: "color" as const }
+                : {}),
+            })
+          }
           items={EXPORT_FORMATS}
         />
-        {exported.format !== "svg" && (
+        <Choice
+          label="Colour"
+          value={exported.colorMode}
+          onChange={(colorMode) => chooseExport({ colorMode })}
+          // CMYK is offered only for the formats that have a CMYK form.
+          items={
+            exported.format === "eps" || exported.format === "pdf" || exported.format === "tiff"
+              ? COLOR_MODES
+              : COLOR_MODES.filter((m) => m.value !== "cmyk")
+          }
+        />
+        {exported.format !== "svg" && exported.format !== "eps" && exported.format !== "pdf" && (
           <Choice
             label="Resolution (DPI)"
             value={exported.dpi}
@@ -551,11 +573,15 @@ export function FormatPanel(props: Props) {
             variant="accent"
             className="flex-1"
             disabled={!props.canExport}
-            onClick={() => props.onSave(exported.format, exported.dpi)}
+            onClick={() => props.onSave(exported.format, exported.dpi, exported.colorMode)}
           >
             Save…
           </Button>
-          <Button className="flex-1" disabled={!props.canExport} onClick={() => props.onCopy(exported.dpi)}>
+          <Button
+            className="flex-1"
+            disabled={!props.canExport}
+            onClick={() => props.onCopy(exported.dpi, exported.colorMode)}
+          >
             Copy
           </Button>
         </div>
