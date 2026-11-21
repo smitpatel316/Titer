@@ -955,8 +955,8 @@ const ROWS: Row[] = [
   {
     item: "169",
     title: "Generate X values as a series",
-    status: "gap",
-    note: "Not built.",
+    status: "covered",
+    note: "Merged on check/v18: Create Series dialog + grid-menu action + generate-series edit_table op (arithmetic/geometric, 10,000 cap) and Generate X Values as a Series on XY tables.",
     checks: [{ kind: "sourceContainsRe", scope: "src", re: "generateX|xAsSeries" }],
   },
   {

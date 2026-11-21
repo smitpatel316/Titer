@@ -2796,7 +2796,7 @@ pub struct EditTableArgs {
     /// delete-columns, rename-column, rename-group, exclude-cells,
     /// include-cells, freeze-title, convert-comma-decimals,
     /// add-calculated-variable, set-calculated-variable,
-    /// remove-calculated-variable, paste-link, remove-link or paste-transposed (seq 230).
+    /// remove-calculated-variable, paste-link, remove-link, generate-series or paste-transposed (seq 230).
     pub op: String,
     /// insert/delete-rows, insert/delete-columns: the 0-based row or
     /// column to act at (rows and columns are 0-based; column 0 holds the
@@ -2843,6 +2843,17 @@ pub struct EditTableArgs {
     /// changes (default true).
     #[serde(default)]
     pub auto_update: Option<bool>,
+    /// generate-series: the first value (default 0). Omit for the dialog's
+    /// default.
+    #[serde(default)]
+    pub first: Option<f64>,
+    /// generate-series: the step added each time (arithmetic) or the factor
+    /// multiplied by each time (geometric); default 1.
+    #[serde(default)]
+    pub step: Option<f64>,
+    /// generate-series: "arithmetic" (default) or "geometric".
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 /// Args for `titer_refresh_linked_data`: the table whose linked source file
@@ -4285,7 +4296,7 @@ impl TiterMcpServer {
     /// file as a link, or break that link.
     #[tool(
         name = "titer_edit_table",
-        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, paste-link, remove-link or paste-transposed. Rows and columns are 0-based; column 0 holds the row titles. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. paste-transposed { rows, at_row, at_col } pastes the block with rows and columns swapped, as Edit ▸ Paste Transposed does. paste-link { source_path, row?, column?, auto_update? } pastes a data file (.csv, .tsv, .txt or .xlsx) as a link at (row, column) — the values land and stay linked, so titer_refresh_linked_data re-reads the file into the same region later; auto_update (default true) refreshes the link when the project opens. remove-link { } keeps the values and drops the link.",
+        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, paste-link, remove-link, generate-series or paste-transposed. Rows and columns are 0-based; column 0 holds the row titles. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. paste-transposed { rows, at_row, at_col } pastes the block with rows and columns swapped, as Edit ▸ Paste Transposed does. paste-link { source_path, row?, column?, auto_update? } pastes a data file (.csv, .tsv, .txt or .xlsx) as a link at (row, column) — the values land and stay linked, so titer_refresh_linked_data re-reads the file into the same region later; auto_update (default true) refreshes the link when the project opens. remove-link { } keeps the values and drops the link. generate-series { column, at, count, first, mode, step } fills a column with an arithmetic series (add step, default) or a geometric one (multiply by step): column defaults to the X column (1) on XY and Survival tables, at defaults to row 0, count to the table's stored rows, first to 0, step to 1; at most 10,000 values.",
         annotations(
             title = "Edit table",
             read_only_hint = false,
@@ -4311,6 +4322,9 @@ impl TiterMcpServer {
             "cells": args.cells.as_ref().map(|c| c.len()),
             "frozen": args.frozen,
             "source_path": args.source_path,
+            "first": args.first,
+            "step": args.step,
+            "mode": args.mode,
         });
         let outcome: Result<serde_json::Value, String> = async {
             let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
@@ -4340,6 +4354,7 @@ impl TiterMcpServer {
                 "set-calculated-variable",
                 "remove-calculated-variable",
                 "paste-link",
+                "generate-series",
                 "remove-link",
                 "paste-transposed",
             ];
@@ -4408,6 +4423,8 @@ impl TiterMcpServer {
                         }
                     }
                 }
+                // generate-series needs nothing: column, at, count, first,
+                // mode and step all have dispatcher defaults.
                 _ => {}
             }
             self.run_table_job(
@@ -4429,6 +4446,9 @@ impl TiterMcpServer {
                     "source_path": args.source_path,
                     "row": args.row,
                     "auto_update": args.auto_update,
+                    "first": args.first,
+                    "step": args.step,
+                    "mode": args.mode,
                 }),
             )
             .await

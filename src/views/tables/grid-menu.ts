@@ -38,6 +38,8 @@ interface MenuContext {
   rename: (column: number) => void;
   /** Renames the top-level group of the column's group (Nested tables only). */
   renameGroup: (column: number) => void;
+  /** Opens Create Series for the selection (Prism: Insert → Create Series…). */
+  createSeries: (range: Range) => void;
   /** Shows a grouped table's Groups panel. */
   showGroups: () => void;
   /** The table is frozen: the mutating items are disabled (seq 165). */
@@ -50,7 +52,7 @@ interface MenuContext {
   breakLink: () => void;
 }
 
-export function gridMenu({ data, type, zone, range, update, rename, renameGroup, showGroups, tableFrozen, pasteLink, refreshLink, breakLink }: MenuContext): MenuItems {
+export function gridMenu({ data, type, zone, range, update, rename, renameGroup, showGroups, tableFrozen, pasteLink, refreshLink, breakLink, createSeries }: MenuContext): MenuItems {
   const nested = isNested(data);
   const grouped = isGrouped(data) || nested;
   const rows = range.r1 - range.r0 + 1;
@@ -85,6 +87,12 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
         { text: "Break Link", action: breakLink },
       );
     }
+  }
+  // Prism's Insert → Create Series…: fill the selection's column with an
+  // arithmetic or geometric series, starting at the selection's top-left
+  // cell. Row titles (column 0) take no series.
+  if (zone === "cell" && onCells && range.c0 >= 1) {
+    items.push(SEPARATOR, { text: "Create Series…", action: () => createSeries(range) });
   }
 
   if (zone !== "column") {

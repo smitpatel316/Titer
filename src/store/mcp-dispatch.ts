@@ -94,6 +94,7 @@ import {
   refreshLinked,
   type LinkedPaste,
 } from "../lib/linked-paste";
+import { fillSeries, generateSeries, validateSeriesSpec, type SeriesMode } from "../lib/series";
 import { SUMMARY_FORMATS, summarySubcolumns, type SummaryFormat } from "../lib/summary-format";
 import {
   convertCommaDecimals,
@@ -1447,10 +1448,45 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           next = writeBlock(data, atRow, atCol, transposeBlock(block), type);
           break;
         }
+        case "generate-series": {
+          // Create Series (Prism: Insert → Create Series…; seq 169): fill
+          // a column with an arithmetic or geometric series. Defaults
+          // follow the dialog: the X column on XY/Survival tables, from
+          // row 0, for the table's stored rows, starting at 0 in steps of 1.
+          const column =
+            argOptNumber(job, job.args, "column") ??
+            (type === "xy" || type === "survival"
+              ? 1
+              : (() => {
+                  throw jobErr(job, "needs column — only XY and Survival tables default to the X column (1).");
+                })());
+          if (column < 1) {
+            throw jobErr(job, "needs a data column (1 or later) — column 0 holds the row titles, and takes no series.");
+          }
+          if (column >= data.columns.length) {
+            throw jobErr(job, `has no column ${column} — the table has ${data.columns.length} columns (0 is the row titles).`);
+          }
+          const at = argInt(job, job.args, "at", 0);
+          if (at > data.rows.length) {
+            throw jobErr(job, `has no row ${at} to start at — the table holds ${data.rows.length} stored rows.`);
+          }
+          const count = argOptNumber(job, job.args, "count") ?? Math.max(1, data.rows.length - at);
+          const spec = {
+            count,
+            first: argOptNumber(job, job.args, "first") ?? 0,
+            mode: ((argOptString(job, job.args, "mode") ?? "arithmetic") as SeriesMode),
+            step: argOptNumber(job, job.args, "step") ?? 1,
+          };
+          const problem = validateSeriesSpec(spec);
+          if (problem) throw jobErr(job, problem);
+          label = "Create Series";
+          next = fillSeries(data, column, at, generateSeries(spec));
+          break;
+        }
         default:
           throw jobErr(
             job,
-            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, paste-link, remove-link, paste-transposed.`,
+            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, paste-link, remove-link, generate-series, paste-transposed.`,
           );
       }
       if (next === null) {
