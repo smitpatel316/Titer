@@ -99,6 +99,10 @@ import {
   addRowGroup,
   applySummaryFormat,
   applySummaryFormatLoses,
+  applySummaryFormatNested,
+  applySummaryFormatNestedLoses,
+  applySummaryFormatXY,
+  applySummaryFormatXYLoses,
   changeErrorFormat,
   columnsBeyond,
   defaultRowGroups,
@@ -186,7 +190,7 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, jitter, legendRightMargin, legendWidthPx, logScaleOffered, movedText, paintOf, perRowSummaryStats, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, withCaps, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, jitter, legendRightMargin, legendWidthPx, logScaleOffered, movedText, paintOf, perRowSummaryStats, scatterOffsets, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -3539,6 +3543,1013 @@ check("grouped bars overlay the individual points when showPoints is set (Mansi 
   const sumFig = GRAPHS["grouped-bars"].build(summary.numeric, options, paintOf(options, 2), summary.titles, "mean-sd-n");
   strictEqual(sumFig.data.length, 2);
   strictEqual(GRAPHS["grouped-stacked"].build(columns, options, paintOf(options, 2)).data.length, 2);
+});
+
+// ── Summary sub-columns on XY and nested tables (seq 208) ─────────────────
+
+/** An XY table with two replicate data sets (A, B) and a shared X. */
+const xyReplicates = (): TableData => ({
+  columns: ["Title", "X", "A:Y1", "A:Y2", "A:Y3", "B:Y1", "B:Y2", "B:Y3"],
+  rows: [
+    [null, "1", "10", "12", "14", "20", "22", "24"],
+    [null, "2", "11", "13", "15", "21", "23", "25"],
+  ],
+  groups: 2,
+  replicates: 3,
+});
+
+/** The same XY table holding pre-calculated summaries instead of replicates. */
+const xySummary = (): TableData => ({
+  columns: ["Title", "X", "A:Mean", "A:SD", "A:N", "B:Mean", "B:SD", "B:N"],
+  rows: [
+    [null, "1", "10", "2", "4", "20", "4", "9"],
+    [null, "2", "12", "3", "4", "22", "6", "9"],
+  ],
+  groups: 2,
+  replicates: 3,
+  summaryFormat: "mean-sd-n",
+});
+
+/** A nested table holding pre-calculated summaries (Mean, SD, N per subgroup). */
+const nestedSummary = (): TableData => ({
+  columns: [
+    "Title",
+    "A:S1:Mean", "A:S1:SD", "A:S1:N",
+    "A:S2:Mean", "A:S2:SD", "A:S2:N",
+    "B:S1:Mean", "B:S1:SD", "B:S1:N",
+    "B:S2:Mean", "B:S2:SD", "B:S2:N",
+  ],
+  rows: [
+    ["r1", "10", "2", "4", "20", "4", "9", "30", "6", "16", "40", "8", "25"],
+    ["r2", "12", "3", "4", "22", "6", "9", "32", "6", "16", "42", "8", "25"],
+  ],
+  groups: 2,
+  subgroups: 2,
+  replicates: 3,
+  summaryFormat: "mean-sd-n",
+});
+
+check("seq 208: an XY table's sub-column format turns each Y data set into Mean/SD/N columns", () => {
+  const t = applySummaryFormatXY(xyReplicates(), "mean-sd-n");
+  deepStrictEqual(t.columns, ["Title", "X", "A:Mean", "A:SD", "A:N", "B:Mean", "B:SD", "B:N"]);
+  deepStrictEqual(t.rows[0], [null, "1", "10", "12", "14", "20", "22", "24"]);
+  strictEqual(t.replicates, 3);
+  strictEqual(t.summaryFormat, "mean-sd-n");
+  strictEqual(summaryFormatOf(t), "mean-sd-n");
+  // Narrowing to Mean, SD drops the N column; back to Replicates restores Y names.
+  const narrow = applySummaryFormatXY(t, "mean-sd");
+  deepStrictEqual(narrow.columns, ["Title", "X", "A:Mean", "A:SD", "B:Mean", "B:SD"]);
+  deepStrictEqual(narrow.rows[0], [null, "1", "10", "12", "20", "22"]);
+  const back = applySummaryFormatXY(narrow, "replicates");
+  deepStrictEqual(back.columns, ["Title", "X", "A:Y1", "A:Y2", "B:Y1", "B:Y2"]);
+  deepStrictEqual(back.rows[0], [null, "1", "10", "12", "20", "22"]);
+  strictEqual(back.summaryFormat, undefined);
+});
+
+check("seq 208: widening a summary format leaves the new slots empty instead of borrowing the next group's values", () => {
+  // Grouped 2-wide → mean-sd-n: each group's new N slot is empty.
+  const grouped2: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+    rows: [["r1", "a1", "a2", "b1", "b2"]],
+    groups: 2,
+    replicates: 2,
+  };
+  deepStrictEqual(applySummaryFormat(grouped2, "mean-sd-n").rows[0], ["r1", "a1", "a2", null, "b1", "b2", null]);
+  // XY 2-wide → mean-sd-n: same, per Y data set.
+  const xy2: TableData = {
+    columns: ["Title", "X", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+    rows: [[null, "1", "10", "12", "20", "22"]],
+    groups: 2,
+    replicates: 2,
+  };
+  deepStrictEqual(applySummaryFormatXY(xy2, "mean-sd-n").rows[0], [null, "1", "10", "12", null, "20", "22", null]);
+});
+
+check("seq 208: an XY table with one column per Y data set gains a set per column on picking a format", () => {
+  const plain: TableData = {
+    columns: ["Title", "X", "Control", "Treated"],
+    rows: [
+      [null, "1", "10", "20"],
+      [null, "2", "11", "21"],
+    ],
+  };
+  const t = applySummaryFormatXY(plain, "mean-sd");
+  deepStrictEqual(t.columns, ["Title", "X", "Control:Mean", "Control:SD", "Treated:Mean", "Treated:SD"]);
+  strictEqual(t.groups, 2);
+  strictEqual(t.replicates, 2);
+  // Narrowing only asks when a dropped sub-column holds values.
+  strictEqual(applySummaryFormatXYLoses(xySummary(), "mean-sd"), true); // the N column holds values
+  strictEqual(applySummaryFormatXYLoses(xySummary(), "mean-sem-n"), false); // same width
+  strictEqual(applySummaryFormatXYLoses(xySummary(), "replicates"), false);
+});
+
+check("seq 208: Mean, CV is a summary format on grouped tables, and CV converts to SD via the mean", () => {
+  const t = applySummaryFormat(grouped(), "mean-cv");
+  deepStrictEqual(t.columns, ["Title", "A:Mean", "A:CV", "Treated:Mean", "Treated:CV"]);
+  strictEqual(t.summaryFormat, "mean-cv");
+  // CV 20% of mean 10 is an SD of 2; with no N stored there is no SEM or CI.
+  const cv: TableData = {
+    columns: ["Title", "A:Mean", "A:CV"],
+    rows: [["r1", "10", "20"]],
+    groups: 1,
+    replicates: 2,
+    summaryFormat: "mean-cv",
+  };
+  deepStrictEqual(perRowSummaryStats(readTable(cv).sets[0].columns, 1, "mean-cv", "sd"), {
+    center: [10],
+    error: [2],
+    errorMinus: null,
+  });
+  deepStrictEqual(perRowSummaryStats(readTable(cv).sets[0].columns, 1, "mean-cv", "sem").error, [null]);
+  deepStrictEqual(perRowSummaryStats(readTable(cv).sets[0].columns, 1, "mean-cv", "ci").error, [null]);
+});
+
+check("seq 208: a nested table's sub-column format renames every subgroup's columns in place", () => {
+  const t = applySummaryFormatNested(nested(), "mean-sd-n");
+  deepStrictEqual(t.columns, [
+    "Title",
+    "A:S1:Mean", "A:S1:SD", "A:S1:N",
+    "A:S2:Mean", "A:S2:SD", "A:S2:N",
+    "B:S1:Mean", "B:S1:SD", "B:S1:N",
+    "B:S2:Mean", "B:S2:SD", "B:S2:N",
+  ]);
+  // Widening 2 → 3: each subgroup's new N slot is empty — values stay in
+  // their (group, subgroup) slot, never the next subgroup's value.
+  deepStrictEqual(t.rows[0], ["r1", "a11", "a12", null, "a21", "a22", null, "b11", "b12", null, "b21", "b22", null]);
+  strictEqual(t.summaryFormat, "mean-sd-n");
+  // Narrowing drops the N column of every subgroup; back to Replicates restores R names.
+  const narrow = applySummaryFormatNested(t, "mean-sd");
+  deepStrictEqual(narrow.columns.slice(1, 5), ["A:S1:Mean", "A:S1:SD", "A:S2:Mean", "A:S2:SD"]);
+  const back = applySummaryFormatNested(narrow, "replicates");
+  deepStrictEqual(back.columns.slice(0, 5), ["Title", "A:S1:R1", "A:S1:R2", "A:S2:R1", "A:S2:R2"]);
+  strictEqual(back.summaryFormat, undefined);
+  strictEqual(applySummaryFormatNestedLoses(t, "mean-sd"), false); // the N columns are empty (widened from 2 replicates)
+  strictEqual(applySummaryFormatNestedLoses(t, "mean-sem-n"), false);
+});
+
+check("seq 208: renesting a nested summary table keeps its summary names", () => {
+  const t = renestTable(applySummaryFormatNested(nested(), "mean-sd-n"), 3, 2, 3);
+  deepStrictEqual(t.columns.slice(-6), ["C:S1:Mean", "C:S1:SD", "C:S1:N", "C:S2:Mean", "C:S2:SD", "C:S2:N"]);
+  strictEqual(t.summaryFormat, "mean-sd-n");
+});
+
+check("seq 208: an XY summary table survives a save and reload, and a mismatched format is dropped", () => {
+  for (const data of [xySummary(), nestedSummary()]) {
+    const type = data.subgroups === undefined ? "xy" : "nested";
+    const file: ProjectFilePayload = {
+      nodes: { t1: { id: "t1", type: "table", name: "Summary", parentId: null, tableType: type, data } },
+      rootOrder: ["t1"],
+      childOrder: { t1: [] },
+      activeNodeId: "t1",
+    };
+    const { project, updated } = read(serializeProjectFile(file));
+    strictEqual(updated, false);
+    const back = project.nodes.t1.data!;
+    strictEqual(back.summaryFormat, "mean-sd-n");
+    deepStrictEqual(back.columns, data.columns);
+    deepStrictEqual(back.rows, data.rows);
+  }
+  const file: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "Mismatch",
+        parentId: null,
+        tableType: "nested",
+        data: { ...nested(), summaryFormat: "mean-sd-n" },
+      },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const { project } = read(serializeProjectFile(file));
+  strictEqual(project.nodes.t1.data!.summaryFormat, undefined);
+});
+
+check("seq 208: XY bars on a summary table draw the stored Means with the converted error, never the average of Mean/SD/N", () => {
+  const dataset = readTable(xySummary());
+  const options = newGraphOptions("xy-bar");
+  const fig = GRAPHS["xy-bar"].build(dataset.columns, options, paintOf(options, 2), dataset.titles, "mean-sd-n");
+  const traces = fig.data as { name: string; y: number[]; error_y?: { array: number[] } }[];
+  deepStrictEqual(traces.map((t) => t.name), ["A", "B"]);
+  deepStrictEqual(traces[0].y, [10, 12]);
+  deepStrictEqual(traces[0].error_y?.array, [1, 1.5]); // SD 2/√4, 3/√4
+  deepStrictEqual(traces[1].y, [20, 22]);
+  deepStrictEqual(traces[1].error_y?.array, [4 / 3, 2]); // SD 4/√9, 6/√9
+  // The same values come out of xyDrawn directly, even with xyReplicates "each".
+  const { x: xCol, ys } = splitXY(dataset.columns);
+  const drawn = xyDrawn(xCol!, ys[0]!, { ...newGraphOptions("xy-scatter"), xyReplicates: "each" }, "mean-sd-n");
+  deepStrictEqual(drawn, { x: [1, 2], y: [10, 12], errors: [1, 1.5] });
+});
+
+check("seq 208: a nested summary table's subgroup Means pool like replicates (mean of Means, SD of Means)", () => {
+  const { sets } = readTable(nestedSummary());
+  // Group A: subgroup Means 10 and 20 in row 1 → center 15, SD √50; row 2: 12 and 22 → 17.
+  deepStrictEqual(perRowSummaryStats(sets[0].columns, 2, "mean-sd-n", "sd"), {
+    center: [15, 17],
+    error: [Math.sqrt(50), Math.sqrt(50)],
+    errorMinus: null,
+  });
+  deepStrictEqual(perRowSummaryStats(sets[0].columns, 2, "mean-sd-n", "sem").error, [
+    Math.sqrt(50) / Math.sqrt(2),
+    Math.sqrt(50) / Math.sqrt(2),
+  ]);
+  // The heatmap's Mean column is the per-row mean of the subgroup Means.
+  const meanCol = summaryMeanColumn(sets[0]);
+  deepStrictEqual(meanCol?.byRow, [15, 17]);
+});
+
+check("seq 208: mean-and-error on a nested summary table plots one point per subgroup, from the Mean columns only", () => {
+  const dataset = readTable(nestedSummary());
+  const options = newGraphOptions("mean-error");
+  const fig = GRAPHS["mean-error"].build(
+    dataset.numeric,
+    options,
+    paintOf(options, 4),
+    dataset.titles,
+    "mean-sd-n",
+  );
+  const traces = fig.data as { y: (number | null)[]; error_y?: { array: (number | null)[] } }[];
+  strictEqual(traces.length, 4); // A:S1, A:S2, B:S1, B:S2 — no SD/N traces
+  // One point per subgroup: the center of that subgroup's Mean column across
+  // rows (11 = mean of 10 and 12), with its SEM.
+  deepStrictEqual(traces.map((t) => t.y), [[11], [21], [31], [41]]);
+  deepStrictEqual(traces.map((t) => t.error_y?.array), [[1], [1], [1], [1]]);
+  const layout = fig.layout as { xaxis?: { ticktext?: string[] } };
+  deepStrictEqual(layout.xaxis?.ticktext, ["A:S1", "A:S2", "B:S1", "B:S2"]);
+});
+
+check("seq 208 MCP: set-summary-format renames an XY table's sub-columns, and bad formats are refused", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-208-table", "create-table", {
+    table_type: "xy",
+    columns: ["", "X", "A:Y1", "A:Y2", "A:Y3", "B:Y1", "B:Y2", "B:Y3"],
+    rows: [
+      ["", 1, 10, 12, 14, 20, 22, 24],
+      ["", 2, 11, 13, 15, 21, 23, 25],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  const done = await harness.run("job-208-format", "edit-table", {
+    table_id: tableId,
+    op: "set-summary-format",
+    format: "mean-sd-n",
+  });
+  strictEqual((done.result as { summary_format: string }).summary_format, "mean-sd-n");
+  deepStrictEqual(harness.state().nodes[tableId]?.data?.columns, [
+    "",
+    "X",
+    "A:Mean",
+    "A:SD",
+    "A:N",
+    "B:Mean",
+    "B:SD",
+    "B:N",
+  ]);
+  // Already that format: a no-op success, still reporting the format.
+  const again = await harness.run("job-208-again", "edit-table", {
+    table_id: tableId,
+    op: "set-summary-format",
+    format: "mean-sd-n",
+  });
+  strictEqual((again.result as { summary_format: string }).summary_format, "mean-sd-n");
+  // Back to replicates restores the Y names.
+  await harness.run("job-208-back", "edit-table", {
+    table_id: tableId,
+    op: "set-summary-format",
+    format: "replicates",
+  });
+  deepStrictEqual(harness.state().nodes[tableId]?.data?.columns, [
+    "",
+    "X",
+    "A:Y1",
+    "A:Y2",
+    "A:Y3",
+    "B:Y1",
+    "B:Y2",
+    "B:Y3",
+  ]);
+  await rejects(
+    harness.run("job-208-bad", "edit-table", { table_id: tableId, op: "set-summary-format", format: "mean-foo" }),
+    /has no sub-column format/,
+  );
+  const column = await harness.run("job-208-column", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B"],
+    rows: [["r1", 1, 2]],
+  });
+  harness.sync();
+  await rejects(
+    harness.run("job-208-wrong-type", "edit-table", {
+      table_id: (column.result as { table_id: string }).table_id,
+      op: "set-summary-format",
+      format: "mean-sd",
+    }),
+    /only grouped, xy and nested tables have sub-columns/,
+  );
+});
+
+check("seq 208 MCP: a nested table written with summary columns is detected as a summary table", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-208-nested", "create-table", {
+    table_type: "nested",
+    columns: [
+      "",
+      "A:S1:Mean", "A:S1:SD", "A:S1:N",
+      "A:S2:Mean", "A:S2:SD", "A:S2:N",
+    ],
+    rows: [["r1", 10, 2, 4, 20, 4, 9]],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  strictEqual(harness.state().nodes[tableId]?.data?.summaryFormat, "mean-sd-n");
+});
+
+// ── Contingency + nested graph shapes, grouped graphs from XY (seq 210) ───
+
+check("seq 210: the offerings cover grouped graphs from XY, scatter/box from contingency, mean-error from nested", () => {
+  const offered = (t: string) => GRAPH_OPTIONS_BY_TABLE[t as keyof typeof GRAPH_OPTIONS_BY_TABLE].map((o) => o.value);
+  for (const type of ["grouped-bars", "grouped-scatter", "grouped-lines", "grouped-stacked", "grouped-hbars"] as const) {
+    ok(offered("xy").includes(type), `xy should offer ${type}`);
+  }
+  ok(offered("contingency").includes("grouped-scatter"), "contingency should offer grouped-scatter");
+  ok(offered("contingency").includes("grouped-box"), "contingency should offer grouped-box");
+  ok(offered("nested").includes("mean-error"), "nested should offer mean-error");
+  // And the ones Prism does not list stay unoffered: no box from XY, no box from nested.
+  ok(!offered("xy").includes("grouped-box"), "xy should not offer grouped-box");
+  ok(!offered("nested").includes("grouped-box"), "nested should not offer grouped-box");
+});
+
+check("seq 210: grouped bars from an XY table plot the Y data sets across the rows, X ignored", () => {
+  const dataset = readTable(xyReplicates());
+  const options = newGraphOptions("grouped-bars");
+  // The X column never reaches the builder: it is not a group.
+  deepStrictEqual(
+    plotColumns(dataset, "grouped-bars", options, "xy").map((c) => c.name),
+    ["A:Y1", "A:Y2", "A:Y3", "B:Y1", "B:Y2", "B:Y3"],
+  );
+  const fig = GRAPHS["grouped-bars"].build(
+    plotColumns(dataset, "grouped-bars", options, "xy"),
+    options,
+    paintOf(options, 2),
+    dataset.titles,
+    "replicates",
+  );
+  const traces = fig.data as { name: string; y: (number | null)[] }[];
+  deepStrictEqual(traces.map((t) => t.name), ["A", "B"]);
+  deepStrictEqual(traces[0].y, [12, 13]); // mean of 10/12/14, then 11/13/15
+  deepStrictEqual(traces[1].y, [22, 23]);
+});
+
+check("seq 210: grouped box from a contingency table draws one degenerate box per outcome", () => {
+  const table: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "5", "7"],
+      ["r2", "3", "9"],
+    ],
+  };
+  const dataset = readTable(table);
+  const options = newGraphOptions("grouped-box");
+  const fig = GRAPHS["grouped-box"].build(
+    plotColumns(dataset, "grouped-box", options, "contingency"),
+    options,
+    paintOf(options, 2),
+    dataset.titles,
+  );
+  const traces = fig.data as { type: string; median: number[] }[];
+  strictEqual(traces.length, 2);
+  ok(traces.every((t) => t.type === "box"), "both traces are boxes");
+  // One box per row, one value in each: the median is the value itself.
+  deepStrictEqual(traces.map((t) => t.median), [
+    [5, 3],
+    [7, 9],
+  ]);
+});
+
+check("seq 210: a grouped box on an XY or nested summary table is refused the same as on a grouped one", () => {
+  // The refusal itself lives in the graph view (`summaryLack`); the message
+  // it shows comes from here, and it must fire for the new summary tables.
+  ok(summaryTableProblem(xySummary(), "Box and violin")?.includes("pre-calculated summaries"));
+  ok(summaryTableProblem(nestedSummary(), "Box and violin")?.includes("pre-calculated summaries"));
+  strictEqual(summaryTableProblem(xyReplicates(), "Box and violin"), undefined);
+});
+
+check("seq 210 MCP: build-graph accepts the new offerings and still refuses the unoffered ones", async () => {
+  const harness = mcpLaggingHarness(true);
+  // The gate runs before createGraph, so a recording stub proves it passed;
+  // the real store action is exercised by the live MCP pin.
+  const created: [string, string][] = [];
+  harness.deps.actions!.createGraph = (tableId, graphType) => {
+    created.push([tableId, graphType]);
+    return `graph_${graphType}`;
+  };
+  const contingency = await harness.run("job-210-cont", "create-table", {
+    table_type: "contingency",
+    columns: ["", "A", "B"],
+    rows: [
+      ["r1", 5, 7],
+      ["r2", 3, 9],
+    ],
+  });
+  const contId = (contingency.result as { table_id: string }).table_id;
+  harness.sync();
+  for (const type of ["grouped-scatter", "grouped-box"]) {
+    const done = await harness.run(`job-210-cont-${type}`, "build-graph", { table_id: contId, graph_type: type });
+    strictEqual((done.result as { graph_type: string }).graph_type, type);
+  }
+  const xy = await harness.run("job-210-xy", "create-table", {
+    table_type: "xy",
+    columns: ["", "X", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+    rows: [
+      ["", 1, 10, 12, 20, 22],
+      ["", 2, 11, 13, 21, 23],
+    ],
+  });
+  const xyId = (xy.result as { table_id: string }).table_id;
+  harness.sync();
+  const bars = await harness.run("job-210-xy-bars", "build-graph", { table_id: xyId, graph_type: "grouped-bars" });
+  strictEqual((bars.result as { graph_type: string }).graph_type, "grouped-bars");
+  await rejects(
+    harness.run("job-210-xy-box", "build-graph", { table_id: xyId, graph_type: "grouped-box" }),
+    /not offered for a XY table/,
+  );
+  const nested = await harness.run("job-210-nested", "create-table", {
+    table_type: "nested",
+    columns: ["", "A:S1:R1", "A:S1:R2", "A:S2:R1", "A:S2:R2"],
+    rows: [["r1", 10, 11, 12, 13]],
+  });
+  const nestedId = (nested.result as { table_id: string }).table_id;
+  harness.sync();
+  const meanError = await harness.run("job-210-nested-me", "build-graph", {
+    table_id: nestedId,
+    graph_type: "mean-error",
+  });
+  strictEqual((meanError.result as { graph_type: string }).graph_type, "mean-error");
+  deepStrictEqual(
+    created.map(([, t]) => t),
+    ["grouped-scatter", "grouped-box", "grouped-bars", "mean-error"],
+  );
+});
+
+// ── XY spikes + bar/scatter combo (seq 211) ──────────────────────────────
+
+/** A plain XY table, one column per Y data set. */
+const xyPlain = (): TableData => ({
+  columns: ["Title", "X", "A", "B"],
+  rows: [
+    [null, "1", "10", "20"],
+    [null, "2", "11", "21"],
+    [null, "3", "12", "22"],
+  ],
+});
+
+check("seq 211: spikes run a vertical line from the baseline to each point, with a marker at the tip", () => {
+  const dataset = readTable(xyPlain());
+  const options = newGraphOptions("xy-spikes");
+  const fig = GRAPHS["xy-spikes"].build(dataset.columns, options, paintOf(options, 2));
+  const traces = fig.data as {
+    mode: string;
+    name: string;
+    x: (number | null)[];
+    y: (number | null)[];
+    showlegend?: boolean;
+  }[];
+  strictEqual(traces.length, 4); // a stems trace and a tips trace per data set
+  deepStrictEqual(traces.map((t) => [t.name, t.mode, t.showlegend ?? true]), [
+    ["A", "lines", false],
+    ["A", "markers", true],
+    ["B", "lines", false],
+    ["B", "markers", true],
+  ]);
+  // The stems start at the baseline and end at the point, one segment per point.
+  deepStrictEqual(traces[0].x, [1, 1, null, 2, 2, null, 3, 3, null]);
+  deepStrictEqual(traces[0].y, [0, 10, null, 0, 11, null, 0, 12, null]);
+  deepStrictEqual(traces[1].x, [1, 2, 3]);
+  deepStrictEqual(traces[1].y, [10, 11, 12]);
+});
+
+check("seq 211: bar + scatter pairs mean bars with the scatter of the same data, following xyStyle and xyReplicates", () => {
+  const dataset = readTable(xyReplicates());
+  const options = newGraphOptions("xy-bar-scatter");
+  const fig = GRAPHS["xy-bar-scatter"].build(dataset.columns, options, paintOf(options, 2));
+  const traces = fig.data as {
+    type: string;
+    mode?: string;
+    name: string;
+    x: number[];
+    y: number[];
+    error_y?: { array: number[] };
+  }[];
+  strictEqual(traces.length, 4); // a bar trace and a scatter trace per data set
+  deepStrictEqual(traces.map((t) => [t.name, t.type, t.mode ?? "bar"]), [
+    ["A", "bar", "bar"],
+    ["A", "scatter", "markers"],
+    ["B", "bar", "bar"],
+    ["B", "scatter", "markers"],
+  ]);
+  // The bars are the per-X means with SEM whiskers; the scatter (mean replicates)
+  // sits on the same means and carries no second set of whiskers.
+  deepStrictEqual(traces[0].y, [12, 13]);
+  deepStrictEqual(traces[0].error_y?.array, [2 / Math.sqrt(3), 2 / Math.sqrt(3)]); // SEM of [10,12,14] / [11,13,15]: SD 2 / √3
+  deepStrictEqual(traces[1].y, [12, 13]);
+  strictEqual(traces[1].error_y, undefined);
+  deepStrictEqual(traces[2].y, [22, 23]);
+  // Each replicate: the scatter shows every value, the bars stay the means.
+  const each = GRAPHS["xy-bar-scatter"].build(
+    dataset.columns,
+    { ...options, xyReplicates: "each" },
+    paintOf(options, 2),
+  );
+  const eachTraces = each.data as { type: string; x: number[]; y: number[] }[];
+  deepStrictEqual(eachTraces[0].y, [12, 13]); // bars still the means
+  deepStrictEqual(eachTraces[1].x, [1, 1, 1, 2, 2, 2]); // every replicate at its X
+  deepStrictEqual(eachTraces[1].y, [10, 12, 14, 11, 13, 15]);
+  // Line style: the scatter part connects its points.
+  const lined = GRAPHS["xy-bar-scatter"].build(
+    dataset.columns,
+    { ...options, xyStyle: "points+line" },
+    paintOf(options, 2),
+  );
+  strictEqual((lined.data as { mode?: string }[])[1].mode, "lines+markers");
+});
+
+check("seq 211: spikes and the combo on a summary table draw the stored Means", () => {
+  const dataset = readTable(xySummary());
+  const options = newGraphOptions("xy-spikes");
+  const spikes = GRAPHS["xy-spikes"].build(dataset.columns, options, paintOf(options, 2), dataset.titles, "mean-sd-n");
+  const spikeTraces = spikes.data as { mode: string; y: (number | null)[]; error_y?: { array: number[] } }[];
+  deepStrictEqual(spikeTraces[1].y, [10, 12]); // the tips are the Means
+  deepStrictEqual(spikeTraces[1].error_y?.array, [1, 1.5]); // the converted SEM
+  const combo = GRAPHS["xy-bar-scatter"].build(
+    dataset.columns,
+    newGraphOptions("xy-bar-scatter"),
+    paintOf(newGraphOptions("xy-bar-scatter"), 2),
+    dataset.titles,
+    "mean-sd-n",
+  );
+  const comboTraces = combo.data as { type: string; y: number[]; error_y?: { array: number[] } }[];
+  deepStrictEqual(comboTraces[0].y, [10, 12]);
+  deepStrictEqual(comboTraces[0].error_y?.array, [1, 1.5]);
+  deepStrictEqual(comboTraces[1].y, [10, 12]);
+});
+
+check("seq 211 MCP: build-graph accepts the spike and combo kinds on XY tables", async () => {
+  const harness = mcpLaggingHarness(true);
+  const created: string[] = [];
+  harness.deps.actions!.createGraph = (_tableId, graphType) => {
+    created.push(graphType);
+    return `graph_${graphType}`;
+  };
+  const xy = await harness.run("job-211-xy", "create-table", {
+    table_type: "xy",
+    columns: ["", "X", "A:Y1", "A:Y2"],
+    rows: [
+      ["", 1, 10, 12],
+      ["", 2, 11, 13],
+    ],
+  });
+  const xyId = (xy.result as { table_id: string }).table_id;
+  harness.sync();
+  for (const type of ["xy-spikes", "xy-bar-scatter"]) {
+    const done = await harness.run(`job-211-${type}`, "build-graph", { table_id: xyId, graph_type: type });
+    strictEqual((done.result as { graph_type: string }).graph_type, type);
+  }
+  // And neither is offered on a grouped table.
+  const groupedTable = await harness.run("job-211-grouped", "create-table", {
+    table_type: "grouped",
+    columns: ["", "A:Y1", "B:Y1"],
+    rows: [["r1", 1, 2]],
+  });
+  harness.sync();
+  await rejects(
+    harness.run("job-211-grouped-spikes", "build-graph", {
+      table_id: (groupedTable.result as { table_id: string }).table_id,
+      graph_type: "xy-spikes",
+    }),
+    /not offered for a Grouped table/,
+  );
+  deepStrictEqual(created, ["xy-spikes", "xy-bar-scatter"]);
+});
+
+// ── Floating bars (seq 212) ──────────────────────────────────────────────
+
+check("seq 212: a column table's floating bars span each column's min to max", () => {
+  const table: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "5", "7"],
+      ["r2", "3", "9"],
+      ["r3", "4", "8"],
+    ],
+  };
+  const dataset = readTable(table);
+  const options = newGraphOptions("floating-bars");
+  const fig = GRAPHS["floating-bars"].build(
+    plotColumns(dataset, "floating-bars", options, "column"),
+    options,
+    paintOf(options, 2),
+    dataset.titles,
+  );
+  const traces = fig.data as { type: string; name: string; x: number[]; y: number[]; base: number[] }[];
+  deepStrictEqual(traces.map((t) => [t.name, t.x, t.y, t.base]), [
+    ["A", [0], [2], [3]], // 3 to 5
+    ["B", [1], [2], [7]], // 7 to 9
+  ]);
+});
+
+check("seq 212: a grouped table's floating bars span each cell's min to max, per row", () => {
+  const table: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+    rows: [
+      ["r1", "10", "14", "20", "24"],
+      ["r2", "11", "15", "21", "25"],
+    ],
+    groups: 2,
+    replicates: 2,
+  };
+  const dataset = readTable(table);
+  const options = newGraphOptions("floating-bars");
+  const fig = GRAPHS["floating-bars"].build(
+    plotColumns(dataset, "floating-bars", options, "grouped"),
+    options,
+    paintOf(options, 2),
+    dataset.titles,
+    "replicates",
+  );
+  const traces = fig.data as { type: string; name: string; x: string[]; y: number[]; base: number[] }[];
+  deepStrictEqual(traces.map((t) => [t.name, t.x, t.y, t.base]), [
+    ["A", ["r1", "r2"], [4, 4], [10, 11]],
+    ["B", ["r1", "r2"], [4, 4], [20, 21]],
+  ]);
+});
+
+check("seq 212: on a summary table a floating bar is the stored Mean ± its stored error", () => {
+  const dataset = readTable(summaryTable());
+  const options = newGraphOptions("floating-bars"); // SEM by default
+  const fig = GRAPHS["floating-bars"].build(
+    plotColumns(dataset, "floating-bars", options, "grouped"),
+    options,
+    paintOf(options, 2),
+    dataset.titles,
+    "mean-sd-n",
+  );
+  const traces = fig.data as { name: string; y: number[]; base: number[] }[];
+  // A: 10 ± 1 and 12 ± 1.5; B: 20 ± 4/3 and 22 ± 2.
+  deepStrictEqual(traces.map((t) => [t.name, t.y, t.base]), [
+    ["A", [2, 3], [9, 10.5]],
+    ["B", [8 / 3, 4], [20 - 4 / 3, 20]],
+  ]);
+  // SD instead of SEM widens the bars to the stored SDs.
+  const sd = GRAPHS["floating-bars"].build(
+    plotColumns(dataset, "floating-bars", { ...options, error: "sd" }, "grouped"),
+    { ...options, error: "sd" },
+    paintOf(options, 2),
+    dataset.titles,
+    "mean-sd-n",
+  );
+  deepStrictEqual((sd.data as { name: string; y: number[]; base: number[] }[]).map((t) => [t.name, t.y, t.base]), [
+    ["A", [4, 6], [8, 9]],
+    ["B", [8, 12], [16, 16]],
+  ]);
+});
+
+check("seq 212: a contingency table's floating bars span each outcome's counts across the rows", () => {
+  const table: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "5", "7"],
+      ["r2", "3", "9"],
+    ],
+  };
+  const dataset = readTable(table);
+  const options = newGraphOptions("floating-bars");
+  const fig = GRAPHS["floating-bars"].build(
+    plotColumns(dataset, "floating-bars", options, "contingency"),
+    options,
+    paintOf(options, 2),
+    dataset.titles,
+  );
+  const traces = fig.data as { name: string; y: number[]; base: number[] }[];
+  deepStrictEqual(traces.map((t) => [t.name, t.y, t.base]), [
+    ["A", [2], [3]],
+    ["B", [2], [7]],
+  ]);
+});
+
+check("seq 212 MCP: build-graph accepts floating bars on column, grouped, nested and contingency — not XY", async () => {
+  const harness = mcpLaggingHarness(true);
+  const created: string[] = [];
+  harness.deps.actions!.createGraph = (_tableId, graphType) => {
+    created.push(graphType);
+    return `graph_${graphType}`;
+  };
+  for (const [tableType, columns, rows] of [
+    ["column", ["", "A", "B"], [["r1", 5, 7]]],
+    ["grouped", ["", "A:Y1", "B:Y1"], [["r1", 5, 7]]],
+    ["nested", ["", "A:S1:R1", "A:S1:R2"], [["r1", 5, 7]]],
+    ["contingency", ["", "A", "B"], [["r1", 5, 7]]],
+  ] as const) {
+    const made = await harness.run(`job-212-${tableType}`, "create-table", { table_type: tableType, columns, rows });
+    harness.sync();
+    const done = await harness.run(`job-212-${tableType}-graph`, "build-graph", {
+      table_id: (made.result as { table_id: string }).table_id,
+      graph_type: "floating-bars",
+    });
+    strictEqual((done.result as { graph_type: string }).graph_type, "floating-bars");
+  }
+  const xy = await harness.run("job-212-xy", "create-table", {
+    table_type: "xy",
+    columns: ["", "X", "A"],
+    rows: [["", 1, 10]],
+  });
+  harness.sync();
+  await rejects(
+    harness.run("job-212-xy-graph", "build-graph", {
+      table_id: (xy.result as { table_id: string }).table_id,
+      graph_type: "floating-bars",
+    }),
+    /not offered for a XY table/,
+  );
+  deepStrictEqual(created, ["floating-bars", "floating-bars", "floating-bars", "floating-bars"]);
+});
+
+// ── Whisker definitions + violin variants (seq 213) ──────────────────────
+
+/** One column, 1–9 with a far outlier at 100: quartiles 2.75 / 5.5 / 8.25 (R type 6). */
+const outlierColumn = (): TableData => ({
+  columns: ["Title", "A"],
+  rows: [[null, "1"], [null, "2"], [null, "3"], [null, "4"], [null, "5"], [null, "6"], [null, "7"], [null, "8"], [null, "9"], [null, "100"]],
+});
+
+check("seq 213: whisker bounds follow Prism's definitions (Tukey fences end at observed points)", () => {
+  const values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 100];
+  deepStrictEqual(whiskerBounds(values, "min-max"), { low: 1, high: 100, outliers: [] });
+  // IQR 5.5, fences −5.5 and 16.5: the whiskers end at 1 and 9, 100 is out.
+  deepStrictEqual(whiskerBounds(values, "tukey"), { low: 1, high: 9, outliers: [100] });
+  // 10–90 percentiles (type 6): 1.1 and 90.9 — 1 and 100 lie outside.
+  // The high fence is a computed float (90.9 ± a last-bit wobble from the
+  // (n+1)p interpolation), so it is pinned with the codebase's 1e-12
+  // tolerance idiom, not deepStrictEqual.
+  const p1090 = whiskerBounds(values, "p10-90");
+  deepStrictEqual(p1090.outliers, [1, 100]);
+  strictEqual(p1090.low, 1.1);
+  ok(Math.abs(p1090.high - 90.9) < 1e-12);
+  deepStrictEqual(whiskerBounds(values, "p5-95"), { low: 1, high: 100, outliers: [] });
+  deepStrictEqual(whiskerBounds(values, "min-max-all"), { low: 1, high: 100, outliers: [] });
+});
+
+check("seq 213: a box draws its whiskers to the chosen fences and its outliers as points", () => {
+  const dataset = readTable(outlierColumn());
+  const base = newGraphOptions("box-violin");
+  type BoxTrace = { type: string; q1: number[]; median: number[]; q3: number[]; lowerfence: number[]; upperfence: number[] };
+  const boxOf = (fig: GraphFigure) => {
+    const t = (fig.data as (BoxTrace & Record<string, unknown>)[]).find((t) => t.type === "box")!;
+    return { type: t.type, q1: t.q1, median: t.median, q3: t.q3, lowerfence: t.lowerfence, upperfence: t.upperfence };
+  };
+  const outliersOf = (fig: GraphFigure) =>
+    (fig.data as { type: string; mode?: string; y: number[] }[]).filter((t) => t.type === "scatter");
+  // Min to max: the quartiles never move, and no outlier trace.
+  const plain = GRAPHS["box-violin"].build(dataset.columns, base, paintOf(base, 1));
+  deepStrictEqual(boxOf(plain), { type: "box", q1: [2.75], median: [5.5], q3: [8.25], lowerfence: [1], upperfence: [100] });
+  strictEqual(outliersOf(plain).length, 0);
+  // Tukey: whiskers 1 to 9, 100 drawn as a point.
+  const tukey = GRAPHS["box-violin"].build(dataset.columns, { ...base, whisker: "tukey" }, paintOf(base, 1));
+  deepStrictEqual(boxOf(tukey).lowerfence, [1]);
+  deepStrictEqual(boxOf(tukey).upperfence, [9]);
+  deepStrictEqual(boxOf(tukey).q1, [2.75]); // the quartiles don't move with the whiskers
+  deepStrictEqual(outliersOf(tukey).map((t) => t.y), [[100]]);
+  // 10–90 percentiles: whiskers 1.1 to 90.9, 1 and 100 drawn as points.
+  const p1090 = GRAPHS["box-violin"].build(dataset.columns, { ...base, whisker: "p10-90" }, paintOf(base, 1));
+  deepStrictEqual(boxOf(p1090).lowerfence, [1.1]);
+  ok(Math.abs(boxOf(p1090).upperfence[0]! - 90.9) < 1e-12); // computed float, see the whiskerBounds pin above
+  deepStrictEqual(outliersOf(p1090).map((t) => t.y), [[1, 100]]);
+  // Min to max, all points: the points trace is drawn even with Show points off.
+  const all = GRAPHS["box-violin"].build(dataset.columns, { ...base, whisker: "min-max-all" }, paintOf(base, 1));
+  strictEqual(outliersOf(all).length, 1);
+  deepStrictEqual(outliersOf(all)[0].y, [1, 2, 3, 4, 5, 6, 7, 8, 9, 100]);
+});
+
+check("seq 213: violin variants map to spanmode and side (full, truncated, half)", () => {
+  const dataset = readTable(outlierColumn());
+  const base = { ...newGraphOptions("box-violin"), kind: "violin" as const };
+  type ViolinTrace = { type: string; spanmode: string; side?: string };
+  const violinOf = (fig: GraphFigure) => {
+    const t = (fig.data as ViolinTrace[]).find((t) => t.type === "violin")!;
+    return { type: t.type, spanmode: t.spanmode, ...(t.side ? { side: t.side } : {}) };
+  };
+  deepStrictEqual(violinOf(GRAPHS["box-violin"].build(dataset.columns, base, paintOf(base, 1))), {
+    type: "violin",
+    spanmode: "soft",
+  });
+  deepStrictEqual(
+    violinOf(GRAPHS["box-violin"].build(dataset.columns, { ...base, violinVariant: "truncated" }, paintOf(base, 1))),
+    { type: "violin", spanmode: "hard" },
+  );
+  deepStrictEqual(
+    violinOf(GRAPHS["box-violin"].build(dataset.columns, { ...base, violinVariant: "half" }, paintOf(base, 1))),
+    { type: "violin", spanmode: "hard", side: "positive" },
+  );
+});
+
+check("seq 213: a grouped box draws Tukey outliers per row, and the Format panel offers both choices", () => {
+  const table: TableData = {
+    columns: ["Title", ...Array.from({ length: 10 }, (_, i) => `A:Y${i + 1}`)],
+    rows: [["r1", "1", "2", "3", "4", "5", "6", "7", "8", "9", "100"]],
+    groups: 1,
+    replicates: 10,
+  };
+  const dataset = readTable(table);
+  const options = { ...newGraphOptions("grouped-box"), whisker: "tukey" as const };
+  const fig = GRAPHS["grouped-box"].build(dataset.columns, options, paintOf(options, 1), dataset.titles);
+  const traces = fig.data as { type: string; lowerfence?: number[]; upperfence?: number[]; y?: number[] }[];
+  strictEqual(traces.length, 2); // the box, and its outlier points
+  deepStrictEqual(traces[0].lowerfence, [1]);
+  deepStrictEqual(traces[0].upperfence, [9]);
+  deepStrictEqual(traces[1].y, [100]);
+  // The shared box/violin Format block offers the whisker choice for boxes
+  // and the variant choice for violins.
+  const src = readFileSync("src/views/graphs/format-sections.tsx", "utf8");
+  const block = src.slice(src.indexOf("const boxOrViolin"));
+  ok(block.includes('label="Whiskers"'), "the Format panel offers a Whiskers choice");
+  ok(block.includes("options.whisker"), "the Whiskers choice writes options.whisker");
+  ok(block.includes('label="Violin"'), "the Format panel offers a Violin variant choice");
+  ok(block.includes("options.violinVariant"), "the Violin choice writes options.violinVariant");
+});
+
+check("seq 213 MCP: build-graph accepts whisker and violinVariant options and refuses bad ones", async () => {
+  const harness = mcpLaggingHarness(true);
+  const captured: { whisker?: string; violinVariant?: string }[] = [];
+  harness.deps.actions!.createGraph = (_tableId, graphType, options) => {
+    captured.push({ whisker: options?.whisker, violinVariant: options?.violinVariant });
+    return `graph_${graphType}`;
+  };
+  const made = await harness.run("job-213-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A"],
+    rows: [["r1", 1]],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  await harness.run("job-213-tukey", "build-graph", {
+    table_id: tableId,
+    graph_type: "box-violin",
+    options: { whisker: "tukey" },
+  });
+  await harness.run("job-213-half", "build-graph", {
+    table_id: tableId,
+    graph_type: "box-violin",
+    options: { kind: "violin", violinVariant: "half" },
+  });
+  deepStrictEqual(captured, [
+    { whisker: "tukey", violinVariant: "full" },
+    { whisker: "min-max", violinVariant: "half" },
+  ]);
+  await rejects(
+    harness.run("job-213-bad", "build-graph", {
+      table_id: tableId,
+      graph_type: "box-violin",
+      options: { whisker: "bogus" },
+    }),
+    /option “whisker” must be one of/,
+  );
+  await rejects(
+    harness.run("job-213-bad2", "build-graph", {
+      table_id: tableId,
+      graph_type: "box-violin",
+      options: { violinVariant: "wide" },
+    }),
+    /option “violinVariant” must be one of/,
+  );
+});
+
+// ── Scatter styles + aligned dot plot (seq 214) ─────────────────────────
+
+/** One column, three 10s and a 20: the density shape is visible in the offsets. */
+const scatterColumn = (): TableData => ({
+  columns: ["Title", "A"],
+  rows: [[null, "10"], [null, "10"], [null, "10"], [null, "20"]],
+});
+
+check("seq 214: scatter offsets — classic is the legacy jitter exactly, aligned is zero, standard spreads by density", () => {
+  const values = [10, 10, 10, 20];
+  // Classic pins to the legacy hash, value for value.
+  deepStrictEqual(
+    scatterOffsets(values, "classic", 0),
+    [0, 1, 2, 3].map((i) => jitter(0, i)),
+  );
+  // Aligned: every point on the column's center line.
+  deepStrictEqual(scatterOffsets(values, "aligned", 0), [0, 0, 0, 0]);
+  // Standard: the three 10s fan across the full width, the lone 20 sits centered.
+  deepStrictEqual(scatterOffsets(values, "standard", 0), [-0.15, 0, 0.15, 0]);
+  // Expanded: in range, deterministic, and not the classic pattern.
+  const expanded = scatterOffsets(values, "expanded", 0);
+  strictEqual(expanded[0], -0.15);
+  ok(expanded.every((o) => o >= -0.15 && o < 0.15), "expanded offsets stay in range");
+  ok(expanded.some((o, i) => o !== jitter(0, i)), "expanded differs from classic");
+});
+
+check("seq 214: individual values draw aligned dots in a column, classic jitter otherwise", () => {
+  const dataset = readTable(scatterColumn());
+  const pointsOf = (fig: GraphFigure) =>
+    (fig.data as { type: string; mode?: string; x: number[]; y: number[] }[]).find(
+      (t) => t.type === "scatter" && t.mode === "markers" && t.y.length === 4,
+    )!;
+  // Default (classic): the legacy jitter, unchanged.
+  const classic = GRAPHS["individual"].build(dataset.columns, newGraphOptions("individual"), paintOf(newGraphOptions("individual"), 1));
+  deepStrictEqual(pointsOf(classic).x, [0, 1, 2, 3].map((i) => jitter(0, i)));
+  // Aligned: all four on the column's center line.
+  const aligned = GRAPHS["individual"].build(
+    dataset.columns,
+    { ...newGraphOptions("individual"), scatterStyle: "aligned" },
+    paintOf(newGraphOptions("individual"), 1),
+  );
+  deepStrictEqual(pointsOf(aligned).x, [0, 0, 0, 0]);
+  deepStrictEqual(pointsOf(aligned).y, [10, 10, 10, 20]);
+  // Standard: the three 10s fanned, the 20 centered.
+  const standard = GRAPHS["individual"].build(
+    dataset.columns,
+    { ...newGraphOptions("individual"), scatterStyle: "standard" },
+    paintOf(newGraphOptions("individual"), 1),
+  );
+  deepStrictEqual(pointsOf(standard).x, [-0.15, 0, 0.15, 0]);
+});
+
+check("seq 214: grouped scatter and grouped box points follow the scatter style, and the panel offers it", () => {
+  const table: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2", "A:Y3"],
+    rows: [["r1", "10", "10", "20"]],
+    groups: 1,
+    replicates: 3,
+  };
+  const dataset = readTable(table);
+  const pointsOf = (fig: GraphFigure) =>
+    (fig.data as { type: string; mode?: string; x: number[]; y: number[] }[]).find(
+      (t) => t.type === "scatter" && t.mode === "markers" && t.y.length === 3,
+    )!;
+  const base = newGraphOptions("grouped-scatter");
+  // Aligned: all three points at the group's place in the row (offset 0, one group).
+  const aligned = GRAPHS["grouped-scatter"].build(
+    plotColumns(dataset, "grouped-scatter", base, "grouped"),
+    { ...base, scatterStyle: "aligned" },
+    paintOf(base, 1),
+    dataset.titles,
+  );
+  deepStrictEqual(pointsOf(aligned).x, [0, 0, 0]);
+  // Classic: the legacy jitter (× 0.4, as grouped points are placed).
+  const classic = GRAPHS["grouped-scatter"].build(
+    plotColumns(dataset, "grouped-scatter", base, "grouped"),
+    base,
+    paintOf(base, 1),
+    dataset.titles,
+  );
+  deepStrictEqual(pointsOf(classic).x, [0, 1, 2].map((ci) => jitter(0, ci) * 0.4));
+  // Grouped box points, aligned: on the box's center line too.
+  const boxOptions = { ...newGraphOptions("grouped-box"), showPoints: true, scatterStyle: "aligned" as const };
+  const box = GRAPHS["grouped-box"].build(
+    plotColumns(dataset, "grouped-box", boxOptions, "grouped"),
+    boxOptions,
+    paintOf(boxOptions, 1),
+    dataset.titles,
+  );
+  deepStrictEqual(pointsOf(box).x, [0, 0, 0]);
+  // The Format panel offers the Scatter choice where points are drawn.
+  const src = readFileSync("src/views/graphs/format-sections.tsx", "utf8");
+  const fn = src.slice(src.indexOf("function ownStyle"));
+  ok(fn.includes('label="Scatter"'), "the Format panel offers a Scatter choice");
+  ok(fn.includes("options.scatterStyle"), "the Scatter choice writes options.scatterStyle");
+});
+
+check("seq 214 MCP: build-graph accepts the aligned scatter style and refuses bad ones", async () => {
+  const harness = mcpLaggingHarness(true);
+  const captured: (string | undefined)[] = [];
+  harness.deps.actions!.createGraph = (_tableId, graphType, options) => {
+    captured.push(options?.scatterStyle);
+    return `graph_${graphType}`;
+  };
+  const made = await harness.run("job-214-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A"],
+    rows: [["r1", 1]],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  await harness.run("job-214-aligned", "build-graph", {
+    table_id: tableId,
+    graph_type: "individual",
+    options: { scatterStyle: "aligned" },
+  });
+  deepStrictEqual(captured, ["aligned"]);
+  await rejects(
+    harness.run("job-214-bad", "build-graph", {
+      table_id: tableId,
+      graph_type: "individual",
+      options: { scatterStyle: "wobbly" },
+    }),
+    /option “scatterStyle” must be one of/,
+  );
 });
 
 check("summary subcolumns: interleaved scatter on a summary table draws centers, not points", () => {

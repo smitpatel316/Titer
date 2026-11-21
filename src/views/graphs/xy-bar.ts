@@ -4,16 +4,17 @@
 import type { GraphOptions } from "../../store/types";
 import type { GraphModule, GraphFigure } from ".";
 import { splitXY, type Column } from "../../lib/dataset";
+import type { SummaryFormat } from "../../lib/summary-format";
 import { rightYDataset, xyDrawn, xyLayout, type Paint } from "./plot-helpers";
 
-function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFigure {
+function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?: (string | null)[], summary?: SummaryFormat): GraphFigure {
   const { x: xCol, ys } = splitXY(columns);
   if (!xCol || ys.length === 0) return { data: [], layout: xyLayout(options, columns[0]?.name ?? "X", 0) };
 
   const right = rightYDataset(options, ys.map((y) => y.name));
   const data = ys.map((set, i) => {
     // A bar stands for one value per X: replicates as their center, whatever `xyReplicates`.
-    const drawn = xyDrawn(xCol, set, { ...options, xyReplicates: "mean" });
+    const drawn = xyDrawn(xCol, set, { ...options, xyReplicates: "mean" }, summary);
     return {
       type: "bar",
       name: set.name,

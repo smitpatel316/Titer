@@ -98,8 +98,11 @@ import {
   type LinkedPaste,
 } from "../lib/linked-paste";
 import { fillSeries, generateSeries, validateSeriesSpec, type SeriesMode } from "../lib/series";
-import { SUMMARY_FORMATS, summarySubcolumns, type SummaryFormat } from "../lib/summary-format";
+import { SUMMARY_FORMATS, summaryFormatOf, summarySubcolumns, type SummaryFormat } from "../lib/summary-format";
 import {
+  applySummaryFormat,
+  applySummaryFormatNested,
+  applySummaryFormatXY,
   convertCommaDecimals,
   deleteColumns,
   deleteRows,
@@ -485,10 +488,13 @@ function groupedShape(
  * The shape of a nested table's columns — "Group:Subgroup:R1" throughout,
  * every group holding the same subgroups and every subgroup the same
  * replicates — or the plain-language reason they do not form one.
+ * `suffixes` are the first subgroup's sub-column names ("R1", "R2"… or
+ * "Mean", "SD", "N" for a summary table), so a summary format can be
+ * detected from them the way grouped tables detect theirs.
  */
 function nestedShape(
   columns: string[],
-): { groups: string[]; subgroups: number; replicates: number } | { error: string } {
+): { groups: string[]; subgroups: number; replicates: number; suffixes: string[] } | { error: string } {
   const dataCols = columns.slice(1);
   if (dataCols.length === 0) return { error: "needs at least one data column after the row-title column." };
   const parts = dataCols.map((n) => n.split(":"));
@@ -514,7 +520,12 @@ function nestedShape(
   if (repCounts.some((n) => n !== repCounts[0])) {
     return { error: "every subgroup must hold the same number of replicates." };
   }
-  return { groups, subgroups: subCounts[0], replicates: repCounts[0] };
+  return {
+    groups,
+    subgroups: subCounts[0],
+    replicates: repCounts[0],
+    suffixes: parts.filter(([g, s]) => g === groups[0] && s === subsOf.get(groups[0])![0]).map((p) => p[2]),
+  };
 }
 
 /**
@@ -595,6 +606,7 @@ function buildTableData(
     groups = shape.groups.length;
     subgroups = shape.subgroups;
     replicates = shape.replicates;
+    summaryFormat = detectSummaryFormat(shape.suffixes);
   } else if (type === "xy") {
     // An XY table's X stays first; the data sets after it may be grouped
     // ("A:Y1"…) or plain ("Y1", "Y2") — the columns decide, either way.
@@ -1209,6 +1221,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       const tableId = argString(job, job.args, "table_id");
       const op = argString(job, job.args, "op");
       const state = deps.getState();
+      const beforeRevision = state.revision;
       const node = tableNode(job, state, tableId);
       if (node.frozen) {
         throw jobErr(job, `Table “${node.name}” is frozen — unfreeze it before editing it.`);
@@ -1420,6 +1433,36 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           next = { ...data, linkedPaste: undefined };
           break;
         }
+        case "set-summary-format": {
+          // Seq 208: the sub-column format (raw replicates, or
+          // pre-calculated summaries) is a table setting on grouped, XY
+          // and nested tables — the MCP twin of the Groups / Replicates
+          // panel's format picker. Values stay in their group's slot;
+          // narrowing to a shorter format drops only the slots past its
+          // width, exactly as the UI does (the helpers decide that).
+          if (type !== "grouped" && type !== "xy" && type !== "nested") {
+            throw jobErr(
+              job,
+              `cannot set a sub-column format — only grouped, xy and nested tables have sub-columns, and this is a ${type} table.`,
+            );
+          }
+          const format = argString(job, job.args, "format") as SummaryFormat;
+          if (!SUMMARY_FORMATS.some((f) => f.value === format)) {
+            throw jobErr(
+              job,
+              `has no sub-column format “${format}” — the formats are ${SUMMARY_FORMATS.map((f) => f.value).join(", ")}.`,
+            );
+          }
+          if (summaryFormatOf(data) === format) break; // already that format: no-op success
+          label = "Change Sub-column Format";
+          next =
+            type === "xy"
+              ? applySummaryFormatXY(data, format)
+              : type === "nested"
+                ? applySummaryFormatNested(data, format)
+                : applySummaryFormat(data, format);
+          break;
+        }
         case "add-calculated-variable":
         case "set-calculated-variable":
         case "remove-calculated-variable": {
@@ -1517,7 +1560,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         default:
           throw jobErr(
             job,
-            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, paste-link, remove-link, generate-series, paste-transposed.`,
+            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-summary-format, paste-link, remove-link, generate-series, paste-transposed.`,
           );
       }
       if (next === null) {
@@ -1529,17 +1572,24 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
             table_id: tableId,
             rows: data.rows.length,
             data_columns: data.columns.length - 1,
+            ...(op === "set-summary-format" ? { summary_format: summaryFormatOf(data) } : {}),
           },
         };
       }
       actions.updateTable(tableId, next, label, move);
-      await deps.flush?.();
+      // Same read-back shape as create-table (v1.6 race fix): the commit
+      // must land before the next job reads the table, or a following
+      // edit-table op sees pre-edit state and can silently no-op (a
+      // set-summary-format back to Replicates reads "replicates" and
+      // reports success while the Mean/SD/N columns stay).
+      await settleAfterDispatch(deps, beforeRevision);
       return {
         result: {
           project_id: job.project_id,
           table_id: tableId,
           rows: next.rows.length,
           data_columns: next.columns.length - 1,
+          ...(op === "set-summary-format" ? { summary_format: next.summaryFormat ?? "replicates" } : {}),
         },
       };
     }

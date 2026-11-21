@@ -16,6 +16,7 @@ import {
   type TableType,
 } from "../../store/types";
 import { isSignificant, pStars } from "../../lib/format";
+import type { SummaryFormat } from "../../lib/summary-format";
 import { GRAPHS, variablePair } from ".";
 import { expandSigPairs, GROUPED_STARS, lettersComparisons, lettersFit, ranOn, sigAnalysisIdsOf, sigPairKey, sigPairSelected, starsFit, type SigComparison } from "./significance-overlay";
 import { cutoffAsP, cutoffOfP, volcanoAxes, volcanoPair } from "./volcano";
@@ -72,6 +73,9 @@ export interface SectionContext {
   binsTooMany: boolean;
   /** An XY table whose data sets hold replicates. */
   replicates: boolean;
+  /** The table's sub-column format ("replicates", or the summaries its
+   *  sub-columns hold) — only the summary-conditional Data choices read it. */
+  summary?: SummaryFormat;
   numericNames: string[];
   allNames: string[];
   /** The chosen regression's failure, when it couldn't be fitted. */
@@ -1111,6 +1115,12 @@ function dataOptions(c: SectionContext): React.ReactNode {
       ); // stacked bars have no error bars
     case "pow-stacked":
       return stackAs; // one bar per data set, segments are its categories — nothing to center
+    case "floating-bars":
+      // The span's error kind matters only on a summary table (Mean ± error);
+      // on replicates the bars are the cell's min to max whatever it says.
+      return c.summary !== undefined && c.summary !== "replicates" ? (
+        <Choice label="Span" value={options.error} onChange={(error) => set({ error })} items={ERROR_ITEMS} />
+      ) : null;
     case "heatmap":
       return c.tableType === "grouped" ? center : null; // a cell sums up a group's replicates
     case "histogram":
@@ -1179,6 +1189,8 @@ function dataOptions(c: SectionContext): React.ReactNode {
         )
       );
     case "xy-scatter":
+    case "xy-spikes":
+    case "xy-bar-scatter":
       if (c.tableType === "multiple") return <VariablePair numericNames={c.numericNames} options={options} set={set} />;
       return (
         c.replicates && (
@@ -1653,6 +1665,21 @@ function ownStyle(context: SectionContext): React.ReactNode {
       ]}
     />
   );
+  // How scatter points spread sideways (Standard / Classic / Expanded /
+  // Aligned dot plot) — offered wherever points are drawn.
+  const scatterStyle = (
+    <Choice
+      label="Scatter"
+      value={options.scatterStyle}
+      onChange={(scatterStyle) => set({ scatterStyle })}
+      items={[
+        { value: "standard", label: "Standard" },
+        { value: "classic", label: "Classic" },
+        { value: "expanded", label: "Expanded" },
+        { value: "aligned", label: "Aligned dot plot" },
+      ]}
+    />
+  );
   const boxOrViolin = (
     <>
       <Choice
@@ -1664,11 +1691,39 @@ function ownStyle(context: SectionContext): React.ReactNode {
           { value: "violin", label: "Violin" },
         ]}
       />
+      {options.kind === "box" ? (
+        <Choice
+          label="Whiskers"
+          value={options.whisker}
+          onChange={(whisker) => set({ whisker })}
+          items={[
+            { value: "min-max", label: "Min to max" },
+            { value: "tukey", label: "Tukey (1.5× IQR)" },
+            { value: "p10-90", label: "10–90 percentiles" },
+            { value: "p5-95", label: "5–95 percentiles" },
+            { value: "p2.5-97.5", label: "2.5–97.5 percentiles" },
+            { value: "p1-99", label: "1–99 percentiles" },
+            { value: "min-max-all", label: "Min to max, all points" },
+          ]}
+        />
+      ) : (
+        <Choice
+          label="Violin"
+          value={options.violinVariant}
+          onChange={(violinVariant) => set({ violinVariant })}
+          items={[
+            { value: "full", label: "Full" },
+            { value: "truncated", label: "Truncated at data" },
+            { value: "half", label: "Half" },
+          ]}
+        />
+      )}
       {shapes(options.kind === "violin" ? "Violin" : "Box")}
       {pointsGroup(
         context,
         <Toggle label="Show points" checked={options.showPoints} onChange={(showPoints) => set({ showPoints })} />,
       )}
+      {(options.showPoints || options.whisker === "min-max-all") && scatterStyle}
     </>
   );
   switch (graphType) {
@@ -1679,6 +1734,7 @@ function ownStyle(context: SectionContext): React.ReactNode {
             <Toggle label="Show bars" checked={options.bars} onChange={(bars) => set({ bars })} />
             {options.bars && shapeRows(context)}
           </Group>
+          {scatterStyle}
           {points}
         </>
       );
@@ -1710,6 +1766,7 @@ function ownStyle(context: SectionContext): React.ReactNode {
               onChange={(estimationViolin) => set({ estimationViolin })}
             />
           </Group>
+          {scatterStyle}
           {points}
         </>
       );
@@ -1736,6 +1793,28 @@ function ownStyle(context: SectionContext): React.ReactNode {
           {points}
         </>
       );
+    case "xy-spikes":
+      // Spikes are always stems from the baseline with a marker at each tip:
+      // no Draw-as choice, just the points' style (the stems take the Lines
+      // section, which `styleControls` adds for any graph with lines).
+      return points;
+    case "xy-bar-scatter":
+      return (
+        <>
+          <Choice
+            label="Draw as"
+            value={options.xyStyle}
+            onChange={(xyStyle) => set({ xyStyle })}
+            items={[
+              { value: "points", label: "Points" },
+              { value: "line", label: "Line" },
+              { value: "points+line", label: "Both" },
+            ]}
+          />
+          {points}
+          {shapes("Bars", context.seriesNames.length > 1 && gap)}
+        </>
+      );
     case "xy-bar":
       return shapes("Bars", context.seriesNames.length > 1 && gap);
     case "residuals":
@@ -1758,6 +1837,8 @@ function ownStyle(context: SectionContext): React.ReactNode {
     case "grouped-stacked":
     case "histogram":
       return shapes("Bars");
+    case "floating-bars":
+      return shapes("Bars", gap);
     case "xy-area":
       return shapes("Area");
     case "grouped-bars":
@@ -1766,7 +1847,14 @@ function ownStyle(context: SectionContext): React.ReactNode {
       return (
         <>
           {groups}
-          {graphType === "grouped-scatter" ? points : shapes("Bars", options.groupLayout === "interleaved" && gap)}
+          {graphType === "grouped-scatter" ? (
+            <>
+              {scatterStyle}
+              {points}
+            </>
+          ) : (
+            shapes("Bars", options.groupLayout === "interleaved" && gap)
+          )}
           {(graphType === "grouped-bars" || graphType === "grouped-hbars") &&
             pointsGroup(
               context,

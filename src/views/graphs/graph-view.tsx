@@ -293,9 +293,11 @@ export function GraphView({ node }: { node: ProjectNode }) {
   const gone = family === "volcano" ? volcanoAxes([], volcanoColumns, buildOptions).gone : undefined;
   // Box and violin need raw replicates (a box from Mean/SD/N would be silently
   // wrong), as does a grouped volcano (a Welch test on stored Means) — a
-  // summary table says so here instead of drawing.
+  // summary table says so here instead of drawing. Grouped-box is offered on
+  // grouped, nested, xy and contingency tables, so the box block is not
+  // scoped to grouped tables (it says nothing on a non-summary table).
   const summaryLack =
-    data && parent?.tableType === "grouped" && (type === "grouped-box" || family === "volcano")
+    data && (type === "grouped-box" || (parent?.tableType === "grouped" && family === "volcano"))
       ? summaryTableProblem(data, GRAPHS[type].label)
       : undefined;
   const lack =
@@ -1029,6 +1031,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
           logLeftOut={logLeftOut}
           binsTooMany={binsTooMany}
           replicates={parent?.tableType === "xy" && Boolean(parent.data && isGrouped(parent.data))}
+          summary={dataset?.summary}
           onFindGenes={findGenes}
           numericNames={dataset?.numeric.map((c) => c.name) ?? []}
           allNames={dataset?.columns.map((c) => c.name) ?? []}

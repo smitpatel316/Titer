@@ -45,6 +45,6 @@ export function buildPanelFigure(
   const columns = plotColumns(dataset, graph.graphType, options, parent.tableType);
   if (!columns.some((c) => c.values.length > 0)) return null;
   const paint = paintOf(options, graphSeriesDataset(graph.graphType, dataset, parent.tableType, options).length);
-  const fig = GRAPHS[graph.graphType].build(columns, options, paint, dataset.titles);
+  const fig = GRAPHS[graph.graphType].build(columns, options, paint, dataset.titles, dataset.summary);
   return opts.hideLegend ? { ...fig, layout: { ...fig.layout, showlegend: false } } : fig;
 }

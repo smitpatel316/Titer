@@ -142,7 +142,10 @@
           "note": {
             "x": 10,
             "y": 250
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-kinase": {
@@ -260,7 +263,10 @@
           "note": {
             "x": 280,
             "y": 180
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-growth": {
@@ -400,7 +406,10 @@
           "legend": {
             "x": 0.04,
             "y": 0.98
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-volume": {
@@ -563,7 +572,10 @@
                 "y": 0
               }
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "g-volume-bars": {
@@ -666,7 +678,10 @@
             "Gemcitabine": {
               "color": "#EE6677"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "g-volume-violin": {
@@ -764,7 +779,10 @@
             "Gemcitabine": {
               "color": "#EE6677"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-pk": {
@@ -887,7 +905,10 @@
           "note": {
             "x": 280,
             "y": 90
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-il6": {
@@ -1014,7 +1035,10 @@
               "dash": "dash",
               "shape": "square"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "g-il6-bars": {
@@ -1111,7 +1135,10 @@
               "color": "#AA3377",
               "pattern": "diagonal"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-immune": {
@@ -1223,7 +1250,10 @@
             "kind": "categorical",
             "colors": ["#CC6677","#332288","#DDCC77","#117733","#88CCEE","#882255","#44AA99","#999933","#AA4499"]
           },
-          "outlineColor": "#FFFFFF"
+          "outlineColor": "#FFFFFF",
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-surv": {
@@ -1410,7 +1440,10 @@
             "HLX-101 + Gem": {
               "color": "#AA3377"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-nested": {
@@ -1516,7 +1549,10 @@
             "name": "tol-muted",
             "kind": "categorical",
             "colors": ["#CC6677","#332288","#DDCC77","#117733","#88CCEE","#882255","#44AA99","#999933","#AA4499"]
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-rnaseq": {
@@ -11677,7 +11713,10 @@
               "outlineColor": "#000000",
               "label": true
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-genes": {
@@ -11793,7 +11832,10 @@
             "kind": "diverging",
             "colors": ["#053061","#2166AC","#4393C3","#92C5DE","#D1E5F0","#F7F7F7","#FDDBC7","#F4A582","#D6604D","#B2182B","#67001F"],
             "reversed": true
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-deseq": {
@@ -12891,7 +12933,10 @@
           },
           "volcanoX": "log2FoldChange",
           "volcanoY": "padj",
-          "volcanoLabel": "Gene"
+          "volcanoLabel": "Gene",
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-ki67": {
@@ -13022,7 +13067,10 @@
             "Week 8": {
               "color": "#4477AA"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-elisa": {
@@ -13150,7 +13198,10 @@
           "note": {
             "x": 20,
             "y": 10
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-markers": {
@@ -13326,7 +13377,10 @@
             "Tumor size (mm)": {
               "color": "#4477AA"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "g-markers-ki67": {
@@ -13417,7 +13471,10 @@
             "Ki-67 (%)": {
               "color": "#4477AA"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-response": {
@@ -13531,7 +13588,10 @@
               "color": "#BBBBBB",
               "pattern": "diagonal"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-exposure": {
@@ -13689,7 +13749,10 @@
             "Response": {
               "color": "#4477AA"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "f-main": {
