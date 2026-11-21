@@ -254,8 +254,8 @@ fn choose_project(app: AppHandle, window: WebviewWindow) {
     });
 }
 
-/// File ▸ Import Prism File…: the Open panel for a Prism file (`.pzfx` or
-/// `.prism`).
+/// File ▸ Import Prism File…: the Open panel for a Prism file (`.pzfx`,
+/// `.prism` or `.pzf`).
 /// Non-blocking, like choose_project: blocking_pick_file parks the main
 /// thread on a semaphore while the NSOpenPanel needs that same thread to
 /// process clicks — deadlock, Titer (not responding), 0% CPU (confirmed
@@ -266,7 +266,7 @@ fn choose_project(app: AppHandle, window: WebviewWindow) {
 #[tauri::command]
 fn choose_prism_file(app: AppHandle, window: WebviewWindow) {
     let label = window.label().to_string();
-    app.dialog().file().set_title("Import Prism File").add_filter("GraphPad Prism File", &["pzfx", "prism"]).pick_file(
+    app.dialog().file().set_title("Import Prism File").add_filter("GraphPad Prism File", &["pzfx", "prism", "pzf"]).pick_file(
         move |file| {
             let picked = file.and_then(|file| file.into_path().ok()).map(|path| path.to_string_lossy().into_owned());
             let _ = app.emit_to(label.as_str(), "prism-file-picked", picked);
@@ -494,15 +494,16 @@ async fn read_prism_text(path: String) -> Result<String, String> {
         .map_err(|e| e.to_string())?
 }
 
-/// A Prism `.prism` file's bytes, for import — a `.prism` file is a ZIP, so
-/// text won't do. Base64, not a JSON number array: a 40 MB file would be a
-/// 40 M-number array the webview would have to parse one number at a time.
+/// A Prism `.prism` or `.pzf` file's bytes, for import — a `.prism` file is
+/// a ZIP and a `.pzf` file is binary, so text won't do for either. Base64,
+/// not a JSON number array: a 40 MB file would be a 40 M-number array the
+/// webview would have to parse one number at a time.
 /// Async, like `read_text` (seq 248): a TCC-blocked read must never park
 /// the main thread.
 #[tauri::command]
 async fn read_prism_bytes(path: String) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
-        check_extension(&path, &["prism"])?;
+        check_extension(&path, &["prism", "pzf"])?;
         fs::read(path).map(|bytes| BASE64.encode(bytes)).map_err(|e| e.to_string())
     })
     .await
@@ -576,6 +577,65 @@ fn write_atomically(path: &Path, data: &[u8]) -> Result<(), String> {
         let _ = fs::remove_file(&tmp); // a failed save leaves nothing behind
         e.to_string()
     })
+}
+
+/// Send to Keynote (seq 217): runs the AppleScript the page built
+/// (`buildKeynoteScript` in src/lib/office-export.ts) in Keynote via
+/// `osascript`, so Keynote makes the presentation and saves the real .key
+/// at `path`. macOS only — anywhere else this refuses outright, before
+/// touching anything (the menu hides the item there, and the MCP tool
+/// refuses the target there first). The script goes in a temp file, not
+/// an `osascript -e` argument, so no shell quoting is involved; the temp
+/// script and the temp PNG the page wrote are deleted once osascript
+/// finishes, whatever it reports. Async, on the blocking pool: osascript
+/// can take seconds while Keynote launches, and a save into ~/Documents
+/// or ~/Desktop can block on a macOS TCC consent prompt (same class as
+/// seq 248's `write_file`).
+#[tauri::command]
+async fn send_to_keynote(script: String, png_path: String, path: String) -> Result<String, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (&script, &png_path, &path);
+        return Err("Send to Keynote needs macOS with Keynote installed — this build cannot drive Keynote.".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        tokio::task::spawn_blocking(move || send_to_keynote_blocking(&script, &png_path, &path))
+            .await
+            .map_err(|e| e.to_string())?
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn send_to_keynote_blocking(script: &str, png_path: &str, path: &str) -> Result<String, String> {
+    use std::io::Write;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let script_path = std::env::temp_dir().join(format!("titer-keynote-{stamp}.applescript"));
+    // Write through a handle so a short write is retried, not silent.
+    let out = (|| -> Result<std::process::Output, String> {
+        let mut script_file = std::fs::File::create(&script_path)
+            .map_err(|e| format!("Couldn't write the Keynote script: {e}"))?;
+        script_file
+            .write_all(script.as_bytes())
+            .and_then(|()| script_file.sync_all())
+            .map_err(|e| format!("Couldn't write the Keynote script: {e}"))?;
+        drop(script_file);
+        std::process::Command::new("osascript")
+            .arg(&script_path)
+            .output()
+            .map_err(|e| format!("Couldn't run osascript (is Keynote installed?): {e}"))
+    })();
+    let _ = std::fs::remove_file(&script_path);
+    let _ = std::fs::remove_file(png_path);
+    let out = out?;
+    if !out.status.success() {
+        let detail = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("Keynote couldn't make the presentation: {}", detail.trim()));
+    }
+    Ok(path.to_string())
 }
 
 // ── My Palettes ──────────────────────────────────────────────────────────
@@ -1494,6 +1554,7 @@ fn main() {
             read_data_text,
             read_data_bytes,
             write_file,
+            send_to_keynote,
             read_my_palettes,
             write_my_palettes,
             backup_write,
@@ -1713,6 +1774,22 @@ mod tests {
         let bytes = BASE64.decode(base64).expect("command returns base64");
         assert!(bytes.starts_with(b"PK"), "a .prism file is a ZIP: {bytes:?}");
         assert!(!bytes.is_empty(), "fixture should have content");
+    }
+
+    // seq 218: the same async path for a `.pzf` fixture — base64 that
+    // decodes to the legacy binary magic, and a `.pzfx` path is refused
+    // (binary reader only: `.pzfx` goes through `read_prism_text`).
+    #[tokio::test]
+    async fn read_prism_bytes_async_reads_a_pzf_fixture() {
+        let path = fixture("aggregates-size.pzf");
+        let base64 = read_prism_bytes(path.to_string_lossy().into_owned()).await.expect("fixture should read");
+        let bytes = BASE64.decode(base64).expect("command returns base64");
+        assert!(bytes.starts_with(b"PCFFGRA4"), "a .pzf file starts with its magic: {bytes:?}");
+        assert!(!bytes.is_empty(), "fixture should have content");
+        let err = read_prism_bytes(fixture("column.pzfx").to_string_lossy().into_owned())
+            .await
+            .expect_err(".pzfx is not a bytes format");
+        assert!(err.contains("can't access"), "{err}");
     }
 
     // ── CC-m6: r_ready must not re-send an in-flight evaluation ──────────

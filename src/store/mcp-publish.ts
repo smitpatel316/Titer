@@ -13,7 +13,10 @@ import { useProjectStore } from "./use-project-store";
  *  the debounced publisher below and the immediate post-job publish
  *  (`publishMcpSnapshotNow`). */
 function snapshotPayload(
-  s: Pick<DocumentState, "filePath" | "revision" | "isDirty" | "nodes" | "rootOrder" | "childOrder" | "activeNodeId" | "openError">,
+  s: Pick<
+    DocumentState,
+    "filePath" | "revision" | "isDirty" | "nodes" | "rootOrder" | "childOrder" | "activeNodeId" | "openError" | "scripts"
+  >,
 ) {
   return {
     filePath: s.filePath,
@@ -25,6 +28,9 @@ function snapshotPayload(
     rootOrder: s.rootOrder,
     childOrder: s.childOrder,
     activeNodeId: s.activeNodeId,
+    // The project's saved scripts (seq 228), so the server can see what
+    // the project runs on open/close and run one by its saved text.
+    scripts: s.scripts ?? [],
     // A failed open, for `titer_open_project`: the window reports the same
     // message the GUI shows, so the server errors instead of reporting the
     // blank project it falls back to as a successful open.
@@ -38,7 +44,10 @@ function snapshotPayload(
  *  instead of the pre-edit snapshot (v1.6 race fix). Never throws; a
  *  no-op where there is no native shell (web preview, tests). */
 export function publishMcpSnapshotNow(
-  s: Pick<DocumentState, "filePath" | "revision" | "isDirty" | "nodes" | "rootOrder" | "childOrder" | "activeNodeId" | "openError">,
+  s: Pick<
+    DocumentState,
+    "filePath" | "revision" | "isDirty" | "nodes" | "rootOrder" | "childOrder" | "activeNodeId" | "openError" | "scripts"
+  >,
 ) {
   return mcpPublishSnapshot(snapshotPayload(s)).catch(() => {});
 }

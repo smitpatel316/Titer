@@ -106,6 +106,21 @@ export function conclusionOf(
         .join(" ");
     }
 
+    case "one-sample-ks": {
+      const dist =
+        { normal: "Normal", lognormal: "Lognormal", exponential: "Exponential", uniform: "Uniform" }[
+          (p?.distribution as string | undefined) ?? "normal"
+        ] ?? "Normal";
+      return result.groups
+        .map((g) => {
+          const pv = stat(`${g.name} — P value`);
+          return sig(pv)
+            ? `${q(g.name)}'s distribution differs significantly from the ${dist} distribution (${P(pv)}).`
+            : `The data don't show that ${q(g.name)}'s distribution differs from the ${dist} distribution (${P(pv)}). That doesn't prove they follow it.`;
+        })
+        .join(" ");
+    }
+
     case "anova":
     case "rm-anova":
     case "kruskal-wallis":
@@ -146,6 +161,26 @@ export function conclusionOf(
         " " +
         said(pr, "Overall, the rows differ", "The data don't show an overall difference between the rows") +
         (comparisons.length ? pairsText() : "")
+      );
+    }
+
+    case "multifactor-anova": {
+      const Y = (p?.response as string | undefined) ?? "the response";
+      const terms = result.stats
+        .filter((s) => s.label.endsWith(" P value"))
+        .map((s) => ({ term: s.label.slice(0, -" P value".length), p: s.value }));
+      const yes = terms.filter((t) => sig(t.p));
+      const no = terms.filter((t) => !sig(t.p));
+      if (!yes.length)
+        return (
+          `The data don't show that any factor or interaction affects ${q(Y)}.` +
+          (differing.length ? pairsText() : "")
+        );
+      return (
+        `${list(yes.map((t) => t.term))} ${yes.length > 1 ? "affect" : "affects"} ${q(Y)} ` +
+        `(${yes.map((t) => P(t.p)).join(", ")}).` +
+        (no.length ? ` The data don't show an effect of ${list(no.map((t) => t.term))}.` : "") +
+        pairsText()
       );
     }
 
@@ -404,7 +439,13 @@ function curveSentence(set: string, i: number, model: string, result: AnalysisRe
     case "logistic-growth":
     case "gompertz-growth": {
       const [max, maxCi] = param("YM");
-      what = `${Y} grows from ${param("Y0")[0]} toward a maximum of ${max} (YM; ${maxCi}), in an S shape${model === "gompertz-growth" ? " whose steepest point comes early, at about 37% of the maximum" : ""}.`;
+      // Seq 166: logistic growth reports its inflection point (Prism 11);
+      // Gompertz has no such row, so its sentence stays as it was — and a
+      // fit with no inflection row (a global fit, an old saved result)
+      // says nothing about one instead of printing a dash.
+      const hasInfl = model === "logistic-growth" && rows.some((r) => r.label === "Inflection point");
+      const [infl, inflCi] = hasInfl ? best("Inflection point") : ["", ""];
+      what = `${Y} grows from ${param("Y0")[0]} toward a maximum of ${max} (YM; ${maxCi}), in an S shape${model === "gompertz-growth" ? " whose steepest point comes early, at about 37% of the maximum" : ""}${infl ? ` — its steepest point (the inflection) is at ${X} = ${infl} (${inflCi}).` : "."}`;
       break;
     }
     case "two-phase-decay": {

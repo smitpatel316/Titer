@@ -1,6 +1,6 @@
 # MCP server contract — Titer (v1.6.0, Phase 2) ↔ stdio bridge
 
-**Status:** Phase 2 + v1.7.4 P0 + 1.8 backup list (57 tools: read, write, run, graph, export, cloud).
+**Status:** Phase 2 + v1.7.4 P0 + 1.8 backup list + 1.8.0 data-file import (58 tools: read, write, run, graph, export, cloud).
 **Server branch:** `check/v16-mcp-phase2` (v1.6.0); the v1.7.4 P0 tools
 (`titer_project_summary`, `titer_search`, `titer_get_analysis_params`,
 `titer_rerun_analysis`, `await_result` on `titer_run_analysis`) were
@@ -123,11 +123,11 @@ SSE stream (`text/event-stream`). Lifecycle:
    `2025-06-18`), `capabilities`, `clientInfo`. Server answers with its
    own `protocolVersion` (the negotiated one — the highest both support),
    `capabilities: { "tools": {} }`, `serverInfo: { "name": "titer",
-   "version": "<app version>" }`, and `instructions` (the 57 tools:
+   "version": "<app version>" }`, and `instructions` (the 58 tools:
    read-only vs mutating, the job model, cloud/export notes — the full
    text lives in `get_info` in `src-tauri/src/mcp.rs`).
 2. `notifications/initialized` — client sends after `initialize`.
-3. `tools/list` — returns all 57 tools in one page (`nextCursor`
+3. `tools/list` — returns all 58 tools in one page (`nextCursor`
    absent). No pagination.
 4. `tools/call` — `{ "name": "<tool>", "arguments": { … } }`.
 5. Sessions: 2025-11-25 clients use protocol-level sessions; the server
@@ -292,7 +292,7 @@ treat it as a local-only read.
 | Tool | Arguments | Returns |
 |---|---|---|
 | `titer_project_summary` **(1.7.4)** | `project_id?` | `{ projects: [{ project_id, file_path, revision, tables, analyses, graphs, figures, info_sheets, counts }] }` — the same listing as `titer_list_projects` plus a `counts` object per project (`{ table, analysis, graph, figure, info }`, the number of nodes of each kind). Names + ids only, no per-node detail: the cheap way to learn what a project holds before reading any node. |
-| `titer_search` **(1.7.4)** | `query`, `kind?` (`table` \\| `analysis` \\| `graph` \\| `figure` \\| `info`), `project_id?` | `{ project_id?, query, matches: [{ id, name, kind, parent_id, parent_name, project_id }], total, truncated }` — nodes whose name (or, for analyses/graphs, their `analysis_type`/`graph_type`/`table_type`) contains the query, case-insensitively, in listing order. `kind` narrows to one node kind (an unknown kind is a tool error naming the five). An empty query is an error. Omit `project_id` to search every open project. At most 100 matches (`truncated: true` when more exist). A miss is `{ matches: [], total: 0 }`, not an error. |
+| `titer_search` **(1.7.4)** | `query`, `kind?` (`table` \\| `analysis` \\| `graph` \\| `info`), `project_id?` | `{ project_id?, query, matches: [{ id, name, kind, parent_id, parent_name, project_id }], total, truncated }` — nodes whose name (or, for analyses/graphs, their `analysis_type`/`graph_type`/`table_type`) contains the query, case-insensitively, in listing order. `kind` narrows to one node kind (an unknown kind is a tool error naming the four). An empty query is an error. Omit `project_id` to search every open project. At most 100 matches (`truncated: true` when more exist). A miss is `{ matches: [], total: 0 }`, not an error. |
 | `titer_get_analysis_params` **(1.7.4)** | `analysis_type` | The valid `params` for that analysis type, generated from the `AnalysisParams` member types (source: `scripts/generate-analysis-params-schema.py`, output `src-tauri/src/analysis-params-schema.json`): `{ analysis_type, label, min_columns, offered_on, requires_packages?, gate?, params: [{ name, type, required, default?, enum?, min?, max?, description? }] }`. `required: true` only where the run errors without the param; every other field lists the default the runner applies. `gate` is the table-type gate in plain language (e.g. three-way ANOVA: "Grouped table with at least 2 row bands"; nested t-test: "Nested table with exactly 2 data groups"). An unknown `analysis_type` is a tool error naming the valid types. Use this before `titer_run_analysis` / `titer_rerun_analysis` instead of guessing param names. |
 
 | Tool | Arguments | Returns |
@@ -308,14 +308,14 @@ treat it as a local-only read.
 | `titer_list_backups` **(1.8)** | — | `{ backups: [{ key, display_name, source_path, saved_at_ms, source_mtime_ms, size_bytes }] }`, newest first — the automatic backups (seq 226): one separate `.hlx` snapshot per project, in Titer's data folder. A backup newer than its file is the crash recovery Titer offers on reopen — tell the user to reopen the project in Titer, which offers the restore; there is no restore tool. Stale backups (past the 4-day keep) are pruned on the read. Read-only. |
 | `titer_send_feedback` | `kind` (`"bug"` \| `"missing-feature"` \| `"other"`), `summary` (short, required, at most 200 characters), `details` (required, at most 4000 characters — what was tried, what happened, what was expected), `failed_tool?` (the tool or step that failed, if any) | `{ feedback_id, received: true, sent: true/false, ... }`. Reports a missing feature or a bug to the Titer team — **read-only wrt the project**: it never touches a snapshot, a job, or a project file. **But it is `open_world_hint: true`, not a local-only read:** the report is always saved on this Mac first: one JSONL entry appended to `<app_data>/mcp/feedback.jsonl` (same 0700 directory as the token, §10), and the user reviews the entries in Settings → AI Connections, sending one to GitHub only by clicking "Send to GitHub" there. **Consent gate:** the entry is also POSTed to the feedback server (`POST https://feedback.smitpatel.net/api/v1/feedback`, 10 s timeout) only when the user has turned on feedback sharing — first-run prompt (Share / Don't share, default off) or the Settings toggle, recorded in `<app_data>/mcp/feedback-consent.json`. Sharing off → `{ feedback_id, received: true, sent: false, sharing: "disabled", note: "…" }` and no POST is attempted (the tool says sharing is disabled, never silently stays local). Sharing on + server 201 → `{ feedback_id, received: true, sent: true, issue_url: "…" }`. Sharing on + server unreachable / timeout / non-2xx → `{ feedback_id, received: true, sent: false, sharing: "enabled", error: "…" }` — the entry stays saved locally and the tool call still succeeds. The bridge auto-attaches minimal context only: app version, OS, the failed tool/step if any, and the last few Activity lines (tool names + ok flags only). **No table data values, no file paths beyond the project file name.** An unknown `kind`, an empty `summary`/`details`, or an over-long one is a plain-language tool error naming the valid choices. |
 
-## 7. Analyses (53 types) — run, freeze, simulate, method, wand, script
+## 7. Analyses (55 types) — run, freeze, simulate, method, wand, script
 
-All 53 `AnalysisType` values in `src/stats/types.ts` are runnable via
+All 55 `AnalysisType` values in `src/stats/types.ts` are runnable via
 `titer_run_analysis`; `params` must match the `AnalysisParams` member
 for the type (§4: unknown/out-of-range params are rejected with the
 valid choices). **Do not guess params — ask first:**
 `titer_get_analysis_params` (§6) returns the valid params, with types,
-ranges, defaults and the table-type gate, for any of the 53 types. The
+ranges, defaults and the table-type gate, for any of the 55 types. The
 table-type gate applies: the analysis must be offered for the table's
 type (`ANALYSIS_OPTIONS_BY_TABLE`, including the data-dependent gates
 — three-way ANOVA needs ≥ 2 row bands; nested t-test needs exactly 2
@@ -361,14 +361,15 @@ plainly ("couldn't read …") instead of silently skipping.
 
 ## 8. Project / document, data tables, graphs / figures / info sheets
 
-### 8.1 Project / document — 5 tools
+### 8.1 Project / document — 6 tools
 
 | Tool | Arguments | Returns |
 |---|---|---|
 | `titer_create_project` | — | `{ project_id, file_path: null, blank: true }` — a new blank project window via the existing `new_project` path. Returns the window label; address it by `project_id` afterwards. |
-| `titer_open_project` | `{ path }` | `{ project_id, file_path, format: "hlx" \| "pzt" \| "prism" \| "pzfx" }`. Rust-side: local `.hlx` / `.pzt` (untitled) opens as a project; `.prism` / `.pzfx` imports as a project (same as File ▸ Import Prism File). Path must be local — no URLs. Fails plainly on a missing/unreadable file. |
+| `titer_open_project` | `{ path }` | `{ project_id, file_path, format: "hlx" \| "pzt" \| "prism" \| "pzfx" \| "pzf" }`. Rust-side: local `.hlx` / `.pzt` (untitled) opens as a project; `.prism` / `.pzfx` / `.pzf` imports as a project (same as File ▸ Import Prism File). Path must be local — no URLs. Fails plainly on a missing/unreadable file. |
 | `titer_save_project` | `project_id?`, `path?`, `format?: "hlx" \| "prism" \| "pzfx"` | `{ project_id, file_path, format, revision }`. Frontend dispatch (bytes are built by the TS writers — Rust has no serializer). `format` must be explicit — the save-nudge prompt never appears to an agent; omit it to save back in the project's current format (`.hlx`, or `.prism`/`.pzfx` for Prism-origin/remote projects). `path` = Save As. Resolution: explicit `format` > path extension > current file extension; a format/path mismatch is refused, never a silent `.hlx` save. Errors name the writer's failure (e.g. mixed Y formats cannot go to `.pzfx`) instead of silently saving as `.hlx`. A remote project with no local file errors plainly ("no file yet — pass path") — it cannot be saved back to the cloud; see §9. `.pzfx` writer coverage is data tables + info sheets only — analyses, graphs and layouts are never written to `.pzfx`. |
 | `titer_import_prism` | `{ path }` | `{ project_id, file_path, imported_tables, warnings }`. Same as `titer_open_project` for a Prism path, kept separate so the intent is explicit. `warnings` carries the import report (what the converter skipped). |
+| `titer_import_data_file` | `project_id?`, `path`, `name?` | `{ project_id, table_id, name, table_type, rows, data_columns, notes }`. Imports a `.csv` / `.tsv` / `.txt` / `.xlsx` file as a new table in the open project (same parsers as File ▸ Import Data File…); always a new table, never appended to the active table. `notes` carries the importer's assumptions (header row, row titles, skipped sheets). |
 | `titer_close_project` | `project_id?`, `save?: "save" \| "discard"` | `{ project_id, closed: true }`. `save` omitted = refuse to close a dirty project (`{ needs_confirm: true, warning: "unsaved changes" }`); pass `save: "save"` or `save: "discard"` explicitly. Never prompts. Closes the window; the snapshot is dropped. |
 
 ### 8.2 Data tables — 9 tools
@@ -453,7 +454,7 @@ human-only in Settings).
 |---|---|---|
 | `titer_cloud_status` | — | `{ accounts: [{ provider, account_id, login, name }], box_has_credentials: boolean }`. Read-only. Wraps `cloud_status`. |
 | `titer_cloud_list` | `provider`, `account_id`, `folder_id?` | `{ entries: [{ id, name, path, kind: "file" \| "folder" }] }`. Read-only. Wraps `cloud_list` (the remote picker). `folder_id` omitted = `"0"` (Box root). |
-| `titer_cloud_download` | `provider`, `account_id`, `file_id` | `{ project_id, file_path, format }`. Downloads to the local cache and opens it in a window (same as the UI's remote open; `.hlx` / `.prism` / `.pzfx` remotes keep their format on save). Metadata is read first (name/format), so a non-project file is refused before any bytes move. Only project files open (`.hlx`, `.pzt`, `.prism`, `.pzfx`). Records the remote handle (see below), so a later `titer_cloud_upload` can update the same file. |
+| `titer_cloud_download` | `provider`, `account_id`, `file_id` | `{ project_id, file_path, format }`. Downloads to the local cache and opens it in a window (same as the UI's remote open; `.hlx` / `.prism` / `.pzfx` remotes keep their format on save — a `.pzf` remote imports as an untitled project and saves as `.prism`, `.pzfx` or `.hlx`, since Titer writes no `.pzf`). Metadata is read first (name/format), so a non-project file is refused before any bytes move. Only project files open (`.hlx`, `.pzt`, `.prism`, `.pzfx`, `.pzf`). Records the remote handle (see below), so a later `titer_cloud_upload` can update the same file. |
 | `titer_cloud_upload` | `provider`, `account_id`, `file_id`, `project_id?` | `{ provider, file_id, version }`. Uploads the project's current on-disk bytes to the existing remote file, conditional on the version seen when it was downloaded (or at `upload_new`) — a version mismatch is a Conflict error naming the remote version, **never a silent overwrite**. Refuses a dirty (unsaved) project — save first with `titer_save_project`. The project must have been opened from that remote file with `titer_cloud_download` (or uploaded as new with `titer_cloud_upload_new`); a local project uploaded to an existing remote file is refused (no seen version — see the open item in §11). Destructive. |
 | `titer_cloud_upload_new` | `provider`, `account_id`, `folder_id?`, `project_id?`, `name?` | `{ provider, file_id, name, path }`. Uploads the project as a new remote file. Same dirty refusal + on-disk bytes as `titer_cloud_upload`. `name` omitted = the local file's name. Afterwards the project is tied to the new remote file, so `titer_cloud_upload` can update it. |
 | `titer_cloud_create_folder` | `provider`, `account_id`, `folder_id?`, `name` | `{ provider, file_id, name, path }`. `folder_id` omitted = root (`"0"`). |
@@ -563,16 +564,16 @@ explicit "Send to GitHub" click opens a pre-filled issue in the browser.
 |---|---|
 | Read / discovery (Phase 1 + L1 + 1.7.4 + 1.8) | 13 |
 | Jobs (`titer_read_job`, `titer_list_jobs`, `titer_cancel_job`) | 3 |
-| Project / document | 5 |
+| Project / document | 6 |
 | Data tables | 9 |
 | Analyses (run + rerun + freeze + simulate + method + wand + script) | 7 |
 | Graphs / figures / info sheets | 7 |
 | Export | 4 |
 | Cloud | 9 |
-| **Total** | **57** |
+| **Total** | **58** |
 
 Annotations: 19 tools are `read_only_hint: true` (the 13 read tools +
-`read_job`/`list_jobs` + the 4 read-only cloud tools); the other 38
+`read_job`/`list_jobs` + the 4 read-only cloud tools); the other 39
 are mutating. `destructive_hint: true` on exactly six:
 `titer_write_table`, `titer_edit_table`, `titer_delete_node`,
 `titer_close_project`, `titer_run_script`, `titer_cloud_upload`.
@@ -582,7 +583,7 @@ is on, §6); everything else is `false`. `idempotent_hint` is per-tool (e.g. `ti
 `titer_rename_node`, `titer_reorder_nodes` are idempotent; create/undo/
 redo/run tools are not).
 
-The allowlist (§12) groups the 57 tools differently — by what the user
+The allowlist (§12) groups the 58 tools differently — by what the user
 turns on, not by what they do. The two groupings overlap (e.g. the
 `destructive` group holds the two tools that delete data or run
 scripts); §12 is the
@@ -596,11 +597,11 @@ The Phase 2 smoke runs against the **real server in a running Titer
 app** via a terminal CLI client (no Claude Desktop sign-in needed).
 It reads endpoint + token from `<app_data>/mcp/discovery.json`, speaks
 Streamable HTTP directly (initialize → tools/list → tools/call across
-all 57 tools), and prints a PASS/FAIL line per check; exit 0 only if
+all 58 tools), and prints a PASS/FAIL line per check; exit 0 only if
 every check passes. **Prerequisite:** in Titer, Settings → AI
 Connections, turn on every group under "What your AI can do" first —
 by default the server advertises only the 5 read tools (§12), and this
-smoke drives all 57. It drives one deterministic flow on a fresh project
+smoke drives all 58. It drives one deterministic flow on a fresh project
 it creates itself (no fixture ids — the ids it needs come from the
 tools' own outputs), plus the `tests/testdata/survival.pzfx` public
 fixture for the Prism-import step:
@@ -610,7 +611,7 @@ fixture for the Prism-import step:
    (default out dir: a fresh temp dir; exports/saves land there).
 3. `initialize` (`protocolVersion 2025-11-25`), then
    `notifications/initialized`, then `tools/list` — with every group on,
-   expect all 57 tools, nothing else (with only the default groups, §12
+   expect all 58 tools, nothing else (with only the default groups, §12
    says 5).
 4. Create a project → create an XY table → write data → summary with
    values → edit/rename/reorder/undo/redo/duplicate → simulate a
@@ -625,6 +626,9 @@ fixture for the Prism-import step:
    analysis (fast run returns `done` inline with the result);
    `titer_project_summary` (counts one analysis after the rerun — no
    duplicate node).
+5c. 1.8.0 data-file import on the same project: `titer_import_data_file`
+   on a generated CSV makes a new table (2 rows, named for the file);
+   a `.hlx` path is refused as "not a data file".
 6. Build a graph → update it → clone it → figure (create/update/read)
    → info sheet (create/update/read). Apply the wand from one table to
    another; apply a method file (missing-file error path — no fixture
@@ -669,7 +673,7 @@ are expected to differ until the `buildGraphFigure` follow-up (§10.1).
 The in-process Rust smoke (`mcp_smoke_job_plumbing_over_http` in
 `src-tauri/src/mcp.rs`) is the other half: with every group enabled via
 its fixture allowlist record, it asserts `tools/list` returns exactly
-57 tools and drives the job plumbing + project/table/
+58 tools and drives the job plumbing + project/table/
 analysis/cloud/graph/composite/export tools over real HTTP with a
 completer task standing in for the frontend dispatcher. A second
 in-process smoke (`mcp_smoke_allowlist_default_over_http`) covers §12:
@@ -687,7 +691,7 @@ end).
 - Never add tools, prompts or resources of its own in front of the
   server: the bridge is a transport, not a server. It forwards stdio ↔
   Streamable HTTP and nothing else. It forwards whatever tools the
-  server lists — the 57 Phase 2 + 1.7.4 + 1.8 tools appear automatically via
+  server lists — the 58 Phase 2 + 1.7.4 + 1.8 tools appear automatically via
   `tools/list`; no bridge change was needed for Phase 2.
 - Never widen the bind (no `0.0.0.0`, no port forwarding, no tunnel).
 - Never log the token or table values.
@@ -758,7 +762,7 @@ tool must assign it a group, or the suite fails).
 | Read project data (`read`) | `titer_list_projects`, `titer_list_tables`, `titer_read_table_summary`, `titer_read_results`, `titer_read_graph` | yes |
 | Read more (`read_more`) | `titer_read_figure`, `titer_read_info_sheet`, `titer_read_activity`, `titer_send_feedback` | no |
 | Discover projects and params (`discovery`) | `titer_project_summary`, `titer_search`, `titer_get_analysis_params` | no |
-| Open and save projects (`project`) | `titer_create_project`, `titer_open_project`, `titer_save_project`, `titer_close_project`, `titer_import_prism` | no |
+| Open and save projects (`project`) | `titer_create_project`, `titer_open_project`, `titer_save_project`, `titer_close_project`, `titer_import_prism`, `titer_import_data_file` | no |
 | Edit tables (`tables`) | `titer_create_table`, `titer_write_table`, `titer_edit_table`, `titer_duplicate_table_family`, `titer_rename_node`, `titer_reorder_nodes`, `titer_undo`, `titer_redo` | no |
 | Run analyses (`analyses`) | `titer_run_analysis`, `titer_rerun_analysis`, `titer_freeze_analysis`, `titer_simulate_data`, `titer_apply_method`, `titer_apply_wand`, `titer_read_job`, `titer_list_jobs`, `titer_cancel_job` | no |
 | Build graphs and figures (`graphs`) | `titer_build_graph`, `titer_update_graph`, `titer_clone_graph`, `titer_create_figure`, `titer_update_figure`, `titer_create_info_sheet`, `titer_update_info_sheet` | no |
@@ -811,5 +815,5 @@ the same human-only boundary as enable/token (D4).
 - Antigravity's `mcp_config.json` is untouched: it keeps its 5-tool
   `enabledTools`. The server-side allowlist now makes that list real
   instead of advisory; the config file format does not change.
-- The server still *has* 57 tools. The allowlist decides which subset
+- The server still *has* 58 tools. The allowlist decides which subset
   a given client sees — it does not remove tools from the server.

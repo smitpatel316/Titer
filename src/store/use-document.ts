@@ -13,7 +13,8 @@ import {
   type TemplateInfo,
   type TemplateKind,
 } from "../lib/template";
-import { parsePzfx } from "../lib/pzfx";
+import { parsePzfx, type PzfxImport } from "../lib/pzfx";
+import { parsePzf } from "../lib/pzf";
 import { writePzfx } from "../lib/pzfx-write";
 import { convertPrism, formatReport } from "../lib/prism";
 import {
@@ -22,7 +23,7 @@ import {
   mergeIntoTable,
   type TabularTable,
 } from "../lib/tabular-import";
-import { writePrism } from "../lib/prism-write";
+import { formatWriteReport, writePrism, type PrismWriteReport } from "../lib/prism-write";
 import { loadPrismSaveChoice, nextSaveAction, savePrismSaveChoice } from "../lib/prism-nudge";
 import { AUTOSAVE_DEBOUNCE_MS, isAutosaveEnabled } from "../lib/autosave";
 import {
@@ -39,6 +40,9 @@ import * as native from "../native";
 import { loadRecents, MAX_RECENTS, saveRecents, recentKey, type RecentEntry } from "./recents";
 import { consumeMcpCloseAllowance } from "./mcp-document";
 import { publishMcpSnapshotNow } from "./mcp-publish";
+import { runProjectScriptText } from "../lib/script-effects";
+import type { ScriptDoc } from "../lib/prism-script";
+import type { ProjectScript } from "./types";
 import { openProjectsOrSay, sayGone } from "../menus";
 import { fileName, fileTitle } from "../lib/paths";
 import {
@@ -62,7 +66,7 @@ const UNTITLED = "Untitled";
 const isProjectFile = (path: string) => path.toLowerCase().endsWith(`.${PROJECT_FILE_EXTENSION}`);
 const isPrismFile = (path: string) => {
   const lower = path.toLowerCase();
-  return lower.endsWith(".prism") || lower.endsWith(".pzfx");
+  return lower.endsWith(".prism") || lower.endsWith(".pzfx") || lower.endsWith(".pzf");
 };
 
 /**
@@ -98,6 +102,16 @@ export function useDocument() {
   // (Quirk 2's family). The report lines, null when no notice is up.
   const [prismImported, setPrismImported] = React.useState<string[] | null>(null);
   const dismissPrismImported = () => setPrismImported(null);
+  // The "Saved as Prism" notice, shown in-app rather than as a native dialog:
+  // same Quirk-2 family as `prismImported` above — the native alert's OK
+  // button could not dismiss it on macOS. The .prism write report (tables /
+  // analyses written, analyses dropped, the graphs warning) used to be
+  // computed and then thrown away — the drop was silent (Mansi P0 #3). The
+  // report lines, null when no notice is up. Only a manual save shows it:
+  // autosave and the quit-save pass `silent`, so a background save never
+  // pops a dialog.
+  const [prismSavedReport, setPrismSavedReport] = React.useState<string[] | null>(null);
+  const dismissPrismSavedReport = () => setPrismSavedReport(null);
   // The "Data File Imported" notice, in-app rather than as a native dialog:
   // same Quirk-2 family as `prismImported` above — the native alert's OK
   // button could not dismiss it on macOS. Shown only when the import has
@@ -199,13 +213,12 @@ export function useDocument() {
     const revision = s.revision;
     const version = native.isNative ? await native.appVersion().catch(() => "1.7.3") : "1.7.3";
     let bytes: Uint8Array;
+    let report: PrismWriteReport;
     try {
-      bytes = (
-        await writePrism(
-          { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
-          version,
-        )
-      ).bytes;
+      ({ bytes, report } = await writePrism(
+        { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
+        version,
+      ));
     } catch (err) {
       await native.alert(
         "Couldn't Save as Prism",
@@ -222,6 +235,8 @@ export function useDocument() {
       // The project now lives on local disk, even if it came from the cloud.
       setRemote(null);
       addRecent({ kind: "local", path: target });
+      // The write report, shown — never silently dropped (Mansi P0 #3).
+      setPrismSavedReport(prismSaveReportLines(report, fileName(target)));
       return true;
     } catch (err) {
       const name = fileName(target);
@@ -288,27 +303,30 @@ export function useDocument() {
    *  JSON — the same rule as local files.
    *  A conflict opens the three-choice dialog instead of overwriting; an
    *  offline save shows the offline notice instead of losing the document. */
-  const saveRemote = async (handle: RemoteHandle): Promise<boolean> => {
+  const saveRemote = async (handle: RemoteHandle, silent = false): Promise<boolean> => {
     const s = latest.current.get();
     const revision = s.revision;
     const version = native.isNative ? await native.appVersion().catch(() => "1.0.7") : "1.0.7";
     let bytes: Uint8Array;
+    let prismReport: PrismWriteReport | null = null;
     try {
-      bytes = handle.path.toLowerCase().endsWith(".prism")
-        ? (
-            await writePrism(
-              { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
-              version,
-            )
-          ).bytes
-        : handle.path.toLowerCase().endsWith(".pzfx")
-          ? (
-              await writePzfx(
-                { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
-                version,
-              )
-            ).bytes
-          : new TextEncoder().encode(serializeProjectFile(s));
+      if (handle.path.toLowerCase().endsWith(".prism")) {
+        const written = await writePrism(
+          { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
+          version,
+        );
+        bytes = written.bytes;
+        prismReport = written.report;
+      } else if (handle.path.toLowerCase().endsWith(".pzfx")) {
+        bytes = (
+          await writePzfx(
+            { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
+            version,
+          )
+        ).bytes;
+      } else {
+        bytes = new TextEncoder().encode(serializeProjectFile(s));
+      }
     } catch (err) {
       await native.alert(
         "Couldn't Save Project",
@@ -334,6 +352,9 @@ export function useDocument() {
         path: handle.path,
       });
       setOfflineNotice(null);
+      // A remote .prism save shows the write report too — same as a local
+      // one — unless this was a background (auto/quit) save.
+      if (!silent && prismReport) setPrismSavedReport(prismSaveReportLines(prismReport, fileName(handle.path)));
       return true;
     } catch (err) {
       if (isConflictError(err)) {
@@ -587,11 +608,15 @@ export function useDocument() {
     void loadRemote(makeRemoteHandle(entry.provider, entry.accountId, entry.fileId, entry.path, null));
   };
 
-  const save = async (saveAs = false): Promise<boolean> => {
+  /** `silent` is for background saves (autosave, quit-save): they write the
+   *  file but never pop the .prism write-report dialog — a dialog every
+   *  10 s, or one that blocks quitting, would be worse than the silence it
+   *  replaced. A manual save always shows the report. */
+  const save = async (saveAs = false, options?: { silent?: boolean }): Promise<boolean> => {
     // A remote file saves back to the cloud — unless Save As, which saves a
     // local copy instead (the project then lives on local disk).
     if (remoteRef.current && !saveAs) {
-      const ok = await saveRemote(remoteRef.current);
+      const ok = await saveRemote(remoteRef.current, options?.silent);
       // Prism: the backup is rewritten on every save, so it is never older
       // than the project file.
       if (ok) void writeBackupSnapshot();
@@ -605,7 +630,7 @@ export function useDocument() {
       const revision = s.revision;
       const version = native.isNative ? await native.appVersion().catch(() => "1.7.3") : "1.7.3";
       try {
-        const { bytes } = await writePrism(
+        const { bytes, report } = await writePrism(
           { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
           version,
         );
@@ -613,6 +638,8 @@ export function useDocument() {
         latest.current.markProjectSaved(filePath, revision);
         // Prism: the backup is rewritten on every save.
         void writeBackupSnapshot();
+        // The write report, shown — never silently dropped (Mansi P0 #3).
+        if (!options?.silent) setPrismSavedReport(prismSaveReportLines(report, fileName(filePath)));
         return true;
       } catch (err) {
         await native.alert(
@@ -783,7 +810,8 @@ export function useDocument() {
     autosaveInFlight.current = true;
     let ok = false;
     try {
-      ok = await saveRef.current();
+      // Silent: a background save never pops the .prism write-report dialog.
+      ok = await saveRef.current(false, { silent: true });
     } finally {
       autosaveInFlight.current = false;
       if (autosaveRearmPending.current) {
@@ -1222,6 +1250,39 @@ export function useDocument() {
     }
   };
 
+  /** Run the project's saved scripts for a hook (seq 228): on open, after
+   *  the project loads; on close, before the save question. Each script runs
+   *  through the same engine + effects as the dialog's Run, in the order the
+   *  scripts are saved; a run that stops on an error changes nothing for
+   *  that script (its log is reported) and the later scripts still run.
+   *  Returns false when any script stopped, so the caller can say so — for
+   *  a close, the window stays open. */
+  const runSavedScripts = async (
+    scripts: ProjectScript[] | undefined,
+    hook: "runOnOpen" | "runOnClose",
+    doc: ScriptDoc,
+  ): Promise<boolean> => {
+    const due = (scripts ?? []).filter((s) => s[hook]);
+    if (!due.length) return true;
+    let current = doc;
+    let ok = true;
+    for (const entry of due) {
+      const result = await runProjectScriptText(current, entry.text, () => void saveRef.current());
+      if (result.stopped) {
+        ok = false;
+        await native.alert(
+          `Script “${entry.name}” Stopped`,
+          [`The ${hook === "runOnOpen" ? "run-on-open" : "run-on-close"} script stopped before it finished:`, ...result.log].join("\n"),
+          "error",
+        );
+        continue;
+      }
+      if (JSON.stringify(result.doc) !== JSON.stringify(current)) latest.current.applyScript(result.doc);
+      current = result.doc;
+    }
+    return ok;
+  };
+
   /** Close with autosave: one save attempt first (only when the toggle is
    *  on, the project is dirty, and it has a target), then the existing
    *  discard prompt — which only appears if the project is still dirty
@@ -1237,6 +1298,18 @@ export function useDocument() {
   const confirmDiscardWithAutosave = async (): Promise<boolean> => {
     if (quitSaveInFlight.current) return quitSaveInFlight.current;
     const asked = (async () => {
+      // Seq 228: the run-on-close scripts run first, so their changes are
+      // in the project the quit-save then writes. A script that stops
+      // calls the close off — the window stays open, with the log shown.
+      const state = latest.current.get();
+      const closed = await runSavedScripts(state.scripts, "runOnClose", {
+        nodes: state.nodes,
+        rootOrder: state.rootOrder,
+        childOrder: state.childOrder,
+        activeNodeId: state.activeNodeId,
+        projectName: state.projectName,
+      });
+      if (!closed) return false;
       const quitSaveAllowed = () =>
         isAutosaveEnabled() &&
         latest.current.isDirty &&
@@ -1244,11 +1317,13 @@ export function useDocument() {
         !conflictRef.current &&
         !autosaveWouldPrompt();
       if (quitSaveAllowed()) {
-        const saved = await saveRef.current();
+        // Silent, like autosave: the quit-save writes the file, and the
+        // report dialog must not hold the window open.
+        const saved = await saveRef.current(false, { silent: true });
         if (saved) {
           await waitForQuitSettle();
           if (quitSaveAllowed()) {
-            await saveRef.current();
+            await saveRef.current(false, { silent: true });
           }
         }
       }
@@ -1321,6 +1396,17 @@ export function useDocument() {
       setOpeningSettled(true);
       if (target.untitled) setUntitled(fileTitle(target.displayName));
       afterLoad();
+      // Seq 228: the run-on-open scripts run once the project is in the
+      // store — built from the parsed file, not the store's ref, which the
+      // load dispatch hasn't re-rendered yet. A script that stops reports
+      // its log; the project still opens.
+      await runSavedScripts(parsed.project.scripts, "runOnOpen", {
+        nodes: parsed.project.nodes,
+        rootOrder: parsed.project.rootOrder,
+        childOrder: parsed.project.childOrder,
+        activeNodeId: parsed.project.activeNodeId,
+        projectName: parsed.project.projectName,
+      });
       // A template that carries instructions (or a description) says so on
       // open (plan 38); any other file clears a stale notice.
       const info = parsed.project.template;
@@ -1405,13 +1491,11 @@ export function useDocument() {
     );
   };
 
-  /** Imports a Prism `.pzfx` file as a new untitled project (File ▸ Import Prism File…,
-   *  or a dropped file). Analyses and graphs aren't in the file — only its data tables —
-   *  so the imported project opens edited: saving keeps it as a Titer project.
+  /** Loads an already-parsed Prism import (`.pzfx` or `.pzf` — same report
+   *  shape) as a new untitled project, and shows the transfer report in-app.
    *  Returns true when the project loaded, so a local import knows to drop
    *  the remote handle. */
-  const importPrismText = async (text: string, name: string): Promise<boolean> => {
-    const imported = parsePzfx(text);
+  const loadImportedProject = async (imported: PzfxImport, name: string): Promise<boolean> => {
     if (imported.tables.length === 0) {
       report();
       await native.alert(
@@ -1446,6 +1530,19 @@ export function useDocument() {
     return true;
   };
 
+  /** Imports a Prism `.pzfx` file as a new untitled project (File ▸ Import Prism File…,
+   *  or a dropped file). Analyses and graphs aren't in the file — only its data tables —
+   *  so the imported project opens edited: saving keeps it as a Titer project. */
+  const importPrismText = async (text: string, name: string): Promise<boolean> =>
+    loadImportedProject(parsePzfx(text), name);
+
+  /** Imports a Prism `.pzf` file (the legacy binary format Prism 4/5 wrote)
+   *  as a new untitled project — same report shape as `.pzfx`. Tables import
+   *  as Column (the format records no table type); analyses, graphs and
+   *  layouts don't come across, and the report says so. */
+  const importPzfBytes = async (data: Uint8Array, name: string): Promise<boolean> =>
+    loadImportedProject(parsePzf(data), name);
+
   const importPrismFile = async (path: string) => {
     if (path.toLowerCase().endsWith(".prism")) {
       let bytes: Uint8Array;
@@ -1458,6 +1555,17 @@ export function useDocument() {
       // A local import starts an untitled local project: the remote handle
       // goes, even if the window held a remote file.
       if (await importPrismBytes(bytes, fileTitle(path))) setRemote(null);
+      return;
+    }
+    if (path.toLowerCase().endsWith(".pzf")) {
+      let bytes: Uint8Array;
+      try {
+        bytes = await native.readPrismBytes(path);
+      } catch {
+        report();
+        return native.alert("Couldn't Import File", `“${fileName(path)}” couldn't be read.`, "error");
+      }
+      if (await importPzfBytes(bytes, fileTitle(path))) setRemote(null);
       return;
     }
     let text: string;
@@ -1507,7 +1615,7 @@ export function useDocument() {
     return true;
   };
 
-  /** File ▸ Import Prism File…: pick a Prism file (`.pzfx` or `.prism`) and import it. In the web build
+  /** File ▸ Import Prism File…: pick a Prism file (`.pzfx`, `.prism` or `.pzf`) and import it. In the web build
    *  (no native shell) the pick is a file input instead. */
   const importPrism = async () => {
     if (native.isNative) {
@@ -1525,22 +1633,25 @@ export function useDocument() {
     const picked = await new Promise<{ name: string; data: ArrayBuffer | string } | null>((resolve) => {
       const input = document.createElement("input");
       input.type = "file";
-      input.accept = ".pzfx,.prism";
+      input.accept = ".pzfx,.prism,.pzf";
       input.onchange = () => {
         const file = input.files?.[0];
         if (!file) return resolve(null);
         const reader = new FileReader();
         reader.onload = () => resolve({ name: file.name, data: reader.result as ArrayBuffer | string });
         reader.onerror = () => resolve(null);
-        // A `.prism` file is a ZIP: read bytes, not text.
-        if (file.name.toLowerCase().endsWith(".prism")) reader.readAsArrayBuffer(file);
+        // A `.prism` file is a ZIP and a `.pzf` file is binary: read bytes, not text.
+        if (file.name.toLowerCase().endsWith(".prism") || file.name.toLowerCase().endsWith(".pzf")) reader.readAsArrayBuffer(file);
         else reader.readAsText(file);
       };
       input.click();
     });
     if (!picked) return;
     if (typeof picked.data !== "string") {
-      if (await importPrismBytes(new Uint8Array(picked.data), picked.name.replace(/\.prism$/i, ""))) setRemote(null);
+      const bytes = new Uint8Array(picked.data);
+      if (picked.name.toLowerCase().endsWith(".pzf")) {
+        if (await importPzfBytes(bytes, picked.name.replace(/\.pzf$/i, ""))) setRemote(null);
+      } else if (await importPrismBytes(bytes, picked.name.replace(/\.prism$/i, ""))) setRemote(null);
     } else {
       if (await importPrismText(picked.data, "Prism import")) setRemote(null);
     }
@@ -1794,12 +1905,12 @@ export function useDocument() {
     // `opening_for` in main.rs); a `.pzm` applies to the active table.
     const projects = paths.filter((p) => isProjectFile(p) || isTemplatePath(p));
     const methods = paths.filter(isMethodPath);
-    const prism = paths.filter((p) => p.toLowerCase().endsWith(".pzfx") || p.toLowerCase().endsWith(".prism"));
+    const prism = paths.filter(isPrismFile);
     const data = paths.filter(isDataFilePath);
     if (paths.length > projects.length + methods.length + prism.length + data.length) {
       void native.alert(
         "Can't Open File",
-        "Titer can only open .hlx project files and .pzt templates, apply .pzm method files, and import .pzfx / .prism Prism files and .csv / .tsv / .txt / .xlsx data files. To convert a Prism file without opening it, use File ▸ Convert….",
+        "Titer can only open .hlx project files and .pzt templates, apply .pzm method files, and import .pzfx / .prism / .pzf Prism files and .csv / .tsv / .txt / .xlsx data files. To convert a Prism file without opening it, use File ▸ Convert….",
       );
     }
     if (projects.length) openProjectsOrSay(projects);
@@ -1865,6 +1976,8 @@ export function useDocument() {
     dismissTemplateNotice,
     prismImported,
     dismissPrismImported,
+    prismSavedReport,
+    dismissPrismSavedReport,
     dataImported,
     dismissDataImported,
     resolveSavePrompt,
@@ -1879,6 +1992,15 @@ export function useDocument() {
     backupRecovery,
     resolveBackupRecovery,
   };
+}
+
+/** (Mansi P0 #3) The .prism write report as notice lines: the verbatim
+ *  report from `formatWriteReport` — tables / analyses written, analyses
+ *  dropped with their reasons, the graphs warning — plus the file it was
+ *  saved as. The report content itself is untouched; only the surfacing is
+ *  new. Pure, so checks.ts pins the exact wording. */
+export function prismSaveReportLines(report: PrismWriteReport, savedName: string): string[] {
+  return [...formatWriteReport(report).split("\n"), "", `Saved as “${savedName}”.`];
 }
 
 /** (FF-F15) Message for a multi-file Prism drop: the first file imports,

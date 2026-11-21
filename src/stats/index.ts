@@ -10,6 +10,8 @@ import type {
   RemoveBaselineParams,
   BindingKineticsParams,
   BindingSaturationParams,
+  BinomialTestParams,
+  ChiSquareGofParams,
   ChiSquareParams,
   CorrelationParams,
   CoxPHParams,
@@ -25,6 +27,7 @@ import type {
   HclustParams,
   McNemarParams,
   MixedEffectsParams,
+  MultifactorAnovaParams,
   MultipleRegressionParams,
   MultipleLogisticRegressionParams,
   MultipleTTestsParams,
@@ -34,6 +37,7 @@ import type {
   SimpleLogisticRegressionParams,
   NonlinearRegressionParams,
   OutliersParams,
+  PValueStackParams,
   SurvivalParams,
   CoxParams,
   PoissonRegressionParams,
@@ -60,7 +64,9 @@ import { withReport } from "./report";
 import { friedmanSpec } from "./column/friedman";
 import { shapiroWilkSpec } from "./column/shapiro-wilk";
 import { kolmogorovSmirnovSpec } from "./column/kolmogorov-smirnov";
+import { oneSampleKsSpec } from "./column/one-sample-ks";
 import { runOutliers } from "./column/rout";
+import { runPValueStack } from "./column/p-values";
 import { runXYCorrelation } from "./xy/correlation";
 import { linearRegressionSpec, runLinearRegressions } from "./xy/linear-regression";
 import { demingRegressionSpec } from "./xy/deming-regression";
@@ -83,6 +89,7 @@ import { runMultipleTTests } from "./grouped/multiple-t-tests";
 import { runNestedTTest } from "./nested/nested-t-test";
 import { runNestedAnova } from "./nested/nested-anova";
 import { runCorrelationMatrix } from "./multiple/correlation-matrix";
+import { runMultifactorAnova } from "./multiple/multifactor-anova";
 import { runMultipleRegression } from "./multiple/multiple-regression";
 import { runMultipleLogisticRegression } from "./multiple/multiple-logistic-regression";
 import { runPoissonRegression } from "./multiple/poisson-regression";
@@ -90,6 +97,8 @@ import { runPrincipalComponentAnalysis } from "./multiple/principal-component-an
 import { runKMeans } from "./multiple/k-means";
 import { runHierarchicalClustering } from "./multiple/hierarchical-clustering";
 import { runChiSquare } from "./contingency/chi-square";
+import { runChiSquareGof } from "./contingency/chi-square-gof";
+import { runBinomialTest } from "./contingency/binomial-test";
 import { runSurvival } from "./survival/survival-analysis";
 import { runCox } from "./survival/cox-regression";
 import { runMcNemar } from "./contingency/mcnemar";
@@ -185,7 +194,13 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     (p as ShapiroWilkParams | undefined)?.test === "anderson-darling" ? ["nortest"] : [],
   ),
   "kolmogorov-smirnov": spec("Kolmogorov-Smirnov test", kolmogorovSmirnovSpec),
+  "one-sample-ks": spec("One-sample Kolmogorov-Smirnov test", oneSampleKsSpec),
   outliers: { label: "Identify outliers", minColumns: 1, run: (c, p) => runOutliers(c, p as OutliersParams) },
+  "p-value-stack": {
+    label: "Analyze a stack of P values",
+    minColumns: 1,
+    run: (c, p) => runPValueStack(c, p as PValueStackParams),
+  },
   correlation: { label: "Correlation", minColumns: 2, run: (c, p) => runXYCorrelation(c, p as XYCorrelationParams) },
   "linear-regression": {
     ...spec("Linear regression", linearRegressionSpec),
@@ -315,6 +330,14 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     minColumns: 2,
     run: (c, p) => runMultipleRegression(c, p as MultipleRegressionParams),
   },
+  "multifactor-anova": {
+    label: "Multifactor ANOVA",
+    // minColumns is a floor only: the response is the one numeric column a
+    // table can hold (the factors may be text), so a 2-column table runs —
+    // the runner validates the response and the factors itself.
+    minColumns: 1,
+    run: (c, p) => runMultifactorAnova(c, p as MultifactorAnovaParams),
+  },
   "multiple-logistic-regression": {
     label: "Multiple logistic regression",
     minColumns: 2,
@@ -344,6 +367,16 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     label: "Chi-square or Fisher's exact test",
     minColumns: 2,
     run: (c, p) => runChiSquare(c, p as ChiSquareParams),
+  },
+  "chi-square-gof": {
+    label: "Chi-square goodness of fit",
+    minColumns: 1,
+    run: (c, p, t) => runChiSquareGof(c, p as ChiSquareGofParams, t),
+  },
+  "binomial-test": {
+    label: "Binomial test",
+    minColumns: 1,
+    run: (c, p, t) => runBinomialTest(c, p as BinomialTestParams, t),
   },
   mcnemar: { label: "McNemar's test", minColumns: 2, run: (c, p) => runMcNemar(c, p as McNemarParams) },
   survival: {
@@ -477,11 +510,18 @@ export function runAnalysis(
   // prettier-ignore
   const named = params as
     { x?: string; y?: string | string[]; ys?: string[]; y2?: string; column?: string; controls?: string[]; dependent?: string; reference?: string; control?: string; compareWith?: string; predictors?: string[]; datasets?: string[]; time?: string; status?: string; covariates?: string[]; stratifyBy?: string } | undefined;
+  // `control` is a column name only for the one-way ANOVA — the two/three-way
+  // ANOVAs' control is a group, row or cell label ("A (Day 1)"), never a
+  // column, and their runners validate it themselves with a clear error
+  // (runPosthoc: "The control cell … holds no data"). Gating it here would
+  // refuse every Dunnett run with a control.
+  const control =
+    testType === "two-way-anova" || testType === "three-way-anova" ? undefined : named?.control;
   // prettier-ignore
   const chosen = [
     ...(Array.isArray(named?.y) ? named.y : named?.y !== undefined ? [named.y] : []),
     ...(named?.ys ?? []),
-    named?.x, named?.y2, named?.column, ...(named?.controls ?? []), named?.dependent, named?.reference, named?.control, named?.compareWith, ...(named?.predictors ?? []), ...(named?.datasets ?? []), named?.time, named?.status, ...(named?.covariates ?? []),
+    named?.x, named?.y2, named?.column, ...(named?.controls ?? []), named?.dependent, named?.reference, control, named?.compareWith, ...(named?.predictors ?? []), ...(named?.datasets ?? []), named?.time, named?.status, ...(named?.covariates ?? []),
   ];
   // (FF-F17) `stratifyBy` is NOT in the gate: no runner reads it — only the
   // survival-curves graph overlay, which draws unstratified when the column

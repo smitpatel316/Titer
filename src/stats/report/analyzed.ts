@@ -49,6 +49,14 @@ export function analyzedOf(
     }
     case "one-sample-t":
       return make(described, "list", `each against ${p?.hypotheticalValue ?? 0}`);
+    case "one-sample-ks": {
+      const dist =
+        { normal: "Normal", lognormal: "Lognormal", exponential: "Exponential", uniform: "Uniform" }[
+          (p?.distribution as string | undefined) ?? "normal"
+        ] ?? "Normal";
+      const article = dist === "Exponential" ? "an" : "a";
+      return make(described, "list", `each against ${article} ${dist} distribution`);
+    }
     case "anova":
     case "kruskal-wallis": {
       const control = p?.posthoc === "dunnett" ? (p.control as string | undefined) : undefined;
@@ -130,6 +138,17 @@ export function analyzedOf(
         ),
         left: all.filter((n) => !described.some((g) => g.name === n)),
       };
+    }
+    case "multifactor-anova": {
+      const response = (p?.response as string | undefined) ?? all[0];
+      const factors = (p?.factors as string[] | undefined) ?? [];
+      if (!response) return undefined;
+      const n = described.reduce((sum, g) => sum + (g.n ?? 0), 0);
+      return make(
+        [{ name: response, n }],
+        "list",
+        factors.length ? `by ${and(factors.map((f) => quoted(f)))}` : undefined,
+      );
     }
     case "chi-square": {
       const rows = table.titles.filter((_, r) => table.columns.some((c) => c.byRow[r] != null)).length;

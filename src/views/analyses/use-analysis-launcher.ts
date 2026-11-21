@@ -141,7 +141,7 @@ export function useStartAnalysis() {
     const wizard = WIZARDS[picked];
     const { data, tableType } = get().nodes[tableId]!;
     const table = readTable(data!);
-    if (!wizard?.questions({}, table, tableType).some(Boolean)) {
+    if (!wizard?.questions({}, table, tableType, data?.rowGroups).some(Boolean)) {
       const { type, params } = wizard?.finish({}, table, tableType) ?? { type: picked as AnalysisType };
       launch(tableId, type, params, forGraph);
       return false;

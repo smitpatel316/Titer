@@ -2,7 +2,7 @@
 // step, each answer choosing the next question. A wizard only declares its questions
 // and how the answers make the test's params; analysis-wizard.tsx asks them.
 // A test without an entry here runs as soon as it is picked.
-import { DOSE_MODELS, CONCENTRATION_UNITS, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel } from "../../stats/types";
+import { DOSE_MODELS, CONCENTRATION_UNITS, GOF_EXPECTED_MODES, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, MULTIFACTOR_MAX_FACTORS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, fdrQError, isFdrPValueMethod, pValueAlphaError, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloParams, type MonteCarloSimulationDistribution, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel, type PValueStackParams } from "../../stats/types";
 import type { PlotFunctionExtra, PlotFunctionModel } from "../../stats/types";
 import {
   PLOT_FUNCTION_DEFAULTS,
@@ -13,12 +13,14 @@ import {
   plotFunctionParams,
   plotFunctionXRange,
 } from "../../stats/xy/plot-function";
-import { hasXColumn, type TableType, type Transform } from "../../store/types";
+import { hasXColumn, type RowGroup, type TableType, type Transform } from "../../store/types";
 import { MODEL_LABEL, termLabel } from "../../stats/xy/nonlinear-regression";
 import { modelSpec } from "../../stats/xy/nonlinear-fit";
 import { parseCustomParameters, parseUserEquation } from "../../stats/xy/user-defined";
+import { isArithmeticTransform } from "../../stats/column/transform-data";
+import { pairedDifferences } from "../../stats/simulation/monte-carlo";
 import { dataGroups, incompleteRows, pairedGroups, pairIndices } from "../../stats/column/base";
-import { rowName } from "../../stats/grouped/base";
+import { flattenThreeWay, groupRows, rowGroupBands, rowName, threeWayTermCells } from "../../stats/grouped/base";
 import { distinctTruthValues } from "../../stats/column/roc-curve";
 
 const isDoseModel = (m: string) => (DOSE_MODELS as readonly string[]).includes(m);
@@ -33,6 +35,7 @@ import type {
   AnalysisType,
   BindingKineticsParams,
   BindingSaturationParams,
+  ChiSquareGofParams,
   ChiSquareParams,
   CompareTwoGroupsParams,
   CorrelationParams,
@@ -42,10 +45,12 @@ import type {
   ExtractRearrangeParams,
   FrequencyDistributionParams,
   MultipleTTestsParams,
+  MultifactorAnovaParams,
   NestedAnovaParams,
   NonlinearRegressionParams,
   NormalizeParams,
   OneSampleTParams,
+  OneSampleKsParams,
   RemoveBaselineParams,
   PruneRowsParams,
   FractionOfTotalParams,
@@ -65,6 +70,7 @@ import type {
   XYCorrelationParams,
 } from "../../stats/types";
 import { parseInhibitorConcentration } from "../../stats/xy/enzyme-inhibition";
+import { multifactorTerms } from "../../stats/multiple/multifactor-anova";
 import { columnFactorName } from "../../stats/mixed/mixed-effects";
 import { levelsOf, splitXY, type Dataset } from "../../lib/dataset";
 import { pairKey } from "../../lib/columns";
@@ -117,10 +123,31 @@ export function parseUnknowns(text: string): { values: number[]; error?: string 
 }
 
 export interface Wizard {
-  /** Every question, given the answers so far (false: not asked with these answers). */
-  questions: (a: Answers, table: Dataset, type?: TableType) => (Question | false)[];
+  /** Every question, given the answers so far (false: not asked with these answers).
+   *  `rowGroups` is a grouped table's third-factor bands (the three-way ANOVA's
+   *  factor C): only the three-way wizard needs it, for its Dunnett-control options. */
+  questions: (a: Answers, table: Dataset, type?: TableType, rowGroups?: RowGroup[]) => (Question | false)[];
   /** The test to create, once every question is answered. */
   finish: (a: Answers, table: Dataset, type?: TableType) => { type: AnalysisType; params?: AnalysisParams };
+}
+
+/** Parse a comma-separated list of expected values (chi-square goodness of
+ *  fit): every entry a finite number above 0 — a category the theory says
+ *  never occurs can't be tested this way (the runner says so too, and also
+ *  checks the counts add up to the observed total, the percentages to 100). */
+export function parseExpectedValues(text: string): { values: number[]; error?: string } {
+  const entries = text
+    .split(",")
+    .map((e) => e.trim())
+    .filter((e) => e !== "");
+  if (!entries.length)
+    return { values: [], error: "Enter the expected values, one per category, separated by commas." };
+  const bad = entries.find((e) => !Number.isFinite(Number(e)));
+  if (bad !== undefined)
+    return { values: [], error: `“${bad}” is not a number — enter the expected values separated by commas.` };
+  const values = entries.map(Number);
+  if (values.some((v) => v <= 0)) return { values: [], error: "Every expected value must be above 0." };
+  return { values };
 }
 
 /** Parse the spline's spar field: blank = automatic (GCV), otherwise a number
@@ -297,8 +324,10 @@ export interface Wizard {
   /** Every question, given the answers so far (false: not asked with these answers).
    *  `tableType` scopes the questions to the table's kind (the Monte Carlo
    *  wizard offers different targets for Column and XY tables); wizards that
-   *  don't need it ignore it, and callers without a table pass none. */
-  questions: (a: Answers, table: Dataset, tableType?: TableType) => (Question | false)[];
+   *  don't need it ignore it, and callers without a table pass none.
+   *  `rowGroups` is a grouped table's third-factor bands (the three-way ANOVA's
+   *  factor C): only the three-way wizard needs it, for its Dunnett-control options. */
+  questions: (a: Answers, table: Dataset, tableType?: TableType, rowGroups?: RowGroup[]) => (Question | false)[];
   /** The test to create, once every question is answered. */
   finish: (a: Answers, table: Dataset, tableType?: TableType) => { type: AnalysisType; params?: AnalysisParams };
   /** The assumptions checklist for the test this wizard is building, given
@@ -408,6 +437,21 @@ const someSets = (table: Dataset, min: number): Question[] => {
   return [{ id: "sets", ask, kind: "names", options: sets, min }];
 };
 
+/** The one data set a test reads, asked as a single choice only when there
+ *  is a choice: the observed-vs-expected tests (chi-square goodness of fit,
+ *  the binomial test) read exactly one data set — `someSets` would let the
+ *  user tick two and the runner would have to refuse them. */
+const oneSet = (table: Dataset): Question | false => {
+  const sets = setNames(table);
+  return sets.length > 1 && choice("set", "Which data set holds the observed counts?", names(sets));
+};
+
+/** `params` with the one data set answered (`oneSet` above). */
+const withOneSet = <P extends object>(a: Answers, params?: P) => {
+  const set = a.set as string | undefined;
+  return set !== undefined ? { ...params, sets: [set] } : params;
+};
+
 /** The answers of the data set questions `wizard` asks first, given the data sets to analyze
  *  (a graph's): them all to tick, or the first two as the two compared. */
 export function answersFor(wizard: Wizard, table: Dataset, tableType: TableType | undefined, sets?: string[]): Answers {
@@ -492,6 +536,27 @@ const round6 = (v: number) => Number(v.toPrecision(6));
 const dataRows = (table: Dataset) =>
   table.titles.flatMap((_, r) => (table.numeric.some((c) => c.byRow[r] != null) ? [rowName(table.titles, r)] : []));
 
+/** A grouped table's cells holding data, by the names results give them ("Group (Row)"). */
+const cellNames = (table: Dataset, groups: string[]) => {
+  const rows = groupRows(table.columns);
+  return groups.flatMap((group) =>
+    table.titles.flatMap((_, r) => (rows.get(group)?.[r]?.length ? [`${group} (${rowName(table.titles, r)})`] : [])),
+  );
+};
+
+/** A three-way term's Dunnett-control options, from the same cells the runner
+ *  compares: the whole term's cell labels, or — for simple effects — the first
+ *  factor's levels within each level of the term's last factor. Undefined when
+ *  the table has no row bands (the wizard cannot know factor C's levels). */
+const threeWayControlOptions = (a: Answers, table: Dataset, rowGroups?: RowGroup[]): string[] | undefined => {
+  const bands = rowGroupBands(rowGroups);
+  if (!bands) return undefined;
+  const term = (a.posthocTerm as string | undefined) ?? "A";
+  const cells = threeWayTermCells(term, flattenThreeWay(table.columns, bands), table.titles);
+  const simple = a.posthocScope === "simple" && term.includes(":");
+  return simple ? [...new Set(cells.map((c) => c.within))] : cells.map((c) => c.label);
+};
+
 /** Whether a grouped table holds replicates: a group with 2 values or more at a row. */
 const replicated = (table: Dataset) =>
   table.sets.some((s) => s.columns[0]?.byRow.some((_, r) => s.columns.filter((c) => c.byRow[r] != null).length > 1));
@@ -505,6 +570,36 @@ const withSets = <P extends object>(a: Answers, params?: P) => {
   const sets = chosenSets(a);
   return sets ? { ...params, sets } : params;
 };
+
+/** The FDR approach's follow-ups, asked when a post-hoc is the FDR approach:
+ *  which method, and at which Q (%) a comparison counts as a discovery. */
+const fdrQuestions = (a: Answers): (Question | false)[] => [
+  a.posthoc === "fdr" &&
+    choice("fdrMethod", "Which false-discovery-rate method?", [
+      ["bh", "Benjamini-Hochberg (recommended)"],
+      ["bky", "Benjamini-Krieger-Yekutieli (two-stage — more power)"],
+      ["by", "Benjamini-Yekutieli (valid under any dependence)"],
+    ]),
+  a.posthoc === "fdr" && {
+    id: "fdrQ",
+    ask: "At which false-discovery rate (Q) does a comparison count as a discovery?",
+    kind: "number",
+    label: "Q (%)",
+    initial: 5,
+    min: 0.01,
+    max: 50,
+    validate: fdrQError,
+  },
+];
+
+/** The FDR approach's params, from its answers (the runner's defaults when unanswered). */
+const fdrParams = (a: Answers) =>
+  a.posthoc === "fdr"
+    ? {
+        fdrMethod: (a.fdrMethod as "bh" | "bky" | "by" | undefined) ?? "bh",
+        fdrQ: (a.fdrQ as number | undefined) ?? 5,
+      }
+    : {};
 
 /** The questions a two-group test asks after its groups are chosen: Gaussian or not,
  *  how the groups are compared, and the tails — shared by the Column-table wizard and
@@ -558,6 +653,7 @@ const PAIRED = "How were the data collected?";
 /** The key of a checklist in CHECKLISTS. */
 export type ChecklistKey =
   | "one-sample-t"
+  | "one-sample-ks"
   | "wilcoxon-signed-rank"
   | "two-sample-t"
   | "paired-t"
@@ -571,6 +667,7 @@ export type ChecklistKey =
   | "two-way-anova-rm"
   | "two-way-anova-srh"
   | "three-way-anova"
+  | "multifactor-anova"
   | "linear-regression"
   | "nonlinear-regression"
   | "survival"
@@ -612,6 +709,37 @@ export const CHECKLISTS: Record<ChecklistKey, AnalysisChecklist> = {
         assumption:
           "The hypothetical value was picked before looking at the data, not chosen to match the observed mean.",
         ifNot: "Testing against a value picked from the same data makes the P value meaningless.",
+      },
+    ],
+  },
+  "one-sample-ks": {
+    title: "One-sample Kolmogorov–Smirnov test — checklist",
+    whenToUse:
+      "Use this when you have one group of numbers and want to test whether they could have come from a particular theoretical distribution (Normal, Lognormal, Exponential or Uniform).",
+    items: [
+      {
+        assumption: "The values are numbers on a continuous scale — measurements, not counts or categories.",
+        ifNot: "For counts or categories this test does not apply; a chi-square goodness-of-fit test is built for that kind of data.",
+      },
+      {
+        assumption: "Each value is independent — no value is a repeat measurement of another, and no two values come from the same subject.",
+        ifNot: "Repeated or matched values need a test that accounts for the matching.",
+      },
+      {
+        assumption:
+          "The reference distribution and its parameters were picked before looking at the data — or, if the parameters were estimated from the same sample, the P value is only approximate (anti-conservative).",
+        ifNot:
+          "A distribution fitted to the same data and then tested against it will look like a better fit than it is; enter the parameters in advance when you can.",
+      },
+      {
+        assumption:
+          "The values are not heavily rounded or tied — the test compares cumulative distributions, and many tied values blunt it.",
+        ifNot: "With many ties the P value is asymptotic, not exact, and the test loses power.",
+      },
+      {
+        assumption:
+          "The sample is big enough to notice a mismatch — the test is most sensitive near the centre of the distribution and weak in the tails.",
+        ifNot: "A non-significant result on a small sample is weak evidence that the data follow the distribution.",
       },
     ],
   },
@@ -773,7 +901,7 @@ export const CHECKLISTS: Record<ChecklistKey, AnalysisChecklist> = {
       {
         assumption: "The groups have similar spread — the ANOVA pools their variances.",
         ifNot:
-          "When the spreads clearly differ, use Welch's ANOVA (answer “No” to the equal-SDs question); it does not pool the variances.",
+          "When the spreads clearly differ, answer “No” to the equal-SDs question: Welch's and Brown-Forsythe ANOVAs are reported instead, and they do not pool the variances.",
       },
       {
         assumption: "No single value dominates any group — check for extreme outliers before trusting the means.",
@@ -985,6 +1113,42 @@ export const CHECKLISTS: Record<ChecklistKey, AnalysisChecklist> = {
       {
         assumption:
           "You decided before running which comparisons matter: with three factors, the list of possible interactions is long and most of them will be hard to interpret.",
+        ifNot:
+          "Comparisons picked because the data looked interesting need a stricter correction for multiple testing.",
+      },
+      {
+        assumption:
+          "You read the interactions before the main effects: a significant interaction means the effect of one factor depends on the others.",
+        ifNot:
+          "With a significant interaction, compare the groups within each level of the other factors instead of reporting the main effects alone.",
+      },
+    ],
+  },
+  "multifactor-anova": {
+    title: "Multifactor ANOVA — checklist",
+    whenToUse:
+      "Use this when one or more factors may each affect a numeric outcome, and you want to test all of them — and how they interact — in one analysis, without reorganising the table for each factor count. It tests the main effects and every two- and three-way interaction; with four or more factors, no four-way interaction is tested.",
+    items: [
+      {
+        assumption: "The observations are independent — no subject appears in more than one cell.",
+        ifNot: "Repeated measurements need a repeated-measures or mixed-effects design instead.",
+      },
+      {
+        assumption: "The outcome is a number on a continuous scale.",
+        ifNot: "For counts or categories an ANOVA does not apply.",
+      },
+      {
+        assumption: "The residuals are roughly symmetric, with similar spread in every cell.",
+        ifNot: "With skewed residuals or very uneven spread, transform the data first or use a rank-based test.",
+      },
+      {
+        assumption:
+          "Each combination holds enough replicates to estimate the interactions — the number of cells grows fast with each factor (four 3-level factors already make 81 combinations).",
+        ifNot: "Without replicates in every combination, the higher-order interactions cannot be separated from noise.",
+      },
+      {
+        assumption:
+          "You decided before running which comparisons matter: with several factors, the list of possible interactions is long and most of them will be hard to interpret.",
         ifNot:
           "Comparisons picked because the data looked interesting need a stricter correction for multiple testing.",
       },
@@ -1316,9 +1480,10 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             ]
           : anova && a.equalSd === "no"
             ? [
-                ["none", "No — only the overall Welch's ANOVA"],
+                ["none", "No — only the overall Welch's and Brown-Forsythe ANOVAs"],
                 ["games-howell", "Yes, every pair — Games-Howell test"],
                 ["t3", "Yes, every pair — Dunnett's T3 test (fewer than 50 values per group)"],
+                ["fdr", "Yes — False Discovery Rate (Benjamini-Hochberg)"],
               ]
             : [
                 ["none", "No — only the overall ANOVA"],
@@ -1329,6 +1494,13 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
                 ["bonferroni", "Yes, pairs I choose — Bonferroni correction"],
                 ["sidak", "Yes, pairs I choose — Šídák correction"],
                 ["holm-sidak", "Yes, pairs I choose — Holm–Šídák correction (more powerful)"],
+                // False Discovery Rate is a one-way ANOVA post-hoc (seq 191):
+                // repeated-measures ANOVA has no FDR path (its CIs come from
+                // `pa`, which has no step-up critical value), so it is not
+                // offered there.
+                ...(anova
+                  ? [["fdr", "Yes, pairs I choose — False Discovery Rate (Benjamini-Hochberg) correction"] as [string, string]]
+                  : []),
                 ["lsd", "Yes, pairs I choose — Fisher's LSD (no correction)"],
               ];
       const pairs = pairLabels(chosenSets(a) ?? setNames(table));
@@ -1360,7 +1532,12 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
               : "Assume the groups have equal SDs?",
             [
               ["yes", a.lognormal === "yes" ? "Yes — lognormal one-way ANOVA" : "Yes — ordinary one-way ANOVA"],
-              ["no", a.lognormal === "yes" ? "No — lognormal Welch's ANOVA" : "No — Welch's ANOVA"],
+              [
+                "no",
+                a.lognormal === "yes"
+                  ? "No — lognormal Welch's and Brown-Forsythe ANOVAs"
+                  : "No — Welch's and Brown-Forsythe ANOVAs",
+              ],
             ],
           ),
         paired &&
@@ -1388,6 +1565,15 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             options: pairs.map((p) => p.label),
             min: 1,
           },
+        // The test for linear trend is Prism's alternative to multiple comparisons (one
+        // comparison, not a family): offered only with the ordinary ANOVA and no post-hoc.
+        anova &&
+          a.equalSd !== "no" &&
+          a.posthoc === "none" &&
+          choice("trend", "Test for linear trend between the column means and their left-to-right order?", [
+            ["no", "No — only the overall ANOVA"],
+            ["yes", "Yes — test for linear trend (columns in a natural order, equally spaced)"],
+          ]),
       ];
     },
     finish: (a, table) => {
@@ -1397,6 +1583,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         equalSd: a.equalSd !== "no",
         ...(a.lognormal === "yes" ? { lognormal: true } : {}),
         ...(a.posthoc === "dunnett" ? { control: a.control as string } : {}),
+        ...(a.trend === "yes" && a.posthoc === "none" ? { trend: true } : {}),
       };
       // A mixed-effects model assumes sphericity: it is asked of complete subjects alone.
       const mixed = type === "rm-anova" && gaps(table, chosenSets(a)) && a.mixed !== "no";
@@ -1416,7 +1603,23 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       const paired = a.paired === "paired";
       const key: ChecklistKey =
         a.gaussian !== "no" ? (paired ? "rm-anova" : "anova") : paired ? "friedman" : "kruskal-wallis";
-      return CHECKLISTS[key];
+      const list = CHECKLISTS[key];
+      // The trend test adds one assumption of its own: the columns are ordered
+      // and equally spaced, so the means read left to right.
+      return key === "anova" && a.trend === "yes"
+        ? {
+            ...list,
+            items: [
+              ...list.items,
+              {
+                assumption:
+                  "The columns are in a natural order (dose, time, age) and equally spaced — the trend test reads the means left to right, one column at a time.",
+                ifNot:
+                  "With unordered or unevenly spaced columns the trend test has no meaning; use the pairwise comparisons instead.",
+              },
+            ],
+          }
+        : list;
     },
   },
 
@@ -1653,6 +1856,62 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
     },
   },
 
+  // "Analyze a stack of P values" (seq 190): P values computed elsewhere,
+  // entered in a column, adjusted for multiplicity. The method picks the
+  // family: the FWER methods ask for alpha, the FDR methods for Q — the
+  // other level is never asked, so a cached result keeps only its own key
+  // (the outliers ROUT/Grubbs split does the same).
+  "p-value-stack": {
+    questions: (a, table) => [
+      ...someSets(table, 1),
+      choice("method", "How should the P values be adjusted for multiple comparisons?", [
+        ["holm-sidak", "Holm–Šídák (recommended — step-down, controls the family-wise error rate)"],
+        ["holm", "Holm (step-down Bonferroni)"],
+        ["bonferroni", "Bonferroni-Dunn (single-step)"],
+        ["sidak", "Bonferroni-Šídák (single-step)"],
+        ["bh", "Benjamini–Hochberg (false discovery rate)"],
+        ["bky", "Benjamini, Krieger and Yekutieli (adaptive two-stage false discovery rate)"],
+        ["by", "Benjamini–Yekutieli (false discovery rate, any dependence)"],
+      ]),
+      // Before the method is answered the alpha question shows (Holm–Šídák
+      // is the default — the first option); picking an FDR method swaps it
+      // for Q on the next step.
+      !isFdrPValueMethod((a.method as string | undefined) ?? "") && {
+        id: "alpha",
+        ask: "How strict should the family-wise test be? A P value is significant when its adjusted P value is below alpha.",
+        kind: "number",
+        label: "Significance level (alpha) =",
+        initial: 0.05,
+        min: 0.001,
+        max: 0.5,
+        step: 0.01,
+        validate: pValueAlphaError,
+      },
+      isFdrPValueMethod((a.method as string | undefined) ?? "") && {
+        id: "q",
+        ask: "How strict should the search be? A P value is a discovery when its q value is below Q: a smaller Q finds fewer.",
+        kind: "number",
+        label: "Q (%) =",
+        initial: 5,
+        ...ROUT_Q,
+        validate: routQError,
+        step: 0.5,
+      },
+    ],
+    finish: (a) => {
+      const method = (a.method as PValueStackParams["method"] | undefined) ?? "holm-sidak";
+      return {
+        type: "p-value-stack",
+        params: withSets(
+          a,
+          isFdrPValueMethod(method)
+            ? { method, q: (a.q as number | undefined) ?? 5 }
+            : { method, alpha: (a.alpha as number | undefined) ?? 0.05 },
+        ),
+      };
+    },
+  },
+
   // Normality tests (plan 23): which of the four tests, and whether to also
   // test the log-transformed values. Shapiro–Wilk is the default; the
   // D'Agostino–Pearson option names its n ≥ 20 floor (the runner still
@@ -1679,6 +1938,120 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         lognormal: a.lognormal === "yes",
       }),
     }),
+  },
+
+  // One-sample Kolmogorov–Smirnov test (seq 170): which theoretical
+  // distribution, and whether its parameters are entered or estimated from
+  // the sample. Only the chosen distribution's parameters are asked, and
+  // only when they are entered — estimated parameters need no questions.
+  // The Uniform limits default to the first data column's range.
+  "one-sample-ks": {
+    questions: (a, table) => {
+      const dist = (a.distribution as string | undefined) ?? "normal";
+      const from = (a.paramsFrom as string | undefined) ?? "estimated";
+      const values = table.numeric[0]?.values ?? [];
+      const lo = values.length ? Math.min(...values) : 0;
+      const hi = values.length ? Math.max(...values) : 1;
+      return [
+        ...someSets(table, 1),
+        choice("distribution", "Which theoretical distribution should each data set be compared against?", [
+          ["normal", "Normal (Gaussian)"],
+          ["lognormal", "Lognormal"],
+          ["exponential", "Exponential"],
+          ["uniform", "Uniform"],
+        ]),
+        choice("paramsFrom", "Where do the distribution's parameters come from?", [
+          ["estimated", "Estimate them from the data (the P value is then approximate)"],
+          ["specified", "Enter them — the reference distribution is fully specified"],
+        ]),
+        from === "specified" &&
+          dist === "normal" && {
+            id: "mean",
+            ask: "Mean of the Normal distribution?",
+            kind: "number",
+            label: "Mean",
+            initial: 0,
+          },
+        from === "specified" &&
+          dist === "normal" && {
+            id: "sd",
+            ask: "Standard deviation of the Normal distribution?",
+            kind: "number",
+            label: "SD",
+            initial: 1,
+            validate: (v) => (v > 0 ? undefined : "The SD must be greater than 0."),
+          },
+        from === "specified" &&
+          dist === "lognormal" && {
+            id: "meanlog",
+            ask: "Mean of the logarithms (the Lognormal distribution's meanlog)?",
+            kind: "number",
+            label: "Mean of the logarithms",
+            initial: 0,
+          },
+        from === "specified" &&
+          dist === "lognormal" && {
+            id: "sdlog",
+            ask: "Standard deviation of the logarithms (the Lognormal distribution's sdlog)?",
+            kind: "number",
+            label: "SD of the logarithms",
+            initial: 1,
+            validate: (v) => (v > 0 ? undefined : "The SD of the logarithms must be greater than 0."),
+          },
+        from === "specified" &&
+          dist === "exponential" && {
+            id: "rate",
+            ask: "Rate of the Exponential distribution (its mean is 1 / rate)?",
+            kind: "number",
+            label: "Rate",
+            initial: 1,
+            validate: (v) => (v > 0 ? undefined : "The rate must be greater than 0."),
+          },
+        from === "specified" &&
+          dist === "uniform" && {
+            id: "min",
+            ask: "Lower limit of the Uniform distribution?",
+            kind: "number",
+            label: "Minimum",
+            initial: lo,
+          },
+        from === "specified" &&
+          dist === "uniform" && {
+            id: "max",
+            ask: "Upper limit of the Uniform distribution?",
+            kind: "number",
+            label: "Maximum",
+            initial: hi,
+          },
+        choice("tails", "One-tailed or two-tailed P value?", [
+          ["two-sided", "Two-tailed (recommended)"],
+          ["less", "One-tailed: expect the sample to fall below the distribution"],
+          ["greater", "One-tailed: expect the sample to fall above the distribution"],
+        ]),
+      ];
+    },
+    finish: (a) => {
+      const distribution = (a.distribution as OneSampleKsParams["distribution"] | undefined) ?? "normal";
+      const specified = a.paramsFrom === "specified";
+      const num = (id: string, fallback: number) => (a[id] as number | undefined) ?? fallback;
+      return {
+        type: "one-sample-ks",
+        params: withSets(a, {
+          distribution,
+          paramsFrom: specified ? "specified" : "estimated",
+          tails: (a.tails as OneSampleKsParams["tails"] | undefined) ?? "two-sided",
+          ...(specified && distribution === "normal"
+            ? { mean: num("mean", 0), sd: num("sd", 1) }
+            : {}),
+          ...(specified && distribution === "lognormal"
+            ? { meanlog: num("meanlog", 0), sdlog: num("sdlog", 1) }
+            : {}),
+          ...(specified && distribution === "exponential" ? { rate: num("rate", 1) } : {}),
+          ...(specified && distribution === "uniform" ? { min: num("min", 0), max: num("max", 1) } : {}),
+        }),
+      };
+    },
+    checklist: () => CHECKLISTS["one-sample-ks"],
   },
 
   "frequency-distribution": {
@@ -1752,7 +2125,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
   // exp, square); a value the function is undefined for is left blank in
   // the results sheet, never NaN — the runner states the reason in its notes.
   "transform-data": {
-    questions: (_, table) => [
+    questions: (a, table) => [
       ...someSets(table, 1),
       choice("function", "Which function should be applied to the values?", [
         ["log10", "log10(Y) — logarithm, base 10"],
@@ -1762,11 +2135,33 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ["reciprocal", "1/Y — reciprocal"],
         ["exp", "exp(Y) — e to the power of Y"],
         ["square", "Y² — square"],
+        ["y-plus-k", "Y+K — add a constant to every value"],
+        ["y-minus-k", "Y−K — subtract a constant from every value"],
+        ["y-times-k", "Y×K — multiply every value by a constant"],
+        ["y-divided-by-k", "Y/K — divide every value by a constant"],
+        ["k-minus-y", "K−Y — subtract every value from a constant"],
+        ["k-divided-by-y", "K/Y — divide a constant by every value"],
       ]),
+      isArithmeticTransform((a.function as TransformFunction | undefined) ?? "log10") && {
+        id: "constant",
+        ask: "What is the constant K to apply?",
+        kind: "number",
+        label: "Constant K",
+        initial: 1,
+        validate: (v) =>
+          a.function === "y-divided-by-k" && v === 0
+            ? "K must not be 0 for Y/K — dividing by 0 is undefined."
+            : undefined,
+      },
     ],
     finish: (a) => ({
       type: "transform-data",
-      params: withSets(a, { function: (a.function as TransformFunction | undefined) ?? "log10" }),
+      params: withSets(a, {
+        function: (a.function as TransformFunction | undefined) ?? "log10",
+        ...(isArithmeticTransform((a.function as TransformFunction | undefined) ?? "log10")
+          ? { constant: a.constant as number }
+          : {}),
+      }),
     }),
   },
   // Transform concentrations (v2): one numeric column (an XY table's X
@@ -1902,54 +2297,114 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             ["compare-two-groups", "Compare two groups (repeat its t test)"],
             ["one-sample-t", "Compare one group to a value (repeat its t test)"],
             ["descriptive-statistics", "Descriptive statistics (repeat its mean)"],
+            ["paired-t", "Paired t test (repeat its t test on the paired differences)"],
+            ["one-way-anova", "One-way ANOVA (repeat its F test)"],
           ];
       const target = (a.target as MonteCarloTarget | undefined) ?? (targets[0][0] as MonteCarloTarget);
       const statistics = MONTE_CARLO_TARGET_STATISTICS[target];
-      // The data sets the repeats simulate: compare-two-groups takes the two
-      // chosen (or first two) columns; one-sample-t / descriptive-statistics
-      // the one chosen column; the XY targets the chosen Y series.
+      const statistic = (a.statistic as MonteCarloStatistic | undefined) ?? statistics[0];
+      const isTTarget =
+        target === "compare-two-groups" || target === "one-sample-t" || target === "paired-t";
+      // The data sets the repeats simulate: compare-two-groups / paired-t
+      // take the two chosen (or first two) columns; one-way ANOVA takes
+      // every chosen column; one-sample-t / descriptive-statistics the one
+      // chosen column; the XY targets the chosen Y series.
       const dataCols = dataNames(table);
       const yCols = yNames(table);
       const groupNames: string[] =
-        target === "compare-two-groups"
+        target === "compare-two-groups" || target === "paired-t"
           ? (chosenSets(a) ?? dataCols.slice(0, 2))
-          : target === "one-sample-t" || target === "descriptive-statistics"
-            ? [(a.group as string | undefined) ?? dataCols[0]].filter((n): n is string => n !== undefined)
-            : [(a.y as string | undefined) ?? yCols[0]].filter((n): n is string => n !== undefined);
-      const simQuestions = groupNames.flatMap((name): (Question | false)[] => {
-        const column = table.numeric.find((c) => c.name === name);
-        const { mean, sd } = meanSd(column?.values ?? []);
-        const observed = column ? ` (observed ${round6(mean)} ± ${round6(sd)})` : "";
-        return [
-          {
-            id: `mean:${name}`,
-            ask: `Mean to simulate for “${name}”${observed}? Set it to the effect you want to test.`,
-            kind: "number",
-            label: `Mean for “${name}”`,
-            initial: round6(mean),
-          },
-          {
-            id: `sd:${name}`,
-            ask: `SD to simulate for “${name}”${observed}?`,
-            kind: "number",
-            label: `SD for “${name}”`,
-            initial: round6(sd),
-            validate: (v) => (v > 0 ? undefined : "The SD must be greater than 0."),
-          },
-        ];
-      });
+          : target === "one-way-anova"
+            ? (chosenSets(a) ?? dataCols)
+            : target === "one-sample-t" || target === "descriptive-statistics"
+              ? [(a.group as string | undefined) ?? dataCols[0]].filter((n): n is string => n !== undefined)
+              : [(a.y as string | undefined) ?? yCols[0]].filter((n): n is string => n !== undefined);
+      // Paired-t simulates the differences, not the two columns — so it
+      // asks for the difference mean/SD (observed values as the start),
+      // where the other targets ask per-column.
+      const pairedDiff =
+        target === "paired-t"
+          ? pairedDifferences(
+              table.numeric.find((c) => c.name === groupNames[0]) ?? { byRow: [] },
+              table.numeric.find((c) => c.name === groupNames[1]) ?? { byRow: [] },
+            )
+          : [];
+      const { mean: diffMean, sd: diffSd } = meanSd(pairedDiff);
+      const simQuestions: (Question | false)[] =
+        target === "paired-t"
+          ? [
+              {
+                id: "differenceMean",
+                ask: `Mean difference to simulate (observed ${round6(diffMean)})? Set it to the effect you want to test.`,
+                kind: "number",
+                label: "Mean difference",
+                initial: round6(diffMean),
+              },
+              {
+                id: "differenceSd",
+                ask: `SD of the differences to simulate (observed ${round6(diffSd)})?`,
+                kind: "number",
+                label: "SD of the differences",
+                initial: round6(diffSd),
+                validate: (v: number) => (v > 0 ? undefined : "The SD must be greater than 0."),
+              },
+            ]
+          : groupNames.flatMap((name): (Question | false)[] => {
+              const column = table.numeric.find((c) => c.name === name);
+              const { mean, sd } = meanSd(column?.values ?? []);
+              const observed = column ? ` (observed ${round6(mean)} ± ${round6(sd)})` : "";
+              return [
+                {
+                  id: `mean:${name}`,
+                  ask: `Mean to simulate for “${name}”${observed}? Set it to the effect you want to test.`,
+                  kind: "number",
+                  label: `Mean for “${name}”`,
+                  initial: round6(mean),
+                },
+                {
+                  id: `sd:${name}`,
+                  ask: `SD to simulate for “${name}”${observed}?`,
+                  kind: "number",
+                  label: `SD for “${name}”`,
+                  initial: round6(sd),
+                  validate: (v) => (v > 0 ? undefined : "The SD must be greater than 0."),
+                },
+              ];
+            });
       return [
         choice(
           "target",
-          "Which analysis should be repeated? Each repeat draws new Gaussian data for the data sets below and runs the analysis on it.",
+          "Which analysis should be repeated? Each repeat draws new simulated data for the data sets below and runs the analysis on it.",
           targets,
         ),
+        choice("simulationDistribution", "What distribution should the simulated values come from?", [
+          ["gaussian", "Gaussian — the usual bell curve"],
+          ["t", "Student's t — wider scatter, more outliers"],
+        ]),
+        a.simulationDistribution === "t" && {
+          id: "simulationDf",
+          ask: "Degrees of freedom for the t simulation? Lower df means wider scatter (5 is a good middle ground).",
+          kind: "number",
+          label: "Degrees of freedom",
+          initial: 5,
+          validate: (v: number) =>
+            v > 2
+              ? undefined
+              : "Degrees of freedom must be greater than 2 — at df ≤ 2 the t distribution has no finite SD to simulate from.",
+        },
         statistics.length > 1 &&
           choice(
             "statistic",
             "Which result should be summarised across the repeats?",
             statistics.map((s): [string, string] => [s, s]),
           ),
+        isTTarget &&
+          statistic === "P value" &&
+          choice("tails", "One- or two-sided P value?", [
+            ["two-sided", "Two-sided"],
+            ["less", "One-sided — the first group (or mean) is less"],
+            ["greater", "One-sided — the first group (or mean) is greater"],
+          ]),
         ...(target === "compare-two-groups"
           ? [
               ...twoSets(a, table),
@@ -1959,6 +2414,8 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
               ]),
             ]
           : []),
+        ...(target === "paired-t" ? [...twoSets(a, table)] : []),
+        ...(target === "one-way-anova" ? someSets(table, 2) : []),
         (target === "one-sample-t" || target === "descriptive-statistics") &&
           dataCols.length > 1 &&
           choice("group", "Which data set should be repeated?", names(dataCols)),
@@ -2008,20 +2465,30 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         (isXY ? "linear-regression" : "compare-two-groups");
       const statistics = MONTE_CARLO_TARGET_STATISTICS[target];
       const statistic = (a.statistic as MonteCarloStatistic | undefined) ?? statistics[0];
+      const isTTarget =
+        target === "compare-two-groups" || target === "one-sample-t" || target === "paired-t";
       const dataCols = dataNames(table);
       const yCols = yNames(table);
       const groupNames: string[] =
-        target === "compare-two-groups"
+        target === "compare-two-groups" || target === "paired-t"
           ? (chosenSets(a) ?? dataCols.slice(0, 2))
-          : target === "one-sample-t" || target === "descriptive-statistics"
-            ? [(a.group as string | undefined) ?? dataCols[0]]
-            : [(a.y as string | undefined) ?? yCols[0]];
+          : target === "one-way-anova"
+            ? (chosenSets(a) ?? dataCols)
+            : target === "one-sample-t" || target === "descriptive-statistics"
+              ? [(a.group as string | undefined) ?? dataCols[0]]
+              : [(a.y as string | undefined) ?? yCols[0]];
       const groupMeans: Record<string, number> = {};
       const groupSds: Record<string, number> = {};
-      for (const name of groupNames) {
-        if (typeof a[`mean:${name}`] === "number") groupMeans[name] = a[`mean:${name}`] as number;
-        if (typeof a[`sd:${name}`] === "number") groupSds[name] = a[`sd:${name}`] as number;
+      // Paired-t simulates the differences, so its overrides are the
+      // difference mean/SD — not per-column groupMeans/groupSds.
+      if (target !== "paired-t") {
+        for (const name of groupNames) {
+          if (typeof a[`mean:${name}`] === "number") groupMeans[name] = a[`mean:${name}`] as number;
+          if (typeof a[`sd:${name}`] === "number") groupSds[name] = a[`sd:${name}`] as number;
+        }
       }
+      const simulationDistribution =
+        (a.simulationDistribution as MonteCarloSimulationDistribution | undefined) ?? "gaussian";
       return {
         type: "monte-carlo",
         params: withSets(a, {
@@ -2031,8 +2498,19 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           seed: a.seed as number,
           groupMeans,
           groupSds,
+          simulationDistribution,
+          ...(simulationDistribution === "t" ? { simulationDf: a.simulationDf as number } : {}),
+          ...(isTTarget && statistic === "P value"
+            ? { tails: (a.tails as MonteCarloParams["tails"] | undefined) ?? "two-sided" }
+            : {}),
           ...(target === "compare-two-groups" ? { equalVariance: a.equalVariance !== "no" } : {}),
           ...(target === "one-sample-t" ? { hypotheticalValue: a.hypotheticalValue as number } : {}),
+          ...(target === "paired-t"
+            ? {
+                differenceMean: a.differenceMean as number,
+                differenceSd: a.differenceSd as number,
+              }
+            : {}),
           ...(target === "one-sample-t" || target === "descriptive-statistics"
             ? { sets: groupNames }
             : {}),
@@ -2161,8 +2639,29 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
     questions: (a, table, tableType) => {
       const targets = tableType === "xy" ? yNames(table) : dataNames(table);
       if (!targets.length) return [];
+      const mode = (a.mode as string | undefined) ?? "remove-baseline";
+      const modeQuestion = choice("mode", "What should this analysis do?", [
+        ["remove-baseline", "Remove a baseline — subtract a baseline from each value"],
+        ["column-math", "Combine two columns — add, subtract, multiply or divide two data sets row by row"],
+      ]);
+      // Column math (seq 206, Prism's "Remove baseline and column math"):
+      // two columns combined row by row, instead of a baseline removed.
+      if (mode === "column-math") {
+        return [
+          modeQuestion,
+          choice("columnMathA", "Which is the first column?", names(targets)),
+          choice("columnMathB", "Which is the second column?", names(targets)),
+          choice("columnMathOperation", "How should the two columns be combined?", [
+            ["subtract", "Subtract — first minus second"],
+            ["divide", "Divide — first divided by second"],
+            ["multiply", "Multiply — first times second"],
+            ["add", "Add — first plus second"],
+          ]),
+        ];
+      }
       const method = a.baselineMethod as string | undefined;
       return [
+        modeQuestion,
         {
           id: "ys",
           ask: "Which data sets should have the baseline removed?",
@@ -2203,17 +2702,30 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         },
       ];
     },
-    finish: (a, table, tableType) => ({
-      type: "remove-baseline",
-      params: {
-        ys: a.ys as string[],
-        ...(tableType === "xy" ? { x: table.columns[0]?.name } : {}),
-        baselineMethod: a.baselineMethod as RemoveBaselineParams["baselineMethod"],
-        ...(a.baselineMethod === "mean-first-n" ? { firstN: a.firstN as number } : {}),
-        ...(a.baselineMethod === "mean-of-controls" ? { controls: a.controls as string[] } : {}),
-        ...(a.baselineMethod === "constant" ? constantParam(a.constant) : {}),
-      },
-    }),
+    finish: (a, table, tableType) => {
+      if (a.mode === "column-math") {
+        return {
+          type: "remove-baseline",
+          params: {
+            columnMathOperation: a.columnMathOperation as RemoveBaselineParams["columnMathOperation"],
+            columnMathA: a.columnMathA as string,
+            columnMathB: a.columnMathB as string,
+            ...(tableType === "xy" ? { x: table.columns[0]?.name } : {}),
+          },
+        };
+      }
+      return {
+        type: "remove-baseline",
+        params: {
+          ys: a.ys as string[],
+          ...(tableType === "xy" ? { x: table.columns[0]?.name } : {}),
+          baselineMethod: a.baselineMethod as RemoveBaselineParams["baselineMethod"],
+          ...(a.baselineMethod === "mean-first-n" ? { firstN: a.firstN as number } : {}),
+          ...(a.baselineMethod === "mean-of-controls" ? { controls: a.controls as string[] } : {}),
+          ...(a.baselineMethod === "constant" ? constantParam(a.constant) : {}),
+        },
+      };
+    },
   },
 
   "prune-rows": {
@@ -2294,6 +2806,11 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ["fraction", "Fractions (0 to 1)"],
           ["percent", "Percentages (0 to 100)"],
         ]),
+        choice("ci", "Confidence interval of each proportion…", [
+          ["none", "No confidence interval"],
+          ["wilson", "Wilson/Brown (recommended) — 95% CI"],
+          ["clopper-pearson", "Clopper–Pearson (exact) — 95% CI"],
+        ]),
       ];
     },
     finish: (a, table, tableType) => ({
@@ -2303,6 +2820,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ...(tableType === "xy" ? { x: table.columns[0]?.name } : {}),
         totalBy: a.totalBy as FractionOfTotalParams["totalBy"],
         format: a.format as FractionOfTotalParams["format"],
+        ...(a.ci ? { ci: a.ci as FractionOfTotalParams["ci"] } : {}),
       },
     }),
   },
@@ -2326,6 +2844,10 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           options: targets,
           min: 1,
         },
+        choice("rowScope", "Should each row be summarised across all the data sets together, or separately within each one?", [
+          ["pooled", "Across all data sets together — one summary per row"],
+          ["per-column", "Within each data set separately — one summary per row per data set"],
+        ]),
       ];
     },
     finish: (a, table, tableType) => ({
@@ -2333,6 +2855,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       params: {
         ys: a.ys as string[],
         ...(tableType === "xy" ? { x: table.columns[0]?.name } : {}),
+        rowScope: (a.rowScope as RowMeansTotalsParams["rowScope"]) ?? "pooled",
       } satisfies RowMeansTotalsParams,
     }),
   },
@@ -2631,6 +3154,31 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             },
           },
         choice("weights", "Weight the points?", weightOptions),
+        // Seq 166 (Prism 11 Range tab): "Don't fit points when X is less
+        // than / greater than …" — points outside the range are ignored
+        // entirely. Either bound alone is enough; both blank fits all.
+        choice("fitRange", "Only fit points within an X range?", [
+          ["no", "No — fit every point"],
+          ["yes", "Yes — ignore points outside an X range"],
+        ]),
+        a.fitRange === "yes" && {
+          id: "fitXMin",
+          ask: "Don't fit points when X is less than… (leave blank for no lower limit)",
+          kind: "text",
+          label: "Don't fit points when X <",
+          initial: "",
+          placeholder: "e.g. 0",
+          parse: (text: string) => parseOptionalNumber(text, "lower X limit"),
+        },
+        a.fitRange === "yes" && {
+          id: "fitXMax",
+          ask: "Don't fit points when X is greater than… (leave blank for no upper limit)",
+          kind: "text",
+          label: "Don't fit points when X >",
+          initial: "",
+          placeholder: "e.g. 10",
+          parse: (text: string) => parseOptionalNumber(text, "upper X limit"),
+        },
         dose &&
           others.length > 0 &&
           choice("compareWith", "Compare this curve with another data set's?", [
@@ -2764,6 +3312,20 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         a.weights !== undefined && a.weights !== "none"
           ? { weights: a.weights as NonlinearRegressionParams["weights"] }
           : {};
+      // Seq 166 (Prism Range tab): the X-range bounds, when the wizard
+      // asked for them — blank is no bound on that side, and both blank
+      // fits every point (the runner refuses an inverted range plainly).
+      const range =
+        a.fitRange === "yes"
+          ? (() => {
+              const lo = parseOptionalNumber(String(a.fitXMin ?? ""), "lower X limit");
+              const hi = parseOptionalNumber(String(a.fitXMax ?? ""), "upper X limit");
+              return {
+                ...(lo.value !== undefined ? { fitXMin: lo.value } : {}),
+                ...(hi.value !== undefined ? { fitXMax: hi.value } : {}),
+              };
+            })()
+          : {};
       const compareModel =
         a.compareModel !== undefined && a.compareModel !== "none"
           ? { compareModel: a.compareModel as NonlinearModel }
@@ -2856,6 +3418,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             ? { ecx: { ec10: 10, ec20: 20, ec80: 80, ec90: 90 }[a.ecx as string] as number }
             : {}),
           ...weights,
+          ...range,
           ...compareModel,
           ...global,
           ...sharedParams,
@@ -2916,6 +3479,9 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ["boltzmann-sigmoid", "Boltzmann sigmoid"],
         ["lorentzian", "Lorentzian"],
         ["sine-wave", "Sine wave"],
+        // 1.8 classic-curves completion (B6 §Standard #10): the Pade
+        // approximant is Prism's tenth standard curve to interpolate.
+        ["pade-11", "Pade (1,1) approximant"],
       ]),
     ],
     finish: (a) => ({
@@ -3416,6 +3982,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ...(a.design === "repeated-measures"
             ? []
             : ([["games-howell", "Yes — Games-Howell test (without assuming equal SDs)"]] as [string, string][])),
+          ["fdr", "Yes — False discovery rate (Benjamini-Hochberg)"],
         ]),
       replicated(table) &&
         a.design !== "nonparametric" &&
@@ -3424,11 +3991,28 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         choice("posthocTarget", "Compare which?", [
           ["groups", "Groups within each row"],
           ["rows", "Rows within each group"],
+          // Cell and marginal-mean comparisons need the ordinary design's
+          // pooled residual — a repeated-measures comparison has no single
+          // error term for them (see two-way-anova.ts).
+          ...(a.design === "repeated-measures"
+            ? []
+            : ([
+                ["cells", "Every cell mean against every other"],
+                ["group-means", "Group means, averaged over rows"],
+                ["row-means", "Row means, averaged over groups"],
+              ] as [string, string][])),
         ]),
       a.posthoc === "dunnett" &&
-        (a.posthocTarget === "rows"
+        (a.posthocTarget === "rows" || a.posthocTarget === "row-means"
           ? choice("control", "Which row is the control?", names(dataRows(table)))
-          : choice("control", "Which group is the control?", names(chosenSets(a) ?? setNames(table)))),
+          : a.posthocTarget === "cells"
+            ? choice(
+                "control",
+                "Which cell is the control?",
+                names(cellNames(table, chosenSets(a) ?? setNames(table))),
+              )
+            : choice("control", "Which group is the control?", names(chosenSets(a) ?? setNames(table)))),
+      ...fdrQuestions(a),
     ],
     finish: (a) => ({
       type: "two-way-anova",
@@ -3438,6 +4022,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         posthocTarget: (a.posthocTarget as TwoWayAnovaParams["posthocTarget"] | undefined) ?? "groups",
         ...(a.design === "repeated-measures" ? { sphericity: a.sphericity === "yes" } : {}),
         ...(a.posthoc === "dunnett" ? { control: a.control as string } : {}),
+        ...fdrParams(a),
       }),
     }),
     // The checklist follows the design: ordinary, repeated-measures, or rank-based.
@@ -3452,34 +4037,69 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
   },
 
   "three-way-anova": {
-    questions: (a, table) => [
-      ...someSets(table, 2),
-      choice("posthoc", "Run multiple comparisons? Only meaningful if the ANOVA is significant.", [
-        ["none", "No — just the ANOVA table"],
-        ["tukey", "Yes — Tukey's"],
-        ["bonferroni", "Yes — Bonferroni-corrected"],
-      ]),
-      a.posthoc !== "none" &&
-        choice(
-          "posthocTerm",
-          "Which term should the comparisons follow up? The wizard cannot know yet which terms will be significant — pick the one you most want to follow up.",
-          [
-            ["A", "Factor A (column groups)"],
-            ["B", "Factor B (rows)"],
-            ["C", "Factor C (row groups)"],
-            ["A:B", "Interaction A:B"],
-            ["A:C", "Interaction A:C"],
-            ["B:C", "Interaction B:C"],
-            ["A:B:C", "Interaction A:B:C"],
-          ],
-        ),
-    ],
+    questions: (a, table, _type, rowGroups) => {
+      const controlOptions = a.posthoc === "dunnett" ? threeWayControlOptions(a, table, rowGroups) : undefined;
+      const termIsInteraction = ((a.posthocTerm as string | undefined) ?? "").includes(":");
+      return [
+        ...someSets(table, 2),
+        choice("posthoc", "Run multiple comparisons? Only meaningful if the ANOVA is significant.", [
+          ["none", "No — just the ANOVA table"],
+          ["tukey", "Yes — Tukey's"],
+          ["bonferroni", "Yes — Bonferroni-corrected"],
+          ["sidak", "Yes — Šídák-corrected"],
+          ["holm-sidak", "Yes — Holm–Šídák"],
+          ["lsd", "Yes — Fisher's LSD (uncorrected)"],
+          ["dunnett", "Yes, each against a control — Dunnett's test"],
+          ["games-howell", "Yes — Games-Howell test (without assuming equal SDs)"],
+          ["fdr", "Yes — False discovery rate (Benjamini-Hochberg)"],
+        ]),
+        a.posthoc !== "none" &&
+          choice(
+            "posthocTerm",
+            "Which term should the comparisons follow up? The wizard cannot know yet which terms will be significant — pick the one you most want to follow up.",
+            [
+              ["A", "Factor A (column groups)"],
+              ["B", "Factor B (rows)"],
+              ["C", "Factor C (row groups)"],
+              ["A:B", "Interaction A:B"],
+              ["A:C", "Interaction A:C"],
+              ["B:C", "Interaction B:C"],
+              ["A:B:C", "Interaction A:B:C"],
+            ],
+          ),
+        a.posthoc !== "none" &&
+          termIsInteraction &&
+          choice("posthocScope", "Compare the whole term, or its simple effects?", [
+            ["term", "The whole term — every level combination against every other"],
+            ["simple", "Simple effects — the first factor's levels within each level of the last factor"],
+          ]),
+        a.posthoc === "dunnett" &&
+          controlOptions !== undefined &&
+          choice(
+            "control",
+            a.posthocScope === "simple" && termIsInteraction
+              ? "Which level is the control (compared within each level of the last factor)?"
+              : termIsInteraction
+                ? "Which cell is the control?"
+                : "Which level is the control?",
+            names(controlOptions),
+          ),
+        ...fdrQuestions(a),
+      ];
+    },
     finish: (a) => ({
       type: "three-way-anova",
       params: withSets(a, {
         posthoc: (a.posthoc as ThreeWayAnovaParams["posthoc"] | undefined) ?? "none",
         ...(a.posthoc !== undefined && a.posthoc !== "none"
-          ? { posthocTerm: (a.posthocTerm as ThreeWayAnovaParams["posthocTerm"] | undefined) ?? "A" }
+          ? {
+              posthocTerm: (a.posthocTerm as ThreeWayAnovaParams["posthocTerm"] | undefined) ?? "A",
+              ...(a.posthocScope !== undefined
+                ? { posthocScope: a.posthocScope as ThreeWayAnovaParams["posthocScope"] }
+                : {}),
+              ...(a.posthoc === "dunnett" && a.control !== undefined ? { control: a.control as string } : {}),
+              ...fdrParams(a),
+            }
           : {}),
       }),
     }),
@@ -3530,10 +4150,29 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ["yes", "Yes — pool one shared SD across all rows"],
         ]),
       choice("correction", "Correct for running many comparisons at once?", [
-        ["holm", "Holm correction (recommended)"],
-        ["fdr", "False discovery rate (Benjamini-Hochberg)"],
+        ["holm-sidak", "Holm–Šídák (recommended)"],
+        ["holm", "Holm (step-down Bonferroni)"],
+        ["sidak", "Šídák–Bonferroni (single-step Šídák)"],
+        ["bonferroni", "Bonferroni–Dunn"],
+        ["fdr", "False discovery rate — Benjamini-Hochberg (BH)"],
+        ["fdr-bky", "False discovery rate — Benjamini-Krieger-Yekutieli two-stage (BKY)"],
+        ["fdr-by", "False discovery rate — Benjamini-Yekutieli (BY)"],
         ["none", "None — treat each row independently"],
       ]),
+      // The FDR methods need a Q: the desired false discovery rate. Only
+      // asked for those methods (the family-wise ones flag at P < 0.05).
+      (a.correction === "fdr" || a.correction === "fdr-bky" || a.correction === "fdr-by") && {
+        id: "q",
+        ask: "What false discovery rate do you want? A row counts as a discovery when its FDR-adjusted P value is below Q: a smaller Q flags fewer rows.",
+        kind: "number",
+        label: "Q (%) =",
+        initial: 5,
+        ...ROUT_Q,
+        // min/max alone are only HTML attributes — the wizard's Next gate
+        // reads `validate`, so without this an out-of-range Q sailed through.
+        validate: routQError,
+        step: 0.5,
+      },
     ],
     finish: (a) => ({
       type: "multiple-t-tests",
@@ -3541,7 +4180,12 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         paired: a.paired === "paired",
         gaussian: a.gaussian === "yes",
         pooledSd: a.gaussian === "yes" && a.pooled === "yes",
-        correction: a.correction as MultipleTTestsParams["correction"],
+        correction: (a.correction as MultipleTTestsParams["correction"] | undefined) ?? "holm-sidak",
+        // FDR params carry a q and the others don't, so each method's cached
+        // results keep their existing keys (as outliers does for q/alpha).
+        ...(a.correction === "fdr" || a.correction === "fdr-bky" || a.correction === "fdr-by"
+          ? { q: (a.q as number | undefined) ?? 5 }
+          : {}),
       }),
     }),
     // The per-row test's assumptions are the two-group ones (the multiple-comparison
@@ -3584,6 +4228,54 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       type: "multiple-regression",
       params: { dependent: a.dependent as string, predictors: a.predictors as string[] },
     }),
+  },
+
+  "multifactor-anova": {
+    questions: (a, table) => {
+      const response = a.response as string | undefined;
+      const byName = new Map(table.columns.map((c) => [c.name, c]));
+      const all = table.columns.map((c) => c.name);
+      // Only columns with ≥ 2 levels can be a factor (a numeric-coded factor
+      // counts — its codes are its levels). When none qualifies, offer every
+      // column but the response and let the runner say so.
+      const factorable = all.filter((n) => n !== response && levelsOf(byName.get(n)!).length >= 2);
+      const factorOptions = factorable.length > 0 ? factorable : all.filter((n) => n !== response);
+      const terms = multifactorTerms((a.factors as string[] | undefined) ?? []);
+      return [
+        choice("response", "Which variable is the response (the outcome you measured)?", names(dataNames(table))),
+        {
+          id: "factors",
+          ask: `Which variables are the factors? Each must have at least two levels (at most ${MULTIFACTOR_MAX_FACTORS}).`,
+          kind: "names",
+          options: factorOptions,
+          min: 1,
+        },
+        choice("posthoc", "Run multiple comparisons? Only meaningful if the ANOVA is significant.", [
+          ["none", "No — just the ANOVA table"],
+          ["tukey", "Yes — Tukey's"],
+          ["bonferroni", "Yes — Bonferroni-corrected"],
+        ]),
+        a.posthoc !== "none" &&
+          terms.length > 0 &&
+          choice(
+            "posthocTerm",
+            "Which term should the comparisons follow up? The wizard cannot know yet which terms will be significant — pick the one you most want to follow up.",
+            terms.map((t): [string, string] => [t, t.includes(":") ? `Interaction ${t}` : t]),
+          ),
+      ];
+    },
+    finish: (a) => ({
+      type: "multifactor-anova",
+      params: {
+        response: a.response as string,
+        factors: a.factors as string[],
+        posthoc: (a.posthoc as MultifactorAnovaParams["posthoc"] | undefined) ?? "none",
+        ...(a.posthoc !== undefined && a.posthoc !== "none"
+          ? { posthocTerm: (a.posthocTerm as string | undefined) ?? (a.factors as string[])[0] }
+          : {}),
+      },
+    }),
+    checklist: () => CHECKLISTS["multifactor-anova"],
   },
 
   "extract-rearrange": {
@@ -4039,6 +4731,75 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ...(a.test !== undefined ? { test: a.test as ChiSquareParams["test"] } : {}),
         trendOrdered: a.trendOrdered === "yes",
       },
+    }),
+  },
+
+  "chi-square-gof": {
+    questions: (a, table) => {
+      const mode = a.expectedMode as string | undefined;
+      return [
+        oneSet(table),
+        // "Equal" comes first: the wizard pre-selects the first option, so
+        // the equal-proportions run is the default, as in Prism. The options
+        // come from GOF_EXPECTED_MODES, so the wizard can never offer a mode
+        // the runner refuses.
+        choice(
+          "expectedMode",
+          "What distribution should the observed counts be compared with?",
+          GOF_EXPECTED_MODES.map(
+            (m): [string, string] => [
+              m,
+              {
+                equal: "Equal proportions — every category expected equally often",
+                counts: "Expected counts — enter one per category",
+                percent: "Expected percentages — enter one per category (they must add up to 100)",
+              }[m],
+            ],
+          ),
+        ),
+        (mode === "counts" || mode === "percent") && {
+          id: "expectedValues",
+          ask:
+            mode === "counts"
+              ? "Enter the expected counts, one per category in row order, separated by commas."
+              : "Enter the expected percentages, one per category in row order, separated by commas (they must add up to 100).",
+          kind: "text",
+          label: mode === "counts" ? "Expected counts" : "Expected percentages",
+          initial: "",
+          placeholder: "25, 25, 25, 25",
+          parse: (text: string) => parseExpectedValues(text),
+        },
+      ];
+    },
+    finish: (a) => ({
+      type: "chi-square-gof",
+      params: withOneSet(a, {
+        expectedMode: (a.expectedMode as ChiSquareGofParams["expectedMode"] | undefined) ?? "equal",
+        ...(a.expectedMode === "counts" || a.expectedMode === "percent"
+          ? { expectedValues: parseExpectedValues((a.expectedValues as string | undefined) ?? "").values }
+          : {}),
+      }),
+    }),
+  },
+
+  "binomial-test": {
+    questions: (_, table) => [
+      oneSet(table),
+      {
+        id: "expectedProportion",
+        ask: "What proportion do you expect in the first category (the first row)?",
+        kind: "number",
+        label: "Expected proportion (0–1)",
+        initial: 0.5,
+        min: 0,
+        max: 1,
+        validate: (v) =>
+          v >= 0 && v <= 1 ? undefined : "Enter a proportion between 0 and 1.",
+      },
+    ],
+    finish: (a) => ({
+      type: "binomial-test",
+      params: withOneSet(a, { expectedProportion: a.expectedProportion as number }),
     }),
   },
 

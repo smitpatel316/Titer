@@ -28,3 +28,31 @@ export function buildContingencyMatrix(columns: Column[]): ContingencyMatrix | {
   if (flat.every((v) => v === 0)) return { error: "The contingency table is empty (all counts are zero)." };
   return { matrix, rows: matrix.length, cols };
 }
+
+/** One observed distribution: a category per row holding a count, in row
+ *  order. The observed-vs-expected tests (chi-square goodness of fit, the
+ *  binomial test) read a single data column — a Parts-of-whole table's one
+ *  column, which Prism imports as a Column table — so blank rows are simply
+ *  not categories, and the row titles name them. */
+export interface ObservedCounts {
+  column: string;
+  categories: string[];
+  observed: number[];
+}
+
+export function readObservedCounts(
+  columns: Column[],
+  titles: (string | null)[],
+): ObservedCounts | { error: string } {
+  const cols = dataGroups(columns);
+  if (cols.length > 1)
+    return {
+      error:
+        `This test reads one data set of observed counts; ${cols.length} were chosen ` +
+        `(${cols.map((c) => `“${c.name}”`).join(", ")}). Choose one, and run it again.`,
+    };
+  const col = cols[0];
+  if (!col) return { error: "The table holds no counts — enter the observed counts in one data set." };
+  const categories = col.rows.map((r) => titles[r] || `Row ${r + 1}`);
+  return { column: col.name, categories, observed: col.values };
+}

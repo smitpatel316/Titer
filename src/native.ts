@@ -2,6 +2,7 @@
 // the window, the project windows and what they open, and the menus. Everything else in
 // the app is plain web code.
 import { invoke } from "@tauri-apps/api/core";
+import { join, tempDir } from "@tauri-apps/api/path";
 import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getVersion, setTheme as setAppTheme } from "@tauri-apps/api/app";
@@ -10,6 +11,8 @@ import { Menu, Submenu, type MenuOptions } from "@tauri-apps/api/menu";
 import { message, save } from "@tauri-apps/plugin-dialog";
 import type { RVector } from "./stats/webr";
 import { cancelActiveEvals, interruptR, resetR, type EngineBootStatus } from "./stats/webr";
+import { buildKeynoteScript, keynoteSizePoints } from "./lib/office-export";
+import { isMacOs } from "./lib/channel";
 import {
   createEvalQueue,
   setRQueueSnapshot,
@@ -117,6 +120,36 @@ export const readText = (path: string) => invoke<string>("read_text", { path });
 export function writeFile(path: string, data: string | Uint8Array) {
   const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
   return invoke("write_file", bytes, { headers: { path: encodeURIComponent(path) } });
+}
+
+/** Runs the Keynote AppleScript in the shell (`send_to_keynote` in
+ *  main.rs): Keynote makes the presentation and saves the .key at `path`.
+ *  The shell deletes the temp PNG and its script file once osascript
+ *  finishes; macOS-only — the shell refuses anywhere else. */
+export const sendToKeynote = (script: string, pngPath: string, path: string) =>
+  invoke<string>("send_to_keynote", { script, pngPath, path });
+
+/** Hands a PNG to Keynote on macOS (seq 217): the PNG goes to a temp
+ *  file, `buildKeynoteScript` writes the AppleScript for it, and the
+ *  shell runs it in Keynote, which saves the real .key at `outPath` and
+ *  stays open on it, as Prism leaves it. Returns the .key path. Throws
+ *  on non-macOS — the menu hides the item there, and the MCP tool
+ *  refuses the target there first. */
+export async function handoffPngToKeynote(
+  png: Uint8Array,
+  title: string,
+  outPath: string,
+  widthPx: number,
+  heightPx: number,
+  dpi: number,
+): Promise<string> {
+  if (!isMacOs()) throw new Error("Send to Keynote needs macOS with Keynote installed.");
+  const tmp = await tempDir();
+  const pngPath = await join(tmp, `titer-keynote-${Date.now()}-${Math.random().toString(36).slice(2)}.png`);
+  await writeFile(pngPath, png);
+  const { widthPt, heightPt } = keynoteSizePoints(widthPx, heightPx, dpi);
+  const script = buildKeynoteScript({ pngPath, outPath, title, widthPt, heightPt });
+  return sendToKeynote(script, pngPath, outPath);
 }
 
 /** My Palettes' file in Titer's data folder: its text ("" before the first), and a new one. */
@@ -787,8 +820,8 @@ export async function onMethodFilePicked(handler: (path: string | null) => void)
 /** A Prism `.pzfx` file's text, for import. */
 export const readPrismText = (path: string) => invoke<string>("read_prism_text", { path });
 
-/** A Prism `.prism` file's bytes, for import — a `.prism` file is a ZIP, so
- *  text won't do. The shell returns base64; this decodes it. */
+/** A Prism `.prism` or `.pzf` file's bytes, for import — a `.prism` file is a ZIP
+ *  and a `.pzf` file is binary, so text won't do for either. The shell returns base64; this decodes it. */
 export async function readPrismBytes(path: string): Promise<Uint8Array> {
   const base64 = await invoke<string>("read_prism_bytes", { path });
   const binary = atob(base64);

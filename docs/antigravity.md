@@ -1,5 +1,10 @@
 # Connect Google Antigravity to Titer
 
+> **Setup moved:** for the one-click setup, start at
+> [docs/antigravity-setup.md](antigravity-setup.md) (Titer 1.8.0, verified
+> against the code). This file is now the deep reference — the plugin
+> path, both transports, and the honest limitations.
+
 Titer exposes a local, read-only MCP server (Phase 1: five tools — list
 projects/tables, read table summaries, read results, read graphs). Google
 Antigravity can connect to it two ways: **install the Titer plugin**

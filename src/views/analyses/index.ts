@@ -48,7 +48,11 @@ export const ANALYSIS_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<Analysi
     "one-sample-t",
     "shapiro-wilk",
     "kolmogorov-smirnov",
+    "one-sample-ks",
+    "chi-square-gof",
+    "binomial-test",
     "outliers",
+    "p-value-stack",
     "transform",
     "monte-carlo",
     "bland-altman",
@@ -85,9 +89,9 @@ export const ANALYSIS_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<Analysi
   ]),
   grouped: optionsFor(["two-way-anova", "mixed-effects", "three-way-anova", "multiple-t-tests", "row-means-totals", "transform", "plot-function"]),
   nested: optionsFor(["nested-t-test", "nested-anova", "plot-function"]),
-  multiple: optionsFor(["descriptive-statistics", "shapiro-wilk", "correlation-matrix", "linear-regression", "compare-two-groups", "multiple-regression", "nonlinear-regression", "principal-component-analysis", "k-means", "hierarchical-clustering", "outliers", "multiple-logistic-regression", "poisson-regression", "cox-proportional-hazards", "survival", "extract-rearrange", "transform", "plot-function"]),
+  multiple: optionsFor(["descriptive-statistics", "shapiro-wilk", "correlation-matrix", "linear-regression", "compare-two-groups", "multiple-regression", "multifactor-anova", "nonlinear-regression", "principal-component-analysis", "k-means", "hierarchical-clustering", "outliers", "multiple-logistic-regression", "poisson-regression", "cox-proportional-hazards", "survival", "extract-rearrange", "transform", "plot-function"]),
   survival: optionsFor(["survival", "cox", "plot-function"]),
-  contingency: [...optionsFor(["chi-square", "plot-function"]), { value: "mcnemar", label: "McNemar's test (paired proportions)" }],
+  contingency: [...optionsFor(["chi-square", "fraction-of-total", "plot-function"]), { value: "mcnemar", label: "McNemar's test (paired proportions)" }],
 };
 
 /** Whether the table has the ≥ 2 row bands a three-way ANOVA needs. */

@@ -6,9 +6,14 @@
 // fractions live in the result only, with the total divided by recorded per
 // column (stats rows, notes, and per-column tables) so the operation is
 // auditable. A value whose total is 0 is left blank, counted, and explained
-// in the notes — never NaN or Infinity into results.
+// in the notes — never NaN or Infinity into results. Seq 196: offered on
+// Contingency tables too (each count as a share of its group, row, or the
+// whole table), and each proportion may carry its 95% CI — Wilson/Brown
+// (Prism's recommendation) or Clopper–Pearson (exact) — computed in pure
+// TypeScript by proportion-ci.ts.
 import type {
   AnalysisOutcome,
+  FractionOfTotalCI,
   FractionOfTotalColumn,
   FractionOfTotalFormat,
   FractionOfTotalParams,
@@ -17,6 +22,7 @@ import type {
   GroupDescriptives,
 } from "../types";
 import { describe } from "../column/base";
+import { proportionCI } from "../proportion-ci";
 import { datasetColumns, type Column as DatasetColumn } from "../../lib/dataset";
 
 /** The row title, or the row number when the table has none (as K-means/PCA name rows). */
@@ -35,6 +41,9 @@ export async function runFractionOfTotal(
   const format: FractionOfTotalFormat = params?.format ?? "fraction";
   if (!["fraction", "percent"].includes(format))
     return { error: `Unknown result format: “${format}”.` };
+  const ci: FractionOfTotalCI = params?.ci ?? "none";
+  if (!["none", "wilson", "clopper-pearson"].includes(ci))
+    return { error: `Unknown confidence interval: “${ci}”.` };
   const xCol = params?.x ? columns.find((c) => c.name === params.x) : undefined;
 
   // The columns to divide: the wizard's choice, or every numeric column
@@ -67,6 +76,7 @@ export async function runFractionOfTotal(
 
   const scale = format === "percent" ? 100 : 1;
   let blank = 0;
+  let ciBlank = 0;
   const fractions: FractionOfTotalColumn[] = targets.map((col) => {
     const columnTotal = totalBy === "column" ? sum(col.values) : totalBy === "grand" ? grandTotal : null;
     const rows: FractionOfTotalRow[] = col.rows.map((r) => {
@@ -74,15 +84,28 @@ export async function runFractionOfTotal(
       const original = col.byRow[r]!;
       const value = total === 0 ? null : (original / total) * scale;
       if (value === null) blank += 1;
+      // The CI is of the proportion original/total, in the result's units
+      // (fractions or percentages, like `value`). It needs a real
+      // proportion: a value below 0, or above the total it was divided by
+      // (a negative value elsewhere in the row/column), has none — blank,
+      // counted, and explained, never NaN.
+      let ciLow: number | null = null;
+      let ciHigh: number | null = null;
+      if (ci !== "none" && value !== null) {
+        const interval = proportionCI(ci, original, total);
+        if (interval) [ciLow, ciHigh] = [interval[0] * scale, interval[1] * scale];
+        else ciBlank += 1;
+      }
       return {
         row: rowName(titles, r),
         ...(xCol ? { x: xCol.byRow[r] ?? null } : {}),
         original,
         total,
         value,
+        ...(ci !== "none" ? { ciLow, ciHigh } : {}),
       };
     });
-    return { column: col.name, total: columnTotal, format, rows };
+    return { column: col.name, total: columnTotal, format, ci, rows };
   });
 
   // Descriptives of the fractions (or percentages), not the originals. A
@@ -119,18 +142,25 @@ export async function runFractionOfTotal(
       : totalBy === "grand"
         ? `Grand total: ${grandTotal}. `
         : "";
+  const ciName = ci === "wilson" ? "Wilson/Brown" : ci === "clopper-pearson" ? "Clopper–Pearson" : null;
   return {
     testType: "fraction-of-total",
-    subtitle: `Fraction of total (${totalBy} total, as ${format === "percent" ? "percentages" : "fractions"})`,
+    subtitle: `Fraction of total (${totalBy} total, as ${format === "percent" ? "percentages" : "fractions"})${ciName ? ` — 95% CI of each proportion (${ciName})` : ""}`,
     stats,
     groups,
     notes:
       `Divided each value in ${fractions.map((c) => `“${c.column}”`).join(", ")} by ${totalWord} and reported the result as a ${unit}. ` +
       totalsNote +
+      (ciName
+        ? `Each proportion also carries its 95% confidence interval (${ciName} method — ${ci === "wilson" ? "Prism's recommended method" : "the exact interval"}). `
+        : "") +
       "The original values are unchanged; the tables below are the fractions of total. " +
       "Only rows holding a value are listed." +
       (blank > 0
         ? ` ${blank} value${blank === 1 ? " is" : "s are"} blank because ${blank === 1 ? "its" : "their"} total is 0.`
+        : "") +
+      (ciBlank > 0
+        ? ` ${ciBlank} value${ciBlank === 1 ? " has" : "s have"} no confidence interval because ${ciBlank === 1 ? "it is" : "they are"} not a proportion of ${ciBlank === 1 ? "its" : "their"} total (below 0, or above the total).`
         : ""),
     fractionsOfTotal: fractions,
   };

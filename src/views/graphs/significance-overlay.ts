@@ -8,7 +8,7 @@ import type { AnalysisOutcome, ComparedCell } from "../../stats/types";
 import type { GraphOptions, GraphType, ProjectNode } from "../../store/types";
 import type { Column } from "../../lib/dataset";
 import type { GraphFigure } from ".";
-import { isSignificant, pStars, pText } from "../../lib/format";
+import { isSignificant, pEquals, pStars, pText } from "../../lib/format";
 import {
   centers,
   errors,
@@ -46,6 +46,27 @@ export interface SigComparison {
   p: number | null;
   /** A grouped table's two cells (`ComparisonRow.cells`). */
   cells?: [ComparedCell, ComparedCell];
+}
+
+/** Whether `sigPairs` selects a comparison: by its own key, by the pairKey of
+ *  the two groups it compares, or by both group names named bare. The Format
+ *  panel stores per-comparison keys, but a pair can also arrive spelled as the
+ *  pair itself — a hand-set or MCP-set list like ["WT", "SKG"] for a
+ *  multiple-t-tests pair, whose comparisons are per-row (their keys name the
+ *  row, not the pair) and would otherwise match nothing and draw no brackets.
+ *  A cell comparison's groups are its cells' groups; a column comparison's are
+ *  group1/group2. One name alone names no pair. */
+export function sigPairSelected(c: SigComparison, sigPairs: string[]): boolean {
+  if (sigPairs.includes(c.key)) return true;
+  const [a, b] = c.cells ? [c.cells[0].group, c.cells[1].group] : [c.group1, c.group2];
+  return sigPairs.includes(pairKey(a, b)) || (sigPairs.includes(a) && sigPairs.includes(b));
+}
+
+/** The per-comparison keys of the comparisons `sigPairs` selects, so a toggle
+ *  in the Format panel can edit the selection explicitly — a group-pair spelling
+ *  can't lose one row. */
+export function expandSigPairs(comparisons: SigComparison[], sigPairs: string[]): string[] {
+  return comparisons.filter((c) => sigPairSelected(c, sigPairs)).map((c) => c.key);
 }
 
 /** Pull the drawable pairwise comparisons out of an analysis outcome. Post-hoc
@@ -159,7 +180,7 @@ function significanceOverlay(
   const annotations: unknown[] = [];
   let top = maxTop;
 
-  const stars = display !== "pvalue";
+  const stars = display === "stars";
   for (const c of resolved) {
     let level = levels.findIndex((band) => band.every(([lo, hi]) => c.hi < lo || c.lo > hi));
     if (level === -1) {
@@ -204,7 +225,7 @@ function significanceOverlay(
       // Stars are drawn larger to match the P-value text and sit snug on the
       // bracket; the P-value label keeps a hair of breathing room.
       y: yL + unit * (stars ? 0.02 : 0.08),
-      text: stars ? pStars(c.p) : pText(c.p),
+      text: stars ? pStars(c.p) : display === "pvalue-eq" ? pEquals(c.p) : pText(c.p),
       showarrow: false,
       yanchor: "bottom",
       font: { color: INK, size: stars ? 19 : 14 },
@@ -350,7 +371,7 @@ export function addSignificance(
   titles?: (string | null)[],
 ) {
   const letters = options.sigDisplay === "letters";
-  const selected = letters ? comparisons : comparisons.filter((c) => (options.sigPairs ?? []).includes(c.key));
+  const selected = letters ? comparisons : comparisons.filter((c) => sigPairSelected(c, options.sigPairs ?? []));
   if (!selected.length) return;
   const grouped = GROUPED_STARS.has(graphType);
   const middle = centers(columns, options.center);
