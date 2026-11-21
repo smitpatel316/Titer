@@ -34,6 +34,7 @@ import {
 import { GRAPHS, hasValueAxis, newGraphOptions } from ".";
 import { EXPORT_FORMATS, RESOLUTIONS, type ExportFormat, type Resolution } from "./graph-export";
 import type { OfficeTarget } from "../../lib/office-export";
+import { isMacOs } from "../../lib/channel";
 import {
   Choice,
   ColorRow,
@@ -575,11 +576,22 @@ export function FormatPanel(props: Props) {
             >
               Send to PowerPoint…
             </Button>
+            {isMacOs() && (
+              <Button
+                className="flex-1"
+                disabled={!props.canExport}
+                onClick={() => props.onSendToOffice!("keynote", exported.dpi)}
+              >
+                Send to Keynote…
+              </Button>
+            )}
           </div>
         )}
         <p className="text-small text-secondary">
           Send to Word / PowerPoint saves a Word or PowerPoint file with the graph in it — open it in Word or
           PowerPoint.
+          {isMacOs() &&
+            " Send to Keynote creates the presentation in Keynote instead (macOS only) — Keynote saves the .key file."}
         </p>
       </Section>
     </>

@@ -44,6 +44,7 @@ import {
   pngSize,
   type OfficeTarget,
 } from "../lib/office-export";
+import { isMacOs } from "../lib/channel";
 import JSZip from "jszip";
 import {
   DEFAULT_GRAPH_OPTIONS,
@@ -54,6 +55,7 @@ import {
 } from "./types";
 import {
   ensureSaveExtension,
+  handoffPngToKeynote,
   writeFile as nativeWriteFile,
   type McpJob,
 } from "../native";
@@ -410,10 +412,13 @@ export async function executeExportFigure(job: McpJob, deps: ExportJobDeps): Pro
   return { result };
 }
 
-/** `export-office`: the GUI's one-click Send to Word / PowerPoint
- *  (`sendGraphToOffice` / `sendFigureToOffice`), driven headlessly —
- *  the same PNG render at `dpi`, embedded at its physical size in a
- *  real .docx / .pptx by the pure `buildOfficeDocument`. Exactly one
+/** `export-office`: the GUI's one-click Send to Word / PowerPoint /
+ *  Keynote (`sendGraphToOffice` / `sendFigureToOffice`), driven
+ *  headlessly — the same PNG render at `dpi`, embedded at its physical
+ *  size in a real .docx / .pptx by the pure `buildOfficeDocument`, or
+ *  handed to Keynote on macOS for a real .key (seq 217: no file-side
+ *  .key exists — Keynote itself makes the presentation, so the target
+ *  refuses on any machine that cannot drive Keynote). Exactly one
  *  of `graph_id` / `figure_id`. */
 export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Promise<ExportJobOutcome> {
   const args = argsOf(job);
@@ -423,8 +428,8 @@ export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Pro
     throw jobErr(job, "needs exactly one of graph_id and figure_id — one image per document, as the UI's one-click export.");
   }
   const targetRaw = reqStr(job, args, "target");
-  if (targetRaw !== "word" && targetRaw !== "powerpoint") {
-    throw jobErr(job, `has no office target “${targetRaw}” — the targets are word and powerpoint.`);
+  if (targetRaw !== "word" && targetRaw !== "powerpoint" && targetRaw !== "keynote") {
+    throw jobErr(job, `has no office target “${targetRaw}” — the targets are word, powerpoint and keynote.`);
   }
   const target = targetRaw as OfficeTarget;
   const dpiRaw = optStr(job, args, "dpi") ?? "300";
@@ -470,20 +475,32 @@ export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Pro
   }
   const dims = pngSize(png);
   if (!dims) throw jobErr(job, "could not draw the image as a PNG image.");
-  const doc = await buildOfficeDocument(target, {
-    png,
-    title,
-    widthPx: dims.widthPx,
-    heightPx: dims.heightPx,
-    dpi: Number(dpi),
-  });
+  // Keynote is not a file build: the PNG is handed to Keynote, which
+  // saves the .key itself (seq 217). The path reported is the .key
+  // Keynote saved, not the raw request — the shell ensures the extension
+  // before dispatching, so in practice they are the same.
+  let savedPath = path;
+  if (target === "keynote") {
+    if (!isMacOs())
+      throw jobErr(job, "needs macOS with Keynote installed — this machine cannot drive Keynote.");
+    const outPath = ensureSaveExtension(path, "key");
+    savedPath = await handoffPngToKeynote(png, title, outPath, dims.widthPx, dims.heightPx, Number(dpi));
+  } else {
+    const doc = await buildOfficeDocument(target, {
+      png,
+      title,
+      widthPx: dims.widthPx,
+      heightPx: dims.heightPx,
+      dpi: Number(dpi),
+    });
+    const io = deps.io ?? defaultExportIo;
+    await io.writeFile(ensureSaveExtension(path, officeExtension(target)), doc);
+  }
   const ext = officeExtension(target);
-  const io = deps.io ?? defaultExportIo;
-  await io.writeFile(ensureSaveExtension(path, ext), doc);
   const result: Record<string, unknown> = {
     project_id: job.project_id,
     target,
-    path,
+    path: savedPath,
     extension: ext,
     width_px: widthPx,
     height_px: heightPx,

@@ -3,7 +3,7 @@
 // then composited onto one canvas (PNG/JPEG) or embedded in one parent SVG
 // (SVG, staying vector). The figure is never rebuilt as a single Plotly
 // subplot figure — the per-graph renderers are not subplot-compatible.
-import { alert, pickSavePath, writeFile } from "../../native";
+import { alert, handoffPngToKeynote, pickSavePath, writeFile } from "../../native";
 import { loadPlotly } from "../graphs/plotly";
 import { withoutSelection } from "../graphs/selection";
 import { vectorTraces } from "../graphs/plot-helpers";
@@ -338,10 +338,14 @@ export function copyFigureImage(figure: ProjectNode, nodes: Record<string, Proje
     .catch((err) => alert("Couldn't Copy the Figure", reason(err), "error"));
 }
 
-/** One-click Send to Word / PowerPoint for a whole layout (v2 item 19): the
- *  figure's composited PNG at `dpi`, embedded at its physical size in a real
- *  .docx / .pptx file — the cross-platform form of Prism's one-click export
- *  (no COM automation on Mac/Linux; the user opens the file in Word/PowerPoint). */
+/** One-click Send to Word / PowerPoint / Keynote for a whole layout
+ *  (v2 item 19, seq 217): the figure's composited PNG at `dpi`, embedded
+ *  at its physical size in a real .docx / .pptx file — the cross-platform
+ *  form of Prism's one-click export (no COM automation on Mac/Linux; the
+ *  user opens the file in Word/PowerPoint). Keynote takes Prism's own
+ *  route instead: the PNG is handed to Keynote on macOS, which makes the
+ *  presentation and saves the real .key (see office-export.ts — no
+ *  file-side .key exists). */
 export async function sendFigureToOffice(
   figure: ProjectNode,
   nodes: Record<string, ProjectNode>,
@@ -357,24 +361,37 @@ export async function sendFigureToOffice(
   try {
     const out = await renderFigureRaster(figure, nodes, "png", dpi);
     if (out.capped && out.reason) await alert("Figure Too Large", `${out.reason} Exporting at the largest fitting size.`, "warning");
-    const doc = await buildOfficeDocument(target, {
-      png: new Uint8Array(await out.blob.arrayBuffer()),
-      title: name,
-      widthPx: out.width,
-      heightPx: out.height,
-      dpi: Number(dpi),
-    });
-    const ext = officeExtension(target);
-    const fileName = `${name}.${ext}`;
-    const path = await pickSavePath(
-      title,
-      lastFolder ? `${lastFolder}/${fileName}` : fileName,
-      target === "word" ? "Word Document" : "PowerPoint Presentation",
-      ext,
-    );
-    if (!path) return;
-    lastFolder = path.slice(0, path.lastIndexOf("/"));
-    await writeFile(path, doc);
+    const png = new Uint8Array(await out.blob.arrayBuffer());
+    if (target === "keynote") {
+      const path = await pickSavePath(
+        title,
+        lastFolder ? `${lastFolder}/${name}.key` : `${name}.key`,
+        "Keynote Presentation",
+        "key",
+      );
+      if (!path) return;
+      lastFolder = path.slice(0, path.lastIndexOf("/"));
+      await handoffPngToKeynote(png, name, path, out.width, out.height, Number(dpi));
+    } else {
+      const doc = await buildOfficeDocument(target, {
+        png,
+        title: name,
+        widthPx: out.width,
+        heightPx: out.height,
+        dpi: Number(dpi),
+      });
+      const ext = officeExtension(target);
+      const fileName = `${name}.${ext}`;
+      const path = await pickSavePath(
+        title,
+        lastFolder ? `${lastFolder}/${fileName}` : fileName,
+        target === "word" ? "Word Document" : "PowerPoint Presentation",
+        ext,
+      );
+      if (!path) return;
+      lastFolder = path.slice(0, path.lastIndexOf("/"));
+      await writeFile(path, doc);
+    }
     if (out.missing)
       await alert(
         "Figure Exported",

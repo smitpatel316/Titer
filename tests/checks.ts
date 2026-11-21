@@ -239,7 +239,14 @@ import { buildGraphFigure, type AnalysisRunner } from "../src/views/graphs/graph
 import { overlayReport } from "../src/store/mcp-export";
 import { createEvalDedupe, ensureSaveExtension } from "../src/native";
 import { engineStatusText, getEngineStatus, onEngineStatus, setEngineStatus } from "../src/stats/engine-status";
-import { buildOfficeDocument, officeExtension } from "../src/lib/office-export";
+import {
+  buildKeynoteScript,
+  buildOfficeDocument,
+  keynoteSizePoints,
+  officeDialogTitle,
+  officeExtension,
+  type OfficeTarget,
+} from "../src/lib/office-export";
 import {
   detectDelimiter,
   excelSerialToIso,
@@ -9950,6 +9957,102 @@ check("an Office export refuses a zero size or DPI (Office)", async () => {
   const png = testPng(10, 10);
   await rejects(buildOfficeDocument("word", { png, title: "x", widthPx: 0, heightPx: 10, dpi: 150 }), /size/);
   await rejects(buildOfficeDocument("powerpoint", { png, title: "x", widthPx: 10, heightPx: 10, dpi: 0 }), /DPI/);
+});
+
+// ── Send to Keynote (seq 217) ────────────────────────────────────────────
+// Pre-fix these fail: "keynote" was not an OfficeTarget (officeExtension
+// answered "pptx" for it), buildOfficeDocument built a .pptx for it, and
+// buildKeynoteScript did not exist.
+
+check("Send to Keynote uses the .key extension and its own dialog title (Keynote)", () => {
+  strictEqual(officeExtension("keynote"), "key");
+  strictEqual(officeDialogTitle("keynote"), "Send to Keynote");
+});
+
+check("a Keynote export is not a file build — it is made in Keynote itself (Keynote)", async () => {
+  const png = testPng(10, 10);
+  await rejects(
+    buildOfficeDocument("keynote" as OfficeTarget, { png, title: "x", widthPx: 10, heightPx: 10, dpi: 150 }),
+    /Keynote/,
+  );
+});
+
+check("the Keynote script launches Keynote, places the PNG at its size and saves a .key (Keynote)", () => {
+  const script = buildKeynoteScript({
+    pngPath: "/tmp/titer-keynote-1.png",
+    outPath: "/Users/smit/Desktop/Dose response.key",
+    title: "Dose response",
+    widthPt: 576,
+    heightPt: 288,
+  });
+  ok(script.includes('tell application "Keynote"'), script);
+  ok(script.includes('POSIX file "/tmp/titer-keynote-1.png"'), script);
+  ok(script.includes('POSIX file "/Users/smit/Desktop/Dose response.key"'), script);
+  ok(script.includes("set imgW to 576") && script.includes("set imgH to 288"), script);
+  ok(script.includes("make new image with properties {file: pngFile}"), script);
+  ok(script.includes("save doc in outFile"), script);
+  // Never a disguised Office file: Keynote is a live handoff, not a .pptx renamed .key.
+  ok(!script.includes("pptx") && !script.includes("docx"), script);
+});
+
+check("the Keynote script escapes quotes, backslashes and line breaks in the title (Keynote)", () => {
+  const script = buildKeynoteScript({
+    pngPath: "/tmp/a.png",
+    outPath: "/tmp/b.key",
+    title: 'He said "hi" \\ bye\nSecond line',
+    widthPt: 100,
+    heightPt: 50,
+  });
+  ok(script.includes('He said \\"hi\\" \\\\ bye Second line'), script);
+  ok(!script.includes('He said "hi"'), script);
+});
+
+check("the Keynote image size is the PNG's physical size in points (Keynote)", () => {
+  // 600×300 px at 150 DPI = 4×2 in = 288×144 pt.
+  const { widthPt, heightPt } = keynoteSizePoints(600, 300, 150);
+  strictEqual(widthPt, 288);
+  strictEqual(heightPt, 144);
+  throws(() => keynoteSizePoints(10, 10, 0), /DPI/);
+});
+
+// The MCP + shell legs can't run in this TS harness (they need a webview
+// and a Mac), so — same static-read shape as the write_file allowlist pins
+// above — these read the sources they cover.
+check("titer_export_office accepts the keynote target through MCP (Keynote)", () => {
+  const exporter = readFileSync("src/store/mcp-export.ts", "utf8");
+  ok(exporter.includes('targetRaw !== "keynote"'), "executeExportOffice must accept the keynote target");
+  ok(exporter.includes("handoffPngToKeynote"), "executeExportOffice must hand the PNG to Keynote");
+  ok(
+    exporter.includes("needs macOS with Keynote installed"),
+    "executeExportOffice must refuse keynote off macOS",
+  );
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(mcp.includes('target != "keynote"'), "the Rust tool must accept the keynote target");
+  ok(
+    mcp.includes("the targets are word, powerpoint and keynote."),
+    "the Rust tool must name all three targets",
+  );
+  ok(mcp.includes("Keynote (.key, macOS only"), "the Rust tool must describe the Keynote target");
+});
+
+check("the shell has a send_to_keynote command driving osascript on macOS (Keynote)", () => {
+  const main = readFileSync("src-tauri/src/main.rs", "utf8");
+  ok(main.includes("fn send_to_keynote"), "main.rs must define send_to_keynote");
+  ok(main.includes('Command::new("osascript")'), "send_to_keynote must drive Keynote through osascript");
+  ok(
+    main.includes("Send to Keynote needs macOS"),
+    "send_to_keynote must refuse off macOS",
+  );
+  ok(main.includes("send_to_keynote,"), "send_to_keynote must be registered in invoke_handler");
+});
+
+check("Send to Keynote is offered in the graph and figure export menus on macOS only (Keynote)", () => {
+  for (const file of ["src/views/graphs/format-panel.tsx", "src/views/figures/figure-view.tsx"]) {
+    const src = readFileSync(file, "utf8");
+    ok(src.includes("Send to Keynote…"), `${file} must offer Send to Keynote`);
+    ok(src.includes('"keynote"'), `${file} must send the keynote target`);
+    ok(src.includes("isMacOs()"), `${file} must gate Send to Keynote on macOS`);
+  }
 });
 
 // The Tauri write_file allowlist, read through either source shape: the

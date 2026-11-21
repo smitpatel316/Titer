@@ -33,6 +33,7 @@ import { DEFAULT_GRAPH_OPTIONS, type FigurePanel, type ProjectNode, type Resolut
 import { PanelPlot } from "./panel-plot";
 import { copyFigureImage, saveFigureImage, sendFigureToOffice } from "./figure-export";
 import type { OfficeTarget } from "../../lib/office-export";
+import { isMacOs } from "../../lib/channel";
 import { EXPORT_FORMATS, saveGraphImage, type ExportFormat } from "../graphs/graph-export";
 
 /** Screen pixels per inch in the editor (the figure keeps its true aspect ratio). */
@@ -384,9 +385,21 @@ export function FigureView({ node }: { node: ProjectNode }) {
             >
               Send to PowerPoint…
             </Button>
+            {isMacOs() && (
+              <Button
+                variant="ghost"
+                className="flex-1"
+                disabled={!panels.length || exporting}
+                onClick={() => void onSendToOffice("keynote")}
+              >
+                Send to Keynote…
+              </Button>
+            )}
           </div>
           <p className="text-small text-secondary">
             Send to Word / PowerPoint saves a Word or PowerPoint file with the whole figure in it.
+            {isMacOs() &&
+              " Send to Keynote creates the presentation in Keynote instead (macOS only) — Keynote saves the .key file."}
           </p>
           {hasEmptyCell(panels, grid) && (
             <p className="text-small text-secondary">The figure has an empty cell — it exports blank.</p>

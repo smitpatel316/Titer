@@ -3328,10 +3328,12 @@ pub struct ExportFigureArgs {
     pub path: Option<String>,
 }
 
-/// Export one graph or figure to Word / PowerPoint — the GUI's one-click
-/// Send to Office, driven headlessly: the same PNG render at `dpi`,
-/// embedded at its physical size in a real .docx / .pptx. Exactly one
-/// of `graph_id` / `figure_id`.
+/// Export one graph or figure to Word / PowerPoint / Keynote — the GUI's
+/// one-click Send to Office, driven headlessly: the same PNG render at
+/// `dpi`, embedded at its physical size in a real .docx / .pptx, or handed
+/// to Keynote on macOS for a real .key (seq 217: no file-side .key exists
+/// — Keynote itself makes the presentation, so `keynote` refuses off
+/// macOS). Exactly one of `graph_id` / `figure_id`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ExportOfficeArgs {
     /// Window label of the project ("project-1"); omit for the front project.
@@ -3343,7 +3345,7 @@ pub struct ExportOfficeArgs {
     /// The figure node's id, as shown by titer_list_projects.
     #[serde(default)]
     pub figure_id: Option<String>,
-    /// "word" | "powerpoint".
+    /// "word" | "powerpoint" | "keynote" (macOS only).
     pub target: String,
     /// "150" | "300" | "600" | "900" | "1200". Omit for "300".
     #[serde(default)]
@@ -6578,12 +6580,12 @@ impl TiterMcpServer {
         }
     }
 
-    /// Export one graph or figure to Word / PowerPoint — the GUI's
+    /// Export one graph or figure to Word / PowerPoint / Keynote — the GUI's
     /// one-click Send to Office, driven headlessly. Exactly one of
     /// `graph_id` / `figure_id`.
     #[tool(
         name = "titer_export_office",
-        description = "Export one graph or figure to Word (.docx) or PowerPoint (.pptx): the same PNG render at dpi 150/300/600/900/1200 (default 300), embedded at its physical size — the GUI's one-click Send to Office, driven headlessly. Exactly one of graph_id / figure_id. path omitted = beside the project file, else <Documents>/Titer Exports.",
+        description = "Export one graph or figure to Word (.docx), PowerPoint (.pptx) or Keynote (.key, macOS only — the presentation is created in Keynote itself): the same PNG render at dpi 150/300/600/900/1200 (default 300), embedded at its physical size — the GUI's one-click Send to Office, driven headlessly. Exactly one of graph_id / figure_id. path omitted = beside the project file, else <Documents>/Titer Exports.",
         annotations(
             title = "Export to Office",
             read_only_hint = false,
@@ -6599,9 +6601,9 @@ impl TiterMcpServer {
         let call_args = serde_json::json!({ "project_id": args.project_id, "graph_id": args.graph_id, "figure_id": args.figure_id, "target": args.target, "dpi": args.dpi, "path": args.path });
         let result: Result<serde_json::Value, String> = async {
             let target = args.target.as_str();
-            if target != "word" && target != "powerpoint" {
+            if target != "word" && target != "powerpoint" && target != "keynote" {
                 return Err(format!(
-                    "Unknown office target “{target}” — the targets are word and powerpoint."
+                    "Unknown office target “{target}” — the targets are word, powerpoint and keynote."
                 ));
             }
             let (node_id, fallback) = match (&args.graph_id, &args.figure_id) {
@@ -6621,7 +6623,13 @@ impl TiterMcpServer {
                 ));
             }
             let project_id = self.state.resolve_project(args.project_id.as_deref())?;
-            let ext = if target == "word" { "docx" } else { "pptx" };
+            let ext = if target == "word" {
+                "docx"
+            } else if target == "powerpoint" {
+                "pptx"
+            } else {
+                "key"
+            };
             let path = match &args.path {
                 Some(p) if !p.trim().is_empty() => ensure_export_extension(p, ext),
                 _ => self
