@@ -3754,7 +3754,7 @@ const ANALYSES: [string, TableData, AnalysisType, AnalysisParams?][] = [
 ];
 
 const volcano: Partial<GraphOptions> = { volcanoX: "Log2 FC", volcanoY: "P", volcanoLabel: "Gene" };
-const GRAPH_CASES: [string, TableData, GraphType, Partial<GraphOptions>?][] = [
+const GRAPH_CASES: [string, TableData, GraphType, Partial<GraphOptions>?, TableType?][] = [
   ["column", column, "individual"],
   ["column", column, "box-violin", { kind: "violin", showPoints: true }],
   ["column", column, "mean-error", { error: "sd" }],
@@ -3783,21 +3783,21 @@ const GRAPH_CASES: [string, TableData, GraphType, Partial<GraphOptions>?][] = [
   ["survival", survivalTable, "survival"],
   ["freireich", freireich, "survival", { survivalShowBand: true }],
   ["coxTable", coxTable, "forest-plot"],
-  ["grouped", grouped, "grouped-scatter"],
-  ["grouped", grouped, "grouped-bars", { groupLayout: "separated" }],
-  ["grouped", grouped, "grouped-lines"],
-  ["grouped", grouped, "grouped-stacked"],
-  ["grouped", grouped, "grouped-hbars", { center: "median" }],
+  ["grouped", grouped, "grouped-scatter", undefined, "grouped"],
+  ["grouped", grouped, "grouped-bars", { groupLayout: "separated" }, "grouped"],
+  ["grouped", grouped, "grouped-lines", undefined, "grouped"],
+  ["grouped", grouped, "grouped-stacked", undefined, "grouped"],
+  ["grouped", grouped, "grouped-hbars", { center: "median" }, "grouped"],
   ["grouped", grouped, "heatmap", { center: "median", heatmapShowValues: true }],
-  ["grouped", grouped, "grouped-box", { showPoints: true }],
-  ["grouped", grouped, "grouped-before-after"],
-  ["groupedArrowsSeparated", grouped, "grouped-before-after", { beforeAfterArrows: true, groupLayout: "separated" }],
-  ["noReplicates", noReplicates, "grouped-before-after"],
-  ["groupedViolin", grouped, "grouped-box", { kind: "violin", groupLayout: "separated" }],
+  ["grouped", grouped, "grouped-box", { showPoints: true }, "grouped"],
+  ["grouped", grouped, "grouped-before-after", undefined, "grouped"],
+  ["groupedArrowsSeparated", grouped, "grouped-before-after", { beforeAfterArrows: true, groupLayout: "separated" }, "grouped"],
+  ["noReplicates", noReplicates, "grouped-before-after", undefined, "grouped"],
+  ["groupedViolin", grouped, "grouped-box", { kind: "violin", groupLayout: "separated" }, "grouped"],
   // A nested table's grouped-family graphs: one series per group across the rows.
-  ["nested3", nested3, "grouped-bars"],
-  ["nested3", nested3, "grouped-scatter"],
-  ["nested3", nested3, "grouped-lines"],
+  ["nested3", nested3, "grouped-bars", undefined, "nested"],
+  ["nested3", nested3, "grouped-scatter", undefined, "nested"],
+  ["nested3", nested3, "grouped-lines", undefined, "nested"],
   ["multiple", multiple, "heatmap"],
   ["multiple", multiple, "xy-scatter", { xVariable: "Height", yVariable: "Weight" }],
   ["poissonCounts", poissonCounts, "observed-fitted"],
@@ -3811,7 +3811,7 @@ const GRAPH_CASES: [string, TableData, GraphType, Partial<GraphOptions>?][] = [
   ["volcano", volcanoTable, "volcano", volcano],
   ["volcanoXY", volcanoXY, "volcano", { volcanoY: "P" }],
   ["volcanoLog", volcanoLog, "volcano", { volcanoY: "-log10 P", volcanoYIsPValue: false }],
-  ["contingency2", contingency2, "grouped-stacked"],
+  ["contingency2", contingency2, "grouped-stacked", undefined, "contingency"],
   ["contingency3", contingency3, "heatmap", { heatmapShowValues: true }],
   ["contingencyEmpty", contingencyEmpty, "heatmap", { heatmapShowValues: true }],
   ["xyNoX", xyNoX, "xy-scatter"],
@@ -3832,23 +3832,29 @@ async function run() {
     if (!repoReady && (type === "cox-proportional-hazards" || type === "mixed-effects")) continue;
     out[`${type} ${name} ${JSON.stringify(params ?? {})}`] = await runAnalysis(type, data, params);
   }
-  for (const [name, data, type, options] of GRAPH_CASES) {
+  for (const [name, data, type, options, tableType] of GRAPH_CASES) {
     const opts = {
       ...newGraphOptions(type),
       series: { Low: { color: "#D55E00" } },
       points: { "Control#1": { color: "#4ADE80" } },
       ...options,
     };
-    // Of the tables here, only a Multiple Variables one changes what a graph plots —
-    // and the Bland-Altman fixture, which is a method-comparison table with no X
-    // column, so its true type is "column", not "xy" (FL-ba-lines: passing "xy"
-    // for it made plotColumns drop Method A as if it were X, and the graph
-    // rendered empty — no points, no bias/limits lines).
+    // plotColumns reads the table's true type: a Multiple Variables table
+    // plots its chosen variables, and the Bland-Altman fixture is a
+    // method-comparison table with no X column, so its true type is
+    // "column", not "xy" (FL-ba-lines: passing "xy" for it made
+    // plotColumns drop Method A as if it were X, and the graph rendered
+    // empty — no points, no bias/limits lines). The same applies to the
+    // grouped/nested/contingency cases, which carry their true type in the
+    // tuple: since seq 210 a grouped graph on an XY table drops the first
+    // column as X, so passing "xy" for a grouped table would drop its
+    // first replicate sub-column (and for a contingency table its first
+    // outcome) — the app always passes the table's real type.
     const columns = plotColumns(
       readTable(data),
       type,
       opts,
-      data === multiple ? "multiple" : data === blandAltman ? "column" : "xy",
+      tableType ?? (data === multiple ? "multiple" : data === blandAltman ? "column" : "xy"),
     );
     const paint = paintOf(opts, GRAPHS[type].family === "volcano" ? 2 : columns.length);
     out[`graph ${type} ${name}`] = GRAPHS[type].build(columns, opts, paint, readTable(data).titles);

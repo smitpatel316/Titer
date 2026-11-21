@@ -146,8 +146,36 @@
     "value": -0.1072717126
    },
    {
+    "label": "Cohen's d 95% CI lower",
+    "value": -1.127121162
+   },
+   {
+    "label": "Cohen's d 95% CI upper",
+    "value": 0.9049427312
+   },
+   {
     "label": "Hedges' g",
     "value": -0.1009408008
+   },
+   {
+    "label": "Hedges' g 95% CI lower",
+    "value": -1.060601253
+   },
+   {
+    "label": "Hedges' g 95% CI upper",
+    "value": 0.8515352442
+   },
+   {
+    "label": "Glass's Δ (second group's SD)",
+    "value": -0.5985454803
+   },
+   {
+    "label": "Glass's Δ 95% CI lower",
+    "value": -6.289013771
+   },
+   {
+    "label": "Glass's Δ 95% CI upper",
+    "value": 5.049321659
    },
    {
     "label": "F (variance ratio)",
@@ -192,7 +220,7 @@
     "n": 7
    }
   ],
-  "notes": "Assumes normal distributions but allows unequal variances (Welch–Satterthwaite df). Two-tailed P value. Compares “Control” and “Low”, the first two columns with data; not included: “High”, “Sparse”.",
+  "notes": "Assumes normal distributions but allows unequal variances (Welch–Satterthwaite df). Two-tailed P value. Glass's Δ standardises the mean difference by the second group's SD; the effect-size 95% CIs come from the t statistic's noncentrality parameter (Welch df). Compares “Control” and “Low”, the first two columns with data; not included: “High”, “Sparse”.",
   "analyzed": {
    "sets": [
     {
@@ -260,8 +288,36 @@
     "value": -0.1072717126
    },
    {
+    "label": "Cohen's d 95% CI lower",
+    "value": null
+   },
+   {
+    "label": "Cohen's d 95% CI upper",
+    "value": 0.7467491845
+   },
+   {
     "label": "Hedges' g",
     "value": -0.1009408008
+   },
+   {
+    "label": "Hedges' g 95% CI lower",
+    "value": null
+   },
+   {
+    "label": "Hedges' g 95% CI upper",
+    "value": 0.7026778902
+   },
+   {
+    "label": "Glass's Δ (second group's SD)",
+    "value": -0.5985454803
+   },
+   {
+    "label": "Glass's Δ 95% CI lower",
+    "value": null
+   },
+   {
+    "label": "Glass's Δ 95% CI upper",
+    "value": 4.166646906
    },
    {
     "label": "F (variance ratio)",
@@ -299,7 +355,7 @@
     "n": 7
    }
   ],
-  "notes": "Assumes both groups are sampled from normal distributions with equal variances. One-tailed P value. Compares “Control” and “Low”, the first two columns with data; not included: “High”, “Sparse”.",
+  "notes": "Assumes both groups are sampled from normal distributions with equal variances. One-tailed P value. Glass's Δ standardises the mean difference by the second group's SD; the effect-size 95% CIs come from the t statistic's noncentrality parameter. Compares “Control” and “Low”, the first two columns with data; not included: “High”, “Sparse”.",
   "analyzed": {
    "sets": [
     {
@@ -367,8 +423,24 @@
     "value": -0.03364927316
    },
    {
+    "label": "Cohen's d 95% CI lower",
+    "value": -0.7733134013
+   },
+   {
+    "label": "Cohen's d 95% CI upper",
+    "value": 0.7087474732
+   },
+   {
     "label": "Hedges' g",
     "value": -0.0292286567
+   },
+   {
+    "label": "Hedges' g 95% CI lower",
+    "value": -0.6717206584
+   },
+   {
+    "label": "Hedges' g 95% CI upper",
+    "value": 0.6156369701
    }
   ],
   "difference": {
@@ -668,8 +740,24 @@
     "value": 0.36682506
    },
    {
+    "label": "Control — Cohen's d 95% CI lower",
+    "value": -0.3632147378
+   },
+   {
+    "label": "Control — Cohen's d 95% CI upper",
+    "value": 1.073035169
+   },
+   {
     "label": "Control — Hedges' g",
     "value": 0.3258150849
+   },
+   {
+    "label": "Control — Hedges' g 95% CI lower",
+    "value": -0.3226083862
+   },
+   {
+    "label": "Control — Hedges' g 95% CI upper",
+    "value": 0.9530729569
    },
    {
     "label": "Low — t",
@@ -701,8 +789,24 @@
     "value": 3.367082702
    },
    {
+    "label": "Low — Cohen's d 95% CI lower",
+    "value": 1.362411749
+   },
+   {
+    "label": "Low — Cohen's d 95% CI upper",
+    "value": 5.351060814
+   },
+   {
     "label": "Low — Hedges' g",
     "value": 2.924737895
+   },
+   {
+    "label": "Low — Hedges' g 95% CI lower",
+    "value": 1.183427205
+   },
+   {
+    "label": "Low — Hedges' g 95% CI upper",
+    "value": 4.648074231
    },
    {
     "label": "High — t",
@@ -734,8 +838,24 @@
     "value": 7.030602828
    },
    {
+    "label": "High — Cohen's d 95% CI lower",
+    "value": 2.775542619
+   },
+   {
+    "label": "High — Cohen's d 95% CI upper",
+    "value": 11.32820942
+   },
+   {
     "label": "High — Hedges' g",
     "value": 5.910970064
+   },
+   {
+    "label": "High — Hedges' g 95% CI lower",
+    "value": 2.3335338
+   },
+   {
+    "label": "High — Hedges' g 95% CI upper",
+    "value": 9.524177147
    },
    {
     "label": "Sparse — t",
@@ -767,8 +887,24 @@
     "value": -1.1
    },
    {
+    "label": "Sparse — Cohen's d 95% CI lower",
+    "value": -2.344594618
+   },
+   {
+    "label": "Sparse — Cohen's d 95% CI upper",
+    "value": 0.2329579328
+   },
+   {
     "label": "Sparse — Hedges' g",
     "value": -0.79596138
+   },
+   {
+    "label": "Sparse — Hedges' g 95% CI lower",
+    "value": -1.696551607
+   },
+   {
+    "label": "Sparse — Hedges' g 95% CI upper",
+    "value": 0.1685686524
    }
   ],
   "groups": [
@@ -1155,6 +1291,16 @@
     "value": 0.8330563806
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.4096752805,
+    "partialEta2": 0.4096752805,
+    "cohensF": 0.8330563806,
+    "partialEta2Lo": 0.03441037262,
+    "partialEta2Hi": 0.5783426835
+   }
+  ],
   "groups": [
    {
     "name": "Control",
@@ -1189,7 +1335,7 @@
     "n": 4
    }
   ],
-  "notes": "Compares means across groups; assumes normal distributions with equal variances.",
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor).",
   "analyzed": {
    "sets": [
     {
@@ -1254,6 +1400,16 @@
     "value": 0.8330563806
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.4096752805,
+    "partialEta2": 0.4096752805,
+    "cohensF": 0.8330563806,
+    "partialEta2Lo": 0.03441037262,
+    "partialEta2Hi": 0.5783426835
+   }
+  ],
   "groups": [
    {
     "name": "Control",
@@ -1288,7 +1444,7 @@
     "n": 4
    }
   ],
-  "notes": "Compares means across groups; assumes normal distributions with equal variances.",
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor).",
   "comparisons": [
    {
     "group1": "Control",
@@ -1404,6 +1560,16 @@
     "value": 0.8330563806
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.4096752805,
+    "partialEta2": 0.4096752805,
+    "cohensF": 0.8330563806,
+    "partialEta2Lo": 0.03441037262,
+    "partialEta2Hi": 0.5783426835
+   }
+  ],
   "groups": [
    {
     "name": "Control",
@@ -1438,7 +1604,7 @@
     "n": 4
    }
   ],
-  "notes": "Compares means across groups; assumes normal distributions with equal variances.",
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor).",
   "comparisons": [
    {
     "group1": "Control",
@@ -1554,6 +1720,16 @@
     "value": 0.8330563806
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.4096752805,
+    "partialEta2": 0.4096752805,
+    "cohensF": 0.8330563806,
+    "partialEta2Lo": 0.03441037262,
+    "partialEta2Hi": 0.5783426835
+   }
+  ],
   "groups": [
    {
     "name": "Control",
@@ -1588,7 +1764,7 @@
     "n": 4
    }
   ],
-  "notes": "Compares means across groups; assumes normal distributions with equal variances.",
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor).",
   "comparisons": [
    {
     "group1": "Low",
@@ -1680,6 +1856,16 @@
     "value": 0.8330563806
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.4096752805,
+    "partialEta2": 0.4096752805,
+    "cohensF": 0.8330563806,
+    "partialEta2Lo": 0.03441037262,
+    "partialEta2Hi": 0.5783426835
+   }
+  ],
   "groups": [
    {
     "name": "Control",
@@ -1714,7 +1900,7 @@
     "n": 4
    }
   ],
-  "notes": "Compares means across groups; assumes normal distributions with equal variances.",
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor).",
   "comparisons": [
    {
     "group1": "Control",
@@ -1830,6 +2016,16 @@
     "value": 0.8330563806
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.4096752805,
+    "partialEta2": 0.4096752805,
+    "cohensF": 0.8330563806,
+    "partialEta2Lo": 0.03441037262,
+    "partialEta2Hi": 0.5783426835
+   }
+  ],
   "groups": [
    {
     "name": "Control",
@@ -1864,7 +2060,7 @@
     "n": 4
    }
   ],
-  "notes": "Compares means across groups; assumes normal distributions with equal variances.",
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor).",
   "comparisons": [
    {
     "group1": "Control",
@@ -1968,6 +2164,16 @@
     "value": 0.8330563806
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.4096752805,
+    "partialEta2": 0.4096752805,
+    "cohensF": 0.8330563806,
+    "partialEta2Lo": 0.03441037262,
+    "partialEta2Hi": 0.5783426835
+   }
+  ],
   "groups": [
    {
     "name": "Control",
@@ -2002,7 +2208,7 @@
     "n": 4
    }
   ],
-  "notes": "Compares means across groups; assumes normal distributions with equal variances. Fisher's LSD is uncorrected — only interpretable when the overall ANOVA was significant.",
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor). Fisher's LSD is uncorrected — only interpretable when the overall ANOVA was significant.",
   "comparisons": [
    {
     "group1": "Control",
@@ -2132,6 +2338,16 @@
    {
     "label": "Geometric mean (Sparse)",
     "value": 10.56821001
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.5428188982,
+    "partialEta2": 0.5428188982,
+    "cohensF": 1.089640771,
+    "partialEta2Lo": 0.1555200478,
+    "partialEta2Hi": 0.6789068775
    }
   ],
   "groups": [
@@ -2299,6 +2515,16 @@
    {
     "label": "Geometric mean (Sparse)",
     "value": 10.56821001
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.5428188982,
+    "partialEta2": 0.5428188982,
+    "cohensF": 1.089640771,
+    "partialEta2Lo": 0.1555200478,
+    "partialEta2Hi": 0.6789068775
    }
   ],
   "groups": [
@@ -2604,6 +2830,16 @@
     "value": 0.8330563806
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.4096752805,
+    "partialEta2": 0.4096752805,
+    "cohensF": 0.8330563806,
+    "partialEta2Lo": 0.03441037262,
+    "partialEta2Hi": 0.5783426835
+   }
+  ],
   "groups": [
    {
     "name": "Control",
@@ -2638,7 +2874,7 @@
     "n": 4
    }
   ],
-  "notes": "Compares means across groups; assumes normal distributions with equal variances.",
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor).",
   "comparisons": [
    {
     "group1": "Control",
@@ -2948,6 +3184,24 @@
     "value": 0.9756860691
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Treatment",
+    "eta2": 0.9756860691,
+    "partialEta2": 0.978721345,
+    "cohensF": 6.781994662,
+    "partialEta2Lo": 0.440924817,
+    "partialEta2Hi": 0.9819532847
+   },
+   {
+    "effect": "Matching (subjects)",
+    "eta2": 0.003101266695,
+    "partialEta2": null,
+    "cohensF": null,
+    "partialEta2Lo": null,
+    "partialEta2Hi": null
+   }
+  ],
   "groups": [
    {
     "name": "Control",
@@ -3091,6 +3345,24 @@
     "value": 0.9756860691
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Treatment",
+    "eta2": 0.9756860691,
+    "partialEta2": 0.978721345,
+    "cohensF": 6.781994662,
+    "partialEta2Lo": 0.440924817,
+    "partialEta2Hi": 0.9819532847
+   },
+   {
+    "effect": "Matching (subjects)",
+    "eta2": 0.003101266695,
+    "partialEta2": null,
+    "cohensF": null,
+    "partialEta2Lo": null,
+    "partialEta2Hi": null
+   }
+  ],
   "groups": [
    {
     "name": "Control",
@@ -3220,6 +3492,24 @@
    {
     "label": "R squared (eta squared)",
     "value": 0.9756860691
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Treatment",
+    "eta2": 0.9756860691,
+    "partialEta2": 0.978721345,
+    "cohensF": 6.781994662,
+    "partialEta2Lo": 0.440924817,
+    "partialEta2Hi": 0.9819532847
+   },
+   {
+    "effect": "Matching (subjects)",
+    "eta2": 0.003101266695,
+    "partialEta2": null,
+    "cohensF": null,
+    "partialEta2Lo": null,
+    "partialEta2Hi": null
    }
   ],
   "groups": [
@@ -4029,6 +4319,16 @@
     "value": 0.8330563806
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.4096752805,
+    "partialEta2": 0.4096752805,
+    "cohensF": 0.8330563806,
+    "partialEta2Lo": 0.03441037262,
+    "partialEta2Hi": 0.5783426835
+   }
+  ],
   "groups": [
    {
     "name": "Control",
@@ -4063,7 +4363,7 @@
     "n": 4
    }
   ],
-  "notes": "Compares means across groups; assumes normal distributions with equal variances. The False Discovery Rate (Benjamini-Hochberg) controls the expected share of false discoveries among the comparisons called significant, rather than the chance of any false positive; no confidence intervals are reported for it.",
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor). The False Discovery Rate (Benjamini-Hochberg) controls the expected share of false discoveries among the comparisons called significant, rather than the chance of any false positive; no confidence intervals are reported for it.",
   "comparisons": [
    {
     "group1": "Control",
@@ -4314,6 +4614,16 @@
     "value": 0.8330563806
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.4096752805,
+    "partialEta2": 0.4096752805,
+    "cohensF": 0.8330563806,
+    "partialEta2Lo": 0.03441037262,
+    "partialEta2Hi": 0.5783426835
+   }
+  ],
   "groups": [
    {
     "name": "Control",
@@ -4348,7 +4658,7 @@
     "n": 4
    }
   ],
-  "notes": "Compares means across groups; assumes normal distributions with equal variances. The False Discovery Rate (Benjamini-Hochberg) controls the expected share of false discoveries among the comparisons called significant, rather than the chance of any false positive; no confidence intervals are reported for it.",
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor). The False Discovery Rate (Benjamini-Hochberg) controls the expected share of false discoveries among the comparisons called significant, rather than the chance of any false positive; no confidence intervals are reported for it.",
   "comparisons": [
    {
     "group1": "Control",
@@ -4573,6 +4883,16 @@
     "p": true
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.4096752805,
+    "partialEta2": 0.4096752805,
+    "cohensF": 0.8330563806,
+    "partialEta2Lo": 0.03441037262,
+    "partialEta2Hi": 0.5783426835
+   }
+  ],
   "groups": [
    {
     "name": "Control",
@@ -4607,7 +4927,7 @@
     "n": 4
    }
   ],
-  "notes": "Compares means across groups; assumes normal distributions with equal variances. The test for linear trend fits the group means against column order (1, 2, 3, …) — the columns must be in a natural order and equally spaced — and tests the linear trend against the ordinary ANOVA's residual mean square; the nonlinear trend is the rest of the between-group variation.",
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor). The test for linear trend fits the group means against column order (1, 2, 3, …) — the columns must be in a natural order and equally spaced — and tests the linear trend against the ordinary ANOVA's residual mean square; the nonlinear trend is the rest of the between-group variation.",
   "analyzed": {
    "sets": [
     {
@@ -4783,6 +5103,24 @@
     "value": 0.9756860691
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Treatment",
+    "eta2": 0.9756860691,
+    "partialEta2": 0.978721345,
+    "cohensF": 6.781994662,
+    "partialEta2Lo": 0.440924817,
+    "partialEta2Hi": 0.9819532847
+   },
+   {
+    "effect": "Matching (subjects)",
+    "eta2": 0.003101266695,
+    "partialEta2": null,
+    "cohensF": null,
+    "partialEta2Lo": null,
+    "partialEta2Hi": null
+   }
+  ],
   "groups": [
    {
     "name": "Control",
@@ -4873,6 +5211,24 @@
    {
     "label": "R squared (eta squared)",
     "value": 0.9756860691
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Treatment",
+    "eta2": 0.9756860691,
+    "partialEta2": 0.978721345,
+    "cohensF": 6.781994662,
+    "partialEta2Lo": 0.440924817,
+    "partialEta2Hi": 0.9819532847
+   },
+   {
+    "effect": "Matching (subjects)",
+    "eta2": 0.003101266695,
+    "partialEta2": null,
+    "cohensF": null,
+    "partialEta2Lo": null,
+    "partialEta2Hi": null
    }
   ],
   "groups": [
@@ -5016,6 +5372,24 @@
    {
     "label": "R squared (eta squared)",
     "value": 0.9756860691
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Treatment",
+    "eta2": 0.9756860691,
+    "partialEta2": 0.978721345,
+    "cohensF": 6.781994662,
+    "partialEta2Lo": 0.440924817,
+    "partialEta2Hi": 0.9819532847
+   },
+   {
+    "effect": "Matching (subjects)",
+    "eta2": 0.003101266695,
+    "partialEta2": null,
+    "cohensF": null,
+    "partialEta2Lo": null,
+    "partialEta2Hi": null
    }
   ],
   "groups": [
@@ -5278,6 +5652,24 @@
     "value": 0.6851196384
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Treatment",
+    "eta2": 0.6851196384,
+    "partialEta2": 0.8137614158,
+    "cohensF": 2.090324526,
+    "partialEta2Lo": 0.3266226574,
+    "partialEta2Hi": 0.8466430909
+   },
+   {
+    "effect": "Matching (subjects)",
+    "eta2": 0.1580829158,
+    "partialEta2": null,
+    "cohensF": null,
+    "partialEta2Lo": null,
+    "partialEta2Hi": null
+   }
+  ],
   "groups": [
    {
     "name": "Day 0",
@@ -5360,6 +5752,24 @@
    {
     "label": "Geisser-Greenhouse epsilon",
     "value": 0.5053820527
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Treatment",
+    "eta2": 0.6851196384,
+    "partialEta2": 0.8137614158,
+    "cohensF": 2.090324526,
+    "partialEta2Lo": 0.07503331522,
+    "partialEta2Hi": 0.7831256475
+   },
+   {
+    "effect": "Matching (subjects)",
+    "eta2": 0.1580829158,
+    "partialEta2": null,
+    "cohensF": null,
+    "partialEta2Lo": null,
+    "partialEta2Hi": null
    }
   ],
   "groups": [
@@ -5475,6 +5885,24 @@
    {
     "label": "Geisser-Greenhouse epsilon",
     "value": 0.5053820527
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Treatment",
+    "eta2": 0.6851196384,
+    "partialEta2": 0.8137614158,
+    "cohensF": 2.090324526,
+    "partialEta2Lo": 0.07503331522,
+    "partialEta2Hi": 0.7831256475
+   },
+   {
+    "effect": "Matching (subjects)",
+    "eta2": 0.1580829158,
+    "partialEta2": null,
+    "cohensF": null,
+    "partialEta2Lo": null,
+    "partialEta2Hi": null
    }
   ],
   "groups": [
@@ -8385,7 +8813,7 @@
     "n": 8
    }
   ],
-  "notes": "Pearson correlation between every pair of variables, computed on pairwise-complete rows; assumes linear relationships.",
+  "notes": "Pearson correlation between every pair of variables, computed on pairwise-complete rows; assumes linear relationships. Each r carries its 95% confidence interval.",
   "matrix": {
    "variables": [
     "Y1",
@@ -8423,6 +8851,40 @@
     [
      0.9866120358,
      0.9625595434,
+     null
+    ]
+   ],
+   "lo": [
+    [
+     null,
+     0.9804243937,
+     -0.7010599688
+    ],
+    [
+     0.9804243937,
+     null,
+     -0.8028626074
+    ],
+    [
+     -0.7010599688,
+     -0.8028626074,
+     null
+    ]
+   ],
+   "hi": [
+    [
+     null,
+     0.999607808,
+     0.7082497114
+    ],
+    [
+     0.999607808,
+     null,
+     0.8199144615
+    ],
+    [
+     0.7082497114,
+     0.8199144615,
      null
     ]
    ],
@@ -30544,6 +31006,32 @@
     "n": 14
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.5080452982,
+    "partialEta2": 0.9587900295,
+    "cohensF": 4.823481338,
+    "partialEta2Lo": 0.8913048163,
+    "partialEta2Hi": 0.96086275
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.3638509582,
+    "partialEta2": 0.9433831352,
+    "cohensF": 4.08198257,
+    "partialEta2Lo": 0.8518638746,
+    "partialEta2Hi": 0.9463551604
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.106267334,
+    "partialEta2": 0.8295412067,
+    "cohensF": 2.206019145,
+    "partialEta2Lo": 0.5814325169,
+    "partialEta2Hi": 0.8405529993
+   }
+  ],
   "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
   "analyzed": {
    "sets": [
@@ -30644,6 +31132,32 @@
     "sem": 0.44474959,
     "median": 12,
     "n": 14
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.5080452982,
+    "partialEta2": 0.9587900295,
+    "cohensF": 4.823481338,
+    "partialEta2Lo": 0.8913048163,
+    "partialEta2Hi": 0.96086275
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.3638509582,
+    "partialEta2": 0.9433831352,
+    "cohensF": 4.08198257,
+    "partialEta2Lo": 0.8518638746,
+    "partialEta2Hi": 0.9463551604
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.106267334,
+    "partialEta2": 0.8295412067,
+    "cohensF": 2.206019145,
+    "partialEta2Lo": 0.5814325169,
+    "partialEta2Hi": 0.8405529993
    }
   ],
   "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
@@ -31019,6 +31533,32 @@
     "sem": 0.44474959,
     "median": 12,
     "n": 14
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.5080452982,
+    "partialEta2": 0.9587900295,
+    "cohensF": 4.823481338,
+    "partialEta2Lo": 0.8913048163,
+    "partialEta2Hi": 0.96086275
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.3638509582,
+    "partialEta2": 0.9433831352,
+    "cohensF": 4.08198257,
+    "partialEta2Lo": 0.8518638746,
+    "partialEta2Hi": 0.9463551604
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.106267334,
+    "partialEta2": 0.8295412067,
+    "cohensF": 2.206019145,
+    "partialEta2Lo": 0.5814325169,
+    "partialEta2Hi": 0.8405529993
    }
   ],
   "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
@@ -31666,6 +32206,32 @@
     "n": 14
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.5080452982,
+    "partialEta2": 0.9587900295,
+    "cohensF": 4.823481338,
+    "partialEta2Lo": 0.8913048163,
+    "partialEta2Hi": 0.96086275
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.3638509582,
+    "partialEta2": 0.9433831352,
+    "cohensF": 4.08198257,
+    "partialEta2Lo": 0.8518638746,
+    "partialEta2Hi": 0.9463551604
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.106267334,
+    "partialEta2": 0.8295412067,
+    "cohensF": 2.206019145,
+    "partialEta2Lo": 0.5814325169,
+    "partialEta2Hi": 0.8405529993
+   }
+  ],
   "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
   "comparisons": [
    {
@@ -32039,6 +32605,32 @@
     "sem": 0.44474959,
     "median": 12,
     "n": 14
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.5080452982,
+    "partialEta2": 0.9587900295,
+    "cohensF": 4.823481338,
+    "partialEta2Lo": 0.8913048163,
+    "partialEta2Hi": 0.96086275
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.3638509582,
+    "partialEta2": 0.9433831352,
+    "cohensF": 4.08198257,
+    "partialEta2Lo": 0.8518638746,
+    "partialEta2Hi": 0.9463551604
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.106267334,
+    "partialEta2": 0.8295412067,
+    "cohensF": 2.206019145,
+    "partialEta2Lo": 0.5814325169,
+    "partialEta2Hi": 0.8405529993
    }
   ],
   "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
@@ -32686,6 +33278,32 @@
     "n": 14
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.5080452982,
+    "partialEta2": 0.9587900295,
+    "cohensF": 4.823481338,
+    "partialEta2Lo": 0.8913048163,
+    "partialEta2Hi": 0.96086275
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.3638509582,
+    "partialEta2": 0.9433831352,
+    "cohensF": 4.08198257,
+    "partialEta2Lo": 0.8518638746,
+    "partialEta2Hi": 0.9463551604
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.106267334,
+    "partialEta2": 0.8295412067,
+    "cohensF": 2.206019145,
+    "partialEta2Lo": 0.5814325169,
+    "partialEta2Hi": 0.8405529993
+   }
+  ],
   "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
   "comparisons": [
    {
@@ -33059,6 +33677,32 @@
     "sem": 0.44474959,
     "median": 12,
     "n": 14
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.5080452982,
+    "partialEta2": 0.9587900295,
+    "cohensF": 4.823481338,
+    "partialEta2Lo": 0.8913048163,
+    "partialEta2Hi": 0.96086275
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.3638509582,
+    "partialEta2": 0.9433831352,
+    "cohensF": 4.08198257,
+    "partialEta2Lo": 0.8518638746,
+    "partialEta2Hi": 0.9463551604
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.106267334,
+    "partialEta2": 0.8295412067,
+    "cohensF": 2.206019145,
+    "partialEta2Lo": 0.5814325169,
+    "partialEta2Hi": 0.8405529993
    }
   ],
   "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares). FDR approach (Benjamini-Hochberg, Q = 5%): 13 of 15 comparisons are discoveries (adjusted P < 0.05). The P values are FDR-adjusted.",
@@ -33436,6 +34080,32 @@
     "n": 14
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.5080452982,
+    "partialEta2": 0.9587900295,
+    "cohensF": 4.823481338,
+    "partialEta2Lo": 0.8913048163,
+    "partialEta2Hi": 0.96086275
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.3638509582,
+    "partialEta2": 0.9433831352,
+    "cohensF": 4.08198257,
+    "partialEta2Lo": 0.8518638746,
+    "partialEta2Hi": 0.9463551604
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.106267334,
+    "partialEta2": 0.8295412067,
+    "cohensF": 2.206019145,
+    "partialEta2Lo": 0.5814325169,
+    "partialEta2Hi": 0.8405529993
+   }
+  ],
   "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares). FDR approach (Benjamini-Krieger-Yekutieli (two-stage), Q = 10%): 15 of 15 comparisons are discoveries (adjusted P < 0.1). The P values are FDR-adjusted.",
   "comparisons": [
    {
@@ -33809,6 +34479,32 @@
     "sem": 0.44474959,
     "median": 12,
     "n": 14
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.5080452982,
+    "partialEta2": 0.9587900295,
+    "cohensF": 4.823481338,
+    "partialEta2Lo": 0.8913048163,
+    "partialEta2Hi": 0.96086275
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.3638509582,
+    "partialEta2": 0.9433831352,
+    "cohensF": 4.08198257,
+    "partialEta2Lo": 0.8518638746,
+    "partialEta2Hi": 0.9463551604
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.106267334,
+    "partialEta2": 0.8295412067,
+    "cohensF": 2.206019145,
+    "partialEta2Lo": 0.5814325169,
+    "partialEta2Hi": 0.8405529993
    }
   ],
   "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares). FDR approach (Benjamini-Yekutieli, Q = 5%): 20 of 30 comparisons are discoveries (adjusted P < 0.05). The P values are FDR-adjusted.",
@@ -34454,6 +35150,32 @@
     "sem": 0.44474959,
     "median": 12,
     "n": 14
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.5080452982,
+    "partialEta2": 0.9587900295,
+    "cohensF": 4.823481338,
+    "partialEta2Lo": 0.8913048163,
+    "partialEta2Hi": 0.96086275
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.3638509582,
+    "partialEta2": 0.9433831352,
+    "cohensF": 4.08198257,
+    "partialEta2Lo": 0.8518638746,
+    "partialEta2Hi": 0.9463551604
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.106267334,
+    "partialEta2": 0.8295412067,
+    "cohensF": 2.206019145,
+    "partialEta2Lo": 0.5814325169,
+    "partialEta2Hi": 0.8405529993
    }
   ],
   "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
@@ -36451,6 +37173,32 @@
     "n": 14
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.5080452982,
+    "partialEta2": 0.9587900295,
+    "cohensF": 4.823481338,
+    "partialEta2Lo": 0.8913048163,
+    "partialEta2Hi": 0.96086275
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.3638509582,
+    "partialEta2": 0.9433831352,
+    "cohensF": 4.08198257,
+    "partialEta2Lo": 0.8518638746,
+    "partialEta2Hi": 0.9463551604
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.106267334,
+    "partialEta2": 0.8295412067,
+    "cohensF": 2.206019145,
+    "partialEta2Lo": 0.5814325169,
+    "partialEta2Hi": 0.8405529993
+   }
+  ],
   "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
   "comparisons": [
    {
@@ -36808,6 +37556,32 @@
     "n": 14
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.5080452982,
+    "partialEta2": 0.9587900295,
+    "cohensF": 4.823481338,
+    "partialEta2Lo": 0.8913048163,
+    "partialEta2Hi": 0.96086275
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.3638509582,
+    "partialEta2": 0.9433831352,
+    "cohensF": 4.08198257,
+    "partialEta2Lo": 0.8518638746,
+    "partialEta2Hi": 0.9463551604
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.106267334,
+    "partialEta2": 0.8295412067,
+    "cohensF": 2.206019145,
+    "partialEta2Lo": 0.5814325169,
+    "partialEta2Hi": 0.8405529993
+   }
+  ],
   "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
   "comparisons": [
    {
@@ -36935,6 +37709,32 @@
     "sem": 0.44474959,
     "median": 12,
     "n": 14
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.5080452982,
+    "partialEta2": 0.9587900295,
+    "cohensF": 4.823481338,
+    "partialEta2Lo": 0.8913048163,
+    "partialEta2Hi": 0.96086275
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.3638509582,
+    "partialEta2": 0.9433831352,
+    "cohensF": 4.08198257,
+    "partialEta2Lo": 0.8518638746,
+    "partialEta2Hi": 0.9463551604
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.106267334,
+    "partialEta2": 0.8295412067,
+    "cohensF": 2.206019145,
+    "partialEta2Lo": 0.5814325169,
+    "partialEta2Hi": 0.8405529993
    }
   ],
   "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
@@ -37128,6 +37928,32 @@
     "sem": 0.5467073156,
     "median": 12,
     "n": 10
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.4780471909,
+    "partialEta2": 0.9838605055,
+    "cohensF": 7.807676304,
+    "partialEta2Lo": 0.5381469783,
+    "partialEta2Hi": 0.9518111893
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.4066411321,
+    "partialEta2": 0.9670706609,
+    "cohensF": 5.419230163,
+    "partialEta2Lo": 0.5889930618,
+    "partialEta2Hi": 0.9285860424
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.09362329525,
+    "partialEta2": 0.8711601551,
+    "cohensF": 2.600302689,
+    "partialEta2Lo": 0.1744421734,
+    "partialEta2Hi": 0.7581689027
    }
   ],
   "notes": "Matched by row: each replicate column is treated as the same subject across every row within its group. Sphericity not assumed: the Geisser-Greenhouse epsilon corrects the degrees of freedom of the row and interaction effects, and each comparison has its own error (rows within a group: a paired t test; groups within a row: that row's pooled SD). 1 replicate column excluded (missing a value in at least one row). FDR approach (Benjamini-Hochberg, Q = 5%): 12 of 15 comparisons are discoveries (adjusted P < 0.05). The P values are FDR-adjusted.",
@@ -37507,6 +38333,32 @@
     "n": 10
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.4780471909,
+    "partialEta2": 0.9838605055,
+    "cohensF": 7.807676304,
+    "partialEta2Lo": 0.5381469783,
+    "partialEta2Hi": 0.9518111893
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.4066411321,
+    "partialEta2": 0.9670706609,
+    "cohensF": 5.419230163,
+    "partialEta2Lo": 0.5889930618,
+    "partialEta2Hi": 0.9285860424
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.09362329525,
+    "partialEta2": 0.8711601551,
+    "cohensF": 2.600302689,
+    "partialEta2Lo": 0.1744421734,
+    "partialEta2Hi": 0.7581689027
+   }
+  ],
   "notes": "Matched by row: each replicate column is treated as the same subject across every row within its group. Sphericity not assumed: the Geisser-Greenhouse epsilon corrects the degrees of freedom of the row and interaction effects, and each comparison has its own error (rows within a group: a paired t test; groups within a row: that row's pooled SD). 1 replicate column excluded (missing a value in at least one row).",
   "comparisons": [
    {
@@ -37870,6 +38722,32 @@
     "sem": 0.5467073156,
     "median": 12,
     "n": 10
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.4780471909,
+    "partialEta2": 0.9838605055,
+    "cohensF": 7.807676304,
+    "partialEta2Lo": 0.5381469783,
+    "partialEta2Hi": 0.9518111893
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.4066411321,
+    "partialEta2": 0.9670706609,
+    "cohensF": 5.419230163,
+    "partialEta2Lo": 0.8707876847,
+    "partialEta2Hi": 0.9621029648
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.09362329525,
+    "partialEta2": 0.8711601551,
+    "cohensF": 2.600302689,
+    "partialEta2Lo": 0.5549017579,
+    "partialEta2Hi": 0.8563150194
    }
   ],
   "notes": "Matched by row: each replicate column is treated as the same subject across every row within its group. Assumes sphericity (no Geisser-Greenhouse correction). 1 replicate column excluded (missing a value in at least one row).",
@@ -38249,6 +39127,32 @@
     "n": 10
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.4780471909,
+    "partialEta2": 0.9838605055,
+    "cohensF": 7.807676304,
+    "partialEta2Lo": 0.5381469783,
+    "partialEta2Hi": 0.9518111893
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.4066411321,
+    "partialEta2": 0.9670706609,
+    "cohensF": 5.419230163,
+    "partialEta2Lo": 0.5889930618,
+    "partialEta2Hi": 0.9285860424
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.09362329525,
+    "partialEta2": 0.8711601551,
+    "cohensF": 2.600302689,
+    "partialEta2Lo": 0.1744421734,
+    "partialEta2Hi": 0.7581689027
+   }
+  ],
   "notes": "Matched by row: each replicate column is treated as the same subject across every row within its group. Sphericity not assumed: the Geisser-Greenhouse epsilon corrects the degrees of freedom of the row and interaction effects, and each comparison has its own error (rows within a group: a paired t test; groups within a row: that row's pooled SD). 1 replicate column excluded (missing a value in at least one row).",
   "comparisons": [
    {
@@ -38624,6 +39528,32 @@
     "sem": 0.5467073156,
     "median": 12,
     "n": 10
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.4780471909,
+    "partialEta2": 0.9838605055,
+    "cohensF": 7.807676304,
+    "partialEta2Lo": 0.5381469783,
+    "partialEta2Hi": 0.9518111893
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.4066411321,
+    "partialEta2": 0.9670706609,
+    "cohensF": 5.419230163,
+    "partialEta2Lo": 0.5889930618,
+    "partialEta2Hi": 0.9285860424
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.09362329525,
+    "partialEta2": 0.8711601551,
+    "cohensF": 2.600302689,
+    "partialEta2Lo": 0.1744421734,
+    "partialEta2Hi": 0.7581689027
    }
   ],
   "notes": "Matched by row: each replicate column is treated as the same subject across every row within its group. Sphericity not assumed: the Geisser-Greenhouse epsilon corrects the degrees of freedom of the row and interaction effects, and each comparison has its own error (rows within a group: a paired t test; groups within a row: that row's pooled SD). 1 replicate column excluded (missing a value in at least one row).",
@@ -41053,6 +41983,64 @@
     "n": 12
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "A — Group",
+    "eta2": 0.2409486792,
+    "partialEta2": 0.8878579077,
+    "cohensF": 2.813762299,
+    "partialEta2Lo": 0.6640316715,
+    "partialEta2Hi": 0.9096974095
+   },
+   {
+    "effect": "B — Row",
+    "eta2": 0.401847404,
+    "partialEta2": 0.9295981878,
+    "cohensF": 3.633755607,
+    "partialEta2Lo": 0.7770534815,
+    "partialEta2Hi": 0.9426450454
+   },
+   {
+    "effect": "C — Row group",
+    "eta2": 0.06560411081,
+    "partialEta2": 0.6831096051,
+    "cohensF": 1.468218385,
+    "partialEta2Lo": 0.2748026272,
+    "partialEta2Hi": 0.7567437684
+   },
+   {
+    "effect": "A:B",
+    "eta2": 0.05686734035,
+    "partialEta2": 0.6513962396,
+    "cohensF": 1.366962466,
+    "partialEta2Lo": 0.2341296956,
+    "partialEta2Hi": 0.733995626
+   },
+   {
+    "effect": "A:C",
+    "eta2": 0.005284989679,
+    "partialEta2": 0.1479629224,
+    "cohensF": 0.416722743,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.3613534298
+   },
+   {
+    "effect": "B:C",
+    "eta2": 0.1822549128,
+    "partialEta2": 0.8569110105,
+    "cohensF": 2.447173456,
+    "partialEta2Lo": 0.5885987067,
+    "partialEta2Hi": 0.8857209821
+   },
+   {
+    "effect": "A:B:C",
+    "eta2": 0.01675921486,
+    "partialEta2": 0.3551240643,
+    "cohensF": 0.7420821167,
+    "partialEta2Lo": 0.02065595025,
+    "partialEta2Hi": 0.5241424911
+   }
+  ],
   "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells."
  },
  "three-way-anova grouped3way {\"posthoc\":\"tukey\",\"posthocTerm\":\"A:B\"}": {
@@ -41171,6 +42159,64 @@
     "sem": 1.029973636,
     "median": 13.71392836,
     "n": 12
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "A — Group",
+    "eta2": 0.2409486792,
+    "partialEta2": 0.8878579077,
+    "cohensF": 2.813762299,
+    "partialEta2Lo": 0.6640316715,
+    "partialEta2Hi": 0.9096974095
+   },
+   {
+    "effect": "B — Row",
+    "eta2": 0.401847404,
+    "partialEta2": 0.9295981878,
+    "cohensF": 3.633755607,
+    "partialEta2Lo": 0.7770534815,
+    "partialEta2Hi": 0.9426450454
+   },
+   {
+    "effect": "C — Row group",
+    "eta2": 0.06560411081,
+    "partialEta2": 0.6831096051,
+    "cohensF": 1.468218385,
+    "partialEta2Lo": 0.2748026272,
+    "partialEta2Hi": 0.7567437684
+   },
+   {
+    "effect": "A:B",
+    "eta2": 0.05686734035,
+    "partialEta2": 0.6513962396,
+    "cohensF": 1.366962466,
+    "partialEta2Lo": 0.2341296956,
+    "partialEta2Hi": 0.733995626
+   },
+   {
+    "effect": "A:C",
+    "eta2": 0.005284989679,
+    "partialEta2": 0.1479629224,
+    "cohensF": 0.416722743,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.3613534298
+   },
+   {
+    "effect": "B:C",
+    "eta2": 0.1822549128,
+    "partialEta2": 0.8569110105,
+    "cohensF": 2.447173456,
+    "partialEta2Lo": 0.5885987067,
+    "partialEta2Hi": 0.8857209821
+   },
+   {
+    "effect": "A:B:C",
+    "eta2": 0.01675921486,
+    "partialEta2": 0.3551240643,
+    "cohensF": 0.7420821167,
+    "partialEta2Lo": 0.02065595025,
+    "partialEta2Hi": 0.5241424911
    }
   ],
   "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B term (A:B cell means).",
@@ -41342,6 +42388,64 @@
     "sem": 1.029973636,
     "median": 13.71392836,
     "n": 12
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "A — Group",
+    "eta2": 0.2409486792,
+    "partialEta2": 0.8878579077,
+    "cohensF": 2.813762299,
+    "partialEta2Lo": 0.6640316715,
+    "partialEta2Hi": 0.9096974095
+   },
+   {
+    "effect": "B — Row",
+    "eta2": 0.401847404,
+    "partialEta2": 0.9295981878,
+    "cohensF": 3.633755607,
+    "partialEta2Lo": 0.7770534815,
+    "partialEta2Hi": 0.9426450454
+   },
+   {
+    "effect": "C — Row group",
+    "eta2": 0.06560411081,
+    "partialEta2": 0.6831096051,
+    "cohensF": 1.468218385,
+    "partialEta2Lo": 0.2748026272,
+    "partialEta2Hi": 0.7567437684
+   },
+   {
+    "effect": "A:B",
+    "eta2": 0.05686734035,
+    "partialEta2": 0.6513962396,
+    "cohensF": 1.366962466,
+    "partialEta2Lo": 0.2341296956,
+    "partialEta2Hi": 0.733995626
+   },
+   {
+    "effect": "A:C",
+    "eta2": 0.005284989679,
+    "partialEta2": 0.1479629224,
+    "cohensF": 0.416722743,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.3613534298
+   },
+   {
+    "effect": "B:C",
+    "eta2": 0.1822549128,
+    "partialEta2": 0.8569110105,
+    "cohensF": 2.447173456,
+    "partialEta2Lo": 0.5885987067,
+    "partialEta2Hi": 0.8857209821
+   },
+   {
+    "effect": "A:B:C",
+    "eta2": 0.01675921486,
+    "partialEta2": 0.3551240643,
+    "cohensF": 0.7420821167,
+    "partialEta2Lo": 0.02065595025,
+    "partialEta2Hi": 0.5241424911
    }
   ],
   "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B:C term (A:B:C cell means).",
@@ -41691,6 +42795,64 @@
     "n": 12
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "A — Group",
+    "eta2": 0.2409486792,
+    "partialEta2": 0.8878579077,
+    "cohensF": 2.813762299,
+    "partialEta2Lo": 0.6640316715,
+    "partialEta2Hi": 0.9096974095
+   },
+   {
+    "effect": "B — Row",
+    "eta2": 0.401847404,
+    "partialEta2": 0.9295981878,
+    "cohensF": 3.633755607,
+    "partialEta2Lo": 0.7770534815,
+    "partialEta2Hi": 0.9426450454
+   },
+   {
+    "effect": "C — Row group",
+    "eta2": 0.06560411081,
+    "partialEta2": 0.6831096051,
+    "cohensF": 1.468218385,
+    "partialEta2Lo": 0.2748026272,
+    "partialEta2Hi": 0.7567437684
+   },
+   {
+    "effect": "A:B",
+    "eta2": 0.05686734035,
+    "partialEta2": 0.6513962396,
+    "cohensF": 1.366962466,
+    "partialEta2Lo": 0.2341296956,
+    "partialEta2Hi": 0.733995626
+   },
+   {
+    "effect": "A:C",
+    "eta2": 0.005284989679,
+    "partialEta2": 0.1479629224,
+    "cohensF": 0.416722743,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.3613534298
+   },
+   {
+    "effect": "B:C",
+    "eta2": 0.1822549128,
+    "partialEta2": 0.8569110105,
+    "cohensF": 2.447173456,
+    "partialEta2Lo": 0.5885987067,
+    "partialEta2Hi": 0.8857209821
+   },
+   {
+    "effect": "A:B:C",
+    "eta2": 0.01675921486,
+    "partialEta2": 0.3551240643,
+    "cohensF": 0.7420821167,
+    "partialEta2Lo": 0.02065595025,
+    "partialEta2Hi": 0.5241424911
+   }
+  ],
   "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B term (A:B cell means).",
   "comparisons": [
    {
@@ -41862,6 +43024,64 @@
     "n": 12
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "A — Group",
+    "eta2": 0.2409486792,
+    "partialEta2": 0.8878579077,
+    "cohensF": 2.813762299,
+    "partialEta2Lo": 0.6640316715,
+    "partialEta2Hi": 0.9096974095
+   },
+   {
+    "effect": "B — Row",
+    "eta2": 0.401847404,
+    "partialEta2": 0.9295981878,
+    "cohensF": 3.633755607,
+    "partialEta2Lo": 0.7770534815,
+    "partialEta2Hi": 0.9426450454
+   },
+   {
+    "effect": "C — Row group",
+    "eta2": 0.06560411081,
+    "partialEta2": 0.6831096051,
+    "cohensF": 1.468218385,
+    "partialEta2Lo": 0.2748026272,
+    "partialEta2Hi": 0.7567437684
+   },
+   {
+    "effect": "A:B",
+    "eta2": 0.05686734035,
+    "partialEta2": 0.6513962396,
+    "cohensF": 1.366962466,
+    "partialEta2Lo": 0.2341296956,
+    "partialEta2Hi": 0.733995626
+   },
+   {
+    "effect": "A:C",
+    "eta2": 0.005284989679,
+    "partialEta2": 0.1479629224,
+    "cohensF": 0.416722743,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.3613534298
+   },
+   {
+    "effect": "B:C",
+    "eta2": 0.1822549128,
+    "partialEta2": 0.8569110105,
+    "cohensF": 2.447173456,
+    "partialEta2Lo": 0.5885987067,
+    "partialEta2Hi": 0.8857209821
+   },
+   {
+    "effect": "A:B:C",
+    "eta2": 0.01675921486,
+    "partialEta2": 0.3551240643,
+    "cohensF": 0.7420821167,
+    "partialEta2Lo": 0.02065595025,
+    "partialEta2Hi": 0.5241424911
+   }
+  ],
   "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A term (A means). No multiplicity-adjusted confidence interval exists for this method, so the comparisons carry none.",
   "comparisons": [
    {
@@ -41991,6 +43211,64 @@
     "sem": 1.029973636,
     "median": 13.71392836,
     "n": 12
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "A — Group",
+    "eta2": 0.2409486792,
+    "partialEta2": 0.8878579077,
+    "cohensF": 2.813762299,
+    "partialEta2Lo": 0.6640316715,
+    "partialEta2Hi": 0.9096974095
+   },
+   {
+    "effect": "B — Row",
+    "eta2": 0.401847404,
+    "partialEta2": 0.9295981878,
+    "cohensF": 3.633755607,
+    "partialEta2Lo": 0.7770534815,
+    "partialEta2Hi": 0.9426450454
+   },
+   {
+    "effect": "C — Row group",
+    "eta2": 0.06560411081,
+    "partialEta2": 0.6831096051,
+    "cohensF": 1.468218385,
+    "partialEta2Lo": 0.2748026272,
+    "partialEta2Hi": 0.7567437684
+   },
+   {
+    "effect": "A:B",
+    "eta2": 0.05686734035,
+    "partialEta2": 0.6513962396,
+    "cohensF": 1.366962466,
+    "partialEta2Lo": 0.2341296956,
+    "partialEta2Hi": 0.733995626
+   },
+   {
+    "effect": "A:C",
+    "eta2": 0.005284989679,
+    "partialEta2": 0.1479629224,
+    "cohensF": 0.416722743,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.3613534298
+   },
+   {
+    "effect": "B:C",
+    "eta2": 0.1822549128,
+    "partialEta2": 0.8569110105,
+    "cohensF": 2.447173456,
+    "partialEta2Lo": 0.5885987067,
+    "partialEta2Hi": 0.8857209821
+   },
+   {
+    "effect": "A:B:C",
+    "eta2": 0.01675921486,
+    "partialEta2": 0.3551240643,
+    "cohensF": 0.7420821167,
+    "partialEta2Lo": 0.02065595025,
+    "partialEta2Hi": 0.5241424911
    }
   ],
   "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B:C term (A:B:C cell means).",
@@ -42340,6 +43618,64 @@
     "n": 12
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "A — Group",
+    "eta2": 0.2409486792,
+    "partialEta2": 0.8878579077,
+    "cohensF": 2.813762299,
+    "partialEta2Lo": 0.6640316715,
+    "partialEta2Hi": 0.9096974095
+   },
+   {
+    "effect": "B — Row",
+    "eta2": 0.401847404,
+    "partialEta2": 0.9295981878,
+    "cohensF": 3.633755607,
+    "partialEta2Lo": 0.7770534815,
+    "partialEta2Hi": 0.9426450454
+   },
+   {
+    "effect": "C — Row group",
+    "eta2": 0.06560411081,
+    "partialEta2": 0.6831096051,
+    "cohensF": 1.468218385,
+    "partialEta2Lo": 0.2748026272,
+    "partialEta2Hi": 0.7567437684
+   },
+   {
+    "effect": "A:B",
+    "eta2": 0.05686734035,
+    "partialEta2": 0.6513962396,
+    "cohensF": 1.366962466,
+    "partialEta2Lo": 0.2341296956,
+    "partialEta2Hi": 0.733995626
+   },
+   {
+    "effect": "A:C",
+    "eta2": 0.005284989679,
+    "partialEta2": 0.1479629224,
+    "cohensF": 0.416722743,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.3613534298
+   },
+   {
+    "effect": "B:C",
+    "eta2": 0.1822549128,
+    "partialEta2": 0.8569110105,
+    "cohensF": 2.447173456,
+    "partialEta2Lo": 0.5885987067,
+    "partialEta2Hi": 0.8857209821
+   },
+   {
+    "effect": "A:B:C",
+    "eta2": 0.01675921486,
+    "partialEta2": 0.3551240643,
+    "cohensF": 0.7420821167,
+    "partialEta2Lo": 0.02065595025,
+    "partialEta2Hi": 0.5241424911
+   }
+  ],
   "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A term (A means).",
   "comparisons": [
    {
@@ -42469,6 +43805,64 @@
     "sem": 1.029973636,
     "median": 13.71392836,
     "n": 12
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "A — Group",
+    "eta2": 0.2409486792,
+    "partialEta2": 0.8878579077,
+    "cohensF": 2.813762299,
+    "partialEta2Lo": 0.6640316715,
+    "partialEta2Hi": 0.9096974095
+   },
+   {
+    "effect": "B — Row",
+    "eta2": 0.401847404,
+    "partialEta2": 0.9295981878,
+    "cohensF": 3.633755607,
+    "partialEta2Lo": 0.7770534815,
+    "partialEta2Hi": 0.9426450454
+   },
+   {
+    "effect": "C — Row group",
+    "eta2": 0.06560411081,
+    "partialEta2": 0.6831096051,
+    "cohensF": 1.468218385,
+    "partialEta2Lo": 0.2748026272,
+    "partialEta2Hi": 0.7567437684
+   },
+   {
+    "effect": "A:B",
+    "eta2": 0.05686734035,
+    "partialEta2": 0.6513962396,
+    "cohensF": 1.366962466,
+    "partialEta2Lo": 0.2341296956,
+    "partialEta2Hi": 0.733995626
+   },
+   {
+    "effect": "A:C",
+    "eta2": 0.005284989679,
+    "partialEta2": 0.1479629224,
+    "cohensF": 0.416722743,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.3613534298
+   },
+   {
+    "effect": "B:C",
+    "eta2": 0.1822549128,
+    "partialEta2": 0.8569110105,
+    "cohensF": 2.447173456,
+    "partialEta2Lo": 0.5885987067,
+    "partialEta2Hi": 0.8857209821
+   },
+   {
+    "effect": "A:B:C",
+    "eta2": 0.01675921486,
+    "partialEta2": 0.3551240643,
+    "cohensF": 0.7420821167,
+    "partialEta2Lo": 0.02065595025,
+    "partialEta2Hi": 0.5241424911
    }
   ],
   "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B term (A:B cell means).",
@@ -42642,6 +44036,64 @@
     "n": 12
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "A — Group",
+    "eta2": 0.2409486792,
+    "partialEta2": 0.8878579077,
+    "cohensF": 2.813762299,
+    "partialEta2Lo": 0.6640316715,
+    "partialEta2Hi": 0.9096974095
+   },
+   {
+    "effect": "B — Row",
+    "eta2": 0.401847404,
+    "partialEta2": 0.9295981878,
+    "cohensF": 3.633755607,
+    "partialEta2Lo": 0.7770534815,
+    "partialEta2Hi": 0.9426450454
+   },
+   {
+    "effect": "C — Row group",
+    "eta2": 0.06560411081,
+    "partialEta2": 0.6831096051,
+    "cohensF": 1.468218385,
+    "partialEta2Lo": 0.2748026272,
+    "partialEta2Hi": 0.7567437684
+   },
+   {
+    "effect": "A:B",
+    "eta2": 0.05686734035,
+    "partialEta2": 0.6513962396,
+    "cohensF": 1.366962466,
+    "partialEta2Lo": 0.2341296956,
+    "partialEta2Hi": 0.733995626
+   },
+   {
+    "effect": "A:C",
+    "eta2": 0.005284989679,
+    "partialEta2": 0.1479629224,
+    "cohensF": 0.416722743,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.3613534298
+   },
+   {
+    "effect": "B:C",
+    "eta2": 0.1822549128,
+    "partialEta2": 0.8569110105,
+    "cohensF": 2.447173456,
+    "partialEta2Lo": 0.5885987067,
+    "partialEta2Hi": 0.8857209821
+   },
+   {
+    "effect": "A:B:C",
+    "eta2": 0.01675921486,
+    "partialEta2": 0.3551240643,
+    "cohensF": 0.7420821167,
+    "partialEta2Lo": 0.02065595025,
+    "partialEta2Hi": 0.5241424911
+   }
+  ],
   "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B term (A:B cell means). No multiplicity-adjusted confidence interval exists for this method, so the comparisons carry none. FDR approach (Benjamini-Hochberg, Q = 5%): 6 of 6 comparisons are discoveries (adjusted P < 0.05). The P values are FDR-adjusted.",
   "comparisons": [
    {
@@ -42813,6 +44265,64 @@
     "n": 12
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "A — Group",
+    "eta2": 0.2409486792,
+    "partialEta2": 0.8878579077,
+    "cohensF": 2.813762299,
+    "partialEta2Lo": 0.6640316715,
+    "partialEta2Hi": 0.9096974095
+   },
+   {
+    "effect": "B — Row",
+    "eta2": 0.401847404,
+    "partialEta2": 0.9295981878,
+    "cohensF": 3.633755607,
+    "partialEta2Lo": 0.7770534815,
+    "partialEta2Hi": 0.9426450454
+   },
+   {
+    "effect": "C — Row group",
+    "eta2": 0.06560411081,
+    "partialEta2": 0.6831096051,
+    "cohensF": 1.468218385,
+    "partialEta2Lo": 0.2748026272,
+    "partialEta2Hi": 0.7567437684
+   },
+   {
+    "effect": "A:B",
+    "eta2": 0.05686734035,
+    "partialEta2": 0.6513962396,
+    "cohensF": 1.366962466,
+    "partialEta2Lo": 0.2341296956,
+    "partialEta2Hi": 0.733995626
+   },
+   {
+    "effect": "A:C",
+    "eta2": 0.005284989679,
+    "partialEta2": 0.1479629224,
+    "cohensF": 0.416722743,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.3613534298
+   },
+   {
+    "effect": "B:C",
+    "eta2": 0.1822549128,
+    "partialEta2": 0.8569110105,
+    "cohensF": 2.447173456,
+    "partialEta2Lo": 0.5885987067,
+    "partialEta2Hi": 0.8857209821
+   },
+   {
+    "effect": "A:B:C",
+    "eta2": 0.01675921486,
+    "partialEta2": 0.3551240643,
+    "cohensF": 0.7420821167,
+    "partialEta2Lo": 0.02065595025,
+    "partialEta2Hi": 0.5241424911
+   }
+  ],
   "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B term (simple effects (the first factor's levels within each B level)).",
   "comparisons": [
    {
@@ -42952,6 +44462,64 @@
     "n": 12
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "A — Group",
+    "eta2": 0.2409486792,
+    "partialEta2": 0.8878579077,
+    "cohensF": 2.813762299,
+    "partialEta2Lo": 0.6640316715,
+    "partialEta2Hi": 0.9096974095
+   },
+   {
+    "effect": "B — Row",
+    "eta2": 0.401847404,
+    "partialEta2": 0.9295981878,
+    "cohensF": 3.633755607,
+    "partialEta2Lo": 0.7770534815,
+    "partialEta2Hi": 0.9426450454
+   },
+   {
+    "effect": "C — Row group",
+    "eta2": 0.06560411081,
+    "partialEta2": 0.6831096051,
+    "cohensF": 1.468218385,
+    "partialEta2Lo": 0.2748026272,
+    "partialEta2Hi": 0.7567437684
+   },
+   {
+    "effect": "A:B",
+    "eta2": 0.05686734035,
+    "partialEta2": 0.6513962396,
+    "cohensF": 1.366962466,
+    "partialEta2Lo": 0.2341296956,
+    "partialEta2Hi": 0.733995626
+   },
+   {
+    "effect": "A:C",
+    "eta2": 0.005284989679,
+    "partialEta2": 0.1479629224,
+    "cohensF": 0.416722743,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.3613534298
+   },
+   {
+    "effect": "B:C",
+    "eta2": 0.1822549128,
+    "partialEta2": 0.8569110105,
+    "cohensF": 2.447173456,
+    "partialEta2Lo": 0.5885987067,
+    "partialEta2Hi": 0.8857209821
+   },
+   {
+    "effect": "A:B:C",
+    "eta2": 0.01675921486,
+    "partialEta2": 0.3551240643,
+    "cohensF": 0.7420821167,
+    "partialEta2Lo": 0.02065595025,
+    "partialEta2Hi": 0.5241424911
+   }
+  ],
   "notes": "A = Group (Placebo, Drug); B = Row (Day 1, Day 2); C = Row group (WT, KO). Compares the three factors and all their interactions; assumes normal distributions with equal variances (Type III sums of squares). 24 observations in 8 cells. Multiple comparisons follow the A:B:C term (simple effects (the first factor's levels within each C level)).",
   "comparisons": [
    {
@@ -43069,6 +44637,32 @@
     "sem": 1.029973636,
     "median": 13.71392836,
     "n": 12
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.2409486792,
+    "partialEta2": 0.8878579077,
+    "cohensF": 2.813762299,
+    "partialEta2Lo": 0.6640316715,
+    "partialEta2Hi": 0.9096974095
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.6497064276,
+    "partialEta2": 0.9552542735,
+    "cohensF": 4.620444022,
+    "partialEta2Lo": 0.8516333871,
+    "partialEta2Hi": 0.963159218
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.07891154489,
+    "partialEta2": 0.7216756315,
+    "cohensF": 1.610257773,
+    "partialEta2Lo": 0.2966992721,
+    "partialEta2Hi": 0.7804204859
    }
   ],
   "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
@@ -44966,7 +46560,7 @@
     "n": 10
    }
   ],
-  "notes": "Pearson correlation between every pair of variables, computed on pairwise-complete rows; assumes linear relationships.",
+  "notes": "Pearson correlation between every pair of variables, computed on pairwise-complete rows; assumes linear relationships. Each r carries its 95% confidence interval.",
   "matrix": {
    "variables": [
     "Weight",
@@ -45023,6 +46617,58 @@
      0.00008126449469,
      0.009907341974,
      0.00005130660578,
+     null
+    ]
+   ],
+   "lo": [
+    [
+     null,
+     0.7994857256,
+     0.9316813555,
+     0.7353501674
+    ],
+    [
+     0.7994857256,
+     null,
+     0.7030551422,
+     0.2854693699
+    ],
+    [
+     0.9316813555,
+     0.7030551422,
+     null,
+     0.7619368893
+    ],
+    [
+     0.7353501674,
+     0.2854693699,
+     0.7619368893,
+     null
+    ]
+   ],
+   "hi": [
+    [
+     null,
+     0.990962389,
+     0.9963529199,
+     0.9843681286
+    ],
+    [
+     0.990962389,
+     null,
+     0.9858942263,
+     0.9557148269
+    ],
+    [
+     0.9963529199,
+     0.9858942263,
+     null,
+     0.9861383325
+    ],
+    [
+     0.9843681286,
+     0.9557148269,
+     0.9861383325,
      null
     ]
    ],
@@ -45086,7 +46732,7 @@
     "n": 10
    }
   ],
-  "notes": "Spearman rank correlation between every pair of variables, computed on pairwise-complete rows; non-parametric, no linearity assumption.",
+  "notes": "Spearman rank correlation between every pair of variables, computed on pairwise-complete rows; non-parametric, no linearity assumption. Each r carries its 95% confidence interval.",
   "matrix": {
    "variables": [
     "Weight",
@@ -45146,6 +46792,58 @@
      null
     ]
    ],
+   "lo": [
+    [
+     null,
+     0.6961757766,
+     0.9454681268,
+     0.7656692693
+    ],
+    [
+     0.6961757766,
+     null,
+     0.6315198734,
+     0.2441114482
+    ],
+    [
+     0.9454681268,
+     0.6315198734,
+     null,
+     0.7656692693
+    ],
+    [
+     0.7656692693,
+     0.2441114482,
+     0.7656692693,
+     null
+    ]
+   ],
+   "hi": [
+    [
+     null,
+     0.9868110859,
+     0.997350644,
+     0.9875178146
+    ],
+    [
+     0.9868110859,
+     null,
+     0.9833990581,
+     0.9559588035
+    ],
+    [
+     0.997350644,
+     0.9833990581,
+     null,
+     0.9875178146
+    ],
+    [
+     0.9875178146,
+     0.9559588035,
+     0.9875178146,
+     null
+    ]
+   ],
    "label": "Correlation matrix (r)"
   },
   "analyzed": {
@@ -45179,6 +46877,14 @@
    {
     "label": "Adjusted R squared",
     "value": 0.9919210982
+   },
+   {
+    "label": "AIC",
+    "value": 32.14026905
+   },
+   {
+    "label": "AICc",
+    "value": 52.14026905
    },
    {
     "label": "F",
@@ -45232,7 +46938,7 @@
     "n": 10
    }
   ],
-  "notes": "Ordinary least-squares regression of “Weight” on 3 predictor(s), fit on 9 complete rows. Each coefficient's P value tests whether that predictor's slope differs from zero, holding the others fixed.",
+  "notes": "Ordinary least-squares regression of “Weight” on 3 predictor(s), fit on 9 complete rows. Each coefficient's P value tests whether that predictor's slope differs from zero, holding the others fixed. “Height” and “Age” and “Dose” are strongly collinear with the other predictor(s) (VIF above 10) — their coefficient is imprecise.",
   "coefficients": [
    {
     "term": "Intercept",
@@ -45263,6 +46969,72 @@
     "p": 0.009884695568
    }
   ],
+  "vif": [
+   {
+    "term": "Height",
+    "vif": 13.3751061
+   },
+   {
+    "term": "Age",
+    "vif": 43.14399259
+   },
+   {
+    "term": "Dose",
+    "vif": 15.62157574
+   }
+  ],
+  "anovaTable": [
+   {
+    "source": "Regression",
+    "df": 3,
+    "ss": 1215.387538,
+    "ms": 405.1291795,
+    "f": 328.4112011,
+    "p": 0.000003684056727
+   },
+   {
+    "source": "Residual",
+    "df": 5,
+    "ss": 6.16801708,
+    "ms": 1.233603416,
+    "f": null,
+    "p": null
+   }
+  ],
+  "covariance": {
+   "variables": [
+    "Intercept",
+    "Height",
+    "Age",
+    "Dose"
+   ],
+   "values": [
+    [
+     469.1638722,
+     -3.489767824,
+     4.64296506,
+     -22.98404624
+    ],
+    [
+     -3.489767824,
+     0.02627321111,
+     -0.03683961123,
+     0.1906711661
+    ],
+    [
+     4.64296506,
+     -0.03683961123,
+     0.06506427462,
+     -0.4148501957
+    ],
+    [
+     -22.98404624,
+     0.1906711661,
+     -0.4148501957,
+     3.211804866
+    ]
+   ]
+  },
   "analyzed": {
    "sets": [
     {
@@ -45287,6 +47059,14 @@
    {
     "label": "Adjusted R squared",
     "value": 0.9712484369
+   },
+   {
+    "label": "AIC",
+    "value": 43.20608879
+   },
+   {
+    "label": "AICc",
+    "value": 53.20608879
    },
    {
     "label": "F",
@@ -45356,6 +47136,58 @@
     "p": 0.005464896356
    }
   ],
+  "vif": [
+   {
+    "term": "Height",
+    "vif": 7.61268524
+   },
+   {
+    "term": "Age",
+    "vif": 7.61268524
+   }
+  ],
+  "anovaTable": [
+   {
+    "source": "Regression",
+    "df": 2,
+    "ss": 1195.214332,
+    "ms": 597.6071659,
+    "f": 136.1228708,
+    "p": 0.00001002693436
+   },
+   {
+    "source": "Residual",
+    "df": 6,
+    "ss": 26.34122374,
+    "ms": 4.390203956,
+    "f": null,
+    "p": null
+   }
+  ],
+  "covariance": {
+   "variables": [
+    "Intercept",
+    "Height",
+    "Age"
+   ],
+   "values": [
+    [
+     1084.335327,
+     -7.563624848,
+     5.958394178
+    ],
+    [
+     -7.563624848,
+     0.0532185364,
+     -0.04345963608
+    ],
+    [
+     5.958394178,
+     -0.04345963608,
+     0.04085726266
+    ]
+   ]
+  },
   "analyzed": {
    "sets": [
     {
@@ -49768,6 +51600,14 @@
     "value": 0.4505635569
    },
    {
+    "label": "Phi 95% CI lower",
+    "value": 0.1404144152
+   },
+   {
+    "label": "Phi 95% CI upper",
+    "value": 0.760461073
+   },
+   {
     "label": "Sensitivity",
     "value": 0.7142857143
    },
@@ -49861,6 +51701,14 @@
    {
     "label": "Cramér's V",
     "value": 0.1657107377
+   },
+   {
+    "label": "Cramér's V 95% CI lower",
+    "value": 0
+   },
+   {
+    "label": "Cramér's V 95% CI upper",
+    "value": 0.2554653768
    }
   ],
   "groups": [],
@@ -49949,6 +51797,14 @@
    {
     "label": "Phi",
     "value": 0.4505635569
+   },
+   {
+    "label": "Phi 95% CI lower",
+    "value": 0.1404144152
+   },
+   {
+    "label": "Phi 95% CI upper",
+    "value": 0.760461073
    },
    {
     "label": "Sensitivity",
@@ -50773,6 +52629,32 @@
     "n": 10
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.4780471909,
+    "partialEta2": 0.9838605055,
+    "cohensF": 7.807676304,
+    "partialEta2Lo": 0.5381469783,
+    "partialEta2Hi": 0.9518111893
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.4066411321,
+    "partialEta2": 0.9670706609,
+    "cohensF": 5.419230163,
+    "partialEta2Lo": 0.8707876847,
+    "partialEta2Hi": 0.9621029648
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.09362329525,
+    "partialEta2": 0.8711601551,
+    "cohensF": 2.600302689,
+    "partialEta2Lo": 0.5549017579,
+    "partialEta2Hi": 0.8563150194
+   }
+  ],
   "notes": "Matched by row: each replicate column is treated as the same subject across every row within its group. Assumes sphericity (no Geisser-Greenhouse correction). 1 replicate column excluded (missing a value in at least one row).",
   "analyzed": {
    "sets": [
@@ -50846,6 +52728,24 @@
     "sem": 0.8819171037,
     "median": 4,
     "n": 3
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.2222222222,
+    "partialEta2": 0.5333333333,
+    "cohensF": 1.069044968,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.7067801905
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.5833333333,
+    "partialEta2": 0.75,
+    "cohensF": 1.732050808,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.8193292361
    }
   ],
   "notes": "One value per cell (no replicates): the interaction can't be told apart from random scatter, so the model assumes there is none and tests the group and row effects only; if there is an interaction, their P values mean little. Comparisons within rows or groups need replicates. Assumes normal distributions with equal variances.",
@@ -51411,6 +53311,14 @@
    {
     "label": "Cramér's V",
     "value": 0.4647580015
+   },
+   {
+    "label": "Cramér's V 95% CI lower",
+    "value": 0.2055941475
+   },
+   {
+    "label": "Cramér's V 95% CI upper",
+    "value": 0.6612900923
    }
   ],
   "groups": [],
@@ -51456,6 +53364,14 @@
    {
     "label": "Cramér's V",
     "value": 0.4647580015
+   },
+   {
+    "label": "Cramér's V 95% CI lower",
+    "value": 0.2055941475
+   },
+   {
+    "label": "Cramér's V 95% CI upper",
+    "value": 0.6612900923
    }
   ],
   "groups": [],
@@ -51501,6 +53417,14 @@
    {
     "label": "Cramér's V",
     "value": 0.4647580015
+   },
+   {
+    "label": "Cramér's V 95% CI lower",
+    "value": 0.2055941475
+   },
+   {
+    "label": "Cramér's V 95% CI upper",
+    "value": 0.6612900923
    }
   ],
   "groups": [],
@@ -51555,6 +53479,14 @@
    {
     "label": "Cramér's V",
     "value": 0.4647580015
+   },
+   {
+    "label": "Cramér's V 95% CI lower",
+    "value": 0.2055941475
+   },
+   {
+    "label": "Cramér's V 95% CI upper",
+    "value": 0.6612900923
    }
   ],
   "groups": [],
@@ -52032,8 +53964,36 @@
     "value": 1.073684862
    },
    {
+    "label": "Cohen's d 95% CI lower",
+    "value": -0.01264174182
+   },
+   {
+    "label": "Cohen's d 95% CI upper",
+    "value": 2.436476894
+   },
+   {
     "label": "Hedges' g",
     "value": 1.004906567
+   },
+   {
+    "label": "Hedges' g 95% CI lower",
+    "value": -0.01183193488
+   },
+   {
+    "label": "Hedges' g 95% CI upper",
+    "value": 2.280400625
+   },
+   {
+    "label": "Glass's Δ (second group's SD)",
+    "value": 0.8284623013
+   },
+   {
+    "label": "Glass's Δ 95% CI lower",
+    "value": -0.009754451137
+   },
+   {
+    "label": "Glass's Δ 95% CI upper",
+    "value": 1.880001597
    },
    {
     "label": "F (variance ratio)",
@@ -52078,7 +54038,7 @@
     "n": 8
    }
   ],
-  "notes": "Assumes normal distributions but allows unequal variances (Welch–Satterthwaite df). Two-tailed P value.",
+  "notes": "Assumes normal distributions but allows unequal variances (Welch–Satterthwaite df). Two-tailed P value. Glass's Δ standardises the mean difference by the second group's SD; the effect-size 95% CIs come from the t statistic's noncentrality parameter (Welch df).",
   "analyzed": {
    "sets": [
     {
@@ -52146,8 +54106,24 @@
     "value": 0.8945750669
    },
    {
+    "label": "Cohen's d 95% CI lower",
+    "value": -0.342916792
+   },
+   {
+    "label": "Cohen's d 95% CI upper",
+    "value": 2.044234374
+   },
+   {
     "label": "Hedges' g",
     "value": 0.6473156407
+   },
+   {
+    "label": "Hedges' g 95% CI lower",
+    "value": -0.2481350209
+   },
+   {
+    "label": "Hedges' g 95% CI upper",
+    "value": 1.479210558
    }
   ],
   "difference": {
@@ -52232,6 +54208,16 @@
     "value": 0.6111714187
    }
   ],
+  "effectSizes": [
+   {
+    "effect": "Between groups",
+    "eta2": 0.2719491866,
+    "partialEta2": 0.2719491866,
+    "cohensF": 0.6111714187,
+    "partialEta2Lo": 0,
+    "partialEta2Hi": 0.4971360018
+   }
+  ],
   "groups": [
    {
     "name": "Control",
@@ -52258,7 +54244,7 @@
     "n": 6
    }
   ],
-  "notes": "Compares means across groups; assumes normal distributions with equal variances.",
+  "notes": "Compares means across groups; assumes normal distributions with equal variances. Partial eta squared equals eta squared here (one factor).",
   "comparisons": [
    {
     "group1": "Control",
@@ -52382,6 +54368,32 @@
     "sem": 0.44474959,
     "median": 12,
     "n": 14
+   }
+  ],
+  "effectSizes": [
+   {
+    "effect": "Group",
+    "eta2": 0.2929622478,
+    "partialEta2": 0.8229053319,
+    "cohensF": 2.155619955,
+    "partialEta2Lo": 0.5373595454,
+    "partialEta2Hi": 0.8518108693
+   },
+   {
+    "effect": "Row",
+    "eta2": 0.5296957188,
+    "partialEta2": 0.8936345116,
+    "cohensF": 2.898541995,
+    "partialEta2Lo": 0.6872432286,
+    "partialEta2Hi": 0.9083168234
+   },
+   {
+    "effect": "Interaction",
+    "eta2": 0.1142946208,
+    "partialEta2": 0.6444869191,
+    "cohensF": 1.346415991,
+    "partialEta2Lo": 0.2010476277,
+    "partialEta2Hi": 0.7052088807
    }
   ],
   "notes": "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares).",
@@ -52679,7 +54691,7 @@
     "n": 10
    }
   ],
-  "notes": "Pearson correlation between every pair of variables, computed on pairwise-complete rows; assumes linear relationships.",
+  "notes": "Pearson correlation between every pair of variables, computed on pairwise-complete rows; assumes linear relationships. Each r carries its 95% confidence interval.",
   "matrix": {
    "variables": [
     "Age",
@@ -52702,6 +54714,26 @@
     ],
     [
      2.77637326e-7,
+     null
+    ]
+   ],
+   "lo": [
+    [
+     null,
+     0.9316813555
+    ],
+    [
+     0.9316813555,
+     null
+    ]
+   ],
+   "hi": [
+    [
+     null,
+     0.9963529199
+    ],
+    [
+     0.9963529199,
      null
     ]
    ],
@@ -53582,7 +55614,7 @@
     "meanline": {
      "visible": true
     },
-    "spanmode": "hard"
+    "spanmode": "soft"
    },
    {
     "type": "scatter",
@@ -53703,7 +55735,7 @@
     "meanline": {
      "visible": true
     },
-    "spanmode": "hard"
+    "spanmode": "soft"
    },
    {
     "type": "scatter",
@@ -53814,7 +55846,7 @@
     "meanline": {
      "visible": true
     },
-    "spanmode": "hard"
+    "spanmode": "soft"
    },
    {
     "type": "scatter",
@@ -53913,7 +55945,7 @@
     "meanline": {
      "visible": true
     },
-    "spanmode": "hard"
+    "spanmode": "soft"
    },
    {
     "type": "scatter",
@@ -65795,7 +67827,7 @@
     "meanline": {
      "visible": true
     },
-    "spanmode": "hard"
+    "spanmode": "soft"
    },
    {
     "type": "violin",
@@ -65845,7 +67877,7 @@
     "meanline": {
      "visible": true
     },
-    "spanmode": "hard"
+    "spanmode": "soft"
    },
    {
     "type": "violin",
@@ -65893,7 +67925,7 @@
     "meanline": {
      "visible": true
     },
-    "spanmode": "hard"
+    "spanmode": "soft"
    }
   ],
   "layout": {
