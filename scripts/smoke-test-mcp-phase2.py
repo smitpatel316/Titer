@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Phase 2 live MCP smoke: initialize -> tools/list -> tools/call across
-all 52 tools against a running Titer MCP server.
+all 54 tools against a running Titer MCP server.
 
 Reads endpoint + token from <app_data>/mcp/discovery.json (argv[1]).
 Speaks Streamable HTTP directly (no bridge, no Claude Desktop sign-in):
@@ -51,10 +51,11 @@ EXPECTED_TOOLS = [
     "titer_reorder_nodes", "titer_undo", "titer_redo",
     # L4 analyses (2)
     "titer_run_analysis", "titer_freeze_analysis",
-    # L6 graphs / figures / info sheets (7)
+    # L6 graphs / figures / info sheets (9)
     "titer_build_graph", "titer_update_graph", "titer_clone_graph",
     "titer_create_figure", "titer_update_figure",
     "titer_create_info_sheet", "titer_update_info_sheet",
+    "titer_list_regenerable_graphs", "titer_regenerate_graphs",
     # L5 composites (4)
     "titer_simulate_data", "titer_apply_method", "titer_apply_wand",
     "titer_run_script",
@@ -67,7 +68,7 @@ EXPECTED_TOOLS = [
     "titer_export_graph", "titer_export_figure", "titer_export_office",
     "titer_export_table_data",
 ]
-assert len(EXPECTED_TOOLS) == 52, len(EXPECTED_TOOLS)
+assert len(EXPECTED_TOOLS) == 54, len(EXPECTED_TOOLS)
 
 
 def main():
@@ -176,15 +177,15 @@ def main():
     check("initialize negotiates 2025-11-25",
           init["result"]["protocolVersion"] == "2025-11-25",
           init["result"]["protocolVersion"])
-    check("initialize instructions name 52 tools",
-          "52 tools" in init["result"].get("instructions", ""),
+    check("initialize instructions name 54 tools",
+          "54 tools" in init["result"].get("instructions", ""),
           init["result"].get("instructions", "")[:80])
     rpc("notifications/initialized", notif=True)
 
-    # 2. tools/list shows all 52 tools, one page
+    # 2. tools/list shows all 54 tools, one page
     lst = rpc("tools/list")
     names = [t["name"] for t in lst["result"]["tools"]]
-    check("tools/list returns 52 tools", len(names) == 52, f"{len(names)}")
+    check("tools/list returns 54 tools", len(names) == 54, f"{len(names)}")
     check("tools/list has no nextCursor", "nextCursor" not in lst["result"])
     for want in EXPECTED_TOOLS:
         check(f"tools/list has {want}", want in names)

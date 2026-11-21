@@ -2,8 +2,8 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 52 tools: 15 read-only (list/read/job/
-// activity/cloud reads + feedback) and 37 mutating, via the L0 Rust→frontend
+// Settings → AI connections. 54 tools: 16 read-only (list/read/job/
+// activity/cloud reads + feedback) and 38 mutating, via the L0 Rust→frontend
 // dispatch + job queue — run-analysis, build-graph, export and cloud
 // tools included (Phase 2).
 //
@@ -43,7 +43,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 52 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 54 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -1861,7 +1861,7 @@ async fn auth_middleware(
 /// the corruption hits every tool that returns non-ASCII text, not just
 /// transform-concentrations. Appending `; charset=utf-8` here, the one
 /// shared path every MCP response flows through, fixes the echo for all
-/// 52 tools. Returns the new header value, or `None` when the type is
+/// 54 tools. Returns the new header value, or `None` when the type is
 /// already labelled or is not one of the textual MCP response types.
 fn utf8_charset(content_type: &str) -> Option<String> {
     let lower = content_type.to_ascii_lowercase();
@@ -2629,6 +2629,38 @@ pub struct UpdateGraphArgs {
     pub graph_id: String,
     /// Partial GraphOptions to merge over the graph's current options.
     pub options: serde_json::Value,
+}
+
+/// One decision in `titer_regenerate_graphs`' `decisions`: which proposal,
+/// and whether to build it or skip it. `overrides` changes the proposal's
+/// graph type, error bars, name or linked analysis (the same fields the
+/// preview dialog's Adjust offers); omit it to build the proposal as
+/// shown. `linked_analysis_id: null` clears the proposed link.
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct RegenDecision {
+    /// The proposal's id, as shown by titer_list_regenerable_graphs.
+    pub proposal_id: String,
+    /// "confirm" or "skip".
+    pub action: String,
+    /// { graph_type?, error?, name?, linked_analysis_id? }.
+    #[serde(default)]
+    pub overrides: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ListRegenerableGraphsArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RegenerateGraphsArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// One decision per proposal — no "create all", no undecided proposal.
+    pub decisions: Vec<RegenDecision>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -4110,10 +4142,12 @@ impl TiterMcpServer {
     /// Import a Prism file (`.prism` / `.pzfx`) as a new untitled project in
     /// a new window — the same as `titer_open_project` for a Prism path,
     /// kept separate so the intent is explicit. `warnings` carries the
-    /// import report (what the converter skipped).
+    /// import report (what the converter skipped). `regenerable_graphs` /
+    /// `graphs_not_regenerable` say whether to offer the graph-regeneration
+    /// step (`titer_list_regenerable_graphs` / `titer_regenerate_graphs`).
     #[tool(
         name = "titer_import_prism",
-        description = "Import a Prism file (.prism / .pzfx) as a new untitled project in a new window — the same as titer_open_project for a Prism path, kept separate so the intent is explicit. warnings carries the import report (what the converter skipped).",
+        description = "Import a Prism file (.prism / .pzfx) as a new untitled project in a new window — the same as titer_open_project for a Prism path, kept separate so the intent is explicit. warnings carries the import report (what the converter skipped). regenerable_graphs / graphs_not_regenerable count the graphs the regen tools can / cannot rebuild.",
         annotations(
             title = "Import Prism file",
             read_only_hint = false,
@@ -4145,6 +4179,8 @@ impl TiterMcpServer {
                 "file_path": args.path,
                 "imported_tables": report.get("imported_tables").cloned().unwrap_or(serde_json::Value::Null),
                 "warnings": report.get("warnings").cloned().unwrap_or(serde_json::Value::Null),
+                "regenerable_graphs": report.get("regenerable_graphs").cloned().unwrap_or(serde_json::Value::Null),
+                "graphs_not_regenerable": report.get("graphs_not_regenerable").cloned().unwrap_or(serde_json::Value::Null),
             }))
         }
         .await;
@@ -4435,6 +4471,94 @@ impl TiterMcpServer {
             }
             Err(e) => {
                 self.state.log_call("titer_build_graph", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// List the graphs a Prism import can regenerate (seq 291): the
+    /// import-time proposals for this project — the same plans the
+    /// "Regenerate graphs…" preview shows. Read-only. Errors when the
+    /// project has no plans (not a Prism import, or already consumed by
+    /// a regenerate run). NOT on the Antigravity allowlist (Phase 2).
+    #[tool(
+        name = "titer_list_regenerable_graphs",
+        description = "List the graphs a Prism import can regenerate: the import-time proposals for this project (proposal_id, Prism title, source table, proposed graph type, error bars, linked analysis, origin sidecar/heuristic, whether reconstructible and why not). Read-only; errors when the project has no import-time plans (not a Prism import, or already consumed by a regenerate run).",
+        annotations(
+            title = "List regenerable graphs",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn list_regenerable_graphs(
+        &self,
+        Parameters(args): Parameters<ListRegenerableGraphsArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let job = self.state.enqueue_job(&project_id, "list-regenerable-graphs", serde_json::json!({}), serde_json::json!({}))?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "Listing the regenerable graphs finished without reporting them.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Listing the regenerable graphs failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_list_regenerable_graphs", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_list_regenerable_graphs", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Regenerate the graphs a Prism import can rebuild (seq 291): one
+    /// decision per proposal is REQUIRED — no "create all", no undecided
+    /// proposal, unknown ids rejected. Synchronous — the builders are
+    /// pure TS. NOT on the Antigravity allowlist (Phase 2, write tool).
+    #[tool(
+        name = "titer_regenerate_graphs",
+        description = "Regenerate the graphs a Prism import can rebuild: decisions is one { proposal_id, action confirm|skip, overrides? } per proposal from titer_list_regenerable_graphs — no create-all, no undecided proposal, unknown ids rejected. overrides changes the proposal's graph_type, error, name or linked_analysis_id (null clears the link). Synchronous. A completed run consumes the plans.",
+        annotations(
+            title = "Regenerate graphs",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn regenerate_graphs(
+        &self,
+        Parameters(args): Parameters<RegenerateGraphsArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "decisions": args.decisions });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let job_args = serde_json::json!({ "decisions": args.decisions });
+            let job = self.state.enqueue_job(&project_id, "regenerate-graphs", job_args, serde_json::json!({}))?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "Regenerating the graphs finished without reporting what it built.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Regenerating the graphs failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_regenerate_graphs", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_regenerate_graphs", call_args, false, Some(&e));
                 Err(e)
             }
         }
@@ -5874,8 +5998,8 @@ impl TiterMcpServer {
         // Inspector 2.13.0 discards tools whose outputSchema has no `type`
         // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
         // returns, so `tools/list` prints `{"tools": []}` even though the
-        // server returns all 52. Every tool returns a JSON object, so stamp
-        // `type: "object"` on all 52 output schemas here — the single choke
+        // server returns all 54. Every tool returns a JSON object, so stamp
+        // `type: "object"` on all 54 output schemas here — the single choke
         // point — instead of touching each tool. `Arc::make_mut`
         // clone-on-writes: rmcp caches the `Value` schema in a thread-local
         // cache shared by all tools, so the cached Arc must never be
@@ -6112,7 +6236,7 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes 52 tools: 15 read-only and 37 that change the open project. \
+                It exposes 54 tools: 16 read-only and 38 that change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_list_tables, titer_read_table_summary (columns, row count, ranges, units; cell values \
                 only when include_values asks), titer_read_results (statistics, p-values, confidence \
@@ -7860,8 +7984,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            52,
-            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + two L4 analysis tools + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools + four L8 export tools + one feedback tool: {names:?}"
+            54,
+            "five Phase 1 tools + three job tools + three L1 read-only tools + five L2 project tools + nine L3 table tools + two L4 analysis tools + nine L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools + four L8 export tools + one feedback tool: {names:?}"
         );
         for name in ["titer_read_job", "titer_list_jobs", "titer_cancel_job"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -7915,6 +8039,8 @@ mod tests {
             "titer_update_figure",
             "titer_create_info_sheet",
             "titer_update_info_sheet",
+            "titer_list_regenerable_graphs",
+            "titer_regenerate_graphs",
         ] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
@@ -8723,7 +8849,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 52, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 54, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema

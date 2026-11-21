@@ -15,7 +15,16 @@ import {
 } from "../lib/template";
 import { parsePzfx } from "../lib/pzfx";
 import { writePzfx } from "../lib/pzfx-write";
-import { convertPrism, formatReport } from "../lib/prism";
+import { convertPrism, formatReport, loadPrismZip } from "../lib/prism";
+import {
+  clearRegenPlans,
+  getRegenPlans,
+  planGraphRegeneration,
+  planPzfxGraphs,
+  regenPlanCounts,
+  setRegenPlans,
+  type GraphPlan,
+} from "../lib/prism-graph-regen";
 import { writePrism } from "../lib/prism-write";
 import { loadPrismSaveChoice, nextSaveAction, savePrismSaveChoice } from "../lib/prism-nudge";
 import { AUTOSAVE_DEBOUNCE_MS, isAutosaveEnabled } from "../lib/autosave";
@@ -83,6 +92,33 @@ export function useDocument() {
   // (Quirk 2's family). The report lines, null when no notice is up.
   const [prismImported, setPrismImported] = React.useState<string[] | null>(null);
   const dismissPrismImported = () => setPrismImported(null);
+  // The import-time graph-regen offer (seq 291): the plans, for the
+  // "Regenerate graphs…" button on the report dialog. The registry
+  // (`setRegenPlans`) is the authority the preview dialog and the MCP
+  // tools read; this state is only the button's visibility mirror — the
+  // dialog opens only when the registry still holds plans.
+  const [regenPlans, setRegenPlansState] = React.useState<GraphPlan[] | null>(null);
+  const [regenDialogOpen, setRegenDialogOpen] = React.useState(false);
+  const openRegenDialog = () => {
+    if ((getRegenPlans() ?? []).length > 0) setRegenDialogOpen(true);
+  };
+  /** Cancel: close the preview, keep the offer (the user can reopen it). */
+  const dismissRegenDialog = () => setRegenDialogOpen(false);
+  /** Done: the run consumed the offer — clear the mirror and the registry. */
+  const consumeRegenPlans = () => {
+    setRegenDialogOpen(false);
+    setRegenPlansState(null);
+    clearRegenPlans();
+  };
+  /** Record fresh import-time plans (both the mirror and the registry). */
+  const recordRegenPlans = (plans: GraphPlan[]) => {
+    if (plans.length === 0) {
+      setRegenPlansState(null);
+      return;
+    }
+    setRegenPlansState(plans);
+    setRegenPlans(null, plans);
+  };
   // The window's title while the project isn't saved anywhere.
   const [untitled, setUntitled] = React.useState(UNTITLED);
   // Other windows change the list too: this one reads it again when it comes to the front.
@@ -1076,6 +1112,11 @@ export function useDocument() {
     prompted.current = false;
     latest.current.loadProject({ ...imported.project, filePath: null, edited: true });
     setUntitled(name);
+    // The .pzfx heuristic plans (one per imported table, rules H1–H6) —
+    // recorded before the report, so the dialog's button can see them.
+    const plans = planPzfxGraphs(imported);
+    imported.graphPlans = plans;
+    recordRegenPlans(plans);
     const lines = [
       `Imported ${imported.tables.length} table${imported.tables.length === 1 ? "" : "s"} from “${name}”:`,
       ...imported.tables.map((t) => `• ${t}`),
@@ -1089,6 +1130,12 @@ export function useDocument() {
     if (imported.issues.length > 0) {
       lines.push("", "Notes:", ...imported.issues.slice(0, 12).map((i) => `• ${i.message}`));
       if (imported.issues.length > 12) lines.push(`…and ${imported.issues.length - 12} more.`);
+    }
+    if (plans.some((p) => p.reconstructible)) {
+      lines.push(
+        "",
+        "Graphs weren't in this file — “Regenerate graphs…” can rebuild one per imported table (guessed from the table — Prism's graph type isn't in the file).",
+      );
     }
     // In-app, not native.alert: the native alert's OK button could not dismiss
     // it on macOS (v1.6.0 Mac proof) — see the `prismImported` state above.
@@ -1132,7 +1179,11 @@ export function useDocument() {
   const importPrismBytes = async (data: Uint8Array, name: string): Promise<boolean> => {
     let converted;
     try {
-      converted = await convertPrism(data, name);
+      // One unzip for the import and the regen planning: the planner
+      // shares this JSZip instance (never unzips twice).
+      const zip = await loadPrismZip(data, name);
+      converted = await convertPrism(data, name, zip);
+      converted.graphPlans = await planGraphRegeneration(zip, converted);
     } catch (err) {
       report();
       await native.alert(
@@ -1147,6 +1198,11 @@ export function useDocument() {
     prompted.current = false;
     latest.current.loadProject({ ...converted.project, filePath: null, edited: true });
     setUntitled(name);
+    // The sidecar plans — recorded before the report, so the dialog's
+    // button can see them and `formatReport` can point at them.
+    const plans = converted.graphPlans ?? [];
+    recordRegenPlans(plans);
+    converted.report.regenerableGraphs = regenPlanCounts(plans).regenerable;
     // In-app, not native.alert: the native alert's OK button could not dismiss
     // it on macOS (v1.6.0 Mac proof) — see the `prismImported` state above.
     setPrismImported([
@@ -1386,6 +1442,11 @@ export function useDocument() {
     dismissTemplateNotice,
     prismImported,
     dismissPrismImported,
+    regenPlans,
+    regenDialogOpen,
+    openRegenDialog,
+    dismissRegenDialog,
+    consumeRegenPlans,
     resolveSavePrompt,
     remote,
     openRemotePicker,

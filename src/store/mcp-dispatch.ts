@@ -45,6 +45,8 @@ import {
   executeCloneGraph,
   executeCreateFigure,
   executeCreateInfoSheet,
+  executeListRegenerableGraphs,
+  executeRegenerateGraphs,
   executeUpdateFigure,
   executeUpdateGraph,
   executeUpdateInfoSheet,
@@ -1292,6 +1294,10 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
     // kebab-case, one per tool; see the lane log for the table.
     case "build-graph":
       return executeBuildGraph(job, toGraphDeps(deps));
+    case "list-regenerable-graphs":
+      return executeListRegenerableGraphs(job, toGraphDeps(deps));
+    case "regenerate-graphs":
+      return executeRegenerateGraphs(job, toGraphDeps(deps));
     case "update-graph":
       return executeUpdateGraph(job, toGraphDeps(deps));
     case "clone-graph":

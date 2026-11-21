@@ -68,6 +68,9 @@ export interface PzfxImport {
   /** Info sheets imported, in file order. */
   infoSheets: string[];
   issues: PzfxIssue[];
+  /** Graph-regen plans, when the caller computed them (see
+   *  `planPzfxGraphs` in `src/lib/prism-graph-regen.ts`). */
+  graphPlans?: import("./prism-graph-regen").GraphPlan[];
 }
 
 // ── A small XML reader ───────────────────────────────────────────────────

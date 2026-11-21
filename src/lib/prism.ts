@@ -69,12 +69,47 @@ export interface ConvertReport {
   infoSheetNames: string[];
   orphanSheetsIgnored: number;
   unreferencedTablesIgnored: number;
+  /** Graphs the regen planner could rebuild, when plans were computed for
+   *  this report (see `formatReport`'s pointer). Unset when no planning ran. */
+  regenerableGraphs?: number;
   issues: ConvertIssue[];
+}
+
+/** One imported table, as the graph-regen planner needs it: which Prism
+ *  datasets feed it, and the formats the sidecar mapping reads. Built by
+ *  `convertPrism` alongside the nodes (the tableUid→nodeId map the
+ *  planner resolves a graph's `inputDataSets` through). */
+export interface PrismTableIndexEntry {
+  sheetUid: string;
+  tableUid: string;
+  nodeId: string;
+  name: string;
+  /** Prism `table.format` as written ("column" | "xy" | "grouped" | "survival" | "contingency" | "nested" | …). */
+  format: string;
+  /** Prism `table.dataFormat` as written ("y_sd_n", "y_replicates", …). */
+  dataFormat: string;
+  /** Dataset uids of the table, in file order. */
+  datasetUids: string[];
+  replicatesCount?: number;
+}
+
+/** What `convertPrism` exposes for the graph-regen planner
+ *  (`src/lib/prism-graph-regen.ts`): the imported tables and the
+ *  nonlinear-regression analysis each input dataset got, if any. */
+export interface PrismIndex {
+  tables: PrismTableIndexEntry[];
+  /** Imported nonlinear-regression analysis node id, by input dataset uid. */
+  analysisNodeByDatasetUid: Record<string, string>;
 }
 
 export interface ConvertResult {
   project: ProjectFilePayload;
   report: ConvertReport;
+  /** The imported tables + analyses, for the graph-regen planner. */
+  prismIndex?: PrismIndex;
+  /** Graph-regen plans, when the caller computed them (see
+   *  `planGraphRegeneration` in `src/lib/prism-graph-regen.ts`). */
+  graphPlans?: import("./prism-graph-regen").GraphPlan[];
 }
 
 // ── Prism document shapes (only the fields the converter reads) ─────────
@@ -492,19 +527,45 @@ const isSummaryFormat = (dataFormat: string) => {
   return s !== undefined && s !== null && s.length > 0;
 };
 
+/**
+ * BUG-9 precedence, as a pure function for the graph-regen planner: the
+ * table-level dataFormat wins when it describes this dataset (its suffix
+ * list matches the subcolumn count) — real Prism files store the specific
+ * statistic there: a y_cv_n table whose datasets say y_sd_n still means
+ * MEAN/CV/N, not MEAN/SD/N. When the table format doesn't fit, the
+ * dataset's own format carries the meaning. Anything else falls back to
+ * the table's format. Mirrors the naming precedence in `convertPrism`.
+ */
+export function resolveDataFormat(tableDataFormat: string, datasetFormat: string, subcolumnCount: number): string {
+  if (summaryFits(tableDataFormat, subcolumnCount)) return tableDataFormat;
+  if (summaryFits(datasetFormat, subcolumnCount)) return datasetFormat;
+  return tableDataFormat;
+}
+
 // ── The converter ────────────────────────────────────────────────────────
 
-export async function convertPrism(data: Uint8Array, sourceName: string): Promise<ConvertResult> {
-  const issues: ConvertIssue[] = [];
-  let zip: JSZip;
+/** Load a `.prism` ZIP, or throw the plain-language refusal `convertPrism`
+ *  throws. Exported so the graph-regen planner can share the one JSZip
+ *  instance `convertPrism` already opened — the source is never unzipped
+ *  twice. */
+export async function loadPrismZip(data: Uint8Array, sourceName: string): Promise<JSZip> {
   try {
-    zip = await JSZip.loadAsync(data);
+    return await JSZip.loadAsync(data);
   } catch {
     throw new Error(
       `“${sourceName}” isn't a Prism 10 .prism file — it isn't a ZIP archive. ` +
         `A .prism file is a ZIP holding JSON and CSV files.`,
     );
   }
+}
+
+export async function convertPrism(
+  data: Uint8Array,
+  sourceName: string,
+  preloadedZip?: JSZip,
+): Promise<ConvertResult> {
+  const issues: ConvertIssue[] = [];
+  const zip = preloadedZip ?? (await loadPrismZip(data, sourceName));
   const readText = async (path: string): Promise<string | null> => {
     const file = zip.file(path);
     return file ? file.async("string") : null;
@@ -544,6 +605,8 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
   const rootOrder: string[] = [];
   const childOrder: Record<string, string[]> = {};
   const tableNodeBySheet = new Map<string, string>();
+  // The regen planner's index (see PrismIndex): filled alongside the nodes.
+  const prismIndex: PrismIndex = { tables: [], analysisNodeByDatasetUid: {} };
   const report: ConvertReport = {
     source: sourceName,
     prismVersion: doc.createdBy?.version ?? "unknown",
@@ -973,6 +1036,16 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
     rootOrder.push(node.id);
     childOrder[node.id] = [];
     tableNodeBySheet.set(sheetUid, node.id);
+    prismIndex.tables.push({
+      sheetUid,
+      tableUid,
+      nodeId: node.id,
+      name,
+      format,
+      dataFormat,
+      datasetUids: setUids,
+      ...(typeof table.replicatesCount === "number" ? { replicatesCount: table.replicatesCount } : {}),
+    });
     report.tables.push(name);
   }
 
@@ -1073,6 +1146,9 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
         nodes[node.id] = node;
         childOrder[parentId].push(node.id);
         report.analyses.push(node.name);
+        // The regen planner links a graph to this analysis by its input
+        // dataset's uid — the graph's `inputDataSets` entry.
+        if (ds.uid) prismIndex.analysisNodeByDatasetUid[ds.uid] = node.id;
       }
     } else if (analysisClass === "SURVIVAL") {
       const node: ProjectNode = {
@@ -1135,6 +1211,7 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
   return {
     project: { nodes, rootOrder, childOrder, activeNodeId: rootOrder[0] ?? null },
     report,
+    prismIndex,
   };
 }
 
@@ -1150,7 +1227,10 @@ export function formatReport(report: ConvertReport): string {
   }
   if (report.graphsNotTransferred) {
     lines.push(
-      `Graphs not transferred: ${report.graphsNotTransferred} — re-create in Titer (graph data is stored in a binary format Prism does not document).`,
+      `Graphs not transferred: ${report.graphsNotTransferred} — re-create in Titer (graph data is stored in a binary format Prism does not document).` +
+        (report.regenerableGraphs
+          ? ` Regenerate graphs… can rebuild ${report.regenerableGraphs === 1 ? "the auto-created one" : `the ${report.regenerableGraphs} auto-created ones`}.`
+          : ""),
     );
   }
   if (report.layoutsNotTransferred) {

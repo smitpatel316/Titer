@@ -1,6 +1,6 @@
 # MCP server contract — Titer (v1.6.0, Phase 2) ↔ stdio bridge
 
-**Status:** Phase 2 (52 tools: read, write, run, graph, export, cloud).
+**Status:** Phase 2 (54 tools: read, write, run, graph, export, cloud).
 **Server branch:** `check/v16-mcp-phase2` (v1.6.0).
 **Spec:** MCP 2025-06-18 / 2025-11-25 ONLY. The 2026-07-28 revision is
 deliberately not negotiated (clients lag it; the server's
@@ -19,7 +19,7 @@ Phase 1 (five read-only tools) is fully carried over unchanged, except
 one additive change: `titer_list_projects` now also returns an
 `info_sheets` array (§5.1). Everything in §§1–4 below is unchanged from
 Phase 1 except where noted; the new material is the job model (§5),
-the 46 Phase 2 tools (§§6–10), and the Phase 2 smoke (§11).
+the 48 Phase 2 tools (§§6–10), and the Phase 2 smoke (§11).
 
 ## 1. Endpoint
 
@@ -118,11 +118,11 @@ SSE stream (`text/event-stream`). Lifecycle:
    `2025-06-18`), `capabilities`, `clientInfo`. Server answers with its
    own `protocolVersion` (the negotiated one — the highest both support),
    `capabilities: { "tools": {} }`, `serverInfo: { "name": "titer",
-   "version": "<app version>" }`, and `instructions` (the 52 tools:
+   "version": "<app version>" }`, and `instructions` (the 54 tools:
    read-only vs mutating, the job model, cloud/export notes — the full
    text lives in `get_info` in `src-tauri/src/mcp.rs`).
 2. `notifications/initialized` — client sends after `initialize`.
-3. `tools/list` — returns all 52 tools in one page (`nextCursor`
+3. `tools/list` — returns all 54 tools in one page (`nextCursor`
    absent). No pagination.
 4. `tools/call` — `{ "name": "<tool>", "arguments": { … } }`.
 5. Sessions: 2025-11-25 clients use protocol-level sessions; the server
@@ -333,7 +333,7 @@ plainly ("couldn't read …") instead of silently skipping.
 | `titer_create_project` | — | `{ project_id, file_path: null, blank: true }` — a new blank project window via the existing `new_project` path. Returns the window label; address it by `project_id` afterwards. |
 | `titer_open_project` | `{ path }` | `{ project_id, file_path, format: "hlx" \| "pzt" \| "prism" \| "pzfx" }`. Rust-side: local `.hlx` / `.pzt` (untitled) opens as a project; `.prism` / `.pzfx` imports as a project (same as File ▸ Import Prism File). Path must be local — no URLs. Fails plainly on a missing/unreadable file. |
 | `titer_save_project` | `project_id?`, `path?`, `format?: "hlx" \| "prism" \| "pzfx"` | `{ project_id, file_path, format, revision }`. Frontend dispatch (bytes are built by the TS writers — Rust has no serializer). `format` must be explicit — the save-nudge prompt never appears to an agent; omit it to save back in the project's current format (`.hlx`, or `.prism`/`.pzfx` for Prism-origin/remote projects). `path` = Save As. Resolution: explicit `format` > path extension > current file extension; a format/path mismatch is refused, never a silent `.hlx` save. Errors name the writer's failure (e.g. mixed Y formats cannot go to `.pzfx`) instead of silently saving as `.hlx`. A remote project with no local file errors plainly ("no file yet — pass path") — it cannot be saved back to the cloud; see §9. `.pzfx` writer coverage is data tables + info sheets only — analyses, graphs and layouts are never written to `.pzfx`. |
-| `titer_import_prism` | `{ path }` | `{ project_id, file_path, imported_tables, warnings }`. Same as `titer_open_project` for a Prism path, kept separate so the intent is explicit. `warnings` carries the import report (what the converter skipped). |
+| `titer_import_prism` | `{ path }` | `{ project_id, file_path, imported_tables, warnings, regenerable_graphs, graphs_not_regenerable }`. Same as `titer_open_project` for a Prism path, kept separate so the intent is explicit. `warnings` carries the import report (what the converter skipped). `regenerable_graphs` / `graphs_not_regenerable` count the graphs the regen tools can / cannot rebuild — when `regenerable_graphs` is above 0, offer the regen step. |
 | `titer_close_project` | `project_id?`, `save?: "save" \| "discard"` | `{ project_id, closed: true }`. `save` omitted = refuse to close a dirty project (`{ needs_confirm: true, warning: "unsaved changes" }`); pass `save: "save"` or `save: "discard"` explicitly. Never prompts. Closes the window; the snapshot is dropped. |
 
 ### 8.2 Data tables — 9 tools
@@ -354,7 +354,7 @@ Excluded cells are dropped from every analysis, graph and range
 (`titer_read_table_summary` already reflects this), and are written
 empty by `titer_export_table_data` (§10), matching what analyses see.
 
-### 8.3 Graphs, figures, info sheets — 7 tools
+### 8.3 Graphs, figures, info sheets — 9 tools
 
 Graphs are built by pure-TS builders from table data + **cached**
 analysis results — a graph never computes an analysis itself. If the
@@ -372,6 +372,8 @@ Multi-table graphs are not in scope (the graph node has a single
 | `titer_update_figure` | `project_id?`, `figure_id`, `layout` | `{ project_id, figure_id, panels }` — `layout` is the figure fields to change: `panels` (`FigurePanel[]`: `graphId`, `label`, `labelManual?`, `title`, `row`, `col`, `rowSpan`, `colSpan`), `grid` (`{ rows, cols }`, cols ≤ 6, rows × cols must fit the panels), `figureSize` (`{ widthIn, heightIn }`, 1–20 in each, aspect within 4:1), `labelStyle` (`{ position: "top-left" \| "top-right" \| "above-panel", fontSizePt, bold }`), `figureTitle` (string), `sharedLegend` (`"none" \| "shared"` — `"shared"` is refused when the panels' series differ), `dpi` (150/300/600/900/1200). |
 | `titer_create_info_sheet` | `project_id?`, `linked_table_id?` | `{ project_id, info_sheet_id, name }` — optionally linked to a table, as the UI allows. A new sheet starts with Prism's six default constants, empty. |
 | `titer_update_info_sheet` | `project_id?`, `info_sheet_id`, `info` | `{ project_id, info_sheet_id }` — partial `InfoSheetData` (`constants?`/`notes?`/`linkedTableId?`) merged over the current sheet. Constants replace the whole list when given (ids generated when omitted, values coerced from numbers/booleans to strings, duplicate names rejected); caps enforced (500 info sheets, 500 constants per sheet). Constants set here are what graphs hook axes to (`yMinConstant` etc.). |
+| `titer_list_regenerable_graphs` | `project_id?` | `{ project_id, proposals: [{ proposal_id, prism_title, source_table, source_table_id, proposed_graph_type, error, linked_analysis_id?, origin: "sidecar" \| "heuristic", heuristic_rule?, reconstructible, reason_if_not?, derived_error?, limit_note? }] }` — the import-time graph plans for this project (seq 291): the same plans the "Regenerate graphs…" preview shows. Read-only. Errors when the project has no plans (not a Prism import, or already consumed by a regenerate run). NOT on the Antigravity allowlist (Phase 2). |
+| `titer_regenerate_graphs` | `project_id?`, `decisions: [{ proposal_id, action: "confirm" \| "skip", overrides?: { graph_type?, error?, name?, linked_analysis_id? } }]` | `{ project_id, created: [{ graph_id, graph_type, name, origin }], skipped: [{ proposal_id, prism_title }], warnings? }` — one decision per proposal is REQUIRED (no "create all", no undecided proposal, unknown ids rejected). `overrides` changes the proposal's type, error bars, name or linked analysis (`linked_analysis_id: null` clears the link); validation reuses `titer_build_graph`'s checks (type offered for the table, linked analysis exists and belongs to the same table). **Synchronous**. A completed run consumes the plans. NOT on the Antigravity allowlist (Phase 2, write tool). |
 
 **Graph types by table type** (`GRAPH_OPTIONS_BY_TABLE`, 33 types):
 Column — individual, before-after, box-violin, mean-error,
@@ -531,13 +533,13 @@ explicit "Send to GitHub" click opens a pre-filled issue in the browser.
 | Project / document | 5 |
 | Data tables | 9 |
 | Analyses (run + freeze + simulate + method + wand + script) | 6 |
-| Graphs / figures / info sheets | 7 |
+| Graphs / figures / info sheets | 9 |
 | Export | 4 |
 | Cloud | 9 |
-| **Total** | **52** |
+| **Total** | **54** |
 
-Annotations: 15 tools are `read_only_hint: true` (the 9 read tools +
-`read_job`/`list_jobs` + the 4 read-only cloud tools); the other 37
+Annotations: 16 tools are `read_only_hint: true` (the 9 read tools +
+`read_job`/`list_jobs` + the 4 read-only cloud tools + `titer_list_regenerable_graphs`); the other 38
 are mutating. `destructive_hint: true` on exactly six:
 `titer_write_table`, `titer_edit_table`, `titer_delete_node`,
 `titer_close_project`, `titer_run_script`, `titer_cloud_upload`.
@@ -554,7 +556,7 @@ The Phase 2 smoke runs against the **real server in a running Titer
 app** via a terminal CLI client (no Claude Desktop sign-in needed).
 It reads endpoint + token from `<app_data>/mcp/discovery.json`, speaks
 Streamable HTTP directly (initialize → tools/list → tools/call across
-all 52 tools), and prints a PASS/FAIL line per check; exit 0 only if
+all 54 tools), and prints a PASS/FAIL line per check; exit 0 only if
 every check passes. It drives one deterministic flow on a fresh project
 it creates itself (no fixture ids — the ids it needs come from the
 tools' own outputs), plus the `tests/testdata/survival.pzfx` public
@@ -564,7 +566,7 @@ fixture for the Prism-import step:
 2. `python3 scripts/smoke-test-mcp-phase2.py <app_data>/mcp/discovery.json [--out-dir <dir>]`
    (default out dir: a fresh temp dir; exports/saves land there).
 3. `initialize` (`protocolVersion 2025-11-25`), then
-   `notifications/initialized`, then `tools/list` — expect all 52
+   `notifications/initialized`, then `tools/list` — expect all 54
    tools, nothing else.
 4. Create a project → create an XY table → write data → summary with
    values → edit/rename/reorder/undo/redo/duplicate → simulate a
@@ -615,7 +617,7 @@ are expected to differ until the `buildGraphFigure` follow-up (§10.1).
 
 The in-process Rust smoke (`mcp_smoke_job_plumbing_over_http` in
 `src-tauri/src/mcp.rs`) is the other half: it asserts `tools/list`
-returns exactly 52 tools and drives the job plumbing + project/table/
+returns exactly 54 tools and drives the job plumbing + project/table/
 analysis/cloud/graph/composite/export tools over real HTTP with a
 completer task standing in for the frontend dispatcher. It does not
 replace the live smoke above (window-making tools fail plainly
@@ -629,7 +631,7 @@ end).
 - Never add tools, prompts or resources of its own in front of the
   server: the bridge is a transport, not a server. It forwards stdio ↔
   Streamable HTTP and nothing else. It forwards whatever tools the
-  server lists — the 52 Phase 2 tools appear automatically via
+  server lists — the 54 Phase 2 tools appear automatically via
   `tools/list`; no bridge change was needed for Phase 2.
 - Never widen the bind (no `0.0.0.0`, no port forwarding, no tunnel).
 - Never log the token or table values.
