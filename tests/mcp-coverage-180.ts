@@ -31,7 +31,7 @@
 // (binomial-test), 203 (distribution equations), 204 (tails + targets),
 // 205 (arithmetic transforms), 206 (column math), 228 (scripts in
 // project file + runOnOpen), 230 (paste-transposed edit op), Mansi-3
-// (sigDisplay pvalue-eq). Counts moved with the tip: 57 tools (was 56),
+// (sigDisplay pvalue-eq). Counts moved with the tip: 58 tools (was 57),
 // 59 AnalysisType variants / schema keys / runner keys (was 54).
 // ONE correction vs the audit stands: row 178 said GAP, but Compact
 // Letter Display IS implemented — `compactLetters` in
@@ -242,7 +242,7 @@ const scopeText = (scope: string): string => {
   }
 };
 
-const EXPECTED_TOOL_COUNT = 57;
+const EXPECTED_TOOL_COUNT = 58;
 const EXPECTED_ANALYSIS_TYPES = 59;
 const META_OFFERINGS = new Set(["compare-many-groups", "interpolate", "transform"]);
 
@@ -713,7 +713,7 @@ const ROWS: Row[] = [
     item: "1.7.4 allowlist",
     title: "1.7.4 allowlist groups",
     status: "covered",
-    note: "10 groups covering all 56 tools exactly once; default = read group only.",
+    note: "10 groups covering all 58 tools exactly once; default = read group only.",
     checks: [{ kind: "invariant", name: "allowlist" }],
   },
   {
@@ -886,6 +886,16 @@ const ROWS: Row[] = [
     checks: [
       { kind: "tool", tool: "titer_import_data_file" },
       { kind: "toolGroup", group: "project", tool: "titer_import_data_file" },
+    ],
+  },
+  {
+    item: "226",
+    title: "Automatic backup",
+    status: "covered",
+    note: "Merged with the 226 lane: titer_list_backups (read-only list of automatic backups) in the read allowlist group.",
+    checks: [
+      { kind: "tool", tool: "titer_list_backups" },
+      { kind: "toolGroup", group: "read", tool: "titer_list_backups" },
     ],
   },
   {
@@ -1269,7 +1279,6 @@ const ROWS: Row[] = [
 
   // ── No meaningful MCP operation ──
   { item: "225", title: "Unified Preferences dialog", status: "na", note: "App settings, not project operations; MCP has no settings surface (allowlist toggles are Tauri commands for the Settings UI, by design).", checks: [] },
-  { item: "226", title: "Automatic backup", status: "na", note: "Automatic background behavior; no agent-invocable operation.", checks: [] },
   { item: "227", title: "Print + Page Setup", status: "na", note: "Local OS dialog; MCP equivalent is export to PDF via titer_export_graph/export_figure.", checks: [] },
   { item: "231", title: "Select Row/Column", status: "na", note: "Transient UI selection state; MCP addresses data by id, not cursor.", checks: [] },
   { item: "239", title: "Manual zoom", status: "na", note: "View state only; no project effect.", checks: [] },

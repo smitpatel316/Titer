@@ -40,7 +40,7 @@ connecting, Titer offers an **Open Antigravity** button.
   **Installed MCP Servers**). `titer` shows up with **5 tools**.
 - Ask Gemini to work with Titer, e.g. **"List my Titer projects"**.
 
-The 5 are the read group — the default. The server has 56 tools in
+The 5 are the read group — the default. The server has 58 tools in
 total, but since the allowlist landed it only advertises the groups you
 have turned on (in 1.7.3 it advertised all 52 — that count is out of
 date; see the version note below).
@@ -130,4 +130,4 @@ Then restart Antigravity (or open the MCP manager with `/mcp` and enable `titer`
 ## Version note
 
 - **1.7.3:** the one-click flow landed; the server advertised all 52 tools and Antigravity enabled all of them, including destructive ones. Any doc that says "52 tools" describes 1.7.3.
-- **1.8.0:** the server-side allowlist is enforced — `tools/list` advertises only the enabled groups (5 read tools by default), and `tools/call` refuses the rest by name. The server now has 56 tools in total. The one-click entry itself still allowlists exactly the five read tools.
+- **1.8.0:** the server-side allowlist is enforced — `tools/list` advertises only the enabled groups (5 read tools by default), and `tools/call` refuses the rest by name. The server now has 58 tools in total. The one-click entry itself still allowlists exactly the five read tools.

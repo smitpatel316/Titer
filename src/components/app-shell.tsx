@@ -16,6 +16,7 @@ import { useMcpJobDispatcher } from "../store/mcp-dispatch";
 import { SavePromptDialog } from "./save-prompt-dialog";
 import { TemplateDialog } from "./template-dialog";
 import { ConflictDialog } from "./conflict-dialog";
+import { BackupRecoveryDialog } from "./backup-recovery-dialog";
 import { RemotePickerDialog } from "./remote-picker";
 import { CloudSettingsDialog } from "./cloud-settings";
 import { Button } from "../ui/controls";
@@ -262,6 +263,13 @@ export function AppShell() {
       <ConflictDialog
         conflict={documentActions.conflict}
         onChoose={(choice) => void documentActions.resolveConflict(choice)}
+      />
+
+      {/* Crash recovery (seq 226): a backup newer than the saved file is
+          offered once, right after the project is established. */}
+      <BackupRecoveryDialog
+        recovery={documentActions.backupRecovery}
+        onChoose={(choice) => void documentActions.resolveBackupRecovery(choice)}
       />
 
       <RemotePickerDialog onPick={(handle) => documentActions.openRemoteHandle(handle)} onClose={closeSelector} />

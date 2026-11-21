@@ -2,8 +2,8 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 57 tools: 18 read-only (list/read/job/
-// activity/cloud reads + feedback + the three 1.7.4 discovery tools)
+// Settings → AI connections. 58 tools: 19 read-only (list/read/job/
+// activity/cloud reads + feedback + the three 1.7.4 discovery tools + the 1.8 backup list)
 // and 39 mutating, via the L0 Rust→frontend dispatch + job queue —
 // run-analysis, build-graph, export and cloud tools included (Phase 2).
 // By default only the 5 Phase 1 read tools are advertised or callable:
@@ -47,7 +47,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 57 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 58 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -1309,7 +1309,7 @@ pub async fn mcp_autostart_if_opted_in(app: AppHandle) {
 // stdio bridge is untouched — it stays a byte-forwarder (contract
 // §11.2) and naturally advertises only what the server advertises.
 //
-// Groups, not 56 checkboxes: every tool belongs to exactly one group
+// Groups, not 58 checkboxes: every tool belongs to exactly one group
 // (the unit test `allowlist_groups_cover_all_tools_once` pins the
 // inventory), so the enabled groups fully determine the advertised set.
 // The `destructive` group holds the two tools that delete data or run
@@ -1334,13 +1334,14 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
     AllowlistGroup {
         id: "read",
         label: "Read project data",
-        description: "List projects and tables; read summaries, results and graphs.",
+        description: "List projects, tables and automatic backups; read summaries, results and graphs.",
         tools: &[
             "titer_list_projects",
             "titer_list_tables",
             "titer_read_table_summary",
             "titer_read_results",
             "titer_read_graph",
+            "titer_list_backups",
         ],
     },
     AllowlistGroup {
@@ -2167,7 +2168,7 @@ async fn auth_middleware(
 /// the corruption hits every tool that returns non-ASCII text, not just
 /// transform-concentrations. Appending `; charset=utf-8` here, the one
 /// shared path every MCP response flows through, fixes the echo for all
-/// 56 tools. Returns the new header value, or `None` when the type is
+/// 58 tools. Returns the new header value, or `None` when the type is
 /// already labelled or is not one of the textual MCP response types.
 fn utf8_charset(content_type: &str) -> Option<String> {
     let lower = content_type.to_ascii_lowercase();
@@ -2639,6 +2640,10 @@ pub struct ActivityArgs {
     #[serde(default)]
     pub limit: Option<u32>,
 }
+
+/// No arguments: `titer_list_backups` lists every automatic backup.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct BackupListArgs {}
 
 /// A feedback report for the Titer team, from the AI app: what is
 /// missing or broken, in the agent's own words. No table data values —
@@ -3895,6 +3900,60 @@ impl TiterMcpServer {
         let lines = self.state.dir().map(|dir| activity_lines(&dir, limit as usize)).unwrap_or_default();
         self.state.log_call("titer_read_activity", serde_json::json!({ "limit": limit }), true, None);
         Ok(Json(serde_json::json!({ "lines": lines })))
+    }
+
+    /// The automatic backups (seq 226): the separate `.hlx` snapshots the
+    /// app writes on a timer and on sheet switch, one per project, in
+    /// Titer's data folder — the crash-recovery copies, not the project
+    /// files themselves. Newest first; a backup is only listed while it is
+    /// within the 4-day keep (stale ones are pruned on the read). Each entry
+    /// carries the project name, the file it belongs to (null for untitled
+    /// and cloud projects), when the snapshot was written, when the file
+    /// itself was last written (null when there is no local file), and the
+    /// snapshot's size. No project data values, no file contents — an agent
+    /// that finds a backup here tells the user to reopen the project in
+    /// Titer, which offers the restore; there is no restore tool.
+    #[tool(
+        name = "titer_list_backups",
+        description = "List automatic backups (one separate snapshot per project, newest first): project name, the file it belongs to, when the snapshot was written and when the file itself was last written, and the snapshot size. A backup newer than its file is the crash recovery Titer offers on reopen — tell the user to reopen the project in Titer, which offers the restore; there is no restore tool.",
+        annotations(
+            title = "List backups",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn list_backups(
+        &self,
+        Parameters(_args): Parameters<BackupListArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let Some(mcp_dir) = self.state.dir() else {
+            return Err(
+                "Backups couldn't be listed — the MCP directory isn't available. Turn the server off and on again in Settings → AI Connections."
+                    .into(),
+            );
+        };
+        // Backups live in <app_data>/backups, beside <app_data>/mcp — the
+        // Tauri commands in main.rs write them there. state.dir() is the
+        // mcp directory itself, so step up one level: listing the mcp
+        // directory would always come back empty.
+        let Some(dir) = mcp_dir.parent().map(|p| p.to_path_buf()) else {
+            return Err(
+                "Backups couldn't be listed — the MCP directory has no parent folder. Turn the server off and on again in Settings → AI Connections."
+                    .into(),
+            );
+        };
+        match crate::backup::list_backups(&dir) {
+            Ok(backups) => {
+                self.state.log_call("titer_list_backups", serde_json::json!({}), true, None);
+                Ok(Json(serde_json::json!({ "backups": backups })))
+            }
+            Err(e) => {
+                self.state.log_call("titer_list_backups", serde_json::json!({}), false, Some(&e));
+                Err(e)
+            }
+        }
     }
 
     /// Report a missing feature or a bug to the Titer team — in the
@@ -6763,8 +6822,8 @@ impl TiterMcpServer {
         // Inspector 2.13.0 discards tools whose outputSchema has no `type`
         // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
         // returns, so `tools/list` prints `{"tools": []}` even though the
-        // server returns all 56. Every tool returns a JSON object, so stamp
-        // `type: "object"` on all 56 output schemas here — the single choke
+        // server returns all 58. Every tool returns a JSON object, so stamp
+        // `type: "object"` on all 58 output schemas here — the single choke
         // point — instead of touching each tool. `Arc::make_mut`
         // clone-on-writes: rmcp caches the `Value` schema in a thread-local
         // cache shared by all tools, so the cached Arc must never be
@@ -7024,10 +7083,10 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes up to 57 tools, gated by the allowlist in Settings → AI Connections \
+                It exposes up to 58 tools, gated by the allowlist in Settings → AI Connections \
                 (contract §12): by default only the 5 read tools below are enabled, and the user \
                 can enable more groups there — a tool that is not listed cannot be called. \
-                18 of the 57 are read-only and 39 change the open project. \
+                19 of the 58 are read-only and 39 change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_project_summary (the same discovery, as counts plus ids and names), \
                 titer_search (find a node by name), \
@@ -7035,6 +7094,7 @@ impl ServerHandler for TiterMcpServer {
                 titer_list_tables, titer_read_table_summary (columns, row count, ranges, units; cell values \
                 only when include_values asks), titer_read_results (statistics, p-values, confidence \
                 intervals), titer_read_graph, titer_read_figure, titer_read_info_sheet, titer_read_activity, \
+                titer_list_backups (automatic backups left by a crash — project name, saved time, size), \
                 titer_send_feedback (report a missing feature or a bug — it saves the report on this \
                 Mac for the user to review, and sends it to the Titer team only if the user has turned on \
                 feedback sharing in Settings → AI Connections), \
@@ -9029,7 +9089,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 56 tools, so it enables every group first.
+        // this test drives all 58 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -9082,9 +9142,12 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            57,
-            "five Phase 1 tools + three job tools + three L1 read-only tools + six L2 project tools + nine L3 table tools + three L4 analysis tools (run, re-run, freeze) + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools + four L8 export tools + one feedback tool + three 1.7.4 discovery tools (params, search, summary): {names:?}"
+            58,
+            "five Phase 1 tools + three job tools + three L1 read-only tools + six L2 project tools + nine L3 table tools + three L4 analysis tools (run, re-run, freeze) + seven L6 graph/figure/info-sheet tools + four L5 analysis-composite tools + nine L9 cloud tools + four L8 export tools + one feedback tool + three 1.7.4 discovery tools (params, search, summary) + one 1.8 backup tool (list backups): {names:?}"
         );
+        for name in ["titer_list_backups"] {
+            assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
+        }
         for name in ["titer_read_job", "titer_list_jobs", "titer_cancel_job"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
@@ -10179,7 +10242,7 @@ mod tests {
 
     #[test]
     fn allowlist_groups_cover_all_tools_once() {
-        // The inventory pin: every tool in exactly one group, 57 total.
+        // The inventory pin: every tool in exactly one group, 58 total.
         // A lane that adds a tool must assign it a group here, or this
         // fails — an ungrouped tool would otherwise be silently hidden.
         // The count alone did not catch that (four tools shipped ungrouped
@@ -10187,7 +10250,7 @@ mod tests {
         // the part that actually catches it.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 57, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 58, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
@@ -10261,7 +10324,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 57, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 58, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema
@@ -10274,6 +10337,34 @@ mod tests {
                 t.name
             );
         }
+    }
+
+    // ── Automatic backup (seq 226) ───────────────────────────────────────
+    #[tokio::test]
+    async fn list_backups_reads_the_app_data_store_not_the_mcp_dir() {
+        // The Tauri commands in main.rs write backups to <app_data>/backups;
+        // state.dir() is <app_data>/mcp. The tool must step up one level —
+        // listing the mcp directory itself would always come back empty.
+        // Pre-fix this test fails (0 backups listed).
+        let app_data = std::env::temp_dir().join(format!("titer-backup-mcp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&app_data);
+        std::fs::create_dir_all(app_data.join("mcp")).expect("mcp dir");
+        crate::backup::write_backup(
+            &app_data,
+            "file:/Research/Dose.hlx",
+            "Dose.hlx",
+            Some("/Research/Dose.hlx"),
+            b"{\"project\": true}",
+        )
+        .expect("write backup");
+        let state = job_state();
+        state.lock().dir = Some(app_data.join("mcp"));
+        let server = TiterMcpServer::new(state);
+        let out = server.list_backups(Parameters(BackupListArgs {})).await.expect("list backups");
+        let backups = out.0["backups"].as_array().expect("backups array");
+        assert_eq!(backups.len(), 1, "the written backup should be listed: {backups:?}");
+        assert_eq!(backups[0]["display_name"], "Dose.hlx");
+        let _ = std::fs::remove_dir_all(&app_data);
     }
 
     // ── Feedback sharing (server mode, seq 276) ─────────────────────────

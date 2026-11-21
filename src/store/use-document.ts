@@ -26,6 +26,15 @@ import {
 import { formatWriteReport, writePrism, type PrismWriteReport } from "../lib/prism-write";
 import { loadPrismSaveChoice, nextSaveAction, savePrismSaveChoice } from "../lib/prism-nudge";
 import { AUTOSAVE_DEBOUNCE_MS, isAutosaveEnabled } from "../lib/autosave";
+import {
+  backupDisplayName,
+  backupIdentity,
+  backupIntervalMinutes,
+  backupIsNewerThanSource,
+  isBackupEnabled,
+  isBackupOnSheetSwitch,
+  untitledBackupId,
+} from "../lib/backup";
 import type { SavePromptChoice } from "../components/save-prompt-dialog";
 import * as native from "../native";
 import { loadRecents, MAX_RECENTS, saveRecents, recentKey, type RecentEntry } from "./recents";
@@ -606,7 +615,13 @@ export function useDocument() {
   const save = async (saveAs = false, options?: { silent?: boolean }): Promise<boolean> => {
     // A remote file saves back to the cloud — unless Save As, which saves a
     // local copy instead (the project then lives on local disk).
-    if (remoteRef.current && !saveAs) return saveRemote(remoteRef.current, options?.silent);
+    if (remoteRef.current && !saveAs) {
+      const ok = await saveRemote(remoteRef.current, options?.silent);
+      // Prism: the backup is rewritten on every save, so it is never older
+      // than the project file.
+      if (ok) void writeBackupSnapshot();
+      return ok;
+    }
     const { filePath } = latest.current;
     // A project already saved as `.prism` saves back as `.prism` — never
     // write `.hlx` JSON into a `.prism` file.
@@ -621,6 +636,8 @@ export function useDocument() {
         );
         await native.writeFile(filePath, bytes);
         latest.current.markProjectSaved(filePath, revision);
+        // Prism: the backup is rewritten on every save.
+        void writeBackupSnapshot();
         // The write report, shown — never silently dropped (Mansi P0 #3).
         if (!options?.silent) setPrismSavedReport(prismSaveReportLines(report, fileName(filePath)));
         return true;
@@ -646,6 +663,8 @@ export function useDocument() {
         );
         await native.writeFile(filePath, bytes);
         latest.current.markProjectSaved(filePath, revision);
+        // Prism: the backup is rewritten on every save.
+        void writeBackupSnapshot();
         return true;
       } catch (err) {
         await native.alert(
@@ -701,6 +720,14 @@ export function useDocument() {
       // A remote file saved to a local path now lives on local disk.
       setRemote(null);
       addRecent({ kind: "local", path: target });
+      // Prism: the backup is rewritten on every save. The target is passed
+      // explicitly: a Save As just moved the project, and the ref still
+      // holds the old path until the next render.
+      void writeBackupSnapshot({
+        identity: backupIdentity({ filePath: target }),
+        displayName: backupDisplayName({ filePath: target }),
+        sourcePath: target,
+      });
       return true;
     } catch (err) {
       const name = fileName(target);
@@ -829,7 +856,299 @@ export function useDocument() {
     prevActiveNodeId.current = id;
     clearAutosaveTimer();
     void attemptAutosave();
+    // Backup on sheet switch too (Prism's second trigger) — defined just
+    // below; the effect runs after render, so the closure is live by then.
+    if (isBackupOnSheetSwitch()) void attemptBackup();
   }, [store.activeNodeId]);
+
+  // ── Automatic backup (Plane seq 226) ───────────────────────────────────
+  // Prism's automatic backup, not 1.7.3's autosave: a SEPARATE `.hlx`
+  // snapshot in Titer's data folder, so a crash leaves something to come
+  // back to — including untitled work, which autosave never touches. Written
+  // on a timer (default every 10 minutes, while the project is dirty) and
+  // on sheet switch, and rewritten on every save so a backup is never older
+  // than the project file; deleted when the project is saved and closed
+  // normally. The next launch offers to restore a backup that is newer than
+  // the saved file. A backup never interrupts work: a failure is swallowed
+  // silently (no prompt, no alert), and the next cycle tries again.
+  //
+  // The timer is NOT a debounce: it fires every interval while the project
+  // stays dirty, even while the user keeps editing — edits must not keep
+  // postponing the backup. So the effect below arms once, when the project
+  // turns dirty, and the fire handler re-arms itself while still dirty.
+  const backupTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backupInFlight = React.useRef(false);
+  const backupFlight = React.useRef<Promise<boolean> | null>(null);
+  const lastBackupRevision = React.useRef(-1);
+  const backupClosing = React.useRef(false);
+  const backupArmed = React.useRef(false);
+  // What this window's backup belongs to, refreshed after every render so
+  // the timer and the close handler — which run long after the render that
+  // set them — always read the current project, not a stale closure.
+  const backupTargetRef = React.useRef<{ identity: string; displayName: string; sourcePath: string | null }>({
+    identity: "",
+    displayName: "",
+    sourcePath: null,
+  });
+  const currentBackupTarget = (): { identity: string; displayName: string; sourcePath: string | null } => {
+    if (filePath) {
+      return { identity: backupIdentity({ filePath }), displayName: backupDisplayName({ filePath }), sourcePath: filePath };
+    }
+    if (remote) {
+      return { identity: backupIdentity({ remote }), displayName: backupDisplayName({ remote }), sourcePath: null };
+    }
+    const id = untitledBackupId(native.windowLabel());
+    return {
+      identity: backupIdentity({ untitledId: id }),
+      displayName: backupDisplayName({ untitledId: id, untitledName: untitled }),
+      sourcePath: null,
+    };
+  };
+  const backupTarget = React.useMemo(currentBackupTarget, [filePath, remote, untitled]);
+  const backupId = backupTarget.identity;
+  React.useEffect(() => {
+    backupTargetRef.current = backupTarget;
+  });
+  const clearBackupTimer = () => {
+    if (backupTimer.current !== null) {
+      clearTimeout(backupTimer.current);
+      backupTimer.current = null;
+    }
+    backupArmed.current = false;
+  };
+  const armBackupTimer = () => {
+    clearBackupTimer();
+    backupArmed.current = true;
+    backupTimer.current = setTimeout(() => {
+      backupTimer.current = null;
+      void attemptBackup().then(() => {
+        // Re-arm while still dirty: the timer is the only writer while the
+        // user keeps editing without switching sheets. A clean project, a
+        // disabled toggle, or a closing window stops the cycle; the next
+        // edit re-arms it through the effect below.
+        if (latest.current.isDirty && isBackupEnabled() && !backupClosing.current) armBackupTimer();
+        else backupArmed.current = false;
+      });
+    }, backupIntervalMinutes() * 60_000);
+  };
+  // The window unmounts with the timer cleared, never firing into a dead
+  // window.
+  React.useEffect(() => clearBackupTimer, []);
+
+  /** One backup snapshot of the current project, unconditionally: the
+   *  callers decide when. Serializes exactly what a save would write (the
+   *  `.hlx` bytes), so the backup loads back through the normal reader.
+   *  `target` overrides the window's current backup target — a save that
+   *  just moved the project (Save As) passes its new path, since the ref
+   *  still holds the old one until the next render. Returns whether the
+   *  snapshot landed, and records the revision it holds, so the timer
+   *  knows the project is covered until the next edit. */
+  const writeBackupSnapshot = async (
+    target: { identity: string; displayName: string; sourcePath: string | null } = backupTargetRef.current,
+  ): Promise<boolean> => {
+    if (!native.isNative) return false;
+    if (!target.identity) return false;
+    const s = latest.current.get();
+    const revision = s.revision;
+    try {
+      const base64 = bytesToBase64(new TextEncoder().encode(serializeProjectFile(s)));
+      await native.backupWrite(target.identity, target.displayName, target.sourcePath, base64);
+      lastBackupRevision.current = revision;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  /** One backup attempt: only when backup is on, the project is dirty, and
+   *  no snapshot has covered this revision yet. While a snapshot is already
+   *  in flight, no second one starts — the timer's re-arm retries on the
+   *  next cycle. A remote conflict pending skips the cycle entirely, like
+   *  autosave: a backup must never race a conflict resolution. */
+  const attemptBackup = async (): Promise<boolean> => {
+    if (!native.isNative) return false;
+    if (!isBackupEnabled()) return false;
+    if (backupClosing.current) return false;
+    if (backupInFlight.current) return false;
+    const s = latest.current;
+    if (!s.isDirty) return false;
+    if (s.revision === lastBackupRevision.current) return false;
+    if (conflictRef.current) return false;
+    backupInFlight.current = true;
+    const flight = (async () => {
+      try {
+        return await writeBackupSnapshot();
+      } finally {
+        backupInFlight.current = false;
+      }
+    })();
+    backupFlight.current = flight;
+    return flight;
+  };
+
+  // Arm once when the project turns dirty; a clean project, a disabled
+  // toggle, or a pending conflict clears the timer instead. (The toggle and
+  // the interval are read when arming — a change in Settings takes effect
+  // on the next edit, not mid-cycle.)
+  React.useEffect(() => {
+    if (!isDirty) {
+      clearBackupTimer();
+      return;
+    }
+    if (!native.isNative) return;
+    if (!isBackupEnabled()) return;
+    if (conflict) return;
+    if (backupArmed.current) return;
+    armBackupTimer();
+  }, [isDirty, filePath, remote, conflict]);
+
+  /** Deletes this window's backup (Prism: deleted when the original is
+   *  saved and closed). A snapshot in flight owns the file: it lands first,
+   *  or the delete would race it and leave a stale backup behind. Missing
+   *  is fine — a project that never backed up deletes nothing — and a
+   *  failure never blocks the close: the 4-day prune cleans it up. */
+  const deleteCurrentBackup = async (): Promise<void> => {
+    if (!native.isNative) return;
+    try {
+      await backupFlight.current?.catch(() => undefined);
+      const entry = await native.backupStatus(backupTargetRef.current.identity);
+      if (entry) await native.backupDelete(entry.key);
+    } catch {
+      // Ignore: see above.
+    }
+  };
+
+  // ── Crash recovery ─────────────────────────────────────────────────────
+  // After a crash the backup remains, and the next launch offers to restore
+  // it — but only once this window knows what project it holds. A window
+  // that is still waiting for its opening (a session restore lands a moment
+  // after mount) must not offer a stale untitled backup for a file that is
+  // about to load over it, so the check waits for the opening to settle:
+  // `applyProjectText` sets it once the project is in the store, and a
+  // window with no opening (a blank window) settles after a grace second.
+  // One check per project identity.
+  const [openingSettled, setOpeningSettled] = React.useState(false);
+  React.useEffect(() => {
+    const timer = setTimeout(() => setOpeningSettled(true), 1000);
+    return () => clearTimeout(timer);
+  }, []);
+  const [backupRecovery, setBackupRecovery] = React.useState<{
+    identity: string;
+    entry: native.BackupEntry;
+  } | null>(null);
+  const recoveryChecked = React.useRef(new Set<string>());
+  React.useEffect(() => {
+    if (!native.isNative) return;
+    if (!openingSettled) return;
+    if (recoveryChecked.current.has(backupId)) return;
+    recoveryChecked.current.add(backupId);
+    void (async () => {
+      let entry: native.BackupEntry | null = null;
+      try {
+        entry = await native.backupStatus(backupId);
+      } catch {
+        return;
+      }
+      if (!entry) return;
+      // The project may have moved on while the check ran: only offer for
+      // the identity this window still holds.
+      if (backupTargetRef.current.identity !== backupId) return;
+      if (!backupIsNewerThanSource(entry.saved_at_ms, entry.source_mtime_ms)) {
+        // Stale: the saved file is newer than the backup — drop it
+        // silently. Restoring it would regress the file.
+        try {
+          await native.backupDelete(entry.key);
+        } catch {
+          // Ignore: the 4-day prune cleans it up.
+        }
+        return;
+      }
+      setBackupRecovery({ identity: backupId, entry });
+    })();
+  }, [backupId, openingSettled]);
+
+  /** The recovery dialog's answer. Restore loads the backup's bytes as
+   *  this window's project — pointed at its file (or untitled), edited, so
+   *  saving writes it back — then deletes the backup: it is the live
+   *  project now, and the next cycle backs it up again. Discard deletes
+   *  the backup and keeps the current file. Keep dismisses the offer and
+   *  leaves the backup on disk (offered again on the next launch, or
+   *  pruned after 4 days). Restoring over unsaved work asks first, like
+   *  any other discard. */
+  const resolveBackupRecovery = async (choice: "restore" | "discard" | "keep"): Promise<void> => {
+    const found = backupRecovery;
+    if (!found) return;
+    if (choice === "restore" && !(await confirmDiscard())) return;
+    setBackupRecovery(null);
+    if (choice !== "restore") {
+      if (choice === "discard") {
+        try {
+          await native.backupDelete(found.entry.key);
+        } catch {
+          // Ignore: the 4-day prune cleans it up.
+        }
+      }
+      return;
+    }
+    // The user may have saved while deciding (the discard prompt's Save
+    // option): re-check that the backup is still newer than the file, or
+    // restoring would regress it. A backup that stopped being newer is
+    // dropped — the file now holds the state.
+    let fresh: native.BackupEntry | null = null;
+    try {
+      fresh = await native.backupStatus(found.identity);
+    } catch {
+      // Ignore: a backup that can't be re-checked is restored as offered.
+    }
+    if (fresh && !backupIsNewerThanSource(fresh.saved_at_ms, fresh.source_mtime_ms)) {
+      try {
+        await native.backupDelete(fresh.key);
+      } catch {
+        // Ignore: the 4-day prune cleans it up.
+      }
+      return;
+    }
+    let text: string;
+    try {
+      text = new TextDecoder().decode(base64ToBytes(await native.backupRead(found.entry.key)));
+    } catch {
+      // Unreadable: the backup is useless — drop it rather than offering
+      // a broken file on every launch.
+      try {
+        await native.backupDelete(found.entry.key);
+      } catch {
+        // Ignore: the 4-day prune cleans it up.
+      }
+      return;
+    }
+    const restored = await applyProjectText(
+      text,
+      {
+        filePath: found.entry.source_path,
+        untitled: !found.entry.source_path,
+        displayName: found.entry.display_name,
+        forceEdited: true,
+      },
+      () => {
+        if (found.entry.source_path) addRecent({ kind: "local", path: found.entry.source_path });
+      },
+    );
+    if (restored) {
+      try {
+        await native.backupDelete(found.entry.key);
+      } catch {
+        // Ignore: the 4-day prune cleans it up.
+      }
+    } else {
+      // The bytes don't parse as a project: the backup is corrupt — drop
+      // it rather than offering it again on the next launch.
+      try {
+        await native.backupDelete(found.entry.key);
+      } catch {
+        // Ignore: the 4-day prune cleans it up.
+      }
+    }
+  };
 
   /** File ▸ Save As Template / Example / Method (plan 38): writes the current
    *  project JSON + a `template` envelope block to a `.pzt`/`.pzm` path from
@@ -1008,7 +1327,16 @@ export function useDocument() {
           }
         }
       }
-      return confirmDiscard();
+      const allowed = await confirmDiscard();
+      if (allowed) {
+        // A clean close: Prism deletes the backup when the original is
+        // saved and closed. Stop the timer first, so no snapshot can land
+        // after the delete.
+        backupClosing.current = true;
+        clearBackupTimer();
+        await deleteCurrentBackup();
+      }
+      return allowed;
     })();
     quitSaveInFlight.current = asked;
     try {
@@ -1025,7 +1353,7 @@ export function useDocument() {
    *  remote `loadRemote`, so both report the same issues the same way. */
   const applyProjectText = async (
     text: string,
-    target: { filePath: string | null; untitled: boolean; displayName: string },
+    target: { filePath: string | null; untitled: boolean; displayName: string; forceEdited?: boolean },
     afterLoad: () => void,
   ): Promise<boolean> => {
     try {
@@ -1054,10 +1382,18 @@ export function useDocument() {
       }
       // A file changed as it was read (repaired, or from an older Titer) opens edited: saving
       // it keeps the project as it is now. The sample stays untitled, never to be saved.
-      const edited = parsed.updated && !target.untitled;
+      // `forceEdited` is the backup restore: the restored content differs
+      // from the saved file by construction, so it opens edited even though
+      // the text itself parses cleanly.
+      const edited = (parsed.updated && !target.untitled) || target.forceEdited === true;
       prismOrigin.current = false;
       prompted.current = false;
       latest.current.loadProject({ ...parsed.project, filePath: target.filePath, edited });
+      // The window knows its project now: the recovery check may run for
+      // it. Set here, not in `load` — the check must wait until the file
+      // is actually in the store, or it would offer a stale untitled
+      // backup for a file that is about to load over it.
+      setOpeningSettled(true);
       if (target.untitled) setUntitled(fileTitle(target.displayName));
       afterLoad();
       // Seq 228: the run-on-open scripts run once the project is in the
@@ -1653,6 +1989,8 @@ export function useDocument() {
     resolveConflict,
     offlineNotice,
     resolveOfflineNotice,
+    backupRecovery,
+    resolveBackupRecovery,
   };
 }
 
