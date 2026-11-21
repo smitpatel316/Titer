@@ -1347,12 +1347,7 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
         id: "read_more",
         label: "Read more",
         description: "Figures, info sheets, the activity log, job status and feedback.",
-        tools: &[
-            "titer_read_figure",
-            "titer_read_info_sheet",
-            "titer_read_activity",
-            "titer_send_feedback",
-        ],
+        tools: &["titer_read_figure", "titer_read_info_sheet", "titer_read_activity", "titer_send_feedback"],
     },
     AllowlistGroup {
         id: "discovery",
