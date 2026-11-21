@@ -1194,5 +1194,69 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
   );
 }
 
+// W16 (seq 302): data sheets carry Prism identity — uid (= sheet id),
+// $id, fenID (sheet position), and the nested table carries its $id.
+// Without them Prism opens the file but hides the data table in the
+// navigator (the table is in the file, just unreachable in the UI).
+// Two generated tables pin distinct fenIDs (0, 1).
+{
+  const w16Project = {
+    nodes: {
+      table_1: {
+        id: "table_1",
+        type: "table",
+        name: "First",
+        parentId: null,
+        tableType: "column",
+        data: { columns: ["Title", "A"], rows: [[null, "1"], [null, "2"]] },
+      },
+      table_2: {
+        id: "table_2",
+        type: "table",
+        name: "Second",
+        parentId: null,
+        tableType: "column",
+        data: { columns: ["Title", "B"], rows: [[null, "3"], [null, "4"]] },
+      },
+    },
+    rootOrder: ["table_1", "table_2"],
+    childOrder: { table_1: [], table_2: [] },
+    activeNodeId: "table_1",
+  };
+  const w16Written = await writePrism(w16Project as never, "1.0.7");
+  const w16Zip = await JSZip.loadAsync(w16Written.bytes);
+  const w16Problems: string[] = [];
+  const w16Fen = new Map<string, unknown>();
+  for (const p of Object.keys(w16Zip.files)) {
+    if (!p.startsWith("data/sheets/") || !p.endsWith("sheet.json") || w16Zip.files[p].dir) continue;
+    const dirUid = p.split("/")[2]; // data/sheets/<uid>/sheet.json
+    const sheet = JSON.parse(await w16Zip.file(p)!.async("string")) as {
+      "@class"?: string;
+      $id?: string;
+      uid?: string;
+      fenID?: unknown;
+      title?: string;
+      table?: { "@class"?: string; $id?: string; uid?: string };
+    };
+    if (sheet["@class"] !== "DataSheet") w16Problems.push(`${sheet.title}: @class ${sheet["@class"]}`);
+    if (sheet.uid !== dirUid) w16Problems.push(`${sheet.title}: uid ${sheet.uid} != dir ${dirUid}`);
+    if (sheet.$id !== "sheets/data_sheet/data_sheet.schema.json")
+      w16Problems.push(`${sheet.title}: $id ${sheet.$id}`);
+    if (typeof sheet.fenID !== "number") w16Problems.push(`${sheet.title}: fenID ${JSON.stringify(sheet.fenID)}`);
+    else w16Fen.set(sheet.title ?? "", sheet.fenID);
+    if (sheet.table?.$id !== "sheets/data_sheet/data_table/data_table.schema.json")
+      w16Problems.push(`${sheet.title}: table $id ${sheet.table?.$id}`);
+    if (!sheet.table?.uid) w16Problems.push(`${sheet.title}: table uid missing`);
+  }
+  const w16Ordered = [...w16Fen.entries()].sort((a, b) => (a[1] as number) - (b[1] as number));
+  if (w16Ordered.length !== 2 || w16Ordered[0][1] !== 0 || w16Ordered[1][1] !== 1)
+    w16Problems.push(`fenIDs ${JSON.stringify(w16Ordered)}, want [["First", 0], ["Second", 1]]`);
+  check(
+    "W16 data sheets carry Prism identity (seq 302)",
+    w16Problems.length === 0,
+    w16Problems.join("; ") || "uid/$id/fenID on both sheets, table $id on both",
+  );
+}
+
 console.log(`\n${checks - failures}/${checks} checks passed.`);
 process.exit(failures ? 1 : 0);
