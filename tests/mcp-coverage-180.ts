@@ -905,11 +905,11 @@ const ROWS: Row[] = [
   {
     item: "161",
     title: "Effect sizes",
-    status: "gap",
-    note: "PARTIAL: partial eta squared LANDED with the 157 lane (multifactor-anova result rows, guarded by the 157 row). Still missing, not built, no lane: Glass's Δ and effect-size CIs (zero hits in src/stats).",
+    status: "covered",
+    note: "Merged on check/v18: effectSizes param (default true) on the ANOVA/t-test/correlation families, EffectSizeRow (eta², partial eta² + 95% CI, Cohen's f), Glass's Δ + Cohen's d / Hedges' g with 95% CIs in the t-test results.",
     checks: [
       { kind: "sourceContainsRe", scope: "stats", re: "Glass" },
-      { kind: "sourceContainsRe", scope: "stats", re: "Cohen's d 95% CI" },
+      { kind: "sourceContainsRe", scope: "stats", re: "Cohen's d and Hedges' g with their 95% CIs" },
     ],
   },
   {

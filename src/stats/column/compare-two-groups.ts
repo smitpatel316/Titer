@@ -15,6 +15,7 @@ import {
   matchedRowsNote,
   pairedGroups,
   pRow,
+  R_EFFECT_CI,
   R_HEDGES,
   rAlt,
   sameDifferences,
@@ -29,6 +30,7 @@ const DEFAULTS: CompareTwoGroupsParams = {
   equalVariance: true,
   ratio: false,
   tails: "two-sided",
+  effectSizes: true,
 };
 
 /** A partial params object (e.g. a field stripped on load) still runs —
@@ -66,8 +68,10 @@ function notes(p: CompareTwoGroupsParams): string {
     );
   }
   return p.equalVariance
-    ? `Assumes both groups are sampled from normal distributions with equal variances. ${tail}`
-    : `Assumes normal distributions but allows unequal variances (Welch–Satterthwaite df). ${tail}`;
+    ? `Assumes both groups are sampled from normal distributions with equal variances. ${tail} ` +
+        `Glass's Δ standardises the mean difference by the second group's SD; the effect-size 95% CIs come from the t statistic's noncentrality parameter.`
+    : `Assumes normal distributions but allows unequal variances (Welch–Satterthwaite df). ${tail} ` +
+        `Glass's Δ standardises the mean difference by the second group's SD; the effect-size 95% CIs come from the t statistic's noncentrality parameter (Welch df).`;
 }
 
 function rCode(groups: Group[], p: CompareTwoGroupsParams): string {
@@ -91,11 +95,16 @@ function rCode(groups: Group[], p: CompareTwoGroupsParams): string {
   }
   if (p.paired) {
     return (
-      // Effect size: the mean difference in SDs of the differences.
-      `${decl};tt<-t.test(g0,g1,paired=TRUE,${alt});${R_HEDGES};d<-mean(g0-g1)/sd(g0-g1);` +
+      // Effect size: the mean difference in SDs of the differences. Its 95%
+      // CI (and Hedges' g's) by noncentral-t inversion: t = d·√n, so the
+      // ncp's CI scales by 1/√n; one-tailed, the one-sided bound instead.
+      `${decl};tt<-t.test(g0,g1,paired=TRUE,${alt});${R_HEDGES};${R_EFFECT_CI};d<-mean(g0-g1)/sd(g0-g1);` +
+      `tc<-if("${rAlt(p.tails)}"=="two.sided")tci(tt$statistic,tt$parameter)else tci1(tt$statistic,tt$parameter,"${rAlt(p.tails)}");` +
+      `s<-1/sqrt(length(g0));dLo=tc[1]*s;dHi=tc[2]*s;` +
       `c(t=unname(tt$statistic),df=unname(tt$parameter),p=tt$p.value,` +
       `md=unname(tt$estimate),ci_lo=tt$conf.int[1],ci_hi=tt$conf.int[2],` +
-      `r2=unname(tt$statistic^2/(tt$statistic^2+tt$parameter)),d=d,g=d*J(length(g0)-1))`
+      `r2=unname(tt$statistic^2/(tt$statistic^2+tt$parameter)),d=d,g=d*J(length(g0)-1),` +
+      `dLo=dLo,dHi=dHi,gLo=dLo*J(length(g0)-1),gHi=dHi*J(length(g0)-1))`
     );
   }
   if (p.lognormal) {
@@ -107,13 +116,23 @@ function rCode(groups: Group[], p: CompareTwoGroupsParams): string {
   }
   // Effect size: the mean difference in pooled SDs, whichever t test runs. The F test of
   // the variances puts the larger on top (F ≥ 1), as Prism does: the same P either way.
+  // Glass's Δ (seq 161) standardises the same difference by the SECOND group's SD —
+  // the control group in Prism's difference (first minus second); the label says so.
+  // The 95% CIs of d, g and Δ come from the t statistic's noncentrality CI (`tci`):
+  // d's scales by √(1/n0 + 1/n1), g's by Hedges' J, Δ's by the pooled-to-control SD
+  // ratio (the ratio held fixed, as in R's `effectsize`); one-tailed, the one-sided
+  // bound instead (`tci1`). Welch's t uses its own (fractional) df.
   return (
-    `${decl};tt<-t.test(g0,g1,var.equal=${rBool(p.equalVariance)},${alt});vt<-if(var(g0)>=var(g1))var.test(g0,g1) else var.test(g1,g0);${R_HEDGES};` +
+    `${decl};tt<-t.test(g0,g1,var.equal=${rBool(p.equalVariance)},${alt});vt<-if(var(g0)>=var(g1))var.test(g0,g1) else var.test(g1,g0);${R_HEDGES};${R_EFFECT_CI};` +
     `n0<-length(g0);n1<-length(g1);d<-(mean(g0)-mean(g1))/sqrt(((n0-1)*var(g0)+(n1-1)*var(g1))/(n0+n1-2));` +
+    `sp<-sqrt(((n0-1)*var(g0)+(n1-1)*var(g1))/(n0+n1-2));sc<-sd(g1);gl<-if(sc>0)(mean(g0)-mean(g1))/sc else NA;` +
+    `tc<-if("${rAlt(p.tails)}"=="two.sided")tci(tt$statistic,tt$parameter)else tci1(tt$statistic,tt$parameter,"${rAlt(p.tails)}");` +
+    `s<-sqrt(1/n0+1/n1);dLo=tc[1]*s;dHi=tc[2]*s;rs<-if(sc>0)sp/sc else NA;` +
     `c(t=unname(tt$statistic),df=unname(tt$parameter),p=tt$p.value,` +
     `md=unname(tt$estimate[1]-tt$estimate[2]),ci_lo=tt$conf.int[1],ci_hi=tt$conf.int[2],` +
     `r2=unname(tt$statistic^2/(tt$statistic^2+tt$parameter)),` +
-    `d=d,g=d*J(n0+n1-2),` +
+    `d=d,g=d*J(n0+n1-2),gl=gl,` +
+    `dLo=dLo,dHi=dHi,gLo=dLo*J(n0+n1-2),gHi=dHi*J(n0+n1-2),glLo=dLo*rs,glHi=dHi*rs,` +
     `F=unname(vt$statistic),Fdfn=unname(vt$parameter[1]),Fdfd=unname(vt$parameter[2]),Fp=vt$p.value)`
   );
 }
@@ -258,8 +277,20 @@ export const compareTwoGroupsSpec: ColumnTestSpec<CompareTwoGroupsParams> = {
       { label: p.paired ? "Mean of differences" : "Mean difference", value: v.md },
       ...ciRows(p.tails, v.ci_lo, v.ci_hi),
       { label: "R squared", value: v.r2 },
-      { label: "Cohen's d", value: v.d },
-      { label: "Hedges' g", value: v.g },
+      ...(p.effectSizes === false
+        ? []
+        : [
+            { label: "Cohen's d", value: v.d },
+            ...ciRows(p.tails, v.dLo, v.dHi, "Cohen's d "),
+            { label: "Hedges' g", value: v.g },
+            ...ciRows(p.tails, v.gLo, v.gHi, "Hedges' g "),
+            ...(p.paired
+              ? []
+              : [
+                  { label: "Glass's Δ (second group's SD)", value: v.gl },
+                  ...ciRows(p.tails, v.glLo, v.glHi, "Glass's Δ "),
+                ]),
+          ]),
     ];
     if (!p.paired) {
       rows.push(

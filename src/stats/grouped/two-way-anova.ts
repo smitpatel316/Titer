@@ -37,11 +37,13 @@ import {
 import {
   adjustFdrPValues,
   describe,
+  effectSizeRow,
   identical,
   pairIndices,
   pRow,
   R_ADJUST,
   R_CRIT,
+  R_EFFECT_CI,
   R_PTUKEY,
   rStr,
   rVec,
@@ -506,7 +508,7 @@ async function runRepeatedMeasures(
         "the Geisser-Greenhouse correction from.",
     };
   }
-  const setup = `${R_PTUKEY};${R_CRIT};${R_ADJUST};v<-${rVec(values)};g<-${rFactor(group)};r<-${rFactor(row)};id<-${rFactor(subject)}`;
+  const setup = `${R_EFFECT_CI};${R_PTUKEY};${R_CRIT};${R_ADJUST};v<-${rVec(values)};g<-${rFactor(group)};r<-${rFactor(row)};id<-${rFactor(subject)}`;
   // Y: a subject per row (values come subject by subject, rows in order); gs its group.
   // Geisser-Greenhouse: epsilon of the rows' covariance pooled over the groups, double-centered.
   // A zero denominator means the differences have no variance at all (sphericity holds
@@ -522,6 +524,15 @@ async function runRepeatedMeasures(
     corrected
       ? `${k}S=${f},${k}Df=e*${df},${k}DfResid=e*${resid},${k}P=pf(${f},e*${df},e*${resid},lower.tail=FALSE)`
       : `${k}S=${f},${k}Df=${df},${k}DfResid=${resid},${k}P=${p}`;
+  // Partial eta squared (seq 161) per effect: each effect's SS over itself
+  // plus its own error stratum's SS — Group on the between-subjects error
+  // (e1's residual), Row and Interaction on the within-subjects error (e2's
+  // residual) — with its 95% CI from the F statistic's noncentrality
+  // (`etaCI`, N = total observations); the Geisser-Greenhouse correction,
+  // when on, uses the corrected degrees of freedom for Row/Interaction.
+  const ecG = `ecG<-etaCI(if(gf)NA else e1$"F value"[1],e1$Df[1],e1$Df[2],length(v))`;
+  const ecR = `ecR<-etaCI(e2$"F value"[1],${corrected ? "e*e2$Df[1]" : "e2$Df[1]"},${corrected ? "e*e2$Df[3]" : "e2$Df[3]"},length(v))`;
+  const ecI = `ecI<-etaCI(e2$"F value"[2],${corrected ? "e*e2$Df[2]" : "e2$Df[2]"},${corrected ? "e*e2$Df[3]" : "e2$Df[3]"},length(v))`;
   const posthoc =
     corrected && params.posthoc !== "none"
       ? correctedPosthoc(
@@ -539,9 +550,11 @@ async function runRepeatedMeasures(
     // No scatter within subjects: nothing is testable. Between subjects only (each group's
     // subjects alike on average): the groups' effect alone isn't.
     `if(${R_FLAT('e2$"Sum Sq"[3]')})c(flat=1) else{gf<-${R_FLAT('e1$"Sum Sq"[2]')};` +
-    `${gg};c(gflat=gf,gS=if(gf)NA else e1$"F value"[1],gDf=e1$Df[1],gP=if(gf)NA else e1$"Pr(>F)"[1],gDfResid=e1$Df[2],gMse=if(gf)NA else e1$"Sum Sq"[2]/e1$Df[2],` +
+    `${gg};${ecG};${ecR};${ecI};c(gflat=gf,gS=if(gf)NA else e1$"F value"[1],gDf=e1$Df[1],gP=if(gf)NA else e1$"Pr(>F)"[1],gDfResid=e1$Df[2],gMse=if(gf)NA else e1$"Sum Sq"[2]/e1$Df[2],` +
     `${within("r", 'e2$"F value"[1]', "e2$Df[1]", "e2$Df[3]", 'e2$"Pr(>F)"[1]')},` +
     `${within("i", 'e2$"F value"[2]', "e2$Df[2]", "e2$Df[3]", 'e2$"Pr(>F)"[2]')},` +
+    `gSS=e1$"Sum Sq"[1],e1SS=e1$"Sum Sq"[2],rSS=e2$"Sum Sq"[1],iSS=e2$"Sum Sq"[2],e2SS=e2$"Sum Sq"[3],` +
+    `gLo=ecG[1],gHi=ecG[2],rLo=ecR[1],rHi=ecR[2],iLo=ecI[1],iHi=ecI[2],` +
     `rMse=e2$"Sum Sq"[3]/e2$Df[3],eps=e${posthoc ? "," + posthoc.rCode : ""})}`;
 
   const v = await evalNamedVector(rCode);
@@ -611,11 +624,22 @@ async function runRepeatedMeasures(
       });
     }
   }
+  // Each effect against its own error stratum (see the `etaCI` note above).
+  const ssTotal = (v.gSS ?? 0) + (v.e1SS ?? 0) + (v.rSS ?? 0) + (v.iSS ?? 0) + (v.e2SS ?? 0);
+  const effectSizes =
+    params.effectSizes === false
+      ? undefined
+      : [
+          effectSizeRow("Group", v.gSS, v.e1SS, ssTotal, v.gLo, v.gHi),
+          effectSizeRow("Row", v.rSS, v.e2SS, ssTotal, v.rLo, v.rHi),
+          effectSizeRow("Interaction", v.iSS, v.e2SS, ssTotal, v.iLo, v.iHi),
+        ];
   return {
     testType: "two-way-anova",
     subtitle: "Repeated-measures two-way ANOVA",
     stats,
     groups,
+    effectSizes,
     notes:
       "Matched by row: each replicate column is treated as the same subject across every row within its group. " +
       (corrected
@@ -732,7 +756,7 @@ export async function runTwoWayAnova(
   }
   if (identical(values)) return { error: NOTHING_VARIES };
   const nonparametric = params.design === "nonparametric";
-  const setup = `v<-${rVec(values)};g<-${rFactor(group)};r<-${rFactor(row)}`;
+  const setup = `${R_EFFECT_CI};v<-${rVec(values)};g<-${rFactor(group)};r<-${rFactor(row)}`;
   const rCode = nonparametric
     ? // Each effect's Type III sum of squares on the ranks (as the ordinary ANOVA's, so an
       // unbalanced design gives the same H whatever the factors' order), over the ranks'
@@ -742,14 +766,23 @@ export async function runTwoWayAnova(
       `rS=h[[2]],rDf=d[2],rP=pchisq(h[[2]],d[2],lower.tail=FALSE),` +
       `iS=h[[3]],iDf=d[3],iP=pchisq(h[[3]],d[3],lower.tail=FALSE))`
     : // Type III sums of squares (Prism's on unbalanced designs; on balanced ones Type
-      // I = II = III), each effect's F on the residual mean square.
+      // I = II = III), each effect's F on the residual mean square. Partial eta
+      // squared (seq 161) per effect — SS_effect / (SS_effect + SS_error) —
+      // with its 95% CI from the F statistic's noncentrality (`etaCI`,
+      // N = total observations); the sums of squares ride along for eta
+      // squared (SS_effect / SS_total) and Cohen's f.
       `${setup};${R_TWO_WAY};s<-tw(v,g,r,${replicated ? "TRUE" : "FALSE"});` +
       `if(is.na(s[["e"]]))c(apart=1) else if(${R_FLAT('s[["e"]]')})c(flat=1) else{` +
       `dfr<-s[["dfe"]];mse<-s[["e"]]/dfr;d<-c(nlevels(g)-1,nlevels(r)-1);d[3]<-d[1]*d[2];` +
       `f<-s[c("g","r"${replicated ? ',"i"' : ""})]/d[1:${replicated ? 3 : 2}]/mse;p<-pf(f,d[seq_along(f)],dfr,lower.tail=FALSE);` +
+      `ec<-t(sapply(seq_along(f),function(k)etaCI(f[k],d[k],dfr,length(v))));` +
       `c(gS=f[[1]],gDf=d[1],gP=p[[1]],rS=f[[2]],rDf=d[2],rP=p[[2]],` +
       (replicated ? `iS=f[[3]],iDf=d[3],iP=p[[3]],` : "") +
-      `dfResid=dfr,mse=mse)}`;
+      `dfResid=dfr,mse=mse,gSS=s[["g"]],rSS=s[["r"]],eSS=s[["e"]],` +
+      (replicated ? `iSS=s[["i"]],` : "") +
+      `gLo=ec[1,1],gHi=ec[1,2],rLo=ec[2,1],rHi=ec[2,2]` +
+      (replicated ? `,iLo=ec[3,1],iHi=ec[3,2]` : "") +
+      `)}`;
 
   const v = await evalNamedVector(rCode);
   if (v.flat != null) return { error: NO_SCATTER };
@@ -770,6 +803,17 @@ export async function runTwoWayAnova(
     ...(replicated ? effect("Interaction", "iS", "iDf", "iP") : []),
     ...(nonparametric ? [] : [{ label: "DFd (residual)", value: v.dfResid ?? null }]),
   ];
+  // Scheirer-Ray-Hare's H statistics carry no sums of squares, so no
+  // effect-size table; the parametric designs get one per effect.
+  const ssTotal = (v.gSS ?? 0) + (v.rSS ?? 0) + (v.iSS ?? 0) + (v.eSS ?? 0);
+  const effectSizes =
+    nonparametric || params.effectSizes === false
+      ? undefined
+      : [
+          effectSizeRow("Group", v.gSS, v.eSS, ssTotal, v.gLo, v.gHi),
+          effectSizeRow("Row", v.rSS, v.eSS, ssTotal, v.rLo, v.rHi),
+          ...(replicated ? [effectSizeRow("Interaction", v.iSS, v.eSS, ssTotal, v.iLo, v.iHi)] : []),
+        ];
   const { groups } = await describe(
     [...new Set(group)].map((name) => ({ name, values: values.filter((_, i) => group[i] === name) })),
   );
@@ -795,6 +839,7 @@ export async function runTwoWayAnova(
     subtitle: nonparametric ? "Scheirer-Ray-Hare test" : "Ordinary two-way ANOVA",
     stats,
     groups,
+    effectSizes,
     notes:
       (nonparametric
         ? "Non-parametric two-way analysis (rank-based); no normality assumption."
