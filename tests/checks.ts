@@ -89,6 +89,7 @@ import {
   DEFAULT_GRAPH_OPTIONS,
   GRAPH_LIMITS,
   SAME_AS_FILL,
+  type FigurePanel,
   type GraphOptions,
   type GraphType,
   type ProjectNode,
@@ -161,7 +162,7 @@ import {
   validateGraphSources,
   type MergeInput,
 } from "../src/lib/multi-table";
-import { executeBuildGraph, executeUpdateGraph, type GraphJobDeps } from "../src/store/mcp-graphs";
+import { executeBuildGraph, executeUpdateFigure, executeUpdateGraph, type FigurePatch, type GraphJobDeps } from "../src/store/mcp-graphs";
 import { buildPanelFigure } from "../src/views/figures/panel-figure";
 import type { McpJob } from "../src/native";
 import { nestedMeans } from "../src/stats/nested/base";
@@ -190,7 +191,7 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, jitter, legendRightMargin, legendWidthPx, logScaleOffered, movedText, paintOf, perRowSummaryStats, scatterOffsets, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, applyNumberFormats, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, jitter, legendRightMargin, legendWidthPx, logScaleOffered, movedText, numberTickformat, paintOf, perRowSummaryStats, scatterOffsets, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xErrorColumn, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -285,6 +286,7 @@ import {
   clampPanel,
   composeFigureSvg,
   duplicateLabels,
+  FIGURE_IMAGE_MAX_DATA_URL,
   FIGURE_RESOLUTIONS,
   figureDpi,
   figureExportSize,
@@ -4767,6 +4769,559 @@ check("seq 209: bar chart draws the mean with SD error bars as bars", () => {
   for (const t of bars) {
     ok(t.error_y?.array != null && Math.abs(t.error_y.array[0] - sd) < 1e-9, JSON.stringify(t.error_y));
   }
+});
+
+// seq 223: superimposed bars + scatter-on-bars. A grouped table with real
+// numbers (2 groups × 2 replicates × 2 rows), so means and points are exact.
+const groupedNumbers = (): TableData => {
+  let t = newGroupedTable(2, 2); // A:Y1 A:Y2 B:Y1 B:Y2
+  t = writeBlock(
+    t,
+    0,
+    0,
+    [
+      ["r1", "1", "3", "10", "12"],
+      ["r2", "2", "4", "20", "22"],
+    ],
+    "grouped",
+  );
+  return t;
+};
+
+check("seq 223: superimposed grouped bars overlap at one x (barmode overlay, no gap)", () => {
+  const dataset = readTable(groupedNumbers());
+  const options = { ...newGraphOptions("grouped-bars"), groupLayout: "superimposed" as const };
+  const fig = GRAPHS["grouped-bars"].build(dataset.columns, options, paintOf(options, 2), dataset.titles);
+  strictEqual(fig.layout.barmode, "overlay");
+  strictEqual(fig.layout.bargroupgap, undefined);
+  const traces = fig.data as { name: string; y: (number | null)[]; error_y?: { array: number[] } }[];
+  deepStrictEqual(traces.map((t) => t.name), ["A", "B"]);
+  // Each bar still runs from the axis to its group's mean, with its error whisker.
+  deepStrictEqual(traces[0].y, [2, 3]);
+  deepStrictEqual(traces[1].y, [11, 21]);
+  deepStrictEqual(traces[0].error_y?.array, [1, 1]);
+  // Interleaved control: the same data, side by side, with the gap.
+  const plain = GRAPHS["grouped-bars"].build(
+    dataset.columns,
+    newGraphOptions("grouped-bars"),
+    paintOf(newGraphOptions("grouped-bars"), 2),
+    dataset.titles,
+  );
+  strictEqual(plain.layout.barmode, "group");
+  strictEqual(plain.layout.bargroupgap, 0.1);
+});
+
+check("seq 223: bars with individual points draws bars plus one points trace per group", () => {
+  ok(GRAPHS["grouped-bars-scatter"], "grouped-bars-scatter is registered");
+  const offered = GRAPH_OPTIONS_BY_TABLE.grouped.map((o) => o.value);
+  ok(offered.includes("grouped-bars-scatter"), "offered for grouped tables");
+  ok(GRAPH_OPTIONS_BY_TABLE.nested.map((o) => o.value).includes("grouped-bars-scatter"), "offered for nested tables");
+  const dataset = readTable(groupedNumbers());
+  const options = newGraphOptions("grouped-bars-scatter");
+  const fig = GRAPHS["grouped-bars-scatter"].build(dataset.columns, options, paintOf(options, 2), dataset.titles);
+  const traces = fig.data as { type: string; mode?: string; name: string; y: (number | null)[] }[];
+  deepStrictEqual(
+    traces.map((t) => `${t.type}/${t.mode ?? ""}`),
+    ["bar/", "bar/", "scatter/markers", "scatter/markers"],
+  );
+  deepStrictEqual(traces.map((t) => t.name), ["A", "B", "A", "B"]);
+  deepStrictEqual(traces[0].y, [2, 3]);
+  deepStrictEqual(traces[1].y, [11, 21]);
+  // The points are the replicates themselves, in table order.
+  deepStrictEqual(traces[2].y, [1, 3, 2, 4]);
+  deepStrictEqual(traces[3].y, [10, 12, 20, 22]);
+  // On a summary table there are no individual values: bars only.
+  const summary = readTable(summaryTable());
+  const summaryFig = GRAPHS["grouped-bars-scatter"].build(
+    summary.numeric,
+    options,
+    paintOf(options, 2),
+    summary.titles,
+    "mean-sd-n",
+  );
+  strictEqual(summaryFig.data.length, 2);
+  ok((summaryFig.data as { type: string }[]).every((t) => t.type === "bar"));
+});
+
+check("seq 223: MCP build-graph accepts grouped-bars-scatter; update-graph accepts groupLayout superimposed", () => {
+  const nodes: Record<string, ProjectNode> = {
+    table_1: {
+      id: "table_1",
+      type: "table",
+      name: "G",
+      parentId: null,
+      tableType: "grouped",
+      data: groupedNumbers(),
+    },
+    graph_1: {
+      id: "graph_1",
+      type: "graph",
+      name: "Bars",
+      parentId: "table_1",
+      graphType: "grouped-bars",
+      graphOptions: newGraphOptions("grouped-bars"),
+    },
+  };
+  const state = { nodes, rootOrder: ["table_1"], childOrder: { table_1: ["graph_1"] }, activeNodeId: "table_1" };
+  const created: { graphType: GraphType }[] = [];
+  const updated: { id: string; options: GraphOptions }[] = [];
+  const deps: GraphJobDeps = {
+    getState: () => state,
+    createGraph: (_parentId, graphType) => {
+      created.push({ graphType });
+      return "graph_2";
+    },
+    updateGraph: (id, options) => {
+      updated.push({ id, options });
+    },
+  };
+  const built = executeBuildGraph(
+    { job_id: "job-223-build", project_id: "project-1", action: "build-graph", args: { table_id: "table_1", graph_type: "grouped-bars-scatter" }, status: "queued" },
+    deps,
+  );
+  strictEqual((built.result as { graph_type: string }).graph_type, "grouped-bars-scatter");
+  strictEqual(created[0]?.graphType, "grouped-bars-scatter");
+  executeUpdateGraph(
+    { job_id: "job-223-update", project_id: "project-1", action: "update-graph", args: { graph_id: "graph_1", options: { groupLayout: "superimposed" } }, status: "queued" },
+    deps,
+  );
+  strictEqual(updated[0]?.id, "graph_1");
+  strictEqual(updated[0]?.options.groupLayout, "superimposed");
+});
+
+// seq 220: axis number format (decimal places / scientific notation).
+check("seq 220: numberTickformat maps a format to Plotly's tickformat", () => {
+  strictEqual(numberTickformat(undefined), undefined);
+  strictEqual(numberTickformat({ format: "auto" }), undefined);
+  strictEqual(numberTickformat({ format: "decimal", decimals: 2 }), ".2f");
+  strictEqual(numberTickformat({ format: "scientific", decimals: 3 }), ".3e");
+  strictEqual(numberTickformat({ format: "decimal" }), ".2f"); // decimals omitted: 2
+  strictEqual(numberTickformat({ format: "decimal", decimals: 0 }), ".0f");
+  strictEqual(numberTickformat({ format: "scientific", decimals: 99 }), ".15e"); // clamped to 15
+  strictEqual(numberTickformat({ format: "decimal", decimals: -4 }), ".0f");
+});
+
+const xyNumbers = (): TableData => ({
+  columns: ["Title", "X", "Y1", "Y2"],
+  rows: [
+    ["r1", "0.001", "1000", "2000"],
+    ["r2", "0.002", "3000", "4000"],
+    ["r3", "0.003", "5000", "6000"],
+  ],
+});
+
+check("seq 220: applyNumberFormats formats numeric axes and leaves category/log axes alone", () => {
+  // An XY scatter: both axes numeric, both formatted.
+  const xyOptions = {
+    ...newGraphOptions("xy-scatter"),
+    xNumberFormat: { format: "scientific", decimals: 1 } as const,
+    yNumberFormat: { format: "decimal", decimals: 0 } as const,
+  };
+  const xyFig = GRAPHS["xy-scatter"].build(readTable(xyNumbers()).columns, xyOptions, paintOf(xyOptions, 2));
+  applyNumberFormats(xyFig, xyOptions);
+  strictEqual((xyFig.layout.xaxis as { tickformat?: string }).tickformat, ".1e");
+  strictEqual((xyFig.layout.yaxis as { tickformat?: string }).tickformat, ".0f");
+  // Grouped bars: the Y (value) axis formats; the X (category) axis keeps its labels.
+  const barOptions = { ...newGraphOptions("grouped-bars"), yNumberFormat: { format: "decimal", decimals: 2 } as const };
+  const barFig = GRAPHS["grouped-bars"].build(
+    readTable(groupedNumbers()).columns,
+    barOptions,
+    paintOf(barOptions, 2),
+  );
+  applyNumberFormats(barFig, barOptions);
+  strictEqual((barFig.layout.yaxis as { tickformat?: string }).tickformat, ".2f");
+  strictEqual((barFig.layout.xaxis as { tickformat?: string }).tickformat, undefined);
+  // A log axis keeps its power ticks: the format never fights the builder.
+  const logOptions = {
+    ...newGraphOptions("xy-scatter"),
+    yScale: "log10" as const,
+    yNumberFormat: { format: "decimal", decimals: 2 } as const,
+  };
+  const logFig = GRAPHS["xy-scatter"].build(readTable(xyNumbers()).columns, logOptions, paintOf(logOptions, 2));
+  applyNumberFormats(logFig, logOptions);
+  strictEqual((logFig.layout.yaxis as { tickformat?: string }).tickformat, undefined);
+  strictEqual((logFig.layout.yaxis as { type?: string }).type, "log");
+  // Separated bars place their own category ticks: the X format stays off.
+  const sepOptions = {
+    ...newGraphOptions("grouped-bars"),
+    groupLayout: "separated" as const,
+    xNumberFormat: { format: "scientific", decimals: 2 } as const,
+  };
+  const sepFig = GRAPHS["grouped-bars"].build(
+    readTable(groupedNumbers()).columns,
+    sepOptions,
+    paintOf(sepOptions, 2),
+  );
+  applyNumberFormats(sepFig, sepOptions);
+  strictEqual((sepFig.layout.xaxis as { tickformat?: string }).tickformat, undefined);
+  // No format anywhere: the figure is untouched.
+  const plainFig = GRAPHS["xy-scatter"].build(
+    readTable(xyNumbers()).columns,
+    newGraphOptions("xy-scatter"),
+    paintOf(newGraphOptions("xy-scatter"), 2),
+  );
+  applyNumberFormats(plainFig, newGraphOptions("xy-scatter"));
+  strictEqual((plainFig.layout.xaxis as { tickformat?: string }).tickformat, undefined);
+  strictEqual((plainFig.layout.yaxis as { tickformat?: string }).tickformat, undefined);
+});
+
+check("seq 220: a number format survives a .hlx save/load round-trip; a broken one reads as none", () => {
+  const withFormat: ProjectFilePayload = {
+    ...payload,
+    nodes: {
+      ...payload.nodes,
+      g1: {
+        ...graph,
+        graphOptions: {
+          ...newGraphOptions("xy-scatter"),
+          xNumberFormat: { format: "decimal", decimals: 1 },
+          yNumberFormat: { format: "scientific", decimals: 3 },
+        },
+      },
+    },
+  };
+  const back = read(serializeProjectFile(withFormat)).project.nodes.g1!.graphOptions;
+  deepStrictEqual(back!.xNumberFormat, { format: "decimal", decimals: 1 });
+  deepStrictEqual(back!.yNumberFormat, { format: "scientific", decimals: 3 });
+  const broken = JSON.parse(serializeProjectFile(withFormat)) as { project: ProjectFilePayload };
+  (broken.project.nodes.g1!.graphOptions as unknown as Record<string, unknown>).yNumberFormat = { format: "percent" };
+  const reread = read(JSON.stringify(broken)).project.nodes.g1!.graphOptions;
+  strictEqual(reread!.yNumberFormat, undefined);
+  deepStrictEqual(reread!.xNumberFormat, { format: "decimal", decimals: 1 });
+});
+
+check("seq 220: MCP update-graph accepts a number format and rejects a bad one", () => {
+  const nodes: Record<string, ProjectNode> = {
+    table_1: {
+      id: "table_1",
+      type: "table",
+      name: "XY",
+      parentId: null,
+      tableType: "xy",
+      data: xyNumbers(),
+    },
+    graph_1: {
+      id: "graph_1",
+      type: "graph",
+      name: "Scatter",
+      parentId: "table_1",
+      graphType: "xy-scatter",
+      graphOptions: newGraphOptions("xy-scatter"),
+    },
+  };
+  const state = { nodes, rootOrder: ["table_1"], childOrder: { table_1: ["graph_1"] }, activeNodeId: "table_1" };
+  const updated: { id: string; options: GraphOptions }[] = [];
+  const deps: GraphJobDeps = {
+    getState: () => state,
+    updateGraph: (id, options) => {
+      updated.push({ id, options });
+    },
+  };
+  const job = (jobId: string, options: unknown) => ({
+    job_id: jobId,
+    project_id: "project-1",
+    action: "update-graph",
+    args: { graph_id: "graph_1", options },
+    status: "queued" as const,
+  });
+  executeUpdateGraph(job("job-220-ok", { xNumberFormat: { format: "scientific", decimals: 1 } }), deps);
+  deepStrictEqual(updated[0]?.options.xNumberFormat, { format: "scientific", decimals: 1 });
+  throws(
+    () => executeUpdateGraph(job("job-220-bad", { xNumberFormat: { format: "percent" } }), deps),
+    /must be one of: auto, decimal, scientific/,
+  );
+  throws(
+    () => executeUpdateGraph(job("job-220-range", { yNumberFormat: { format: "decimal", decimals: 16 } }), deps),
+    /whole number from 0 to 15/,
+  );
+  throws(
+    () => executeUpdateGraph(job("job-220-shape", { yNumberFormat: ".2f" }), deps),
+    /must be an object/,
+  );
+});
+
+// seq 222: X error bars on XY graphs (Prism's X-error subcolumn, imported as
+// the "<X> error" column). The error column is used as the bars, not drawn
+// as a series, while xError is on.
+const xyWithXError = (): TableData => ({
+  columns: ["Title", "X", "Y1", "Y2", "X error"],
+  rows: [
+    ["r1", "1", "10", "20", "0.1"],
+    ["r2", "2", "30", "40", "0.2"],
+    ["r3", "3", "50", "60", "0.3"],
+  ],
+});
+
+const errorXOf = (trace: unknown): number[] | undefined => {
+  const err = (trace as { error_x?: { array?: number[] } }).error_x;
+  return err?.array;
+};
+
+check("seq 222: xErrorColumn finds the '<X> error' column; xyDrawn aligns its values with the points", () => {
+  const cols = readTable(xyWithXError()).columns;
+  const x = cols[0]!;
+  const err = xErrorColumn(cols, x);
+  strictEqual(err?.name, "X error");
+  strictEqual(xErrorColumn(readTable(xyNumbers()).columns, readTable(xyNumbers()).columns[0]!), undefined);
+  const mean = { ...newGraphOptions("xy-scatter"), xyReplicates: "mean" as const, xError: true };
+  const ySet = { name: "Y1", columns: [cols[1]!] };
+  deepStrictEqual(xyDrawn(x, ySet, mean, undefined, err).xErrors, [0.1, 0.2, 0.3]);
+  strictEqual(xyDrawn(x, ySet, { ...mean, xError: false }, undefined, err).xErrors, undefined);
+  strictEqual(xyDrawn(x, ySet, mean, undefined).xErrors, undefined);
+  // Replicates drawn each: the row's X error repeats for each replicate point.
+  const repCols = readTable({
+    columns: ["Title", "X", "Y:Y1", "Y:Y2", "X error"],
+    rows: [
+      ["r1", "1", "10", "12", "0.1"],
+      ["r2", "2", "30", "32", "0.2"],
+    ],
+  }).columns;
+  const repSet = { name: "Y", columns: [repCols[1]!, repCols[2]!] };
+  const each = xyDrawn(repCols[0]!, repSet, { ...mean, xyReplicates: "each" as const }, undefined, xErrorColumn(repCols, repCols[0]!));
+  deepStrictEqual(each.x, [1, 1, 2, 2]);
+  deepStrictEqual(each.xErrors, [0.1, 0.1, 0.2, 0.2]);
+});
+
+check("seq 222: XY scatter, bar and area draw error_x from the X-error column and stop drawing it as a series", () => {
+  const options = { ...newGraphOptions("xy-scatter"), xError: true };
+  for (const type of ["xy-scatter", "xy-bar", "xy-area"] as const) {
+    const fig = GRAPHS[type].build(readTable(xyWithXError()).columns, options, paintOf(options, 2));
+    strictEqual(fig.data.length, 2, `${type} draws the two Y sets, not the error column`);
+    deepStrictEqual(
+      fig.data.map((t) => (t as { name?: string }).name),
+      ["Y1", "Y2"],
+    );
+    for (const trace of fig.data) deepStrictEqual(errorXOf(trace), [0.1, 0.2, 0.3]);
+  }
+  // Off: today's behaviour is untouched — the error column stays a series and
+  // no X bars are drawn.
+  const off = GRAPHS["xy-scatter"].build(
+    readTable(xyWithXError()).columns,
+    newGraphOptions("xy-scatter"),
+    paintOf(newGraphOptions("xy-scatter"), 3),
+  );
+  deepStrictEqual(
+    off.data.map((t) => (t as { name?: string }).name),
+    ["Y1", "Y2", "X error"],
+  );
+  for (const trace of off.data) strictEqual(errorXOf(trace), undefined);
+  // On, but no error column: no bars, and nothing is hidden.
+  const noCol = GRAPHS["xy-scatter"].build(
+    readTable(xyNumbers()).columns,
+    { ...newGraphOptions("xy-scatter"), xError: true },
+    paintOf(newGraphOptions("xy-scatter"), 2),
+  );
+  deepStrictEqual(
+    noCol.data.map((t) => (t as { name?: string }).name),
+    ["Y1", "Y2"],
+  );
+  for (const trace of noCol.data) strictEqual(errorXOf(trace), undefined);
+});
+
+check("seq 222: MCP update-graph accepts xError and rejects a non-boolean", () => {
+  const nodes: Record<string, ProjectNode> = {
+    table_1: {
+      id: "table_1",
+      type: "table",
+      name: "XY",
+      parentId: null,
+      tableType: "xy",
+      data: xyWithXError(),
+    },
+    graph_1: {
+      id: "graph_1",
+      type: "graph",
+      name: "Scatter",
+      parentId: "table_1",
+      graphType: "xy-scatter",
+      graphOptions: newGraphOptions("xy-scatter"),
+    },
+  };
+  const state = { nodes, rootOrder: ["table_1"], childOrder: { table_1: ["graph_1"] }, activeNodeId: "table_1" };
+  const updated: { id: string; options: GraphOptions }[] = [];
+  const deps: GraphJobDeps = {
+    getState: () => state,
+    updateGraph: (id, options) => {
+      updated.push({ id, options });
+    },
+  };
+  const job = (jobId: string, options: unknown) => ({
+    job_id: jobId,
+    project_id: "project-1",
+    action: "update-graph",
+    args: { graph_id: "graph_1", options },
+    status: "queued" as const,
+  });
+  executeUpdateGraph(job("job-222-ok", { xError: true }), deps);
+  strictEqual(updated[0]?.options.xError, true);
+  throws(() => executeUpdateGraph(job("job-222-bad", { xError: "yes" }), deps), /must be a boolean/);
+});
+
+// seq 219: blank layout / image panels + a figure background colour.
+// A panel with no graph: kind "blank" (an empty cell, for layout) or "image"
+// (an embedded picture, for a gel / blot / photo beside the graphs).
+const blankPanel = (label: string, col: number): FigurePanel => ({
+  graphId: "",
+  kind: "blank",
+  label,
+  title: "",
+  row: 0,
+  col,
+  rowSpan: 1,
+  colSpan: 1,
+});
+const imagePanel = (label: string, col: number, imageData = "data:image/png;base64,iVBORw0KGgo="): FigurePanel => ({
+  graphId: "",
+  kind: "image",
+  imageData,
+  imageName: "gel.png",
+  label,
+  title: "",
+  row: 0,
+  col,
+  rowSpan: 1,
+  colSpan: 1,
+});
+
+check("seq 219: blank and image panels are never 'missing' and never break a shared legend", () => {
+  const before = figurePayload();
+  const panels = [...before.nodes.f1.panels!, blankPanel("C", 2), imagePanel("D", 3)];
+  deepStrictEqual(missingPanels(panels, before.nodes), []);
+  const legend = sharedLegendCheck(panels, before.nodes);
+  ok(legend.ok, JSON.stringify(legend));
+  strictEqual(legend.entries?.length, 2);
+  // A deleted graph is still missing — the blank/image panels don't mask it.
+  const nodes = { ...before.nodes };
+  delete nodes.g2;
+  deepStrictEqual(missingPanels(panels, nodes).map((p) => p.graphId), ["g2"]);
+  // Blank/image panels alone can't share a legend: there is nothing to read.
+  const noGraphs = sharedLegendCheck([blankPanel("A", 0), imagePanel("B", 1)], before.nodes);
+  ok(!noGraphs.ok && noGraphs.reason?.includes("at least two"), JSON.stringify(noGraphs));
+});
+
+check("seq 219: the composed SVG uses the figure background and embeds image panels; blank panels keep their labels", () => {
+  const before = figurePayload();
+  const panels = [...before.nodes.f1.panels!, blankPanel("C", 2), imagePanel("D", 3)];
+  const panel = () =>
+    `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200"><rect width="300" height="200"/></svg>`;
+  const figure = {
+    panels,
+    grid: { rows: 1, cols: 4 },
+    figureSize: { widthIn: 10, heightIn: 7.5 },
+    labelStyle: { position: "top-left" as const, fontSizePt: 12, bold: true },
+    figureTitle: "",
+    sharedLegend: "none" as const,
+    figureBackground: "#e8e8e8",
+  };
+  const { svg, missing } = composeFigureSvg(
+    before.nodes.f1.panels!.map((p) => ({ panel: p, svg: panel() })),
+    figure,
+  );
+  strictEqual(missing, 0);
+  ok(svg.includes('fill="#e8e8e8"'), svg);
+  ok(svg.includes('<image href="data:image/png;base64,iVBORw0KGgo="'), svg);
+  ok(svg.includes(">C</text>") && svg.includes(">D</text>"), svg);
+  // No background set: the page stays white.
+  const plain = composeFigureSvg(
+    before.nodes.f1.panels!.map((p) => ({ panel: p, svg: panel() })),
+    { ...figure, panels: before.nodes.f1.panels!, grid: { rows: 1, cols: 2 }, figureBackground: undefined },
+  );
+  ok(plain.svg.includes('fill="#ffffff"'), plain.svg);
+  strictEqual(plain.missing, 0);
+});
+
+check("seq 219: blank/image panels and the background survive a .hlx round-trip; a broken image reads as no image", () => {
+  const before = figurePayload();
+  const withPanels: ProjectFilePayload = {
+    ...before,
+    nodes: {
+      ...before.nodes,
+      f1: {
+        ...before.nodes.f1,
+        figureBackground: "#e8e8e8",
+        panels: [...before.nodes.f1.panels!, blankPanel("C", 2), imagePanel("D", 3)],
+        grid: { rows: 1, cols: 4 },
+      },
+    },
+  };
+  const { project } = read(serializeProjectFile(withPanels));
+  const f1 = project.nodes.f1!;
+  strictEqual(f1.figureBackground, "#e8e8e8");
+  strictEqual(f1.panels?.length, 4);
+  deepStrictEqual(f1.panels?.[2], blankPanel("C", 2));
+  deepStrictEqual(f1.panels?.[3], imagePanel("D", 3));
+  // A hand-edited file with a non-image data URL: the image is dropped, the
+  // panel stays (blank until a real image is picked) — the file still opens.
+  const broken = JSON.parse(serializeProjectFile(withPanels)) as { project: ProjectFilePayload };
+  (broken.project.nodes.f1!.panels![3] as unknown as Record<string, unknown>).imageData = "data:text/plain,hello";
+  const reread = read(JSON.stringify(broken)).project.nodes.f1!;
+  strictEqual(reread.panels?.[3]?.kind, "image");
+  strictEqual(reread.panels?.[3]?.imageData, undefined);
+  strictEqual(reread.panels?.[3]?.imageName, "gel.png");
+});
+
+check("seq 219: MCP update-figure takes a background colour and blank/image panels, and rejects bad ones", () => {
+  const before = figurePayload();
+  const nodes = { ...before.nodes };
+  const state = { nodes, rootOrder: before.rootOrder, childOrder: before.childOrder, activeNodeId: "f1" };
+  const applied: { id: string; patch: FigurePatch }[] = [];
+  const deps: GraphJobDeps = {
+    getState: () => state,
+    updateFigure: (id, patch) => {
+      applied.push({ id, patch });
+    },
+  };
+  const job = (jobId: string, layout: unknown) => ({
+    job_id: jobId,
+    project_id: "project-1",
+    action: "update-figure",
+    args: { figure_id: "f1", layout },
+    status: "queued" as const,
+  });
+  const out = executeUpdateFigure(
+    job("job-219-ok", {
+      backgroundColor: "#123456",
+      panels: [
+        { graphId: "g1", row: 0, col: 0 },
+        { graphId: "g2", row: 0, col: 1 },
+        { kind: "blank", row: 0, col: 2 },
+        { kind: "image", imageData: "data:image/png;base64,iVBORw0KGgo=", imageName: "gel.png", row: 0, col: 3 },
+      ],
+      grid: { rows: 1, cols: 4 },
+    }),
+    deps,
+  );
+  strictEqual(applied[0]?.patch.figureBackground, "#123456");
+  strictEqual(applied[0]?.patch.panels?.length, 4);
+  strictEqual(applied[0]?.patch.panels?.[2]?.kind, "blank");
+  strictEqual(applied[0]?.patch.panels?.[3]?.kind, "image");
+  strictEqual(applied[0]?.patch.panels?.[3]?.imageName, "gel.png");
+  deepStrictEqual(
+    (out.result as { panels: { kind?: string }[] }).panels.map((p) => p.kind ?? "graph"),
+    ["graph", "graph", "blank", "image"],
+  );
+  throws(
+    () => executeUpdateFigure(job("job-219-bg", { backgroundColor: "red" }), deps),
+    /must be a #rrggbb hex/,
+  );
+  throws(
+    () =>
+      executeUpdateFigure(
+        job("job-219-big", {
+          panels: [{ kind: "image", imageData: `data:image/png;base64,${"A".repeat(FIGURE_IMAGE_MAX_DATA_URL)}`, row: 0, col: 0 }],
+        }),
+        deps,
+      ),
+    /too large/,
+  );
+  throws(
+    () =>
+      executeUpdateFigure(
+        job("job-219-nograph", { panels: [{ graphId: "nope", row: 0, col: 0 }] }),
+        deps,
+      ),
+    /names no graph/,
+  );
 });
 
 check("summary subcolumns: the heatmap plots the Mean column, not the mean of Mean/SD/N", () => {

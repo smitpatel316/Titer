@@ -1164,18 +1164,18 @@ const ROWS: Row[] = [
   {
     item: "219",
     title: "Blank layout/image panels + background",
-    status: "gap",
-    note: "Not built. Figure panels are graph IDs only (FigurePanel.graphId); no image panels, no drawing canvas, no background field in figure.ts.",
+    status: "covered",
+    note: "Merged on check/v18: blank + image FigurePanel kinds (never missing, never break a shared legend) + figureBackground colour in the composed SVG, with .hlx round-trip and MCP update-figure support. Check corrected: the image-panel surface in figure.ts is validFigureImageData, not imagePanel.",
     checks: [
       { kind: "sourceContains", file: "figure", text: "background" },
-      { kind: "sourceContains", file: "figure", text: "imagePanel" },
+      { kind: "sourceContains", file: "figure", text: "validFigureImageData" },
     ],
   },
   {
     item: "220",
     title: "Axis number format",
-    status: "gap",
-    note: "Not built. Zero tickformat/decimals hits in src/views/graphs/.",
+    status: "covered",
+    note: "Merged on check/v18: x/y number formats (auto/decimal/scientific, 0–15 decimals) via numberTickformat + applyNumberFormats; log/category axes untouched; .hlx round-trip; MCP update-graph validates.",
     checks: [
       { kind: "sourceContainsRe", scope: "graphs", re: "tickformat" },
       { kind: "sourceContainsRe", scope: "graphs", re: "decimals" },
@@ -1184,15 +1184,15 @@ const ROWS: Row[] = [
   {
     item: "222",
     title: "X error bars",
-    status: "gap",
-    note: "Not built. No xError in GraphOptions; error_x set only by forest-plot + horizontal bars.",
+    status: "covered",
+    note: "Merged on check/v18: xError option — the '<X> error' column draws error_x on XY scatter/bar/area and is hidden as a series while on; MCP update-graph validates.",
     checks: [{ kind: "graphOption", field: "xError" }],
   },
   {
     item: "223",
     title: "Superimposed bars + scatter-on-bars",
-    status: "gap",
-    note: "Partial: scatter-on-bars ✓ (showPoints on grouped-bars); superimposed bars ✗ (groupLayout only interleaved|separated).",
+    status: "covered",
+    note: "Merged on check/v18: groupLayout superimposed (barmode overlay, no gap) + grouped-bars-scatter kind (bars + one points trace per group) on grouped/nested tables; summary tables draw bars only.",
     checks: [{ kind: "graphChoiceExtra", choice: "groupLayout", known: ["interleaved", "separated"] }],
   },
   {

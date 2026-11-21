@@ -39,7 +39,7 @@ import { addEstimationPlot } from "./estimation-plot";
 import { coxSurvivalColumns } from "./survival";
 import { FormatPanel } from "./format-panel";
 import { copyGraphImage, saveGraphImage, sendGraphToOffice } from "./graph-export";
-import { addNote, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, refLineParts, rightYDataset, unlinkedAnalysisNote, withCaps } from "./plot-helpers";
+import { addNote, applyNumberFormats, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, refLineParts, rightYDataset, unlinkedAnalysisNote, withCaps } from "./plot-helpers";
 import { addLogisticCurve as addAnalysisLogisticCurve } from "./fitted-curve";
 import { useStartAnalysis } from "../analyses/use-analysis-launcher";
 import { loadPlotly } from "./plotly";
@@ -709,6 +709,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
         allSeries,
       );
       const fig = GRAPHS[type].build(coxSurvivalCols ?? volcanoColumns, buildOptions, paint, drawDataset?.titles, drawDataset?.summary, parent?.tableType);
+      applyNumberFormats(fig, buildOptions);
       fig.data = withCaps(fig.data, options);
       // A graph whose sibling analysis isn't linked draws only its axes or
       // points: say so on the canvas (G-F7), instead of leaving bare axes.

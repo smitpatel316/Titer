@@ -2,6 +2,7 @@
 // draws (centers, errors), and the Plotly layout of each family.
 import {
   SAME_AS_FILL,
+  type AxisNumberFormat,
   type FillPattern,
   type GraphOptions,
   type GraphType,
@@ -483,15 +484,28 @@ export const centers = (cols: Column[], center: GraphOptions["center"]) =>
 export const errorOf = (v: number[], kind: GraphOptions["error"]) =>
   kind === "sem" ? sem(v) : kind === "ci" ? (v.length < 2 ? 0 : tCrit95(v.length - 1) * sem(v)) : sd(v);
 
+/** An XY table's X-error column, if one was imported: Prism's X-error
+ *  subcolumn arrives as a column named "<X> error" (see pzfx.ts) — a Y
+ *  series by the table's shape, but metadata about X, not a data set. */
+export function xErrorColumn(columns: Column[], x: Column): Column | undefined {
+  return columns.find((c) => c.name === `${x.name} error`);
+}
+
 /** A Y data set of an XY graph, as drawn: each value where X has one, keyed so it can be
  *  picked and styled; or, for replicates shown as their center (`xyReplicates`), each X's
- *  center (mean or median) and its error (none when error bars are off). */
+ *  center (mean or median) and its error (none when error bars are off). `xErrorCol` is
+ *  the table's X-error column (see `xErrorColumn`): while `options.xError` is on, each
+ *  point also carries its row's X error, aligned by row — the same value for every
+ *  replicate of that row, 0 where the column holds none. */
 export function xyDrawn(
   x: Column,
   set: DataSet,
   options: GraphOptions,
   summary: SummaryFormat = "replicates",
-): { x: number[]; y: number[]; keys?: string[]; errors?: number[] } {
+  xErrorCol?: Column,
+): { x: number[]; y: number[]; keys?: string[]; errors?: number[]; xErrors?: number[] } {
+  const xErrors = (rows: number[]): number[] | undefined =>
+    options.xError && xErrorCol ? rows.map((r) => xErrorCol.byRow[r] ?? 0) : undefined;
   // A summary table's Y set holds its stored Mean (and error) columns, not
   // replicates: the drawn points are the Means, with the stored error
   // converted to the graph's error kind — averaging Mean/SD/N as replicates
@@ -512,7 +526,12 @@ export function xyDrawn(
   }
   if (set.columns.length === 1 || options.xyReplicates === "each") {
     const points = xyPoints(x, set);
-    return { x: points.x, y: points.y, keys: points.rows.map((r, i) => pointKeyOf(points.columns[i], r)) };
+    return {
+      x: points.x,
+      y: points.y,
+      keys: points.rows.map((r, i) => pointKeyOf(points.columns[i], r)),
+      xErrors: xErrors(points.rows),
+    };
   }
   const rows = xyRows(x, set);
   return {
@@ -521,6 +540,7 @@ export function xyDrawn(
     ...(options.error === "none"
       ? {}
       : { errors: rows.values.map((v) => (v.length < 2 ? 0 : errorOf(v, options.error))) }),
+    xErrors: xErrors(rows.rows),
   };
 }
 
@@ -717,6 +737,38 @@ export function curveXs(xs: number[], scale: GraphOptions["xScale"], steps: numb
     const t = lo + ((hi - lo) * i) / steps;
     return log ? 10 ** t : t;
   });
+}
+
+/** An axis number format as a Plotly `tickformat` string: fixed decimals
+ *  (".2f") or scientific (".2e"); automatic (or absent) draws Plotly's own
+ *  ticks. `decimals` clamps to 0–15 — beyond that Plotly would print noise. */
+export function numberTickformat(fmt: AxisNumberFormat | undefined): string | undefined {
+  if (!fmt || fmt.format === "auto") return undefined;
+  const decimals = Math.max(0, Math.min(15, Math.floor(fmt.decimals ?? 2)));
+  return `.${decimals}${fmt.format === "decimal" ? "f" : "e"}`;
+}
+
+/** Applies each axis's number format to a built figure's numeric linear
+ *  axes (see `numberTickformat`). Category axes, log axes (whose ticks are
+ *  the powers) and axes with custom tick placement keep their own labels,
+ *  so a format never fights a builder's ticks. Mutates the figure in
+ *  place — builders return a fresh figure per draw, and the graph view
+ *  already mutates it for overlays. */
+export function applyNumberFormats(fig: GraphFigure, options: GraphOptions): void {
+  const axes: [string, AxisNumberFormat | undefined][] = [
+    ["xaxis", options.xNumberFormat],
+    ["yaxis", options.yNumberFormat],
+    ["yaxis2", options.y2NumberFormat],
+  ];
+  for (const [key, fmt] of axes) {
+    const tickformat = numberTickformat(fmt);
+    if (!tickformat) continue;
+    const axis = fig.layout[key] as Record<string, unknown> | undefined;
+    if (!axis || typeof axis !== "object") continue;
+    if (axis.type === "category" || axis.type === "log") continue;
+    if (axis.tickmode === "array") continue;
+    axis.tickformat = tickformat;
+  }
 }
 
 /** A logarithmic axis: ticks at the powers of `base` (only those in range show), small

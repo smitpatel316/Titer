@@ -16,6 +16,7 @@ import {
   MAX_REF_LINES,
   REF_LABEL_PLACES,
   clamp,
+  type AxisNumberFormat,
   type FigurePanel,
   FLOATING_NOTE_COLORS,
   type FloatingNote,
@@ -117,6 +118,7 @@ import {
   DEFAULT_LABEL_STYLE,
   figureDpi,
   FIGURE_SIZE_LIMITS,
+  validFigureImageData,
 } from "./figure";
 
 export const PROJECT_FILE_EXTENSION = "hlx";
@@ -224,7 +226,7 @@ const NODE_KEYS = Object.keys({
   id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, highlight: 1, tableType: 1, data: 1, transform: 1, notes: 1, tags: 1,
   analysisType: 1, analysisParams: 1, cachedResult: 1, frozen: 1, orphaned: 1, sourceTableName: 1, graphType: 1, graphOptions: 1,
   sourceTableIds: 1,
-  panels: 1, grid: 1, figureSize: 1, labelStyle: 1, figureTitle: 1, sharedLegend: 1, dpi: 1,
+  panels: 1, grid: 1, figureSize: 1, labelStyle: 1, figureTitle: 1, sharedLegend: 1, figureBackground: 1, dpi: 1,
   info: 1,
 } satisfies Record<keyof ProjectNode, 1>);
 // prettier-ignore
@@ -245,6 +247,7 @@ const OPTIONAL_OPTIONS = {
   volcanoX: "text", volcanoY: "text", volcanoLabel: "text", volcanoGroupA: "text", volcanoGroupB: "text", rightYDataset: "text", y2Label: "text",
   palette: "palette", series: "styles", points: "pointStyles", outlineColor: "color", pointOutlineColor: "color", errorColor: "color",
   legend: "place", note: "place", refLines: "refLines", sets: "texts",
+  xNumberFormat: "numberFormat", yNumberFormat: "numberFormat", y2NumberFormat: "numberFormat",
 } as const satisfies Record<OptionalOption, keyof typeof READ_OPTION>;
 // A graph's links to its analyses (FF-F13): the graph options that name a
 // sibling analysis node — the source of an overlay (significance brackets,
@@ -544,6 +547,20 @@ function readStyles(v: unknown): Record<string, SeriesStyle> | undefined {
 const readPlace = (v: unknown): Place | undefined =>
   isObj(v) && isFiniteNumber(v.x) && isFiniteNumber(v.y) ? { x: v.x, y: v.y } : undefined;
 
+/** An axis number format: `format` one of auto/decimal/scientific, `decimals`
+ *  a whole number 0–15. A broken value reads as no format rather than
+ *  breaking the open — an unknown format is not a format at all. */
+const readNumberFormat = (v: unknown): AxisNumberFormat | undefined => {
+  if (!isObj(v)) return undefined;
+  const format = oneOf(["auto", "decimal", "scientific"] as const, v.format);
+  if (!format) return undefined;
+  const decimals =
+    typeof v.decimals === "number" && Number.isInteger(v.decimals)
+      ? Math.max(0, Math.min(15, v.decimals))
+      : undefined;
+  return defined({ format, decimals });
+};
+
 /** Reference lines: each at a finite value, its dashes one of the list (else dashed), its
  *  thickness within the lines' limits, a color or none, a text or none; ten at most. */
 function readRefLines(v: unknown): RefLine[] | undefined {
@@ -605,6 +622,7 @@ const READ_OPTION = {
   styles: readStyles,
   pointStyles: readPointStyles,
   place: readPlace,
+  numberFormat: readNumberFormat,
   refLines: readRefLines,
   color: (v: unknown) => (isHex(v) ? v : undefined),
 };
@@ -1544,17 +1562,31 @@ function readInfoSheet(raw: unknown): InfoSheetData {
  *  `panels` opens as an empty figure (not an error); a panel out of range is
  *  clamped into the grid; a `dpi` Titer doesn't offer falls back to 600; a
  *  size outside 1–20 in is brought within, and an aspect beyond 4:1 is
- *  reined in by shrinking the longer side. Unknown figure fields are kept
- *  by the node's spread in `readNode` and written back on save. */
+ *  reined in by shrinking the longer side. A blank/image panel needs no
+ *  graph (its `graphId` is empty); an image whose data URL isn't an image
+ *  reads as no image — the panel stays, blank until a real image is picked.
+ *  Unknown figure fields are kept by the node's spread in `readNode` and
+ *  written back on save. */
 function readFigure(
   raw: Obj,
-): Pick<ProjectNode, "panels" | "grid" | "figureSize" | "labelStyle" | "figureTitle" | "sharedLegend" | "dpi"> {
+): Pick<ProjectNode, "panels" | "grid" | "figureSize" | "labelStyle" | "figureTitle" | "sharedLegend" | "figureBackground" | "dpi"> {
   const panels = (Array.isArray(raw.panels) ? raw.panels : [])
-    .filter((p): p is Obj => isObj(p) && typeof p.graphId === "string" && p.graphId !== "")
+    .filter(
+      (p): p is Obj =>
+        isObj(p) &&
+        ((typeof p.graphId === "string" && p.graphId !== "") || p.kind === "blank" || p.kind === "image"),
+    )
     .map((p) => {
       const n = (k: string) => (isFiniteNumber(p[k]) ? Math.floor(p[k] as number) : undefined);
+      const kind = oneOf(["graph", "blank", "image"] as const, p.kind);
       return defined({
-        graphId: p.graphId as string,
+        graphId: typeof p.graphId === "string" ? (p.graphId as string) : "",
+        // A panel's kind is only written when it isn't a graph (absent reads
+        // as "graph", as every panel was before this landed — old files need
+        // no migration, and a round-trip keeps them byte-identical).
+        kind: kind === "graph" || kind === undefined ? undefined : kind,
+        imageData: kind === "image" ? validFigureImageData(p.imageData) : undefined,
+        imageName: kind === "image" && typeof p.imageName === "string" ? (p.imageName as string) : undefined,
         graphName: typeof p.graphName === "string" ? (p.graphName as string) : undefined,
         label: typeof p.label === "string" ? (p.label as string) : "",
         labelManual: p.labelManual === true || undefined,
@@ -1579,15 +1611,16 @@ function readFigure(
   const styleRaw = isObj(raw.labelStyle) ? raw.labelStyle : {};
   const position = oneOf(["top-left", "top-right", "above-panel"] as const, styleRaw.position) ?? "top-left";
   const fontSizePt = within(styleRaw.fontSizePt, { min: 8, max: 28 }) ?? DEFAULT_LABEL_STYLE.fontSizePt;
-  return {
+  return defined({
     panels: clamped,
     grid,
     figureSize: { widthIn, heightIn },
     labelStyle: { position, fontSizePt, bold: styleRaw.bold !== false },
     figureTitle: typeof raw.figureTitle === "string" ? raw.figureTitle : "",
     sharedLegend: oneOf(["none", "shared"] as const, raw.sharedLegend) ?? "none",
+    figureBackground: isHex(raw.figureBackground) ? (raw.figureBackground as string) : undefined,
     dpi: figureDpi(raw.dpi),
-  };
+  });
 }
 
 /** `tableColors`: where a table leaves the colors it kept for its graphs. */

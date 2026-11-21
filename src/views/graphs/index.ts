@@ -28,6 +28,7 @@ import { xyArea } from "./xy-area";
 import { xySpikes } from "./xy-spikes";
 import { xyBarScatter } from "./xy-bar-scatter";
 import { groupedBars } from "./grouped-bars";
+import { groupedBarsScatter } from "./grouped-bars-scatter";
 import { groupedScatter } from "./grouped-scatter";
 import { groupedBox } from "./grouped-box";
 import { floatingBars } from "./floating-bars";
@@ -124,6 +125,7 @@ export const GRAPHS: Record<GraphType, GraphModule> = {
   "xy-spikes": xySpikes,
   "xy-bar-scatter": xyBarScatter,
   "grouped-bars": groupedBars,
+  "grouped-bars-scatter": groupedBarsScatter,
   "grouped-scatter": groupedScatter,
   "grouped-before-after": groupedBeforeAfter,
   "grouped-lines": groupedLines,
@@ -315,6 +317,13 @@ export function graphSeriesDataset(
     const x = variablePair(dataset.numeric, options)[0];
     return x ? [x.name] : [];
   }
+  // An XY graph with X error bars on draws its "<X> error" column as the
+  // bars, not as a series — the Series section styles only what is drawn.
+  if (family === "xy" && options.xError) {
+    const first = dataset.columns[0]?.name;
+    const series = seriesOfDataset(dataset, tableType);
+    return first ? series.filter((s) => s !== `${first} error`) : series;
+  }
   return seriesOfDataset(dataset, tableType);
 }
 
@@ -390,6 +399,7 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
     "grouped-before-after",
     "grouped-box",
     "grouped-bars",
+    "grouped-bars-scatter",
     "grouped-lines",
     "grouped-stacked",
     "grouped-hbars",

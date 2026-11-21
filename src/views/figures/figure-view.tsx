@@ -11,9 +11,11 @@ import {
   DEFAULT_FIGURE_DPI,
   DEFAULT_FIGURE_SIZE,
   DEFAULT_LABEL_STYLE,
+  FIGURE_IMAGE_MAX_DATA_URL,
   FIGURE_MAX_COLS,
   FIGURE_RESOLUTIONS,
   LABEL_POSITIONS,
+  validFigureImageData,
 } from "../../lib/figure";
 import {
   assignLabels,
@@ -40,6 +42,21 @@ import { COLOR_MODES, type ColorMode } from "../../lib/vector-export";
 /** Screen pixels per inch in the editor (the figure keeps its true aspect ratio). */
 const SCREEN_PX_PER_IN = 72;
 
+/** A panel's key in the editor: its graph's id, or its kind + cell for a
+ *  panel with no graph (blank / image) — those remount when they move, which
+ *  costs nothing: they hold no Plotly element. */
+const panelKey = (panel: FigurePanel): string =>
+  (panel.kind ?? "graph") === "graph" ? panel.graphId : `${panel.kind}-${panel.row}-${panel.col}`;
+
+/** A file read as a data URL (for an image panel's embedded picture). */
+const readAsDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("Couldn't read the image file."));
+    reader.readAsDataURL(file);
+  });
+
 export function FigureView({ node }: { node: ProjectNode }) {
   const { nodes, updateFigure, setActiveNode } = useProjectStore();
   const panels = node.panels ?? [];
@@ -48,13 +65,14 @@ export function FigureView({ node }: { node: ProjectNode }) {
   const labelStyle = node.labelStyle ?? { ...DEFAULT_LABEL_STYLE };
   const figureTitle = node.figureTitle ?? "";
   const sharedLegend = node.sharedLegend ?? "none";
+  const figureBackground = node.figureBackground ?? "#ffffff";
   const dpi = node.dpi ?? DEFAULT_FIGURE_DPI;
 
   const set = (patch: Parameters<typeof updateFigure>[1]) => updateFigure(node.id, patch);
   const setPanels = (next: FigurePanel[]) => set({ panels: next });
 
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
-  const selected = panels.find((p) => p.graphId === selectedId) ?? null;
+  const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
+  const selected = panels.find((p) => panelKey(p) === selectedKey) ?? null;
   const [addGraphId, setAddGraphId] = React.useState("");
   const [exportFormat, setExportFormat] = React.useState<ExportFormat>("png");
   const [colorMode, setColorMode] = React.useState<ColorMode>("color");
@@ -75,34 +93,76 @@ export function FigureView({ node }: { node: ProjectNode }) {
   const legend = sharedLegendCheck(panels, nodes);
   const dupes = duplicateLabels(panels);
 
+  // Places a panel in the first free cell, growing a row when the grid is
+  // full rather than stacking a panel on top of another.
+  const insertPanel = (panel: FigurePanel) => {
+    const cell = firstFreeCell(panels, grid);
+    const nextGrid = cell ? grid : { rows: grid.rows + 1, cols: grid.cols };
+    const placed: FigurePanel = {
+      ...panel,
+      row: cell ? cell.row : grid.rows,
+      col: cell ? cell.col : 0,
+    };
+    const next = assignLabels([...panels, placed]);
+    set({ panels: next, grid: nextGrid });
+    setSelectedKey(panelKey(placed));
+  };
+
   const addPanel = (graphId: string) => {
     const graph = nodes[graphId];
     if (!graph) return;
-    const cell = firstFreeCell(panels, grid);
-    const row = cell?.row ?? grid.rows - 1;
-    const col = cell?.col ?? grid.cols - 1;
-    // No free cell: grow a row (up to the grid's rows, else a new row) rather
-    // than stacking a panel on top of another.
-    const nextGrid = cell ? grid : { rows: grid.rows + 1, cols: grid.cols };
-    const panel: FigurePanel = {
+    insertPanel({
       graphId,
       graphName: graph.name,
       label: "",
       title: "",
-      row: cell ? row : grid.rows,
-      col: cell ? col : 0,
+      row: 0,
+      col: 0,
       rowSpan: 1,
       colSpan: 1,
-    };
-    const next = assignLabels([...panels, panel]);
-    set({ panels: next, grid: nextGrid });
-    setSelectedId(graphId);
+    });
     setAddGraphId("");
   };
 
-  const removePanel = (graphId: string) => {
-    setPanels(panels.filter((p) => p.graphId !== graphId));
-    if (selectedId === graphId) setSelectedId(null);
+  const addBlankPanel = () => {
+    setError(null);
+    insertPanel({ graphId: "", kind: "blank", label: "", title: "", row: 0, col: 0, rowSpan: 1, colSpan: 1 });
+  };
+
+  const addImagePanel = async (file: File) => {
+    setError(null);
+    let dataUrl: string;
+    try {
+      dataUrl = await readAsDataUrl(file);
+    } catch {
+      setError("Couldn't read the image file.");
+      return;
+    }
+    if (!validFigureImageData(dataUrl)) {
+      setError(
+        dataUrl.length > FIGURE_IMAGE_MAX_DATA_URL
+          ? `That image is too large to embed (at most ${FIGURE_IMAGE_MAX_DATA_URL.toLocaleString()} characters as a data URL). Use a smaller image.`
+          : "That file isn't an image Titer can embed.",
+      );
+      return;
+    }
+    insertPanel({
+      graphId: "",
+      kind: "image",
+      imageData: dataUrl,
+      imageName: file.name,
+      label: "",
+      title: "",
+      row: 0,
+      col: 0,
+      rowSpan: 1,
+      colSpan: 1,
+    });
+  };
+
+  const removePanel = (panel: FigurePanel) => {
+    setPanels(panels.filter((p) => p !== panel));
+    if (selectedKey === panelKey(panel)) setSelectedKey(null);
   };
 
   const movePanel = (panel: FigurePanel, dr: number, dc: number) => {
@@ -214,9 +274,32 @@ export function FigureView({ node }: { node: ProjectNode }) {
           <Button disabled={!addGraphId} onClick={() => addGraphId && addPanel(addGraphId)}>
             Add Panel
           </Button>
+          <div className="flex gap-2">
+            <Button variant="ghost" className="flex-1" onClick={addBlankPanel}>
+              Add Blank Panel
+            </Button>
+            <label className="flex-1">
+              <span className="flex cursor-pointer items-center justify-center rounded border border-separator px-2 py-1 text-regular hover:bg-hover">
+                Add Image Panel…
+              </span>
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                aria-label="Add an image panel"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) void addImagePanel(file);
+                }}
+              />
+            </label>
+          </div>
           <p className="text-small text-secondary">
-            A graph can appear in a figure only once — to use it twice, duplicate the graph first.
+            A graph can appear in a figure only once — to use it twice, duplicate the graph first. A blank panel
+            is an empty cell for layout; an image panel embeds a picture (a gel, blot or photo) beside the graphs.
           </p>
+          {error && <p className="text-small text-red-600">{error}</p>}
           {selected && (
             <div className="flex flex-col gap-2 border-t border-separator pt-2">
               <Field label="Label">
@@ -258,19 +341,20 @@ export function FigureView({ node }: { node: ProjectNode }) {
                 <Button onClick={() => movePanel(selected, 0, 1)}>→</Button>
                 <Button onClick={() => movePanel(selected, -1, 0)}>↑</Button>
                 <Button onClick={() => movePanel(selected, 1, 0)}>↓</Button>
-                <Button
-                  onClick={() => {
-                    const graph = nodes[selected.graphId];
-                    if (graph) setActiveNode(graph.id);
-                  }}
-                >
-                  Open Graph
-                </Button>
-                <Button variant="ghost" onClick={() => removePanel(selected.graphId)}>
+                {(selected.kind ?? "graph") === "graph" && (
+                  <Button
+                    onClick={() => {
+                      const graph = nodes[selected.graphId];
+                      if (graph) setActiveNode(graph.id);
+                    }}
+                  >
+                    Open Graph
+                  </Button>
+                )}
+                <Button variant="ghost" onClick={() => removePanel(selected)}>
                   Remove
                 </Button>
               </div>
-              {error && <p className="text-small text-red-600">{error}</p>}
             </div>
           )}
         </div>
@@ -306,6 +390,25 @@ export function FigureView({ node }: { node: ProjectNode }) {
               onChange={(e) => set({ figureTitle: e.target.value })}
             />
           </Field>
+          <Field label="Background color">
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={figureBackground}
+                aria-label="Figure background color"
+                onChange={(e) => set({ figureBackground: e.target.value })}
+              />
+              <span className="text-small text-secondary">{figureBackground}</span>
+              {node.figureBackground && (
+                <Button variant="ghost" onClick={() => set({ figureBackground: undefined })}>
+                  White
+                </Button>
+              )}
+            </div>
+          </Field>
+          <p className="text-small text-secondary">
+            Blank cells and the margins around panels show the background color, in the editor and on export.
+          </p>
         </div>
       </Section>
       <Section title="Labels">
@@ -469,7 +572,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
                     scaled size, so the view scrolls to every edge of it. */}
                 <div style={{ width: widthPx * fit, height: heightPx * fit }}>
                   <div
-                    className="grid bg-white shadow-sheet"
+                    className="grid shadow-sheet"
                     style={{
                       width: widthPx,
                       height: heightPx,
@@ -477,30 +580,64 @@ export function FigureView({ node }: { node: ProjectNode }) {
                       transformOrigin: "0 0",
                       gridTemplateColumns: `repeat(${grid.cols}, 1fr)`,
                       gridTemplateRows: `repeat(${grid.rows}, 1fr)`,
+                      background: figureBackground,
                     }}
                   >
                   {panels.map((panel) => {
                     const graph = nodes[panel.graphId];
+                    const isGraph = (panel.kind ?? "graph") === "graph";
                     const w = Math.round(panel.colSpan * cellW);
                     const h = Math.round(panel.rowSpan * cellH);
                     return (
                       <div
-                        key={panel.graphId}
+                        key={panelKey(panel)}
                         className={cn(
                           "relative overflow-hidden ring-1 ring-separator",
-                          selectedId === panel.graphId && "ring-2 ring-accent",
+                          selectedKey === panelKey(panel) && "ring-2 ring-accent",
                         )}
                         style={{ gridRow: `${panel.row + 1} / span ${panel.rowSpan}`, gridColumn: `${panel.col + 1} / span ${panel.colSpan}` }}
-                        onClick={() => setSelectedId(panel.graphId)}
+                        onClick={() => setSelectedKey(panelKey(panel))}
                         onDoubleClick={() => graph && setActiveNode(graph.id)}
                       >
-                        {!graph ? (
+                        {!isGraph && panel.kind === "blank" ? (
+                          <>
+                            <div className="flex h-full w-full items-center justify-center">
+                              <p className="text-small text-secondary">Blank panel</p>
+                            </div>
+                            <span className="absolute top-1 left-2 text-regular font-bold">{panel.label}</span>
+                            {panel.title && (
+                              <span className="absolute top-1 left-1/2 -translate-x-1/2 text-small font-bold">
+                                {panel.title}
+                              </span>
+                            )}
+                          </>
+                        ) : !isGraph && panel.kind === "image" ? (
+                          <>
+                            {panel.imageData ? (
+                              <img
+                                src={panel.imageData}
+                                alt={panel.imageName ?? "Image panel"}
+                                className="h-full w-full object-contain"
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center">
+                                <p className="text-small text-secondary">No image yet</p>
+                              </div>
+                            )}
+                            <span className="absolute top-1 left-2 text-regular font-bold">{panel.label}</span>
+                            {panel.title && (
+                              <span className="absolute top-1 left-1/2 -translate-x-1/2 text-small font-bold">
+                                {panel.title}
+                              </span>
+                            )}
+                          </>
+                        ) : !graph ? (
                           <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-white px-2 text-center">
                             <p className="text-regular">Graph deleted — pick a replacement</p>
                             <p className="text-small text-secondary">
                               {panel.graphName ? `“${panel.graphName}” is missing.` : "The graph this panel showed is gone."}
                             </p>
-                            <Button variant="ghost" onClick={() => removePanel(panel.graphId)}>
+                            <Button variant="ghost" onClick={() => removePanel(panel)}>
                               Remove Panel
                             </Button>
                           </div>

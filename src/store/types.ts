@@ -28,6 +28,7 @@ export type GraphType =
   | "xy-spikes"
   | "xy-bar-scatter"
   | "grouped-bars"
+  | "grouped-bars-scatter"
   | "grouped-scatter"
   | "grouped-before-after"
   | "grouped-box"
@@ -103,7 +104,7 @@ export const GRAPH_CHOICES = {
   xyStyle: ["points", "line", "points+line"],
   xyReplicates: ["mean", "each"],
   pieValue: ["sum", "mean"],
-  groupLayout: ["interleaved", "separated"],
+  groupLayout: ["interleaved", "separated", "superimposed"],
   sigDisplay: ["stars", "pvalue", "pvalue-eq", "letters"],
   regBand: ["confidence", "prediction"],
   residualsAs: ["x", "qq"],
@@ -156,6 +157,14 @@ export const GRAPH_LIMITS = {
   pcaY: { min: 1, max: 20 },
 } as const;
 
+/** An axis's number format (Prism's Format Axes "Number format"): automatic
+ *  (Plotly's own ticks), a fixed number of decimal places, or scientific
+ *  notation with that many decimals. `decimals` 0–15; omitted, 2. */
+export interface AxisNumberFormat {
+  format: "auto" | "decimal" | "scientific";
+  decimals?: number;
+}
+
 /**
  * Display options for a graph node. A superset across the families — each graph
  * module reads only the fields it needs (keeps the store flat + easy to extend).
@@ -183,13 +192,23 @@ export interface GraphOptions {
   xyStyle: Choice<"xyStyle">;
   // An XY table's replicates: each X's center and error (`center`, `error`), or each value.
   xyReplicates: Choice<"xyReplicates">;
+  // X error bars on XY graphs (Prism's X-error subcolumn, imported as the
+  // "<X> error" column): drawn from that column's values whenever it exists,
+  // whether or not Y error bars are on — Prism couples them, Titer does not,
+  // so an X-only error display is possible. While on, the error column is
+  // used as the bars, not drawn as a series. Off: the column stays a series,
+  // as before.
+  xError: boolean;
   // Pie/donut (axis-less proportion charts): each column is one slice, sized by the
   // column's total (sum) or mean; percentages vs. raw values on the slice labels.
   pieValue: Choice<"pieValue">;
   pieShowPercent: boolean;
   // Grouped bars/scatter (interleaved bars, horizontal bars, interleaved scatter):
-  // interleave groups within each row, or give each group its own block of
-  // categories (Prism's "Separated" arrangement). Not offered for connected
+  // interleave groups within each row, give each group its own block of
+  // categories (Prism's "Separated" arrangement), or draw every group's bar
+  // from the axis to its value at the same x (Prism's "Superimposed" — a
+  // taller bar hides a shorter one behind it unless the fill is
+  // semi-transparent; see grouped-common.ts). Not offered for connected
   // lines (groups must share the same X axis to show interaction) or stacked
   // bars (stacking already combines groups per category).
   groupLayout: Choice<"groupLayout">;
@@ -221,6 +240,12 @@ export interface GraphOptions {
   y2Min?: number;
   y2Max?: number;
   y2Step?: number;
+  // Each axis's number format (see AxisNumberFormat): omitted = automatic.
+  // Applied to numeric linear axes only — category axes, log axes (whose
+  // ticks are the powers) and custom-tick axes keep their own labels.
+  xNumberFormat?: AxisNumberFormat;
+  yNumberFormat?: AxisNumberFormat;
+  y2NumberFormat?: AxisNumberFormat;
   // An axis limit hooked to an info constant (the constant's name, not its
   // value): resolved live in GraphView, so editing the constant moves the
   // axis. A hooked limit wins over its number above when it resolves.
@@ -436,6 +461,7 @@ export const DEFAULT_GRAPH_OPTIONS: GraphOptions = {
   estimationViolin: false,
   xyStyle: "points",
   xyReplicates: "mean",
+  xError: false,
   pieValue: "sum",
   pieShowPercent: true,
   groupLayout: "interleaved",
@@ -842,15 +868,32 @@ export interface ProjectNode {
   labelStyle?: FigureLabelStyle;
   figureTitle?: string;
   sharedLegend?: SharedLegend;
+  /** The page's background colour, as `#rrggbb` (white when absent): blank
+   *  cells and the margins around panels show it, in the editor and on
+   *  export. */
+  figureBackground?: string;
   dpi?: Resolution;
   /** Info sheet nodes only: its constants, notes, and linked table. */
   info?: InfoSheetData;
 }
 
 /** One panel of a multi-panel figure: a reference to an existing graph node,
- *  never a copy of it — editing the graph updates the panel automatically. */
+ *  never a copy of it — editing the graph updates the panel automatically.
+ *  Or a panel with no graph: `kind` "blank" (an empty cell, for layout — a
+ *  spacer, or room for a caption) or "image" (an embedded picture, for a gel,
+ *  blot or photo beside the graphs). A blank/image panel's `graphId` is "". */
 export interface FigurePanel {
   graphId: string;
+  /** Which kind of panel this is (absent reads as "graph", as every panel was
+   *  before this landed — old files need no migration). */
+  kind?: "graph" | "blank" | "image";
+  /** An image panel's picture, as a data URL (embedded in the file, so the
+   *  project stays self-contained; capped — see FIGURE_IMAGE_MAX_DATA_URL).
+   *  A panel with no image yet draws blank until one is picked. */
+  imageData?: string;
+  /** An image panel's file name, for the panel's listing (never trusted for
+   *  lookup — the picture itself is `imageData`). */
+  imageName?: string;
   /** The graph's name when the panel was saved: a hint for the placeholder
    *  shown when the graph is gone ("Graph 'Dose-response' is missing").
    *  Never trusted for lookup — ids are the reference. */

@@ -370,7 +370,7 @@ function lettersOverlay(
 }
 
 /** The grouped graphs that draw stars: each group's values at a row stand side by side. */
-export const GROUPED_STARS = new Set<GraphType>(["grouped-bars", "grouped-scatter", "grouped-box"]);
+export const GROUPED_STARS = new Set<GraphType>(["grouped-bars", "grouped-bars-scatter", "grouped-scatter", "grouped-box"]);
 
 /** A grouped graph's spots: each group at each row, at its place on the axis (bars side by
  *  side in a row's slot, Plotly's 0.2 gap between rows; points and boxes at their offsets;
@@ -385,12 +385,16 @@ function groupedSpots(
   const rows = rowCountOf(columns);
   const n = groups.length;
   const separated = options.groupLayout === "separated" ? separatedPositions(n, rowLabels(rows, titles)) : undefined;
+  // Superimposed bars all stand at the row's center, so their brackets do too.
+  const superimposed = options.groupLayout === "superimposed";
   const xOf = (g: number, r: number) =>
     separated
       ? separated.posOf(g, r)
-      : graphType === "grouped-bars"
-        ? r - 0.4 + (0.8 * (g + 0.5)) / n
-        : r + groupOffset(g, n);
+      : superimposed
+        ? r
+        : graphType === "grouped-bars" || graphType === "grouped-bars-scatter"
+          ? r - 0.4 + (0.8 * (g + 0.5)) / n
+          : r + groupOffset(g, n);
   return groups.flatMap((group, g) => {
     const { center, error } = perRowStats(group.columns, rows, options.center, options.error);
     return Array.from({ length: rows }, (_, r) => {
