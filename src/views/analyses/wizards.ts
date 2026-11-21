@@ -2330,7 +2330,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             )
           : [];
       const { mean: diffMean, sd: diffSd } = meanSd(pairedDiff);
-      const simQuestions =
+      const simQuestions: (Question | false)[] =
         target === "paired-t"
           ? [
               {
