@@ -537,11 +537,11 @@ async fn read_data_bytes(path: String) -> Result<String, String> {
 
 /// Extensions `write_file` may write: every format the app saves or
 /// exports, including the table-export formats the MCP tools advertise
-/// (csv/xlsx/txt). A format missing here fails at the gate before its
+/// (csv/xlsx/txt/xml). A format missing here fails at the gate before its
 /// writer runs (v1.6 BUG D: xlsx was missing, so every xlsx export failed).
 const WRITE_FILE_EXTENSIONS: &[&str] = &[
     "hlx", "prism", "pzt", "pzm", "pzfx", "png", "jpg", "jpeg", "svg", "pdf", "tif", "tiff", "bmp", "eps", "csv", "txt", "xlsx",
-    "docx", "pptx",
+    "xml", "docx", "pptx",
 ];
 
 /// Writes the raw request body to the (URL-encoded) `path` header, atomically.
@@ -1709,11 +1709,11 @@ mod tests {
 
     #[test]
     fn write_file_accepts_every_export_format() {
-        // titer_export_table_data advertises csv/xlsx/txt (mcp.rs) and the
+        // titer_export_table_data advertises csv/xlsx/txt/xml (mcp.rs) and the
         // graph/figure/office exports write png/svg/pdf/docx/pptx — the
         // write gate must accept all of them (v1.6 BUG D: xlsx was missing
         // from the inline list, so every xlsx export failed at the gate).
-        for ext in ["csv", "xlsx", "txt", "png", "svg", "pdf", "docx", "pptx", "hlx", "pzfx"] {
+        for ext in ["csv", "xlsx", "txt", "xml", "png", "svg", "pdf", "docx", "pptx", "hlx", "pzfx"] {
             assert!(
                 check_extension(&format!("/tmp/x.{ext}"), WRITE_FILE_EXTENSIONS).is_ok(),
                 "{ext} should be writable"

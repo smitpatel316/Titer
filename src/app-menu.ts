@@ -12,6 +12,7 @@ import { useLayout } from "./store/use-layout";
 import { removeWithConfirm, type DocumentActions } from "./store/use-document";
 import { NODE_NAMES, type GraphType, type NodeType } from "./store/types";
 import { TABLE_TYPE_OPTIONS } from "./views/tables";
+import { TABLE_DATA_EXPORT_FORMATS, exportTableData } from "./views/tables/table-data-export";
 import { analysisOptionsForTable, analysisOptionsKey } from "./views/analyses";
 import { GRAPH_OPTIONS_BY_TABLE } from "./views/graphs";
 import { useStartAnalysis } from "./views/analyses/use-analysis-launcher";
@@ -203,6 +204,21 @@ export function useAppMenu(doc: DocumentActions) {
           sep,
           { text: "Save", accelerator: "CmdOrCtrl+S", enabled: isDirty, action: () => latest.current.doc.save() },
           { text: "Save As…", accelerator: "CmdOrCtrl+Shift+S", action: () => latest.current.doc.save(true) },
+          {
+            // Seq 164: the active table as a file — the MCP-only
+            // `titer_export_table_data`, now in the menu. Same serializers,
+            // same csv/xlsx/txt/xml formats; the save dialog picks the file.
+            text: "Export Table Data",
+            enabled: hasTable,
+            items: TABLE_DATA_EXPORT_FORMATS.map((f) => ({
+              text: f.label,
+              action: () => {
+                const id = latest.current.store.activeTableId;
+                const table = id ? latest.current.store.nodes[id] : undefined;
+                if (table) void exportTableData(table, f.value);
+              },
+            })),
+          },
           sep,
           // Seq 227: Print prints the sheet as shown, on the paper Page Setup chose.
           { text: "Page Setup…", action: () => latest.current.store.openSelector({ kind: "preferences", section: "print" }) },

@@ -289,7 +289,12 @@ import {
   parseXlsx,
   rowsToTable,
 } from "../src/lib/tabular-import";
-import { tableToXlsx } from "../src/store/mcp-export";
+import { executeExportTableData, tableToCsv, tableToTxt, tableToXml, tableToXlsx } from "../src/store/mcp-export";
+import {
+  exportTableData,
+  serializeTableData,
+  TABLE_DATA_EXPORT_FORMATS,
+} from "../src/views/tables/table-data-export";
 import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { decodePng, bmpEncode, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
@@ -25791,6 +25796,203 @@ check("48: remapping qualified options follows a table rename and nothing else",
   deepStrictEqual(
     merged?.dataset.sets.map((s) => s.name),
     ["Control", "Assay 2 — Control"],
+  );
+});
+
+// Seq 164 — UI table-data export (CSV / XLSX / TXT): the File menu path
+// mirrors the MCP-only `titer_export_table_data` — same serializers, same
+// excluded-cells-empty rule — through the native save dialog.
+const EXPORT_164_DATA = {
+  columns: ["Title", "ID", "Value"],
+  rows: [
+    ["s1", "0123", "1.5"],
+    ["a, b", "x\"y", "9.9"],
+  ],
+  excluded: ["1,2"],
+};
+const EXPORT_164_NODE = {
+  id: "table_1",
+  type: "table",
+  name: "My: Table",
+  parentId: null,
+  tableType: "column",
+  data: EXPORT_164_DATA,
+};
+
+check("export-164: the UI serializes exactly what the MCP export writes", async () => {
+  const data = EXPORT_164_DATA;
+  strictEqual(await serializeTableData(data, "My: Table", "csv"), tableToCsv(data));
+  strictEqual(await serializeTableData(data, "My: Table", "txt"), tableToTxt(data));
+  const uiXlsx = await serializeTableData(data, "My: Table", "xlsx");
+  const mcpXlsx = await tableToXlsx(data, "My: Table");
+  deepStrictEqual([...uiXlsx], [...mcpXlsx]);
+  // Excluded cells are empty, as analyses see them — never the stored value.
+  const csv = (await serializeTableData(data, "My: Table", "csv")) as string;
+  ok(csv.endsWith('"a, b","x""y",'), "excluded cell was not written empty in CSV");
+  // An ID like "0123" stays text in the workbook, never the number 123.
+  const parsed = await parseXlsx((await serializeTableData(data, "My: Table", "xlsx")) as Uint8Array);
+  // The .xlsx writer is sparse: an empty (here excluded) trailing cell is
+  // omitted, not written empty — the read-back row ends at the last value.
+  deepStrictEqual(parsed.sheet.rows, [
+    ["Title", "ID", "Value"],
+    ["s1", "0123", "1.5"],
+    ["a, b", 'x"y'],
+  ]);
+  // An unknown format is a plain error, not a silently wrong file.
+  await rejects(serializeTableData(data, "My: Table", "pdf" as never), /no table format/);
+  // Prism XML: the same Prism-XML dialect the .pzfx writer writes — the
+  // document root, the table title, and the excluded value kept as an
+  // Excluded="1" cell (the plain-text formats flatten that away).
+  const xml = new TextDecoder().decode((await serializeTableData(data, "My: Table", "xml")) as Uint8Array);
+  // The writer stamps the current time into <Created>, so two writes
+  // differ by that stamp alone — compare with it normalized out.
+  const stamp = (s: string) => s.replace(/DateTime="[^"]*"/, 'DateTime="X"');
+  strictEqual(
+    stamp(xml),
+    stamp(new TextDecoder().decode(await tableToXml(data, "My: Table", "column"))),
+    "UI xml differs from the MCP xml writer",
+  );
+  ok(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?><GraphPadPrismFile'), "xml is not a Prism XML document");
+  ok(xml.includes("<Title>My: Table</Title>"), "xml lost the table title");
+  ok(xml.includes('<d Excluded="1">9.9</d>'), "xml lost the excluded marker");
+  ok(xml.includes("<Template"), "xml has no <Template> element (Prism shows its compliance dialog without one)");
+  // And it round-trips through the repo's own Prism XML reader as the same table.
+  const back = parsePzfx(xml);
+  strictEqual(back.issues.filter((i) => i.severity === "error").length, 0, "xml did not parse back");
+  const backTable = Object.values(back.project.nodes).find((n) => n.type === "table");
+  ok(backTable, "xml round-trip lost the table");
+  deepStrictEqual(backTable!.data!.columns, ["Title", "ID", "Value"]);
+  deepStrictEqual(backTable!.data!.rows, [
+    ["s1", "0123", "1.5"],
+    ["a, b", 'x"y', "9.9"],
+  ]);
+  ok((backTable!.data!.excluded ?? []).includes("1,2"), "xml round-trip lost the excluded cell");
+});
+
+check("export-164: Prism XML refuses what it cannot express, plainly", async () => {
+  const data = EXPORT_164_DATA;
+  // A Nested table has no Prism counterpart — never silently rewritten.
+  await rejects(serializeTableData(data, "Nested", "xml", "nested"), /no matching table type/);
+  await rejects(serializeTableData(data, "Multi", "xml", "multiple"), /no matching table type/);
+  // An empty table has nothing to write: the writer skips rowless tables
+  // (a re-import would drop them), so there would be nothing to write.
+  await rejects(
+    serializeTableData({ columns: ["Title", "A"], rows: [] }, "Empty", "xml"),
+    /holds no rows/,
+  );
+  await rejects(
+    serializeTableData({ columns: ["Title"], rows: [["s1"]] }, "Title-only", "xml"),
+    /no data columns/,
+  );
+});
+
+check("export-164: the MCP export job writes Prism XML too", async () => {
+  const written: { path: string; bytes: string | Uint8Array }[] = [];
+  const deps = {
+    getState: () => ({
+      nodes: { table_1: EXPORT_164_NODE },
+      rootOrder: ["table_1"],
+      childOrder: { table_1: [] as string[] },
+      activeNodeId: "table_1",
+    }),
+    io: {
+      writeFile: async (path: string, bytes: string | Uint8Array) => {
+        written.push({ path, bytes });
+      },
+    },
+  };
+  const job = {
+    job_id: "job-xml",
+    action: "export-table-data",
+    project_id: "project-1",
+    status: "queued",
+    args: { table_id: "table_1", format: "xml", path: "/exports/My- Table.xml" },
+  };
+  const out = await executeExportTableData(job as never, deps as never);
+  strictEqual((out.result as { format: string }).format, "xml");
+  strictEqual((out.result as { rows: number }).rows, 2);
+  strictEqual(written.length, 1);
+  strictEqual(written[0].path, "/exports/My- Table.xml");
+  const text = new TextDecoder().decode(written[0].bytes as Uint8Array);
+  ok(text.includes("<GraphPadPrismFile"), "MCP job did not write Prism XML");
+  ok(text.includes("<Title>My: Table</Title>"), "MCP job lost the table title");
+  // The job rejects an unknown format the same way the UI serializer does.
+  await rejects(
+    executeExportTableData({ ...job, args: { table_id: "table_1", format: "yaml", path: "/x" } } as never, deps as never),
+    /no table format/,
+  );
+  // The Rust side admits the format: the tool validates it, the tool
+  // description advertises it, and the write gate accepts the extension
+  // (v1.6 BUG D: a format missing from the gate failed every export).
+  const rust = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(rust.includes('const TABLE_DATA_FORMATS: &[&str] = &["csv", "xlsx", "txt", "xml"]'), "Rust format list has no xml");
+  ok(rust.includes("Prism XML"), "Rust tool description never mentions Prism XML");
+  const shell = readFileSync("src-tauri/src/main.rs", "utf8");
+  ok(shell.includes('"xml"'), "write-file gate has no xml extension");
+});
+
+check("export-164: the export goes through the save dialog and honours cancel", async () => {
+  const calls: { title: string; defaultPath: string; name: string; ext: string }[] = [];
+  const written: { path: string; bytes: string | Uint8Array }[] = [];
+  const alerts: string[] = [];
+  const io = {
+    pickSavePath: async (title: string, defaultPath: string, name: string, ext: string) => {
+      calls.push({ title, defaultPath, name, ext });
+      return "/exports/My- Table.csv";
+    },
+    writeFile: async (path: string, bytes: string | Uint8Array) => {
+      written.push({ path, bytes });
+    },
+    alert: async (title: string) => {
+      alerts.push(title);
+    },
+  };
+  await exportTableData(EXPORT_164_NODE as never, "csv", io);
+  strictEqual(calls.length, 1);
+  strictEqual(calls[0].title, "Export Table Data");
+  // The table name is sanitized as a file stem (":" becomes "-").
+  ok(calls[0].defaultPath.endsWith("My- Table.csv"), `default path was ${calls[0].defaultPath}`);
+  strictEqual(written.length, 1);
+  strictEqual(written[0].path, "/exports/My- Table.csv");
+  strictEqual(written[0].bytes, tableToCsv(EXPORT_164_DATA));
+  strictEqual(alerts.length, 0);
+  // The next export offers the folder the last one went to.
+  await exportTableData(EXPORT_164_NODE as never, "txt", io);
+  ok(calls[1].defaultPath.startsWith("/exports/"), `last folder not reused: ${calls[1].defaultPath}`);
+  // Cancel in the dialog writes nothing and alerts nothing.
+  const cancelled = {
+    ...io,
+    pickSavePath: async () => null,
+    writeFile: async () => {
+      throw new Error("writeFile must not run on cancel");
+    },
+  };
+  await exportTableData(EXPORT_164_NODE as never, "csv", cancelled);
+  // A failed write says so instead of failing silently.
+  const failing = {
+    ...io,
+    writeFile: async () => {
+      throw new Error("disk full");
+    },
+  };
+  await exportTableData(EXPORT_164_NODE as never, "csv", failing);
+  ok(alerts.some((t) => t.includes("Couldn't Export the Table Data")), "failed write raised no alert");
+});
+
+check("export-164: the File menu offers Export Table Data in CSV, XLSX, TXT and Prism XML", () => {
+  const menu = readFileSync("src/app-menu.ts", "utf8");
+  ok(menu.includes("Export Table Data"), "File menu has no Export Table Data item");
+  ok(menu.includes("exportTableData"), "File menu never calls the table-data export");
+  ok(menu.includes("hasTable"), "Export Table Data is not gated on having a table");
+  const exporter = readFileSync("src/views/tables/table-data-export.ts", "utf8");
+  ok(exporter.includes("TABLE_DATA_EXPORT_FORMATS"), "exporter has no format list");
+  ok(exporter.includes("serializeTableData"), "exporter has no serializer entry point");
+  ok(exporter.includes("exportTableData"), "exporter has no export entry point");
+  ok(exporter.includes("Prism XML (.xml)"), "menu has no Prism XML format");
+  deepStrictEqual(
+    [...TABLE_DATA_EXPORT_FORMATS.map((f) => f.value)],
+    ["csv", "xlsx", "txt", "xml"],
+    "UI formats differ from the MCP export's csv/xlsx/txt/xml",
   );
 });
 

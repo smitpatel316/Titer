@@ -915,8 +915,8 @@ const ROWS: Row[] = [
   {
     item: "164",
     title: "UI table-data export",
-    status: "gap",
-    note: "titer_export_table_data covers csv/xlsx/txt. Missing: Prism XML (.xml) — no XML writer.",
+    status: "covered",
+    note: "Merged on check/v18: File-menu table-data export (CSV/XLSX/TXT/Prism XML) through the same serializers as titer_export_table_data; the MCP struct carries the xml format.",
     checks: [{ kind: "structContains", struct: "ExportTableDataArgs", text: "xml" }],
   },
   {
