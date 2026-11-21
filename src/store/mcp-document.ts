@@ -16,6 +16,7 @@
 // letting a later hand-close skip its prompt.
 import { convertPrism, type ConvertReport } from "../lib/prism";
 import { parsePzfx } from "../lib/pzfx";
+import { parsePzf } from "../lib/pzf";
 import { writePrism } from "../lib/prism-write";
 import { writePzfx } from "../lib/pzfx-write";
 import { serializeProjectFile } from "../lib/project-file";
@@ -289,8 +290,8 @@ export async function executeImportPrism(
   _projectId: string,
 ): Promise<{ result: unknown }> {
   const ext = extOf(args.path);
-  if (ext !== "prism" && ext !== "pzfx") {
-    throw new Error(`“${fileName(args.path)}” is not a Prism file — import a .prism or .pzfx file.`);
+  if (ext !== "prism" && ext !== "pzfx" && ext !== "pzf") {
+    throw new Error(`“${fileName(args.path)}” is not a Prism file — import a .prism, .pzfx or .pzf file.`);
   }
   if (deps.getState().isDirty) {
     throw new Error(
@@ -307,6 +308,15 @@ export async function executeImportPrism(
     }
     deps.loadProject({ ...converted.project, filePath: null, edited: true });
     return { result: { imported_tables: converted.report.tables, warnings: importWarnings(converted.report) } };
+  }
+  if (ext === "pzf") {
+    const bytes = await readPrismWithTimeout(() => deps.io.readPrismBytes(args.path), args.path);
+    const imported = parsePzf(bytes);
+    if (imported.tables.length === 0) {
+      throw new Error(imported.issues.map((i) => i.message).join("\n") || "No tables in this file could be imported.");
+    }
+    deps.loadProject({ ...imported.project, filePath: null, edited: true });
+    return { result: { imported_tables: imported.tables, warnings: imported.issues.map((i) => i.message) } };
   }
   const text = await readPrismWithTimeout(() => deps.io.readPrismText(args.path), args.path);
   const imported = parsePzfx(text);

@@ -48,7 +48,7 @@ export function clearPrismSaveChoice(): void {
 }
 
 export interface SavePromptState {
-  /** The project came from a Prism file (.prism or .pzfx import). */
+  /** The project came from a Prism file (.prism, .pzfx or .pzf import). */
   prismOrigin: boolean;
   /** The prompt already appeared for this project (f.4: at most once). */
   prompted: boolean;

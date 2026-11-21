@@ -2213,8 +2213,9 @@ fn project_path_format(path: &str) -> Result<&'static str, String> {
         "pzt" => Ok("pzt"),
         "prism" => Ok("prism"),
         "pzfx" => Ok("pzfx"),
+        "pzf" => Ok("pzf"),
         _ => Err(format!(
-            "“{path}” is not a project file — open a .hlx or .pzt project, or import a .prism or .pzfx Prism file."
+            "“{path}” is not a project file — open a .hlx or .pzt project, or import a .prism, .pzfx or .pzf Prism file."
         )),
     }
 }
@@ -2358,8 +2359,9 @@ fn cloud_project_format(name: &str) -> Result<&'static str, String> {
         "pzt" => Ok("pzt"),
         "prism" => Ok("prism"),
         "pzfx" => Ok("pzfx"),
+        "pzf" => Ok("pzf"),
         _ => Err(format!(
-            "“{name}” is not a project file — download a .hlx, .pzt, .prism or .pzfx file to open it as a project."
+            "“{name}” is not a project file — download a .hlx, .pzt, .prism, .pzfx or .pzf file to open it as a project."
         )),
     }
 }
@@ -4594,7 +4596,7 @@ impl TiterMcpServer {
     /// must be local — never a URL — and the file must exist.
     #[tool(
         name = "titer_open_project",
-        description = "Open a project file in a new window: .hlx / .pzt opens as a project (.pzt opens untitled); .prism / .pzfx is imported as a project, as File > Import Prism File does. The path must be a local file, never a URL.",
+        description = "Open a project file in a new window: .hlx / .pzt opens as a project (.pzt opens untitled); .prism / .pzfx / .pzf is imported as a project, as File > Import Prism File does. The path must be a local file, never a URL.",
         annotations(
             title = "Open project",
             read_only_hint = false,
@@ -4615,7 +4617,7 @@ impl TiterMcpServer {
             }
             let app = app_handle_or_err(&self.state)?;
             match format {
-                "prism" | "pzfx" => {
+                "prism" | "pzfx" | "pzf" => {
                     let (label, _) = import_prism_in_new_window(&self.state, &app, &args.path).await?;
                     Ok(serde_json::json!({ "project_id": label, "file_path": args.path, "format": format }))
                 }
@@ -4717,13 +4719,13 @@ impl TiterMcpServer {
         }
     }
 
-    /// Import a Prism file (`.prism` / `.pzfx`) as a new untitled project in
+    /// Import a Prism file (`.prism` / `.pzfx` / `.pzf`) as a new untitled project in
     /// a new window — the same as `titer_open_project` for a Prism path,
     /// kept separate so the intent is explicit. `warnings` carries the
     /// import report (what the converter skipped).
     #[tool(
         name = "titer_import_prism",
-        description = "Import a Prism file (.prism / .pzfx) as a new untitled project in a new window — the same as titer_open_project for a Prism path, kept separate so the intent is explicit. warnings carries the import report (what the converter skipped).",
+        description = "Import a Prism file (.prism / .pzfx / .pzf) as a new untitled project in a new window — the same as titer_open_project for a Prism path, kept separate so the intent is explicit. warnings carries the import report (what the converter skipped).",
         annotations(
             title = "Import Prism file",
             read_only_hint = false,
@@ -4739,9 +4741,9 @@ impl TiterMcpServer {
         let import_args = serde_json::json!({ "path": args.path });
         let result: Result<serde_json::Value, String> = async {
             let format = project_path_format(&args.path)?;
-            if format != "prism" && format != "pzfx" {
+            if format != "prism" && format != "pzfx" && format != "pzf" {
                 return Err(format!(
-                    "“{}” is a Titer project file, not a Prism file — import a .prism or .pzfx file, or open it with titer_open_project.",
+                    "“{}” is a Titer project file, not a Prism file — import a .prism, .pzfx or .pzf file, or open it with titer_open_project.",
                     args.path
                 ));
             }
@@ -5964,11 +5966,11 @@ impl TiterMcpServer {
             let cache_path = cache.to_string_lossy().into_owned();
             // The open step (L0 dispatch only for Prism remotes): a `.hlx`
             // opens from its cache path like any local file (L2 pattern);
-            // a `.prism` / `.pzfx` goes through the headless import-prism
+            // a `.prism` / `.pzfx` / `.pzf` goes through the headless import-prism
             // job — the UI's local-import path pops a modal alert, so it
             // must not be used here.
             let label = match format {
-                "prism" | "pzfx" => {
+                "prism" | "pzfx" | "pzf" => {
                     let (label, _) = import_prism_in_new_window(&self.state, &app, &cache_path).await?;
                     label
                 }
@@ -8417,11 +8419,12 @@ mod tests {
     // ── Project tools (L2) ───────────────────────────────────────────────
 
     #[test]
-    fn project_path_format_accepts_the_four_extensions() {
+    fn project_path_format_accepts_the_five_extensions() {
         assert_eq!(project_path_format("/tmp/Dose.hlx").unwrap(), "hlx");
         assert_eq!(project_path_format("/tmp/Template.PZT").unwrap(), "pzt");
         assert_eq!(project_path_format("/tmp/Data.prism").unwrap(), "prism");
         assert_eq!(project_path_format("/tmp/Data.PZFX").unwrap(), "pzfx");
+        assert_eq!(project_path_format("/tmp/Data.PZF").unwrap(), "pzf");
         let err = project_path_format("/tmp/notes.txt").expect_err("txt is not a project file");
         assert!(err.contains("not a project file"), "{err}");
         let err = project_path_format("/tmp/Dose").expect_err("no extension");

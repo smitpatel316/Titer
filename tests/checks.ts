@@ -22812,6 +22812,60 @@ check("mcp import-data-file: a non-data file, a missing path and an empty file a
   );
 });
 
+// ── seq 218 MCP coverage (titer_import_prism accepts .pzf) ─────────────
+// The .pzf reader existed but no MCP tool could import a .pzf file —
+// these pins drive the `import-prism` dispatch job over the lagging
+// harness, with the file read stubbed through JobDeps.io and the loaded
+// project captured through JobDeps.loadProject.
+const mcpImportPrismHarness = (files: Record<string, string | Uint8Array>) => {
+  const harness = mcpLaggingHarness(true);
+  let loaded: Parameters<NonNullable<JobDeps["loadProject"]>>[0] | null = null;
+  harness.deps.io = {
+    writeFile: async () => {},
+    appVersion: async () => "1.8.0",
+    readPrismText: async (path: string) => {
+      const found = files[path];
+      if (typeof found !== "string") throw new Error(`“${path}” couldn't be read.`);
+      return found;
+    },
+    readPrismBytes: async (path: string) => {
+      const found = files[path];
+      if (!(found instanceof Uint8Array)) throw new Error(`“${path}” couldn't be read.`);
+      return found;
+    },
+    readDataText: async () => {
+      throw new Error("unused in this check");
+    },
+    readDataBytes: async () => {
+      throw new Error("unused in this check");
+    },
+  };
+  harness.deps.loadProject = (payload) => {
+    loaded = payload;
+  };
+  return { ...harness, loaded: () => loaded };
+};
+
+check("mcp import-prism: a .pzf imports as a new project, with its tables and warnings", async () => {
+  const bytes = new Uint8Array(readFileSync(new URL("./testdata/aggregates-size.pzf", import.meta.url)));
+  const harness = mcpImportPrismHarness({ "/tmp/agg.pzf": bytes });
+  const done = await harness.run("job-mcp-pzf", "import-prism", { path: "/tmp/agg.pzf" });
+  const result = done.result as { imported_tables: string[]; warnings: string[] };
+  deepStrictEqual(result.imported_tables, ["Data 1"]);
+  ok(result.warnings.some((w) => w.includes("doesn't record the table type")), "table-type warning missing");
+  const loaded = harness.loaded();
+  if (!loaded) throw new Error("loadProject was never called");
+  const node = loaded.rootOrder.map((id) => loaded.nodes[id]).find((n) => n?.type === "table");
+  if (!node || node.type !== "table") throw new Error("no table node loaded");
+  deepStrictEqual(node.data!.columns, ["Title", "Sau1", "Sau2", "Sau3", "Sau4", "Slugd"]);
+  strictEqual(node.data!.rows.length, 67);
+});
+
+check("mcp import-prism: a .hlx path is still refused as not a Prism file", async () => {
+  const harness = mcpImportPrismHarness({});
+  await rejects(harness.run("job-mcp-hlx", "import-prism", { path: "/tmp/Dose.hlx" }), /not a Prism file/);
+});
+
 // ── Run ──────────────────────────────────────────────────────────────────
 
 // Descriptives are computed by R since the v1.0.7 rebase, so checks that run
