@@ -25831,6 +25831,15 @@ check("titer_save_project returns the write report (Mansi P0 #6, MCP side)", asy
       readPrismBytes: async () => {
         throw new Error("unused in this check");
       },
+      readText: async () => {
+        throw new Error("unused in this check");
+      },
+      readDataText: async () => {
+        throw new Error("unused in this check");
+      },
+      readDataBytes: async () => {
+        throw new Error("unused in this check");
+      },
     },
   };
   type SaveResult = {
