@@ -10,7 +10,14 @@
 // (upstream's `fit` block). The exponential (plan 08) and enzyme (plan 09)
 // models keep their `algorithm="port"` fits and X = 0 retention — upstream's
 // defaults fail or drop points there.
-import type { AnalysisOutcome, Column, NonlinearModel, RegressionCoefficient, StatRow } from "../types";
+import type {
+  AnalysisOutcome,
+  Column,
+  NonlinearFitMethod,
+  NonlinearModel,
+  RegressionCoefficient,
+  StatRow,
+} from "../types";
 import { rVec } from "../column/base";
 import { datasetColumns, pairUp, splitXY, xyProblem } from "../../lib/dataset";
 import { evalNamedVector, type RVector } from "../webr";
@@ -395,6 +402,29 @@ const nls200Tol = (expr: string, start: string) =>
 const nlsDerivTol = (expr: string, start: string, theta: string) =>
   `m<-nls(y~eval(deriv(~${expr},${theta})),start=${start},control=nls.control(maxiter=200,tol=1e-3))`;
 
+/** The polynomial models (seq 201): the only models `centered` applies to. */
+export const POLYNOMIAL_MODELS = ["quadratic", "cubic", "quartic", "quintic", "sextic"] as const;
+export const isPolynomialModel = (m: NonlinearModel): boolean =>
+  (POLYNOMIAL_MODELS as readonly string[]).includes(m);
+
+/** A polynomial fit of the given degree (Plan 29: base R lm, powers of X).
+ *  Centered (seq 201) subtracts the mean of X first (`xm<-mean(x)`), so
+ *  the terms are powers of (X − mean X): B0 is the fitted Y at the mean X
+ *  and the higher terms are far less collinear. The fitted values and R²
+ *  are unchanged — only the coefficients move. The uncentered strings are
+ *  the historical ones, byte for byte. */
+function polynomialSpec(degree: number, centered = false): ModelSpec {
+  const terms = Array.from({ length: degree + 1 }, (_, i) => `B${i}`);
+  const powers = Array.from({ length: degree - 1 }, (_, i) => i + 2);
+  if (!centered)
+    return { kind: "lm", fit: `m<-lm(y~x${powers.map((k) => `+I(x^${k})`).join("")})`, terms };
+  return {
+    kind: "lm",
+    fit: `xm<-mean(x);m<-lm(y~I(x-xm)${powers.map((k) => `+I((x-xm)^${k})`).join("")})`,
+    terms,
+  };
+}
+
 export function modelSpec(
   model: NonlinearModel,
   opts?: {
@@ -413,6 +443,9 @@ export function modelSpec(
      *  required — without them the spec cannot be built. */
     customEquation?: string;
     customParameters?: Record<string, number>;
+    /** Center the polynomial (seq 201): fit powers of (X − mean X) instead
+     *  of powers of X. Polynomials only — the runner refuses it elsewhere. */
+    centered?: boolean;
   },
 ): ModelSpec {
   // v2 item 23: the spec comes from the user's equation, not a curated case.
@@ -454,13 +487,13 @@ export function modelSpec(
       // Michaelis-Menten/hyperbola precedent: one equation, two names).
       return { kind: "lm", fit: "m<-lm(log(y)~x)", terms: ["Intercept", "Slope"], positiveY: true, logY: true };
     case "quadratic":
-      return { kind: "lm", fit: "m<-lm(y~x+I(x^2))", terms: ["B0", "B1", "B2"] };
+      return polynomialSpec(2, opts?.centered);
     case "cubic":
-      return { kind: "lm", fit: "m<-lm(y~x+I(x^2)+I(x^3))", terms: ["B0", "B1", "B2", "B3"] };
+      return polynomialSpec(3, opts?.centered);
     case "quartic":
       // Plan 29: 4th order polynomial — base R lm, the exact pattern of
       // the quadratic/cubic entries.
-      return { kind: "lm", fit: "m<-lm(y~x+I(x^2)+I(x^3)+I(x^4))", terms: ["B0", "B1", "B2", "B3", "B4"] };
+      return polynomialSpec(4, opts?.centered);
     case "quintic":
       // Plan 29: 5th order polynomial — same pattern, one degree higher.
       return {
@@ -1995,6 +2028,9 @@ export interface FitOptions {
   weights?: number[];
   fixed?: Record<string, number>;
   bounds?: Record<string, [number, number]>;
+  /** The fitting method (seq 200): least squares (default), robust (Tukey
+   *  biweight IRLS) or Poisson (weights 1/fitted IRLS). */
+  fitMethod?: NonlinearFitMethod;
 }
 
 export interface AppliedFitOptions {
@@ -2508,11 +2544,76 @@ export interface NonlinearFit {
   retryMethod?: string;
 }
 
+/** Warm-start an nls fit string from the current fit (seq 200): replace
+ *  the spec's `start=list(...)` with `start=as.list(coef(m))`, so an IRLS
+ *  refit starts from the previous round's coefficients instead of the
+ *  data-derived starts. lm strings have no start list and pass through
+ *  unchanged. The start list after applyFitOptions holds exactly the free
+ *  parameters, in formula order — which is exactly what coef(m) names, in
+ *  the same order — so bounds (positional lower/upper vectors) stay
+ *  aligned. Without this, the Poisson refit re-runs nls from its cold
+ *  starts under the 1/fitted weights and stalls ("false convergence"). */
+function warmStartFit(call: string): string {
+  const yAt = call.indexOf("y~");
+  const startAt = yAt < 0 ? -1 : call.indexOf(",start=", yAt);
+  if (startAt < 0) return call;
+  const rest = call.slice(startAt + 7);
+  if (!rest.startsWith("list(") && !rest.startsWith("c(")) return call;
+  const closeAt = matchParen(rest, rest.indexOf("("));
+  if (closeAt < 0) return call;
+  return `${call.slice(0, startAt + 7)}as.list(coef(m))${rest.slice(closeAt + 1)}`;
+}
+
+/** R that refits `m` by iteratively reweighted least squares (seq 200):
+ *  robust (Tukey biweight) or Poisson (weights 1/fitted). `weightedFit`
+ *  is the fit assignment that reads R variable `w` (the current weights);
+ *  `initialFit` the fit as first run (base weights, if any). The base
+ *  weights (`wb` — the user's weighting scheme when set, else 1) multiply
+ *  the IRLS weights each round, so a weighted robust/Poisson fit composes
+ *  with the weighting scheme. A refit that errors keeps the previous `m`
+ *  (the assignment never completed); non-finite coefficients restore the
+ *  initial fit. At most 25 rounds, stopping when the coefficients move
+ *  less than 1e-6 relative. The two methods:
+ *  - robust: residuals scaled by 1.4826·MAD, Tukey biweight c = 4.685
+ *    (Prism's robust regression; 95% efficient at the Gaussian). Points
+ *    further than c·scale get weight 0; a zero scale (an exact fit) keeps
+ *    the least-squares fit.
+ *  - Poisson: weights 1/fitted (fitted clamped at 1e-6, so a zero or
+ *    negative fitted value cannot make an infinite weight). For a direct
+ *    mean model the weighted-LS score with weights 1/μ is the Poisson
+ *    score, so the fixed point is the Poisson MLE (verified against
+ *    scipy's MLE in Python). */
+function irlsLoop(
+  weightedFit: string,
+  initialFit: string,
+  method: "robust" | "poisson",
+  baseWeights: string,
+): string {
+  const update =
+    method === "robust"
+      ? `r<-residuals(m);s<-1.4826*median(abs(r-median(r)));if(!is.finite(s)||s==0)break;` +
+        `u<-r/(4.685*s);wr<-(1-pmin(u^2,1))^2;`
+      : `mu<-fitted(m);mu[mu<1e-6]<-1e-6;wr<-1/mu;`;
+  return (
+    `${baseWeights};` +
+    `for(it in 1:25){cf0<-coef(m);if(any(!is.finite(cf0)))break;${update}w<-wb*wr;` +
+    `ok<-tryCatch({${weightedFit};TRUE},error=function(e)FALSE);if(!ok)break;` +
+    // A refit that produced non-finite coefficients is discarded — but
+    // the initial fit reads `w` when the user weighted, and `w` is now
+    // the last IRLS weights, so restore the base weights first.
+    `cf1<-coef(m);if(any(!is.finite(cf1))){w<-wb;${initialFit};break};` +
+    `if(max(abs(cf1-cf0)/pmax(1,abs(cf0)))<1e-6)break};`
+  );
+}
+
 /** Fit a model spec (not necessarily one of the curated nonlinear models)
  *  and return its coefficients, derived quantities and goodness-of-fit rows —
  *  one R call per attempt: the primary, then each `retryFits` entry in
  *  order until one converges. The binding runners (plan 16) fit their own
- *  specs through this, so there is exactly one nls call site in the repo. */
+ *  specs through this, so there is exactly one nls call site in the repo.
+ *  A robust/Poisson method (seq 200) refits by IRLS inside the same R call
+ *  (see irlsLoop); R² and the sum of squares are then computed on the raw
+ *  residuals, not the IRLS weights. */
 export async function fitModelSpec(
   xs: number[],
   ys: number[],
@@ -2525,10 +2626,37 @@ export async function fitModelSpec(
   const eff = applied.spec;
   const extra = extraAssignments + applied.extraAssignments;
   const weighted = !!(options?.weights);
+  const method = options?.fitMethod ?? "least-squares";
+  // The weights-reading variant of the spec: when the user weighted, the
+  // effective spec already reads `w`; otherwise it is the same spec with
+  // weights appended (the dummy vector's assignment is discarded — the
+  // loop assigns `w` itself).
+  const appliedW =
+    method === "least-squares"
+      ? undefined
+      : options?.weights
+        ? applied
+        : applyFitOptions(spec, { ...options, weights: [0] });
   const attempts: ({ fit?: string; method?: string } | undefined)[] = [undefined, ...(eff.retryFits ?? [])];
   let lastErr: unknown;
-  for (const attempt of attempts) {
-    const rCode = `${fitStatementsForSpec(xs, ys, eff, attempt?.fit, extra, weighted)}c(${fitEntries(eff)})`;
+  for (let j = 0; j < attempts.length; j++) {
+    const attempt = attempts[j];
+    let rCode: string;
+    if (method === "least-squares") {
+      rCode = `${fitStatementsForSpec(xs, ys, eff, attempt?.fit, extra, weighted)}c(${fitEntries(eff)})`;
+    } else {
+      const wSpec = appliedW!.spec;
+      // Warm-start each IRLS refit from the previous round's coefficients
+      // (see warmStartFit) — cold starts stall under the IRLS weights.
+      const weightedFit = warmStartFit(j === 0 ? wSpec.fit : wSpec.retryFits![j - 1].fit);
+      const initialFit = attempt?.fit ?? eff.fit;
+      rCode =
+        `x<-${rVec(xs)};y<-${rVec(ys)};${extra}${initialFit};` +
+        irlsLoop(weightedFit, initialFit, method, options?.weights ? "wb<-w" : "wb<-rep(1,length(x))") +
+        fitSummaryStatements(eff, false) +
+        `ss<-sum(residuals(m)^2);sst<-sum((y-mean(y))^2);r2<-1-ss/sst;syx<-sqrt(ss/df);` +
+        `c(${fitEntries(eff)})`;
+    }
     try {
       const v = await evalNamedVector(rCode);
       const { coefficients, derived, stats } = parseFit(v, eff, xs.length, labelTerm);

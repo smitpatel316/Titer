@@ -15,7 +15,7 @@ import {
 } from "../../stats/xy/plot-function";
 import { hasXColumn, type RowGroup, type TableType, type Transform } from "../../store/types";
 import { MODEL_LABEL, termLabel } from "../../stats/xy/nonlinear-regression";
-import { modelSpec } from "../../stats/xy/nonlinear-fit";
+import { isPolynomialModel, modelSpec } from "../../stats/xy/nonlinear-fit";
 import { parseCustomParameters, parseUserEquation } from "../../stats/xy/user-defined";
 import { isArithmeticTransform } from "../../stats/column/transform-data";
 import { pairedDifferences } from "../../stats/simulation/monte-carlo";
@@ -2707,8 +2707,26 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         label: "Baseline Y =",
         initial: 0,
       },
+      {
+        id: "ignorePeaksBelow",
+        ask: "Ignore peaks whose height is less than this percentage of the distance from the series' minimum to maximum Y? A peak smaller than that is left out of the area (0 keeps every peak).",
+        kind: "number",
+        label: "Ignore peaks smaller than ___% of the Y range =",
+        initial: 0,
+      },
+      choice("peaksAboveBaselineOnly", "Only count peaks above the baseline?", [
+        ["no", "No — area below the baseline counts as negative"],
+        ["yes", "Yes — only peaks above the baseline count; area below it is ignored"],
+      ]),
     ],
-    finish: (a) => ({ type: "area-under-curve", params: { baseline: a.baseline as number } }),
+    finish: (a) => ({
+      type: "area-under-curve",
+      params: {
+        baseline: a.baseline as number,
+        ...((a.ignorePeaksBelow as number) > 0 ? { ignorePeaksBelow: a.ignorePeaksBelow as number } : {}),
+        ...(a.peaksAboveBaselineOnly === "yes" ? { peaksAboveBaselineOnly: true } : {}),
+      },
+    }),
   },
 
   // Remove baseline (v2): subtract a baseline from a curve — Prism's Analyze >
@@ -3203,6 +3221,14 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ["other", "Another curve (line, polynomial, exponential, Michaelis-Menten…)"],
         ]),
         choice("model", "Which curve should be fitted to X and Y?", models),
+        // Seq 201: a polynomial can be centered at the mean of X — B0
+        // becomes the fitted Y there, and the higher terms are far less
+        // collinear. The fitted values and R² are unchanged.
+        (a.model !== undefined && isPolynomialModel(a.model as NonlinearModel)) &&
+          choice("centered", "Center the polynomial at the mean of X?", [
+            ["no", "No — fit powers of X itself"],
+            ["yes", "Yes — fit powers of (X − mean X); B0 is the fitted Y at the mean X"],
+          ]),
         // v2 item 23: a user-defined equation — the equation first, then one starting
         // value per parameter it names. The comparison and global-fit questions below
         // are hidden for it (the runner cannot build those from an equation yet).
@@ -3233,6 +3259,13 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             },
           },
         choice("weights", "Weight the points?", weightOptions),
+        // Seq 200: the fitting method — least squares, robust (outliers
+        // barely move the fit), or Poisson (counts).
+        choice("fitMethod", "How should the curve be fitted?", [
+          ["least-squares", "Least squares (recommended — every point counts equally)"],
+          ["robust", "Robust regression (Tukey biweight — outliers barely move the fit)"],
+          ["poisson", "Poisson (for counts — maximum Poisson likelihood)"],
+        ]),
         // Seq 166 (Prism 11 Range tab): "Don't fit points when X is less
         // than / greater than …" — points outside the range are ignored
         // entirely. Either bound alone is enough; both blank fits all.
@@ -3498,6 +3531,10 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             : {}),
           ...weights,
           ...range,
+          ...(a.centered === "yes" ? { centered: true } : {}),
+          ...(a.fitMethod !== undefined && a.fitMethod !== "least-squares"
+            ? { fitMethod: a.fitMethod as NonlinearRegressionParams["fitMethod"] }
+            : {}),
           ...compareModel,
           ...global,
           ...sharedParams,

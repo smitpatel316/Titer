@@ -311,6 +311,10 @@ const PARAMS = {
   // Nonlinear regression framework (plan 26): weighting, model comparison,
   // global fitting, fixed parameters and bounds.
   weights: ["none", "1/y", "1/y2", "1/x", "1/x2", "1/sd2"],
+  // Seq 201: centered polynomials (fit powers of X − mean X).
+  centered: "yes/no",
+  // Seq 200: the nonlinear fitting method (least squares / robust / Poisson).
+  fitMethod: ["least-squares", "robust", "poisson"],
   compareModel: [...NONLINEAR_MODELS],
   globalY: "names",
   sharedParams: "names",
@@ -333,6 +337,8 @@ const PARAMS = {
   hypotheticalValue: "number", baseline: "number", q: ROUT_Q, lambda: "number", ecx: EC_ANYTHING,
   // Seq 166 (Prism Range tab): the X-range bounds for nonlinear regression.
   fitXMin: "number", fitXMax: "number",
+  // Area under the curve (seq 202): ignore peaks smaller than a % of the Y range.
+  ignorePeaksBelow: { min: 0, max: 100 }, peaksAboveBaselineOnly: "yes/no",
   // Remove baseline (v2): how the baseline is defined, and the values it needs.
   // Seq 206: column math — the operation and the two columns it combines.
   baselineMethod: REMOVE_BASELINE_METHODS, firstN: "number", controls: "names", constant: "number",
@@ -1034,10 +1040,10 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "linear-regression": ["x", "y", "ys", "forceOrigin", "weights", "sets"],
   "deming-regression": ["y", "lambda", "sets"],
   "simple-logistic-regression": ["y", "sets"],
-  "area-under-curve": ["baseline", "sets"],
+  "area-under-curve": ["baseline", "ignorePeaksBelow", "peaksAboveBaselineOnly", "sets"],
   "row-means-totals": ["ys", "x", "rowScope", "sets"],
   "nonlinear-regression": [
-    "x", "y", "ys", "model", "compareWith", "compare", "interpolate", "weights", "fitXMin", "fitXMax", "fixed", "bounds", "fixedConstants",
+    "x", "y", "ys", "model", "centered", "fitMethod", "compareWith", "compare", "interpolate", "weights", "fitXMin", "fitXMax", "fixed", "bounds", "fixedConstants",
     "boundsConstants", "compareModel", "globalY", "sharedParams", "ligandConcentration", "ligandKd",
     "ligandConcentrationConstant", "ligandKdConstant", "fitKi", "rout", "q", "ecx", "customEquation", "customParameters",
     "sets",

@@ -547,6 +547,16 @@ export interface SimpleLogisticRegressionParams {
 export interface AreaUnderCurveParams {
   /** Baseline Y value the area is measured from (peaks are heights above it). */
   baseline: number;
+  /** Ignore peaks whose height is less than this percent of the distance from
+   *  the series' minimum to maximum Y (Prism's "Ignore peaks that are less
+   *  than __% of the distance from minimum to maximum Y"). 0 (or omitted)
+   *  keeps every peak. A "peak" is a maximal run of points above the
+   *  baseline; a peak under the threshold contributes no area. */
+  ignorePeaksBelow?: number;
+  /** Only peaks above the baseline count: area below the baseline is
+   *  ignored instead of counting as negative. Omitted/false keeps the usual
+   *  rule (area below the baseline is negative). */
+  peaksAboveBaselineOnly?: boolean;
 }
 
 /** The baseline definitions "remove-baseline" offers (Prism's Remove
@@ -654,6 +664,12 @@ export type NonlinearModel = (typeof NONLINEAR_MODELS)[number];
 
 /** Params for "nonlinear-regression" (XY table): which Y data set to fit, and which curve. */
 export type NonlinearWeightScheme = "none" | "1/y" | "1/y2" | "1/x" | "1/x2" | "1/sd2";
+/** The fitting method a nonlinear regression uses (seq 200, Prism's Method
+ *  tab): least squares (every point counts equally), robust (Tukey biweight
+ *  — an outlier-resistant refit), or Poisson (counts — maximum Poisson
+ *  likelihood, by iteratively reweighted least squares with weights 1/μ). */
+export const NONLINEAR_FIT_METHODS = ["least-squares", "robust", "poisson"] as const;
+export type NonlinearFitMethod = (typeof NONLINEAR_FIT_METHODS)[number];
 export interface NonlinearRegressionParams {
   /** Multiple Variables tables: the X variable (the Y variable is `y`). */
   x?: string;
@@ -696,6 +712,15 @@ export interface NonlinearRegressionParams {
    *  name is already taken (the other Y data set's column), so the model
    *  comparison uses this field instead. */
   compareModel?: NonlinearModel;
+  /** Center the polynomial (seq 201): fit powers of (X − mean X) instead of
+   *  powers of X. The fitted values and R² are unchanged — only the
+   *  coefficients move (B0 becomes the fitted Y at the mean X, and the
+   *  higher terms are far less collinear, so their standard errors shrink).
+   *  Polynomials only; any other model refuses it. */
+  centered?: boolean;
+  /** How the curve is fitted (seq 200): least squares (default), robust
+   *  (Tukey biweight), or Poisson (counts). */
+  fitMethod?: NonlinearFitMethod;
   /** Extra Y series for a shared-parameter (global) fit. nls models only. */
   globalY?: string[];
   /** Which parameters are shared across the global fit's series (omitted:
@@ -1883,6 +1908,37 @@ interface CorrelationMatrix {
   label?: string;
 }
 
+/** One predictor's variance inflation factor (seq 198, multiple-regression
+ *  diagnostics): VIF = 1 / (1 − R²ⱼ), where R²ⱼ is that predictor regressed
+ *  on all the others. 1 = no collinearity; above 10 the predictor is
+ *  strongly collinear with the others and its coefficient is imprecise. */
+export interface VifRow {
+  term: string;
+  vif: number | null;
+}
+
+/** One row of a regression ANOVA table (seq 198): the variation the model
+ *  explains (Regression) against what is left (Residual), with the F test
+ *  of the whole model. */
+export interface AnovaRow {
+  source: string;
+  df: number | null;
+  ss: number | null;
+  ms: number | null;
+  f: number | null;
+  p: number | null;
+}
+
+/** A covariance matrix of fitted coefficients (seq 198): `values[i][j]` is
+ *  the covariance between the coefficients of `variables[i]` and
+ *  `variables[j]` (symmetric; the diagonal is each coefficient's variance).
+ *  Reported on the uncentered scale — the intercept's row is the intercept
+ *  as fitted, not the centered fit's. */
+export interface CovarianceMatrix {
+  variables: string[];
+  values: (number | null)[][];
+}
+
 /** One group of a survival analysis: its subjects, its events, and its median survival with
  *  the median's 95% interval (null where the curve, or the band's edge, never reaches 50%). */
 export interface SurvivalGroupRow {
@@ -2479,6 +2535,12 @@ export interface AnalysisResult {
   matrix?: CorrelationMatrix;
   /** Optional regression coefficients table (multiple regression). */
   coefficients?: RegressionCoefficient[];
+  /** Optional multiple-regression diagnostics (seq 198): one VIF per
+   *  predictor (multicollinearity), the regression ANOVA table, and the
+   *  covariance matrix of the coefficients. */
+  vif?: VifRow[];
+  anovaTable?: AnovaRow[];
+  covariance?: CovarianceMatrix;
   /** A curve fit's best-fit values, one column per data set (two when curves are compared). */
   fit?: { sets: string[]; rows: FitRow[] };
   /** A standard curve's unknowns, interpolated. */
@@ -2492,6 +2554,11 @@ export interface AnalysisResult {
    *  overlays need it to evaluate the curve, and the result alone does not carry it.
    *  Set whenever the run supplied one. */
   customEquation?: string;
+  /** The X a centered polynomial fit was centered at (seq 201): the mean of
+   *  the fitted X values. The fitted-curve overlays need it to evaluate the
+   *  curve (powers of X − centeredX, not of X). Set whenever the run fitted
+   *  a polynomial with `centered`. */
+  centeredX?: number;
   /** Optional variance components ("mixed-effects"): one row per
    *  random-effects grouping (subject intercept + residual in v1). */
   varianceComponents?: VarianceComponent[];

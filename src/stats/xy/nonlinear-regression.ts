@@ -22,7 +22,7 @@ import type {
   StatRow,
 } from "../types";
 import { describe, missingColumn, pRow, rVec } from "../column/base";
-import { routQError } from "../types";
+import { NONLINEAR_FIT_METHODS, routQError } from "../types";
 import { num } from "../../lib/format";
 import { maxOf, minOf } from "../../lib/summary";
 import { pointKeyOf } from "../../lib/columns";
@@ -42,6 +42,7 @@ import {
   fitSummaryStatements,
   formulaExpr,
   formulaVariables,
+  isPolynomialModel,
   MODEL_LABEL,
   modelSpec,
   parseFit,
@@ -504,6 +505,12 @@ const NESTED_PAIRS: [NonlinearModel, NonlinearModel][] = [
   ["cubic", "quartic"],
   ["cubic", "quintic"],
   ["quartic", "quintic"],
+  // Seq 201: the ladder continues to the 6th order polynomial.
+  ["line", "sextic"],
+  ["quadratic", "sextic"],
+  ["cubic", "sextic"],
+  ["quartic", "sextic"],
+  ["quintic", "sextic"],
   ["agonist-3pl-logx", "sigmoidal-4pl-logx"],
   ["inhibitor-3pl-logx", "sigmoidal-4pl-logx"],
   ["sigmoidal-4pl-logx", "asymmetric-5pl-logx"],
@@ -1484,6 +1491,8 @@ async function compareModels(
   const specB = modelSpec(otherModel, {
     ...(kiDivisorB != null ? { kiDivisor: kiDivisorB } : {}),
     ...(otherModel === "homologous-competition-logx" ? { ligandConcentration: ligand } : {}),
+    // A centered comparison centers both models the same way.
+    ...(params.centered === true ? { centered: true } : {}),
   });
   // Both fits take the weights (R3-12): the summary code already weighted
   // the sums of squares, but the lm()/nls() calls themselves were
@@ -2060,10 +2069,17 @@ export async function runNonlinearRegression(
       ...(isUserDefinedModel
         ? { customEquation: params?.customEquation, customParameters: params?.customParameters }
         : {}),
+      ...(params?.centered === true ? { centered: true } : {}),
     });
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
+  // Seq 201: centering only applies to polynomial fits (quadratic
+  // through sextic) — any other model refuses it plainly.
+  if (params?.centered === true && !isPolynomialModel(model))
+    return {
+      error: "Centering only applies to polynomial fits — choose a polynomial (quadratic through sextic) to center it.",
+    };
   // A two-site fit that does not converge says so plainly (plan 28): the
   // likeliest cause is data with a single phase, not a numerical quirk.
   const twoSiteError: AnalysisOutcome = {
@@ -2105,6 +2121,11 @@ export async function runNonlinearRegression(
     const ecxBlocked = [spec.dose.midpoint, "HillSlope", "S"].some((t) => fixedNames.includes(t));
     if (!ecxBlocked) spec = { ...spec, derived: [...(spec.derived ?? []), ecAnything(model, f)] };
   }
+  // Seq 200: the fitting method — least squares, robust, or Poisson.
+  // A bogus value (from MCP or a stored file) is refused, not defaulted.
+  const fitMethod = params?.fitMethod ?? "least-squares";
+  if (!(NONLINEAR_FIT_METHODS as readonly string[]).includes(fitMethod))
+    return { error: "Choose a fitting method: least squares, robust, or Poisson." };
   const comparingModels = params?.compareModel !== undefined;
   if (comparingModels && params.compareModel === model)
     return { error: "Choose a different model to compare with." };
@@ -2120,6 +2141,18 @@ export async function runNonlinearRegression(
     return { error: "Interpolation can't be combined with comparing models — fit the model first, then interpolate from it." };
   if (comparingModels && useRout)
     return { error: "ROUT can't be combined with comparing models yet — fit the model with ROUT first, then compare it with the other model." };
+  // Seq 200: the robust/Poisson methods run through fitModelSpec's IRLS —
+  // the model-comparison, two-data-set, global and interpolation paths
+  // build their own R, so those combinations are refused plainly for now
+  // (the single-fit and several-Y paths take the method).
+  if (fitMethod !== "least-squares" && comparingModels)
+    return { error: "The robust and Poisson fitting methods can't be combined with comparing models yet — fit the model on its own first." };
+  if (fitMethod !== "least-squares" && comparingSets)
+    return { error: "The robust and Poisson fitting methods can't be combined with comparing two data sets yet — fit each data set separately." };
+  if (fitMethod !== "least-squares" && global)
+    return { error: "The robust and Poisson fitting methods can't be combined with a global fit yet — fit each data set on its own first." };
+  if (fitMethod !== "least-squares" && params?.interpolate)
+    return { error: "The robust and Poisson fitting methods can't be combined with interpolation yet — fit the model first, then interpolate from it." };
   if (global && comparingSets)
     return { error: "A global fit can't be combined with comparing two data sets — the global fit already fits them together." };
   if (global && params?.interpolate)
@@ -2193,6 +2226,7 @@ export async function runNonlinearRegression(
         ...(wr.weights ? { weights: wr.weights } : {}),
         ...(fixedNames.length ? { fixed } : {}),
         ...(boundNames.length ? { bounds } : {}),
+        ...(fitMethod !== "least-squares" ? { fitMethod } : {}),
       };
       let applied: AppliedFitOptions;
       try {
@@ -2224,6 +2258,10 @@ export async function runNonlinearRegression(
           }
         }
       }
+      // Seq 200: Poisson fitting needs counts — checked on the fitted
+      // values (post-ROUT), not the raw column.
+      if (fitMethod === "poisson" && prep.ys.some((y) => y < 0))
+        return { error: "Poisson fitting needs counts — all Y values must be 0 or more." };
       let fitted: NonlinearFit;
       try {
         fitted = await fitModelSpec(prep.xs, prep.ys, spec, "", termLabel, setFitOpts);
@@ -2293,6 +2331,7 @@ export async function runNonlinearRegression(
     ...(weights ? { weights } : {}),
     ...(fixedNames.length ? { fixed } : {}),
     ...(boundNames.length ? { bounds } : {}),
+    ...(fitMethod !== "least-squares" ? { fitMethod } : {}),
   };
   let effSpec: ModelSpec;
   let extraAssignments = "";
@@ -2454,6 +2493,10 @@ export async function runNonlinearRegression(
       return fitError(err, model);
     }
   } else {
+    // Seq 200: Poisson fitting needs counts — checked on the fitted values
+    // (post-ROUT), not the raw column.
+    if (fitMethod === "poisson" && first.ys.some((y) => y < 0))
+      return { error: "Poisson fitting needs counts — all Y values must be 0 or more." };
     try {
       const fitted = await fitModelSpec(first.xs, first.ys, spec, "", termLabel, fitOpts);
       retried = fitted.retried;
@@ -2537,9 +2580,25 @@ function frameworkNotes(
   first: { xs: number[]; ys: number[]; rangeExcluded?: number },
 ): string {
   const parts: string[] = [];
+  // Seq 200: a robust/Poisson fit is uninterpretable without naming the
+  // method — and its R² and sum of squares are computed on the raw
+  // residuals, not the IRLS weights (see fitModelSpec).
+  const method = params?.fitMethod ?? "least-squares";
+  if (method === "robust")
+    parts.push(
+      "Fitted by robust regression (Tukey biweight): points far from the curve are down-weighted, so outliers barely move the fit. R² and the sum of squares are computed on the raw residuals.",
+    );
+  else if (method === "poisson")
+    parts.push(
+      "Fitted by Poisson maximum likelihood (iteratively reweighted least squares, weights 1/fitted): for count data, where the scatter grows with the mean. R² and the sum of squares are computed on the raw residuals.",
+    );
   const scheme = params?.weights;
   if (scheme && scheme !== "none") {
-    parts.push(`Weighted by ${WEIGHT_LABEL[scheme]}; R² and the sum of squares are weighted.`);
+    parts.push(
+      method === "least-squares"
+        ? `Weighted by ${WEIGHT_LABEL[scheme]}; R² and the sum of squares are weighted.`
+        : `Weighted by ${WEIGHT_LABEL[scheme]} (combined with the fitting method's weights).`,
+    );
     if (scheme === "1/y2" && first.ys.some((y) => y <= 0))
       parts.push("Some Y are ≤ 0; 1/Y² weights still apply arithmetically but, as a variance model, assume scatter grows with |Y|.");
     if (scheme === "1/x2" && first.xs.some((x) => x <= 0))
@@ -2605,6 +2664,13 @@ async function assembleResult(
   comparison = sets.length > 1,
 ): Promise<AnalysisOutcome> {
   const other = comparison;
+  // Seq 201: a centered polynomial's center is the mean of the fitted X's
+  // (post-ROUT — `first` is the fitted set); the overlays need it to
+  // evaluate powers of (X − centeredX).
+  const centeredX =
+    params?.centered === true && first.xs.length
+      ? first.xs.reduce((s, v) => s + v, 0) / first.xs.length
+      : undefined;
   // Plan 29: the segmental breakpoint is a derived value, not a fitted
   // coefficient — report it as a coefficient row with no standard error
   // (the fixed-parameter precedent in runNonlinearRegression), so the
@@ -2695,10 +2761,15 @@ async function assembleResult(
         (invertedCI
           ? " No 95% CI is shown for an unknown whose band inversion comes back inverted (lower bound above the upper bound): on a non-monotonic curve the band can cross its Y in the wrong order, so no valid interval exists for it."
           : "");
+  const methodLabel =
+    params?.fitMethod === "robust" ? "Robust fit" : params?.fitMethod === "poisson" ? "Poisson fit" : "Least-squares fit";
   const notes =
-    `Least-squares fit ("${MODEL_LABEL[model]}") of ${sets.map((s) => `“${s.name}”`).join(" and ")} on “${xCol.name}”. ` +
+    `${methodLabel} ("${MODEL_LABEL[model]}") of ${sets.map((s) => `“${s.name}”`).join(" and ")} on “${xCol.name}”. ` +
     `95% CIs are asymptotic (from each parameter's standard error${spec.terms.includes("S") ? "; the asymmetry S's, on its log" : ""}).` +
     frameworkNotes(params, coefficients, first) +
+    (centeredX != null
+      ? ` Centered at the mean of X (${num(centeredX)}): B0 is the fitted Y there, and the higher terms are powers of (X − ${num(centeredX)}).`
+      : "") +
     (other ? ` Extra sum-of-squares F test: ${question} ${answer}` : "") +
     (sets.length > 1 && !other ? " Each data set is fitted on its own." : "") +
     (comparisonNotes ? ` ${comparisonNotes}` : "") +
@@ -2818,5 +2889,7 @@ async function assembleResult(
     ...(params?.ligandConcentration != null ? { ligandConcentration: params.ligandConcentration } : {}),
     // The overlays need the equation to evaluate a user-defined curve (v2 item 23).
     ...(params?.customEquation != null ? { customEquation: params.customEquation } : {}),
+    // The overlays need the center to evaluate a centered polynomial (seq 201).
+    ...(centeredX != null ? { centeredX } : {}),
   };
 }
