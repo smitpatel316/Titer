@@ -1964,7 +1964,18 @@ export function parseProjectFile(
   };
   // `updated` compares what Titer knows only: carrying unknowns through is not
   // a repair, so a newer file that needed no repair still opens unedited.
-  const known = { nodes, rootOrder, childOrder, activeNodeId, projectName, scripts };
+  // `scripts` is omitted when empty, like `read` and the serializer omit it:
+  // the reader normalizes an absent block to `[]`, and JSON keeps `[]` while
+  // dropping `undefined` — listing it unconditionally flagged every scriptless
+  // file as updated (the 1.8 merge-all round-trip regression).
+  const known = {
+    nodes,
+    rootOrder,
+    childOrder,
+    activeNodeId,
+    projectName,
+    ...(scripts.length ? { scripts } : {}),
+  };
   const filed = Object.fromEntries(PROJECT_KEYS.map((k) => [k, project[k]]));
   return { project: read, issues, updated: contents(known) !== contents(filed) };
 }
