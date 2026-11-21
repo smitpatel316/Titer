@@ -21,12 +21,13 @@ import {
 import type { BindingKineticsParams, BindingSaturationParams, DoseResponseSpecialParams, EnzymeInhibitionParams, LinearRegressionParams, SimpleLogisticRegressionParams, NonlinearRegressionParams, CoxPHParams, PoissonRegressionParams, DemingRegressionParams } from "../../stats/types";
 import { useProjectStore } from "../../store/use-project-store";
 import { groupsOf, isGrouped, readTable, splitXY, xyProblem, type Column } from "../../lib/dataset";
+import { mergedGraphData } from "../../lib/multi-table";
 import { summaryTableProblem } from "../../lib/summary-format";
 import { paletteOf } from "../../lib/palettes";
 import { computeGroupedDEG } from "../../lib/deg";
 import { useAnalysis, useAnalyses } from "../analyses/use-analysis";
 import { infoSheetsOf, resolveGraphOptions } from "../../lib/info-sheets";
-import { choosableSets, GRAPHS, graphSeries, hasValueAxis, plotColumns } from ".";
+import { choosableSets, GRAPHS, graphSeriesDataset, hasValueAxis, plotColumns } from ".";
 import { addFittedCurve } from "./fitted-curve";
 import { addBindingCurve, addDoseResponseSpecialCurve, addEnzymeInhibitionCurve } from "./binding-curve";
 import { addGeneratedCurves } from "./generated-curves";
@@ -78,7 +79,7 @@ type Size = { width: number; height: number };
 type Margins = { l: number; r: number; t: number; b: number };
 
 export function GraphView({ node }: { node: ProjectNode }) {
-  const { nodes, rootOrder, updateGraph, openSelector } = useProjectStore();
+  const { nodes, rootOrder, updateGraph, setGraphSources, openSelector } = useProjectStore();
   const type = node.graphType!;
   const family = GRAPHS[type].family;
   const parent = node.parentId ? nodes[node.parentId] : undefined;
@@ -143,6 +144,30 @@ export function GraphView({ node }: { node: ProjectNode }) {
       parent?.tableType,
     ],
   );
+  // ── Multi-table (#48) ──────────────────────────────────────────────
+  // The graph's merged dataset: its primary table plus `sourceTableIds`.
+  // The builders, the Data section and the series all read the merged
+  // columns below (`drawColumns`); the analysis overlays keep reading
+  // the primary table's columns, since analyses run on one table.
+  const merged = React.useMemo(
+    () => mergedGraphData(node, nodes),
+    [node, nodes],
+  );
+  const drawDataset = merged?.dataset ?? dataset;
+  const drawColumns = React.useMemo(
+    () => (drawDataset && parent?.tableType ? plotColumns(drawDataset, type, options, parent.tableType) : []),
+    [
+      drawDataset,
+      type,
+      options.center,
+      options.xVariable,
+      options.yVariable,
+      options.bubbleSizeVariable,
+      options.bubbleColorVariable,
+      options.sets?.join("\n"),
+      parent?.tableType,
+    ],
+  );
   // An XY scatter also draws a sibling "Plot a function" analysis's generated
   // curves — the curves come from an equation + parameters, not the table, so
   // the scatter draws even when the parent table is empty. The exemption is
@@ -172,8 +197,8 @@ export function GraphView({ node }: { node: ProjectNode }) {
         !(type === "survival" && parent?.tableType === "multiple") &&
         parent?.tableType &&
         hasXColumn(parent.tableType) &&
-        dataset
-        ? xyProblem(dataset.columns)
+        drawDataset
+        ? xyProblem(drawDataset.columns)
         : undefined;
 
   // A volcano on a grouped table: Titer computes the DEGs between two of its groups
@@ -184,14 +209,14 @@ export function GraphView({ node }: { node: ProjectNode }) {
       ? groupsOf(dataset.numeric).map((g) => g.name)
       : undefined;
   const volcanoColumns = React.useMemo(() => {
-    if (!volcanoGroups || !data) return columns;
+    if (!volcanoGroups || !data) return drawColumns;
     const [a, b] = volcanoPair(volcanoGroups, options);
     const deg = a && b && a !== b ? computeGroupedDEG(data, a, b, options.volcanoEffect) : [];
     // One row per table row, so a gene keeps its row's number (its key, see volcano.ts).
     const rows: (string | null)[][] = data.rows.map(() => []);
     for (const d of deg) rows[d.row] = [null, d.label, String(d.log2FC), String(d.p), String(d.padj)];
     return readTable({ columns: ["Title", "Gene", "Log2 FC", "P", "FDR"], rows }).columns;
-  }, [columns, data, volcanoGroups?.join("\n"), options.volcanoGroupA, options.volcanoGroupB, options.volcanoEffect]);
+  }, [drawColumns, data, volcanoGroups?.join("\n"), options.volcanoGroupA, options.volcanoGroupB, options.volcanoEffect]);
   // The rows of a grouped table holding values of the two groups that gave no gene.
   const volcanoLeftOut = React.useMemo(() => {
     if (!volcanoGroups || !dataset) return 0;
@@ -203,11 +228,13 @@ export function GraphView({ node }: { node: ProjectNode }) {
     return rows.size - (volcanoColumns.find((c) => c.name === "Log2 FC")?.values.length ?? 0);
   }, [dataset, volcanoColumns, volcanoGroups?.join("\n"), options.volcanoGroupA, options.volcanoGroupB]);
 
-  // The table's series, whose places give their colors, and those shown (the data sets the
-  // graph chose), one row each in the Series section.
-  const choosable = dataset && parent?.tableType ? choosableSets(type, dataset, parent.tableType) : [];
+  // The tables' series, whose places give their colors, and those shown (the data sets the
+  // graph chose), one row each in the Series section — from the merged
+  // dataset (#48), so an extra table's series are listed too.
+  const choosable = drawDataset && parent?.tableType ? choosableSets(type, drawDataset, parent.tableType) : [];
   const shownSets = choosable.length ? options.sets : undefined;
-  const allSeries = data && parent?.tableType ? graphSeries(type, data, parent.tableType, options) : [];
+  const allSeries =
+    drawDataset && parent?.tableType ? graphSeriesDataset(type, drawDataset, parent.tableType, options) : [];
   const seriesNames = shownSets ? allSeries.filter((n) => shownSets.includes(n)) : allSeries;
   // The data sets it shows that are left in the table: none, and it says so.
   const setsGone = shownSets && !shownSets.some((n) => choosable.includes(n));
@@ -226,7 +253,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
           volcanoYIsPValue: true,
         }
       : family === "volcano" && parent?.tableType === "xy"
-        ? { ...options, volcanoX: dataset?.columns[0]?.name }
+        ? { ...options, volcanoX: drawDataset?.columns[0]?.name }
         : options,
     sheets,
   );
@@ -236,21 +263,21 @@ export function GraphView({ node }: { node: ProjectNode }) {
   // The data set on the right Y axis, if the pick is still a series — its
   // values live on the right axis, so they count under y2, not under y.
   const right = family === "xy" ? rightYDataset(options, seriesNames) : undefined;
-  const rightCols = right ? columns.slice(1).filter((c) => c.name === right) : [];
+  const rightCols = right ? drawColumns.slice(1).filter((c) => c.name === right) : [];
   const logLeftOut = {
-    x: family === "xy" && options.xScale !== "linear" ? atOrUnder0(columns.slice(0, 1)) : 0,
+    x: family === "xy" && options.xScale !== "linear" ? atOrUnder0(drawColumns.slice(0, 1)) : 0,
     // A histogram's Y counts values: an empty bin is simply not drawn. A bubble
     // plot's size and color columns are not Y data: only its Y column counts.
     y:
       options.yScale !== "linear" && family !== "histogram"
-        ? atOrUnder0((family === "xy" ? columns.slice(1, type === "bubble-plot" ? 2 : undefined) : columns).filter((c) => c.name !== right))
+        ? atOrUnder0((family === "xy" ? drawColumns.slice(1, type === "bubble-plot" ? 2 : undefined) : drawColumns).filter((c) => c.name !== right))
         : 0,
     y2: right && options.y2Scale !== "linear" ? atOrUnder0(rightCols) : 0,
   };
   const binsTooMany =
     family === "histogram" &&
     tooManyBins(
-      columns.flatMap((c) => c.values),
+      drawColumns.flatMap((c) => c.values),
       options.binWidth,
     );
   const volcanoY =
@@ -272,13 +299,14 @@ export function GraphView({ node }: { node: ProjectNode }) {
       ? summaryTableProblem(data, GRAPHS[type].label)
       : undefined;
   const lack =
+    merged?.problem ??
     xyLack ??
     summaryLack ??
     (gone === undefined
       ? undefined
       : `The column “${gone}” is no longer in the table.`) ??
     (setsGone ? "None of the data sets this graph shows is left in the table: choose some in its Data section." : undefined);
-  const hasData = !lack && (columns.some((c) => c.values.length > 0) || plotFunctionAnalysis !== undefined);
+  const hasData = !lack && (drawColumns.some((c) => c.values.length > 0) || plotFunctionAnalysis !== undefined);
 
   // The figure's traces as last drawn, without the selection ring.
   const [drawn, setDrawn] = React.useState<unknown[]>([]);
@@ -678,7 +706,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
           : allSeries.length,
         allSeries,
       );
-      const fig = GRAPHS[type].build(coxSurvivalCols ?? volcanoColumns, buildOptions, paint, dataset?.titles, dataset?.summary);
+      const fig = GRAPHS[type].build(coxSurvivalCols ?? volcanoColumns, buildOptions, paint, drawDataset?.titles, drawDataset?.summary);
       fig.data = withCaps(fig.data, options);
       // A graph whose sibling analysis isn't linked draws only its axes or
       // points: say so on the canvas (G-F7), instead of leaving bare axes.
@@ -764,7 +792,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
       }
       if (type === "kmeans-scatter") {
         if (kmeansResult)
-          addKmeansScatter(fig, columns, kmeansResult, options, paint, dataset?.titles);
+          addKmeansScatter(fig, columns, kmeansResult, options, paint, drawDataset?.titles);
         else unlinked("kmeans-scatter");
       }
       if (type === "dendrogram") {
@@ -949,6 +977,30 @@ export function GraphView({ node }: { node: ProjectNode }) {
           sets={choosable}
           graphType={type}
           tableType={parent?.tableType}
+          sourceTables={[
+            ...(parent ? [{ id: parent.id, name: parent.name, primary: true }] : []),
+            ...(node.sourceTableIds ?? []).map((id) => ({
+              id,
+              name: nodes[id]?.name ?? id,
+              primary: false,
+            })),
+          ]}
+          availableSourceTables={rootOrder
+            .filter(
+              (id) =>
+                nodes[id]?.type === "table" &&
+                nodes[id]?.tableType === parent?.tableType &&
+                id !== parent?.id &&
+                !(node.sourceTableIds ?? []).includes(id),
+            )
+            .map((id) => ({ id, name: nodes[id]!.name }))}
+          onAddSourceTable={(id) => setGraphSources(node.id, [...(node.sourceTableIds ?? []), id])}
+          onRemoveSourceTable={(id) =>
+            setGraphSources(
+              node.id,
+              (node.sourceTableIds ?? []).filter((s) => s !== id),
+            )
+          }
           options={options}
           set={set}
           analyses={analyses}

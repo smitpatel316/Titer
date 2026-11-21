@@ -1269,8 +1269,8 @@ const ROWS: Row[] = [
   {
     item: "#48",
     title: "One graph from multiple tables",
-    status: "gap",
-    note: "Not built. titer_build_graph takes a single table_id; no multi-table UI either.",
+    status: "covered",
+    note: "Merged on check/v18: source_table_ids on build_graph/update_graph + merged dataset in the graph view, panel figure and export.",
     checks: [{ kind: "structContains", struct: "BuildGraphArgs", text: "table_ids" }],
   },
   {

@@ -53,6 +53,13 @@ export interface SectionContext {
   seriesNames: string[];
   /** The data sets it can show or leave out (`choosableSets`). */
   sets: string[];
+  /** The tables this graph plots (#48): the primary first, then the
+   *  extra sources — with the tables that could still be added, and the
+   *  add/remove handlers. Omitted outside the graph view. */
+  sourceTables?: { id: string; name: string; primary: boolean }[];
+  availableSourceTables?: { id: string; name: string }[];
+  onAddSourceTable?: (id: string) => void;
+  onRemoveSourceTable?: (id: string) => void;
   /** Volcano on a grouped table: the groups it can compare (Titer computes the DEGs). */
   volcanoGroups?: string[];
   /** Its rows holding values of the two groups compared that gave no gene. */
@@ -954,12 +961,73 @@ function RegressionControls({
 
 export function dataControls(c: SectionContext): React.ReactNode {
   const options = dataOptions(c);
-  if (c.sets.length < 2) return options;
+  const sources = c.sourceTables ? (
+    <SourceTablesRow
+      tables={c.sourceTables}
+      available={c.availableSourceTables ?? []}
+      onAdd={c.onAddSourceTable}
+      onRemove={c.onRemoveSourceTable}
+    />
+  ) : null;
+  if (c.sets.length < 2)
+    return (
+      <>
+        {sources}
+        {options}
+      </>
+    );
   return (
     <>
+      {sources}
       <SetsRow sets={c.sets} chosen={c.options.sets} onChange={(sets) => c.set({ sets })} />
       {options}
     </>
+  );
+}
+
+/** The tables a graph plots (#48): the primary (fixed), the extra
+ *  sources (each removable), and a picker to add another table of the
+ *  same type. Prism's "New Graph of Existing Data", as a row in the
+ *  Data section: a graph is made on one table, then tables are added
+ *  here. */
+function SourceTablesRow({
+  tables,
+  available,
+  onAdd,
+  onRemove,
+}: {
+  tables: { id: string; name: string; primary: boolean }[];
+  available: { id: string; name: string }[];
+  onAdd?: (id: string) => void;
+  onRemove?: (id: string) => void;
+}) {
+  return (
+    <Row label="Source tables">
+      <div className="flex flex-col gap-1.5">
+        {tables.map((t) => (
+          <div key={t.id} className="flex items-center gap-2">
+            <span className="flex-1 truncate text-small">{t.name}</span>
+            {t.primary ? (
+              <span className="text-small text-secondary">primary</span>
+            ) : (
+              <Button variant="ghost" size="small" onClick={() => onRemove?.(t.id)}>
+                Remove
+              </Button>
+            )}
+          </div>
+        ))}
+        {available.length > 0 && onAdd && (
+          <Select
+            value=""
+            onChange={(id) => {
+              if (id) onAdd(id);
+            }}
+            placeholder="Add a table…"
+            options={available.map((t) => ({ value: t.id, label: t.name }))}
+          />
+        )}
+      </div>
+    </Row>
   );
 }
 

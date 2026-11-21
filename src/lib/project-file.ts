@@ -212,6 +212,7 @@ const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId", "proje
 const NODE_KEYS = Object.keys({
   id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, highlight: 1, tableType: 1, data: 1, transform: 1, notes: 1, tags: 1,
   analysisType: 1, analysisParams: 1, cachedResult: 1, frozen: 1, orphaned: 1, sourceTableName: 1, graphType: 1, graphOptions: 1,
+  sourceTableIds: 1,
   panels: 1, grid: 1, figureSize: 1, labelStyle: 1, figureTitle: 1, sharedLegend: 1, dpi: 1,
   info: 1,
 } satisfies Record<keyof ProjectNode, 1>);
@@ -1679,6 +1680,19 @@ function readNode(
   } else {
     node.graphType = lower(n.graphType) as ProjectNode["graphType"];
     node.graphOptions = readOptions(n.graphOptions, node.name, issues);
+    // Extra source tables (#48): ids only, de-duplicated, never the graph's
+    // own table — anything else is a hand edit, dropped rather than trusted.
+    // Whether each id is a table of the right type is checked in the
+    // cross-node pass below (the tables may not be read yet here).
+    if (Array.isArray(n.sourceTableIds)) {
+      const ids = [...new Set(n.sourceTableIds.filter((id): id is string => typeof id === "string" && id !== ""))].filter(
+        (id) => id !== node.parentId,
+      );
+      if (ids.length) node.sourceTableIds = ids;
+      else delete node.sourceTableIds;
+    } else {
+      delete node.sourceTableIds;
+    }
     if (!isIn(GRAPHS, node.graphType) && (node.graphType as string) !== DOSE_GRAPH) {
       issues.push({ severity: "error", message: `Graph “${node.name}” uses a chart this version doesn't know.` });
     }
@@ -2100,6 +2114,25 @@ export function parseProjectFile(
           severity: "warning",
           message: `Graph “${node.name}” referred to an analysis that no longer exists; the link was removed.`,
         });
+      }
+    }
+    // (#48) A graph's extra source tables must still exist, be tables, and
+    // match the primary table's type — a source that doesn't is dropped
+    // (same repair as the dangling analysis links above). A source whose
+    // rows don't line up with the primary's is NOT dropped here: the graph
+    // shows that problem in its own view instead of silently losing data.
+    if (node.sourceTableIds?.length) {
+      const kept = node.sourceTableIds.filter((id) => {
+        const source = nodeOf(id);
+        return source?.type === "table" && source.tableType === tableType;
+      });
+      if (kept.length !== node.sourceTableIds.length) {
+        issues.push({
+          severity: "warning",
+          message: `Graph “${node.name}” referred to a source table that no longer exists or is a different type; that source was removed.`,
+        });
+        if (kept.length) node.sourceTableIds = kept;
+        else delete node.sourceTableIds;
       }
     }
   }

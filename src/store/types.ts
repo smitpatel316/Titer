@@ -779,6 +779,11 @@ export interface ProjectNode {
   /** Graph nodes only: which chart this node draws + its display options. */
   graphType?: GraphType;
   graphOptions?: GraphOptions;
+  /** Graph nodes only (#48): the extra tables this graph also plots, by
+   *  id, beyond its primary table (`parentId`). Same table type as the
+   *  primary; their series are qualified with the table's name
+   *  (see src/lib/multi-table.ts). Omitted = a single-table graph. */
+  sourceTableIds?: string[];
   /** Figure nodes only: the panels it composes (see src/lib/figure.ts). */
   panels?: FigurePanel[];
   grid?: FigureGrid;

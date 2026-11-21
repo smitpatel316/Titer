@@ -171,6 +171,7 @@ export interface JobDeps {
     redo: () => void;
     createGraph: NonNullable<GraphJobDeps["createGraph"]>;
     updateGraph: NonNullable<GraphJobDeps["updateGraph"]>;
+    setGraphSources: NonNullable<GraphJobDeps["setGraphSources"]>;
     cloneGraph: NonNullable<GraphJobDeps["cloneGraph"]>;
     createFigure: NonNullable<GraphJobDeps["createFigure"]>;
     updateFigure: NonNullable<GraphJobDeps["updateFigure"]>;
@@ -219,6 +220,7 @@ function toGraphDeps(deps: JobDeps): GraphJobDeps {
     getState: deps.getState,
     createGraph: a?.createGraph,
     updateGraph: a?.updateGraph,
+    setGraphSources: a?.setGraphSources,
     cloneGraph: a?.cloneGraph,
     createFigure: a?.createFigure,
     updateFigure: a?.updateFigure,

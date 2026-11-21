@@ -3072,6 +3072,11 @@ pub struct BuildGraphArgs {
     /// Display name for the graph. Omit for the type's label.
     #[serde(default)]
     pub name: Option<String>,
+    /// Extra tables (by id, as shown by titer_list_tables) whose data sets
+    /// this graph also plots (#48) — same table type as table_id. Omit
+    /// for a single-table graph.
+    #[serde(default)]
+    pub source_table_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -3082,7 +3087,14 @@ pub struct UpdateGraphArgs {
     /// The graph node's id, as shown by titer_list_projects.
     pub graph_id: String,
     /// Partial GraphOptions to merge over the graph's current options.
-    pub options: serde_json::Value,
+    /// Omit when only changing the source tables.
+    #[serde(default)]
+    pub options: Option<serde_json::Value>,
+    /// Extra tables (by id) this graph also plots (#48), replacing its
+    /// current sources outright — same table type as the graph's table.
+    /// Empty clears them. Omit to leave the sources alone.
+    #[serde(default)]
+    pub source_table_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -3669,7 +3681,7 @@ impl TiterMcpServer {
     /// labels, the analyses it draws from, and the figures it belongs to.
     #[tool(
         name = "titer_read_graph",
-        description = "Read what a graph shows: its type, source table, titles and labels, the analyses it draws from, and the figures it belongs to.",
+        description = "Read what a graph shows: its type, source table plus any extra source tables it also plots, titles and labels, the analyses it draws from, and the figures it belongs to.",
         annotations(
             title = "Read graph",
             read_only_hint = true,
@@ -5305,10 +5317,12 @@ impl TiterMcpServer {
     /// table's type, or the error names the valid types. `options` is a
     /// partial GraphOptions over the type's defaults. Synchronous — the
     /// builders are pure TS over table data + cached results. `warnings`
-    /// says when a linked analysis is not computed yet.
+    /// says when a linked analysis is not computed yet. `source_table_ids`
+    /// adds further tables of the same type, whose data sets the graph
+    /// also plots (one graph from multiple tables).
     #[tool(
         name = "titer_build_graph",
-        description = "Build a graph on a table: graph_type must be offered for the table's type (otherwise the error names the valid types); options is a partial GraphOptions over the type's defaults (titles, axis limits, linked analyses, palette by built-in name or { name, kind, colors }); name overrides the display name. Warnings says when a linked analysis is not computed yet.",
+        description = "Build a graph on a table: graph_type must be offered for the table's type (otherwise the error names the valid types); options is a partial GraphOptions over the type's defaults (titles, axis limits, linked analyses, palette by built-in name or { name, kind, colors }); name overrides the display name; source_table_ids adds further tables of the same type whose data sets the graph also plots. Warnings says when a linked analysis is not computed yet.",
         annotations(
             title = "Build graph",
             read_only_hint = false,
@@ -5330,6 +5344,9 @@ impl TiterMcpServer {
             }
             if let Some(name) = &args.name {
                 job_args["name"] = serde_json::Value::String(name.clone());
+            }
+            if let Some(source_table_ids) = &args.source_table_ids {
+                job_args["source_table_ids"] = serde_json::json!(source_table_ids);
             }
             let job = self.state.enqueue_job(&project_id, "build-graph", job_args, serde_json::json!({}))?;
             let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
@@ -5353,10 +5370,11 @@ impl TiterMcpServer {
     }
 
     /// Change a graph's options: a partial GraphOptions merged over its
-    /// current options. Same validation as the build.
+    /// current options. Same validation as the build. `source_table_ids`
+    /// replaces the graph's extra tables outright (empty clears them).
     #[tool(
         name = "titer_update_graph",
-        description = "Change a graph's options: a partial GraphOptions merged over its current options (titles, axis limits, linked analyses, display choices). Same validation as titer_build_graph.",
+        description = "Change a graph's options: a partial GraphOptions merged over its current options (titles, axis limits, linked analyses, display choices). Same validation as titer_build_graph. source_table_ids replaces the graph's extra source tables outright (empty clears them); omit options when only changing sources.",
         annotations(
             title = "Update graph",
             read_only_hint = false,
@@ -5372,7 +5390,13 @@ impl TiterMcpServer {
         let call_args = serde_json::json!({ "project_id": args.project_id, "graph_id": args.graph_id });
         let result: Result<serde_json::Value, String> = async {
             let project_id = self.state.resolve_project(args.project_id.as_deref())?;
-            let job_args = serde_json::json!({ "graph_id": args.graph_id, "options": args.options });
+            let mut job_args = serde_json::json!({ "graph_id": args.graph_id });
+            if let Some(options) = &args.options {
+                job_args["options"] = options.clone();
+            }
+            if let Some(source_table_ids) = &args.source_table_ids {
+                job_args["source_table_ids"] = serde_json::json!(source_table_ids);
+            }
             let job = self.state.enqueue_job(&project_id, "update-graph", job_args, serde_json::json!({}))?;
             let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
             if done.status == JobStatus::Done {
@@ -7823,12 +7847,37 @@ fn read_graph(project_id: &str, snapshot: &serde_json::Value, graph_id: &str) ->
         }),
         None => ("".to_string(), None, None),
     };
+    // Extra source tables (#48): the tables beyond the primary this graph
+    // also plots, in order. A dangling id still lists (name/type null),
+    // so the caller sees the reference instead of silently losing it.
+    let extra_source_tables: Vec<serde_json::Value> = node
+        .get("sourceTableIds")
+        .and_then(|v| v.as_array())
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|v| v.as_str())
+                .map(|id| {
+                    find_node(snapshot, id).map_or(
+                        serde_json::json!({ "id": id, "name": null, "table_type": null }),
+                        |n| {
+                            serde_json::json!({
+                                "id": id,
+                                "name": node_name(n),
+                                "table_type": n.get("tableType").and_then(|v| v.as_str()).map(display_table_type),
+                            })
+                        },
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(serde_json::json!({
         "project_id": project_id,
         "graph_id": graph_id,
         "name": node_name(node),
         "graph_type": node.get("graphType").and_then(|v| v.as_str()),
         "source_table": { "id": source_id, "name": source_name, "table_type": source_type },
+        "extra_source_tables": extra_source_tables,
         "title": options.get("title").and_then(|v| v.as_str()).unwrap_or(""),
         "x_label": options.get("xLabel").and_then(|v| v.as_str()).unwrap_or(""),
         "y_label": options.get("yLabel").and_then(|v| v.as_str()).unwrap_or(""),
@@ -8266,6 +8315,24 @@ mod tests {
         assert_eq!(out["source_table"]["table_type"], "XY");
         assert_eq!(out["linked_analyses"][0]["analysis_id"], "a1");
         assert_eq!(out["linked_analyses"][0]["link"], "regAnalysisId");
+    }
+
+    #[test]
+    fn read_graph_lists_extra_source_tables() {
+        // #48: a graph plotting a second table must say so — otherwise an
+        // agent can build a multi-table graph and never read back what it
+        // plots. Pre-fix FAIL pin: read_graph had no extra_source_tables key.
+        let mut snap = two_table_snapshot();
+        snap["nodes"]["g1"]["sourceTableIds"] = json!(["t2"]);
+        let out = read_graph("project-1", &snap, "g1").expect("graph");
+        assert_eq!(out["extra_source_tables"].as_array().map(|a| a.len()), Some(1), "{out}");
+        assert_eq!(out["extra_source_tables"][0]["id"], "t2");
+        assert_eq!(out["extra_source_tables"][0]["name"], "Second");
+        assert_eq!(out["extra_source_tables"][0]["table_type"], "Column");
+        // A single-table graph reports an empty list, not a missing key.
+        let snap = two_table_snapshot();
+        let out = read_graph("project-1", &snap, "g1").expect("graph");
+        assert_eq!(out["extra_source_tables"].as_array().map(|a| a.len()), Some(0), "{out}");
     }
 
     #[test]

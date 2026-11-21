@@ -11,9 +11,12 @@
 // analyses. Rust only resolves the project and passes the raw JSON args
 // through (same split as L2's `mcp-document.ts`).
 //
-// Multi-table graphs (#48) are NOT in scope (GAP-7): every tool here
-// takes one table (build/clone) or the graphs it names (figures).
+// Multi-table graphs (#48): `titer_build_graph` takes extra tables in
+// `source_table_ids` (same table type as the primary — see
+// `src/lib/multi-table.ts`), and `titer_update_graph` takes them to
+// change a graph's sources.
 import { GRAPH_OPTIONS_BY_TABLE, newGraphOptions } from "../views/graphs";
+import { validateGraphSources } from "../lib/multi-table";
 import { PALETTES, paletteNamed, savedPalette } from "../lib/palettes";
 import {
   DEFAULT_FIGURE_SIZE,
@@ -77,8 +80,15 @@ export type FigurePatch = Partial<{
  *  them, and a graph job then errors plainly. */
 export interface GraphJobDeps {
   getState: () => GraphJobState;
-  createGraph?: (parentId: string, graphType: GraphType, graphOptions?: GraphOptions) => string;
+  createGraph?: (
+    parentId: string,
+    graphType: GraphType,
+    graphOptions?: GraphOptions,
+    sourceTableIds?: string[],
+  ) => string;
   updateGraph?: (id: string, options: GraphOptions) => void;
+  /** A graph's extra source tables (#48), in order; empty clears them. */
+  setGraphSources?: (id: string, sourceTableIds: string[]) => void;
   cloneGraph?: (graphId: string, options: CloneOptions) => string;
   createFigure?: (graphIds?: string[]) => string;
   updateFigure?: (id: string, patch: FigurePatch) => void;
@@ -705,6 +715,8 @@ const publicPanel = (p: FigurePanel) => ({
 /** `titer_build_graph`: a graph of `graph_type` on `table_id`, with a
  *  partial `GraphOptions` over the type's defaults (incl. its palette
  *  and the table's error format, exactly as the UI's create-graph path).
+ *  `source_table_ids` (#48) adds further tables of the same type, whose
+ *  data sets the graph also plots — see `src/lib/multi-table.ts`.
  *  Synchronous — the builders are pure TS over table data + cached
  *  results. */
 export function executeBuildGraph(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
@@ -726,36 +738,58 @@ export function executeBuildGraph(job: McpJob, deps: GraphJobDeps): GraphJobOutc
       `graph type “${graphType}” is not offered for a ${TABLE_TYPE_LABELS[tableType]} table — ` +
         `the types for this table are: ${offered.join(", ")}.`,
     );
+  // The extra tables, when any: same type as the primary, rows lining up
+  // where the graph needs them to (the merge's own checks).
+  let sourceTableIds: string[] | undefined;
+  if (args.source_table_ids !== undefined && args.source_table_ids !== null) {
+    const errors = validateGraphSources(table, args.source_table_ids, state.nodes);
+    if (errors.length) throw jobErr(job, errors.join(" "));
+    sourceTableIds = [...(args.source_table_ids as string[])];
+  }
   const { options, warnings } = validateGraphOptions(job, args.options, state, tableId);
   const merged: GraphOptions = {
     ...newGraphOptions(graphType as GraphType, table.data?.errorFormat),
     ...options,
   };
   const createGraph = need(job, deps.createGraph, "create a graph");
-  const graphId = createGraph(tableId, graphType as GraphType, merged);
+  const graphId = createGraph(tableId, graphType as GraphType, merged, sourceTableIds);
   if (name !== undefined) need(job, deps.renameNode, "rename a graph")(graphId, name);
   const result: Record<string, unknown> = { project_id: job.project_id, graph_id: graphId, graph_type: graphType };
+  if (sourceTableIds?.length) result.source_table_ids = sourceTableIds;
   if (warnings.length) result.warnings = warnings;
   return { result, created: { graph_id: graphId } };
 }
 
 /** `titer_update_graph`: a partial `GraphOptions` merged over the
  *  graph's current options (the reducer replaces them wholesale, so the
- *  merge happens here). Same validation as build. */
+ *  merge happens here). Same validation as build. `source_table_ids`
+ *  (#48) replaces the graph's extra tables outright (empty clears them);
+ *  either `options` or `source_table_ids` must be given. */
 export function executeUpdateGraph(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
   const args = argsOf(job);
   const graphId = reqStr(job, args, "graph_id");
-  if (args.options === undefined) throw jobErr(job, `needs “options” — the graph options to change.`);
+  if (args.options === undefined && args.source_table_ids === undefined)
+    throw jobErr(job, `needs “options” — the graph options to change — or “source_table_ids”.`);
   const state = deps.getState();
   const node = state.nodes[graphId];
   if (!node) throw jobErr(job, `no graph with id “${graphId}” — run titer_list_projects to see the graphs.`);
   if (node.type !== "graph") throw jobErr(job, `“${node.name}” is a ${node.type}, not a graph.`);
   const tableId = node.parentId && state.nodes[node.parentId]?.type === "table" ? node.parentId : undefined;
-  const { options, warnings } = validateGraphOptions(job, args.options, state, tableId);
-  const merged: GraphOptions = { ...DEFAULT_GRAPH_OPTIONS, ...(node.graphOptions ?? {}), ...options };
-  need(job, deps.updateGraph, "update a graph")(graphId, merged);
   const result: Record<string, unknown> = { project_id: job.project_id, graph_id: graphId };
-  if (warnings.length) result.warnings = warnings;
+  if (args.source_table_ids !== undefined && args.source_table_ids !== null) {
+    const table = tableId ? state.nodes[tableId] : undefined;
+    if (!table) throw jobErr(job, `the graph “${node.name}” has no data table to add sources to.`);
+    const errors = validateGraphSources(table, args.source_table_ids, state.nodes);
+    if (errors.length) throw jobErr(job, errors.join(" "));
+    need(job, deps.setGraphSources, "change a graph's source tables")(graphId, [...(args.source_table_ids as string[])]);
+    result.source_table_ids = [...(args.source_table_ids as string[])];
+  }
+  if (args.options !== undefined) {
+    const { options, warnings } = validateGraphOptions(job, args.options, state, tableId);
+    const merged: GraphOptions = { ...DEFAULT_GRAPH_OPTIONS, ...(node.graphOptions ?? {}), ...options };
+    need(job, deps.updateGraph, "update a graph")(graphId, merged);
+    if (warnings.length) result.warnings = warnings;
+  }
   return { result };
 }
 
