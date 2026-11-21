@@ -34,6 +34,7 @@ import type {
   NestedAnovaParams,
   NormalizeParams,
   LinearRegressionParams,
+  CompareSlopesParams,
   SimpleLogisticRegressionParams,
   NonlinearRegressionParams,
   OutliersParams,
@@ -69,6 +70,7 @@ import { runOutliers } from "./column/rout";
 import { runPValueStack } from "./column/p-values";
 import { runXYCorrelation } from "./xy/correlation";
 import { linearRegressionSpec, runLinearRegressions } from "./xy/linear-regression";
+import { runCompareSlopes } from "./xy/compare-slopes";
 import { demingRegressionSpec } from "./xy/deming-regression";
 import { runSimpleLogisticRegression } from "./xy/logistic-regression";
 import { runAreaUnderCurve } from "./xy/area-under-curve";
@@ -206,8 +208,39 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
   "linear-regression": {
     ...spec("Linear regression", linearRegressionSpec),
     // Several Y data sets: each regressed on its own, side by side; one: as the spec says.
-    run: (c, p) => {
+    run: async (c, p) => {
       const params = p as LinearRegressionParams | undefined;
+      // Prism's "Test whether the slopes and intercepts are significantly
+      // different": the comparison, not the separate fits — the same runner
+      // the standalone "compare-slopes" type uses (MCP audit seq 292: the
+      // param must be in the linear-regression schema, reachable via
+      // titer_run_analysis). Not forced through the origin (Prism disables
+      // the option then), not on a Multiple Variables x/y pair, and
+      // unweighted — each refusal is explicit, never a silent reinterpretation.
+      if (params?.compareSlopes === true) {
+        if (params.forceOrigin)
+          return Promise.resolve({
+            error:
+              "Comparing slopes and intercepts is not available when the line is forced through the origin — run it without forcing through the origin.",
+          });
+        if (params.x !== undefined)
+          return Promise.resolve({
+            error:
+              "Comparing slopes and intercepts needs an XY table with two or more Y data sets — a Multiple Variables table's two named variables make one line, not lines to compare.",
+          });
+        if ((params.weights ?? "none") !== "none")
+          return Promise.resolve({
+            error:
+              "Comparing slopes and intercepts uses unweighted fits (one residual variance is pooled) — run it without weighting.",
+          });
+        const ys = params.ys ?? (params.y !== undefined ? [params.y] : undefined);
+        // The comparison keeps its own stats, fit and summary — but the
+        // result is stored under this analysis, and a saved result only
+        // loads when its testType is the analysis's own (project-file.ts),
+        // so the type is this one, not "compare-slopes".
+        const out = await runCompareSlopes(c, ys ? { ys } : undefined);
+        return "error" in out ? out : { ...out, testType: "linear-regression" as const };
+      }
       const ys = params?.ys ?? [];
       return ys.length > 1
         ? runLinearRegressions(c, { ...params!, ys })
@@ -215,6 +248,12 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     },
   },
   "deming-regression": spec("Deming regression", demingRegressionSpec),
+  "compare-slopes": {
+    label: "Compare slopes and intercepts",
+    // X + at least two Y data sets — the runner enforces the per-set minimums.
+    minColumns: 3,
+    run: (c, p) => runCompareSlopes(c, p as CompareSlopesParams),
+  },
   "simple-logistic-regression": {
     label: "Simple logistic regression",
     minColumns: 2,

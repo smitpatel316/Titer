@@ -32,8 +32,8 @@
 // 205 (arithmetic transforms), 206 (column math), 228 (scripts in
 // project file + runOnOpen), 230 (paste-transposed edit op), Mansi-3
 // (sigDisplay pvalue-eq). Counts moved with the tip: 58 tools (was 57),
-// 60 AnalysisType variants / schema keys / runner keys (was 54; 60 since
-// seq 177 select-transform).
+// 61 AnalysisType variants / schema keys / runner keys (was 54; 60 since
+// seq 177 select-transform; 61 since #46 compare-slopes).
 // ONE correction vs the audit stands: row 178 said GAP, but Compact
 // Letter Display IS implemented — `compactLetters` in
 // src/views/graphs/significance-overlay.ts, `sigDisplay` "letters",
@@ -249,7 +249,7 @@ const scopeText = (scope: string): string => {
 };
 
 const EXPECTED_TOOL_COUNT = 58;
-const EXPECTED_ANALYSIS_TYPES = 60;
+const EXPECTED_ANALYSIS_TYPES = 61;
 const META_OFFERINGS = new Set(["compare-many-groups", "interpolate", "transform"]);
 
 // ── Global invariants (run first; any failure is a regression) ──────────
@@ -1262,8 +1262,8 @@ const ROWS: Row[] = [
   {
     item: "#46",
     title: "Compare slopes/intercepts",
-    status: "gap",
-    note: "Not built. No slope/intercept comparison param in the linear-regression schema (x/y/ys/forceOrigin/weights/sets only).",
+    status: "covered",
+    note: "Merged on check/v18: compareSlopes param on linear-regression + compare-slopes analysis type.",
     checks: [{ kind: "hasExtraParam", type: "linear-regression", known: ["x", "y", "ys", "forceOrigin", "weights", "sets"] }],
   },
   {

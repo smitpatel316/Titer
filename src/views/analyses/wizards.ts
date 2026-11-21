@@ -748,6 +748,7 @@ export type ChecklistKey =
   | "three-way-anova"
   | "multifactor-anova"
   | "linear-regression"
+  | "compare-slopes"
   | "nonlinear-regression"
   | "survival"
   | "cox-ph"
@@ -1277,6 +1278,43 @@ export const CHECKLISTS: Record<ChecklistKey, AnalysisChecklist> = {
         assumption:
           "Forcing the line through the origin is only justified when Y really is zero at X = 0 — the wizard asks, and “No” is the safe default.",
         ifNot: "Forcing through the origin when it does not hold bends the whole line and biases the slope.",
+      },
+    ],
+  },
+  "compare-slopes": {
+    title: "Compare slopes and intercepts — checklist",
+    whenToUse:
+      "Use this when you fitted a line to each of two or more Y data sets on the same X and want to know whether the lines really differ — whether their slopes differ, and (when they don't) whether the lines are identical or parallel with different intercepts.",
+    items: [
+      {
+        assumption: "Each data set's relationship is straight — check a scatter plot of Y against X before comparing, not after.",
+        ifNot:
+          "A curved relationship needs a curve fit (nonlinear regression) or a transformation, not a comparison of straight lines through a curve.",
+      },
+      {
+        assumption: "Each point is independent — no point is a repeat measurement of another, and no two points share a subject.",
+        ifNot: "Repeated measurements need a model that accounts for the repeats, such as a mixed-effects analysis.",
+      },
+      {
+        assumption:
+          "The scatter around the line is similar in every data set — the comparison pools one residual variance across them.",
+        ifNot:
+          "When one data set scatters much more than another, the pooled variance misleads both tests; compare the lines another way (for example, fit each on its own and compare the slopes with their standard errors).",
+      },
+      {
+        assumption:
+          "The residuals — the distances from each line — are roughly symmetric, which matters most for small samples and for confidence intervals.",
+        ifNot: "With skewed residuals, transform Y first or use a robust fit.",
+      },
+      {
+        assumption: "No single point drags a line: check points with extreme X (high leverage) and points far from the line.",
+        ifNot: "Investigate influential points first; one point can move a slope and the P value a lot.",
+      },
+      {
+        assumption:
+          "The lines are compared where the data are: the X ranges should overlap, and the intercepts are compared at X = 0.",
+        ifNot:
+          "Lines fitted on disjoint X ranges, or intercepts at an X far outside the data, are extrapolations — the comparison still runs, but say so when you report it.",
       },
     ],
   },
@@ -2647,11 +2685,24 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ["no", "No — fit both slope and Y-intercept (recommended)"],
         ["yes", "Yes — assume Y = 0 when X = 0"],
       ]),
+      // Prism's "Test whether the slopes and intercepts are significantly
+      // different" (#46): only when ≥ 2 Y data sets are fitted and the line
+      // is not forced through the origin (Prism disables it then).
+      ...(type === "xy" && yNames(table).length >= 2 && a.origin !== "yes"
+        ? [
+            choice("compare", "Test whether the slopes and intercepts are significantly different?", [
+              ["no", "No — fit each line on its own"],
+              ["yes", "Yes — compare the lines (are the slopes different? are the lines identical?)"],
+            ]),
+          ]
+        : []),
       // Plan 26: weighting (1/SD² needs the replicate columns this runner
       // never sees, so it is not offered here). Only an XY table's regression
       // on X is weighted — a Multiple Variables table regresses two named
-      // columns, and asks no weighting question.
-      ...(type === "xy"
+      // columns, and asks no weighting question. No weighting with the
+      // comparison: its F tests pool one residual variance, so the runner
+      // refuses a weighting scheme rather than ignoring it.
+      ...(type === "xy" && a.compare !== "yes"
         ? [
             choice("weights", "Weight the points?", [
               ["none", "No weighting (recommended unless scatter grows with Y)"],
@@ -2667,13 +2718,32 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       type: "linear-regression",
       params: {
         ...(a.x === undefined ? { ...fittedYs(a) } : { x: a.x as string, y: a.y as string }),
-        forceOrigin: a.origin === "yes",
-        ...(a.weights !== undefined && a.weights !== "none"
+        // A comparison is never forced through the origin, even when the
+        // origin answer was given before the comparison was picked.
+        forceOrigin: a.origin === "yes" && a.compare !== "yes",
+        ...(a.compare === "yes" ? { compareSlopes: true } : {}),
+        ...(a.weights !== undefined && a.weights !== "none" && a.compare !== "yes"
           ? { weights: a.weights as LinearRegressionParams["weights"] }
           : {}),
       },
     }),
-    checklist: () => CHECKLISTS["linear-regression"],
+    checklist: (a) => CHECKLISTS[a.compare === "yes" ? "compare-slopes" : "linear-regression"],
+  },
+
+  "compare-slopes": {
+    // Prism's "Test whether the slopes and intercepts are significantly
+    // different": an XY table's Y data sets, each needing at least 3 points
+    // (the runner says so when one is short). No origin question — Prism
+    // disables the comparison when the lines are forced through the origin —
+    // and no weighting: the F tests pool one residual variance.
+    questions: (_a, table) => [
+      ysQuestion(table, "Which Y data sets' lines should be compared? Each is fitted on its own first, then the lines are compared."),
+    ],
+    finish: (a) => ({
+      type: "compare-slopes",
+      params: a.ys === undefined ? {} : { ys: a.ys as string[] },
+    }),
+    checklist: () => CHECKLISTS["compare-slopes"],
   },
 
   "deming-regression": {

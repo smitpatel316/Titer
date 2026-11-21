@@ -297,6 +297,26 @@
       }
     ]
   },
+  "compare-slopes": {
+    "label": "Compare slopes and intercepts",
+    "min_columns": 3,
+    "offered_on": [
+      "xy"
+    ],
+    "params": [
+      {
+        "name": "ys",
+        "type": "string[]",
+        "required": false
+      },
+      {
+        "name": "sets",
+        "type": "string[]",
+        "required": false,
+        "description": "Data sets (columns, or a grouped table's groups) the analysis runs on; omitted: all of them (the first two for a two-group test)."
+      }
+    ]
+  },
   "compare-two-groups": {
     "label": "Compare two groups",
     "min_columns": 2,
@@ -1051,6 +1071,12 @@
         "type": "boolean",
         "default": false,
         "required": false
+      },
+      {
+        "name": "compareSlopes",
+        "type": "boolean",
+        "required": false,
+        "description": "Compare the slopes and intercepts of the Y data sets' lines (≥ 2 sets) instead of fitting each on its own."
       },
       {
         "name": "weights",

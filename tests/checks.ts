@@ -3997,6 +3997,272 @@ check("the linear-regression wizard weights every Y set it is asked to fit", asy
   ok(plain.stats.some((s) => s.label === "Pearson r"));
 });
 
+check("compare-slopes compares slopes then intercepts with Prism's two F tests (#46)", async () => {
+  // Reference values are independent of R: OLS + extra-sum-of-squares F
+  // computed in Python (numpy/scipy) from the same numbers — see
+  // .helix-v18/lane-46/ref.py. Three fixtures, one per Prism outcome:
+  // slopes differ / parallel-but-distinct / one line fits all.
+  const close = (got: number | null | undefined, want: number, tol = 1e-9) => {
+    ok(got != null && Math.abs(got - want) <= tol + Math.abs(want) * 1e-9, `got ${got}, want ${want}`);
+  };
+  const stat = (out: AnalysisResult, label: string) => out.stats.find((s) => s.label === label)?.value;
+  const fitRow = (out: AnalysisResult, label: string) => out.fit?.rows.find((r) => r.label === label);
+  const xy = (a: number[], b: number[], c?: number[]): TableData => ({
+    columns: ["Title", "X", "A", "B", ...(c ? ["C"] : [])],
+    rows: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((x, i) => [
+      "",
+      String(x),
+      String(a[i]),
+      String(b[i]),
+      ...(c ? [String(c[i])] : []),
+    ]),
+  });
+
+  // Slopes differ (slopes ~0.99 vs ~1.98): F = 1025.04, P ~ 6.2e-16;
+  // the lines cross at X ~ 0.995.
+  const differ = await runAnalysis(
+    "compare-slopes",
+    xy(
+      [1.2, 2.1, 2.9, 4.3, 4.8, 6.1, 6.9, 8.2, 8.8, 10.1],
+      [0.3, 1.8, 4.2, 5.9, 8.3, 9.8, 12.1, 13.9, 16.2, 17.8],
+    ),
+    {},
+  );
+  if ("error" in differ) throw new Error(differ.error);
+  close(stat(differ, "F (slopes differ)"), 1025.042339092466, 1e-6);
+  ok((stat(differ, "P value (slopes differ)") ?? 1) < 1e-12);
+  strictEqual(stat(differ, "DFn (slopes)"), 1);
+  strictEqual(stat(differ, "DFd (slopes)"), 16);
+  close(stat(differ, "Intersection point (X)"), 0.9951308581862435, 1e-9);
+  close(fitRow(differ, "Slope")?.values?.[0], 0.9854545454545456);
+  close(fitRow(differ, "Slope")?.values?.[1], 1.981212121212121);
+  ok(differ.summary?.includes("slopes of “A” and “B” differ significantly"));
+  ok(differ.notes.includes("not compared"));
+
+  // Parallel but distinct (slopes ~0.998 vs ~0.988, intercepts ~1.04 vs
+  // ~5.05): slopes P = 0.660, identical-lines P ~ 2e-21; common slope ~0.993.
+  const parallel = await runAnalysis(
+    "compare-slopes",
+    xy(
+      [1.1, 2.0, 3.2, 3.9, 5.1, 5.8, 7.0, 8.1, 8.9, 10.2],
+      [5.0, 6.2, 6.9, 8.1, 8.8, 10.0, 11.2, 11.9, 13.1, 13.8],
+    ),
+    {},
+  );
+  if ("error" in parallel) throw new Error(parallel.error);
+  close(stat(parallel, "F (slopes differ)"), 0.20097357440887365, 1e-9);
+  close(stat(parallel, "P value (slopes differ)")!, 0.6599474355408477, 1e-9);
+  ok((stat(parallel, "P value (lines identical)") ?? 1) < 1e-18);
+  close(stat(parallel, "Common slope"), 0.993030303030304);
+  close(stat(parallel, "Common slope 95% CI lower"), 0.9693626009509846);
+  close(stat(parallel, "Common slope 95% CI upper"), 1.0166980051096235);
+  ok(!parallel.stats.some((s) => s.label === "Intersection point (X)"));
+  ok(parallel.summary?.includes("parallel lines with different intercepts"));
+  deepStrictEqual(parallel.analyzed?.sets.map((s) => s.name), ["A", "B"]);
+
+  // One line fits all (same line, different noise): both P values high.
+  const identical = await runAnalysis(
+    "compare-slopes",
+    xy(
+      [1.1, 2.0, 3.2, 3.9, 5.1, 5.8, 7.0, 8.1, 8.9, 10.2],
+      [0.9, 2.2, 2.8, 4.1, 4.9, 6.2, 6.8, 8.0, 9.1, 9.9],
+    ),
+    {},
+  );
+  if ("error" in identical) throw new Error(identical.error);
+  ok((stat(identical, "P value (slopes differ)") ?? 0) > 0.9);
+  close(stat(identical, "P value (lines identical)")!, 0.5520534959932211, 1e-9);
+  ok(identical.summary?.includes("one line may describe them all"));
+
+  // Three sets: DFn is 2, and the slopes test still pins (F = 813.00).
+  const three = await runAnalysis(
+    "compare-slopes",
+    xy(
+      [1.2, 2.1, 2.9, 4.3, 4.8, 6.1, 6.9, 8.2, 8.8, 10.1],
+      [0.3, 1.8, 4.2, 5.9, 8.3, 9.8, 12.1, 13.9, 16.2, 17.8],
+      [2.0, 2.9, 4.1, 4.8, 6.0, 7.2, 7.9, 9.1, 9.8, 11.0],
+    ),
+    {},
+  );
+  if ("error" in three) throw new Error(three.error);
+  strictEqual(stat(three, "DFn (slopes)"), 2);
+  strictEqual(stat(three, "DFd (slopes)"), 24);
+  close(stat(three, "F (slopes differ)"), 812.9977109720761, 1e-6);
+  ok(!three.stats.some((s) => s.label === "Intersection point (X)"));
+});
+
+check("compare-slopes refuses one data set, a short set, a flat X and a missing set (#46)", async () => {
+  const one: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [0, 1, 2, 3, 4].map((x) => ["", String(x), String(1 + x)]),
+  };
+  deepStrictEqual(await runAnalysis("compare-slopes", one, {}), {
+    error: "Comparing slopes and intercepts needs at least two Y data sets on one XY table — this table has only “A”.",
+  });
+  // A has only 2 paired points (its later cells are blank); a line needs 3.
+  const ragged: TableData = {
+    columns: ["Title", "X", "A", "B"],
+    rows: [
+      ["", "0", "1", "1"],
+      ["", "1", "2", "3"],
+      ["", "2", "", "5"],
+      ["", "3", "", "7"],
+      ["", "4", "", "9"],
+    ],
+  };
+  deepStrictEqual(await runAnalysis("compare-slopes", ragged, {}), {
+    error: "“A” needs at least 3 points to be regressed on X.",
+  });
+  const flatX: TableData = {
+    columns: ["Title", "X", "A", "B"],
+    rows: [
+      ["", "1", "1", "2"],
+      ["", "1", "2", "3"],
+      ["", "1", "3", "4"],
+    ],
+  };
+  deepStrictEqual(await runAnalysis("compare-slopes", flatX, {}), {
+    error: "“X”'s values are all identical: a line needs X values that differ.",
+  });
+  // A named set the table no longer has is caught by runAnalysis's
+  // missing-column gate before the runner sees it.
+  deepStrictEqual(await runAnalysis("compare-slopes", ragged, { ys: ["A", "Nope"] }), {
+    error: "The column “Nope” is no longer in the table. Create this analysis again to choose another.",
+  });
+});
+
+check("linear-regression with compareSlopes runs the slope/intercept comparison (MCP audit seq 292)", async () => {
+  // The audit's bar: the comparison is a param in the linear-regression
+  // schema, reachable via titer_run_analysis — not UI-only. Same fixture
+  // and reference values as the standalone type (see ref.py).
+  const close = (got: number | null | undefined, want: number, tol = 1e-9) => {
+    ok(got != null && Math.abs(got - want) <= tol + Math.abs(want) * 1e-9, `got ${got}, want ${want}`);
+  };
+  const stat = (out: AnalysisResult, label: string) => out.stats.find((s) => s.label === label)?.value;
+  const data: TableData = {
+    columns: ["Title", "X", "A", "B"],
+    rows: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((x, i) => [
+      "",
+      String(x),
+      String([1.2, 2.1, 2.9, 4.3, 4.8, 6.1, 6.9, 8.2, 8.8, 10.1][i]),
+      String([0.3, 1.8, 4.2, 5.9, 8.3, 9.8, 12.1, 13.9, 16.2, 17.8][i]),
+    ]),
+  };
+  const out = await runAnalysis("linear-regression", data, { ys: ["A", "B"], forceOrigin: false, compareSlopes: true });
+  if ("error" in out) throw new Error(out.error);
+  // Stored under this analysis: a saved result only loads when its
+  // testType is the analysis's own (project-file.ts).
+  strictEqual(out.testType, "linear-regression");
+  close(stat(out, "F (slopes differ)"), 1025.042339092466, 1e-6);
+  ok((stat(out, "P value (slopes differ)") ?? 1) < 1e-12);
+  close(stat(out, "Intersection point (X)"), 0.9951308581862435, 1e-9);
+  ok(out.summary?.includes("slopes of “A” and “B” differ significantly"));
+  // The refusals are explicit, never silent reinterpretations.
+  deepStrictEqual(
+    await runAnalysis("linear-regression", data, { ys: ["A", "B"], forceOrigin: true, compareSlopes: true }),
+    {
+      error:
+        "Comparing slopes and intercepts is not available when the line is forced through the origin — run it without forcing through the origin.",
+    },
+  );
+  deepStrictEqual(
+    await runAnalysis("linear-regression", data, {
+      ys: ["A", "B"],
+      forceOrigin: false,
+      compareSlopes: true,
+      weights: "1/y",
+    }),
+    {
+      error:
+        "Comparing slopes and intercepts uses unweighted fits (one residual variance is pooled) — run it without weighting.",
+    },
+  );
+  deepStrictEqual(
+    await runAnalysis("linear-regression", data, { x: "X", y: "A", forceOrigin: false, compareSlopes: true }),
+    {
+      error:
+        "Comparing slopes and intercepts needs an XY table with two or more Y data sets — a Multiple Variables table's two named variables make one line, not lines to compare.",
+    },
+  );
+  // One set is not a comparison.
+  deepStrictEqual(
+    await runAnalysis("linear-regression", data, { y: "A", forceOrigin: false, compareSlopes: true }),
+    {
+      error:
+        "Comparing slopes and intercepts needs at least two Y data sets on one XY table — this table has only “A”.",
+    },
+  );
+});
+
+check("the linear-regression wizard offers the slopes/intercepts comparison on two or more Y sets (#46)", () => {
+  const wizard = WIZARDS["linear-regression"]!;
+  const data: TableData = {
+    columns: ["Title", "X", "A", "B"],
+    rows: [
+      ["", "0", "1", "2"],
+      ["", "1", "2", "3"],
+    ],
+  };
+  const table = readTable(data);
+  const asked = (a: Answers) => wizard.questions(a, table, "xy").filter(Boolean) as Question[];
+  const compare = asked({ origin: "no" }).find((q) => q.id === "compare") as Question;
+  ok(compare && compare.kind === "choice");
+  deepStrictEqual(
+    (compare as { options: { value: string }[] }).options.map((o) => o.value),
+    ["no", "yes"],
+  );
+  // Not offered when the line is forced through the origin (Prism disables
+  // it then), nor on a Multiple Variables table, nor with one Y set.
+  ok(!asked({ origin: "yes" }).some((q) => q.id === "compare"));
+  ok(
+    !wizard
+      .questions({ origin: "no" }, table, "multiple")
+      .filter(Boolean)
+      .some((q) => (q as Question).id === "compare"),
+  );
+  const oneY = readTable({ columns: ["Title", "X", "A"], rows: [["", "0", "1"], ["", "1", "2"]] });
+  ok(
+    !wizard
+      .questions({ origin: "no" }, oneY, "xy")
+      .filter(Boolean)
+      .some((q) => (q as Question).id === "compare"),
+  );
+  deepStrictEqual(wizard.finish({ ys: ["A", "B"], origin: "no", compare: "yes" }, table), {
+    type: "linear-regression",
+    params: { ys: ["A", "B"], forceOrigin: false, compareSlopes: true },
+  });
+  // A comparison never carries the origin or the weights, even when those
+  // answers were given before it was picked.
+  deepStrictEqual(wizard.finish({ ys: ["A", "B"], origin: "yes", compare: "yes", weights: "1/y" }, table), {
+    type: "linear-regression",
+    params: { ys: ["A", "B"], forceOrigin: false, compareSlopes: true },
+  });
+  ok(wizard.checklist!({ compare: "yes" }, table)?.title.includes("Compare slopes and intercepts"));
+});
+
+check("the compare-slopes wizard asks the Y data sets and finishes with ys (#46)", () => {
+  const wizard = WIZARDS["compare-slopes"]!;
+  const data: TableData = {
+    columns: ["Title", "X", "A", "B", "C"],
+    rows: [
+      ["", "0", "1", "2", "3"],
+      ["", "1", "2", "3", "4"],
+    ],
+  };
+  const table = readTable(data);
+  const qs = wizard.questions({}, table, "xy").filter(Boolean) as Question[];
+  strictEqual(qs.length, 1);
+  strictEqual(qs[0].id, "ys");
+  if (qs[0].kind !== "names") throw new Error("ys is not a names question");
+  deepStrictEqual(qs[0].options, ["A", "B", "C"]);
+  deepStrictEqual(wizard.finish({ ys: ["A", "C"] }, table), { type: "compare-slopes", params: { ys: ["A", "C"] } });
+  deepStrictEqual(wizard.finish({}, table), { type: "compare-slopes", params: {} });
+  ok(wizard.checklist!({}, table)?.title.includes("Compare slopes and intercepts"));
+  // Offered on XY tables (after linear regression), nowhere else.
+  ok(analysisOptionsForTable("xy").some((o) => o.value === "compare-slopes"));
+  ok(!analysisOptionsForTable("column").some((o) => o.value === "compare-slopes"));
+});
+
 check("the Bland-Altman graph never plots X as a method on XY tables (FL-f8-graph)", () => {
   const xy = readTable({
     columns: ["Title", "Time", "Method A", "Method B"],

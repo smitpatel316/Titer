@@ -16,6 +16,7 @@ export type AnalysisType =
   | "one-sample-ks"
   | "correlation"
   | "linear-regression"
+  | "compare-slopes"
   | "deming-regression"
   | "area-under-curve"
   | "remove-baseline"
@@ -512,7 +513,13 @@ export interface FriedmanParams {
 }
 
 /** Params for "linear-regression": which Y series to regress on X, and whether to
- *  force the line through the origin (intercept = 0). */
+ *  force the line through the origin (intercept = 0). `compareSlopes` is Prism's
+ *  "Test whether the slopes and intercepts are significantly different" checkbox
+ *  (#46, MCP audit seq 292): with two or more Y data sets it runs the
+ *  slope/intercept comparison ("compare-slopes") instead of fitting each line
+ *  on its own. It needs an XY table (not Multiple Variables `x`/`y`), it is
+ *  not available forced through the origin (Prism disables the option then),
+ *  and the comparison is unweighted, so it refuses a weighting scheme. */
 export interface LinearRegressionParams {
   /** The X variable of a Multiple Variables table; omitted, X is the first data column (XY). */
   x?: string;
@@ -521,9 +528,24 @@ export interface LinearRegressionParams {
   /** An XY table's Y data sets, each regressed on its own (`y` then unused). */
   ys?: string[];
   forceOrigin: boolean;
+  /** Compare the slopes and intercepts of the Y data sets' lines (≥ 2 sets)
+   *  instead of fitting each on its own. */
+  compareSlopes?: boolean;
   /** Weighting (plan 26, same schemes as nonlinear regression except 1/SD²,
    *  which needs the replicate columns this runner never sees). */
   weights?: Exclude<NonlinearWeightScheme, "1/sd2">;
+}
+
+/** Params for "compare-slopes" (XY table, #46): which Y data sets' lines to
+ *  compare — Prism's "Test whether the slopes and intercepts are significantly
+ *  different" (linear regression, ANCOVA-equivalent extra sum-of-squares F
+ *  tests; Zar, Biostatistical Analysis, ch. 18). Omitted, every Y data set.
+ *  Unweighted OLS only: Prism's comparison shares one residual variance, so
+ *  no weighting is offered, and forcing through the origin is not offered
+ *  either — Prism disables the option then (FAQ 677). */
+export interface CompareSlopesParams {
+  /** An XY table's Y data sets to compare; omitted, all of them. */
+  ys?: string[];
 }
 
 /** Params for "deming-regression" (XY table): which Y series to compare with X,
@@ -1758,6 +1780,7 @@ export type AnalysisParams = DataSetsParam &
     | CorrelationParams
     | XYCorrelationParams
     | LinearRegressionParams
+    | CompareSlopesParams
     | DemingRegressionParams
     | AreaUnderCurveParams
     | RemoveBaselineParams

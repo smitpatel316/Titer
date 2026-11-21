@@ -592,8 +592,8 @@ for typ, keys in sorted(KEYS_BY_TYPE.items()):
         out["gates"] = GATES[typ]
     schema[typ] = out
 
-# Sanity: 60 types (59 + select-transform, seq 177), every key accounted for, offered_on non-empty.
-assert len(schema) == 60, f"{len(schema)} types, expected 60"
+# Sanity: 61 types (60 + compare-slopes, #46), every key accounted for, offered_on non-empty.
+assert len(schema) == 61, f"{len(schema)} types, expected 61"
 for typ, entry in schema.items():
     assert entry["offered_on"], f"{typ} offered on no table type"
     assert entry["min_columns"] is not None, f"{typ} has no min_columns"
