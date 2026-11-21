@@ -3981,6 +3981,75 @@ check("G-F5: the ROC optimal-cutpoint annotation flips by quadrant (no edge clip
   strictEqual(weak.yanchor, "bottom");
 });
 
+// Batch 3 #45 (QQ + residual plots): a graph that cannot draw a data set
+// names it on the figure (G-F8) instead of silently drawing nothing — the
+// regression overlay already does this for the same fit; the two graph
+// types used to drop the sets without a word.
+check("a QQ plot names a one-value data set instead of silently drawing nothing (18-45)", () => {
+  const data = readTable({
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["", "5", "1"],
+      ["", "", "2"],
+      ["", "", "4"],
+    ],
+  });
+  const options = newGraphOptions("qq-plot");
+  const fig = GRAPHS["qq-plot"].build(plotColumns(data, "qq-plot", options, "column"), options, paintOf(options, 2));
+  // A (1 value) draws nothing; B (3 values) draws its points + normal line.
+  strictEqual(fig.data.length, 2);
+  const notes = ((fig.layout.annotations as { text?: string }[] | undefined) ?? []).map((a) => a.text ?? "");
+  ok(
+    notes.some((t) => t.includes("“A”") && t.includes("at least 2 values")),
+    `expected a note naming A, got: ${JSON.stringify(notes)}`,
+  );
+});
+
+check("a residual plot names a data set whose line cannot be fitted (18-45)", () => {
+  const noteTexts = (fig: GraphFigure) =>
+    ((fig.layout.annotations as { text?: string }[] | undefined) ?? []).map((a) => a.text ?? "");
+  // 2 paired points are too few for a line: no traces — but the figure says why.
+  const few = readTable({
+    columns: ["Title", "X", "Y"],
+    rows: [
+      ["", "1", "2"],
+      ["", "2", "4"],
+    ],
+  });
+  const options = newGraphOptions("residuals");
+  const fewFig = GRAPHS["residuals"].build(plotColumns(few, "residuals", options, "xy"), options, paintOf(options, 1));
+  deepStrictEqual(fewFig.data, []);
+  ok(
+    noteTexts(fewFig).some((t) => t.includes("“Y”") && t.includes("at least 3 points")),
+    `expected a note naming Y, got: ${JSON.stringify(noteTexts(fewFig))}`,
+  );
+  // The same failure in QQ mode names the set too.
+  const qqFig = GRAPHS["residuals"].build(
+    plotColumns(few, "residuals", { ...options, residualsAs: "qq" }, "xy"),
+    { ...options, residualsAs: "qq" },
+    paintOf(options, 1),
+  );
+  ok(
+    noteTexts(qqFig).some((t) => t.includes("“Y”") && t.includes("at least 3 points")),
+    `expected a QQ-mode note naming Y, got: ${JSON.stringify(noteTexts(qqFig))}`,
+  );
+  // All X identical: also unfittable, named with its own reason.
+  const flat = readTable({
+    columns: ["Title", "X", "Y"],
+    rows: [
+      ["", "1", "2"],
+      ["", "1", "4"],
+      ["", "1", "5"],
+    ],
+  });
+  const flatFig = GRAPHS["residuals"].build(plotColumns(flat, "residuals", options, "xy"), options, paintOf(options, 1));
+  deepStrictEqual(flatFig.data, []);
+  ok(
+    noteTexts(flatFig).some((t) => t.includes("“Y”") && t.includes("all X values are the same")),
+    `expected a note naming Y, got: ${JSON.stringify(noteTexts(flatFig))}`,
+  );
+});
+
 // v1.5.0 m15 (plan 05): the runner's ROC points are one row per threshold
 // PLUS the (0,0)/(1,1) endpoints for the graph — the graph used to add them
 // itself while the runner's table stopped at the extreme thresholds. The
