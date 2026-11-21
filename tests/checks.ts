@@ -179,7 +179,7 @@ import { kruskalWallisSpec } from "../src/stats/column/kruskal-wallis";
 import { anovaSpec } from "../src/stats/column/anova";
 import { dagostinoPearson } from "../src/stats/column/shapiro-wilk";
 import { runRout } from "../src/stats/column/rout";
-import { adjustStackPValues, fisherCombinedP, runPValueStack, stoufferCombinedP } from "../src/stats/column/p-values";
+import { adjustStackPValues, bkyTrueNullEstimate, fisherCombinedP, runPValueStack, stoufferCombinedP } from "../src/stats/column/p-values";
 import {
   CHECKLIST_KEYS,
   CHECKLISTS,
@@ -15532,9 +15532,14 @@ check("Holm–Šídák steps down over the sorted P values, keeping the running 
   );
 });
 
-check("P-value adjustments pass nulls through", () => {
-  deepStrictEqual(adjustPValues([null, 0.9], "sidak"), [null, 0.99]);
-  deepStrictEqual(adjustPValues([1, null], "holm-sidak"), [1, null]);
+check("P-value adjustments pass nulls through and exclude them from the family", () => {
+  // m counts the non-null P values only (R's p.adjust drops NAs): with one
+  // null in three, Šídák uses m = 2 — 0.9 → 0.99, 0.5 → 0.75 (m = 3 would
+  // give 0.999 and 0.875).
+  deepStrictEqual(adjustPValues([null, 0.9, 0.5], "sidak"), [null, 0.99, 0.75]);
+  // Holm–Šídák step-down over the two non-null values: 0.5 → 0.75, then
+  // max(0.75, 0.9) = 0.9 for the 0.9.
+  deepStrictEqual(adjustPValues([0.9, null, 0.5], "holm-sidak"), [0.9, null, 0.75]);
   deepStrictEqual(
     adjustComparisonRows(
       [
@@ -15544,6 +15549,18 @@ check("P-value adjustments pass nulls through", () => {
       "sidak",
     ).map((r) => Number(r.p!.toFixed(4))),
     [0.05, 0.0941],
+  );
+  // A null row in the comparisons table does not inflate the family either.
+  deepStrictEqual(
+    adjustComparisonRows(
+      [
+        { group1: "A", group2: "B", diff: 1, p: 0.0253 },
+        { group1: "A", group2: "C", diff: 2, p: null },
+        { group1: "B", group2: "C", diff: 3, p: 0.0482 },
+      ],
+      "sidak",
+    ).map((r) => (r.p == null ? null : Number(r.p.toFixed(4)))),
+    [0.05, null, 0.0941],
   );
 });
 
@@ -15573,8 +15590,21 @@ check("the FDR approach matches R's p.adjust (BH, BY); BKY beats BH (seq 192)", 
     adjustFdrPValues(ps, "bky").map((p) => Number(p!.toFixed(4))),
     [0.02, 0.04, 0.3333],
   );
-  // Nulls pass through, and the rows helper adjusts in place order.
-  deepStrictEqual(adjustFdrPValues([null, 0.01, 0.04], "bh"), [null, 0.03, 0.06]);
+  // Nulls pass through, and the rows helper adjusts in place order — with
+  // one null in three, BH uses m = 2 (R's p.adjust drops NAs): 0.01 → 0.02,
+  // 0.04 → 0.04 (m = 3 would give 0.03 and 0.06).
+  deepStrictEqual(adjustFdrPValues([null, 0.01, 0.04], "bh"), [null, 0.02, 0.04]);
+  deepStrictEqual(
+    adjustFdrComparisonRows(
+      [
+        { group1: "A", group2: "B", diff: 1, p: 0.01 },
+        { group1: "A", group2: "C", diff: 2, p: null },
+        { group1: "B", group2: "C", diff: 3, p: 0.04 },
+      ],
+      "bh",
+    ).map((r) => r.p),
+    [0.02, null, 0.04],
+  );
   deepStrictEqual(
     adjustFdrComparisonRows(
       [
@@ -15720,16 +15750,34 @@ check("BKY falls back to no discoveries when stage 1 rejects nothing, and to all
   );
 });
 
-check("multiple-t-tests adjustments count null rows in the family and pass them through", () => {
-  // A constant row has no P but still counts as a comparison (m = 2 here).
-  deepStrictEqual(adjustMultipleTTestPValues([null, 0.01], "bonferroni"), [null, 0.02]);
-  deepStrictEqual(adjustMultipleTTestPValues([null, 0.01], "holm"), [null, 0.02]);
-  deepStrictEqual(adjustMultipleTTestPValues([0.01, null], "fdr"), [0.02, null]);
+check("multiple-t-tests adjustments exclude null rows from the family and pass them through", () => {
+  // A constant row has no P and does not count as a comparison (m = 1 here,
+  // as R's p.adjust counts only the non-NA values).
+  deepStrictEqual(adjustMultipleTTestPValues([null, 0.01], "bonferroni"), [null, 0.01]);
+  deepStrictEqual(adjustMultipleTTestPValues([null, 0.01], "holm"), [null, 0.01]);
+  deepStrictEqual(adjustMultipleTTestPValues([0.01, null], "fdr"), [0.01, null]);
   // One comparison is the identity for every method.
   for (const method of ["holm-sidak", "holm", "sidak", "bonferroni", "fdr", "fdr-bky", "fdr-by"] as const) {
     const one = adjustMultipleTTestPValues([0.04], method, 5);
     ok(one.length === 1 && Math.abs(one[0]! - 0.04) < 1e-12, `${method} m=1: ${one[0]}`);
   }
+});
+
+// Cycle 28b: one null row in five (m = 4) — every correction pinned against
+// live R p.adjust on the same raw values (holm, bonferroni, BH, BY) and the
+// closed forms R lacks (holm-sidak, sidak, BKY). The paired-Holm gene2/gene3
+// values (0.6762 / 0.0792) are the sweep's repro numbers.
+check("multiple-t-tests null-in-family pins match R p.adjust (cycle 28b)", () => {
+  const ps: (number | null)[] = [null, 0.225403, 0.019804, 0.666667, 1.0];
+  const at4 = (xs: (number | null)[]) => xs.map((p) => (p == null ? null : Number(p.toFixed(4))));
+  deepStrictEqual(at4(adjustMultipleTTestPValues(ps, "holm")), [null, 0.6762, 0.0792, 1, 1]);
+  deepStrictEqual(at4(adjustMultipleTTestPValues(ps, "bonferroni")), [null, 0.9016, 0.0792, 1, 1]);
+  deepStrictEqual(at4(adjustMultipleTTestPValues(ps, "holm-sidak")), [null, 0.5352, 0.0769, 0.8889, 1]);
+  deepStrictEqual(at4(adjustMultipleTTestPValues(ps, "sidak")), [null, 0.64, 0.0769, 0.9877, 1]);
+  deepStrictEqual(at4(adjustMultipleTTestPValues(ps, "fdr")), [null, 0.4508, 0.0792, 0.8889, 1]);
+  deepStrictEqual(at4(adjustMultipleTTestPValues(ps, "fdr-by")), [null, 0.9392, 0.165, 1, 1]);
+  // BKY at Q = 5%: stage 1 rejects nothing, so the BH values scale up by 1.05.
+  deepStrictEqual(at4(adjustMultipleTTestPValues(ps, "fdr-bky", 5)), [null, 0.4733, 0.0832, 0.9333, 1]);
 });
 
 check("FDR Q falls back to 5% outside 0.01–50, and the significance threshold is Q for FDR, 0.05 otherwise", () => {
@@ -19327,6 +19375,24 @@ check("a stack of P values adjusts by every method and combines Fisher/Stouffer"
   deepStrictEqual(await runPValueStack([], { method: "holm-sidak" }), {
     error: "This needs at least 1 column containing numeric data.",
   });
+});
+
+// Cycle 28b: the stack helpers take nullable P values too, and a null entry
+// must not inflate the family — with one null in four, m = 3 throughout
+// (same m-excludes-nulls rule as R's p.adjust).
+check("stack-of-P-values adjustments exclude null entries from the family", () => {
+  const ps: (number | null)[] = [null, 0.01, 0.04, 0.5];
+  const at4 = (xs: (number | null)[]) => xs.map((p) => (p == null ? null : Number(p.toFixed(4))));
+  deepStrictEqual(at4(adjustStackPValues(ps, "bonferroni")), [null, 0.03, 0.12, 1]);
+  deepStrictEqual(at4(adjustStackPValues(ps, "sidak")), [null, 0.0297, 0.1153, 0.875]);
+  deepStrictEqual(at4(adjustStackPValues(ps, "holm")), [null, 0.03, 0.08, 0.5]);
+  deepStrictEqual(at4(adjustStackPValues(ps, "holm-sidak")), [null, 0.0297, 0.0784, 0.5]);
+  deepStrictEqual(at4(adjustStackPValues(ps, "bh")), [null, 0.03, 0.06, 0.5]);
+  deepStrictEqual(at4(adjustStackPValues(ps, "bky", 0.05)), [null, 0.021, 0.042, 0.35]);
+  deepStrictEqual(at4(adjustStackPValues(ps, "by")), [null, 0.055, 0.11, 0.9167]);
+  // BKY's true-null estimate counts the same m = 3: stage 1 rejects only
+  // 0.01, so m₀ = 2 (m = 4 would give 3).
+  strictEqual(bkyTrueNullEstimate(ps, 0.05), 2);
 });
 
 check("the stack-of-P-values wizard asks for alpha or Q by method family", () => {

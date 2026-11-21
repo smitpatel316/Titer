@@ -255,13 +255,15 @@ export function dunnPosthocStatements(
 /** The P-value adjustments a post-hoc can apply to a family's raw P values, in
  *  TypeScript (plan 25): Šídák's single-step `1 − (1 − p)^m`, and Holm–Šídák's
  *  step-down — for the i-th smallest P (i = 1…m), the max over j ≤ i of
- *  `1 − (1 − p_(j))^(m−j+1)`, capped at 1. `m` is the family size (the rows'
- *  length); null P values pass through unadjusted. With m = 1 both are the
- *  identity. Pure arithmetic — no R, no package. */
+ *  `1 − (1 − p_(j))^(m−j+1)`, capped at 1. `m` is the family size (the
+ *  count of non-null P values — R's `p.adjust` drops NAs, so a null P is
+ *  not a comparison); null P values pass through unadjusted. With m = 1
+ *  both are the identity. Pure arithmetic — no R, no package. */
 export type PAdjustment = "sidak" | "holm-sidak";
 
 export function adjustPValues(ps: (number | null)[], method: PAdjustment): (number | null)[] {
-  const m = ps.length;
+  // m is the count of non-null P values (R's p.adjust drops NAs).
+  const m = ps.filter((p) => p != null).length;
   if (method === "sidak") {
     return ps.map((p) => (p == null ? null : Math.min(1, 1 - (1 - p) ** m)));
   }
@@ -301,14 +303,17 @@ export type FdrMethod = "bh" | "bky" | "by";
  *  the BH formula then runs with m₀ in place of m — fewer true nulls, more
  *  power than BH at the same Q. `qPercent` is the FDR threshold Q in percent
  *  (BKY's first stage is the only part that needs it); null P values pass
- *  through unadjusted. Pure arithmetic — no R, no package. Cross-checked
- *  against R's p.adjust ("BH", "BY") in tests/checks.ts. */
+ *  through unadjusted, and `m` is the count of non-null P values (R's
+ *  `p.adjust` drops NAs, so a null P is not a comparison). Pure arithmetic —
+ *  no R, no package. Cross-checked against R's p.adjust ("BH", "BY") in
+ *  tests/checks.ts. */
 export function adjustFdrPValues(
   ps: (number | null)[],
   method: FdrMethod,
   qPercent = 5,
 ): (number | null)[] {
-  const m = ps.length;
+  // m is the count of non-null P values (R's p.adjust drops NAs).
+  const m = ps.filter((p) => p != null).length;
   const indexed = ps.map((p, i) => [p, i] as const).filter(([p]) => p != null);
   const sorted = [...indexed].sort((a, b) => a[0]! - b[0]!);
   const out: (number | null)[] = ps.map(() => null);

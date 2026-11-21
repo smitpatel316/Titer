@@ -55,10 +55,11 @@ const DEFAULTS: MultipleTTestsParams = {
 };
 
 /** Adjust a family's raw P values for multiplicity. `m` is the family size
- *  — every tested row, null P values included (a constant row has no P but
- *  still counts as a comparison, as R's `p.adjust` counts it). Nulls pass
- *  through unadjusted; the non-null values are adjusted over the full m.
- *  Pure arithmetic — no R, so the checks pin it against `p.adjust` directly.
+ *  — the count of non-null P values only: R's `p.adjust` drops NAs before
+ *  adjusting, so a constant row has no P and does not count as a
+ *  comparison. Nulls pass through unadjusted; the non-null values are
+ *  adjusted over m. Pure arithmetic — no R, so the checks pin it against
+ *  `p.adjust` directly.
  *
  *  - holm-sidak / sidak: the shared step-down / single-step Šídák
  *    (`adjustPValues`); bonferroni: `min(1, m·p)`; holm: step-down
@@ -76,7 +77,8 @@ export function adjustMultipleTTestPValues(
   correction: MultipleTTestCorrection,
   q?: number,
 ): (number | null)[] {
-  const m = ps.length;
+  // m is the count of non-null P values (R's p.adjust drops NAs).
+  const m = ps.filter((p) => p != null).length;
   if (correction === "none") return [...ps];
   if (correction === "holm-sidak" || correction === "sidak") {
     return adjustPValues(ps, correction);
