@@ -29940,9 +29940,16 @@ check("linked-168: a .prism write of a linked table matches the unlinked write",
   });
   const tableFiles = async (bytes: Uint8Array) => {
     const zip = await JSZip.loadAsync(bytes);
-    const names = Object.keys(zip.files).filter((n) => n.startsWith("data/tables/"));
+    // Directory entries (data/, data/tables/, data/tables/<uid>/) are
+    // not files: JSZip creates them implicitly and zip.file() returns
+    // null for them, so reading one throws on `.async`. The table uid in
+    // each path is a fresh random UUID per write, so it is normalized
+    // out — the comparison is over the files' contents, not their names.
+    const names = Object.keys(zip.files).filter((n) => n.startsWith("data/tables/") && !zip.files[n].dir);
     const texts: Record<string, string> = {};
-    for (const n of names) texts[n] = await zip.file(n)!.async("string");
+    for (const n of names) {
+      texts[n.replace(/data\/tables\/[^/]+\//, "data/tables/TABLE/")] = await zip.file(n)!.async("string");
+    }
     return texts;
   };
   const linkedFiles = await tableFiles((await writePrism(project(true), "1.8.0")).bytes);

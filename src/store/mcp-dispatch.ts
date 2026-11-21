@@ -1734,8 +1734,13 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           },
         };
       }
+      // Same read-back shape as edit-table (v1.6 race fix): the commit
+      // must land before the next job reads the table, or a following
+      // refresh reads pre-refresh state and reports a change that already
+      // happened. `deps.flush` alone does not settle a lagging getState.
+      const beforeRevision = state.revision;
       actions.updateTable(tableId, res.data, "Update Linked Data");
-      await deps.flush?.();
+      await settleAfterDispatch(deps, beforeRevision);
       return {
         result: {
           project_id: job.project_id,
