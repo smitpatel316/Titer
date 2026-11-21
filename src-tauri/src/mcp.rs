@@ -2936,7 +2936,8 @@ pub struct SearchArgs {
     /// "One-way ANOVA" node whatever it is named).
     pub query: String,
     /// Only nodes of this kind: "table" | "analysis" | "graph" |
-    /// "figure" | "info". Omit for every kind.
+    /// "info". Omit for every kind. (Figures are not searched — find
+    /// them through their graphs.)
     #[serde(default)]
     pub kind: Option<String>,
 }
@@ -3419,7 +3420,7 @@ impl TiterMcpServer {
     async fn search(&self, Parameters(args): Parameters<SearchArgs>) -> Result<Json<serde_json::Value>, String> {
         let search_args = serde_json::json!({ "project_id": args.project_id, "query": args.query, "kind": args.kind });
         let result = (|| {
-            const KINDS: &[&str] = &["table", "analysis", "graph", "figure", "info"];
+            const KINDS: &[&str] = &["table", "analysis", "graph", "info"];
             if let Some(kind) = &args.kind {
                 if !KINDS.contains(&kind.as_str()) {
                     return Err(format!("Unknown kind “{kind}”. Valid kinds: {}.", KINDS.join(", ")));
@@ -8280,11 +8281,12 @@ mod tests {
     fn search_nodes_finds_by_name_and_type() {
         let snap = snapshot();
         let (found, total) = search_nodes(&snap, "dose", None);
-        // Table, analysis AND figure: the figure "Dose figure" matches by
-        // name too (search covers every bucket).
-        assert_eq!(total, 3, "{found:?}");
+        // Table and analysis: the figure "Dose figure" matches by name
+        // too, but search never returns figures — find them through
+        // their graphs.
+        assert_eq!(total, 2, "{found:?}");
         let ids: Vec<&str> = found.iter().map(|m| m["id"].as_str().unwrap()).collect();
-        assert_eq!(ids, vec!["t1", "a1", "f1"], "table then analysis then figure, in listing order");
+        assert_eq!(ids, vec!["t1", "a1"], "table then analysis, in listing order");
         assert_eq!(found[1]["parent_id"], "t1");
         assert_eq!(found[1]["parent_name"], "Dose-response");
         // Case-insensitive, and the kind filter narrows to tables only.
@@ -10063,7 +10065,7 @@ mod tests {
         state.lock().dir = Some(dir.clone());
         let session2 = mcp_initialize(&client, &url).await;
         let names2 = mcp_list_tool_names(&client, &url, &session2).await;
-        assert_eq!(names2.len(), 11, "five reads + six destructive tools: {names2:?}");
+        assert_eq!(names2.len(), 7, "five reads + two destructive tools: {names2:?}");
         assert!(names2.contains(&"titer_delete_node".to_string()), "delete appears: {names2:?}");
         assert!(names2.contains(&"titer_run_script".to_string()), "script appears: {names2:?}");
 
@@ -10177,7 +10179,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 56, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 57, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema
