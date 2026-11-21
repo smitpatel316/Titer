@@ -253,9 +253,9 @@ export async function renderGraphImage(
     const Plotly = await loadPlotly();
     await Plotly.react(el, fig.data, { ...fig.layout, ...draw96 }, { displayModeBar: false, scrollZoom: false, doubleClick: false });
     const drawn = el as unknown as { data: unknown[]; layout: object };
-    // EPS is drawn as SVG (Plotly has no EPS output); PDF/TIFF/BMP are
-    // built from the PNG Plotly draws (it has no PDF/TIFF/BMP output).
-    const drawnFormat = format === "eps" ? "svg" : format === "pdf" || format === "tiff" || format === "bmp" ? "png" : format;
+    // EPS/PDF are drawn as SVG (Plotly has no EPS/PDF output); TIFF/BMP
+    // are built from the PNG Plotly draws (it has no TIFF/BMP output).
+    const drawnFormat = format === "eps" || format === "pdf" ? "svg" : format === "tiff" || format === "bmp" ? "png" : format;
     const layout =
       drawnFormat === "jpeg" || format === "pdf" || format === "tiff" || format === "eps" || format === "bmp"
         ? { ...drawn.layout, ...WHITE }
@@ -272,7 +272,7 @@ export async function renderGraphImage(
       return { bytes: new TextEncoder().encode(await image.text()), ...dims, vector: true };
     }
     // The blob's body reads once: take the bytes, derive the SVG text
-    // (vector formats) and the PNG (raster formats / the PDF fallback).
+    // (vector formats) and the PNG (raster formats) from them.
     const bytes = new Uint8Array(await image.arrayBuffer());
     if (format === "eps") {
       return { bytes: svgToEps(new TextDecoder().decode(bytes), { colorMode }), ...dims, vector: true };
@@ -282,7 +282,12 @@ export async function renderGraphImage(
         return { bytes: svgToPdf(new TextDecoder().decode(bytes), { colorMode }), ...dims, vector: true };
       } catch (err) {
         if (!(err instanceof VectorExportError)) throw err;
-        return { bytes: pdfEncode(decodePng(bytes), Number(dpi), colorMode), ...dims, vector: false };
+        // The drawing has raster/gradient content: draw it again as PNG
+        // and encode the raster PDF, not a vector file that silently
+        // dropped it.
+        const pngUrl = await Plotly.toImage(figure, { format: "png", ...draw96, scale: Number(dpi) / PX_PER_INCH });
+        const pngBytes = new Uint8Array(await (await (await fetch(pngUrl)).blob()).arrayBuffer());
+        return { bytes: pdfEncode(decodePng(pngBytes), Number(dpi), colorMode), ...dims, vector: false };
       }
     }
     if (format === "bmp") return { bytes: bmpEncode(decodePng(bytes), Number(dpi)), ...dims, vector: false };

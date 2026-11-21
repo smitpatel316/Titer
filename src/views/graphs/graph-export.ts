@@ -60,9 +60,9 @@ function tooLarge(size: Size, dpi: Resolution) {
 async function toImage(el: HTMLElement, size: Size, format: ExportFormat, dpi: Resolution, colorMode: ColorMode = "color") {
   validateExportColorMode(format, colorMode);
   const drawn = el as HTMLElement & { data: unknown[]; layout: object };
-  // EPS is drawn as SVG (Plotly has no EPS output); PDF/TIFF/BMP are built
-  // from the PNG Plotly draws (it has no PDF/TIFF/BMP output).
-  const drawnFormat = format === "eps" ? "svg" : format === "pdf" || format === "tiff" || format === "bmp" ? "png" : format;
+  // EPS/PDF are drawn as SVG (Plotly has no EPS/PDF output); TIFF/BMP are
+  // built from the PNG Plotly draws (it has no TIFF/BMP output).
+  const drawnFormat = format === "eps" || format === "pdf" ? "svg" : format === "tiff" || format === "bmp" ? "png" : format;
   const layout =
     drawnFormat === "jpeg" || format === "pdf" || format === "tiff" || format === "eps" || format === "bmp"
       ? { ...drawn.layout, ...WHITE }
@@ -73,11 +73,12 @@ async function toImage(el: HTMLElement, size: Size, format: ExportFormat, dpi: R
       : { data: vectorTraces(withoutSelection(drawn.data)), layout };
   const vector = format === "svg" || format === "eps" || format === "pdf";
   const scale = vector ? 1 : Number(dpi) / PX_PER_INCH;
-  const url = await (await loadPlotly()).toImage(figure, { format: drawnFormat, ...size, scale });
+  const Plotly = await loadPlotly();
+  const url = await Plotly.toImage(figure, { format: drawnFormat, ...size, scale });
   const image = await (await fetch(url)).blob();
   if (format === "svg") return { blob: image, vector: true };
   // The blob's body reads once: take the bytes, derive the SVG text (vector
-  // formats) and the PNG (raster formats / the PDF fallback) from them.
+  // formats) and the PNG (raster formats) from them.
   const bytes = new Uint8Array(await image.arrayBuffer());
   if (format === "eps")
     return {
@@ -94,10 +95,12 @@ async function toImage(el: HTMLElement, size: Size, format: ExportFormat, dpi: R
       };
     } catch (err) {
       if (!(err instanceof VectorExportError)) throw err;
-      // The drawing has raster/gradient content: the raster PDF, not a
-      // vector file that silently dropped it.
+      // The drawing has raster/gradient content: draw it again as PNG and
+      // encode the raster PDF, not a vector file that silently dropped it.
+      const pngUrl = await Plotly.toImage(figure, { format: "png", ...size, scale: Number(dpi) / PX_PER_INCH });
+      const pngBytes = new Uint8Array(await (await (await fetch(pngUrl)).blob()).arrayBuffer());
       return {
-        blob: new Blob([pdfEncode(decodePng(bytes), Number(dpi), colorMode) as BlobPart], { type: "application/pdf" }),
+        blob: new Blob([pdfEncode(decodePng(pngBytes), Number(dpi), colorMode) as BlobPart], { type: "application/pdf" }),
         vector: false,
       };
     }
