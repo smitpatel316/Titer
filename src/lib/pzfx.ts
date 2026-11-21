@@ -216,7 +216,7 @@ const rawChildText = (node: XmlNode): string => {
  * "Group"). Trailing spaces are PRESERVED (BUG-4/BUG-7): only line breaks
  * collapse, nothing is trimmed.
  */
-const cleanTitle = (value: string): string => {
+export const cleanTitle = (value: string): string => {
   const collapsed = value.replace(/\s*(\r\n|\r|\n)\s*/g, " ");
   return collapsed.trim() === "" ? "" : collapsed;
 };

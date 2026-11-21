@@ -251,8 +251,8 @@ fn choose_project(app: AppHandle, window: WebviewWindow) {
     });
 }
 
-/// File ▸ Import Prism File…: the Open panel for a Prism file (`.pzfx` or
-/// `.prism`).
+/// File ▸ Import Prism File…: the Open panel for a Prism file (`.pzfx`,
+/// `.prism` or `.pzf`).
 /// Non-blocking, like choose_project: blocking_pick_file parks the main
 /// thread on a semaphore while the NSOpenPanel needs that same thread to
 /// process clicks — deadlock, Titer (not responding), 0% CPU (confirmed
@@ -263,7 +263,7 @@ fn choose_project(app: AppHandle, window: WebviewWindow) {
 #[tauri::command]
 fn choose_prism_file(app: AppHandle, window: WebviewWindow) {
     let label = window.label().to_string();
-    app.dialog().file().set_title("Import Prism File").add_filter("GraphPad Prism File", &["pzfx", "prism"]).pick_file(
+    app.dialog().file().set_title("Import Prism File").add_filter("GraphPad Prism File", &["pzfx", "prism", "pzf"]).pick_file(
         move |file| {
             let picked = file.and_then(|file| file.into_path().ok()).map(|path| path.to_string_lossy().into_owned());
             let _ = app.emit_to(label.as_str(), "prism-file-picked", picked);
@@ -491,15 +491,16 @@ async fn read_prism_text(path: String) -> Result<String, String> {
         .map_err(|e| e.to_string())?
 }
 
-/// A Prism `.prism` file's bytes, for import — a `.prism` file is a ZIP, so
-/// text won't do. Base64, not a JSON number array: a 40 MB file would be a
-/// 40 M-number array the webview would have to parse one number at a time.
+/// A Prism `.prism` or `.pzf` file's bytes, for import — a `.prism` file is
+/// a ZIP and a `.pzf` file is binary, so text won't do for either. Base64,
+/// not a JSON number array: a 40 MB file would be a 40 M-number array the
+/// webview would have to parse one number at a time.
 /// Async, like `read_text` (seq 248): a TCC-blocked read must never park
 /// the main thread.
 #[tauri::command]
 async fn read_prism_bytes(path: String) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
-        check_extension(&path, &["prism"])?;
+        check_extension(&path, &["prism", "pzf"])?;
         fs::read(path).map(|bytes| BASE64.encode(bytes)).map_err(|e| e.to_string())
     })
     .await
@@ -1708,6 +1709,22 @@ mod tests {
         let bytes = BASE64.decode(base64).expect("command returns base64");
         assert!(bytes.starts_with(b"PK"), "a .prism file is a ZIP: {bytes:?}");
         assert!(!bytes.is_empty(), "fixture should have content");
+    }
+
+    // seq 218: the same async path for a `.pzf` fixture — base64 that
+    // decodes to the legacy binary magic, and a `.pzfx` path is refused
+    // (binary reader only: `.pzfx` goes through `read_prism_text`).
+    #[tokio::test]
+    async fn read_prism_bytes_async_reads_a_pzf_fixture() {
+        let path = fixture("aggregates-size.pzf");
+        let base64 = read_prism_bytes(path.to_string_lossy().into_owned()).await.expect("fixture should read");
+        let bytes = BASE64.decode(base64).expect("command returns base64");
+        assert!(bytes.starts_with(b"PCFFGRA4"), "a .pzf file starts with its magic: {bytes:?}");
+        assert!(!bytes.is_empty(), "fixture should have content");
+        let err = read_prism_bytes(fixture("column.pzfx").to_string_lossy().into_owned())
+            .await
+            .expect_err(".pzfx is not a bytes format");
+        assert!(err.contains("can't access"), "{err}");
     }
 
     // ── CC-m6: r_ready must not re-send an in-flight evaluation ──────────

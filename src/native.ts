@@ -786,8 +786,8 @@ export async function onMethodFilePicked(handler: (path: string | null) => void)
 /** A Prism `.pzfx` file's text, for import. */
 export const readPrismText = (path: string) => invoke<string>("read_prism_text", { path });
 
-/** A Prism `.prism` file's bytes, for import — a `.prism` file is a ZIP, so
- *  text won't do. The shell returns base64; this decodes it. */
+/** A Prism `.prism` or `.pzf` file's bytes, for import — a `.prism` file is a ZIP
+ *  and a `.pzf` file is binary, so text won't do for either. The shell returns base64; this decodes it. */
 export async function readPrismBytes(path: string): Promise<Uint8Array> {
   const base64 = await invoke<string>("read_prism_bytes", { path });
   const binary = atob(base64);

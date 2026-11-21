@@ -192,10 +192,12 @@ panel labels and one export — the figure for a paper, built from the same live
 Titer reads and writes GraphPad Prism files, so existing Prism projects move over
 without retyping data.
 
-- **Open Prism files:** File › Import Prism File… opens `.pzfx` (Prism 5–9) and
-  `.prism` (Prism 10). A `.prism` file brings in its data tables, analysis parameters
+- **Open Prism files:** File › Import Prism File… opens `.pzfx` (Prism 5–9),
+  `.prism` (Prism 10) and `.pzf` (Prism 4/5, legacy binary). A `.prism` file brings in its data tables, analysis parameters
   and info sheets; graphs and layouts are not transferred, and results are recomputed
-  from the data on open.
+  from the data on open. A `.pzf` file brings in its data tables (as Column tables —
+  the legacy format records no table type) and info sheets; analyses, graphs and
+  layouts are not transferred.
 - **Save back to Prism:** the save prompt offers Save as `.prism` (Prism 10) or Save as
   `.pzfx` (Prism 5–9). The writers cover data tables, analysis parameters and info
   sheets (`.prism`) or data tables and info sheets (`.pzfx`) — never graphs, layouts or
@@ -351,10 +353,12 @@ Building the Mac DMGs needs both Mac targets for Rust, once:
 
 ## Clean-room note
 
-Titer's GraphPad Prism file support (`.pzfx` import, `.prism` import, and `.prism` /
+Titer's GraphPad Prism file support (`.pzfx` import, `.prism` import, `.pzf` import, and `.prism` /
 `.pzfx` write-back) was built clean-room: by studying the files Prism writes, together
 with public documentation and the open-source readers for those formats (R's `pzfx`
-package and Python's `pypzfx`), and implementing the importers and writers independently
+package and Python's `pypzfx` — both `.pzfx`-only; the `.pzf` grammar was
+reverse-engineered from two real public `.pzf` files, since no spec or reader exists
+for it), and implementing the importers and writers independently
 from those observations. No part of it involved decompiling, disassembling,
 or otherwise reverse-engineering Prism's program, and no cracked or pirated
 Prism source was used. Where the internal structure of a file was unclear,
