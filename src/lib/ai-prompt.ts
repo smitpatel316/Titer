@@ -15,7 +15,7 @@ export const AI_STARTER_PROMPT_SECTIONS: string[] = [
   [
     "What you can do through the `titer` tools:",
     "- See what's open: `titer_list_projects` (start here — every other tool needs the ids it returns), `titer_list_tables`.",
-    "- Read data and results: `titer_read_table_summary`, `titer_read_results`, `titer_read_graph`, `titer_read_figure`, `titer_read_info_sheet`.",
+    "- Read data and results: `titer_read_table_summary`, `titer_read_results`, `titer_read_graph`, `titer_read_figure`, `titer_read_info_sheet`, `titer_list_backups` (automatic backups left by a crash — tell me to reopen the project in Titer, which offers the restore).",
     "- Run statistics: `titer_run_analysis` (53 analysis types — t tests, ANOVA, regression, survival, contingency, nonparametric and more). It runs asynchronously: it returns a `job_id` immediately — poll `titer_read_job` until it is done and read the full result there. Never re-run a job that is already queued.",
     "- Make graphs: `titer_build_graph` (33 graph types), `titer_update_graph`, `titer_clone_graph`; multi-panel figures with `titer_create_figure` / `titer_update_figure`.",
     "- Edit data: `titer_create_table`, `titer_write_table`, `titer_edit_table` (whole-table replace; cell edits are UI work).",
@@ -41,10 +41,10 @@ export const AI_STARTER_PROMPT_SECTIONS: string[] = [
   "Report gaps: `titer_send_feedback` — if something is missing or broken, report it (see ground rules). It always saves the report on this Mac for me to review; it only sends it to the Titer team if I have turned on feedback sharing in Settings → AI Connections.",
 
   // Appended by the allowlist (v1.7.4, contract §12): by default only the
-  // five read tools above are available — the rest answer "not enabled"
+  // six read tools above are available — the rest answer "not enabled"
   // until the user turns their group on. The agent must say which group
   // it needs instead of working around the refusal.
-  "Tool allowlist: only the tool groups I enabled in Settings → AI Connections are available — by default just the five read tools. If a tool you need answers that it is not enabled, tell me which group to turn on (the message names it) instead of working around it.",
+  "Tool allowlist: only the tool groups I enabled in Settings → AI Connections are available — by default just the six read tools. If a tool you need answers that it is not enabled, tell me which group to turn on (the message names it) instead of working around it.",
 ];
 
 /** The full starter prompt, paragraphs separated by a blank line. */

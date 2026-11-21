@@ -183,8 +183,9 @@ exist — build it with `scripts/build-stdio-bridge.sh`.)
 ## Verify the connection
 
 1. In the App: **Customizations → Installed → MCP Servers** — the server
-   shows with a green status dot and “5 tools enabled” by default (the
-   five read tools in the snippets above). Since 1.7.4 the server
+   shows with a green status dot and “6 tools enabled” by default (the
+   six read tools the server advertises by default — the five in the
+   snippets above, plus `titer_list_backups`). Since 1.7.4 the server
    enforces the allowlist: Antigravity only ever sees the tools Titer
    has enabled, so the count here is the allowlisted count, not the
    server's full set. (In 1.7.3 the server advertised all 52 tools and

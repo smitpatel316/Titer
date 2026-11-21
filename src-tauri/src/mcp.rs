@@ -106,7 +106,7 @@ const OPT_IN_FILE: &str = "mcp-opt-in.json";
 /// feedback-consent records beside it, same 0700 directory, same
 /// owner-only (0600) file. Missing, unreadable, or malformed reads as the
 /// default — only the `read` group — so a fresh install advertises just
-/// the five Phase 1 read tools (docs/mcp-server-contract.md §12).
+/// the six read-group tools (docs/mcp-server-contract.md §12).
 const ALLOWLIST_FILE: &str = "mcp-allowlist.json";
 
 /// The feedback server: `POST {this}` with one saved entry's JSON, and it
@@ -1326,8 +1326,10 @@ struct AllowlistGroup {
     tools: &'static [&'static str],
 }
 
-/// The five Phase 1 read tools, on by default — the same five
-/// `ANTIGRAVITY_ENABLED_TOOLS` below and in docs/antigravity.md.
+/// The six read-group tools, on by default — the five Phase 1 tools plus
+/// `titer_list_backups` (seq 226). Note: `ANTIGRAVITY_ENABLED_TOOLS` below
+/// still allowlists exactly the five Phase 1 tools, by design; the
+/// server-side default is six.
 const ALLOWLIST_DEFAULT_GROUPS: &[&str] = &["read"];
 
 const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
@@ -1463,8 +1465,8 @@ fn allowed_tools(groups: &HashSet<String>) -> HashSet<String> {
 
 /// The enabled groups from the persisted record: the `groups` array, with
 /// unknown ids dropped. Missing, unreadable, or malformed reads as the
-/// default (only `read`) — a fresh install advertises just the five Phase
-/// 1 read tools. An explicit empty array is honoured (nothing
+/// default (only `read`) — a fresh install advertises just the six
+/// read-group tools. An explicit empty array is honoured (nothing
 /// advertised); only a missing `groups` key falls back to the default.
 fn read_allowlist_groups(dir: &std::path::Path) -> HashSet<String> {
     let default: HashSet<String> = ALLOWLIST_DEFAULT_GROUPS.iter().map(|g| g.to_string()).collect();
@@ -1501,7 +1503,7 @@ fn write_allowlist_file(dir: &std::path::Path, groups: &HashSet<String>) -> Resu
 
 /// The tools this server may advertise and run, from the persisted
 /// record. No `mcp/` directory yet (tests, or a server started before
-/// any Settings visit) reads as the default — only the five read tools.
+/// any Settings visit) reads as the default — only the six read tools.
 fn load_allowlist(state: &McpState) -> HashSet<String> {
     match state.dir() {
         Some(dir) => allowed_tools(&read_allowlist_groups(&dir)),
@@ -2544,7 +2546,8 @@ fn analysis_params_schema(analysis_type: &str) -> Option<serde_json::Value> {
 }
 
 // ── The MCP server: tools ───────────────────────────────────────────────
-// Nine read-only tools: the five Phase 1 tools, plus the four Phase 2
+// Ten read-only tools: the five Phase 1 tools plus the 1.8 backup tool
+// (`titer_list_backups`), plus the four Phase 2
 // read-only additions (titer_read_figure, titer_read_info_sheet,
 // titer_read_activity, titer_send_feedback). Every one is annotated
 // read_only_hint, and every call is written to the Activity log with an
@@ -6817,7 +6820,8 @@ impl TiterMcpServer {
         // The allowlist (contract §12): read once per session, so a toggle
         // change in Settings applies when the client reconnects. A fresh
         // state with no `mcp/` directory yet reads as the default — only
-        // the five Phase 1 read tools.
+        // the six read-group tools (the five Phase 1 tools plus
+        // `titer_list_backups`).
         let allowed = load_allowlist(&state);
         // Inspector 2.13.0 discards tools whose outputSchema has no `type`
         // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
@@ -7084,7 +7088,7 @@ impl ServerHandler for TiterMcpServer {
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
                 It exposes up to 58 tools, gated by the allowlist in Settings → AI Connections \
-                (contract §12): by default only the 5 read tools below are enabled, and the user \
+                (contract §12): by default only the 6 read tools below are enabled, and the user \
                 can enable more groups there — a tool that is not listed cannot be called. \
                 19 of the 58 are read-only and 39 change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
@@ -10162,7 +10166,7 @@ mod tests {
     #[tokio::test]
     async fn mcp_smoke_allowlist_default_over_http() {
         // No `mcp/` directory at all: the default allowlist — exactly the
-        // five Phase 1 read tools, nothing else. This is the audit's §5
+        // six read-group tools, nothing else. This is the audit's §5
         // finding made into a test: the server must not advertise the
         // destructive tools (or `titer_run_script`) to a fresh client.
         let state = job_state();
@@ -10175,13 +10179,14 @@ mod tests {
         assert_eq!(
             names,
             vec![
+                "titer_list_backups",
                 "titer_list_projects",
                 "titer_list_tables",
                 "titer_read_graph",
                 "titer_read_results",
                 "titer_read_table_summary",
             ],
-            "default tools/list is exactly the five Phase 1 read tools: {names:?}"
+            "default tools/list is exactly the six read-group tools: {names:?}"
         );
 
         // A disallowed call is rejected server-side with a message naming
@@ -10210,7 +10215,7 @@ mod tests {
         state.lock().dir = Some(dir.clone());
         let session2 = mcp_initialize(&client, &url).await;
         let names2 = mcp_list_tool_names(&client, &url, &session2).await;
-        assert_eq!(names2.len(), 7, "five reads + two destructive tools: {names2:?}");
+        assert_eq!(names2.len(), 8, "six reads + two destructive tools: {names2:?}");
         assert!(names2.contains(&"titer_delete_node".to_string()), "delete appears: {names2:?}");
         assert!(names2.contains(&"titer_run_script".to_string()), "script appears: {names2:?}");
 
@@ -10231,9 +10236,9 @@ mod tests {
             call_raw_text(&resp)
         );
 
-        // The first session is untouched by the toggle: it still lists 5.
+        // The first session is untouched by the toggle: it still lists 6.
         let names_again = mcp_list_tool_names(&client, &url, &session).await;
-        assert_eq!(names_again.len(), 5, "existing session keeps its allowlist: {names_again:?}");
+        assert_eq!(names_again.len(), 6, "existing session keeps its allowlist: {names_again:?}");
 
         cancel.cancel();
         server.abort();
@@ -10266,7 +10271,7 @@ mod tests {
     }
 
     #[test]
-    fn allowlist_default_is_the_five_read_tools() {
+    fn allowlist_default_is_the_six_read_tools() {
         let groups: HashSet<String> = ALLOWLIST_DEFAULT_GROUPS.iter().map(|g| g.to_string()).collect();
         let tools = allowed_tools(&groups);
         let mut names: Vec<&str> = tools.iter().map(String::as_str).collect();
@@ -10274,6 +10279,7 @@ mod tests {
         assert_eq!(
             names,
             vec![
+                "titer_list_backups",
                 "titer_list_projects",
                 "titer_list_tables",
                 "titer_read_graph",
