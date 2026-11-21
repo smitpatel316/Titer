@@ -1055,6 +1055,10 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           throw new Error("This window can't freeze tables (no setTableFrozen).");
         });
       freeze(tableId, args.frozen);
+      // The commit has to land before this job returns (v1.6 race fix):
+      // the next job reads the table through getState(), and without the
+      // wait it would still see the table unfrozen and let an edit through.
+      await settleAfterDispatch(deps, state.revision);
       return {
         result: { project_id: job.project_id, table_id: tableId, frozen: args.frozen },
         created: { table_id: tableId },

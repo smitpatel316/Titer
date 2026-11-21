@@ -1884,11 +1884,15 @@ function readNode(
     node.parentId = null;
     Object.assign(node, readFigure(n));
     // A frozen figure (seq 237) draws each panel from its snapshot, and
-    // carries drawing objects like a graph (seq 238). Frozen with no
-    // snapshot to draw from is a corrupt file, not a frozen figure.
+    // carries drawing objects like a graph (seq 238). The saver drops the
+    // flag and keeps the snapshots (seq 165), so snapshots on file mean
+    // frozen, flag or no flag — the figure is re-frozen on load. Frozen
+    // with no snapshot to draw from is a corrupt file, not a frozen figure.
     const frozenByGraph = readFrozenDataByGraph(n.frozenDataByGraph);
-    if (node.frozen === true && frozenByGraph) node.frozenDataByGraph = frozenByGraph;
-    else {
+    if (frozenByGraph) {
+      node.frozen = true;
+      node.frozenDataByGraph = frozenByGraph;
+    } else {
       delete node.frozen;
       delete node.frozenDataByGraph;
     }
@@ -1916,11 +1920,15 @@ function readNode(
       issues.push({ severity: "error", message: `Graph “${node.name}” uses a chart this version doesn't know.` });
     }
     // A frozen graph (seq 237) draws from its snapshot, and carries
-    // drawing objects (seq 238). Frozen with no snapshot to draw from is
-    // a corrupt file, not a frozen graph.
+    // drawing objects (seq 238). The saver drops the flag and keeps the
+    // snapshot (seq 165), so a snapshot on file means frozen, flag or no
+    // flag — the graph is re-frozen on load. Frozen with no snapshot to
+    // draw from is a corrupt file, not a frozen graph.
     const frozenData = readFrozenData(n.frozenData);
-    if (node.frozen === true && frozenData) node.frozenData = frozenData;
-    else {
+    if (frozenData) {
+      node.frozen = true;
+      node.frozenData = frozenData;
+    } else {
       delete node.frozen;
       delete node.frozenData;
     }
@@ -1932,11 +1940,11 @@ function readNode(
   if (type !== "table") delete node.transform; // a table's alone
   if (type !== "analysis") {
     // Orphaned results belong to analyses only: a hand-edited file can't
-    // orphan a graph. Frozen now belongs to analyses, graphs and figures
-    // alike (seq 237) — the graph/figure branches above already kept or
-    // dropped it — so only tables and info sheets lose it here.
+    // orphan a graph. Frozen now belongs to analyses, graphs, figures and
+    // tables alike (seq 165, seq 237) — the branches above already kept or
+    // dropped it — so only info sheets lose the flag here.
     if (type !== "graph" && type !== "figure") {
-      delete node.frozen;
+      if (type !== "table") delete node.frozen;
       delete node.frozenData;
       delete node.frozenDataByGraph;
       delete node.drawingObjects;
