@@ -444,8 +444,8 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       const node = state.nodes[action.id];
       if (!node || node.type !== "graph" || node.graphType === action.graphType) return state;
       const table = node.parentId ? state.nodes[node.parentId] : undefined;
-      const tableType = table && table.type === "table" ? table.tableType : undefined;
-      if (!tableType) return state;
+      if (!table || table.type !== "table") return state;
+      const tableType = table.tableType;
       if (!GRAPH_OPTIONS_BY_TABLE[tableType].some((o) => o.value === action.graphType)) return state;
       const oldOptions = node.graphOptions;
       const options = action.options ?? {
