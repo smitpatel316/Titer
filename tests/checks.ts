@@ -21435,10 +21435,14 @@ check("freezing a data table blocks edits until unfrozen (seq 165)", () => {
 });
 
 check("a frozen table survives a save and reload, and a frozen flag on a graph is dropped (seq 165)", () => {
+  // The graph's regAnalysisId points at analysis "a1", so the file carries
+  // it: without it the link dangles, and the loader repairs a dangling
+  // link — that repair, not the frozen flags, would mark the file updated.
+  // This check is about the frozen flags, so the file it builds is a sound one.
   const file = {
-    nodes: { t1: { ...table, frozen: true }, g1: { ...graph, frozen: true } },
+    nodes: { t1: { ...table, frozen: true }, a1: analysis, g1: { ...graph, frozen: true } },
     rootOrder: ["t1"],
-    childOrder: { t1: ["g1"] },
+    childOrder: { t1: ["g1", "a1"] },
     activeNodeId: "t1",
   };
   const readBack = read(serializeProjectFile(file));
