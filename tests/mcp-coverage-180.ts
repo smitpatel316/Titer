@@ -1200,8 +1200,8 @@ const ROWS: Row[] = [
   {
     item: "224",
     title: "MV text grouping variables",
-    status: "gap",
-    note: "Partial. Cells are text-capable, but multi-level categorical covariates unsupported (cox-ph.ts errors on them). Tripwire: when that blocker goes away, this row flags LANDED.",
+    status: "covered",
+    note: "Merged on check/v18: text predictors/covariates are dummy-coded (first level the reference) in multiple, multiple-logistic, Poisson and Cox regression — coefficients pinned against R's lm()/glm()/coxph() with treatment contrasts, and the Cox multi-level blocker is gone (gate flagged LANDED on the tip).",
     checks: [
       {
         kind: "tripwire",

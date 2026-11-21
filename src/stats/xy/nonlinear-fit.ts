@@ -418,6 +418,10 @@ function polynomialSpec(degree: number, centered = false): ModelSpec {
   const powers = Array.from({ length: degree - 1 }, (_, i) => i + 2);
   if (!centered)
     return { kind: "lm", fit: `m<-lm(y~x${powers.map((k) => `+I(x^${k})`).join("")})`, terms };
+  // `xm` stays in scope for predict() on newdata — never I(x-mean(x))
+  // inline, whose mean of a single new X is itself. The two statements
+  // survive the retry ladder because retryChain braces each fit (a bare
+  // `;` inside expression(...) is a parse error).
   return {
     kind: "lm",
     fit: `xm<-mean(x);m<-lm(y~I(x-xm)${powers.map((k) => `+I((x-xm)^${k})`).join("")})`,
@@ -496,19 +500,16 @@ export function modelSpec(
       return polynomialSpec(4, opts?.centered);
     case "quintic":
       // Plan 29: 5th order polynomial — same pattern, one degree higher.
-      return {
-        kind: "lm",
-        fit: "m<-lm(y~x+I(x^2)+I(x^3)+I(x^4)+I(x^5))",
-        terms: ["B0", "B1", "B2", "B3", "B4", "B5"],
-      };
+      // (Gate fix: this used to hardcode the uncentered fit and ignore
+      // opts.centered, so a centered quintic reported the raw intercept
+      // as B0 — route through polynomialSpec like quadratic..quartic.)
+      return polynomialSpec(5, opts?.centered);
     case "sextic":
       // B6 §Polynomial #11: 6th order polynomial — one degree higher
-      // again, same lm pattern.
-      return {
-        kind: "lm",
-        fit: "m<-lm(y~x+I(x^2)+I(x^3)+I(x^4)+I(x^5)+I(x^6))",
-        terms: ["B0", "B1", "B2", "B3", "B4", "B5", "B6"],
-      };
+      // again, same lm pattern (and the same centered routing as the
+      // quintic — the hardcoded uncentered fit reported B0 = 2, the raw
+      // intercept, for a centered sextic whose B0 is 39.73).
+      return polynomialSpec(6, opts?.centered);
     case "centered-first":
     case "centered-second":
     case "centered-third":
@@ -1464,6 +1465,24 @@ export function modelSpec(
       return {
         kind: "nls",
         fit: "m<-nls(y~Y0*exp(K*x),start=list(Y0=y[which.min(x)],K=0.1),algorithm=\"port\")",
+        // Gate fix (seq 200): port stalls from the Y0 = y-at-min-X start
+        // on steeply growing counts ("false convergence (8)") — the
+        // seq-200 Poisson data fails the primary AND the least-squares
+        // fit that way, so the Poisson IRLS never gets an initial fit.
+        // The retry starts from the log-linear fit (lm(log(y)~x) on the
+        // positive counts — the growth model's own linearisation), which
+        // converges on that data to the scipy pins (verified in WebR).
+        // It only runs when the primary fails, so passing fits never
+        // touch it; with fewer than two positive counts it falls back
+        // to the primary start. The start expressions are self-contained
+        // (no pre-statement variables), so the global fit's data-driven
+        // restart can evaluate them per series.
+        retryFits: [
+          {
+            fit: "m<-nls(y~Y0*exp(K*x),start=list(Y0=if(sum(y>0)>=2)exp(coef(lm(log(y[y>0])~x[y>0]))[[1]]) else y[which.min(x)],K=if(sum(y>0)>=2)coef(lm(log(y[y>0])~x[y>0]))[[2]] else 0.1),algorithm=\"port\")",
+            method: "log-linear start",
+          },
+        ],
         terms: ["Y0", "K"],
         derived: [overK("Doubling time", "log(2)"), overK("Tau", "1")],
         curveFn: 'g<-function(xv,p) p[["Y0"]]*exp(p[["K"]]*xv)',
