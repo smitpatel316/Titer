@@ -150,8 +150,9 @@ export function resolveSaveTarget(
 }
 
 /** The project's bytes in `format`, built by the TS writers — the same
- *  writers the UI save uses. Throws the writer's own error (e.g. a table
- *  mixing Y formats cannot go to `.pzfx`). */
+ *  writers the UI save uses. Throws the writer's own error (e.g. a project
+ *  with no data tables cannot go to `.pzfx`); a table mixing Y formats
+ *  splits into one table per format instead of refusing (seq 163). */
 export async function buildSaveBytes(state: DocumentState, format: SaveFormat, version: string): Promise<Uint8Array> {
   const payload = {
     nodes: state.nodes,
