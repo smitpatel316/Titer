@@ -1,8 +1,8 @@
 // Kolmogorov-Smirnov test — two-sample, base R ks.test. Compares two independent
 // groups without assuming Gaussian distributions: D is the largest absolute
 // vertical distance between the two cumulative frequency distributions.
-// One-sample KS (a sample vs. a reference distribution) is out of scope here;
-// see plan 07 follow-on.
+// One-sample KS (a sample vs. a reference distribution) is its own analysis,
+// "one-sample-ks" (seq 170).
 import type { Column, StatRow } from "../types";
 import { dataGroups, declareGroups, pRow, type ColumnTestSpec, type Group } from "./base";
 
@@ -63,7 +63,7 @@ export const kolmogorovSmirnovSpec: ColumnTestSpec = {
     skipped.forEach((n, i) => {
       if (n) parts.push(`“${groups[i].name}”: ${n} non-numeric cell${n === 1 ? "" : "s"} ignored.`);
     });
-    parts.push("One-sample KS (vs. a reference distribution) is not included; see plan 07 follow-on.");
+    parts.push("To compare a sample against a theoretical distribution instead, use the one-sample Kolmogorov–Smirnov test.");
     return parts.join(" ");
   },
   subtitle: () => "Kolmogorov-Smirnov test (two-sample)",

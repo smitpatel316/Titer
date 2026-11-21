@@ -5,7 +5,7 @@
 
 import { maxOf } from "../../lib/summary";
 import { pairKey } from "../../lib/columns";
-import type { TAILS, AnalysisType, AnalysisOutcome, Column, ComparisonRow, DifferenceResult, GroupDescriptives, NormalityRow, StatRow } from "../types";
+import type { TAILS, AnalysisType, AnalysisOutcome, Column, ComparisonRow, DifferenceResult, EffectSizeRow, GroupDescriptives, NormalityRow, StatRow } from "../types";
 import { evalNamedVector } from "../webr";
 
 /** A group as a test sees it: a name and its numbers. */
@@ -153,10 +153,13 @@ export const R_PTUKEY =
 
 /** R: P values corrected for the `m` pairs of a family (`adj`, from each pair's raw P), and a
  *  pair's corrected P from its |t| (`pa`), by `how`: Bonferroni, Šidák, Holm-Šidák (step-down:
- *  the smallest P against m pairs, the next against m − 1…, never below an earlier one) or
- *  Fisher's LSD (none). Holm-Šidák's step-down gives no CI (`pa` NA). */
+ *  the smallest P against m pairs, the next against m − 1…, never below an earlier one),
+ *  the False Discovery Rate (Benjamini-Hochberg step-up: the i-th smallest P against m/i
+ *  pairs, never below a larger one), or Fisher's LSD (none). Holm-Šidák's step-down and
+ *  the FDR's step-up give no CI (`pa` NA): no single critical value covers the family. */
 export const R_ADJUST = `adj<-function(p,how){m<-length(p);if(how=="fisher")return(p);if(how=="bonferroni")return(pmin(1,m*p))
-if(how=="sidak")return(1-(1-p)^m);o<-order(p);a<-cummax(1-(1-p[o])^(m-seq_len(m)+1));r<-numeric(m);r[o]<-pmin(1,a);r}
+if(how=="sidak")return(1-(1-p)^m);o<-order(p);if(how=="fdr"){a<-rev(cummin(rev(m/seq_len(m)*p[o])));r<-numeric(m);r[o]<-pmin(1,a);return(r)}
+a<-cummax(1-(1-p[o])^(m-seq_len(m)+1));r<-numeric(m);r[o]<-pmin(1,a);r}
 pa<-function(t,df,how,m){p<-2*pt(-abs(t),df);switch(how,fisher=p,bonferroni=pmin(1,m*p),sidak=1-(1-p)^m,NA)}`;
 
 /** The pairs a test compares: every pair, or those `compared` names (`pairKey`, either way
@@ -284,6 +287,73 @@ export function adjustComparisonRows(rows: ComparisonRow[], method: PAdjustment)
   return rows.map((r, i) => ({ ...r, p: adjusted[i] }));
 }
 
+/** The FDR-approach methods Prism offers after an ANOVA: Benjamini-Hochberg
+ *  (BH), the two-stage Benjamini-Krieger-Yekutieli (BKY), Benjamini-Yekutieli (BY). */
+export type FdrMethod = "bh" | "bky" | "by";
+
+/** The FDR-adjusted P values (q-values) of a family's raw P values, in
+ *  TypeScript (the FDR approach's whole-family step-up needs the family sorted,
+ *  which R can't see one pair at a time — same reason Šídák / Holm–Šídák live
+ *  here). BH: for the i-th smallest P (i = 1…m), the min over k ≥ i of
+ *  `m·p_(k)/k`, capped at 1. BY: the same, times the m-th harmonic number
+ *  (valid under any dependence). BKY (two-stage): a first BH pass at level
+ *  Q/(1+Q) estimates how many of the m nulls are true (m₀ = m − rejections);
+ *  the BH formula then runs with m₀ in place of m — fewer true nulls, more
+ *  power than BH at the same Q. `qPercent` is the FDR threshold Q in percent
+ *  (BKY's first stage is the only part that needs it); null P values pass
+ *  through unadjusted. Pure arithmetic — no R, no package. Cross-checked
+ *  against R's p.adjust ("BH", "BY") in tests/checks.ts. */
+export function adjustFdrPValues(
+  ps: (number | null)[],
+  method: FdrMethod,
+  qPercent = 5,
+): (number | null)[] {
+  const m = ps.length;
+  const indexed = ps.map((p, i) => [p, i] as const).filter(([p]) => p != null);
+  const sorted = [...indexed].sort((a, b) => a[0]! - b[0]!);
+  const out: (number | null)[] = ps.map(() => null);
+  if (sorted.length === 0) return out;
+  // BY's dependence penalty: the m-th harmonic number.
+  const harmonic = method === "by" ? Array.from({ length: m }, (_, i) => 1 / (i + 1)).reduce((a, b) => a + b, 0) : 1;
+  // BKY stage 1: BH at Q/(1+Q) — how many of the m nulls look false.
+  let m0 = m;
+  if (method === "bky") {
+    const q1 = qPercent / 100 / (1 + qPercent / 100);
+    let rejections = 0;
+    sorted.forEach(([p], rank) => {
+      if (p! <= ((rank + 1) / m) * q1) rejections = rank + 1;
+    });
+    // All rejected in stage 1: at most one null can still be true.
+    m0 = Math.max(m - rejections, 1);
+  }
+  // Step-up: the adjusted value of the i-th smallest P is the smallest of
+  // `factor·m₀·p_(k)/k` over k ≥ i (scanning from the largest down, keeping the
+  // running minimum), capped at 1 — so the adjusted values never decrease as
+  // the raw P values grow.
+  let runningMin = Infinity;
+  for (let rank = sorted.length - 1; rank >= 0; rank--) {
+    const [p, i] = sorted[rank];
+    runningMin = Math.min(runningMin, Math.min(1, (harmonic * m0 * p!) / (rank + 1)));
+    out[i] = runningMin;
+  }
+  return ps.map((p, i) => (p == null ? null : out[i]));
+}
+
+/** Adjust a comparisons table's P values by the FDR approach (same rows back,
+ *  new P values) — the FDR counterpart of `adjustComparisonRows`. */
+export function adjustFdrComparisonRows(
+  rows: ComparisonRow[],
+  method: FdrMethod,
+  qPercent = 5,
+): ComparisonRow[] {
+  const adjusted = adjustFdrPValues(
+    rows.map((r) => r.p),
+    method,
+    qPercent,
+  );
+  return rows.map((r, i) => ({ ...r, p: adjusted[i] }));
+}
+
 /** The comparisons table: each pair's names, its difference of means and its P value,
  *  and its 95% CI (`lo_i_j`/`hi_i_j`) when the test computed one. */
 function buildComparisons(
@@ -307,6 +377,7 @@ const POSTHOC_LABELS: Record<string, string> = {
   bonferroni: "Bonferroni-corrected multiple comparisons",
   sidak: "Šídák-corrected multiple comparisons",
   "holm-sidak": "Holm–Šídák multiple comparisons test",
+  fdr: "False Discovery Rate (Benjamini-Hochberg) multiple comparisons",
   lsd: "Fisher's LSD test (uncorrected)",
   fisher: "Fisher's LSD test, uncorrected",
   dunn: "Dunn's multiple comparisons test (Bonferroni-corrected)",
@@ -360,6 +431,13 @@ export interface ColumnTestSpec<P = unknown> {
    *  reads it, and the results view renders it. Without it the wizard
    *  reports the test couldn't run on any data. */
   normality?: (v: Record<string, number | null>, groups: GroupDescriptives[], params: P | undefined) => NormalityRow[];
+  /** The ANOVA effect-size table (`AnalysisOutcome.effectSizes`), from the
+   *  same R values — one row per effect (seq 161). */
+  effectSizes?: (
+    v: Record<string, number | null>,
+    groups: GroupDescriptives[],
+    params: P | undefined,
+  ) => EffectSizeRow[] | undefined;
   /** The post-hoc comparisons that ran, as their table's heading ("Tukey's multiple
    *  comparisons test"); none, no table. Its R gives each pair's P value as `p_i_j`. */
   posthoc?: (params: P | undefined) => string | undefined;
@@ -437,6 +515,7 @@ export async function runColumnTest<P>(
     equation: spec.equation?.(v, described, params),
     stats: spec.rows(v, described, params),
     difference: spec.difference?.(v, described, params),
+    effectSizes: spec.effectSizes?.(v, described, params),
     normality: spec.normality?.(v, described, params),
     groups: described,
     notes: extraNotes ? `${baseNotes} ${extraNotes}` : baseNotes,
@@ -493,5 +572,60 @@ export function noScatter(groups: Group[], test: string): string | undefined {
     return `All the values are identical: the ${test} has nothing to compare.`;
 }
 
+/** One ANOVA effect-size row from its sums of squares (seq 161): eta squared
+ *  = SS_effect / SS_total, partial eta squared = SS_effect / (SS_effect +
+ *  SS_error), Cohen's f = √(partial / (1 − partial)) (Prism's ANOVA guide).
+ *  `lo` / `hi` are the partial eta squared's 95% CI, computed in R
+ *  (`etaCI`); pass nulls where a measure doesn't apply. Nulls where the
+ *  sums of squares are missing or the design leaves no error term. */
+export function effectSizeRow(
+  effect: string,
+  ssEffect: number | null | undefined,
+  ssError: number | null | undefined,
+  ssTotal: number | null | undefined,
+  lo: number | null | undefined,
+  hi: number | null | undefined,
+): EffectSizeRow {
+  const finite = (x: number | null | undefined): x is number => typeof x === "number" && Number.isFinite(x);
+  const eta2 = finite(ssEffect) && finite(ssTotal) && ssTotal > 0 ? ssEffect / ssTotal : null;
+  const partial =
+    finite(ssEffect) && finite(ssError) && ssEffect + ssError > 0 ? ssEffect / (ssEffect + ssError) : null;
+  return {
+    effect,
+    eta2,
+    partialEta2: partial,
+    cohensF: partial == null || partial >= 1 ? null : Math.sqrt(partial / (1 - partial)),
+    partialEta2Lo: finite(lo) ? lo : null,
+    partialEta2Hi: finite(hi) ? hi : null,
+  };
+}
+
 /** R: Hedges' correction of a Cohen's d with `df` degrees of freedom, exact (none under 2 df). */
 export const R_HEDGES = "J<-function(df)if(df<2)NA else exp(lgamma(df/2)-lgamma((df-1)/2))/sqrt(df/2)";
+
+/** R: 95% CIs for effect sizes by noncentrality inversion (the pivot method
+ *  of Smithson 2003 / Steiger 2004, as used by R's `effectsize` package).
+ *  `tci(t, df)`: the noncentrality parameter's two-sided 95% CI for a t
+ *  statistic — the ncp whose CDF at the observed t is 0.975 / 0.025 (pt
+ *  falls as ncp rises). `tci1(t, df, side)`: the one-sided 95% bound for a
+ *  one-tailed test ("greater" → lower bound only, "less" → upper only).
+ *  `fci(F, d1, d2)`: the same for an F statistic (ncp ≥ 0: a bound is 0
+ *  when even ncp 0 leaves the CDF on the wrong side of its target).
+ *  `xci(x, df)`: the same for a chi-square statistic.
+ *  `etaCI(F, d1, d2, N)`: partial eta squared's 95% CI from an F statistic,
+ *  λ/(λ + N) with N the total observations — verified against
+ *  effectsize::F_to_eta2(15, df = 1, df_error = 60): 90% CI [0.067, 0.336]
+ *  vs the package's published [0.07, 0.34]. NA on failure, never an error. */
+export const R_EFFECT_CI = `
+tci<-function(t,df){if(!is.finite(t))return(c(NA,NA));c(tryCatch(uniroot(function(n)pt(t,df,n)-0.975,c(-200,200),tol=1e-8)$root,error=function(e)NA),tryCatch(uniroot(function(n)pt(t,df,n)-0.025,c(-200,200),tol=1e-8)$root,error=function(e)NA))}
+tci1<-function(t,df,side){if(!is.finite(t))return(c(NA,NA));if(side=="greater")c(tryCatch(uniroot(function(n)pt(t,df,n)-0.95,c(-200,200),tol=1e-8)$root,error=function(e)NA),NA)else c(NA,tryCatch(uniroot(function(n)pt(t,df,n)-0.05,c(-200,200),tol=1e-8)$root,error=function(e)NA))}
+fci<-function(F,d1,d2){if(!is.finite(F))return(c(NA,NA));g<-function(n,p)pf(F,d1,d2,n)-p;hi<-if(g(0,0.025)<0)0 else{b<-10;while(g(b,0.025)>0)b<-b*2;tryCatch(uniroot(function(n)g(n,0.025),c(0,b),tol=1e-8)$root,error=function(e)NA)};lo<-if(g(0,0.975)<0)0 else{b<-10;while(g(b,0.975)>0)b<-b*2;tryCatch(uniroot(function(n)g(n,0.975),c(0,b),tol=1e-8)$root,error=function(e)NA)};c(lo,hi)}
+xci<-function(x,df){if(!is.finite(x))return(c(NA,NA));g<-function(n,p)pchisq(x,df,n)-p;hi<-if(g(0,0.025)<0)0 else{b<-10;while(g(b,0.025)>0)b<-b*2;tryCatch(uniroot(function(n)g(n,0.025),c(0,b),tol=1e-8)$root,error=function(e)NA)};lo<-if(g(0,0.975)<0)0 else{b<-10;while(g(b,0.975)>0)b<-b*2;tryCatch(uniroot(function(n)g(n,0.975),c(0,b),tol=1e-8)$root,error=function(e)NA)};c(lo,hi)}
+etaCI<-function(F,d1,d2,N){e<-fci(F,d1,d2);e/(e+N)}`;
+
+/** R: `rci(ct, n)`, r's 95% CI: Pearson's from cor.test (Fisher's z),
+ *  Spearman's on Fisher's z with Fieller, Hartley and Pearson's variance,
+ *  1.06 / (n − 3) (1957); none under 4 pairs, nor for a perfect r (±1),
+ *  where Fisher's z is infinite. */
+export const R_RCI =
+  "rci<-function(ct,n){r<-unname(ct$estimate);if(abs(r)>=1)return(c(NA,NA));if(!is.null(ct$conf.int))return(as.vector(ct$conf.int));if(n<4)return(c(NA,NA));tanh(atanh(r)+c(-1,1)*qnorm(0.975)*sqrt(1.06/(n-3)))}";

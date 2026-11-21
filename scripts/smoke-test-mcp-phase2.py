@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Phase 2 live MCP smoke: initialize -> tools/list -> tools/call across
-all 52 tools against a running Titer MCP server.
+all 71 tools against a running Titer MCP server.
 
 Reads endpoint + token from <app_data>/mcp/discovery.json (argv[1]).
 Speaks Streamable HTTP directly (no bridge, no Claude Desktop sign-in):
 POST JSON-RPC, parse SSE `data:` lines. Exit 0 only if every check
 passes; prints a PASS/FAIL line per check.
+
+PREREQUISITE: in Titer, Settings → AI Connections, turn on every group
+under "What your AI can do" first — by default the server advertises
+only the 5 read tools (contract §12), and this smoke drives all 59.
 
 The script drives one deterministic flow on a fresh project it creates
 itself (no fixture ids — every id it needs comes from a tool's own
@@ -36,23 +40,32 @@ import time
 import requests
 
 EXPECTED_TOOLS = [
-    # Phase 1 (5) + job tools (3) + L1 read-only (3)
+    # L1 read-only (3) + 1.7.4 discovery (3)
     "titer_list_projects", "titer_list_tables", "titer_read_table_summary",
     "titer_read_results", "titer_read_graph",
     "titer_read_job", "titer_list_jobs", "titer_cancel_job",
     "titer_read_figure", "titer_read_info_sheet", "titer_read_activity",
     "titer_send_feedback",
-    # L2 project (5)
+    "titer_project_summary", "titer_search", "titer_get_analysis_params",
+    # 1.8 backup list (1)
+    "titer_list_backups",
+    # L2 project (7)
     "titer_create_project", "titer_open_project", "titer_save_project",
-    "titer_import_prism", "titer_close_project",
-    # L3 tables (9)
+    "titer_import_prism", "titer_import_data_file", "titer_merge_project", "titer_close_project",
+    # L3 tables (10)
     "titer_create_table", "titer_write_table", "titer_edit_table",
+    "titer_freeze_table",
+    "titer_refresh_linked_data",
     "titer_duplicate_table_family", "titer_rename_node", "titer_delete_node",
     "titer_reorder_nodes", "titer_undo", "titer_redo",
-    # L4 analyses (2)
-    "titer_run_analysis", "titer_freeze_analysis",
-    # L6 graphs / figures / info sheets (7)
+    # L4 analyses (5)
+    "titer_run_analysis", "titer_rerun_analysis", "titer_freeze_analysis",
+    "titer_clone_analysis", "titer_repoint_analysis",
+    # L6 graphs / figures / info sheets / drawing objects (14)
     "titer_build_graph", "titer_update_graph", "titer_clone_graph",
+    "titer_clone_figure", "titer_freeze_graph", "titer_freeze_figure",
+    "titer_add_drawing_object", "titer_update_drawing_object",
+    "titer_delete_drawing_object", "titer_arrange_drawing_objects",
     "titer_create_figure", "titer_update_figure",
     "titer_create_info_sheet", "titer_update_info_sheet",
     # L5 composites (4)
@@ -63,11 +76,11 @@ EXPECTED_TOOLS = [
     "titer_cloud_upload", "titer_cloud_upload_new",
     "titer_cloud_create_folder", "titer_cloud_move",
     "titer_cloud_metadata", "titer_cloud_revisions",
-    # L8 export (4)
+    # L8 export (5)
     "titer_export_graph", "titer_export_figure", "titer_export_office",
-    "titer_export_table_data",
+    "titer_export_table_data", "titer_export_all_graphs",
 ]
-assert len(EXPECTED_TOOLS) == 52, len(EXPECTED_TOOLS)
+assert len(EXPECTED_TOOLS) == 71, len(EXPECTED_TOOLS)
 
 
 def main():
@@ -176,15 +189,12 @@ def main():
     check("initialize negotiates 2025-11-25",
           init["result"]["protocolVersion"] == "2025-11-25",
           init["result"]["protocolVersion"])
-    check("initialize instructions name 52 tools",
-          "52 tools" in init["result"].get("instructions", ""),
+    check("initialize instructions name 71 tools",
+          "71 tools" in init["result"].get("instructions", ""),
           init["result"].get("instructions", "")[:80])
     rpc("notifications/initialized", notif=True)
 
-    # 2. tools/list shows all 52 tools, one page
-    lst = rpc("tools/list")
-    names = [t["name"] for t in lst["result"]["tools"]]
-    check("tools/list returns 52 tools", len(names) == 52, f"{len(names)}")
+    # 2. tools/list shows all 71 tools, one page
     check("tools/list has no nextCursor", "nextCursor" not in lst["result"])
     for want in EXPECTED_TOOLS:
         check(f"tools/list has {want}", want in names)
@@ -282,6 +292,9 @@ def main():
     frozen = tool("titer_freeze_analysis", {"project_id": pid, "analysis_id": aid, "frozen": True})
     check("freeze_analysis", frozen.get("frozen") is True)
     tool("titer_freeze_analysis", {"project_id": pid, "analysis_id": aid, "frozen": False})
+    ftab = tool("titer_freeze_table", {"project_id": pid, "table_id": tid_col, "frozen": True})
+    check("freeze_table", ftab.get("frozen") is True)
+    tool("titer_freeze_table", {"project_id": pid, "table_id": tid_col, "frozen": False})
     jobs = tool("titer_list_jobs", {"project_id": pid})
     check("list_jobs includes the run job",
           any(j.get("job_id") == job_id for j in jobs.get("jobs", [])),
@@ -289,6 +302,36 @@ def main():
     cancelled = tool("titer_cancel_job", {"job_id": job_id})
     check("cancel_job on a done job reports done", cancelled.get("status") == "done",
           json.dumps(cancelled)[:160])
+
+    # 7b. 1.7.4 P0 tools: params schema, search, rerun (awaited), summary
+    schema = tool("titer_get_analysis_params", {"analysis_type": "anova"})
+    posthoc = next((p for p in schema.get("params", []) if p["name"] == "posthoc"), None)
+    check("get_analysis_params anova lists posthoc with tukey",
+          posthoc is not None and "tukey" in (posthoc.get("enum") or []),
+          json.dumps(posthoc)[:200] if posthoc else "no posthoc")
+    gate = tool("titer_get_analysis_params", {"analysis_type": "three-way-anova"})
+    check("get_analysis_params three-way-anova carries its table gate",
+          bool(gate.get("gate")), gate.get("gate", "")[:120])
+    hit = tool("titer_search", {"project_id": pid, "query": "descriptive"})
+    check("search finds the run analysis by type",
+          any(m.get("id") == aid for m in hit.get("matches", [])),
+          json.dumps(hit.get("matches", []))[:200])
+    miss = tool("titer_search", {"project_id": pid, "query": "zzz-no-such-node"})
+    check("search miss returns no matches",
+          miss.get("matches") == [] and miss.get("total") == 0,
+          json.dumps(miss)[:160])
+    # The awaited rerun finishes inline (descriptive stats are fast) and
+    # reuses the same node — no duplicate analysis appears in the summary.
+    rerun = tool("titer_rerun_analysis", {"project_id": pid, "analysis_id": aid,
+                                          "await_result": True})
+    check("rerun_analysis awaited returns done inline",
+          rerun.get("status") == "done" and bool(rerun.get("result")),
+          json.dumps(rerun)[:200])
+    summary = tool("titer_project_summary", {"project_id": pid})
+    proj = next((p for p in summary.get("projects", []) if p["project_id"] == pid), None)
+    check("project_summary counts one analysis after the rerun",
+          proj is not None and proj.get("counts", {}).get("analysis") == 1,
+          json.dumps(proj)[:200] if proj else "no project")
 
     # 8. graphs / figures / info sheets
     graph = tool("titer_build_graph", {"project_id": pid, "table_id": tid_xy,
@@ -351,6 +394,16 @@ def main():
     tool("titer_export_figure", {"project_id": pid, "figure_id": fid,
                                  "format": "png", "dpi": "300", "path": fpng})
     check_file("export_figure png magic", fpng, b"\x89PNG")
+    # seq 179: the whole project at once — the graph + figure above, one
+    # file each, into one folder (explicit folder, so nothing lands in
+    # the project's own directory).
+    all_dir = os.path.join(out_dir, "smoke-export-all")
+    all_exp = tool("titer_export_all_graphs", {"project_id": pid, "format": "png",
+                                               "dpi": "300", "folder": all_dir})
+    check("export_all_graphs exports graph + figure", all_exp.get("exported_count") == 2,
+          json.dumps(all_exp)[:300])
+    for item in all_exp.get("exported", []):
+        check_file(f"export_all {item['name']} png magic", item["path"], b"\x89PNG")
     docx = os.path.join(out_dir, "smoke-graph.docx")
     office = tool("titer_export_office", {"project_id": pid, "graph_id": gid,
                                           "target": "word", "path": docx})
@@ -370,6 +423,21 @@ def main():
                                      "format": "txt", "path": txtp})
     with open(txtp, "rb") as f:
         check("export_table_data txt is tab-separated", b"\t" in f.read(), txtp)
+
+    # 10b. 1.8.0 data-file import: a generated CSV imports as a new table
+    # in the same project (seq 155 MCP coverage).
+    csvp = os.path.join(out_dir, "smoke-dose.csv")
+    with open(csvp, "w") as f:
+        f.write("Dose,Response\n0,1.1\n1,2.2\n")
+    imported_csv = tool("titer_import_data_file", {"project_id": pid, "path": csvp})
+    check("import_data_file csv makes a table",
+          bool(imported_csv.get("table_id")) and imported_csv.get("rows") == 2,
+          json.dumps(imported_csv)[:200])
+    check("import_data_file csv names the table for the file",
+          imported_csv.get("name", "").startswith("smoke-dose"), imported_csv.get("name", ""))
+    err = tool_error_text("titer_import_data_file",
+                          {"project_id": pid, "path": os.path.join(out_dir, "smoke.hlx")})
+    check("import_data_file refuses a project file", "not a data file" in err, err[:200])
 
     # 11. save, default-path export, reopen, import, close
     hlx = os.path.join(out_dir, "smoke.hlx")

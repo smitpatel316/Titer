@@ -25,7 +25,7 @@ import {
 export const DEFAULT_FIGURE_SIZE: FigureSize = { widthIn: 10, heightIn: 7.5 };
 export const DEFAULT_LABEL_STYLE: FigureLabelStyle = { position: "top-left", fontSizePt: 12, bold: true };
 export const DEFAULT_FIGURE_DPI: Resolution = "600";
-export const FIGURE_RESOLUTIONS: Resolution[] = ["150", "300", "600", "900", "1200"];
+export const FIGURE_RESOLUTIONS: Resolution[] = ["100", "150", "300", "600", "900", "1200"];
 /** A figure's page, in inches: papers are in inches, and beyond this is
  *  almost certainly a typo (also see the 4:1 aspect rule below). */
 export const FIGURE_SIZE_LIMITS = { min: 1, max: 20 };
@@ -34,6 +34,21 @@ export const FIGURE_MAX_COLS_DEFAULT = 4;
 export const FIGURE_MAX_COLS = 6;
 /** Points per inch (an SVG's unit). */
 export const PT_PER_INCH = 72;
+/** The most an embedded panel image may take in the file, as a data URL
+ *  (~1.5 MB of picture — a figure file stays openable and shareable). */
+export const FIGURE_IMAGE_MAX_DATA_URL = 2_000_000;
+
+/** An embedded panel image as a file holds it: a data URL for an image
+ *  within the size cap — anything else is not an image Titer can keep
+ *  (a hand-edited file's broken image reads as no image, not a failed open). */
+export function validFigureImageData(v: unknown): string | undefined {
+  return typeof v === "string" && v.startsWith("data:image/") && v.length <= FIGURE_IMAGE_MAX_DATA_URL ? v : undefined;
+}
+
+/** Whether a panel shows a graph (the default kind): blank and image panels
+ *  hold no graph, so the legend check and the missing check skip them, and
+ *  the exporter leaves their cell to the background or the picture. */
+export const isGraphPanel = (panel: FigurePanel): boolean => (panel.kind ?? "graph") === "graph";
 
 // ── Labels ───────────────────────────────────────────────────────────────
 
@@ -249,9 +264,10 @@ export function sharedLegendCheck(
   panels: FigurePanel[],
   nodes: Record<string, ProjectNode>,
 ): { ok: boolean; reason?: string; entries?: { name: string; color: string }[] } {
-  if (panels.length < 2) return { ok: false, reason: "A shared legend needs at least two panels." };
+  const graphPanels = panels.filter(isGraphPanel);
+  if (graphPanels.length < 2) return { ok: false, reason: "A shared legend needs at least two panels." };
   let entries: { name: string; color: string }[] | null = null;
-  for (const panel of panels) {
+  for (const panel of graphPanels) {
     const graph = nodes[panel.graphId];
     if (!graph || graph.type !== "graph" || !graph.graphType || !graph.graphOptions)
       return { ok: false, reason: `Panel ${panel.label || "“" + (panel.graphName ?? panel.graphId) + "”"} has no graph to read a legend from.` };
@@ -284,9 +300,10 @@ export function sharedLegendCheck(
 // ── Missing graphs ───────────────────────────────────────────────────────
 
 /** Panels whose graph is gone (deleted, or from an older Titer): they stay as
- *  placeholders naming the graph, and export leaves their cell blank. */
+ *  placeholders naming the graph, and export leaves their cell blank.
+ *  Blank and image panels hold no graph, so they are never missing. */
 export function missingPanels(panels: FigurePanel[], nodes: Record<string, ProjectNode>): FigurePanel[] {
-  return panels.filter((p) => !nodes[p.graphId] || nodes[p.graphId].type !== "graph");
+  return panels.filter((p) => isGraphPanel(p) && (!nodes[p.graphId] || nodes[p.graphId].type !== "graph"));
 }
 
 // ── SVG composition ──────────────────────────────────────────────────────
@@ -315,7 +332,10 @@ export interface ComposedPanelSvg {
  *  labels, per-panel titles, figure title and (when shared) the single legend
  *  drawn as SVG text — so the export stays vector and editable. Width/height
  *  are the figure size in points (10 in = 720 pt). A shared legend takes a
- *  strip below the grid, so the parent grows by 28 pt in that case. */
+ *  strip below the grid, so the parent grows by 28 pt in that case. Image
+ *  panels embed their picture (`<image>`, fitted to the cell without
+ *  distortion); blank panels draw nothing but their label. The page is the
+ *  figure's background colour (white when none is set). */
 export function composeFigureSvg(
   panels: ComposedPanelSvg[],
   figure: {
@@ -325,6 +345,7 @@ export function composeFigureSvg(
     labelStyle: FigureLabelStyle;
     figureTitle: string;
     sharedLegend: SharedLegend;
+    figureBackground?: string;
   },
   sharedEntries?: { name: string; color: string }[],
 ): { svg: string; missing: number } {
@@ -335,7 +356,8 @@ export function composeFigureSvg(
   // A figure title takes a strip above the grid, so it never overlaps a panel.
   const titleStrip = figure.figureTitle ? fontSizePt + 16 : 0;
   const rects = panelRectsPt(figure.panels, figure.grid, figure.figureSize).map((r) => ({ ...r, y: r.y + titleStrip }));
-  const rectOf = new Map(rects.map((r) => [r.panel.graphId, r]));
+  const rectOf = new Map(rects.map((r) => [r.panel, r]));
+  const entryOf = new Map(panels.map((p) => [p.panel, p.svg]));
   const fontWeight = bold ? "bold" : "normal";
   const fontFamily = "Arial, Helvetica, sans-serif";
   let missing = 0;
@@ -344,17 +366,27 @@ export function composeFigureSvg(
     parts.push(
       `<text x="${widthPt / 2}" y="${fontSizePt + 6}" text-anchor="middle" font-family="${fontFamily}" font-size="${fontSizePt + 4}" font-weight="bold">${escapeXml(figure.figureTitle)}</text>`,
     );
-  for (const { panel, svg } of panels) {
-    const rect = rectOf.get(panel.graphId);
+  for (const panel of figure.panels) {
+    const rect = rectOf.get(panel);
     if (!rect) continue;
-    const inner = svgInner(svg);
-    if (!inner) {
-      missing++;
-      continue;
+    if (panel.kind === "image" && panel.imageData) {
+      parts.push(
+        `<image href="${escapeXml(panel.imageData)}" x="${rect.x}" y="${rect.y}" width="${rect.width}" height="${rect.height}" preserveAspectRatio="xMidYMid meet"/>`,
+      );
+    } else if (isGraphPanel(panel)) {
+      const svg = entryOf.get(panel);
+      const inner = svg ? svgInner(svg) : null;
+      if (!inner) {
+        // The graph is gone, or its SVG couldn't be read: the cell stays
+        // blank (counted, not failed).
+        missing++;
+      } else {
+        parts.push(
+          `<svg x="${rect.x}" y="${rect.y}" width="${rect.width}" height="${rect.height}" viewBox="0 0 ${inner.width} ${inner.height}">${inner.inner}</svg>`,
+        );
+      }
     }
-    parts.push(
-      `<svg x="${rect.x}" y="${rect.y}" width="${rect.width}" height="${rect.height}" viewBox="0 0 ${inner.width} ${inner.height}">${inner.inner}</svg>`,
-    );
+    // Every panel — graph, image or blank — keeps its label and title.
     const labelX =
       position === "top-right" ? rect.x + rect.width - 6 : position === "above-panel" ? rect.x + rect.width / 2 : rect.x + 6;
     const anchor = position === "top-right" ? "end" : position === "above-panel" ? "middle" : "start";
@@ -366,9 +398,6 @@ export function composeFigureSvg(
         `<text x="${rect.x + rect.width / 2}" y="${rect.y + fontSizePt * 2 + 8}" text-anchor="middle" font-family="${fontFamily}" font-size="${fontSizePt}" font-weight="${fontWeight}">${escapeXml(panel.title)}</text>`,
       );
   }
-  // Panels whose graph is gone leave their cell blank (counted, not failed).
-  for (const panel of figure.panels)
-    if (!panels.some((p) => p.panel.graphId === panel.graphId)) missing++;
   if (legendStrip && sharedEntries) {
     const swatch = 10;
     const gap = 6;
@@ -386,7 +415,7 @@ export function composeFigureSvg(
   }
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${widthPt}" height="${heightPt + legendStrip + titleStrip}" viewBox="0 0 ${widthPt} ${heightPt + legendStrip + titleStrip}">` +
-    `<rect x="0" y="0" width="${widthPt}" height="${heightPt + legendStrip + titleStrip}" fill="#ffffff"/>` +
+    `<rect x="0" y="0" width="${widthPt}" height="${heightPt + legendStrip + titleStrip}" fill="${escapeXml(figure.figureBackground ?? "#ffffff")}"/>` +
     parts.join("") +
     `</svg>`;
   return { svg, missing };

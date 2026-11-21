@@ -468,6 +468,7 @@ export const PACKAGE_REGISTRY: PackageEntry[] = [
   { name: "pROC", version: "1.19.1", license: "GPL (>= 3)", plans: ["05"], uses: "ROC curves (roc, auc, ci.auc, coords)" },
   { name: "lme4", version: "2.0-6", license: "GPL (>= 2)", plans: ["14", "20"], uses: "Mixed-effects models (lmer); nested-test v2" },
   { name: "lmerTest", version: "3.2-1", license: "GPL (>= 2)", plans: ["20"], uses: "Satterthwaite p-values for lmer fits (lmer wrapper)" },
+  { name: "pbkrtest", version: "0.5.5", license: "GPL (>= 2)", plans: ["20"], uses: "Kenward-Roger denominator DF for lmer fits (vcovAdj, get_Lb_ddf)" },
   { name: "multcomp", version: "1.4-32", license: "GPL-2", plans: ["25"], uses: "Dunnett multiple comparisons (glht)" },
   { name: "mvtnorm", version: "1.2-4", license: "GPL-2", plans: ["25"], uses: "Multivariate t/normal probabilities under multcomp::glht" },
   { name: "nortest", version: "1.0-4", license: "GPL (>= 2)", plans: ["23"], uses: "Anderson–Darling (ad.test); NOT D'Agostino–Pearson — nortest::pearson.test is a binned chi-square goodness-of-fit test, not the omnibus K2 (plan 23 implements K2 in TypeScript)" },

@@ -21,7 +21,7 @@
 //   Survival    → Survival  (X = time, Y = event codes 1/0 per group; the survival
 //                 graph and the survival analysis apply to it)
 //   Contingency → Contingency
-//   PartsOfWhole→ Column    (one Y column, rows named by the row titles)
+//   PartsOfWhole→ Parts of Whole (rows are the categories, one Y column per data set)
 //   Nested      → NO verified marker (see below): a Prism nested table is
 //                 one of Prism's eight formats (Prism 8+), with replicates
 //                 stacked into subcolumns, but no public .pzfx file or reader
@@ -216,7 +216,7 @@ const rawChildText = (node: XmlNode): string => {
  * "Group"). Trailing spaces are PRESERVED (BUG-4/BUG-7): only line breaks
  * collapse, nothing is trimmed.
  */
-const cleanTitle = (value: string): string => {
+export const cleanTitle = (value: string): string => {
   const collapsed = value.replace(/\s*(\r\n|\r|\n)\s*/g, " ");
   return collapsed.trim() === "" ? "" : collapsed;
 };
@@ -477,7 +477,10 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
   const isGroupedReplicates =
     tableType === "TwoWay" && yFormat === "replicates";
   if (tableType === "OneWay" || tableType === "PartsOfWhole" || tableType === "Contingency") {
-    titerType = tableType === "Contingency" ? "contingency" : "column";
+    // A Parts-of-Whole table keeps its type (seq 197): its rows are
+    // mutually exclusive categories and its columns data sets — importing it
+    // as Column would invite group comparisons its values must never get.
+    titerType = tableType === "Contingency" ? "contingency" : tableType === "PartsOfWhole" ? "parts-of-whole" : "column";
     for (const y of yColumns) {
       const names = subcolumnNames(y.title, yFormat, y.subcolumns.length);
       y.subcolumns.forEach((sub, i) => pushColumn(names[i], sub));
@@ -573,7 +576,9 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
             ? "Survival"
             : titerType === "contingency"
               ? "Contingency"
-              : "Column";
+              : titerType === "parts-of-whole"
+                ? "Parts of Whole"
+                : "Column";
     warnings.push(
       `${displayName} was a HugeTable in Prism (${subcolumns} subcolumns per data set) — imported as a ${typeName} table with all values kept.`,
     );

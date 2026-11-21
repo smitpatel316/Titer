@@ -22,7 +22,7 @@ import type {
   StatRow,
 } from "../types";
 import { describe, missingColumn, pRow, rVec } from "../column/base";
-import { routQError } from "../types";
+import { NONLINEAR_FIT_METHODS, routQError } from "../types";
 import { num } from "../../lib/format";
 import { maxOf, minOf } from "../../lib/summary";
 import { pointKeyOf } from "../../lib/columns";
@@ -42,6 +42,7 @@ import {
   fitSummaryStatements,
   formulaExpr,
   formulaVariables,
+  isPolynomialModel,
   MODEL_LABEL,
   modelSpec,
   parseFit,
@@ -75,8 +76,20 @@ export const positiveXOnly = (model: NonlinearModel) =>
   // v2 item 23: a user equation has no X restriction, and its spec cannot be built
   // without the equation — never call modelSpec on it bare.
   model === "user-defined" ? false : modelSpec(model).positiveX === true;
+export const logYOnly = (model: NonlinearModel) =>
+  // The fit is on log(Y) (semilog-y-log, log-log-line,
+  // exponential-growth-log): R's Sum of squares is on the log scale, so
+  // the graph check below must compare log residuals, not raw ones.
+  model === "user-defined" ? false : modelSpec(model).logY === true;
 export const nonNegativeXOnly = (model: NonlinearModel) =>
+  // The fit drops X < 0 points (pade-11, power-series, the LQ family):
+  // the graph check must skip them too, or it compares the drawn curve
+  // against R's Sum of squares over a different point set.
   model === "user-defined" ? false : modelSpec(model).nonNegativeX === true;
+export const positiveYOnly = (model: NonlinearModel) =>
+  // The fit drops Y <= 0 points (the log-Y models): same skip, and it
+  // keeps Math.log(y) off non-positive values in the log-Y branch.
+  model === "user-defined" ? false : modelSpec(model).positiveY === true;
 
 /** A parameter as results name it (its name in the equations otherwise). */
 const TERM_LABEL: Record<string, string> = { HillSlope: "Hill slope", S: "Asymmetry (S)" };
@@ -103,18 +116,58 @@ export const invertMethod = (model: NonlinearModel): InvertMethod =>
   model === "quartic" ||
   model === "quintic" ||
   model === "segmental-linear" ||
+  // 1.8 classic-curves completion (B6 §Lines, §Polynomial): the
+  // horizontal line has no inverse at all, and the sixth-order /
+  // centered polynomials have none in closed form.
+  model === "horizontal-line" ||
+  model === "sextic" ||
+  model === "centered-first" ||
+  model === "centered-second" ||
+  model === "centered-third" ||
+  model === "centered-fourth" ||
+  model === "centered-fifth" ||
+  model === "centered-sixth" ||
+  // 1.8 classic-curves completion (B6 §Dose-response Special, §Classic,
+  // §Growth, §Linear quadratic): two midpoints / no closed form — invert
+  // numerically (uniroot on the fitted curve).
+  model === "biphasic-logx" ||
+  model === "biphasic-x" ||
+  model === "bell-shaped-logx" ||
+  model === "bell-shaped-x" ||
+  model === "power-series" ||
+  model === "beta-growth-decay" ||
+  model === "lq-fraction-surviving" ||
+  model === "lq-percent-surviving" ||
+  model === "lq-fraction-dead" ||
+  model === "lq-percent-dead" ||
+  model === "lq-count-alive" ||
+  model === "lq-count-dead" ||
   // v2 item 23: a user equation has no closed-form inverse — the interpolation path
   // inverts it numerically (uniroot on the fitted curve), as for the polynomials.
   model === "user-defined" ||
   model === "two-phase-decay" ||
+  model === "three-phase-decay" ||
   model === "plateau-decay" ||
+  model === "plateau-association" ||
+  model === "two-phase-association" ||
   model === "substrate-inhibition" ||
   // Other classic curves (v2): the Gaussian and Lorentzian have two X
   // roots each (either side of the peak) and the sine wave infinitely many,
   // so no single closed-form inverse — invert numerically.
   model === "gaussian" ||
   model === "lorentzian" ||
-  model === "sine-wave"
+  model === "sine-wave" ||
+  // 1.8 classic-curves completion: the two-component / cumulative /
+  // lognormal / damped / sinc shapes have no closed-form inverse either.
+  model === "sum-of-two-gaussians" ||
+  model === "lognormal" ||
+  model === "cumulative-gaussian-percent" ||
+  model === "cumulative-gaussian-fraction" ||
+  model === "cumulative-gaussian-counts" ||
+  model === "sum-of-two-lorentzians" ||
+  model === "standard-sine-wave" ||
+  model === "damped-sine-wave" ||
+  model === "sinc"
     ? "numeric"
     : "closed-form";
 
@@ -137,6 +190,12 @@ export function invertModel(
     const r = (top - y) / (y - bottom);
     return r > 0 ? r : null;
   };
+  // A normalized curve's ratio (100 − Y)/Y — Bottom=0, Top=100 by
+  // construction, so no Bottom/Top coefficients exist to read.
+  const normRatio = () => {
+    const r = (100 - y) / y;
+    return r > 0 ? r : null;
+  };
   switch (model) {
     case "line": {
       const b = c("Intercept");
@@ -144,11 +203,35 @@ export function invertModel(
       if (b == null || s == null || s === 0) return null;
       return (y - b) / s;
     }
+    case "line-through-origin": {
+      // B6 §Lines #3: Y = Slope·X, so X = Y/Slope.
+      const s = c("Slope");
+      if (s == null || s === 0) return null;
+      return y / s;
+    }
     case "semilog-line": {
       const b = c("Intercept");
       const s = c("Slope");
       if (b == null || s == null || s === 0) return null;
       const x = Math.exp((y - b) / s);
+      return x > 0 ? x : null;
+    }
+    case "semilog-y-log":
+    case "exponential-growth-log": {
+      // B6 §Lines #6 / §Growth #2: Y = exp(Intercept + Slope·X), so
+      // X = (ln Y − Intercept)/Slope (Y must be > 0).
+      const b = c("Intercept");
+      const s = c("Slope");
+      if (b == null || s == null || s === 0 || y <= 0) return null;
+      return (Math.log(y) - b) / s;
+    }
+    case "log-log-line": {
+      // B6 §Lines #7: Y = exp(Intercept)·X^Slope, so
+      // X = exp((ln Y − Intercept)/Slope) (Y must be > 0).
+      const b = c("Intercept");
+      const s = c("Slope");
+      if (b == null || s == null || s === 0 || y <= 0) return null;
+      const x = Math.exp((Math.log(y) - b) / s);
       return x > 0 ? x : null;
     }
     case "sigmoidal-4pl-logx": {
@@ -172,11 +255,130 @@ export function invertModel(
       if (r == null || mid == null) return null;
       return mid - Math.log10(r);
     }
+    case "agonist-3pl-x": {
+      // B6 Stim #5: Y=Bottom+(Top-Bottom)/(1+EC50/X), so X = EC50/r.
+      const r = ratio();
+      const ec50 = c("EC50");
+      if (r == null || ec50 == null) return null;
+      const x = ec50 / r;
+      return x > 0 ? x : null;
+    }
     case "inhibitor-3pl-logx": {
       const r = ratio();
       const mid = c("LogIC50");
       if (r == null || mid == null) return null;
       return mid + Math.log10(r);
+    }
+    case "inhibitor-3pl-x": {
+      // B6 Inhib #5: Y=Bottom+(Top-Bottom)/(1+X/IC50), so X = IC50·r.
+      const r = ratio();
+      const ic50 = c("IC50");
+      if (r == null || ic50 == null) return null;
+      const x = ic50 * r;
+      return x > 0 ? x : null;
+    }
+    case "agonist-3pl-normalized-logx": {
+      // B6 Stim #3: Bottom=0, Top=100, so r = (100−Y)/Y and X = LogEC50 − log10(r).
+      const r = normRatio();
+      const mid = c("LogEC50");
+      if (r == null || mid == null) return null;
+      return mid - Math.log10(r);
+    }
+    case "agonist-4pl-normalized-logx": {
+      // B6 Stim #4: X = LogEC50 − log10(r)/HillSlope.
+      const r = normRatio();
+      const mid = c("LogEC50");
+      const h = c("HillSlope");
+      if (r == null || mid == null || h == null || h === 0) return null;
+      return mid - Math.log10(r) / h;
+    }
+    case "agonist-3pl-normalized-x": {
+      // B6 Stim #7: X = EC50/r.
+      const r = normRatio();
+      const ec50 = c("EC50");
+      if (r == null || ec50 == null) return null;
+      const x = ec50 / r;
+      return x > 0 ? x : null;
+    }
+    case "agonist-4pl-normalized-x": {
+      // B6 Stim #8: X = EC50/r^(1/HillSlope).
+      const r = normRatio();
+      const ec50 = c("EC50");
+      const h = c("HillSlope");
+      if (r == null || ec50 == null || h == null || h === 0) return null;
+      const x = ec50 / r ** (1 / h);
+      return x > 0 ? x : null;
+    }
+    case "inhibitor-3pl-normalized-logx": {
+      // B6 Inhib #3: X = LogIC50 + log10(r).
+      const r = normRatio();
+      const mid = c("LogIC50");
+      if (r == null || mid == null) return null;
+      return mid + Math.log10(r);
+    }
+    case "inhibitor-4pl-normalized-logx": {
+      // B6 Inhib #4: X = LogIC50 + log10(r)/HillSlope.
+      const r = normRatio();
+      const mid = c("LogIC50");
+      const h = c("HillSlope");
+      if (r == null || mid == null || h == null || h === 0) return null;
+      return mid + Math.log10(r) / h;
+    }
+    case "inhibitor-3pl-normalized-x": {
+      // B6 Inhib #7: X = IC50·r.
+      const r = normRatio();
+      const ic50 = c("IC50");
+      if (r == null || ic50 == null) return null;
+      const x = ic50 * r;
+      return x > 0 ? x : null;
+    }
+    case "inhibitor-4pl-normalized-x": {
+      // B6 Inhib #8: X = IC50·r^(1/HillSlope).
+      const r = normRatio();
+      const ic50 = c("IC50");
+      const h = c("HillSlope");
+      if (r == null || ic50 == null || h == null || h === 0) return null;
+      const x = ic50 * r ** (1 / h);
+      return x > 0 ? x : null;
+    }
+    case "absolute-ic50-logx": {
+      // B6 Special logx #11: the 4PL inverse (same as sigmoidal-4pl-logx).
+      const r = ratio();
+      const mid = c("LogEC50");
+      const h = c("HillSlope");
+      if (r == null || mid == null || h == null || h === 0) return null;
+      return mid - Math.log10(r) / h;
+    }
+    case "absolute-ic50-x": {
+      // B6 Special X #11: the 4PL inverse (same as sigmoidal-4pl-x).
+      const r = ratio();
+      const ec50 = c("EC50");
+      const h = c("HillSlope");
+      if (r == null || ec50 == null || h == null || h === 0) return null;
+      const x = ec50 / r ** (1 / h);
+      return x > 0 ? x : null;
+    }
+    case "pade-11": {
+      // B6 Standard #10: Y=(A0+A1·X)/(1+B1·X), so X = (A0−Y)/(Y·B1−A1).
+      const a0 = c("A0");
+      const a1 = c("A1");
+      const b1 = c("B1");
+      if (a0 == null || a1 == null || b1 == null) return null;
+      const denom = y * b1 - a1;
+      if (denom === 0) return null;
+      const x = (a0 - y) / denom;
+      return x >= 0 ? x : null;
+    }
+    case "exponential-plateau": {
+      // B6 Growth #3: Y=YM−(YM−Y0)·exp(−K·X), so
+      // X = −ln((YM−Y)/(YM−Y0))/K.
+      const y0 = c("Y0");
+      const ym = c("YM");
+      const k = c("K");
+      if (y0 == null || ym == null || k == null || k === 0 || ym === y0) return null;
+      const q = (ym - y) / (ym - y0);
+      if (q <= 0) return null;
+      return -Math.log(q) / k;
     }
     case "asymmetric-5pl-logx": {
       const r = ratio();
@@ -303,6 +505,12 @@ const NESTED_PAIRS: [NonlinearModel, NonlinearModel][] = [
   ["cubic", "quartic"],
   ["cubic", "quintic"],
   ["quartic", "quintic"],
+  // Seq 201: the ladder continues to the 6th order polynomial.
+  ["line", "sextic"],
+  ["quadratic", "sextic"],
+  ["cubic", "sextic"],
+  ["quartic", "sextic"],
+  ["quintic", "sextic"],
   ["agonist-3pl-logx", "sigmoidal-4pl-logx"],
   ["inhibitor-3pl-logx", "sigmoidal-4pl-logx"],
   ["sigmoidal-4pl-logx", "asymmetric-5pl-logx"],
@@ -485,6 +693,17 @@ function equation(
       if (plateau == null || span1 == null || k1 == null || span2 == null || k2 == null) return undefined;
       return `Y = ${num(plateau)} + ${num(span1)}·exp(−${num(k1)}·X) + ${num(span2)}·exp(−${num(k2)}·X)`;
     }
+    case "three-phase-decay": {
+      const span1 = coefOf(coefficients, "Span1");
+      const k1 = coefOf(coefficients, "K1");
+      const span2 = coefOf(coefficients, "Span2");
+      const k2 = coefOf(coefficients, "K2");
+      const span3 = coefOf(coefficients, "Span3");
+      const k3 = coefOf(coefficients, "K3");
+      if (plateau == null || span1 == null || k1 == null || span2 == null || k2 == null || span3 == null || k3 == null)
+        return undefined;
+      return `Y = ${num(plateau)} + ${num(span1)}·exp(−${num(k1)}·X) + ${num(span2)}·exp(−${num(k2)}·X) + ${num(span3)}·exp(−${num(k3)}·X)`;
+    }
     case "plateau-decay": {
       const x0 = coefOf(coefficients, "X0");
       if (x0 == null || y0 == null || plateau == null || k == null) return undefined;
@@ -493,6 +712,19 @@ function equation(
     case "one-phase-association":
       if (y0 == null || plateau == null || k == null) return undefined;
       return `Y = ${num(y0)} + (${num(plateau)} − ${num(y0)})·(1 − exp(−${num(k)}·X))`;
+    case "two-phase-association": {
+      const span1 = coefOf(coefficients, "Span1");
+      const k1 = coefOf(coefficients, "K1");
+      const span2 = coefOf(coefficients, "Span2");
+      const k2 = coefOf(coefficients, "K2");
+      if (y0 == null || span1 == null || k1 == null || span2 == null || k2 == null) return undefined;
+      return `Y = ${num(y0)} + ${num(span1)}·(1 − exp(−${num(k1)}·X)) + ${num(span2)}·(1 − exp(−${num(k2)}·X))`;
+    }
+    case "plateau-association": {
+      const x0 = coefOf(coefficients, "X0");
+      if (x0 == null || y0 == null || plateau == null || k == null) return undefined;
+      return `Y = ${num(y0)} for X < ${num(x0)}; Y = ${num(y0)} + (${num(plateau)} − ${num(y0)})·(1 − exp(−${num(k)}·(X − ${num(x0)}))) for X ≥ ${num(x0)}`;
+    }
     case "exponential-growth":
       if (y0 == null || k == null) return undefined;
       return `Y = ${num(y0)}·exp(${num(k)}·X)`;
@@ -535,6 +767,75 @@ function equation(
       const base = coefOf(coefficients, "Baseline");
       if (amp == null || wl == null || phase == null || base == null) return undefined;
       return `Y = ${num(amp)}·sin((2π·X/${num(wl)}) + ${num(phase)}) + ${num(base)}`;
+    }
+    case "sum-of-two-gaussians": {
+      const amp1 = coefOf(coefficients, "Amplitude1");
+      const mean1 = coefOf(coefficients, "Mean1");
+      const sd1 = coefOf(coefficients, "SD1");
+      const amp2 = coefOf(coefficients, "Amplitude2");
+      const mean2 = coefOf(coefficients, "Mean2");
+      const sd2 = coefOf(coefficients, "SD2");
+      if (amp1 == null || mean1 == null || sd1 == null || amp2 == null || mean2 == null || sd2 == null)
+        return undefined;
+      return `Y = ${num(amp1)}·exp(−0.5·((X − ${num(mean1)})/${num(sd1)})²) + ${num(amp2)}·exp(−0.5·((X − ${num(mean2)})/${num(sd2)})²)`;
+    }
+    case "lognormal": {
+      const a = coefOf(coefficients, "A");
+      const gm = coefOf(coefficients, "GeoMean");
+      const gsd = coefOf(coefficients, "GeoSD");
+      if (a == null || gm == null || gsd == null) return undefined;
+      return `Y = (${num(a)}/X)·exp(−0.5·(ln(X/${num(gm)})/ln(${num(gsd)}))²)`;
+    }
+    case "cumulative-gaussian-percent": {
+      const mean = coefOf(coefficients, "Mean");
+      const sd = coefOf(coefficients, "SD");
+      if (mean == null || sd == null) return undefined;
+      return `Y = 100·Φ((X − ${num(mean)})/${num(sd)})`;
+    }
+    case "cumulative-gaussian-fraction": {
+      const mean = coefOf(coefficients, "Mean");
+      const sd = coefOf(coefficients, "SD");
+      if (mean == null || sd == null) return undefined;
+      return `Y = Φ((X − ${num(mean)})/${num(sd)})`;
+    }
+    case "cumulative-gaussian-counts": {
+      const mean = coefOf(coefficients, "Mean");
+      const sd = coefOf(coefficients, "SD");
+      const total = coefOf(coefficients, "Total");
+      if (mean == null || sd == null || total == null) return undefined;
+      return `Y = ${num(total)}·Φ((X − ${num(mean)})/${num(sd)})`;
+    }
+    case "sum-of-two-lorentzians": {
+      const amp1 = coefOf(coefficients, "Amplitude1");
+      const c1 = coefOf(coefficients, "Center1");
+      const w1 = coefOf(coefficients, "Width1");
+      const amp2 = coefOf(coefficients, "Amplitude2");
+      const c2 = coefOf(coefficients, "Center2");
+      const w2 = coefOf(coefficients, "Width2");
+      if (amp1 == null || c1 == null || w1 == null || amp2 == null || c2 == null || w2 == null)
+        return undefined;
+      return `Y = ${num(amp1)}/(1 + ((X − ${num(c1)})/${num(w1)})²) + ${num(amp2)}/(1 + ((X − ${num(c2)})/${num(w2)})²)`;
+    }
+    case "standard-sine-wave": {
+      const amp = coefOf(coefficients, "Amplitude");
+      const wl = coefOf(coefficients, "Wavelength");
+      const phase = coefOf(coefficients, "PhaseShift");
+      if (amp == null || wl == null || phase == null) return undefined;
+      return `Y = ${num(amp)}·sin((2π·X/${num(wl)}) + ${num(phase)})`;
+    }
+    case "damped-sine-wave": {
+      const amp = coefOf(coefficients, "Amplitude");
+      const wl = coefOf(coefficients, "Wavelength");
+      const phase = coefOf(coefficients, "PhaseShift");
+      const kk = coefOf(coefficients, "K");
+      if (amp == null || wl == null || phase == null || kk == null) return undefined;
+      return `Y = ${num(amp)}·exp(−${num(kk)}·X)·sin((2π·X/${num(wl)}) + ${num(phase)})`;
+    }
+    case "sinc": {
+      const amp = coefOf(coefficients, "Amplitude");
+      const wl = coefOf(coefficients, "Wavelength");
+      if (amp == null || wl == null) return undefined;
+      return `Y = ${num(amp)}·sin(2π·X/${num(wl)})/(2π·X/${num(wl)})`;
     }
     case "michaelis-menten": {
       const vmax = coefOf(coefficients, "Vmax");
@@ -595,6 +896,17 @@ function equation(
   }
 }
 
+/** The sine-family Wavelength start: the mean-crossing count of the
+ *  demeaned data (each crossing half a cycle), so Wavelength ≈
+ *  2·range/crossings — the same count the R starts use. */
+function sineWavelength(xs: number[], ys: number[]): number {
+  const meanY = ys.reduce((s, v) => s + v, 0) / ys.length;
+  const signs = ys.map((v) => Math.sign(v - meanY));
+  let crossings = 0;
+  for (let i = 1; i < signs.length; i++) if (signs[i] !== signs[i - 1]) crossings++;
+  return (2 * (Math.max(...xs) - Math.min(...xs))) / Math.max(1, crossings);
+}
+
 /** The data-driven starting values the R fit used, in the same terms as
  *  modelSpec's `start` list — recomputed here from the fitted points, so the
  *  note always names what nls() actually started from. */
@@ -622,6 +934,8 @@ function startingValues(
       return `Starting values: Y0 = ${num(yAtMinX)}, Plateau = ${num(minY)}, K = 0.5.`;
     case "two-phase-decay":
       return `Starting values: Plateau = ${num(minY)}, Span1 = ${num(0.6 * (maxY - minY))}, K1 = 1, Span2 = ${num(0.4 * (maxY - minY))}, K2 = 0.1.`;
+    case "three-phase-decay":
+      return `Starting values: Plateau = ${num(minY)}, Span1 = ${num(0.5 * (maxY - minY))}, K1 = 1, Span2 = ${num(0.3 * (maxY - minY))}, K2 = 0.1, Span3 = ${num(0.2 * (maxY - minY))}, K3 = 0.01.`;
     case "plateau-decay": {
       const x0 = median(xs);
       const below = ys.filter((_, i) => xs[i] < x0);
@@ -630,6 +944,14 @@ function startingValues(
     }
     case "one-phase-association":
       return `Starting values: Y0 = ${num(yAtMinX)}, Plateau = ${num(maxY)}, K = 0.5.`;
+    case "two-phase-association":
+      return `Starting values: Y0 = ${num(yAtMinX)}, Span1 = ${num(0.6 * (maxY - minY))}, K1 = 1, Span2 = ${num(0.4 * (maxY - minY))}, K2 = 0.1.`;
+    case "plateau-association": {
+      const x0 = median(xs);
+      const below = ys.filter((_, i) => xs[i] < x0);
+      const y0 = below.reduce((s, v) => s + v, 0) / below.length;
+      return `Starting values: X0 = ${num(x0)}, Y0 = ${num(y0)}, Plateau = ${num(maxY)}, K = 0.5.`;
+    }
     case "exponential-growth":
       return `Starting values: Y0 = ${num(yAtMinX)}, K = 0.1.`;
     case "gaussian": {
@@ -652,6 +974,41 @@ function startingValues(
       for (let i = 1; i < signs.length; i++) if (signs[i] !== signs[i - 1]) crossings++;
       const wl = (2 * (Math.max(...xs) - Math.min(...xs))) / Math.max(1, crossings);
       return `Starting values: Amplitude = ${num((maxY - minY) / 2)}, Wavelength = ${num(wl)}, PhaseShift = 0, Baseline = ${num(meanY)}.`;
+    }
+    case "sum-of-two-gaussians": {
+      const xAtMaxY = xs[ys.indexOf(maxY)];
+      return `Starting values: Amplitude1 = ${num(maxY)}, Mean1 = ${num(xAtMaxY)}, SD1 = ${num((Math.max(...xs) - Math.min(...xs)) / 6)}, Amplitude2 = ${num(maxY / 2)}, Mean2 = ${num(median(xs))}, SD2 = ${num((Math.max(...xs) - Math.min(...xs)) / 6)}.`;
+    }
+    case "lognormal": {
+      const xAtMaxY = xs[ys.indexOf(maxY)];
+      return `Starting values: A = ${num(maxY * xAtMaxY)}, GeoMean = ${num(xAtMaxY)}, GeoSD = 2.`;
+    }
+    case "cumulative-gaussian-percent":
+    case "cumulative-gaussian-fraction":
+      return `Starting values: Mean = ${num(median(xs))}, SD = ${num((Math.max(...xs) - Math.min(...xs)) / 4)}.`;
+    case "cumulative-gaussian-counts":
+      return `Starting values: Mean = ${num(median(xs))}, SD = ${num((Math.max(...xs) - Math.min(...xs)) / 4)}, Total = ${num(maxY)}.`;
+    case "sum-of-two-lorentzians": {
+      const xAtMaxY = xs[ys.indexOf(maxY)];
+      return `Starting values: Amplitude1 = ${num(maxY)}, Center1 = ${num(xAtMaxY)}, Width1 = ${num((Math.max(...xs) - Math.min(...xs)) / 6)}, Amplitude2 = ${num(maxY / 2)}, Center2 = ${num(median(xs))}, Width2 = ${num((Math.max(...xs) - Math.min(...xs)) / 6)}.`;
+    }
+    case "standard-sine-wave": {
+      const wl = sineWavelength(xs, ys);
+      return `Starting values: Amplitude = ${num((maxY - minY) / 2)}, Wavelength = ${num(wl)}, PhaseShift = 0.`;
+    }
+    case "damped-sine-wave": {
+      const wl = sineWavelength(xs, ys);
+      return `Starting values: Amplitude = ${num((maxY - minY) / 2)}, Wavelength = ${num(wl)}, PhaseShift = 0, K = 0.1.`;
+    }
+    case "sinc": {
+      // The R start counts the sign changes of the raw Y (see modelSpec) —
+      // the demeaned count collapses on a sinc, whose mean sits above most
+      // of its lobes.
+      const signs = ys.map((v) => Math.sign(v));
+      let changes = 0;
+      for (let i = 1; i < signs.length; i++) if (signs[i] !== signs[i - 1]) changes++;
+      const wl = (2 * (Math.max(...xs) - Math.min(...xs))) / Math.max(1, changes);
+      return `Starting values: Amplitude = ${num(maxY)}, Wavelength = ${num(wl)}.`;
     }
     case "michaelis-menten":
       return `Starting values: Vmax = ${num(maxY * 1.1)}, Km = ${num(median(xs.filter((x) => x > 0)))}.`;
@@ -1020,7 +1377,14 @@ function comparisonRCode(
   // Every parameter but the shared midpoint, one per data set (`g`).
   const own = spec.terms.filter((t) => t !== midpoint);
   const indexed = own.reduce((e, t) => e.replace(new RegExp(`\\b${t}\\b`, "g"), `${t}[g]`), expr);
-  const start = own.map((t) => `${t}=c(c0[["${t}"]],c1[["${t}"]])`).join(",");
+  // 1.8: a normalized 3PL has no own parameter at all (its only term is
+  // the midpoint) — the start list is just the midpoint, with no leading
+  // comma (`list(,LogEC50=s)` is invalid R).
+  const startParts = [
+    ...own.map((t) => `${t}=c(c0[["${t}"]],c1[["${t}"]])`),
+    `${midpoint}=s`,
+  ];
+  const start = startParts.join(",");
   // The shared midpoint starts between the two, else at either one's (curves far apart
   // may converge only from there); the best of the fits that converge is kept.
   const reduced =
@@ -1028,12 +1392,16 @@ function comparisonRCode(
       ? `x<-c(x0,x1);y<-c(y0,y1);${spec.fit}`
       : `x<-c(x0,x1);y<-c(y0,y1);g<-rep(1:2,c(length(x0),length(x1)));c0<-coef(m0);c1<-coef(m1)\n` +
         `ms<-lapply(c(mean(c(c0[["${midpoint}"]],c1[["${midpoint}"]])),c0[["${midpoint}"]],c1[["${midpoint}"]]),` +
-        `function(s)tryCatch(nls(y~${indexed},start=list(${start},${midpoint}=s),control=nls.control(maxiter=200)),error=function(e)NULL))\n` +
+        `function(s)tryCatch(nls(y~${indexed},start=list(${start}),control=nls.control(maxiter=200)),error=function(e)tryCatch(nls(y~${indexed},start=list(${start}),control=nls.control(maxiter=200,tol=1e-3)),error=function(e2)NULL)))\n` +
         `ms<-Filter(Negate(is.null),ms);if(!length(ms))stop("no fit with a shared midpoint")\n` +
         `m<-ms[[which.min(sapply(ms,function(f)sum(residuals(f)^2)))]]`;
   // One set's fit, captured with its prefix (`a`/`b`) before the next fit overwrites `m`.
+  // Each set runs the spec's retry ladder (retryChain), not just the
+  // primary — a model whose primary stalls on a noiseless curve but whose
+  // retry converges (agonist-3pl-normalized-logx) used to fail the whole
+  // comparison here.
   const setBlock = (xVar: string, yVar: string, prefix: string) =>
-    `x<-${xVar};y<-${yVar};${spec.fit};${fitSummaryStatements(spec)}` +
+    `x<-${xVar};y<-${yVar};${retryChain([spec.fit, ...(spec.retryFits ?? []).map((r) => r.fit)], fitSummaryStatements(spec))};` +
     `${prefix.replace(/_$/, "")}<-c(${fitEntries(spec, prefix)});`;
   return (
     `x0<-${rVec(s0.xs)};y0<-${rVec(s0.ys)};x1<-${rVec(s1.xs)};y1<-${rVec(s1.ys)};` +
@@ -1094,7 +1462,7 @@ async function compareModels(
   // points (positive X, enough of them) — otherwise R fails cryptically
   // ("subscript out of bounds", "NA/NaN/Inf in 'x'"). And both models
   // must fit the SAME points, or the F test / AICc compare different data.
-  const preparedB = prepareFit(columns, params.y, otherModel);
+  const preparedB = prepareFit(columns, params.y, otherModel, 0, undefined, fitRange(params));
   if ("error" in preparedB) return preparedB;
   if (
     preparedB.xs.length !== first.xs.length ||
@@ -1123,6 +1491,8 @@ async function compareModels(
   const specB = modelSpec(otherModel, {
     ...(kiDivisorB != null ? { kiDivisor: kiDivisorB } : {}),
     ...(otherModel === "homologous-competition-logx" ? { ligandConcentration: ligand } : {}),
+    // A centered comparison centers both models the same way.
+    ...(params.centered === true ? { centered: true } : {}),
   });
   // Both fits take the weights (R3-12): the summary code already weighted
   // the sums of squares, but the lm()/nls() calls themselves were
@@ -1186,6 +1556,39 @@ async function compareModels(
   return assembleResult(model, spec, xCol, first.yCol, undefined, sets, [parsedA], [], [], titles, first, undefined, undefined, params, stats, extraNotes);
 }
 
+/** fitModelSpec's retry ladder, as R: try each `m<-nls(...)` fit string in
+ *  turn (primary, then the retries), keeping the first that converges and
+ *  throwing the last error. The comparison's per-set fits used to run only
+ *  the primary, so a model whose primary stalls on a noiseless curve but
+ *  whose retry converges (agonist-3pl-normalized-logx) failed the whole
+ *  comparison. A succeeding primary is untouched — the chain returns its
+ *  result and the retries never run. */
+/** fitModelSpec's retry ladder, as R: try each `m<-nls(...)` fit string in
+ *  turn (primary, then the retries), keeping the first whose fit AND
+ *  summary both succeed, and throwing the last error if every attempt
+ *  fails. Each attempt is `{fit; summary}` — a summary/vcov failure on
+ *  a converged fit falls through to the next retry too (agonist-3pl-
+ *  normalized-logx: port converges but vcov fails with "element (1,1)
+ *  is zero"; tol then succeeds). A `for` loop (unlike a tryCatch
+ *  handler, which is a function whose assignments are local) does not
+ *  scope, so the assignments (m, s, co, cf, V, ...) persist; the fits
+ *  are held as unevaluated expressions so no text escaping is needed.
+ *  A succeeding primary is untouched — the loop breaks after it. */
+function retryChain(fits: string[], summary: string): string {
+  // Each fit is braced inside expression(...): a fit that assigns a
+  // helper first (a centered polynomial's `xm<-mean(x)`, a segmental
+  // fit's `brk<-optimize(...)`) holds two statements, and a bare `;`
+  // inside expression() is a parse error ("unexpected ';'") — the
+  // seq-201 centered-sextic interpolation failed exactly this way.
+  // Braces change nothing for single-statement fits.
+  const braced = fits.map((f) => `{${f}}`).join(",");
+  return (
+    `retryOk<-FALSE;retryErr<-NULL;` +
+    `for(retryFit in expression(${braced})){retryOk<-tryCatch({eval(retryFit);${summary}TRUE},error=function(e){retryErr<<-e;FALSE});if(retryOk)break};` +
+    `if(!retryOk)stop(retryErr)`
+  );
+}
+
 /** The default shared parameters for a global fit (plan 26): the dose
  *  midpoint + HillSlope when the model has them (Prism's typical 4PL
  *  default: share LogEC50 + HillSlope, fit Bottom/Top per curve); models
@@ -1197,6 +1600,32 @@ function defaultSharedParams(spec: ModelSpec): string[] {
   return out;
 }
 
+/** Seq 166 (Prism Range tab): the fitted X range from the params, when
+ *  either bound is set — `prepareFit`'s `range`, in its shape. */
+const fitRange = (params: NonlinearRegressionParams | undefined) =>
+  params?.fitXMin != null || params?.fitXMax != null
+    ? { min: params?.fitXMin, max: params?.fitXMax }
+    : undefined;
+
+/** Seq 166: the Range-tab sentence for the notes — which X the fit kept,
+ *  and how many points outside it were not fitted. */
+function rangeNotes(params: NonlinearRegressionParams | undefined, rangeExcluded: number): string {
+  if (params?.fitXMin == null && params?.fitXMax == null) return "";
+  const bounds = [
+    params.fitXMin != null ? `X ≥ ${num(params.fitXMin)}` : null,
+    params.fitXMax != null ? `X ≤ ${num(params.fitXMax)}` : null,
+  ]
+    .filter((b): b is string => b !== null)
+    .join(" and ");
+  return (
+    ` Only points with ${bounds} were fitted` +
+    (rangeExcluded
+      ? ` — ${rangeExcluded} point${rangeExcluded === 1 ? "" : "s"} outside the range ${rangeExcluded === 1 ? "was" : "were"} not fitted`
+      : "") +
+    "."
+  );
+}
+
 /** A global (shared-parameter) fit (plan 26): several Y series fitted in one
  *  stacked nls() call through runGlobalFit. Single-series fits supply the
  *  starts (a shared start is their mean); the stacked formula shares the
@@ -1206,21 +1635,35 @@ async function runGlobalNonlinear(
   params: NonlinearRegressionParams | undefined,
   model: NonlinearModel,
   spec: ModelSpec,
-  first: { xCol: Column; yCol: Column; xs: number[]; ys: number[]; rows: number[]; columns: string[] },
+  first: { xCol: Column; yCol: Column; xs: number[]; ys: number[]; rows: number[]; columns: string[]; rangeExcluded: number },
   xCol: Column,
   rout?: { q: number; titles: (string | null)[] },
 ): Promise<AnalysisOutcome> {
   const fixed = params?.fixed ?? {};
   const bounds = params?.bounds ?? {};
   const extraNames = params!.globalY!;
-  const series: { name: string; xs: number[]; ys: number[]; rows: number[]; columns: string[] }[] = [
-    { name: first.yCol.name, xs: first.xs, ys: first.ys, rows: first.rows, columns: first.columns },
+  const series: {
+    name: string;
+    xs: number[];
+    ys: number[];
+    rows: number[];
+    columns: string[];
+    rangeExcluded: number;
+  }[] = [
+    {
+      name: first.yCol.name,
+      xs: first.xs,
+      ys: first.ys,
+      rows: first.rows,
+      columns: first.columns,
+      rangeExcluded: first.rangeExcluded ?? 0,
+    },
   ];
   const yCols: Column[] = [first.yCol];
   for (const name of extraNames) {
-    const p = prepareFit(columns, name, model, Object.keys(fixed).length);
+    const p = prepareFit(columns, name, model, Object.keys(fixed).length, undefined, fitRange(params));
     if ("error" in p) return p;
-    series.push({ name, xs: p.xs, ys: p.ys, rows: p.rows, columns: p.columns });
+    series.push({ name, xs: p.xs, ys: p.ys, rows: p.rows, columns: p.columns, rangeExcluded: p.rangeExcluded });
     yCols.push(p.yCol);
   }
   // ROUT (upstream 1.0.9): each series' outliers found on its own
@@ -1514,6 +1957,7 @@ async function runGlobalNonlinear(
     `fitted separately per data set: ${perSeriesParams.length ? perSeriesParams.map(termLabel).join(", ") : "none"}. ` +
     `95% CIs are asymptotic (from each parameter's standard error). ` +
     `R² is per data set; the sum of squares, Sy.x and degrees of freedom are for all series together.` +
+    rangeNotes(params, series.reduce((s, x) => s + x.rangeExcluded, 0)) +
     (Object.keys(fixed).length
       ? ` Fixed: ${Object.entries(fixed)
           .map(([n, v]) => `${termLabel(n)} = ${num(v)}`)
@@ -1540,8 +1984,39 @@ async function runGlobalNonlinear(
   };
 }
 
-export async function runNonlinearRegression(
+/** A Multiple Variables fit's two columns: the named X and Y variables, in that order —
+ *  so splitXY below reads them as an XY table's X and first Y. */
+function narrowToXY(
   columns: Column[],
+  params: NonlinearRegressionParams,
+): [Column, Column] | { error: string } {
+  const xCol = columns.find((c) => c.name === params.x);
+  if (!xCol) return { error: missingColumn(params.x!) };
+  if (!xCol.values.length) return { error: `“${params.x}” holds no numbers yet.` };
+  if (params.y === undefined)
+    return { error: "Pick a Y variable — run the analysis again and choose the variables." };
+  const yCol = columns.find((c) => c.name === params.y);
+  if (!yCol) return { error: missingColumn(params.y) };
+  if (!yCol.values.length) return { error: `“${params.y}” holds no numbers yet.` };
+  if (params.ys !== undefined && params.ys.length > 1)
+    return {
+      error: "Fitting several Y variables cannot be combined with naming an X variable — fit one Y variable at a time.",
+    };
+  if (params.compareWith !== undefined)
+    return {
+      error:
+        "Comparing two data sets' curves cannot be combined with naming an X variable yet — fit each Y variable on its own first.",
+    };
+  if (params.globalY !== undefined && params.globalY.length > 0)
+    return {
+      error:
+        "A global fit cannot be combined with naming an X variable yet — fit each Y variable on its own first.",
+    };
+  return [xCol, yCol];
+}
+
+export async function runNonlinearRegression(
+  columnsIn: Column[],
   params: NonlinearRegressionParams | undefined,
   titles: (string | null)[] = [],
 ): Promise<AnalysisOutcome> {
@@ -1549,6 +2024,18 @@ export async function runNonlinearRegression(
   if (!model || !Object.hasOwn(MODEL_LABEL, model)) return { error: "Choose a standard curve to fit." };
   // v2 item 23: the user types their own equation.
   const isUserDefinedModel = model === "user-defined";
+
+  // A Multiple Variables table names its X and Y variables (`x`, `y`): the fit runs on
+  // those two columns alone, so the rest of the runner — built on splitXY's
+  // first-column-is-X — works unchanged, interpolation included. Comparing data sets,
+  // a global fit and several Y variables need the table's other Y series, so they are
+  // refused here, plainly, instead of fitting the wrong columns.
+  let columns = columnsIn;
+  if (params?.x !== undefined) {
+    const narrowed = narrowToXY(columns, params);
+    if ("error" in narrowed) return narrowed;
+    columns = narrowed;
+  }
 
   const { x: xCol, ys: yCols } = splitXY(columns);
   // A Y data set's replicates pool (see datasetColumns): "Control" fits
@@ -1589,10 +2076,17 @@ export async function runNonlinearRegression(
       ...(isUserDefinedModel
         ? { customEquation: params?.customEquation, customParameters: params?.customParameters }
         : {}),
+      ...(params?.centered === true ? { centered: true } : {}),
     });
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
+  // Seq 201: centering only applies to polynomial fits (quadratic
+  // through sextic) — any other model refuses it plainly.
+  if (params?.centered === true && !isPolynomialModel(model))
+    return {
+      error: "Centering only applies to polynomial fits — choose a polynomial (quadratic through sextic) to center it.",
+    };
   // A two-site fit that does not converge says so plainly (plan 28): the
   // likeliest cause is data with a single phase, not a numerical quirk.
   const twoSiteError: AnalysisOutcome = {
@@ -1634,6 +2128,11 @@ export async function runNonlinearRegression(
     const ecxBlocked = [spec.dose.midpoint, "HillSlope", "S"].some((t) => fixedNames.includes(t));
     if (!ecxBlocked) spec = { ...spec, derived: [...(spec.derived ?? []), ecAnything(model, f)] };
   }
+  // Seq 200: the fitting method — least squares, robust, or Poisson.
+  // A bogus value (from MCP or a stored file) is refused, not defaulted.
+  const fitMethod = params?.fitMethod ?? "least-squares";
+  if (!(NONLINEAR_FIT_METHODS as readonly string[]).includes(fitMethod))
+    return { error: "Choose a fitting method: least squares, robust, or Poisson." };
   const comparingModels = params?.compareModel !== undefined;
   if (comparingModels && params.compareModel === model)
     return { error: "Choose a different model to compare with." };
@@ -1649,10 +2148,27 @@ export async function runNonlinearRegression(
     return { error: "Interpolation can't be combined with comparing models — fit the model first, then interpolate from it." };
   if (comparingModels && useRout)
     return { error: "ROUT can't be combined with comparing models yet — fit the model with ROUT first, then compare it with the other model." };
+  // Seq 200: the robust/Poisson methods run through fitModelSpec's IRLS —
+  // the model-comparison, two-data-set, global and interpolation paths
+  // build their own R, so those combinations are refused plainly for now
+  // (the single-fit and several-Y paths take the method).
+  if (fitMethod !== "least-squares" && comparingModels)
+    return { error: "The robust and Poisson fitting methods can't be combined with comparing models yet — fit the model on its own first." };
+  if (fitMethod !== "least-squares" && comparingSets)
+    return { error: "The robust and Poisson fitting methods can't be combined with comparing two data sets yet — fit each data set separately." };
+  if (fitMethod !== "least-squares" && global)
+    return { error: "The robust and Poisson fitting methods can't be combined with a global fit yet — fit each data set on its own first." };
+  if (fitMethod !== "least-squares" && params?.interpolate)
+    return { error: "The robust and Poisson fitting methods can't be combined with interpolation yet — fit the model first, then interpolate from it." };
   if (global && comparingSets)
     return { error: "A global fit can't be combined with comparing two data sets — the global fit already fits them together." };
   if (global && params?.interpolate)
     return { error: "Interpolation can't be combined with a global fit — fit one curve first, then interpolate from it." };
+  if (params?.interpolate && spec.logY)
+    return {
+      error:
+        "Interpolation isn't supported for a log-Y curve — its fit is on log(Y), so the interpolated X would be read off the wrong scale. Fit the curve, then read X off the fitted line.",
+    };
   if (global && weightsScheme !== "none")
     return { error: "Weighting can't be combined with a global fit yet." };
   if (global && spec.kind === "lm")
@@ -1706,15 +2222,18 @@ export async function runNonlinearRegression(
     let routOutliers: CurveOutlier[] = [];
     let anyRetried = false;
     let retryMethod: string | undefined;
+    let multiRangeExcluded = 0;
     for (const name of params.ys!) {
-      let prep = prepareFit(columns, name, model, fixedNames.length, spec);
+      let prep = prepareFit(columns, name, model, fixedNames.length, spec, fitRange(params));
       if ("error" in prep) return prep;
+      multiRangeExcluded += prep.rangeExcluded;
       const wr = computeWeights(weightsScheme, prep, yColsAll);
       if ("error" in wr) return wr;
       let setFitOpts: FitOptions = {
         ...(wr.weights ? { weights: wr.weights } : {}),
         ...(fixedNames.length ? { fixed } : {}),
         ...(boundNames.length ? { bounds } : {}),
+        ...(fitMethod !== "least-squares" ? { fitMethod } : {}),
       };
       let applied: AppliedFitOptions;
       try {
@@ -1746,6 +2265,10 @@ export async function runNonlinearRegression(
           }
         }
       }
+      // Seq 200: Poisson fitting needs counts — checked on the fitted
+      // values (post-ROUT), not the raw column.
+      if (fitMethod === "poisson" && prep.ys.some((y) => y < 0))
+        return { error: "Poisson fitting needs counts — all Y values must be 0 or more." };
       let fitted: NonlinearFit;
       try {
         fitted = await fitModelSpec(prep.xs, prep.ys, spec, "", termLabel, setFitOpts);
@@ -1789,7 +2312,7 @@ export async function runNonlinearRegression(
       [],
       [],
       titles,
-      { xs: multiSets[0].xs, ys: multiSets[0].ys },
+      { xs: multiSets[0].xs, ys: multiSets[0].ys, rangeExcluded: multiRangeExcluded },
       anyRetried || undefined,
       retryMethod,
       params,
@@ -1805,7 +2328,7 @@ export async function runNonlinearRegression(
   if (comparingSets && !other) return { error: xyProblem(columns, params.compareWith)! };
   if (other && !spec.dose) return { error: "Only dose-response curves can be compared." };
 
-  let first = prepareFit(columns, params?.y, model, fixedNames.length, spec);
+  let first = prepareFit(columns, params?.y, model, fixedNames.length, spec, fitRange(params));
   if ("error" in first) return first;
   // Weighting needs the fitted points (and, for 1/SD², their rows).
   const weightResult = computeWeights(weightsScheme, first, yCols.flatMap((s) => s.columns));
@@ -1815,6 +2338,7 @@ export async function runNonlinearRegression(
     ...(weights ? { weights } : {}),
     ...(fixedNames.length ? { fixed } : {}),
     ...(boundNames.length ? { bounds } : {}),
+    ...(fitMethod !== "least-squares" ? { fitMethod } : {}),
   };
   let effSpec: ModelSpec;
   let extraAssignments = "";
@@ -1869,9 +2393,11 @@ export async function runNonlinearRegression(
   }
 
   let second: { xs: number[]; ys: number[]; rows: number[]; columns: string[] } | undefined;
+  let secondRangeExcluded = 0;
   if (other) {
-    const p = prepareFit(columns, params.compareWith, model);
+    const p = prepareFit(columns, params.compareWith, model, 0, undefined, fitRange(params));
     if ("error" in p) return p;
+    secondRangeExcluded = p.rangeExcluded;
     // ROUT: the second set's outliers found on its own fit, then left out —
     // a comparison refuses weights/fixed/bounds, so the plain spec fits it.
     if (useRout) {
@@ -1956,8 +2482,15 @@ export async function runNonlinearRegression(
       `,setNames(li,sub("ix","il",names(ix))),setNames(hi,sub("ix","ih",names(ix)))`;
     // The effective spec (fixed parameters substituted, weights) drives
     // the interpolation too, so the unknowns are read off the same fit.
+    // The fit runs the spec's retry ladder (retryChain), not just the
+    // primary: the single-fit path used to stall here (Pade (1,1) on
+    // noiseless standards: "number of iterations exceeded maximum of
+    // 200"), while the main fit path's port/tol retry converges on the
+    // same data. A succeeding primary is untouched. The summary is
+    // inside the chain (retryChain takes it), so a summary/vcov failure
+    // on a converged retry falls through to the next retry too.
     const rCode =
-      `${fitStatementsForSpec(first.xs, first.ys, effSpec, undefined, extraAssignments, !!weights)}${R_INTERP}\n` +
+      `x<-${rVec(first.xs)};y<-${rVec(first.ys)};${extraAssignments}${retryChain([effSpec.fit, ...(effSpec.retryFits ?? []).map((r) => r.fit)], fitSummaryStatements(effSpec, !!weights))};${R_INTERP}\n` +
       `ix<-interp(m,${rVec(unknownY)},${lo},${hi},${spec.positiveX || spec.nonNegativeX ? "TRUE" : "FALSE"})\n` +
       `${interpolationCode(effSpec, unknownY, lo, hi)}c(${fitEntries(effSpec)},${interpNames})`;
     try {
@@ -1967,6 +2500,10 @@ export async function runNonlinearRegression(
       return fitError(err, model);
     }
   } else {
+    // Seq 200: Poisson fitting needs counts — checked on the fitted values
+    // (post-ROUT), not the raw column.
+    if (fitMethod === "poisson" && first.ys.some((y) => y < 0))
+      return { error: "Poisson fitting needs counts — all Y values must be 0 or more." };
     try {
       const fitted = await fitModelSpec(first.xs, first.ys, spec, "", termLabel, fitOpts);
       retried = fitted.retried;
@@ -1986,7 +2523,7 @@ export async function runNonlinearRegression(
       // One R call already ran; reuse its entries by re-reading them out of
       // the same shape — simplest is to keep the parsed fit and build the
       // result from it (no second R call).
-      return assembleResult(model, spec, xCol, pooledY, other, sets, [fitted], [], [], titles, first, fitted.retried, fitted.retryMethod, params, [], "", false, rout);
+      return assembleResult(model, spec, xCol, pooledY, other, sets, [fitted], [], [], titles, { ...first, rangeExcluded: first.rangeExcluded + secondRangeExcluded }, fitted.retried, fitted.retryMethod, params, [], "", false, rout);
     } catch (err) {
       if (isTwoSiteCompetition(model)) return twoSiteError;
       return fitError(err, model);
@@ -2037,7 +2574,7 @@ export async function runNonlinearRegression(
       high: inverted ? null : high,
     };
   });
-  return assembleResult(model, spec, xCol, pooledY, other, sets, parsed, interpolated, v, titles, first, retried, retryMethod, params, [], "", invertedCI, rout);
+  return assembleResult(model, spec, xCol, pooledY, other, sets, parsed, interpolated, v, titles, { ...first, rangeExcluded: first.rangeExcluded + secondRangeExcluded }, retried, retryMethod, params, [], "", invertedCI, rout);
 }
 
 /** The notes' weighting / fixed-parameter / bounds sentences (plan 26): a
@@ -2047,12 +2584,28 @@ export async function runNonlinearRegression(
 function frameworkNotes(
   params: NonlinearRegressionParams | undefined,
   coefficients: RegressionCoefficient[],
-  first: { xs: number[]; ys: number[] },
+  first: { xs: number[]; ys: number[]; rangeExcluded?: number },
 ): string {
   const parts: string[] = [];
+  // Seq 200: a robust/Poisson fit is uninterpretable without naming the
+  // method — and its R² and sum of squares are computed on the raw
+  // residuals, not the IRLS weights (see fitModelSpec).
+  const method = params?.fitMethod ?? "least-squares";
+  if (method === "robust")
+    parts.push(
+      "Fitted by robust regression (Tukey biweight): points far from the curve are down-weighted, so outliers barely move the fit. R² and the sum of squares are computed on the raw residuals.",
+    );
+  else if (method === "poisson")
+    parts.push(
+      "Fitted by Poisson maximum likelihood (iteratively reweighted least squares, weights 1/fitted): for count data, where the scatter grows with the mean. R² and the sum of squares are computed on the raw residuals.",
+    );
   const scheme = params?.weights;
   if (scheme && scheme !== "none") {
-    parts.push(`Weighted by ${WEIGHT_LABEL[scheme]}; R² and the sum of squares are weighted.`);
+    parts.push(
+      method === "least-squares"
+        ? `Weighted by ${WEIGHT_LABEL[scheme]}; R² and the sum of squares are weighted.`
+        : `Weighted by ${WEIGHT_LABEL[scheme]} (combined with the fitting method's weights).`,
+    );
     if (scheme === "1/y2" && first.ys.some((y) => y <= 0))
       parts.push("Some Y are ≤ 0; 1/Y² weights still apply arithmetically but, as a variance model, assume scatter grows with |Y|.");
     if (scheme === "1/x2" && first.xs.some((x) => x <= 0))
@@ -2079,6 +2632,10 @@ function frameworkNotes(
         })
         .join(", ")}.`,
     );
+  // Seq 166: the Range-tab sentence — which X was fitted, and how many
+  // points outside it were not fitted.
+  const range = rangeNotes(params, first.rangeExcluded ?? 0);
+  if (range) parts.push(range.trim());
   return parts.length ? ` ${parts.join(" ")}` : "";
 }
 
@@ -2100,7 +2657,7 @@ async function assembleResult(
   interpolated: InterpolatedRow[],
   v: RVector | [],
   _titles: (string | null)[],
-  first: { xs: number[]; ys: number[] },
+  first: { xs: number[]; ys: number[]; rangeExcluded?: number },
   retried: boolean | undefined,
   retryMethod: string | undefined,
   params: NonlinearRegressionParams | undefined,
@@ -2114,6 +2671,13 @@ async function assembleResult(
   comparison = sets.length > 1,
 ): Promise<AnalysisOutcome> {
   const other = comparison;
+  // Seq 201: a centered polynomial's center is the mean of the fitted X's
+  // (post-ROUT — `first` is the fitted set); the overlays need it to
+  // evaluate powers of (X − centeredX).
+  const centeredX =
+    params?.centered === true && first.xs.length
+      ? first.xs.reduce((s, v) => s + v, 0) / first.xs.length
+      : undefined;
   // Plan 29: the segmental breakpoint is a derived value, not a fitted
   // coefficient — report it as a coefficient row with no standard error
   // (the fixed-parameter precedent in runNonlinearRegression), so the
@@ -2126,6 +2690,32 @@ async function assembleResult(
       p.coefficients.push({
         term: `${prefix}X0`,
         estimate: x0,
+        stdError: null,
+        t: null,
+        p: null,
+        low: null,
+        high: null,
+      });
+    });
+  }
+  // 1.8 (B6 §Polynomial): a centered polynomial's X center is a derived
+  // value, not a fitted coefficient — report it as a coefficient row with
+  // no standard error (the segmental precedent above), so the overlay can
+  // draw the curve from the coefficients alone.
+  if (
+    model === "centered-first" ||
+    model === "centered-second" ||
+    model === "centered-third" ||
+    model === "centered-fourth" ||
+    model === "centered-fifth" ||
+    model === "centered-sixth"
+  ) {
+    parsed.forEach((p, i) => {
+      const xc = p.derived.find((d) => d.label === "X center")?.value ?? null;
+      const prefix = p.coefficients[0]?.term.startsWith(`${sets[i].name} — `) ? `${sets[i].name} — ` : "";
+      p.coefficients.push({
+        term: `${prefix}XCenter`,
+        estimate: xc,
         stdError: null,
         t: null,
         p: null,
@@ -2178,10 +2768,15 @@ async function assembleResult(
         (invertedCI
           ? " No 95% CI is shown for an unknown whose band inversion comes back inverted (lower bound above the upper bound): on a non-monotonic curve the band can cross its Y in the wrong order, so no valid interval exists for it."
           : "");
+  const methodLabel =
+    params?.fitMethod === "robust" ? "Robust fit" : params?.fitMethod === "poisson" ? "Poisson fit" : "Least-squares fit";
   const notes =
-    `Least-squares fit ("${MODEL_LABEL[model]}") of ${sets.map((s) => `“${s.name}”`).join(" and ")} on “${xCol.name}”. ` +
+    `${methodLabel} ("${MODEL_LABEL[model]}") of ${sets.map((s) => `“${s.name}”`).join(" and ")} on “${xCol.name}”. ` +
     `95% CIs are asymptotic (from each parameter's standard error${spec.terms.includes("S") ? "; the asymmetry S's, on its log" : ""}).` +
     frameworkNotes(params, coefficients, first) +
+    (centeredX != null
+      ? ` Centered at the mean of X (${num(centeredX)}): B0 is the fitted Y there, and the higher terms are powers of (X − ${num(centeredX)}).`
+      : "") +
     (other ? ` Extra sum-of-squares F test: ${question} ${answer}` : "") +
     (sets.length > 1 && !other ? " Each data set is fitted on its own." : "") +
     (comparisonNotes ? ` ${comparisonNotes}` : "") +
@@ -2256,9 +2851,13 @@ async function assembleResult(
         extraNotes.push("The breakpoint is at the edge of the data — the fit is effectively a single line.");
     }
   }
-  if (model === "quartic" || model === "quintic")
+  if (model === "quartic" || model === "quintic" || model === "sextic")
     extraNotes.push(
-      `A ${model === "quartic" ? "fourth" : "fifth"} order polynomial can overfit — it follows the noise as well as the trend, so prefer a lower order unless the extra terms are justified.`,
+      `A ${model === "quartic" ? "fourth" : model === "quintic" ? "fifth" : "sixth"} order polynomial can overfit — it follows the noise as well as the trend, so prefer a lower order unless the extra terms are justified.`,
+    );
+  if (model === "centered-fourth" || model === "centered-fifth" || model === "centered-sixth")
+    extraNotes.push(
+      `A ${model === "centered-fourth" ? "fourth" : model === "centered-fifth" ? "fifth" : "sixth"} order polynomial can overfit — it follows the noise as well as the trend, so prefer a lower order unless the extra terms are justified.`,
     );
   if (isExponential(model) || isEnzyme(model) || isClassic(model)) {
     extraNotes.push(startingValues(model, first.xs, first.ys));
@@ -2297,5 +2896,7 @@ async function assembleResult(
     ...(params?.ligandConcentration != null ? { ligandConcentration: params.ligandConcentration } : {}),
     // The overlays need the equation to evaluate a user-defined curve (v2 item 23).
     ...(params?.customEquation != null ? { customEquation: params.customEquation } : {}),
+    // The overlays need the center to evaluate a centered polynomial (seq 201).
+    ...(centeredX != null ? { centeredX } : {}),
   };
 }

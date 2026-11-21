@@ -4,34 +4,43 @@
 // the front. Its project-free parts are in menus.ts.
 import { WIZARDS } from "./views/analyses/wizards";
 import * as React from "react";
-import { isNative, onFocusChange, setTheme, type Theme } from "./native";
+import { closeAll, isMac, isNative, onFocusChange, setTheme, type Theme } from "./native";
+import { THEME_CHANGED_EVENT, THEME_KEY, loadTheme } from "./lib/theme";
 import { projectItems, separator as sep, setMenuBar } from "./menus";
 import { useProjectStore } from "./store/use-project-store";
 import { useLayout } from "./store/use-layout";
+import { useDrawingSelection } from "./store/drawing-selection";
+import { zoomActualSize, zoomFitNode, zoomInNode, zoomOutNode } from "./store/use-zoom";
+import { insertPictureObject, newDrawingObject } from "./components/drawing-objects";
 import { removeWithConfirm, type DocumentActions } from "./store/use-document";
-import { NODE_NAMES, type GraphType, type NodeType } from "./store/types";
+import { NODE_NAMES, type DrawingObjectKind, type GraphType, type NodeType } from "./store/types";
 import { TABLE_TYPE_OPTIONS } from "./views/tables";
+import { TABLE_DATA_EXPORT_FORMATS, exportTableData } from "./views/tables/table-data-export";
 import { analysisOptionsForTable, analysisOptionsKey } from "./views/analyses";
 import { GRAPH_OPTIONS_BY_TABLE } from "./views/graphs";
 import { useStartAnalysis } from "./views/analyses/use-analysis-launcher";
 import { SECTIONS } from "./views/graphs/format-panel";
-
-const THEME_KEY = "titer.theme";
-
-/** The appearance chosen in View ▸ Appearance, which every window shares. */
-function savedTheme(): Theme {
-  try {
-    const theme = localStorage.getItem(THEME_KEY);
-    return theme === "light" || theme === "dark" ? theme : "system";
-  } catch {
-    return "system";
-  }
-}
+import { linkedSheetIds, pingPongTarget } from "./lib/sheet-navigation";
+import { applyResimulation, simulateTableData } from "./stats/simulation/simulate";
 
 /** Text-editing commands go to a focused text field natively, everything else to the
  *  table grid (whose idle input, marked `data-grid-idle`, doesn't count as a text field).
  *  Undo and Redo go to the field being typed in, else to the project (the store). */
-export type EditCommand = "delete" | "select-all" | "fill-down" | "exclude" | "find" | "find-next" | "find-previous";
+export type EditCommand =
+  | "delete"
+  | "select-all"
+  | "select-row"
+  | "select-column"
+  | "fill-down"
+  | "exclude"
+  | "find"
+  | "find-next"
+  | "find-previous"
+  | "paste-special"
+  | "paste-transpose"
+  | "paste-link"
+  | "refresh-link"
+  | "break-link";
 const TEXT_COMMANDS: EditCommand[] = ["delete", "select-all"];
 
 /** Where the keyboard is: a text field, the data grid, or elsewhere. */
@@ -52,7 +61,8 @@ function edit(command: EditCommand) {
 export function useAppMenu(doc: DocumentActions) {
   const store = useProjectStore();
   const startAnalysis = useStartAnalysis();
-  const { sidebar, inspector, panel, inspectorHere, settingsHere, setLayout, setOpenSections, setFoldedTables } =
+  const drawingSelection = useDrawingSelection();
+  const { sidebar, inspector, panel, inspectorHere, settingsHere, gallery, setLayout, setOpenSections, setFoldedTables } =
     useLayout();
   // What the right panel shows, if shown: the note, or the settings where there are some.
   const shown = !inspector ? null : panel === "settings" && settingsHere ? "settings" : "notes";
@@ -62,7 +72,7 @@ export function useAppMenu(doc: DocumentActions) {
     enabled,
     action: () => setLayout(shown === view ? { inspector: false } : { inspector: true, panel: view }),
   });
-  const [theme, setThemeState] = React.useState(savedTheme);
+  const [theme, setThemeState] = React.useState(loadTheme);
 
   // Menu actions run long after the menu was built: read everything through this ref.
   const latest = React.useRef({ store, doc, startAnalysis });
@@ -79,18 +89,27 @@ export function useAppMenu(doc: DocumentActions) {
     }
   }, [theme]);
 
+  // The theme the Preferences dialog set (seq 225) re-reads at once, not
+  // only when the window comes to the front.
+  React.useEffect(() => {
+    const onChanged = () => setThemeState(loadTheme());
+    window.addEventListener(THEME_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(THEME_CHANGED_EVENT, onChanged);
+  }, []);
+
   // Only the window in front sets the menu; it reads the theme again, which another window may have changed.
   const [focused, setFocused] = React.useState(false);
   React.useEffect(
     () =>
       onFocusChange((focus) => {
         setFocused(focus);
-        if (focus) setThemeState(savedTheme());
+        if (focus) setThemeState(loadTheme());
       }),
     [],
   );
 
-  const { activeTableId, activeNodeId, activeNode, isDirty, nodes, undoName, redoName } = store;
+  const { activeTableId, activeNodeId, activeNode, isDirty, nodes, childOrder, recentNodeIds, undoName, redoName } =
+    store;
 
   // A text field being typed in has its own Undo, so the menu follows the focus.
   const [typing, setTyping] = React.useState(false);
@@ -105,6 +124,11 @@ export function useAppMenu(doc: DocumentActions) {
   }, []);
   const tableType = activeTableId ? nodes[activeTableId]?.tableType : undefined;
   const hasTable = activeTableId !== null;
+  // A frozen table takes no data edits (seq 165): the Edit menu's mutating
+  // items go quiet while it is frozen, and the Freeze item below flips it.
+  const activeTableFrozen = activeTableId ? Boolean(nodes[activeTableId]?.frozen) : false;
+  // Linked paste (Prism 11, seq 168): Update and Break act on the active table's link.
+  const hasLink = activeTableId ? Boolean(nodes[activeTableId]?.data?.linkedPaste) : false;
   // Wand needs an example: another table with ≥ 1 analysis or graph child.
   const wandAvailable = Object.values(nodes).some(
     (n) =>
@@ -127,11 +151,99 @@ export function useAppMenu(doc: DocumentActions) {
   // A graph's Format panel shown, whose sections the View menu folds.
   const formatShown = activeNode?.type === "graph" && shown === "settings";
 
+  // The drawing objects selected on the active sheet, for the Arrange menu.
+  const selectedObjects =
+    activeNode && drawingSelection.nodeId === activeNode.id
+      ? (activeNode.drawingObjects ?? []).filter((o) => drawingSelection.ids.includes(o.id))
+      : [];
+  const canArrange = selectedObjects.length > 0;
+  const canGroup = selectedObjects.length >= 2;
+  const canUngroup = selectedObjects.some((o) => o.groupId);
+
+  /** Insert Text / Picture / Drawing (seq 238) on a graph or figure sheet. */
+  const insertDrawingMenu = (kind: "graph" | "figure") => ({
+    text: "Insert",
+    enabled: activeNode?.type === kind,
+    items: (
+      [
+        ["text", "Text Box"],
+        ["rect", "Rectangle"],
+        ["ellipse", "Ellipse"],
+        ["line", "Line"],
+        ["arrow", "Arrow"],
+      ] as [DrawingObjectKind, string][]
+    )
+      .map(([objectKind, label]) => ({
+        text: label,
+        action: () => {
+          const { activeNode: current, addDrawingObject } = latest.current.store;
+          if (current?.type === kind)
+            addDrawingObject(current.id, newDrawingObject(objectKind, current.drawingObjects ?? []));
+        },
+      }))
+      .concat([
+        {
+          text: "Picture…",
+          action: () => {
+            const { activeNode: current, addDrawingObject } = latest.current.store;
+            if (current?.type === kind)
+              insertPictureObject(current.id, current.drawingObjects ?? [], addDrawingObject);
+          },
+        },
+      ]),
+  });
+
+  /** Freeze / Unfreeze (seq 237) for the active graph or figure. */
+  const freezeMenuItem = (kind: "graph" | "figure") => {
+    const label = kind === "graph" ? "Graph" : "Figure";
+    return {
+      text: activeNode?.type === kind && activeNode.frozen ? `Unfreeze ${label}` : `Freeze ${label}`,
+      enabled: activeNode?.type === kind,
+      action: () => {
+        const { activeNode: current, setGraphFrozen } = latest.current.store;
+        if (current?.type === kind) setGraphFrozen(current.id, kind, !current.frozen);
+      },
+    };
+  };
+
+  /** The active sheet's zoom, for View ▸ Zoom (seq 239). */
+  const zoomAction = (fn: (id: string) => void) => () => {
+    const id = latest.current.store.activeNodeId;
+    if (id) fn(id);
+  };
+  // Keyboard navigation (seq 240): the sheets linked to the active one,
+  // and the sheet Previous Sheet walks back to.
+  const linkedIds = activeNode ? linkedSheetIds(activeNode, nodes, childOrder) : [];
+  const previousId = activeNodeId ? pingPongTarget(recentNodeIds, activeNodeId) : null;
+  // Re-run simulation (seq 243): the simulated table behind the active
+  // graph — or the active table itself, when it is the simulated one.
+  const simTableId =
+    activeNode?.type === "graph" ? activeNode.parentId : activeNode?.type === "table" ? activeNode.id : null;
+  const simSpec = simTableId ? nodes[simTableId]?.data?.simulation : undefined;
+
   React.useEffect(() => {
     if (!isNative || !focused) return;
     const run = (fn: (l: typeof latest.current, tableId: string) => void) => () => {
       const tableId = latest.current.store.activeTableId;
       if (tableId) fn(latest.current, tableId);
+    };
+
+    // Re-simulate the active graph's table with the next seed (seq 243):
+    // a fresh draw of the same spec, titles and X column kept.
+    const resimulate = async () => {
+      const s = latest.current.store;
+      const node = s.activeNode;
+      const tableId = node?.type === "graph" ? node.parentId : node?.type === "table" ? node.id : null;
+      const table = tableId ? s.nodes[tableId] : undefined;
+      const oldData = table?.data;
+      const spec = oldData?.simulation;
+      if (!tableId || !oldData || !spec) return;
+      try {
+        const fresh = await simulateTableData({ ...spec, seed: spec.seed + 1 });
+        s.updateTable(tableId, applyResimulation(oldData, fresh), "Simulate Again");
+      } catch {
+        // No error surface from a menu: a failed draw leaves the table as it was.
+      }
     };
 
     // Each menu deletes what it makes: the item selected, when it is of its kind (the last
@@ -177,12 +289,18 @@ export function useAppMenu(doc: DocumentActions) {
             () => latest.current.doc.clearRecents(),
             (entry) => latest.current.doc.openRemoteEntry(entry),
           ),
+          // The Welcome dialog (seq 167): the template gallery + Graph
+          // Portfolio + recents. It auto-shows on a fresh first window; this
+          // opens it on demand (also the only way back after "don't show").
+          { text: "Welcome…", action: () => latest.current.doc.openWelcome() },
           { text: "Open from Cloud…", action: () => latest.current.doc.openRemotePicker() },
           {
             text: "Connected Storage…",
             action: () => latest.current.store.openSelector({ kind: "cloud-settings" }),
           },
           { text: "Import Prism File…", action: () => void latest.current.doc.importPrism() },
+          { text: "Import Data File…", action: () => void latest.current.doc.importData() },
+          { text: "Merge…", action: () => void latest.current.doc.mergeProject() },
           {
             text: "Convert…",
             action: () => latest.current.store.openSelector({ kind: "converter" }),
@@ -194,6 +312,36 @@ export function useAppMenu(doc: DocumentActions) {
           sep,
           { text: "Save", accelerator: "CmdOrCtrl+S", enabled: isDirty, action: () => latest.current.doc.save() },
           { text: "Save As…", accelerator: "CmdOrCtrl+Shift+S", action: () => latest.current.doc.save(true) },
+          {
+            // A copy of the whole project (seq 234): the current file stays put.
+            text: "Save a Copy…",
+            action: () => void latest.current.doc.saveCopy(),
+          },
+          {
+            // One table's family as its own project (seq 233): the current file stays put.
+            text: "Save Family As…",
+            enabled: hasTable,
+            action: () => void latest.current.doc.saveFamilyAs(),
+          },
+          {
+            // Seq 164: the active table as a file — the MCP-only
+            // `titer_export_table_data`, now in the menu. Same serializers,
+            // same csv/xlsx/txt/xml formats; the save dialog picks the file.
+            text: "Export Table Data",
+            enabled: hasTable,
+            items: TABLE_DATA_EXPORT_FORMATS.map((f) => ({
+              text: f.label,
+              action: () => {
+                const id = latest.current.store.activeTableId;
+                const table = id ? latest.current.store.nodes[id] : undefined;
+                if (table) void exportTableData(table, f.value);
+              },
+            })),
+          },
+          sep,
+          // Seq 227: Print prints the sheet as shown, on the paper Page Setup chose.
+          { text: "Page Setup…", action: () => latest.current.store.openSelector({ kind: "preferences", section: "print" }) },
+          { text: "Print…", accelerator: "CmdOrCtrl+P", action: () => window.print() },
           sep,
           // Save Special (plan 38): a template / example / method file is this
           // project with a `template` envelope block, under a `.pzt`/`.pzm`
@@ -214,7 +362,25 @@ export function useAppMenu(doc: DocumentActions) {
             action: () => latest.current.store.openSelector({ kind: "save-template", templateKind: "method" }),
           },
           sep,
+          {
+            text: "Export All Graphs…",
+            enabled: Object.values(nodes).some((n) => n.type === "graph" || n.type === "figure"),
+            action: () => latest.current.store.openSelector({ kind: "export-all-graphs" }),
+          },
+          sep,
           { item: "CloseWindow" },
+          // Close All (seq 235, macOS only): every project window, each
+          // asking about its unsaved changes; Titer itself stays open.
+          ...(isMac
+            ? [
+                sep,
+                {
+                  text: "Close All",
+                  accelerator: "CmdOrCtrl+Alt+W",
+                  action: () => void closeAll(),
+                },
+              ]
+            : []),
         ],
       },
       {
@@ -237,12 +403,74 @@ export function useAppMenu(doc: DocumentActions) {
           { item: "Cut" },
           { item: "Copy" },
           { item: "Paste" },
+          {
+            // Linked paste (Prism 11, seq 168): paste a data file as a link
+            // at the selection, so the table updates when the file changes.
+            text: "Paste Link…",
+            enabled: hasTable,
+            action: () => edit("paste-link"),
+          },
+          {
+            text: "Update Linked Data",
+            enabled: hasTable && hasLink,
+            action: () => edit("refresh-link"),
+          },
+          {
+            text: "Break Link",
+            enabled: hasTable && hasLink,
+            action: () => edit("break-link"),
+          },
           sep,
-          { text: "Delete", enabled: hasTable, action: () => edit("delete") },
+          { text: "Delete", enabled: hasTable && !activeTableFrozen, action: () => edit("delete") },
           { text: "Select All", accelerator: "CmdOrCtrl+A", action: () => edit("select-all") },
+          // Seq 231: the keys already select this way in the grid (Shift+Space
+          // the rows, Ctrl+Space the columns); the menu names them.
+          {
+            text: "Select Row",
+            accelerator: "Shift+Space",
+            enabled: hasTable,
+            action: () => edit("select-row"),
+          },
+          {
+            text: "Select Column",
+            accelerator: "Ctrl+Space",
+            enabled: hasTable,
+            action: () => edit("select-column"),
+          },
           { text: "Fill Down", accelerator: "CmdOrCtrl+D", enabled: hasTable, action: () => edit("fill-down") },
+          {
+            // One sheet, nothing else (seq 236): a table's children stay behind.
+            text: "Duplicate Current Sheet",
+            enabled: activeNode !== null,
+            action: () => {
+              const { activeNode: current, duplicateNode } = latest.current.store;
+              if (current) duplicateNode(current.id);
+            },
+          },
           sep,
-          { text: "Exclude / Include", accelerator: "CmdOrCtrl+E", enabled: hasTable, action: () => edit("exclude") },
+          // Seq 230: Paste Special offers Values / Transpose; Paste Transposed
+          // swaps the clipboard block's rows and columns at once. Both write
+          // data, so a frozen table disables them like Fill Down (seq 165).
+          {
+            text: "Paste Special…",
+            enabled: hasTable && !activeTableFrozen,
+            action: () => edit("paste-special"),
+          },
+          {
+            text: "Paste Transposed",
+            accelerator: "CmdOrCtrl+Shift+V",
+            enabled: hasTable && !activeTableFrozen,
+            action: () => edit("paste-transpose"),
+          },
+          sep,
+          { text: "Fill Down", accelerator: "CmdOrCtrl+D", enabled: hasTable && !activeTableFrozen, action: () => edit("fill-down") },
+          sep,
+          {
+            text: "Exclude / Include",
+            accelerator: "CmdOrCtrl+E",
+            enabled: hasTable && !activeTableFrozen,
+            action: () => edit("exclude"),
+          },
           sep,
           { text: "Find…", accelerator: "CmdOrCtrl+F", enabled: hasTable, action: () => edit("find") },
           { text: "Find Next", accelerator: "CmdOrCtrl+G", enabled: hasTable, action: () => edit("find-next") },
@@ -251,6 +479,14 @@ export function useAppMenu(doc: DocumentActions) {
             accelerator: "CmdOrCtrl+Shift+G",
             enabled: hasTable,
             action: () => edit("find-previous"),
+          },
+          sep,
+          {
+            // Prism's Edit ▸ Freeze Sheet (seq 165): a frozen table takes no
+            // data edits until unfrozen.
+            text: activeNode?.type === "table" && activeNode.frozen ? "Unfreeze Table" : "Freeze Table",
+            enabled: activeNode?.type === "table",
+            action: run((l, id) => l.store.setTableFrozen(id, !l.store.nodes[id]?.frozen)),
           },
         ],
       },
@@ -261,6 +497,14 @@ export function useAppMenu(doc: DocumentActions) {
             text: "New Table…",
             accelerator: "CmdOrCtrl+Alt+T",
             action: () => latest.current.store.openSelector({ kind: "new-table" }),
+          },
+          {
+            // A new table with its first graph, as one undo step (seq 232).
+            text: "New Data Table and Graph",
+            items: TABLE_TYPE_OPTIONS.map((o) => ({
+              text: o.label,
+              action: () => latest.current.store.createTableWithGraph(o.value),
+            })),
           },
           sep,
           ...TABLE_TYPE_OPTIONS.map((o) => ({
@@ -333,6 +577,30 @@ export function useAppMenu(doc: DocumentActions) {
             action: run((l, id) => l.store.createGraph(id, o.value as GraphType)),
           })),
           sep,
+          freezeMenuItem("graph"),
+          insertDrawingMenu("graph"),
+          {
+            // Re-run the simulation behind the active graph's table (seq 243).
+            text: "Simulate Again",
+            accelerator: "F9",
+            enabled: Boolean(simSpec),
+            action: () => void resimulate(),
+          },
+          {
+            // Change the active graph's type (seq 244): the current type is
+            // not offered — picking it would be a no-op.
+            text: "Change Graph Type",
+            enabled: activeNode?.type === "graph",
+            items: (tableType ? GRAPH_OPTIONS_BY_TABLE[tableType] : []).map((o) => ({
+              text: o.label,
+              enabled: activeNode?.type === "graph" && activeNode.graphType !== o.value,
+              action: () => {
+                const id = latest.current.store.activeNodeId;
+                if (id) latest.current.store.changeGraphType(id, o.value as GraphType);
+              },
+            })),
+          },
+          sep,
           deleteItem("graph"),
         ],
       },
@@ -346,7 +614,73 @@ export function useAppMenu(doc: DocumentActions) {
             action: () => latest.current.store.createFigure(),
           },
           sep,
+          freezeMenuItem("figure"),
+          insertDrawingMenu("figure"),
+          sep,
           deleteItem("figure"),
+        ],
+      },
+      {
+        // Arrange (seq 238): what the selected drawing objects do — the
+        // menu reads the layer's selection, so it stays dim with none.
+        text: "Arrange",
+        items: [
+          {
+            text: "Group",
+            enabled: canGroup,
+            action: () =>
+              activeNode && latest.current.store.arrangeDrawingObjects(activeNode.id, "group", drawingSelection.ids),
+          },
+          {
+            text: "Ungroup",
+            enabled: canUngroup,
+            action: () =>
+              activeNode && latest.current.store.arrangeDrawingObjects(activeNode.id, "ungroup", drawingSelection.ids),
+          },
+          sep,
+          {
+            text: "Bring to Front",
+            enabled: canArrange,
+            action: () =>
+              activeNode &&
+              latest.current.store.arrangeDrawingObjects(activeNode.id, "bring-to-front", drawingSelection.ids),
+          },
+          {
+            text: "Bring Forward",
+            enabled: canArrange,
+            action: () =>
+              activeNode &&
+              latest.current.store.arrangeDrawingObjects(activeNode.id, "bring-forward", drawingSelection.ids),
+          },
+          {
+            text: "Send Backward",
+            enabled: canArrange,
+            action: () =>
+              activeNode &&
+              latest.current.store.arrangeDrawingObjects(activeNode.id, "send-backward", drawingSelection.ids),
+          },
+          {
+            text: "Send to Back",
+            enabled: canArrange,
+            action: () =>
+              activeNode &&
+              latest.current.store.arrangeDrawingObjects(activeNode.id, "send-to-back", drawingSelection.ids),
+          },
+          sep,
+          {
+            text: "Duplicate",
+            enabled: canArrange,
+            action: () =>
+              activeNode &&
+              latest.current.store.arrangeDrawingObjects(activeNode.id, "duplicate", drawingSelection.ids),
+          },
+          {
+            text: "Delete",
+            enabled: canArrange,
+            action: () =>
+              activeNode &&
+              latest.current.store.arrangeDrawingObjects(activeNode.id, "delete", drawingSelection.ids),
+          },
         ],
       },
       {
@@ -364,9 +698,16 @@ export function useAppMenu(doc: DocumentActions) {
       {
         text: "Settings",
         items: [
+          // Seq 225: Preferences holds every setting — General, Appearance,
+          // AI Connections, Feedback and Print — in one place. ⌘, is the
+          // macOS Preferences key, so it opens Preferences, not AI Connections.
+          {
+            text: "Preferences…",
+            accelerator: "CmdOrCtrl+,",
+            action: () => latest.current.store.openSelector({ kind: "preferences" }),
+          },
           {
             text: "AI Connections…",
-            accelerator: "CmdOrCtrl+,",
             action: () => latest.current.store.openSelector({ kind: "ai-connections" }),
           },
         ],
@@ -378,6 +719,12 @@ export function useAppMenu(doc: DocumentActions) {
             text: sidebar ? "Hide Sidebar" : "Show Sidebar",
             accelerator: "CmdOrCtrl+B",
             action: () => setLayout({ sidebar: !sidebar }),
+          },
+          // Seq 229: the Gallery shows every graph on one sheet.
+          {
+            text: "Gallery",
+            checked: gallery,
+            action: () => setLayout({ gallery: !gallery }),
           },
           panelItem("notes", "Notes", "CmdOrCtrl+Alt+N", inspectorHere),
           panelItem("settings", "Inspector", "CmdOrCtrl+Alt+I", settingsHere),
@@ -400,8 +747,55 @@ export function useAppMenu(doc: DocumentActions) {
           { text: "Collapse All Sections", enabled: formatShown, action: () => setOpenSections(new Set()) },
           sep,
           {
+            // Keyboard navigation (seq 240): jump to any sheet, walk its
+            // links, or walk back to the sheet before it.
+            text: "Go to Sheet…",
+            accelerator: "CmdOrCtrl+J",
+            action: () => latest.current.store.openSelector({ kind: "go-to-sheet" }),
+          },
+          {
+            text: "Go to Linked Sheet",
+            accelerator: "CmdOrCtrl+L",
+            enabled: linkedIds.length > 0,
+            action: () => {
+              const s = latest.current.store;
+              const node = s.activeNode;
+              if (!node) return;
+              const linked = linkedSheetIds(node, s.nodes, s.childOrder);
+              if (!linked.length) return;
+              // Cycle: the next linked sheet after the last-visited one.
+              const visited = s.recentNodeIds.filter((id) => linked.includes(id));
+              const last = visited.at(-1);
+              const next = last === undefined ? linked[0] : linked[(linked.indexOf(last) + 1) % linked.length];
+              s.setActiveNode(next);
+            },
+          },
+          {
+            text: "Previous Sheet",
+            accelerator: "CmdOrCtrl+Alt+Z",
+            enabled: previousId !== null,
+            action: () => {
+              const s = latest.current.store;
+              const target = s.activeNodeId ? pingPongTarget(s.recentNodeIds, s.activeNodeId) : null;
+              if (target) s.setActiveNode(target);
+            },
+          },
+          sep,
+          {
             text: "Appearance",
             items: [themeItem("system", "Automatic"), themeItem("light", "Light"), themeItem("dark", "Dark")],
+          },
+          {
+            // Manual zoom (seq 239): the graph zoom already existed by
+            // gesture — the menu makes it explicit, and gives figures one.
+            text: "Zoom",
+            enabled: activeNode?.type === "graph" || activeNode?.type === "figure",
+            items: [
+              { text: "Zoom In", accelerator: "CmdOrCtrl+Plus", action: zoomAction(zoomInNode) },
+              { text: "Zoom Out", accelerator: "CmdOrCtrl+-", action: zoomAction(zoomOutNode) },
+              { text: "Actual Size", accelerator: "CmdOrCtrl+0", action: zoomAction(zoomActualSize) },
+              { text: "Fit to Window", action: zoomAction(zoomFitNode) },
+            ],
           },
           sep,
           { item: "Fullscreen" },
@@ -412,10 +806,19 @@ export function useAppMenu(doc: DocumentActions) {
     focused,
     tableType,
     hasTable,
+    activeTableFrozen,
+    activeNode?.frozen,
+    hasLink,
     wandAvailable,
     analysisKey,
     activeNodeId !== null,
     activeNode?.type,
+    activeNode?.frozen,
+    drawingSelection,
+    activeNode?.graphType,
+    linkedIds.length,
+    previousId,
+    Boolean(simSpec),
     tableCount,
     formatShown,
     inspectorHere,
@@ -425,6 +828,7 @@ export function useAppMenu(doc: DocumentActions) {
     doc.recents,
     theme,
     sidebar,
+    gallery,
     inspector,
     typing,
     undoName,

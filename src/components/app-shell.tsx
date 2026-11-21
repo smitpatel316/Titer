@@ -9,13 +9,17 @@ import { onFullscreenChange } from "../native";
 import { UniversalModal } from "./universal-modal";
 import { Dialog } from "../ui/dialog";
 import { ConverterDialog } from "./converter-dialog";
+import { ExportAllDialog } from "./export-all-dialog";
 import { AiConnectionsDialog } from "./ai-connections-dialog";
 import { FeedbackConsentDialog } from "./feedback-consent-dialog";
 import { useMcpSnapshotPublisher } from "../store/mcp-publish";
 import { useMcpJobDispatcher } from "../store/mcp-dispatch";
 import { SavePromptDialog } from "./save-prompt-dialog";
 import { TemplateDialog } from "./template-dialog";
+import { WelcomeDialog } from "./welcome-dialog";
+import { openProjectsOrSay } from "../menus";
 import { ConflictDialog } from "./conflict-dialog";
+import { BackupRecoveryDialog } from "./backup-recovery-dialog";
 import { RemotePickerDialog } from "./remote-picker";
 import { CloudSettingsDialog } from "./cloud-settings";
 import { Button } from "../ui/controls";
@@ -28,8 +32,11 @@ import { WandDialog } from "./wand-dialog";
 import { SimulateDataDialog } from "./simulate-data-dialog";
 import { CloneGraphDialog } from "./clone-graph-dialog";
 import { ScriptDialog } from "./script-dialog";
+import { PreferencesDialog } from "./preferences-dialog";
+import { PRINT_SETTINGS_CHANGED_EVENT, loadPrintSettings, printPageCss } from "../lib/print-settings";
 import { useStartAnalysis } from "../views/analyses/use-analysis-launcher";
 import { GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
+import { goToSheetEntries } from "../lib/sheet-navigation";
 
 // The traffic lights sit at x 20–80, centered in the 52 px toolbars (`trafficLightPosition`
 // in tauri.conf.json). With the sidebar hidden, its button follows them (or starts the
@@ -47,21 +54,44 @@ export function AppShell() {
   // v1.6.0 L0: this window runs the MCP jobs Rust queues for it.
   useMcpJobDispatcher();
   const { projectUpdated, dismissProjectUpdated } = documentActions;
-  const { prismImported, dismissPrismImported } = documentActions;
+  const { prismImported, dismissPrismImported, dataImported, dismissDataImported } = documentActions;
+  const { prismSavedReport, dismissPrismSavedReport } = documentActions;
+  const { projectMerged, dismissProjectMerged } = documentActions;
   const { templateNotice, dismissTemplateNotice } = documentActions;
+  const { linkedNotice, dismissLinkedNotice } = documentActions;
   const { sidebar } = useLayout();
   const [fullscreen, setFullscreen] = React.useState(false);
   React.useEffect(() => onFullscreenChange(setFullscreen), []);
+  // Seq 227: the `@page` rule for the print settings (paper, orientation,
+  // margins, scale), injected once and re-injected whenever Preferences
+  // changes them — File ▸ Print and a script's Print both print on it.
+  React.useEffect(() => {
+    const apply = () => {
+      let style = document.getElementById("titer-print-page");
+      if (!style) {
+        style = document.createElement("style");
+        style.id = "titer-print-page";
+        document.head.appendChild(style);
+      }
+      style.textContent = printPageCss(loadPrintSettings());
+    };
+    apply();
+    window.addEventListener(PRINT_SETTINGS_CHANGED_EVENT, apply);
+    return () => window.removeEventListener(PRINT_SETTINGS_CHANGED_EVENT, apply);
+  }, []);
   const hidden = HIDDEN_SIDEBAR[fullscreen ? "fullscreen" : "window"];
-  const { nodes, selector, closeSelector, createTable, createGraph, isDirty } = useProjectStore();
+  const { nodes, rootOrder, childOrder, selector, closeSelector, createTable, createGraph, setActiveNode, isDirty } =
+    useProjectStore();
   const startAnalysis = useStartAnalysis();
   // The New Analysis / New Graph pickers list what fits the target table's type.
   const tableType = selector && "tableId" in selector ? (nodes[selector.tableId]?.tableType ?? "column") : "column";
   const tableData = selector && "tableId" in selector ? nodes[selector.tableId]?.data : undefined;
+  // Go to Sheet (seq 240): every sheet in outline order, grouped by section.
+  const goToEntries = selector?.kind === "go-to-sheet" ? goToSheetEntries(nodes, rootOrder, childOrder) : [];
 
   return (
     <div className="flex h-full">
-      {!sidebar && <SidebarToggle className={`fixed top-3 z-10 ${hidden.button}`} />}
+      {!sidebar && <SidebarToggle className={`fixed top-3 z-10 print:hidden ${hidden.button}`} />}
       <ProjectSidebar />
       <main
         className="flex min-w-0 flex-1 flex-col"
@@ -77,7 +107,7 @@ export function AppShell() {
             through to save()'s own save panel. */}
         <div
           data-tauri-drag-region
-          className="flex h-10 shrink-0 items-center gap-2 border-b border-separator pr-3 pl-[var(--toolbar-inset,16px)]"
+          className="flex h-10 shrink-0 items-center gap-2 border-b border-separator pr-3 pl-[var(--toolbar-inset,16px)] print:hidden"
         >
           <Button
             disabled={!isDirty}
@@ -163,9 +193,96 @@ export function AppShell() {
         }
       />
 
+      {/* The "Saved as Prism" notice (Mansi P0 #3), in-app for the same
+          Quirk-2 reason as "Prism File Imported" above: the write report
+          used to be computed and thrown away, so dropped analyses and the
+          graphs warning were silent. A manual .prism save shows it; a
+          background save (autosave, quit-save) never does. Long reports
+          scroll, like the converter's. */}
+      <Dialog
+        open={prismSavedReport !== null}
+        onClose={dismissPrismSavedReport}
+        onReturn={dismissPrismSavedReport}
+        dismissLabel="OK"
+        title="Saved as Prism"
+        description="What made it into the .prism file — and what didn't. Anything listed as not written needs re-creating in Prism from the tables."
+      >
+        <pre className="max-h-64 overflow-auto rounded-md bg-control p-3 text-small whitespace-pre-wrap">
+          {prismSavedReport?.join("\n")}
+        </pre>
+      </Dialog>
+
+      {/* The "Data File Imported" notice, in-app for the same Quirk-2
+          reason as "Prism File Imported" above. Shown only when the import
+          has something to say (assumptions it made, rows padded, sheets
+          skipped); a clean import just opens the table. */}
+      <Dialog
+        open={dataImported !== null}
+        onClose={dismissDataImported}
+        onReturn={dismissDataImported}
+        dismissLabel="OK"
+        title="Data File Imported"
+        description={
+          <>
+            {dataImported?.map((line, i) => (
+              <React.Fragment key={i}>
+                {line}
+                <br />
+              </React.Fragment>
+            ))}
+          </>
+        }
+      />
+
+      {/* The "Linked Data" notice, in-app for the same Quirk-2 reason as
+          "Data File Imported" above: the linked sources a project open
+          couldn't refresh (moved, deleted, unreadable), and the links that
+          update by hand. The values stay as they were saved; use Edit ▸
+          Update Linked Data to try again once the file is back. */}
+      <Dialog
+        open={linkedNotice !== null}
+        onClose={dismissLinkedNotice}
+        onReturn={dismissLinkedNotice}
+        dismissLabel="OK"
+        title="Linked Data"
+        description={
+          <>
+            {linkedNotice?.map((line, i) => (
+              <React.Fragment key={i}>
+                {line}
+                <br />
+              </React.Fragment>
+            ))}
+          </>
+        }
+      />
+      {/* The "Project Merged" notice (File ▸ Merge, seq 180), in-app for
+          the same Quirk-2 reason as "Prism File Imported" above. */}
+      <Dialog
+        open={projectMerged !== null}
+        onClose={dismissProjectMerged}
+        onReturn={dismissProjectMerged}
+        dismissLabel="OK"
+        title="Project Merged"
+        description={
+          <>
+            {projectMerged?.map((line, i) => (
+              <React.Fragment key={i}>
+                {line}
+                <br />
+              </React.Fragment>
+            ))}
+          </>
+        }
+      />
+
       <ConverterDialog />
 
+      <ExportAllDialog />
+
       <AiConnectionsDialog />
+
+      <PreferencesDialog />
 
       <FeedbackConsentDialog />
 
@@ -174,6 +291,23 @@ export function AppShell() {
       <TemplateDialog
         defaultName={documentActions.title}
         onSave={(kind, info) => void documentActions.saveTemplate(kind, info)}
+      />
+
+      {/* The Welcome dialog (seq 167): the gallery + Graph Portfolio + recents
+          on a fresh window (use-document decides when it auto-shows); File ▸
+          Welcome… opens it on demand. */}
+      <WelcomeDialog
+        open={documentActions.welcomeOpen}
+        onClose={documentActions.closeWelcome}
+        onApplyTemplate={(templateId) => documentActions.applyTemplate(templateId)}
+        recents={documentActions.recents}
+        onOpenRecent={(entry) =>
+          entry.kind === "local"
+            ? openProjectsOrSay([entry.path], (gone) =>
+                documentActions.forgetRecent({ kind: "local", path: gone }),
+              )
+            : documentActions.openRemoteEntry(entry)
+        }
       />
 
       {/* A template's instructions on open (plan 38): Prism's popup, in-app
@@ -199,6 +333,13 @@ export function AppShell() {
       <ConflictDialog
         conflict={documentActions.conflict}
         onChoose={(choice) => void documentActions.resolveConflict(choice)}
+      />
+
+      {/* Crash recovery (seq 226): a backup newer than the saved file is
+          offered once, right after the project is established. */}
+      <BackupRecoveryDialog
+        recovery={documentActions.backupRecovery}
+        onChoose={(choice) => void documentActions.resolveBackupRecovery(choice)}
       />
 
       <RemotePickerDialog onPick={(handle) => documentActions.openRemoteHandle(handle)} onClose={closeSelector} />
@@ -236,6 +377,20 @@ export function AppShell() {
         options={GRAPH_OPTIONS_BY_TABLE[tableType]}
         onSelect={(type) => {
           if (selector?.kind === "new-graph") createGraph(selector.tableId, type);
+          closeSelector();
+        }}
+        onClose={closeSelector}
+      />
+
+      {/* Go to Sheet (seq 240, View ▸ Go to Sheet…): every sheet in
+          outline order, grouped by section. */}
+      <UniversalModal
+        open={selector?.kind === "go-to-sheet"}
+        title="Go to Sheet"
+        description="Jump to a sheet in this project."
+        options={goToEntries.map((e) => ({ value: e.id, label: `${e.section} — ${e.label}` }))}
+        onSelect={(id) => {
+          setActiveNode(id);
           closeSelector();
         }}
         onClose={closeSelector}

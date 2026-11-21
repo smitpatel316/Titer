@@ -39,6 +39,7 @@ export const GRAPH_ANALYSIS_LINKS = [
   "poissonAnalysisId",
   "pcaAnalysisId",
   "kmeansAnalysisId",
+  "hclustAnalysisId",
   "smoothAnalysisId",
   "monteCarloAnalysisId",
 ] as const satisfies readonly (keyof GraphOptions)[];
@@ -134,6 +135,7 @@ export function cloneGraphPlan(
     const id = graph.graphOptions?.[field];
     if (typeof id === "string") linked.add(id);
   }
+  for (const id of graph.graphOptions?.sigAnalysisIds ?? []) if (typeof id === "string") linked.add(id);
   const idMap = new Map<string, string>();
   const clonedNodes: Record<string, ProjectNode> = { [newTableId]: newTable };
   for (const childId of childOrder[table.id] ?? []) {
@@ -162,6 +164,15 @@ export function cloneGraphPlan(
       // A link to an analysis under another table keeps pointing at the
       // original; a link whose analysis is gone is dropped.
       else if (!nodes[id]) delete newOptions[field];
+    }
+    // The multi-source list, same rule per entry: cloned ones remap, other
+    // tables' keep pointing at the original, gone ones drop out.
+    if (newOptions.sigAnalysisIds) {
+      const remapped = newOptions.sigAnalysisIds.flatMap((id) =>
+        idMap.has(id) ? [idMap.get(id)!] : nodes[id] ? [id] : [],
+      );
+      if (remapped.length) newOptions.sigAnalysisIds = remapped;
+      else delete newOptions.sigAnalysisIds;
     }
   }
   const newGraph: ProjectNode = {

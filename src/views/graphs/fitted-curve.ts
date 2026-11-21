@@ -14,21 +14,43 @@ function coef(coefficients: RegressionCoefficient[], term: string): number {
   return coefficients.find((c) => c.term === term)?.estimate ?? NaN;
 }
 
+/** The standard normal CDF Φ(z), by Simpson integration of the density
+ *  from −10 (Φ(−10) ≈ 8e-24) — accurate to ~1e-10, where the
+ *  Abramowitz–Stegun erf (|ε| < 1.5e-7) left the cumulative-Gaussian
+ *  overlay ~6e-6 off R's exact pnorm on the percent scale, over the
+ *  overlay's 1e-6 tolerance. Drawing-only, like the erf was. */
+const pnorm = (z: number): number => {
+  if (z <= -10) return 0;
+  if (z >= 10) return 1;
+  const a = -10;
+  const n = 2000;
+  const h = (z - a) / n;
+  const pdf = (t: number) => Math.exp(-(t * t) / 2);
+  let s = pdf(a) + pdf(z);
+  for (let i = 1; i < n; i++) s += (i % 2 === 0 ? 2 : 4) * pdf(a + i * h);
+  return (s * h) / 3 / Math.sqrt(2 * Math.PI);
+};
+
 /** The fitted curve at `x`: the model's equation (nonlinear-regression.ts) with its coefficients.
  *  The homologous model also needs the radioligand concentration [L] (its
  *  fit carries it — see AnalysisResult.ligandConcentration); without it the
  *  curve is undefined (NaN). A user-defined fit carries its equation instead
- *  (AnalysisResult.customEquation, v2 item 23) — without it, no curve. */
+ *  (AnalysisResult.customEquation, v2 item 23) — without it, no curve.
+ *  A centered polynomial fit (seq 201) carries its center instead
+ *  (AnalysisResult.centeredX): its terms are powers of (X − centeredX). */
 export function evaluate(
   model: NonlinearModel,
   coefficients: RegressionCoefficient[],
   x: number,
   ligandConcentration?: number,
   customEquation?: string,
+  centeredX?: number,
 ): number {
   const c = (term: string) => coef(coefficients, termLabel(term));
   const [bottom, top, hill, s] = [c("Bottom"), c("Top"), c("HillSlope"), c("S")];
   const rise = top - bottom;
+  // A centered polynomial's terms are powers of (X − centeredX), not of X.
+  const xc = x - (centeredX ?? 0);
   switch (model) {
     case "user-defined": {
       if (!customEquation) return NaN;
@@ -42,29 +64,177 @@ export function evaluate(
       return bottom + rise / (1 + (c("EC50") / x) ** hill);
     case "agonist-3pl-logx":
       return bottom + rise / (1 + 10 ** (c("LogEC50") - x));
+    case "agonist-3pl-x":
+      // B6 Stim #5: Y = Bottom+(Top-Bottom)/(1+EC50/X).
+      return bottom + rise / (1 + c("EC50") / x);
     case "inhibitor-3pl-logx":
       return bottom + rise / (1 + 10 ** (x - c("LogIC50")));
+    case "inhibitor-3pl-x":
+      // B6 Inhib #5: Y = Bottom+(Top-Bottom)/(1+X/IC50).
+      return bottom + rise / (1 + x / c("IC50"));
+    case "agonist-3pl-normalized-logx":
+      // B6 Stim #3: Bottom=0, Top=100.
+      return 100 / (1 + 10 ** (c("LogEC50") - x));
+    case "agonist-4pl-normalized-logx":
+      // B6 Stim #4.
+      return 100 / (1 + 10 ** ((c("LogEC50") - x) * hill));
+    case "agonist-3pl-normalized-x":
+      // B6 Stim #7.
+      return 100 / (1 + c("EC50") / x);
+    case "agonist-4pl-normalized-x":
+      // B6 Stim #8.
+      return 100 / (1 + (c("EC50") / x) ** hill);
+    case "inhibitor-3pl-normalized-logx":
+      // B6 Inhib #3.
+      return 100 / (1 + 10 ** (x - c("LogIC50")));
+    case "inhibitor-4pl-normalized-logx":
+      // B6 Inhib #4: the (x-LogIC50) form falls with HillSlope > 0.
+      return 100 / (1 + 10 ** ((x - c("LogIC50")) * hill));
+    case "inhibitor-3pl-normalized-x":
+      // B6 Inhib #7.
+      return 100 / (1 + x / c("IC50"));
+    case "inhibitor-4pl-normalized-x":
+      // B6 Inhib #8: the (x/IC50) form falls with HillSlope > 0.
+      return 100 / (1 + (x / c("IC50")) ** hill);
+    case "biphasic-logx": {
+      // B6 Special logx #2.
+      const span = c("Top") - c("Bottom");
+      return (
+        c("Bottom") +
+        (span * c("Frac")) / (1 + 10 ** ((c("LogEC50_1") - x) * c("nH1"))) +
+        (span * (1 - c("Frac"))) / (1 + 10 ** ((c("LogEC50_2") - x) * c("nH2")))
+      );
+    }
+    case "biphasic-x": {
+      // B6 Special X #2.
+      const span = c("Top") - c("Bottom");
+      return (
+        c("Bottom") +
+        (span * c("Frac")) / (1 + (c("EC50_1") / x) ** c("nH1")) +
+        (span * (1 - c("Frac"))) / (1 + (c("EC50_2") / x) ** c("nH2"))
+      );
+    }
+    case "bell-shaped-logx": {
+      // B6 Special logx #3.
+      return (
+        c("Dip") +
+        (c("Plateau1") - c("Dip")) / (1 + 10 ** ((c("LogEC50_1") - x) * c("nH1"))) +
+        (c("Plateau2") - c("Dip")) / (1 + 10 ** ((x - c("LogEC50_2")) * c("nH2")))
+      );
+    }
+    case "bell-shaped-x": {
+      // B6 Special X #3.
+      return (
+        c("Dip") +
+        (c("Plateau1") - c("Dip")) / (1 + (c("EC50_1") / x) ** c("nH1")) +
+        (c("Plateau2") - c("Dip")) / (1 + (x / c("EC50_2")) ** c("nH2"))
+      );
+    }
+    case "absolute-ic50-logx":
+      // B6 Special logx #11: the 4PL fit.
+      return bottom + rise / (1 + 10 ** ((c("LogEC50") - x) * hill));
+    case "absolute-ic50-x":
+      // B6 Special X #11: the 4PL fit.
+      return bottom + rise / (1 + (c("EC50") / x) ** hill);
+    case "pade-11":
+      // B6 Standard #10: Y=(A0+A1·X)/(1+B1·X).
+      return (c("A0") + c("A1") * x) / (1 + c("B1") * x);
+    case "power-series":
+      // B6 Classic #13: Y=A·X^B + C·X^D.
+      return c("A") * x ** c("B") + c("C") * x ** c("D");
+    case "exponential-plateau":
+      // B6 Growth #3: Y=YM−(YM−Y0)·exp(−K·X).
+      return c("YM") - (c("YM") - c("Y0")) * Math.exp(-c("K") * x);
+    case "beta-growth-decay": {
+      // B6 Growth #6: Yin et al. 2003.
+      const te = c("Te");
+      const tm = c("Tm");
+      return c("Wmax") * (1 + (te - x) / (te - tm)) * (x / te) ** (te / (te - tm));
+    }
+    case "lq-fraction-surviving":
+      // B6 §Linear quadratic #1.
+      return Math.exp(-(c("A") * x + c("B") * x ** 2));
+    case "lq-percent-surviving":
+      // B6 §Linear quadratic #2.
+      return 100 * Math.exp(-(c("A") * x + c("B") * x ** 2));
+    case "lq-fraction-dead":
+      // B6 §Linear quadratic #4.
+      return 1 - Math.exp(-(c("A") * x + c("B") * x ** 2));
+    case "lq-percent-dead":
+      // B6 §Linear quadratic #5.
+      return 100 * (1 - Math.exp(-(c("A") * x + c("B") * x ** 2)));
+    case "lq-count-alive":
+      // B6 §Linear quadratic #3.
+      return c("Total") * Math.exp(-(c("A") * x + c("B") * x ** 2));
+    case "lq-count-dead":
+      // B6 §Linear quadratic #6.
+      return c("Total") * (1 - Math.exp(-(c("A") * x + c("B") * x ** 2)));
     case "asymmetric-5pl-logx":
       return bottom + rise / (1 + 10 ** ((c("LogEC50") + Math.log10(2 ** (1 / s) - 1) / hill - x) * hill)) ** s;
     case "asymmetric-5pl-x":
       return bottom + rise / (1 + ((c("EC50") * (2 ** (1 / s) - 1) ** (1 / hill)) / x) ** hill) ** s;
     case "line":
       return c("Intercept") + c("Slope") * x;
+    case "line-through-origin":
+      // B6 §Lines #3: Y = Slope·X, no intercept.
+      return c("Slope") * x;
+    case "horizontal-line":
+      // B6 §Lines #4: Y = Mean.
+      return c("Mean");
     case "semilog-line":
       return c("Intercept") + c("Slope") * Math.log(x);
+    case "semilog-y-log":
+    case "exponential-growth-log":
+      // B6 §Lines #6 / §Growth #2: log(Y) = Intercept + Slope·X, so
+      // Y = exp(Intercept + Slope·X) on the raw scale.
+      return Math.exp(c("Intercept") + c("Slope") * x);
+    case "log-log-line":
+      // B6 §Lines #7: log(Y) = Intercept + Slope·log(X), a power law.
+      return Math.exp(c("Intercept")) * x ** c("Slope");
     case "hyperbola":
       return (c("Bmax") * x) / (c("Kd") + x);
     case "quadratic":
-      return c("B0") + c("B1") * x + c("B2") * x ** 2;
+      return c("B0") + c("B1") * xc + c("B2") * xc ** 2;
     case "cubic":
-      return c("B0") + c("B1") * x + c("B2") * x ** 2 + c("B3") * x ** 3;
+      return c("B0") + c("B1") * xc + c("B2") * xc ** 2 + c("B3") * xc ** 3;
     case "quartic":
       // Plan 29: the polynomial evaluator generalises by degree.
-      return c("B0") + c("B1") * x + c("B2") * x ** 2 + c("B3") * x ** 3 + c("B4") * x ** 4;
+      return c("B0") + c("B1") * xc + c("B2") * xc ** 2 + c("B3") * xc ** 3 + c("B4") * xc ** 4;
     case "quintic":
       return (
-        c("B0") + c("B1") * x + c("B2") * x ** 2 + c("B3") * x ** 3 + c("B4") * x ** 4 + c("B5") * x ** 5
+        c("B0") + c("B1") * xc + c("B2") * xc ** 2 + c("B3") * xc ** 3 + c("B4") * xc ** 4 + c("B5") * xc ** 5
       );
+    case "sextic":
+      // Seq 201: 6th order polynomial — same pattern, one degree higher.
+      return (
+        c("B0") + c("B1") * xc + c("B2") * xc ** 2 + c("B3") * xc ** 3 + c("B4") * xc ** 4 + c("B5") * xc ** 5 +
+        c("B6") * xc ** 6
+      );
+    case "sextic":
+      // B6 §Polynomial #11: one degree higher again.
+      return (
+        c("B0") + c("B1") * x + c("B2") * x ** 2 + c("B3") * x ** 3 + c("B4") * x ** 4 + c("B5") * x ** 5 + c("B6") * x ** 6
+      );
+    case "centered-first":
+    case "centered-second":
+    case "centered-third":
+    case "centered-fourth":
+    case "centered-fifth":
+    case "centered-sixth": {
+      // B6 §Polynomial #2,4,6,8,10,12: fitted on X − XCenter (the
+      // coefficient row the runner appends for the derived X center).
+      const xc = c("XCenter");
+      const d = x - xc;
+      let y = c("B0") + c("B1") * d;
+      if (model !== "centered-first") y += c("B2") * d ** 2;
+      if (model === "centered-third" || model === "centered-fourth" || model === "centered-fifth" || model === "centered-sixth")
+        y += c("B3") * d ** 3;
+      if (model === "centered-fourth" || model === "centered-fifth" || model === "centered-sixth")
+        y += c("B4") * d ** 4;
+      if (model === "centered-fifth" || model === "centered-sixth") y += c("B5") * d ** 5;
+      if (model === "centered-sixth") y += c("B6") * d ** 6;
+      return y;
+    }
     case "segmental-linear":
       // Plan 29: the continuous hinge (X0 is the coefficient row the
       // runner appends for the profiled breakpoint) — one unbroken line,
@@ -80,14 +250,62 @@ export function evaluate(
       return (c("Y0") - c("Plateau")) * Math.exp(-c("K") * x) + c("Plateau");
     case "two-phase-decay":
       return c("Plateau") + c("Span1") * Math.exp(-c("K1") * x) + c("Span2") * Math.exp(-c("K2") * x);
+    case "three-phase-decay":
+      return (
+        c("Plateau") +
+        c("Span1") * Math.exp(-c("K1") * x) +
+        c("Span2") * Math.exp(-c("K2") * x) +
+        c("Span3") * Math.exp(-c("K3") * x)
+      );
     case "plateau-decay":
       return x < c("X0")
         ? c("Y0")
         : c("Plateau") + (c("Y0") - c("Plateau")) * Math.exp(-c("K") * (x - c("X0")));
     case "one-phase-association":
       return c("Y0") + (c("Plateau") - c("Y0")) * (1 - Math.exp(-c("K") * x));
+    case "two-phase-association":
+      return (
+        c("Y0") +
+        c("Span1") * (1 - Math.exp(-c("K1") * x)) +
+        c("Span2") * (1 - Math.exp(-c("K2") * x))
+      );
+    case "plateau-association":
+      return x < c("X0")
+        ? c("Y0")
+        : c("Y0") + (c("Plateau") - c("Y0")) * (1 - Math.exp(-c("K") * (x - c("X0"))));
     case "gaussian":
       return c("Amplitude") * Math.exp(-0.5 * ((x - c("Mean")) / c("SD")) ** 2);
+    case "sum-of-two-gaussians":
+      return (
+        c("Amplitude1") * Math.exp(-0.5 * ((x - c("Mean1")) / c("SD1")) ** 2) +
+        c("Amplitude2") * Math.exp(-0.5 * ((x - c("Mean2")) / c("SD2")) ** 2)
+      );
+    case "lognormal":
+      return (c("A") / x) * Math.exp(-0.5 * (Math.log(x / c("GeoMean")) / Math.log(c("GeoSD"))) ** 2);
+    case "cumulative-gaussian-percent":
+      return 100 * pnorm((x - c("Mean")) / c("SD"));
+    case "cumulative-gaussian-fraction":
+      return pnorm((x - c("Mean")) / c("SD"));
+    case "cumulative-gaussian-counts":
+      return c("Total") * pnorm((x - c("Mean")) / c("SD"));
+    case "sum-of-two-lorentzians":
+      return (
+        c("Amplitude1") / (1 + ((x - c("Center1")) / c("Width1")) ** 2) +
+        c("Amplitude2") / (1 + ((x - c("Center2")) / c("Width2")) ** 2)
+      );
+    case "standard-sine-wave":
+      return c("Amplitude") * Math.sin((2 * Math.PI * x) / c("Wavelength") + c("PhaseShift"));
+    case "damped-sine-wave":
+      return (
+        c("Amplitude") *
+        Math.exp(-c("K") * x) *
+        Math.sin((2 * Math.PI * x) / c("Wavelength") + c("PhaseShift"))
+      );
+    case "sinc":
+      return x === 0
+        ? c("Amplitude")
+        : (c("Amplitude") * Math.sin((2 * Math.PI * x) / c("Wavelength"))) /
+            ((2 * Math.PI * x) / c("Wavelength"));
     case "boltzmann-sigmoid":
       return c("Bottom") + (c("Top") - c("Bottom")) / (1 + Math.exp((c("V50") - x) / c("Slope")));
     case "lorentzian":
@@ -129,13 +347,14 @@ function fittedCurve(
   steps = 100,
   ligandConcentration?: number,
   customEquation?: string,
+  centeredX?: number,
 ): { x: number[]; y: number[] } {
   const x: number[] = [];
   const y: number[] = [];
   for (let i = 0; i <= steps; i++) {
     const x0 = xMin + ((xMax - xMin) * i) / steps;
     x.push(x0);
-    y.push(evaluate(model, coefficients, x0, ligandConcentration, customEquation));
+    y.push(evaluate(model, coefficients, x0, ligandConcentration, customEquation, centeredX));
   }
   return { x, y };
 }
@@ -202,7 +421,7 @@ export function addFittedCurves(
     if (!y || !xs.length || !coefficients.some((c) => c.estimate != null)) return [];
     const lines = curveLines(fit, i, coefficients);
     notes.push(many ? `${name}: ${lines.join(", ")}` : lines.join("<br>"));
-    const curve = fittedCurve(model, coefficients, ...extent(xs), 100, fit.ligandConcentration, fit.customEquation);
+    const curve = fittedCurve(model, coefficients, ...extent(xs), 100, fit.ligandConcentration, fit.customEquation, fit.centeredX);
     return [
       {
         type: "scatter",
@@ -246,7 +465,7 @@ export function addFittedCurve(
       const yCol = ys.find((c) => c.name === setName) ?? y;
       const xs = xyPoints(x, yCol).x.filter((v) => keepCurveX(model, v));
       if (!xs.length) continue;
-      const curve = fittedCurve(model, coefficientsForSet(coefficients, setName, sets), ...extent(xs), 100, fit.ligandConcentration, fit.customEquation);
+      const curve = fittedCurve(model, coefficientsForSet(coefficients, setName, sets), ...extent(xs), 100, fit.ligandConcentration, fit.customEquation, fit.centeredX);
       fig.data = [
         {
           type: "scatter",
@@ -264,7 +483,7 @@ export function addFittedCurve(
   }
   const xs = xyPoints(x, y).x.filter((v) => keepCurveX(model, v));
   if (!xs.length) return;
-  const curve = fittedCurve(model, coefficients, ...extent(xs), 100, fit.ligandConcentration, fit.customEquation);
+  const curve = fittedCurve(model, coefficients, ...extent(xs), 100, fit.ligandConcentration, fit.customEquation, fit.centeredX);
   fig.data = [
     {
       type: "scatter",

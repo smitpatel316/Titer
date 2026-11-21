@@ -8,6 +8,27 @@
 // Titer stores params, never results, and whether Prism recomputes on
 // open is unknown until a Prism/Viewer read-back (test C-07, still open).
 //
+// Multiple t tests (`MULTIPLE_TWO_SAMPLE_TESTS`, seq 289 / 1.8 M1) are
+// written the same params-only way: the test + correction Prism recomputes
+// per row (t, df, p) on open. The mapping is corpus-verified (11 real
+// Prism 10 files, 12 analyses — test-corpus, never Mansi's files):
+// paired → MULTIPLE_PAIRED_TWO_SAMPLE_TESTS; unpaired Welch (Titer's
+// default) → MULTIPLE_UNPAIRED_TWO_SAMPLE_EQUAL_SD_TESTS, the only
+// unpaired-parametric value ever observed, whose stored results in both
+// files carrying it are Welch-computed (fractional Welch–Satterthwaite
+// df, re-derived from the raw data); Wilcoxon → MULTIPLE_WILCOXON_TESTS;
+// Mann-Whitney → MULTIPLE_MANN_WHITNEY_TESTS. The multipleComparisons
+// block is verbatim from those files (all three sub-blocks present, only
+// `type` varies). Two substitutions, disclosed in the save report:
+// Prism offers no plain-Holm option, so Holm is written as Holm-Šídák
+// (GraphPad's recommended closest); Titer's FDR is Benjamini-Hochberg,
+// written as Prism's recommended two-stage Benjamini-Krieger-Yekutieli
+// (the only fdr.test observed). Two gaps cannot be represented and are
+// registered, not guessed: a pooled SD across all rows (no Prism test
+// value observed for the single-pooled-variance choice — EQUAL_SD's
+// stored results are per-row Welch, not pooled), and no correction (no
+// multipleComparisons type value observed for "do not correct").
+//
 // The spec is the vault note `Research/.prism write spec (1C).md` — this
 // file implements it. Anything the spec marks unknown is left out, never
 // guessed. Clean-room: written from files Prism wrote, never from Prism's
@@ -20,10 +41,25 @@
 //   column     → format "column", one y_single dataset per column
 //   grouped    → format "grouped", one y_replicates dataset per group
 //   contingency→ format "contingency", one y_single dataset per column
+//   parts-of-whole → format "parts_of_whole", one y_single dataset per column
 //   survival   → format "survival", X = time, one dataset per group
-//   nested / multiple → the write FAILS with a plain-language error naming
-//                 the table: silently dropping a table would be data loss,
-//                 and Prism has no counterpart for them.
+//   nested / multiple → written as a Column table, with a warning in the
+//                 transfer report naming the table (seq 162). No values or
+//                 column names are dropped — the flattening is lossless at
+//                 the cell level — but the table TYPE is not preserved, and
+//                 the report says so plainly. The evidence: no real Prism
+//                 file with a nested table exists in Titer's corpus (the
+//                 4 synthetic nested files are the project's own generator
+//                 output, explicitly never ground truth), so a native
+//                 `format: "nested"` emission would be a guess at Prism's
+//                 layout — and a guessed layout is the crash class seq 175
+//                 fixed. For Multiple Variables there is no `multiple`
+//                 format at all, in real or synthetic files: even the
+//                 corpus generator writes MV tables as `format: "column"`.
+//                 This mirrors the import direction, which reads Prism
+//                 nested tables as Column with the same warning
+//                 (src/lib/prism.ts), so the mapping is the exact reverse
+//                 of an established one, not a new invention.
 
 import JSZip from "jszip";
 import type { ProjectFilePayload } from "./project-file";
@@ -312,14 +348,26 @@ const excludedCellAttributes = (rows: Set<number> | undefined): { rows: string; 
   return entries;
 };
 
-const replicateEntry = (lastRow: number, cellAttributes?: { rows: string; attributes: string[] }[]) => ({
+// seq 289: firstRow is a real parameter now, not a hardcoded 0 — a
+// replicate range's [firstRow, lastRow] is exactly the rows where its
+// subcolumns hold values, and a wholly-blank run gets the sentinel
+// firstRow -1, lastRow -1 (real Prism's rule; copy_2 violated it in 32
+// of 58 grouped ranges and Prism 11 refuses the file). The string
+// variant is the row-titles replicate: real files carry exactly one
+// DriverReplicate there (valueType "string", decimalsLength 15).
+const replicateEntry = (
+  firstRow: number,
+  lastRow: number,
+  cellAttributes?: { rows: string; attributes: string[] }[],
+  valueType: "real" | "string" = "real",
+) => ({
   "@class": "DriverReplicate",
-  valueType: "real",
+  valueType,
   commonAttributes: ["NUMERIC"],
-  decimalsLength: 1,
+  decimalsLength: valueType === "string" ? 15 : 1,
   significantDigitsCount: 7,
   lastRow,
-  firstRow: 0,
+  firstRow,
   ...(cellAttributes && cellAttributes.length ? { cellAttributes } : {}),
 });
 
@@ -339,7 +387,13 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
   // 02BD7CFB). Inputs are matched to datasets by position, never by title.
   const tableInfo = new Map<
     string,
-    { sheetUid: string; tableUid: string; datasetUidByTitle: Map<string, string>; datasetTitles: string[]; datasetUids: string[] }
+    {
+      sheetUid: string;
+      tableUid: string;
+      datasetUidByTitle: Map<string, string>;
+      datasetTitles: string[];
+      datasetUids: string[];
+    }
   >();
 
   const tables = project.rootOrder.map((id) => project.nodes[id]).filter((n) => n?.type === "table");
@@ -357,12 +411,23 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
     }
     const tableType = table.tableType ?? "column";
     if (tableType === "nested" || tableType === "multiple") {
-      // Refuse the whole write: dropping a table silently would be data
-      // loss, and Prism has no counterpart for these types. The user can
-      // convert the table to Column first and try again.
-      throw new Error(
-        `${displayName} is a ${tableType === "nested" ? "Nested" : "Multiple variables"} table, and Prism has no matching table type — convert it to a Column table first, then save as .prism.`,
-      );
+      // Written as a Column table, never refused and never dropped: the
+      // whole write used to fail here, so a project holding one nested or
+      // MV table could not be saved as .prism at all. All values and column
+      // names survive verbatim (the generic path below emits one y_single
+      // dataset per column — "A:S1:R1" names pass through untouched, since
+      // they match neither the summary nor the replicate grouping); only
+      // the table type is lost, and the report says so. The type can't be
+      // preserved honestly: no verified native representation exists (see
+      // the header note), so guessing `format: "nested"` would risk the
+      // file Prism rejects or crashes on.
+      issues.push({
+        severity: "warning",
+        message:
+          tableType === "nested"
+            ? `${displayName} is a Nested table — no verified .prism representation of a nested table exists in Titer's file corpus, so it was written as a Column table with all values and column names preserved; re-create the group/subgroup nesting in Prism.`
+            : `${displayName} is a Multiple variables table — .prism has no separate table format for it in Titer's verified file corpus, so it was written as a Column table with all values and column names preserved; re-create it as a Multiple Variables table in Prism.`,
+      });
     }
     const rowCount = data.rows.length;
     const rowTitles = data.rows.map((r) => r[0]);
@@ -473,6 +538,14 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
       } else if (tableType === "contingency") {
         format = "contingency";
         dataFormat = "y_single";
+      } else if (tableType === "parts-of-whole") {
+        format = "parts_of_whole";
+        // The table-level format is its datasets' format when they agree
+        // (a y_sd_n Parts-of-Whole table declares y_sd_n, as a Column
+        // table does — real Prism stores the specific statistic there);
+        // otherwise y_single, and the reader names subcolumns from each
+        // dataset's own format (W7/BUG-9).
+        dataFormat = uniform ? sets[0].dataFormat : "y_single";
       } else {
         format = "column";
         dataFormat = uniform ? sets[0].dataFormat : "y_single";
@@ -495,7 +568,7 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         attributes: ["DS_ATTR_X"],
         replicates: [
           {
-            ...replicateEntry(rowCount - 1, excludedCellAttributes(excludedByColumn.get(0))),
+            ...replicateEntry(0, rowCount - 1, excludedCellAttributes(excludedByColumn.get(0))),
             commonAttributes: ["NUMERIC", "NOTCONV"],
           },
         ],
@@ -516,14 +589,30 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         // different exclusions must not share a run (BUG-10: Ya_1+Ya_2
         // excluded at row 1, Yb_1 excluded but Yb_2 live, must not become
         // one "0~1" range with EXCLUDED row 1).
+        //
+        // The run ALSO breaks where the row-occupancy pattern changes
+        // (seq 289): a range's [firstRow, lastRow] is exactly the rows
+        // where its subcolumns hold values, so consecutive subcolumns
+        // sharing the same occupied-row set form one range with
+        // firstRow/lastRow = min/max of that set, and a wholly-blank set
+        // gets the sentinel firstRow -1, lastRow -1. The old writer
+        // emitted one range spanning all rows for every dataset, claiming
+        // rows that hold no data — Prism 11 refuses the file. The two
+        // splits compose (a run breaks where either pattern changes),
+        // neither replaces the other.
+        const isBlank = (v: string | null) => v === null || v.trim() === "";
         const keyOf = (rows: Set<number>) => [...rows].sort((a, b) => a - b).join(",");
-        const runs: { start: number; end: number; key: string; rows: Set<number> }[] = [];
+        const runs: { start: number; end: number; key: string; rows: Set<number>; occupied: Set<number> }[] = [];
         for (let k = 0; k < set.columns.length; k++) {
           const rows = excludedByColumn.get(yColToAll(set.columns[k])) ?? new Set<number>();
-          const key = keyOf(rows);
+          const occupied = new Set<number>();
+          for (let r = 0; r < rowCount; r++) {
+            if (!isBlank(yColumns[set.columns[k]].values[r])) occupied.add(r);
+          }
+          const key = `${keyOf(rows)}|${keyOf(occupied)}`;
           const last = runs[runs.length - 1];
           if (last && last.key === key) last.end = k;
-          else runs.push({ start: k, end: k, key, rows });
+          else runs.push({ start: k, end: k, key, rows, occupied });
         }
         setJson(`data/sets/${setUid}.json`, {
           "@class": "DataSet",
@@ -531,9 +620,13 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
           format: "y_replicates",
           title: set.title,
           attributes: ["DS_ATTR_Y"],
-          "replicate ranges": runs.map(({ start, end, rows }) => ({
+          "replicate ranges": runs.map(({ start, end, rows, occupied }) => ({
             range: start === end ? String(start) : `${start}~${end}`,
-            replicate: replicateEntry(lastRow, excludedCellAttributes(rows)),
+            replicate: replicateEntry(
+              occupied.size === 0 ? -1 : Math.min(...occupied),
+              occupied.size === 0 ? -1 : Math.max(...occupied),
+              excludedCellAttributes(rows),
+            ),
           })),
         });
       } else {
@@ -544,7 +637,7 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
           title: set.title,
           attributes: ["DS_ATTR_Y"],
           replicates: set.columns.map((colIdx) =>
-            replicateEntry(lastRow, excludedCellAttributes(excludedByColumn.get(yColToAll(colIdx)))),
+            replicateEntry(0, lastRow, excludedCellAttributes(excludedByColumn.get(yColToAll(colIdx)))),
           ),
         });
       }
@@ -559,7 +652,12 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         format: "text",
         title: "Row titles",
         attributes: ["DS_ATTR_RT"],
-        replicates: [],
+        // seq 289: real Prism files carry exactly one string
+        // DriverReplicate here (firstRow 0, lastRow <last> — the
+        // original's 38/38, corpus 95/95); the empty array Titer wrote
+        // is a plausible unconditional-deref crash, same family as
+        // BUG-20 / seq 175.
+        replicates: [replicateEntry(0, rowCount - 1, undefined, "string")],
       });
     }
 
@@ -577,6 +675,17 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
     });
     setJson(`data/sheets/${sheetUid}/sheet.json`, {
       "@class": "DataSheet",
+      // seq 302: identity fields Prism requires to list the table in the
+      // navigator — without uid/$id/fenID Prism opens the file but hides
+      // the data table (the table is in the file, just unreachable in the
+      // UI). Values mirror the info-sheet writer: uid is the sheet id,
+      // $id the data-sheet schema, fenID the sheet position (real Prism
+      // files carry distinct per-sheet fenIDs; MTT note above: fenID is
+      // sheet position, not class). The nested table object carries its
+      // own $id, verbatim from a real Prism file.
+      $id: "sheets/data_sheet/data_sheet.schema.json",
+      uid: sheetUid,
+      fenID: dataSheetUids.length - 1,
       title: name,
       table: {
         // BUG-20: real Prism's reader dispatches on table["@class"] and
@@ -584,6 +693,7 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         // 11.2.0 on open (SIGSEGV in NSDocument init). Real files write
         // "XYDataTable" for xy/survival tables, "DataTable" otherwise.
         "@class": isXY ? "XYDataTable" : "DataTable",
+        $id: "sheets/data_sheet/data_table/data_table.schema.json",
         uid: tableUid,
         format,
         dataFormat,
@@ -605,6 +715,12 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
   // Prism 4PL analysis over two datasets into two Titer nodes; the writer
   // reverses per node — the report says the written file has one analysis
   // per node, not per source analysis).
+  // Multiple-t-tests correction substitutions (seq 289): Prism has no
+  // plain-Holm and no observed Benjamini-Hochberg fdr.test, so Holm is
+  // written as Holm-Šídák and FDR as Benjamini-Krieger-Yekutieli — the
+  // names are collected here and disclosed as one warning each below.
+  const holmSidakWritten: string[] = [];
+  const bkyWritten: string[] = [];
   for (const table of tables) {
     const info = tableInfo.get(table.id);
     if (!info) continue;
@@ -755,6 +871,130 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         });
         setJson(`analyses/${analysisUid}/constants.json`, { "@class": "AnalysisConstants", version: "0.0.0" });
         report.analyses.push(node.name);
+      } else if (node.analysisType === "multiple-t-tests") {
+        // Multiple t tests → MULTIPLE_TWO_SAMPLE_TESTS, params-only like
+        // NLREG/survival: isCalculated false, resultSheets [], no
+        // results.json — Prism recomputes t, df and p per row on open.
+        // Params default as the runner does (multiple-t-tests.ts
+        // DEFAULTS): unpaired, Gaussian, no pooled SD, Holm.
+        const paired = params.paired === true;
+        const gaussian = params.gaussian !== false;
+        const pooledSd = params.pooledSd === true;
+        const correction = typeof params.correction === "string" ? params.correction : "holm";
+        const reasons: string[] = [];
+        let test: string | undefined;
+        if (gaussian && paired) test = "MULTIPLE_PAIRED_TWO_SAMPLE_TESTS";
+        else if (gaussian && !paired && !pooledSd) test = "MULTIPLE_UNPAIRED_TWO_SAMPLE_EQUAL_SD_TESTS";
+        else if (gaussian && !paired && pooledSd)
+          reasons.push(
+            "pooled SD across rows (one shared SD for every row) — no Prism test value was observed for the single-pooled-variance choice, and MULTIPLE_UNPAIRED_TWO_SAMPLE_EQUAL_SD_TESTS stores per-row Welch results, not pooled ones",
+          );
+        else if (!gaussian && paired) test = "MULTIPLE_WILCOXON_TESTS";
+        else if (!gaussian && !paired) test = "MULTIPLE_MANN_WHITNEY_TESTS";
+        // Prism's correction options (GraphPad Statistics Guide, "Options
+        // for multiple t tests"): statistical — Holm-Šídák (recommended),
+        // Šídák-Bonferroni, Bonferroni-Dunn, or none; FDR — BKY
+        // (recommended), Benjamini-Hochberg, or Benjamini-Yekutieli. The
+        // corpus shows only HOLM_SIDAK and BENJAMINI_KRIEGER_YEKUTIELI,
+        // so Titer's Holm and Benjamini-Hochberg are written as those
+        // nearest Prism methods and disclosed in the report below — never
+        // silently, and never as a guessed enum. "none" has no observed
+        // multipleComparisons type value (FDR and STATISTICAL only), and
+        // omitting the block would let Prism apply its own default
+        // correction, so it is registered, not written.
+        let mcType: "STATISTICAL" | "FDR" | undefined;
+        if (correction === "holm") mcType = "STATISTICAL";
+        else if (correction === "fdr") mcType = "FDR";
+        else if (correction === "none")
+          reasons.push(
+            "no correction — no multipleComparisons type value was observed for “do not correct” (FDR and STATISTICAL only)",
+          );
+        else reasons.push(`correction “${correction}” — unknown correction`);
+        // The two compared datasets: the wizard's `sets` ([set1, set2])
+        // when the table has more than two groups, else every dataset
+        // (the usual two-group table). Idx is a LETTER by position among
+        // ALL datasets (seq 247, J6) — real files skip letters for
+        // datasets outside the analysis (Low A, High C), so the position
+        // is looked up in the full list, never among the inputs.
+        const setsParam =
+          Array.isArray(params.sets) && params.sets.every((s) => typeof s === "string")
+            ? (params.sets as string[])
+            : undefined;
+        const inputTitles = setsParam ?? info.datasetTitles;
+        if (inputTitles.length !== 2) reasons.push(`needs exactly 2 input datasets, found ${inputTitles.length}`);
+        const inputs: { uid: string; title: string; idx: string }[] = [];
+        for (const title of inputTitles) {
+          const pos = info.datasetTitles.indexOf(title);
+          if (pos < 0) {
+            reasons.push(`dataset “${title}” is not in table “${table.name}”`);
+            continue;
+          }
+          inputs.push({ uid: info.datasetUids[pos] ?? "", title, idx: String.fromCharCode(65 + pos) });
+        }
+        if (inputs.length === 2 && inputs[0].uid === inputs[1].uid)
+          reasons.push(`datasets “${inputTitles[0]}” and “${inputTitles[1]}” resolve to the same dataset`);
+        if (reasons.length > 0) {
+          report.analysesNotWritten.push(`${node.name} (multiple-t-tests — ${reasons.join("; ")})`);
+          continue;
+        }
+        const analysisUid = crypto.randomUUID().toUpperCase();
+        analysisUids.push(analysisUid);
+        titles[analysisUid] = { title: node.name };
+        setJson(`analyses/${analysisUid}/sheet.json`, {
+          "@class": "AnalysisSheet",
+          analysisClass: "MULTIPLE_TWO_SAMPLE_TESTS",
+          // Identity fields, as NLREG (seq 247): fenID has no per-class
+          // constant in real MTT files (18, 17, 24, 25, 19, 53, 54, 39,
+          // 38, 1, 9 — sheet position, not class), so 0 like NLREG;
+          // minRequiredVersion 10.0.0.0 is the majority observed value
+          // (8 of 11 real files; the rest 9.0.0.0).
+          uid: analysisUid,
+          fenID: 0,
+          $id: "analyses/sheet.schema.json",
+          minRequiredVersion: { major: 10, minor: 0, subminor: 0, build: 0 },
+          title: node.name,
+          inputSheets: [{ uid: info.sheetUid, title: table.name }],
+          inputDataSets: inputs,
+          resultSheets: [],
+          isCalculated: false,
+        });
+        setJson(`analyses/${analysisUid}/parameters.json`, {
+          "@class": "AnalysisParameters",
+          $id: "analyses/multiple_two_sample_tests/parameters.schema.json",
+          version: "0.0.0",
+          content: {
+            test,
+            // The multipleComparisons block is verbatim from real files:
+            // all three sub-blocks are always present and only `type`
+            // selects one. discoveryLevel 1.0 and significanceLevel 0.05
+            // are the uniform observed values; pValueStyle
+            // FULL_SINGLE_ASTERISK is the majority (8 of 11).
+            multipleComparisons: {
+              type: mcType,
+              statistical: {
+                test: "HOLM_SIDAK",
+                report: { adjustedPValues: true },
+                options: { significanceLevel: 0.05 },
+              },
+              fdr: {
+                test: "BENJAMINI_KRIEGER_YEKUTIELI",
+                options: { discoveryLevel: 1.0 },
+              },
+              noCorrection: { options: { significanceLevel: 0.05 } },
+            },
+            report: { negLog10: false, negLog2: false },
+            graph: { volcanoPlot: true },
+            options: { swapDirection: false },
+            output: {
+              significantDigitCount: 4,
+              pValueStyle: { type: "P_VALUE_STYLE_FULL_SINGLE_ASTERISK", decimalDigitCount: 6 },
+            },
+          },
+        });
+        setJson(`analyses/${analysisUid}/constants.json`, { "@class": "AnalysisConstants", version: "0.0.0" });
+        if (mcType === "STATISTICAL") holmSidakWritten.push(node.name);
+        else bkyWritten.push(node.name);
+        report.analyses.push(node.name);
       } else {
         report.analysesNotWritten.push(`${node.name} (${node.analysisType} — not yet supported in Prism)`);
       }
@@ -768,6 +1008,22 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
     issues.push({
       severity: "warning",
       message: `Analyses are written one per Titer node (${analysisNodes} written) — a Prism analysis over two datasets becomes two Titer nodes on import, and each writes back as its own analysis.`,
+    });
+  }
+  // Multiple-t-tests correction substitutions (seq 289): Prism has no
+  // plain-Holm option and no observed Benjamini-Hochberg fdr.test, so the
+  // written file uses Prism's nearest methods and Prism recomputes the
+  // adjusted p-values on open — they will differ slightly from Titer's.
+  if (holmSidakWritten.length) {
+    issues.push({
+      severity: "warning",
+      message: `Multiple t tests with Holm correction (${holmSidakWritten.length} written) use Prism's Holm-Šídák method instead — Prism offers no plain-Holm option, so the adjusted p-values Prism computes on open will differ slightly from Titer's Holm values.`,
+    });
+  }
+  if (bkyWritten.length) {
+    issues.push({
+      severity: "warning",
+      message: `Multiple t tests with FDR correction (${bkyWritten.length} written) use Prism's two-stage Benjamini-Krieger-Yekutieli method instead of Titer's Benjamini-Hochberg — the q-values Prism computes on open will differ from Titer's.`,
     });
   }
   issues.push({
@@ -787,7 +1043,8 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
   // alone is sufficient: a selectedCellsRange-only variant opens clean,
   // while uiState-only still crashes. Value is the real-Prism default.
   const infoUids: string[] = [];
-  for (const infoNode of project.rootOrder.map((id) => project.nodes[id]).filter((n) => n?.type === "info")) {
+  const infoNodes = project.rootOrder.map((id) => project.nodes[id]).filter((n) => n?.type === "info");
+  for (const [infoIdx, infoNode] of infoNodes.entries()) {
     const infoUid = crypto.randomUUID().toUpperCase();
     infoUids.push(infoUid);
     titles[infoUid] = { title: infoNode.name };
@@ -795,7 +1052,10 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
       "@class": "InfoSheet",
       $id: "sheets/info_sheet/info_sheet.schema.json",
       uid: infoUid,
-      fenID: 0,
+      // seq 289: info sheets get distinct fenIDs (0, 2, … — the
+      // original's pattern: "Project info 1" 0, "*Project info 1" 2);
+      // the hardcoded 0 on every info sheet duplicated the id.
+      fenID: infoIdx * 2,
       title: infoNode.name,
       notesText: infoNode.info?.notes ?? "",
       selectedCellsRange: {

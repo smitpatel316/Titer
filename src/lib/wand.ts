@@ -21,6 +21,7 @@ export const WAND_LINK_FIELDS = [
   "poissonAnalysisId",
   "pcaAnalysisId",
   "kmeansAnalysisId",
+  "hclustAnalysisId",
   "smoothAnalysisId",
   "monteCarloAnalysisId",
 ] as const;
@@ -194,6 +195,16 @@ export function applyWand(
         const copy = remap.get(linked);
         if (copy) options[field] = copy;
         else delete options[field];
+      }
+      // The multi-source list, same rule per entry: remapped when its
+      // analysis was copied, dropped when it wasn't; an emptied list goes.
+      if (Array.isArray(options.sigAnalysisIds)) {
+        const remapped = options.sigAnalysisIds.flatMap((id) => {
+          const copy = remap.get(id);
+          return copy ? [copy] : [];
+        });
+        if (remapped.length) options.sigAnalysisIds = remapped;
+        else delete options.sigAnalysisIds;
       }
       nextNodes[id] = { id, type: "graph", name, parentId: targetId, graphType: type, graphOptions: options };
       createdIds.push(id);

@@ -2,7 +2,12 @@
 // inventory §3.4): the seven tools `titer_build_graph`,
 // `titer_update_graph`, `titer_clone_graph`, `titer_create_figure`,
 // `titer_update_figure`, `titer_create_info_sheet` and
-// `titer_update_info_sheet`.
+// `titer_update_info_sheet` — plus the 1.8.0 menus-batch tools
+// `titer_freeze_graph`, `titer_freeze_figure`,
+// `titer_add_drawing_object`, `titer_update_drawing_object`,
+// `titer_delete_drawing_object` and `titer_arrange_drawing_objects`
+// (seq 237/238). `titer_clone_analysis` / `titer_clone_figure` (seq 236)
+// live in mcp-dispatch.ts, on the generic `duplicateNode` store action.
 //
 // The dispatcher is the authority here, not Rust: it has the live store
 // and `GRAPH_OPTIONS_BY_TABLE`, so it validates the graph type against
@@ -11,13 +16,17 @@
 // analyses. Rust only resolves the project and passes the raw JSON args
 // through (same split as L2's `mcp-document.ts`).
 //
-// Multi-table graphs (#48) are NOT in scope (GAP-7): every tool here
-// takes one table (build/clone) or the graphs it names (figures).
+// Multi-table graphs (#48): `titer_build_graph` takes extra tables in
+// `source_table_ids` (same table type as the primary — see
+// `src/lib/multi-table.ts`), and `titer_update_graph` takes them to
+// change a graph's sources.
 import { GRAPH_OPTIONS_BY_TABLE, newGraphOptions } from "../views/graphs";
+import { validateGraphSources } from "../lib/multi-table";
 import { PALETTES, paletteNamed, savedPalette } from "../lib/palettes";
 import {
   DEFAULT_FIGURE_SIZE,
   DEFAULT_LABEL_STYLE,
+  FIGURE_IMAGE_MAX_DATA_URL,
   FIGURE_MAX_COLS,
   FIGURE_RESOLUTIONS,
   assignLabels,
@@ -32,11 +41,16 @@ import { MAX_INFO_CONSTANTS, MAX_INFO_SHEETS, allConstantNames, newConstantId } 
 import type { McpJob } from "../native";
 import {
   DEFAULT_GRAPH_OPTIONS,
+  DRAWING_OBJECT_KINDS,
   FILL_PATTERNS,
   GRAPH_CHOICES,
   GRAPH_LIMITS,
+  MAX_PICTURE_BYTES,
   PALETTE_KINDS,
   REF_LABEL_PLACES,
+  type ArrangeOp,
+  type AxisNumberFormat,
+  type DrawingObject,
   type FigureGrid,
   type FigureLabelStyle,
   type FigurePanel,
@@ -69,6 +83,8 @@ export type FigurePatch = Partial<{
   labelStyle: FigureLabelStyle;
   figureTitle: string;
   sharedLegend: SharedLegend;
+  /** The page's background colour, as `#rrggbb` (absent: white). */
+  figureBackground: string;
   dpi: Resolution;
 }>;
 
@@ -77,14 +93,36 @@ export type FigurePatch = Partial<{
  *  them, and a graph job then errors plainly. */
 export interface GraphJobDeps {
   getState: () => GraphJobState;
-  createGraph?: (parentId: string, graphType: GraphType, graphOptions?: GraphOptions) => string;
+  createGraph?: (
+    parentId: string,
+    graphType: GraphType,
+    graphOptions?: GraphOptions,
+    sourceTableIds?: string[],
+  ) => string;
   updateGraph?: (id: string, options: GraphOptions) => void;
+  /** A graph's extra source tables (#48), in order; empty clears them. */
+  setGraphSources?: (id: string, sourceTableIds: string[]) => void;
+  /** Change a graph's type (seq 244): the new type's defaults, keeping
+   *  the title and the size — or `options` wholesale, as the MCP path
+   *  merges the caller's options over the current ones already. */
+  changeGraphType?: (id: string, graphType: GraphType, options?: GraphOptions) => void;
   cloneGraph?: (graphId: string, options: CloneOptions) => string;
   createFigure?: (graphIds?: string[]) => string;
   updateFigure?: (id: string, patch: FigurePatch) => void;
   createInfoSheet?: (linkedTableId?: string | null) => string;
   updateInfoSheet?: (id: string, info: InfoSheetData) => void;
   renameNode?: (id: string, name: string) => void;
+  /** Freeze (or unfreeze) a graph or a figure (seq 237). */
+  setGraphFrozen?: (id: string, kind: "graph" | "figure", frozen: boolean) => void;
+  /** Drawing objects on a graph or figure sheet (seq 238). */
+  addDrawingObject?: (nodeId: string, object: DrawingObject) => void;
+  updateDrawingObject?: (
+    nodeId: string,
+    objectId: string,
+    patch: Partial<Omit<DrawingObject, "id" | "kind">>,
+  ) => void;
+  deleteDrawingObject?: (nodeId: string, objectId: string) => void;
+  arrangeDrawingObjects?: (nodeId: string, op: ArrangeOp, objectIds: string[]) => void;
 }
 
 /** What one graph job reports: the tool's output, and what it created
@@ -107,6 +145,7 @@ const TABLE_TYPE_LABELS: Record<TableType, string> = {
   multiple: "Multiple variables",
   contingency: "Contingency",
   survival: "Survival",
+  "parts-of-whole": "Parts of Whole",
 };
 
 // ── Job-arg readers ────────────────────────────────────────────────────
@@ -153,6 +192,9 @@ const CHOICE_FIELDS: Record<string, keyof typeof GRAPH_CHOICES> = {
   error: "error",
   shape: "shape",
   kind: "kind",
+  whisker: "whisker",
+  violinVariant: "violinVariant",
+  scatterStyle: "scatterStyle",
   xyStyle: "xyStyle",
   xyReplicates: "xyReplicates",
   pieValue: "pieValue",
@@ -185,11 +227,15 @@ const LIMIT_FIELDS = Object.keys(GRAPH_LIMITS);
 const PLAIN_NUMBER_FIELDS = ["yMin", "yMax", "xMin", "xMax", "y2Min", "y2Max", "binWidth"];
 const POSITIVE_NUMBER_FIELDS = ["yStep", "xStep", "y2Step"];
 
+/** Axis number formats: `{ format, decimals? }` objects (see `AxisNumberFormat`). */
+const NUMBER_FORMAT_FIELDS = ["xNumberFormat", "yNumberFormat", "y2NumberFormat"];
+
 /** Boolean fields. */
 const BOOLEAN_FIELDS = [
   "bars",
   "showPoints",
   "estimationViolin",
+  "xError",
   "pieShowPercent",
   "regShowLine",
   "regShowBand",
@@ -231,7 +277,7 @@ const STRING_FIELDS = [
 
 /** The options that name a sibling analysis (see `GraphOptions`): the
  *  graph draws its brackets / lines / curves from that analysis's cached
- *  result. All ten — `clone-graph`'s `GRAPH_ANALYSIS_LINKS` lists nine
+ *  result. All eleven — `clone-graph`'s `GRAPH_ANALYSIS_LINKS` lists ten
  *  (it omits `ttestAnalysisId`; see the lane log), but validation here
  *  covers the field the graphs actually read. */
 const LINK_FIELDS = [
@@ -243,6 +289,7 @@ const LINK_FIELDS = [
   "poissonAnalysisId",
   "pcaAnalysisId",
   "kmeansAnalysisId",
+  "hclustAnalysisId",
   "smoothAnalysisId",
   "monteCarloAnalysisId",
 ];
@@ -258,10 +305,12 @@ const GRAPH_OPTION_KEYS = [
   ...LIMIT_FIELDS,
   ...PLAIN_NUMBER_FIELDS,
   ...POSITIVE_NUMBER_FIELDS,
+  ...NUMBER_FORMAT_FIELDS,
   ...BOOLEAN_FIELDS,
   ...STRING_FIELDS,
   ...LINK_FIELDS,
   ...CONSTANT_HOOK_FIELDS,
+  "sigAnalysisIds",
   "sigPairs",
   "sets",
   "refLines",
@@ -369,6 +418,26 @@ function validatedPlace(job: McpJob, name: string, value: unknown): { x: number;
   return { x: value.x, y: value.y };
 }
 
+/** An axis number format as the tool spells it: `{ format, decimals? }`
+ *  (see `AxisNumberFormat`). `format` omitted reads as "auto"; `decimals`
+ *  omitted reads as 2. Unknown fields are rejected. */
+function validatedNumberFormat(job: McpJob, key: string, value: unknown): AxisNumberFormat {
+  if (!isPlainObject(value)) throw jobErr(job, `option “${key}” must be an object { format?, decimals? }.`);
+  for (const field of Object.keys(value))
+    if (!["format", "decimals"].includes(field))
+      throw jobErr(job, `unknown number-format field “${field}” on “${key}” — use format or decimals.`);
+  const format = value.format ?? "auto";
+  if (typeof format !== "string" || !["auto", "decimal", "scientific"].includes(format))
+    throw jobErr(job, `option “${key}.format” must be one of: auto, decimal, scientific — got ${JSON.stringify(format)}.`);
+  const out: AxisNumberFormat = { format: format as AxisNumberFormat["format"] };
+  if (value.decimals !== undefined) {
+    if (typeof value.decimals !== "number" || !Number.isInteger(value.decimals) || value.decimals < 0 || value.decimals > 15)
+      throw jobErr(job, `option “${key}.decimals” must be a whole number from 0 to 15 — got ${JSON.stringify(value.decimals)}.`);
+    out.decimals = value.decimals;
+  }
+  return out;
+}
+
 /** Reference lines as the tool spells them: `{ value }` each, with the
  *  panel's defaults (`dash`, width 1) where left out. */
 function validatedRefLines(job: McpJob, value: unknown): RefLine[] {
@@ -398,6 +467,33 @@ function validatedRefLines(job: McpJob, value: unknown): RefLine[] {
     if (line.labelPlace !== undefined) out.labelPlace = line.labelPlace as RefLine["labelPlace"];
     return out;
   });
+}
+
+/** One linked analysis id, checked: a missing id, or one naming a non-analysis, is an
+ *  error; one from another table, or not computed yet, is a warning (the graph still
+ *  builds — it shows the link as missing until the analysis is run). */
+function checkLink(
+  job: McpJob,
+  key: string,
+  value: string,
+  state: GraphJobState,
+  tableId: string | undefined,
+  warnings: string[],
+): void {
+  const linked = state.nodes[value];
+  if (!linked) throw jobErr(job, `no analysis with id “${value}” for option “${key}” — run titer_list_projects to see the analyses.`);
+  if (linked.type !== "analysis")
+    throw jobErr(job, `“${value}” for option “${key}” is a ${linked.type}, not an analysis.`);
+  // Not for `sigAnalysisIds`: a multi-source significance list names copy
+  // tables by design, so another table is the normal case, not a warning.
+  if (key !== "sigAnalysisIds" && tableId && linked.parentId !== tableId)
+    warnings.push(
+      `Linked analysis “${linked.name}” (${key}) belongs to another table — the graph reads its cached result as-is.`,
+    );
+  if (!linked.cachedResult)
+    warnings.push(
+      `Linked analysis “${linked.name}” (${key}) has not been computed yet — the graph will show it as missing until it is run (titer_run_analysis).`,
+    );
 }
 
 /**
@@ -447,6 +543,8 @@ function validateGraphOptions(
       if (!isFiniteNumber(value) || value <= 0)
         throw jobErr(job, `option “${key}” must be a positive number — got ${JSON.stringify(value)}.`);
       options[key] = value;
+    } else if (NUMBER_FORMAT_FIELDS.includes(key)) {
+      options[key] = validatedNumberFormat(job, key, value);
     } else if (BOOLEAN_FIELDS.includes(key)) {
       if (typeof value !== "boolean") throw jobErr(job, `option “${key}” must be a boolean — got ${JSON.stringify(value)}.`);
       options[key] = value;
@@ -455,19 +553,13 @@ function validateGraphOptions(
       options[key] = value;
     } else if (LINK_FIELDS.includes(key)) {
       if (typeof value !== "string" || !value) throw jobErr(job, `option “${key}” must be an analysis id.`);
-      const linked = state.nodes[value];
-      if (!linked) throw jobErr(job, `no analysis with id “${value}” for option “${key}” — run titer_list_projects to see the analyses.`);
-      if (linked.type !== "analysis")
-        throw jobErr(job, `“${value}” for option “${key}” is a ${linked.type}, not an analysis.`);
-      if (tableId && linked.parentId !== tableId)
-        warnings.push(
-          `Linked analysis “${linked.name}” (${key}) belongs to another table — the graph reads its cached result as-is.`,
-        );
-      if (!linked.cachedResult)
-        warnings.push(
-          `Linked analysis “${linked.name}” (${key}) has not been computed yet — the graph will show it as missing until it is run (titer_run_analysis).`,
-        );
+      checkLink(job, key, value, state, tableId, warnings);
       options[key] = value;
+    } else if (key === "sigAnalysisIds") {
+      if (!Array.isArray(value) || !value.every((v) => typeof v === "string" && v))
+        throw jobErr(job, `option “sigAnalysisIds” must be a list of analysis ids (strings).`);
+      for (const id of value) checkLink(job, key, id, state, tableId, warnings);
+      options[key] = [...new Set(value)];
     } else if (CONSTANT_HOOK_FIELDS.includes(key)) {
       if (typeof value !== "string" || !value) throw jobErr(job, `option “${key}” must be an info constant's name.`);
       if (!knownConstants.has(value))
@@ -534,7 +626,7 @@ function validateFigureLayout(
     // matters (update-figure checks it; create-figure starts at "none").
     return { patch: {}, panels };
   }
-  if (!isPlainObject(raw)) throw jobErr(job, `“layout” must be an object { grid?, figureSize?, labelStyle?, figureTitle?, sharedLegend?, dpi?, panels? }.`);
+  if (!isPlainObject(raw)) throw jobErr(job, `“layout” must be an object { grid?, figureSize?, labelStyle?, figureTitle?, sharedLegend?, backgroundColor?, dpi?, panels? }.`);
   const patch: FigurePatch = {};
   let nextPanels = panels;
   let nextGrid = grid;
@@ -557,19 +649,48 @@ function validateFigureLayout(
       );
     if (!Array.isArray(raw.panels)) throw jobErr(job, `“layout.panels” must be a list of panels.`);
     const parsed: FigurePanel[] = raw.panels.map((p, i) => {
-      if (!isPlainObject(p)) throw jobErr(job, `panel ${i} must be an object { graphId, label?, title?, row, col, rowSpan?, colSpan? }.`);
-      const graphId = p.graphId;
-      if (typeof graphId !== "string" || !graphId) throw jobErr(job, `panel ${i} needs a “graphId”.`);
-      const graph = state.nodes[graphId];
-      if (!graph) throw jobErr(job, `panel ${i} names no graph with id “${graphId}” — run titer_list_projects to see the graphs.`);
-      if (graph.type !== "graph") throw jobErr(job, `panel ${i} names “${graph.name}”, a ${graph.type}, not a graph.`);
+      if (!isPlainObject(p))
+        throw jobErr(
+          job,
+          `panel ${i} must be an object { graphId?, kind?, imageData?, imageName?, label?, title?, row, col, rowSpan?, colSpan? }.`,
+        );
+      const kind = p.kind ?? "graph";
+      if (kind !== "graph" && kind !== "blank" && kind !== "image")
+        throw jobErr(job, `panel ${i} “kind” must be one of: graph, blank, image — got ${JSON.stringify(kind)}.`);
+      if (kind === "graph") {
+        const graphId = p.graphId;
+        if (typeof graphId !== "string" || !graphId) throw jobErr(job, `panel ${i} needs a “graphId”.`);
+        const graph = state.nodes[graphId];
+        if (!graph) throw jobErr(job, `panel ${i} names no graph with id “${graphId}” — run titer_list_projects to see the graphs.`);
+        if (graph.type !== "graph") throw jobErr(job, `panel ${i} names “${graph.name}”, a ${graph.type}, not a graph.`);
+      }
+      // An image panel needs its picture (a data URL, within the cap — the
+      // file embeds it, so a huge one would bloat the project); a blank
+      // panel needs neither a graph nor a picture.
+      let imageData: string | undefined;
+      if (kind === "image") {
+        if (typeof p.imageData !== "string" || !p.imageData.startsWith("data:image/"))
+          throw jobErr(job, `panel ${i} is an image panel — it needs an “imageData” data URL (data:image/…).`);
+        if (p.imageData.length > FIGURE_IMAGE_MAX_DATA_URL)
+          throw jobErr(
+            job,
+            `panel ${i} “imageData” is too large (${p.imageData.length} characters — at most ${FIGURE_IMAGE_MAX_DATA_URL}). Use a smaller image.`,
+          );
+        imageData = p.imageData;
+      }
+      if (p.imageName !== undefined && typeof p.imageName !== "string")
+        throw jobErr(job, `panel ${i} “imageName” must be a string.`);
       if (p.label !== undefined && typeof p.label !== "string") throw jobErr(job, `panel ${i} “label” must be a string.`);
       if (p.labelManual !== undefined && typeof p.labelManual !== "boolean")
         throw jobErr(job, `panel ${i} “labelManual” must be a boolean.`);
       if (p.title !== undefined && typeof p.title !== "string") throw jobErr(job, `panel ${i} “title” must be a string.`);
+      const graph = kind === "graph" ? state.nodes[p.graphId as string] : undefined;
       return {
-        graphId,
-        graphName: graph.name,
+        graphId: kind === "graph" ? (p.graphId as string) : "",
+        ...(kind === "graph" ? {} : { kind }),
+        ...(imageData ? { imageData } : {}),
+        ...(p.imageName ? { imageName: p.imageName as string } : {}),
+        graphName: graph?.name,
         label: (p.label as string | undefined) ?? "",
         labelManual: p.labelManual as boolean | undefined,
         title: (p.title as string | undefined) ?? "",
@@ -644,6 +765,17 @@ function validateFigureLayout(
     patch.sharedLegend = raw.sharedLegend as SharedLegend;
   }
 
+  // The page's background colour: a #rrggbb hex; null clears it back to white.
+  if (raw.backgroundColor !== undefined) {
+    if (raw.backgroundColor === null) {
+      patch.figureBackground = undefined;
+    } else if (typeof raw.backgroundColor !== "string" || !/^#[0-9a-f]{6}$/i.test(raw.backgroundColor)) {
+      throw jobErr(job, `“layout.backgroundColor” must be a #rrggbb hex colour — got ${JSON.stringify(raw.backgroundColor)}.`);
+    } else {
+      patch.figureBackground = raw.backgroundColor;
+    }
+  }
+
   if (raw.dpi !== undefined) {
     if (typeof raw.dpi !== "string" || !(FIGURE_RESOLUTIONS as readonly string[]).includes(raw.dpi))
       throw jobErr(job, `“layout.dpi” must be one of: ${FIGURE_RESOLUTIONS.join(", ")}.`);
@@ -651,8 +783,8 @@ function validateFigureLayout(
   }
 
   for (const key of Object.keys(raw))
-    if (!["panels", "grid", "figureSize", "labelStyle", "figureTitle", "sharedLegend", "dpi"].includes(key))
-      throw jobErr(job, `unknown layout field “${key}” — use grid, figureSize, labelStyle, figureTitle, sharedLegend, dpi (and panels on update).`);
+    if (!["panels", "grid", "figureSize", "labelStyle", "figureTitle", "sharedLegend", "backgroundColor", "dpi"].includes(key))
+      throw jobErr(job, `unknown layout field “${key}” — use grid, figureSize, labelStyle, figureTitle, sharedLegend, backgroundColor, dpi (and panels on update).`);
 
   // A shared legend is only sound when every panel's graph draws the same
   // series in the same colours — the editor refuses it otherwise, and so
@@ -666,9 +798,14 @@ function validateFigureLayout(
   return { patch, panels: nextPanels };
 }
 
-/** A panel as the tool output spells it (snake_case, like the other tools). */
+/** A panel as the tool output spells it (snake_case, like the other tools).
+ *  The picture itself is never listed — it is large, and the listing stays
+ *  small; `has_image` says whether an image panel holds one. */
 const publicPanel = (p: FigurePanel) => ({
   graph_id: p.graphId,
+  kind: p.kind ?? "graph",
+  ...(p.imageName ? { image_name: p.imageName } : {}),
+  ...(p.kind === "image" ? { has_image: Boolean(p.imageData) } : {}),
   label: p.label,
   title: p.title,
   row: p.row,
@@ -682,6 +819,8 @@ const publicPanel = (p: FigurePanel) => ({
 /** `titer_build_graph`: a graph of `graph_type` on `table_id`, with a
  *  partial `GraphOptions` over the type's defaults (incl. its palette
  *  and the table's error format, exactly as the UI's create-graph path).
+ *  `source_table_ids` (#48) adds further tables of the same type, whose
+ *  data sets the graph also plots — see `src/lib/multi-table.ts`.
  *  Synchronous — the builders are pure TS over table data + cached
  *  results. */
 export function executeBuildGraph(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
@@ -703,35 +842,109 @@ export function executeBuildGraph(job: McpJob, deps: GraphJobDeps): GraphJobOutc
       `graph type “${graphType}” is not offered for a ${TABLE_TYPE_LABELS[tableType]} table — ` +
         `the types for this table are: ${offered.join(", ")}.`,
     );
+  // The extra tables, when any: same type as the primary, rows lining up
+  // where the graph needs them to (the merge's own checks).
+  let sourceTableIds: string[] | undefined;
+  if (args.source_table_ids !== undefined && args.source_table_ids !== null) {
+    const errors = validateGraphSources(table, args.source_table_ids, state.nodes);
+    if (errors.length) throw jobErr(job, errors.join(" "));
+    sourceTableIds = [...(args.source_table_ids as string[])];
+  }
   const { options, warnings } = validateGraphOptions(job, args.options, state, tableId);
   const merged: GraphOptions = {
     ...newGraphOptions(graphType as GraphType, table.data?.errorFormat),
     ...options,
   };
   const createGraph = need(job, deps.createGraph, "create a graph");
-  const graphId = createGraph(tableId, graphType as GraphType, merged);
+  const graphId = createGraph(tableId, graphType as GraphType, merged, sourceTableIds);
   if (name !== undefined) need(job, deps.renameNode, "rename a graph")(graphId, name);
   const result: Record<string, unknown> = { project_id: job.project_id, graph_id: graphId, graph_type: graphType };
+  if (sourceTableIds?.length) result.source_table_ids = sourceTableIds;
   if (warnings.length) result.warnings = warnings;
   return { result, created: { graph_id: graphId } };
 }
 
 /** `titer_update_graph`: a partial `GraphOptions` merged over the
  *  graph's current options (the reducer replaces them wholesale, so the
- *  merge happens here). Same validation as build. */
+/** `titer_update_graph`: a partial `GraphOptions` merged over the
+ *  graph's current options (the reducer replaces them wholesale, so the
+ *  merge happens here). Same validation as build. `source_table_ids`
+ *  (#48) replaces the graph's extra tables outright (empty clears them).
+ *  With `graph_type` (seq 244) it changes the graph's type instead — the
+ *  type must be offered for the graph's table, the new type's defaults
+ *  apply (title and size kept, as in the UI), and `options`, when given
+ *  with it, merge over the current ones and apply to the new type — and
+ *  `source_table_ids`, when given with it, still changes the sources
+ *  (the three parts apply together, never just the type).
+ *  At least one of the three is required. */
 export function executeUpdateGraph(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
   const args = argsOf(job);
   const graphId = reqStr(job, args, "graph_id");
-  if (args.options === undefined) throw jobErr(job, `needs “options” — the graph options to change.`);
+  const graphType = optStr(job, args, "graph_type");
+  if (graphType === undefined && args.options === undefined && args.source_table_ids === undefined)
+    throw jobErr(job, `needs “options” — the graph options to change —, “source_table_ids” to change the graph’s sources, or “graph_type” to change the graph’s type.`);
   const state = deps.getState();
   const node = state.nodes[graphId];
   if (!node) throw jobErr(job, `no graph with id “${graphId}” — run titer_list_projects to see the graphs.`);
   if (node.type !== "graph") throw jobErr(job, `“${node.name}” is a ${node.type}, not a graph.`);
   const tableId = node.parentId && state.nodes[node.parentId]?.type === "table" ? node.parentId : undefined;
   const { options, warnings } = validateGraphOptions(job, args.options, state, tableId);
-  const merged: GraphOptions = { ...DEFAULT_GRAPH_OPTIONS, ...(node.graphOptions ?? {}), ...options };
-  need(job, deps.updateGraph, "update a graph")(graphId, merged);
+  // A source change is validated before anything is dispatched, so a bad
+  // source list aborts before a type change (or an options change) lands —
+  // the three parts of one call (graph_type, source_table_ids, options)
+  // apply together or not at all.
+  const hasSources = args.source_table_ids !== undefined && args.source_table_ids !== null;
+  if (hasSources) {
+    const table = tableId ? state.nodes[tableId] : undefined;
+    if (!table) throw jobErr(job, `the graph “${node.name}” has no data table to add sources to.`);
+    const errors = validateGraphSources(table, args.source_table_ids, state.nodes);
+    if (errors.length) throw jobErr(job, errors.join(" "));
+  }
+  const sourceTableIds = hasSources ? [...(args.source_table_ids as string[])] : undefined;
+  const typeChange = graphType !== undefined && graphType !== node.graphType;
+  // A type change goes through `changeGraphType`, not `updateGraph`: the
+  // store takes the new type's defaults (or the caller's merged options)
+  // and renames the graph for its new type. The same type with nothing to
+  // change is a no-op, not a spurious undo step.
+  if (!typeChange && args.options === undefined && sourceTableIds === undefined) {
+    return {
+      result: {
+        project_id: job.project_id,
+        graph_id: graphId,
+        ...(graphType !== undefined ? { graph_type: graphType } : {}),
+      },
+    };
+  }
   const result: Record<string, unknown> = { project_id: job.project_id, graph_id: graphId };
+  if (typeChange) {
+    const table = tableId ? state.nodes[tableId] : undefined;
+    const tableType = table?.type === "table" ? table.tableType : undefined;
+    if (!tableType) throw jobErr(job, `graph “${node.name}” has no data table, so its type can't change.`);
+    const offered = GRAPH_OPTIONS_BY_TABLE[tableType];
+    if (!offered.some((o) => o.value === graphType))
+      throw jobErr(
+        job,
+        `“${graphType}” is not a graph type for a ${TABLE_TYPE_LABELS[tableType]} table — the types are: ${offered
+          .map((o) => o.value)
+          .join(", ")}.`,
+      );
+    const change = need(job, deps.changeGraphType, "change a graph's type");
+    if (args.options === undefined) {
+      change(graphId, graphType as GraphType);
+    } else {
+      const merged: GraphOptions = { ...DEFAULT_GRAPH_OPTIONS, ...(node.graphOptions ?? {}), ...options };
+      change(graphId, graphType as GraphType, merged);
+    }
+    result.graph_type = graphType;
+  }
+  if (sourceTableIds !== undefined) {
+    need(job, deps.setGraphSources, "change a graph's source tables")(graphId, [...sourceTableIds]);
+    result.source_table_ids = [...sourceTableIds];
+  }
+  if (args.options !== undefined && !typeChange) {
+    const merged: GraphOptions = { ...DEFAULT_GRAPH_OPTIONS, ...(node.graphOptions ?? {}), ...options };
+    need(job, deps.updateGraph, "update a graph")(graphId, merged);
+  }
   if (warnings.length) result.warnings = warnings;
   return { result };
 }
@@ -940,4 +1153,228 @@ export function executeUpdateInfoSheet(job: McpJob, deps: GraphJobDeps): GraphJo
 
   need(job, deps.updateInfoSheet, "update an info sheet")(infoSheetId, { constants, notes, linkedTableId });
   return { result: { project_id: job.project_id, info_sheet_id: infoSheetId } };
+}
+
+/** A new drawing object's id, like the store's `genId` (seq 238). */
+function newDrawingId() {
+  return `drawing_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+const ARRANGE_OPS: ArrangeOp[] = [
+  "bring-to-front",
+  "send-to-back",
+  "bring-forward",
+  "send-backward",
+  "duplicate",
+  "group",
+  "ungroup",
+  "delete",
+];
+
+/** A graph or figure node, or a plain error naming what was asked for. */
+function drawingSheet(job: McpJob, state: GraphJobState, nodeId: string): ProjectNode {
+  const node = state.nodes[nodeId];
+  if (!node)
+    throw jobErr(job, `no sheet with id “${nodeId}” — run titer_list_projects to see the graphs and figures.`);
+  if (node.type !== "graph" && node.type !== "figure")
+    throw jobErr(job, `“${node.name}” is a ${node.type}, not a graph or a figure — drawing objects live on graphs and figures.`);
+  return node;
+}
+
+/** A drawing object of `node`, or a plain error. */
+function drawingObject(job: McpJob, node: ProjectNode, objectId: string): DrawingObject {
+  const object = (node.drawingObjects ?? []).find((o) => o.id === objectId);
+  if (!object)
+    throw jobErr(job, `“${node.name}” has no drawing object “${objectId}” — add one with titer_add_drawing_object first.`);
+  return object;
+}
+
+/** `titer_freeze_graph`: freeze (or unfreeze) a graph — a frozen graph
+ *  draws its snapshot while the live data keep changing. */
+export function executeFreezeGraph(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
+  const args = argsOf(job);
+  const graphId = reqStr(job, args, "graph_id");
+  if (typeof args.frozen !== "boolean") throw jobErr(job, `“frozen” must be true or false.`);
+  const state = deps.getState();
+  const node = state.nodes[graphId];
+  if (!node) throw jobErr(job, `no graph with id “${graphId}” — run titer_list_projects to see the graphs.`);
+  if (node.type !== "graph") throw jobErr(job, `“${node.name}” is a ${node.type}, not a graph.`);
+  if (args.frozen === true) {
+    const parent = node.parentId ? state.nodes[node.parentId] : undefined;
+    if (!parent?.data) {
+      throw jobErr(job, `graph “${node.name}” has no data table to freeze from.`);
+    }
+  }
+  need(job, deps.setGraphFrozen, "freeze a graph")(graphId, "graph", args.frozen as boolean);
+  return { result: { project_id: job.project_id, graph_id: graphId, frozen: args.frozen } };
+}
+
+/** `titer_freeze_figure`: freeze (or unfreeze) a figure — a frozen
+ *  figure draws each panel from its snapshot. */
+export function executeFreezeFigure(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
+  const args = argsOf(job);
+  const figureId = reqStr(job, args, "figure_id");
+  if (typeof args.frozen !== "boolean") throw jobErr(job, `“frozen” must be true or false.`);
+  const state = deps.getState();
+  const node = state.nodes[figureId];
+  if (!node) throw jobErr(job, `no figure with id “${figureId}” — run titer_list_projects to see the figures.`);
+  if (node.type !== "figure") throw jobErr(job, `“${node.name}” is a ${node.type}, not a figure.`);
+  if (args.frozen === true) {
+    const hasData = (node.panels ?? []).some((panel) => {
+      const graph = state.nodes[panel.graphId];
+      const parent = graph?.parentId ? state.nodes[graph.parentId] : undefined;
+      return Boolean(parent?.data);
+    });
+    if (!hasData) {
+      throw jobErr(job, `figure “${node.name}” has no panel with a data table to freeze from.`);
+    }
+  }
+  need(job, deps.setGraphFrozen, "freeze a figure")(figureId, "figure", args.frozen as boolean);
+  return { result: { project_id: job.project_id, figure_id: figureId, frozen: args.frozen } };
+}
+
+/** A drawing object's fields as a job holds them: the kind and geometry
+ *  required, the rest only when well-formed. A picture needs its image
+ *  as a data URL under the cap, like the Insert Picture picker. */
+function validateDrawingObject(job: McpJob, raw: unknown): DrawingObject {
+  if (!isPlainObject(raw)) throw jobErr(job, `“object” must be an object { kind, x, y, width, height, ... }.`);
+  const kind = raw.kind;
+  if (typeof kind !== "string" || !(DRAWING_OBJECT_KINDS as readonly string[]).includes(kind))
+    throw jobErr(job, `“object.kind” must be one of ${DRAWING_OBJECT_KINDS.join(", ")}.`);
+  const num = (name: string, min?: number): number => {
+    const value = raw[name];
+    if (typeof value !== "number" || !Number.isFinite(value) || (min !== undefined && value < min))
+      throw jobErr(job, `“object.${name}” must be a finite number${min !== undefined ? ` of at least ${min}` : ""}.`);
+    return value;
+  };
+  const x = num("x");
+  const y = num("y");
+  const width = num("width", 1);
+  const height = num("height", 1);
+  const object: DrawingObject = { id: newDrawingId(), kind: kind as DrawingObject["kind"], x, y, width, height };
+  if (raw.text !== undefined) {
+    if (typeof raw.text !== "string") throw jobErr(job, `“object.text” must be a string.`);
+    object.text = raw.text;
+  }
+  if (raw.fontSize !== undefined) {
+    if (typeof raw.fontSize !== "number" || !Number.isFinite(raw.fontSize) || raw.fontSize < 6 || raw.fontSize > 200)
+      throw jobErr(job, `“object.fontSize” must be a number from 6 to 200.`);
+    object.fontSize = raw.fontSize;
+  }
+  for (const key of ["color", "fill"] as const) {
+    if (raw[key] !== undefined) {
+      if (typeof raw[key] !== "string") throw jobErr(job, `“object.${key}” must be a string.`);
+      object[key] = raw[key] as string;
+    }
+  }
+  if (raw.strokeWidth !== undefined) {
+    if (typeof raw.strokeWidth !== "number" || !Number.isFinite(raw.strokeWidth) || raw.strokeWidth <= 0)
+      throw jobErr(job, `“object.strokeWidth” must be a positive number.`);
+    object.strokeWidth = raw.strokeWidth;
+  }
+  if (raw.src !== undefined) {
+    if (typeof raw.src !== "string" || !raw.src.startsWith("data:image/") || raw.src.length * 0.75 > MAX_PICTURE_BYTES)
+      throw jobErr(
+        job,
+        `“object.src” must be an image data URL under ${Math.round(MAX_PICTURE_BYTES / 1_000_000)} MB.`,
+      );
+    object.src = raw.src;
+  }
+  if (kind === "picture" && object.src === undefined)
+    throw jobErr(job, `a picture object needs “src” — its image as a data URL.`);
+  if (raw.groupId !== undefined) {
+    if (typeof raw.groupId !== "string" || raw.groupId === "")
+      throw jobErr(job, `“object.groupId” must be a non-empty string.`);
+    object.groupId = raw.groupId;
+  }
+  return object;
+}
+
+/** `titer_add_drawing_object`: a text/drawing/picture object on a graph
+ *  or figure sheet. The id is assigned here and returned. */
+export function executeAddDrawingObject(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
+  const args = argsOf(job);
+  const nodeId = reqStr(job, args, "node_id");
+  if (args.object === undefined) throw jobErr(job, `needs “object” — the drawing object to add.`);
+  const object = validateDrawingObject(job, args.object);
+  const state = deps.getState();
+  drawingSheet(job, state, nodeId);
+  need(job, deps.addDrawingObject, "add a drawing object")(nodeId, object);
+  return {
+    result: { project_id: job.project_id, node_id: nodeId, object_id: object.id },
+    created: { object_id: object.id },
+  };
+}
+
+/** The patch fields `titer_update_drawing_object` accepts, and their
+ *  validation — the same rules as the add, minus kind (which never
+ *  changes) and id. */
+const DRAWING_PATCH_FIELDS = ["x", "y", "width", "height", "text", "fontSize", "color", "fill", "strokeWidth", "src", "groupId"] as const;
+
+function validateDrawingPatch(job: McpJob, raw: unknown): Partial<Omit<DrawingObject, "id" | "kind">> {
+  if (!isPlainObject(raw)) throw jobErr(job, `“patch” must be an object { ...fields to change }.`);
+  for (const key of Object.keys(raw)) {
+    if (!(DRAWING_PATCH_FIELDS as readonly string[]).includes(key))
+      throw jobErr(job, `unknown drawing field “${key}” — use ${DRAWING_PATCH_FIELDS.join(", ")}.`);
+  }
+  // Reuse the add's validation: a full object built from the patch's
+  // fields, with dummy geometry, then only the patched fields kept.
+  const probe = validateDrawingObject(job, {
+    kind: "rect",
+    x: 0,
+    y: 0,
+    width: 1,
+    height: 1,
+    ...raw,
+  });
+  const patch: Partial<Omit<DrawingObject, "id" | "kind">> = {};
+  for (const key of DRAWING_PATCH_FIELDS) {
+    if (raw[key] !== undefined) (patch as Record<string, unknown>)[key] = probe[key];
+  }
+  return patch;
+}
+
+/** `titer_update_drawing_object`: change one drawing object. */
+export function executeUpdateDrawingObject(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
+  const args = argsOf(job);
+  const nodeId = reqStr(job, args, "node_id");
+  const objectId = reqStr(job, args, "object_id");
+  if (args.patch === undefined) throw jobErr(job, `needs “patch” — the drawing fields to change.`);
+  const patch = validateDrawingPatch(job, args.patch);
+  if (!Object.keys(patch).length) throw jobErr(job, `“patch” changes nothing — pass a field to change.`);
+  const state = deps.getState();
+  const node = drawingSheet(job, state, nodeId);
+  drawingObject(job, node, objectId);
+  need(job, deps.updateDrawingObject, "update a drawing object")(nodeId, objectId, patch);
+  return { result: { project_id: job.project_id, node_id: nodeId, object_id: objectId } };
+}
+
+/** `titer_delete_drawing_object`: delete one drawing object. */
+export function executeDeleteDrawingObject(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
+  const args = argsOf(job);
+  const nodeId = reqStr(job, args, "node_id");
+  const objectId = reqStr(job, args, "object_id");
+  const state = deps.getState();
+  const node = drawingSheet(job, state, nodeId);
+  drawingObject(job, node, objectId);
+  need(job, deps.deleteDrawingObject, "delete a drawing object")(nodeId, objectId);
+  return { result: { project_id: job.project_id, node_id: nodeId, object_id: objectId, deleted: true } };
+}
+
+/** `titer_arrange_drawing_objects`: reorder, copy, group/ungroup or
+ *  delete the selected drawing objects. */
+export function executeArrangeDrawingObjects(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
+  const args = argsOf(job);
+  const nodeId = reqStr(job, args, "node_id");
+  const op = reqStr(job, args, "op");
+  if (!(ARRANGE_OPS as readonly string[]).includes(op))
+    throw jobErr(job, `“op” must be one of ${ARRANGE_OPS.join(", ")}.`);
+  if (!Array.isArray(args.object_ids) || !args.object_ids.length || !args.object_ids.every((v) => typeof v === "string"))
+    throw jobErr(job, `“object_ids” must be a non-empty list of drawing object ids.`);
+  const objectIds = [...(args.object_ids as string[])];
+  const state = deps.getState();
+  const node = drawingSheet(job, state, nodeId);
+  for (const id of objectIds) drawingObject(job, node, id);
+  need(job, deps.arrangeDrawingObjects, "arrange drawing objects")(nodeId, op as ArrangeOp, objectIds);
+  return { result: { project_id: job.project_id, node_id: nodeId, op, object_ids: objectIds } };
 }

@@ -25,7 +25,9 @@
 // Tukey, Bonferroni, Šídák, Holm–Šídák and Fisher's LSD are offered (plan 25);
 // the Šídák family adjusts in R per family, on raw P values (`R_ADJUST`).
 import {
+  FDR_METHODS,
   PAIR_CORRECTIONS,
+  fdrQError,
   type AnalysisOutcome,
   type Column,
   type ComparedCell,
@@ -33,15 +35,19 @@ import {
   type TwoWayAnovaParams,
 } from "../types";
 import {
+  adjustFdrPValues,
   describe,
+  effectSizeRow,
   identical,
   pairIndices,
   pRow,
   R_ADJUST,
   R_CRIT,
+  R_EFFECT_CI,
   R_PTUKEY,
   rStr,
   rVec,
+  type FdrMethod,
 } from "../column/base";
 import { evalNamedVector } from "../webr";
 import { R_MAXIMUM_T } from "../column/anova";
@@ -58,10 +64,41 @@ const POSTHOC_LABEL_SHORT: Record<string, string> = {
   "games-howell": "Games-Howell",
 };
 
+/** The FDR approach's heading: its method (Benjamini-Hochberg / two-stage
+ *  Benjamini-Krieger-Yekutieli / Benjamini-Yekutieli) and its Q. */
+const FDR_LABEL: Record<FdrMethod, string> = {
+  bh: "Benjamini-Hochberg",
+  bky: "Benjamini-Krieger-Yekutieli (two-stage)",
+  by: "Benjamini-Yekutieli",
+};
+const fdrLabel = (method: FdrMethod, q: number) => `FDR approach (${FDR_LABEL[method]}, Q = ${q}%)`;
+/** The comparisons label for a two-way post-hoc: the method's short heading,
+ *  or the FDR approach's method + Q. */
+const posthocLabel = (params: TwoWayAnovaParams) =>
+  params.posthoc === "fdr"
+    ? fdrLabel(params.fdrMethod ?? "bh", params.fdrQ ?? 5)
+    : (POSTHOC_LABEL_SHORT[params.posthoc] ?? params.posthoc);
+
+/** What the FDR approach reports in the notes: how many comparisons are
+ *  discoveries at Q (adjusted P below Q). */
+const fdrNote = (params: TwoWayAnovaParams, comparisons: ComparisonRow[] | undefined) => {
+  if (params.posthoc !== "fdr" || !comparisons) return "";
+  const q = (params.fdrQ ?? 5) / 100;
+  const discoveries = comparisons.filter((c) => c.p != null && c.p < q).length;
+  return (
+    ` ${fdrLabel(params.fdrMethod ?? "bh", params.fdrQ ?? 5)}: ${discoveries} of ${comparisons.length} ` +
+    `comparison${comparisons.length === 1 ? " is" : "s are"} discoveries (adjusted P < ${q}). ` +
+    // No CI claim here: FDR comparisons carry no interval (runPosthoc and
+    // the RM path both null low/high), same as the three-way note.
+    "The P values are FDR-adjusted."
+  );
+};
+
 /** The post-hoc methods a two-way ANOVA offers: Tukey, Bonferroni,
  *  Šídák, Holm–Šídák and Fisher's LSD, plus Dunnett and Games-Howell on the
- *  ordinary design. Anything else the params type allows is refused up front
- *  rather than silently run as Bonferroni. */
+ *  ordinary design, plus the FDR approach (raw P values, FDR-adjusted in
+ *  TypeScript after R returns them). Anything else the params type allows is
+ *  refused up front rather than silently run as Bonferroni. */
 const TWO_WAY_POSTHOCS = [
   "none",
   "tukey",
@@ -71,9 +108,15 @@ const TWO_WAY_POSTHOCS = [
   "lsd",
   "dunnett",
   "games-howell",
+  "fdr",
 ] as const;
 type Method = "tukey" | (typeof PAIR_CORRECTIONS)[number];
-type OrdinaryMethod = Method | "dunnett" | "games-howell";
+type OrdinaryMethod = Method | "dunnett" | "games-howell" | "fdr";
+/** The method R's family machinery runs for an ordinary method: the FDR
+ *  approach's raw P values are Fisher's LSD's (uncorrected, one family at a
+ *  time), adjusted afterwards in TypeScript. */
+const rMethodOf = (method: OrdinaryMethod): Method | "dunnett" | "games-howell" =>
+  method === "fdr" ? "lsd" : method;
 const corrects = (method: OrdinaryMethod) => (PAIR_CORRECTIONS as readonly string[]).includes(method);
 /** R_ADJUST's `adj`/`pa` name the uncorrected method "fisher"; Titer calls it
  *  "lsd" — pass "fisher" to R, or `adj` falls through to its Holm–Šídák branch
@@ -111,33 +154,47 @@ const rFactor = (labels: string[]) => `factor(c(${labels.map(rStr).join(",")}))`
 async function runPosthoc(
   columns: Column[],
   method: OrdinaryMethod,
-  target: "groups" | "rows",
+  target: "groups" | "rows" | "cells" | "group-means" | "row-means",
   mse: number | null,
   dfResid: number | null,
   titles: (string | null)[],
   control?: string,
+  fdr?: { method: FdrMethod; q: number },
 ): Promise<ComparisonRow[] | { error: string } | undefined> {
   if (mse == null || dfResid == null) return undefined;
   const rows = groupRows(columns);
   const names = [...rows.keys()];
   const rowCount = rows.get(names[0])?.length ?? 0;
-  // Dunnett's control: a group, or a row by its name.
+  const rowLabels = Array.from({ length: rowCount }, (_, r) => rowName(titles, r));
+  // The members a Dunnett control is picked from, by target: groups, rows, cells
+  // ("Group (Row)"), marginal group means, or marginal row means.
+  const cellList =
+    target === "cells"
+      ? names.flatMap((name) =>
+          rowLabels.flatMap((label, r) =>
+            rows.get(name)![r].length > 0 ? [{ group: name, row: r, label: `${name} (${label})` }] : [],
+          ),
+        )
+      : [];
+  const controlMembers =
+    target === "groups" || target === "group-means"
+      ? names
+      : target === "rows" || target === "row-means"
+        ? rowLabels
+        : cellList.map((c) => c.label);
+  // Dunnett's control: a group, a row, a cell, or a marginal mean, by its name.
   const controlAt =
-    method !== "dunnett"
-      ? undefined
-      : target === "groups"
-        ? names.indexOf(control ?? "")
-        : Array.from({ length: rowCount }, (_, r) => rowName(titles, r)).indexOf(control ?? "");
+    method !== "dunnett" ? undefined : control === undefined ? -1 : controlMembers.indexOf(control);
   if (controlAt === -1)
     return {
-      error: `The control ${target === "groups" ? "group" : "row"}${control ? ` “${control}”` : ""} holds no data. Create this analysis again to choose another.`,
+      error: `The control ${target === "groups" || target === "group-means" ? "group" : target === "rows" || target === "row-means" ? "row" : "cell"}${control ? ` “${control}”` : ""} holds no data. Create this analysis again to choose another.`,
     };
   // Each comparison's two cells (a group at a row) and how many means its family compares
   // (the groups holding data at its row, or the rows holding data in its group).
   const cells: {
     label1: string;
     label2: string;
-    at: [ComparedCell, ComparedCell];
+    at?: [ComparedCell, ComparedCell];
     a: number[];
     b: number[];
     means: number;
@@ -163,7 +220,7 @@ async function runPosthoc(
           });
       }
     }
-  } else {
+  } else if (target === "rows") {
     for (const name of names) {
       const rowsForGroup = rows.get(name)!;
       const means = rowsForGroup.filter((v) => v.length > 0).length;
@@ -183,6 +240,49 @@ async function runPosthoc(
             family: names.indexOf(name),
           });
       }
+    }
+  } else if (target === "cells") {
+    // Every cell mean against every other (one family), or each against the
+    // control cell (Dunnett) — Prism's "compare cell means" scope.
+    for (const [i, j] of familyPairs(cellList.length, controlAt)) {
+      const [ci, cj] = [cellList[i], cellList[j]];
+      const [a, b] = [rows.get(ci.group)![ci.row], rows.get(cj.group)![cj.row]];
+      cells.push({
+        label1: ci.label,
+        label2: cj.label,
+        at: [
+          { group: ci.group, row: ci.row },
+          { group: cj.group, row: cj.row },
+        ],
+        a,
+        b,
+        means: cellList.length,
+        family: 0,
+      });
+    }
+  } else if (target === "group-means") {
+    // The marginal group means (main effect of the groups): each group's values
+    // pooled over rows, one family. No single cell to draw a bracket on.
+    const present = names.filter((name) => rows.get(name)!.some((v) => v.length > 0));
+    const controlPresent = method === "dunnett" ? present.indexOf(control ?? "") : undefined;
+    if (controlPresent === -1)
+      return { error: `The control group “${control}” holds no data. Create this analysis again to choose another.` };
+    for (const [i, j] of familyPairs(present.length, controlPresent)) {
+      const [a, b] = [present[i], present[j]].map((name) => rows.get(name)!.flat());
+      cells.push({ label1: present[i], label2: present[j], a, b, means: present.length, family: 0 });
+    }
+  } else {
+    // The marginal row means (main effect of the rows): each row's values pooled
+    // over groups, one family.
+    const present = rowLabels.filter((_, r) => names.some((name) => rows.get(name)![r].length > 0));
+    const presentRows = present.map((label) => rowLabels.indexOf(label));
+    const controlPresent = method === "dunnett" ? present.indexOf(control ?? "") : undefined;
+    if (controlPresent === -1)
+      return { error: `The control row “${control}” holds no data. Create this analysis again to choose another.` };
+    for (const [i, j] of familyPairs(present.length, controlPresent)) {
+      const [ri, rj] = [presentRows[i], presentRows[j]];
+      const atRow = (r: number) => names.flatMap((name) => rows.get(name)![r]);
+      cells.push({ label1: present[i], label2: present[j], a: atRow(ri), b: atRow(rj), means: present.length, family: 0 });
     }
   }
   if (cells.length === 0) return undefined;
@@ -223,24 +323,42 @@ async function runPosthoc(
         ? `{a<-${rVec(c.a)};b<-${rVec(c.b)};d<-mean(a)-mean(b);va<-var(a)/length(a);vb<-var(b)/length(b);s<-sqrt(va+vb);` +
           `w<-(va+vb)^2/(va^2/(length(a)-1)+vb^2/(length(b)-1));t<-d/s;h<-crit(function(x)ptk(x*sqrt(2),${c.means},w))*s;` +
           `c(d,ptk(abs(t)*sqrt(2),${c.means},w),d-h,d+h)}`
-        : `${pooled(c)}h<-crit(function(x)${ciP(method as Method, c.means, df)})*s;c(d,${pOf(method as Method, "t", c.means, df)},d-h,d+h)}`,
+        : `${pooled(c)}h<-crit(function(x)${ciP(rMethodOf(method) as Method, c.means, df)})*s;c(d,${pOf(rMethodOf(method) as Method, "t", c.means, df)},d-h,d+h)}`,
   );
   const v = await evalNamedVector(
     `${R_PTUKEY};${R_CRIT};${R_ADJUST};${dunnett}c(${byFamily(
       parts,
       cells.map((c) => c.family),
-      method,
+      rMethodOf(method),
     )})`,
   );
-  return cells.map((c, k) => ({
+  // No multiplicity-adjusted interval exists for the FDR approach (as for
+  // Holm–Šídák, whose `pa` is NA) — the comparison carries no CI rather
+  // than the unadjusted LSD interval its P values no longer match.
+  const comparisons = cells.map((c, k) => ({
     group1: c.label1,
     group2: c.label2,
-    cells: c.at,
+    ...(c.at ? { cells: c.at } : {}),
     diff: v[`d_${k}`] ?? null,
-    low: v[`lo_${k}`] ?? null,
-    high: v[`hi_${k}`] ?? null,
+    low: method === "fdr" ? null : (v[`lo_${k}`] ?? null),
+    high: method === "fdr" ? null : (v[`hi_${k}`] ?? null),
     p: v[`p_${k}`] ?? null,
   }));
+  if (method !== "fdr" || !fdr) return comparisons;
+  // The FDR approach: R returned Fisher's LSD's raw P values (one family at a
+  // time); each family's are adjusted here, in TypeScript.
+  for (const family of [...new Set(cells.map((c) => c.family))]) {
+    const idx = cells.map((c, i) => (c.family === family ? i : -1)).filter((i) => i >= 0);
+    const adjusted = adjustFdrPValues(
+      idx.map((i) => comparisons[i].p),
+      fdr.method,
+      fdr.q,
+    );
+    idx.forEach((i, k) => {
+      comparisons[i] = { ...comparisons[i], p: adjusted[k] };
+    });
+  }
+  return comparisons;
 }
 
 /** R comparing the cells of a repeated-measures design without assuming sphericity (`Y`:
@@ -248,20 +366,28 @@ async function runPosthoc(
  *  its own error, never the whole experiment's: rows within a group, a paired t on that
  *  group's differences (n − 1 df); groups within a row, that row's pooled SD. */
 function correctedPosthoc(
-  method: Method,
+  method: Method | "fdr",
   target: "groups" | "rows",
   groupNames: string[],
   rowNames: string[],
   rowIndex: number[],
-): { rCode: string; labels: [string, string][]; cells: [ComparedCell, ComparedCell][] } {
+): {
+  rCode: string;
+  labels: [string, string][];
+  cells: [ComparedCell, ComparedCell][];
+  family: number[];
+} {
   const labels: [string, string][] = [];
   const cells: [ComparedCell, ComparedCell][] = [];
   const parts: string[] = [];
   const family: number[] = [];
+  // The FDR approach runs on Fisher's LSD's raw P values here, adjusted
+  // afterwards in TypeScript (same as the ordinary design's runPosthoc).
+  const rMethod: Method = method === "fdr" ? "lsd" : method;
   // With its t (`t`) and standard error (`s`): its difference, its P, and its 95% CI, the
   // difference ± the t at which its corrected P is 0.05.
   const ci = (diff: string, means: number, df: string) =>
-    `{dd<-${diff};h<-crit(function(x)${ciP(method, means, df)})*s;c(dd,${pOf(method, "t", means, df)},dd-h,dd+h)}`;
+    `{dd<-${diff};h<-crit(function(x)${ciP(rMethod, means, df)})*s;c(dd,${pOf(rMethod, "t", means, df)},dd-h,dd+h)}`;
   if (target === "rows") {
     for (const g of groupNames)
       for (const [i, j] of pairIndices(rowNames.length)) {
@@ -294,8 +420,8 @@ function correctedPosthoc(
       }
     });
   }
-  const rCode = byFamily(parts, family, method);
-  return { rCode, labels, cells };
+  const rCode = byFamily(parts, family, rMethod);
+  return { rCode, labels, cells, family };
 }
 
 /** The error when every value is the same, or when the model leaves no scatter to test
@@ -337,6 +463,16 @@ async function runRepeatedMeasures(
   params: TwoWayAnovaParams,
   titles: (string | null)[],
 ): Promise<AnalysisOutcome> {
+  // Cell and marginal-mean comparisons need the ordinary design's pooled
+  // residual: a repeated-measures comparison has no single error term for
+  // them (each of its comparisons carries its own).
+  if (params.posthoc !== "none" && params.posthocTarget !== "groups" && params.posthocTarget !== "rows") {
+    return {
+      error:
+        `“${params.posthocTarget}” comparisons follow the ordinary two-way ANOVA, not the repeated-measures one — ` +
+        "choose groups within each row, or rows within each group.",
+    };
+  }
   const { values, group, row, subject, dropped } = flattenRepeated(columns);
   if (new Set(group).size < 2 || new Set(row).size < 2 || values.length === 0) {
     return {
@@ -372,7 +508,7 @@ async function runRepeatedMeasures(
         "the Geisser-Greenhouse correction from.",
     };
   }
-  const setup = `${R_PTUKEY};${R_CRIT};${R_ADJUST};v<-${rVec(values)};g<-${rFactor(group)};r<-${rFactor(row)};id<-${rFactor(subject)}`;
+  const setup = `${R_EFFECT_CI};${R_PTUKEY};${R_CRIT};${R_ADJUST};v<-${rVec(values)};g<-${rFactor(group)};r<-${rFactor(row)};id<-${rFactor(subject)}`;
   // Y: a subject per row (values come subject by subject, rows in order); gs its group.
   // Geisser-Greenhouse: epsilon of the rows' covariance pooled over the groups, double-centered.
   // A zero denominator means the differences have no variance at all (sphericity holds
@@ -388,11 +524,20 @@ async function runRepeatedMeasures(
     corrected
       ? `${k}S=${f},${k}Df=e*${df},${k}DfResid=e*${resid},${k}P=pf(${f},e*${df},e*${resid},lower.tail=FALSE)`
       : `${k}S=${f},${k}Df=${df},${k}DfResid=${resid},${k}P=${p}`;
+  // Partial eta squared (seq 161) per effect: each effect's SS over itself
+  // plus its own error stratum's SS — Group on the between-subjects error
+  // (e1's residual), Row and Interaction on the within-subjects error (e2's
+  // residual) — with its 95% CI from the F statistic's noncentrality
+  // (`etaCI`, N = total observations); the Geisser-Greenhouse correction,
+  // when on, uses the corrected degrees of freedom for Row/Interaction.
+  const ecG = `ecG<-etaCI(if(gf)NA else e1$"F value"[1],e1$Df[1],e1$Df[2],length(v))`;
+  const ecR = `ecR<-etaCI(e2$"F value"[1],${corrected ? "e*e2$Df[1]" : "e2$Df[1]"},${corrected ? "e*e2$Df[3]" : "e2$Df[3]"},length(v))`;
+  const ecI = `ecI<-etaCI(e2$"F value"[2],${corrected ? "e*e2$Df[2]" : "e2$Df[2]"},${corrected ? "e*e2$Df[3]" : "e2$Df[3]"},length(v))`;
   const posthoc =
     corrected && params.posthoc !== "none"
       ? correctedPosthoc(
-          params.posthoc as Method,
-          params.posthocTarget,
+          params.posthoc as Method | "fdr",
+          params.posthocTarget as "groups" | "rows",
           // Rows within a group are compared on its subjects' differences: two at least.
           params.posthocTarget === "rows" ? groupNames.filter((g) => subjectsOf(g) > 1) : groupNames,
           rowNames,
@@ -405,9 +550,11 @@ async function runRepeatedMeasures(
     // No scatter within subjects: nothing is testable. Between subjects only (each group's
     // subjects alike on average): the groups' effect alone isn't.
     `if(${R_FLAT('e2$"Sum Sq"[3]')})c(flat=1) else{gf<-${R_FLAT('e1$"Sum Sq"[2]')};` +
-    `${gg};c(gflat=gf,gS=if(gf)NA else e1$"F value"[1],gDf=e1$Df[1],gP=if(gf)NA else e1$"Pr(>F)"[1],gDfResid=e1$Df[2],gMse=if(gf)NA else e1$"Sum Sq"[2]/e1$Df[2],` +
+    `${gg};${ecG};${ecR};${ecI};c(gflat=gf,gS=if(gf)NA else e1$"F value"[1],gDf=e1$Df[1],gP=if(gf)NA else e1$"Pr(>F)"[1],gDfResid=e1$Df[2],gMse=if(gf)NA else e1$"Sum Sq"[2]/e1$Df[2],` +
     `${within("r", 'e2$"F value"[1]', "e2$Df[1]", "e2$Df[3]", 'e2$"Pr(>F)"[1]')},` +
     `${within("i", 'e2$"F value"[2]', "e2$Df[2]", "e2$Df[3]", 'e2$"Pr(>F)"[2]')},` +
+    `gSS=e1$"Sum Sq"[1],e1SS=e1$"Sum Sq"[2],rSS=e2$"Sum Sq"[1],iSS=e2$"Sum Sq"[2],e2SS=e2$"Sum Sq"[3],` +
+    `gLo=ecG[1],gHi=ecG[2],rLo=ecR[1],rHi=ecR[2],iLo=ecI[1],iHi=ecI[2],` +
     `rMse=e2$"Sum Sq"[3]/e2$Df[3],eps=e${posthoc ? "," + posthoc.rCode : ""})}`;
 
   const v = await evalNamedVector(rCode);
@@ -439,8 +586,11 @@ async function runRepeatedMeasures(
         group2,
         cells: posthoc.cells[k],
         diff: v[`d_${k}`] ?? null,
-        low: v[`lo_${k}`] ?? null,
-        high: v[`hi_${k}`] ?? null,
+        // No multiplicity-adjusted interval exists for the FDR approach —
+        // the comparison carries no CI rather than the unadjusted LSD
+        // interval its P values no longer match (same as runPosthoc).
+        low: params.posthoc === "fdr" ? null : (v[`lo_${k}`] ?? null),
+        high: params.posthoc === "fdr" ? null : (v[`hi_${k}`] ?? null),
         p: v[`p_${k}`] ?? null,
       }))
     : params.posthoc !== "none"
@@ -449,17 +599,47 @@ async function runRepeatedMeasures(
           // Dunnett / Games-Howell are refused for repeated measures before dispatch.
           completeSubjects(columns).subjects,
           params.posthoc as OrdinaryMethod,
-          params.posthocTarget,
+          params.posthocTarget as "groups" | "rows",
           mse ?? null,
           dfResid ?? null,
           titles,
+          params.control,
+          params.posthoc === "fdr"
+            ? { method: params.fdrMethod ?? "bh", q: params.fdrQ ?? 5 }
+            : undefined,
         )) as ComparisonRow[] | undefined)
       : undefined;
+  // The FDR approach on the Geisser-Greenhouse path: the corrected comparisons
+  // came back with Fisher's LSD's raw P values — adjust each family here.
+  if (posthoc && params.posthoc === "fdr" && comparisons) {
+    for (const family of [...new Set(posthoc.family)]) {
+      const idx = posthoc.family.map((f, i) => (f === family ? i : -1)).filter((i) => i >= 0);
+      const adjusted = adjustFdrPValues(
+        idx.map((i) => comparisons[i].p),
+        params.fdrMethod ?? "bh",
+        params.fdrQ ?? 5,
+      );
+      idx.forEach((i, k) => {
+        comparisons[i] = { ...comparisons[i], p: adjusted[k] };
+      });
+    }
+  }
+  // Each effect against its own error stratum (see the `etaCI` note above).
+  const ssTotal = (v.gSS ?? 0) + (v.e1SS ?? 0) + (v.rSS ?? 0) + (v.iSS ?? 0) + (v.e2SS ?? 0);
+  const effectSizes =
+    params.effectSizes === false
+      ? undefined
+      : [
+          effectSizeRow("Group", v.gSS, v.e1SS, ssTotal, v.gLo, v.gHi),
+          effectSizeRow("Row", v.rSS, v.e2SS, ssTotal, v.rLo, v.rHi),
+          effectSizeRow("Interaction", v.iSS, v.e2SS, ssTotal, v.iLo, v.iHi),
+        ];
   return {
     testType: "two-way-anova",
     subtitle: "Repeated-measures two-way ANOVA",
     stats,
     groups,
+    effectSizes,
     notes:
       "Matched by row: each replicate column is treated as the same subject across every row within its group. " +
       (corrected
@@ -481,10 +661,10 @@ async function runRepeatedMeasures(
         : "") +
       (dropped > 0
         ? ` ${dropped} replicate column${dropped === 1 ? "" : "s"} excluded (missing a value in at least one row).`
-        : ""),
+        : "") + fdrNote(params, comparisons),
     comparisons,
     comparisonsLabel: comparisons?.length
-      ? `${POSTHOC_LABEL_SHORT[params.posthoc] ?? params.posthoc} multiple comparisons ` +
+      ? `${posthocLabel(params)} multiple comparisons ` +
         (params.posthocTarget === "groups"
           ? "(groups within each row, each row a family)"
           : "(rows within each group, each group a family)")
@@ -511,7 +691,31 @@ export async function runTwoWayAnova(
     return {
       error:
         `“${params.posthoc}” multiple comparisons are not available for two-way ANOVA — ` +
-        `choose Tukey, Bonferroni, Šídák, Holm–Šídák, Fisher's LSD, Dunnett or Games-Howell.`,
+        `choose Tukey, Bonferroni, Šídák, Holm–Šídák, Fisher's LSD, Dunnett, Games-Howell or the FDR approach.`,
+    };
+  }
+  if (params.posthoc === "fdr") {
+    if (params.fdrMethod !== undefined && !(FDR_METHODS as readonly string[]).includes(params.fdrMethod)) {
+      return {
+        error: `“${params.fdrMethod}” is not an FDR method — choose Benjamini-Hochberg, Benjamini-Krieger-Yekutieli or Benjamini-Yekutieli.`,
+      };
+    }
+    const qError = params.fdrQ === undefined ? undefined : fdrQError(params.fdrQ);
+    if (qError) return { error: qError };
+  }
+  const TARGET_LABELS: Record<TwoWayAnovaParams["posthocTarget"], string> = {
+    groups: "groups within each row, each row a family",
+    rows: "rows within each group, each group a family",
+    cells: "every cell mean against every other cell mean, one family",
+    "group-means": "group means averaged over rows (main effect of the groups), one family",
+    "row-means": "row means averaged over groups (main effect of the rows), one family",
+  };
+  const targetLabel = TARGET_LABELS[params.posthocTarget];
+  if (targetLabel === undefined) {
+    return {
+      error:
+        `“${params.posthocTarget}” is not a two-way comparison scope — choose groups within each row, rows within ` +
+        "each group, every cell mean, group means or row means.",
     };
   }
   // One value per cell (a group at a row): the interaction can't be told from scatter, so
@@ -552,7 +756,7 @@ export async function runTwoWayAnova(
   }
   if (identical(values)) return { error: NOTHING_VARIES };
   const nonparametric = params.design === "nonparametric";
-  const setup = `v<-${rVec(values)};g<-${rFactor(group)};r<-${rFactor(row)}`;
+  const setup = `${R_EFFECT_CI};v<-${rVec(values)};g<-${rFactor(group)};r<-${rFactor(row)}`;
   const rCode = nonparametric
     ? // Each effect's Type III sum of squares on the ranks (as the ordinary ANOVA's, so an
       // unbalanced design gives the same H whatever the factors' order), over the ranks'
@@ -562,14 +766,23 @@ export async function runTwoWayAnova(
       `rS=h[[2]],rDf=d[2],rP=pchisq(h[[2]],d[2],lower.tail=FALSE),` +
       `iS=h[[3]],iDf=d[3],iP=pchisq(h[[3]],d[3],lower.tail=FALSE))`
     : // Type III sums of squares (Prism's on unbalanced designs; on balanced ones Type
-      // I = II = III), each effect's F on the residual mean square.
+      // I = II = III), each effect's F on the residual mean square. Partial eta
+      // squared (seq 161) per effect — SS_effect / (SS_effect + SS_error) —
+      // with its 95% CI from the F statistic's noncentrality (`etaCI`,
+      // N = total observations); the sums of squares ride along for eta
+      // squared (SS_effect / SS_total) and Cohen's f.
       `${setup};${R_TWO_WAY};s<-tw(v,g,r,${replicated ? "TRUE" : "FALSE"});` +
       `if(is.na(s[["e"]]))c(apart=1) else if(${R_FLAT('s[["e"]]')})c(flat=1) else{` +
       `dfr<-s[["dfe"]];mse<-s[["e"]]/dfr;d<-c(nlevels(g)-1,nlevels(r)-1);d[3]<-d[1]*d[2];` +
       `f<-s[c("g","r"${replicated ? ',"i"' : ""})]/d[1:${replicated ? 3 : 2}]/mse;p<-pf(f,d[seq_along(f)],dfr,lower.tail=FALSE);` +
+      `ec<-t(sapply(seq_along(f),function(k)etaCI(f[k],d[k],dfr,length(v))));` +
       `c(gS=f[[1]],gDf=d[1],gP=p[[1]],rS=f[[2]],rDf=d[2],rP=p[[2]],` +
       (replicated ? `iS=f[[3]],iDf=d[3],iP=p[[3]],` : "") +
-      `dfResid=dfr,mse=mse)}`;
+      `dfResid=dfr,mse=mse,gSS=s[["g"]],rSS=s[["r"]],eSS=s[["e"]],` +
+      (replicated ? `iSS=s[["i"]],` : "") +
+      `gLo=ec[1,1],gHi=ec[1,2],rLo=ec[2,1],rHi=ec[2,2]` +
+      (replicated ? `,iLo=ec[3,1],iHi=ec[3,2]` : "") +
+      `)}`;
 
   const v = await evalNamedVector(rCode);
   if (v.flat != null) return { error: NO_SCATTER };
@@ -590,6 +803,17 @@ export async function runTwoWayAnova(
     ...(replicated ? effect("Interaction", "iS", "iDf", "iP") : []),
     ...(nonparametric ? [] : [{ label: "DFd (residual)", value: v.dfResid ?? null }]),
   ];
+  // Scheirer-Ray-Hare's H statistics carry no sums of squares, so no
+  // effect-size table; the parametric designs get one per effect.
+  const ssTotal = (v.gSS ?? 0) + (v.rSS ?? 0) + (v.iSS ?? 0) + (v.eSS ?? 0);
+  const effectSizes =
+    nonparametric || params.effectSizes === false
+      ? undefined
+      : [
+          effectSizeRow("Group", v.gSS, v.eSS, ssTotal, v.gLo, v.gHi),
+          effectSizeRow("Row", v.rSS, v.eSS, ssTotal, v.rLo, v.rHi),
+          ...(replicated ? [effectSizeRow("Interaction", v.iSS, v.eSS, ssTotal, v.iLo, v.iHi)] : []),
+        ];
   const { groups } = await describe(
     [...new Set(group)].map((name) => ({ name, values: values.filter((_, i) => group[i] === name) })),
   );
@@ -603,6 +827,9 @@ export async function runTwoWayAnova(
           v.dfResid,
           titles,
           params.control,
+          params.posthoc === "fdr"
+            ? { method: params.fdrMethod ?? "bh", q: params.fdrQ ?? 5 }
+            : undefined,
         )
       : undefined;
   if (posthoc && "error" in posthoc) return posthoc;
@@ -612,19 +839,17 @@ export async function runTwoWayAnova(
     subtitle: nonparametric ? "Scheirer-Ray-Hare test" : "Ordinary two-way ANOVA",
     stats,
     groups,
-    notes: nonparametric
-      ? "Non-parametric two-way analysis (rank-based); no normality assumption."
-      : replicated
-        ? "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares)."
-        : "One value per cell (no replicates): the interaction can't be told apart from random scatter, so the model " +
-          "assumes there is none and tests the group and row effects only; if there is an interaction, their P values " +
-          "mean little. Comparisons within rows or groups need replicates. Assumes normal distributions with equal variances.",
+    effectSizes,
+    notes:
+      (nonparametric
+        ? "Non-parametric two-way analysis (rank-based); no normality assumption."
+        : replicated
+          ? "Compares group and row-position effects, plus their interaction; assumes normal distributions with equal variances (Type III sums of squares)."
+          : "One value per cell (no replicates): the interaction can't be told apart from random scatter, so the model " +
+            "assumes there is none and tests the group and row effects only; if there is an interaction, their P values " +
+            "mean little. Comparisons within rows or groups need replicates. Assumes normal distributions with equal variances.") +
+      fdrNote(params, comparisons),
     comparisons,
-    comparisonsLabel: comparisons?.length
-      ? `${POSTHOC_LABEL_SHORT[params.posthoc] ?? params.posthoc} multiple comparisons ` +
-        (params.posthocTarget === "groups"
-          ? "(groups within each row, each row a family)"
-          : "(rows within each group, each group a family)")
-      : undefined,
+    comparisonsLabel: comparisons?.length ? `${posthocLabel(params)} multiple comparisons (${targetLabel})` : undefined,
   };
 }

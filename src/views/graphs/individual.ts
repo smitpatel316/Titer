@@ -4,7 +4,7 @@
 import type { GraphOptions } from "../../store/types";
 import type { GraphModule, GraphFigure } from ".";
 import type { Column } from "../../lib/dataset";
-import { baseLayout, centers, COLUMN_BAR, errors, jitter, seriesPoints, type Paint } from "./plot-helpers";
+import { baseLayout, centers, COLUMN_BAR, errors, scatterOffsets, seriesPoints, type Paint } from "./plot-helpers";
 import { pointKeyOf } from "../../lib/columns";
 
 function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFigure {
@@ -47,11 +47,12 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
       });
     }
 
-    // This column's individual points.
+    // This column's individual points, spread sideways per the scatter style.
+    const offs = scatterOffsets(c.values, options.scatterStyle, i);
     data.push({
       type: "scatter",
       mode: "markers",
-      x: c.values.map((_, vi) => i + jitter(i, vi)),
+      x: c.values.map((_, vi) => i + offs[vi]),
       y: c.values,
       ...seriesPoints(
         paint,

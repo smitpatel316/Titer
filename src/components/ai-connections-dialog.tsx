@@ -8,18 +8,21 @@ import { Button, Input, Switch } from "../ui/controls";
 import {
   isNative,
   mcpActivity,
+  mcpAllowlist,
   mcpClaudeCodeCommand,
   mcpConnectAntigravity,
   mcpFeedback,
   mcpFeedbackConsent,
   mcpOpenAntigravity,
   mcpRegenerateToken,
+  mcpSetAllowlist,
   mcpSetEnabled,
   mcpSetFeedbackConsent,
   mcpStatus,
   mcpToken,
   openGithubIssue,
   type FeedbackEntry,
+  type McpAllowlistGroup,
   type McpStatus,
 } from "../native";
 import { useProjectStore } from "../store/use-project-store";
@@ -89,6 +92,7 @@ export function AiConnectionsDialog() {
   const [activity, setActivity] = React.useState<string[]>([]);
   const [feedback, setFeedback] = React.useState<FeedbackEntry[]>([]);
   const [feedbackSharing, setFeedbackSharing] = React.useState<boolean | null>(null);
+  const [allowlist, setAllowlist] = React.useState<McpAllowlistGroup[] | null>(null);
   const [copiedFeedback, setCopiedFeedback] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
@@ -113,6 +117,7 @@ export function AiConnectionsDialog() {
       setActivity(await mcpActivity(10));
       setFeedback(await mcpFeedback());
       setFeedbackSharing(await mcpFeedbackConsent());
+      setAllowlist(await mcpAllowlist());
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -174,6 +179,24 @@ export function AiConnectionsDialog() {
     }
   };
 
+  /** One allowlist group toggle: what the AI may do beyond reading.
+   *  The server reads the choice when an AI app connects, so a change
+   *  applies on reconnect — no restart needed. */
+  const toggleAllowlistGroup = async (id: string, enabled: boolean) => {
+    if (!allowlist) return;
+    setBusy(true);
+    try {
+      const groups = enabled
+        ? [...new Set([...allowlist.filter((g) => g.enabled).map((g) => g.id), id])]
+        : allowlist.filter((g) => g.enabled && g.id !== id).map((g) => g.id);
+      setAllowlist(await mcpSetAllowlist(groups));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const regenerate = async () => {
     if (!confirmRegen) {
       setConfirmRegen(true);
@@ -228,7 +251,7 @@ export function AiConnectionsDialog() {
       onClose={closeSelector}
       dismissLabel="Done"
       title="AI Connections"
-      description="Let an AI app you already use (Claude Code, Claude Desktop, Antigravity / Gemini, …) work with what's open in Titer — through a local server only. It can read and change your project, not just look at it."
+      description="Let an AI app you already use (Claude Code, Claude Desktop, Antigravity / Gemini, …) work with what's open in Titer — through a local server only. By default it can only read your project; the groups below decide what else it may do."
     >
       {!isNative ? (
         <p className="text-regular text-secondary">
@@ -298,6 +321,33 @@ export function AiConnectionsDialog() {
                 </div>
               )}
             </div>
+          </Section>
+
+          <Section label="What your AI can do">
+            <p className="text-small text-secondary">
+              By default your AI can only read your project. Each group below unlocks more tools —
+              the server advertises only what is on, and refuses the rest. A change applies the
+              next time your AI app connects.
+            </p>
+            {allowlist === null ? (
+              <p className="text-regular text-secondary">Checking…</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {allowlist.map((group) => (
+                  <div key={group.id} className="flex items-start gap-3">
+                    <Switch
+                      checked={group.enabled}
+                      disabled={busy}
+                      onChange={(v) => void toggleAllowlistGroup(group.id, v)}
+                    />
+                    <span className="text-regular text-secondary">
+                      <span className="text-primary">{group.label}</span> — {group.description}{" "}
+                      <span className="text-small">({group.tools.length} tools)</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </Section>
 
           {status?.enabled && token && (
@@ -431,9 +481,10 @@ export function AiConnectionsDialog() {
 
           <p className="text-small text-secondary">
             Local only: the server binds 127.0.0.1, needs the token above, and never sends data anywhere — except
-            feedback reports, and only when you turn sharing on above. Phase 2 gives an agent 52 tools — 15
-            read-only, and 37 that change your project: run an analysis, build a graph, export, save or delete. Only
-            switch this on for an app you trust. It cannot change these settings.
+            feedback reports, and only when you turn sharing on above. By default your AI can only read your
+            project (6 read tools). The groups above unlock more — up to 71 tools, 19 read-only and 52 that
+            change your project: run an analysis, build a graph, export, save or delete. Only switch groups on
+            for an app you trust. It cannot change these settings.
           </p>
 
           {error && <p className="text-regular text-red-600">{error}</p>}

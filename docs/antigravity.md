@@ -1,5 +1,10 @@
 # Connect Google Antigravity to Titer
 
+> **Setup moved:** for the one-click setup, start at
+> [docs/antigravity-setup.md](antigravity-setup.md) (Titer 1.8.0, verified
+> against the code). This file is now the deep reference — the plugin
+> path, both transports, and the honest limitations.
+
 Titer exposes a local, read-only MCP server (Phase 1: five tools — list
 projects/tables, read table summaries, read results, read graphs). Google
 Antigravity can connect to it two ways: **install the Titer plugin**
@@ -178,11 +183,23 @@ exist — build it with `scripts/build-stdio-bridge.sh`.)
 ## Verify the connection
 
 1. In the App: **Customizations → Installed → MCP Servers** — the server
-   shows with a green status dot and “5 tools enabled”. (⋮ → **Restart**,
-   **Disable**, **Delete** manage it.) In the CLI: `/mcp`.
-2. Ask the agent: “List my open Titer projects and their tables.” It
+   shows with a green status dot and “6 tools enabled” by default (the
+   six read tools the server advertises by default — the five in the
+   snippets above, plus `titer_list_backups`). Since 1.7.4 the server
+   enforces the allowlist: Antigravity only ever sees the tools Titer
+   has enabled, so the count here is the allowlisted count, not the
+   server's full set. (In 1.7.3 the server advertised all 52 tools and
+   Antigravity 2.33.0 showed the full count, so the old “5 tools
+   enabled” expectation did not hold — that is the bug 1.7.4 fixes.)
+   (⋮ → **Restart**, **Disable**, **Delete** manage it.) In the CLI:
+   `/mcp`.
+2. To give the agent more tools, enable them in Titer under **Settings →
+   AI connections** — the count in Antigravity rises to match what you
+   enabled. Enabling write tools lets the agent change your project, so
+   only enable what you trust the app with.
+3. Ask the agent: “List my open Titer projects and their tables.” It
    should call `titer_list_projects` and report what Titer has open.
-3. Cross-check in Titer: **Settings → AI connections → Activity log**
+4. Cross-check in Titer: **Settings → AI connections → Activity log**
    records every tool call (tool name + args summary, never values or the
    token).
 

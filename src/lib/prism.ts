@@ -353,6 +353,137 @@ const NONLINEAR_MODELS: Record<string, NonlinearModel> = {
   "Sine wave": "sine-wave",
   "Two phase decay": "two-phase-decay",
   "Two-phase decay": "two-phase-decay",
+  // 1.8 classic-curves completion (B6 names, verbatim from Prism 11.2.0's
+  // Model tab): the rest of the Gaussian / Sine waves / Exponential
+  // families. The cumulative Gaussian is listed under both Gaussian and
+  // Lines in Prism's tree, with slightly different spellings ("Percents"
+  // vs "Percentages", "Fraction" vs "Fractions") — all spellings map.
+  "Sum of two Gaussians": "sum-of-two-gaussians",
+  Lognormal: "lognormal",
+  "Cumulative Gaussian -- Percents": "cumulative-gaussian-percent",
+  "Cumulative Gaussian --  Percentages": "cumulative-gaussian-percent",
+  "Cumulative Gaussian -- Fraction": "cumulative-gaussian-fraction",
+  "Cumulative Gaussian -- Fractions": "cumulative-gaussian-fraction",
+  "Cumulative Gaussian -- Counts": "cumulative-gaussian-counts",
+  "Sum of two Lorentzians": "sum-of-two-lorentzians",
+  "Lorentzian (Cauchy)": "lorentzian",
+  "Standard sine wave": "standard-sine-wave",
+  "Damped sine wave": "damped-sine-wave",
+  "Sinc()": "sinc",
+  "Sine wave with nonzero baseline": "sine-wave",
+  "Three phase decay": "three-phase-decay",
+  "Three-phase decay": "three-phase-decay",
+  "Plateau followed by one phase association": "plateau-association",
+  "Two phase association": "two-phase-association",
+  "Two-phase association": "two-phase-association",
+  "One phase association": "one-phase-association",
+  "One-phase association": "one-phase-association",
+  // 1.8 classic-curves completion (B6 §Lines, §Polynomial, §Growth):
+  // verbatim Model-tab names. "Third order polynomial" carries a double
+  // space in B6 (line 140) — both spellings map; the semilog log-Y line
+  // likewise (B6 line 127, double space before "Y is log").
+  "Straight line": "line",
+  "Line through origin": "line-through-origin",
+  "Horizontal line": "horizontal-line",
+  "Semilog line -- X is log, Y is linear": "semilog-line",
+  "Semilog line -- X is linear,  Y is log": "semilog-y-log",
+  "Log-log line -- X and Y both log": "log-log-line",
+  "Segmental linear regression": "segmental-linear",
+  "Two intersecting lines. Fit the crossing point.": "segmental-linear",
+  "First order polynomial (straight line)": "line",
+  "Centered first order polynomial (straight line)": "centered-first",
+  "Centered second order polynomial (quadratic)": "centered-second",
+  "Third order polynomial  (cubic)": "cubic",
+  "Third order polynomial (cubic)": "cubic",
+  "Centered third order polynomial  (cubic)": "centered-third",
+  "Centered third order polynomial (cubic)": "centered-third",
+  "Fourth order polynomial": "quartic",
+  "Centered fourth order polynomial": "centered-fourth",
+  "Fifth order polynomial": "quintic",
+  "Centered fifth order polynomial": "centered-fifth",
+  "Sixth order polynomial": "sextic",
+  "Centered sixth order polynomial": "centered-sixth",
+  "Exponential growth with log(population)": "exponential-growth-log",
+  // 1.8 classic-curves completion (B6 §Dose-response Stimulation/Inhibition):
+  // verbatim Model-tab names. Stim #2/#6 and Inhib #2/#6 are the variable-
+  // slope 4PLs, already mapped above as the sigmoidal-4pl forms.
+  "[Agonist] vs. response (three parameters)": "agonist-3pl-x",
+  "[Inhibitor] vs. response (three parameters)": "inhibitor-3pl-x",
+  "log(agonist) vs. normalized response": "agonist-3pl-normalized-logx",
+  "log(agonist) vs. normalized response -- Variable slope": "agonist-4pl-normalized-logx",
+  "[Agonist] vs. normalized response": "agonist-3pl-normalized-x",
+  "[Agonist] vs. normalized response -- Variable slope": "agonist-4pl-normalized-x",
+  "log(inhibitor) vs. normalized response": "inhibitor-3pl-normalized-logx",
+  "log(inhibitor) vs. normalized response -- Variable slope": "inhibitor-4pl-normalized-logx",
+  "[Inhibitor] vs. normalized response": "inhibitor-3pl-normalized-x",
+  "[Inhibitor] vs. normalized response -- Variable slope": "inhibitor-4pl-normalized-x",
+  // 1.8 classic-curves completion (B6 §Dose-response Special, §Standard,
+  // §Growth, §Linear quadratic, §Classic): verbatim Model-tab names.
+  "Biphasic, X is concentration": "biphasic-x",
+  "Biphasic, X is log(concentration)": "biphasic-logx",
+  "Bell-shaped, X is concentration": "bell-shaped-x",
+  "Bell-shaped, X is log(concentration)": "bell-shaped-logx",
+  "Absolute IC50, X is concentration": "absolute-ic50-x",
+  "Absolute IC50, X is log(concentration)": "absolute-ic50-logx",
+  "Pade (1,1) approximant": "pade-11",
+  "Power series: Y=A*X^B + C*X^D": "power-series",
+  "Exponential plateau": "exponential-plateau",
+  "Beta growth then decay": "beta-growth-decay",
+  "Linear quadratic cell death (Y is fraction of cells surviving)": "lq-fraction-surviving",
+  "Linear quadratic survival (Y is percentage)": "lq-percent-surviving",
+  "Linear quadratic survival (Y is # alive cells)": "lq-count-alive",
+  "Linear quadratic cell death (Y is fraction of dead cells)": "lq-fraction-dead",
+  "Linear quadratic survival (Y is percentage cells dead)": "lq-percent-dead",
+  "Linear quadratic survival (Y is # dead cells)": "lq-count-dead",
+  // 1.8 classic-curves completion (B6 coverage sweep): verbatim Model-tab
+  // names whose equation already ships as a single-curve model but had no
+  // reader key — the pre-existing models were mapped only under the name
+  // Prism writes in .prism files, which differs from the Model-tab name
+  // (e.g. "Straight line" for "Line", "One phase decay" for "One phase
+  // exponential decay"). Only names that are the same equation are added:
+  // the separate-analysis models (binding saturation/kinetics, enzyme
+  // inhibition, dose-response special) are NOT single-curve models and
+  // stay out of this map. ("Line", "Gaussian" and "Lognormal" are already
+  // keys above, unquoted — do not repeat them here.)
+  "Semilog line": "semilog-line",
+  "Hyperbola (X is concentration)": "hyperbola",
+  "One site binding (hyperbola)": "hyperbola",
+  "Asymmetric Sigmoidal, 5PL, X is log(concentration)": "asymmetric-5pl-logx",
+  "Asymmetric Sigmoidal, 5PL, X is concentration": "asymmetric-5pl-x",
+  "Asymmetric (five parameter), X is log(concentration)": "asymmetric-5pl-logx",
+  "Asymmetric (five parameter), X is concentration": "asymmetric-5pl-x",
+  "log(agonist) vs. response (three parameters)": "agonist-3pl-logx",
+  "[Agonist] vs. response -- Variable slope (four parameters)": "sigmoidal-4pl-x",
+  "log(inhibitor) vs. response (three parameters)": "inhibitor-3pl-logx",
+  "[Inhibitor] vs. response -- Variable slope (four parameters)": "sigmoidal-4pl-x",
+  "Gaussian distribution": "gaussian",
+  "Boltzmann sigmoidal": "boltzmann-sigmoid",
+  "Exponential growth equation": "exponential-growth",
+  "Exponential (Malthusian) growth": "exponential-growth",
+  "Exponential growth": "exponential-growth",
+  "Gompertz growth": "gompertz-growth",
+  "Logistic growth": "logistic-growth",
+  "Plateau followed by one phase decay": "plateau-decay",
+  "Michaelis-Menten": "michaelis-menten",
+  "Allosteric sigmoidal": "allosteric-sigmoidal",
+  "Substrate inhibition": "substrate-inhibition",
+  "Sigmoidal dose-response": "agonist-3pl-logx",
+  "Sigmoidal dose-response (variable slope)": "sigmoidal-4pl-logx",
+  "One site competition": "inhibitor-3pl-logx",
+  "Two site competition": "two-site-competition-logx",
+  "One site - Fit logIC50": "inhibitor-3pl-logx",
+  "Two sites - Fit logIC50": "two-site-competition-logx",
+  "One site -- Homologous": "homologous-competition-logx",
+  "One phase exponential decay": "one-phase-decay",
+  "Two phase exponential decay": "two-phase-decay",
+  "One phase exponential association": "one-phase-association",
+  "Two phase exponential association": "two-phase-association",
+  // B6 Classic #14: the first-order polynomial under its Classic-equations
+  // name (the Second/Third/Fourth Order twins are keyed just below).
+  "Polynomial: First Order (straight line)": "line",
+  "Polynomial: Second Order (Y=A + B*X + C*X^2)": "quadratic",
+  "Polynomial: Third Order (Y=A + B*X + C*X^2 + D*X^3)": "cubic",
+  "Polynomial: Fourth Order (Y=A + B*X + C*X^2 + D*X^3 + E*X^4)": "quartic",
 };
 
 const genId = (type: string) => `${type}_${Math.random().toString(36).slice(2, 10)}`;
@@ -889,6 +1020,7 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
     else if (format === "grouped") helixType = "grouped";
     else if (format === "contingency") helixType = "contingency";
     else if (format === "column") helixType = "column";
+    else if (format === "parts_of_whole") helixType = "parts-of-whole";
     else if (format === "nested") {
       // A Prism nested table is one of Prism's formats, but Titer's nested
       // table needs its own structure — import as Column, never silently.

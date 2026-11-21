@@ -26,8 +26,12 @@ import {
   type SimulationSpec,
 } from "../stats/types";
 import { simulateTableData, validateSimulationSpec } from "../stats/simulation/simulate";
+import { repointCandidates } from "../lib/repoint-analysis";
 import { parseProjectText, validateAnalysisParams } from "../lib/project-file";
+import { fileName, fileTitle } from "../lib/paths";
+import { importTabularFile } from "../lib/tabular-import";
 import { extractMethod, methodForTable, remapGraphOptions } from "../lib/template";
+import { TEMPLATES, planTemplateApply, templateById } from "../lib/templates";
 import { runScript } from "../lib/prism-script";
 import type { WandReport } from "../lib/wand";
 import { analysisOptionsForTable, analysisTypesOfferedForTable, countDataGroups, hasRowGroups } from "../views/analyses";
@@ -35,16 +39,25 @@ import {
   defaultDocumentIo,
   executeCloseProject,
   executeImportPrism,
+  executeMergeProject,
   executeSaveProject,
+  readFileWithTimeout,
   type DocumentDeps,
   type DocumentIo,
   type DocumentState,
+  type MergeDeps,
 } from "./mcp-document";
 import {
+  executeAddDrawingObject,
+  executeArrangeDrawingObjects,
   executeBuildGraph,
   executeCloneGraph,
   executeCreateFigure,
   executeCreateInfoSheet,
+  executeDeleteDrawingObject,
+  executeFreezeFigure,
+  executeFreezeGraph,
+  executeUpdateDrawingObject,
   executeUpdateFigure,
   executeUpdateGraph,
   executeUpdateInfoSheet,
@@ -52,6 +65,7 @@ import {
 } from "./mcp-graphs";
 import {
   defaultExportIo,
+  executeExportAllGraphs,
   executeExportFigure,
   executeExportGraph,
   executeExportOffice,
@@ -66,6 +80,8 @@ import {
   mcpTakeJobs,
   onMcpCancelJob,
   onMcpRunJob,
+  readDataBytes,
+  readDataText,
   type McpJob,
 } from "../native";
 import { publishAnalysisResult, publishMcpSnapshotNow } from "./mcp-publish";
@@ -73,9 +89,27 @@ import { useProjectActions, useProjectStore } from "./use-project-store";
 import type { ProjectNode, RowGroup, TableData, TableType } from "./types";
 import type { TableMove } from "./references";
 import { groupsOf, isGrouped, isNested, leadOf, readTable, setColumns } from "../lib/dataset";
-import { seriesKeyOf } from "../lib/columns";
-import { SUMMARY_FORMATS, summarySubcolumns, type SummaryFormat } from "../lib/summary-format";
 import {
+  addCalculatedVariable,
+  isCalculatedColumn,
+  removeCalculatedVariable,
+  setCalculatedFormula,
+} from "../lib/calcvars";
+import { seriesKeyOf } from "../lib/columns";
+import {
+  applyLinkedBlock,
+  isLinkedSourcePath,
+  linkedPasteKindOf,
+  parseLinkedSource,
+  refreshLinked,
+  type LinkedPaste,
+} from "../lib/linked-paste";
+import { fillSeries, generateSeries, validateSeriesSpec, type SeriesMode } from "../lib/series";
+import { SUMMARY_FORMATS, summaryFormatOf, summarySubcolumns, type SummaryFormat } from "../lib/summary-format";
+import {
+  applySummaryFormat,
+  applySummaryFormatNested,
+  applySummaryFormatXY,
   convertCommaDecimals,
   deleteColumns,
   deleteRows,
@@ -88,6 +122,8 @@ import {
   rowsDeleted,
   rowsInserted,
   shiftRowGroupsForDelete,
+  transposeBlock,
+  writeBlock,
 } from "../views/tables/table-data";
 import { TABLES } from "../views/tables/index";
 
@@ -116,6 +152,10 @@ export interface JobDeps {
   renameNode?: (id: string, name: string) => void;
   /** Freeze or unfreeze an analysis node (default: the real store action). */
   setAnalysisFrozen?: (id: string, frozen: boolean) => void;
+  /** Freeze or unfreeze a table node (default: the real store action). */
+  setTableFrozen?: (id: string, frozen: boolean) => void;
+  /** Replace an analysis node's params (default: the real store action). */
+  setAnalysisParams?: (id: string, params: AnalysisParams) => void;
   /** Copy an example table's analyses + graphs onto target tables, as one
    *  undo step (default: the real store action). Returns the per-table
    *  report. */
@@ -131,6 +171,9 @@ export interface JobDeps {
   }) => void;
   /** Load a project into the store (the import job replaces it). */
   loadProject?: DocumentDeps["loadProject"];
+  /** Append another project's sheets to this one, as one undo step (the
+   *  merge job — File ▸ Merge, seq 180). */
+  mergeProject?: MergeDeps["mergeProject"];
   /** Mark the project saved (the save job). */
   markSaved?: DocumentDeps["markSaved"];
   /** Headless document IO; defaults to the real native calls. */
@@ -138,6 +181,10 @@ export interface JobDeps {
   /** Headless export IO; defaults to the real `write_file` call. A
    *  harness driving the table-data jobs in node injects a stub here. */
   exportIo?: ExportIo;
+  /** Read a linked-paste source file (default: the real native reads — text
+   *  for delimited files, bytes for `.xlsx`). A harness driving the linked
+   *  jobs in node injects a stub here. */
+  readLinkedSource?: (sourcePath: string, kind: "csv" | "xlsx") => Promise<string | Uint8Array>;
   /** The project actions the table branches dispatch through (L3). The
    *  hook passes the real ones; a harness that drives only `noop` /
    *  `run-analysis` may omit them, and a table job then errors plainly.
@@ -150,6 +197,8 @@ export interface JobDeps {
     createSimulatedTable: (tableType: TableType, data: TableData) => void;
     updateTable: (id: string, data: TableData, label: string, move?: TableMove) => void;
     duplicateFamily: (id: string) => void;
+    /** Duplicate one sheet, nothing else (seq 236). */
+    duplicateNode: (id: string) => void;
     renameNode: (id: string, name: string) => void;
     removeNode: (id: string) => void;
     reorderTables: (order: string[]) => void;
@@ -158,11 +207,25 @@ export interface JobDeps {
     redo: () => void;
     createGraph: NonNullable<GraphJobDeps["createGraph"]>;
     updateGraph: NonNullable<GraphJobDeps["updateGraph"]>;
+    setGraphSources: NonNullable<GraphJobDeps["setGraphSources"]>;
+    /** Move an orphaned analysis under a table that offers its test (seq 242). */
+    repointAnalysis: (id: string, tableId: string) => void;
+    /** Change a graph's type, keeping its title and size (seq 244). */
+    changeGraphType: NonNullable<GraphJobDeps["changeGraphType"]>;
     cloneGraph: NonNullable<GraphJobDeps["cloneGraph"]>;
     createFigure: NonNullable<GraphJobDeps["createFigure"]>;
     updateFigure: NonNullable<GraphJobDeps["updateFigure"]>;
     createInfoSheet: NonNullable<GraphJobDeps["createInfoSheet"]>;
     updateInfoSheet: NonNullable<GraphJobDeps["updateInfoSheet"]>;
+    /** Append another project's sheets, as one undo step (the merge job). */
+    mergeProject: MergeDeps["mergeProject"];
+    /** Freeze (or unfreeze) a graph or a figure (seq 237). */
+    setGraphFrozen: NonNullable<GraphJobDeps["setGraphFrozen"]>;
+    /** Drawing objects on a graph or figure sheet (seq 238). */
+    addDrawingObject: NonNullable<GraphJobDeps["addDrawingObject"]>;
+    updateDrawingObject: NonNullable<GraphJobDeps["updateDrawingObject"]>;
+    deleteDrawingObject: NonNullable<GraphJobDeps["deleteDrawingObject"]>;
+    arrangeDrawingObjects: NonNullable<GraphJobDeps["arrangeDrawingObjects"]>;
   };
   /** Wait for the store to settle after a dispatch, so a `getState()` read
    *  sees the dispatched change. In the app this is two macrotasks (React
@@ -206,12 +269,35 @@ function toGraphDeps(deps: JobDeps): GraphJobDeps {
     getState: deps.getState,
     createGraph: a?.createGraph,
     updateGraph: a?.updateGraph,
+    setGraphSources: a?.setGraphSources,
+    changeGraphType: a?.changeGraphType,
     cloneGraph: a?.cloneGraph,
     createFigure: a?.createFigure,
     updateFigure: a?.updateFigure,
     createInfoSheet: a?.createInfoSheet,
     updateInfoSheet: a?.updateInfoSheet,
     renameNode: a?.renameNode,
+    setGraphFrozen: a?.setGraphFrozen,
+    addDrawingObject: a?.addDrawingObject,
+    updateDrawingObject: a?.updateDrawingObject,
+    deleteDrawingObject: a?.deleteDrawingObject,
+    arrangeDrawingObjects: a?.arrangeDrawingObjects,
+  };
+}
+
+/** The merge job's deps, from the job deps — the merge action rides
+ *  L3's shared `actions` object (a harness that omits it gets the plain
+ *  "no store action" error from `needMergeProject` below). */
+function toMergeDeps(deps: JobDeps): MergeDeps {
+  return {
+    getState: deps.getState,
+    mergeProject:
+      deps.mergeProject ??
+      deps.actions?.mergeProject ??
+      (() => {
+        throw new Error("This window can't merge projects (no mergeProject).");
+      }),
+    io: deps.io ?? defaultDocumentIo,
   };
 }
 
@@ -221,6 +307,10 @@ function toExportDeps(deps: JobDeps): ExportJobDeps {
   return {
     getState: deps.getState,
     io: deps.exportIo ?? defaultExportIo,
+    // The overlay runs: the dispatcher's `run` (the real `runAnalysis`
+    // in the app, a stub in a harness), so headless exports draw the
+    // graph's overlays from the same cache the views read.
+    run: deps.run ?? runAnalysis,
   };
 }
 
@@ -247,8 +337,8 @@ function reqString(value: unknown, name: string): string {
 // authority — they validate against live state and throw plain-language
 // errors the awaiting tool returns as tool errors.
 
-/** The seven table types, as the tools spell them. */
-const TABLE_TYPES: TableType[] = ["column", "xy", "grouped", "nested", "multiple", "contingency", "survival"];
+/** The eight table types, as the tools spell them. */
+const TABLE_TYPES: TableType[] = ["column", "xy", "grouped", "nested", "multiple", "contingency", "survival", "parts-of-whole"];
 
 /** `job (action)` prefix for the table branches' plain-language errors. */
 const jobErr = (job: McpJob, message: string) => new Error(`Job ${job.job_id} (${job.action}) ${message}`);
@@ -294,6 +384,14 @@ function argBool(job: McpJob, args: unknown, key: string): boolean {
   return value;
 }
 
+/** One optional arg, as a boolean — missing takes `fallback`. */
+function argOptBool(job: McpJob, args: unknown, key: string, fallback: boolean): boolean {
+  const value = (args as Record<string, unknown> | null | undefined)?.[key];
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== "boolean") throw jobErr(job, `needs ${key} to be true or false.`);
+  return value;
+}
+
 /** One optional arg, as a finite number — present but not a number is an error. */
 function argOptNumber(job: McpJob, args: unknown, key: string): number | undefined {
   const value = (args as Record<string, unknown> | null | undefined)?.[key];
@@ -330,6 +428,25 @@ function tableNode(job: McpJob, state: ReturnType<JobDeps["getState"]>, tableId:
     throw jobErr(job, `“${tableId}” is not a table (it is a ${node.type}).`);
   }
   return node;
+}
+
+/** A linked-paste source file's contents (Prism 11, seq 168): the injected
+ *  reader, or the real native reads — text for delimited files, bytes for
+ *  `.xlsx`. A source that can't be read is a plain error naming the file. */
+async function readLinkedSource(
+  job: McpJob,
+  deps: JobDeps,
+  sourcePath: string,
+  kind: "csv" | "xlsx",
+): Promise<string | Uint8Array> {
+  const read =
+    deps.readLinkedSource ??
+    ((path: string, k: "csv" | "xlsx") => (k === "xlsx" ? readDataBytes(path) : readDataText(path)));
+  try {
+    return await read(sourcePath, kind);
+  } catch {
+    throw jobErr(job, `“${fileName(sourcePath)}” couldn't be read — the file may have moved or been deleted.`);
+  }
 }
 
 /** A node of any kind, by id. */
@@ -397,10 +514,13 @@ function groupedShape(
  * The shape of a nested table's columns — "Group:Subgroup:R1" throughout,
  * every group holding the same subgroups and every subgroup the same
  * replicates — or the plain-language reason they do not form one.
+ * `suffixes` are the first subgroup's sub-column names ("R1", "R2"… or
+ * "Mean", "SD", "N" for a summary table), so a summary format can be
+ * detected from them the way grouped tables detect theirs.
  */
 function nestedShape(
   columns: string[],
-): { groups: string[]; subgroups: number; replicates: number } | { error: string } {
+): { groups: string[]; subgroups: number; replicates: number; suffixes: string[] } | { error: string } {
   const dataCols = columns.slice(1);
   if (dataCols.length === 0) return { error: "needs at least one data column after the row-title column." };
   const parts = dataCols.map((n) => n.split(":"));
@@ -426,7 +546,12 @@ function nestedShape(
   if (repCounts.some((n) => n !== repCounts[0])) {
     return { error: "every subgroup must hold the same number of replicates." };
   }
-  return { groups, subgroups: subCounts[0], replicates: repCounts[0] };
+  return {
+    groups,
+    subgroups: subCounts[0],
+    replicates: repCounts[0],
+    suffixes: parts.filter(([g, s]) => g === groups[0] && s === subsOf.get(groups[0])![0]).map((p) => p[2]),
+  };
 }
 
 /**
@@ -507,6 +632,7 @@ function buildTableData(
     groups = shape.groups.length;
     subgroups = shape.subgroups;
     replicates = shape.replicates;
+    summaryFormat = detectSummaryFormat(shape.suffixes);
   } else if (type === "xy") {
     // An XY table's X stays first; the data sets after it may be grouped
     // ("A:Y1"…) or plain ("Y1", "Y2") — the columns decide, either way.
@@ -569,7 +695,10 @@ function buildTableData(
   if (!base) return data;
 
   // A replace keeps what the call did not replace: the marks, the bands,
-  // the widths, the error format, the freeze flag and the notes.
+  // the widths, the error format, the freeze flag and the notes. It does
+  // NOT keep a linked paste (seq 168): the values no longer come from the
+  // source, so a later refresh must not overwrite the replacement — the
+  // fresh data above carries no link, and none is restored here.
   const onCell = (k: unknown): k is string => {
     const [r, c] =
       typeof k === "string" && /^\d+,\d+$/.test(k) ? k.split(",").map(Number) : [Infinity, Infinity];
@@ -615,6 +744,13 @@ function buildTableData(
   if (base.errorFormat) data.errorFormat = base.errorFormat;
   if (base.freezeTitle) data.freezeTitle = true;
   if (base.notes) data.notes = base.notes;
+  // A replace keeps the formulas whose column survives: the store's
+  // recompute materializes their values over whatever the call passed for
+  // those columns, so a formula always rules its column.
+  if (base.calculated) {
+    const kept = base.calculated.filter((v) => columns.includes(v.name));
+    if (kept.length) data.calculated = kept;
+  }
   return data;
 }
 
@@ -801,7 +937,8 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       };
     }
     case "run-analysis": {
-      const analysisId = (job.args as { analysis_id?: unknown } | null | undefined)?.analysis_id;
+      const args = (job.args as { analysis_id?: unknown; params?: unknown } | null | undefined) ?? {};
+      const analysisId = args.analysis_id;
       if (typeof analysisId !== "string" || !analysisId) {
         throw new Error(`Job ${job.job_id} (run-analysis) has no analysis_id.`);
       }
@@ -813,7 +950,36 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       if (node.frozen) {
         throw new Error(`Analysis “${node.name}” is frozen — unfreeze it before running it again.`);
       }
+      // `titer_rerun_analysis` overrides: validated strictly (unknown or
+      // out-of-range keys are rejected naming the valid choices, never
+      // silently defaulted) and merged over the node's stored params —
+      // then saved on the node, so the next run and the UI see them. An
+      // orphaned analysis keeps its params (its source table is gone),
+      // so overrides on one are refused here. The stored params
+      // themselves are not re-validated: a file-loaded node may carry a
+      // key this version doesn't know (FF-F12), which the runners ignore.
+      let storedParams = node.analysisParams;
       const type = node.analysisType;
+      if (args.params !== undefined) {
+        if (node.orphaned) {
+          throw new Error(
+            `Analysis “${node.name}” is orphaned (its table was deleted) — its parameters can't be changed.`,
+          );
+        }
+        if (!type) {
+          throw new Error(`Analysis “${node.name}” has no analysis type recorded.`);
+        }
+        const { errors, params: checked } = validateAnalysisParams(type, args.params);
+        if (errors.length) throw new Error(errors.join(" "));
+        const merged = { ...(storedParams ?? {}), ...(checked ?? {}) } as AnalysisParams;
+        const setParams =
+          deps.setAnalysisParams ??
+          (() => {
+            throw new Error("This window can't change analysis params (no setAnalysisParams).");
+          });
+        setParams(analysisId, merged);
+        storedParams = merged;
+      }
       const parent = node.parentId ? state.nodes[node.parentId] : undefined;
       const data = parent?.type === "table" ? parent.data : undefined;
       if (!type || !data) {
@@ -822,7 +988,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       // Info-constant hooks resolve live, exactly as the analysis view
       // does — a hook that can't resolve is an error, never a guessed number.
       const sheets = infoSheetsOf(state.nodes, state.rootOrder);
-      const resolved = resolveAnalysisParams(node.analysisParams, type, sheets);
+      const resolved = resolveAnalysisParams(storedParams, type, sheets);
       if ("error" in resolved) throw new Error(resolved.error);
       const outcome = await (deps.run ?? runAnalysis)(type, data, resolved.params);
       // Await the publish: the result must be in the server's map before
@@ -866,6 +1032,119 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         created: { analysis_id: analysisId },
       };
     }
+    case "freeze-table": {
+      // `setTableFrozen` — a frozen table can't be edited until unfrozen
+      // (seq 165); freezing is idempotent, unfreezing restores edits.
+      const args = (job.args ?? {}) as { table_id?: unknown; frozen?: unknown };
+      const tableId = reqString(args.table_id, "table_id");
+      if (typeof args.frozen !== "boolean") {
+        throw new Error(`Job argument “frozen” must be true or false.`);
+      }
+      const state = deps.getState();
+      const node = state.nodes[tableId];
+      if (!node || node.type !== "table") {
+        throw new Error(
+          node
+            ? `“${tableId}” is not a table (it is a ${node.type}).`
+            : `No table with id “${tableId}” in this project.`,
+        );
+      }
+      const freeze =
+        deps.setTableFrozen ??
+        (() => {
+          throw new Error("This window can't freeze tables (no setTableFrozen).");
+        });
+      freeze(tableId, args.frozen);
+      // The commit has to land before this job returns (v1.6 race fix):
+      // the next job reads the table through getState(), and without the
+      // wait it would still see the table unfrozen and let an edit through.
+      await settleAfterDispatch(deps, state.revision);
+      return {
+        result: { project_id: job.project_id, table_id: tableId, frozen: args.frozen },
+        created: { table_id: tableId },
+      };
+    }
+    case "clone-analysis":
+    case "clone-figure": {
+      // seq 236: one sheet, nothing else — the generic `duplicateNode`
+      // store action. Tables and graphs already have their own clone
+      // tools (duplicate_table_family / clone_graph).
+      const kind = job.action === "clone-analysis" ? "analysis" : "figure";
+      const argName = kind === "analysis" ? "analysis_id" : "figure_id";
+      const actions = tableActions(job, deps);
+      const nodeId = argString(job, job.args, argName);
+      const state = deps.getState();
+      const node = state.nodes[nodeId];
+      if (!node) throw jobErr(job, `no ${kind} with id “${nodeId}” in this project.`);
+      if (node.type !== kind) throw jobErr(job, `“${node.name}” is a ${node.type}, not a ${kind}.`);
+      const before = new Set(Object.keys(state.nodes));
+      const beforeRevision = state.revision;
+      actions.duplicateNode(nodeId);
+      await settleAfterDispatch(deps, beforeRevision);
+      const after = deps.getState();
+      const createdId = Object.keys(after.nodes).find((id) => !before.has(id));
+      if (!createdId) {
+        throw jobErr(
+          job,
+          `duplicated the ${kind} but its id could not be read back — ask titer_list_projects for the new ${kind}.`,
+        );
+      }
+      return {
+        result: { project_id: job.project_id, [`${kind}_id`]: createdId },
+        created: { [`${kind}_id`]: createdId },
+      };
+    }
+    case "repoint-analysis": {
+      // seq 242: move an orphaned analysis under a table that offers its
+      // test — the saved results stay until the re-run lands. The table
+      // must offer the test, or the error names the tables that do.
+      const actions = tableActions(job, deps);
+      const analysisId = argString(job, job.args, "analysis_id");
+      const tableId = argString(job, job.args, "table_id");
+      const state = deps.getState();
+      const node = state.nodes[analysisId];
+      if (!node || node.type !== "analysis") {
+        throw jobErr(
+          job,
+          node
+            ? `“${analysisId}” is not an analysis (it is a ${node.type}).`
+            : `No analysis with id “${analysisId}” in this project.`,
+        );
+      }
+      if (!node.orphaned) {
+        throw jobErr(job, `“${node.name}” is not orphaned — only an orphaned analysis can be re-pointed.`);
+      }
+      const table = state.nodes[tableId];
+      if (!table || table.type !== "table") {
+        throw jobErr(
+          job,
+          table
+            ? `“${tableId}” is not a table (it is a ${table.type}).`
+            : `No table with id “${tableId}” in this project.`,
+        );
+      }
+      const candidates = repointCandidates(node, state.nodes);
+      if (!candidates.some((t) => t.id === tableId)) {
+        throw jobErr(
+          job,
+          candidates.length === 0
+            ? `table “${table.name}” doesn't offer the ${node.analysisType} test — and no table in this project does.`
+            : `table “${table.name}” doesn't offer the ${node.analysisType} test — the tables that do are: ${candidates
+                .map((t) => `“${t.name}”`)
+                .join(", ")}.`,
+        );
+      }
+      const beforeRevision = state.revision;
+      actions.repointAnalysis(analysisId, tableId);
+      await settleAfterDispatch(deps, beforeRevision);
+      const after = deps.getState();
+      if (after.nodes[analysisId]?.parentId !== tableId) {
+        throw jobErr(job, `re-pointed “${node.name}” but its table could not be read back — ask titer_list_projects for the analysis.`);
+      }
+      return {
+        result: { project_id: job.project_id, analysis_id: analysisId, table_id: tableId, table_name: table.name },
+      };
+    }
     case "save-project": {
       // L2: write the project (GAP-4 — the TS writers build the bytes, Rust
       // only ever wrote them) and mark it saved. The job's result is the
@@ -882,6 +1161,70 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       // same as File ▸ Import Prism File, minus the dialog.
       const args = (job.args ?? {}) as { path?: unknown };
       return executeImportPrism(toDocumentDeps(deps), { path: reqString(args.path, "path") }, job.project_id);
+    }
+    case "import-data-file": {
+      // seq 155 MCP coverage: import a data file (.csv / .tsv / .txt /
+      // .xlsx) as a NEW table in this project — the same parsers as
+      // File ▸ Import Data File…, minus the dialog. Unlike the UI, it
+      // never appends to the active table: MCP never prompts, so the
+      // append choice can't be asked — the import always makes a table.
+      const actions = tableActions(job, deps);
+      const path = argString(job, job.args, "path");
+      const name = argOptString(job, job.args, "name");
+      if (name !== undefined && !name.trim()) throw jobErr(job, "needs a non-empty name.");
+      const ext = path.split(/[\\/]/).pop()?.split(".").pop()?.toLowerCase() ?? "";
+      if (ext !== "csv" && ext !== "tsv" && ext !== "txt" && ext !== "xlsx") {
+        throw jobErr(
+          job,
+          `“${fileName(path)}” is not a data file — import a .csv, .tsv, .txt or .xlsx file.`,
+        );
+      }
+      const io = deps.io ?? defaultDocumentIo;
+      let table;
+      try {
+        const content =
+          ext === "xlsx"
+            ? await readFileWithTimeout(() => io.readDataBytes(path), path)
+            : await readFileWithTimeout(() => io.readDataText(path), path);
+        table = await importTabularFile(path, content);
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("couldn't be read in time")) throw err;
+        throw new Error(err instanceof Error ? err.message : String(err));
+      }
+      const tableName = name?.trim() ? name.trim() : fileTitle(path);
+      const preState = deps.getState();
+      const before = new Set(preState.rootOrder);
+      const beforeRevision = preState.revision;
+      actions.createTableWithData(table.tableType, table.data, tableName);
+      await settleAfterDispatch(deps, beforeRevision);
+      const after = deps.getState();
+      const createdId =
+        after.activeNodeId && !before.has(after.activeNodeId) && after.nodes[after.activeNodeId]?.type === "table"
+          ? after.activeNodeId
+          : after.rootOrder.find((id) => !before.has(id) && after.nodes[id]?.type === "table");
+      if (!createdId) {
+        throw jobErr(job, "imported the file but its table id could not be read back — ask titer_list_tables for the new table.");
+      }
+      const created = after.nodes[createdId]!;
+      return {
+        result: {
+          project_id: job.project_id,
+          table_id: createdId,
+          name: created.name,
+          table_type: TABLES[table.tableType].label,
+          rows: created.data?.rows.length ?? 0,
+          data_columns: (created.data?.columns.length ?? 1) - 1,
+          notes: table.notes,
+        },
+        created: { table_id: createdId },
+      };
+    }
+    case "merge-project": {
+      // Seq 180: read another project file and append its sheets to this
+      // one — the same as File ▸ Merge, minus the dialog. Unlike an
+      // import, this never discards the project.
+      const args = (job.args ?? {}) as { path?: unknown };
+      return executeMergeProject(toMergeDeps(deps), { path: reqString(args.path, "path") }, job.project_id);
     }
     case "close-project": {
       // L2: settle the save question, then arm the close bypass — Rust
@@ -939,6 +1282,9 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       const actions = tableActions(job, deps);
       const tableId = argString(job, job.args, "table_id");
       const node = tableNode(job, deps.getState(), tableId);
+      if (node.frozen) {
+        throw jobErr(job, `Table “${node.name}” is frozen — unfreeze it before writing to it.`);
+      }
       const type = node.tableType ?? "column";
       const columns = (job.args as Record<string, unknown> | null | undefined)?.columns;
       const rows = (job.args as Record<string, unknown> | null | undefined)?.rows;
@@ -986,7 +1332,11 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       const tableId = argString(job, job.args, "table_id");
       const op = argString(job, job.args, "op");
       const state = deps.getState();
+      const beforeRevision = state.revision;
       const node = tableNode(job, state, tableId);
+      if (node.frozen) {
+        throw jobErr(job, `Table “${node.name}” is frozen — unfreeze it before editing it.`);
+      }
       const type = node.tableType ?? "column";
       const data = node.data ?? { columns: ["Title"], rows: [] };
       // One grid-menu op: a new TableData via the table-data.ts helpers,
@@ -1141,10 +1491,187 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           next = convertCommaDecimals(data);
           break;
         }
+        case "paste-link": {
+          // Linked paste (Prism 11, seq 168): paste a data file as a link at
+          // (row, column) — the values land and the link is stored, so a
+          // later refresh re-reads the file into the same region.
+          const sourcePath = argString(job, job.args, "source_path");
+          if (!isLinkedSourcePath(sourcePath)) {
+            throw jobErr(job, `needs source_path to name a data file (.csv, .tsv, .txt or .xlsx), not “${sourcePath}”.`);
+          }
+          const row = argInt(job, job.args, "row", 0);
+          const col = argInt(job, job.args, "column", 0);
+          const autoUpdate = argOptBool(job, job.args, "auto_update", true);
+          const kind = linkedPasteKindOf(sourcePath);
+          const sourceName = fileName(sourcePath);
+          const content = await readLinkedSource(job, deps, sourcePath, kind);
+          let block: (string | null)[][];
+          try {
+            block = await parseLinkedSource(sourceName, content);
+          } catch (err) {
+            throw jobErr(job, err instanceof Error ? err.message : "couldn't be read as data.");
+          }
+          const width = block.reduce((w, r) => Math.max(w, r.length), 0);
+          const link: LinkedPaste = {
+            sourcePath,
+            sourceName,
+            kind,
+            row,
+            col,
+            rows: block.length,
+            cols: width,
+            autoUpdate,
+          };
+          const res = applyLinkedBlock(data, link, block, type);
+          if (res.changed) {
+            label = "Paste Link";
+            next = res.data;
+            break;
+          }
+          // The values already match: still a link when there wasn't this one.
+          if (JSON.stringify(data.linkedPaste) !== JSON.stringify(link)) {
+            label = "Paste Link";
+            next = { ...data, linkedPaste: link };
+          }
+          break;
+        }
+        case "remove-link": {
+          // Linked paste (Prism 11, seq 168): the values stay, the link goes.
+          if (!data.linkedPaste) {
+            throw jobErr(job, "has no linked paste to remove — paste a file as a link first (paste-link).");
+          }
+          label = "Break Link";
+          next = { ...data, linkedPaste: undefined };
+          break;
+        }
+        case "set-summary-format": {
+          // Seq 208: the sub-column format (raw replicates, or
+          // pre-calculated summaries) is a table setting on grouped, XY
+          // and nested tables — the MCP twin of the Groups / Replicates
+          // panel's format picker. Values stay in their group's slot;
+          // narrowing to a shorter format drops only the slots past its
+          // width, exactly as the UI does (the helpers decide that).
+          if (type !== "grouped" && type !== "xy" && type !== "nested") {
+            throw jobErr(
+              job,
+              `cannot set a sub-column format — only grouped, xy and nested tables have sub-columns, and this is a ${type} table.`,
+            );
+          }
+          const format = argString(job, job.args, "format") as SummaryFormat;
+          if (!SUMMARY_FORMATS.some((f) => f.value === format)) {
+            throw jobErr(
+              job,
+              `has no sub-column format “${format}” — the formats are ${SUMMARY_FORMATS.map((f) => f.value).join(", ")}.`,
+            );
+          }
+          if (summaryFormatOf(data) === format) break; // already that format: no-op success
+          label = "Change Sub-column Format";
+          next =
+            type === "xy"
+              ? applySummaryFormatXY(data, format)
+              : type === "nested"
+                ? applySummaryFormatNested(data, format)
+                : applySummaryFormat(data, format);
+          break;
+        }
+        case "add-calculated-variable":
+        case "set-calculated-variable":
+        case "remove-calculated-variable": {
+          // Calculated Variables (Prism 11, seq 156): Multiple Variables
+          // tables only — the formula core lives in lib/calcvars.ts.
+          if (type !== "multiple") {
+            throw jobErr(job, `cannot use ${op} — calculated variables only exist in Multiple Variables tables, and this is a ${type} table.`);
+          }
+          const name = argString(job, job.args, "name");
+          if (op === "remove-calculated-variable") {
+            if (!isCalculatedColumn(data, name)) {
+              throw jobErr(job, `has no calculated variable named “${name}” — ask titer_list_tables for the table's variables first.`);
+            }
+            label = "Remove Calculated Variable";
+            next = removeCalculatedVariable(data, name);
+            break;
+          }
+          const formula = argString(job, job.args, "formula");
+          const bare = formula.startsWith("=") ? formula.slice(1) : formula;
+          const res =
+            op === "add-calculated-variable"
+              ? addCalculatedVariable(data, name, bare)
+              : setCalculatedFormula(data, name, bare);
+          if ("error" in res) throw jobErr(job, res.error);
+          label = op === "add-calculated-variable" ? "Add Calculated Variable" : "Edit Calculated Variable";
+          next = res.data;
+          break;
+        }
+        case "paste-transposed": {
+          // Seq 230, the MCP half of Edit ▸ Paste Transposed: `rows` is the
+          // clipboard block; it lands transposed (rows become columns) at
+          // (at_row, at_col), growing the table as a GUI paste does.
+          const raw = (job.args as Record<string, unknown> | null | undefined)?.rows;
+          if (
+            !Array.isArray(raw) ||
+            raw.length === 0 ||
+            raw.some(
+              (row) =>
+                !Array.isArray(row) ||
+                row.some((v) => v !== null && typeof v !== "string" && typeof v !== "number"),
+            )
+          ) {
+            throw jobErr(job, "needs rows to be a non-empty array of rows, each an array of strings, numbers or null.");
+          }
+          const block = (raw as (string | number | null)[][]).map((row) =>
+            row.map((v) => (v === null ? null : String(v))),
+          );
+          const atRow = argInt(job, job.args, "at_row", 0);
+          const atCol = argInt(job, job.args, "at_col", 0);
+          if (atRow > data.rows.length || atCol >= data.columns.length) {
+            throw jobErr(
+              job,
+              `has no cell (${atRow}, ${atCol}) to paste at — the table holds ${data.rows.length} rows and ${data.columns.length} columns.`,
+            );
+          }
+          label = "Paste Transposed";
+          next = writeBlock(data, atRow, atCol, transposeBlock(block), type);
+          break;
+        }
+        case "generate-series": {
+          // Create Series (Prism: Insert → Create Series…; seq 169): fill
+          // a column with an arithmetic or geometric series. Defaults
+          // follow the dialog: the X column on XY/Survival tables, from
+          // row 0, for the table's stored rows, starting at 0 in steps of 1.
+          const column =
+            argOptNumber(job, job.args, "column") ??
+            (type === "xy" || type === "survival"
+              ? 1
+              : (() => {
+                  throw jobErr(job, "needs column — only XY and Survival tables default to the X column (1).");
+                })());
+          if (column < 1) {
+            throw jobErr(job, "needs a data column (1 or later) — column 0 holds the row titles, and takes no series.");
+          }
+          if (column >= data.columns.length) {
+            throw jobErr(job, `has no column ${column} — the table has ${data.columns.length} columns (0 is the row titles).`);
+          }
+          const at = argInt(job, job.args, "at", 0);
+          if (at > data.rows.length) {
+            throw jobErr(job, `has no row ${at} to start at — the table holds ${data.rows.length} stored rows.`);
+          }
+          const count = argOptNumber(job, job.args, "count") ?? Math.max(1, data.rows.length - at);
+          const spec = {
+            count,
+            first: argOptNumber(job, job.args, "first") ?? 0,
+            mode: ((argOptString(job, job.args, "mode") ?? "arithmetic") as SeriesMode),
+            step: argOptNumber(job, job.args, "step") ?? 1,
+          };
+          const problem = validateSeriesSpec(spec);
+          if (problem) throw jobErr(job, problem);
+          label = "Create Series";
+          next = fillSeries(data, column, at, generateSeries(spec));
+          break;
+        }
         default:
           throw jobErr(
             job,
-            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals.`,
+            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-summary-format, paste-link, remove-link, generate-series, paste-transposed.`,
           );
       }
       if (next === null) {
@@ -1156,17 +1683,76 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
             table_id: tableId,
             rows: data.rows.length,
             data_columns: data.columns.length - 1,
+            ...(op === "set-summary-format" ? { summary_format: summaryFormatOf(data) } : {}),
           },
         };
       }
       actions.updateTable(tableId, next, label, move);
-      await deps.flush?.();
+      // Same read-back shape as create-table (v1.6 race fix): the commit
+      // must land before the next job reads the table, or a following
+      // edit-table op sees pre-edit state and can silently no-op (a
+      // set-summary-format back to Replicates reads "replicates" and
+      // reports success while the Mean/SD/N columns stay).
+      await settleAfterDispatch(deps, beforeRevision);
       return {
         result: {
           project_id: job.project_id,
           table_id: tableId,
           rows: next.rows.length,
           data_columns: next.columns.length - 1,
+          ...(op === "set-summary-format" ? { summary_format: next.summaryFormat ?? "replicates" } : {}),
+        },
+      };
+    }
+    case "refresh-linked-data": {
+      // Linked paste (Prism 11, seq 168): re-read a table's linked source
+      // file into its region. An unchanged source is a no-op success — no
+      // dispatch, no undo step, no dirty flag — so a refresh that finds
+      // nothing new costs nothing.
+      const actions = tableActions(job, deps);
+      const tableId = argString(job, job.args, "table_id");
+      const state = deps.getState();
+      const node = tableNode(job, state, tableId);
+      const type = node.tableType ?? "column";
+      const data = node.data ?? { columns: ["Title"], rows: [] };
+      const link = data.linkedPaste;
+      if (!link) {
+        throw jobErr(job, "has no linked data — paste a file as a link first (paste-link).");
+      }
+      const content = await readLinkedSource(job, deps, link.sourcePath, link.kind);
+      let res: { data: TableData; changed: boolean; droppedColumns: number };
+      try {
+        res = await refreshLinked(data, link, content, type);
+      } catch (err) {
+        throw jobErr(job, err instanceof Error ? err.message : "couldn't be read as data.");
+      }
+      if (!res.changed) {
+        return {
+          result: {
+            project_id: job.project_id,
+            table_id: tableId,
+            rows: data.rows.length,
+            data_columns: data.columns.length - 1,
+            updated: false,
+            dropped_columns: 0,
+          },
+        };
+      }
+      // Same read-back shape as edit-table (v1.6 race fix): the commit
+      // must land before the next job reads the table, or a following
+      // refresh reads pre-refresh state and reports a change that already
+      // happened. `deps.flush` alone does not settle a lagging getState.
+      const beforeRevision = state.revision;
+      actions.updateTable(tableId, res.data, "Update Linked Data");
+      await settleAfterDispatch(deps, beforeRevision);
+      return {
+        result: {
+          project_id: job.project_id,
+          table_id: tableId,
+          rows: res.data.rows.length,
+          data_columns: res.data.columns.length - 1,
+          updated: true,
+          dropped_columns: res.droppedColumns,
         },
       };
     }
@@ -1296,6 +1882,18 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       return executeUpdateGraph(job, toGraphDeps(deps));
     case "clone-graph":
       return executeCloneGraph(job, toGraphDeps(deps));
+    case "freeze-graph":
+      return executeFreezeGraph(job, toGraphDeps(deps));
+    case "freeze-figure":
+      return executeFreezeFigure(job, toGraphDeps(deps));
+    case "add-drawing-object":
+      return executeAddDrawingObject(job, toGraphDeps(deps));
+    case "update-drawing-object":
+      return executeUpdateDrawingObject(job, toGraphDeps(deps));
+    case "delete-drawing-object":
+      return executeDeleteDrawingObject(job, toGraphDeps(deps));
+    case "arrange-drawing-objects":
+      return executeArrangeDrawingObjects(job, toGraphDeps(deps));
     case "create-figure":
       return executeCreateFigure(job, toGraphDeps(deps));
     case "update-figure":
@@ -1434,6 +2032,59 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         created: { table_id: tableId },
       };
     }
+    case "apply-template": {
+      // L2: start from a built-in template (seq 167) — the same plan the
+      // Welcome dialog applies in the UI (`planTemplateApply`): a fresh
+      // window's untouched table is replaced, anywhere else the template
+      // adds a table. The graphs are nodes with defaults, not runs (as in
+      // the UI — they draw when viewed).
+      const actions = tableActions(job, deps);
+      const templateId = argString(job, job.args, "template_id");
+      const template = templateById(templateId);
+      if (!template) {
+        throw jobErr(
+          job,
+          `has no template “${templateId}” — the templates are ${TEMPLATES.map((t) => t.id).join(", ")}.`,
+        );
+      }
+      const preState = deps.getState();
+      const before = new Set(preState.rootOrder);
+      const beforeRevision = preState.revision;
+      const plan = planTemplateApply(template, {
+        nodes: preState.nodes,
+        rootOrder: preState.rootOrder,
+        childOrder: preState.childOrder,
+      });
+      if (plan.replaceTableId) actions.removeNode(plan.replaceTableId);
+      actions.createTableWithData(plan.table.tableType, plan.table.data, plan.table.name);
+      await settleAfterDispatch(deps, beforeRevision);
+      const after = deps.getState();
+      const createdId =
+        after.activeNodeId && !before.has(after.activeNodeId) && after.nodes[after.activeNodeId]?.type === "table"
+          ? after.activeNodeId
+          : after.rootOrder.find((id) => !before.has(id) && after.nodes[id]?.type === "table");
+      if (!createdId) {
+        throw jobErr(job, "applied the template but its table's id could not be read back — ask titer_list_tables for the new table.");
+      }
+      const created = after.nodes[createdId]!;
+      const graphIds: string[] = [];
+      for (const g of plan.graphs) graphIds.push(actions.createGraph(createdId, g.graphType, g.options));
+      return {
+        result: {
+          project_id: job.project_id,
+          template_id: template.id,
+          template_name: template.name,
+          table_id: createdId,
+          name: created.name,
+          table_type: TABLES[plan.table.tableType].label,
+          rows: created.data?.rows.length ?? 0,
+          data_columns: (created.data?.columns.length ?? 1) - 1,
+          graphs: graphIds,
+          replaced_pristine_table: plan.replaceTableId !== null,
+        },
+        created: { table_id: createdId },
+      };
+    }
     case "apply-wand": {
       // L5: analyze + graph this table like another table (Analysis ▸ Use
       // Wand…) — the store's `applyWand`, one target, one undo step. The
@@ -1525,6 +2176,8 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       return executeExportGraph(job, toExportDeps(deps));
     case "export-figure":
       return executeExportFigure(job, toExportDeps(deps));
+    case "export-all-graphs":
+      return executeExportAllGraphs(job, toExportDeps(deps));
     case "export-office":
       return executeExportOffice(job, toExportDeps(deps));
     case "export-table-data":
@@ -1549,6 +2202,8 @@ export function useMcpJobDispatcher() {
   const createAnalysis = actions.createAnalysis;
   const renameNode = actions.renameNode;
   const setAnalysisFrozen = actions.setAnalysisFrozen;
+  const setTableFrozen = actions.setTableFrozen;
+  const setAnalysisParams = actions.setAnalysisParams;
   const applyWand = actions.applyWand;
   const applyScript = actions.applyScript;
   const loadProject = actions.loadProject;
@@ -1624,6 +2279,8 @@ export function useMcpJobDispatcher() {
                 createAnalysis,
                 renameNode,
                 setAnalysisFrozen,
+                setTableFrozen,
+                setAnalysisParams,
                 applyWand,
                 applyScript,
                 loadProject,

@@ -75,7 +75,17 @@ export function transformTable(source: TableData, type: TableType, t: Transform,
   );
   const { widths, freezeTitle } = own ?? source;
   const kept = Object.entries(widths ?? {}).filter(([name]) => source.columns.includes(name));
-  return { ...source, rows, widths: kept.length ? Object.fromEntries(kept) : undefined, freezeTitle };
+  // A table computed from another carries no formulas of its own: its values
+  // come from its source table, and a copied `calculated` would recompute
+  // over them on load. (A Transform of an MV table keeps the materialized
+  // values — they are transformed like any other value above.)
+  return {
+    ...source,
+    calculated: undefined,
+    rows,
+    widths: kept.length ? Object.fromEntries(kept) : undefined,
+    freezeTitle,
+  };
 }
 
 /** What a transform makes, as a table's name ends: "Table 1, log10". */

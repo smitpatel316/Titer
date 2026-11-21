@@ -7,6 +7,9 @@
 // xdg-open equivalents so the same commands keep their signatures.
 mod cloud;
 mod cloud_box;
+// Automatic backup (Plane seq 226, 1.8.0): the separate-copy store — see
+// backup.rs. The commands below are its frontend face.
+mod backup;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 #[cfg(target_os = "macos")]
 use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
@@ -75,6 +78,13 @@ struct ProjectWindows {
     /// the sequence. Cleared when that window is destroyed, or by
     /// `cancel_quit`.
     quit_closing: Option<String>,
+    /// A close-all-driven close is in flight (seq 235, File ▸ Close All):
+    /// like `quit_closing`, but the label of the project window that has
+    /// been asked to close while Titer waits for its answer. Cleared when
+    /// that window is destroyed, or by `cancel_quit`. Unlike a quit, Titer
+    /// itself stays open when the last one goes.
+    closing_all: bool,
+    close_all_closing: Option<String>,
 }
 
 impl Opening {
@@ -251,8 +261,8 @@ fn choose_project(app: AppHandle, window: WebviewWindow) {
     });
 }
 
-/// File ▸ Import Prism File…: the Open panel for a Prism file (`.pzfx` or
-/// `.prism`).
+/// File ▸ Import Prism File…: the Open panel for a Prism file (`.pzfx`,
+/// `.prism` or `.pzf`).
 /// Non-blocking, like choose_project: blocking_pick_file parks the main
 /// thread on a semaphore while the NSOpenPanel needs that same thread to
 /// process clicks — deadlock, Titer (not responding), 0% CPU (confirmed
@@ -263,12 +273,30 @@ fn choose_project(app: AppHandle, window: WebviewWindow) {
 #[tauri::command]
 fn choose_prism_file(app: AppHandle, window: WebviewWindow) {
     let label = window.label().to_string();
-    app.dialog().file().set_title("Import Prism File").add_filter("GraphPad Prism File", &["pzfx", "prism"]).pick_file(
+    app.dialog().file().set_title("Import Prism File").add_filter("GraphPad Prism File", &["pzfx", "prism", "pzf"]).pick_file(
         move |file| {
             let picked = file.and_then(|file| file.into_path().ok()).map(|path| path.to_string_lossy().into_owned());
             let _ = app.emit_to(label.as_str(), "prism-file-picked", picked);
         },
     );
+}
+
+/// File ▸ Import Data File…: the Open panel for a data file (`.csv`,
+/// `.tsv`, `.txt` or `.xlsx`).
+/// Non-blocking, like choose_prism_file (a blocking picker deadlocked the
+/// app Nov 9): the event carries the path, or null on Cancel, so the page
+/// can unsubscribe either way.
+#[tauri::command]
+fn choose_data_file(app: AppHandle, window: WebviewWindow) {
+    let label = window.label().to_string();
+    app.dialog()
+        .file()
+        .set_title("Import Data File")
+        .add_filter("Data File", &["csv", "tsv", "txt", "xlsx"])
+        .pick_file(move |file| {
+            let picked = file.and_then(|file| file.into_path().ok()).map(|path| path.to_string_lossy().into_owned());
+            let _ = app.emit_to(label.as_str(), "data-file-picked", picked);
+        });
 }
 
 /// The project windows, lowest label first ("project-2" before "project-10"),
@@ -311,6 +339,32 @@ fn close_next_project_window(app: &AppHandle) -> bool {
     true
 }
 
+/// Asks ONE project window to close (the lowest label), as the next step of a
+/// close-all: the same one-at-a-time rule as a quit (asking all of them at
+/// once raced their native save dialogs — bugfix/quit-save-dialog).
+/// Returns false when there is no window to close, one is already being
+/// closed, or no close-all is in flight.
+fn close_next_for_close_all(app: &AppHandle) -> bool {
+    let Some(label) = project_labels(app).into_iter().next() else {
+        return false;
+    };
+    let Some(window) = app.get_webview_window(&label) else {
+        return false;
+    };
+    // Check and set under one lock, as the quit's version does: a `cancel_quit`
+    // that landed after the close-all was marked must stop the sequence
+    // before another window is asked.
+    let state = app.state::<Projects>();
+    let mut projects = state.0.lock().unwrap();
+    if !projects.closing_all || projects.close_all_closing.is_some() {
+        return false;
+    }
+    projects.close_all_closing = Some(label);
+    drop(projects);
+    let _ = window.close();
+    true
+}
+
 /// Analysis ▸ Apply Method…: the Open panel for a method file (`.pzm`).
 /// Non-blocking, like choose_prism_file (a blocking picker deadlocked the
 /// app Nov 9): the event carries the path, or null on Cancel, so the page
@@ -326,12 +380,53 @@ fn choose_method_file(app: AppHandle, window: WebviewWindow) {
     );
 }
 
+/// File ▸ Merge…: the Open panel for a project file (`.hlx`, `.pzt`,
+/// `.prism` or `.pzfx`) to merge into this project.
+/// Non-blocking, like choose_prism_file (a blocking picker deadlocked the
+/// app Nov 9): the event carries the path, or null on Cancel, so the page
+/// can unsubscribe either way.
+#[tauri::command]
+fn choose_merge_file(app: AppHandle, window: WebviewWindow) {
+    let label = window.label().to_string();
+    app.dialog()
+        .file()
+        .set_title("Merge Project")
+        .add_filter("Titer Project", &["hlx", "pzt"])
+        .add_filter("GraphPad Prism File", &["pzfx", "prism"])
+        .pick_file(move |file| {
+            let picked = file.and_then(|file| file.into_path().ok()).map(|path| path.to_string_lossy().into_owned());
+            let _ = app.emit_to(label.as_str(), "merge-file-picked", picked);
+        });
+}
+
 /// A window refused to close (its user chose Cancel): Titer doesn't quit after all.
+/// The same cancel stops a close-all in flight, so the rest stay open.
 #[tauri::command]
 fn cancel_quit(projects: State<Projects>) {
     let mut projects = projects.0.lock().unwrap();
     projects.quitting = false;
     projects.quit_closing = None;
+    projects.closing_all = false;
+    projects.close_all_closing = None;
+}
+
+/// Closes every project window through the normal flow (seq 235), as File ▸
+/// Close All does: mark the close-all, close the project windows one at a
+/// time (each asks about its unsaved changes), and Titer stays open once
+/// the last one is gone. A window whose user cancels the close calls
+/// `cancel_quit`, which clears the flag, so the rest stay open. A quit in
+/// flight wins over a close-all.
+#[tauri::command]
+fn close_all(app: AppHandle) {
+    {
+        let state = app.state::<Projects>();
+        let mut projects = state.0.lock().unwrap();
+        if projects.quitting {
+            return;
+        }
+        projects.closing_all = true;
+    }
+    let _ = close_next_for_close_all(&app);
 }
 
 /// Quits through the normal flow, as the macOS quit hook does: mark the
@@ -339,9 +434,16 @@ fn cancel_quit(projects: State<Projects>) {
 /// unsaved changes), and the run loop ends Titer once the last one is gone.
 /// Used by the updater after staging a relaunch. A window whose user cancels
 /// the quit calls `cancel_quit`, which clears the flag, so Titer stays.
+/// A close-all in flight is abandoned first — the quit takes over the sequence.
 #[tauri::command]
 fn quit_app(app: AppHandle) {
-    app.state::<Projects>().0.lock().unwrap().quitting = true;
+    {
+        let state = app.state::<Projects>();
+        let mut projects = state.0.lock().unwrap();
+        projects.closing_all = false;
+        projects.close_all_closing = None;
+        projects.quitting = true;
+    }
     if !close_next_project_window(&app) && project_labels(&app).is_empty() {
         app.exit(0);
     }
@@ -473,15 +575,41 @@ async fn read_prism_text(path: String) -> Result<String, String> {
         .map_err(|e| e.to_string())?
 }
 
-/// A Prism `.prism` file's bytes, for import — a `.prism` file is a ZIP, so
-/// text won't do. Base64, not a JSON number array: a 40 MB file would be a
-/// 40 M-number array the webview would have to parse one number at a time.
+/// A Prism `.prism` or `.pzf` file's bytes, for import — a `.prism` file is
+/// a ZIP and a `.pzf` file is binary, so text won't do for either. Base64,
+/// not a JSON number array: a 40 MB file would be a 40 M-number array the
+/// webview would have to parse one number at a time.
 /// Async, like `read_text` (seq 248): a TCC-blocked read must never park
 /// the main thread.
 #[tauri::command]
 async fn read_prism_bytes(path: String) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
-        check_extension(&path, &["prism"])?;
+        check_extension(&path, &["prism", "pzf"])?;
+        fs::read(path).map(|bytes| BASE64.encode(bytes)).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A data file's (`.csv`, `.tsv`, `.txt`) text, for import. Only those —
+/// `.xlsx` goes through `read_data_bytes` (a ZIP, so text won't do), and
+/// project files (`.hlx`, `.pzt`, `.pzm`) through `read_text`. Async, like
+/// `read_text` (seq 248): a TCC-blocked read must never park the main thread.
+#[tauri::command]
+async fn read_data_text(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || read_text_with_bom(path, &["csv", "tsv", "txt"]))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// A data file's (`.xlsx`) bytes, for import. Base64, like
+/// `read_prism_bytes`: a JSON number array would make the webview parse a
+/// large file one number at a time. Async, like `read_text` (seq 248): a
+/// TCC-blocked read must never park the main thread.
+#[tauri::command]
+async fn read_data_bytes(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        check_extension(&path, &["xlsx"])?;
         fs::read(path).map(|bytes| BASE64.encode(bytes)).map_err(|e| e.to_string())
     })
     .await
@@ -490,11 +618,11 @@ async fn read_prism_bytes(path: String) -> Result<String, String> {
 
 /// Extensions `write_file` may write: every format the app saves or
 /// exports, including the table-export formats the MCP tools advertise
-/// (csv/xlsx/txt). A format missing here fails at the gate before its
+/// (csv/xlsx/txt/xml). A format missing here fails at the gate before its
 /// writer runs (v1.6 BUG D: xlsx was missing, so every xlsx export failed).
 const WRITE_FILE_EXTENSIONS: &[&str] = &[
-    "hlx", "prism", "pzt", "pzm", "pzfx", "png", "jpg", "jpeg", "svg", "pdf", "tif", "tiff", "bmp", "csv", "txt", "xlsx",
-    "docx", "pptx",
+    "hlx", "prism", "pzt", "pzm", "pzfx", "png", "jpg", "jpeg", "svg", "pdf", "tif", "tiff", "bmp", "eps", "csv", "txt", "xlsx",
+    "xml", "docx", "pptx",
 ];
 
 /// Writes the raw request body to the (URL-encoded) `path` header, atomically.
@@ -532,6 +660,65 @@ fn write_atomically(path: &Path, data: &[u8]) -> Result<(), String> {
     })
 }
 
+/// Send to Keynote (seq 217): runs the AppleScript the page built
+/// (`buildKeynoteScript` in src/lib/office-export.ts) in Keynote via
+/// `osascript`, so Keynote makes the presentation and saves the real .key
+/// at `path`. macOS only — anywhere else this refuses outright, before
+/// touching anything (the menu hides the item there, and the MCP tool
+/// refuses the target there first). The script goes in a temp file, not
+/// an `osascript -e` argument, so no shell quoting is involved; the temp
+/// script and the temp PNG the page wrote are deleted once osascript
+/// finishes, whatever it reports. Async, on the blocking pool: osascript
+/// can take seconds while Keynote launches, and a save into ~/Documents
+/// or ~/Desktop can block on a macOS TCC consent prompt (same class as
+/// seq 248's `write_file`).
+#[tauri::command]
+async fn send_to_keynote(script: String, png_path: String, path: String) -> Result<String, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (&script, &png_path, &path);
+        return Err("Send to Keynote needs macOS with Keynote installed — this build cannot drive Keynote.".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        tokio::task::spawn_blocking(move || send_to_keynote_blocking(&script, &png_path, &path))
+            .await
+            .map_err(|e| e.to_string())?
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn send_to_keynote_blocking(script: &str, png_path: &str, path: &str) -> Result<String, String> {
+    use std::io::Write;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let script_path = std::env::temp_dir().join(format!("titer-keynote-{stamp}.applescript"));
+    // Write through a handle so a short write is retried, not silent.
+    let out = (|| -> Result<std::process::Output, String> {
+        let mut script_file = std::fs::File::create(&script_path)
+            .map_err(|e| format!("Couldn't write the Keynote script: {e}"))?;
+        script_file
+            .write_all(script.as_bytes())
+            .and_then(|()| script_file.sync_all())
+            .map_err(|e| format!("Couldn't write the Keynote script: {e}"))?;
+        drop(script_file);
+        std::process::Command::new("osascript")
+            .arg(&script_path)
+            .output()
+            .map_err(|e| format!("Couldn't run osascript (is Keynote installed?): {e}"))
+    })();
+    let _ = std::fs::remove_file(&script_path);
+    let _ = std::fs::remove_file(png_path);
+    let out = out?;
+    if !out.status.success() {
+        let detail = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("Keynote couldn't make the presentation: {}", detail.trim()));
+    }
+    Ok(path.to_string())
+}
+
 // ── My Palettes ──────────────────────────────────────────────────────────
 // The palettes made on this Mac, for every project and window: JSON in Titer's data
 // folder, read and checked by the page (src/store/my-palettes.ts).
@@ -560,6 +747,63 @@ async fn write_my_palettes(app: AppHandle, text: String) -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+// ── Automatic backup (Plane seq 226, 1.8.0) ──────────────────────────────
+// The commands behind src/lib/backup.ts + the frontend backup engine. All
+// disk work runs on a blocking-pool thread (seq 248), like the palettes
+// above; the store itself lives in backup.rs. Bytes cross as base64, like
+// `read_prism_bytes`: a JSON number array would make the webview parse a
+// large file one number at a time.
+
+/// Writes (or overwrites) this project's backup snapshot.
+#[tauri::command]
+async fn backup_write(
+    app: AppHandle,
+    identity: String,
+    display_name: String,
+    source_path: Option<String>,
+    base64: String,
+) -> Result<backup::BackupEntry, String> {
+    let bytes = BASE64.decode(base64).map_err(|e| e.to_string())?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || {
+        backup::write_backup(&dir, &identity, &display_name, source_path.as_deref(), &bytes)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The backups on disk, newest first (stale and incomplete ones pruned).
+#[tauri::command]
+async fn backup_list(app: AppHandle) -> Result<Vec<backup::BackupEntry>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || backup::list_backups(&dir)).await.map_err(|e| e.to_string())?
+}
+
+/// The backup for one project identity, if it has one within the keep.
+#[tauri::command]
+async fn backup_status(app: AppHandle, identity: String) -> Result<Option<backup::BackupEntry>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || backup::backup_status(&dir, &identity))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// One backup's snapshot bytes, as base64, for restoring.
+#[tauri::command]
+async fn backup_read(app: AppHandle, key: String) -> Result<String, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || backup::read_backup(&dir, &key).map(|bytes| BASE64.encode(bytes)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Deletes a project's backup. Missing is fine.
+#[tauri::command]
+async fn backup_delete(app: AppHandle, key: String) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || backup::delete_backup(&dir, &key)).await.map_err(|e| e.to_string())?
 }
 
 // ── Cloud storage (v2 item 75, Box first) ─────────────────────────────────
@@ -974,13 +1218,14 @@ fn set_spinner(window: WebviewWindow, at: Option<(f64, f64)>) {
     });
 }
 
-/// Titer's GitHub page, its releases, or Buy Me a Coffee, in the default
-/// browser: fixed addresses, so the page can't open anything else.
+/// Titer's GitHub page, its releases, the user guide, or Buy Me a Coffee,
+/// in the default browser: fixed addresses, so the page can't open anything else.
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn open_link(link: String) {
     let url = match link.as_str() {
         "github" => c"https://github.com/smitpatel316/Titer",
+        "guide" => c"https://github.com/smitpatel316/Titer",
         "releases" => c"https://github.com/smitpatel316/Titer/releases/latest",
         "coffee" => c"https://www.buymeacoffee.com/smitpatel316",
         _ => return,
@@ -1041,7 +1286,15 @@ fn ask_before_quitting_macos(app: &AppHandle) {
         if !windows_exist {
             return 1; // NSTerminateNow
         }
-        app.state::<Projects>().0.lock().unwrap().quitting = true;
+        // A close-all in flight is abandoned first — the quit takes over
+        // the sequence (see `quit_app`).
+        {
+            let state = app.state::<Projects>();
+            let mut projects = state.0.lock().unwrap();
+            projects.closing_all = false;
+            projects.close_all_closing = None;
+            projects.quitting = true;
+        }
         // One window at a time: asking all of them at once raced their
         // native save dialogs (bugfix/quit-save-dialog). The Destroyed
         // handler asks the next one once this one is gone.
@@ -1143,6 +1396,7 @@ fn accent_color() -> Option<String> {
 fn open_link(link: String) {
     let url = match link.as_str() {
         "github" => "https://github.com/smitpatel316/Titer",
+        "guide" => "https://github.com/smitpatel316/Titer",
         "releases" => "https://github.com/smitpatel316/Titer/releases/latest",
         "coffee" => "https://www.buymeacoffee.com/smitpatel316",
         _ => return,
@@ -1378,8 +1632,11 @@ fn main() {
             new_project,
             choose_project,
             choose_prism_file,
+            choose_data_file,
             choose_method_file,
+            choose_merge_file,
             cancel_quit,
+            close_all,
             quit_app,
             updater::fetch_channel_manifest,
             updater::download_update,
@@ -1387,9 +1644,17 @@ fn main() {
             read_text,
             read_prism_text,
             read_prism_bytes,
+            read_data_text,
+            read_data_bytes,
             write_file,
+            send_to_keynote,
             read_my_palettes,
             write_my_palettes,
+            backup_write,
+            backup_list,
+            backup_status,
+            backup_read,
+            backup_delete,
             set_recent_documents,
             accent_color,
             open_link,
@@ -1428,6 +1693,8 @@ fn main() {
             mcp::mcp_feedback,
             mcp::mcp_feedback_consent,
             mcp::mcp_set_feedback_consent,
+            mcp::mcp_allowlist,
+            mcp::mcp_set_allowlist,
             mcp::mcp_publish_snapshot,
             mcp::mcp_publish_result,
             mcp::mcp_take_jobs,
@@ -1456,12 +1723,18 @@ fn main() {
                 projects.documents.remove(&label);
                 projects.openings.remove(&label);
                 let quitting = projects.quitting;
+                let closing_all = projects.closing_all;
                 // Only the window the quit sequence asked to close advances
                 // it; a window the user closed by hand meanwhile leaves the
-                // sequence waiting on its own window's answer.
+                // sequence waiting on its own window's answer. The same
+                // rule holds for a close-all (seq 235).
                 let advance = quitting && projects.quit_closing.as_deref() == Some(label.as_str());
+                let advance_all = closing_all && projects.close_all_closing.as_deref() == Some(label.as_str());
                 if advance {
                     projects.quit_closing = None;
+                }
+                if advance_all {
+                    projects.close_all_closing = None;
                 }
                 drop(projects);
                 // BUG-22: the MCP snapshot registry is Rust-side state too —
@@ -1475,6 +1748,11 @@ fn main() {
                     if quitting {
                         app.exit(0);
                     } else {
+                        // The last window of a close-all is gone: the
+                        // sequence ends (Titer stays open, unlike a quit).
+                        if closing_all {
+                            app.state::<Projects>().0.lock().unwrap().closing_all = false;
+                        }
                         // Titer stays open: the engine window sets the menu bar for no window.
                         let _ = app.emit_to("engine", "no-windows", ());
                     }
@@ -1483,6 +1761,11 @@ fn main() {
                     // (close_next_project_window re-checks `quitting`, so a
                     // cancel that landed meanwhile stops the sequence.)
                     let _ = close_next_project_window(app);
+                } else if advance_all {
+                    // The close-all's current window is gone: ask the next one.
+                    // (close_next_for_close_all re-checks `closing_all`, so a
+                    // cancel that landed meanwhile stops the sequence.)
+                    let _ = close_next_for_close_all(app);
                 }
             }
             // A click on the Dock icon while no window is open: a new project.
@@ -1535,11 +1818,11 @@ mod tests {
 
     #[test]
     fn write_file_accepts_every_export_format() {
-        // titer_export_table_data advertises csv/xlsx/txt (mcp.rs) and the
+        // titer_export_table_data advertises csv/xlsx/txt/xml (mcp.rs) and the
         // graph/figure/office exports write png/svg/pdf/docx/pptx — the
         // write gate must accept all of them (v1.6 BUG D: xlsx was missing
         // from the inline list, so every xlsx export failed at the gate).
-        for ext in ["csv", "xlsx", "txt", "png", "svg", "pdf", "docx", "pptx", "hlx", "pzfx"] {
+        for ext in ["csv", "xlsx", "txt", "xml", "png", "svg", "pdf", "docx", "pptx", "hlx", "pzfx"] {
             assert!(
                 check_extension(&format!("/tmp/x.{ext}"), WRITE_FILE_EXTENSIONS).is_ok(),
                 "{ext} should be writable"
@@ -1600,6 +1883,22 @@ mod tests {
         let bytes = BASE64.decode(base64).expect("command returns base64");
         assert!(bytes.starts_with(b"PK"), "a .prism file is a ZIP: {bytes:?}");
         assert!(!bytes.is_empty(), "fixture should have content");
+    }
+
+    // seq 218: the same async path for a `.pzf` fixture — base64 that
+    // decodes to the legacy binary magic, and a `.pzfx` path is refused
+    // (binary reader only: `.pzfx` goes through `read_prism_text`).
+    #[tokio::test]
+    async fn read_prism_bytes_async_reads_a_pzf_fixture() {
+        let path = fixture("aggregates-size.pzf");
+        let base64 = read_prism_bytes(path.to_string_lossy().into_owned()).await.expect("fixture should read");
+        let bytes = BASE64.decode(base64).expect("command returns base64");
+        assert!(bytes.starts_with(b"PCFFGRA4"), "a .pzf file starts with its magic: {bytes:?}");
+        assert!(!bytes.is_empty(), "fixture should have content");
+        let err = read_prism_bytes(fixture("column.pzfx").to_string_lossy().into_owned())
+            .await
+            .expect_err(".pzfx is not a bytes format");
+        assert!(err.contains("can't access"), "{err}");
     }
 
     // ── CC-m6: r_ready must not re-send an in-flight evaluation ──────────

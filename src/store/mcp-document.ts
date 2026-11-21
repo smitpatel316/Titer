@@ -16,12 +16,14 @@
 // letting a later hand-close skip its prompt.
 import { convertPrism, type ConvertReport } from "../lib/prism";
 import { parsePzfx } from "../lib/pzfx";
-import { writePrism } from "../lib/prism-write";
-import { writePzfx } from "../lib/pzfx-write";
-import { serializeProjectFile } from "../lib/project-file";
-import { fileName, fileTitle } from "../lib/paths";
+import { parsePzf } from "../lib/pzf";
+import { formatWriteReport, writePrism, type PrismWriteIssue, type PrismWriteReport } from "../lib/prism-write";
+import { formatPzfxWriteReport, writePzfx } from "../lib/pzfx-write";
+import { parseProjectText, serializeProjectFile } from "../lib/project-file";
+import { formatMergeReport, mergeProjects } from "../lib/project-merge";
+import { fileName, fileTitle, sameFilePath } from "../lib/paths";
 import * as native from "../native";
-import type { ProjectNode } from "./types";
+import type { ProjectNode, ProjectScript } from "./types";
 
 /** The project as a document job sees it: the store state, nothing more. */
 export interface DocumentState {
@@ -30,6 +32,9 @@ export interface DocumentState {
   childOrder: Record<string, string[]>;
   activeNodeId: string | null;
   projectName?: string;
+  /** The project's saved Prism scripts (seq 228) — a save must carry them,
+   *  or an MCP save would silently drop what the GUI saved. */
+  scripts?: ProjectScript[];
   fileUnknowns?: Record<string, unknown>;
   projectUnknowns?: Record<string, unknown>;
   filePath: string | null;
@@ -46,15 +51,23 @@ export interface DocumentState {
 export interface DocumentIo {
   writeFile: (path: string, data: string | Uint8Array) => Promise<unknown>;
   appVersion: () => Promise<string>;
+  readText: (path: string) => Promise<string>;
   readPrismText: (path: string) => Promise<string>;
   readPrismBytes: (path: string) => Promise<Uint8Array>;
+  /** A data file's (`.csv`, `.tsv`, `.txt`) text, for import. */
+  readDataText: (path: string) => Promise<string>;
+  /** A data file's (`.xlsx`) bytes, for import — a ZIP, so text won't do. */
+  readDataBytes: (path: string) => Promise<Uint8Array>;
 }
 
 export const defaultDocumentIo: DocumentIo = {
   writeFile: native.writeFile,
   appVersion: native.appVersion,
+  readText: native.readText,
   readPrismText: native.readPrismText,
   readPrismBytes: native.readPrismBytes,
+  readDataText: native.readDataText,
+  readDataBytes: native.readDataBytes,
 };
 
 export interface DocumentDeps {
@@ -66,6 +79,7 @@ export interface DocumentDeps {
     childOrder: Record<string, string[]>;
     activeNodeId: string | null;
     projectName?: string;
+    scripts?: ProjectScript[];
     fileUnknowns?: Record<string, unknown>;
     projectUnknowns?: Record<string, unknown>;
     filePath: string | null;
@@ -149,31 +163,77 @@ export function resolveSaveTarget(
   return { target: pathExt ? target : `${target}.${format}`, format };
 }
 
+/** The write report as `titer_save_project` returns it (Mansi P0 #6, MCP
+ *  side): the writer's report in snake_case — the same content the UI save
+ *  dialog shows — plus the UI's verbatim summary text, so an agent learns
+ *  what was written and what was dropped without re-reading the file.
+ *  `null` for `.hlx`: the native format has no writer report, everything
+ *  is written. */
+export interface SaveWriteReport {
+  tables_written: string[];
+  analyses_written: string[];
+  analyses_not_written: string[];
+  info_sheets_written: string[];
+  issues: PrismWriteIssue[];
+  /** The UI's verbatim report text (`formatWriteReport` / `formatPzfxWriteReport`). */
+  summary: string;
+}
+
+/** Map a writer's report to the MCP shape. The summary keeps the UI's
+ *  wording — including the prism-vs-pzfx difference in the
+ *  analyses-not-written line — so the two surfaces never drift apart. */
+export function toSaveWriteReport(report: PrismWriteReport, format: "prism" | "pzfx"): SaveWriteReport {
+  return {
+    tables_written: report.tables,
+    analyses_written: report.analyses,
+    analyses_not_written: report.analysesNotWritten,
+    info_sheets_written: report.infoSheets,
+    issues: report.issues,
+    summary: format === "prism" ? formatWriteReport(report) : formatPzfxWriteReport(report),
+  };
+}
+
 /** The project's bytes in `format`, built by the TS writers — the same
- *  writers the UI save uses. Throws the writer's own error (e.g. a table
- *  mixing Y formats cannot go to `.pzfx`). */
-export async function buildSaveBytes(state: DocumentState, format: SaveFormat, version: string): Promise<Uint8Array> {
+/** The project's bytes in `format`, built by the TS writers — the same
+ *  writers the UI save uses — plus the writer's report for `.prism` /
+ *  `.pzfx` (which tables/analyses were written, which analyses were
+ *  dropped and why). `.hlx` has no writer report (`null`). Throws the
+ *  writer's own error (e.g. a project with no data tables cannot go to
+ *  `.pzfx`); a table mixing Y formats splits into one table per format
+ *  instead of refusing (seq 163). */
+export async function buildSaveBytes(
+  state: DocumentState,
+  format: SaveFormat,
+  version: string,
+): Promise<{ bytes: Uint8Array; writeReport: SaveWriteReport | null }> {
   const payload = {
     nodes: state.nodes,
     rootOrder: state.rootOrder,
     childOrder: state.childOrder,
     activeNodeId: state.activeNodeId,
     projectName: state.projectName,
+    scripts: state.scripts,
     fileUnknowns: state.fileUnknowns,
     projectUnknowns: state.projectUnknowns,
   };
   switch (format) {
     case "hlx":
-      return new TextEncoder().encode(serializeProjectFile(payload));
-    case "prism":
-      return (await writePrism(payload, version)).bytes;
-    case "pzfx":
-      return (await writePzfx(payload, version)).bytes;
+      return { bytes: new TextEncoder().encode(serializeProjectFile(payload)), writeReport: null };
+    case "prism": {
+      const written = await writePrism(payload, version);
+      return { bytes: written.bytes, writeReport: toSaveWriteReport(written.report, "prism") };
+    }
+    case "pzfx": {
+      const written = await writePzfx(payload, version);
+      return { bytes: written.bytes, writeReport: toSaveWriteReport(written.report, "pzfx") };
+    }
   }
 }
 
 /** The `save-project` job: write the project and mark it saved. Returns
- *  the tool's output shape (`{ project_id, file_path, format, revision }`). */
+ *  the tool's output shape (`{ project_id, file_path, format, revision,
+ *  write_report }`) — `write_report` is the writer's report for
+ *  `.prism`/`.pzfx` saves, `null` for `.hlx`. */
 export async function executeSaveProject(
   deps: DocumentDeps,
   args: { path?: string; format?: string },
@@ -186,7 +246,7 @@ export async function executeSaveProject(
   const revision = state.revision;
   // Read the project only now, after the format is settled: bytes are
   // built from the state as it is at write time, as the UI save does.
-  const bytes = await buildSaveBytes(deps.getState(), format, version);
+  const { bytes, writeReport } = await buildSaveBytes(deps.getState(), format, version);
   try {
     await deps.io.writeFile(target, bytes);
   } catch (err) {
@@ -195,7 +255,7 @@ export async function executeSaveProject(
     );
   }
   deps.markSaved(target, revision);
-  return { result: { project_id: projectId, file_path: target, format, revision } };
+  return { result: { project_id: projectId, file_path: target, format, revision, write_report: writeReport } };
 }
 
 // ── Prism import ─────────────────────────────────────────────────────────
@@ -224,19 +284,19 @@ export function importWarnings(report: ConvertReport): string[] {
   return warnings;
 }
 
-/** How long a Prism file read may take before the import job fails instead
- *  of hanging (seq 248): a local read is well under this, even for a large
- *  `.prism` — a longer wait means the read is blocked, not slow. */
-export const PRISM_READ_TIMEOUT_MS = 60_000;
+/** How long a file read may take before the import job fails instead of
+ *  hanging (seq 248): a local read is well under this, even for a large
+ *  file — a longer wait means the read is blocked, not slow. */
+export const FILE_READ_TIMEOUT_MS = 60_000;
 
-/** Reads a Prism file, or fails after `PRISM_READ_TIMEOUT_MS` with the
- *  likely cause (seq 248): on macOS the first read of a file in
- *  Documents, Desktop or Downloads pops a permission prompt ("Titer would
- *  like to access…") and the read waits until it is answered — so an
- *  unanswered prompt used to wedge the whole app. The shell read is async
- *  now, so the app stays responsive; this timeout ends the job in ERROR
- *  instead of leaving it wedged in the serial job drain. */
-export async function readPrismWithTimeout<T>(read: () => Promise<T>, path: string): Promise<T> {
+/** Reads a file, or fails after `FILE_READ_TIMEOUT_MS` with the likely
+ *  cause (seq 248): on macOS the first read of a file in Documents,
+ *  Desktop or Downloads pops a permission prompt ("Titer would like to
+ *  access…") and the read waits until it is answered — so an unanswered
+ *  prompt used to wedge the whole app. The shell read is async now, so
+ *  the app stays responsive; this timeout ends the job in ERROR instead
+ *  of leaving it wedged in the serial job drain. */
+export async function readFileWithTimeout<T>(read: () => Promise<T>, path: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -249,13 +309,22 @@ export async function readPrismWithTimeout<T>(read: () => Promise<T>, path: stri
                 `“${fileName(path)}” couldn't be read in time — macOS may be waiting on a permission prompt for Documents, Desktop or Downloads. Answer the prompt (Allow), or move the file out of the protected folder and retry.`,
               ),
             ),
-          PRISM_READ_TIMEOUT_MS,
+          FILE_READ_TIMEOUT_MS,
         );
       }),
     ]);
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** A Prism file read, with the seq 248 timeout (see `readFileWithTimeout`). */
+export const PRISM_READ_TIMEOUT_MS = FILE_READ_TIMEOUT_MS;
+
+/** Reads a Prism file, or fails after `PRISM_READ_TIMEOUT_MS` with the
+ *  likely cause (seq 248) — see `readFileWithTimeout`. */
+export async function readPrismWithTimeout<T>(read: () => Promise<T>, path: string): Promise<T> {
+  return readFileWithTimeout(read, path);
 }
 
 /** The `import-prism` job: read a Prism file and load it as this window's
@@ -269,8 +338,8 @@ export async function executeImportPrism(
   _projectId: string,
 ): Promise<{ result: unknown }> {
   const ext = extOf(args.path);
-  if (ext !== "prism" && ext !== "pzfx") {
-    throw new Error(`“${fileName(args.path)}” is not a Prism file — import a .prism or .pzfx file.`);
+  if (ext !== "prism" && ext !== "pzfx" && ext !== "pzf") {
+    throw new Error(`“${fileName(args.path)}” is not a Prism file — import a .prism, .pzfx or .pzf file.`);
   }
   if (deps.getState().isDirty) {
     throw new Error(
@@ -288,6 +357,15 @@ export async function executeImportPrism(
     deps.loadProject({ ...converted.project, filePath: null, edited: true });
     return { result: { imported_tables: converted.report.tables, warnings: importWarnings(converted.report) } };
   }
+  if (ext === "pzf") {
+    const bytes = await readPrismWithTimeout(() => deps.io.readPrismBytes(args.path), args.path);
+    const imported = parsePzf(bytes);
+    if (imported.tables.length === 0) {
+      throw new Error(imported.issues.map((i) => i.message).join("\n") || "No tables in this file could be imported.");
+    }
+    deps.loadProject({ ...imported.project, filePath: null, edited: true });
+    return { result: { imported_tables: imported.tables, warnings: imported.issues.map((i) => i.message) } };
+  }
   const text = await readPrismWithTimeout(() => deps.io.readPrismText(args.path), args.path);
   const imported = parsePzfx(text);
   if (imported.tables.length === 0) {
@@ -295,6 +373,128 @@ export async function executeImportPrism(
   }
   deps.loadProject({ ...imported.project, filePath: null, edited: true });
   return { result: { imported_tables: imported.tables, warnings: imported.issues.map((i) => i.message) } };
+}
+
+// ── Merge ────────────────────────────────────────────────────────────────
+
+/** What the `merge-project` job needs: the project as it is now, the
+ *  store's `mergeProject` action (one undo step), and the file reads. */
+export interface MergeDeps {
+  getState: () => DocumentState;
+  /** The store's `mergeProject` (File ▸ Merge, seq 180). */
+  mergeProject: (doc: {
+    nodes: Record<string, ProjectNode>;
+    rootOrder: string[];
+    childOrder: Record<string, string[]>;
+    activeNodeId: string | null;
+  }) => void;
+  io: DocumentIo;
+}
+
+/** The `merge-project` job: read another project file and append its
+ *  sheets to this one — the same as File ▸ Merge, minus the dialog.
+ *  A `.hlx` / `.pzt` file merges as a project; a `.prism` / `.pzfx` file
+ *  is converted first, then merged (the import report's issues ride along
+ *  in `warnings`). Unlike an import, this never discards the project, so
+ *  a dirty project merges fine. Returns the merge report as the tool's
+ *  output (`merged_*` counts, the merged names, and what was renamed,
+ *  skipped or dropped — and why). */
+export async function executeMergeProject(
+  deps: MergeDeps,
+  args: { path: string },
+  projectId: string,
+): Promise<{ result: unknown }> {
+  const ext = extOf(args.path);
+  if (ext !== "hlx" && ext !== "pzt" && ext !== "prism" && ext !== "pzfx") {
+    throw new Error(
+      `“${fileName(args.path)}” is not a project file — merge a .hlx or .pzt project, or a .prism or .pzfx Prism file.`,
+    );
+  }
+  // Prism's rule: the file to merge "must not be open" — merging this
+  // window's own file would duplicate every sheet under an asterisk.
+  const openPath = deps.getState().filePath;
+  if (openPath && sameFilePath(openPath, args.path)) {
+    throw new Error(`“${fileName(args.path)}” is already open in this window — merge a file that isn't open.`);
+  }
+  const sourceName = fileTitle(args.path);
+  let incoming: {
+    nodes: Record<string, ProjectNode>;
+    rootOrder: string[];
+    childOrder: Record<string, string[]>;
+    activeNodeId: string | null;
+  };
+  const warnings: string[] = [];
+  if (ext === "prism") {
+    const bytes = await readPrismWithTimeout(() => deps.io.readPrismBytes(args.path), args.path);
+    let converted;
+    try {
+      converted = await convertPrism(bytes, sourceName);
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : "This file couldn't be imported.");
+    }
+    incoming = converted.project;
+    warnings.push(...importWarnings(converted.report));
+  } else if (ext === "pzfx") {
+    const text = await readPrismWithTimeout(() => deps.io.readPrismText(args.path), args.path);
+    const imported = parsePzfx(text);
+    if (imported.tables.length === 0) {
+      throw new Error(imported.issues.map((i) => i.message).join("\n") || "No tables in this file could be imported.");
+    }
+    incoming = imported.project;
+    warnings.push(...imported.issues.map((i) => i.message));
+  } else {
+    let text: string;
+    try {
+      text = await deps.io.readText(args.path);
+    } catch {
+      throw new Error(`“${fileName(args.path)}” couldn't be read. It may be damaged, or in an encoding Titer can't read.`);
+    }
+    let parsed;
+    try {
+      parsed = parseProjectText(text);
+    } catch {
+      throw new Error("This file is damaged or isn't a valid Titer project.");
+    }
+    if ("error" in parsed) throw new Error(parsed.error);
+    incoming = parsed.project;
+    warnings.push(...parsed.issues.map((i) => i.message));
+  }
+  const state = deps.getState();
+  // A converted Prism file can come back with no sheets at all (the .hlx
+  // and .pzfx readers refuse empties themselves, above): nothing to merge
+  // is a refusal, not a "Merged 0 sheets" report.
+  if (Object.keys(incoming.nodes).length === 0) {
+    throw new Error(`“${fileName(args.path)}” has no sheets to merge.`);
+  }
+  const merged = mergeProjects(
+    { nodes: state.nodes, rootOrder: state.rootOrder, childOrder: state.childOrder, activeNodeId: state.activeNodeId },
+    incoming,
+    sourceName,
+  );
+  deps.mergeProject({
+    nodes: merged.nodes,
+    rootOrder: merged.rootOrder,
+    childOrder: merged.childOrder,
+    activeNodeId: merged.activeNodeId,
+  });
+  const { report } = merged;
+  return {
+    result: {
+      project_id: projectId,
+      source: sourceName,
+      merged_tables: report.tables.length,
+      merged_analyses: report.analyses.length,
+      merged_graphs: report.graphs.length,
+      merged_figures: report.figures.length,
+      merged_info_sheets: report.infoSheets.length,
+      merged: [...report.tables, ...report.analyses, ...report.graphs, ...report.figures, ...report.infoSheets],
+      renamed: report.renamed,
+      skipped: report.skipped,
+      dropped: report.dropped,
+      warnings,
+      report: formatMergeReport(report),
+    },
+  };
 }
 
 // ── Close ────────────────────────────────────────────────────────────────

@@ -10,6 +10,8 @@ import type {
   RemoveBaselineParams,
   BindingKineticsParams,
   BindingSaturationParams,
+  BinomialTestParams,
+  ChiSquareGofParams,
   ChiSquareParams,
   CorrelationParams,
   CoxPHParams,
@@ -22,17 +24,21 @@ import type {
   RowMeansTotalsParams,
   PlotFunctionParams,
   KMeansParams,
+  HclustParams,
   McNemarParams,
   MixedEffectsParams,
+  MultifactorAnovaParams,
   MultipleRegressionParams,
   MultipleLogisticRegressionParams,
   MultipleTTestsParams,
   NestedAnovaParams,
   NormalizeParams,
   LinearRegressionParams,
+  CompareSlopesParams,
   SimpleLogisticRegressionParams,
   NonlinearRegressionParams,
   OutliersParams,
+  PValueStackParams,
   SurvivalParams,
   CoxParams,
   PoissonRegressionParams,
@@ -59,9 +65,12 @@ import { withReport } from "./report";
 import { friedmanSpec } from "./column/friedman";
 import { shapiroWilkSpec } from "./column/shapiro-wilk";
 import { kolmogorovSmirnovSpec } from "./column/kolmogorov-smirnov";
+import { oneSampleKsSpec } from "./column/one-sample-ks";
 import { runOutliers } from "./column/rout";
+import { runPValueStack } from "./column/p-values";
 import { runXYCorrelation } from "./xy/correlation";
 import { linearRegressionSpec, runLinearRegressions } from "./xy/linear-regression";
+import { runCompareSlopes } from "./xy/compare-slopes";
 import { demingRegressionSpec } from "./xy/deming-regression";
 import { runSimpleLogisticRegression } from "./xy/logistic-regression";
 import { runAreaUnderCurve } from "./xy/area-under-curve";
@@ -82,17 +91,22 @@ import { runMultipleTTests } from "./grouped/multiple-t-tests";
 import { runNestedTTest } from "./nested/nested-t-test";
 import { runNestedAnova } from "./nested/nested-anova";
 import { runCorrelationMatrix } from "./multiple/correlation-matrix";
+import { runMultifactorAnova } from "./multiple/multifactor-anova";
 import { runMultipleRegression } from "./multiple/multiple-regression";
 import { runMultipleLogisticRegression } from "./multiple/multiple-logistic-regression";
 import { runPoissonRegression } from "./multiple/poisson-regression";
 import { runPrincipalComponentAnalysis } from "./multiple/principal-component-analysis";
 import { runKMeans } from "./multiple/k-means";
+import { runHierarchicalClustering } from "./multiple/hierarchical-clustering";
 import { runChiSquare } from "./contingency/chi-square";
+import { runChiSquareGof } from "./contingency/chi-square-gof";
+import { runBinomialTest } from "./contingency/binomial-test";
 import { runSurvival } from "./survival/survival-analysis";
 import { runCox } from "./survival/cox-regression";
 import { runMcNemar } from "./contingency/mcnemar";
 import { runCoxPH } from "./survival/cox-ph";
 import { runExtractRearrange } from "./multiple/extract-rearrange";
+import { runSelectTransform } from "./multiple/select-transform";
 import { runMixedEffects } from "./mixed/mixed-effects";
 import { runBlandAltman } from "./column/bland-altman";
 import { runRocCurve } from "./column/roc-curve";
@@ -102,7 +116,7 @@ import { runTransformConcentrations } from "./column/transform-concentrations";
 import { runNormalize } from "./xy/normalize";
 import { runTranspose } from "./column/transpose";
 import { runMonteCarlo } from "./simulation/monte-carlo";
-import type { ExtractRearrangeParams, MonteCarloParams } from "./types";
+import type { ExtractRearrangeParams, MonteCarloParams, SelectTransformParams } from "./types";
 import type { TableData } from "../store/types";
 import { datasetColumns, readTable, setColumns, type Column } from "../lib/dataset";
 import { REPLICATE_TESTS, summaryTableProblem } from "../lib/summary-format";
@@ -183,13 +197,50 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     (p as ShapiroWilkParams | undefined)?.test === "anderson-darling" ? ["nortest"] : [],
   ),
   "kolmogorov-smirnov": spec("Kolmogorov-Smirnov test", kolmogorovSmirnovSpec),
+  "one-sample-ks": spec("One-sample Kolmogorov-Smirnov test", oneSampleKsSpec),
   outliers: { label: "Identify outliers", minColumns: 1, run: (c, p) => runOutliers(c, p as OutliersParams) },
+  "p-value-stack": {
+    label: "Analyze a stack of P values",
+    minColumns: 1,
+    run: (c, p) => runPValueStack(c, p as PValueStackParams),
+  },
   correlation: { label: "Correlation", minColumns: 2, run: (c, p) => runXYCorrelation(c, p as XYCorrelationParams) },
   "linear-regression": {
     ...spec("Linear regression", linearRegressionSpec),
     // Several Y data sets: each regressed on its own, side by side; one: as the spec says.
-    run: (c, p) => {
+    run: async (c, p) => {
       const params = p as LinearRegressionParams | undefined;
+      // Prism's "Test whether the slopes and intercepts are significantly
+      // different": the comparison, not the separate fits — the same runner
+      // the standalone "compare-slopes" type uses (MCP audit seq 292: the
+      // param must be in the linear-regression schema, reachable via
+      // titer_run_analysis). Not forced through the origin (Prism disables
+      // the option then), not on a Multiple Variables x/y pair, and
+      // unweighted — each refusal is explicit, never a silent reinterpretation.
+      if (params?.compareSlopes === true) {
+        if (params.forceOrigin)
+          return Promise.resolve({
+            error:
+              "Comparing slopes and intercepts is not available when the line is forced through the origin — run it without forcing through the origin.",
+          });
+        if (params.x !== undefined)
+          return Promise.resolve({
+            error:
+              "Comparing slopes and intercepts needs an XY table with two or more Y data sets — a Multiple Variables table's two named variables make one line, not lines to compare.",
+          });
+        if ((params.weights ?? "none") !== "none")
+          return Promise.resolve({
+            error:
+              "Comparing slopes and intercepts uses unweighted fits (one residual variance is pooled) — run it without weighting.",
+          });
+        const ys = params.ys ?? (params.y !== undefined ? [params.y] : undefined);
+        // The comparison keeps its own stats, fit and summary — but the
+        // result is stored under this analysis, and a saved result only
+        // loads when its testType is the analysis's own (project-file.ts),
+        // so the type is this one, not "compare-slopes".
+        const out = await runCompareSlopes(c, ys ? { ys } : undefined);
+        return "error" in out ? out : { ...out, testType: "linear-regression" as const };
+      }
       const ys = params?.ys ?? [];
       return ys.length > 1
         ? runLinearRegressions(c, { ...params!, ys })
@@ -197,6 +248,12 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     },
   },
   "deming-regression": spec("Deming regression", demingRegressionSpec),
+  "compare-slopes": {
+    label: "Compare slopes and intercepts",
+    // X + at least two Y data sets — the runner enforces the per-set minimums.
+    minColumns: 3,
+    run: (c, p) => runCompareSlopes(c, p as CompareSlopesParams),
+  },
   "simple-logistic-regression": {
     label: "Simple logistic regression",
     minColumns: 2,
@@ -313,6 +370,14 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     minColumns: 2,
     run: (c, p) => runMultipleRegression(c, p as MultipleRegressionParams),
   },
+  "multifactor-anova": {
+    label: "Multifactor ANOVA",
+    // minColumns is a floor only: the response is the one numeric column a
+    // table can hold (the factors may be text), so a 2-column table runs —
+    // the runner validates the response and the factors itself.
+    minColumns: 1,
+    run: (c, p) => runMultifactorAnova(c, p as MultifactorAnovaParams),
+  },
   "multiple-logistic-regression": {
     label: "Multiple logistic regression",
     minColumns: 2,
@@ -333,10 +398,25 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     minColumns: 2,
     run: (c, p, t) => runKMeans(c, p as KMeansParams, t),
   },
+  "hierarchical-clustering": {
+    label: "Hierarchical clustering",
+    minColumns: 2,
+    run: (c, p, t) => runHierarchicalClustering(c, p as HclustParams, t),
+  },
   "chi-square": {
     label: "Chi-square or Fisher's exact test",
     minColumns: 2,
     run: (c, p) => runChiSquare(c, p as ChiSquareParams),
+  },
+  "chi-square-gof": {
+    label: "Chi-square goodness of fit",
+    minColumns: 1,
+    run: (c, p, t) => runChiSquareGof(c, p as ChiSquareGofParams, t),
+  },
+  "binomial-test": {
+    label: "Binomial test",
+    minColumns: 1,
+    run: (c, p, t) => runBinomialTest(c, p as BinomialTestParams, t),
   },
   mcnemar: { label: "McNemar's test", minColumns: 2, run: (c, p) => runMcNemar(c, p as McNemarParams) },
   survival: {
@@ -409,6 +489,13 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     minColumns: 1,
     run: (c, p, t) => runExtractRearrange(c, p as ExtractRearrangeParams, t),
   },
+  "select-transform": {
+    label: "Select and transform",
+    // minColumns is a floor only: the runner validates each named variable
+    // (a transform needs numbers) — the wizard offers only what the table holds.
+    minColumns: 1,
+    run: (c, p, t) => runSelectTransform(c, p as SelectTransformParams, t),
+  },
 };
 
 /** Whether the wizard for `type` may run: `blocked` when a required package
@@ -470,11 +557,18 @@ export function runAnalysis(
   // prettier-ignore
   const named = params as
     { x?: string; y?: string | string[]; ys?: string[]; y2?: string; column?: string; controls?: string[]; dependent?: string; reference?: string; control?: string; compareWith?: string; predictors?: string[]; datasets?: string[]; time?: string; status?: string; covariates?: string[]; stratifyBy?: string } | undefined;
+  // `control` is a column name only for the one-way ANOVA — the two/three-way
+  // ANOVAs' control is a group, row or cell label ("A (Day 1)"), never a
+  // column, and their runners validate it themselves with a clear error
+  // (runPosthoc: "The control cell … holds no data"). Gating it here would
+  // refuse every Dunnett run with a control.
+  const control =
+    testType === "two-way-anova" || testType === "three-way-anova" ? undefined : named?.control;
   // prettier-ignore
   const chosen = [
     ...(Array.isArray(named?.y) ? named.y : named?.y !== undefined ? [named.y] : []),
     ...(named?.ys ?? []),
-    named?.x, named?.y2, named?.column, ...(named?.controls ?? []), named?.dependent, named?.reference, named?.control, named?.compareWith, ...(named?.predictors ?? []), ...(named?.datasets ?? []), named?.time, named?.status, ...(named?.covariates ?? []),
+    named?.x, named?.y2, named?.column, ...(named?.controls ?? []), named?.dependent, named?.reference, control, named?.compareWith, ...(named?.predictors ?? []), ...(named?.datasets ?? []), named?.time, named?.status, ...(named?.covariates ?? []),
   ];
   // (FF-F17) `stratifyBy` is NOT in the gate: no runner reads it — only the
   // survival-curves graph overlay, which draws unstratified when the column

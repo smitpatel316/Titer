@@ -30,14 +30,25 @@
 //                 date X via XAdvancedColumn)
 //   survival   → Survival, X = time, one YColumn per group
 //   contingency→ Contingency, one YColumn per column
-//   nested / multiple → the write FAILS with a plain-language error naming
-//                 the table: silently dropping a table would be data loss,
-//                 and Prism has no counterpart for them.
+//   nested / multiple → written as a OneWay (Column) table, with a warning
+//                 in the transfer report naming the table (seq 163, the
+//                 .pzfx mirror of seq 162 for .prism). No values or column
+//                 names are dropped; only the table type is lost, and the
+//                 report says so. No verified native representation exists
+//                 (see src/lib/pzfx.ts: no public .pzfx file or reader
+//                 shows a distinct TableType for a nested table), so a
+//                 guessed one would risk the file Prism rejects — the same
+//                 crash class seq 175 fixed. This mirrors the import
+//                 direction, which reads Prism nested tables as Column
+//                 with the same warning.
 //   A table past 52 subcolumns in a data set (or 104 data sets) writes as
 //   <HugeTable>, as Prism writes it — the reader takes either tag.
 // A table whose datasets mix formats (one replicates, one SDN) cannot be
-// expressed in one table-level YFormat, so the whole write FAILS naming
-// the table — never silently rewritten as something else.
+// expressed in one table-level YFormat, so it SPLITS into one table per
+// format — "Name (SDN)", "Name (replicates)" — with a warning naming the
+// table and the split (seq 163). Every value is preserved across the
+// pieces; nothing is silently rewritten as something else, and the whole
+// write never fails on one mixed table.
 
 import type { ProjectFilePayload } from "./project-file";
 import type { PrismWriteReport } from "./prism-write";
@@ -88,6 +99,7 @@ const GROUPED_SUMMARY_YFORMAT: Record<Exclude<SummaryFormat, "replicates">, stri
   "mean-cv-n": "CVN",
   "mean-sd": "SD",
   "mean-sem": "SE",
+  "mean-cv": "CV",
   "mean-plus-minus": "low-high",
   "mean-upper-lower": "upper-lower-limits",
 };
@@ -164,16 +176,37 @@ function groupYColumns(columns: WriteColumn[]): WriteSet[] {
   return sets;
 }
 
-/** The table's single YFormat, from its datasets' implied formats — or a
- *  refusal when they disagree (one table-level YFormat can't hold two). */
-function tableYFormat(sets: WriteSet[], displayName: string): string | null {
-  const implied = [...new Set(sets.map((s) => s.yFormat).filter((f): f is string => f !== null))];
-  if (implied.length > 1) {
-    throw new Error(
-      `${displayName} mixes Y formats (${implied.join(" and ")}), and a .pzfx table holds only one Y format — split it into separate tables first, then save as .pzfx.`,
-    );
+/** Split datasets by their implied YFormat: a `.pzfx` table holds only one
+ *  table-level YFormat, so a table whose datasets mix formats is written
+ *  as one table per format (seq 163) instead of refusing the whole write.
+ *  The label is the YFormat itself ("SDN", "replicates"), or "values" for
+ *  datasets that imply none — it becomes the split table's title suffix.
+ *  A single-format table yields one partition and keeps its own title. */
+interface FormatPartition {
+  label: string;
+  sets: WriteSet[];
+  yFormat: string | null;
+}
+function partitionSetsByFormat(sets: WriteSet[]): FormatPartition[] {
+  const parts: FormatPartition[] = [];
+  for (const set of sets) {
+    const label = set.yFormat ?? "values";
+    let part = parts.find((p) => p.label === label);
+    if (!part) {
+      part = { label, sets: [], yFormat: set.yFormat };
+      parts.push(part);
+    }
+    part.sets.push(set);
   }
-  return implied[0] ?? null;
+  return parts;
+}
+
+/** The split warning for a table written as several tables, one per Y
+ *  format — naming the original table, the formats, and the new titles. */
+function splitWarning(displayName: string, parts: { label: string; title: string }[]): string {
+  const labels = parts.map((p) => p.label);
+  const titles = parts.map((p) => `“${p.title}”`);
+  return `${displayName} mixes Y formats (${labels.join(" and ")}), and a .pzfx table holds only one Y format — it was written as ${parts.length} tables, one per format (${titles.join(", ")}), with all values preserved.`;
 }
 
 /** The tag a table is written under: Prism writes `<HugeTable>` instead of
@@ -206,12 +239,21 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
     }
     const tableType = table.tableType ?? "column";
     if (tableType === "nested" || tableType === "multiple") {
-      // Refuse the whole write: dropping a table silently would be data
-      // loss, and Prism has no counterpart for these types. The user can
-      // convert the table to Column first and try again.
-      throw new Error(
-        `${displayName} is a ${tableType === "nested" ? "Nested" : "Multiple variables"} table, and Prism has no matching table type — convert it to a Column table first, then save as .pzfx.`,
-      );
+      // Written as a OneWay (Column) table, never refused and never
+      // dropped: the whole write used to fail here, so a project holding
+      // one nested or MV table could not be saved as .pzfx at all. All
+      // values and column names survive verbatim (the generic path below
+      // emits one YColumn per dataset); only the table type is lost, and
+      // the report says so. The type can't be preserved honestly: no
+      // verified native representation exists (see the header note), so
+      // guessing a nested TableType would risk the file Prism rejects.
+      issues.push({
+        severity: "warning",
+        message:
+          tableType === "nested"
+            ? `${displayName} is a Nested table — no verified .pzfx representation of a nested table exists in Titer's file corpus, so it was written as a OneWay (Column) table with all values and column names preserved; re-create the group/subgroup nesting in Prism.`
+            : `${displayName} is a Multiple variables table — .pzfx has no separate table format for it in Titer's verified file corpus, so it was written as a OneWay (Column) table with all values and column names preserved; re-create it as a Multiple Variables table in Prism.`,
+      });
     }
     const rowCount = data.rows.length;
     if (rowCount === 0) {
@@ -291,12 +333,13 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
       const groups = groupRuns(yColumns.map((c) => c.name)).map((r) => ({ title: r.name, columns: r.columns }));
       const sublabel = (c: WriteColumn) =>
         c.name.includes(":") ? c.name.slice(c.name.lastIndexOf(":") + 1) : c.name;
-      // The groups' format: the declared summaryFormat when its subcolumns
-      // match every group, else the shape the subcolumn labels imply when
-      // all groups share one, else replicates (the importer's rule — a
-      // TwoWay summary table imports as Column, never Grouped). Groups that
-      // disagree on shape are a mixed-format table: refuse, never silently
-      // rewrite one group's summaries as replicates (or vice versa).
+      // Each group's format is the shape its subcolumn labels imply (the
+      // importer's rule — a TwoWay summary table imports as Column, never
+      // Grouped); a group whose labels match no summary shape is
+      // replicates. Groups that disagree on shape are a mixed-format
+      // table: it SPLITS into one TwoWay per shape (seq 163), never
+      // silently rewritten as one shape or the other, and never a
+      // whole-write refusal.
       const shapeOf = (labels: string[]): string | null => {
         for (const [value, yF] of Object.entries(GROUPED_SUMMARY_YFORMAT) as [SummaryFormat, string][]) {
           const def = summaryFormatDef(value);
@@ -305,74 +348,80 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
         return null;
       };
       const groupLabels = groups.map((g) => g.columns.map((ci) => sublabel(yColumns[ci])));
-      const declared =
-        data.summaryFormat && data.summaryFormat !== "replicates" ? summaryFormatDef(data.summaryFormat) : null;
-      const matchesDeclared = (labels: string[]) =>
-        declared !== null &&
-        labels.length === declared.subcolumns.length &&
-        labels.every((label, k) => label === declared.subcolumns[k]);
-      let summaryYFormat: string | null = null;
-      if (declared && groupLabels.every(matchesDeclared)) {
-        summaryYFormat = GROUPED_SUMMARY_YFORMAT[data.summaryFormat as Exclude<SummaryFormat, "replicates">];
-      } else if (declared && groupLabels.some(matchesDeclared)) {
-        throw new Error(
-          `${displayName} mixes Y formats (some groups are ${GROUPED_SUMMARY_YFORMAT[data.summaryFormat as Exclude<SummaryFormat, "replicates">]} summaries and some are not), and a .pzfx table holds only one Y format — split it into separate tables first, then save as .pzfx.`,
-        );
-      } else {
-        const shapes = groupLabels.map(shapeOf);
-        const distinct = [...new Set(shapes)];
-        if (distinct.length > 1) {
-          throw new Error(
-            `${displayName} mixes Y formats (${distinct.map((s) => s ?? "replicates").join(" and ")}), and a .pzfx table holds only one Y format — split it into separate tables first, then save as .pzfx.`,
-          );
+      const groupShapes = groupLabels.map((labels) => shapeOf(labels) ?? "replicates");
+      const partGroups: { label: string; groups: { title: string; columns: number[] }[] }[] = [];
+      groupShapes.forEach((label, gi) => {
+        let part = partGroups.find((p) => p.label === label);
+        if (!part) {
+          part = { label, groups: [] };
+          partGroups.push(part);
         }
-        if (distinct.length === 1 && distinct[0] !== null) summaryYFormat = distinct[0];
-      }
-      if (summaryYFormat) {
-        yFormat = summaryYFormat;
+        part.groups.push(groups[gi]);
+      });
+      const splitTitles = partGroups.map((p) => `${name} (${p.label})`);
+      if (partGroups.length > 1) {
         issues.push({
           severity: "warning",
-          message: `${displayName} is a grouped summary table; .pzfx stores it as TwoWay with YFormat ${summaryYFormat}, which Titer reads back as a Column table — the values are identical, only the table type changes.`,
+          message: splitWarning(
+            displayName,
+            partGroups.map((p, i) => ({ label: p.label, title: splitTitles[i] })),
+          ),
         });
-      } else {
-        yFormat = "replicates";
-        const maxGroup = Math.max(...groups.map((g) => g.columns.length));
-        replicates = Math.max(data.replicates ?? 0, maxGroup);
       }
-      // One YColumn per group, in group order; replicate groups are padded
-      // to `replicates` subcolumns with empty <d>s, as the importer pads
-      // on read. A Y dataset at yColumns[j] sits at data-column index
-      // yStart + j + 1 (data column 0 holds the row titles).
-      const yXml = groups
-        .map(({ title, columns: cols }) => {
-          const subCols = [...cols];
-          while (yFormat === "replicates" && subCols.length < (replicates ?? 0)) subCols.push(-1);
-          const width = 89 * Math.max(1, subCols.length);
-          const subs = subCols
-            .map((ci) =>
-              ci < 0
-                ? `<Subcolumn>${Array.from({ length: rowCount }, () => `<d/>`).join("")}</Subcolumn>`
-                : `<Subcolumn>${dElements(yStart + ci + 1)}</Subcolumn>`,
-            )
-            .join("");
-          return `<YColumn Width="${width}" Decimals="0" Subcolumns="${subCols.length}"><Title>${escapeXml(title)}</Title>${subs}</YColumn>`;
-        })
-        .join("");
-      const id = `Table${tableIds.length}`;
-      tableIds.push(id);
-      // A table past Prism's huge size writes as <HugeTable>, not <Table>.
-      // (Merge fix: `groups` is an array of {title, columns} runs since
-      // lane A — lane E's Map-era `.values()`/`.size` no longer typecheck.
-      // Same shape as the sets call site below: count + max columns.)
-      const maxSubcolumns =
-        yFormat === "replicates"
-          ? (replicates ?? 0)
-          : Math.max(0, ...groups.map((g) => g.columns.length));
-      const tag = tableTag(groups.length, maxSubcolumns);
-      tableXml.push(
-        `<${tag} ID="${id}" XFormat="${xFormat}"${yFormat ? ` YFormat="${yFormat}"` : ""}${replicates !== undefined && yFormat === "replicates" ? ` Replicates="${replicates}"` : ""} TableType="${prismTableType}" EVFormat="AsteriskAfterNumber"><Title>${escapeXml(name)}</Title>${emitRowTitles ? `<RowTitlesColumn Width="39"><Subcolumn>${Array.from({ length: rowCount }, (_, r) => { const v = rowTitles[r]; return v === null ? `<d/>` : `<d>${escapeXml(v)}</d>`; }).join("")}</Subcolumn></RowTitlesColumn>` : ""}${yXml}</${tag}>`,
-      );
-      report.tables.push(name);
+      // One TwoWay per shape, in first-appearance order. A single-shape
+      // table emits exactly one table under its own title, as before.
+      for (let pi = 0; pi < partGroups.length; pi++) {
+        const part = partGroups[pi];
+        const partTitle = partGroups.length > 1 ? splitTitles[pi] : name;
+        const partDisplayName = `“${partTitle}”`;
+        const isSummary = part.label !== "replicates";
+        if (isSummary) {
+          yFormat = part.label;
+          replicates = undefined;
+          issues.push({
+            severity: "warning",
+            message: `${partDisplayName} is a grouped summary table; .pzfx stores it as TwoWay with YFormat ${part.label}, which Titer reads back as a Column table — the values are identical, only the table type changes.`,
+          });
+        } else {
+          yFormat = "replicates";
+          const maxGroup = Math.max(...part.groups.map((g) => g.columns.length));
+          replicates = Math.max(data.replicates ?? 0, maxGroup);
+        }
+        // One YColumn per group, in group order; replicate groups are padded
+        // to `replicates` subcolumns with empty <d>s, as the importer pads
+        // on read. A Y dataset at yColumns[j] sits at data-column index
+        // yStart + j + 1 (data column 0 holds the row titles).
+        const yXml = part.groups
+          .map(({ title, columns: cols }) => {
+            const subCols = [...cols];
+            while (yFormat === "replicates" && subCols.length < (replicates ?? 0)) subCols.push(-1);
+            const width = 89 * Math.max(1, subCols.length);
+            const subs = subCols
+              .map((ci) =>
+                ci < 0
+                  ? `<Subcolumn>${Array.from({ length: rowCount }, () => `<d/>`).join("")}</Subcolumn>`
+                  : `<Subcolumn>${dElements(yStart + ci + 1)}</Subcolumn>`,
+              )
+              .join("");
+            return `<YColumn Width="${width}" Decimals="0" Subcolumns="${subCols.length}"><Title>${escapeXml(title)}</Title>${subs}</YColumn>`;
+          })
+          .join("");
+        const id = `Table${tableIds.length}`;
+        tableIds.push(id);
+        // A table past Prism's huge size writes as <HugeTable>, not <Table>.
+        // (Merge fix: `groups` is an array of {title, columns} runs since
+        // lane A — lane E's Map-era `.values()`/`.size` no longer typecheck.
+        // Same shape as the sets call site below: count + max columns.)
+        const maxSubcolumns =
+          yFormat === "replicates"
+            ? (replicates ?? 0)
+            : Math.max(0, ...part.groups.map((g) => g.columns.length));
+        const tag = tableTag(part.groups.length, maxSubcolumns);
+        tableXml.push(
+          `<${tag} ID="${id}" XFormat="${xFormat}"${yFormat ? ` YFormat="${yFormat}"` : ""}${replicates !== undefined && yFormat === "replicates" ? ` Replicates="${replicates}"` : ""} TableType="${prismTableType}" EVFormat="AsteriskAfterNumber"><Title>${escapeXml(partTitle)}</Title>${emitRowTitles ? `<RowTitlesColumn Width="39"><Subcolumn>${Array.from({ length: rowCount }, (_, r) => { const v = rowTitles[r]; return v === null ? `<d/>` : `<d>${escapeXml(v)}</d>`; }).join("")}</Subcolumn></RowTitlesColumn>` : ""}${yXml}</${tag}>`,
+        );
+        report.tables.push(partTitle);
+      }
       continue;
     }
 
@@ -380,7 +429,19 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
     const sets = tableType === "contingency" || tableType === "survival"
       ? yColumns.map((c, i) => ({ title: c.name, columns: [i], yFormat: null }))
       : groupYColumns(yColumns);
-    yFormat = tableYFormat(sets, displayName);
+    // A table whose datasets mix Y formats splits into one table per
+    // format (seq 163) — a single-format table yields one partition and
+    // keeps its own title, exactly as before.
+    const partitions = partitionSetsByFormat(sets);
+    if (partitions.length > 1) {
+      issues.push({
+        severity: "warning",
+        message: splitWarning(
+          displayName,
+          partitions.map((p) => ({ label: p.label, title: `${name} (${p.label})` })),
+        ),
+      });
+    }
     if (tableType === "xy") {
       prismTableType = "XY";
       // Date X: a "<X> (date)" column wins; else row titles that all look
@@ -405,9 +466,7 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
           });
         }
       }
-      if (yFormat === "replicates") {
-        replicates = Math.max(...sets.filter((s) => s.yFormat === "replicates").map((s) => s.columns.length));
-      }
+      // Replicates is per format partition, computed in the loop below.
     } else if (tableType === "survival") {
       prismTableType = "Survival";
       // XAdvancedColumn is a duplicate of X in Prism's own files and the
@@ -416,37 +475,52 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
     } else if (tableType === "contingency") {
       prismTableType = "Contingency";
       xFormat = "none";
-    } else {
-      prismTableType = "OneWay";
+    } else if (tableType === "parts-of-whole") {
+      // Prism's PartsOfWhole: no X, one Y column per data set (seq 197).
+      // The YFormat comes from the sets, as for Column — single columns
+      // write no YFormat, and read back as Parts of Whole either way.
+      prismTableType = "PartsOfWhole";
       xFormat = "none";
       if (yFormat === "replicates") {
         replicates = Math.max(...sets.filter((s) => s.yFormat === "replicates").map((s) => s.columns.length));
       }
+    } else {
+      prismTableType = "OneWay";
+      xFormat = "none";
     }
 
+    // One table per format partition (usually one — the loop is the split).
     // One YColumn per dataset, in dataset order. A Y dataset at
     // yColumns[j] sits at data-column index yStart + j + 1.
-    const yXml = sets
-      .map((set) => {
-        const width = 89 * set.columns.length;
-        const subs = set.columns
-          .map((ci) => `<Subcolumn>${dElements(yStart + ci + 1)}</Subcolumn>`)
-          .join("");
-        return `<YColumn Width="${width}" Decimals="0" Subcolumns="${set.columns.length}"><Title>${escapeXml(set.title)}</Title>${subs}</YColumn>`;
-      })
-      .join("");
-    const xXml =
-      xColumn === null
-        ? ""
-        : `<XColumn Width="${xFormat === "date" ? 114 : 89}" Decimals="${xFormat === "date" ? 14 : 0}" Subcolumns="${xError ? 2 : 1}"><Title>${escapeXml(xColumn.name)}</Title><Subcolumn>${dElements(1)}</Subcolumn>${xError ? `<Subcolumn>${dElements(allColumns.indexOf(xError) + 1)}</Subcolumn>` : ""}</XColumn>`;
-    const id = `Table${tableIds.length}`;
-    tableIds.push(id);
-    // A table past Prism's huge size writes as <HugeTable>, not <Table>.
-    const tag = tableTag(sets.length, Math.max(0, ...sets.map((s) => s.columns.length)));
-    tableXml.push(
-      `<${tag} ID="${id}" XFormat="${xFormat}"${yFormat ? ` YFormat="${yFormat}"` : ""}${replicates !== undefined ? ` Replicates="${replicates}"` : ""} TableType="${prismTableType}" EVFormat="AsteriskAfterNumber"><Title>${escapeXml(name)}</Title>${emitRowTitles ? `<RowTitlesColumn Width="39"><Subcolumn>${Array.from({ length: rowCount }, (_, r) => { const v = rowTitles[r]; return v === null ? `<d/>` : `<d>${escapeXml(v)}</d>`; }).join("")}</Subcolumn></RowTitlesColumn>` : ""}${xXml}${xAdvanced ?? ""}${yXml}</${tag}>`,
-    );
-    report.tables.push(name);
+    for (const part of partitions) {
+      const partTitle = partitions.length > 1 ? `${name} (${part.label})` : name;
+      yFormat = part.yFormat;
+      replicates =
+        part.yFormat === "replicates"
+          ? Math.max(...part.sets.filter((s) => s.yFormat === "replicates").map((s) => s.columns.length))
+          : undefined;
+      const yXml = part.sets
+        .map((set) => {
+          const width = 89 * set.columns.length;
+          const subs = set.columns
+            .map((ci) => `<Subcolumn>${dElements(yStart + ci + 1)}</Subcolumn>`)
+            .join("");
+          return `<YColumn Width="${width}" Decimals="0" Subcolumns="${set.columns.length}"><Title>${escapeXml(set.title)}</Title>${subs}</YColumn>`;
+        })
+        .join("");
+      const xXml =
+        xColumn === null
+          ? ""
+          : `<XColumn Width="${xFormat === "date" ? 114 : 89}" Decimals="${xFormat === "date" ? 14 : 0}" Subcolumns="${xError ? 2 : 1}"><Title>${escapeXml(xColumn.name)}</Title><Subcolumn>${dElements(1)}</Subcolumn>${xError ? `<Subcolumn>${dElements(allColumns.indexOf(xError) + 1)}</Subcolumn>` : ""}</XColumn>`;
+      const id = `Table${tableIds.length}`;
+      tableIds.push(id);
+      // A table past Prism's huge size writes as <HugeTable>, not <Table>.
+      const tag = tableTag(part.sets.length, Math.max(0, ...part.sets.map((s) => s.columns.length)));
+      tableXml.push(
+        `<${tag} ID="${id}" XFormat="${xFormat}"${yFormat ? ` YFormat="${yFormat}"` : ""}${replicates !== undefined ? ` Replicates="${replicates}"` : ""} TableType="${prismTableType}" EVFormat="AsteriskAfterNumber"><Title>${escapeXml(partTitle)}</Title>${emitRowTitles ? `<RowTitlesColumn Width="39"><Subcolumn>${Array.from({ length: rowCount }, (_, r) => { const v = rowTitles[r]; return v === null ? `<d/>` : `<d>${escapeXml(v)}</d>`; }).join("")}</Subcolumn></RowTitlesColumn>` : ""}${xXml}${xAdvanced ?? ""}${yXml}</${tag}>`,
+      );
+      report.tables.push(partTitle);
+    }
   }
 
   if (report.tables.length === 0) {

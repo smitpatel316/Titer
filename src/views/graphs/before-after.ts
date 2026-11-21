@@ -18,6 +18,9 @@ import { pointKeyOf } from "../../lib/columns";
 import {
   INK,
   baseLayout,
+  centers,
+  COLUMN_BAR,
+  errors,
   groupedScatterLayout,
   groupOffset,
   legendRightMargin,
@@ -149,13 +152,16 @@ function arrowAnnotations(
   });
 }
 
-function buildBeforeAfter(
+/** One subject's line per row through its present values, in column order:
+ *  the traces, the segments between consecutive points (for arrowheads),
+ *  and every plotted value (for the arrows' axis range). Shared by the
+ *  plain before-after and the MV before-after bar-and-strip plot. */
+function subjectTraces(
   columns: Column[],
   options: GraphOptions,
   paint: Paint,
   titles?: (string | null)[],
-): GraphFigure {
-  const names = columns.map((c) => c.name);
+): { data: unknown[]; segments: Segment[]; yAll: number[] } {
   const rows = rowCountOf(columns);
   const data: unknown[] = [];
   const segments: Segment[] = [];
@@ -185,6 +191,17 @@ function buildBeforeAfter(
     }
     yAll.push(...pts.map((p) => p.v));
   }
+  return { data, segments, yAll };
+}
+
+function buildBeforeAfter(
+  columns: Column[],
+  options: GraphOptions,
+  paint: Paint,
+  titles?: (string | null)[],
+): GraphFigure {
+  const names = columns.map((c) => c.name);
+  const { data, segments, yAll } = subjectTraces(columns, options, paint, titles);
 
   names.forEach((name, i) => data.push(legendTrace(paint, name, i)));
 
@@ -282,6 +299,74 @@ export const beforeAfter: GraphModule = {
   points: () => true,
   lines: () => true,
   build: buildBeforeAfter,
+};
+
+/** "Before-after bar and strip plot" (Prism 11.1 MV gallery, seq 209): the
+ *  paired-subject lines of a before-after plot over a bar at each variable's
+ *  center with error whiskers — the same bars the Individual-values builder
+ *  draws (COLUMN_BAR at the center, error whiskers on an invisible marker).
+ *  Rows are the subjects, variables the conditions, in column order. */
+function buildMvBeforeAfterBarStrip(
+  columns: Column[],
+  options: GraphOptions,
+  paint: Paint,
+  titles?: (string | null)[],
+): GraphFigure {
+  const names = columns.map((c) => c.name);
+  const center = centers(columns, options.center);
+  const errs = errors(columns, options.error);
+  const data: unknown[] = [];
+
+  columns.forEach((c, i) => {
+    data.push({
+      ...COLUMN_BAR,
+      x: [i],
+      y: [center[i]],
+      marker: paint.bars(c.name, i),
+      hoverinfo: "skip",
+    });
+    if (errs) {
+      data.push({
+        type: "scatter",
+        mode: "markers",
+        x: [i],
+        y: [center[i]],
+        marker: { opacity: 0 },
+        error_y: paint.errorBars(c.name, i, [errs[i]]),
+        hoverinfo: "skip",
+      });
+    }
+  });
+
+  const { data: subjects, segments, yAll } = subjectTraces(columns, options, paint, titles);
+  data.push(...subjects);
+  names.forEach((name, i) => data.push(legendTrace(paint, name, i)));
+
+  return {
+    data,
+    layout: {
+      ...baseLayout(options, names, { zeroBase: true }),
+      showlegend: names.length > 1,
+      legend: { x: 1.02, y: 1, xanchor: "left", ...options.legend },
+      margin: {
+        ...marginsFor(options),
+        r: names.length > 1 ? legendRightMargin(options, names) : 16,
+      },
+      ...(options.beforeAfterArrows && segments.length
+        ? { annotations: arrowAnnotations(segments, options, [-0.5, names.length - 0.5], yAll, names) }
+        : {}),
+    },
+  };
+}
+
+export const mvBeforeAfterBarStrip: GraphModule = {
+  label: "Before-after bar and strip plot",
+  family: "column",
+  points: () => true,
+  lines: () => true,
+  patterns: () => true,
+  defaults: { fill: 0.5, error: "sd" },
+  build: buildMvBeforeAfterBarStrip,
 };
 
 export const groupedBeforeAfter: GraphModule = {

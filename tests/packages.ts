@@ -106,8 +106,11 @@ check("repo includes codetools", repoVersions.has("codetools"), "multcomp Import
 
 // CC-m9: the whole vendored repo ships in the DMG, so its size and closure
 // are pinned — growth must be deliberate, not a side effect of a rebuild.
-// Measured 2026-11-16: 57.0 MB / 45 packages (11 pinned + 34 transitive
-// hard deps); largest install batch is mixed-effects at 34.2 MB of .tgz.
+// Measured 2026-11-20: 88.9 MB / 72 packages (12 pinned + 60 transitive
+// hard deps). The mixed-effects install batch is 34.2 MB of .tgz for
+// Satterthwaite (lme4 + lmerTest) and 66.8 MB when Kenward-Roger is chosen
+// — pbkrtest's tidyverse closure (dplyr/broom/tidyr/…) is the price of
+// Prism's default DF method (seq 181), taken deliberately.
 const manifestFiles = new Set(repoManifest.packages.map((p) => p.file));
 check(
   "repo holds no package outside the manifest (CC-m9)",
@@ -122,8 +125,8 @@ check(
 );
 check(
   "repo closure is the pinned set plus its hard dependencies (CC-m9)",
-  repoManifest.packages.length === 45,
-  `expected 45 packages (11 pinned + 34 transitive), got ${repoManifest.packages.length} — a bigger closure ships a bigger DMG; update this pin deliberately`,
+  repoManifest.packages.length === 72,
+  `expected 72 packages (12 pinned + 60 transitive), got ${repoManifest.packages.length} — a bigger closure ships a bigger DMG; update this pin deliberately`,
 );
 
 // ── Serve the bundled repo on localhost ────────────────────────────────
@@ -488,7 +491,7 @@ await startR(fileURLToPath(new URL("../node_modules/webr/dist/", import.meta.url
   // available.packages reads it before falling back to PACKAGES.gz, so a
   // repo without it wastes a failed fetch on the first install of a session.
   // It must list exactly the vendored closure (repoManifest.packages — the
-  // 45-package closure, not the 11-package registry: the registry names
+  // 72-package closure, not the 12-package registry: the registry names
   // only the pinned direct dependencies, the repo also ships their
   // transitive deps). A stale or foreign .rds would let install.packages
   // resolve against packages this build does not ship.

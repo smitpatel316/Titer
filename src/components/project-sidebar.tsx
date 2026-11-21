@@ -165,6 +165,8 @@ export function ProjectSidebar() {
     },
   });
 
+  // A frozen sheet (seq 237) shows in italics, as in Prism's Navigator.
+  const frozenClass = (node: OutlineNode) => (node.frozen ? "italic" : "");
   const rowClass = (id: string): string =>
     [dropClass(dropTarget, id), draggingId === id ? "opacity-40" : ""].filter(Boolean).join(" ");
 
@@ -412,7 +414,7 @@ export function ProjectSidebar() {
                   e.preventDefault();
                   childMenu(child);
                 }}
-                className={rowClass(child.id)}
+                className={[rowClass(child.id), frozenClass(child)].filter(Boolean).join(" ")}
                 {...rowDnd("child", child.id, table.id)}
               />
             ))}
@@ -449,6 +451,7 @@ export function ProjectSidebar() {
               e.preventDefault();
               childMenu(figure);
             }}
+            className={frozenClass(figure)}
           />
         ))}
         {orphaned.map((orphan) => (

@@ -1,23 +1,31 @@
-// Send to Word / PowerPoint (v2 item 19): one-click export of a graph or
-// layout into a real .docx / .pptx file.
+// Send to Word / PowerPoint / Keynote (v2 item 19, seq 217): one-click
+// export of a graph or layout.
 //
 // Prism's Send-to-Office buttons place a graph straight into Word or
-// PowerPoint. On Mac/Linux there is no COM automation to drive those apps,
-// so the cross-platform form of the one-click export is a genuine Office
-// Open XML file — the graph's PNG embedded at its physical size, with its
-// title — that the user opens in Word/PowerPoint. The builders here are
-// pure: bytes in, bytes out, no dialogs, so the suite can open the result
-// with JSZip and check every part.
+// PowerPoint, and on Mac its Send to Keynote (Shift-Command-H) places it
+// in Keynote. Word/PowerPoint are genuine Office Open XML files — the
+// graph's PNG embedded at its physical size, with its title — that the
+// user opens in Word/PowerPoint. Keynote is different, and deliberately
+// so: a .key is a ZIP of Snappy-framed protobuf (.iwa) files whose schema
+// Apple never documented, so there is no file-side .key builder here (a
+// hand-rolled .key Keynote may refuse is worse than none — seq 217 scope,
+// Nov 2026). Prism itself never wrote a .key either: its Send to Keynote
+// is a live-app handoff via AppleScript, and that is what this module
+// builds — `buildKeynoteScript` writes the script, the shell's
+// `send_to_keynote` runs it in Keynote on macOS, and Keynote saves the
+// real .key. The builders here are pure: bytes in, bytes out, no dialogs,
+// so the suite can open the result with JSZip and check every part.
 import JSZip from "jszip";
 
-export type OfficeTarget = "word" | "powerpoint";
+export type OfficeTarget = "word" | "powerpoint" | "keynote";
 
-/** The file extension for a target ("docx" / "pptx"). */
-export const officeExtension = (target: OfficeTarget) => (target === "word" ? "docx" : "pptx");
+/** The file extension for a target ("docx" / "pptx" / "key"). */
+export const officeExtension = (target: OfficeTarget) =>
+  target === "word" ? "docx" : target === "powerpoint" ? "pptx" : "key";
 
 /** The save-dialog title for a target. */
 export const officeDialogTitle = (target: OfficeTarget) =>
-  target === "word" ? "Send to Word" : "Send to PowerPoint";
+  target === "word" ? "Send to Word" : target === "powerpoint" ? "Send to PowerPoint" : "Send to Keynote";
 
 const EMU_PER_INCH = 914400;
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -152,7 +160,103 @@ async function buildPowerPoint(image: OfficeImage): Promise<Uint8Array> {
   return zip.generateAsync({ type: "uint8array" });
 }
 
-/** The graph/layout as a real Word document or PowerPoint deck. */
+/** The graph/layout as a real Word document or PowerPoint deck. Keynote
+ *  has no file builder — a .key is written by Keynote itself, from the
+ *  script `buildKeynoteScript` builds (see above); calling this with
+ *  "keynote" is a caller bug, and it says so. */
 export function buildOfficeDocument(target: OfficeTarget, image: OfficeImage): Promise<Uint8Array> {
+  if (target === "keynote")
+    throw new Error("Send to Keynote builds the presentation in Keynote itself (macOS), not as a file — use buildKeynoteScript + send_to_keynote.");
   return target === "word" ? buildWord(image) : buildPowerPoint(image);
+}
+
+// ── Send to Keynote (seq 217) ───────────────────────────────────────────
+// Prism's mechanism, not a file format: AppleScript tells Keynote to make
+// a presentation, add a slide with the title and the graph image, and save
+// it as a .key. The script is pure text — the suite pins its shape — and
+// the shell runs it (src-tauri/src/main.rs, `send_to_keynote`) only on
+// macOS, where osascript and Keynote exist. Unverified on a real Mac in
+// this lane: the Linux container cannot run Keynote, so the Mac proof
+// batch owns the end-to-end check (script text, image placement, save).
+
+/** Points per inch — Keynote sizes and positions are in points. */
+const PT_PER_INCH = 72;
+
+/** An image's size in points at its physical size (pixels / DPI × 72). */
+export function keynoteSizePoints(widthPx: number, heightPx: number, dpi: number): { widthPt: number; heightPt: number } {
+  if (!(widthPx > 0 && heightPx > 0)) throw new Error("Send to Keynote needs a positive image size.");
+  if (!(dpi > 0)) throw new Error("Send to Keynote needs a positive DPI.");
+  return { widthPt: (widthPx / dpi) * PT_PER_INCH, heightPt: (heightPx / dpi) * PT_PER_INCH };
+}
+
+export interface KeynoteScriptInput {
+  /** Absolute path of the PNG file Keynote should place (a temp file the caller wrote). */
+  pngPath: string;
+  /** Absolute path the .key presentation should be saved to. */
+  outPath: string;
+  /** The graph or figure title, shown above the image. */
+  title: string;
+  /** The image's physical size in points (see `keynoteSizePoints`). */
+  widthPt: number;
+  heightPt: number;
+}
+
+/** An AppleScript string literal: backslashes and quotes escaped, line
+ *  breaks flattened — a literal line break inside "..." is a syntax
+ *  error in AppleScript, and a title is one line on the slide anyway. */
+function appleScriptString(text: string): string {
+  return `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/[\r\n]+/g, " ")}"`;
+}
+
+/** A script number: integers bare, fractions to two decimals — never
+ *  locale-formatted, never scientific. */
+function appleScriptNumber(value: number): string {
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/0$/, "");
+}
+
+/** The AppleScript that makes the Keynote presentation: a new document,
+ *  its first slide carrying the title as a text item at the top and the
+ *  PNG centred below it at its physical size (fitted inside the slide,
+ *  never cropped), saved to `outPath`. The slide size is read from the
+ *  document itself, so any theme — widescreen or 4:3 — lays out right.
+ *  Keynote stays open on the new presentation, as Prism leaves it: the
+ *  user continues there. No font styling is set — Keynote's default text
+ *  item — because the script dictionary's text styling was not verified
+ *  against a real Keynote in this lane; the Mac proof batch may add it. */
+export function buildKeynoteScript(input: KeynoteScriptInput): string {
+  const { pngPath, outPath, title, widthPt, heightPt } = input;
+  if (!(widthPt > 0 && heightPt > 0)) throw new Error("Send to Keynote needs a positive image size.");
+  return [
+    'tell application "Keynote"',
+    "\tactivate",
+    `\tset pngFile to POSIX file ${appleScriptString(pngPath)}`,
+    `\tset outFile to POSIX file ${appleScriptString(outPath)}`,
+    "\tset doc to make new document",
+    "\tset slideW to width of doc",
+    "\tset slideH to height of doc",
+    "\tset mySlide to slide 1 of doc",
+    `\tset imgW to ${appleScriptNumber(widthPt)}`,
+    `\tset imgH to ${appleScriptNumber(heightPt)}`,
+    "\tset maxW to slideW - 72",
+    "\tset maxH to slideH - 108",
+    "\tif imgW > maxW then",
+    "\t\tset imgH to imgH * maxW / imgW",
+    "\t\tset imgW to maxW",
+    "\tend if",
+    "\tif imgH > maxH then",
+    "\t\tset imgW to imgW * maxH / imgH",
+    "\t\tset imgH to maxH",
+    "\tend if",
+    "\ttell mySlide",
+    `\t\tset titleBox to make new text item with properties {object text: ${appleScriptString(title)}}`,
+    "\t\tset position of titleBox to {36, 18}",
+    "\t\tset size of titleBox to {slideW - 72, 36}",
+    "\t\tset newImage to make new image with properties {file: pngFile}",
+    "\t\tset position of newImage to {(slideW - imgW) / 2, 72 + (maxH - imgH) / 2}",
+    "\t\tset size of newImage to {imgW, imgH}",
+    "\tend tell",
+    "\tsave doc in outFile",
+    "end tell",
+  ].join("\n");
 }

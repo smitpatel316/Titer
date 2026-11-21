@@ -9,8 +9,9 @@ import { num } from "../../lib/format";
 
 const DEFAULTS: LinearRegressionParams = { forceOrigin: false };
 
-/** What X and Y lack for a line, or nothing. */
-function lineProblem(x: Group, y: Group, origin: boolean): string | undefined {
+/** What X and Y lack for a line, or nothing. Exported for "compare-slopes",
+ *  whose every set must make a line before the lines can be compared. */
+export function lineProblem(x: Group, y: Group, origin: boolean): string | undefined {
   const need = origin ? 2 : 3;
   if (y.values.length < need) return `“${y.name}” needs at least ${need} points to be regressed on X.`;
   // Through the origin, a line needs one X other than 0; else, two different Xs and a Y that changes.

@@ -2,6 +2,7 @@
 // draws (centers, errors), and the Plotly layout of each family.
 import {
   SAME_AS_FILL,
+  type AxisNumberFormat,
   type FillPattern,
   type GraphOptions,
   type GraphType,
@@ -15,7 +16,7 @@ import { xyPoints, xyRows, type Column, type DataSet } from "../../lib/dataset";
 import { pointKeyOf } from "../../lib/columns";
 import type { GraphFigure } from ".";
 import { paletteColor, paletteOf, withOpacity } from "../../lib/palettes";
-import { boxOf, mean, median, sd, sem } from "../../lib/summary";
+import { boxOf, mean, median, quantile, sd, sem } from "../../lib/summary";
 import { summaryFormatDef, type SummaryFormat } from "../../lib/summary-format";
 import { tCrit95 } from "../../lib/student-t";
 
@@ -184,11 +185,19 @@ export function seriesPoints(paint: Paint, key: string, index: number, pointKeys
 }
 
 /** A column's individual points at its place `i` on the axis, jittered, each styled. */
-export function columnPoints(paint: Paint, c: Column, i: number) {
+/** A column's individual points, spread sideways per `style` (classic = the
+ *  legacy jitter exactly). */
+export function columnPoints(
+  paint: Paint,
+  c: Column,
+  i: number,
+  style: GraphOptions["scatterStyle"] = "classic",
+) {
+  const offs = scatterOffsets(c.values, style, i);
   return {
     type: "scatter",
     mode: "markers",
-    x: c.values.map((_, vi) => i + jitter(i, vi)),
+    x: c.values.map((_, vi) => i + offs[vi]),
     y: c.values,
     ...seriesPoints(
       paint,
@@ -271,6 +280,12 @@ export const extent = (v: number[]): [number, number] => [
   v.reduce((a, b) => Math.min(a, b), Infinity),
   v.reduce((a, b) => Math.max(a, b), -Infinity),
 ];
+
+/** Smallest value (a loop, safe for any number of points). */
+export const minOf = (v: number[]): number => v.reduce((a, b) => Math.min(a, b), Infinity);
+
+/** Largest value (a loop, safe for any number of points). */
+export const maxOf = (v: number[]): number => v.reduce((a, b) => Math.max(a, b), -Infinity);
 
 /** Pairs in ascending X order, so a connecting line (or the area beneath it)
  *  follows the data's trend instead of the table's row order: unsorted X
@@ -396,6 +411,14 @@ export function unlinkedAnalysisNote(graphType: GraphType): string | null {
       return "Run a Principal component analysis on this table to draw the scores biplot.";
     case "kmeans-scatter":
       return "Run a K-means clustering on this table to draw the cluster scatter.";
+    case "dendrogram":
+      return "Run a Hierarchical clustering on this table to draw the dendrogram.";
+    case "elbow-plot":
+      return "Run a Hierarchical clustering on this table to draw the Elbow plot.";
+    case "silhouette-plot":
+      return "Run a Hierarchical clustering on this table to draw the Silhouette plot.";
+    case "gap-plot":
+      return "Run a Hierarchical clustering on this table to draw the Gap plot.";
     default:
       return null;
   }
@@ -409,6 +432,7 @@ export function unlinkedAnalysisNote(graphType: GraphType): string | null {
  *  builder's business (fixed-range graphs honour it, see roc-curve.ts). */
 export function axesRangeInputs(graphType: GraphType): { x: boolean; y: boolean } {
   if (graphType === "scree-plot") return { x: false, y: true };
+  if (graphType === "dendrogram") return { x: false, y: true };
   if (graphType === "forest-plot") return { x: true, y: false };
   return { x: true, y: true };
 }
@@ -460,17 +484,58 @@ export const centers = (cols: Column[], center: GraphOptions["center"]) =>
 export const errorOf = (v: number[], kind: GraphOptions["error"]) =>
   kind === "sem" ? sem(v) : kind === "ci" ? (v.length < 2 ? 0 : tCrit95(v.length - 1) * sem(v)) : sd(v);
 
+/** An XY table's X-error column, if one was imported: Prism's X-error
+ *  subcolumn arrives as a column named "<X> error" (see pzfx.ts) — a Y
+ *  series by the table's shape, but metadata about X, not a data set. */
+export function xErrorColumn(columns: Column[], x: Column): Column | undefined {
+  return columns.find((c) => c.name === `${x.name} error`);
+}
+
 /** A Y data set of an XY graph, as drawn: each value where X has one, keyed so it can be
  *  picked and styled; or, for replicates shown as their center (`xyReplicates`), each X's
- *  center (mean or median) and its error (none when error bars are off). */
+ *  center (mean or median) and its error (none when error bars are off). `xErrorCol` is
+ *  the table's X-error column (see `xErrorColumn`): while `options.xError` is on, each
+ *  point also carries its row's X error, aligned by row — the same value for every
+ *  replicate of that row, 0 where the column holds none. */
 export function xyDrawn(
   x: Column,
   set: DataSet,
   options: GraphOptions,
-): { x: number[]; y: number[]; keys?: string[]; errors?: number[] } {
+  summary: SummaryFormat = "replicates",
+  xErrorCol?: Column,
+): { x: number[]; y: number[]; keys?: string[]; errors?: number[]; xErrors?: number[] } {
+  const xErrors = (rows: number[]): number[] | undefined =>
+    options.xError && xErrorCol ? rows.map((r) => xErrorCol.byRow[r] ?? 0) : undefined;
+  // A summary table's Y set holds its stored Mean (and error) columns, not
+  // replicates: the drawn points are the Means, with the stored error
+  // converted to the graph's error kind — averaging Mean/SD/N as replicates
+  // would be silently wrong. This holds whatever `xyReplicates` says.
+  if (summary !== "replicates") {
+    const meanCol = set.columns.find((c) => summarySuffix(c.name) === "Mean");
+    if (!meanCol) return { x: [], y: [] };
+    const rows = x.rows.filter((r) => meanCol.byRow[r] != null);
+    const xErrs = xErrors(rows);
+    return {
+      x: rows.map((r) => x.byRow[r]!),
+      y: rows.map((r) => meanCol.byRow[r]!),
+      ...(options.error === "none"
+        ? {}
+        : {
+            errors: rows.map((r) => summaryErrorAt(set.columns, r, summary, options.error).error ?? 0),
+          }),
+      // Only present when there really are X errors: the return's shape is
+      // pinned (seq 208), and an `xErrors: undefined` key would change it.
+      ...(xErrs ? { xErrors: xErrs } : {}),
+    };
+  }
   if (set.columns.length === 1 || options.xyReplicates === "each") {
     const points = xyPoints(x, set);
-    return { x: points.x, y: points.y, keys: points.rows.map((r, i) => pointKeyOf(points.columns[i], r)) };
+    return {
+      x: points.x,
+      y: points.y,
+      keys: points.rows.map((r, i) => pointKeyOf(points.columns[i], r)),
+      xErrors: xErrors(points.rows),
+    };
   }
   const rows = xyRows(x, set);
   return {
@@ -479,6 +544,7 @@ export function xyDrawn(
     ...(options.error === "none"
       ? {}
       : { errors: rows.values.map((v) => (v.length < 2 ? 0 : errorOf(v, options.error))) }),
+    xErrors: xErrors(rows.rows),
   };
 }
 
@@ -491,6 +557,45 @@ export const jitter = (col: number, i: number) => {
   const s = Math.sin(col * 131.7 + i * 977.3) * 43758.5453;
   return (s - Math.floor(s) - 0.5) * 0.3;
 };
+
+/** How far sideways each scatter point sits from its column/row, one offset
+ *  per value (nulls get 0 — the caller never draws them). "classic" is the
+ *  legacy `jitter` exactly (same seed and index, so existing graphs render
+ *  unchanged); "aligned" is 0 everywhere — dots stacked in a column, Prism's
+ *  aligned dot plot; "standard" spreads points in proportion to how many
+ *  share their Y (a lone point sits centered, the densest Y gets the full
+ *  width); "expanded" is a low-discrepancy (golden-ratio) spread, which
+ *  breaks the visual banding a single hash can leave. `indexBase` lets the
+ *  grouped builders keep their legacy per-point index (row × 10 + replicate)
+ *  so classic stays bit-identical there too. */
+export function scatterOffsets(
+  values: (number | null)[],
+  style: GraphOptions["scatterStyle"],
+  seed: number,
+  indexBase = 0,
+): number[] {
+  if (style === "aligned") return values.map(() => 0);
+  if (style === "classic") return values.map((_, i) => jitter(seed, indexBase + i));
+  if (style === "expanded") {
+    return values.map((_, i) => {
+      const f = (indexBase + i) * 0.6180339887498949 + seed * 0.3183098861837907;
+      return (f - Math.floor(f) - 0.5) * 0.3;
+    });
+  }
+  const counts = new Map<number, number>();
+  for (const v of values) if (v != null) counts.set(v, (counts.get(v) ?? 0) + 1);
+  const maxCount = Math.max(1, ...counts.values());
+  const seen = new Map<number, number>();
+  return values.map((v) => {
+    if (v == null) return 0;
+    const k = counts.get(v)!;
+    const j = seen.get(v) ?? 0;
+    seen.set(v, j + 1);
+    if (k === 1) return 0;
+    const w = 0.15 * (k / maxCount);
+    return -w + (2 * w * j) / (k - 1);
+  });
+}
 
 /** The least space around the plot area. Every axis has `automargin`, so Plotly
  *  widens it just enough for tick labels and axis titles — but automargin does
@@ -638,6 +743,38 @@ export function curveXs(xs: number[], scale: GraphOptions["xScale"], steps: numb
   });
 }
 
+/** An axis number format as a Plotly `tickformat` string: fixed decimals
+ *  (".2f") or scientific (".2e"); automatic (or absent) draws Plotly's own
+ *  ticks. `decimals` clamps to 0–15 — beyond that Plotly would print noise. */
+export function numberTickformat(fmt: AxisNumberFormat | undefined): string | undefined {
+  if (!fmt || fmt.format === "auto") return undefined;
+  const decimals = Math.max(0, Math.min(15, Math.floor(fmt.decimals ?? 2)));
+  return `.${decimals}${fmt.format === "decimal" ? "f" : "e"}`;
+}
+
+/** Applies each axis's number format to a built figure's numeric linear
+ *  axes (see `numberTickformat`). Category axes, log axes (whose ticks are
+ *  the powers) and axes with custom tick placement keep their own labels,
+ *  so a format never fights a builder's ticks. Mutates the figure in
+ *  place — builders return a fresh figure per draw, and the graph view
+ *  already mutates it for overlays. */
+export function applyNumberFormats(fig: GraphFigure, options: GraphOptions): void {
+  const axes: [string, AxisNumberFormat | undefined][] = [
+    ["xaxis", options.xNumberFormat],
+    ["yaxis", options.yNumberFormat],
+    ["yaxis2", options.y2NumberFormat],
+  ];
+  for (const [key, fmt] of axes) {
+    const tickformat = numberTickformat(fmt);
+    if (!tickformat) continue;
+    const axis = fig.layout[key] as Record<string, unknown> | undefined;
+    if (!axis || typeof axis !== "object") continue;
+    if (axis.type === "category" || axis.type === "log") continue;
+    if (axis.tickmode === "array") continue;
+    axis.tickformat = tickformat;
+  }
+}
+
 /** A logarithmic axis: ticks at the powers of `base` (only those in range show), small
  *  ticks between the powers of 10, and its range typed in real values (above 0). Values
  *  at or under 0 have no place on it: Plotly leaves them out (the Format panel says how
@@ -698,18 +835,60 @@ const xAxisRange = (options: GraphOptions, zeroBase?: boolean, grid: GraphOption
  *  their values, but texts (annotations) at the log10 of them on a log axis. */
 export const onAxis = (v: number, scale: GraphOptions["xScale"]) => (scale === "linear" ? v : Math.log10(v));
 
+/** Where a box's whiskers end, and which values lie past them (Prism's whisker
+ *  choices, FAQ 1481): min to max (no outliers), Tukey's 1.5×IQR fences — the
+ *  whiskers end at an observed data point, values beyond are outliers — or a
+ *  percentile pair, with values outside the pair as outliers. "min-max-all"
+ *  is min to max with all points drawn (its outliers list is empty; the
+ *  builders draw the points instead). Percentiles use Titer's `quantile`
+ *  (R type 6), the same method as the box's quartiles. */
+export function whiskerBounds(
+  values: number[],
+  whisker: GraphOptions["whisker"],
+): { low: number; high: number; outliers: number[] } {
+  const lo = minOf(values);
+  const hi = maxOf(values);
+  if (whisker === "min-max" || whisker === "min-max-all") return { low: lo, high: hi, outliers: [] };
+  if (whisker === "tukey") {
+    const q1 = quantile(values, 0.25);
+    const q3 = quantile(values, 0.75);
+    const iqr = q3 - q1;
+    const lowFence = q1 - 1.5 * iqr;
+    const highFence = q3 + 1.5 * iqr;
+    const inside = values.filter((v) => v >= lowFence && v <= highFence);
+    return {
+      low: minOf(inside),
+      high: maxOf(inside),
+      outliers: values.filter((v) => v < lowFence || v > highFence),
+    };
+  }
+  const [p, q] =
+    whisker === "p10-90"
+      ? [0.1, 0.9]
+      : whisker === "p5-95"
+        ? [0.05, 0.95]
+        : whisker === "p2.5-97.5"
+          ? [0.025, 0.975]
+          : [0.01, 0.99];
+  const low = quantile(values, p);
+  const high = quantile(values, q);
+  return { low, high, outliers: values.filter((v) => v < low || v > high) };
+}
+
 /** Boxes at `x`, one per list of values, as Helix computes them (`boxOf`: the quartiles of
- *  Descriptive statistics, whiskers to the minimum and maximum): Plotly only draws them. */
-export function boxTrace(x: number[], values: number[][]) {
+ *  Descriptive statistics, whiskers to the minimum and maximum): Plotly only draws them.
+ *  `whisker` moves the fences (Tukey, percentiles); the quartiles never move. */
+export function boxTrace(x: number[], values: number[][], whisker: GraphOptions["whisker"] = "min-max") {
   const boxes = values.map(boxOf);
+  const fences = values.map((v) => whiskerBounds(v, whisker));
   const field = (k: keyof (typeof boxes)[number]) => boxes.map((b) => b[k]);
   return {
     x,
     q1: field("q1"),
     median: field("median"),
     q3: field("q3"),
-    lowerfence: field("lowerfence"),
-    upperfence: field("upperfence"),
+    lowerfence: fences.map((f) => f.low),
+    upperfence: fences.map((f) => f.high),
   };
 }
 
@@ -936,6 +1115,66 @@ export function perRowStats(
   return { center: c, error: e };
 }
 
+/** A column name's sub-column suffix — the part after the last ":"
+ *  ("Mean" for "A:Mean" and for a nested "A:S1:Mean"; the whole name
+ *  when there is no ":"). */
+const summarySuffix = (name: string) => name.slice(name.lastIndexOf(":") + 1);
+
+/** One summary group's stored error at one row, converted to the graph's
+ *  error kind exactly via N when N is present (SD ↔ SEM), or the 95% CI
+ *  half-width (t × SEM) when N ≥ 2. A conversion that needs an N the
+ *  format doesn't store has no error bar — a null there, never a guessed
+ *  number. `errorMinus` carries the lower side for the asymmetric formats
+ *  (Mean, +error, −error and Mean, upper, lower limits), whose upper and
+ *  lower errors differ; null for the symmetric ones (and when the Mean
+ *  itself is missing at that row). */
+export function summaryErrorAt(
+  cols: Column[],
+  r: number,
+  format: SummaryFormat,
+  error: GraphOptions["error"],
+): { error: number | null; errorMinus: number | null } {
+  const def = summaryFormatDef(format);
+  const col = (suffix: string) => cols.find((c) => summarySuffix(c.name) === suffix);
+  const m = col("Mean")?.byRow[r] ?? null;
+  if (m == null || error === "none") return { error: null, errorMinus: null };
+  const n = col("N")?.byRow[r] ?? null;
+  if (def.errorKind === "plus-minus") {
+    return { error: col("+error")?.byRow[r] ?? null, errorMinus: col("−error")?.byRow[r] ?? null };
+  }
+  if (def.errorKind === "upper-lower") {
+    const upper = col("Upper limit")?.byRow[r] ?? null;
+    const lower = col("Lower limit")?.byRow[r] ?? null;
+    return {
+      error: upper == null ? null : upper - m,
+      errorMinus: lower == null ? null : m - lower,
+    };
+  }
+  // The stored error, as an SD: SD itself, SEM × √N, or CV% of the mean.
+  const stored =
+    def.errorKind === "sd"
+      ? col("SD")?.byRow[r] ?? null
+      : def.errorKind === "sem"
+        ? col("SEM")?.byRow[r] ?? null
+        : col("CV")?.byRow[r] ?? null;
+  const asSd =
+    stored == null
+      ? null
+      : def.errorKind === "sem"
+        ? n == null
+          ? null
+          : stored * Math.sqrt(n)
+        : def.errorKind === "cv"
+          ? (stored / 100) * m
+          : stored;
+  const asSem = asSd == null ? null : def.errorKind === "sem" ? stored : n == null ? null : asSd / Math.sqrt(n);
+  return {
+    error:
+      error === "sd" ? asSd : error === "sem" ? asSem : n == null || n < 2 || asSem == null ? null : tCrit95(n - 1) * asSem,
+    errorMinus: null,
+  };
+}
+
 /** Per-row center and error for one group of a summary table: the center is
  *  the stored Mean; the error is the stored error, converted to the graph's
  *  error kind exactly via N when N is present (SD ↔ SEM), or the 95% CI
@@ -944,61 +1183,32 @@ export function perRowStats(
  *  there, never a guessed number. `errorMinus` carries the lower side for the
  *  asymmetric formats (Mean, +error, −error and Mean, upper, lower limits),
  *  whose upper and lower errors differ; it is null for the symmetric ones.
- *  `center[r]` is null where the group has no Mean in that row. */
+ *  `center[r]` is null where the group has no Mean in that row.
+ *  A group holding several Mean columns (a nested table's subgroups) is
+ *  read as the subgroup Means themselves: the center is their mean or
+ *  median, the error their SD/SEM/CI — the nested pooling the replicate
+ *  graphs already do, applied to the stored Means. */
 export function perRowSummaryStats(
   cols: Column[],
   rows: number,
   format: SummaryFormat,
   error: GraphOptions["error"],
 ): { center: (number | null)[]; error: (number | null)[] | null; errorMinus: (number | null)[] | null } {
-  const def = summaryFormatDef(format);
-  const suffixOf = (name: string) => name.slice(name.indexOf(":") + 1);
-  const col = (suffix: string) => cols.find((c) => suffixOf(c.name) === suffix);
-  const meanCol = col("Mean");
-  const nCol = col("N");
-  const center: (number | null)[] = [];
+  const meanCols = cols.filter((c) => summarySuffix(c.name) === "Mean");
+  if (meanCols.length > 1) {
+    const stats = perRowStats(meanCols, rows, "mean", error);
+    return { ...stats, errorMinus: null };
+  }
   const err: (number | null)[] | null = error === "none" ? null : [];
   const errMinus: (number | null)[] | null = error === "none" ? null : [];
+  const center: (number | null)[] = [];
   for (let r = 0; r < rows; r++) {
-    const m = meanCol?.byRow[r] ?? null;
+    const m = meanCols[0]?.byRow[r] ?? null;
     center.push(m);
     if (!err || !errMinus) continue;
-    if (m == null) {
-      err.push(null);
-      errMinus.push(null);
-      continue;
-    }
-    const n = nCol?.byRow[r] ?? null;
-    if (def.errorKind === "plus-minus") {
-      err.push(col("+error")?.byRow[r] ?? null);
-      errMinus.push(col("−error")?.byRow[r] ?? null);
-      continue;
-    }
-    if (def.errorKind === "upper-lower") {
-      const upper = col("Upper limit")?.byRow[r] ?? null;
-      const lower = col("Lower limit")?.byRow[r] ?? null;
-      err.push(upper == null ? null : upper - m);
-      errMinus.push(lower == null ? null : m - lower);
-      continue;
-    }
-    // The stored error, as an SD: SD itself, SEM × √N, or CV% of the mean.
-    const stored = def.errorKind === "sd" ? col("SD")?.byRow[r] ?? null : def.errorKind === "sem" ? col("SEM")?.byRow[r] ?? null : col("CV")?.byRow[r] ?? null;
-    const asSd =
-      stored == null
-        ? null
-        : def.errorKind === "sem"
-          ? n == null
-            ? null
-            : stored * Math.sqrt(n)
-          : def.errorKind === "cv"
-            ? (stored / 100) * m
-            : stored;
-    const asSem =
-      asSd == null ? null : def.errorKind === "sem" ? stored : n == null ? null : asSd / Math.sqrt(n);
-    err.push(
-      error === "sd" ? asSd : error === "sem" ? asSem : n == null || n < 2 || asSem == null ? null : tCrit95(n - 1) * asSem,
-    );
-    errMinus.push(null);
+    const { error: e, errorMinus: em } = summaryErrorAt(cols, r, format, error);
+    err.push(e);
+    errMinus.push(em);
   }
   return { center, error: err, errorMinus: errMinus?.every((v) => v == null) ? null : errMinus };
 }
@@ -1019,27 +1229,56 @@ export function centerColumn({ name, columns }: DataSet, center: GraphOptions["c
 }
 
 /** A data set's Mean column (a summary table's group), if it has one — what a
- *  heatmap plots, instead of `centerColumn` (which would average Mean/SD/N). */
-export function summaryMeanColumn({ columns }: DataSet): Column | undefined {
-  return columns.find((c) => c.name.slice(c.name.indexOf(":") + 1) === "Mean");
+ *  heatmap plots, instead of `centerColumn` (which would average Mean/SD/N).
+ *  Several Mean columns (a nested table's subgroups) read as one column of
+ *  their per-row mean, the nested pooling the replicate graphs already do. */
+export function summaryMeanColumn({ name, columns }: DataSet): Column | undefined {
+  const meanCols = columns.filter((c) => summarySuffix(c.name) === "Mean");
+  if (meanCols.length === 0) return undefined;
+  if (meanCols.length === 1) return meanCols[0];
+  const byRow = meanCols[0].byRow.map((_, r) => {
+    const vs = meanCols.flatMap((c) => (c.byRow[r] == null ? [] : [c.byRow[r]!]));
+    return vs.length ? mean(vs) : null;
+  });
+  const rows = byRow.flatMap((v, r) => (v == null ? [] : [r]));
+  return {
+    name,
+    cells: byRow.map((v) => (v == null ? null : String(v))),
+    byRow,
+    values: rows.map((r) => byRow[r]!),
+    rows,
+  };
 }
 
-/** Horizontal offset of group `g` within a row's slot, so interleaved scatter
+/** Where a group sits within a row's slot, so interleaved scatter
  *  points fan out per group across [-0.28, 0.28] (bars use Plotly's own barmode). */
 export const groupOffset = (g: number, total: number) => (total <= 1 ? 0 : -0.28 + (0.56 * g) / (total - 1));
 
-interface SeparatedAxis {
+interface CategoryPositions {
   posOf: (group: number, row: number) => number;
   tickvals: number[];
   ticktext: string[];
   range: [number, number];
 }
 
+/** Category positions for the "Interleaved" arrangement: each group at its
+ *  offset within every row's slot (`groupOffset`), so a bar, a box and a
+ *  point of the same group and row share one place — a point overlaid on a
+ *  bar sits on its own bar. Ticks are the row labels, one per row. */
+export function interleavedPositions(groups: number, labels: string[]): CategoryPositions {
+  return {
+    posOf: (g, r) => r + groupOffset(g, groups),
+    tickvals: labels.map((_, i) => i),
+    ticktext: labels,
+    range: [-0.5, labels.length - 0.5],
+  };
+}
+
 /** Category positions for the "Separated" arrangement: each group gets its own
  *  block of `rows` slots (with a 1-slot gap between blocks) instead of sharing
  *  a slot per row, so groups sit side by side rather than interleaved. Ticks
  *  repeat the row labels once per block. */
-export function separatedPositions(groups: number, labels: string[]): SeparatedAxis {
+export function separatedPositions(groups: number, labels: string[]): CategoryPositions {
   const gap = 1;
   const rows = labels.length;
   const blockWidth = rows + gap;
@@ -1066,7 +1305,7 @@ export function separatedPositions(groups: number, labels: string[]): SeparatedA
 export function groupedBarLayout(
   options: GraphOptions,
   seriesCount: number,
-  opts: { horizontal?: boolean; separated?: SeparatedAxis; seriesNames?: string[] } = {},
+  opts: { horizontal?: boolean; positions?: CategoryPositions; seriesNames?: string[] } = {},
 ): Record<string, unknown> {
   // The grid choice follows the PHYSICAL axis: when horizontal, the value axis
   // sits on X and the category axis on Y, so the choices swap with them.
@@ -1077,15 +1316,16 @@ export function groupedBarLayout(
     ...yAxisRange(options, true, valueGrid),
     ...axisTitle(options.yLabel, options.yTitleGap),
   };
-  // Separated blocks need numeric positions with gaps between them, so they use
-  // explicit tick placement instead of Plotly's evenly-spaced "category" axis.
+  // Numeric category positions (separated blocks, or interleaved positions
+  // when points are overlaid on the bars) need explicit tick placement
+  // instead of Plotly's evenly-spaced "category" axis.
   const category = {
-    ...(opts.separated
+    ...(opts.positions
       ? {
           tickmode: "array",
-          tickvals: opts.separated.tickvals,
-          ticktext: opts.separated.ticktext,
-          range: opts.separated.range,
+          tickvals: opts.positions.tickvals,
+          ticktext: opts.positions.ticktext,
+          range: opts.positions.range,
         }
       : { type: "category" }),
     ...axisChrome(options, categoryGrid),
@@ -1106,7 +1346,7 @@ export function groupedScatterLayout(
   options: GraphOptions,
   labels: string[],
   seriesCount: number,
-  separated?: SeparatedAxis,
+  positions?: CategoryPositions,
   seriesNames: string[] = [],
 ): Record<string, unknown> {
   return {
@@ -1115,9 +1355,9 @@ export function groupedScatterLayout(
     legend: legendOf(options),
     xaxis: {
       tickmode: "array",
-      tickvals: separated ? separated.tickvals : labels.map((_, i) => i),
-      ticktext: separated ? separated.ticktext : labels,
-      range: separated ? separated.range : [-0.5, labels.length - 0.5],
+      tickvals: positions ? positions.tickvals : labels.map((_, i) => i),
+      ticktext: positions ? positions.ticktext : labels,
+      range: positions ? positions.range : [-0.5, labels.length - 0.5],
       ...axisChrome(options, options.gridX),
       ...axisTitle(options.xLabel, options.xTitleGap),
     },

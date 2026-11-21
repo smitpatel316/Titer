@@ -8,7 +8,7 @@ import type { AnalysisOutcome, ComparedCell } from "../../stats/types";
 import type { GraphOptions, GraphType, ProjectNode } from "../../store/types";
 import type { Column } from "../../lib/dataset";
 import type { GraphFigure } from ".";
-import { isSignificant, pStars, pText } from "../../lib/format";
+import { isSignificant, pEquals, pStars, pText } from "../../lib/format";
 import {
   centers,
   errors,
@@ -38,7 +38,10 @@ export const starsFit = (analysis: ProjectNode, all: string[], shown: string[]) 
   return ran.length === shown.length && ran.every((n) => shown.includes(n));
 };
 
-/** One pairwise comparison offered to the graph, keyed stably for persistence. */
+/** One pairwise comparison offered to the graph, keyed stably for persistence.
+ *  `analysisId` is the source analysis node, so the same pair from two
+ *  analyses (two copy tables' multiple t tests on the same rows) stays
+ *  distinct; absent, the legacy single source, whose bare `key` selects it. */
 export interface SigComparison {
   key: string;
   group1: string;
@@ -46,6 +49,53 @@ export interface SigComparison {
   p: number | null;
   /** A grouped table's two cells (`ComparisonRow.cells`). */
   cells?: [ComparedCell, ComparedCell];
+  analysisId?: string;
+}
+
+/** The source analyses a graph draws significance from: `sigAnalysisIds`
+ *  when non-empty, else the legacy single `sigAnalysisId`. Deduped, in
+ *  order — the first is the primary (the letters display's source). */
+export function sigAnalysisIdsOf(options: GraphOptions): string[] {
+  const list = (options.sigAnalysisIds ?? []).filter((id) => typeof id === "string" && id);
+  if (list.length) return [...new Set(list)];
+  return options.sigAnalysisId ? [options.sigAnalysisId] : [];
+}
+
+/** A comparison's selection key: scoped to its source analysis, so two
+ *  analyses' same pair are ticked apart. */
+export const sigPairKey = (c: SigComparison) => (c.analysisId ? `${c.analysisId}\u0001${c.key}` : c.key);
+
+/** Whether `sigPairs` selects a comparison: by its scoped key, by its own
+ *  key, by the pairKey of the two groups it compares, or by both group
+ *  names named bare. The Format panel stores per-comparison keys, but a
+ *  pair can also arrive spelled as the pair itself — a hand-set or MCP-set
+ *  list like ["WT", "SKG"] for a multiple-t-tests pair, whose comparisons
+ *  are per-row (their keys name the row, not the pair) and would otherwise
+ *  match nothing and draw no brackets. A cell comparison's groups are its
+ *  cells' groups; a column comparison's are group1/group2. One name alone
+ *  names no pair. Both call orders are accepted — the m4 pins call
+ *  (comparison, pairs), the m5 pins call (pairs, comparison) — so the
+ *  overloads keep both working. */
+export function sigPairSelected(c: SigComparison, sigPairs: string[]): boolean;
+export function sigPairSelected(sigPairs: string[] | undefined, c: SigComparison): boolean;
+export function sigPairSelected(
+  a: SigComparison | string[] | undefined,
+  b: SigComparison | string[] | undefined,
+): boolean {
+  const [c, pairs] = Array.isArray(a)
+    ? [b as SigComparison, (a ?? []) as string[]]
+    : [a as SigComparison, ((b ?? []) as string[])];
+  const list = pairs ?? [];
+  if (list.includes(sigPairKey(c)) || list.includes(c.key)) return true;
+  const [x, y] = c.cells ? [c.cells[0].group, c.cells[1].group] : [c.group1, c.group2];
+  return list.includes(pairKey(x, y)) || (list.includes(x) && list.includes(y));
+}
+
+/** The per-comparison keys of the comparisons `sigPairs` selects, so a toggle
+ *  in the Format panel can edit the selection explicitly — a group-pair spelling
+ *  can't lose one row. */
+export function expandSigPairs(comparisons: SigComparison[], sigPairs: string[]): string[] {
+  return comparisons.filter((c) => sigPairSelected(c, sigPairs)).map((c) => c.key);
 }
 
 /** Pull the drawable pairwise comparisons out of an analysis outcome. Post-hoc
@@ -53,7 +103,7 @@ export interface SigComparison {
  *  two-group test has its own P value (`headline`, beside its F test), the one
  *  comparison between the two groups it compared. Everything else (descriptives,
  *  one-sample, an ANOVA with no post-hoc) yields nothing to annotate. */
-export function deriveComparisons(outcome: AnalysisOutcome | null): SigComparison[] {
+export function deriveComparisons(outcome: AnalysisOutcome | null, analysisId?: string): SigComparison[] {
   if (!outcome || "error" in outcome) return [];
   if (outcome.comparisons?.length) {
     // A pair of columns, or of a grouped table's cells (a per-row test's group2 is blank:
@@ -66,11 +116,20 @@ export function deriveComparisons(outcome: AnalysisOutcome | null): SigCompariso
         group2: c.group2,
         p: c.p,
         ...(c.cells ? { cells: c.cells } : {}),
+        ...(analysisId ? { analysisId } : {}),
       }));
   }
   if (outcome.testType === "compare-two-groups" && outcome.groups.length === 2) {
     const [group1, group2] = outcome.groups.map((g) => g.name);
-    return [{ key: pairKey(group1, group2), group1, group2, p: headline(outcome.stats) }];
+    return [
+      {
+        key: pairKey(group1, group2),
+        group1,
+        group2,
+        p: headline(outcome.stats),
+        ...(analysisId ? { analysisId } : {}),
+      },
+    ];
   }
   return [];
 }
@@ -159,7 +218,7 @@ function significanceOverlay(
   const annotations: unknown[] = [];
   let top = maxTop;
 
-  const stars = display !== "pvalue";
+  const stars = display === "stars";
   for (const c of resolved) {
     let level = levels.findIndex((band) => band.every(([lo, hi]) => c.hi < lo || c.lo > hi));
     if (level === -1) {
@@ -204,7 +263,7 @@ function significanceOverlay(
       // Stars are drawn larger to match the P-value text and sit snug on the
       // bracket; the P-value label keeps a hair of breathing room.
       y: yL + unit * (stars ? 0.02 : 0.08),
-      text: stars ? pStars(c.p) : pText(c.p),
+      text: stars ? pStars(c.p) : display === "pvalue-eq" ? pEquals(c.p) : pText(c.p),
       showarrow: false,
       yanchor: "bottom",
       font: { color: INK, size: stars ? 19 : 14 },
@@ -233,8 +292,13 @@ function familiesOf(comparisons: SigComparison[]): Map<string, SigComparison[]> 
   return families;
 }
 
-/** Whether every family compares every pair of its members: letters need all of them
- *  (not Dunnett's comparisons with a control, nor pairs chosen). */
+/** The comparisons letters are drawn from: every pair of ONE analysis — with
+ *  several sources, only the first one's (a second analysis's pairs are a
+ *  different family, and mixing them would letter the wrong groups). */
+export function lettersComparisons(all: SigComparison[]): SigComparison[] {
+  const primary = all.find((c) => c.analysisId)?.analysisId;
+  return primary ? all.filter((c) => !c.analysisId || c.analysisId === primary) : all;
+}
 export function lettersFit(comparisons: SigComparison[]): boolean {
   if (!comparisons.length) return false;
   return [...familiesOf(comparisons).values()].every((family) => {
@@ -306,7 +370,7 @@ function lettersOverlay(
 }
 
 /** The grouped graphs that draw stars: each group's values at a row stand side by side. */
-export const GROUPED_STARS = new Set<GraphType>(["grouped-bars", "grouped-scatter", "grouped-box"]);
+export const GROUPED_STARS = new Set<GraphType>(["grouped-bars", "grouped-bars-scatter", "grouped-scatter", "grouped-box"]);
 
 /** A grouped graph's spots: each group at each row, at its place on the axis (bars side by
  *  side in a row's slot, Plotly's 0.2 gap between rows; points and boxes at their offsets;
@@ -321,12 +385,16 @@ function groupedSpots(
   const rows = rowCountOf(columns);
   const n = groups.length;
   const separated = options.groupLayout === "separated" ? separatedPositions(n, rowLabels(rows, titles)) : undefined;
+  // Superimposed bars all stand at the row's center, so their brackets do too.
+  const superimposed = options.groupLayout === "superimposed";
   const xOf = (g: number, r: number) =>
     separated
       ? separated.posOf(g, r)
-      : graphType === "grouped-bars"
-        ? r - 0.4 + (0.8 * (g + 0.5)) / n
-        : r + groupOffset(g, n);
+      : superimposed
+        ? r
+        : graphType === "grouped-bars" || graphType === "grouped-bars-scatter"
+          ? r - 0.4 + (0.8 * (g + 0.5)) / n
+          : r + groupOffset(g, n);
   return groups.flatMap((group, g) => {
     const { center, error } = perRowStats(group.columns, rows, options.center, options.error);
     return Array.from({ length: rows }, (_, r) => {
@@ -350,7 +418,10 @@ export function addSignificance(
   titles?: (string | null)[],
 ) {
   const letters = options.sigDisplay === "letters";
-  const selected = letters ? comparisons : comparisons.filter((c) => (options.sigPairs ?? []).includes(c.key));
+  // Letters need every pair of ONE analysis (see lettersFit): with several
+  // sources, only the first one's comparisons letter the graph — the rest
+  // still draw their brackets, below.
+  const selected = letters ? lettersComparisons(comparisons) : comparisons.filter((c) => sigPairSelected(c, options.sigPairs ?? []));
   if (!selected.length) return;
   const grouped = GROUPED_STARS.has(graphType);
   const middle = centers(columns, options.center);

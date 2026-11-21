@@ -56,7 +56,7 @@ and figure that uses it updates at once.
 
 ### Tables
 
-Seven table types. Each guides how data are entered, and offers every analysis and graph
+Eight table types. Each guides how data are entered, and offers every analysis and graph
 its data allow:
 
 - **Column:** groups side by side (control, doses, treatments)
@@ -80,7 +80,7 @@ And a spreadsheet that feels like one:
 
 ### Analyses
 
-**53 analyses**, covering all 56 analyses in GraphPad Prism 10's catalogue. That
+**55 analyses**, covering all 56 analyses in GraphPad Prism 10's catalogue. That
 "56" is a catalogue mapping — every Prism 10 analysis has a Titer equivalent listed
 below — not a single test-suite score. The numbers themselves are checked against
 Prism's own saved results and against reference values: the frozen-tip suite passed
@@ -123,11 +123,12 @@ Prism's own saved results and against reference values: the frozen-tip suite pas
 - **Survival:** Kaplan-Meier with median survival, log-rank, trend and Gehan-Breslow-Wilcoxon
   tests, hazard ratios, and Cox regression; Number at Risk shown under the curve
 - **Multivariate and simulation:** principal component analysis (with scree plot and biplot),
-  K-means clustering, ROC curves, Bland–Altman, Monte Carlo simulation
+  K-means clustering, hierarchical clustering (with dendrogram, Elbow, Silhouette and Gap plots),
+  ROC curves, Bland–Altman, Monte Carlo simulation
 - **Data operations** (not analyses, but shipped): transform data, transform concentrations,
   remove baseline, normalize — as live computed tables that follow their source and can
   be analyzed and graphed — transpose, prune rows, fraction of total
-- **Beyond Prism:** K-means clustering, plot-a-function, and row means/totals have no Prism
+- **Beyond Prism:** plot-a-function, and row means/totals have no Prism
   equivalent
 - **Clear results:** the exact test that ran, whether it is significant, every statistic,
   multiple comparisons and descriptive statistics, ready to copy
@@ -137,7 +138,7 @@ Prism's own saved results and against reference values: the frozen-tip suite pas
 
 ### Graphs
 
-**33 graph types**, all drawn from your tables and analyses:
+**37 graph types**, all drawn from your tables and analyses:
 
 - **Column and grouped data:** dot plots, before-and-after plots, box and violin plots,
   mean-with-error plots, grouped bars, grouped scatter, grouped before-and-after,
@@ -146,7 +147,7 @@ Prism's own saved results and against reference values: the frozen-tip suite pas
 - **Specialized:** heatmaps, volcano plots, survival (Kaplan–Meier) curves, forest plots,
   estimation plots, Bland–Altman plots, ROC curves, Schild plots, observed-vs-fitted
   plots, pie and donut charts, histograms, scree plots, PCA biplots, K-means scatter
-  plots, Monte Carlo histograms
+  plots, dendrograms, Elbow, Silhouette and Gap plots, Monte Carlo histograms
 
 - **Ready for a paper by default**
 - **Statistics on the graph:** significance stars, P values or group letters from your
@@ -191,10 +192,12 @@ panel labels and one export — the figure for a paper, built from the same live
 Titer reads and writes GraphPad Prism files, so existing Prism projects move over
 without retyping data.
 
-- **Open Prism files:** File › Import Prism File… opens `.pzfx` (Prism 5–9) and
-  `.prism` (Prism 10). A `.prism` file brings in its data tables, analysis parameters
+- **Open Prism files:** File › Import Prism File… opens `.pzfx` (Prism 5–9),
+  `.prism` (Prism 10) and `.pzf` (Prism 4/5, legacy binary). A `.prism` file brings in its data tables, analysis parameters
   and info sheets; graphs and layouts are not transferred, and results are recomputed
-  from the data on open.
+  from the data on open. A `.pzf` file brings in its data tables (as Column tables —
+  the legacy format records no table type) and info sheets; analyses, graphs and
+  layouts are not transferred.
 - **Save back to Prism:** the save prompt offers Save as `.prism` (Prism 10) or Save as
   `.pzfx` (Prism 5–9). The writers cover data tables, analysis parameters and info
   sheets (`.prism`) or data tables and info sheets (`.pzfx`) — never graphs, layouts or
@@ -309,7 +312,8 @@ to a small server that runs only on your machine.
    Check it connected with `/mcps` or `opencode mcp list`.
 
    **Codex and Google Antigravity** also connect — see [docs/codex.md](docs/codex.md) and
-   [docs/antigravity.md](docs/antigravity.md) for their setup.
+   [docs/antigravity-setup.md](docs/antigravity-setup.md) for their setup
+   (deep reference: [docs/antigravity.md](docs/antigravity.md)).
 
 3. **Ask it things**, for example:
 
@@ -349,10 +353,12 @@ Building the Mac DMGs needs both Mac targets for Rust, once:
 
 ## Clean-room note
 
-Titer's GraphPad Prism file support (`.pzfx` import, `.prism` import, and `.prism` /
+Titer's GraphPad Prism file support (`.pzfx` import, `.prism` import, `.pzf` import, and `.prism` /
 `.pzfx` write-back) was built clean-room: by studying the files Prism writes, together
 with public documentation and the open-source readers for those formats (R's `pzfx`
-package and Python's `pypzfx`), and implementing the importers and writers independently
+package and Python's `pypzfx` — both `.pzfx`-only; the `.pzf` grammar was
+reverse-engineered from two real public `.pzf` files, since no spec or reader exists
+for it), and implementing the importers and writers independently
 from those observations. No part of it involved decompiling, disassembling,
 or otherwise reverse-engineering Prism's program, and no cracked or pirated
 Prism source was used. Where the internal structure of a file was unclear,

@@ -10,12 +10,16 @@
 
 import {
   DEFAULT_GRAPH_OPTIONS,
+  DRAWING_OBJECT_KINDS,
+  type DrawingObject,
   FILL_PATTERNS,
   GRAPH_CHOICES,
   GRAPH_LIMITS,
+  MAX_PICTURE_BYTES,
   MAX_REF_LINES,
   REF_LABEL_PLACES,
   clamp,
+  type AxisNumberFormat,
   type FigurePanel,
   FLOATING_NOTE_COLORS,
   type FloatingNote,
@@ -31,6 +35,7 @@ import {
   type Place,
   type PointStyle,
   type ProjectNode,
+  type ProjectScript,
   type RefLine,
   type RowGroup,
   SAME_AS_FILL,
@@ -63,21 +68,35 @@ import {
   EC_ANYTHING,
   ENZYME_INHIBITION_MODELS,
   EXTRACT_REARRANGE_TARGETS,
+  FDR_METHODS,
+  FDR_Q,
+  FRACTION_OF_TOTAL_CIS,
   FRACTION_OF_TOTAL_FORMATS,
   FRACTION_OF_TOTAL_TOTALS,
+  GOF_EXPECTED_MODES,
+  KS_DISTRIBUTIONS,
+  MONTE_CARLO_SIMULATION_DISTRIBUTIONS,
   MONTE_CARLO_STATISTICS,
+  COLUMN_MATH_OPERATIONS,
   MONTE_CARLO_TARGETS,
+  MULTIPLE_T_TEST_CORRECTIONS,
   NONLINEAR_MODELS,
   NORMALIZE_HUNDRED_DEFS,
   NORMALIZE_METHODS,
   NORMALIZE_ZERO_DEFS,
+  PLOT_FUNCTION_DISTRIBUTIONS,
   POSTHOC_TARGETS,
   PRUNE_ROWS_CONDITIONS,
+  P_VALUE_STACK_METHODS,
   RANK_POSTHOCS,
   REMOVE_BASELINE_METHODS,
   ROUT_Q,
+  ROW_MEANS_SCOPES,
+  SELECT_TRANSFORM_KINDS,
+  SELECT_TRANSFORM_OPERATORS,
   SMOOTH_DIFF_INT_OPERATIONS,
   TAILS,
+  THREE_WAY_POSTHOC_SCOPES,
   THREE_WAY_TERMS,
   TRANSFORM_FUNCTIONS,
   TWO_WAY_DESIGNS,
@@ -92,6 +111,9 @@ import { isGrouped, isNested } from "./dataset";
 import { isSummaryFormatValue, summarySubcolumns } from "./summary-format";
 import { groupRuns } from "./columns";
 import { regroupDropped, regroupTable, renestDropped, renestTable } from "../views/tables/table-data";
+import { readCalculated, recomputeCalculated } from "./calcvars";
+import { readLinkedPaste } from "./linked-paste";
+import { readSimulationSpec } from "../stats/simulation/simulate";
 import { transformTable } from "./transform";
 import {
   assignLabels,
@@ -100,6 +122,7 @@ import {
   DEFAULT_LABEL_STYLE,
   figureDpi,
   FIGURE_SIZE_LIMITS,
+  validFigureImageData,
 } from "./figure";
 
 export const PROJECT_FILE_EXTENSION = "hlx";
@@ -116,6 +139,9 @@ export interface ProjectFilePayload {
   template?: TemplateInfo;
   /** The name a script's SetProjectName gave the project. Omitted when unset. */
   projectName?: string;
+  /** The project's saved Prism scripts (seq 228): a plain `.hlx` without
+   *  any omits the field, as it omits an unset projectName. */
+  scripts?: ProjectScript[];
   /** Unknown keys from a newer or hand-edited file (FF-F12): the file envelope's
    *  and the project's, kept verbatim and written back on save, so opening a
    *  newer file in this Titer doesn't silently lose its forward-compat data.
@@ -126,16 +152,34 @@ export interface ProjectFilePayload {
 
 // ── Writing ──────────────────────────────────────────────────────────────
 
-export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeId, template, projectName, fileUnknowns, projectUnknowns }: ProjectFilePayload): string {
+export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeId, template, projectName, scripts, fileUnknowns, projectUnknowns }: ProjectFilePayload): string {
+  // A sheet only carries the flags that belong to its kind (seq 165): a
+  // frozen flag on a graph is dropped here, not written and dropped again
+  // on load — otherwise every save/load round-trip would read as updated.
+  // An analysis's frozen/orphaned flags only ever mean anything as `true`
+  // (the reader drops anything else): a re-pointed analysis carries
+  // `orphaned: false` in state, and writing it would make the next open
+  // report the file as updated. Leave the flags off unless true.
+  const cleanNodes = Object.fromEntries(
+    Object.entries(nodes).map(([id, node]) => {
+      const next = { ...node };
+      if (next.type === "analysis") {
+        if (next.orphaned !== true) delete next.orphaned;
+        if (next.frozen !== true) delete next.frozen;
+      } else if (next.type !== "table") delete next.frozen;
+      return [id, next];
+    }),
+  );
   // Unknown keys go back where they came from, under the known keys — a
   // hand-edited file can't smuggle a second `nodes` or `app` past the reader.
   const project: ProjectFilePayload = {
     ...projectUnknowns,
-    nodes,
+    nodes: cleanNodes,
     rootOrder,
     childOrder,
     activeNodeId,
     ...(projectName ? { projectName } : {}),
+    ...(scripts?.length ? { scripts } : {}),
   };
   // The `template` block lives at the file level, beside `project` (plan 38):
   // a plain `.hlx` never carries one — only the template saver passes it.
@@ -187,18 +231,20 @@ const unknownsOf = (obj: Obj, known: readonly string[]): Obj => {
 // Every field Titer knows, per level. The `satisfies` checks make TypeScript
 // flag any field added to a type but not listed here.
 const FILE_KEYS = ["app", "schemaVersion", "savedAt", "template", "project"];
-const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId", "projectName"] satisfies (keyof ProjectFilePayload)[];
+const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId", "projectName", "scripts"] satisfies (keyof ProjectFilePayload)[];
 // prettier-ignore
 const NODE_KEYS = Object.keys({
   id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, highlight: 1, tableType: 1, data: 1, transform: 1, notes: 1, tags: 1,
   analysisType: 1, analysisParams: 1, cachedResult: 1, frozen: 1, orphaned: 1, sourceTableName: 1, graphType: 1, graphOptions: 1,
-  panels: 1, grid: 1, figureSize: 1, labelStyle: 1, figureTitle: 1, sharedLegend: 1, dpi: 1,
+  sourceTableIds: 1,
+  frozenData: 1, frozenDataByGraph: 1, drawingObjects: 1,
+  panels: 1, grid: 1, figureSize: 1, labelStyle: 1, figureTitle: 1, sharedLegend: 1, figureBackground: 1, dpi: 1,
   info: 1,
 } satisfies Record<keyof ProjectNode, 1>);
 // prettier-ignore
 const DATA_KEYS = Object.keys({
   columns: 1, rows: 1, groups: 1, replicates: 1, subgroups: 1, rowGroups: 1, excluded: 1,
-  widths: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1,
+  widths: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1, linkedPaste: 1, simulation: 1,
 } satisfies Record<keyof TableData, 1>);
 
 // Graph options without a default, by the kind of value they hold.
@@ -209,15 +255,16 @@ type OptionalOption = {
 const OPTIONAL_OPTIONS = {
   yMin: "number", yMax: "number", yStep: "number", xMin: "number", xMax: "number", xStep: "number", y2Min: "number", y2Max: "number", y2Step: "number", binWidth: "number",
   yMinConstant: "text", yMaxConstant: "text", xMinConstant: "text", xMaxConstant: "text",
-  sigAnalysisId: "text", sigPairs: "texts", regAnalysisId: "text", demingAnalysisId: "text", coxAnalysisId: "text", ttestAnalysisId: "text", poissonAnalysisId: "text", smoothAnalysisId: "text", pcaAnalysisId: "text", kmeansAnalysisId: "text", monteCarloAnalysisId: "text", xVariable: "text", yVariable: "text", bubbleSizeVariable: "text", bubbleColorVariable: "text",
+  sigAnalysisId: "text", sigAnalysisIds: "texts", sigPairs: "texts", regAnalysisId: "text", demingAnalysisId: "text", coxAnalysisId: "text", ttestAnalysisId: "text", poissonAnalysisId: "text", smoothAnalysisId: "text", pcaAnalysisId: "text", kmeansAnalysisId: "text", hclustAnalysisId: "text", monteCarloAnalysisId: "text", xVariable: "text", yVariable: "text", bubbleSizeVariable: "text", bubbleColorVariable: "text",
   volcanoX: "text", volcanoY: "text", volcanoLabel: "text", volcanoGroupA: "text", volcanoGroupB: "text", rightYDataset: "text", y2Label: "text",
   palette: "palette", series: "styles", points: "pointStyles", outlineColor: "color", pointOutlineColor: "color", errorColor: "color",
   legend: "place", note: "place", refLines: "refLines", sets: "texts",
+  xNumberFormat: "numberFormat", yNumberFormat: "numberFormat", y2NumberFormat: "numberFormat",
 } as const satisfies Record<OptionalOption, keyof typeof READ_OPTION>;
 // A graph's links to its analyses (FF-F13): the graph options that name a
 // sibling analysis node — the source of an overlay (significance brackets,
 // a regression line, a Deming/Cox/t-test/Poisson/PCA/smooth/k-means/
-// Monte-Carlo overlay). Every `*AnalysisId` option, including the two the
+// hierarchical-clustering/Monte-Carlo overlay). Every `*AnalysisId` option, including the two the
 // old warning missed (kmeans, monte-carlo).
 const GRAPH_ANALYSIS_LINKS = [
   "sigAnalysisId",
@@ -229,6 +276,7 @@ const GRAPH_ANALYSIS_LINKS = [
   "pcaAnalysisId",
   "smoothAnalysisId",
   "kmeansAnalysisId",
+  "hclustAnalysisId",
   "monteCarloAnalysisId",
 ] as const;
 // The retired dose-response graph's own options (before Titer 1.0.7): no
@@ -256,6 +304,7 @@ type ParamKind =
   | "number"
   | "name"
   | "names"
+  | "numbers"
   | "name-or-names"
   | "name-or-number"
   | "name-and-names"
@@ -264,23 +313,35 @@ type ParamKind =
   | "plot-curves"
   | "texts-by-name"
   | "text-pairs-by-name"
+  | "transforms"
+  | "equations"
+  | "row-range"
+  | "row-filter"
+  | "column-filter"
   | readonly string[]
   | Limits;
 // prettier-ignore
 const PARAMS = {
-  paired: "yes/no", gaussian: "yes/no", equalVariance: "yes/no", ratio: "yes/no", forceOrigin: "yes/no", pooledSd: "yes/no", quasi: "yes/no", fixHillSlope: "yes/no", trendOrdered: "yes/no", continuityCorrection: "yes/no",
-  equalSd: "yes/no", sphericity: "yes/no", interpolate: "yes/no", tails: TAILS, posthoc: [...ANOVA_POSTHOCS, ...RANK_POSTHOCS], mixed: "yes/no",
+  paired: "yes/no", gaussian: "yes/no", equalVariance: "yes/no", ratio: "yes/no", forceOrigin: "yes/no", compareSlopes: "yes/no", pooledSd: "yes/no", quasi: "yes/no", fixHillSlope: "yes/no", trendOrdered: "yes/no", continuityCorrection: "yes/no", effectSizes: "yes/no",
+  equalSd: "yes/no", sphericity: "yes/no", interpolate: "yes/no", tails: TAILS, posthoc: [...ANOVA_POSTHOCS, ...RANK_POSTHOCS, "fdr"], mixed: "yes/no", trend: "yes/no",
   // `model` is shared by nonlinear-regression and the binding runners:
   // the reader only sanitizes, each runner validates its own.
   model: [...NONLINEAR_MODELS, ...BINDING_SATURATION_MODELS, ...BINDING_KINETICS_MODELS, ...ENZYME_INHIBITION_MODELS, ...DOSE_RESPONSE_SPECIAL_MODELS],
   // `method` is shared by correlation ("pearson"/"spearman") and Spline/Lowess
-  // ("spline"/"lowess") — and now outliers ("rout"/"grubbs"): the reader only
-  // sanitizes, each runner validates its own.
-  method: [...CORRELATION_METHODS, "spline", "lowess", "rout", "grubbs"],
-  mode: CORRELATION_MODES, design: TWO_WAY_DESIGNS, posthocTarget: POSTHOC_TARGETS, correction: CORRECTIONS, curveTest: CURVE_TESTS, compare: CURVE_COMPARISONS,
+  // ("spline"/"lowess") — and now outliers ("rout"/"grubbs") and the stack of
+  // P values (the seven corrections): the reader only sanitizes, each runner
+  // validates its own. The stack runner refuses a cross-family value with a
+  // clean error (the spline-lowess precedent), so it needs no PARAM_CHOICES
+  // narrowing.
+  method: [...CORRELATION_METHODS, "spline", "lowess", "rout", "grubbs", ...P_VALUE_STACK_METHODS],
+  mode: CORRELATION_MODES, design: TWO_WAY_DESIGNS, posthocTarget: POSTHOC_TARGETS, correction: [...CORRECTIONS, ...MULTIPLE_T_TEST_CORRECTIONS], curveTest: CURVE_TESTS, compare: CURVE_COMPARISONS,
   // Nonlinear regression framework (plan 26): weighting, model comparison,
   // global fitting, fixed parameters and bounds.
   weights: ["none", "1/y", "1/y2", "1/x", "1/x2", "1/sd2"],
+  // Seq 201: centered polynomials (fit powers of X − mean X).
+  centered: "yes/no",
+  // Seq 200: the nonlinear fitting method (least squares / robust / Poisson).
+  fitMethod: ["least-squares", "robust", "poisson"],
   compareModel: [...NONLINEAR_MODELS],
   globalY: "names",
   sharedParams: "names",
@@ -301,23 +362,33 @@ const PARAMS = {
   customEquation: "name",
   customParameters: "numbers-by-name",
   hypotheticalValue: "number", baseline: "number", q: ROUT_Q, lambda: "number", ecx: EC_ANYTHING,
+  // Seq 166 (Prism Range tab): the X-range bounds for nonlinear regression.
+  fitXMin: "number", fitXMax: "number",
+  // Area under the curve (seq 202): ignore peaks smaller than a % of the Y range.
+  ignorePeaksBelow: { min: 0, max: 100 }, peaksAboveBaselineOnly: "yes/no",
   // Remove baseline (v2): how the baseline is defined, and the values it needs.
+  // Seq 206: column math — the operation and the two columns it combines.
   baselineMethod: REMOVE_BASELINE_METHODS, firstN: "number", controls: "names", constant: "number",
+  columnMathOperation: COLUMN_MATH_OPERATIONS, columnMathA: "name", columnMathB: "name",
   // Normalize (v2): how each value is rescaled, and the values it needs.
   normalizeMethod: NORMALIZE_METHODS, asPercent: "yes/no", zeroDef: NORMALIZE_ZERO_DEFS, hundredDef: NORMALIZE_HUNDRED_DEFS,
   zeroConstant: "number", hundredConstant: "number",
   // Prune rows (v2): the condition, and the threshold/range it needs.
   condition: PRUNE_ROWS_CONDITIONS, threshold: "number", low: "number", high: "number",
-  // Fraction of total (v2): which total each value is divided by, and
-  // whether the result is a fraction or a percent.
-  totalBy: FRACTION_OF_TOTAL_TOTALS, format: FRACTION_OF_TOTAL_FORMATS,
+  // Fraction of total (v2): which total each value is divided by, whether
+  // the result is a fraction or a percent, and which 95% CI of each
+  // proportion it carries (seq 196).
+  totalBy: FRACTION_OF_TOTAL_TOTALS, format: FRACTION_OF_TOTAL_FORMATS, ci: FRACTION_OF_TOTAL_CIS,
+  // Row means and totals (1.8, seq 194): whether each row is summarised
+  // across all the chosen data sets together, or within each one.
+  rowScope: ROW_MEANS_SCOPES,
   alpha: { min: 0.001, max: 0.5 }, iterate: "yes/no",
   f: "number", spar: "number", df: "number",
   // Smooth, differentiate or integrate a curve (v2): the operation is a
   // choice; window/order are numbers the runner validates (5/9/13, 2/3);
   // `baseline` already has an entry above.
   operation: SMOOTH_DIFF_INT_OPERATIONS, window: "number", order: "number", smoothResults: "yes/no", startValue: "number",
-  y: "name-or-names", y2: "name", ys: "names", dependent: "name", reference: "name", control: "name", compareWith: "name", datasets: "names", predictors: "names", sets: "names", compared: "names",
+  y: "name-or-names", y2: "name", ys: "names", dependent: "name", reference: "name", control: "name", compareWith: "name", datasets: "names", predictors: "names", sets: "names", compared: "names", factors: "names",
   // Transform concentrations (v2): the column to convert, and the units
   // it is in now vs. the units it is converted to.
   column: "name", fromUnit: CONCENTRATION_UNITS, toUnit: CONCENTRATION_UNITS,
@@ -328,20 +399,43 @@ const PARAMS = {
   bUnits: ["M", "nM", "µM"],
   binMode: BIN_MODES, binWidth: "number", binCount: { min: 2, max: 100 }, startAt: "number",
   posthocTerm: THREE_WAY_TERMS,
+  // The FDR approach after an ANOVA (seq 192): which method, and at which Q
+  // (%) a comparison counts as a discovery — same 0.01–50 range as ROUT's Q.
+  // `posthocScope` splits a three-way interaction term into simple effects.
+  fdrMethod: FDR_METHODS, fdrQ: FDR_Q, posthocScope: THREE_WAY_POSTHOC_SCOPES,
   truth: "name", score: "name", positive: "name-or-number",
   time: "name", status: "name", covariates: "names", stratifyBy: "name", ties: ["efron", "breslow"],
+  // A Multiple Variables t test's response split, and a survival analysis's groups.
+  groupBy: "name",
   // Normality tests (plan 23): which of the four tests, and whether to
   // also test the log-transformed values. `test` is shared with chi-square's
   // test choice (fisher/yates/chi-square/trend): the reader only sanitizes,
   // each runner validates its own.
+  // One-sample Kolmogorov–Smirnov test (seq 170): the theoretical
+  // distribution, where its parameters come from, and the parameters
+  // themselves — the reader only sanitizes, the runner validates its own.
+  distribution: KS_DISTRIBUTIONS,
+  paramsFrom: ["specified", "estimated"],
+  mean: "number", sd: "number", meanlog: "number", sdlog: "number", rate: "number", min: "number", max: "number",
   test: ["shapiro-wilk", "dagostino-pearson", "anderson-darling", "kolmogorov-smirnov", ...CONTINGENCY_TESTS],
   lognormal: "yes/no",
+  // Chi-square goodness of fit + binomial test (seq 195): how the expected
+  // distribution is given, the per-category values (counts or percentages,
+  // in row order), and the binomial's expected proportion for the first
+  // category (0–1).
+  expectedMode: GOF_EXPECTED_MODES,
+  expectedValues: "numbers",
+  expectedProportion: { min: 0, max: 1 },
   // Principal component analysis (plan 21): the matrix, and how many
   // components to report (0 = all).
   scale: ["correlation", "covariance"], components: "number",
   // K-means clustering (plan 30): how many clusters, and whether to
   // standardise the variables first.
   clusters: "number", standardise: "yes/no",
+  // Hierarchical clustering (seq 160): how clusters merge, and how rows
+  // are measured apart.
+  linkage: ["complete", "average", "single", "ward.D2"],
+  distance: ["euclidean", "manhattan"],
   // Mixed-effects model (plan 20): the random structure and the subject
   // identity are choices; `subjectFactor` is one name + its per-row levels.
   // (FF-F18) `slopeVariable` was dropped in v1.5.0: a dead param, accepted
@@ -352,23 +446,32 @@ const PARAMS = {
   // unknown param (FF-F12 carry-through).
   randomStructure: ["intercept", "slope"], subjectId: ["row", "replicate"], interaction: "yes/no",
   fixedFactors: "names", subjectFactor: "name-and-names",
+  // Denominator DF behind the mixed-effects P values (seq 181): which of
+  // Prism's three methods — Legacy, Satterthwaite, Kenward-Roger.
+  dfMethod: ["legacy", "satterthwaite", "kenward-roger"],
   // Monte Carlo simulation (plan 22): the target analysis + statistic are
   // choices; repeats/seed are numbers; the per-column simulated means/SDs
   // are numbers-by-name (the target's own options — equalVariance,
-  // hypotheticalValue, y, method — already have entries above).
+  // hypotheticalValue, y, method — already have entries above). Seq 204:
+  // the simulation distribution (gaussian/t) + its df, the P-value tails,
+  // and the paired-t difference mean/SD.
   targetAnalysis: MONTE_CARLO_TARGETS,
   summaryStatistic: MONTE_CARLO_STATISTICS,
   repeats: "number",
   seed: "number",
   groupMeans: "numbers-by-name",
   groupSds: "numbers-by-name",
+  simulationDistribution: MONTE_CARLO_SIMULATION_DISTRIBUTIONS,
+  simulationDf: "number",
+  differenceMean: "number",
+  differenceSd: "number",
   rout: "yes/no", x: "name",
   // Transform data (v2): which function to apply.
   function: TRANSFORM_FUNCTIONS,
   // Plot a function (v2): the equation, the X range, how many line segments
   // draw each curve, the extra series, and the curves themselves (each a
   // label + its parameter values, read by the "plot-curves" kind below).
-  equation: [...NONLINEAR_MODELS, "gaussian"],
+  equation: [...NONLINEAR_MODELS, ...PLOT_FUNCTION_DISTRIBUTIONS],
   xMin: "number",
   xMax: "number",
   segments: { min: 10, max: 1000 },
@@ -380,6 +483,15 @@ const PARAMS = {
   response: "name", grouping: "name", subject: "name", rowTitles: "name",
   rowFactor: "name", columnFactor: "name", rowVariable: "name", outcome: "name", count: "name",
   prefixNames: "yes/no", completeRows: "yes/no",
+  // Select and transform (seq 177): which variables the new table keeps, the
+  // per-variable transforms and equations that add columns, and the row
+  // selection (a range, a value comparison, a column comparison).
+  columns: "names",
+  transforms: "transforms",
+  equations: "equations",
+  rowRange: "row-range",
+  rowFilter: "row-filter",
+  columnFilter: "column-filter",
 } satisfies Record<ParamKey, ParamKind>;
 
 const isFiniteNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -447,6 +559,20 @@ function readStyles(v: unknown): Record<string, SeriesStyle> | undefined {
 const readPlace = (v: unknown): Place | undefined =>
   isObj(v) && isFiniteNumber(v.x) && isFiniteNumber(v.y) ? { x: v.x, y: v.y } : undefined;
 
+/** An axis number format: `format` one of auto/decimal/scientific, `decimals`
+ *  a whole number 0–15. A broken value reads as no format rather than
+ *  breaking the open — an unknown format is not a format at all. */
+const readNumberFormat = (v: unknown): AxisNumberFormat | undefined => {
+  if (!isObj(v)) return undefined;
+  const format = oneOf(["auto", "decimal", "scientific"] as const, v.format);
+  if (!format) return undefined;
+  const decimals =
+    typeof v.decimals === "number" && Number.isInteger(v.decimals)
+      ? Math.max(0, Math.min(15, v.decimals))
+      : undefined;
+  return defined({ format, decimals });
+};
+
 /** Reference lines: each at a finite value, its dashes one of the list (else dashed), its
  *  thickness within the lines' limits, a color or none, a text or none; ten at most. */
 function readRefLines(v: unknown): RefLine[] | undefined {
@@ -508,6 +634,7 @@ const READ_OPTION = {
   styles: readStyles,
   pointStyles: readPointStyles,
   place: readPlace,
+  numberFormat: readNumberFormat,
   refLines: readRefLines,
   color: (v: unknown) => (isHex(v) ? v : undefined),
 };
@@ -565,6 +692,8 @@ function readData(
   beyond: number;
   regroupDropped: string[];
   rowGroupsDropped: string[];
+  /** A stored link that failed validation (a hand-edited file) — dropped, so the caller can say so. */
+  linkedPasteDropped: boolean;
 } | null {
   const { seriesColors, pointColors, ...d } = canonical(raw, [...DATA_KEYS, "seriesColors", "pointColors"]);
   if (!Array.isArray(d.columns) || !Array.isArray(d.rows)) return null;
@@ -587,6 +716,15 @@ function readData(
       )
     : {};
   const rowGroups = readRowGroups(d.rowGroups);
+  // Calculated variables survive only as entries naming a column with a
+  // non-empty formula; a stored error is dropped — the values are recomputed
+  // below (and on every edit), and the error is re-derived then.
+  const calculated = readCalculated(d.calculated, columns);
+  // A linked paste (Prism 11, seq 168) survives only as a well-formed link:
+  // a hand-edited file holding anything else loses the link (and the caller
+  // warns), instead of carrying a bogus source path into a refresh.
+  const linkedPaste = readLinkedPaste(d.linkedPaste);
+  const linkedPasteDropped = d.linkedPaste !== undefined && linkedPaste === undefined;
   // Groups of sub-columns: a Grouped table's, a Nested table's, or an XY table's data sets of replicates (after X).
   const grouping =
     (type === "grouped" || type === "xy" || type === "nested") && isCount(d.groups) && isCount(d.replicates);
@@ -604,6 +742,11 @@ function readData(
     // Only "sd" or "sem" survives: a hand-edited file holding anything else
     // reads as SEM, the default, instead of carrying a bogus format.
     errorFormat: d.errorFormat === "sd" || d.errorFormat === "sem" ? d.errorFormat : undefined,
+    calculated,
+    linkedPaste,
+    // A simulated table's spec survives only when it is a valid spec:
+    // a hand-edited one is dropped, so the table can't re-run on a lie.
+    simulation: readSimulationSpec(d.simulation),
   } as TableData);
   const regroupDroppedNames: string[] = [];
   // Where the groups start: an XY table's X column comes first — unless the
@@ -613,17 +756,19 @@ function readData(
   const kind = lead === 2 ? "xy" : "grouped";
   // A summary format survives only when it fits its columns: a known format,
   // whose width is the table's sub-column count, with every group's suffixes
-  // in its order ("A:Mean", "A:SD", "A:N"). Anything else is a stale or
-  // hand-edited value — dropped, so the columns read as plain replicates and
-  // the load-time rebuild below can put the names straight.
-  if (isGrouped(data) && data.summaryFormat !== undefined) {
+  // in its order ("A:Mean", "A:SD", "A:N" — a nested table's "A:S1:Mean"…).
+  // Anything else is a stale or hand-edited value — dropped, so the columns
+  // read as plain replicates and the load-time rebuild below can put the
+  // names straight. The suffix is the part after the LAST ":" (a nested
+  // sub-column's middle part is its subgroup, not its format).
+  if ((isGrouped(data) || isNested(data)) && data.summaryFormat !== undefined) {
     const format = data.summaryFormat;
     const subs = isSummaryFormatValue(format) ? summarySubcolumns(format) : [];
     const fits =
       subs.length === data.replicates &&
       columns
         .slice(lead)
-        .every((name, i) => name.slice(name.indexOf(":") + 1) === subs[i % subs.length]);
+        .every((name, i) => name.slice(name.lastIndexOf(":") + 1) === subs[i % subs.length]);
     if (!fits) data = defined({ ...data, summaryFormat: undefined });
   }
   if (isGrouped(data) && columns.length > lead) {
@@ -668,6 +813,7 @@ function readData(
     beyond,
     regroupDropped: regroupDroppedNames,
     rowGroupsDropped: rowGroups.dropped,
+    linkedPasteDropped,
   };
 }
 
@@ -710,14 +856,14 @@ function readOptions(raw: unknown, label: string, issues: ProjectIssue[]): Graph
  *  key (`??` in the runner) or spread-merge their defaults (one-sample-t,
  *  one-way ANOVA, frequency-distribution). Mirrors each runner's DEFAULTS —
  *  compare-two-groups, kruskal-wallis, friedman, nested-anova,
- *  deming-regression, survival — and the multiple-t-tests wizard default (Holm). */
+ *  deming-regression, survival — and the multiple-t-tests wizard default (Holm–Šídák). */
 const PARAM_DEFAULTS: Record<string, Record<string, unknown>> = {
   "compare-two-groups": { paired: false, gaussian: true, equalVariance: true, ratio: false, tails: "two-sided" },
   "kruskal-wallis": { posthoc: "none" },
   friedman: { posthoc: "none" },
   "nested-anova": { posthoc: "none" },
   "deming-regression": { lambda: 1 },
-  "multiple-t-tests": { paired: false, gaussian: true, pooledSd: false, correction: "holm" },
+  "multiple-t-tests": { paired: false, gaussian: true, pooledSd: false, correction: "holm-sidak" },
   survival: { curveTest: "logrank", correction: "holm" },
   // M7 fallbacks: a cross-family choice left out below lands on these.
   anova: { posthoc: "none" },
@@ -746,6 +892,10 @@ const PARAM_CHOICES: Record<string, Record<string, readonly string[]>> = {
   correlation: { method: CORRELATION_METHODS },
   "correlation-matrix": { method: CORRELATION_METHODS },
   outliers: { method: ["rout", "grubbs"] },
+  // The merged `correction` list admits every family's values: survival only
+  // offers holm/fdr/none, multiple-t-tests the full Prism set (seq 193).
+  survival: { correction: CORRECTIONS },
+  "multiple-t-tests": { correction: MULTIPLE_T_TEST_CORRECTIONS },
 };
 
 /** A collection param, keeping its usable entries: one bad entry used to
@@ -821,9 +971,80 @@ function readParam(kind: ParamKind, v: unknown, report?: (dropped: number) => vo
     if (kept.length !== v.length) report?.(v.length - kept.length);
     return kept.length ? kept : undefined;
   }
+  if (kind === "transforms") {
+    // One transform per entry: a variable, a kind from the offered list, and
+    // the constant K / title when given. An entry naming an unknown kind, or
+    // with a non-numeric K, is left out whole and reported (M6).
+    if (!Array.isArray(v)) return undefined;
+    const kept = v.filter(
+      (t): t is { variable: string; kind: string; k?: number; title?: string } =>
+        isObj(t) &&
+        typeof t.variable === "string" &&
+        typeof t.kind === "string" &&
+        (SELECT_TRANSFORM_KINDS as readonly string[]).includes(t.kind) &&
+        (t.k === undefined || isFiniteNumber(t.k)) &&
+        (t.title === undefined || typeof t.title === "string"),
+    );
+    if (kept.length !== v.length) report?.(v.length - kept.length);
+    return kept.length ? kept : undefined;
+  }
+  if (kind === "equations") {
+    // One equation per entry: a name and its formula, both strings. A
+    // nameless or formula-less entry is left out whole and reported (M6).
+    if (!Array.isArray(v)) return undefined;
+    const kept = v.filter(
+      (e): e is { name: string; formula: string } =>
+        isObj(e) && typeof e.name === "string" && e.name.trim() !== "" && typeof e.formula === "string",
+    );
+    if (kept.length !== v.length) report?.(v.length - kept.length);
+    return kept.length ? kept : undefined;
+  }
+  if (kind === "row-range") {
+    // A 1-based inclusive row range: both ends finite numbers (the runner
+    // checks they are whole rows inside the table).
+    if (!isObj(v) || !isFiniteNumber(v.first) || !isFiniteNumber(v.last)) return undefined;
+    return { first: v.first, last: v.last };
+  }
+  if (kind === "row-filter") {
+    // A variable, a comparison from the offered list, and the value to
+    // compare against when the comparison needs one ("is-not-missing" does not).
+    if (
+      !isObj(v) ||
+      typeof v.variable !== "string" ||
+      typeof v.operator !== "string" ||
+      !(SELECT_TRANSFORM_OPERATORS as readonly string[]).includes(v.operator) ||
+      (v.operator !== "is-not-missing" && v.value !== undefined && !isFiniteNumber(v.value))
+    )
+      return undefined;
+    return {
+      variable: v.variable,
+      operator: v.operator,
+      ...(v.value !== undefined ? { value: v.value } : {}),
+    };
+  }
+  if (kind === "column-filter") {
+    // Two different variables and a comparison between them ("is-not-missing"
+    // compares a variable to a value, not to another variable).
+    if (
+      !isObj(v) ||
+      typeof v.variable !== "string" ||
+      typeof v.otherVariable !== "string" ||
+      typeof v.operator !== "string" ||
+      v.operator === "is-not-missing" ||
+      !(SELECT_TRANSFORM_OPERATORS as readonly string[]).includes(v.operator)
+    )
+      return undefined;
+    return { variable: v.variable, operator: v.operator, otherVariable: v.otherVariable };
+  }
   if (kind === "names") {
     if (!Array.isArray(v)) return undefined;
     const kept = v.filter((s): s is string => typeof s === "string");
+    if (kept.length !== v.length) report?.(v.length - kept.length);
+    return kept.length ? kept : undefined;
+  }
+  if (kind === "numbers") {
+    if (!Array.isArray(v)) return undefined;
+    const kept = v.filter(isFiniteNumber);
     if (kept.length !== v.length) report?.(v.length - kept.length);
     return kept.length ? kept : undefined;
   }
@@ -838,45 +1059,51 @@ function readParam(kind: ParamKind, v: unknown, report?: (dropped: number) => vo
  *  compiler-checked as a `ParamKey`, the per-type grouping is not — a key
  *  listed under the wrong type is caught by the runner, not here.
  *  `correlation` takes `XYCorrelationParams`, `correlation-matrix` takes
- *  `CorrelationParams` (method only) — see `src/stats/index.ts`. */
-const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
+ *  `CorrelationParams` (method only) — see `src/stats/index.ts`.
+ *  Exported: tests/checks.ts pins the generated MCP params schema
+ *  (src-tauri/src/analysis-params-schema.json) against this list. */
+export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "descriptive-statistics": ["sets"],
   "frequency-distribution": ["binMode", "binWidth", "binCount", "startAt", "sets"],
-  "fraction-of-total": ["ys", "x", "totalBy", "format", "sets"],
-  "transform-data": ["function", "sets"],
+  "fraction-of-total": ["ys", "x", "totalBy", "format", "ci", "sets"],
+  "transform-data": ["function", "constant", "sets"],
   "transform-concentrations": ["column", "fromUnit", "toUnit", "sets"],
-  "remove-baseline": ["ys", "x", "baselineMethod", "firstN", "controls", "constant", "constantHook", "sets"],
+  "remove-baseline": ["ys", "x", "baselineMethod", "firstN", "controls", "constant", "constantHook", "columnMathOperation", "columnMathA", "columnMathB", "sets"],
   normalize: [
     "ys", "x", "normalizeMethod", "asPercent", "controls", "constant", "constantHook", "zeroDef", "zeroConstant",
     "zeroConstantHook", "hundredDef", "hundredConstant", "hundredConstantHook", "sets",
   ],
   transpose: ["sets"],
   "prune-rows": ["ys", "x", "condition", "threshold", "low", "high", "sets"],
-  "compare-two-groups": ["paired", "gaussian", "equalVariance", "ratio", "lognormal", "tails", "sets"],
-  "one-sample-t": ["hypotheticalValue", "tails", "gaussian", "lognormal", "sets"],
-  anova: ["posthoc", "equalSd", "control", "compared", "lognormal", "sets"],
+  "compare-two-groups": ["paired", "gaussian", "equalVariance", "ratio", "lognormal", "tails", "response", "groupBy", "effectSizes", "sets"],
+  "one-sample-t": ["hypotheticalValue", "tails", "gaussian", "lognormal", "effectSizes", "sets"],
+  anova: ["posthoc", "equalSd", "control", "compared", "lognormal", "effectSizes", "trend", "sets"],
   "kruskal-wallis": ["posthoc", "sets"],
-  "rm-anova": ["posthoc", "sphericity", "compared", "mixed", "sets"],
+  "rm-anova": ["posthoc", "sphericity", "compared", "mixed", "effectSizes", "sets"],
   friedman: ["posthoc", "sets"],
-  "mixed-effects": ["fixedFactors", "randomStructure", "subjectId", "subjectFactor", "interaction", "sets"],
+  "mixed-effects": ["fixedFactors", "randomStructure", "subjectId", "subjectFactor", "interaction", "dfMethod", "sets"],
   "shapiro-wilk": ["test", "lognormal", "sets"],
   "kolmogorov-smirnov": ["sets"],
+  "one-sample-ks": ["distribution", "paramsFrom", "mean", "sd", "meanlog", "sdlog", "rate", "min", "max", "tails", "sets"],
   outliers: ["q", "method", "alpha", "iterate", "sets"],
+  "p-value-stack": ["method", "q", "alpha", "sets"],
   "monte-carlo": [
     "targetAnalysis", "summaryStatistic", "repeats", "seed", "groupMeans", "groupSds", "equalVariance",
-    "hypotheticalValue", "y", "method", "sets",
+    "hypotheticalValue", "y", "method", "tails", "simulationDistribution", "simulationDf", "differenceMean",
+    "differenceSd", "sets",
   ],
   "bland-altman": ["sets"],
   "roc-curve": ["truth", "score", "positive", "sets"],
   "plot-function": ["equation", "xMin", "xMax", "segments", "curves", "extra", "ligandConcentration", "sets"],
-  correlation: ["method", "mode", "datasets", "sets"],
-  "linear-regression": ["x", "y", "ys", "forceOrigin", "weights", "sets"],
+  correlation: ["method", "mode", "datasets", "effectSizes", "sets"],
+  "linear-regression": ["x", "y", "ys", "forceOrigin", "compareSlopes", "weights", "sets"],
+  "compare-slopes": ["ys", "sets"],
   "deming-regression": ["y", "lambda", "sets"],
   "simple-logistic-regression": ["y", "sets"],
-  "area-under-curve": ["baseline", "sets"],
-  "row-means-totals": ["ys", "x", "sets"],
+  "area-under-curve": ["baseline", "ignorePeaksBelow", "peaksAboveBaselineOnly", "sets"],
+  "row-means-totals": ["ys", "x", "rowScope", "sets"],
   "nonlinear-regression": [
-    "y", "ys", "model", "compareWith", "compare", "interpolate", "weights", "fixed", "bounds", "fixedConstants",
+    "x", "y", "ys", "model", "centered", "fitMethod", "compareWith", "compare", "interpolate", "weights", "fitXMin", "fitXMax", "fixed", "bounds", "fixedConstants",
     "boundsConstants", "compareModel", "globalY", "sharedParams", "ligandConcentration", "ligandKd",
     "ligandConcentrationConstant", "ligandKdConstant", "fitKi", "rout", "q", "ecx", "customEquation", "customParameters",
     "sets",
@@ -889,25 +1116,30 @@ const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   ],
   "spline-lowess": ["y", "method", "f", "spar", "df", "sets"],
   "smooth-differentiate-integrate": ["ys", "x", "operation", "window", "order", "smoothResults", "baseline", "startValue", "sets"],
-  "two-way-anova": ["design", "posthoc", "posthocTarget", "sphericity", "sets"],
-  "three-way-anova": ["posthoc", "posthocTerm", "sets"],
-  "multiple-t-tests": ["paired", "gaussian", "pooledSd", "correction", "sets"],
+  "two-way-anova": ["design", "posthoc", "posthocTarget", "sphericity", "effectSizes", "control", "fdrMethod", "fdrQ", "sets"],
+  "three-way-anova": ["posthoc", "posthocTerm", "effectSizes", "posthocScope", "control", "fdrMethod", "fdrQ", "sets"],
+  "multiple-t-tests": ["paired", "gaussian", "pooledSd", "correction", "q", "sets"],
   "nested-t-test": ["sets"],
   "nested-anova": ["posthoc", "sets"],
-  "correlation-matrix": ["method", "sets"],
+  "correlation-matrix": ["method", "effectSizes", "sets"],
   "multiple-regression": ["dependent", "predictors", "sets"],
+  "multifactor-anova": ["response", "factors", "posthoc", "posthocTerm", "sets"],
   "multiple-logistic-regression": ["dependent", "predictors", "sets"],
   "poisson-regression": ["dependent", "predictors", "quasi", "sets"],
   "principal-component-analysis": ["scale", "components", "sets"],
   "k-means": ["clusters", "standardise", "sets"],
+  "hierarchical-clustering": ["clusters", "linkage", "distance", "standardise", "sets"],
   "cox-proportional-hazards": ["time", "status", "covariates", "ties", "stratifyBy", "sets"],
   "extract-rearrange": [
     "target", "x", "response", "grouping", "subject", "rowTitles", "rowFactor", "columnFactor", "rowVariable",
     "outcome", "count", "prefixNames", "completeRows", "sets",
   ],
-  survival: ["curveTest", "correction", "sets"],
+  "select-transform": ["columns", "transforms", "equations", "rowRange", "rowFilter", "columnFilter", "sets"],
+  survival: ["curveTest", "correction", "time", "status", "groupBy", "sets"],
   cox: ["reference", "sets"],
-  "chi-square": ["test", "trendOrdered", "sets"],
+  "chi-square": ["test", "trendOrdered", "effectSizes", "sets"],
+  "chi-square-gof": ["expectedMode", "expectedValues", "sets"],
+  "binomial-test": ["expectedProportion", "sets"],
   mcnemar: ["continuityCorrection", "sets"],
 };
 
@@ -947,6 +1179,10 @@ function checkParamValue(kind: ParamKind, key: string, v: unknown): { value: unk
   if (kind === "names") {
     if (Array.isArray(v) && v.length && v.every((s) => typeof s === "string")) return { value: v };
     return bad("a list of column names");
+  }
+  if (kind === "numbers") {
+    if (Array.isArray(v) && v.length && v.every(isFiniteNumber)) return { value: v };
+    return bad("a list of numbers");
   }
   if (kind === "name-and-names") {
     if (
@@ -1000,6 +1236,63 @@ function checkParamValue(kind: ParamKind, key: string, v: unknown): { value: unk
       return { value: v };
     return bad("a list of curves, each { label, params } with numeric parameter values");
   }
+  if (kind === "transforms") {
+    if (
+      Array.isArray(v) &&
+      v.length &&
+      v.every(
+        (t) =>
+          isObj(t) &&
+          typeof t.variable === "string" &&
+          typeof t.kind === "string" &&
+          (SELECT_TRANSFORM_KINDS as readonly string[]).includes(t.kind) &&
+          (t.k === undefined || isFiniteNumber(t.k)) &&
+          (t.title === undefined || typeof t.title === "string"),
+      )
+    )
+      return { value: v };
+    return bad(
+      `a list of transforms, each { variable, kind } with kind one of: ${SELECT_TRANSFORM_KINDS.join(", ")}`,
+    );
+  }
+  if (kind === "equations") {
+    if (
+      Array.isArray(v) &&
+      v.length &&
+      v.every((e) => isObj(e) && typeof e.name === "string" && e.name.trim() !== "" && typeof e.formula === "string")
+    )
+      return { value: v };
+    return bad('a list of equations, each { name, formula }, e.g. { name: "BMI", formula: "Weight / Height^2" }');
+  }
+  if (kind === "row-range") {
+    if (isObj(v) && isFiniteNumber(v.first) && isFiniteNumber(v.last)) return { value: v };
+    return bad("a row range { first, last }, e.g. { first: 2, last: 5 }");
+  }
+  if (kind === "row-filter") {
+    if (
+      isObj(v) &&
+      typeof v.variable === "string" &&
+      typeof v.operator === "string" &&
+      (SELECT_TRANSFORM_OPERATORS as readonly string[]).includes(v.operator) &&
+      (v.operator === "is-not-missing" || v.value === undefined || isFiniteNumber(v.value))
+    )
+      return { value: v };
+    return bad(
+      `a row filter { variable, operator, value? } with operator one of: ${SELECT_TRANSFORM_OPERATORS.join(", ")}`,
+    );
+  }
+  if (kind === "column-filter") {
+    if (
+      isObj(v) &&
+      typeof v.variable === "string" &&
+      typeof v.otherVariable === "string" &&
+      typeof v.operator === "string" &&
+      v.operator !== "is-not-missing" &&
+      (SELECT_TRANSFORM_OPERATORS as readonly string[]).includes(v.operator)
+    )
+      return { value: v };
+    return bad("a column filter { variable, operator, otherVariable } with operator one of: >, <, =, >=, <=, !=");
+  }
   if (Array.isArray(kind)) {
     const found = oneOf(kind, v);
     return found !== undefined
@@ -1038,7 +1331,13 @@ export function validateAnalysisParams(
       );
       continue;
     }
-    const checked = checkParamValue(PARAMS[key as ParamKey], key, value);
+    const checked = checkParamValue(
+      // A multifactor ANOVA's post-hoc term names its own factors
+      // ("Treatment:Time") — a free name, like the file reader's.
+      analysisType === "multifactor-anova" && key === "posthocTerm" ? "name" : PARAMS[key as ParamKey],
+      key,
+      value,
+    );
     if ("error" in checked) {
       errors.push(checked.error);
       continue;
@@ -1110,7 +1409,11 @@ function readParams(
   // it can't change what a test computes or reach R.
   const read = (k: string, v: unknown) => {
     if (!isIn(PARAMS, k)) return v;
-    const kind = PARAMS[k as ParamKey];
+    // A multifactor ANOVA's post-hoc term names its own factors
+    // ("Treatment:Time"), not one of the three-way ANOVA's fixed terms —
+    // read it as a free name; the runner checks it against the terms.
+    const kind =
+      analysisType === "multifactor-anova" && k === "posthocTerm" ? "name" : PARAMS[k as ParamKey];
     // FF-F16: a saved number outside its limits is brought within them on
     // load — warn, so the analysis doesn't silently re-run on different
     // parameters than the file specifies. The clamp itself stays: the
@@ -1132,7 +1435,7 @@ function readParams(
     // not a missing value: keep it, so a save keeps the file as it was.
     if ((k === "spar" || k === "df") && v === null) return null;
     let dropped = 0;
-    const value = readParam(PARAMS[k as ParamKey], v, (n) => {
+    const value = readParam(kind, v, (n) => {
       dropped = n;
     });
     if (dropped > 0) {
@@ -1255,6 +1558,129 @@ function readFloatingNotes(raw: unknown, label: string, issues: ProjectIssue[]):
   return notes.length ? notes : undefined;
 }
 
+/** A frozen snapshot (seq 237): a table's data as it was when a graph was
+ *  frozen. Read leniently — columns + rows are the payload, the rest is
+ *  kept only when well-formed — because the snapshot is never edited, only
+ *  drawn from: a hand edit that breaks a field loses that field, not the
+ *  graph. `calculated` formulas and row-group bands are dropped: the rows
+ *  already hold the computed values, and a frozen graph never recomputes. */
+function readFrozenData(raw: unknown): TableData | undefined {
+  if (!isObj(raw)) return undefined;
+  const d = canonical(raw, DATA_KEYS);
+  if (!Array.isArray(d.columns) || !Array.isArray(d.rows)) return undefined;
+  const columns = d.columns.map((c) => cellText(c) ?? "");
+  if (!columns.length) return undefined;
+  const rows = d.rows.map((row) => {
+    const cells = Array.isArray(row) ? row.map((c) => cellText(c) || null) : [];
+    return cells.slice(0, columns.length);
+  });
+  const onCell = (k: unknown): k is string => {
+    const [r, c] = typeof k === "string" && /^\d+,\d+$/.test(k) ? k.split(",").map(Number) : [Infinity];
+    return r < rows.length && c < columns.length;
+  };
+  const widths = isObj(d.widths)
+    ? Object.fromEntries(
+        Object.entries(d.widths).filter(([name, w]) => columns.includes(name) && isFiniteNumber(w) && w > 0),
+      )
+    : {};
+  return defined({
+    columns,
+    rows,
+    groups: isCount(d.groups) ? (d.groups as number) : undefined,
+    replicates: isCount(d.replicates) ? (d.replicates as number) : undefined,
+    subgroups: isCount(d.subgroups) ? (d.subgroups as number) : undefined,
+    excluded: Array.isArray(d.excluded) ? d.excluded.filter(onCell) : undefined,
+    widths: Object.keys(widths).length ? widths : undefined,
+    freezeTitle: d.freezeTitle === true || undefined,
+    errorFormat: oneOf(["sd", "sem"] as const, d.errorFormat),
+    summaryFormat: isSummaryFormatValue(d.summaryFormat) ? d.summaryFormat : undefined,
+    notes: typeof d.notes === "string" && d.notes ? d.notes : undefined,
+  }) as TableData;
+}
+
+/** A figure's frozen snapshots (seq 237): each panel graph's parent table
+ *  data as it was when the figure was frozen, by graph id. */
+function readFrozenDataByGraph(raw: unknown): Record<string, TableData> | undefined {
+  if (!isObj(raw)) return undefined;
+  const out: Record<string, TableData> = {};
+  for (const [graphId, data] of Object.entries(raw)) {
+    const read = readFrozenData(data);
+    if (read) out[graphId] = read;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Text/drawing/picture objects (seq 238) as a file holds them, forgivingly:
+ *  an object with a kind this version doesn't know, no usable geometry, or
+ *  (pictures) no image data URL under the size cap is left out on its own;
+ *  the rest read as saved, with missing ids repaired. Unknown fields are
+ *  kept by the node's spread in `readNode` and written back on save. */
+function readDrawingObjects(raw: unknown, label: string, issues: ProjectIssue[]): DrawingObject[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) {
+    issues.push({
+      severity: "warning",
+      message: `Sheet “${label}” had drawing objects that couldn't be read; they were left out.`,
+    });
+    return undefined;
+  }
+  const seen = new Set<string>();
+  let dropped = 0;
+  const objects: DrawingObject[] = [];
+  for (const entry of raw) {
+    if (!isObj(entry) || !DRAWING_OBJECT_KINDS.includes(entry.kind as DrawingObject["kind"])) {
+      dropped++;
+      continue;
+    }
+    const kind = entry.kind as DrawingObject["kind"];
+    const id =
+      typeof entry.id === "string" && entry.id !== "" && !seen.has(entry.id)
+        ? entry.id
+        : `drawing_${Math.random().toString(36).slice(2, 10)}`;
+    if (seen.has(id)) {
+      dropped++;
+      continue;
+    }
+    seen.add(id);
+    if (!isFiniteNumber(entry.x) || !isFiniteNumber(entry.y) || !isFiniteNumber(entry.width) || !isFiniteNumber(entry.height) || entry.width <= 0 || entry.height <= 0) {
+      dropped++;
+      continue;
+    }
+    // A picture without its image is nothing to draw.
+    if (kind === "picture") {
+      const src = entry.src;
+      if (typeof src !== "string" || !src.startsWith("data:image/") || src.length > MAX_PICTURE_BYTES * 2) {
+        dropped++;
+        continue;
+      }
+    }
+    objects.push(
+      defined({
+        id,
+        kind,
+        x: Math.max(0, entry.x as number),
+        y: Math.max(0, entry.y as number),
+        width: entry.width as number,
+        height: entry.height as number,
+        text: typeof entry.text === "string" ? (entry.text as string) : undefined,
+        fontSize: isFiniteNumber(entry.fontSize) ? Math.max(6, Math.min(200, entry.fontSize as number)) : undefined,
+        color: typeof entry.color === "string" ? (entry.color as string) : undefined,
+        fill: typeof entry.fill === "string" ? (entry.fill as string) : undefined,
+        strokeWidth: isFiniteNumber(entry.strokeWidth) ? Math.max(0.5, entry.strokeWidth as number) : undefined,
+        src: typeof entry.src === "string" ? (entry.src as string) : undefined,
+        groupId: typeof entry.groupId === "string" && entry.groupId !== "" ? (entry.groupId as string) : undefined,
+      }) as DrawingObject,
+    );
+  }
+  if (dropped) {
+    issues.push({
+      severity: "warning",
+      message: `Sheet “${label}” had ${dropped === 1 ? "a drawing object" : `${dropped} drawing objects`} that couldn't be read as saved; ${dropped === 1 ? "it was" : "they were"} left out.`,
+    });
+  }
+  return objects.length ? objects : undefined;
+}
+
 const NODE_TYPES: NodeType[] = ["table", "analysis", "graph", "figure", "info"];
 
 /** An info sheet as a file holds it, forgivingly: constants read as names +
@@ -1274,17 +1700,31 @@ function readInfoSheet(raw: unknown): InfoSheetData {
  *  `panels` opens as an empty figure (not an error); a panel out of range is
  *  clamped into the grid; a `dpi` Titer doesn't offer falls back to 600; a
  *  size outside 1–20 in is brought within, and an aspect beyond 4:1 is
- *  reined in by shrinking the longer side. Unknown figure fields are kept
- *  by the node's spread in `readNode` and written back on save. */
+ *  reined in by shrinking the longer side. A blank/image panel needs no
+ *  graph (its `graphId` is empty); an image whose data URL isn't an image
+ *  reads as no image — the panel stays, blank until a real image is picked.
+ *  Unknown figure fields are kept by the node's spread in `readNode` and
+ *  written back on save. */
 function readFigure(
   raw: Obj,
-): Pick<ProjectNode, "panels" | "grid" | "figureSize" | "labelStyle" | "figureTitle" | "sharedLegend" | "dpi"> {
+): Pick<ProjectNode, "panels" | "grid" | "figureSize" | "labelStyle" | "figureTitle" | "sharedLegend" | "figureBackground" | "dpi"> {
   const panels = (Array.isArray(raw.panels) ? raw.panels : [])
-    .filter((p): p is Obj => isObj(p) && typeof p.graphId === "string" && p.graphId !== "")
+    .filter(
+      (p): p is Obj =>
+        isObj(p) &&
+        ((typeof p.graphId === "string" && p.graphId !== "") || p.kind === "blank" || p.kind === "image"),
+    )
     .map((p) => {
       const n = (k: string) => (isFiniteNumber(p[k]) ? Math.floor(p[k] as number) : undefined);
+      const kind = oneOf(["graph", "blank", "image"] as const, p.kind);
       return defined({
-        graphId: p.graphId as string,
+        graphId: typeof p.graphId === "string" ? (p.graphId as string) : "",
+        // A panel's kind is only written when it isn't a graph (absent reads
+        // as "graph", as every panel was before this landed — old files need
+        // no migration, and a round-trip keeps them byte-identical).
+        kind: kind === "graph" || kind === undefined ? undefined : kind,
+        imageData: kind === "image" ? validFigureImageData(p.imageData) : undefined,
+        imageName: kind === "image" && typeof p.imageName === "string" ? (p.imageName as string) : undefined,
         graphName: typeof p.graphName === "string" ? (p.graphName as string) : undefined,
         label: typeof p.label === "string" ? (p.label as string) : "",
         labelManual: p.labelManual === true || undefined,
@@ -1309,15 +1749,16 @@ function readFigure(
   const styleRaw = isObj(raw.labelStyle) ? raw.labelStyle : {};
   const position = oneOf(["top-left", "top-right", "above-panel"] as const, styleRaw.position) ?? "top-left";
   const fontSizePt = within(styleRaw.fontSizePt, { min: 8, max: 28 }) ?? DEFAULT_LABEL_STYLE.fontSizePt;
-  return {
+  return defined({
     panels: clamped,
     grid,
     figureSize: { widthIn, heightIn },
     labelStyle: { position, fontSizePt, bold: styleRaw.bold !== false },
     figureTitle: typeof raw.figureTitle === "string" ? raw.figureTitle : "",
     sharedLegend: oneOf(["none", "shared"] as const, raw.sharedLegend) ?? "none",
+    figureBackground: isHex(raw.figureBackground) ? (raw.figureBackground as string) : undefined,
     dpi: figureDpi(raw.dpi),
-  };
+  });
 }
 
 /** `tableColors`: where a table leaves the colors it kept for its graphs. */
@@ -1391,9 +1832,25 @@ function readNode(
         message: `Table “${node.name}” left out ${dropped.length === 1 ? "a row group" : `${dropped.length} row groups`} it couldn't read: ${dropped.join(", ")}.`,
       });
     }
+    if (read.linkedPasteDropped) {
+      issues.push({
+        severity: "warning",
+        message: `Table “${node.name}” had a linked data entry it couldn't read; the link was dropped and its values kept as they were.`,
+      });
+    }
     node.parentId = null;
     node.transform = readTransform(n.transform);
     if (!node.transform) delete node.transform;
+    // A frozen table stays frozen (seq 165): the flag only ever means
+    // anything as `true` — anything else is a hand edit, dropped rather
+    // than trusted.
+    if (node.frozen !== true) delete node.frozen;
+    // A file's stored values are never trusted for a calculated variable:
+    // recompute them from the formula on load, so a hand-edited file or an
+    // older save still opens with live values (and a broken formula reads
+    // as its error, not as stale numbers). A table computed from another
+    // never carries formulas — transformTable drops them.
+    if (!node.transform && lower(n.tableType) === "multiple") node.data = recomputeCalculated(node.data);
     node.tableType = lower(n.tableType) as ProjectNode["tableType"];
     if (!isIn(TABLES, node.tableType)) {
       issues.push({
@@ -1426,18 +1883,72 @@ function readNode(
     // A figure may span tables, so it lives at the project root, never under one table.
     node.parentId = null;
     Object.assign(node, readFigure(n));
+    // A frozen figure (seq 237) draws each panel from its snapshot, and
+    // carries drawing objects like a graph (seq 238). The saver drops the
+    // flag and keeps the snapshots (seq 165), so snapshots on file mean
+    // frozen, flag or no flag — the figure is re-frozen on load. Frozen
+    // with no snapshot to draw from is a corrupt file, not a frozen figure.
+    const frozenByGraph = readFrozenDataByGraph(n.frozenDataByGraph);
+    if (frozenByGraph) {
+      node.frozen = true;
+      node.frozenDataByGraph = frozenByGraph;
+    } else {
+      delete node.frozen;
+      delete node.frozenDataByGraph;
+    }
+    delete node.frozenData;
+    const figureObjects = readDrawingObjects(n.drawingObjects, node.name, issues);
+    if (figureObjects) node.drawingObjects = figureObjects;
+    else delete node.drawingObjects;
   } else {
     node.graphType = lower(n.graphType) as ProjectNode["graphType"];
     node.graphOptions = readOptions(n.graphOptions, node.name, issues);
+    // Extra source tables (#48): ids only, de-duplicated, never the graph's
+    // own table — anything else is a hand edit, dropped rather than trusted.
+    // Whether each id is a table of the right type is checked in the
+    // cross-node pass below (the tables may not be read yet here).
+    if (Array.isArray(n.sourceTableIds)) {
+      const ids = [...new Set(n.sourceTableIds.filter((id): id is string => typeof id === "string" && id !== ""))].filter(
+        (id) => id !== node.parentId,
+      );
+      if (ids.length) node.sourceTableIds = ids;
+      else delete node.sourceTableIds;
+    } else {
+      delete node.sourceTableIds;
+    }
     if (!isIn(GRAPHS, node.graphType) && (node.graphType as string) !== DOSE_GRAPH) {
       issues.push({ severity: "error", message: `Graph “${node.name}” uses a chart this version doesn't know.` });
     }
+    // A frozen graph (seq 237) draws from its snapshot, and carries
+    // drawing objects (seq 238). The saver drops the flag and keeps the
+    // snapshot (seq 165), so a snapshot on file means frozen, flag or no
+    // flag — the graph is re-frozen on load. Frozen with no snapshot to
+    // draw from is a corrupt file, not a frozen graph.
+    const frozenData = readFrozenData(n.frozenData);
+    if (frozenData) {
+      node.frozen = true;
+      node.frozenData = frozenData;
+    } else {
+      delete node.frozen;
+      delete node.frozenData;
+    }
+    delete node.frozenDataByGraph;
+    const graphObjects = readDrawingObjects(n.drawingObjects, node.name, issues);
+    if (graphObjects) node.drawingObjects = graphObjects;
+    else delete node.drawingObjects;
   }
   if (type !== "table") delete node.transform; // a table's alone
   if (type !== "analysis") {
-    // Frozen / orphaned results belong to analyses only: a hand-edited file
-    // can't freeze a table or orphan a graph.
-    delete node.frozen;
+    // Orphaned results belong to analyses only: a hand-edited file can't
+    // orphan a graph. Frozen now belongs to analyses, graphs, figures and
+    // tables alike (seq 165, seq 237) — the branches above already kept or
+    // dropped it — so only info sheets lose the flag here.
+    if (type !== "graph" && type !== "figure") {
+      if (type !== "table") delete node.frozen;
+      delete node.frozenData;
+      delete node.frozenDataByGraph;
+      delete node.drawingObjects;
+    }
     delete node.orphaned;
     delete node.sourceTableName;
     delete node.cachedResult;
@@ -1784,6 +2295,14 @@ export function parseProjectFile(
   );
   const activeNodeId = nodeOf(project.activeNodeId) ? (project.activeNodeId as string) : rootOrder[0];
   const projectName = typeof project.projectName === "string" && project.projectName !== "" ? project.projectName : undefined;
+  // The saved scripts (seq 228): a broken entry is dropped with a warning,
+  // never an error — the project still opens, and saving keeps the rest.
+  const { scripts, droppedScripts } = parseProjectScripts(project.scripts);
+  if (droppedScripts > 0)
+    issues.push({
+      severity: "warning",
+      message: `${droppedScripts === 1 ? "1 saved script" : `${droppedScripts} saved scripts`} couldn't be read and ${droppedScripts === 1 ? "was" : "were"} dropped.`,
+    });
 
   for (const node of Object.values(nodes)) {
     if (node.type === "figure") {
@@ -1831,6 +2350,38 @@ export function parseProjectFile(
         message: `Graph “${node.name}” referred to an analysis that no longer exists; the link was removed.`,
       });
     }
+    // The multi-source list, same repair per entry: a dead id drops out of
+    // the list, and an emptied list goes with it.
+    if (Array.isArray(o.sigAnalysisIds)) {
+      const kept = o.sigAnalysisIds.filter((id) => typeof id === "string" && nodeOf(id));
+      if (kept.length !== o.sigAnalysisIds.length) {
+        if (kept.length) o.sigAnalysisIds = kept;
+        else delete o.sigAnalysisIds;
+        issues.push({
+          severity: "warning",
+          message: `Graph “${node.name}” referred to an analysis that no longer exists; the link was removed.`,
+        });
+      }
+    }
+    // (#48) A graph's extra source tables must still exist, be tables, and
+    // match the primary table's type — a source that doesn't is dropped
+    // (same repair as the dangling analysis links above). A source whose
+    // rows don't line up with the primary's is NOT dropped here: the graph
+    // shows that problem in its own view instead of silently losing data.
+    if (node.sourceTableIds?.length) {
+      const kept = node.sourceTableIds.filter((id) => {
+        const source = nodeOf(id);
+        return source?.type === "table" && source.tableType === tableType;
+      });
+      if (kept.length !== node.sourceTableIds.length) {
+        issues.push({
+          severity: "warning",
+          message: `Graph “${node.name}” referred to a source table that no longer exists or is a different type; that source was removed.`,
+        });
+        if (kept.length) node.sourceTableIds = kept;
+        else delete node.sourceTableIds;
+      }
+    }
   }
 
   // The `template` block (plan 38) is metadata, not project data: a missing
@@ -1848,14 +2399,71 @@ export function parseProjectFile(
     activeNodeId,
     ...(template ? { template } : {}),
     ...(projectName ? { projectName } : {}),
+    ...(scripts.length ? { scripts } : {}),
     ...(Object.keys(fileUnknowns).length ? { fileUnknowns } : {}),
     ...(Object.keys(projectUnknowns).length ? { projectUnknowns } : {}),
   };
   // `updated` compares what Titer knows only: carrying unknowns through is not
   // a repair, so a newer file that needed no repair still opens unedited.
-  const known = { nodes, rootOrder, childOrder, activeNodeId, projectName };
+  // `scripts` is omitted when empty, like `read` and the serializer omit it:
+  // the reader normalizes an absent block to `[]`, and JSON keeps `[]` while
+  // dropping `undefined` — listing it unconditionally flagged every scriptless
+  // file as updated (the 1.8 merge-all round-trip regression).
+  // Same class, `childOrder`: the reader rebuilds it from the nodes and
+  // lists every table, childless ones as `[]` — a file that omits an empty
+  // list (a hand-built or older file) is semantically identical, so empty
+  // lists are stripped from both sides of the comparison, never counted
+  // as a repair. A non-empty list still has to match exactly.
+  const stripEmptyChildLists = (order: unknown) =>
+    isObj(order)
+      ? Object.fromEntries(
+          Object.entries(order).filter(([, v]) => !(Array.isArray(v) && v.length === 0)),
+        )
+      : order;
+  const known = {
+    nodes,
+    rootOrder,
+    childOrder: stripEmptyChildLists(childOrder),
+    activeNodeId,
+    projectName,
+    ...(scripts.length ? { scripts } : {}),
+  };
   const filed = Object.fromEntries(PROJECT_KEYS.map((k) => [k, project[k]]));
+  filed.childOrder = stripEmptyChildLists(filed.childOrder);
   return { project: read, issues, updated: contents(known) !== contents(filed) };
+}
+
+/** The `scripts` block of a `.hlx` file (seq 228), validated: an entry needs
+ *  a string id, name and text — the hooks default off — and duplicate ids
+ *  keep their first copy. Returns the kept scripts and how many were dropped. */
+export function parseProjectScripts(value: unknown): { scripts: ProjectScript[]; droppedScripts: number } {
+  if (value === undefined) return { scripts: [], droppedScripts: 0 };
+  if (!Array.isArray(value)) return { scripts: [], droppedScripts: 1 };
+  const scripts: ProjectScript[] = [];
+  const seen = new Set<string>();
+  let droppedScripts = 0;
+  for (const entry of value) {
+    if (
+      !isObj(entry) ||
+      typeof entry.id !== "string" ||
+      entry.id === "" ||
+      typeof entry.name !== "string" ||
+      typeof entry.text !== "string" ||
+      seen.has(entry.id)
+    ) {
+      droppedScripts++;
+      continue;
+    }
+    seen.add(entry.id);
+    scripts.push({
+      id: entry.id,
+      name: entry.name,
+      text: entry.text,
+      runOnOpen: entry.runOnOpen === true,
+      runOnClose: entry.runOnClose === true,
+    });
+  }
+  return { scripts, droppedScripts };
 }
 
 // ── Dose-response graphs (before Titer 1.0.7) ───────────────────────────

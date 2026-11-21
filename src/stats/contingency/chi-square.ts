@@ -7,7 +7,7 @@
 // filled) and the whole test is one WebR round-trip returning a flat named vector.
 import type { AnalysisOutcome, ChiSquareParams, Column, StatRow } from "../types";
 import { buildContingencyMatrix } from "./common";
-import { pairedGroups } from "../column/base";
+import { pairedGroups, R_EFFECT_CI } from "../column/base";
 import { evalNamedVector } from "../webr";
 import { num } from "../../lib/format";
 
@@ -105,25 +105,34 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
 
   // as.numeric() drops R's own names ("X-squared", "df"…): the keys are only ours.
   const rCode = is2x2
-    ? `${R_WILSON};m<-matrix(c(${flat.join(",")}),nrow=2,byrow=TRUE);ft<-fisher.test(m);ct<-suppressWarnings(chisq.test(m,correct=${test !== "chi-square" ? "TRUE" : "FALSE"}));cu<-suppressWarnings(chisq.test(m,correct=FALSE));` +
+    ? `${R_WILSON};${R_EFFECT_CI};m<-matrix(c(${flat.join(",")}),nrow=2,byrow=TRUE);ft<-fisher.test(m);ct<-suppressWarnings(chisq.test(m,correct=${test !== "chi-square" ? "TRUE" : "FALSE"}));cu<-suppressWarnings(chisq.test(m,correct=FALSE));` +
       // The first column's risk in row 1 over row 2, its CI on the log (Katz); Phi, signed;
       // the two risks' difference, its CI Newcombe's (Wilson's of each risk combined).
+      // Phi's 95% CI (seq 161) by noncentral-chi-square inversion on the UNCORRECTED
+      // statistic (the signed Phi is √(χ²/n) with the table's sign): a negative Phi's
+      // interval flips, so the lower bound is the more negative one.
       `n1<-sum(m[1,]);n2<-sum(m[2,]);p1<-m[1,1]/n1;p2<-m[2,1]/n2;rr<-p1/p2;` +
       `z<-qnorm(0.975)*sqrt(1/m[1,1]-1/n1+1/m[2,1]-1/n2);w1<-wil(m[1,1],n1);w2<-wil(m[2,1],n2);d<-p1-p2;` +
       `dlo<-d-sqrt((p1-w1[1])^2+(w2[2]-p2)^2);dhi<-d+sqrt((w1[2]-p1)^2+(p2-w2[1])^2);` +
+      `ph<-(m[1,1]*m[2,2]-m[1,2]*m[2,1])/sqrt(prod(rowSums(m),colSums(m)));` +
+      `vc<-xci(as.numeric(cu$statistic),1);phiLo<-if(ph<0)-sqrt(vc[2]/sum(m)) else sqrt(vc[1]/sum(m));phiHi<-if(ph<0)-sqrt(vc[1]/sum(m)) else sqrt(vc[2]/sum(m));` +
       `se<-wil(m[1,1],sum(m[,1]));sp<-wil(m[2,2],sum(m[,2]));pp<-wil(m[1,1],n1);np<-wil(m[2,2],n2);` +
       `c(p=${test === "fisher" ? "ft$p.value" : "ct$p.value"},odds=as.numeric(ft$estimate),oddsLo=ft$conf.int[1],oddsHi=ft$conf.int[2],` +
       `chisq=as.numeric(ct$statistic),df=as.numeric(ct$parameter),minexp=min(ct$expected),n=sum(m),` +
       `chisqU=as.numeric(cu$statistic),` +
-      `rr=rr,rrLo=rr*exp(-z),rrHi=rr*exp(z),phi=(m[1,1]*m[2,2]-m[1,2]*m[2,1])/sqrt(prod(rowSums(m),colSums(m))),` +
+      `rr=rr,rrLo=rr*exp(-z),rrHi=rr*exp(z),phi=ph,phiLo=phiLo,phiHi=phiHi,` +
       `d=d,dLo=dlo,dHi=dhi,nnt=1/abs(d),nntLo=if(dlo>0||dhi<0)1/max(abs(c(dlo,dhi))) else NA,nntHi=if(dlo>0||dhi<0)1/min(abs(c(dlo,dhi))) else NA,` +
       `sens=m[1,1]/sum(m[,1]),sensLo=se[1],sensHi=se[2],spec=m[2,2]/sum(m[,2]),specLo=sp[1],specHi=sp[2],` +
       `ppv=p1,ppvLo=pp[1],ppvHi=pp[2],npv=m[2,2]/n2,npvLo=np[1],npvHi=np[2])`
-    : `m<-matrix(c(${flat.join(",")}),nrow=${rows},byrow=TRUE);ct<-suppressWarnings(chisq.test(m));` +
+    : `${R_EFFECT_CI};m<-matrix(c(${flat.join(",")}),nrow=${rows},byrow=TRUE);ct<-suppressWarnings(chisq.test(m));` +
       (trend ? `tt<-prop.trend.test(c(${trendX.join(",")}),c(${trendN.join(",")}));` : "") +
+      // Cramér's V's 95% CI (seq 161) by noncentral-chi-square inversion:
+      // V = √(χ²/(n·(min(r,c) − 1))), so the ncp's CI scales by the same divisor.
+      `vc<-xci(as.numeric(ct$statistic),as.numeric(ct$parameter));` +
+      `vLo=sqrt(vc[1]/(sum(m)*(min(dim(m))-1)));vHi=sqrt(vc[2]/(sum(m)*(min(dim(m))-1)));` +
       `c(chisq=as.numeric(ct$statistic),df=as.numeric(ct$parameter),p=ct$p.value,minexp=min(ct$expected),n=sum(m)` +
       (trend ? `,trend=as.numeric(tt$statistic),trendP=tt$p.value` : "") +
-      `,cramer=sqrt(as.numeric(ct$statistic)/(sum(m)*(min(dim(m))-1))))`;
+      `,cramer=sqrt(as.numeric(ct$statistic)/(sum(m)*(min(dim(m))-1))),vLo=vLo,vHi=vHi)`;
 
   const v = await evalNamedVector(rCode);
   const row = (label: string, key: string, p = false): StatRow => ({
@@ -148,7 +157,7 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
       ...withCi(`Relative risk (${groups[0].name})`, "rr"),
       ...withCi(`Difference of risks (${groups[0].name})`, "d"),
       ...withCi("Number needed to treat", "nnt"),
-      row("Phi", "phi"),
+      ...(params?.effectSizes === false ? [row("Phi", "phi")] : withCi("Phi", "phi")),
       ...withCi("Sensitivity", "sens"),
       ...withCi("Specificity", "spec"),
       ...withCi("Positive predictive value", "ppv"),
@@ -167,6 +176,10 @@ export async function runChiSquare(columns: Column[], params?: ChiSquareParams):
       stats.push({ label: "P value (test for trend)", value: v.trendP ?? null, p: true });
     }
     stats.push({ label: "Cramér's V", value: v.cramer ?? null });
+    if (params?.effectSizes !== false) {
+      stats.push({ label: "Cramér's V 95% CI lower", value: v.vLo ?? null });
+      stats.push({ label: "Cramér's V 95% CI upper", value: v.vHi ?? null });
+    }
   }
 
   const first = groups[0].name;
