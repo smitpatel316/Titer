@@ -52422,7 +52422,7 @@
     "n": 64
    }
   ],
-  "notes": "Repeated “Compare two groups” 5000 times on simulated data (seed 42), summarising the P value. Each repeat drew “A”: n = 64, simulated mean 0, SD 1; “B”: n = 64, simulated mean 0.5, SD 1. The 95% interval is the 2.5th–97.5th percentiles of the 5000 simulated P values. Power is the share of repeats with P < 0.05 — the chance this design detects the simulated effect. The observed P value on the real data is 0.003254726441554271. Tails are two-sided; the simulation is Gaussian (each group's mean/SD as simulated, or its observed mean/SD when not set).",
+  "notes": "Repeated “Compare two groups” 5000 times on simulated data (seed 42), summarising the P value. Each repeat drew “A”: n = 64, simulated mean 0, SD 1; “B”: n = 64, simulated mean 0.5, SD 1. The 95% interval is the 2.5th–97.5th percentiles of the 5000 simulated P values. Power is the share of repeats with P < 0.05 — the chance this design detects the simulated effect. The observed P value on the real data is 0.003254726441554271. Tails are two-sided. The simulation is Gaussian (each group's mean/SD as simulated, or its observed mean/SD when not set).",
   "monteCarlo": {
    "repeats": 5000,
    "statistic": "P value",
@@ -52508,7 +52508,7 @@
     "n": 64
    }
   ],
-  "notes": "Repeated “Compare one group to a value” 200 times on simulated data (seed 42), summarising the P value. Each repeat drew “A”: n = 64, simulated mean 0, SD 1. The 95% interval is the 2.5th–97.5th percentiles of the 200 simulated P values. Power is the share of repeats with P < 0.05 — the chance this design detects the simulated effect. The observed P value on the real data is 1. Tails are two-sided; the simulation is Gaussian (each group's mean/SD as simulated, or its observed mean/SD when not set).",
+  "notes": "Repeated “Compare one group to a value” 200 times on simulated data (seed 42), summarising the P value. Each repeat drew “A”: n = 64, simulated mean 0, SD 1. The 95% interval is the 2.5th–97.5th percentiles of the 200 simulated P values. Power is the share of repeats with P < 0.05 — the chance this design detects the simulated effect. The observed P value on the real data is 1. Tails are two-sided. The simulation is Gaussian (each group's mean/SD as simulated, or its observed mean/SD when not set).",
   "monteCarlo": {
    "repeats": 200,
    "statistic": "P value",
@@ -52590,7 +52590,7 @@
     "n": 8
    }
   ],
-  "notes": "Repeated “Linear regression” 200 times on simulated data (seed 42), summarising the Slope. Each repeat drew “Y1”: n = 8, simulated mean 5, SD 2. The 95% interval is the 2.5th–97.5th percentiles of the 200 simulated Slopes. The observed Slope on the real data is 2.012280701754386. Tails are two-sided; the simulation is Gaussian (each group's mean/SD as simulated, or its observed mean/SD when not set).",
+  "notes": "Repeated “Linear regression” 200 times on simulated data (seed 42), summarising the Slope. Each repeat drew “Y1”: n = 8, simulated mean 5, SD 2. The 95% interval is the 2.5th–97.5th percentiles of the 200 simulated Slopes. The observed Slope on the real data is 2.012280701754386. The simulation is Gaussian (each group's mean/SD as simulated, or its observed mean/SD when not set).",
   "monteCarlo": {
    "repeats": 200,
    "statistic": "Slope",
