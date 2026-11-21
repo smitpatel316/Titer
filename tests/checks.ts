@@ -46,6 +46,7 @@ import {
 import { highlightStyle, searchProject } from "../src/lib/project-search";
 import { galleryItems } from "../src/lib/gallery";
 import { loadPrintSettings, printPageCss, savePrintSettings } from "../src/lib/print-settings";
+import { formatMergeReport, mergeProjects, type MergeInput as ProjectMergeInput } from "../src/lib/project-merge";
 import { kaplanMeier } from "../src/lib/kaplan-meier";
 import {
   adjustMultipleTTestPValues,
@@ -75,6 +76,7 @@ import {
 import { writePrism, type PrismWriteReport } from "../src/lib/prism-write";
 import {
   infoSheetsOf,
+  MAX_INFO_SHEETS,
   newInfoSheetData,
   resolveAnalysisParams,
   resolveBoundSide,
@@ -760,6 +762,343 @@ check("replacing the copy's data leaves the original family untouched", () => {
   strictEqual(s.nodes.a1.parentId, t1);
 });
 
+// ── File ▸ Merge (seq 180) ───────────────────────────────────────────────
+// Prism 10 User Guide, "Merging and splitting projects": File ▸ Merge
+// appends all sheets from another project file to the current one, and
+// "Prism places an asterisk (*) in front of the name of each merged sheet."
+// Before the fix there was no merge operation at all: no `mergeProjects`,
+// no `mergeProject` reducer action. These pins drive the pure merge first
+// (a family with every link kind), then the reducer action.
+const mergeTableData = (values: string[][]): TableData => ({ columns: ["", "Y1"], rows: values });
+
+/** The current project: two tables, an analysis + graph family, a figure and a linked info sheet. */
+const mergeCurrent = (): ProjectMergeInput => ({
+  nodes: {
+    t1: { id: "t1", type: "table", name: "Table 1", parentId: null, tableType: "column", data: mergeTableData([["A", "1"], ["B", "2"]]) },
+    t2: { id: "t2", type: "table", name: "Doses", parentId: null, tableType: "column", data: mergeTableData([["A", "3"]]) },
+    a1: { id: "a1", type: "analysis", name: "Descriptive statistics", parentId: "t1", analysisType: "descriptive-statistics", analysisParams: { columns: ["Y1"] } as AnalysisParams },
+    g1: { id: "g1", type: "graph", name: "Individual values", parentId: "t1", graphType: "individual", graphOptions: { ...newGraphOptions("individual"), sigAnalysisId: "a1" } },
+    f1: { id: "f1", type: "figure", name: "Figure 1", parentId: null, panels: [{ graphId: "g1", label: "A", title: "", row: 0, col: 0, rowSpan: 1, colSpan: 1 }], grid: { rows: 1, cols: 1 } },
+    i1: { id: "i1", type: "info", name: "Info Sheet", parentId: null, info: { constants: [], notes: "", linkedTableId: "t1" } },
+  },
+  rootOrder: ["t1", "t2", "i1", "f1"],
+  childOrder: { t1: ["a1", "g1"], t2: [] },
+  activeNodeId: "t1",
+});
+
+/** The incoming project: name collisions ("Doses", "Table 1"), an id
+ *  collision (its table is also "t1"), every link kind, an orphaned
+ *  analysis, and two dangling links (a graph link + a figure panel) that
+ *  must be dropped and reported, never silently swallowed. */
+const mergeIncoming = (): ProjectMergeInput => ({
+  nodes: {
+    t1: { id: "t1", type: "table", name: "Doses", parentId: null, tableType: "column", data: mergeTableData([["A", "9"]]) },
+    s2: { id: "s2", type: "table", name: "Table 1", parentId: null, tableType: "column", data: mergeTableData([["A", "8"]]) },
+    st1: { id: "st1", type: "table", name: "Doses, Log10", parentId: null, tableType: "column", data: mergeTableData([["A", "0"]]), transform: { from: "t1", kind: "log10" } },
+    sa1: { id: "sa1", type: "analysis", name: "t test", parentId: "t1", analysisType: "descriptive-statistics", analysisParams: { columns: ["Y1"] } as AnalysisParams },
+    sg1: { id: "sg1", type: "graph", name: "Individual values", parentId: "t1", graphType: "individual", graphOptions: { ...newGraphOptions("individual"), regAnalysisId: "sa1", sigAnalysisId: "missing-analysis" } },
+    sf1: { id: "sf1", type: "figure", name: "Layout 1", parentId: null, panels: [{ graphId: "sg1", label: "A", title: "", row: 0, col: 0, rowSpan: 1, colSpan: 1 }, { graphId: "missing-graph", graphName: "Gone", label: "B", title: "", row: 0, col: 1, rowSpan: 1, colSpan: 1 }], grid: { rows: 1, cols: 2 } },
+    si1: { id: "si1", type: "info", name: "Info Sheet", parentId: null, info: { constants: [], notes: "", linkedTableId: "t1" } },
+    so1: { id: "so1", type: "analysis", name: "Old results", parentId: null, orphaned: true, sourceTableName: "Gone", analysisType: "descriptive-statistics" },
+  },
+  rootOrder: ["t1", "s2", "st1", "si1", "sf1", "so1"],
+  childOrder: { t1: ["sa1", "sg1"], s2: [], st1: [] },
+  activeNodeId: "t1",
+});
+
+check("merging a project appends its sheets with Prism's asterisk and keeps every link", () => {
+  const current = mergeCurrent();
+  const incoming = mergeIncoming();
+  const merged = mergeProjects(current, incoming, "Other.hlx");
+  // Root order keeps the file invariant (tables, then info, then figures,
+  // then orphaned analyses): current tables + incoming tables, current
+  // infos + incoming infos, current figures + incoming figures, orphans last.
+  const types = merged.rootOrder.map((id) => merged.nodes[id].type);
+  strictEqual(types.join(","), "table,table,table,table,table,info,info,figure,figure,analysis");
+  const incomingIds = Object.keys(incoming.nodes);
+  // Every incoming sheet (roots and children) is in the merged project
+  // under a fresh id — counted over the nodes, not the root order, which
+  // lists roots only.
+  const mergedIncoming = Object.keys(merged.nodes).filter((id) => !current.nodes[id]);
+  strictEqual(mergedIncoming.length, incomingIds.length);
+  for (const id of mergedIncoming) ok(!incomingIds.includes(id), `incoming id ${id} was reused — merge must mint fresh ids`);
+  const byName = new Map(Object.values(merged.nodes).map((n) => [n.name, n]));
+  // Prism's asterisk, on every merged sheet — including the name collisions.
+  strictEqual(byName.get("* Doses")?.type, "table");
+  strictEqual(byName.get("* Table 1")?.type, "table");
+  strictEqual(byName.get("* t test")?.type, "analysis");
+  strictEqual(byName.get("* Individual values")?.type, "graph");
+  strictEqual(byName.get("* Layout 1")?.type, "figure");
+  strictEqual(byName.get("* Info Sheet")?.type, "info");
+  strictEqual(byName.get("* Doses, Log10")?.type, "table");
+  strictEqual(byName.get("* Old results")?.type, "analysis");
+  // The current project's sheets are untouched, names and ids alike.
+  strictEqual(merged.nodes.t1.name, "Table 1");
+  strictEqual(merged.nodes.t2.name, "Doses");
+  deepStrictEqual(merged.childOrder.t1, ["a1", "g1"]);
+  // The merged family links to itself, through the fresh ids.
+  const table = byName.get("* Doses")!;
+  const analysis = byName.get("* t test")!;
+  const graph = byName.get("* Individual values")!;
+  strictEqual(analysis.parentId, table.id);
+  strictEqual(graph.parentId, table.id);
+  strictEqual(graph.graphOptions?.regAnalysisId, analysis.id);
+  strictEqual(graph.graphOptions?.sigAnalysisId, undefined, "a link to an analysis that isn't in the file is dropped");
+  deepStrictEqual(merged.childOrder[table.id], [analysis.id, graph.id]);
+  const figure = byName.get("* Layout 1")!;
+  strictEqual(figure.panels?.length, 1, "a panel whose graph isn't in the file is dropped");
+  strictEqual(figure.panels?.[0].graphId, graph.id);
+  const info = byName.get("* Info Sheet")!;
+  strictEqual(info.info?.linkedTableId, table.id);
+  const transformed = byName.get("* Doses, Log10")!;
+  strictEqual(transformed.transform?.from, table.id);
+  const orphan = byName.get("* Old results")!;
+  strictEqual(orphan.parentId, null);
+  strictEqual(orphan.orphaned, true);
+  // The data is copied, not shared with the incoming project.
+  ok(table.data !== incoming.nodes.t1.data, "the merged table owns its data");
+  deepStrictEqual(table.data, incoming.nodes.t1.data);
+  // The merge appends; it doesn't navigate away.
+  strictEqual(merged.activeNodeId, "t1");
+  // The report names what merged and what was dropped.
+  strictEqual(merged.report.sourceName, "Other.hlx");
+  deepStrictEqual(merged.report.tables, ["* Doses", "* Table 1", "* Doses, Log10"]);
+  deepStrictEqual(merged.report.analyses, ["* t test", "* Old results"]);
+  deepStrictEqual(merged.report.graphs, ["* Individual values"]);
+  deepStrictEqual(merged.report.figures, ["* Layout 1"]);
+  deepStrictEqual(merged.report.infoSheets, ["* Info Sheet"]);
+  deepStrictEqual(merged.report.renamed, []);
+  strictEqual(merged.report.skipped.length, 0);
+  strictEqual(merged.report.dropped.length, 2);
+  ok(merged.report.dropped.some((d) => d.includes("missing-analysis")), "the dropped graph link is named");
+  ok(merged.report.dropped.some((d) => d.includes("Gone")), "the dropped figure panel is named by its graph's name");
+  // The report reads as the merge notice.
+  const lines = formatMergeReport(merged.report).split("\n");
+  strictEqual(lines[0], `Merged 8 sheets from “Other.hlx”:`);
+  ok(lines.some((l) => l.includes("* Doses")), "the notice lists the merged tables");
+  ok(lines.some((l) => l.includes("Dropped links:")), "the notice has a dropped-links section");
+});
+
+check("merging uniquifies a name when even the asterisk form is taken", () => {
+  const current = mergeCurrent();
+  current.nodes.star = { id: "star", type: "table", name: "* Doses", parentId: null, tableType: "column", data: mergeTableData([["A", "0"]]) };
+  current.rootOrder = ["t1", "t2", "star", "i1", "f1"];
+  current.childOrder.star = [];
+  const incoming: ProjectMergeInput = {
+    nodes: {
+      d1: { id: "d1", type: "table", name: "Doses", parentId: null, tableType: "column", data: mergeTableData([["A", "1"]]) },
+      d2: { id: "d2", type: "table", name: "Doses", parentId: null, tableType: "column", data: mergeTableData([["A", "2"]]) },
+    },
+    rootOrder: ["d1", "d2"],
+    childOrder: { d1: [], d2: [] },
+    activeNodeId: "d1",
+  };
+  const merged = mergeProjects(current, incoming, "Doses.hlx");
+  const names = merged.rootOrder.map((id) => merged.nodes[id].name);
+  ok(names.includes("* Doses 2"), "first colliding table takes * Doses 2");
+  ok(names.includes("* Doses 3"), "second colliding table takes * Doses 3");
+  ok(names.includes("* Doses"), "the existing * Doses table is untouched");
+  deepStrictEqual(merged.report.renamed, [
+    { from: "Doses", to: "* Doses 2" },
+    { from: "Doses", to: "* Doses 3" },
+  ]);
+});
+
+check("merging stops at the 500 info-sheet cap and says what it skipped", () => {
+  const current = mergeCurrent();
+  const nodes: Record<string, ProjectNode> = {};
+  const rootOrder: string[] = [];
+  for (let i = 0; i < MAX_INFO_SHEETS + 1; i++) {
+    const id = `info${i}`;
+    nodes[id] = { id, type: "info", name: `Info ${i + 1}`, parentId: null, info: { constants: [], notes: "" } };
+    rootOrder.push(id);
+  }
+  const incoming: ProjectMergeInput = { nodes, rootOrder, childOrder: {}, activeNodeId: rootOrder[0] };
+  const merged = mergeProjects(current, incoming, "Infos.hlx");
+  const infoCount = Object.values(merged.nodes).filter((n) => n.type === "info").length;
+  strictEqual(infoCount, MAX_INFO_SHEETS, "the cap counts the project's existing info sheets too");
+  // The current project already holds 1 info sheet, so 499 of the 501
+  // incoming ones fit under the 500 cap — the last two are skipped.
+  strictEqual(merged.report.skipped.length, 2);
+  deepStrictEqual(
+    merged.report.skipped.map((s) => s.name),
+    ["Info 500", "Info 501"],
+  );
+  ok(merged.report.skipped[0].reason.includes("500"), "the skip names the cap");
+  strictEqual(merged.report.infoSheets.length, MAX_INFO_SHEETS - 1);
+});
+
+check("mergeProject is one undo step and leaves the project dirty", () => {
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  s = reducer(s, {
+    type: "create",
+    node: { id: "a1", type: "analysis", name: "Descriptive statistics", parentId: t1, analysisType: "descriptive-statistics", analysisParams: { columns: ["Y1"] } as AnalysisParams },
+  });
+  const before = s;
+  const current: ProjectMergeInput = { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId };
+  const merged = mergeProjects(current, mergeIncoming(), "Other.hlx");
+  s = reducer(s, { type: "mergeProject", nodes: merged.nodes, rootOrder: merged.rootOrder, childOrder: merged.childOrder, activeNodeId: merged.activeNodeId });
+  strictEqual(s.isDirty, true);
+  strictEqual(s.rootOrder.length, before.rootOrder.length + 6);
+  strictEqual(s.activeNodeId, before.activeNodeId, "merging doesn't move the active sheet");
+  strictEqual(s.past.at(-1)?.label, "Merge Project", "the Edit menu names the undo step");
+  s = reducer(s, { type: "undo" });
+  deepStrictEqual(s.rootOrder, before.rootOrder);
+  deepStrictEqual(s.childOrder, before.childOrder);
+  deepStrictEqual(Object.keys(s.nodes).sort(), Object.keys(before.nodes).sort());
+});
+
+check("MCP merge-project merges a .hlx file's sheets into the project (seq 180)", async () => {
+  const harness = mcpLaggingHarness(true);
+  harness.sync();
+  const before = harness.state();
+  const fixture = serializeProjectFile(mergeIncoming());
+  const io = {
+    writeFile: () => Promise.resolve(undefined),
+    appVersion: () => Promise.resolve("1.8.0"),
+    readText: async () => fixture,
+    readPrismText: async () => "",
+    readPrismBytes: async () => new Uint8Array(),
+    readDataText: async () => "",
+    readDataBytes: async () => new Uint8Array(),
+  };
+  const done = await executeJob(
+    { job_id: "job-merge", project_id: "project-1", action: "merge-project", args: { path: "/tmp/Other.hlx" }, status: "queued" },
+    { ...harness.deps, io },
+  );
+  const result = done.result as {
+    merged_tables: number;
+    merged_analyses: number;
+    merged_graphs: number;
+    merged_figures: number;
+    merged_info_sheets: number;
+    merged: string[];
+    renamed: unknown[];
+    dropped: string[];
+    warnings: string[];
+  };
+  strictEqual(result.merged_tables, 3);
+  strictEqual(result.merged_analyses, 2);
+  strictEqual(result.merged_graphs, 1);
+  strictEqual(result.merged_figures, 1);
+  strictEqual(result.merged_info_sheets, 1);
+  ok(result.merged.includes("* Doses"), "the merged names carry Prism's asterisk");
+  deepStrictEqual(result.renamed, []);
+  // The .hlx reader already prunes the graph's dangling analysis link on
+  // load (and says so in `warnings`), so the merge itself drops only the
+  // figure panel whose graph isn't in the file.
+  strictEqual(result.dropped.length, 1);
+  ok(result.dropped[0].includes("Gone"), "the dropped figure panel is named by its graph's name");
+  strictEqual(result.warnings.length, 2);
+  const after = harness.state();
+  strictEqual(after.rootOrder.length, before.rootOrder.length + 6);
+  strictEqual(after.activeNodeId, before.activeNodeId, "merging doesn't move the active sheet");
+  strictEqual(after.past.at(-1)?.label, "Merge Project");
+  ok(Object.values(after.nodes).some((n) => n.name === "* Doses" && n.type === "table"));
+});
+
+check("MCP merge-project merges a .pzfx file through the converter (seq 180)", async () => {
+  const harness = mcpLaggingHarness(true);
+  harness.sync();
+  const fixture = readFileSync("tests/testdata/column.pzfx", "utf8");
+  const io = {
+    writeFile: () => Promise.resolve(undefined),
+    appVersion: () => Promise.resolve("1.8.0"),
+    readText: async () => "",
+    readPrismText: async () => fixture,
+    readPrismBytes: async () => new Uint8Array(),
+    readDataText: async () => "",
+    readDataBytes: async () => new Uint8Array(),
+  };
+  const done = await executeJob(
+    { job_id: "job-merge-pzfx", project_id: "project-1", action: "merge-project", args: { path: "/tmp/Column.pzfx" }, status: "queued" },
+    { ...harness.deps, io },
+  );
+  const result = done.result as { merged_tables: number; merged: string[] };
+  strictEqual(result.merged_tables, 1);
+  ok(result.merged[0].startsWith("* "), "the converted table merges with Prism's asterisk");
+  ok(Object.values(harness.state().nodes).some((n) => n.name === result.merged[0]));
+});
+
+check("MCP merge-project refuses a file that isn't a project (seq 180)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const io = {
+    writeFile: () => Promise.resolve(undefined),
+    appVersion: () => Promise.resolve("1.8.0"),
+    readText: async () => "",
+    readPrismText: async () => "",
+    readPrismBytes: async () => new Uint8Array(),
+    readDataText: async () => "",
+    readDataBytes: async () => new Uint8Array(),
+  };
+  await rejects(
+    executeJob(
+      { job_id: "job-merge-bad", project_id: "project-1", action: "merge-project", args: { path: "/tmp/notes.txt" }, status: "queued" },
+      { ...harness.deps, io },
+    ),
+    /not a project file/,
+  );
+});
+
+check("MCP merge-project refuses the file already open in this window (seq 180)", async () => {
+  const io = {
+    writeFile: () => Promise.resolve(undefined),
+    appVersion: () => Promise.resolve("1.8.0"),
+    readText: async () => "",
+    readPrismText: async () => "",
+    readPrismBytes: async () => new Uint8Array(),
+    readDataText: async () => "",
+    readDataBytes: async () => new Uint8Array(),
+  };
+  // The same path, and the same file spelled with different case (a
+  // macOS picker can return either): Prism's rule is the file to merge
+  // "must not be open".
+  for (const mergePath of ["/tmp/Other.hlx", "/tmp/OTHER.HLX"]) {
+    const harness = mcpLaggingHarness(true);
+    harness.dispatch({ type: "markSaved", filePath: "/tmp/Other.hlx", savedRevision: harness.state().revision });
+    harness.sync();
+    await rejects(
+      executeJob(
+        { job_id: "job-merge-open", project_id: "project-1", action: "merge-project", args: { path: mergePath }, status: "queued" },
+        { ...harness.deps, io },
+      ),
+      /already open in this window/,
+    );
+  }
+});
+
+check("MCP merge-project refuses a file with no sheets (seq 180)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const fixture = serializeProjectFile({ nodes: {}, rootOrder: [], childOrder: {}, activeNodeId: null });
+  const io = {
+    writeFile: () => Promise.resolve(undefined),
+    appVersion: () => Promise.resolve("1.8.0"),
+    readText: async () => fixture,
+    readPrismText: async () => "",
+    readPrismBytes: async () => new Uint8Array(),
+    readDataText: async () => "",
+    readDataBytes: async () => new Uint8Array(),
+  };
+  await rejects(
+    executeJob(
+      { job_id: "job-merge-empty", project_id: "project-1", action: "merge-project", args: { path: "/tmp/Empty.hlx" }, status: "queued" },
+      { ...harness.deps, io },
+    ),
+    /no readable data tables/,
+  );
+});
+
+check("remapGraphOptions keeps an estimation plot's t-test link when the analysis is cloned", () => {
+  const options = { ...newGraphOptions("individual"), ttestAnalysisId: "a1" };
+  const { options: kept, dropped } = remapGraphOptions(options, { a1: "a9" });
+  strictEqual(kept?.ttestAnalysisId, "a9");
+  deepStrictEqual(dropped, []);
+  const { options: gone, dropped: dropped2 } = remapGraphOptions(options, {});
+  strictEqual(gone?.ttestAnalysisId, undefined);
+  deepStrictEqual(dropped2, ["ttestAnalysisId"]);
+});
+
 // ── v1.6 MCP race fix ──────────────────────────────────────────────────────
 // Failure B: the dispatcher's create-table read the new id back from
 // `getState()` after two blind zero-timers; under load React defers the
@@ -841,6 +1180,7 @@ const mcpLaggingHarness = (withRevisionWait: boolean) => {
     updateFigure: neverUnused,
     createInfoSheet: neverUnused,
     updateInfoSheet: neverUnused,
+    mergeProject: (doc) => dispatch({ type: "mergeProject", ...doc }),
   };
   const deps: JobDeps = {
     getState: () => ({
@@ -25864,6 +26204,9 @@ const mcpImportDataHarness = (files: Record<string, string | Uint8Array>) => {
   harness.deps.io = {
     writeFile: async () => {},
     appVersion: async () => "1.8.0",
+    readText: async () => {
+      throw new Error("unused in this check");
+    },
     readPrismText: async () => {
       throw new Error("unused in this check");
     },
@@ -25967,6 +26310,9 @@ const mcpImportPrismHarness = (files: Record<string, string | Uint8Array>) => {
   harness.deps.io = {
     writeFile: async () => {},
     appVersion: async () => "1.8.0",
+    readText: async () => {
+      throw new Error("unused in this check");
+    },
     readPrismText: async (path: string) => {
       const found = files[path];
       if (typeof found !== "string") throw new Error(`“${path}” couldn't be read.`);

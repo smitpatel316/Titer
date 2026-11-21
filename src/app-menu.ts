@@ -205,6 +205,7 @@ export function useAppMenu(doc: DocumentActions) {
           },
           { text: "Import Prism File…", action: () => void latest.current.doc.importPrism() },
           { text: "Import Data File…", action: () => void latest.current.doc.importData() },
+          { text: "Merge…", action: () => void latest.current.doc.mergeProject() },
           {
             text: "Convert…",
             action: () => latest.current.store.openSelector({ kind: "converter" }),

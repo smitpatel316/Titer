@@ -31,8 +31,9 @@
 // (binomial-test), 203 (distribution equations), 204 (tails + targets),
 // 205 (arithmetic transforms), 206 (column math), 228 (scripts in
 // project file + runOnOpen), 230 (paste-transposed edit op), Mansi-3
-// (sigDisplay pvalue-eq). Counts moved with the tip: 59 tools (was 57; 58
-// since seq 226 list-backups; 59 since seq 168 refresh-linked-data),
+// (sigDisplay pvalue-eq). Counts moved with the tip: 60 tools (was 57; 58
+// since seq 226 list-backups; 59 since seq 168 refresh-linked-data; 60
+// since seq 180 merge-project),
 // 61 AnalysisType variants / schema keys / runner keys (was 54; 60 since
 // seq 177 select-transform; 61 since #46 compare-slopes).
 // ONE correction vs the audit stands: row 178 said GAP, but Compact
@@ -249,7 +250,7 @@ const scopeText = (scope: string): string => {
   }
 };
 
-const EXPECTED_TOOL_COUNT = 59;
+const EXPECTED_TOOL_COUNT = 60;
 const EXPECTED_ANALYSIS_TYPES = 61;
 const META_OFFERINGS = new Set(["compare-many-groups", "interpolate", "transform"]);
 
@@ -720,7 +721,7 @@ const ROWS: Row[] = [
     item: "1.7.4 allowlist",
     title: "1.7.4 allowlist groups",
     status: "covered",
-    note: "10 groups covering all 58 tools exactly once; default = read group only.",
+    note: "10 groups covering all 60 tools exactly once; default = read group only.",
     checks: [{ kind: "invariant", name: "allowlist" }],
   },
   {
@@ -979,8 +980,8 @@ const ROWS: Row[] = [
   {
     item: "180",
     title: "File > Merge",
-    status: "gap",
-    note: "Not built. No merge-project function anywhere; no cross-project copy tool to compose it from.",
+    status: "covered",
+    note: "Merged on check/v18: File > Merge + titer_merge_project (.hlx/.pzt appends with Prism-style asterisk rename; .prism/.pzfx converted first; links remapped, missing-sheet links dropped and named; one undo step).",
     checks: [{ kind: "sourceContainsRe", scope: "src", re: "merge-?project" }],
   },
   {

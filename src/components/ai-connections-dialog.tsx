@@ -482,7 +482,7 @@ export function AiConnectionsDialog() {
           <p className="text-small text-secondary">
             Local only: the server binds 127.0.0.1, needs the token above, and never sends data anywhere — except
             feedback reports, and only when you turn sharing on above. By default your AI can only read your
-            project (6 read tools). The groups above unlock more — up to 59 tools, 19 read-only and 40 that
+            project (6 read tools). The groups above unlock more — up to 60 tools, 19 read-only and 41 that
             change your project: run an analysis, build a graph, export, save or delete. Only switch groups on
             for an app you trust. It cannot change these settings.
           </p>

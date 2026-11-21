@@ -1,6 +1,6 @@
 # MCP server contract — Titer (v1.6.0, Phase 2) ↔ stdio bridge
 
-**Status:** Phase 2 + v1.7.4 P0 + 1.8 backup list + 1.8.0 data-file import + 1.8.0 linked paste (59 tools: read, write, run, graph, export, cloud)
+**Status:** Phase 2 + v1.7.4 P0 + 1.8 backup list + 1.8.0 data-file import + 1.8.0 linked paste + 1.8.0 merge project (60 tools: read, write, run, graph, export, cloud)
 **Server branch:** `check/v16-mcp-phase2` (v1.6.0); the v1.7.4 P0 tools
 (`titer_project_summary`, `titer_search`, `titer_get_analysis_params`,
 `titer_rerun_analysis`, `await_result` on `titer_run_analysis`) were
@@ -123,11 +123,11 @@ SSE stream (`text/event-stream`). Lifecycle:
    `2025-06-18`), `capabilities`, `clientInfo`. Server answers with its
    own `protocolVersion` (the negotiated one — the highest both support),
    `capabilities: { "tools": {} }`, `serverInfo: { "name": "titer",
-   "version": "<app version>" }`, and `instructions` (the 59 tools:
+   "version": "<app version>" }`, and `instructions` (the 60 tools:
    read-only vs mutating, the job model, cloud/export notes — the full
    text lives in `get_info` in `src-tauri/src/mcp.rs`).
 2. `notifications/initialized` — client sends after `initialize`.
-3. `tools/list` — returns all 59 tools in one page (`nextCursor`
+3. `tools/list` — returns all 60 tools in one page (`nextCursor`
    absent). No pagination.
 4. `tools/call` — `{ "name": "<tool>", "arguments": { … } }`.
 5. Sessions: 2025-11-25 clients use protocol-level sessions; the server
@@ -361,7 +361,7 @@ plainly ("couldn't read …") instead of silently skipping.
 
 ## 8. Project / document, data tables, graphs / figures / info sheets
 
-### 8.1 Project / document — 6 tools
+### 8.1 Project / document — 7 tools
 
 | Tool | Arguments | Returns |
 |---|---|---|
@@ -370,6 +370,7 @@ plainly ("couldn't read …") instead of silently skipping.
 | `titer_save_project` | `project_id?`, `path?`, `format?: "hlx" \| "prism" \| "pzfx"` | `{ project_id, file_path, format, revision }`. Frontend dispatch (bytes are built by the TS writers — Rust has no serializer). `format` must be explicit — the save-nudge prompt never appears to an agent; omit it to save back in the project's current format (`.hlx`, or `.prism`/`.pzfx` for Prism-origin/remote projects). `path` = Save As. Resolution: explicit `format` > path extension > current file extension; a format/path mismatch is refused, never a silent `.hlx` save. Errors name the writer's failure (e.g. mixed Y formats cannot go to `.pzfx`) instead of silently saving as `.hlx`. A remote project with no local file errors plainly ("no file yet — pass path") — it cannot be saved back to the cloud; see §9. `.pzfx` writer coverage is data tables + info sheets only — analyses, graphs and layouts are never written to `.pzfx`. |
 | `titer_import_prism` | `{ path }` | `{ project_id, file_path, imported_tables, warnings }`. Same as `titer_open_project` for a Prism path, kept separate so the intent is explicit. `warnings` carries the import report (what the converter skipped). |
 | `titer_import_data_file` | `project_id?`, `path`, `name?` | `{ project_id, table_id, name, table_type, rows, data_columns, notes }`. Imports a `.csv` / `.tsv` / `.txt` / `.xlsx` file as a new table in the open project (same parsers as File ▸ Import Data File…); always a new table, never appended to the active table. `notes` carries the importer's assumptions (header row, row titles, skipped sheets). |
+| `titer_merge_project` | `project_id?`, `{ path }` | `{ project_id, source, merged_tables, merged_analyses, merged_graphs, merged_figures, merged_info_sheets, merged, renamed, skipped, dropped, warnings, report }`. Same as File ▸ Merge: appends the file's sheets to this project, each renamed with an asterisk in front (Prism-style); `.prism` / `.pzfx` is converted first, then merged. Links inside the merged sheets are remapped to the new copies; links to sheets missing from the file are dropped and named in `dropped`. The current project's sheets are untouched; one undo step. Path must be local — no URLs. The file already open in this window is refused, as is a file with no sheets to merge. |
 | `titer_close_project` | `project_id?`, `save?: "save" \| "discard"` | `{ project_id, closed: true }`. `save` omitted = refuse to close a dirty project (`{ needs_confirm: true, warning: "unsaved changes" }`); pass `save: "save"` or `save: "discard"` explicitly. Never prompts. Closes the window; the snapshot is dropped. |
 
 ### 8.2 Data tables — 10 tools
@@ -567,13 +568,13 @@ explicit "Send to GitHub" click opens a pre-filled issue in the browser.
 |---|---|
 | Read / discovery (Phase 1 + L1 + 1.7.4 + 1.8) | 13 |
 | Jobs (`titer_read_job`, `titer_list_jobs`, `titer_cancel_job`) | 3 |
-| Project / document | 6 |
+| Project / document | 7 |
 | Data tables | 10 |
 | Analyses (run + rerun + freeze + simulate + method + wand + script) | 7 |
 | Graphs / figures / info sheets | 7 |
 | Export | 5 |
 | Cloud | 9 |
-| **Total** | **59** |
+| **Total** | **60** |
 
 Annotations: 19 tools are `read_only_hint: true` (the 13 read tools +
 `read_job`/`list_jobs` + the 4 read-only cloud tools); the other 39
@@ -586,7 +587,7 @@ is on, §6); everything else is `false`. `idempotent_hint` is per-tool (e.g. `ti
 `titer_rename_node`, `titer_reorder_nodes` are idempotent; create/undo/
 redo/run tools are not).
 
-The allowlist (§12) groups the 59 tools differently — by what the user
+The allowlist (§12) groups the 60 tools differently — by what the user
 turns on, not by what they do. The two groupings overlap (e.g. the
 `destructive` group holds the two tools that delete data or run
 scripts); §12 is the
@@ -600,11 +601,11 @@ The Phase 2 smoke runs against the **real server in a running Titer
 app** via a terminal CLI client (no Claude Desktop sign-in needed).
 It reads endpoint + token from `<app_data>/mcp/discovery.json`, speaks
 Streamable HTTP directly (initialize → tools/list → tools/call across
-all 59 tools), and prints a PASS/FAIL line per check; exit 0 only if
+all 60 tools), and prints a PASS/FAIL line per check; exit 0 only if
 every check passes. **Prerequisite:** in Titer, Settings → AI
 Connections, turn on every group under "What your AI can do" first —
 by default the server advertises only the 6 read tools (§12), and this
-smoke drives all 59. It drives one deterministic flow on a fresh project
+smoke drives all 60. It drives one deterministic flow on a fresh project
 it creates itself (no fixture ids — the ids it needs come from the
 tools' own outputs), plus the `tests/testdata/survival.pzfx` public
 fixture for the Prism-import step:
@@ -614,7 +615,7 @@ fixture for the Prism-import step:
    (default out dir: a fresh temp dir; exports/saves land there).
 3. `initialize` (`protocolVersion 2025-11-25`), then
    `notifications/initialized`, then `tools/list` — with every group on,
-   expect all 59 tools, nothing else (with only the default groups, §12
+   expect all 60 tools, nothing else (with only the default groups, §12
    says 5).
 4. Create a project → create an XY table → write data → summary with
    values → edit/rename/reorder/undo/redo/duplicate → simulate a
@@ -676,7 +677,7 @@ are expected to differ until the `buildGraphFigure` follow-up (§10.1).
 The in-process Rust smoke (`mcp_smoke_job_plumbing_over_http` in
 `src-tauri/src/mcp.rs`) is the other half: with every group enabled via
 its fixture allowlist record, it asserts `tools/list` returns exactly
-59 tools and drives the job plumbing + project/table/
+60 tools and drives the job plumbing + project/table/
 analysis/cloud/graph/composite/export tools over real HTTP with a
 completer task standing in for the frontend dispatcher. A second
 in-process smoke (`mcp_smoke_allowlist_default_over_http`) covers §12:
@@ -694,7 +695,7 @@ end).
 - Never add tools, prompts or resources of its own in front of the
   server: the bridge is a transport, not a server. It forwards stdio ↔
   Streamable HTTP and nothing else. It forwards whatever tools the
-  server lists — the 59 Phase 2 + 1.7.4 + 1.8 tools appear automatically via
+  server lists — the 60 Phase 2 + 1.7.4 + 1.8 tools appear automatically via
   `tools/list`; no bridge change was needed for Phase 2.
 - Never widen the bind (no `0.0.0.0`, no port forwarding, no tunnel).
 - Never log the token or table values.
@@ -767,7 +768,7 @@ tool must assign it a group, or the suite fails).
 | Read project data (`read`) | `titer_list_projects`, `titer_list_tables`, `titer_read_table_summary`, `titer_read_results`, `titer_read_graph` | yes |
 | Read more (`read_more`) | `titer_read_figure`, `titer_read_info_sheet`, `titer_read_activity`, `titer_send_feedback` | no |
 | Discover projects and params (`discovery`) | `titer_project_summary`, `titer_search`, `titer_get_analysis_params` | no |
-| Open and save projects (`project`) | `titer_create_project`, `titer_open_project`, `titer_save_project`, `titer_close_project`, `titer_import_prism`, `titer_import_data_file` | no |
+| Open and save projects (`project`) | `titer_create_project`, `titer_open_project`, `titer_save_project`, `titer_close_project`, `titer_import_prism`, `titer_import_data_file`, `titer_merge_project` | no |
 | Edit tables (`tables`) | `titer_create_table`, `titer_write_table`, `titer_edit_table`, `titer_refresh_linked_data`, `titer_duplicate_table_family`, `titer_rename_node`, `titer_reorder_nodes`, `titer_undo`, `titer_redo` | no |
 | Run analyses (`analyses`) | `titer_run_analysis`, `titer_rerun_analysis`, `titer_freeze_analysis`, `titer_simulate_data`, `titer_apply_method`, `titer_apply_wand`, `titer_read_job`, `titer_list_jobs`, `titer_cancel_job` | no |
 | Build graphs and figures (`graphs`) | `titer_build_graph`, `titer_update_graph`, `titer_clone_graph`, `titer_create_figure`, `titer_update_figure`, `titer_create_info_sheet`, `titer_update_info_sheet` | no |
@@ -823,5 +824,5 @@ the same human-only boundary as enable/token (D4).
   tools — the five plus `titer_list_backups` — and Antigravity follows
   what the server advertises, so it shows six. The config file format
   does not change.
-- The server still *has* 59 tools. The allowlist decides which subset
+- The server still *has* 60 tools. The allowlist decides which subset
   a given client sees — it does not remove tools from the server.

@@ -121,6 +121,16 @@ type Action =
    *  nodes and the orders with them in place. One undo step takes the whole
    *  clone back. */
   | { type: "cloneGraph"; plan: ClonePlan }
+  /** File ▸ Merge (seq 180): `mergeProjects` (src/lib/project-merge.ts)
+   *  already built the merged content — one swap, one undo step, and the
+   *  active sheet stays where it was. */
+  | {
+      type: "mergeProject";
+      nodes: Record<string, ProjectNode>;
+      rootOrder: string[];
+      childOrder: Record<string, string[]>;
+      activeNodeId: string | null;
+    }
   | { type: "setActive"; id: string | null }
   | { type: "rename"; id: string; name: string }
   | { type: "remove"; id: string }
@@ -322,6 +332,15 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         rootOrder: action.plan.rootOrder,
         childOrder: action.plan.childOrder,
         activeNodeId: action.plan.activeNodeId,
+        isDirty: true,
+      };
+    case "mergeProject":
+      return {
+        ...state,
+        nodes: action.nodes,
+        rootOrder: action.rootOrder,
+        childOrder: action.childOrder,
+        activeNodeId: action.activeNodeId,
         isDirty: true,
       };
     case "rename": {
@@ -739,6 +758,7 @@ const UNDOABLE = new Set<Action["type"]>([
   "create",
   "applyWand",
   "cloneGraph",
+  "mergeProject",
   "rename",
   "remove",
   "duplicateFamily",
@@ -771,6 +791,8 @@ function changeName(action: Action): string {
       return "Use Wand";
     case "cloneGraph":
       return "Clone Graph";
+    case "mergeProject":
+      return "Merge Project";
     case "rename":
       return "Rename";
     case "remove":
@@ -897,6 +919,15 @@ interface ProjectActions {
    *  Returns the cloned graph's id; throws the plan's error when the
    *  graph (or its table) isn't there to clone. */
   cloneGraph: (graphId: string, options: CloneOptions) => string;
+  /** Merges another project's sheets into this one (File ▸ Merge, seq
+   *  180): `mergeProjects` (src/lib/project-merge.ts) built the merged
+   *  content; this applies it as one undo step. */
+  mergeProject: (doc: {
+    nodes: Record<string, ProjectNode>;
+    rootOrder: string[];
+    childOrder: Record<string, string[]>;
+    activeNodeId: string | null;
+  }) => void;
   /** A figure at the project root; `graphIds` (in order) start as its panels.
    *  Returns the new figure's id. */
   createFigure: (graphIds?: string[]) => string;
@@ -1149,6 +1180,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         dispatch({ type: "cloneGraph", plan: planned.plan });
         return planned.plan.activeNodeId;
       },
+      mergeProject: (doc) => dispatch({ type: "mergeProject", ...doc }),
       createFigure: (graphIds = []) => {
         const names: Record<string, string> = {};
         for (const id of graphIds) {
