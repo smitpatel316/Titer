@@ -94,6 +94,7 @@ import {
   deleteRows,
   fillRange,
   freshColumnNames,
+  insertColumns,
   insertRows,
   newGroupedTable,
   newNestedTable,
@@ -308,6 +309,14 @@ import {
   serializeTableData,
   TABLE_DATA_EXPORT_FORMATS,
 } from "../src/views/tables/table-data-export";
+import {
+  applyLinkedBlock,
+  blocksEqual,
+  linkedBlockOf,
+  parseLinkedSource,
+  readLinkedPaste,
+  type LinkedPaste,
+} from "../src/lib/linked-paste";
 import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { decodePng, bmpEncode, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
@@ -3687,6 +3696,9 @@ check("renaming a nested table's top-level group renames all its sub-columns, an
         groupColumn = c;
       },
       showGroups: () => {},
+      pasteLink: () => {},
+      refreshLink: () => {},
+      breakLink: () => {},
     });
   const items = menu(nested(), "nested");
   const texts = items.map((i) => ("text" in i ? i.text : ""));
@@ -26265,6 +26277,399 @@ check("export-164: the File menu offers Export Table Data in CSV, XLSX, TXT and 
     ["csv", "xlsx", "txt", "xml"],
     "UI formats differ from the MCP export's csv/xlsx/txt/xml",
   );
+});
+
+// ── Linked paste (seq 168) ─────────────────────────────────────────────
+// Prism's paste-as-link: the pasted block stays linked to its source file
+// (CSV/TXT/XLSX) and the table updates when the file changes. The parsers
+// are seq 155's; the link engine is pure (src/lib/linked-paste.ts).
+
+const linked168Link: LinkedPaste = {
+  sourcePath: "/tmp/lab/values.csv",
+  sourceName: "values.csv",
+  kind: "csv",
+  row: 0,
+  col: 1,
+  rows: 2,
+  cols: 2,
+  autoUpdate: true,
+};
+
+check("linked-168: a CSV source parses to the block a paste would write; an .xlsx source too", async () => {
+  deepStrictEqual(await parseLinkedSource("values.csv", "A,B\n1,2\n3,4\n"), [
+    ["A", "B"],
+    ["1", "2"],
+    ["3", "4"],
+  ]);
+  // A semicolon file (Excel in a comma-decimal locale) still detects.
+  deepStrictEqual(await parseLinkedSource("euro.csv", "A;B\n1;2\n"), [
+    ["A", "B"],
+    ["1", "2"],
+  ]);
+  const bytes = await tableToXlsx({ columns: ["Title", "A", "B"], rows: [[null, "1", "x"], ["r1", "2.5", "y"]] }, "Test");
+  deepStrictEqual(await parseLinkedSource("book.xlsx", bytes), [
+    ["Title", "A", "B"],
+    [null, "1", "x"],
+    ["r1", "2.5", "y"],
+  ]);
+  await rejects(parseLinkedSource("empty.csv", ""), /has no data to import/);
+  await rejects(parseLinkedSource("junk.xlsx", new TextEncoder().encode("not a zip")), /isn't a valid \.xlsx workbook/);
+});
+
+check("linked-168: a refresh replaces changed values, leaves untouched cells alone, and reports no change when identical", () => {
+  const data: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["s1", "1", "2"],
+      ["s2", "3", "4"],
+    ],
+    linkedPaste: linked168Link,
+  };
+  // Identical source: the same object back, so no undo entry and no dirty flag.
+  const same = applyLinkedBlock(data, linked168Link, [["1", "2"], ["3", "4"]], "column");
+  strictEqual(same.changed, false);
+  strictEqual(same.data, data);
+  // One value changed: only that cell moves; the row titles and the other cells stay.
+  const changed = applyLinkedBlock(data, linked168Link, [["1", "9"], ["3", "4"]], "column");
+  strictEqual(changed.changed, true);
+  deepStrictEqual(changed.data.rows, [
+    ["s1", "1", "9"],
+    ["s2", "3", "4"],
+  ]);
+  strictEqual(changed.data.linkedPaste?.rows, 2);
+  strictEqual(changed.data.linkedPaste?.cols, 2);
+  // The current block reads back what the link covers.
+  deepStrictEqual(linkedBlockOf(changed.data, linked168Link), [["1", "9"], ["3", "4"]]);
+  ok(blocksEqual([["1", "2"]], [["1", "2"]]) && !blocksEqual([["1", "2"]], [["1", "9"]]), "block compare wrong");
+});
+
+check("linked-168: a smaller source blanks the leftover linked cells; a larger one grows the table", () => {
+  const data: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["s1", "1", "2"],
+      ["s2", "3", "4"],
+      ["s3", "5", "6"],
+    ],
+    linkedPaste: { ...linked168Link, rows: 3, cols: 2 },
+  };
+  // The source lost its last row: the row's linked cells blank, the row title stays.
+  const shrunk = applyLinkedBlock(data, data.linkedPaste!, [["1", "2"], ["3", "4"]], "column");
+  strictEqual(shrunk.changed, true);
+  deepStrictEqual(shrunk.data.rows, [
+    ["s1", "1", "2"],
+    ["s2", "3", "4"],
+    ["s3", null, null],
+  ]);
+  strictEqual(shrunk.data.linkedPaste?.rows, 2);
+  // The source grew: the table grows with it, and the link's shape follows.
+  const grown = applyLinkedBlock(data, data.linkedPaste!, [["1", "2"], ["3", "4"], ["5", "6"], ["7", "8"]], "column");
+  strictEqual(grown.data.rows.length, 4);
+  deepStrictEqual(grown.data.rows[3], [null, "7", "8"]);
+  strictEqual(grown.data.linkedPaste?.rows, 4);
+});
+
+check("linked-168: a grouped table truncates a too-wide refresh and reports the dropped columns", () => {
+  const data = newGroupedTable(2, 2);
+  data.rows = [
+    ["r1", "1", "2", "3", "4"],
+    ["r2", "5", "6", "7", "8"],
+  ];
+  const link: LinkedPaste = { ...linked168Link, row: 0, col: 1, rows: 1, cols: 4 };
+  // Six columns pasted where four fit: the four land, two are reported, nothing else moves.
+  const res = applyLinkedBlock(data, link, [["9", "10", "11", "12", "13", "14"]], "grouped");
+  strictEqual(res.changed, true);
+  strictEqual(res.droppedColumns, 2);
+  deepStrictEqual(res.data.rows[0], ["r1", "9", "10", "11", "12"]);
+  deepStrictEqual(res.data.rows[1], ["r2", "5", "6", "7", "8"]);
+});
+
+check("linked-168: inserting/deleting rows and columns above the anchor moves it; deleting the anchor drops the link", () => {
+  const base: TableData = {
+    columns: ["Title", "A", "B", "C"],
+    rows: [
+      ["r1", "1", "2", "3"],
+      ["r2", "4", "5", "6"],
+      ["r3", "7", "8", "9"],
+    ],
+    linkedPaste: { ...linked168Link, row: 1, col: 2, rows: 1, cols: 1 },
+  };
+  // A row inserted above the anchor pushes the link down with its values.
+  const down = insertRows(base, 0, 1);
+  strictEqual(down.linkedPaste?.row, 2);
+  strictEqual(down.rows[2]?.[2], "5");
+  // A row deleted above it pulls the link up.
+  const up = deleteRows(down, 0, 1);
+  strictEqual(up.linkedPaste?.row, 1);
+  // Deleting the anchor row itself drops the link — the region no longer lines up.
+  const gone = deleteRows(base, 1, 1);
+  strictEqual(gone.linkedPaste, undefined);
+  strictEqual(gone.rows[1]?.[2], "8");
+  // A column inserted before the anchor pushes it right; deleting the anchor column drops it.
+  const right = insertColumns(base, 1, 1, "column");
+  strictEqual(right.linkedPaste?.col, 3);
+  const colGone = deleteColumns(base, 2, 1);
+  strictEqual(colGone.linkedPaste, undefined);
+});
+
+check("linked-168: the link survives a .hlx round-trip; a hand-edited bogus link is dropped with a warning", () => {
+  const payload: ProjectFilePayload = {
+    nodes: {
+      table_1: {
+        id: "table_1",
+        type: "table",
+        name: "Linked",
+        parentId: null,
+        tableType: "column",
+        data: {
+          columns: ["Title", "A"],
+          rows: [[null, "1"]],
+          linkedPaste: linked168Link,
+        },
+      },
+    },
+    rootOrder: ["table_1"],
+    childOrder: { table_1: [] },
+    activeNodeId: "table_1",
+  };
+  const parsed = parseProjectFile(JSON.parse(serializeProjectFile(payload)));
+  ok(!("error" in parsed), "round-trip failed to parse");
+  if (!("error" in parsed)) {
+    deepStrictEqual(parsed.project.nodes.table_1.data?.linkedPaste, linked168Link);
+  }
+  // A bogus link (a path that isn't a string, a bad kind) is dropped, and the load says so.
+  const bogus = structuredClone(payload);
+  (bogus.nodes.table_1.data as unknown as Record<string, unknown>).linkedPaste = {
+    ...linked168Link,
+    sourcePath: 42,
+    kind: "pdf",
+  };
+  const parsedBogus = parseProjectFile(JSON.parse(serializeProjectFile(bogus)));
+  ok(!("error" in parsedBogus), "bogus-link file failed to parse");
+  if (!("error" in parsedBogus)) {
+    strictEqual(parsedBogus.project.nodes.table_1.data?.linkedPaste, undefined);
+    ok(
+      parsedBogus.issues.some((i) => i.message.includes("linked data")),
+      "no warning for the dropped link",
+    );
+  }
+  // The validator itself: missing fields and bad shapes are not links.
+  strictEqual(readLinkedPaste(null), undefined);
+  strictEqual(readLinkedPaste({ ...linked168Link, rows: 0 }), undefined);
+  strictEqual(readLinkedPaste({ ...linked168Link, autoUpdate: "yes" }), undefined);
+  deepStrictEqual(readLinkedPaste(linked168Link), linked168Link);
+});
+
+check("linked-168: a .prism write of a linked table matches the unlinked write", async () => {
+  const node = (linked: boolean): ProjectNode => ({
+    id: "table_1",
+    type: "table",
+    name: "Minimal",
+    parentId: null,
+    tableType: "column",
+    data: {
+      columns: ["Title", "A"],
+      rows: [[null, "1"], [null, "2"]],
+      ...(linked ? { linkedPaste: linked168Link } : {}),
+    },
+  });
+  const project = (linked: boolean): Parameters<typeof writePrism>[0] => ({
+    nodes: { table_1: node(linked) },
+    rootOrder: ["table_1"],
+    childOrder: { table_1: [] },
+    activeNodeId: "table_1",
+  });
+  const tableFiles = async (bytes: Uint8Array) => {
+    const zip = await JSZip.loadAsync(bytes);
+    const names = Object.keys(zip.files).filter((n) => n.startsWith("data/tables/"));
+    const texts: Record<string, string> = {};
+    for (const n of names) texts[n] = await zip.file(n)!.async("string");
+    return texts;
+  };
+  const linkedFiles = await tableFiles((await writePrism(project(true), "1.8.0")).bytes);
+  const plainFiles = await tableFiles((await writePrism(project(false), "1.8.0")).bytes);
+  deepStrictEqual(linkedFiles, plainFiles);
+});
+
+check("linked-168: the menu, the grid commands and the refresh-on-open hook are wired", () => {
+  const menu = readFileSync("src/app-menu.ts", "utf8");
+  ok(menu.includes("Paste Link…"), "Edit menu has no Paste Link… item");
+  ok(menu.includes("Update Linked Data"), "Edit menu has no Update Linked Data item");
+  ok(menu.includes("Break Link"), "Edit menu has no Break Link item");
+  const grid = readFileSync("src/views/tables/grid.tsx", "utf8");
+  ok(grid.includes("paste-link"), "grid never handles the paste-link command");
+  ok(grid.includes("refresh-link"), "grid never handles the refresh-link command");
+  const document = readFileSync("src/store/use-document.ts", "utf8");
+  ok(document.includes("linkedPaste") || document.includes("checkLinked"), "use-document never checks links on open");
+  const shell = readFileSync("src/components/app-shell.tsx", "utf8");
+  ok(shell.includes("Linked Data"), "the shell mounts no linked-data notice");
+  const view = readFileSync("src/views/tables/table-view.tsx", "utf8");
+  ok(view.includes("linkedPaste"), "the table view shows no link state");
+});
+
+check("linked-168: MCP refresh-linked-data updates a linked table, no-ops when unchanged, and errors without a link", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-168-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B"],
+    rows: [
+      ["s1", 1, 2],
+      ["s2", 3, 4],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  // The link arrives the way the UI stores it: an updateTable with the link on the data.
+  const node = harness.state().nodes[tableId]!;
+  harness.dispatch({
+    type: "updateTable",
+    id: tableId,
+    data: { ...node.data!, linkedPaste: linked168Link },
+    label: "Paste Link",
+  });
+  harness.sync();
+  let source = "1,9\n3,4\n";
+  harness.deps.readLinkedSource = async () => source;
+  const refreshed = await harness.run("job-168-refresh", "refresh-linked-data", { table_id: tableId });
+  strictEqual((refreshed.result as { updated: boolean }).updated, true);
+  strictEqual(harness.state().nodes[tableId]?.data?.rows[0]?.[2], "9");
+  // The same source again: no change, no undo step.
+  const before = harness.state().revision;
+  const noop = await harness.run("job-168-noop", "refresh-linked-data", { table_id: tableId });
+  strictEqual((noop.result as { updated: boolean }).updated, false);
+  strictEqual(harness.state().revision, before);
+  // A table with no link errors plainly instead of refreshing nothing.
+  const plain = await harness.run("job-168-plain", "create-table", {
+    table_type: "column",
+    columns: ["", "A"],
+    rows: [["s1", 1]],
+  });
+  const plainId = (plain.result as { table_id: string }).table_id;
+  harness.sync();
+  await rejects(harness.run("job-168-nolink", "refresh-linked-data", { table_id: plainId }), /no linked data/);
+  // A source that can't be read errors plainly too.
+  harness.deps.readLinkedSource = async () => {
+    throw new Error("gone");
+  };
+  await rejects(harness.run("job-168-gone", "refresh-linked-data", { table_id: tableId }), /couldn't be read/);
+});
+
+check("linked-168: MCP paste-link pastes a file as a link and remove-link breaks it", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-168-pl-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B"],
+    rows: [
+      ["s1", 1, 2],
+      ["s2", 3, 4],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  harness.deps.readLinkedSource = async () => "9,8\n7,6\n";
+  const pasted = await harness.run("job-168-pl", "edit-table", {
+    table_id: tableId,
+    op: "paste-link",
+    source_path: "/tmp/lab/new.csv",
+    row: 0,
+    column: 1,
+  });
+  strictEqual((pasted.result as { rows: number }).rows, 2);
+  const linked = harness.state().nodes[tableId]?.data;
+  deepStrictEqual(linked?.linkedPaste, {
+    sourcePath: "/tmp/lab/new.csv",
+    sourceName: "new.csv",
+    kind: "csv",
+    row: 0,
+    col: 1,
+    rows: 2,
+    cols: 2,
+    autoUpdate: true,
+  });
+  strictEqual(linked?.rows[0]?.[1], "9");
+  strictEqual(linked?.rows[1]?.[2], "6");
+  // A file that isn't data is refused, and a link that is already there over
+  // identical values still stores (re-linking is not a no-op).
+  harness.deps.readLinkedSource = async () => "";
+  await rejects(
+    harness.run("job-168-pl-empty", "edit-table", { table_id: tableId, op: "paste-link", source_path: "/tmp/lab/e.csv" }),
+    /has no data to import/,
+  );
+  await rejects(
+    harness.run("job-168-pl-pdf", "edit-table", { table_id: tableId, op: "paste-link", source_path: "/tmp/lab/doc.pdf" }),
+    /data file/,
+  );
+  const removed = await harness.run("job-168-rm", "edit-table", { table_id: tableId, op: "remove-link" });
+  strictEqual((removed.result as { rows: number }).rows, 2);
+  strictEqual(harness.state().nodes[tableId]?.data?.linkedPaste, undefined);
+  strictEqual(harness.state().nodes[tableId]?.data?.rows[0]?.[1], "9");
+  await rejects(
+    harness.run("job-168-rm2", "edit-table", { table_id: tableId, op: "remove-link" }),
+    /no linked paste/,
+  );
+});
+
+check("linked-168: regrouping, renesting or switching summary format keeps the link's anchor by position", () => {
+  const grouped: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2"],
+    rows: [["r1", "1", "2"]],
+    groups: 1,
+    replicates: 2,
+    linkedPaste: { ...linked168Link, row: 0, col: 1, rows: 1, cols: 2 },
+  };
+  // The columns are rebuilt, but the anchor is a position: it stays where
+  // it was, and a refresh re-pastes the source into that same region.
+  deepStrictEqual(regroupTable(grouped, 2, 2).linkedPaste, { ...linked168Link, row: 0, col: 1, rows: 1, cols: 2 });
+  deepStrictEqual(applySummaryFormat(grouped, "mean-sd-n").linkedPaste, {
+    ...linked168Link,
+    row: 0,
+    col: 1,
+    rows: 1,
+    cols: 2,
+  });
+  const nested: TableData = {
+    columns: ["Title", "A:S1:R1", "A:S1:R2"],
+    rows: [["r1", "1", "2"]],
+    groups: 1,
+    subgroups: 1,
+    replicates: 2,
+    linkedPaste: { ...linked168Link, row: 0, col: 1, rows: 1, cols: 2 },
+  };
+  deepStrictEqual(renestTable(nested, 2, 1, 2).linkedPaste, { ...linked168Link, row: 0, col: 1, rows: 1, cols: 2 });
+});
+
+check("linked-168: a whole-table write drops the link, so a refresh can't overwrite the replacement", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-168-wt-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B"],
+    rows: [
+      ["s1", 1, 2],
+      ["s2", 3, 4],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  const node = harness.state().nodes[tableId]!;
+  harness.dispatch({
+    type: "updateTable",
+    id: tableId,
+    data: { ...node.data!, linkedPaste: linked168Link },
+    label: "Paste Link",
+  });
+  harness.sync();
+  strictEqual(harness.state().nodes[tableId]?.data?.linkedPaste?.sourceName, "values.csv");
+  await harness.run("job-168-wt", "write-table", {
+    table_id: tableId,
+    columns: ["", "A", "B"],
+    rows: [
+      ["s1", 9, 9],
+      ["s2", 9, 9],
+    ],
+  });
+  harness.sync();
+  strictEqual(harness.state().nodes[tableId]?.data?.linkedPaste, undefined);
+  strictEqual(harness.state().nodes[tableId]?.data?.rows[0]?.[1], "9");
 });
 
 // ── Run ──────────────────────────────────────────────────────────────────

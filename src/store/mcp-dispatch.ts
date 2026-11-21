@@ -70,6 +70,8 @@ import {
   mcpTakeJobs,
   onMcpCancelJob,
   onMcpRunJob,
+  readDataBytes,
+  readDataText,
   type McpJob,
 } from "../native";
 import { publishAnalysisResult, publishMcpSnapshotNow } from "./mcp-publish";
@@ -84,6 +86,14 @@ import {
   setCalculatedFormula,
 } from "../lib/calcvars";
 import { seriesKeyOf } from "../lib/columns";
+import {
+  applyLinkedBlock,
+  isLinkedSourcePath,
+  linkedPasteKindOf,
+  parseLinkedSource,
+  refreshLinked,
+  type LinkedPaste,
+} from "../lib/linked-paste";
 import { SUMMARY_FORMATS, summarySubcolumns, type SummaryFormat } from "../lib/summary-format";
 import {
   convertCommaDecimals,
@@ -154,6 +164,10 @@ export interface JobDeps {
   /** Headless export IO; defaults to the real `write_file` call. A
    *  harness driving the table-data jobs in node injects a stub here. */
   exportIo?: ExportIo;
+  /** Read a linked-paste source file (default: the real native reads — text
+   *  for delimited files, bytes for `.xlsx`). A harness driving the linked
+   *  jobs in node injects a stub here. */
+  readLinkedSource?: (sourcePath: string, kind: "csv" | "xlsx") => Promise<string | Uint8Array>;
   /** The project actions the table branches dispatch through (L3). The
    *  hook passes the real ones; a harness that drives only `noop` /
    *  `run-analysis` may omit them, and a table job then errors plainly.
@@ -316,6 +330,14 @@ function argBool(job: McpJob, args: unknown, key: string): boolean {
   return value;
 }
 
+/** One optional arg, as a boolean — missing takes `fallback`. */
+function argOptBool(job: McpJob, args: unknown, key: string, fallback: boolean): boolean {
+  const value = (args as Record<string, unknown> | null | undefined)?.[key];
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== "boolean") throw jobErr(job, `needs ${key} to be true or false.`);
+  return value;
+}
+
 /** One optional arg, as a finite number — present but not a number is an error. */
 function argOptNumber(job: McpJob, args: unknown, key: string): number | undefined {
   const value = (args as Record<string, unknown> | null | undefined)?.[key];
@@ -352,6 +374,25 @@ function tableNode(job: McpJob, state: ReturnType<JobDeps["getState"]>, tableId:
     throw jobErr(job, `“${tableId}” is not a table (it is a ${node.type}).`);
   }
   return node;
+}
+
+/** A linked-paste source file's contents (Prism 11, seq 168): the injected
+ *  reader, or the real native reads — text for delimited files, bytes for
+ *  `.xlsx`. A source that can't be read is a plain error naming the file. */
+async function readLinkedSource(
+  job: McpJob,
+  deps: JobDeps,
+  sourcePath: string,
+  kind: "csv" | "xlsx",
+): Promise<string | Uint8Array> {
+  const read =
+    deps.readLinkedSource ??
+    ((path: string, k: "csv" | "xlsx") => (k === "xlsx" ? readDataBytes(path) : readDataText(path)));
+  try {
+    return await read(sourcePath, kind);
+  } catch {
+    throw jobErr(job, `“${fileName(sourcePath)}” couldn't be read — the file may have moved or been deleted.`);
+  }
 }
 
 /** A node of any kind, by id. */
@@ -591,7 +632,10 @@ function buildTableData(
   if (!base) return data;
 
   // A replace keeps what the call did not replace: the marks, the bands,
-  // the widths, the error format, the freeze flag and the notes.
+  // the widths, the error format, the freeze flag and the notes. It does
+  // NOT keep a linked paste (seq 168): the values no longer come from the
+  // source, so a later refresh must not overwrite the replacement — the
+  // fresh data above carries no link, and none is restored here.
   const onCell = (k: unknown): k is string => {
     const [r, c] =
       typeof k === "string" && /^\d+,\d+$/.test(k) ? k.split(",").map(Number) : [Infinity, Infinity];
@@ -1291,6 +1335,59 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           next = convertCommaDecimals(data);
           break;
         }
+        case "paste-link": {
+          // Linked paste (Prism 11, seq 168): paste a data file as a link at
+          // (row, column) — the values land and the link is stored, so a
+          // later refresh re-reads the file into the same region.
+          const sourcePath = argString(job, job.args, "source_path");
+          if (!isLinkedSourcePath(sourcePath)) {
+            throw jobErr(job, `needs source_path to name a data file (.csv, .tsv, .txt or .xlsx), not “${sourcePath}”.`);
+          }
+          const row = argInt(job, job.args, "row", 0);
+          const col = argInt(job, job.args, "column", 0);
+          const autoUpdate = argOptBool(job, job.args, "auto_update", true);
+          const kind = linkedPasteKindOf(sourcePath);
+          const sourceName = fileName(sourcePath);
+          const content = await readLinkedSource(job, deps, sourcePath, kind);
+          let block: (string | null)[][];
+          try {
+            block = await parseLinkedSource(sourceName, content);
+          } catch (err) {
+            throw jobErr(job, err instanceof Error ? err.message : "couldn't be read as data.");
+          }
+          const width = block.reduce((w, r) => Math.max(w, r.length), 0);
+          const link: LinkedPaste = {
+            sourcePath,
+            sourceName,
+            kind,
+            row,
+            col,
+            rows: block.length,
+            cols: width,
+            autoUpdate,
+          };
+          const res = applyLinkedBlock(data, link, block, type);
+          if (res.changed) {
+            label = "Paste Link";
+            next = res.data;
+            break;
+          }
+          // The values already match: still a link when there wasn't this one.
+          if (JSON.stringify(data.linkedPaste) !== JSON.stringify(link)) {
+            label = "Paste Link";
+            next = { ...data, linkedPaste: link };
+          }
+          break;
+        }
+        case "remove-link": {
+          // Linked paste (Prism 11, seq 168): the values stay, the link goes.
+          if (!data.linkedPaste) {
+            throw jobErr(job, "has no linked paste to remove — paste a file as a link first (paste-link).");
+          }
+          label = "Break Link";
+          next = { ...data, linkedPaste: undefined };
+          break;
+        }
         case "add-calculated-variable":
         case "set-calculated-variable":
         case "remove-calculated-variable": {
@@ -1353,7 +1450,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         default:
           throw jobErr(
             job,
-            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, paste-transposed.`,
+            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, paste-link, remove-link, paste-transposed.`,
           );
       }
       if (next === null) {
@@ -1376,6 +1473,53 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           table_id: tableId,
           rows: next.rows.length,
           data_columns: next.columns.length - 1,
+        },
+      };
+    }
+    case "refresh-linked-data": {
+      // Linked paste (Prism 11, seq 168): re-read a table's linked source
+      // file into its region. An unchanged source is a no-op success — no
+      // dispatch, no undo step, no dirty flag — so a refresh that finds
+      // nothing new costs nothing.
+      const actions = tableActions(job, deps);
+      const tableId = argString(job, job.args, "table_id");
+      const state = deps.getState();
+      const node = tableNode(job, state, tableId);
+      const type = node.tableType ?? "column";
+      const data = node.data ?? { columns: ["Title"], rows: [] };
+      const link = data.linkedPaste;
+      if (!link) {
+        throw jobErr(job, "has no linked data — paste a file as a link first (paste-link).");
+      }
+      const content = await readLinkedSource(job, deps, link.sourcePath, link.kind);
+      let res: { data: TableData; changed: boolean; droppedColumns: number };
+      try {
+        res = await refreshLinked(data, link, content, type);
+      } catch (err) {
+        throw jobErr(job, err instanceof Error ? err.message : "couldn't be read as data.");
+      }
+      if (!res.changed) {
+        return {
+          result: {
+            project_id: job.project_id,
+            table_id: tableId,
+            rows: data.rows.length,
+            data_columns: data.columns.length - 1,
+            updated: false,
+            dropped_columns: 0,
+          },
+        };
+      }
+      actions.updateTable(tableId, res.data, "Update Linked Data");
+      await deps.flush?.();
+      return {
+        result: {
+          project_id: job.project_id,
+          table_id: tableId,
+          rows: res.data.rows.length,
+          data_columns: res.data.columns.length - 1,
+          updated: true,
+          dropped_columns: res.droppedColumns,
         },
       };
     }

@@ -9,7 +9,7 @@
 // Excluded cells ("row,col" keys) follow the cells around: structural edits remap
 // them so they stay attached to their values. (Graphs follow on their own: see
 // store/references.ts.)
-import type { RowGroup, TableData, TableErrorFormat, TableType } from "../../store/types";
+import type { LinkedPaste, RowGroup, TableData, TableErrorFormat, TableType } from "../../store/types";
 import { tableErrorFormat } from "../../store/types";
 import { renameCalculatedReferences } from "../../lib/calcvars";
 import { seriesKeyOf, groupRuns } from "../../lib/columns";
@@ -203,6 +203,39 @@ export function toggleExcluded(data: TableData, range: Range): TableData {
 
 // ── Rows and columns ───────────────────────────────────────────────────
 
+/** The link after `count` rows/columns are inserted at `at` on `axis`: the
+ *  anchor moves down/right with its values when the insert lands at or
+ *  above/before it, and stays when the insert is past it. (Prism 11,
+ *  seq 168 — the link engine lives in src/lib/linked-paste.ts; the
+ *  adjustment itself sits here so every structural edit carries it.) */
+export function linkedPasteAfterInsert(
+  link: LinkedPaste,
+  axis: "row" | "col",
+  at: number,
+  count: number,
+): LinkedPaste {
+  if (axis === "row") return link.row >= at ? { ...link, row: link.row + count } : link;
+  return link.col >= at ? { ...link, col: link.col + count } : link;
+}
+
+/** The link after `count` rows/columns are deleted from `at` on `axis` —
+ *  or undefined, when the deletion takes the anchor itself: the region no
+ *  longer lines up with the source, so the link goes rather than refresh
+ *  into the wrong cells. A deletion past the anchor pulls it up/left. */
+export function linkedPasteAfterDelete(
+  link: LinkedPaste,
+  axis: "row" | "col",
+  at: number,
+  count: number,
+): LinkedPaste | undefined {
+  if (axis === "row") {
+    if (link.row >= at && link.row < at + count) return undefined;
+    return link.row >= at + count ? { ...link, row: link.row - count } : link;
+  }
+  if (link.col >= at && link.col < at + count) return undefined;
+  return link.col >= at + count ? { ...link, col: link.col - count } : link;
+}
+
 /** Where each row goes when `count` rows are inserted before row `at`. */
 export const rowsInserted = (at: number, count: number) => (r: number) => (r >= at ? r + count : r);
 /** Where each row goes when `count` rows are deleted from row `at` (null: deleted). */
@@ -218,6 +251,7 @@ export function insertRows(data: TableData, at: number, count: number): TableDat
     rows,
     excluded: remapExcluded(data, (r, c) => [shift(r), c]),
     rowGroups: shiftRowGroupsForInsert(data.rowGroups, at, count),
+    linkedPaste: data.linkedPaste ? linkedPasteAfterInsert(data.linkedPaste, "row", at, count) : undefined,
   };
 }
 
@@ -229,6 +263,7 @@ export function deleteRows(data: TableData, at: number, count: number): TableDat
     rows,
     excluded: remapExcluded(data, (r, c) => (shift(r) === null ? null : [shift(r)!, c])),
     rowGroups: shiftRowGroupsForDelete(data.rowGroups, at, count),
+    linkedPaste: data.linkedPaste ? linkedPasteAfterDelete(data.linkedPaste, "row", at, count) : undefined,
   };
 }
 
@@ -241,7 +276,13 @@ export function insertColumns(data: TableData, at: number, count: number, type: 
     next.splice(at, 0, ...Array<Cell>(count).fill(null));
     return next;
   });
-  return { ...data, columns, rows, excluded: remapExcluded(data, (r, c) => [r, c >= at ? c + count : c]) };
+  return {
+    ...data,
+    columns,
+    rows,
+    excluded: remapExcluded(data, (r, c) => [r, c >= at ? c + count : c]),
+    linkedPaste: data.linkedPaste ? linkedPasteAfterInsert(data.linkedPaste, "col", at, count) : undefined,
+  };
 }
 
 /** The widths of `columns` alone: a column gone takes its width with it. */
@@ -262,6 +303,7 @@ export function deleteColumns(data: TableData, at: number, count: number): Table
     rows: data.rows.map((row) => row.filter(keep)),
     excluded: remapExcluded(data, (r, c) => (c < at ? [r, c] : c >= at + n ? [r, c - n] : null)),
     widths: widthsOf(data.widths, columns),
+    linkedPaste: data.linkedPaste ? linkedPasteAfterDelete(data.linkedPaste, "col", at, n) : undefined,
     // A deleted calculated variable goes with its column; a formula that
     // used a deleted source keeps its text and reads as an error until it
     // is edited or removed (the recompute names the missing variable).
@@ -407,6 +449,9 @@ export function regroupTable(
     replicates,
     excluded: remapExcluded(data, (r, c) => (to(c) < 0 ? null : [r, to(c)])),
     widths: widthsOf(data.widths, columns),
+    // Regrouping rebuilds the columns, but the link's anchor is a position
+    // (seq 168): it stays where it was, and a refresh re-pastes the source
+    // into that same region — values keep their slots, as they do here.
   };
 }
 
@@ -457,6 +502,8 @@ export function applySummaryFormat(data: TableData, format: SummaryFormat): Tabl
       return to === null ? null : [r, to];
     }),
     widths: widthsOf(data.widths, columns),
+    // A format switch rebuilds the sub-columns, but the link's anchor is a
+    // position (seq 168): it stays where it was.
   };
 }
 
@@ -553,6 +600,8 @@ export function renestTable(data: TableData, groups: number, subgroups: number, 
     replicates,
     excluded: remapExcluded(data, (r, c) => (to(c) < 0 ? null : [r, to(c)])),
     widths: widthsOf(data.widths, columns),
+    // Renesting rebuilds the columns, but the link's anchor is a position
+    // (seq 168): it stays where it was.
   };
 }
 

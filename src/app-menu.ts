@@ -32,7 +32,10 @@ export type EditCommand =
   | "find-next"
   | "find-previous"
   | "paste-special"
-  | "paste-transpose";
+  | "paste-transpose"
+  | "paste-link"
+  | "refresh-link"
+  | "break-link";
 const TEXT_COMMANDS: EditCommand[] = ["delete", "select-all"];
 
 /** Where the keyboard is: a text field, the data grid, or elsewhere. */
@@ -117,6 +120,8 @@ export function useAppMenu(doc: DocumentActions) {
   // A frozen table takes no data edits (seq 165): the Edit menu's mutating
   // items go quiet while it is frozen, and the Freeze item below flips it.
   const activeTableFrozen = activeTableId ? Boolean(nodes[activeTableId]?.frozen) : false;
+  // Linked paste (Prism 11, seq 168): Update and Break act on the active table's link.
+  const hasLink = activeTableId ? Boolean(nodes[activeTableId]?.data?.linkedPaste) : false;
   // Wand needs an example: another table with ≥ 1 analysis or graph child.
   const wandAvailable = Object.values(nodes).some(
     (n) =>
@@ -273,6 +278,23 @@ export function useAppMenu(doc: DocumentActions) {
           { item: "Cut" },
           { item: "Copy" },
           { item: "Paste" },
+          {
+            // Linked paste (Prism 11, seq 168): paste a data file as a link
+            // at the selection, so the table updates when the file changes.
+            text: "Paste Link…",
+            enabled: hasTable,
+            action: () => edit("paste-link"),
+          },
+          {
+            text: "Update Linked Data",
+            enabled: hasTable && hasLink,
+            action: () => edit("refresh-link"),
+          },
+          {
+            text: "Break Link",
+            enabled: hasTable && hasLink,
+            action: () => edit("break-link"),
+          },
           sep,
           { text: "Delete", enabled: hasTable && !activeTableFrozen, action: () => edit("delete") },
           { text: "Select All", accelerator: "CmdOrCtrl+A", action: () => edit("select-all") },
@@ -506,6 +528,7 @@ export function useAppMenu(doc: DocumentActions) {
     hasTable,
     activeTableFrozen,
     activeNode?.frozen,
+    hasLink,
     wandAvailable,
     analysisKey,
     activeNodeId !== null,

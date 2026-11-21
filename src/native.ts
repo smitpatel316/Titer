@@ -784,6 +784,30 @@ export async function readDataBytes(path: string): Promise<Uint8Array> {
   return bytes;
 }
 
+/** A linked-paste source file's contents (Prism 11, seq 168): bytes for an
+ *  `.xlsx` workbook, text for a delimited file. */
+export async function readLinkedSource(sourcePath: string, kind: "csv" | "xlsx"): Promise<string | Uint8Array> {
+  return kind === "xlsx" ? readDataBytes(sourcePath) : readDataText(sourcePath);
+}
+
+/** Linked paste (Prism 11, seq 168): after picking a source file, ask
+ *  whether the link updates itself when the file changes (Prism's
+ *  "Automatically update" checkbox, checked by default), updates by hand,
+ *  or cancels the paste. In the web build there is no three-way prompt,
+ *  so Cancel is not offered — the paste goes ahead by hand. */
+export async function askPasteLink(sourceName: string): Promise<"auto" | "manual" | "cancel"> {
+  if (!isNative)
+    return window.confirm(`Update “${sourceName}” automatically when the file changes?`) ? "auto" : "manual";
+  const answer = await message(`“${sourceName}” will stay linked to this table.`, {
+    title: "Paste Link",
+    kind: "info",
+    buttons: { yes: "Update Automatically", no: "Update By Hand", cancel: "Cancel" },
+  });
+  if (answer === "Update Automatically" || answer === "Yes") return "auto";
+  if (answer === "Update By Hand" || answer === "No") return "manual";
+  return "cancel";
+}
+
 /** Where an imported data file goes when its shape matches the active
  *  table: a new table, appended to that table, or nowhere (Cancel). In the
  *  web build (no native shell) a confirm stands in for the dialog. */

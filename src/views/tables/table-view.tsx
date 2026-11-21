@@ -40,7 +40,8 @@ import {
 } from "../../lib/calcvars";
 import { SUMMARY_FORMATS, summaryFormatOf, summarySubcolumns, type SummaryFormat } from "../../lib/summary-format";
 import { seriesKeyOf } from "../../lib/columns";
-import { confirmDelete } from "../../native";
+import { alert, confirmDelete } from "../../native";
+import { refreshLinkedFromFile } from "./linked-data";
 import { AddFloatingNoteButton, FloatingNotesLayer } from "../../components/floating-notes";
 import { TABLES } from ".";
 
@@ -67,6 +68,40 @@ export function TableView({ node }: { node: ProjectNode }) {
       <AddFloatingNoteButton node={node} />
     </>
   );
+  const link = data.linkedPaste;
+  // Linked paste (Prism 11, seq 168): the table's link, as a slim bar over
+  // the grid — what file it follows, whether it updates itself on open,
+  // and Update / Break Link beside it (the same actions as Edit ▸ Update
+  // Linked Data / Break Link and the grid menu's).
+  const refreshLink = async () => {
+    try {
+      const res = await refreshLinkedFromFile(data, node.tableType ?? "column");
+      if (res.changed) update(res.data, "Update Linked Data");
+    } catch (err) {
+      await alert(
+        "Couldn't Update Linked Data",
+        err instanceof Error ? err.message : "The linked file couldn't be read.",
+        "error",
+      );
+    }
+  };
+  const linkedBar = link ? (
+    <div className="flex shrink-0 items-center gap-2 border-b border-separator bg-surface px-3 py-1 text-xs text-muted">
+      <span>
+        Linked to “{link.sourceName}”
+        {link.autoUpdate ? " — updates automatically when the file changes" : " — updates by hand"}
+      </span>
+      <span className="flex-1" />
+      <Button onClick={() => void refreshLink()}>Update Now</Button>
+      <Button
+        onClick={() => {
+          if (data.linkedPaste) update({ ...data, linkedPaste: undefined }, "Break Link");
+        }}
+      >
+        Break Link
+      </Button>
+    </div>
+  ) : null;
   const grid = (
     <Grid
       data={data}
@@ -84,6 +119,7 @@ export function TableView({ node }: { node: ProjectNode }) {
           Frozen — this table can't be edited until unfrozen.
         </p>
       )}
+      {linkedBar}
       {grid}
       <FloatingNotesLayer node={node} />
     </div>

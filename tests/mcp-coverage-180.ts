@@ -31,7 +31,8 @@
 // (binomial-test), 203 (distribution equations), 204 (tails + targets),
 // 205 (arithmetic transforms), 206 (column math), 228 (scripts in
 // project file + runOnOpen), 230 (paste-transposed edit op), Mansi-3
-// (sigDisplay pvalue-eq). Counts moved with the tip: 58 tools (was 57),
+// (sigDisplay pvalue-eq). Counts moved with the tip: 59 tools (was 57; 58
+// since seq 226 list-backups; 59 since seq 168 refresh-linked-data),
 // 61 AnalysisType variants / schema keys / runner keys (was 54; 60 since
 // seq 177 select-transform; 61 since #46 compare-slopes).
 // ONE correction vs the audit stands: row 178 said GAP, but Compact
@@ -248,7 +249,7 @@ const scopeText = (scope: string): string => {
   }
 };
 
-const EXPECTED_TOOL_COUNT = 58;
+const EXPECTED_TOOL_COUNT = 59;
 const EXPECTED_ANALYSIS_TYPES = 61;
 const META_OFFERINGS = new Set(["compare-many-groups", "interpolate", "transform"]);
 
@@ -947,8 +948,8 @@ const ROWS: Row[] = [
   {
     item: "168",
     title: "Linked paste",
-    status: "gap",
-    note: "Not built. Zero hits in src/lib, src/store, src/views.",
+    status: "covered",
+    note: "Merged on check/v18: paste-link / remove-link edit ops + titer_refresh_linked_data, linked bar + grid-menu + Edit-menu actions, .hlx round-trip with repair, auto-refresh on open.",
     checks: [{ kind: "sourceContainsRe", scope: "src", re: "linked-?paste" }],
   },
   {

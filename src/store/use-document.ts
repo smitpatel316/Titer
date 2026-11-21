@@ -46,6 +46,7 @@ import type { ScriptDoc } from "../lib/prism-script";
 import type { ProjectScript } from "./types";
 import { openProjectsOrSay, sayGone } from "../menus";
 import { fileName, fileTitle } from "../lib/paths";
+import { refreshLinkedFromFile } from "../views/tables/linked-data";
 import {
   base64ToBytes,
   bytesToBase64,
@@ -129,6 +130,11 @@ export function useDocument() {
   // notice is up.
   const [dataImported, setDataImported] = React.useState<string[] | null>(null);
   const dismissDataImported = () => setDataImported(null);
+  // The "Linked Data" notice, in-app rather than as a native dialog (Quirk 2,
+  // as above): the linked sources a project open couldn't refresh, each named
+  // with its table. Shown only when a refresh fails; a clean refresh is silent.
+  const [linkedNotice, setLinkedNotice] = React.useState<string[] | null>(null);
+  const dismissLinkedNotice = () => setLinkedNotice(null);
   // The window's title while the project isn't saved anywhere.
   const [untitled, setUntitled] = React.useState(UNTITLED);
   // Other windows change the list too: this one reads it again when it comes to the front.
@@ -1418,6 +1424,13 @@ export function useDocument() {
         activeNodeId: parsed.project.activeNodeId,
         projectName: parsed.project.projectName,
       });
+      // Linked paste (seq 168): a local project's auto-updating links
+      // re-read their sources now that the project is in the store — a
+      // source that can't be read is named in the Linked Data notice.
+      if (target.filePath) {
+        const linkedLines = await checkLinkedData(parsed.project.nodes);
+        if (linkedLines.length) setLinkedNotice(linkedLines);
+      }
       // A template that carries instructions (or a description) says so on
       // open (plan 38); any other file clears a stale notice.
       const info = parsed.project.template;
@@ -1707,6 +1720,36 @@ export function useDocument() {
         ...table.notes.map((n) => `• ${n}`),
       ]);
     }
+  };
+
+  /** Linked paste (Prism 11, seq 168): after a project loads, every table
+   *  whose link says to update itself re-reads its source file — the values
+   *  land as one undo step per table ("Update Linked Data"), and a source
+   *  that can't be read is named, not failed over. A link that updates by
+   *  hand is listed instead, so the user knows it is there to refresh.
+   *  Only for a project opened from a local file, on desktop: the web
+   *  build has no disk paths to re-read, and a remote project's paths name
+   *  another machine's files. Returns the notice lines, if any. */
+  const checkLinkedData = async (nodes: Record<string, ProjectNode>): Promise<string[]> => {
+    if (!native.isNative) return [];
+    const lines: string[] = [];
+    for (const node of Object.values(nodes)) {
+      if (node.type !== "table" || !node.data?.linkedPaste) continue;
+      const link = node.data.linkedPaste;
+      if (!link.autoUpdate) {
+        lines.push(`• “${link.sourceName}” (${node.name}) updates by hand — use Edit ▸ Update Linked Data to refresh it.`);
+        continue;
+      }
+      try {
+        const res = await refreshLinkedFromFile(node.data, node.tableType ?? "column");
+        if (res.changed) latest.current.updateTable(node.id, res.data, "Update Linked Data");
+      } catch (err) {
+        lines.push(
+          `• “${link.sourceName}” (${node.name}) couldn't be updated — ${err instanceof Error ? err.message : "the file couldn't be read."}`,
+        );
+      }
+    }
+    return lines;
   };
 
   /** Imports a data file's contents (text for CSV/TXT, bytes for XLSX).
@@ -2049,6 +2092,8 @@ export function useDocument() {
     dismissPrismSavedReport,
     dataImported,
     dismissDataImported,
+    linkedNotice,
+    dismissLinkedNotice,
     resolveSavePrompt,
     remote,
     openRemotePicker,

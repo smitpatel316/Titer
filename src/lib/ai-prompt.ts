@@ -18,7 +18,7 @@ export const AI_STARTER_PROMPT_SECTIONS: string[] = [
     "- Read data and results: `titer_read_table_summary`, `titer_read_results`, `titer_read_graph`, `titer_read_figure`, `titer_read_info_sheet`, `titer_list_backups` (automatic backups left by a crash — tell me to reopen the project in Titer, which offers the restore).",
     "- Run statistics: `titer_run_analysis` (53 analysis types — t tests, ANOVA, regression, survival, contingency, nonparametric and more). It runs asynchronously: it returns a `job_id` immediately — poll `titer_read_job` until it is done and read the full result there. Never re-run a job that is already queued.",
     "- Make graphs: `titer_build_graph` (33 graph types; `source_table_ids` plots further tables of the same type on the same graph), `titer_update_graph`, `titer_clone_graph`; multi-panel figures with `titer_create_figure` / `titer_update_figure`.",
-    "- Edit data: `titer_create_table`, `titer_write_table`, `titer_edit_table` (whole-table replace; cell edits are UI work).",
+    "- Edit data: `titer_create_table`, `titer_write_table`, `titer_edit_table` (whole-table replace; cell edits are UI work). A table pasted as a link from a data file (`titer_edit_table` paste-link) stays linked to it — `titer_refresh_linked_data` re-reads the file into the same region.",
     "- Files: `titer_open_project` / `titer_import_prism` (`.hlx`, `.prism`, `.pzfx`, `.pzf`, `.pzt` — local paths only), `titer_save_project` (say the format explicitly or it saves back in the project's current format), `titer_close_project`.",
     "- Undo/redo: `titer_undo`, `titer_redo`. Your own audit trail: `titer_read_activity`.",
   ].join("\n"),

@@ -42,9 +42,15 @@ interface MenuContext {
   showGroups: () => void;
   /** The table is frozen: the mutating items are disabled (seq 165). */
   tableFrozen?: boolean;
+  /** Pastes a picked file as a link at `range`'s top-left cell (seq 168). */
+  pasteLink: (range: Range) => void;
+  /** Re-reads the table's linked source into it (seq 168). */
+  refreshLink: () => void;
+  /** Drops the table's link, keeping its values (seq 168). */
+  breakLink: () => void;
 }
 
-export function gridMenu({ data, type, zone, range, update, rename, renameGroup, showGroups, tableFrozen }: MenuContext): MenuItems {
+export function gridMenu({ data, type, zone, range, update, rename, renameGroup, showGroups, tableFrozen, pasteLink, refreshLink, breakLink }: MenuContext): MenuItems {
   const nested = isNested(data);
   const grouped = isGrouped(data) || nested;
   const rows = range.r1 - range.r0 + 1;
@@ -66,6 +72,20 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
     { item: "Copy" },
     { item: "Paste" },
   ];
+
+  // Linked paste (Prism 11, seq 168): a file pasted as a link at the
+  // selection, or — when this table has one — its source re-read, or the
+  // link broken (values stay). A cell menu only: a row or column menu's
+  // range would anchor the paste over the row titles.
+  if (zone === "cell") {
+    items.push({ text: "Paste Link…", action: () => pasteLink(range) });
+    if (data.linkedPaste) {
+      items.push(
+        { text: "Update Linked Data", action: refreshLink },
+        { text: "Break Link", action: breakLink },
+      );
+    }
+  }
 
   if (zone !== "column") {
     items.push(
