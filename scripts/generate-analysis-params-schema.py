@@ -410,7 +410,7 @@ for f in (ROOT / "src/stats").rglob("*.ts"):
 # Defaults the runners apply with `??` when a param is omitted (no
 # `const DEFAULTS` to parse — each cited by file):
 #  area-under-curve.ts: `params?.baseline ?? 0`
-#  fraction-of-total.ts: `?? "column"` / `?? "fraction"`
+#  fraction-of-total.ts: `?? "column"` / `?? "fraction"` / `?? "none"`
 #  k-means.ts: `params?.clusters ?? 2`, `standardise !== false`
 #  hierarchical-clustering.ts: `params?.clusters ?? 2`,
 #    linkage falls through to "complete", distance to "euclidean",
@@ -435,6 +435,7 @@ RUNNER_FALLBACKS = {
     ("area-under-curve", "baseline"): 0,
     ("fraction-of-total", "totalBy"): "column",
     ("fraction-of-total", "format"): "fraction",
+    ("fraction-of-total", "ci"): "none",
     ("k-means", "clusters"): 2,
     ("k-means", "standardise"): True,
     ("hierarchical-clustering", "clusters"): 2,

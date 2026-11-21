@@ -108,6 +108,7 @@ import { analysisOptionsForTable, analysisOptionsKey } from "../src/views/analys
 import { followTable } from "../src/store/references";
 import { isSummaryFormatValue, summaryFormatOf, summaryTableProblem } from "../src/lib/summary-format";
 import { tCrit95 } from "../src/lib/student-t";
+import { clopperPearsonCI, proportionCI, wilsonCI } from "../src/stats/proportion-ci";
 import { groupRuns, pairKey } from "../src/lib/columns";
 import {
   NAMED_COLORS,
@@ -14958,27 +14959,152 @@ check("fraction-of-total wizard asks for the total and the format, and finishes 
   const wizard = WIZARDS["fraction-of-total"]!;
   deepStrictEqual(
     wizard.questions({}, table, "xy").filter(Boolean).map((q) => (q as Question).id),
-    ["ys", "totalBy", "format"],
+    ["ys", "totalBy", "format", "ci"],
   );
   deepStrictEqual(
     wizard.questions({}, table, "xy").filter(Boolean).map((q) => (q as Question).kind),
-    ["names", "choice", "choice"],
+    ["names", "choice", "choice", "choice"],
   );
-  deepStrictEqual(wizard.finish({ ys: ["Y1"], totalBy: "row", format: "percent" }, table, "xy"), {
+  deepStrictEqual(wizard.finish({ ys: ["Y1"], totalBy: "row", format: "percent", ci: "wilson" }, table, "xy"), {
     type: "fraction-of-total",
-    params: { ys: ["Y1"], x: "Time", totalBy: "row", format: "percent" },
+    params: { ys: ["Y1"], x: "Time", totalBy: "row", format: "percent", ci: "wilson" },
   });
   // A Column table has no X column to carry into the result rows.
   deepStrictEqual(wizard.finish({ ys: ["Y1", "Y2"], totalBy: "grand", format: "fraction" }, table, "column"), {
     type: "fraction-of-total",
     params: { ys: ["Y1", "Y2"], totalBy: "grand", format: "fraction" },
   });
-  // The menu offers it after Frequency distribution on column tables, and
-  // after Area under the curve on XY tables.
+  // The menu offers it after Frequency distribution on column tables, after
+  // Area under the curve on XY tables — and, seq 196, after Chi-square on
+  // Contingency tables, where Prism offers it.
   const columnOrder = analysisOptionsForTable("column").map((o) => o.value);
   strictEqual(columnOrder[columnOrder.indexOf("fraction-of-total") - 1], "frequency-distribution");
   const xyOrder = analysisOptionsForTable("xy").map((o) => o.value);
   strictEqual(xyOrder[xyOrder.indexOf("fraction-of-total") - 1], "area-under-curve");
+  const contingencyOrder = analysisOptionsForTable("contingency").map((o) => o.value);
+  deepStrictEqual(contingencyOrder, ["chi-square", "fraction-of-total", "plot-function", "mcnemar"]);
+});
+
+// Fraction of total, seq 196: each proportion may carry its 95% CI —
+// Wilson/Brown (Prism's recommendation) or Clopper–Pearson (exact) —
+// pinned against SciPy (scipy.stats.beta.ppf / the Wilson closed form, z =
+// 1.959963984540054). A value that is not a proportion of its total has no
+// interval, and an unknown method is refused instead of silently dropping it.
+check("fraction of total carries a 95% CI of each proportion (Wilson/Brown or Clopper–Pearson)", async () => {
+  // Unit pins, both methods, incl. the 0 and n edges (Wilson 0/20 and
+  // 20/20 clamp to the boundary; Clopper–Pearson pins them exactly).
+  const close = (got: [number, number] | null, want: [number, number]) =>
+    ok(got !== null && Math.abs(got[0] - want[0]) < 1e-9 && Math.abs(got[1] - want[1]) < 1e-9, `${got} vs ${want}`);
+  close(wilsonCI(10, 40), [0.14187118639096302, 0.40193961420768026]);
+  close(wilsonCI(30, 40), [0.5980603857923197, 0.858128813609037]);
+  close(wilsonCI(0, 20), [0, 0.16112515805281938]);
+  close(wilsonCI(20, 20), [0.8388748419471806, 1]);
+  close(clopperPearsonCI(10, 40), [0.126914798932845, 0.4119619801514299]);
+  close(clopperPearsonCI(30, 50), [0.45179402847918043, 0.7359216049054632]);
+  close(clopperPearsonCI(0, 20), [0, 0.1684334709830853]);
+  close(clopperPearsonCI(20, 20), [0.8315665290169146, 1]);
+  // "none" is not an interval, and a non-proportion has none either.
+  strictEqual(proportionCI("none", 10, 40), null);
+  strictEqual(proportionCI("wilson", 50, 40), null);
+  strictEqual(proportionCI("wilson", -1, 40), null);
+  strictEqual(proportionCI("clopper-pearson", 10, 0), null);
+
+  // End to end on a Contingency table (seq 196's home): counts by group,
+  // each as a share of its column total, with Wilson CIs.
+  const table: TableData = {
+    columns: ["Title", "Men", "Women"],
+    rows: [
+      ["Yes", "10", "30"],
+      ["No", "30", "20"],
+    ],
+  };
+  const out = await runAnalysis("fraction-of-total", table, {
+    ys: ["Men", "Women"],
+    totalBy: "column",
+    format: "fraction",
+    ci: "wilson",
+  });
+  if ("error" in out) throw new Error(out.error);
+  strictEqual(out.fractionsOfTotal?.[0].ci, "wilson");
+  deepStrictEqual(
+    out.fractionsOfTotal?.[0].rows.map((r) => [r.original, r.total, r.value]),
+    [
+      [10, 40, 0.25],
+      [30, 40, 0.75],
+    ],
+  );
+  close(
+    [out.fractionsOfTotal?.[0].rows[0].ciLow ?? NaN, out.fractionsOfTotal?.[0].rows[0].ciHigh ?? NaN],
+    [0.14187118639096302, 0.40193961420768026],
+  );
+  close(
+    [out.fractionsOfTotal?.[1].rows[0].ciLow ?? NaN, out.fractionsOfTotal?.[1].rows[0].ciHigh ?? NaN],
+    [0.4618143774758936, 0.7239161026974346],
+  );
+  ok(out.subtitle?.includes("Wilson/Brown"));
+  ok(out.notes.includes("Wilson/Brown"));
+  // Clopper–Pearson on the same table, as percentages: the intervals scale
+  // by 100 with the values.
+  const cp = await runAnalysis("fraction-of-total", table, {
+    ys: ["Men"],
+    totalBy: "column",
+    format: "percent",
+    ci: "clopper-pearson",
+  });
+  if ("error" in cp) throw new Error(cp.error);
+  strictEqual(cp.fractionsOfTotal?.[0].ci, "clopper-pearson");
+  const pct = cp.fractionsOfTotal?.[0].rows[0];
+  ok(pct?.value === 25 && pct.ciLow != null && Math.abs(pct.ciLow - 12.6914798932845) < 1e-9);
+  ok(pct?.ciHigh != null && Math.abs(pct.ciHigh - 41.19619801514299) < 1e-9);
+  ok(cp.subtitle?.includes("Clopper–Pearson"));
+  // No CI asked: the rows carry no interval fields at all.
+  const plain = await runAnalysis("fraction-of-total", table, {
+    ys: ["Men"],
+    totalBy: "column",
+    format: "fraction",
+  });
+  if ("error" in plain) throw new Error(plain.error);
+  strictEqual(plain.fractionsOfTotal?.[0].ci, "none");
+  strictEqual(plain.fractionsOfTotal?.[0].rows[0].ciLow, undefined);
+  // An unknown method is refused, not silently dropped.
+  deepStrictEqual(
+    await runAnalysis("fraction-of-total", table, {
+      ys: ["Men"],
+      totalBy: "column",
+      format: "fraction",
+      ci: "bogus" as never,
+    }),
+    { error: "Unknown confidence interval: “bogus”." },
+  );
+});
+
+check("fraction of total leaves the CI blank for a value that is not a proportion of its total", async () => {
+  // 10 of a column totalling 5 is a fraction (2.0) but not a proportion:
+  // the value stands, the CI is blank, and the note says why.
+  const table: TableData = {
+    columns: ["Title", "Time", "Y1"],
+    rows: [
+      ["", "0", "10"],
+      ["", "1", "-5"],
+    ],
+  };
+  const out = await runAnalysis("fraction-of-total", table, {
+    ys: ["Y1"],
+    x: "Time",
+    totalBy: "column",
+    format: "fraction",
+    ci: "wilson",
+  });
+  if ("error" in out) throw new Error(out.error);
+  deepStrictEqual(
+    out.fractionsOfTotal?.[0].rows.map((r) => [r.value, r.ciLow, r.ciHigh]),
+    [
+      [2, null, null],
+      [-1, null, null],
+    ],
+  );
+  ok(out.notes.includes("2 values have no confidence interval"));
+  ok(out.notes.includes("not a proportion"));
 });
 
 // Row means / totals (v2): each row summarised across its data sets — total,

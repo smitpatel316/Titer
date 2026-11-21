@@ -621,9 +621,18 @@ export type FractionOfTotalTotal = (typeof FRACTION_OF_TOTAL_TOTALS)[number];
 export const FRACTION_OF_TOTAL_FORMATS = ["fraction", "percent"] as const;
 export type FractionOfTotalFormat = (typeof FRACTION_OF_TOTAL_FORMATS)[number];
 
+/** The 95% confidence interval of each proportion "fraction-of-total" may
+ *  carry (Prism's "Confidence interval of a proportion", via Fraction of
+ *  Total): none, or Wilson/Brown — Prism's recommendation — or
+ *  Clopper–Pearson, the exact interval. Always 95%; there is no level
+ *  choice, matching Prism. */
+export const FRACTION_OF_TOTAL_CIS = ["none", "wilson", "clopper-pearson"] as const;
+export type FractionOfTotalCI = (typeof FRACTION_OF_TOTAL_CIS)[number];
+
 /** Params for "fraction-of-total": which columns to divide (`ys`), how the
- *  total is defined, whether the result is a fraction or a percent, and —
- *  for XY tables — the X column whose values label the result rows. */
+ *  total is defined, whether the result is a fraction or a percent, which
+ *  95% CI of each proportion to carry (`ci`, omitted: none), and — for XY
+ *  tables — the X column whose values label the result rows. */
 export interface FractionOfTotalParams {
   /** Omitted: every numeric column except `x` — the wizard always sets it. */
   ys?: string[];
@@ -631,6 +640,10 @@ export interface FractionOfTotalParams {
   x?: string;
   totalBy: FractionOfTotalTotal;
   format: FractionOfTotalFormat;
+  /** Omitted: no confidence interval. The CI treats the original value as
+   *  successes out of the total as trials, so it is blank for a value that
+   *  is not a proportion of its total (below 0, or above the total). */
+  ci?: FractionOfTotalCI;
 }
 
 /** The curves a nonlinear regression fits. `-logx`/`-x` say whether X is log(concentration)
@@ -1904,23 +1917,31 @@ export interface GoodnessOfFitCategoryRow {
  *  it was divided by, and the resulting fraction (or percent). `value` is
  *  null when the total is 0 — the cell is blank, never NaN or Infinity.
  *  `row` is the row title, or the row number when the table has none; `x`
- *  is the X value at that row (XY tables only). */
+ *  is the X value at that row (XY tables only). `ciLow`/`ciHigh` are the
+ *  95% CI of the proportion, in the same units as `value`, when the analysis
+ *  asked for one — null when the value is not a proportion of its total
+ *  (below 0, or above the total), or when the value itself is blank. */
 export interface FractionOfTotalRow {
   row: string;
   x?: number | null;
   original: number;
   total: number;
   value: number | null;
+  ciLow?: number | null;
+  ciHigh?: number | null;
 }
 
 /** One column's divided values ("fraction-of-total"): the total divided by
- *  — the column total, or the grand total — and whether the values are
- *  fractions or percentages. In row-total mode each row has its own total,
- *  so `total` is null and every row carries its own. */
+ *  — the column total, or the grand total — whether the values are
+ *  fractions or percentages, and which 95% CI of each proportion they
+ *  carry (`ci`, "none" when the analysis asked for none). In row-total
+ *  mode each row has its own total, so `total` is null and every row
+ *  carries its own. */
 export interface FractionOfTotalColumn {
   column: string;
   total: number | null;
   format: FractionOfTotalFormat;
+  ci: FractionOfTotalCI;
   rows: FractionOfTotalRow[];
 }
 

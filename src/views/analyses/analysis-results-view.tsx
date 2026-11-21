@@ -562,6 +562,7 @@ export function AnalysisResultsView({
 
       {result.fractionsOfTotal?.map((col) => {
         const hasX = col.rows.some((r) => r.x !== undefined);
+        const hasCI = col.rows.some((r) => r.ciLow != null && r.ciHigh != null);
         return (
           <Table
             key={col.column}
@@ -572,6 +573,7 @@ export function AnalysisResultsView({
               { label: "Original", numeric: true },
               { label: "Total", numeric: true },
               { label: col.format === "percent" ? "Percent of total" : "Fraction of total", numeric: true },
+              ...(hasCI ? [{ label: "95% CI of proportion", numeric: true }] : []),
             ]}
             rows={col.rows.map((r) => [
               r.row,
@@ -579,6 +581,7 @@ export function AnalysisResultsView({
               num(r.original),
               num(r.total),
               num(r.value),
+              ...(hasCI ? [r.ciLow == null || r.ciHigh == null ? "—" : `${num(r.ciLow)} to ${num(r.ciHigh)}`] : []),
             ])}
           />
         );
