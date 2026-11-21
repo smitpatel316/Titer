@@ -1,6 +1,7 @@
 // Headless export jobs for the MCP dispatcher (v1.6.0 L8, GAP-2):
-// the four tools `titer_export_graph`, `titer_export_figure`,
-// `titer_export_office` and `titer_export_table_data`.
+// the five tools `titer_export_graph`, `titer_export_figure`,
+// `titer_export_office`, `titer_export_table_data` and
+// `titer_export_all_graphs` (seq 179: every graph and figure at once).
 //
 // GAP-2 was that every export path rendered through `Plotly.toImage` on
 // a live, mounted DOM element, so a graph that was not open on screen
@@ -57,6 +58,7 @@ import { isMacOs } from "../lib/channel";
 import JSZip from "jszip";
 import { writePzfx } from "../lib/pzfx-write";
 import { version as appVersion } from "../../package.json";
+import { planExportAll, type ExportAllItem, type ExportAllKind } from "../lib/export-all";
 import {
   DEFAULT_GRAPH_OPTIONS,
   GRAPH_LIMITS,
@@ -97,6 +99,10 @@ export interface ExportJobDeps {
    *  `buildGraphFigure`). A harness injects a stub; the table-data jobs
    *  never call it. */
   run?: AnalysisRunner;
+  /** How one batch item renders (seq 179). Omitted: the real offscreen
+   *  renderers below. Injectable so the node test harness can drive the
+   *  batch without a webview, exactly like `io` for the table jobs. */
+  render?: ExportAllRenderer;
 }
 
 /** An overlay report as the tool returns it: which overlays drew, and
@@ -112,6 +118,25 @@ export function overlayReport(overlays: GraphOverlayStatus[]): {
       .map((o) => ({ overlay: o.overlay, status: o.status, ...(o.detail ? { detail: o.detail } : {}) })),
   };
 }
+
+/** One batch item drawn: the image bytes, its pixel size, and the
+ *  figure export's `missing` count when the item is a figure. */
+export interface ExportAllRenderOut {
+  bytes: Uint8Array;
+  widthPx: number;
+  heightPx: number;
+  capped?: boolean;
+  reason?: string;
+  missing?: number;
+}
+
+/** Draw one batch item (a graph, or a whole figure) as image bytes. */
+export type ExportAllRenderer = (
+  item: ExportAllItem,
+  format: ExportFormat,
+  dpi: Resolution,
+  nodes: Record<string, ProjectNode>,
+) => Promise<ExportAllRenderOut>;
 
 /** What one export job reports: the tool's output. */
 export interface ExportJobOutcome {
@@ -149,6 +174,22 @@ function optNum(job: McpJob, args: Record<string, unknown>, name: string): numbe
     throw jobErr(job, `needs ${name} to be a number.`);
   }
   return value;
+}
+
+function optBool(job: McpJob, args: Record<string, unknown>, name: string): boolean | undefined {
+  const value = args[name];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "boolean") throw jobErr(job, `needs ${name} to be a boolean.`);
+  return value;
+}
+
+function optStrArray(job: McpJob, args: Record<string, unknown>, name: string): string[] | undefined {
+  const value = args[name];
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) {
+    throw jobErr(job, `needs ${name} to be a list of strings.`);
+  }
+  return value as string[];
 }
 
 /** The file extension for a graph/figure export format. */
@@ -520,6 +561,196 @@ export async function executeExportFigure(job: McpJob, deps: ExportJobDeps): Pro
   };
   if (reason) result.reason = reason;
   return { result };
+}
+
+/** What one export-all batch reports, per item: written, skipped, or
+ *  failed — a failed render never stops the rest of the batch. */
+export interface ExportAllBatchOutcome {
+  folder: string;
+  format: ExportFormat;
+  dpi: Resolution;
+  exported: {
+    id: string;
+    kind: ExportAllKind;
+    name: string;
+    path: string;
+    width_px: number;
+    height_px: number;
+    capped?: boolean;
+    reason?: string;
+    missing?: number;
+  }[];
+  skipped: { id: string; kind: ExportAllKind; name: string; reason: string }[];
+  failed: { id: string; kind: ExportAllKind; name: string; error: string }[];
+  exported_count: number;
+  skipped_count: number;
+  failed_count: number;
+}
+
+export interface RunExportAllOptions {
+  folder: string;
+  format: ExportFormat;
+  dpi: Resolution;
+  includeGraphs?: boolean;
+  includeFigures?: boolean;
+  graphIds?: string[];
+  figureIds?: string[];
+}
+
+/** The real batch renderer: a graph through the headless graph render,
+ *  a figure through its own raster/SVG render — the same paths the
+ *  single-item tools use, so a batch file matches its one-at-a-time file. */
+async function defaultExportAllRender(
+  item: ExportAllItem,
+  format: ExportFormat,
+  dpi: Resolution,
+  nodes: Record<string, ProjectNode>,
+): Promise<ExportAllRenderOut> {
+  if (item.kind === "graph") {
+    const graph = nodes[item.id]!;
+    const size96 = graphDrawSize(graph);
+    const out = await renderGraphImage(graph, nodes, format, dpi, size96);
+    return { bytes: out.bytes, widthPx: out.widthPx, heightPx: out.heightPx, capped: out.capped, reason: out.reason };
+  }
+  const figure = nodes[item.id]!;
+  if (format === "svg") {
+    const out = await renderFigureSvg(figure, nodes, dpi);
+    return {
+      bytes: new TextEncoder().encode(out.svg),
+      widthPx: out.width,
+      heightPx: out.height,
+      missing: out.missing,
+    };
+  }
+  if (format === "eps") {
+    // EPS is SVG converted, as the single-item export does — the raster
+    // renderer takes no eps.
+    const out = await renderFigureSvg(figure, nodes, dpi);
+    return {
+      bytes: svgToEps(out.svg),
+      widthPx: out.width,
+      heightPx: out.height,
+      missing: out.missing,
+    };
+  }
+  if (format === "pdf") {
+    // PDF is true vector (the composed SVG, converted), with a raster
+    // fallback when a panel has content the converter cannot draw.
+    const svgOut = await renderFigureSvg(figure, nodes, dpi);
+    try {
+      return {
+        bytes: svgToPdf(svgOut.svg),
+        widthPx: svgOut.width,
+        heightPx: svgOut.height,
+        missing: svgOut.missing,
+      };
+    } catch (err) {
+      if (!(err instanceof VectorExportError)) throw err;
+      const out = await renderFigureRaster(figure, nodes, "pdf", dpi);
+      return {
+        bytes: new Uint8Array(await out.blob.arrayBuffer()),
+        widthPx: out.width,
+        heightPx: out.height,
+        capped: out.capped,
+        reason: out.reason,
+        missing: out.missing,
+      };
+    }
+  }
+  const out = await renderFigureRaster(figure, nodes, format, dpi);
+  return {
+    bytes: new Uint8Array(await out.blob.arrayBuffer()),
+    widthPx: out.width,
+    heightPx: out.height,
+    capped: out.capped,
+    reason: out.reason,
+    missing: out.missing,
+  };
+}
+
+/** Run an export-all batch: plan the files, render and write each one
+ *  into `folder`, and report per item. One bad render is recorded in
+ *  `failed` and the batch goes on — the point of the batch is that the
+ *  user gets the rest. Shared by the MCP tool and the File-menu dialog. */
+export async function runExportAllBatch(
+  state: ExportJobState,
+  options: RunExportAllOptions,
+  deps: Pick<ExportJobDeps, "io" | "render">,
+): Promise<ExportAllBatchOutcome> {
+  // An empty folder would land files in "/" after the trailing-slash
+  // trim below — refuse it here, so no caller (MCP, GUI, future) can
+  // write a batch to the filesystem root by mistake. The MCP path
+  // rejects it earlier (`reqStr`); the GUI validates before calling.
+  const folder = options.folder.trim().replace(/\/+$/, "");
+  if (!folder) throw new Error("Export-all needs a folder to write into.");
+  const plan = planExportAll(state, options);
+  const render = deps.render ?? defaultExportAllRender;
+  const io = deps.io ?? defaultExportIo;
+  const outcome: ExportAllBatchOutcome = {
+    folder,
+    format: plan.format,
+    dpi: plan.dpi,
+    exported: [],
+    skipped: plan.skipped,
+    failed: [],
+    exported_count: 0,
+    skipped_count: plan.skipped.length,
+    failed_count: 0,
+  };
+  for (const item of plan.items) {
+    try {
+      const out = await render(item, plan.format, plan.dpi, state.nodes);
+      const path = `${folder}/${item.fileName}`;
+      await io.writeFile(path, out.bytes);
+      const entry: ExportAllBatchOutcome["exported"][number] = {
+        id: item.id,
+        kind: item.kind,
+        name: item.name,
+        path,
+        width_px: out.widthPx,
+        height_px: out.heightPx,
+      };
+      if (out.capped) entry.capped = true;
+      if (out.reason) entry.reason = out.reason;
+      if (out.missing) entry.missing = out.missing;
+      outcome.exported.push(entry);
+    } catch (err) {
+      outcome.failed.push({
+        id: item.id,
+        kind: item.kind,
+        name: item.name,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  outcome.exported_count = outcome.exported.length;
+  outcome.failed_count = outcome.failed.length;
+  return outcome;
+}
+
+/** `export-all-graphs`: every graph and figure in the project, one file
+ *  each, into `folder` (resolved by Rust when omitted). The plan throws
+ *  when there is nothing to export; a render failure is reported per
+ *  item in `failed`, never thrown, so the batch finishes. */
+export async function executeExportAllGraphs(job: McpJob, deps: ExportJobDeps): Promise<ExportJobOutcome> {
+  const args = argsOf(job);
+  const folder = reqStr(job, args, "folder");
+  const { format, dpi } = exportFormatDpi(job, args);
+  const state = deps.getState();
+  const out = await runExportAllBatch(
+    state,
+    {
+      folder,
+      format,
+      dpi,
+      includeGraphs: optBool(job, args, "include_graphs"),
+      includeFigures: optBool(job, args, "include_figures"),
+      graphIds: optStrArray(job, args, "graph_ids"),
+      figureIds: optStrArray(job, args, "figure_ids"),
+    },
+    deps,
+  );
+  return { result: { project_id: job.project_id, ...out } };
 }
 
 /** `export-office`: the GUI's one-click Send to Word / PowerPoint /

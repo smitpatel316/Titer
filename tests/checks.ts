@@ -294,6 +294,7 @@ import {
 import { buildGraphFigure, type AnalysisRunner } from "../src/views/graphs/graph-figure";
 import { overlayReport } from "../src/store/mcp-export";
 import { createEvalDedupe, ensureSaveExtension } from "../src/native";
+import { defaultExportAllFolder, planExportAll } from "../src/lib/export-all";
 import { engineStatusText, getEngineStatus, onEngineStatus, setEngineStatus } from "../src/stats/engine-status";
 import {
   buildKeynoteScript,
@@ -327,6 +328,7 @@ import {
   readLinkedPaste,
   type LinkedPaste,
 } from "../src/lib/linked-paste";
+import { executeExportAllGraphs, runExportAllBatch, type ExportJobDeps } from "../src/store/mcp-export";
 import { sampleProject } from "./sample-project";
 import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { decodePng, bmpEncode, packBits, pdfEncode, tiffEncode } from "../src/lib/raster-export";
@@ -11288,6 +11290,147 @@ check("the Tauri write path allows .pzfx saves (pzfx-write)", () => {
   const main = readFileSync("src-tauri/src/main.rs", "utf8");
   const allowlist = writeFileAllowlist(main);
   ok(allowlist.includes('"pzfx"'), `write_file allowlist must include "pzfx": [${allowlist}]`);
+});
+
+// ── Export All Graphs & Layouts (seq 179) ─────────────────────────────
+// Prism's File > Export All Graphs: every graph and layout in the project,
+// one file each, in one folder, at one format/DPI. Before this lane Titer
+// exported one graph or figure at a time, each through its own save panel,
+// so a project with a dozen graphs took a dozen panels.
+check("export-all lists every graph and figure in sidebar order (seq 179)", () => {
+  const payload = figurePayload();
+  const plan = planExportAll(payload, { format: "png" });
+  deepStrictEqual(
+    plan.items.map((i) => i.id),
+    ["g1", "g2", "f1"],
+  );
+  deepStrictEqual(
+    plan.items.map((i) => i.fileName),
+    ["Plot.png", "Bars.png", "Figure 1.png"],
+  );
+  deepStrictEqual(plan.skipped, []);
+});
+
+check("export-all skips a figure with no panels, and says so (seq 179)", () => {
+  const payload = figurePayload();
+  const empty: ProjectNode = { id: "f2", type: "figure", name: "Empty Figure", parentId: null, panels: [] };
+  const state = {
+    ...payload,
+    nodes: { ...payload.nodes, f2: empty },
+    rootOrder: [...payload.rootOrder, "f2"],
+  };
+  const plan = planExportAll(state, { format: "png" });
+  deepStrictEqual(
+    plan.items.map((i) => i.id),
+    ["g1", "g2", "f1"],
+  );
+  strictEqual(plan.skipped.length, 1);
+  strictEqual(plan.skipped[0].id, "f2");
+  ok(plan.skipped[0].reason.includes("no panels"), plan.skipped[0].reason);
+});
+
+check("export-all gives same-named graphs different files, and sanitizes stems (seq 179)", () => {
+  const payload = figurePayload();
+  const renamed = {
+    ...payload,
+    nodes: {
+      ...payload.nodes,
+      g2: { ...payload.nodes.g2, name: "Plot" },
+      g1: { ...payload.nodes.g1, name: "A/B: C" },
+    },
+  };
+  const plan = planExportAll(renamed, { format: "jpeg" });
+  deepStrictEqual(
+    plan.items.map((i) => i.fileName),
+    ["A-B- C.jpg", "Plot.jpg", "Figure 1.jpg"],
+  );
+});
+
+check("export-all takes an explicit subset, and an unknown id is an error (seq 179)", () => {
+  const payload = figurePayload();
+  const subset = planExportAll(payload, { format: "svg", graphIds: ["g2"] });
+  deepStrictEqual(
+    subset.items.map((i) => i.id),
+    ["g2"],
+  );
+  throws(() => planExportAll(payload, { format: "png", graphIds: ["nope"] }), /no graph with id “nope”/);
+  throws(() => planExportAll(payload, { format: "png", includeGraphs: false, includeFigures: false }), /nothing to export/i);
+  const empty = { nodes: {}, rootOrder: [], childOrder: {} };
+  throws(() => planExportAll(empty, { format: "png" }), /nothing to export/i);
+});
+
+check("export-all writes one file per item and keeps going past a failed render (seq 179)", async () => {
+  const payload = figurePayload();
+  const written: Record<string, Uint8Array> = {};
+  const deps: ExportJobDeps = {
+    getState: () => ({
+      nodes: payload.nodes,
+      rootOrder: payload.rootOrder,
+      childOrder: payload.childOrder,
+      activeNodeId: payload.activeNodeId,
+    }),
+    io: {
+      writeFile: async (path, data) => {
+        written[path] = typeof data === "string" ? new TextEncoder().encode(data) : data;
+      },
+    },
+    render: async (item) => {
+      if (item.id === "g2") throw new Error("could not draw Bars");
+      return { bytes: new Uint8Array([1, 2, 3]), widthPx: 100, heightPx: 80 };
+    },
+  };
+  const job: McpJob = {
+    job_id: "job-179",
+    project_id: "project-1",
+    action: "export-all-graphs",
+    args: { folder: "/tmp/exports/", format: "png", dpi: "300" },
+    status: "queued",
+  };
+  const out = await executeExportAllGraphs(job, deps);
+  const result = out.result as {
+    exported: { id: string; path: string }[];
+    failed: { id: string; error: string }[];
+    exported_count: number;
+    failed_count: number;
+    folder: string;
+  };
+  strictEqual(result.folder, "/tmp/exports");
+  strictEqual(result.exported_count, 2);
+  strictEqual(result.failed_count, 1);
+  deepStrictEqual(
+    result.exported.map((e) => e.id),
+    ["g1", "f1"],
+  );
+  strictEqual(result.failed[0].id, "g2");
+  ok(result.failed[0].error.includes("could not draw Bars"), result.failed[0].error);
+  deepStrictEqual(Object.keys(written).sort(), ["/tmp/exports/Figure 1.png", "/tmp/exports/Plot.png"]);
+});
+
+check("export-all through the dispatcher reports an empty project instead of an unknown action (seq 179)", async () => {
+  const harness = mcpLaggingHarness(true);
+  await rejects(
+    harness.run("job-179-empty", "export-all-graphs", { folder: "/tmp/exports", format: "png" }),
+    /nothing to export/i,
+  );
+});
+
+check("export-all default folder sits beside the project file (seq 179)", () => {
+  strictEqual(defaultExportAllFolder("/Users/smit/Work/Tumor.hlx"), "/Users/smit/Work/Tumor Exports");
+  strictEqual(defaultExportAllFolder("Tumor.hlx"), "Tumor Exports");
+  strictEqual(defaultExportAllFolder("/Users/smit/Work/A/B: C.hlx"), "/Users/smit/Work/A/B- C Exports");
+  strictEqual(defaultExportAllFolder(null), null);
+});
+
+check("export-all refuses an empty folder instead of writing to the root (seq 179)", async () => {
+  const payload = figurePayload();
+  await rejects(
+    runExportAllBatch(
+      { nodes: payload.nodes, rootOrder: payload.rootOrder, childOrder: payload.childOrder, activeNodeId: payload.activeNodeId },
+      { folder: "   ", format: "png", dpi: "300" },
+      {},
+    ),
+    /needs a folder/i,
+  );
 });
 
 check("a figure holds references, not copies, of its graphs (F-07)", () => {

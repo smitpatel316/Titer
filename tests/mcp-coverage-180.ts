@@ -617,11 +617,11 @@ const ROWS: Row[] = [
     item: "179",
     title: "Export All Graphs/Layouts",
     status: "covered",
-    note: "No single export-all tool, but the primitives compose: list + export per node.",
+    note: "Merged on check/v18: titer_export_all_graphs batch tool (every graph + figure, one file each, per-item failure reporting) + File-menu Export All dialog on the same plan/render path.",
     checks: [
       {
         kind: "tools",
-        tools: ["titer_list_projects", "titer_export_graph", "titer_export_figure", "titer_export_table_data"],
+        tools: ["titer_list_projects", "titer_export_graph", "titer_export_figure", "titer_export_table_data", "titer_export_all_graphs"],
       },
     ],
   },

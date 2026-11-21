@@ -9,7 +9,7 @@ passes; prints a PASS/FAIL line per check.
 
 PREREQUISITE: in Titer, Settings → AI Connections, turn on every group
 under "What your AI can do" first — by default the server advertises
-only the 5 read tools (contract §12), and this smoke drives all 58.
+only the 5 read tools (contract §12), and this smoke drives all 59.
 
 The script drives one deterministic flow on a fresh project it creates
 itself (no fixture ids — every id it needs comes from a tool's own
@@ -72,9 +72,9 @@ EXPECTED_TOOLS = [
     "titer_cloud_upload", "titer_cloud_upload_new",
     "titer_cloud_create_folder", "titer_cloud_move",
     "titer_cloud_metadata", "titer_cloud_revisions",
-    # L8 export (4)
+    # L8 export (5)
     "titer_export_graph", "titer_export_figure", "titer_export_office",
-    "titer_export_table_data",
+    "titer_export_table_data", "titer_export_all_graphs",
 ]
 assert len(EXPECTED_TOOLS) == 59, len(EXPECTED_TOOLS)
 
@@ -393,6 +393,16 @@ def main():
     tool("titer_export_figure", {"project_id": pid, "figure_id": fid,
                                  "format": "png", "dpi": "300", "path": fpng})
     check_file("export_figure png magic", fpng, b"\x89PNG")
+    # seq 179: the whole project at once — the graph + figure above, one
+    # file each, into one folder (explicit folder, so nothing lands in
+    # the project's own directory).
+    all_dir = os.path.join(out_dir, "smoke-export-all")
+    all_exp = tool("titer_export_all_graphs", {"project_id": pid, "format": "png",
+                                               "dpi": "300", "folder": all_dir})
+    check("export_all_graphs exports graph + figure", all_exp.get("exported_count") == 2,
+          json.dumps(all_exp)[:300])
+    for item in all_exp.get("exported", []):
+        check_file(f"export_all {item['name']} png magic", item["path"], b"\x89PNG")
     docx = os.path.join(out_dir, "smoke-graph.docx")
     office = tool("titer_export_office", {"project_id": pid, "graph_id": gid,
                                           "target": "word", "path": docx})

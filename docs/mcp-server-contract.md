@@ -523,6 +523,7 @@ expected to differ until the shared `buildGraphFigure` follow-up lands.
 | `titer_export_figure` | `project_id?`, `figure_id`, `format`, `dpi?`, `color_mode?`, `path?`, `width_in?`, `height_in?` | `{ project_id, figure_id, format, dpi, color_mode, vector, path, width_px, height_px, missing?, capped? }` — same shape as graph export; `missing` counts panels whose graph could not be drawn (reported, not hidden). `width_in`/`height_in` override the figure's saved size in inches (one alone derives the other from the saved aspect ratio; out-of-limits sizes are a plain error naming the limits). PDF is true vector (falls back to raster, reported as `vector: false`); EPS is true vector. |
 | `titer_export_office` | `project_id?`, `graph_id?`, `figure_id?`, `target: "word" \| "powerpoint"`, `dpi?` (default `"300"`), `path?` | `{ project_id, target, path, extension: "docx" \| "pptx" }` (+ the source id, `width_px`/`height_px`, `capped`/`reason`, and `missing` for a figure). Exactly one of `graph_id` / `figure_id`. One image per document (title + centred image), the GUI's one-click Send to Office driven headlessly: the same PNG render at `dpi`, embedded at its physical size. |
 | `titer_export_table_data` | `project_id?`, `table_id`, `format?: "csv" \| "xlsx" \| "txt"` (default `"csv"`), `path?` | `{ project_id, table_id, format, path, rows }`. CSV generated from the snapshot (no UI CSV writer exists to reuse); TXT is tab-separated, same grid + quoting; XLSX is a minimal hand-built workbook (JSZip + inline strings, same pattern as the office export). Cells stay text — nothing is coerced to a number, so an ID like "0123" never becomes 123. Excluded cells are written empty, matching what analyses see. Empty cells are omitted from the XLSX (sparse). |
+| `titer_export_all_graphs` | `project_id?`, `format: "png" \| "jpeg" \| "svg" \| "pdf" \| "tiff"`, `dpi?` (default `"300"`), `folder?`, `include_graphs?`, `include_figures?`, `graph_ids?`, `figure_ids?` | `{ project_id, folder, format, dpi, exported: [{ id, kind, name, path, width_px, height_px, capped?, reason?, missing? }], skipped: [{ id, kind, name, reason }], failed: [{ id, kind, name, error }], exported_count, skipped_count, failed_count }`. Every graph and figure in the project, one file each, into one folder (seq 179, Prism's File > Export All Graphs). `folder` omitted = a `<project-stem> Exports` folder beside the project file, else `<Documents>/Titer Exports`. Same-named nodes get ` (2)`, ` (3)`, … — a batch never overwrites its own earlier file. A figure with no panels is skipped, not failed; a failed render is reported per item in `failed` and never stops the batch. Same renderers as the single-item tools, so a batch file matches its one-at-a-time file. |
 
 ### 10.2 Activity log
 
@@ -570,7 +571,7 @@ explicit "Send to GitHub" click opens a pre-filled issue in the browser.
 | Data tables | 10 |
 | Analyses (run + rerun + freeze + simulate + method + wand + script) | 7 |
 | Graphs / figures / info sheets | 7 |
-| Export | 4 |
+| Export | 5 |
 | Cloud | 9 |
 | **Total** | **59** |
 
@@ -770,7 +771,7 @@ tool must assign it a group, or the suite fails).
 | Edit tables (`tables`) | `titer_create_table`, `titer_write_table`, `titer_edit_table`, `titer_refresh_linked_data`, `titer_duplicate_table_family`, `titer_rename_node`, `titer_reorder_nodes`, `titer_undo`, `titer_redo` | no |
 | Run analyses (`analyses`) | `titer_run_analysis`, `titer_rerun_analysis`, `titer_freeze_analysis`, `titer_simulate_data`, `titer_apply_method`, `titer_apply_wand`, `titer_read_job`, `titer_list_jobs`, `titer_cancel_job` | no |
 | Build graphs and figures (`graphs`) | `titer_build_graph`, `titer_update_graph`, `titer_clone_graph`, `titer_create_figure`, `titer_update_figure`, `titer_create_info_sheet`, `titer_update_info_sheet` | no |
-| Export (`export`) | `titer_export_graph`, `titer_export_figure`, `titer_export_office`, `titer_export_table_data` | no |
+| Export (`export`) | `titer_export_graph`, `titer_export_figure`, `titer_export_office`, `titer_export_table_data`, `titer_export_all_graphs` | no |
 | Cloud (Box) (`cloud`) | `titer_cloud_status`, `titer_cloud_list`, `titer_cloud_metadata`, `titer_cloud_revisions`, `titer_cloud_download`, `titer_cloud_upload`, `titer_cloud_upload_new`, `titer_cloud_create_folder`, `titer_cloud_move` | no |
 | Destructive actions (`destructive`) | `titer_delete_node`, `titer_run_script` | no |
 

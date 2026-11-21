@@ -1422,7 +1422,13 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
         id: "export",
         label: "Export",
         description: "Export graphs, figures and tables to files.",
-        tools: &["titer_export_graph", "titer_export_figure", "titer_export_office", "titer_export_table_data"],
+        tools: &[
+            "titer_export_graph",
+            "titer_export_figure",
+            "titer_export_office",
+            "titer_export_table_data",
+            "titer_export_all_graphs",
+        ],
     },
     AllowlistGroup {
         id: "cloud",
@@ -3453,6 +3459,40 @@ pub struct ExportTableDataArgs {
     /// Where to write the file. Omit for the default path (see above).
     #[serde(default)]
     pub path: Option<String>,
+}
+
+/// Export every graph and figure (layout) in the project, one image file
+/// each, into one folder (seq 179, Prism's File > Export All Graphs).
+/// `folder` omitted = a `<project-stem> Exports` folder beside the
+/// project file, else <Documents>/Titer Exports. Figures with no panels
+/// are skipped and reported, not failed; a graph that fails to render is
+/// reported per item in `failed` while the rest of the batch still writes.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ExportAllGraphsArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// "png" | "jpeg" | "svg" | "pdf" | "tiff".
+    pub format: String,
+    /// "150" | "300" | "600" | "900" | "1200". Omit for "300".
+    #[serde(default)]
+    pub dpi: Option<String>,
+    /// The folder to write into. Omit for the default folder (see above).
+    #[serde(default)]
+    pub folder: Option<String>,
+    /// Export graphs (default true).
+    #[serde(default)]
+    pub include_graphs: Option<bool>,
+    /// Export figures / layouts (default true).
+    #[serde(default)]
+    pub include_figures: Option<bool>,
+    /// Export exactly these graph ids (default: all). When either list is
+    /// given, only the listed items export.
+    #[serde(default)]
+    pub graph_ids: Option<Vec<String>>,
+    /// Export exactly these figure ids (default: all).
+    #[serde(default)]
+    pub figure_ids: Option<Vec<String>>,
 }
 
 #[tool_router(router = tools, vis = "pub")]
@@ -7091,6 +7131,80 @@ pub struct CreateProjectArgs {
             }
         }
     }
+
+    /// Export every graph and figure (layout) in the project, one image
+    /// file each, into one folder (PNG, JPEG, SVG, PDF or TIFF at
+    /// 150–1200 DPI, default 300), rendered offscreen. `folder` omitted
+    /// = a `<project-stem> Exports` folder beside the project file, else
+    /// <Documents>/Titer Exports.
+    /// Returns the folder, per-item paths, and the skipped / failed lists
+    /// (a figure with no panels is skipped; a failed render never stops
+    /// the batch). A big project can outrun the 120 s job wait — the
+    /// error then names the job id to check with titer_read_job.
+    #[tool(
+        name = "titer_export_all_graphs",
+        description = "Export every graph and figure (layout) in the project, one image file each, into one folder: format png/jpeg/svg/pdf/tiff, dpi 150/300/600/900/1200 (default 300, ignored for SVG). Rendered offscreen — nothing need be open on screen. folder omitted = a '<project-stem> Exports' folder beside the project file, else <Documents>/Titer Exports. include_graphs/include_figures default true; graph_ids/figure_ids export exactly those (when either list is given, only the listed items export). Returns the folder, per-item paths, and skipped/failed lists — a figure with no panels is skipped, a failed render is reported per item and never stops the batch.",
+        annotations(
+            title = "Export all graphs",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn export_all_graphs(
+        &self,
+        Parameters(args): Parameters<ExportAllGraphsArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "format": args.format, "dpi": args.dpi, "folder": args.folder, "include_graphs": args.include_graphs, "include_figures": args.include_figures, "graph_ids": args.graph_ids, "figure_ids": args.figure_ids });
+        let result: Result<serde_json::Value, String> = async {
+            let format = args.format.as_str();
+            if !EXPORT_FORMATS.contains(&format) {
+                return Err(format!(
+                    "Unknown export format “{format}” — the formats are png, jpeg, svg, pdf, tiff."
+                ));
+            }
+            let dpi = args.dpi.as_deref().unwrap_or("300");
+            if !EXPORT_DPIS.contains(&dpi) {
+                return Err(format!(
+                    "Unknown resolution “{dpi}” — the resolutions are 150, 300, 600, 900, 1200 DPI."
+                ));
+            }
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let folder = match &args.folder {
+                Some(f) if !f.trim().is_empty() => f.trim().to_string(),
+                _ => self
+                    .default_export_dir(&project_id)?
+                    .to_string_lossy()
+                    .into_owned(),
+            };
+            let mut job_args = serde_json::json!({ "folder": folder, "format": format, "dpi": dpi });
+            if let Some(v) = args.include_graphs {
+                job_args["include_graphs"] = serde_json::json!(v);
+            }
+            if let Some(v) = args.include_figures {
+                job_args["include_figures"] = serde_json::json!(v);
+            }
+            if let Some(v) = &args.graph_ids {
+                job_args["graph_ids"] = serde_json::json!(v);
+            }
+            if let Some(v) = &args.figure_ids {
+                job_args["figure_ids"] = serde_json::json!(v);
+            }
+            self.run_export_job(&project_id, "export-all-graphs", job_args).await
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_export_all_graphs", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_export_all_graphs", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
 }
 
 impl TiterMcpServer {
@@ -7268,6 +7382,45 @@ impl TiterMcpServer {
             n += 1;
         }
         Ok(candidate)
+    }
+
+    /// The folder an export-all batch writes into when the caller passes
+    /// none (seq 179): a `<project-stem> Exports` folder beside the
+    /// project file when the project has one, else <Documents>/Titer
+    /// Exports (created if needed). A batch writes a dozen files, so it
+    /// gets its own folder instead of littering the project directory —
+    /// the single-export default (beside the file) is the wrong shape
+    /// here. Mirrors the frontend's `defaultExportAllFolder`.
+    fn default_export_dir(&self, project_id: &str) -> Result<PathBuf, String> {
+        let snapshot = self.state.snapshot_for(project_id).ok_or_else(|| {
+            format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+        })?;
+        let dir = match snapshot.get("filePath").and_then(|v| v.as_str()) {
+            Some(p) => {
+                let path = PathBuf::from(p);
+                let stem = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| sanitize_export_stem(s, "Titer"))
+                    .unwrap_or_else(|| "Titer".to_string());
+                path.parent()
+                    .map(|d| d.join(format!("{stem} Exports")))
+                    .unwrap_or_else(|| PathBuf::from(format!("{stem} Exports")))
+            }
+            None => {
+                let app = self.state.app_handle().ok_or_else(|| {
+                    "The project has no saved file yet — pass a folder, or save the project first.".to_string()
+                })?;
+                // Same Documents fallback as `default_export_path` above
+                // (Linux without XDG user-dirs has no `document_dir`).
+                let base = app.path().document_dir().or_else(|_| {
+                    app.path().home_dir().map(|h| h.join("Documents"))
+                });
+                base.map_err(|e| e.to_string())?.join("Titer Exports")
+            }
+        };
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        Ok(dir)
     }
 }
 
@@ -9540,7 +9693,7 @@ mod tests {
         for name in ["titer_export_graph"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
-        for name in ["titer_export_figure", "titer_export_office", "titer_export_table_data"] {
+        for name in ["titer_export_figure", "titer_export_office", "titer_export_table_data", "titer_export_all_graphs"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
 
