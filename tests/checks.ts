@@ -10106,9 +10106,10 @@ check("seq 200 nonlinear fitting methods: robust and Poisson", async () => {
     fitMethod: "robust",
   });
   ok(!("error" in multi), `robust multi-Y failed: ${"error" in multi ? multi.error : ""}`);
-  // Several Y sets carry their coefficients with a ` (Set)` suffix.
-  const slopeA = coef(multi, "Slope (A)");
-  const slopeB = coef(multi, "Slope (B)");
+  // Several Y sets carry their coefficients as "Set — Term" (the
+  // multi-set naming — the ` (Set)` suffix is the global fit's only).
+  const slopeA = coef(multi, "A — Slope");
+  const slopeB = coef(multi, "B — Slope");
   ok(slopeA != null && Math.abs(slopeA - 2.98) < 0.05, `robust multi-Y slope A should be ~2.98, got ${slopeA}`);
   ok(slopeB != null && Math.abs(slopeB - 3) < 0.05, `robust multi-Y slope B should be ~3, got ${slopeB}`);
 });
@@ -16230,7 +16231,11 @@ check("a constant or collinear predictor is named, not a crash, in multiple regr
 // level in the table the reference, coefficients named Variable[Level]
 // (GraphPad Prism 11 Curve Fitting Guide, "Parameter values from multiple
 // regression"). Each check pins the runner against R's own factor() fit, so
-// the dummy coding — not just the plumbing — is verified.
+// the dummy coding — not just the plumbing — is verified. The reference
+// extractions wrap each coefficient in as.numeric(): a bare coef(m)[i]
+// carries its name ("(Intercept)", "gDrug", …), and c() pastes it onto the
+// outer name ("b0.(Intercept)"), so ref.b0 came back undefined and every
+// comparison failed while the runner was exactly right.
 const close224 = (got: number | null | undefined, want: number, tol = 1e-9) =>
   got != null && Math.abs(got - want) < tol;
 
@@ -16267,7 +16272,7 @@ check("seq 224: a text predictor is dummy-coded in multiple regression (first le
     `y<-${rVec([12, 15, 13, 18, 22, 20, 25, 23, 27, 30, 28, 33])};` +
       `x<-${rVec([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])};` +
       `g<-factor(c("Control","Control","Drug","Drug","Placebo","Placebo","Control","Drug","Placebo","Control","Drug","Placebo"),levels=c("Control","Drug","Placebo"));` +
-      `m<-lm(y~x+g);s<-summary(m);c(b0=coef(m)[1],bx=coef(m)[2],bd=coef(m)[3],bp=coef(m)[4],r2=s$r.squared)`,
+      `m<-lm(y~x+g);s<-summary(m);c(b0=as.numeric(coef(m)[1]),bx=as.numeric(coef(m)[2]),bd=as.numeric(coef(m)[3]),bp=as.numeric(coef(m)[4]),r2=s$r.squared)`,
   );
   const byTerm = new Map((out.coefficients ?? []).map((c) => [c.term, c.estimate]));
   ok(close224(byTerm.get("Intercept"), ref.b0!), JSON.stringify(out.coefficients));
@@ -16306,7 +16311,7 @@ check("seq 224: a text predictor is dummy-coded in multiple logistic regression"
     `y<-${rVec([0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1])};` +
       `x<-${rVec([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])};` +
       `g<-factor(c("Control","Drug","Control","Drug","Control","Drug","Control","Drug","Control","Drug","Control","Drug"),levels=c("Control","Drug"));` +
-      `m<-glm(y~x+g,family=binomial);c(b0=coef(m)[1],bx=coef(m)[2],bd=coef(m)[3])`,
+      `m<-glm(y~x+g,family=binomial);c(b0=as.numeric(coef(m)[1]),bx=as.numeric(coef(m)[2]),bd=as.numeric(coef(m)[3]))`,
   );
   const byTerm = new Map((out.coefficients ?? []).map((c) => [c.term, c.estimate]));
   ok(close224(byTerm.get("X"), ref.bx!, 1e-6), JSON.stringify(out.coefficients));
@@ -16343,7 +16348,7 @@ check("seq 224: a text predictor is dummy-coded in Poisson regression", async ()
     `y<-${rVec([2, 3, 1, 4, 5, 3, 6, 4, 7, 5, 8, 6])};` +
       `x<-${rVec([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])};` +
       `g<-factor(c("Control","Drug","Control","Drug","Control","Drug","Control","Drug","Control","Drug","Control","Drug"),levels=c("Control","Drug"));` +
-      `m<-glm(y~x+g,family=poisson);c(b0=coef(m)[1],bx=coef(m)[2],bd=coef(m)[3])`,
+      `m<-glm(y~x+g,family=poisson);c(b0=as.numeric(coef(m)[1]),bx=as.numeric(coef(m)[2]),bd=as.numeric(coef(m)[3]))`,
   );
   const byTerm = new Map((out.coefficients ?? []).map((c) => [c.term, c.estimate]));
   ok(close224(byTerm.get("X"), ref.bx!, 1e-6), JSON.stringify(out.coefficients));
@@ -16390,7 +16395,7 @@ check("seq 224: a text covariate is dummy-coded in Cox proportional-hazards regr
       `g<-factor(c("Control","Drug","Placebo","Control","Drug","Placebo","Control","Drug","Placebo","Control","Drug","Placebo"),levels=c("Control","Drug","Placebo"));` +
       `age<-${rVec([45, 52, 38, 61, 49, 55, 42, 58, 47, 63, 50, 44])};` +
       `m<-survival::coxph(survival::Surv(time,status)~g+age,ties="efron");` +
-      `c(hrd=exp(coef(m)[1]),hrp=exp(coef(m)[2]),hra=exp(coef(m)[3]))`,
+      `c(hrd=as.numeric(exp(coef(m)[1])),hrp=as.numeric(exp(coef(m)[2])),hra=as.numeric(exp(coef(m)[3])))`,
   );
   const byTerm = new Map((out.coefficients ?? []).map((c) => [c.term, c.hazardRatio]));
   ok(close224(byTerm.get("Trt[Drug]"), ref.hrd!, 1e-6), JSON.stringify(out.coefficients));

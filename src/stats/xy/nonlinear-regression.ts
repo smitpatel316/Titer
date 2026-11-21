@@ -1575,9 +1575,16 @@ async function compareModels(
  *  are held as unevaluated expressions so no text escaping is needed.
  *  A succeeding primary is untouched — the loop breaks after it. */
 function retryChain(fits: string[], summary: string): string {
+  // Each fit is braced inside expression(...): a fit that assigns a
+  // helper first (a centered polynomial's `xm<-mean(x)`, a segmental
+  // fit's `brk<-optimize(...)`) holds two statements, and a bare `;`
+  // inside expression() is a parse error ("unexpected ';'") — the
+  // seq-201 centered-sextic interpolation failed exactly this way.
+  // Braces change nothing for single-statement fits.
+  const braced = fits.map((f) => `{${f}}`).join(",");
   return (
     `retryOk<-FALSE;retryErr<-NULL;` +
-    `for(retryFit in expression(${fits.join(",")})){retryOk<-tryCatch({eval(retryFit);${summary}TRUE},error=function(e){retryErr<<-e;FALSE});if(retryOk)break};` +
+    `for(retryFit in expression(${braced})){retryOk<-tryCatch({eval(retryFit);${summary}TRUE},error=function(e){retryErr<<-e;FALSE});if(retryOk)break};` +
     `if(!retryOk)stop(retryErr)`
   );
 }
