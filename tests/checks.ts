@@ -9971,8 +9971,13 @@ check("Send to Keynote uses the .key extension and its own dialog title (Keynote
 
 check("a Keynote export is not a file build — it is made in Keynote itself (Keynote)", async () => {
   const png = testPng(10, 10);
+  // Wrapped: the keynote guard throws synchronously, before any promise
+  // exists — passing the bare call to rejects() would let the throw escape
+  // during argument evaluation instead of asserting on it.
   await rejects(
-    buildOfficeDocument("keynote" as OfficeTarget, { png, title: "x", widthPx: 10, heightPx: 10, dpi: 150 }),
+    async () => {
+      await buildOfficeDocument("keynote" as OfficeTarget, { png, title: "x", widthPx: 10, heightPx: 10, dpi: 150 });
+    },
     /Keynote/,
   );
 });
