@@ -107,9 +107,10 @@ export function stoufferCombinedP(ps: number[]): number {
 
 /** Benjamini–Hochberg q values, in the order given (nulls pass through):
  *  for the i-th smallest P (i = 1…m), the min over j ≥ i of m·p_(j)/j,
- *  capped at 1 — the step-up running minimum from the largest P down. */
+ *  capped at 1 — the step-up running minimum from the largest P down.
+ *  `m` is the count of non-null P values (R's `p.adjust` drops NAs). */
 function bhAdjusted(ps: (number | null)[]): (number | null)[] {
-  const m = ps.length;
+  const m = ps.filter((p) => p != null).length;
   const indexed = ps.map((p, i) => [p, i] as const).filter(([p]) => p != null);
   const sorted = [...indexed].sort((a, b) => a[0]! - b[0]!);
   const out: (number | null)[] = ps.map(() => null);
@@ -123,9 +124,10 @@ function bhAdjusted(ps: (number | null)[]): (number | null)[] {
 }
 
 /** Holm's step-down Bonferroni adjustment, in the order given: for the i-th
- *  smallest P, the max over j ≤ i of (m−j+1)·p_(j), capped at 1. */
+ *  smallest P, the max over j ≤ i of (m−j+1)·p_(j), capped at 1. `m` is the
+ *  count of non-null P values (R's `p.adjust` drops NAs). */
 function holmAdjusted(ps: (number | null)[]): (number | null)[] {
-  const m = ps.length;
+  const m = ps.filter((p) => p != null).length;
   const indexed = ps.map((p, i) => [p, i] as const).filter(([p]) => p != null);
   const sorted = [...indexed].sort((a, b) => a[0]! - b[0]!);
   const out: (number | null)[] = ps.map(() => null);
@@ -140,10 +142,12 @@ function holmAdjusted(ps: (number | null)[]): (number | null)[] {
 /** The Benjamini–Krieger–Yekutieli estimate of the number of true null
  *  hypotheses: run BH at level q/(1+q), count its rejections r₁, and take
  *  m₀ = m − r₁ (Benjamini, Krieger & Yekutieli 2006). `q` is the FDR level
- *  as a fraction. */
+ *  as a fraction. `m` is the count of non-null P values (R's `p.adjust`
+ *  drops NAs). */
 export function bkyTrueNullEstimate(ps: (number | null)[], q: number): number {
   const qPrime = q / (1 + q);
-  return ps.length - bhAdjusted(ps).filter((v) => v != null && v <= qPrime).length;
+  const m = ps.filter((p) => p != null).length;
+  return m - bhAdjusted(ps).filter((v) => v != null && v <= qPrime).length;
 }
 
 /** Benjamini–Krieger–Yekutieli q values, in the order given: the stage-2 BH
@@ -174,9 +178,11 @@ export function adjustStackPValues(
   method: PValueStackMethod,
   q = 0.05,
 ): (number | null)[] {
+  // m is the count of non-null P values (R's p.adjust drops NAs).
+  const m = ps.filter((p) => p != null).length;
   switch (method) {
     case "bonferroni":
-      return ps.map((p) => (p == null ? null : Math.min(1, p * ps.length)));
+      return ps.map((p) => (p == null ? null : Math.min(1, p * m)));
     case "sidak":
       return adjustPValues(ps, "sidak");
     case "holm":
@@ -188,7 +194,7 @@ export function adjustStackPValues(
     case "bky":
       return bkyAdjusted(ps, q);
     case "by": {
-      const c = Array.from({ length: ps.length }, (_, i) => 1 / (i + 1)).reduce((a, b) => a + b, 0);
+      const c = Array.from({ length: m }, (_, i) => 1 / (i + 1)).reduce((a, b) => a + b, 0);
       return bhAdjusted(ps).map((v) => (v == null ? null : Math.min(1, v * c)));
     }
   }
