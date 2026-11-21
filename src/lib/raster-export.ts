@@ -5,6 +5,7 @@
 // size; a TIFF is the same raster with its DPI written in. Alpha is
 // composited onto white (the same rule as JPEG); no transparency, no CMYK.
 import { deflate, inflate } from "pako";
+import { rgbToCmyk, type ColorMode } from "./vector-export";
 
 export type RgbaImage = { width: number; height: number; rgba: Uint8Array };
 
@@ -128,6 +129,27 @@ export function decodePng(bytes: Uint8Array): RgbaImage {
   return { width, height, rgba };
 }
 
+/** RGB bytes as luminance bytes (Rec. 601 luma). */
+export function rgbToGrayBytes(rgb: Uint8Array): Uint8Array {
+  const out = new Uint8Array(rgb.length / 3);
+  for (let i = 0; i < out.length; i++)
+    out[i] = Math.round(0.299 * rgb[i * 3]! + 0.587 * rgb[i * 3 + 1]! + 0.114 * rgb[i * 3 + 2]!);
+  return out;
+}
+
+/** RGB bytes as CMYK bytes (naive conversion, no ICC profile). */
+export function rgbToCmykBytes(rgb: Uint8Array): Uint8Array {
+  const out = new Uint8Array((rgb.length / 3) * 4);
+  for (let i = 0; i < rgb.length / 3; i++) {
+    const [c, m, y, k] = rgbToCmyk(rgb[i * 3]! / 255, rgb[i * 3 + 1]! / 255, rgb[i * 3 + 2]! / 255);
+    out[i * 4] = Math.round(c * 255);
+    out[i * 4 + 1] = Math.round(m * 255);
+    out[i * 4 + 2] = Math.round(y * 255);
+    out[i * 4 + 3] = Math.round(k * 255);
+  }
+  return out;
+}
+
 /** RGBA composited onto white, as RGB — the JPEG rule, shared by PDF/TIFF. */
 export function compositeOnWhite({ width, height, rgba }: RgbaImage): Uint8Array {
   const rgb = new Uint8Array(width * height * 3);
@@ -167,13 +189,22 @@ export function packBits(data: Uint8Array): Uint8Array {
 }
 
 /** A little-endian TIFF: RGB, PackBits, one strip, X/YResolution = dpi
- *  (rational, unit inch). Reads in Preview, Photoshop, ImageJ. */
-export function tiffEncode(image: RgbaImage, dpi: number): Uint8Array {
+ *  (rational, unit inch). Reads in Preview, Photoshop, ImageJ.
+ *  `colorMode` (seq 216, not yet implemented): "cmyk" / "grayscale". */
+/** A little-endian TIFF: RGB / CMYK / grayscale, PackBits, one strip,
+ *  X/YResolution = dpi (rational, unit inch). Reads in Preview,
+ *  Photoshop, ImageJ. CMYK is Photometric 5 with 4 samples, grayscale
+ *  is Photometric 1 with 1 sample. */
+export function tiffEncode(image: RgbaImage, dpi: number, colorMode: ColorMode = "color"): Uint8Array {
   const { width, height } = image;
   const rgb = compositeOnWhite(image);
-  const strip = packBits(rgb);
+  const samples = colorMode === "cmyk" ? 4 : colorMode === "grayscale" ? 1 : 3;
+  const photometric = colorMode === "cmyk" ? 5 : colorMode === "grayscale" ? 1 : 2;
+  const data =
+    colorMode === "cmyk" ? rgbToCmykBytes(rgb) : colorMode === "grayscale" ? rgbToGrayBytes(rgb) : rgb;
+  const strip = packBits(data);
   const bitsOffset = 8 + 2 + 12 * 12 + 4; // header + IFD count + entries + next-IFD
-  const xResOffset = bitsOffset + 6;
+  const xResOffset = bitsOffset + 8; // BitsPerSample needs 2 bytes/sample (4 max)
   const yResOffset = xResOffset + 8;
   const stripOffset = yResOffset + 8;
   const total = stripOffset + strip.length;
@@ -190,11 +221,11 @@ export function tiffEncode(image: RgbaImage, dpi: number): Uint8Array {
     // tag, type, count, value-or-offset (SHORT=3, LONG=4, RATIONAL=5)
     [256, 4, 1, width], // ImageWidth
     [257, 4, 1, height], // ImageLength
-    [258, 3, 3, bitsOffset], // BitsPerSample 8,8,8
+    [258, 3, samples, bitsOffset], // BitsPerSample 8 per sample
     [259, 3, 1, 32773], // Compression: PackBits
-    [262, 3, 1, 2], // Photometric: RGB
+    [262, 3, 1, photometric], // Photometric: RGB 2 / CMYK 5 / BlackIsZero 1
     [273, 4, 1, stripOffset], // StripOffsets
-    [277, 3, 1, 3], // SamplesPerPixel
+    [277, 3, 1, samples], // SamplesPerPixel
     [278, 4, 1, height], // RowsPerStrip
     [279, 4, 1, strip.length], // StripByteCounts
     [282, 5, 1, xResOffset], // XResolution
@@ -208,10 +239,10 @@ export function tiffEncode(image: RgbaImage, dpi: number): Uint8Array {
     set32(at + 4, count);
     set32(at + 8, value);
   });
+  // One sample: the BitsPerSample value sits inline in the tag, not at bitsOffset.
+  if (samples === 1) set16(10 + 2 * 12 + 8, 8);
   set32(10 + 12 * 12, 0); // no next IFD
-  set16(bitsOffset, 8);
-  set16(bitsOffset + 2, 8);
-  set16(bitsOffset + 4, 8);
+  for (let s2 = 0; s2 < samples; s2++) set16(bitsOffset + s2 * 2, 8);
   set32(xResOffset, dpi);
   set32(xResOffset + 4, 1);
   set32(yResOffset, dpi);
@@ -220,14 +251,56 @@ export function tiffEncode(image: RgbaImage, dpi: number): Uint8Array {
   return out;
 }
 
+/** A 24-bit BMP: uncompressed BGR, rows bottom-up and padded to 4 bytes,
+ *  DPI written as pixels per meter. */
+export function bmpEncode(image: RgbaImage, dpi: number): Uint8Array {
+  const { width, height } = image;
+  const rgb = compositeOnWhite(image);
+  const rowSize = Math.floor((width * 3 + 3) / 4) * 4;
+  const pixelData = rowSize * height;
+  const total = 54 + pixelData;
+  const out = new Uint8Array(total);
+  const view = new DataView(out.buffer);
+  const ppm = Math.round(dpi / 0.0254);
+  out[0] = 0x42; // "BM"
+  out[1] = 0x4d;
+  view.setUint32(2, total, true);
+  view.setUint32(10, 54, true);
+  view.setUint32(14, 40, true); // BITMAPINFOHEADER
+  view.setInt32(18, width, true);
+  view.setInt32(22, height, true);
+  view.setUint16(26, 1, true);
+  view.setUint16(28, 24, true);
+  view.setUint32(30, 0, true); // BI_RGB, uncompressed
+  view.setUint32(34, pixelData, true);
+  view.setUint32(38, ppm, true);
+  view.setUint32(42, ppm, true);
+  for (let y = 0; y < height; y++) {
+    const srcRow = height - 1 - y; // BMP rows are bottom-up
+    for (let x = 0; x < width; x++) {
+      const si = (srcRow * width + x) * 3;
+      const di = 54 + y * rowSize + x * 3;
+      out[di] = rgb[si + 2]!;
+      out[di + 1] = rgb[si + 1]!;
+      out[di + 2] = rgb[si]!;
+    }
+  }
+  return out;
+}
+
 const fmtPt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(4).replace(/0+$/, "").replace(/\.$/, ""));
 
 /** A PDF 1.4 with one page at the graph's printed size (points = px × 72/dpi)
- *  and one FlateDecode DeviceRGB image XObject. */
-export function pdfEncode(image: RgbaImage, dpi: number): Uint8Array {
+ *  and one FlateDecode image XObject — DeviceRGB by default, DeviceCMYK
+ *  for "cmyk", DeviceGray for "grayscale". */
+export function pdfEncode(image: RgbaImage, dpi: number, colorMode: ColorMode = "color"): Uint8Array {
   const { width, height } = image;
   const rgb = compositeOnWhite(image);
-  const compressed = deflate(rgb);
+  const data =
+    colorMode === "cmyk" ? rgbToCmykBytes(rgb) : colorMode === "grayscale" ? rgbToGrayBytes(rgb) : rgb;
+  const colorSpace =
+    colorMode === "cmyk" ? "DeviceCMYK" : colorMode === "grayscale" ? "DeviceGray" : "DeviceRGB";
+  const compressed = deflate(data);
   const pageWidth = fmtPt((width * 72) / dpi);
   const pageHeight = fmtPt((height * 72) / dpi);
   const content = `q ${pageWidth} 0 0 ${pageHeight} 0 0 cm /Im0 Do Q`;
@@ -238,7 +311,7 @@ export function pdfEncode(image: RgbaImage, dpi: number): Uint8Array {
       head: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`,
     },
     {
-      head: `<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /BitsPerComponent 8 /ColorSpace /DeviceRGB /Filter /FlateDecode /Length ${compressed.length} >>`,
+      head: `<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /BitsPerComponent 8 /ColorSpace /${colorSpace} /Filter /FlateDecode /Length ${compressed.length} >>`,
       stream: compressed,
     },
     { head: `<< /Length ${content.length} >>`, stream: new TextEncoder().encode(content) },

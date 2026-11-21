@@ -3274,11 +3274,14 @@ fn read_method_file(path: &str) -> Result<String, String> {
 // ── Export tools (L8) ────────────────────────────────────────────────
 
 /// Export one graph as an image file, rendered offscreen from its node
-/// (GAP-2) — it need not be open on screen. SVG ignores `dpi`. `path`
-/// omitted = beside the project file, else <Documents>/Titer Exports
-/// (the L8 default-path rule). `width_in` / `height_in` override the
-/// graph's saved size, in inches (one alone derives the other from the
-/// saved aspect ratio).
+/// (GAP-2) — it need not be open on screen. SVG/EPS/PDF ignore `dpi`
+/// (they are vector). `path` omitted = beside the project file, else
+/// <Documents>/Titer Exports (the L8 default-path rule). `width_in` /
+/// `height_in` override the graph's saved size, in inches (one alone
+/// derives the other from the saved aspect ratio). `color_mode` is
+/// color (default), grayscale, or cmyk — CMYK only for EPS, PDF and
+/// TIFF. PDF is true vector, falling back to raster when the drawing
+/// has content that can't be vectorised; EPS is true vector.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ExportGraphArgs {
     /// Window label of the project ("project-1"); omit for the front project.
@@ -3286,11 +3289,14 @@ pub struct ExportGraphArgs {
     pub project_id: Option<String>,
     /// The graph node's id, as shown by titer_list_projects.
     pub graph_id: String,
-    /// "png" | "jpeg" | "svg" | "pdf" | "tiff".
+    /// "png" | "jpeg" | "svg" | "pdf" | "tiff" | "eps" | "bmp".
     pub format: String,
-    /// "150" | "300" | "600" | "900" | "1200". Omit for "300".
+    /// "100" | "150" | "300" | "600" | "900" | "1200". Omit for "300".
     #[serde(default)]
     pub dpi: Option<String>,
+    /// "color" | "grayscale" | "cmyk". Omit for "color". CMYK only for EPS, PDF and TIFF (naive conversion, no ICC profile).
+    #[serde(default)]
+    pub color_mode: Option<String>,
     /// Where to write the file. Omit for the default path (see above).
     #[serde(default)]
     pub path: Option<String>,
@@ -3304,8 +3310,11 @@ pub struct ExportGraphArgs {
 
 /// Export one figure as an image file, rendered offscreen from its
 /// panels (GAP-2) — the figure need not be open on screen. Same
-/// formats / resolutions / default-path rule as `titer_export_graph`.
-/// `missing` in the result counts panels whose graph could not be drawn.
+/// formats / resolutions / colour modes / default-path rule as
+/// `titer_export_graph`. `missing` in the result counts panels whose
+/// graph could not be drawn. `width_in` / `height_in` override the
+/// figure's saved size, in inches (one alone derives the other from
+/// the saved aspect ratio).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ExportFigureArgs {
     /// Window label of the project ("project-1"); omit for the front project.
@@ -3313,14 +3322,23 @@ pub struct ExportFigureArgs {
     pub project_id: Option<String>,
     /// The figure node's id, as shown by titer_list_projects.
     pub figure_id: String,
-    /// "png" | "jpeg" | "svg" | "pdf" | "tiff".
+    /// "png" | "jpeg" | "svg" | "pdf" | "tiff" | "eps" | "bmp".
     pub format: String,
-    /// "150" | "300" | "600" | "900" | "1200". Omit for "300".
+    /// "100" | "150" | "300" | "600" | "900" | "1200". Omit for "300".
     #[serde(default)]
     pub dpi: Option<String>,
+    /// "color" | "grayscale" | "cmyk". Omit for "color". CMYK only for EPS, PDF and TIFF (naive conversion, no ICC profile).
+    #[serde(default)]
+    pub color_mode: Option<String>,
     /// Where to write the file. Omit for the default path (see above).
     #[serde(default)]
     pub path: Option<String>,
+    /// The export width in inches. Omit to use the figure's saved width.
+    #[serde(default)]
+    pub width_in: Option<f64>,
+    /// The export height in inches. Omit to use the figure's saved height.
+    #[serde(default)]
+    pub height_in: Option<f64>,
 }
 
 /// Export one graph or figure to Word / PowerPoint / Keynote — the GUI's
@@ -6443,13 +6461,17 @@ impl TiterMcpServer {
     // format/dpi through as job args. The tool returns the job's result
     // (path, pixel size, capped) — never the bytes.
 
-    /// Export one graph as an image file (PNG, JPEG, SVG, PDF or TIFF
-    /// at 150–1200 DPI, default 300), rendered offscreen — the graph
-    /// need not be open on screen. SVG ignores dpi. `width_in` /
-    /// `height_in` override the graph's saved size in inches.
+    /// Export one graph as an image file (PNG, JPEG, SVG, PDF, TIFF,
+    /// EPS or BMP at 100–1200 DPI, default 300), rendered offscreen —
+    /// the graph need not be open on screen. SVG/EPS/PDF ignore dpi
+    /// (they are vector). PDF is true vector, falling back to raster
+    /// when the drawing has content that can't be vectorised; EPS is
+    /// true vector. `color_mode` color/grayscale/cmyk (default color;
+    /// CMYK only for EPS/PDF/TIFF). `width_in` / `height_in` override
+    /// the graph's saved size in inches.
     #[tool(
         name = "titer_export_graph",
-        description = "Export one graph as an image file: format png/jpeg/svg/pdf/tiff, dpi 150/300/600/900/1200 (default 300, ignored for SVG). Rendered offscreen — the graph need not be open on screen. path omitted = beside the project file, else <Documents>/Titer Exports. width_in/height_in override the graph's saved size in inches (one alone derives the other from the aspect ratio). Returns the written path, pixel size, and capped/reason when the export was shrunk to the largest image Titer draws.",
+        description = "Export one graph as an image file: format png/jpeg/svg/pdf/tiff/eps/bmp, dpi 100/150/300/600/900/1200 (default 300, ignored for SVG/EPS/PDF). PDF is true vector (falls back to raster when the drawing has content that can't be vectorised); EPS is true vector. color_mode color/grayscale/cmyk (default color; CMYK only for EPS/PDF/TIFF, naive conversion, no ICC profile). Rendered offscreen — the graph need not be open on screen. path omitted = beside the project file, else <Documents>/Titer Exports. width_in/height_in override the graph's saved size in inches (one alone derives the other from the aspect ratio). Returns the written path, pixel size, vector flag, and capped/reason when the export was shrunk to the largest image Titer draws.",
         annotations(
             title = "Export graph",
             read_only_hint = false,
@@ -6462,20 +6484,22 @@ impl TiterMcpServer {
         &self,
         Parameters(args): Parameters<ExportGraphArgs>,
     ) -> Result<Json<serde_json::Value>, String> {
-        let call_args = serde_json::json!({ "project_id": args.project_id, "graph_id": args.graph_id, "format": args.format, "dpi": args.dpi, "path": args.path });
+        let call_args = serde_json::json!({ "project_id": args.project_id, "graph_id": args.graph_id, "format": args.format, "dpi": args.dpi, "color_mode": args.color_mode, "path": args.path });
         let result: Result<serde_json::Value, String> = async {
             let format = args.format.as_str();
             if !EXPORT_FORMATS.contains(&format) {
                 return Err(format!(
-                    "Unknown export format “{format}” — the formats are png, jpeg, svg, pdf, tiff."
+                    "Unknown export format “{format}” — the formats are png, jpeg, svg, pdf, tiff, eps, bmp."
                 ));
             }
             let dpi = args.dpi.as_deref().unwrap_or("300");
             if !EXPORT_DPIS.contains(&dpi) {
                 return Err(format!(
-                    "Unknown resolution “{dpi}” — the resolutions are 150, 300, 600, 900, 1200 DPI."
+                    "Unknown resolution “{dpi}” — the resolutions are 100, 150, 300, 600, 900, 1200 DPI."
                 ));
             }
+            let color_mode = args.color_mode.as_deref().unwrap_or("color");
+            validate_color_mode(format, color_mode)?;
             if let Some(w) = args.width_in {
                 if !(w > 0.0) {
                     return Err("width_in must be greater than 0.".to_string());
@@ -6495,7 +6519,7 @@ impl TiterMcpServer {
                     .to_string_lossy()
                     .into_owned(),
             };
-            let mut job_args = serde_json::json!({ "graph_id": args.graph_id, "format": format, "dpi": dpi, "path": path });
+            let mut job_args = serde_json::json!({ "graph_id": args.graph_id, "format": format, "dpi": dpi, "color_mode": color_mode, "path": path });
             if let Some(w) = args.width_in {
                 job_args["width_in"] = serde_json::json!(w);
             }
@@ -6517,13 +6541,18 @@ impl TiterMcpServer {
         }
     }
 
-    /// Export one figure as an image file (PNG, JPEG, SVG, PDF or TIFF
-    /// at 150–1200 DPI, default 300), rendered offscreen — the figure
-    /// need not be open on screen. `missing` counts panels whose graph
-    /// could not be drawn.
+    /// Export one figure as an image file (PNG, JPEG, SVG, PDF, TIFF,
+    /// EPS or BMP at 100–1200 DPI, default 300), rendered offscreen —
+    /// the figure need not be open on screen. SVG/EPS/PDF ignore dpi
+    /// (they are vector). PDF is true vector, falling back to raster
+    /// when a panel has content that can't be vectorised; EPS is true
+    /// vector. `color_mode` color/grayscale/cmyk (default color; CMYK
+    /// only for EPS/PDF/TIFF). `width_in` / `height_in` override the
+    /// figure's saved size in inches. `missing` counts panels whose
+    /// graph could not be drawn.
     #[tool(
         name = "titer_export_figure",
-        description = "Export one figure as an image file: format png/jpeg/svg/pdf/tiff, dpi 150/300/600/900/1200 (default 300, ignored for SVG). Rendered offscreen — the figure need not be open on screen. path omitted = beside the project file, else <Documents>/Titer Exports. Returns the written path, pixel size, missing-panel count, and capped/reason when the export was shrunk.",
+        description = "Export one figure as an image file: format png/jpeg/svg/pdf/tiff/eps/bmp, dpi 100/150/300/600/900/1200 (default 300, ignored for SVG/EPS/PDF). PDF is true vector (falls back to raster when a panel has content that can't be vectorised); EPS is true vector. color_mode color/grayscale/cmyk (default color; CMYK only for EPS/PDF/TIFF, naive conversion, no ICC profile). Rendered offscreen — the figure need not be open on screen. width_in/height_in override the figure's saved size in inches (one alone derives the other from the aspect ratio). path omitted = beside the project file, else <Documents>/Titer Exports. Returns the written path, pixel size, vector flag, missing-panel count, and capped/reason when the export was shrunk.",
         annotations(
             title = "Export figure",
             read_only_hint = false,
@@ -6536,19 +6565,31 @@ impl TiterMcpServer {
         &self,
         Parameters(args): Parameters<ExportFigureArgs>,
     ) -> Result<Json<serde_json::Value>, String> {
-        let call_args = serde_json::json!({ "project_id": args.project_id, "figure_id": args.figure_id, "format": args.format, "dpi": args.dpi, "path": args.path });
+        let call_args = serde_json::json!({ "project_id": args.project_id, "figure_id": args.figure_id, "format": args.format, "dpi": args.dpi, "color_mode": args.color_mode, "path": args.path });
         let result: Result<serde_json::Value, String> = async {
             let format = args.format.as_str();
             if !EXPORT_FORMATS.contains(&format) {
                 return Err(format!(
-                    "Unknown export format “{format}” — the formats are png, jpeg, svg, pdf, tiff."
+                    "Unknown export format “{format}” — the formats are png, jpeg, svg, pdf, tiff, eps, bmp."
                 ));
             }
             let dpi = args.dpi.as_deref().unwrap_or("300");
             if !EXPORT_DPIS.contains(&dpi) {
                 return Err(format!(
-                    "Unknown resolution “{dpi}” — the resolutions are 150, 300, 600, 900, 1200 DPI."
+                    "Unknown resolution “{dpi}” — the resolutions are 100, 150, 300, 600, 900, 1200 DPI."
                 ));
+            }
+            let color_mode = args.color_mode.as_deref().unwrap_or("color");
+            validate_color_mode(format, color_mode)?;
+            if let Some(w) = args.width_in {
+                if !(w > 0.0) {
+                    return Err("width_in must be greater than 0.".to_string());
+                }
+            }
+            if let Some(h) = args.height_in {
+                if !(h > 0.0) {
+                    return Err("height_in must be greater than 0.".to_string());
+                }
             }
             let project_id = self.state.resolve_project(args.project_id.as_deref())?;
             let ext = export_extension(format);
@@ -6559,7 +6600,13 @@ impl TiterMcpServer {
                     .to_string_lossy()
                     .into_owned(),
             };
-            let job_args = serde_json::json!({ "figure_id": args.figure_id, "format": format, "dpi": dpi, "path": path });
+            let mut job_args = serde_json::json!({ "figure_id": args.figure_id, "format": format, "dpi": dpi, "color_mode": color_mode, "path": path });
+            if let Some(w) = args.width_in {
+                job_args["width_in"] = serde_json::json!(w);
+            }
+            if let Some(h) = args.height_in {
+                job_args["height_in"] = serde_json::json!(h);
+            }
             self.run_export_job(&project_id, "export-figure", job_args).await
         }
         .await;
@@ -6882,8 +6929,29 @@ impl TiterMcpServer {
 }
 
 /// The graph/figure export formats, and the resolutions they render at.
-const EXPORT_FORMATS: &[&str] = &["png", "jpeg", "svg", "pdf", "tiff"];
-const EXPORT_DPIS: &[&str] = &["150", "300", "600", "900", "1200"];
+const EXPORT_FORMATS: &[&str] = &["png", "jpeg", "svg", "pdf", "tiff", "eps", "bmp"];
+const EXPORT_DPIS: &[&str] = &["100", "150", "300", "600", "900", "1200"];
+/// The export colour modes. CMYK exists only for EPS, PDF and TIFF
+/// (PNG/JPEG/SVG/BMP have no CMYK form — the naive print conversion,
+/// K = 1 − max, no ICC profile).
+const EXPORT_COLOR_MODES: &[&str] = &["color", "grayscale", "cmyk"];
+
+/// A colour mode for a format: CMYK is refused for the formats that
+/// have no CMYK form, naming the ones that do.
+fn validate_color_mode(format: &str, color_mode: &str) -> Result<(), String> {
+    if !EXPORT_COLOR_MODES.contains(&color_mode) {
+        return Err(format!(
+            "Unknown colour mode “{color_mode}” — the colour modes are color, grayscale, cmyk."
+        ));
+    }
+    if color_mode == "cmyk" && !matches!(format, "eps" | "pdf" | "tiff") {
+        return Err(
+            "CMYK is only available for EPS, PDF and TIFF — PNG, JPEG, SVG and BMP have no CMYK form."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
 /// The table-data export formats.
 const TABLE_DATA_FORMATS: &[&str] = &["csv", "xlsx", "txt"];
 
@@ -6895,6 +6963,8 @@ fn export_extension(format: &str) -> &'static str {
         "svg" => "svg",
         "pdf" => "pdf",
         "tiff" => "tiff",
+        "eps" => "eps",
+        "bmp" => "bmp",
         _ => "png",
     }
 }

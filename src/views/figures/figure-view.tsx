@@ -35,6 +35,7 @@ import { copyFigureImage, saveFigureImage, sendFigureToOffice } from "./figure-e
 import type { OfficeTarget } from "../../lib/office-export";
 import { isMacOs } from "../../lib/channel";
 import { EXPORT_FORMATS, saveGraphImage, type ExportFormat } from "../graphs/graph-export";
+import { COLOR_MODES, type ColorMode } from "../../lib/vector-export";
 
 /** Screen pixels per inch in the editor (the figure keeps its true aspect ratio). */
 const SCREEN_PX_PER_IN = 72;
@@ -56,6 +57,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
   const selected = panels.find((p) => p.graphId === selectedId) ?? null;
   const [addGraphId, setAddGraphId] = React.useState("");
   const [exportFormat, setExportFormat] = React.useState<ExportFormat>("png");
+  const [colorMode, setColorMode] = React.useState<ColorMode>("color");
   const [exporting, setExporting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [sizeError, setSizeError] = React.useState<string | null>(null);
@@ -161,7 +163,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
   const onExport = async () => {
     setExporting(true);
     try {
-      await saveFigureImage(node, nodes, exportFormat, dpi, node.name);
+      await saveFigureImage(node, nodes, exportFormat, dpi, node.name, colorMode);
     } finally {
       setExporting(false);
     }
@@ -348,23 +350,47 @@ export function FigureView({ node }: { node: ProjectNode }) {
         <div className="flex flex-col gap-2">
           <RadioList
             value={exportFormat}
-            onChange={setExportFormat}
+            onChange={(f) => {
+              setExportFormat(f);
+              // CMYK has no form for PNG/JPEG/SVG/BMP: picking one of
+              // those drops the colour back to Color.
+              if (colorMode === "cmyk" && f !== "eps" && f !== "pdf" && f !== "tiff") setColorMode("color");
+            }}
             options={EXPORT_FORMATS}
           />
-          <Field label="Resolution">
+          <Field label="Colour">
             <Segmented
-              value={dpi}
-              onChange={(v) => set({ dpi: v })}
-              options={FIGURE_RESOLUTIONS.map((r) => ({ value: r as Resolution, label: `${r} DPI` }))}
+              value={colorMode}
+              onChange={(v) => setColorMode(v)}
+              // CMYK is offered only for the formats that have a CMYK form.
+              options={
+                (exportFormat === "eps" || exportFormat === "pdf" || exportFormat === "tiff"
+                  ? COLOR_MODES
+                  : COLOR_MODES.filter((m) => m.value !== "cmyk")
+                ).map((m) => ({ value: m.value, label: m.label }))
+              }
             />
           </Field>
+          {exportFormat !== "svg" && exportFormat !== "eps" && exportFormat !== "pdf" && (
+            <Field label="Resolution">
+              <Segmented
+                value={dpi}
+                onChange={(v) => set({ dpi: v })}
+                options={FIGURE_RESOLUTIONS.map((r) => ({ value: r as Resolution, label: `${r} DPI` }))}
+              />
+            </Field>
+          )}
           <Button disabled={!panels.length || exporting} onClick={onExport}>
-            {exporting ? "Exporting…" : `Export Figure (${dpi} DPI)`}
+            {exporting
+              ? "Exporting…"
+              : exportFormat === "svg" || exportFormat === "eps" || exportFormat === "pdf"
+                ? "Export Figure"
+                : `Export Figure (${dpi} DPI)`}
           </Button>
           <Button
             variant="ghost"
             disabled={!panels.length || exporting}
-            onClick={() => copyFigureImage(node, nodes, dpi)}
+            onClick={() => copyFigureImage(node, nodes, dpi, colorMode)}
           >
             Copy Figure (PNG)
           </Button>
@@ -505,7 +531,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
                                 e.stopPropagation();
                                 const el = plottedRef.current.get(panel.graphId);
                                 const options = { ...DEFAULT_GRAPH_OPTIONS, ...graph.graphOptions };
-                                if (el) void saveGraphImage(el, { width: options.width, height: options.height }, exportFormat, dpi, graph.name);
+                                if (el) void saveGraphImage(el, { width: options.width, height: options.height }, exportFormat, dpi, graph.name, colorMode);
                               }}
                             >
                               Export panel

@@ -537,7 +537,7 @@ async fn read_data_bytes(path: String) -> Result<String, String> {
 /// (csv/xlsx/txt). A format missing here fails at the gate before its
 /// writer runs (v1.6 BUG D: xlsx was missing, so every xlsx export failed).
 const WRITE_FILE_EXTENSIONS: &[&str] = &[
-    "hlx", "prism", "pzt", "pzm", "pzfx", "png", "jpg", "jpeg", "svg", "pdf", "tif", "tiff", "bmp", "csv", "txt", "xlsx",
+    "hlx", "prism", "pzt", "pzm", "pzfx", "png", "jpg", "jpeg", "svg", "pdf", "tif", "tiff", "bmp", "eps", "csv", "txt", "xlsx",
     "docx", "pptx",
 ];
 
