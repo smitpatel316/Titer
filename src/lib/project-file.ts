@@ -2409,15 +2409,27 @@ export function parseProjectFile(
   // the reader normalizes an absent block to `[]`, and JSON keeps `[]` while
   // dropping `undefined` — listing it unconditionally flagged every scriptless
   // file as updated (the 1.8 merge-all round-trip regression).
+  // Same class, `childOrder`: the reader rebuilds it from the nodes and
+  // lists every table, childless ones as `[]` — a file that omits an empty
+  // list (a hand-built or older file) is semantically identical, so empty
+  // lists are stripped from both sides of the comparison, never counted
+  // as a repair. A non-empty list still has to match exactly.
+  const stripEmptyChildLists = (order: unknown) =>
+    isObj(order)
+      ? Object.fromEntries(
+          Object.entries(order).filter(([, v]) => !(Array.isArray(v) && v.length === 0)),
+        )
+      : order;
   const known = {
     nodes,
     rootOrder,
-    childOrder,
+    childOrder: stripEmptyChildLists(childOrder),
     activeNodeId,
     projectName,
     ...(scripts.length ? { scripts } : {}),
   };
   const filed = Object.fromEntries(PROJECT_KEYS.map((k) => [k, project[k]]));
+  filed.childOrder = stripEmptyChildLists(filed.childOrder);
   return { project: read, issues, updated: contents(known) !== contents(filed) };
 }
 

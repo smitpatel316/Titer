@@ -415,7 +415,7 @@ export const GRAPH_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<GraphType>
   // Seq 210: mean-and-error too (its per-subgroup pooling reads the Mean
   // columns of a nested summary table; see mean-error.ts).
   // Seq 212: floating bars — one bar per row × group × subgroup cell.
-  nested: optionsFor(["grouped-bars", "grouped-scatter", "grouped-lines", "mean-error", "floating-bars"]),
+  nested: optionsFor(["grouped-bars", "grouped-bars-scatter", "grouped-scatter", "grouped-lines", "mean-error", "floating-bars"]),
   multiple: optionsFor(["xy-scatter", "bubble-plot", "histogram", "qq-plot", "heatmap", "mv-strip-plot", "mv-summary-symbol", "mv-bar-strip", "mv-before-after-bar-strip", "mv-before-after-strip", "mv-box-whisker", "mv-violin", "mv-bar-chart", "volcano", "forest-plot", "observed-fitted", "scree-plot", "pca-biplot", "kmeans-scatter", "dendrogram", "elbow-plot", "silhouette-plot", "gap-plot", "survival"]),
   // Outcomes as series across the row categories, as Prism graphs contingency tables.
   // Seq 210: scatter and box-and-violin too (one value per cell: a box from a
