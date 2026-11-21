@@ -43,7 +43,7 @@
 // src/views/graphs/significance-overlay.ts, `sigDisplay` "letters",
 // reachable via build_graph/update_graph — so 178 is COVERED here.
 // Two rows were `in-flight` (196, Mansi-4) — both merged now, rows flipped
-// to covered. 31 rows are still genuine gaps (see GAP-CONFIRMED lines at run
+// to covered. 30 rows are still genuine gaps (see GAP-CONFIRMED lines at run
 // time); row 201 was the last landed-but-unflipped row — its checks named
 // enum values '6th-order'/'centered' that the B1 lane implemented as
 // 'sextic'/'centered-first..sixth'; the checks are corrected to the real enum
@@ -1279,8 +1279,8 @@ const ROWS: Row[] = [
   {
     item: "Mansi-6",
     title: "Save-as-.prism report in titer_save_project result (m2)",
-    status: "gap",
-    note: "The m2 lane merged (7f5213a) but surfaced the report in UI only: executeSaveProject still returns only {project_id, file_path, format, revision} — the write report (tables/analyses written vs dropped) is NOT in the titer_save_project result. Genuine remaining MCP-side gap.",
+    status: "covered",
+    note: "Merged on check/v18: executeSaveProject returns write_report (tables/analyses written vs dropped + summary) for .prism/.pzfx, null for .hlx (Mansi P0 #6, cherry-picked from fix/18-m2-mcp-result).",
     checks: [{ kind: "saveResultHasReport" }],
   },
 
