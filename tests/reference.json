@@ -20256,7 +20256,154 @@
   "summary": "“BL” runs between two plateaus, — and —, and is halfway between them at a concentration of — (the EC50; ). The curve accounts for 100% of the variation in “BL” (R²)."
  },
  "nonlinear-regression specialB6X {\"y\":\"AI\",\"model\":\"absolute-ic50-logx\"}": {
-  "error": "This curve (\"Absolute IC50, X is log(concentration)\") could not be fitted to these data (singular gradient). Try another model or Y data set."
+  "testType": "nonlinear-regression",
+  "subtitle": "Absolute IC50, X is log(concentration)",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "AI"
+   ],
+   "rows": [
+    {
+     "label": "EC50",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       1,
+       1
+      ]
+     ]
+    },
+    {
+     "label": "Span",
+     "values": [
+      90
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       90,
+       90
+      ]
+     ]
+    },
+    {
+     "label": "Absolute IC50",
+     "values": [
+      0.8
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.470265474e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      5.49199036e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      9
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      13
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 0,
+    "sd": 1.947220241,
+    "sem": 0.5400617249,
+    "median": 0,
+    "n": 13
+   },
+   {
+    "name": "AI",
+    "mean": 55,
+    "sd": 40.10081111,
+    "sem": 11.1219639,
+    "median": 55,
+    "n": 13
+   }
+  ],
+  "notes": "Least-squares fit (\"Absolute IC50, X is log(concentration)\") of “AI” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "Bottom",
+    "estimate": 10,
+    "stdError": 1.371014694e-11,
+    "t": 729386785200,
+    "p": 8.714647308e-104,
+    "low": 10,
+    "high": 10
+   },
+   {
+    "term": "Top",
+    "estimate": 100,
+    "stdError": 1.371014694e-11,
+    "t": 7293867852000,
+    "p": 8.714647308e-113,
+    "low": 100,
+    "high": 100
+   },
+   {
+    "term": "LogEC50",
+    "estimate": -1.723708596e-16,
+    "stdError": 4.044497709e-13,
+    "t": -0.0004261860731,
+    "p": 0.9996692499,
+    "low": -9.151013171e-13,
+    "high": 9.147565754e-13
+   },
+   {
+    "term": "Hill slope",
+    "estimate": 1,
+    "stdError": 8.316817842e-13,
+    "t": 1202382953000,
+    "p": 9.693609863e-106,
+    "low": 1,
+    "high": 1
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "AI",
+     "n": 13
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "BP",
+    "BL"
+   ]
+  },
+  "summary": "“AI” runs between two plateaus, 10 and 100, and is halfway between them at a concentration of 1 (the EC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “AI” (R²)."
  },
  "nonlinear-regression specialXB6X {\"y\":\"BPX\",\"model\":\"biphasic-x\"}": {
   "testType": "nonlinear-regression",
@@ -21906,7 +22053,123 @@
   "summary": "“N3A” runs between two plateaus, — and —, and is halfway between them at a concentration of 1 (the EC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N3A” (R²)."
  },
  "nonlinear-regression doseLogB6X {\"y\":\"N4A\",\"model\":\"agonist-4pl-normalized-logx\"}": {
-  "error": "This curve (\"log(agonist) vs. normalized response -- Variable slope\") could not be fitted to these data (singular gradient). Try another model or Y data set."
+  "testType": "nonlinear-regression",
+  "subtitle": "log(agonist) vs. normalized response -- Variable slope",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "N4A"
+   ],
+   "rows": [
+    {
+     "label": "EC50",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       1,
+       1
+      ]
+     ]
+    },
+    {
+     "label": "Span",
+     "values": [
+      100
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.511273199e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      6.937142387e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      11
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      13
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 0,
+    "sd": 1.947220241,
+    "sem": 0.5400617249,
+    "median": 0,
+    "n": 13
+   },
+   {
+    "name": "N4A",
+    "mean": 50,
+    "sd": 47.17579511,
+    "sem": 13.0842114,
+    "median": 50,
+    "n": 13
+   }
+  ],
+  "notes": "Least-squares fit (\"log(agonist) vs. normalized response -- Variable slope\") of “N4A” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "LogEC50",
+    "estimate": 3.921138106e-17,
+    "stdError": 2.332227589e-13,
+    "t": 0.0001681284505,
+    "p": 0.9998688633,
+    "low": -5.132806199e-13,
+    "high": 5.133590427e-13
+   },
+   {
+    "term": "Hill slope",
+    "estimate": 1.5,
+    "stdError": 1.083664358e-12,
+    "t": 1384192429000,
+    "p": 3.514677301e-129,
+    "low": 1.5,
+    "high": 1.5
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "N4A",
+     "n": 13
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "N3A",
+    "N3I",
+    "N4I",
+    "N3B"
+   ]
+  },
+  "summary": "“N4A” runs between two plateaus, — and —, and is halfway between them at a concentration of 1 (the EC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N4A” (R²)."
  },
  "nonlinear-regression doseLogB6X {\"y\":\"N3I\",\"model\":\"inhibitor-3pl-normalized-logx\"}": {
   "testType": "nonlinear-regression",
@@ -22019,7 +22282,123 @@
   "summary": "“N3I” runs between two plateaus, — and —, and is halfway between them at a concentration of 1 (the IC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N3I” (R²)."
  },
  "nonlinear-regression doseLogB6X {\"y\":\"N4I\",\"model\":\"inhibitor-4pl-normalized-logx\"}": {
-  "error": "This curve (\"log(inhibitor) vs. normalized response -- Variable slope\") could not be fitted to these data (singular gradient). Try another model or Y data set."
+  "testType": "nonlinear-regression",
+  "subtitle": "log(inhibitor) vs. normalized response -- Variable slope",
+  "stats": [],
+  "fit": {
+   "sets": [
+    "N4I"
+   ],
+   "rows": [
+    {
+     "label": "IC50",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "95% CI",
+     "ranges": [
+      [
+       1,
+       1
+      ]
+     ]
+    },
+    {
+     "label": "Span",
+     "values": [
+      100
+     ]
+    },
+    {
+     "label": "R squared",
+     "values": [
+      1
+     ]
+    },
+    {
+     "label": "Sy.x",
+     "values": [
+      2.511237177e-11
+     ]
+    },
+    {
+     "label": "Sum of squares",
+     "values": [
+      6.936943376e-21
+     ]
+    },
+    {
+     "label": "Degrees of freedom",
+     "values": [
+      11
+     ]
+    },
+    {
+     "label": "N",
+     "values": [
+      13
+     ]
+    }
+   ]
+  },
+  "groups": [
+   {
+    "name": "X",
+    "mean": 0,
+    "sd": 1.947220241,
+    "sem": 0.5400617249,
+    "median": 0,
+    "n": 13
+   },
+   {
+    "name": "N4I",
+    "mean": 50,
+    "sd": 47.17579511,
+    "sem": 13.0842114,
+    "median": 50,
+    "n": 13
+   }
+  ],
+  "notes": "Least-squares fit (\"log(inhibitor) vs. normalized response -- Variable slope\") of “N4I” on “X”. 95% CIs are asymptotic (from each parameter's standard error).",
+  "coefficients": [
+   {
+    "term": "LogIC50",
+    "estimate": -5.945320584e-17,
+    "stdError": 2.332194135e-13,
+    "t": -0.0002549239145,
+    "p": 0.9998011646,
+    "low": -5.133719215e-13,
+    "high": 5.13253015e-13
+   },
+   {
+    "term": "Hill slope",
+    "estimate": 1.5,
+    "stdError": 1.083648814e-12,
+    "t": 1384212284000,
+    "p": 3.514122783e-129,
+    "low": 1.5,
+    "high": 1.5
+   }
+  ],
+  "analyzed": {
+   "sets": [
+    {
+     "name": "N4I",
+     "n": 13
+    }
+   ],
+   "how": "list",
+   "detail": "on “X”",
+   "left": [
+    "N3A",
+    "N4A",
+    "N3I",
+    "N3B"
+   ]
+  },
+  "summary": "“N4I” runs between two plateaus, — and —, and is halfway between them at a concentration of 1 (the IC50; 95% CI 1 to 1). The curve accounts for 100% of the variation in “N4I” (R²)."
  },
  "nonlinear-regression doseLogB6X {\"y\":\"N3A\",\"model\":\"agonist-3pl-normalized-logx\",\"compareWith\":\"N3B\",\"compare\":\"ec50\"}": {
   "testType": "nonlinear-regression",
