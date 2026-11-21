@@ -153,7 +153,7 @@ export function validateGraphSources(
 }
 
 const tableLabel = (type: TableType) =>
-  ({ column: "Column", xy: "XY", grouped: "Grouped", nested: "Nested", multiple: "Multiple Variables", contingency: "Contingency", survival: "Survival" })[type];
+  ({ column: "Column", xy: "XY", grouped: "Grouped", nested: "Nested", multiple: "Multiple Variables", contingency: "Contingency", survival: "Survival", "parts-of-whole": "Parts of Whole" })[type];
 
 /** The merge itself, over plain inputs (so the tests drive it without
  *  nodes). `extras` must already be validated (same type as `primary`). */

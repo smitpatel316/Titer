@@ -474,6 +474,15 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
     } else if (tableType === "contingency") {
       prismTableType = "Contingency";
       xFormat = "none";
+    } else if (tableType === "parts-of-whole") {
+      // Prism's PartsOfWhole: no X, one Y column per data set (seq 197).
+      // The YFormat comes from the sets, as for Column — single columns
+      // write no YFormat, and read back as Parts of Whole either way.
+      prismTableType = "PartsOfWhole";
+      xFormat = "none";
+      if (yFormat === "replicates") {
+        replicates = Math.max(...sets.filter((s) => s.yFormat === "replicates").map((s) => s.columns.length));
+      }
     } else {
       prismTableType = "OneWay";
       xFormat = "none";

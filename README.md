@@ -56,7 +56,7 @@ and figure that uses it updates at once.
 
 ### Tables
 
-Seven table types. Each guides how data are entered, and offers every analysis and graph
+Eight table types. Each guides how data are entered, and offers every analysis and graph
 its data allow:
 
 - **Column:** groups side by side (control, doses, treatments)

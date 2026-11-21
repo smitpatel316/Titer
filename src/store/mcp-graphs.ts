@@ -117,6 +117,7 @@ const TABLE_TYPE_LABELS: Record<TableType, string> = {
   multiple: "Multiple variables",
   contingency: "Contingency",
   survival: "Survival",
+  "parts-of-whole": "Parts of Whole",
 };
 
 // ── Job-arg readers ────────────────────────────────────────────────────

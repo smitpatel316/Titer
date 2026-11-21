@@ -1150,5 +1150,49 @@ const analyses = Object.values(project.nodes).filter((n) => n.type === "analysis
   );
 }
 
+// W15 (seq 197): a Parts-of-Whole table writes as format parts_of_whole and
+// reads back as the native type, cell-identical — not as Column.
+{
+  const powProject = {
+    nodes: {
+      table_1: {
+        id: "table_1",
+        type: "table",
+        name: "Mendel peas",
+        parentId: null,
+        tableType: "parts-of-whole",
+        data: {
+          columns: ["Title", "# of seeds", "Expected"],
+          rows: [
+            ["Round and yellow", "315", "312.75"],
+            ["Round and green", "108", "104.25"],
+            ["Angular and yellow", "101", "104.25"],
+            ["Angular and green", "32", "34.75"],
+          ],
+        },
+      },
+    },
+    rootOrder: ["table_1"],
+    childOrder: { table_1: [] },
+    activeNodeId: "table_1",
+  };
+  const powWritten = await writePrism(powProject as never, "1.0.7");
+  const powZip = await JSZip.loadAsync(powWritten.bytes);
+  const powSheet = JSON.parse(
+    (await powZip
+      .file(Object.keys(powZip.files).find((p) => p.startsWith("data/sheets/") && p.endsWith("sheet.json"))!)!
+      .async("string")) as string,
+  ) as { table?: { format?: string } };
+  const powBack = await convertPrism(powWritten.bytes, "pow-round-trip.prism");
+  const powTable = Object.values(powBack.project.nodes).find((n) => n?.type === "table");
+  check(
+    "W15 Parts-of-Whole .prism round-trip keeps the native type",
+    powSheet.table?.format === "parts_of_whole" &&
+      powTable?.tableType === "parts-of-whole" &&
+      JSON.stringify(powTable?.data) === JSON.stringify(powProject.nodes.table_1.data),
+    `format ${powSheet.table?.format}, back as ${powTable?.tableType}`,
+  );
+}
+
 console.log(`\n${checks - failures}/${checks} checks passed.`);
 process.exit(failures ? 1 : 0);

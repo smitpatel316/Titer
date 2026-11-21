@@ -41,6 +41,7 @@
 //   column     → format "column", one y_single dataset per column
 //   grouped    → format "grouped", one y_replicates dataset per group
 //   contingency→ format "contingency", one y_single dataset per column
+//   parts-of-whole → format "parts_of_whole", one y_single dataset per column
 //   survival   → format "survival", X = time, one dataset per group
 //   nested / multiple → written as a Column table, with a warning in the
 //                 transfer report naming the table (seq 162). No values or
@@ -537,6 +538,14 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
       } else if (tableType === "contingency") {
         format = "contingency";
         dataFormat = "y_single";
+      } else if (tableType === "parts-of-whole") {
+        format = "parts_of_whole";
+        // The table-level format is its datasets' format when they agree
+        // (a y_sd_n Parts-of-Whole table declares y_sd_n, as a Column
+        // table does — real Prism stores the specific statistic there);
+        // otherwise y_single, and the reader names subcolumns from each
+        // dataset's own format (W7/BUG-9).
+        dataFormat = uniform ? sets[0].dataFormat : "y_single";
       } else {
         format = "column";
         dataFormat = uniform ? sets[0].dataFormat : "y_single";

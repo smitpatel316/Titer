@@ -71,6 +71,7 @@ const FIXTURES = [
   "x_date_row_titles",
   "x_y_rep",
   "x_y_with_strike",
+  "parts_of_whole",
   "pypzfx-column_hugetable",
 ] as const;
 const INFO_FIXTURES = [

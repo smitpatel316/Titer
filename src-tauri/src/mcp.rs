@@ -152,7 +152,7 @@ const MAX_FEEDBACK_DETAILS_CHARS: usize = 4000;
 const JOB_RETAIN_AFTER_READ_SECS: u64 = 900;
 const JOB_RETAIN_UNREAD_SECS: u64 = 86_400;
 
-/// The seven table types, as the roadmap names them (§2 "Look at my data").
+/// The eight table types, as the roadmap names them (§2 "Look at my data").
 fn display_table_type(table_type: &str) -> &'static str {
     match table_type {
         "column" => "Column",
@@ -162,6 +162,7 @@ fn display_table_type(table_type: &str) -> &'static str {
         "contingency" => "Contingency",
         "survival" => "Survival",
         "nested" => "Nested",
+        "parts-of-whole" => "Parts of Whole",
         _ => "Unknown",
     }
 }
@@ -4190,7 +4191,7 @@ impl TiterMcpServer {
     /// the given columns and rows. Column 0 is the row-title column.
     #[tool(
         name = "titer_create_table",
-        description = "Create a data table: the empty table of a type (column, xy, grouped, nested, multiple, contingency, survival), or one filled with the given columns and rows. Grouped tables only: row_groups sets the row bands (factor-C levels) as {\"name\", \"count\"} pairs tiling the rows exactly. Column 0 is the row-title column.",
+        description = "Create a data table: the empty table of a type (column, xy, grouped, nested, multiple, contingency, survival, parts-of-whole), or one filled with the given columns and rows. Grouped tables only: row_groups sets the row bands (factor-C levels) as {\"name\", \"count\"} pairs tiling the rows exactly. Column 0 is the row-title column.",
         annotations(
             title = "Create table",
             read_only_hint = false,
@@ -8055,6 +8056,7 @@ fn column_role(table_type: &str, data_col: usize, data: &serde_json::Value) -> S
         }
         "multiple" => format!("Variable {}", data_col + 1),
         "contingency" => format!("Category {}", data_col + 1),
+        "parts-of-whole" => format!("Dataset {}", data_col + 1),
         _ => format!("Column {}", data_col + 1),
     }
 }
@@ -8431,8 +8433,8 @@ fn read_info_sheet(
 
 // ── Data-table tools (L3): pure helpers ──────────────────────────────────
 
-/// The seven table types, as the tools spell them.
-const TABLE_TYPES: &[&str] = &["column", "xy", "grouped", "nested", "multiple", "contingency", "survival"];
+/// The eight table types, as the tools spell them.
+const TABLE_TYPES: &[&str] = &["column", "xy", "grouped", "nested", "multiple", "contingency", "survival", "parts-of-whole"];
 
 /// Columns + rows as a tool passes them: a non-empty column list of unique
 /// strings — column 0 is the row-title column and may be empty (Prism
@@ -9080,6 +9082,10 @@ mod tests {
         assert_eq!(column_role("nested", 7, &nested), "Group B · subgroup 1 · replicate 2");
         assert_eq!(column_role("xy", 0, &json!({})), "X");
         assert_eq!(column_role("survival", 0, &json!({})), "Time");
+        assert_eq!(column_role("parts-of-whole", 1, &json!({})), "Dataset 2");
+        assert_eq!(display_table_type("parts-of-whole"), "Parts of Whole");
+        // Seq 197: titer_create_table accepts the native type.
+        assert!(TABLE_TYPES.contains(&"parts-of-whole"));
     }
 
     #[test]

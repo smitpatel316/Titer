@@ -865,7 +865,7 @@ const ROWS: Row[] = [
     item: "196",
     title: "Fraction-of-total",
     status: "covered",
-    note: "Merged on check/v18: 'ci' param on fraction-of-total + Contingency offering. Caveat: PoW offering still blocked on 197 (no PoW table type).",
+    note: "Merged on check/v18: 'ci' param on fraction-of-total + Contingency offering; Parts-of-Whole offering landed with 197 (native table type).",
     checks: [{ kind: "analysisParam", type: "fraction-of-total", param: "ci" }],
   },
   {
@@ -996,8 +996,8 @@ const ROWS: Row[] = [
   {
     item: "197",
     title: "Parts-of-whole native table type",
-    status: "gap",
-    note: "No parts-of-whole in the TableType union (7 types); import maps PoW→Column; titer_create_table accepts only the 7.",
+    status: "covered",
+    note: "Merged on check/v18: native Parts of Whole table type (8th TableType) — create/import (PoW maps to it, no longer to Column), pie/donut/pow-stacked graphs with row categories as series, fraction-of-total + transform + plot-function analyses, .prism/.pzfx round-trip with a public fixture.",
     checks: [{ kind: "tableType", type: "parts-of-whole" }],
   },
   {
