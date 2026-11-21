@@ -40,10 +40,11 @@
 // reachable via build_graph/update_graph — so 178 is COVERED here.
 // Two rows were `in-flight` (196, Mansi-4) — both merged now, rows flipped
 // to covered. 33 rows are still genuine gaps (see GAP-CONFIRMED lines at run
-// time); one landed-but-unflipped row remains (201: its checks name enum
-// values '6th-order'/'centered' that the B1 lane implemented as 'sextic' /
-// 'centered-first..fifth' — the row's checks need correcting to the real enum
-// values before it can flip; do NOT flip it blindly, it would regress).
+// time); row 201 was the last landed-but-unflipped row — its checks named
+// enum values '6th-order'/'centered' that the B1 lane implemented as
+// 'sextic'/'centered-first..sixth'; the checks are corrected to the real enum
+// values below (sextic, centered-first, centered-sixth) and the row flips to
+// covered with the batch-analyses-a merge.
 // the gate stays red for them by design — do NOT flip a row until its
 // surface exists on the tip. Sections below are the audit-tip grouping;
 // the per-row `status` is the current verdict and is authoritative.
@@ -1015,12 +1016,12 @@ const ROWS: Row[] = [
   {
     item: "201",
     title: "6th-order + centered polynomials",
-    status: "gap",
-    note: "Model enum (32) tops out at quintic; no 6th-order, no centered-polynomial option.",
+    status: "covered",
+    note: "Merged on check/v18: sextic + centered-first..sixth in the nonlinear-regression model enum (B6 + seq 201), plus the centered flag and fitMethod params.",
     checks: [
-      { kind: "analysisParamEnum", type: "nonlinear-regression", param: "model", value: "6th-order" },
       { kind: "analysisParamEnum", type: "nonlinear-regression", param: "model", value: "sextic" },
-      { kind: "analysisParamEnum", type: "nonlinear-regression", param: "model", value: "centered" },
+      { kind: "analysisParamEnum", type: "nonlinear-regression", param: "model", value: "centered-first" },
+      { kind: "analysisParamEnum", type: "nonlinear-regression", param: "model", value: "centered-sixth" },
     ],
   },
   {
