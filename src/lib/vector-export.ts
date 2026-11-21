@@ -543,7 +543,8 @@ export function parsePathData(d: string): PathSeg[] {
       }
       case "T": {
         const [x, y] = at(nextNum(), nextNum());
-        const [qx, qy] = prevQuad ? [2 * cx - prevQuad[0], 2 * cy - prevQuad[1]] : [cx, cy];
+        const qx: number = prevQuad ? 2 * cx - prevQuad[0] : cx;
+        const qy: number = prevQuad ? 2 * cy - prevQuad[1] : cy;
         segs.push({
           kind: "C",
           x1: cx + (2 / 3) * (qx - cx),

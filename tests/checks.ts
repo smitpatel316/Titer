@@ -9227,7 +9227,7 @@ check("seq 216: the grayscale figure walk maps colours, never labels", () => {
   ]);
   strictEqual(trace.fillcolor, "none");
   strictEqual(trace.name, "Control");
-  const layout = gray.layout as Record<string, Record<string, unknown>>;
+  const layout = gray.layout as unknown as Record<string, Record<string, unknown>>;
   strictEqual((layout.title as Record<string, unknown>).text, "Control");
   strictEqual(layout.paper_bgcolor, "#ffffff");
   strictEqual(((layout.xaxis as Record<string, unknown>).title as Record<string, unknown>).text, "Dose");

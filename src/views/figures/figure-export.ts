@@ -40,7 +40,8 @@ async function panelImage(
   graph: ProjectNode,
   nodes: Record<string, ProjectNode>,
   size: Size,
-  format: ExportFormat,
+  // Never "eps": the figure's EPS path draws panels as SVG (renderFigureSvg).
+  format: "svg" | "png" | "jpeg" | "pdf" | "tiff" | "bmp",
   dpi: Resolution,
   hideLegend: boolean,
   colorMode: ColorMode = "color",
