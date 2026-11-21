@@ -280,6 +280,12 @@ export const extent = (v: number[]): [number, number] => [
   v.reduce((a, b) => Math.max(a, b), -Infinity),
 ];
 
+/** Smallest value (a loop, safe for any number of points). */
+export const minOf = (v: number[]): number => v.reduce((a, b) => Math.min(a, b), Infinity);
+
+/** Largest value (a loop, safe for any number of points). */
+export const maxOf = (v: number[]): number => v.reduce((a, b) => Math.max(a, b), -Infinity);
+
 /** Pairs in ascending X order, so a connecting line (or the area beneath it)
  *  follows the data's trend instead of the table's row order: unsorted X
  *  draws a zigzag / self-overlapping fill, and disagrees in shape with the

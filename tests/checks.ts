@@ -2926,7 +2926,7 @@ check("seq 208: XY bars on a summary table draw the stored Means with the conver
   deepStrictEqual(traces[1].error_y?.array, [4 / 3, 2]); // SD 4/√9, 6/√9
   // The same values come out of xyDrawn directly, even with xyReplicates "each".
   const { x: xCol, ys } = splitXY(dataset.columns);
-  const drawn = xyDrawn(xCol, ys[0], { ...newGraphOptions("xy-scatter"), xyReplicates: "each" }, "mean-sd-n");
+  const drawn = xyDrawn(xCol, ys[0]!, { ...newGraphOptions("xy-scatter"), xyReplicates: "each" }, "mean-sd-n");
   deepStrictEqual(drawn, { x: [1, 2], y: [10, 12], errors: [1, 1.5] });
 });
 
@@ -3285,7 +3285,7 @@ check("seq 211: spikes and the combo on a summary table draw the stored Means", 
 check("seq 211 MCP: build-graph accepts the spike and combo kinds on XY tables", async () => {
   const harness = mcpLaggingHarness(true);
   const created: string[] = [];
-  harness.deps.actions!.createGraph = (tableId, graphType) => {
+  harness.deps.actions!.createGraph = (_tableId, graphType) => {
     created.push(graphType);
     return `graph_${graphType}`;
   };
@@ -3428,7 +3428,7 @@ check("seq 212: a contingency table's floating bars span each outcome's counts a
 check("seq 212 MCP: build-graph accepts floating bars on column, grouped, nested and contingency — not XY", async () => {
   const harness = mcpLaggingHarness(true);
   const created: string[] = [];
-  harness.deps.actions!.createGraph = (tableId, graphType) => {
+  harness.deps.actions!.createGraph = (_tableId, graphType) => {
     created.push(graphType);
     return `graph_${graphType}`;
   };
@@ -3562,7 +3562,7 @@ check("seq 213: a grouped box draws Tukey outliers per row, and the Format panel
 check("seq 213 MCP: build-graph accepts whisker and violinVariant options and refuses bad ones", async () => {
   const harness = mcpLaggingHarness(true);
   const captured: { whisker?: string; violinVariant?: string }[] = [];
-  harness.deps.actions!.createGraph = (tableId, graphType, options) => {
+  harness.deps.actions!.createGraph = (_tableId, graphType, options) => {
     captured.push({ whisker: options?.whisker, violinVariant: options?.violinVariant });
     return `graph_${graphType}`;
   };
@@ -3705,7 +3705,7 @@ check("seq 214: grouped scatter and grouped box points follow the scatter style,
 check("seq 214 MCP: build-graph accepts the aligned scatter style and refuses bad ones", async () => {
   const harness = mcpLaggingHarness(true);
   const captured: (string | undefined)[] = [];
-  harness.deps.actions!.createGraph = (tableId, graphType, options) => {
+  harness.deps.actions!.createGraph = (_tableId, graphType, options) => {
     captured.push(options?.scatterStyle);
     return `graph_${graphType}`;
   };
