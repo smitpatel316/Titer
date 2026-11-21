@@ -600,7 +600,7 @@ Streamable HTTP directly (initialize → tools/list → tools/call across
 all 58 tools), and prints a PASS/FAIL line per check; exit 0 only if
 every check passes. **Prerequisite:** in Titer, Settings → AI
 Connections, turn on every group under "What your AI can do" first —
-by default the server advertises only the 5 read tools (§12), and this
+by default the server advertises only the 6 read tools (§12), and this
 smoke drives all 58. It drives one deterministic flow on a fresh project
 it creates itself (no fixture ids — the ids it needs come from the
 tools' own outputs), plus the `tests/testdata/survival.pzfx` public
@@ -737,16 +737,18 @@ config was advisory only: the bridge is a byte-forwarder that never
 reads it (by design, §11.2), the server advertised all 52 tools, and
 Antigravity 2.33.0 enabled all of them — including the six destructive
 tools and `titer_run_script`. The only gate was Antigravity's Ask-mode
-approval. The allowlist makes the 5-tool list real, server-side.
+approval. The allowlist makes the default 6-tool list real, server-side.
 
 ### 12.1 Default set
 
-By default only the five Phase 1 read tools are advertised or callable
-— the same five as Antigravity's `enabledTools` and the one-click
-"Connect to Antigravity" entry:
+By default only the six read-group tools are advertised or callable —
+the five Phase 1 read tools plus `titer_list_backups` (automatic
+backups, added in 1.8.0, seq 226). Note the one-click "Connect to
+Antigravity" entry still allowlists exactly the five Phase 1 tools, by
+design — the server-side default is one tool wider:
 
 `titer_list_projects`, `titer_list_tables`, `titer_read_table_summary`,
-`titer_read_results`, `titer_read_graph`.
+`titer_read_results`, `titer_read_graph`, `titer_list_backups`.
 
 Everything else is hidden until the user turns its group on.
 
@@ -813,7 +815,10 @@ the same human-only boundary as enable/token (D4).
 - The stdio bridge is untouched: it stays a byte-forwarder (§11.2)
   and naturally advertises only what the server advertises.
 - Antigravity's `mcp_config.json` is untouched: it keeps its 5-tool
-  `enabledTools`. The server-side allowlist now makes that list real
-  instead of advisory; the config file format does not change.
+  `enabledTools` (the one-click entry still allowlists exactly the five
+  Phase 1 tools, by design). The server-side default is now six read
+  tools — the five plus `titer_list_backups` — and Antigravity follows
+  what the server advertises, so it shows six. The config file format
+  does not change.
 - The server still *has* 58 tools. The allowlist decides which subset
   a given client sees — it does not remove tools from the server.

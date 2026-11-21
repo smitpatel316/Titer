@@ -135,9 +135,15 @@ fn prune_backups(dir: &Path, now: u64) {
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let Some(stem) = name.strip_suffix(".json") else {
-            // A snapshot with no sidecar is an incomplete write: drop it.
-            if name.ends_with(".hlx") {
-                let _ = fs::remove_file(entry.path());
+            // A snapshot with no sidecar is an incomplete write: drop it —
+            // but only when its sidecar really is missing. Deleting every
+            // `.hlx` here also deleted complete pairs: the snapshot a
+            // `write_backup` had just written, so no backup ever survived
+            // to be listed or restored.
+            if let Some(stem) = name.strip_suffix(".hlx") {
+                if !is_valid_key(stem) || !meta_path(dir, stem).exists() {
+                    let _ = fs::remove_file(entry.path());
+                }
             }
             continue;
         };
