@@ -3851,9 +3851,19 @@ impl TiterMcpServer {
         &self,
         Parameters(_args): Parameters<BackupListArgs>,
     ) -> Result<Json<serde_json::Value>, String> {
-        let Some(dir) = self.state.dir() else {
+        let Some(mcp_dir) = self.state.dir() else {
             return Err(
                 "Backups couldn't be listed — the MCP directory isn't available. Turn the server off and on again in Settings → AI Connections."
+                    .into(),
+            );
+        };
+        // Backups live in <app_data>/backups, beside <app_data>/mcp — the
+        // Tauri commands in main.rs write them there. state.dir() is the
+        // mcp directory itself, so step up one level: listing the mcp
+        // directory would always come back empty.
+        let Some(dir) = mcp_dir.parent().map(|p| p.to_path_buf()) else {
+            return Err(
+                "Backups couldn't be listed — the MCP directory has no parent folder. Turn the server off and on again in Settings → AI Connections."
                     .into(),
             );
         };
@@ -10018,6 +10028,34 @@ mod tests {
                 t.name
             );
         }
+    }
+
+    // ── Automatic backup (seq 226) ───────────────────────────────────────
+    #[tokio::test]
+    async fn list_backups_reads_the_app_data_store_not_the_mcp_dir() {
+        // The Tauri commands in main.rs write backups to <app_data>/backups;
+        // state.dir() is <app_data>/mcp. The tool must step up one level —
+        // listing the mcp directory itself would always come back empty.
+        // Pre-fix this test fails (0 backups listed).
+        let app_data = std::env::temp_dir().join(format!("titer-backup-mcp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&app_data);
+        std::fs::create_dir_all(app_data.join("mcp")).expect("mcp dir");
+        crate::backup::write_backup(
+            &app_data,
+            "file:/Research/Dose.hlx",
+            "Dose.hlx",
+            Some("/Research/Dose.hlx"),
+            b"{\"project\": true}",
+        )
+        .expect("write backup");
+        let state = job_state();
+        state.lock().dir = Some(app_data.join("mcp"));
+        let server = TiterMcpServer::new(state);
+        let out = server.list_backups(Parameters(BackupListArgs {})).await.expect("list backups");
+        let backups = out.0["backups"].as_array().expect("backups array");
+        assert_eq!(backups.len(), 1, "the written backup should be listed: {backups:?}");
+        assert_eq!(backups[0]["display_name"], "Dose.hlx");
+        let _ = std::fs::remove_dir_all(&app_data);
     }
 
     // ── Feedback sharing (server mode, seq 276) ─────────────────────────

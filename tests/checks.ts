@@ -19100,6 +19100,11 @@ check("seq 226: the backup engine, settings, dialog and shell commands are wired
   ok(rust.includes("mod backup;"), "the backup module is not wired into the shell");
   const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
   ok(mcp.includes('"titer_list_backups"'), "the MCP server has no list-backups tool");
+  // The list tool reads the app-data store (<app_data>/backups), not the
+  // MCP directory (<app_data>/mcp): state.dir() is the mcp dir, so the
+  // tool steps up one level — listing the mcp dir would always come back
+  // empty.
+  ok(mcp.includes("mcp_dir.parent()"), "titer_list_backups must step up from the MCP dir to the app-data dir");
 });
 
 // ── Run ──────────────────────────────────────────────────────────────────
