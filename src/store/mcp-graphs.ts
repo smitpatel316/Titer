@@ -873,8 +873,10 @@ export function executeBuildGraph(job: McpJob, deps: GraphJobDeps): GraphJobOutc
  *  With `graph_type` (seq 244) it changes the graph's type instead — the
  *  type must be offered for the graph's table, the new type's defaults
  *  apply (title and size kept, as in the UI), and `options`, when given
- *  with it, merge over the current ones and apply to the new type. At
- *  least one of the three is required. */
+ *  with it, merge over the current ones and apply to the new type — and
+ *  `source_table_ids`, when given with it, still changes the sources
+ *  (the three parts apply together, never just the type).
+ *  At least one of the three is required. */
 export function executeUpdateGraph(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
   const args = argsOf(job);
   const graphId = reqStr(job, args, "graph_id");
@@ -887,14 +889,34 @@ export function executeUpdateGraph(job: McpJob, deps: GraphJobDeps): GraphJobOut
   if (node.type !== "graph") throw jobErr(job, `“${node.name}” is a ${node.type}, not a graph.`);
   const tableId = node.parentId && state.nodes[node.parentId]?.type === "table" ? node.parentId : undefined;
   const { options, warnings } = validateGraphOptions(job, args.options, state, tableId);
+  // A source change is validated before anything is dispatched, so a bad
+  // source list aborts before a type change (or an options change) lands —
+  // the three parts of one call (graph_type, source_table_ids, options)
+  // apply together or not at all.
+  const hasSources = args.source_table_ids !== undefined && args.source_table_ids !== null;
+  if (hasSources) {
+    const table = tableId ? state.nodes[tableId] : undefined;
+    if (!table) throw jobErr(job, `the graph “${node.name}” has no data table to add sources to.`);
+    const errors = validateGraphSources(table, args.source_table_ids, state.nodes);
+    if (errors.length) throw jobErr(job, errors.join(" "));
+  }
+  const sourceTableIds = hasSources ? [...(args.source_table_ids as string[])] : undefined;
+  const typeChange = graphType !== undefined && graphType !== node.graphType;
   // A type change goes through `changeGraphType`, not `updateGraph`: the
   // store takes the new type's defaults (or the caller's merged options)
   // and renames the graph for its new type. The same type with nothing to
   // change is a no-op, not a spurious undo step.
-  if (graphType !== undefined && graphType === node.graphType && args.options === undefined) {
-    return { result: { project_id: job.project_id, graph_id: graphId, graph_type: graphType } };
+  if (!typeChange && args.options === undefined && sourceTableIds === undefined) {
+    return {
+      result: {
+        project_id: job.project_id,
+        graph_id: graphId,
+        ...(graphType !== undefined ? { graph_type: graphType } : {}),
+      },
+    };
   }
-  if (graphType !== undefined && graphType !== node.graphType) {
+  const result: Record<string, unknown> = { project_id: job.project_id, graph_id: graphId };
+  if (typeChange) {
     const table = tableId ? state.nodes[tableId] : undefined;
     const tableType = table?.type === "table" ? table.tableType : undefined;
     if (!tableType) throw jobErr(job, `graph “${node.name}” has no data table, so its type can't change.`);
@@ -913,25 +935,17 @@ export function executeUpdateGraph(job: McpJob, deps: GraphJobDeps): GraphJobOut
       const merged: GraphOptions = { ...DEFAULT_GRAPH_OPTIONS, ...(node.graphOptions ?? {}), ...options };
       change(graphId, graphType as GraphType, merged);
     }
-    const result: Record<string, unknown> = { project_id: job.project_id, graph_id: graphId, graph_type: graphType };
-    if (warnings.length) result.warnings = warnings;
-    return { result };
+    result.graph_type = graphType;
   }
-  const result: Record<string, unknown> = { project_id: job.project_id, graph_id: graphId };
-  if (args.source_table_ids !== undefined && args.source_table_ids !== null) {
-    const table = tableId ? state.nodes[tableId] : undefined;
-    if (!table) throw jobErr(job, `the graph “${node.name}” has no data table to add sources to.`);
-    const errors = validateGraphSources(table, args.source_table_ids, state.nodes);
-    if (errors.length) throw jobErr(job, errors.join(" "));
-    need(job, deps.setGraphSources, "change a graph's source tables")(graphId, [...(args.source_table_ids as string[])]);
-    result.source_table_ids = [...(args.source_table_ids as string[])];
+  if (sourceTableIds !== undefined) {
+    need(job, deps.setGraphSources, "change a graph's source tables")(graphId, [...sourceTableIds]);
+    result.source_table_ids = [...sourceTableIds];
   }
-  if (args.options !== undefined) {
-    const { options, warnings } = validateGraphOptions(job, args.options, state, tableId);
+  if (args.options !== undefined && !typeChange) {
     const merged: GraphOptions = { ...DEFAULT_GRAPH_OPTIONS, ...(node.graphOptions ?? {}), ...options };
     need(job, deps.updateGraph, "update a graph")(graphId, merged);
-    if (warnings.length) result.warnings = warnings;
   }
+  if (warnings.length) result.warnings = warnings;
   return { result };
 }
 

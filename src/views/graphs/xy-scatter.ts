@@ -29,7 +29,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?:
   // Replicates as their center (or each value) per `xyReplicates`; then the cap
   // is on the total plotted, so the stride is shared — each series keeps its
   // shape and the total stays at the cap.
-  const drawn = ys.map((set) => xyDrawn(xCol, set, options, summary));
+  const drawn = ys.map((set) => xyDrawn(xCol, set, options, summary, xErr));
   const right = rightYDataset(options, ys.map((y) => y.name));
   const total = drawn.reduce((sum, d) => sum + d.x.length, 0);
   const stride = total > XY_SCATTER_MAX_POINTS ? Math.ceil(total / XY_SCATTER_MAX_POINTS) : 1;

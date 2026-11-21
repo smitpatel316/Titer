@@ -514,6 +514,7 @@ export function xyDrawn(
     const meanCol = set.columns.find((c) => summarySuffix(c.name) === "Mean");
     if (!meanCol) return { x: [], y: [] };
     const rows = x.rows.filter((r) => meanCol.byRow[r] != null);
+    const xErrs = xErrors(rows);
     return {
       x: rows.map((r) => x.byRow[r]!),
       y: rows.map((r) => meanCol.byRow[r]!),
@@ -522,6 +523,9 @@ export function xyDrawn(
         : {
             errors: rows.map((r) => summaryErrorAt(set.columns, r, summary, options.error).error ?? 0),
           }),
+      // Only present when there really are X errors: the return's shape is
+      // pinned (seq 208), and an `xErrors: undefined` key would change it.
+      ...(xErrs ? { xErrors: xErrs } : {}),
     };
   }
   if (set.columns.length === 1 || options.xyReplicates === "each") {

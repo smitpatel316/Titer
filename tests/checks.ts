@@ -29347,14 +29347,30 @@ check("48: MCP build-graph with source_table_ids creates the graph with its sour
   const nodes: Record<string, ProjectNode> = { t1, t2 };
   const created: { parentId: string; graphType: string; sourceTableIds?: string[] }[] = [];
   const sourced: { id: string; sourceTableIds: string[] }[] = [];
+  const changed: { id: string; graphType: string; options?: GraphOptions }[] = [];
   const deps: GraphJobDeps = {
     getState: () => ({ nodes, rootOrder: ["t1", "t2"], childOrder: {}, activeNodeId: null }),
-    createGraph: (parentId, graphType, _options, sourceTableIds) => {
+    createGraph: (parentId, graphType, options, sourceTableIds) => {
       created.push({ parentId, graphType, sourceTableIds });
+      // Like the real store, creating the graph puts it in the project —
+      // the update below has to find it there.
+      nodes.g1 = {
+        id: "g1",
+        type: "graph",
+        name: "Plot",
+        parentId,
+        graphType,
+        graphOptions: options,
+        ...(sourceTableIds?.length ? { sourceTableIds } : {}),
+      };
       return "g1";
     },
     setGraphSources: (id, sourceTableIds) => {
       sourced.push({ id, sourceTableIds });
+    },
+    changeGraphType: (id, graphType, options) => {
+      changed.push({ id, graphType, options });
+      if (nodes[id]) nodes[id] = { ...nodes[id], graphType, ...(options ? { graphOptions: options } : {}) };
     },
     renameNode: () => {},
   };
@@ -29368,6 +29384,27 @@ check("48: MCP build-graph with source_table_ids creates the graph with its sour
   );
   deepStrictEqual(updated.result.source_table_ids, []);
   deepStrictEqual(sourced, [{ id: "g1", sourceTableIds: [] }]);
+  // All three parts together: a type change still changes the sources (and
+  // takes the options), instead of dropping them on the type-change return.
+  const combined = executeUpdateGraph(
+    {
+      ...job({ graph_id: "g1", graph_type: "box-violin", source_table_ids: ["t2"], options: { center: "median" } }),
+      action: "update-graph",
+    },
+    deps,
+  );
+  deepStrictEqual(combined.result.graph_type, "box-violin");
+  deepStrictEqual(combined.result.source_table_ids, ["t2"]);
+  strictEqual(changed[0]?.graphType, "box-violin");
+  strictEqual(changed[0]?.options?.center, "median");
+  deepStrictEqual(sourced[sourced.length - 1], { id: "g1", sourceTableIds: ["t2"] });
+  // The same type with sources is not a no-op either: the sources change.
+  const sameType = executeUpdateGraph(
+    { ...job({ graph_id: "g1", graph_type: "box-violin", source_table_ids: [] }), action: "update-graph" },
+    deps,
+  );
+  deepStrictEqual(sameType.result.source_table_ids, []);
+  deepStrictEqual(sourced[sourced.length - 1], { id: "g1", sourceTableIds: [] });
   throws(
     () => executeBuildGraph(job({ table_id: "t1", graph_type: "mean-error", source_table_ids: ["tX"] }), deps),
     /no table with id “tX”/,
@@ -29433,6 +29470,10 @@ check("48: renaming a source table re-qualifies the graph, and deleting it drops
       data: colTable("Assay 2", { Control: [4, 5, 6] }).data,
     },
   });
+  // `create` numbers a root table from its name ("Assay 2" → "Assay 2 1"),
+  // so the graph's qualified set is built from the name the table really
+  // has — the rename below re-qualifies from that name, not the requested one.
+  const t2Name = s.nodes.t2?.name ?? "Assay 2";
   s = reducer(s, {
     type: "create",
     node: {
@@ -29441,7 +29482,7 @@ check("48: renaming a source table re-qualifies the graph, and deleting it drops
       name: "Plot",
       parentId: t1,
       graphType: "mean-error",
-      graphOptions: { ...newGraphOptions("mean-error"), sets: ["Assay 2 — Control"] },
+      graphOptions: { ...newGraphOptions("mean-error"), sets: [`${t2Name} — Control`] },
       sourceTableIds: ["t2"],
     },
   });
