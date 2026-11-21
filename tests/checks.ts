@@ -13031,12 +13031,14 @@ check("the chi-square wizard asks about ordering only on a 2×k / k×2 table, de
     type: "chi-square",
     params: { trendOrdered: false },
   });
-  // McNemar's test sits after chi-square and Plot a function on contingency tables.
+  // McNemar's test sits after chi-square, fraction-of-total and Plot a
+  // function on contingency tables (fraction-of-total joined the list
+  // with seq 196; the pin's expected list follows the wizard order).
   deepStrictEqual(
     analysisOptionsForTable("contingency").map((o) => o.value),
-    ["chi-square", "plot-function", "mcnemar"],
+    ["chi-square", "fraction-of-total", "plot-function", "mcnemar"],
   );
-  deepStrictEqual(analysisOptionsForTable("contingency")[2]?.label, "McNemar's test (paired proportions)");
+  deepStrictEqual(analysisOptionsForTable("contingency")[3]?.label, "McNemar's test (paired proportions)");
 });
 
 // QAB-4: the 2×2 chi-square shown for reference is the UNCORRECTED Pearson
