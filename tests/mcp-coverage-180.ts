@@ -38,8 +38,12 @@
 // Letter Display IS implemented — `compactLetters` in
 // src/views/graphs/significance-overlay.ts, `sigDisplay` "letters",
 // reachable via build_graph/update_graph — so 178 is COVERED here.
-// Two rows are still `in-flight` (196, Mansi-4: branches unmerged).
-// 36 rows are still genuine gaps (see GAP-CONFIRMED lines at run time);
+// Two rows were `in-flight` (196, Mansi-4) — both merged now, rows flipped
+// to covered. 33 rows are still genuine gaps (see GAP-CONFIRMED lines at run
+// time); one landed-but-unflipped row remains (201: its checks name enum
+// values '6th-order'/'centered' that the B1 lane implemented as 'sextic' /
+// 'centered-first..fifth' — the row's checks need correcting to the real enum
+// values before it can flip; do NOT flip it blindly, it would regress).
 // the gate stays red for them by design — do NOT flip a row until its
 // surface exists on the tip. Sections below are the audit-tip grouping;
 // the per-row `status` is the current verdict and is authoritative.
@@ -857,9 +861,8 @@ const ROWS: Row[] = [
   {
     item: "196",
     title: "Fraction-of-total",
-    status: "in-flight",
-    branch: "fix/18-196-fraction-total",
-    note: "Branch adds a 'ci' param + Contingency offering. Caveat: PoW offering still blocked on 197 (no PoW table type).",
+    status: "covered",
+    note: "Merged on check/v18: 'ci' param on fraction-of-total + Contingency offering. Caveat: PoW offering still blocked on 197 (no PoW table type).",
     checks: [{ kind: "analysisParam", type: "fraction-of-total", param: "ci" }],
   },
   {
@@ -872,9 +875,8 @@ const ROWS: Row[] = [
   {
     item: "Mansi-4",
     title: "Grouped-scatter multi-sigAnalysisId (m5)",
-    status: "in-flight",
-    branch: "fix/18-m5-multisig",
-    note: "Single sigAnalysisId on tip; branch adds sigAnalysisIds?: string[].",
+    status: "covered",
+    note: "Merged on check/v18: sigAnalysisIds?: string[] on GraphOptions; multi-source brackets + letters from the first analysis.",
     checks: [{ kind: "sourceContains", file: "storeTypes", text: "sigAnalysisIds" }],
   },
 
@@ -1135,8 +1137,8 @@ const ROWS: Row[] = [
   {
     item: "216",
     title: "Publication export",
-    status: "gap",
-    note: "Partial: PNG/JPEG/SVG/PDF/TIFF at 150–1200 DPI + size via export_graph/export_figure. Missing: EPS, BMP, 100 DPI, CMYK, grayscale, vector PDF (PDF embeds a raster image). CMYK/grayscale/vector-PDF have no stable absence marker, so this row checks EPS/BMP/100-DPI only.",
+    status: "covered",
+    note: "Merged on check/v18: EPS, BMP, 100 DPI now present (checked here). CMYK/grayscale/vector-PDF also built by the 216 lane but have no stable absence marker, so this row checks EPS/BMP/100-DPI only.",
     checks: [
       { kind: "exportFormat", format: "eps" },
       { kind: "exportFormat", format: "bmp" },
@@ -1146,8 +1148,8 @@ const ROWS: Row[] = [
   {
     item: "217",
     title: "Send to Keynote + Office",
-    status: "gap",
-    note: "Partial: Word + PowerPoint ✓ via titer_export_office; Keynote ✗ (OfficeTarget = word|powerpoint only).",
+    status: "covered",
+    note: "Merged on check/v18: Keynote via the Mac AppleScript handoff (titer_export_office, OfficeTarget keynote); Word + PowerPoint as before.",
     checks: [{ kind: "sourceContainsRe", scope: "officeExport", re: "keynote" }],
   },
   {
