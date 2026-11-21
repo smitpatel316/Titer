@@ -376,6 +376,24 @@ const nls200 = (expr: string, start: string) => `nls(y~${expr},start=${start},co
  *  tol=1e-3 converges at the same optimum (verified in R and scipy). */
 const nls200Tol = (expr: string, start: string) =>
   `nls(y~${expr},start=${start},control=nls.control(maxiter=200,tol=1e-3))`;
+/** The 4PL gate fix (analytic-gradient retry): R's nls differentiates by
+ *  forward differences (numericDeriv) with step delta = |theta| *
+ *  sqrt(.Machine$double.eps). When a fitted parameter's value is within
+ *  ~1e-8 of zero — LogEC50/LogIC50 = 0 exactly on the classic-curves 4PL
+ *  fixtures (EC50/IC50 = 1) — delta collapses to ~1e-17, so
+ *  f(theta+delta) == f(theta) in floating point and the gradient column
+ *  comes out exactly zero: the first Gauss-Newton step lands on a singular
+ *  gradient ("singular gradient"), and the port + relaxed-tolerance retries
+ *  die the same way (they share the numeric gradient). deriv() supplies the
+ *  exact analytic gradient instead, so the fit converges — but only with
+ *  the relaxed tolerance: on noiseless data the relative-offset convergence
+ *  test stalls at ~4e-05 (above tol = 1e-5), so this rung carries tol = 1e-3
+ *  (verified in R: deriv + tol = 1e-3 converges to the generating values;
+ *  deriv + default tol stalls at minFactor). Appended after the port/tol
+ *  rungs, so it only runs when they all fail and never moves a passing fit.
+ *  `theta` lists the start parameters, in start order, as R strings. */
+const nlsDerivTol = (expr: string, start: string, theta: string) =>
+  `m<-nls(y~eval(deriv(~${expr},${theta})),start=${start},control=nls.control(maxiter=200,tol=1e-3))`;
 
 export function modelSpec(
   model: NonlinearModel,
@@ -736,7 +754,9 @@ export function modelSpec(
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, `list(LogEC50=median(x),HillSlope=${SIGN})`)}`,
-        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x),
+        // plus the analytic-gradient retry (the gate fix: the numeric
+        // gradient collapses when LogEC50 hits ~0, see nlsDerivTol).
         retryFits: [
           {
             fit: `m<-nls(y~${expr},start=list(LogEC50=median(x),HillSlope=${SIGN}),algorithm="port",control=nls.control(maxiter=200))`,
@@ -745,6 +765,10 @@ export function modelSpec(
           {
             fit: `m<-${nls200Tol(expr, `list(LogEC50=median(x),HillSlope=${SIGN})`)}`,
             method: "relaxed tolerance",
+          },
+          {
+            fit: nlsDerivTol(expr, `list(LogEC50=median(x),HillSlope=${SIGN})`, 'c("LogEC50","HillSlope")'),
+            method: "analytic gradient",
           },
         ],
         terms: ["LogEC50", "HillSlope"],
@@ -833,7 +857,9 @@ export function modelSpec(
       return {
         kind: "nls",
         fit: `m<-${nls200(expr, "list(LogIC50=median(x),HillSlope=1)")}`,
-        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x).
+        // Same port-then-relaxed retries as the 4PLs (see agonist-3pl-x),
+        // plus the analytic-gradient retry (the gate fix: the numeric
+        // gradient collapses when LogIC50 hits ~0, see nlsDerivTol).
         retryFits: [
           {
             fit: `m<-nls(y~${expr},start=list(LogIC50=median(x),HillSlope=1),algorithm="port",control=nls.control(maxiter=200))`,
@@ -842,6 +868,10 @@ export function modelSpec(
           {
             fit: `m<-${nls200Tol(expr, "list(LogIC50=median(x),HillSlope=1)")}`,
             method: "relaxed tolerance",
+          },
+          {
+            fit: nlsDerivTol(expr, "list(LogIC50=median(x),HillSlope=1)", 'c("LogIC50","HillSlope")'),
+            method: "analytic gradient",
           },
         ],
         terms: ["LogIC50", "HillSlope"],
@@ -1036,6 +1066,17 @@ export function modelSpec(
           {
             fit: `m<-${nls200Tol(FOUR_LOG, `list(Bottom=min(y),Top=max(y),LogEC50=median(x),HillSlope=${SIGN})`)}`,
             method: "relaxed tolerance",
+          },
+          {
+            // The gate fix: the numeric gradient collapses when LogEC50
+            // hits ~0 (see nlsDerivTol) — same 4PL pathology as the
+            // normalized logx twins.
+            fit: nlsDerivTol(
+              FOUR_LOG,
+              `list(Bottom=min(y),Top=max(y),LogEC50=median(x),HillSlope=${SIGN})`,
+              'c("Bottom","Top","LogEC50","HillSlope")',
+            ),
+            method: "analytic gradient",
           },
         ],
         terms: ["Bottom", "Top", "LogEC50", "HillSlope"],
@@ -1969,8 +2010,19 @@ const rNum = (v: number): string => {
   return String(v);
 };
 
-/** Substitute fixed parameters as constants in a formula (bare names). */
+/** Substitute fixed parameters as constants in a formula (bare names).
+ *  String literals are left alone: the analytic-gradient retry names its
+ *  parameters as strings in deriv()'s theta list (c("LogEC50","HillSlope")),
+ *  and substituting a fixed value there would corrupt the list. */
 function substituteFormula(expr: string, fixedByVar: Record<string, number>): string {
+  return expr
+    .split(/("[^"]*")/g)
+    .map((part, i) => (i % 2 === 0 ? substituteNames(part, fixedByVar) : part))
+    .join("");
+}
+
+/** Substitute fixed parameters as constants in a bare-name expression. */
+function substituteNames(expr: string, fixedByVar: Record<string, number>): string {
   let out = expr;
   for (const [name, value] of Object.entries(fixedByVar))
     out = out.replace(new RegExp(`\\b${name}\\b`, "g"), `(${rNum(value)})`);
