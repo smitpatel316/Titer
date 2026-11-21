@@ -31,6 +31,7 @@ import { AnalysisWizard } from "../views/analyses/analysis-wizard";
 import { WandDialog } from "./wand-dialog";
 import { SimulateDataDialog } from "./simulate-data-dialog";
 import { CloneGraphDialog } from "./clone-graph-dialog";
+import { RegenerateGraphsDialog } from "./regenerate-graphs-dialog";
 import { ScriptDialog } from "./script-dialog";
 import { PreferencesDialog } from "./preferences-dialog";
 import { PRINT_SETTINGS_CHANGED_EVENT, loadPrintSettings, printPageCss } from "../lib/print-settings";
@@ -174,7 +175,9 @@ export function AppShell() {
           could not dismiss it on macOS (v1.6.0 Mac proof — second native sheet
           on the window right after the askToSave sheet; rfd's sheet path left
           the alert window with a button that ends nothing). Same Quirk-2
-          family as "Project Updated" above. */}
+          family as "Project Updated" above. When the import carried graphs
+          Prism didn't transfer, "Regenerate graphs…" opens the preview that
+          rebuilds the auto-created ones (seq 291). */}
       <Dialog
         open={prismImported !== null}
         onClose={dismissPrismImported}
@@ -190,6 +193,13 @@ export function AppShell() {
               </React.Fragment>
             ))}
           </>
+        }
+        footer={
+          documentActions.regenPlans?.some((p) => p.reconstructible) ? (
+            <Button variant="accent" onClick={() => documentActions.openRegenDialog()}>
+              Regenerate graphs…
+            </Button>
+          ) : undefined
         }
       />
 
@@ -276,7 +286,13 @@ export function AppShell() {
         }
       />
 
-      <ConverterDialog />
+      <RegenerateGraphsDialog
+        open={documentActions.regenDialogOpen}
+        onCancel={documentActions.dismissRegenDialog}
+        onDone={documentActions.consumeRegenPlans}
+      />
+
+      <ConverterDialog onOpenRegenerate={() => documentActions.openRegenDialog()} />
 
       <ExportAllDialog />
 

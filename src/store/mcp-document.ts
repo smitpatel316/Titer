@@ -14,9 +14,15 @@
 // `allowMcpCloseOnce` arms a one-shot, 30-second allowance the handler
 // consumes — an allowance that outlives a failed close expires instead of
 // letting a later hand-close skip its prompt.
-import { convertPrism, type ConvertReport } from "../lib/prism";
+import { convertPrism, loadPrismZip, type ConvertReport } from "../lib/prism";
 import { parsePzfx } from "../lib/pzfx";
 import { parsePzf } from "../lib/pzf";
+import {
+  planGraphRegeneration,
+  planPzfxGraphs,
+  regenPlanCounts,
+  setRegenPlans,
+} from "../lib/prism-graph-regen";
 import { formatWriteReport, writePrism, type PrismWriteIssue, type PrismWriteReport } from "../lib/prism-write";
 import { formatPzfxWriteReport, writePzfx } from "../lib/pzfx-write";
 import { parseProjectText, serializeProjectFile } from "../lib/project-file";
@@ -331,11 +337,15 @@ export async function readPrismWithTimeout<T>(read: () => Promise<T>, path: stri
  *  (untitled, edited) project — the same as File ▸ Import Prism File, minus
  *  the dialog. A dirty project refuses: an import replaces the project, and
  *  the agent must save or close it first. Returns the tool's output shape
- *  (`{ imported_tables, warnings }`). */
+ *  (`{ imported_tables, warnings, regenerable_graphs,
+ *  graphs_not_regenerable }`) — the regen counts say whether to offer the
+ *  graph-regeneration step, and the plans are recorded in the import-time
+ *  registry for `titer_list_regenerable_graphs` /
+ *  `titer_regenerate_graphs` (seq 291). */
 export async function executeImportPrism(
   deps: DocumentDeps,
   args: { path: string },
-  _projectId: string,
+  projectId: string,
 ): Promise<{ result: unknown }> {
   const ext = extOf(args.path);
   if (ext !== "prism" && ext !== "pzfx" && ext !== "pzf") {
@@ -350,12 +360,26 @@ export async function executeImportPrism(
     const bytes = await readPrismWithTimeout(() => deps.io.readPrismBytes(args.path), args.path);
     let converted;
     try {
-      converted = await convertPrism(bytes, fileTitle(args.path));
+      // One unzip for the import and the regen planning.
+      const zip = await loadPrismZip(bytes, fileTitle(args.path));
+      converted = await convertPrism(bytes, fileTitle(args.path), zip);
+      converted.graphPlans = await planGraphRegeneration(zip, converted);
     } catch (err) {
       throw new Error(err instanceof Error ? err.message : "This file couldn't be imported.");
     }
+    const counts = regenPlanCounts(converted.graphPlans ?? []);
     deps.loadProject({ ...converted.project, filePath: null, edited: true });
-    return { result: { imported_tables: converted.report.tables, warnings: importWarnings(converted.report) } };
+    // After the load: `loadProject` clears the registry, so the fresh
+    // plans are recorded here, keyed by this window's project id.
+    setRegenPlans(projectId, converted.graphPlans ?? []);
+    return {
+      result: {
+        imported_tables: converted.report.tables,
+        warnings: importWarnings(converted.report),
+        regenerable_graphs: counts.regenerable,
+        graphs_not_regenerable: counts.notRegenerable,
+      },
+    };
   }
   if (ext === "pzf") {
     const bytes = await readPrismWithTimeout(() => deps.io.readPrismBytes(args.path), args.path);
@@ -371,8 +395,19 @@ export async function executeImportPrism(
   if (imported.tables.length === 0) {
     throw new Error(imported.issues.map((i) => i.message).join("\n") || "No tables in this file could be imported.");
   }
+  const plans = planPzfxGraphs(imported);
+  imported.graphPlans = plans;
+  const counts = regenPlanCounts(plans);
   deps.loadProject({ ...imported.project, filePath: null, edited: true });
-  return { result: { imported_tables: imported.tables, warnings: imported.issues.map((i) => i.message) } };
+  setRegenPlans(projectId, plans);
+  return {
+    result: {
+      imported_tables: imported.tables,
+      warnings: imported.issues.map((i) => i.message),
+      regenerable_graphs: counts.regenerable,
+      graphs_not_regenerable: counts.notRegenerable,
+    },
+  };
 }
 
 // ── Merge ────────────────────────────────────────────────────────────────
