@@ -24,7 +24,7 @@ import { groupsOf, isGrouped, readTable, splitXY, xyProblem, type Column } from 
 import { summaryTableProblem } from "../../lib/summary-format";
 import { paletteOf } from "../../lib/palettes";
 import { computeGroupedDEG } from "../../lib/deg";
-import { useAnalysis } from "../analyses/use-analysis";
+import { useAnalysis, useAnalyses } from "../analyses/use-analysis";
 import { infoSheetsOf, resolveGraphOptions } from "../../lib/info-sheets";
 import { choosableSets, GRAPHS, graphSeries, hasValueAxis, plotColumns } from ".";
 import { addFittedCurve } from "./fitted-curve";
@@ -53,7 +53,7 @@ import { addKmeansScatter } from "./kmeans-scatter";
 import { addDendrogram } from "./dendrogram";
 import { addElbowPlot, addGapPlot, addSilhouettePlot } from "./choosing-k";
 import { addMonteCarloHistogram } from "./monte-carlo-histogram";
-import { addSignificance, deriveComparisons, GROUPED_STARS, starsFit } from "./significance-overlay";
+import { addSignificance, deriveComparisons, GROUPED_STARS, sigAnalysisIdsOf, starsFit } from "./significance-overlay";
 import {
   drawnKeys,
   drawnStyle,
@@ -372,21 +372,41 @@ export function GraphView({ node }: { node: ProjectNode }) {
   // ── Overlays from the table's analyses ───────────────────────────────
 
   const analyses = Object.values(nodes).filter((n) => n.type === "analysis" && n.parentId === node.parentId);
-  // Significance brackets read the chosen analysis's own result (the one its view shows).
-  const sigAnalysis = options.sigAnalysisId ? nodes[options.sigAnalysisId] : undefined;
+  // Significance brackets read the chosen analyses' own results (the ones their views
+  // show). One id is the legacy single source; `sigAnalysisIds` names several — a
+  // grouped-scatter's multiple t tests, one per copy table. Each runs on its own
+  // parent table's data (a copy's test reads the copy's numbers, not the graph's
+  // table's), and its brackets land on the graph's rows, which a copy shares with
+  // the original.
   const stars = family === "column" || GROUPED_STARS.has(type);
-  const sigOutcome = useAnalysis(
-    stars ? sigAnalysis?.analysisType : undefined,
-    data,
-    sigAnalysis?.analysisParams,
+  const sigIdKey = sigAnalysisIdsOf(options).join("\n");
+  const sigAnalyses = sigIdKey
+    .split("\n")
+    .filter(Boolean)
+    .map((id) => nodes[id])
+    .filter((n): n is ProjectNode => n !== undefined && n.type === "analysis");
+  const sigOutcomes = useAnalyses(
+    stars
+      ? sigAnalyses.map((a) => ({
+          id: a.id,
+          type: a.analysisType,
+          data: a.parentId ? nodes[a.parentId]?.data : undefined,
+          params: a.analysisParams,
+        }))
+      : [],
   );
-  // None while its analysis runs (its stars come once R answers); none from an analysis
-  // of other data sets than those the graph shows (`starsFit`).
-  const sigFits = sigAnalysis !== undefined && starsFit(sigAnalysis, choosable, shownSets ?? choosable);
-  const comparisons = React.useMemo(
-    () => (!sigFits ? [] : sigAnalysis && !sigOutcome ? null : deriveComparisons(sigOutcome)),
-    [sigFits, sigAnalysis, sigOutcome],
-  );
+  // None while its analyses run (their stars come once R answers); none from an analysis
+  // of other data sets than those the graph shows (`starsFit`). The memo reads the
+  // current nodes but keys on the stable pieces, so an unrelated store change doesn't
+  // rebuild the list and redraw the plot.
+  const comparisons = React.useMemo(() => {
+    if (!stars || !sigAnalyses.length) return [];
+    const fitting = sigAnalyses.filter((a) => starsFit(a, choosable, shownSets ?? choosable));
+    if (!fitting.length) return [];
+    if (!sigOutcomes) return null;
+    return fitting.flatMap((a) => deriveComparisons(sigOutcomes[sigAnalyses.indexOf(a)] ?? null, a.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stars, sigIdKey, sigOutcomes, choosable.join("\n"), (shownSets ?? choosable).join("\n")]);
   // An XY scatter draws a regression of its table: a linear one's line and band it computes
   // itself; a nonlinear or logistic one's curve, from its result.
   const regNode = options.regAnalysisId ? nodes[options.regAnalysisId] : undefined;
@@ -666,7 +686,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
         const note = unlinkedAnalysisNote(t);
         if (note) addNote(fig, note, options);
       };
-      if (stars && options.sigAnalysisId)
+      if (stars && (comparisons?.length ?? 0) > 0)
         addSignificance(fig, columns, type, options, comparisons ?? [], dataset?.titles);
       if (type === "xy-scatter" && curveParams) {
         const { x, ys } = splitXY(columns);
@@ -932,6 +952,12 @@ export function GraphView({ node }: { node: ProjectNode }) {
           options={options}
           set={set}
           analyses={analyses}
+          allAnalyses={Object.values(nodes).filter((n) => n.type === "analysis")}
+          analysisTables={Object.fromEntries(
+            Object.values(nodes)
+              .filter((n) => n.type === "analysis")
+              .map((a) => [a.id, a.parentId ? nodes[a.parentId]?.name ?? "" : ""]),
+          )}
           comparisons={comparisons}
           seriesNames={seriesNames}
           setSeriesStyle={setSeriesStyle}

@@ -17,7 +17,7 @@ import {
 } from "../../store/types";
 import { isSignificant, pStars } from "../../lib/format";
 import { GRAPHS, variablePair } from ".";
-import { expandSigPairs, GROUPED_STARS, lettersFit, ranOn, sigPairSelected, starsFit, type SigComparison } from "./significance-overlay";
+import { expandSigPairs, GROUPED_STARS, lettersComparisons, lettersFit, ranOn, sigAnalysisIdsOf, sigPairKey, sigPairSelected, starsFit, type SigComparison } from "./significance-overlay";
 import { cutoffAsP, cutoffOfP, volcanoAxes, volcanoPair } from "./volcano";
 import { paletteOf } from "../../lib/palettes";
 import { MAX_BINS } from "../../lib/histogram";
@@ -43,6 +43,11 @@ export interface SectionContext {
   set: SetOptions;
   /** The analyses of the graph's table: sources for significance stars and fitted lines. */
   analyses: ProjectNode[];
+  /** Every analysis in the project: a grouped-scatter's significance can
+   *  come from copy tables, not just its own. */
+  allAnalyses?: ProjectNode[];
+  /** Each analysis's parent table name, for the multi-source picker. */
+  analysisTables?: Record<string, string>;
   /** The chosen analysis's pairs; null while it runs. */
   comparisons: SigComparison[] | null;
   seriesNames: string[];
@@ -81,7 +86,7 @@ const SIGNIFICANCE_SOURCES = new Set<AnalysisType | undefined>([
 ]);
 
 /** A grouped graph's: comparisons between its cells. */
-const GROUPED_SOURCES = new Set<AnalysisType | undefined>(["two-way-anova", "multiple-t-tests"]);
+export const GROUPED_SOURCES = new Set<AnalysisType | undefined>(["two-way-anova", "multiple-t-tests"]);
 
 const CENTER_ITEMS = [
   { value: "mean" as const, label: "Mean" },
@@ -145,6 +150,21 @@ export function statisticsControls(c: SectionContext): React.ReactNode {
     const chosen = sources.find((a) => a.id === options.sigAnalysisId);
     const partial = shown.length < c.sets.length;
     const newAnalysis = () => c.onNewAnalysis(undefined, shown);
+    // A grouped-scatter's significance can come from several analyses — its
+    // multiple t tests, one per copy table — so it picks them, not one.
+    if (graphType === "grouped-scatter")
+      return (
+        <MultiSignificanceControls
+          all={c.allAnalyses ?? c.analyses}
+          tables={c.analysisTables ?? {}}
+          comparisons={c.comparisons}
+          options={options}
+          set={set}
+          shown={shown}
+          sets={c.sets}
+          onNewAnalysis={newAnalysis}
+        />
+      );
     if (!fitting.length && !chosen) {
       return (
         <NoAnalysis onNewAnalysis={newAnalysis}>
@@ -572,6 +592,154 @@ function PcaControls({
           />
         </>
       )}
+    </>
+  );
+}
+
+/** Pick several analyses, then which of each one's pairwise comparisons get a bracket —
+ *  a grouped-scatter's multiple t tests, one per copy table. An analysis of another
+ *  table is listed with its table's name; one that ran on other data sets than the
+ *  graph shows can't annotate it. A comparison's tick is scoped to its analysis, so
+ *  the same row from two copy tables is ticked apart. */
+function MultiSignificanceControls({
+  all,
+  tables,
+  comparisons,
+  options,
+  set,
+  shown,
+  sets,
+  onNewAnalysis,
+}: {
+  all: ProjectNode[];
+  tables: Record<string, string>;
+  comparisons: SigComparison[] | null;
+  options: GraphOptions;
+  set: SetOptions;
+  shown: string[];
+  sets: string[];
+  onNewAnalysis: () => void;
+}) {
+  const ids = sigAnalysisIdsOf(options);
+  const fits = (a: ProjectNode) => starsFit(a, sets, shown);
+  const sources = all.filter((a) => GROUPED_SOURCES.has(a.analysisType));
+  const fitting = sources.filter(fits);
+  // Chosen from every analysis, not just this kind's: a legacy single source
+  // of another kind keeps drawing (graph-view merges it), and stays ticked here.
+  const chosen = ids.map((id) => all.find((a) => a.id === id)).filter((a): a is ProjectNode => !!a);
+  const listed = [...fitting, ...chosen.filter((a) => !fitting.includes(a))];
+  const unfit = chosen.filter((a) => !fits(a));
+  const partial = shown.length < sets.length;
+  const toggleAnalysis = (id: string, on: boolean) => {
+    const next = on ? [...new Set([...ids, id])] : ids.filter((x) => x !== id);
+    set({
+      sigAnalysisIds: next,
+      sigAnalysisId: next[0],
+      // Unchecking drops its pairs (a scoped key matches nothing left);
+      // checking keeps the others' ticks.
+      sigPairs: on
+        ? options.sigPairs ?? []
+        : (options.sigPairs ?? []).filter((k) => !k.startsWith(`${id}\u0001`)),
+    });
+  };
+  if (!fitting.length && !chosen.length) {
+    return (
+      <NoAnalysis onNewAnalysis={onNewAnalysis}>
+        {partial
+          ? `Show significance brackets from multiple t tests of the data sets this graph shows (${listOf(shown)}), one per copy table.`
+          : "Show significance brackets from multiple t tests — one per copy table — or a two-way ANOVA of this table with multiple comparisons."}
+      </NoAnalysis>
+    );
+  }
+  const selected = options.sigPairs ?? [];
+  const togglePair = (c: SigComparison, on: boolean) => {
+    const key = sigPairKey(c);
+    set({ sigPairs: on ? [...selected, key] : selected.filter((k) => k !== key && k !== c.key) });
+  };
+  const lettered = comparisons === null ? [] : lettersComparisons(comparisons);
+  return (
+    <>
+      <Row label="Analyses">
+        <div className="flex flex-col gap-1.5">
+          {listed.map((a) => (
+            <label key={a.id} className="flex items-center gap-2">
+              <Checkbox checked={ids.includes(a.id)} onChange={(checked) => toggleAnalysis(a.id, checked)} />
+              <span className="flex-1 truncate text-small">
+                {a.name}
+                {tables[a.id] ? ` — ${tables[a.id]}` : ""}
+              </span>
+            </label>
+          ))}
+        </div>
+      </Row>
+      {unfit.length ? (
+        <p className="text-small text-secondary">
+          {unfit
+            .map(
+              (a) =>
+                `“${a.name}” ran on ${listOf(ranOn(a, sets))}, not on the data sets this graph shows (${listOf(shown)}): its brackets aren't drawn.`,
+            )
+            .join(" ")}
+        </p>
+      ) : null}
+
+      {ids.length ? (
+        <>
+          <Choice
+            label="Show"
+            value={options.sigDisplay}
+            onChange={(sigDisplay) => set({ sigDisplay })}
+            items={[
+              { value: "stars", label: "Stars" },
+              { value: "pvalue", label: "P value" },
+              { value: "letters", label: "Letters" },
+            ]}
+          />
+          {comparisons === null ? (
+            <p className="text-small text-secondary">Running the analyses…</p>
+          ) : options.sigDisplay === "letters" ? (
+            <p className="text-small text-secondary">
+              {lettersFit(lettered)
+                ? "Groups that share a letter don't differ significantly (P ≥ 0.05); “a” goes to the highest."
+                : "Letters need every pair compared (Tukey's test, say): this analysis compares only some pairs."}
+              {chosen.length > 1 ? " Letters come from the first analysis only." : ""}
+            </p>
+          ) : (
+            chosen.map((a) => {
+              const pairs = comparisons.filter((c) => c.analysisId === a.id);
+              if (!pairs.length) return null;
+              return (
+                <Row key={a.id} label={`${a.name}${tables[a.id] ? ` — ${tables[a.id]}` : ""}`}>
+                  <div className="flex flex-col gap-1.5">
+                    {pairs.map((c) => (
+                      <label key={sigPairKey(c)} className="flex items-center gap-2">
+                        <Checkbox checked={sigPairSelected(selected, c)} onChange={(checked) => togglePair(c, checked)} />
+                        <span className="flex-1 truncate text-small">
+                          {c.group2 ? `${c.group1} vs. ${c.group2}` : c.group1}
+                        </span>
+                        <span
+                          className={cn(
+                            "text-small tabular-nums",
+                            isSignificant(c.p) ? "text-support-green" : "text-secondary",
+                          )}
+                        >
+                          {pStars(c.p)}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </Row>
+              );
+            })
+          )}
+          {comparisons !== null && !comparisons.length && options.sigDisplay !== "letters" ? (
+            <p className="text-small text-secondary">
+              These analyses have no pairwise comparisons. Use multiple t tests, or a test of more groups with multiple
+              comparisons.
+            </p>
+          ) : null}
+        </>
+      ) : null}
     </>
   );
 }

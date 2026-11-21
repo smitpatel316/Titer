@@ -180,6 +180,9 @@ import {
   addSignificance,
   deriveComparisons,
   expandSigPairs,
+  lettersComparisons,
+  sigAnalysisIdsOf,
+  sigPairKey,
   sigPairSelected,
   type SigComparison,
 } from "../src/views/graphs/significance-overlay";
@@ -11712,6 +11715,127 @@ check("a graph's stars compare the two groups its t test chose, with the test's 
     deriveComparisons(outcome).map((c) => [c.group1, c.group2, c.p]),
     [["Control", "Drug B", 0.01]],
   );
+});
+
+check("grouped-scatter multi-sig: the list wins over the single id, deduped, in order", () => {
+  const base = { ...newGraphOptions("grouped-scatter"), sigDisplay: "pvalue" as const };
+  deepStrictEqual(sigAnalysisIdsOf({ ...base, sigAnalysisId: "a1", sigAnalysisIds: ["a2", "a1", "a2"] }), ["a2", "a1"]);
+  deepStrictEqual(sigAnalysisIdsOf({ ...base, sigAnalysisId: "a1" }), ["a1"]);
+  deepStrictEqual(sigAnalysisIdsOf({ ...base, sigAnalysisIds: [] }), []);
+  deepStrictEqual(sigAnalysisIdsOf(base), []);
+});
+
+check("grouped-scatter multi-sig: the same pair from two analyses stays distinct, and a bare key still selects a legacy pair", () => {
+  const outcome = {
+    comparisons: [{ group1: "WT", group2: "SKG", p: 0.03 }],
+  } as unknown as AnalysisOutcome;
+  const fromA = deriveComparisons(outcome, "a1");
+  const fromB = deriveComparisons(outcome, "a2");
+  strictEqual(fromA[0].analysisId, "a1");
+  strictEqual(fromB[0].analysisId, "a2");
+  ok(sigPairKey(fromA[0]) !== sigPairKey(fromB[0]), "scoped keys differ");
+  // Only the first analysis's pair is ticked by its scoped key.
+  ok(sigPairSelected([sigPairKey(fromA[0])], fromA[0]));
+  ok(!sigPairSelected([sigPairKey(fromA[0])], fromB[0]));
+  // A graph saved before multi-source ticked the bare key: it still draws.
+  const legacy = deriveComparisons(outcome);
+  ok(sigPairSelected([legacy[0].key], legacy[0]));
+});
+
+check("grouped-scatter multi-sig: letters come from the first analysis only", () => {
+  const outcome = {
+    comparisons: [{ group1: "WT", group2: "SKG", p: 0.03 }],
+  } as unknown as AnalysisOutcome;
+  const all = [...deriveComparisons(outcome, "a1"), ...deriveComparisons(outcome, "a2")];
+  deepStrictEqual(
+    lettersComparisons(all).map((c) => c.analysisId),
+    ["a1"],
+  );
+  // No source tagged (legacy single source): every comparison letters.
+  deepStrictEqual(lettersComparisons(deriveComparisons(outcome)).length, 1);
+});
+
+check("grouped-scatter multi-sig: two copy tables' p= brackets both draw, stacked", () => {
+  // A grouped table, two groups × two rows; each copy table's multiple t tests
+  // compares A vs. B at row 1 (its cells), with its own P value.
+  const data = writeBlock(newGroupedTable(2, 2), 0, 0, [
+    ["r1", "1", "2", "3", "4"],
+    ["r2", "5", "6", "7", "8"],
+  ], "grouped");
+  const outcomeFor = (p: number) =>
+    ({
+      comparisons: [{ group1: "r2", group2: "", cells: [{ group: "A", row: 1 }, { group: "B", row: 1 }], p }],
+    }) as unknown as AnalysisOutcome;
+  const [fromA] = deriveComparisons(outcomeFor(0.03), "a1");
+  const [fromB] = deriveComparisons(outcomeFor(0.004), "a2");
+  const options = {
+    ...newGraphOptions("grouped-scatter"),
+    sigDisplay: "pvalue" as const,
+    sigAnalysisIds: ["a1", "a2"],
+    sigPairs: [sigPairKey(fromA), sigPairKey(fromB)],
+  };
+  const fig: GraphFigure = { data: [], layout: {} };
+  addSignificance(fig, readTable(data).columns, "grouped-scatter", options, [fromA, fromB]);
+  // One bracket per analysis: 3 lines each, one p= label each.
+  strictEqual((fig.layout.shapes as unknown[]).length, 6);
+  const labels = fig.layout.annotations as { text: string }[];
+  deepStrictEqual(
+    labels.map((a) => a.text),
+    ["P = 0.03", "P = 0.004"],
+  );
+  // The same pair from two analyses shares its X span, so the second bracket
+  // stacks above the first instead of overwriting it.
+  const brackets = fig.layout.shapes as { y0: number }[];
+  ok(brackets[3].y0 > brackets[0].y0, "the second copy's bracket sits higher");
+  // Ticking only the first analysis's pair draws only its bracket.
+  const oneFig: GraphFigure = { data: [], layout: {} };
+  addSignificance(
+    oneFig,
+    readTable(data).columns,
+    "grouped-scatter",
+    { ...options, sigPairs: [sigPairKey(fromA)] },
+    [fromA, fromB],
+  );
+  strictEqual((oneFig.layout.shapes as unknown[]).length, 3);
+  deepStrictEqual((oneFig.layout.annotations as { text: string }[]).map((a) => a.text), ["P = 0.03"]);
+});
+
+check("grouped-scatter multi-sig: a legacy single sigAnalysisId still draws its bracket", () => {
+  const data = writeBlock(newGroupedTable(2, 2), 0, 0, [
+    ["r1", "1", "2", "3", "4"],
+    ["r2", "5", "6", "7", "8"],
+  ], "grouped");
+  const outcome = {
+    comparisons: [{ group1: "r2", group2: "", cells: [{ group: "A", row: 1 }, { group: "B", row: 1 }], p: 0.03 }],
+  } as unknown as AnalysisOutcome;
+  const [comparison] = deriveComparisons(outcome);
+  const options = {
+    ...newGraphOptions("grouped-scatter"),
+    sigDisplay: "pvalue" as const,
+    sigAnalysisId: "a1",
+    sigPairs: [comparison.key],
+  };
+  const fig: GraphFigure = { data: [], layout: {} };
+  addSignificance(fig, readTable(data).columns, "grouped-scatter", options, [comparison]);
+  strictEqual((fig.layout.shapes as unknown[]).length, 3);
+  deepStrictEqual((fig.layout.annotations as { text: string }[]).map((a) => a.text), ["P = 0.03"]);
+});
+
+check("a cloned graph remaps the multi-sig list per entry (remapGraphOptions)", () => {
+  const options = { ...newGraphOptions("grouped-scatter"), sigAnalysisIds: ["a1", "a9"] };
+  const both = remapGraphOptions(options, { a1: "n1", a9: "n2" });
+  deepStrictEqual(both.options?.sigAnalysisIds, ["n1", "n2"]);
+  deepStrictEqual(both.dropped, []);
+  // Only one cloned: the other entry drops out, the list survives.
+  const one = remapGraphOptions(options, { a1: "n1" });
+  deepStrictEqual(one.options?.sigAnalysisIds, ["n1"]);
+  deepStrictEqual(one.dropped, []);
+  // None cloned: the list goes with the links.
+  const none = remapGraphOptions(options, {});
+  strictEqual(none.options?.sigAnalysisIds, undefined);
+  deepStrictEqual(none.dropped, ["sigAnalysisIds"]);
+  // The input is never mutated.
+  deepStrictEqual(options.sigAnalysisIds, ["a1", "a9"]);
 });
 
 check("a matched test counts as left out only the rows holding some of its values", () => {

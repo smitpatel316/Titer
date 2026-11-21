@@ -92,3 +92,73 @@ export function useAnalysis(
 
   return done && done.key === key && done.data === data ? done.outcome : null;
 }
+
+// A TableData's stable number, so a list of runs serializes to one key: the
+// runs are keyed by the data object's identity (runAnalysis's own cache),
+// and the requests are rebuilt every render, so their identity can't drive
+// the effect below.
+const dataIds = new WeakMap<TableData, number>();
+let nextDataId = 1;
+const dataId = (data: TableData): number => {
+  const found = dataIds.get(data);
+  if (found !== undefined) return found;
+  const id = nextDataId++;
+  dataIds.set(data, id);
+  return id;
+};
+
+/** One analysis a graph draws from: its node id, its type and params, and
+ *  the data it ran on — its own parent table's, so a copy table's test reads
+ *  the copy's numbers, not the graph's table's. */
+export interface AnalysisRequest {
+  id: string;
+  type: AnalysisType | undefined;
+  data: TableData | undefined;
+  params?: AnalysisParams;
+}
+
+/** Several analyses at once (a graph's significance sources): one hook call
+ *  for a list of any length, so the count may change without breaking the
+ *  hooks order. null until every one has landed (or has nothing to run);
+ *  each outcome sits at its request's place. Shares runAnalysis's cache with
+ *  the analysis views, so a run already open there costs nothing here. */
+export function useAnalyses(requests: AnalysisRequest[]): (AnalysisOutcome | null)[] | null {
+  const { nodes, rootOrder } = useProjectStore();
+  const sheets = React.useMemo(() => infoSheetsOf(nodes, rootOrder), [nodes, rootOrder]);
+  const key = requests
+    .map((r) => {
+      const resolved = resolveAnalysisParams(r.params, r.type, sheets);
+      const runParams = "params" in resolved ? resolved.params : undefined;
+      const resolveError = "error" in resolved ? resolved.error : undefined;
+      return JSON.stringify([
+        r.id,
+        r.type,
+        r.data ? dataId(r.data) : null,
+        runParams ?? null,
+        resolveError ?? null,
+      ]);
+    })
+    .join("\n");
+  const [done, setDone] = React.useState<{ key: string; outcomes: (AnalysisOutcome | null)[] } | null>(null);
+
+  React.useEffect(() => {
+    if (!requests.length) {
+      setDone({ key, outcomes: [] });
+      return;
+    }
+    let current = true;
+    setDone(null);
+    const runs = requests.map((r) => {
+      const resolved = resolveAnalysisParams(r.params, r.type, sheets);
+      if ("error" in resolved) return Promise.resolve({ error: resolved.error } as AnalysisOutcome);
+      if (!r.type || !r.data) return Promise.resolve(null);
+      return runAnalysis(r.type, r.data, "params" in resolved ? resolved.params : undefined);
+    });
+    void Promise.all(runs).then((outcomes) => current && setDone({ key, outcomes }));
+    return () => {
+      current = false;
+    };
+  }, [key]);
+
+  return done && done.key === key ? done.outcomes : null;
+}

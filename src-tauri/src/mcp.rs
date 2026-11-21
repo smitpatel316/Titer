@@ -7106,7 +7106,7 @@ impl ServerHandler for TiterMcpServer {
 
     /// `tools/list` advertises only the allowed tools (contract §12) —
     /// the other half of the gate, and the fix for the audit's §5 finding
-    /// (the server used to advertise all 52). Same cache-hint shape as
+    /// (the server used to advertise all 56). Same cache-hint shape as
     /// the `#[tool_handler]`-generated version, filtered to `self.allowed`.
     async fn list_tools(
         &self,
