@@ -20,6 +20,8 @@ import { analysisOptionsForTable, analysisOptionsKey } from "./views/analyses";
 import { GRAPH_OPTIONS_BY_TABLE } from "./views/graphs";
 import { useStartAnalysis } from "./views/analyses/use-analysis-launcher";
 import { SECTIONS } from "./views/graphs/format-panel";
+import { linkedSheetIds, pingPongTarget } from "./lib/sheet-navigation";
+import { applyResimulation, simulateTableData } from "./stats/simulation/simulate";
 
 /** Text-editing commands go to a focused text field natively, everything else to the
  *  table grid (whose idle input, marked `data-grid-idle`, doesn't count as a text field).
@@ -106,7 +108,8 @@ export function useAppMenu(doc: DocumentActions) {
     [],
   );
 
-  const { activeTableId, activeNodeId, activeNode, isDirty, nodes, undoName, redoName } = store;
+  const { activeTableId, activeNodeId, activeNode, isDirty, nodes, childOrder, recentNodeIds, undoName, redoName } =
+    store;
 
   // A text field being typed in has its own Undo, so the menu follows the focus.
   const [typing, setTyping] = React.useState(false);
@@ -208,12 +211,39 @@ export function useAppMenu(doc: DocumentActions) {
     const id = latest.current.store.activeNodeId;
     if (id) fn(id);
   };
+  // Keyboard navigation (seq 240): the sheets linked to the active one,
+  // and the sheet Previous Sheet walks back to.
+  const linkedIds = activeNode ? linkedSheetIds(activeNode, nodes, childOrder) : [];
+  const previousId = activeNodeId ? pingPongTarget(recentNodeIds, activeNodeId) : null;
+  // Re-run simulation (seq 243): the simulated table behind the active
+  // graph — or the active table itself, when it is the simulated one.
+  const simTableId =
+    activeNode?.type === "graph" ? activeNode.parentId : activeNode?.type === "table" ? activeNode.id : null;
+  const simSpec = simTableId ? nodes[simTableId]?.data?.simulation : undefined;
 
   React.useEffect(() => {
     if (!isNative || !focused) return;
     const run = (fn: (l: typeof latest.current, tableId: string) => void) => () => {
       const tableId = latest.current.store.activeTableId;
       if (tableId) fn(latest.current, tableId);
+    };
+
+    // Re-simulate the active graph's table with the next seed (seq 243):
+    // a fresh draw of the same spec, titles and X column kept.
+    const resimulate = async () => {
+      const s = latest.current.store;
+      const node = s.activeNode;
+      const tableId = node?.type === "graph" ? node.parentId : node?.type === "table" ? node.id : null;
+      const table = tableId ? s.nodes[tableId] : undefined;
+      const oldData = table?.data;
+      const spec = oldData?.simulation;
+      if (!tableId || !oldData || !spec) return;
+      try {
+        const fresh = await simulateTableData({ ...spec, seed: spec.seed + 1 });
+        s.updateTable(tableId, applyResimulation(oldData, fresh), "Simulate Again");
+      } catch {
+        // No error surface from a menu: a failed draw leaves the table as it was.
+      }
     };
 
     // Each menu deletes what it makes: the item selected, when it is of its kind (the last
@@ -549,6 +579,27 @@ export function useAppMenu(doc: DocumentActions) {
           sep,
           freezeMenuItem("graph"),
           insertDrawingMenu("graph"),
+          {
+            // Re-run the simulation behind the active graph's table (seq 243).
+            text: "Simulate Again",
+            accelerator: "F9",
+            enabled: Boolean(simSpec),
+            action: () => void resimulate(),
+          },
+          {
+            // Change the active graph's type (seq 244): the current type is
+            // not offered — picking it would be a no-op.
+            text: "Change Graph Type",
+            enabled: activeNode?.type === "graph",
+            items: (tableType ? GRAPH_OPTIONS_BY_TABLE[tableType] : []).map((o) => ({
+              text: o.label,
+              enabled: activeNode?.type === "graph" && activeNode.graphType !== o.value,
+              action: () => {
+                const id = latest.current.store.activeNodeId;
+                if (id) latest.current.store.changeGraphType(id, o.value as GraphType);
+              },
+            })),
+          },
           sep,
           deleteItem("graph"),
         ],
@@ -696,6 +747,41 @@ export function useAppMenu(doc: DocumentActions) {
           { text: "Collapse All Sections", enabled: formatShown, action: () => setOpenSections(new Set()) },
           sep,
           {
+            // Keyboard navigation (seq 240): jump to any sheet, walk its
+            // links, or walk back to the sheet before it.
+            text: "Go to Sheet…",
+            accelerator: "CmdOrCtrl+J",
+            action: () => latest.current.store.openSelector({ kind: "go-to-sheet" }),
+          },
+          {
+            text: "Go to Linked Sheet",
+            accelerator: "CmdOrCtrl+L",
+            enabled: linkedIds.length > 0,
+            action: () => {
+              const s = latest.current.store;
+              const node = s.activeNode;
+              if (!node) return;
+              const linked = linkedSheetIds(node, s.nodes, s.childOrder);
+              if (!linked.length) return;
+              // Cycle: the next linked sheet after the last-visited one.
+              const visited = s.recentNodeIds.filter((id) => linked.includes(id));
+              const last = visited.at(-1);
+              const next = last === undefined ? linked[0] : linked[(linked.indexOf(last) + 1) % linked.length];
+              s.setActiveNode(next);
+            },
+          },
+          {
+            text: "Previous Sheet",
+            accelerator: "CmdOrCtrl+Alt+Z",
+            enabled: previousId !== null,
+            action: () => {
+              const s = latest.current.store;
+              const target = s.activeNodeId ? pingPongTarget(s.recentNodeIds, s.activeNodeId) : null;
+              if (target) s.setActiveNode(target);
+            },
+          },
+          sep,
+          {
             text: "Appearance",
             items: [themeItem("system", "Automatic"), themeItem("light", "Light"), themeItem("dark", "Dark")],
           },
@@ -729,6 +815,10 @@ export function useAppMenu(doc: DocumentActions) {
     activeNode?.type,
     activeNode?.frozen,
     drawingSelection,
+    activeNode?.graphType,
+    linkedIds.length,
+    previousId,
+    Boolean(simSpec),
     tableCount,
     formatShown,
     inspectorHere,

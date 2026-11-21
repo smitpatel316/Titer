@@ -113,6 +113,7 @@ import { groupRuns } from "./columns";
 import { regroupDropped, regroupTable, renestDropped, renestTable } from "../views/tables/table-data";
 import { readCalculated, recomputeCalculated } from "./calcvars";
 import { readLinkedPaste } from "./linked-paste";
+import { readSimulationSpec } from "../stats/simulation/simulate";
 import { transformTable } from "./transform";
 import {
   assignLabels,
@@ -155,10 +156,17 @@ export function serializeProjectFile({ nodes, rootOrder, childOrder, activeNodeI
   // A sheet only carries the flags that belong to its kind (seq 165): a
   // frozen flag on a graph is dropped here, not written and dropped again
   // on load — otherwise every save/load round-trip would read as updated.
+  // An analysis's frozen/orphaned flags only ever mean anything as `true`
+  // (the reader drops anything else): a re-pointed analysis carries
+  // `orphaned: false` in state, and writing it would make the next open
+  // report the file as updated. Leave the flags off unless true.
   const cleanNodes = Object.fromEntries(
     Object.entries(nodes).map(([id, node]) => {
       const next = { ...node };
-      if (next.type !== "table" && next.type !== "analysis") delete next.frozen;
+      if (next.type === "analysis") {
+        if (next.orphaned !== true) delete next.orphaned;
+        if (next.frozen !== true) delete next.frozen;
+      } else if (next.type !== "table") delete next.frozen;
       return [id, next];
     }),
   );
@@ -236,7 +244,7 @@ const NODE_KEYS = Object.keys({
 // prettier-ignore
 const DATA_KEYS = Object.keys({
   columns: 1, rows: 1, groups: 1, replicates: 1, subgroups: 1, rowGroups: 1, excluded: 1,
-  widths: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1, linkedPaste: 1,
+  widths: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1, linkedPaste: 1, simulation: 1,
 } satisfies Record<keyof TableData, 1>);
 
 // Graph options without a default, by the kind of value they hold.
@@ -736,6 +744,9 @@ function readData(
     errorFormat: d.errorFormat === "sd" || d.errorFormat === "sem" ? d.errorFormat : undefined,
     calculated,
     linkedPaste,
+    // A simulated table's spec survives only when it is a valid spec:
+    // a hand-edited one is dropped, so the table can't re-run on a lie.
+    simulation: readSimulationSpec(d.simulation),
   } as TableData);
   const regroupDroppedNames: string[] = [];
   // Where the groups start: an XY table's X column comes first — unless the

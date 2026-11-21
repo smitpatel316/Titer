@@ -27,6 +27,8 @@ import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, newGraphOptions } from "../views/graphs
 import type { TemplateKind } from "../lib/template";
 import { ANALYSES } from "../stats";
 import { followTable, type TableMove } from "./references";
+import { pushHistory } from "../lib/sheet-navigation";
+import { repointCandidates } from "../lib/repoint-analysis";
 import { applyWand as planWand, type WandReport } from "../lib/wand";
 import { cloneGraphPlan, type CloneOptions, type ClonePlan } from "../lib/clone-graph";
 import { DEFAULT_FIGURE_DPI, DEFAULT_FIGURE_SIZE, DEFAULT_LABEL_STYLE, newFigurePanels } from "../lib/figure";
@@ -46,6 +48,7 @@ type Selector =
   | { kind: "wand"; tableId: string }
   | { kind: "clone-graph"; graphId: string }
   | { kind: "simulate-data"; tableId: string }
+  | { kind: "go-to-sheet" }
   | { kind: "script" }
   | { kind: "converter" }
   | { kind: "save-prompt" }
@@ -79,6 +82,10 @@ interface Content {
 
 interface ProjectState extends Content {
   activeNodeId: string | null;
+  /** The sheets visited, oldest first (seq 240): Previous Sheet walks
+   *  back through it. Navigation state, not content — undo never
+   *  restores it, and it is never saved. */
+  recentNodeIds: string[];
   /** Unknown keys from a newer/hand-edited file's envelopes (FF-F12), carried through save. */
   fileUnknowns?: Record<string, unknown>;
   projectUnknowns?: Record<string, unknown>;
@@ -150,6 +157,16 @@ type Action =
    *  the next run — and the UI — see the new params. Orphaned sheets
    *  keep their params (their source table is gone). */
   | { type: "setAnalysisParams"; id: string; params: AnalysisParams }
+  /** Move an orphaned analysis under another table that offers its test
+   *  (seq 242): the saved results stay until the re-run lands, and the
+   *  orphan flag + source name go away. Refuses anything else. */
+  | { type: "repointAnalysis"; id: string; tableId: string }
+  /** Change a graph's type (seq 244): the new type's defaults, keeping
+   *  the title and the size, and the graph renamed for its new type.
+   *  `options` overrides the defaults wholesale (the MCP path, which
+   *  merged the caller's options over them already). Refuses a type the
+   *  table doesn't offer. */
+  | { type: "changeGraphType"; id: string; graphType: GraphType; options?: GraphOptions }
   /** Duplicates a data table together with its analyses and graphs (its family):
    *  the copy takes new data and its analyses follow the copy (Prism 10,
    *  "Repeating an analysis"). Figures are not part of a family and stay put. */
@@ -289,6 +306,7 @@ export function makeInitialState(): ProjectState {
     rootOrder: [first.id],
     childOrder: { [first.id]: [] },
     activeNodeId: first.id,
+    recentNodeIds: [first.id],
     selector: null,
     filePath: null,
     isDirty: false,
@@ -349,7 +367,15 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         pid === null
           ? { ...state.childOrder, [node.id]: [] } // a new table starts empty
           : { ...state.childOrder, [pid]: [...(state.childOrder[pid] ?? []), node.id] };
-      return { ...state, nodes, rootOrder, childOrder, activeNodeId: node.id, isDirty: true };
+      return {
+        ...state,
+        nodes,
+        rootOrder,
+        childOrder,
+        activeNodeId: node.id,
+        recentNodeIds: pushHistory(state.recentNodeIds, node.id),
+        isDirty: true,
+      };
     }
     case "applyWand": {
       // The planner (src/lib/wand.ts) already built the new content: one swap,
@@ -357,7 +383,11 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       return { ...state, nodes: action.nodes, childOrder: action.childOrder, activeNodeId: action.activeNodeId, isDirty: true };
     }
     case "setActive":
-      return { ...state, activeNodeId: action.id };
+      return {
+        ...state,
+        activeNodeId: action.id,
+        recentNodeIds: action.id ? pushHistory(state.recentNodeIds, action.id) : state.recentNodeIds,
+      };
     case "cloneGraph":
       return {
         ...state,
@@ -482,6 +512,53 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       return {
         ...state,
         nodes: { ...state.nodes, [action.id]: { ...node, analysisParams: action.params } },
+        isDirty: true,
+      };
+    }
+    case "repointAnalysis": {
+      const node = state.nodes[action.id];
+      if (!node || node.type !== "analysis" || !node.orphaned) return state;
+      const table = state.nodes[action.tableId];
+      if (!table || table.type !== "table") return state;
+      if (!repointCandidates(node, state.nodes).some((t) => t.id === action.tableId)) return state;
+      // The saved results stay (the re-run lands on next view); the orphan
+      // flag is cleared explicitly and the source name goes away with it.
+      const { sourceTableName: _, ...kept } = node;
+      const nodes = {
+        ...state.nodes,
+        [action.id]: { ...kept, parentId: action.tableId, orphaned: false },
+      };
+      return {
+        ...state,
+        nodes,
+        rootOrder: state.rootOrder.filter((id) => id !== action.id),
+        childOrder: {
+          ...state.childOrder,
+          [action.tableId]: [...(state.childOrder[action.tableId] ?? []), action.id],
+        },
+        activeNodeId: action.id,
+        isDirty: true,
+      };
+    }
+    case "changeGraphType": {
+      const node = state.nodes[action.id];
+      if (!node || node.type !== "graph" || node.graphType === action.graphType) return state;
+      const table = node.parentId ? state.nodes[node.parentId] : undefined;
+      if (!table || table.type !== "table") return state;
+      const tableType = table.tableType;
+      if (!tableType) return state;
+      if (!GRAPH_OPTIONS_BY_TABLE[tableType].some((o) => o.value === action.graphType)) return state;
+      const oldOptions = node.graphOptions;
+      const options = action.options ?? {
+        ...newGraphOptions(action.graphType, table.data?.errorFormat),
+        ...(oldOptions ? { title: oldOptions.title, width: oldOptions.width, height: oldOptions.height } : {}),
+      };
+      return {
+        ...state,
+        nodes: {
+          ...state.nodes,
+          [action.id]: { ...node, graphType: action.graphType, name: GRAPHS[action.graphType].label, graphOptions: options },
+        },
         isDirty: true,
       };
     }
@@ -968,6 +1045,7 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         rootOrder: action.rootOrder,
         childOrder: action.childOrder,
         activeNodeId: action.activeNodeId,
+        recentNodeIds: action.activeNodeId ? [action.activeNodeId] : [],
         ...(action.projectName ? { projectName: action.projectName } : {}),
         ...(action.scripts?.length ? { scripts: action.scripts } : {}),
         ...(action.fileUnknowns ? { fileUnknowns: action.fileUnknowns } : {}),
@@ -1027,6 +1105,8 @@ const UNDOABLE = new Set<Action["type"]>([
   "setAnalysisFrozen",
   "setTableFrozen",
   "setAnalysisParams",
+  "repointAnalysis",
+  "changeGraphType",
 ]);
 const MUTATING = new Set<Action["type"]>([...UNDOABLE, "cacheAnalysisResult", "undo", "redo", "load"]);
 
@@ -1051,6 +1131,10 @@ function changeName(action: Action): string {
       return action.frozen ? "Freeze Table" : "Unfreeze Table";
     case "setAnalysisParams":
       return "Change Analysis Parameters";
+    case "repointAnalysis":
+      return "Re-point Analysis";
+    case "changeGraphType":
+      return "Change Graph Type";
     case "duplicateFamily":
       return "Duplicate Family";
     case "createTableWithGraph":
@@ -1245,6 +1329,10 @@ interface ProjectActions {
   setTableFrozen: (id: string, frozen: boolean) => void;
   /** Replace an analysis node's params (a rerun with overrides). */
   setAnalysisParams: (id: string, params: AnalysisParams) => void;
+  /** Move an orphaned analysis under a table that offers its test (seq 242). */
+  repointAnalysis: (id: string, tableId: string) => void;
+  /** Change a graph's type, keeping its title and size (seq 244). */
+  changeGraphType: (id: string, graphType: GraphType, options?: GraphOptions) => void;
   /** Duplicates a data table together with its analyses and graphs (its family). */
   duplicateFamily: (id: string) => void;
   /** A new data table with its first graph, as one undo step (seq 232). */
@@ -1318,6 +1406,8 @@ interface ProjectContextValue extends ProjectActions {
   /** Each table's analyses and graphs, in sidebar order. */
   childOrder: Record<string, string[]>;
   activeNodeId: string | null;
+  /** The sheets visited, oldest first (seq 240) — Previous Sheet walks back through it. */
+  recentNodeIds: string[];
   activeNode: ProjectNode | null;
   activeTableId: string | null;
   /** The script-set project name (v2 item 6). */
@@ -1530,6 +1620,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       setAnalysisFrozen: (id, frozen) => dispatch({ type: "setAnalysisFrozen", id, frozen }),
       setTableFrozen: (id, frozen) => dispatch({ type: "setTableFrozen", id, frozen }),
       setAnalysisParams: (id, params) => dispatch({ type: "setAnalysisParams", id, params }),
+      repointAnalysis: (id, tableId) => dispatch({ type: "repointAnalysis", id, tableId }),
+      changeGraphType: (id, graphType, options) =>
+        dispatch({ type: "changeGraphType", id, graphType, ...(options ? { options } : {}) }),
       duplicateFamily: (id) => dispatch({ type: "duplicateFamily", id }),
       createTableWithGraph: (tableType) => dispatch({ type: "createTableWithGraph", tableType }),
       duplicateNode: (id) => dispatch({ type: "duplicateNode", id }),
@@ -1570,6 +1663,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       rootOrder: state.rootOrder,
       childOrder: state.childOrder,
       activeNodeId: state.activeNodeId,
+      recentNodeIds: state.recentNodeIds,
       activeNode,
       activeTableId,
       projectName: state.projectName,

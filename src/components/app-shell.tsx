@@ -36,6 +36,7 @@ import { PreferencesDialog } from "./preferences-dialog";
 import { PRINT_SETTINGS_CHANGED_EVENT, loadPrintSettings, printPageCss } from "../lib/print-settings";
 import { useStartAnalysis } from "../views/analyses/use-analysis-launcher";
 import { GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
+import { goToSheetEntries } from "../lib/sheet-navigation";
 
 // The traffic lights sit at x 20–80, centered in the 52 px toolbars (`trafficLightPosition`
 // in tauri.conf.json). With the sidebar hidden, its button follows them (or starts the
@@ -79,11 +80,14 @@ export function AppShell() {
     return () => window.removeEventListener(PRINT_SETTINGS_CHANGED_EVENT, apply);
   }, []);
   const hidden = HIDDEN_SIDEBAR[fullscreen ? "fullscreen" : "window"];
-  const { nodes, selector, closeSelector, createTable, createGraph, isDirty } = useProjectStore();
+  const { nodes, rootOrder, childOrder, selector, closeSelector, createTable, createGraph, setActiveNode, isDirty } =
+    useProjectStore();
   const startAnalysis = useStartAnalysis();
   // The New Analysis / New Graph pickers list what fits the target table's type.
   const tableType = selector && "tableId" in selector ? (nodes[selector.tableId]?.tableType ?? "column") : "column";
   const tableData = selector && "tableId" in selector ? nodes[selector.tableId]?.data : undefined;
+  // Go to Sheet (seq 240): every sheet in outline order, grouped by section.
+  const goToEntries = selector?.kind === "go-to-sheet" ? goToSheetEntries(nodes, rootOrder, childOrder) : [];
 
   return (
     <div className="flex h-full">
@@ -373,6 +377,20 @@ export function AppShell() {
         options={GRAPH_OPTIONS_BY_TABLE[tableType]}
         onSelect={(type) => {
           if (selector?.kind === "new-graph") createGraph(selector.tableId, type);
+          closeSelector();
+        }}
+        onClose={closeSelector}
+      />
+
+      {/* Go to Sheet (seq 240, View ▸ Go to Sheet…): every sheet in
+          outline order, grouped by section. */}
+      <UniversalModal
+        open={selector?.kind === "go-to-sheet"}
+        title="Go to Sheet"
+        description="Jump to a sheet in this project."
+        options={goToEntries.map((e) => ({ value: e.id, label: `${e.section} — ${e.label}` }))}
+        onSelect={(id) => {
+          setActiveNode(id);
           closeSelector();
         }}
         onClose={closeSelector}

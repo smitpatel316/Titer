@@ -31,10 +31,11 @@
 // (binomial-test), 203 (distribution equations), 204 (tails + targets),
 // 205 (arithmetic transforms), 206 (column math), 228 (scripts in
 // project file + runOnOpen), 230 (paste-transposed edit op), Mansi-3
-// (sigDisplay pvalue-eq). Counts moved with the tip: 70 tools (was 57
+// (sigDisplay pvalue-eq). Counts moved with the tip: 71 tools (was 57
 // per the old pin, which lagged the registry by two since seq 179
 // export-all-graphs — the registry was 62, not 60, after seq 180
-// merge-project; 70 since seq 232–239 menus batch B),
+// merge-project; 70 since seq 232–239 menus batch B; 71 since seq 240–244
+// menus batch C, which adds titer_repoint_analysis),
 // 61 AnalysisType variants / schema keys / runner keys (was 54; 60 since
 // seq 177 select-transform; 61 since #46 compare-slopes).
 // ONE correction vs the audit stands: row 178 said GAP, but Compact
@@ -42,7 +43,7 @@
 // src/views/graphs/significance-overlay.ts, `sigDisplay` "letters",
 // reachable via build_graph/update_graph — so 178 is COVERED here.
 // Two rows were `in-flight` (196, Mansi-4) — both merged now, rows flipped
-// to covered. 33 rows are still genuine gaps (see GAP-CONFIRMED lines at run
+// to covered. 31 rows are still genuine gaps (see GAP-CONFIRMED lines at run
 // time); row 201 was the last landed-but-unflipped row — its checks named
 // enum values '6th-order'/'centered' that the B1 lane implemented as
 // 'sextic'/'centered-first..sixth'; the checks are corrected to the real enum
@@ -251,7 +252,7 @@ const scopeText = (scope: string): string => {
   }
 };
 
-const EXPECTED_TOOL_COUNT = 70;
+const EXPECTED_TOOL_COUNT = 71;
 const EXPECTED_ANALYSIS_TYPES = 61;
 const META_OFFERINGS = new Set(["compare-many-groups", "interpolate", "transform"]);
 
@@ -1250,16 +1251,16 @@ const ROWS: Row[] = [
   {
     item: "242",
     title: "Re-point orphaned analysis",
-    status: "gap",
-    note: "Not built. Orphan state exists (orphaned results in the sidebar) but no re-point/relink operation.",
+    status: "covered",
+    note: "Merged on check/v18: repoint-analysis dispatch case + titer_repoint_analysis tool + repointCandidates (seq 242).",
     checks: [{ kind: "sourceContainsRe", scope: "mcpDispatch", re: "re-?point|relink" }],
   },
   {
     item: "244",
     title: "Change graph type after creation",
-    status: "gap",
-    note: "Not built. titer_update_graph takes options only, no kind; no UI either.",
-    checks: [{ kind: "structContains", struct: "UpdateGraphArgs", text: "kind" }],
+    status: "covered",
+    note: "Merged on check/v18: graph_type param on titer_update_graph + changeGraphType dispatch + Change Graph Type menu (seq 244). The check named 'kind'; the implementation calls the field graph_type (verified in UpdateGraphArgs), so the check is corrected to the real field name.",
+    checks: [{ kind: "structContains", struct: "UpdateGraphArgs", text: "graph_type" }],
   },
   {
     item: "#46",

@@ -26,6 +26,7 @@ import {
   type SimulationSpec,
 } from "../stats/types";
 import { simulateTableData, validateSimulationSpec } from "../stats/simulation/simulate";
+import { repointCandidates } from "../lib/repoint-analysis";
 import { parseProjectText, validateAnalysisParams } from "../lib/project-file";
 import { fileName, fileTitle } from "../lib/paths";
 import { importTabularFile } from "../lib/tabular-import";
@@ -207,6 +208,10 @@ export interface JobDeps {
     createGraph: NonNullable<GraphJobDeps["createGraph"]>;
     updateGraph: NonNullable<GraphJobDeps["updateGraph"]>;
     setGraphSources: NonNullable<GraphJobDeps["setGraphSources"]>;
+    /** Move an orphaned analysis under a table that offers its test (seq 242). */
+    repointAnalysis: (id: string, tableId: string) => void;
+    /** Change a graph's type, keeping its title and size (seq 244). */
+    changeGraphType: NonNullable<GraphJobDeps["changeGraphType"]>;
     cloneGraph: NonNullable<GraphJobDeps["cloneGraph"]>;
     createFigure: NonNullable<GraphJobDeps["createFigure"]>;
     updateFigure: NonNullable<GraphJobDeps["updateFigure"]>;
@@ -265,6 +270,7 @@ function toGraphDeps(deps: JobDeps): GraphJobDeps {
     createGraph: a?.createGraph,
     updateGraph: a?.updateGraph,
     setGraphSources: a?.setGraphSources,
+    changeGraphType: a?.changeGraphType,
     cloneGraph: a?.cloneGraph,
     createFigure: a?.createFigure,
     updateFigure: a?.updateFigure,
@@ -1082,6 +1088,57 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       return {
         result: { project_id: job.project_id, [`${kind}_id`]: createdId },
         created: { [`${kind}_id`]: createdId },
+      };
+    }
+    case "repoint-analysis": {
+      // seq 242: move an orphaned analysis under a table that offers its
+      // test — the saved results stay until the re-run lands. The table
+      // must offer the test, or the error names the tables that do.
+      const actions = tableActions(job, deps);
+      const analysisId = argString(job, job.args, "analysis_id");
+      const tableId = argString(job, job.args, "table_id");
+      const state = deps.getState();
+      const node = state.nodes[analysisId];
+      if (!node || node.type !== "analysis") {
+        throw jobErr(
+          job,
+          node
+            ? `“${analysisId}” is not an analysis (it is a ${node.type}).`
+            : `No analysis with id “${analysisId}” in this project.`,
+        );
+      }
+      if (!node.orphaned) {
+        throw jobErr(job, `“${node.name}” is not orphaned — only an orphaned analysis can be re-pointed.`);
+      }
+      const table = state.nodes[tableId];
+      if (!table || table.type !== "table") {
+        throw jobErr(
+          job,
+          table
+            ? `“${tableId}” is not a table (it is a ${table.type}).`
+            : `No table with id “${tableId}” in this project.`,
+        );
+      }
+      const candidates = repointCandidates(node, state.nodes);
+      if (!candidates.some((t) => t.id === tableId)) {
+        throw jobErr(
+          job,
+          candidates.length === 0
+            ? `table “${table.name}” doesn't offer the ${node.analysisType} test — and no table in this project does.`
+            : `table “${table.name}” doesn't offer the ${node.analysisType} test — the tables that do are: ${candidates
+                .map((t) => `“${t.name}”`)
+                .join(", ")}.`,
+        );
+      }
+      const beforeRevision = state.revision;
+      actions.repointAnalysis(analysisId, tableId);
+      await settleAfterDispatch(deps, beforeRevision);
+      const after = deps.getState();
+      if (after.nodes[analysisId]?.parentId !== tableId) {
+        throw jobErr(job, `re-pointed “${node.name}” but its table could not be read back — ask titer_list_projects for the analysis.`);
+      }
+      return {
+        result: { project_id: job.project_id, analysis_id: analysisId, table_id: tableId, table_name: table.name },
       };
     }
     case "save-project": {

@@ -108,6 +108,10 @@ export function setMenuBar(menus: MenuItems) {
     [titer, ...menus],
     [{ item: "Minimize" }, { item: "Maximize" }, separator, { item: "BringAllToFront" }],
     [
+      // The user guide lives in the repo's README (Help ▸ Titer User Guide,
+      // seq 241): the same fixed address as the GitHub link, opened the
+      // same way — the shell only ever opens fixed addresses.
+      { text: "Titer User Guide", accelerator: "F1", action: () => openLink("guide") },
       { text: "Titer on GitHub", action: () => openLink("github") },
       { text: "Buy Me a Coffee", action: () => openLink("coffee") },
       separator,
