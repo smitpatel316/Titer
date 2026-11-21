@@ -675,6 +675,17 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
     });
     setJson(`data/sheets/${sheetUid}/sheet.json`, {
       "@class": "DataSheet",
+      // seq 302: identity fields Prism requires to list the table in the
+      // navigator — without uid/$id/fenID Prism opens the file but hides
+      // the data table (the table is in the file, just unreachable in the
+      // UI). Values mirror the info-sheet writer: uid is the sheet id,
+      // $id the data-sheet schema, fenID the sheet position (real Prism
+      // files carry distinct per-sheet fenIDs; MTT note above: fenID is
+      // sheet position, not class). The nested table object carries its
+      // own $id, verbatim from a real Prism file.
+      $id: "sheets/data_sheet/data_sheet.schema.json",
+      uid: sheetUid,
+      fenID: dataSheetUids.length - 1,
       title: name,
       table: {
         // BUG-20: real Prism's reader dispatches on table["@class"] and
@@ -682,6 +693,7 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         // 11.2.0 on open (SIGSEGV in NSDocument init). Real files write
         // "XYDataTable" for xy/survival tables, "DataTable" otherwise.
         "@class": isXY ? "XYDataTable" : "DataTable",
+        $id: "sheets/data_sheet/data_table/data_table.schema.json",
         uid: tableUid,
         format,
         dataFormat,
