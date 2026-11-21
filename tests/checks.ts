@@ -2813,6 +2813,25 @@ check("seq 208: an XY table's sub-column format turns each Y data set into Mean/
   strictEqual(back.summaryFormat, undefined);
 });
 
+check("seq 208: widening a summary format leaves the new slots empty instead of borrowing the next group's values", () => {
+  // Grouped 2-wide → mean-sd-n: each group's new N slot is empty.
+  const grouped2: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+    rows: [["r1", "a1", "a2", "b1", "b2"]],
+    groups: 2,
+    replicates: 2,
+  };
+  deepStrictEqual(applySummaryFormat(grouped2, "mean-sd-n").rows[0], ["r1", "a1", "a2", null, "b1", "b2", null]);
+  // XY 2-wide → mean-sd-n: same, per Y data set.
+  const xy2: TableData = {
+    columns: ["Title", "X", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+    rows: [[null, "1", "10", "12", "20", "22"]],
+    groups: 2,
+    replicates: 2,
+  };
+  deepStrictEqual(applySummaryFormatXY(xy2, "mean-sd-n").rows[0], [null, "1", "10", "12", null, "20", "22", null]);
+});
+
 check("seq 208: an XY table with one column per Y data set gains a set per column on picking a format", () => {
   const plain: TableData = {
     columns: ["Title", "X", "Control", "Treated"],
@@ -2861,7 +2880,9 @@ check("seq 208: a nested table's sub-column format renames every subgroup's colu
     "B:S1:Mean", "B:S1:SD", "B:S1:N",
     "B:S2:Mean", "B:S2:SD", "B:S2:N",
   ]);
-  deepStrictEqual(t.rows[0], ["r1", "a11", "a12", "a21", "a22", "b11", "b12", "b21", "b22"]);
+  // Widening 2 → 3: each subgroup's new N slot is empty — values stay in
+  // their (group, subgroup) slot, never the next subgroup's value.
+  deepStrictEqual(t.rows[0], ["r1", "a11", "a12", null, "a21", "a22", null, "b11", "b12", null, "b21", "b22", null]);
   strictEqual(t.summaryFormat, "mean-sd-n");
   // Narrowing drops the N column of every subgroup; back to Replicates restores R names.
   const narrow = applySummaryFormatNested(t, "mean-sd");
@@ -2869,7 +2890,7 @@ check("seq 208: a nested table's sub-column format renames every subgroup's colu
   const back = applySummaryFormatNested(narrow, "replicates");
   deepStrictEqual(back.columns.slice(0, 5), ["Title", "A:S1:R1", "A:S1:R2", "A:S2:R1", "A:S2:R2"]);
   strictEqual(back.summaryFormat, undefined);
-  strictEqual(applySummaryFormatNestedLoses(t, "mean-sd"), true); // the N columns hold values
+  strictEqual(applySummaryFormatNestedLoses(t, "mean-sd"), false); // the N columns are empty (widened from 2 replicates)
   strictEqual(applySummaryFormatNestedLoses(t, "mean-sem-n"), false);
 });
 
@@ -2926,7 +2947,7 @@ check("seq 208: XY bars on a summary table draw the stored Means with the conver
   deepStrictEqual(traces[1].error_y?.array, [4 / 3, 2]); // SD 4/√9, 6/√9
   // The same values come out of xyDrawn directly, even with xyReplicates "each".
   const { x: xCol, ys } = splitXY(dataset.columns);
-  const drawn = xyDrawn(xCol, ys[0]!, { ...newGraphOptions("xy-scatter"), xyReplicates: "each" }, "mean-sd-n");
+  const drawn = xyDrawn(xCol!, ys[0]!, { ...newGraphOptions("xy-scatter"), xyReplicates: "each" }, "mean-sd-n");
   deepStrictEqual(drawn, { x: [1, 2], y: [10, 12], errors: [1, 1.5] });
 });
 
@@ -3239,7 +3260,7 @@ check("seq 211: bar + scatter pairs mean bars with the scatter of the same data,
   // The bars are the per-X means with SEM whiskers; the scatter (mean replicates)
   // sits on the same means and carries no second set of whiskers.
   deepStrictEqual(traces[0].y, [12, 13]);
-  deepStrictEqual(traces[0].error_y?.array, [1, 1]);
+  deepStrictEqual(traces[0].error_y?.array, [2 / Math.sqrt(3), 2 / Math.sqrt(3)]); // SEM of [10,12,14] / [11,13,15]: SD 2 / √3
   deepStrictEqual(traces[1].y, [12, 13]);
   strictEqual(traces[1].error_y, undefined);
   deepStrictEqual(traces[2].y, [22, 23]);
@@ -3251,8 +3272,8 @@ check("seq 211: bar + scatter pairs mean bars with the scatter of the same data,
   );
   const eachTraces = each.data as { type: string; x: number[]; y: number[] }[];
   deepStrictEqual(eachTraces[0].y, [12, 13]); // bars still the means
-  deepStrictEqual(eachTraces[1].x, [1, 1, 2, 2]);
-  deepStrictEqual(eachTraces[1].y, [10, 12, 11, 13]);
+  deepStrictEqual(eachTraces[1].x, [1, 1, 1, 2, 2, 2]); // every replicate at its X
+  deepStrictEqual(eachTraces[1].y, [10, 12, 14, 11, 13, 15]);
   // Line style: the scatter part connects its points.
   const lined = GRAPHS["xy-bar-scatter"].build(
     dataset.columns,
@@ -3476,7 +3497,13 @@ check("seq 213: whisker bounds follow Prism's definitions (Tukey fences end at o
   // IQR 5.5, fences −5.5 and 16.5: the whiskers end at 1 and 9, 100 is out.
   deepStrictEqual(whiskerBounds(values, "tukey"), { low: 1, high: 9, outliers: [100] });
   // 10–90 percentiles (type 6): 1.1 and 90.9 — 1 and 100 lie outside.
-  deepStrictEqual(whiskerBounds(values, "p10-90"), { low: 1.1, high: 90.9, outliers: [1, 100] });
+  // The high fence is a computed float (90.9 ± a last-bit wobble from the
+  // (n+1)p interpolation), so it is pinned with the codebase's 1e-12
+  // tolerance idiom, not deepStrictEqual.
+  const p1090 = whiskerBounds(values, "p10-90");
+  deepStrictEqual(p1090.outliers, [1, 100]);
+  strictEqual(p1090.low, 1.1);
+  ok(Math.abs(p1090.high - 90.9) < 1e-12);
   deepStrictEqual(whiskerBounds(values, "p5-95"), { low: 1, high: 100, outliers: [] });
   deepStrictEqual(whiskerBounds(values, "min-max-all"), { low: 1, high: 100, outliers: [] });
 });
@@ -3504,7 +3531,7 @@ check("seq 213: a box draws its whiskers to the chosen fences and its outliers a
   // 10–90 percentiles: whiskers 1.1 to 90.9, 1 and 100 drawn as points.
   const p1090 = GRAPHS["box-violin"].build(dataset.columns, { ...base, whisker: "p10-90" }, paintOf(base, 1));
   deepStrictEqual(boxOf(p1090).lowerfence, [1.1]);
-  deepStrictEqual(boxOf(p1090).upperfence, [90.9]);
+  ok(Math.abs(boxOf(p1090).upperfence[0]! - 90.9) < 1e-12); // computed float, see the whiskerBounds pin above
   deepStrictEqual(outliersOf(p1090).map((t) => t.y), [[1, 100]]);
   // Min to max, all points: the points trace is drawn even with Show points off.
   const all = GRAPHS["box-violin"].build(dataset.columns, { ...base, whisker: "min-max-all" }, paintOf(base, 1));

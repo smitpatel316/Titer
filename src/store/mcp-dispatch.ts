@@ -1043,6 +1043,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       const tableId = argString(job, job.args, "table_id");
       const op = argString(job, job.args, "op");
       const state = deps.getState();
+      const beforeRevision = state.revision;
       const node = tableNode(job, state, tableId);
       const type = node.tableType ?? "column";
       const data = node.data ?? { columns: ["Title"], rows: [] };
@@ -1276,7 +1277,12 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         };
       }
       actions.updateTable(tableId, next, label, move);
-      await deps.flush?.();
+      // Same read-back shape as create-table (v1.6 race fix): the commit
+      // must land before the next job reads the table, or a following
+      // edit-table op sees pre-edit state and can silently no-op (a
+      // set-summary-format back to Replicates reads "replicates" and
+      // reports success while the Mean/SD/N columns stay).
+      await settleAfterDispatch(deps, beforeRevision);
       return {
         result: {
           project_id: job.project_id,

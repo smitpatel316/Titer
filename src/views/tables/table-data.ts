@@ -447,7 +447,9 @@ export function applySummaryFormat(data: TableData, format: SummaryFormat): Tabl
         if (c === 0) return row[0] ?? null;
         const [g, s] = newSlot(c);
         const from = 1 + g * oldWidth + s;
-        return from < data.columns.length ? (row[from] ?? null) : null;
+        // A new slot past the old width holds nothing — never the next
+        // group's value (widening 2 → 3 must leave the N slot empty).
+        return s < oldWidth && from < data.columns.length ? (row[from] ?? null) : null;
       }),
     ),
     replicates: newWidth,
@@ -518,7 +520,9 @@ export function applySummaryFormatXY(data: TableData, format: SummaryFormat): Ta
         const g = Math.floor(slot / newWidth);
         const s = slot % newWidth;
         const from = lead + g * oldWidth + s;
-        return from < data.columns.length ? (row[from] ?? null) : null;
+        // A new slot past the old width holds nothing — never the next
+        // data set's value (widening 2 → 3 must leave the N slot empty).
+        return s < oldWidth && from < data.columns.length ? (row[from] ?? null) : null;
       }),
     ),
     groups: keys.length,
@@ -597,7 +601,9 @@ export function applySummaryFormatNested(data: TableData, format: SummaryFormat)
         const s = Math.floor(rem / newWidth);
         const r = rem % newWidth;
         const from = 1 + g * perGroup + s * oldWidth + r;
-        return from < data.columns.length ? (row[from] ?? null) : null;
+        // A new slot past the old width holds nothing — never the next
+        // subgroup's value (widening 2 → 3 must leave the N slot empty).
+        return r < oldWidth && from < data.columns.length ? (row[from] ?? null) : null;
       }),
     ),
     groups,
