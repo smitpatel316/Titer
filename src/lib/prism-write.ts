@@ -43,23 +43,29 @@
 //   contingency→ format "contingency", one y_single dataset per column
 //   parts-of-whole → format "parts_of_whole", one y_single dataset per column
 //   survival   → format "survival", X = time, one dataset per group
-//   nested / multiple → written as a Column table, with a warning in the
+//   nested        → format "nested", one y_replicates dataset per group,
+//                 replicatesCount = subcolumns per dataset (seq 303) —
+//                 when the columns form uniform replicate groups. The
+//                 layout is verified, not guessed: the 1.8.0 re-proof
+//                 opened the syn-nested-a layout in real Prism 11 and
+//                 the nested table presented with all 6 subcolumns
+//                 reachable; the writer emits that same shape (format +
+//                 dataFormat + replicatesCount + one range per run). A
+//                 nested table whose columns do NOT form uniform
+//                 replicate groups still flattens to Column with the
+//                 seq 162 warning (W15 pins that fallback).
+//   multiple      → written as a Column table, with a warning in the
 //                 transfer report naming the table (seq 162). No values or
 //                 column names are dropped — the flattening is lossless at
 //                 the cell level — but the table TYPE is not preserved, and
-//                 the report says so plainly. The evidence: no real Prism
-//                 file with a nested table exists in Titer's corpus (the
-//                 4 synthetic nested files are the project's own generator
-//                 output, explicitly never ground truth), so a native
-//                 `format: "nested"` emission would be a guess at Prism's
-//                 layout — and a guessed layout is the crash class seq 175
-//                 fixed. For Multiple Variables there is no `multiple`
-//                 format at all, in real or synthetic files: even the
-//                 corpus generator writes MV tables as `format: "column"`.
-//                 This mirrors the import direction, which reads Prism
-//                 nested tables as Column with the same warning
-//                 (src/lib/prism.ts), so the mapping is the exact reverse
-//                 of an established one, not a new invention.
+//                 the report says so plainly. For Multiple Variables there
+//                 is no `multiple` format at all, in real or synthetic
+//                 files: even the corpus generator writes MV tables as
+//                 `format: "column"`. This mirrors the import direction,
+//                 which reads Prism nested tables as Column with the same
+//                 warning (src/lib/prism.ts) — the import side is
+//                 unchanged by seq 303; only the writer now preserves a
+//                 genuine nested shape.
 
 import JSZip from "jszip";
 import type { ProjectFilePayload } from "./project-file";
@@ -410,25 +416,23 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
       continue;
     }
     const tableType = table.tableType ?? "column";
-    if (tableType === "nested" || tableType === "multiple") {
+    if (tableType === "multiple") {
       // Written as a Column table, never refused and never dropped: the
-      // whole write used to fail here, so a project holding one nested or
-      // MV table could not be saved as .prism at all. All values and column
-      // names survive verbatim (the generic path below emits one y_single
-      // dataset per column — "A:S1:R1" names pass through untouched, since
-      // they match neither the summary nor the replicate grouping); only
-      // the table type is lost, and the report says so. The type can't be
-      // preserved honestly: no verified native representation exists (see
-      // the header note), so guessing `format: "nested"` would risk the
-      // file Prism rejects or crashes on.
+      // whole write used to fail here, so a project holding one MV table
+      // could not be saved as .prism at all. All values and column names
+      // survive verbatim (the generic path below emits one y_single
+      // dataset per column); only the table type is lost, and the report
+      // says so. No `multiple` format exists in Titer's verified file
+      // corpus, so there is nothing honest to emit instead.
       issues.push({
         severity: "warning",
-        message:
-          tableType === "nested"
-            ? `${displayName} is a Nested table — no verified .prism representation of a nested table exists in Titer's file corpus, so it was written as a Column table with all values and column names preserved; re-create the group/subgroup nesting in Prism.`
-            : `${displayName} is a Multiple variables table — .prism has no separate table format for it in Titer's verified file corpus, so it was written as a Column table with all values and column names preserved; re-create it as a Multiple Variables table in Prism.`,
+        message: `${displayName} is a Multiple variables table — .prism has no separate table format for it in Titer's verified file corpus, so it was written as a Column table with all values and column names preserved; re-create it as a Multiple Variables table in Prism.`,
       });
     }
+    // A nested table warns only if it actually flattens (seq 303): the
+    // warning lives in the format arm below, after the datasets are
+    // computed — a genuine nested shape writes as format "nested" with
+    // no warning at all.
     const rowCount = data.rows.length;
     const rowTitles = data.rows.map((r) => r[0]);
     const hasRowTitles = rowTitles.some((v) => v !== null && v !== "");
@@ -546,6 +550,33 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
         // otherwise y_single, and the reader names subcolumns from each
         // dataset's own format (W7/BUG-9).
         dataFormat = uniform ? sets[0].dataFormat : "y_single";
+      } else if (tableType === "nested") {
+        // seq 303: a genuine nested shape — every dataset a y_replicates
+        // group with the same subcolumn count — writes as format "nested"
+        // with replicatesCount = that count, the layout real Prism 11
+        // verified in the 1.8.0 re-proof (one y_replicates dataset per
+        // group; the dataset structure comes from groupDatasets above,
+        // unchanged). replicatesCount comes from the emitted datasets,
+        // not the model metadata, so a stale data.replicates can't
+        // misdescribe the file. Anything else (summary columns, singles,
+        // mixed widths) is not a nested shape Prism would read as one:
+        // it flattens to Column with the seq 162 warning, as before.
+        const nestedShape =
+          sets.length > 0 &&
+          sets.every((s) => s.dataFormat === "y_replicates") &&
+          sets.every((s) => s.columns.length === sets[0].columns.length);
+        if (nestedShape) {
+          format = "nested";
+          dataFormat = "y_replicates";
+          replicatesCount = sets[0].columns.length;
+        } else {
+          format = "column";
+          dataFormat = uniform ? sets[0].dataFormat : "y_single";
+          issues.push({
+            severity: "warning",
+            message: `${displayName} is a Nested table — its columns do not form uniform replicate groups, so no verified .prism representation of this table exists; it was written as a Column table with all values and column names preserved; re-create the group/subgroup nesting in Prism.`,
+          });
+        }
       } else {
         format = "column";
         dataFormat = uniform ? sets[0].dataFormat : "y_single";
