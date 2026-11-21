@@ -23,15 +23,32 @@
 //   ships when this file is all `covered` (+ `na` / `licence-wall`).
 //
 // Source of the table: ~/workspace/.helix-v18/mcp-coverage-audit-1.8.0.md
-// (tip check/v18 @ 584d7ff), with ONE correction: audit row 178 said GAP,
-// but Compact Letter Display IS implemented — `compactLetters` in
+// (tip check/v18 @ 584d7ff), RE-VERIFIED against check/v18 @ c3210bc
+// (gate-fix lane, Nov 20). Between the two tips 17 rows flipped to
+// `covered` as their lanes merged: 155 (import-data-file tool), 157,
+// 166 (fitXMin/fitXMax + Inflection-point result row), 170 (new type
+// one-sample-ks), 190 (p-value-stack), 191, 192, 193, 194, 195
+// (binomial-test), 203 (distribution equations), 204 (tails + targets),
+// 205 (arithmetic transforms), 206 (column math), 228 (scripts in
+// project file + runOnOpen), 230 (paste-transposed edit op), Mansi-3
+// (sigDisplay pvalue-eq). Counts moved with the tip: 57 tools (was 56),
+// 59 AnalysisType variants / schema keys / runner keys (was 54).
+// ONE correction vs the audit stands: row 178 said GAP, but Compact
+// Letter Display IS implemented — `compactLetters` in
 // src/views/graphs/significance-overlay.ts, `sigDisplay` "letters",
 // reachable via build_graph/update_graph — so 178 is COVERED here.
-// "COVERED (in flight — branch)" audit rows are `in-flight` here: the
-// surface exists on the named lane branch, not on this tip, so the gate
-// stays red for them until the coordinator merges the branch and the row
-// is flipped. All 13 named branches were verified to exist on origin.
+// Two rows are still `in-flight` (196, Mansi-4: branches unmerged).
+// 36 rows are still genuine gaps (see GAP-CONFIRMED lines at run time);
+// the gate stays red for them by design — do NOT flip a row until its
+// surface exists on the tip. Sections below are the audit-tip grouping;
+// the per-row `status` is the current verdict and is authoritative.
 // Mansi (5) "Antigravity drops" is not an audit item and is omitted.
+// One product-code fix rides with this file: mcp.rs listed the three
+// discovery tools in BOTH read_more and discovery (60 entries, 57
+// unique), breaking the exactly-once rule the file's allowlist
+// invariant mirrors (and the Rust test
+// allowlist_groups_cover_all_tools_once). The trio was dropped from
+// read_more, restoring the audited design (discovery only).
 //
 // The check reads source files as text and asserts on structure (tool
 // registry, AnalysisType union, runner keys, schema params, offerings,
@@ -225,8 +242,8 @@ const scopeText = (scope: string): string => {
   }
 };
 
-const EXPECTED_TOOL_COUNT = 56;
-const EXPECTED_ANALYSIS_TYPES = 54;
+const EXPECTED_TOOL_COUNT = 57;
+const EXPECTED_ANALYSIS_TYPES = 59;
 const META_OFFERINGS = new Set(["compare-many-groups", "interpolate", "transform"]);
 
 // ── Global invariants (run first; any failure is a regression) ──────────
@@ -504,9 +521,10 @@ const specLabel = (spec: Spec): string => {
 };
 
 // ── The table ────────────────────────────────────────────────────────────
-// Statuses verified against this tip (check/v18 @ 584d7ff) by reading the
+// Statuses verified against this tip (check/v18 @ c3210bc) by reading the
 // cited code, not by trusting the audit prose. `branch` names an origin
-// branch where the surface already exists (all verified on origin).
+// branch where the surface already exists (both remaining ones verified
+// on origin: fix/18-196-fraction-total, fix/18-m5-multisig).
 type Status = "covered" | "gap" | "in-flight" | "na" | "licence-wall";
 interface Row {
   item: string;
@@ -761,36 +779,40 @@ const ROWS: Row[] = [
   {
     item: "157",
     title: "Multifactor ANOVA",
-    status: "in-flight",
-    branch: "fix/18-157-multifactor",
-    note: "Type + params + runner + schema + MV offering exist on the branch.",
-    checks: [{ kind: "analysis", type: "multifactor-anova" }],
+    status: "covered",
+    note: "Merged on check/v18. Type + runner + schema + MV offering; the runner also returns partial eta squared per term (guards seq 161's landed half).",
+    checks: [
+      { kind: "analysis", type: "multifactor-anova" },
+      { kind: "analysisOffering", table: "multiple", type: "multifactor-anova" },
+      { kind: "sourceContainsRe", scope: "stats", re: "partial eta squared" },
+    ],
   },
   {
     item: "190",
     title: "Stack of P values",
-    status: "in-flight",
-    branch: "fix/18-190-pstack",
-    note: "No stack-of-p-values analysis type on tip.",
-    checks: [{ kind: "analysisTypeMatches", re: "stack" }],
+    status: "covered",
+    note: "Merged on check/v18 as analysis type p-value-stack, offered on Column.",
+    checks: [
+      { kind: "analysis", type: "p-value-stack" },
+      { kind: "analysisOffering", table: "column", type: "p-value-stack" },
+    ],
   },
   {
     item: "191",
     title: "One-way ANOVA completion",
-    status: "in-flight",
-    branch: "fix/18-191-anova1",
-    note: "Branch schema adds posthoc 'fdr', a trend param and a lognormal param; on tip the posthoc enum has no fdr and there is no trend param.",
+    status: "covered",
+    note: "Merged on check/v18: posthoc enum has fdr, plus trend and lognormal params.",
     checks: [
       { kind: "analysisParamEnum", type: "anova", param: "posthoc", value: "fdr" },
       { kind: "analysisParam", type: "anova", param: "trend" },
+      { kind: "analysisParam", type: "anova", param: "lognormal" },
     ],
   },
   {
     item: "192",
     title: "Two/three-way post-hoc",
-    status: "in-flight",
-    branch: "fix/18-192-posthoc",
-    note: "Branch adds fdrMethod/fdrQ (two-way) and posthocScope/fdrMethod/fdrQ (three-way).",
+    status: "covered",
+    note: "Merged on check/v18: fdrMethod/fdrQ (two-way) and posthocScope/fdrMethod/fdrQ (three-way).",
     checks: [
       { kind: "analysisParamEnum", type: "two-way-anova", param: "posthoc", value: "fdr" },
       { kind: "analysisParam", type: "two-way-anova", param: "fdrMethod" },
@@ -803,9 +825,8 @@ const ROWS: Row[] = [
   {
     item: "193",
     title: "Multiple-t-tests corrections",
-    status: "in-flight",
-    branch: "fix/18-193-mtt-corr",
-    note: "Branch correction enum has all 8; on tip only holm, fdr, none.",
+    status: "covered",
+    note: "Merged on check/v18: correction enum has all 8 values.",
     checks: [
       { kind: "analysisParamEnum", type: "multiple-t-tests", param: "correction", value: "holm-sidak" },
       { kind: "analysisParamEnum", type: "multiple-t-tests", param: "correction", value: "sidak" },
@@ -817,18 +838,20 @@ const ROWS: Row[] = [
   {
     item: "194",
     title: "Row statistics",
-    status: "in-flight",
-    branch: "fix/18-194-rowstats",
-    note: "Branch adds the rowScope param.",
+    status: "covered",
+    note: "Merged on check/v18: rowScope param present.",
     checks: [{ kind: "analysisParam", type: "row-means-totals", param: "rowScope" }],
   },
   {
     item: "195",
     title: "Chi-square + binomial",
-    status: "in-flight",
-    branch: "fix/18-195-chisq-binom",
-    note: "chi-square exists on tip (type + schema + offered on Contingency); the binomial analysis type does not. ('binomial' elsewhere in types.ts is only a simulate-data distribution.)",
-    checks: [{ kind: "analysis", type: "binomial" }],
+    status: "covered",
+    note: "Merged on check/v18 as analysis type binomial-test (offered on Column); chi-square-gof was already on tip. ('binomial' elsewhere in types.ts is only a simulate-data distribution.)",
+    checks: [
+      { kind: "analysis", type: "binomial-test" },
+      { kind: "analysis", type: "chi-square-gof" },
+      { kind: "analysisOffering", table: "column", type: "binomial-test" },
+    ],
   },
   {
     item: "196",
@@ -841,9 +864,8 @@ const ROWS: Row[] = [
   {
     item: "Mansi-3",
     title: "Sig brackets + 'p=' prefix (m4)",
-    status: "in-flight",
-    branch: "fix/18-m4-sig-brackets",
-    note: "Brackets are covered on tip (sigAnalysisId/sigPairs/sigDisplay); the 'p=' prefix is sigDisplay 'pvalue-eq', which the branch adds.",
+    status: "covered",
+    note: "Merged on check/v18: sigDisplay 'pvalue-eq' is a valid choice (brackets were covered on tip).",
     checks: [{ kind: "graphChoice", choice: "sigDisplay", value: "pvalue-eq" }],
   },
   {
@@ -859,18 +881,21 @@ const ROWS: Row[] = [
   {
     item: "155",
     title: "CSV/XLSX/TXT file import",
-    status: "gap",
-    note: "No MCP tool imports a data file; titer_import_prism rejects non-.prism/.pzfx. create_table+write_table covers inline data only.",
-    checks: [{ kind: "toolNameMatches", re: "import_(csv|xlsx|txt|data|file)" }],
+    status: "covered",
+    note: "Merged on check/v18: titer_import_data_file (CSV/TSV/TXT/XLSX) in the project allowlist group.",
+    checks: [
+      { kind: "tool", tool: "titer_import_data_file" },
+      { kind: "toolGroup", group: "project", tool: "titer_import_data_file" },
+    ],
   },
   {
     item: "161",
     title: "Effect sizes",
     status: "gap",
-    note: "Cohen's d/g + Cohen's f exist and return via run_analysis+read_results. Missing: partial eta², Glass's Δ, effect-size CIs.",
+    note: "PARTIAL: partial eta squared LANDED with the 157 lane (multifactor-anova result rows, guarded by the 157 row). Still missing, not built, no lane: Glass's Δ and effect-size CIs (zero hits in src/stats).",
     checks: [
-      { kind: "sourceContainsRe", scope: "stats", re: "partial eta" },
       { kind: "sourceContainsRe", scope: "stats", re: "Glass" },
+      { kind: "sourceContainsRe", scope: "stats", re: "Cohen's d 95% CI" },
     ],
   },
   {
@@ -890,9 +915,13 @@ const ROWS: Row[] = [
   {
     item: "166",
     title: "Nonlinear-regression additions",
-    status: "gap",
-    note: "logistic-growth model IS in the enum, but the inflection transform + 'Don't fit points when…' series-X option are absent from the schema.",
-    checks: [{ kind: "analysisParam", type: "nonlinear-regression", param: "inflection" }],
+    status: "covered",
+    note: "Merged on check/v18: fitXMin/fitXMax restrict the fit X-range, and logistic-growth runs report an 'Inflection point' result row (with 95% CI). The inflection point is a result, not a schema param — the old probe (param 'inflection') was the wrong shape.",
+    checks: [
+      { kind: "analysisParam", type: "nonlinear-regression", param: "fitXMin" },
+      { kind: "analysisParam", type: "nonlinear-regression", param: "fitXMax" },
+      { kind: "sourceContains", file: "src/stats/xy/nonlinear-fit.ts", text: "Inflection point" },
+    ],
   },
   {
     item: "167",
@@ -918,9 +947,12 @@ const ROWS: Row[] = [
   {
     item: "170",
     title: "One-sample KS test",
-    status: "gap",
-    note: "Existing type is two-sample only; no one-sample variant (kolmogorov-smirnov schema has no params at all).",
-    checks: [{ kind: "hasExtraParam", type: "kolmogorov-smirnov", known: ["sets"] }],
+    status: "covered",
+    note: "Merged on check/v18 as a new analysis type one-sample-ks (offered on Column) — not a param on kolmogorov-smirnov, which stays two-sample only; the old probe was the wrong shape.",
+    checks: [
+      { kind: "analysis", type: "one-sample-ks" },
+      { kind: "analysisOffering", table: "column", type: "one-sample-ks" },
+    ],
   },
   {
     item: "177",
@@ -988,49 +1020,55 @@ const ROWS: Row[] = [
   {
     item: "203",
     title: "Plot-a-function distributions",
-    status: "gap",
-    note: "plot-function equation enum is regression models only (+gaussian); no z/t/F/chi-square/binomial/Poisson distributions; user-defined not plottable.",
+    status: "covered",
+    note: "Merged on check/v18: plot-function equation enum has the six statistical distributions (named *-distribution, not bare names — the old probe was the wrong shape).",
     checks: [
-      { kind: "analysisParamEnum", type: "plot-function", param: "equation", value: "binomial" },
-      { kind: "analysisParamEnum", type: "plot-function", param: "equation", value: "poisson" },
+      { kind: "analysisParamEnum", type: "plot-function", param: "equation", value: "normal-distribution" },
+      { kind: "analysisParamEnum", type: "plot-function", param: "equation", value: "t-distribution" },
+      { kind: "analysisParamEnum", type: "plot-function", param: "equation", value: "f-distribution" },
+      { kind: "analysisParamEnum", type: "plot-function", param: "equation", value: "chi-square-distribution" },
+      { kind: "analysisParamEnum", type: "plot-function", param: "equation", value: "binomial-distribution" },
+      { kind: "analysisParamEnum", type: "plot-function", param: "equation", value: "poisson-distribution" },
     ],
   },
   {
     item: "204",
     title: "Monte Carlo coverage",
-    status: "gap",
-    note: "Partial: monte-carlo targetAnalysis limited to 5 types; Gaussian simulation only; two-sided tails only. The 5 targets are reachable via run_analysis.",
+    status: "covered",
+    note: "Merged on check/v18: targetAnalysis gained paired-t + one-way-anova (7 targets), tails param (two-sided/less/greater), simulationDistribution gaussian/t. Residual, still open per the types.ts comment: Poisson / binomial simulation.",
     checks: [
-      { kind: "analysisParamEnum", type: "monte-carlo", param: "targetAnalysis", value: "anova" },
+      { kind: "analysisParamEnum", type: "monte-carlo", param: "targetAnalysis", value: "one-way-anova" },
+      { kind: "analysisParamEnum", type: "monte-carlo", param: "targetAnalysis", value: "paired-t" },
       { kind: "analysisParam", type: "monte-carlo", param: "tails" },
+      { kind: "analysisParamEnum", type: "monte-carlo", param: "simulationDistribution", value: "t" },
     ],
   },
   {
     item: "205",
     title: "Transform arithmetic",
-    status: "gap",
-    note: "transform-data has 7 unary functions only; arithmetic transforms (Y±K, Y×K, Y/K, K−Y, K/Y) absent.",
+    status: "covered",
+    note: "Merged on check/v18: transform-data function enum gained the six arithmetic transforms (Y±K, Y×K, Y/K, K−Y, K/Y) plus a constant param.",
     checks: [
-      {
-        kind: "analysisParamEnumExtra",
-        type: "transform-data",
-        param: "function",
-        known: ["log10", "ln", "log2", "sqrt", "reciprocal", "exp", "square"],
-      },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "y-plus-k" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "y-minus-k" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "y-times-k" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "y-divided-by-k" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "k-minus-y" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "k-divided-by-y" },
     ],
   },
   {
     item: "206",
     title: "Remove-baseline column math",
-    status: "gap",
-    note: "remove-baseline has 4 baseline methods only; no column-math params (subtract/divide/multiply columns).",
+    status: "covered",
+    note: "Merged on check/v18: remove-baseline gained columnMathOperation (subtract/divide/multiply/add) + columnMathA/B params. The old probe (extra baselineMethod enum values) was the wrong shape — column math is separate params, not new baseline methods.",
     checks: [
-      {
-        kind: "analysisParamEnumExtra",
-        type: "remove-baseline",
-        param: "baselineMethod",
-        known: ["first-value", "mean-first-n", "mean-of-controls", "constant"],
-      },
+      { kind: "analysisParam", type: "remove-baseline", param: "columnMathOperation" },
+      { kind: "analysisParamEnum", type: "remove-baseline", param: "columnMathOperation", value: "subtract" },
+      { kind: "analysisParamEnum", type: "remove-baseline", param: "columnMathOperation", value: "divide" },
+      { kind: "analysisParamEnum", type: "remove-baseline", param: "columnMathOperation", value: "multiply" },
+      { kind: "analysisParam", type: "remove-baseline", param: "columnMathA" },
+      { kind: "analysisParam", type: "remove-baseline", param: "columnMathB" },
     ],
   },
   {
@@ -1158,8 +1196,8 @@ const ROWS: Row[] = [
   {
     item: "228",
     title: "Scripts saved in project + run on open/close",
-    status: "gap",
-    note: "Partial: run ✓ via titer_run_script; save-in-project ✗ (no scripts field in project-file.ts) + auto-run on open/close ✗ (no runOnOpen hooks).",
+    status: "covered",
+    note: "Merged on check/v18: scripts live in the project file (scripts?: ProjectScript[], serialized + parsed back with warnings) and runOnOpen entries run on open. Run itself is titer_run_script; save_project persists the file, so the MCP path composes.",
     checks: [
       { kind: "sourceContains", file: "projectFile", text: "scripts" },
       { kind: "sourceContains", file: "projectFile", text: "runOnOpen" },
@@ -1168,9 +1206,9 @@ const ROWS: Row[] = [
   {
     item: "230",
     title: "Paste Special / Paste Transpose",
-    status: "gap",
-    note: "Partial: transpose ✓ (transpose analysis type via run_analysis); Paste Special ✗ (no paste-special op in edit-table ops).",
-    checks: [{ kind: "editOpsContains", op: "paste" }],
+    status: "covered",
+    note: "Merged on check/v18: titer_edit_table gained a paste-transposed op (pastes data transposed at a cell, growing the table as a GUI paste does). Transpose analysis type was already covered via run_analysis. Fuller Paste Special dialog options (values-only etc.) are UI-side, not an MCP op.",
+    checks: [{ kind: "editOpsContains", op: "paste-transposed" }],
   },
   {
     item: "236",
@@ -1225,8 +1263,7 @@ const ROWS: Row[] = [
     item: "Mansi-6",
     title: "Save-as-.prism report in titer_save_project result (m2)",
     status: "gap",
-    branch: "fix/18-m2-write-report",
-    note: "titer_save_project returns only {project_id, file_path, format, revision} — the write report (tables/analyses written vs dropped) is NOT in the result. The m2 lane surfaces it in UI only.",
+    note: "The m2 lane merged (7f5213a) but surfaced the report in UI only: executeSaveProject still returns only {project_id, file_path, format, revision} — the write report (tables/analyses written vs dropped) is NOT in the titer_save_project result. Genuine remaining MCP-side gap.",
     checks: [{ kind: "saveResultHasReport" }],
   },
 
