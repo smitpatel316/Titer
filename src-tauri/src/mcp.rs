@@ -3393,7 +3393,7 @@ pub struct ArrangeDrawingObjectsArgs {
 }
 
 /// A multi-panel figure: the graphs, and the figure's grid/title shape.
-/// `layout` is the figure's grid/title shape (grid, figureSize,
+/// `layout` is the figure's grid/title shape (grid, preset, figureSize,
 /// labelStyle, figureTitle, sharedLegend, dpi) — the fields of the
 /// figure editor, as `titer_update_figure` takes them (panels there).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -3416,8 +3416,11 @@ pub struct UpdateFigureArgs {
     pub project_id: Option<String>,
     /// The figure node's id, as shown by titer_list_projects.
     pub figure_id: String,
-    /// The figure fields to change (panels, grid, figureSize, labelStyle,
-    /// figureTitle, sharedLegend, dpi).
+    /// The figure fields to change (panels, grid, preset, figureSize,
+    /// labelStyle, figureTitle, sharedLegend, dpi). `preset` is one of the
+    /// 9 arrangement presets ("1x1" through "3x3") — it re-grids the
+    /// figure and never deletes a graph (graphs that no longer fit are
+    /// reported as unplaced).
     pub layout: serde_json::Value,
 }
 
@@ -6703,7 +6706,7 @@ impl TiterMcpServer {
     /// figureTitle, sharedLegend, dpi).
     #[tool(
         name = "titer_create_figure",
-        description = "Make a multi-panel figure over the given graphs (all the project's graphs when graph_ids is omitted). layout is the figure's grid/title shape: grid, figureSize, labelStyle, figureTitle, sharedLegend, backgroundColor (#rrggbb page colour), dpi.",
+        description = "Make a multi-panel figure over the given graphs (all the project's graphs when graph_ids is omitted). layout is the figure's grid/title shape: grid, preset (one of the 9 arrangement presets, \"1x1\" through \"3x3\" — re-grids the figure, never deletes a graph; graphs that no longer fit are reported as unplaced), figureSize, labelStyle, figureTitle, sharedLegend, backgroundColor (#rrggbb page colour), dpi.",
         annotations(
             title = "Create figure",
             read_only_hint = false,
@@ -6748,13 +6751,16 @@ impl TiterMcpServer {
     }
 
     /// Change a figure: panels, grid, titles — `layout` is the figure
-    /// fields to change (panels, grid, figureSize, labelStyle,
-    /// figureTitle, sharedLegend, backgroundColor, dpi). A panel is a graph
+    /// fields to change (panels, grid, preset, figureSize, labelStyle,
+    /// figureTitle, sharedLegend, backgroundColor, dpi). `preset` is one
+    /// of the 9 arrangement presets ("1x1" through "3x3") — it re-grids
+    /// the figure and never deletes a graph (graphs that no longer fit
+    /// are reported as unplaced). A panel is a graph
     /// ({ graphId }), a blank cell ({ kind: "blank" }) for layout, or an
     /// embedded picture ({ kind: "image", imageData, imageName? }).
     #[tool(
         name = "titer_update_figure",
-        description = "Change a figure: layout is the figure fields to change — panels, grid, figureSize, labelStyle, figureTitle, sharedLegend, backgroundColor (#rrggbb page colour), dpi. Panels are graphs ({ graphId }), blank cells ({ kind: \"blank\" }), or embedded pictures ({ kind: \"image\", imageData, imageName? }).",
+        description = "Change a figure: layout is the figure fields to change — panels, grid, preset (one of the 9 arrangement presets, \"1x1\" through \"3x3\" — re-grids the figure, never deletes a graph; graphs that no longer fit are reported as unplaced), figureSize, labelStyle, figureTitle, sharedLegend, backgroundColor (#rrggbb page colour), dpi. Panels are graphs ({ graphId }), blank cells ({ kind: \"blank\" }), or embedded pictures ({ kind: \"image\", imageData, imageName? }).",
         annotations(
             title = "Update figure",
             read_only_hint = false,

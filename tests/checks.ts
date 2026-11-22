@@ -313,10 +313,12 @@ import { largestAt, PX_PER_INCH, withDpi } from "../src/lib/image-dpi";
 import { runScript, scriptImportFiles, type ScriptDoc } from "../src/lib/prism-script";
 import { encodeBmp, encodeTiff } from "../src/lib/tiff";
 import {
+  applyFigurePreset,
   assignLabels,
   clampPanel,
   composeFigureSvg,
   duplicateLabels,
+  FIGURE_ARRANGEMENT_PRESETS,
   FIGURE_IMAGE_MAX_DATA_URL,
   FIGURE_RESOLUTIONS,
   figureDpi,
@@ -327,6 +329,8 @@ import {
   newFigurePanels,
   panelPlotSize,
   panelRects,
+  parseFigurePreset,
+  presetLabel,
   sharedLegendCheck,
   validateFigureSize,
 } from "../src/lib/figure";
@@ -15573,6 +15577,136 @@ check("a figure's size is validated in inches, within 1–20 and 4:1", () => {
   ok(validateFigureSize({ widthIn: 25, heightIn: 7.5 }).reason !== undefined);
   ok(validateFigureSize({ widthIn: 10, heightIn: 40 }).reason !== undefined);
   ok(validateFigureSize({ widthIn: 20, heightIn: 1 }).reason !== undefined);
+});
+
+check("figure arrangement presets offer 1×1–3×3 and re-grid without deleting a graph (seq 308)", () => {
+  // All 9 presets, in reading order.
+  deepStrictEqual(FIGURE_ARRANGEMENT_PRESETS.map(presetLabel), [
+    "1×1",
+    "1×2",
+    "1×3",
+    "2×1",
+    "2×2",
+    "2×3",
+    "3×1",
+    "3×2",
+    "3×3",
+  ]);
+  deepStrictEqual(parseFigurePreset("2x2"), { rows: 2, cols: 2 });
+  deepStrictEqual(parseFigurePreset("2×2"), { rows: 2, cols: 2 });
+  deepStrictEqual(parseFigurePreset({ rows: 3, cols: 1 }), { rows: 3, cols: 1 });
+  strictEqual(parseFigurePreset("4x4"), undefined);
+  strictEqual(parseFigurePreset("2x0"), undefined);
+  strictEqual(parseFigurePreset("nope"), undefined);
+
+  // Acceptance: a 1×3 figure re-gridded to 2×2 keeps the graphs that fit.
+  const { panels, grid } = newFigurePanels(["g1", "g2", "g3"]);
+  deepStrictEqual(grid, { rows: 1, cols: 3 });
+  const shrunk = applyFigurePreset(panels, { rows: 2, cols: 2 });
+  deepStrictEqual(shrunk.grid, { rows: 2, cols: 2 });
+  deepStrictEqual(
+    shrunk.panels.map((p) => p.graphId),
+    ["g1", "g2"],
+  );
+  deepStrictEqual(
+    shrunk.panels.map((p) => [p.row, p.col]),
+    [
+      [0, 0],
+      [0, 1],
+    ],
+  );
+  // The third graph is unassigned, not deleted: it is listed as unplaced,
+  // and every graph is still accounted for between kept + unplaced.
+  deepStrictEqual(
+    shrunk.unplaced.map((p) => p.graphId),
+    ["g3"],
+  );
+  deepStrictEqual([...shrunk.panels, ...shrunk.unplaced].map((p) => p.graphId).sort(), ["g1", "g2", "g3"]);
+  // Growing the grid keeps everything; the extra cells stay empty.
+  const grown = applyFigurePreset(panels, { rows: 3, cols: 3 });
+  deepStrictEqual(grown.grid, { rows: 3, cols: 3 });
+  deepStrictEqual(
+    grown.panels.map((p) => p.graphId),
+    ["g1", "g2", "g3"],
+  );
+  deepStrictEqual(grown.unplaced, []);
+  // A spanning panel is clamped into the new grid, never stacked on another.
+  const spanning = applyFigurePreset(
+    [
+      { graphId: "g1", label: "A", title: "", row: 0, col: 0, rowSpan: 1, colSpan: 2 },
+      { graphId: "g2", label: "B", title: "", row: 0, col: 2, rowSpan: 1, colSpan: 1 },
+    ],
+    { rows: 1, cols: 2 },
+  );
+  deepStrictEqual(
+    spanning.panels.map((p) => [p.graphId, p.row, p.col, p.rowSpan, p.colSpan]),
+    [["g1", 0, 0, 1, 2]],
+  );
+  deepStrictEqual(
+    spanning.unplaced.map((p) => p.graphId),
+    ["g2"],
+  );
+  // The editor offers the picker and lists unplaced graphs.
+  const view = readFileSync("src/views/figures/figure-view.tsx", "utf8");
+  ok(view.includes("FIGURE_ARRANGEMENT_PRESETS"), "the figure editor must offer the arrangement presets");
+  ok(view.includes("applyFigurePreset"), "picking a preset must re-grid through applyFigurePreset");
+  ok(view.includes("Unplaced"), "graphs dropped by a preset must be listed as unplaced");
+});
+
+check("seq 308: MCP update-figure takes a preset and reports the unplaced graphs", () => {
+  const before = figurePayload();
+  const g3: ProjectNode = {
+    id: "g3",
+    type: "graph",
+    name: "Third",
+    parentId: "ft",
+    graphType: "individual",
+    graphOptions: newGraphOptions("individual"),
+  };
+  const nodes = {
+    ...before.nodes,
+    g3,
+    f1: {
+      ...before.nodes.f1,
+      panels: [
+        { graphId: "g1", graphName: "Plot", label: "A", title: "", row: 0, col: 0, rowSpan: 1, colSpan: 1 },
+        { graphId: "g2", graphName: "Bars", label: "B", title: "", row: 0, col: 1, rowSpan: 1, colSpan: 1 },
+        { graphId: "g3", graphName: "Third", label: "C", title: "", row: 0, col: 2, rowSpan: 1, colSpan: 1 },
+      ],
+      grid: { rows: 1, cols: 3 },
+    },
+  };
+  const state = { nodes, rootOrder: before.rootOrder, childOrder: before.childOrder, activeNodeId: "f1" };
+  const applied: { id: string; patch: FigurePatch }[] = [];
+  const deps: GraphJobDeps = {
+    getState: () => state,
+    updateFigure: (id, patch) => {
+      applied.push({ id, patch });
+    },
+  };
+  const job = (jobId: string, layout: unknown) => ({
+    job_id: jobId,
+    project_id: "project-1",
+    action: "update-figure",
+    args: { figure_id: "f1", layout },
+    status: "queued" as const,
+  });
+  const out = executeUpdateFigure(job("job-308-ok", { preset: "2x2" }), deps);
+  deepStrictEqual(applied[0]?.patch.grid, { rows: 2, cols: 2 });
+  deepStrictEqual(
+    applied[0]?.patch.panels?.map((p) => p.graphId),
+    ["g1", "g2"],
+  );
+  deepStrictEqual(
+    (out.result as { unplaced: { graph_id: string }[] }).unplaced.map((p) => p.graph_id),
+    ["g3"],
+  );
+  // No graph is ever deleted by picking a preset: g3 is still in the project.
+  strictEqual(state.nodes.g3?.type, "graph");
+  throws(
+    () => executeUpdateFigure(job("job-308-bad", { preset: "4x4" }), deps),
+    /must be one of the 9 arrangement presets/,
+  );
 });
 
 check("figures are created, edited and undone through the store", () => {

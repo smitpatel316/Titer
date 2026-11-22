@@ -11,6 +11,7 @@ import {
   DEFAULT_FIGURE_DPI,
   DEFAULT_FIGURE_SIZE,
   DEFAULT_LABEL_STYLE,
+  FIGURE_ARRANGEMENT_PRESETS,
   FIGURE_IMAGE_MAX_DATA_URL,
   FIGURE_MAX_COLS,
   FIGURE_RESOLUTIONS,
@@ -18,6 +19,7 @@ import {
   validFigureImageData,
 } from "../../lib/figure";
 import {
+  applyFigurePreset,
   assignLabels,
   clampPanel,
   duplicateLabels,
@@ -25,6 +27,8 @@ import {
   hasEmptyCell,
   missingPanels,
   panelsOverlap,
+  parseFigurePreset,
+  presetLabel,
   sharedLegendCheck,
   validateFigureSize,
 } from "../../lib/figure";
@@ -76,6 +80,10 @@ export function FigureView({ node }: { node: ProjectNode }) {
   const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
   const selected = panels.find((p) => panelKey(p) === selectedKey) ?? null;
   const [addGraphId, setAddGraphId] = React.useState("");
+  // Panels a preset dropped from the grid (seq 308): their graphs are still
+  // in the project, just unassigned — listed below the preset picker until
+  // they are added back (here, or through "Add a graph…").
+  const [unplacedPanels, setUnplacedPanels] = React.useState<FigurePanel[]>([]);
   const [exportFormat, setExportFormat] = React.useState<ExportFormat>("png");
   const [exportPresetChoice, setExportPresetChoice] = React.useState<"custom" | ExportPreset>("custom");
   const [colorMode, setColorMode] = React.useState<ColorMode>("color");
@@ -254,6 +262,37 @@ export function FigureView({ node }: { node: ProjectNode }) {
     set({ grid: next, panels: panels.map((p) => clampPanel(p, next)) });
   };
 
+  // A preset only changes the grid shape — it never deletes a graph. Panels
+  // that no longer fit are listed as unplaced (their graphs stay in the
+  // project), and a graph unplaced by an earlier pick stays listed until it
+  // is back in the figure.
+  const currentPreset = FIGURE_ARRANGEMENT_PRESETS.find((p) => p.rows === grid.rows && p.cols === grid.cols) ?? null;
+  const unplacedKey = (p: FigurePanel): string =>
+    (p.kind ?? "graph") === "graph" ? `graph-${p.graphId}` : `${p.kind}-${p.row}-${p.col}`;
+  const unplacedName = (p: FigurePanel): string =>
+    (p.kind ?? "graph") === "graph"
+      ? (nodes[p.graphId]?.name ?? p.graphName ?? p.graphId)
+      : p.kind === "image"
+        ? (p.imageName ?? "Image panel")
+        : "Blank panel";
+  const visibleUnplaced = unplacedPanels.filter((p) =>
+    (p.kind ?? "graph") === "graph" ? !panels.some((q) => q.graphId === p.graphId) : true,
+  );
+  const applyPreset = (preset: { rows: number; cols: number }) => {
+    const next = applyFigurePreset(panels, preset);
+    set({ grid: next.grid, panels: next.panels });
+    setUnplacedPanels((prev) => {
+      const backIn = new Set(next.panels.map(unplacedKey));
+      const merged = prev.filter((p) => !backIn.has(unplacedKey(p)));
+      for (const p of next.unplaced) if (!merged.some((q) => unplacedKey(q) === unplacedKey(p))) merged.push(p);
+      return merged;
+    });
+  };
+  const reAddUnplaced = (panel: FigurePanel) => {
+    insertPanel(panel);
+    setUnplacedPanels((prev) => prev.filter((p) => unplacedKey(p) !== unplacedKey(panel)));
+  };
+
   const onExport = async () => {
     setExporting(true);
     try {
@@ -397,6 +436,39 @@ export function FigureView({ node }: { node: ProjectNode }) {
           <Field label="Columns">
             <NumberInput value={grid.cols} aria-label="Grid columns" onChange={(v) => changeGrid(null, v)} />
           </Field>
+          <Field label="Arrangement preset">
+            <Select
+              value={currentPreset ? presetLabel(currentPreset) : ""}
+              onChange={(v) => {
+                const preset = parseFigurePreset(v);
+                if (preset) applyPreset(preset);
+              }}
+              placeholder="Custom arrangement"
+              options={FIGURE_ARRANGEMENT_PRESETS.map((p) => ({
+                value: presetLabel(p),
+                label: `${presetLabel(p)} — ${p.rows * p.cols} panel${p.rows * p.cols === 1 ? "" : "s"}`,
+              }))}
+            />
+          </Field>
+          {visibleUnplaced.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <p className="text-small text-secondary">
+                Unplaced by the preset — the graph is still in the project, just not in this figure:
+              </p>
+              {visibleUnplaced.map((p) => (
+                <div key={unplacedKey(p)} className="flex items-center justify-between gap-2">
+                  <span className="text-small">{unplacedName(p)}</span>
+                  <Button variant="ghost" onClick={() => reAddUnplaced(p)}>
+                    Add back
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="text-small text-secondary">
+            A preset only changes the grid — it never deletes a graph. A graph that no longer fits is listed above,
+            ready to add back.
+          </p>
           <Field label="Width (in)">
             <NumberInput
               value={figureSize.widthIn}
