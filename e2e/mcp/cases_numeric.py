@@ -313,7 +313,11 @@ def c_q05_student_t(suite):
         _check_stat(r, "95% CI lower", -6.646, rel=2e-3)
         _check_stat(r, "95% CI upper", 0.6461, rel=2e-3)
         _check_stat(r, "R squared", 0.3103, rel=2e-3)
-        _check_stat(r, "F (variance ratio)", 0.25, rel=2e-3)
+        # F puts the larger variance on top (F >= 1), as Prism does
+        # (src/stats/column/compare-two-groups.ts:117-118): B var 10 /
+        # A var 2.5 = 4. The old pin 0.25 was the reciprocal
+        # (smaller/larger). The F test P is the same either way.
+        _check_stat(r, "F (variance ratio)", 4, rel=2e-3)
         _check_stat(r, "F DFn", 4, rel=2e-3)
         _check_stat(r, "F DFd", 4, rel=2e-3)
         _check_p(r, "F test P value", 0.208, rel=4e-3)
@@ -695,9 +699,12 @@ def c_q65_multireg(suite):
         assert abs(c["estimate"]) < 1e-9, f"Var2 coef: {c['estimate']}"
         _check_stat(r, "R squared", 1, rel=2e-3)
         _check_stat(r, "Adjusted R squared", 1, rel=2e-3)
-        _check_stat(r, "F", 4.03e31, rel=1e-2)
+        # R²=1 exactly: F = (R²/k)/((1-R²)/(n-k-1)) divides by ~0, so its
+        # magnitude is float noise (app returns 9.17e30 vs the old pin
+        # 4.03e31). Only its scale is meaningful: astronomically large.
+        assert _stat(r, "F") > 1e25, f"multireg F: {_stat(r, 'F')}"
         assert _stat(r, "P value (model)") < 0.0001
-        return "multireg: y = 1 + 2*Var1 + 0*Var2, R2=1, F=4.03e31"
+        return "multireg: y = 1 + 2*Var1 + 0*Var2, R2=1, F>1e25"
     finally:
         suite.close(pid)
 
