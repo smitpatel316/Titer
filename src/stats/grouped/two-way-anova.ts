@@ -439,6 +439,12 @@ const R_FLAT = (resid: string) => `${resid}<=1e-20*sum((v-mean(v))^2)`;
  *  `tw(v, g, r, inter)`: each effect's sum of squares, Type III (every cell filled: a main
  *  effect tests its unweighted means, the interaction what the additive model leaves),
  *  or, without the interaction, the additive model's (Type II = III); the residual's, its df.
+ *  `tw1(v, g, r)`: each effect's sum of squares, Type I sequential (Group first, then Row,
+ *  then Interaction) — the Scheirer-Ray-Hare reference (rcompanion): the Group term is the
+ *  one-way SS of the count-weighted group means, the Row term what the additive model adds
+ *  after Group, the Interaction term `add2` as in `tw`. On unbalanced designs Type I and
+ *  III differ (seq 314: Type III gave Group H 23.0225, Type I gives the reference 22.7207);
+ *  the denominator `var(k)` is already the tie-corrected one, so no further correction.
  *  `sp(Y, gs)`: a split-plot (subjects in groups, each at every row) in the strata of
  *  `aov(v ~ g * r + Error(id / r))`: `e1` between subjects (groups, residual), `e2` within
  *  (rows, interaction, residual). */
@@ -450,6 +456,9 @@ one<-function(m,w){W<-1/w;sum(W*(m-sum(W*m)/sum(W))^2)}
 if(inter)return(c(g=one(rowMeans(mu),rowSums(1/n)/R^2),r=one(colMeans(mu),colSums(1/n)/G^2),i=add2(n,mu),
 e=sum((v-mu[cbind(as.integer(g),as.integer(r))])^2),dfe=length(v)-G*R))
 e<-add2(n,mu);c(g=sum((v-ave(v,r))^2)-e,r=sum((v-ave(v,g))^2)-e,e=e,dfe=length(v)-G-R+1)}
+tw1<-function(v,g,r){n<-unclass(table(g,r));mu<-tapply(v,list(g,r),mean);mu[n==0]<-0;m<-mean(v)
+gm<-rowSums(n*mu)/rowSums(n);sg<-sum(rowSums(n)*(gm-m)^2);sc<-sum(n*(mu-m)^2);si<-add2(n,mu)
+c(g=sg,r=sc-si-sg,i=si)}
 sp<-function(Y,gs){R<-ncol(Y);N<-nrow(Y);G<-nlevels(gs);k<-as.integer(gs);s<-rowMeans(Y);m<-mean(Y)
 ng<-as.vector(table(gs));mg<-as.vector(tapply(s,gs,mean));mr<-colMeans(Y);mgr<-apply(Y,2,function(y)tapply(y,gs,mean))
 st<-function(S,D){Q<-S/D;n<-length(S);f<-c(Q[-n]/Q[n],NA)
@@ -758,10 +767,11 @@ export async function runTwoWayAnova(
   const nonparametric = params.design === "nonparametric";
   const setup = `${R_EFFECT_CI};v<-${rVec(values)};g<-${rFactor(group)};r<-${rFactor(row)}`;
   const rCode = nonparametric
-    ? // Each effect's Type III sum of squares on the ranks (as the ordinary ANOVA's, so an
-      // unbalanced design gives the same H whatever the factors' order), over the ranks'
-      // total mean square.
-      `${setup};${R_TWO_WAY};k<-rank(v);s<-tw(k,g,r,TRUE);h<-s[1:3]/var(k);d<-c(nlevels(g)-1,nlevels(r)-1);d[3]<-d[1]*d[2];` +
+    ? // Each effect's Type I sequential sum of squares on the ranks (the Scheirer-Ray-Hare
+      // reference: Group first, then Row, then Interaction — NOT Type III, which gives a
+      // different H on unbalanced designs, seq 314), over the ranks' total mean square
+      // (var(k) already embodies the tie correction).
+      `${setup};${R_TWO_WAY};k<-rank(v);s<-tw1(k,g,r);h<-s[1:3]/var(k);d<-c(nlevels(g)-1,nlevels(r)-1);d[3]<-d[1]*d[2];` +
       `c(gS=h[[1]],gDf=d[1],gP=pchisq(h[[1]],d[1],lower.tail=FALSE),` +
       `rS=h[[2]],rDf=d[2],rP=pchisq(h[[2]],d[2],lower.tail=FALSE),` +
       `iS=h[[3]],iDf=d[3],iP=pchisq(h[[3]],d[3],lower.tail=FALSE))`

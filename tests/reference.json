@@ -40127,7 +40127,7 @@
   "stats": [
    {
     "label": "Group H",
-    "value": 23.02252615
+    "value": 22.7206541
    },
    {
     "label": "Group DFn",
@@ -40135,12 +40135,12 @@
    },
    {
     "label": "Group P value",
-    "value": 0.00001001663771,
+    "value": 0.00001164857094,
     "p": true
    },
    {
     "label": "Row H",
-    "value": 16.91120796
+    "value": 16.99872588
    },
    {
     "label": "Row DFn",
@@ -40148,7 +40148,7 @@
    },
    {
     "label": "Row P value",
-    "value": 0.002011254946,
+    "value": 0.001934051595,
     "p": true
    },
    {
@@ -40211,7 +40211,7 @@
    "detail": "5 rows",
    "left": []
   },
-  "summary": "The data don't show that the difference between the groups depends on the row (interaction P = 0.9971). Overall, the groups differ (P < 0.0001). Overall, the rows differ (P = 0.002011)."
+  "summary": "The data don't show that the difference between the groups depends on the row (interaction P = 0.9971). Overall, the groups differ (P < 0.0001). Overall, the rows differ (P = 0.001934)."
  },
  "multiple-t-tests twoGroups {\"paired\":false,\"gaussian\":true,\"pooledSd\":false,\"correction\":\"holm\"}": {
   "testType": "multiple-t-tests",
