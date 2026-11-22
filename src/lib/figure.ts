@@ -153,6 +153,86 @@ export function clampPanel(panel: FigurePanel, grid: FigureGrid): FigurePanel {
   };
 }
 
+// ── Arrangement presets (seq 308) ────────────────────────────────────────
+
+/** One numbered arrangement preset, as Prism's layout dialog offers them
+ *  (1×1, 1×2, 2×1, 2×2, …): a grid shape, nothing more. */
+export interface FigurePreset {
+  rows: number;
+  cols: number;
+}
+
+/** The nine presets: every shape from 1×1 through 3×3, in reading order. */
+export const FIGURE_ARRANGEMENT_PRESETS: FigurePreset[] = [
+  { rows: 1, cols: 1 },
+  { rows: 1, cols: 2 },
+  { rows: 1, cols: 3 },
+  { rows: 2, cols: 1 },
+  { rows: 2, cols: 2 },
+  { rows: 2, cols: 3 },
+  { rows: 3, cols: 1 },
+  { rows: 3, cols: 2 },
+  { rows: 3, cols: 3 },
+];
+
+/** A preset's name, as the picker shows it: "2×2". */
+export function presetLabel(preset: FigurePreset): string {
+  return `${preset.rows}×${preset.cols}`;
+}
+
+/** A preset as typed ("2x2", "2×2") or as { rows, cols } — or undefined
+ *  when it is not one of the nine (a 4×4 grid is free-form, not a preset). */
+export function parseFigurePreset(value: unknown): FigurePreset | undefined {
+  if (typeof value === "string") {
+    const m = /^([1-3])[x×]([1-3])$/.exec(value.trim());
+    if (m) return { rows: Number(m[1]), cols: Number(m[2]) };
+    return undefined;
+  }
+  if (typeof value === "object" && value !== null) {
+    const { rows, cols } = value as { rows?: unknown; cols?: unknown };
+    if (
+      Number.isInteger(rows) &&
+      Number.isInteger(cols) &&
+      (rows as number) >= 1 &&
+      (rows as number) <= 3 &&
+      (cols as number) >= 1 &&
+      (cols as number) <= 3
+    )
+      return { rows: rows as number, cols: cols as number };
+  }
+  return undefined;
+}
+
+/** Re-grid a figure to a preset: panels whose top-left cell is still in the
+ *  new grid are kept where they are (spans clamped to the grid's edge); a
+ *  panel that would land on an already-kept panel is unplaced instead of
+ *  stacked on top of it. Nothing is deleted: `unplaced` lists the panels
+ *  that no longer fit — their graphs stay in the project, unassigned, for
+ *  the editor (or the MCP caller) to list and place again. Labels are
+ *  reassigned in reading order, except ones typed by hand. Returns new
+ *  panels; the input is untouched. */
+export function applyFigurePreset(
+  panels: FigurePanel[],
+  preset: FigurePreset,
+): { panels: FigurePanel[]; grid: FigureGrid; unplaced: FigurePanel[] } {
+  const grid: FigureGrid = { rows: preset.rows, cols: preset.cols };
+  const kept: FigurePanel[] = [];
+  const unplaced: FigurePanel[] = [];
+  for (const panel of readingOrder(panels)) {
+    if (panel.row >= grid.rows || panel.col >= grid.cols) {
+      unplaced.push(panel);
+      continue;
+    }
+    const clamped = clampPanel(panel, grid);
+    if (kept.some((k) => panelsOverlap(clamped, k))) {
+      unplaced.push(panel);
+      continue;
+    }
+    kept.push(clamped);
+  }
+  return { panels: assignLabels(kept), grid, unplaced };
+}
+
 // ── Size ─────────────────────────────────────────────────────────────────
 
 /** A figure's size in pixels at `dpi` (the exported image's size). */

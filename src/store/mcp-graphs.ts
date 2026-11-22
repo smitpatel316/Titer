@@ -27,13 +27,17 @@ import { PALETTES, paletteNamed, savedPalette } from "../lib/palettes";
 import {
   DEFAULT_FIGURE_SIZE,
   DEFAULT_LABEL_STYLE,
+  FIGURE_ARRANGEMENT_PRESETS,
   FIGURE_IMAGE_MAX_DATA_URL,
   FIGURE_MAX_COLS,
   FIGURE_RESOLUTIONS,
+  applyFigurePreset,
   assignLabels,
   duplicateLabels,
   newFigurePanels,
   panelsOverlap,
+  parseFigurePreset,
+  presetLabel,
   sharedLegendCheck,
   validateFigureSize,
 } from "../lib/figure";
@@ -606,6 +610,9 @@ export interface ValidatedFigureLayout {
   /** The panels the figure ends up with (create: built from `graph_ids`;
    *  update: the patched panels, or the figure's current ones). */
   panels: FigurePanel[];
+  /** Panels a preset dropped from the grid (seq 308): their graphs stay
+   *  in the project, unassigned — the caller lists them as unplaced. */
+  unplaced: FigurePanel[];
 }
 
 function reqInt(job: McpJob, name: string, value: unknown, min: number): number {
@@ -631,12 +638,17 @@ function validateFigureLayout(
     // legend the figure already has stays valid only if the panels still
     // agree — checked by the caller through `panels`/`grid` when it
     // matters (update-figure checks it; create-figure starts at "none").
-    return { patch: {}, panels };
+    return { patch: {}, panels, unplaced: [] };
   }
-  if (!isPlainObject(raw)) throw jobErr(job, `“layout” must be an object { grid?, figureSize?, labelStyle?, figureTitle?, sharedLegend?, backgroundColor?, dpi?, panels? }.`);
+  if (!isPlainObject(raw))
+    throw jobErr(
+      job,
+      `“layout” must be an object { grid?, preset?, figureSize?, labelStyle?, figureTitle?, sharedLegend?, backgroundColor?, dpi?, panels? }.`,
+    );
   const patch: FigurePatch = {};
   let nextPanels = panels;
   let nextGrid = grid;
+  const unplaced: FigurePanel[] = [];
 
   if (raw.grid !== undefined) {
     if (!isPlainObject(raw.grid)) throw jobErr(job, `“layout.grid” must be { rows, cols }.`);
@@ -721,6 +733,26 @@ function validateFigureLayout(
     patch.panels = nextPanels;
   }
 
+  // An arrangement preset (seq 308) re-grids the figure to one of the nine
+  // shapes ("2x2" / "2×2"); it wins over an explicit `grid`, and it applies
+  // to whatever panels are in effect (the patched ones, or the figure's
+  // current ones). It never deletes a graph: panels that no longer fit are
+  // unplaced, and the caller reports them.
+  if (raw.preset !== undefined) {
+    const preset = parseFigurePreset(raw.preset);
+    if (!preset)
+      throw jobErr(
+        job,
+        `“layout.preset” must be one of the 9 arrangement presets (${FIGURE_ARRANGEMENT_PRESETS.map(presetLabel).join(", ")}) — got ${JSON.stringify(raw.preset)}.`,
+      );
+    const regridded = applyFigurePreset(nextPanels, preset);
+    nextPanels = regridded.panels;
+    nextGrid = regridded.grid;
+    unplaced.push(...regridded.unplaced);
+    patch.grid = nextGrid;
+    patch.panels = nextPanels;
+  }
+
   // Panels must fit the grid — whether the grid is new or the figure's own.
   for (const p of nextPanels)
     if (p.row + p.rowSpan > nextGrid.rows || p.col + p.colSpan > nextGrid.cols)
@@ -790,8 +822,23 @@ function validateFigureLayout(
   }
 
   for (const key of Object.keys(raw))
-    if (!["panels", "grid", "figureSize", "labelStyle", "figureTitle", "sharedLegend", "backgroundColor", "dpi"].includes(key))
-      throw jobErr(job, `unknown layout field “${key}” — use grid, figureSize, labelStyle, figureTitle, sharedLegend, backgroundColor, dpi (and panels on update).`);
+    if (
+      ![
+        "panels",
+        "grid",
+        "preset",
+        "figureSize",
+        "labelStyle",
+        "figureTitle",
+        "sharedLegend",
+        "backgroundColor",
+        "dpi",
+      ].includes(key)
+    )
+      throw jobErr(
+        job,
+        `unknown layout field “${key}” — use grid, preset, figureSize, labelStyle, figureTitle, sharedLegend, backgroundColor, dpi (and panels on update).`,
+      );
 
   // A shared legend is only sound when every panel's graph draws the same
   // series in the same colours — the editor refuses it otherwise, and so
@@ -802,7 +849,7 @@ function validateFigureLayout(
     if (!check.ok) throw jobErr(job, check.reason ?? "these panels cannot share one legend.");
   }
 
-  return { patch, panels: nextPanels };
+  return { patch, panels: nextPanels, unplaced };
 }
 
 /** A panel as the tool output spells it (snake_case, like the other tools).
@@ -1026,14 +1073,23 @@ export function executeCreateFigure(job: McpJob, deps: GraphJobDeps): GraphJobOu
   const names: Record<string, string> = {};
   for (const id of graphIds) names[id] = state.nodes[id]?.name ?? id;
   const { panels, grid } = newFigurePanels(graphIds, names);
-  const { patch } = validateFigureLayout(job, args.layout, state, panels, grid, false, {
+  const {
+    patch,
+    panels: finalPanels,
+    unplaced,
+  } = validateFigureLayout(job, args.layout, state, panels, grid, false, {
     labelStyle: DEFAULT_LABEL_STYLE,
     figureSize: DEFAULT_FIGURE_SIZE,
   });
   const figureId = need(job, deps.createFigure, "create a figure")(graphIds);
   if (Object.keys(patch).length) need(job, deps.updateFigure, "lay out a figure")(figureId, patch);
   return {
-    result: { project_id: job.project_id, figure_id: figureId, panels: panels.map(publicPanel) },
+    result: {
+      project_id: job.project_id,
+      figure_id: figureId,
+      panels: finalPanels.map(publicPanel),
+      unplaced: unplaced.map(publicPanel),
+    },
     created: { figure_id: figureId },
   };
 }
@@ -1050,7 +1106,7 @@ export function executeUpdateFigure(job: McpJob, deps: GraphJobDeps): GraphJobOu
   if (node.type !== "figure") throw jobErr(job, `“${node.name}” is a ${node.type}, not a figure.`);
   const currentPanels = node.panels ?? [];
   const currentGrid = node.grid ?? { rows: 1, cols: 1 };
-  const { patch, panels } = validateFigureLayout(job, args.layout, state, currentPanels, currentGrid, true, {
+  const { patch, panels, unplaced } = validateFigureLayout(job, args.layout, state, currentPanels, currentGrid, true, {
     labelStyle: node.labelStyle ?? DEFAULT_LABEL_STYLE,
     figureSize: node.figureSize ?? DEFAULT_FIGURE_SIZE,
   });
@@ -1063,7 +1119,14 @@ export function executeUpdateFigure(job: McpJob, deps: GraphJobDeps): GraphJobOu
   }
   if (!Object.keys(patch).length) throw jobErr(job, `“layout” changes nothing — pass a field to change.`);
   need(job, deps.updateFigure, "update a figure")(figureId, patch);
-  return { result: { project_id: job.project_id, figure_id: figureId, panels: panels.map(publicPanel) } };
+  return {
+    result: {
+      project_id: job.project_id,
+      figure_id: figureId,
+      panels: panels.map(publicPanel),
+      unplaced: unplaced.map(publicPanel),
+    },
+  };
 }
 
 /** `titer_create_info_sheet`: an info sheet at the project root,
