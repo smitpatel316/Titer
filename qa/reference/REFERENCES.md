@@ -52,3 +52,5 @@ whole case.
 - q39-bar: Linux-captured 2026-11-19 (PNG sha c1c4990cc97f874b…; xy-bar on q39 fixture); Mac reference owed.
 - q39-area: Linux-captured 2026-11-19 (PNG sha ef724fa05f300ccc…; xy-area on q39 fixture); Mac reference owed.
 - q61: Linux-captured 2026-11-19 (PNG sha 7d18660aa9c8e160…; individual-values on ABCD); Mac reference owed.
+- q38-box: Linux-captured 2026-11-22 (PNG sha 56bbf423ab7dfba9…; box-violin on q38 fixture); Mac reference owed.
+- q38-violin: Linux-captured 2026-11-22 (PNG sha 630c84c5f68cf444…; box-violin on q38 fixture); Mac reference owed.
