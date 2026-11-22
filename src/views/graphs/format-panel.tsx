@@ -33,7 +33,15 @@ import {
   type SeriesStyle,
 } from "../../store/types";
 import { GRAPHS, hasValueAxis, newGraphOptions } from ".";
-import { EXPORT_FORMATS, RESOLUTIONS, type ExportFormat, type Resolution } from "./graph-export";
+import {
+  EXPORT_FORMATS,
+  EXPORT_PRESETS,
+  RESOLUTIONS,
+  exportPreset,
+  type ExportFormat,
+  type ExportPreset,
+  type Resolution,
+} from "./graph-export";
 import { COLOR_MODES, type ColorMode } from "../../lib/vector-export";
 import type { OfficeTarget } from "../../lib/office-export";
 import { isMacOs } from "../../lib/channel";
@@ -124,7 +132,7 @@ const EXPORT_KEY = "titer.graph.export";
 
 /** The sections, in their one order (each shown only when it has something for the graph). */
 export const SECTIONS = ["Statistics", "Data", "Style", "Series", "Selected points", "Text", "Axes", "Match", "Export"];
-type ExportChoice = { format: ExportFormat; dpi: Resolution; colorMode: ColorMode };
+type ExportChoice = { format: ExportFormat; dpi: Resolution; colorMode: ColorMode; preset: "custom" | ExportPreset };
 function readExport(): ExportChoice {
   try {
     const saved = JSON.parse(localStorage.getItem(EXPORT_KEY) ?? "{}");
@@ -132,9 +140,10 @@ function readExport(): ExportChoice {
       format: EXPORT_FORMATS.some((f) => f.value === saved.format) ? saved.format : "png",
       dpi: RESOLUTIONS.includes(saved.dpi) ? saved.dpi : "300",
       colorMode: COLOR_MODES.some((m) => m.value === saved.colorMode) ? saved.colorMode : "color",
+      preset: EXPORT_PRESETS.some((p) => p.value === saved.preset) ? saved.preset : "custom",
     };
   } catch {
-    return { format: "png", dpi: "300", colorMode: "color" };
+    return { format: "png", dpi: "300", colorMode: "color", preset: "custom" };
   }
 }
 
@@ -159,7 +168,13 @@ export function FormatPanel(props: Props) {
   const right = family === "xy" ? rightYDataset(options, seriesNames) : undefined;
   const [exported, setExported] = React.useState(readExport);
   const chooseExport = (choice: Partial<ExportChoice>) => {
-    const next = { ...exported, ...choice };
+    // Picking a format or resolution by hand leaves the preset behind.
+    const next = {
+      ...exported,
+      ...choice,
+      preset:
+        choice.preset ?? (choice.format !== undefined || choice.dpi !== undefined ? "custom" : exported.preset),
+    };
     setExported(next);
     remember(EXPORT_KEY, next);
   };
@@ -556,6 +571,19 @@ export function FormatPanel(props: Props) {
           items={[
             { value: "white", label: "White" },
             { value: "transparent", label: "Transparent" },
+          ]}
+        />
+        <Choice
+          label="Preset"
+          value={exported.preset}
+          onChange={(preset) =>
+            preset === "custom"
+              ? chooseExport({ preset: "custom" })
+              : chooseExport({ preset, ...exportPreset(preset)! })
+          }
+          items={[
+            { value: "custom" as const, label: "Custom" },
+            ...EXPORT_PRESETS.map((p) => ({ value: p.value, label: p.label })),
           ]}
         />
         <Choice

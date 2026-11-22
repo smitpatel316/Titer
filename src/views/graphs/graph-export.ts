@@ -30,6 +30,23 @@ const EXTENSION: Record<ExportFormat, string> = { png: "png", jpeg: "jpg", svg: 
 export const RESOLUTIONS = ["100", "150", "300", "600", "900", "1200"] as const;
 export type Resolution = (typeof RESOLUTIONS)[number];
 
+/** One-click export presets: a preset picks a format and a resolution
+ *  together, so a publication-ready file is one tap instead of two
+ *  separate choices. "Publication" is the journal figure: a TIFF at
+ *  300 DPI — the resolution journals ask for colour figures, and the
+ *  TIFF Titer already writes at true resolution with correct DPI tags
+ *  (seq 290). */
+export const EXPORT_PRESETS = [
+  { value: "publication", label: "Publication (TIFF, 300 DPI)", format: "tiff", dpi: "300" },
+] as const;
+export type ExportPreset = (typeof EXPORT_PRESETS)[number]["value"];
+
+/** The format + resolution a preset picks, or null for an unknown preset. */
+export function exportPreset(preset: string): { format: ExportFormat; dpi: Resolution } | null {
+  const found = EXPORT_PRESETS.find((p) => p.value === preset);
+  return found ? { format: found.format, dpi: found.dpi } : null;
+}
+
 // The folder of the last export, offered again for the next one this session.
 let lastFolder: string | null = null;
 

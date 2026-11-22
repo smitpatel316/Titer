@@ -34,7 +34,9 @@ import { withoutSelection } from "../views/graphs/selection";
 import { vectorTraces } from "../views/graphs/plot-helpers";
 import {
   EXPORT_FORMATS,
+  EXPORT_PRESETS,
   RESOLUTIONS,
+  exportPreset,
   type ExportFormat,
 } from "../views/graphs/graph-export";
 import { largestAt, PX_PER_INCH, withDpi } from "../lib/image-dpi";
@@ -433,16 +435,23 @@ function tableNode(job: McpJob, state: ExportJobState, tableId: string): Project
 /** `format` / `dpi` / `color_mode` args, validated the same way for graph
  *  and figure exports (Rust validates them too; the dispatcher is the
  *  authority). CMYK exists only for EPS, PDF and TIFF — the other
- *  formats have no CMYK form. */
-function exportFormatDpi(
+ *  formats have no CMYK form. `preset` picks a format + resolution
+ *  together ("publication" = TIFF at 300 DPI); an explicit `format` /
+ *  `dpi` wins over the preset. */
+export function exportFormatDpi(
   job: McpJob,
   args: Record<string, unknown>,
 ): { format: ExportFormat; dpi: Resolution; colorMode: ColorMode } {
-  const formatRaw = reqStr(job, args, "format");
+  const presetRaw = optStr(job, args, "preset");
+  const preset = presetRaw === undefined ? null : exportPreset(presetRaw);
+  if (presetRaw !== undefined && !preset) {
+    throw jobErr(job, `has no export preset “${presetRaw}” — the presets are ${EXPORT_PRESETS.map((p) => p.value).join(", ")}.`);
+  }
+  const formatRaw = optStr(job, args, "format") ?? preset?.format ?? reqStr(job, args, "format");
   if (!EXPORT_FORMATS.some((f) => f.value === formatRaw)) {
     throw jobErr(job, `has no export format “${formatRaw}” — the formats are ${EXPORT_FORMATS.map((f) => f.value).join(", ")}.`);
   }
-  const dpiRaw = optStr(job, args, "dpi") ?? "300";
+  const dpiRaw = optStr(job, args, "dpi") ?? preset?.dpi ?? "300";
   if (!(RESOLUTIONS as readonly string[]).includes(dpiRaw)) {
     throw jobErr(job, `has no resolution “${dpiRaw}” — the resolutions are ${RESOLUTIONS.join(", ")} DPI.`);
   }

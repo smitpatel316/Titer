@@ -38,7 +38,7 @@ import { DrawingObjectsLayer } from "../../components/drawing-objects";
 import { copyFigureImage, saveFigureImage, sendFigureToOffice } from "./figure-export";
 import type { OfficeTarget } from "../../lib/office-export";
 import { isMacOs } from "../../lib/channel";
-import { EXPORT_FORMATS, saveGraphImage, type ExportFormat } from "../graphs/graph-export";
+import { EXPORT_FORMATS, EXPORT_PRESETS, exportPreset, saveGraphImage, type ExportFormat, type ExportPreset } from "../graphs/graph-export";
 import { COLOR_MODES, type ColorMode } from "../../lib/vector-export";
 
 /** Screen pixels per inch in the editor (the figure keeps its true aspect ratio). */
@@ -77,6 +77,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
   const selected = panels.find((p) => panelKey(p) === selectedKey) ?? null;
   const [addGraphId, setAddGraphId] = React.useState("");
   const [exportFormat, setExportFormat] = React.useState<ExportFormat>("png");
+  const [exportPresetChoice, setExportPresetChoice] = React.useState<"custom" | ExportPreset>("custom");
   const [colorMode, setColorMode] = React.useState<ColorMode>("color");
   const [exporting, setExporting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -480,9 +481,27 @@ export function FigureView({ node }: { node: ProjectNode }) {
       </Section>
       <Section title="Export">
         <div className="flex flex-col gap-2">
+          <Field label="Preset">
+            <Segmented
+              value={exportPresetChoice}
+              onChange={(v) => {
+                setExportPresetChoice(v);
+                if (v !== "custom") {
+                  const picked = exportPreset(v)!;
+                  setExportFormat(picked.format);
+                  set({ dpi: picked.dpi });
+                }
+              }}
+              options={[
+                { value: "custom" as const, label: "Custom" },
+                ...EXPORT_PRESETS.map((p) => ({ value: p.value, label: p.label })),
+              ]}
+            />
+          </Field>
           <RadioList
             value={exportFormat}
             onChange={(f) => {
+              setExportPresetChoice("custom");
               setExportFormat(f);
               // CMYK has no form for PNG/JPEG/SVG/BMP: picking one of
               // those drops the colour back to Color.
@@ -504,10 +523,13 @@ export function FigureView({ node }: { node: ProjectNode }) {
             />
           </Field>
           {exportFormat !== "svg" && exportFormat !== "eps" && exportFormat !== "pdf" && (
-            <Field label="Resolution">
+            <Field label="Resolution (DPI)">
               <Segmented
                 value={dpi}
-                onChange={(v) => set({ dpi: v })}
+                onChange={(v) => {
+                  setExportPresetChoice("custom");
+                  set({ dpi: v });
+                }}
                 options={FIGURE_RESOLUTIONS.map((r) => ({ value: r as Resolution, label: `${r} DPI` }))}
               />
             </Field>
