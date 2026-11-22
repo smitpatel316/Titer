@@ -9,6 +9,7 @@ import type { TableData, TableType } from "../../store/types";
 import { useProjectActions, useProjectStore } from "../../store/use-project-store";
 import { checkNormality } from "./normality-check";
 import { useAnalysisLauncher } from "./use-analysis-launcher";
+import { recordRecentAnalysis } from "../../store/recent-analyses";
 import { analysisLabel } from ".";
 import { packageGate } from "../../stats";
 import { ensurePackages } from "../../stats/webr";
@@ -61,6 +62,8 @@ export function AnalysisWizard() {
       onDone={(a) => {
         const { type, params } = wizard.finish(a, table, tableType);
         launch(selector.tableId, type, params, selector.forGraph);
+        // Wizard completion is a run: the picked test joins Recently used (seq 298).
+        recordRecentAnalysis(selector.testType);
         closeSelector();
       }}
     />

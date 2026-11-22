@@ -5,7 +5,7 @@ import { useAppMenu } from "../app-menu";
 import { useDocument } from "../store/use-document";
 import { useProjectStore } from "../store/use-project-store";
 import { useLayout } from "../store/use-layout";
-import { onFullscreenChange } from "../native";
+import { alert, onFullscreenChange } from "../native";
 import { UniversalModal } from "./universal-modal";
 import { Dialog } from "../ui/dialog";
 import { ConverterDialog } from "./converter-dialog";
@@ -26,7 +26,8 @@ import { Button } from "../ui/controls";
 import { FloppyDiskIcon } from "@phosphor-icons/react";
 import { TABLE_TYPE_OPTIONS } from "../views/tables";
 import { TableDetail } from "../views/tables/table-detail";
-import { analysisOptionsForTable } from "../views/analyses";
+import { analysisOptionsForTable, isAnalysisOffered } from "../views/analyses";
+import { clearRecentAnalyses, loadRecentAnalyses, type RecentAnalysisEntry } from "../store/recent-analyses";
 import { AnalysisWizard } from "../views/analyses/analysis-wizard";
 import { WandDialog } from "./wand-dialog";
 import { SimulateDataDialog } from "./simulate-data-dialog";
@@ -87,6 +88,28 @@ export function AppShell() {
   // The New Analysis / New Graph pickers list what fits the target table's type.
   const tableType = selector && "tableId" in selector ? (nodes[selector.tableId]?.tableType ?? "column") : "column";
   const tableData = selector && "tableId" in selector ? nodes[selector.tableId]?.data : undefined;
+  // Recently-used analyses (seq 298): read fresh whenever the New Analysis
+  // picker opens; the Clear link bumps the version to re-read after emptying.
+  const [recentsVersion, setRecentsVersion] = React.useState(0);
+  const recentAnalyses = React.useMemo(
+    () => (selector?.kind === "new-analysis" ? loadRecentAnalyses() : []),
+    [selector?.kind, recentsVersion],
+  );
+  // A tap on a recent entry opens its wizard — or the not-applicable note
+  // when this table's type doesn't offer it.
+  const onRecentAnalysis = (entry: RecentAnalysisEntry) => {
+    if (selector?.kind !== "new-analysis") return;
+    if (!isAnalysisOffered(entry.type, tableType, tableData)) {
+      const tableTypeLabel = TABLE_TYPE_OPTIONS.find((o) => o.value === tableType)?.label ?? tableType;
+      alert(
+        `“${entry.label}” isn't available for this table.`,
+        `This analysis isn't offered for a ${tableTypeLabel} table. Run it from a table that supports it.`,
+      );
+      return;
+    }
+    if (startAnalysis(selector.tableId, entry.type, selector.forGraph)) return;
+    closeSelector();
+  };
   // Go to Sheet (seq 240): every sheet in outline order, grouped by section.
   const goToEntries = selector?.kind === "go-to-sheet" ? goToSheetEntries(nodes, rootOrder, childOrder) : [];
 
@@ -141,6 +164,39 @@ export function AppShell() {
         open={selector?.kind === "new-analysis"}
         title="New Analysis"
         description="Choose a statistical test."
+        header={
+          recentAnalyses.length > 0 ? (
+            <section aria-label="Recently used">
+              <p className="text-strong">Recently used</p>
+              <ul className="-mx-2 mt-1 flex flex-col gap-0.5">
+                {recentAnalyses.map((entry) => (
+                  <li key={entry.type}>
+                    <button
+                      type="button"
+                      className="w-full rounded-md px-2 py-1.5 text-left text-regular outline-none focus:bg-accent focus:text-white"
+                      onClick={() => onRecentAnalysis(entry)}
+                    >
+                      {entry.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-1 flex justify-end">
+                <button
+                  type="button"
+                  className="text-small text-secondary underline outline-none hover:text-primary focus:text-primary"
+                  onClick={() => {
+                    clearRecentAnalyses();
+                    setRecentsVersion((v) => v + 1);
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+              <div className="mt-3 border-t border-separator" />
+            </section>
+          ) : undefined
+        }
         options={analysisOptionsForTable(tableType, tableData)}
         onSelect={(type) => {
           // A test with options moves on to its wizard; otherwise the picker is done.

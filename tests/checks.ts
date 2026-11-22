@@ -282,6 +282,13 @@ import { decideUpdate, type ChannelManifest } from "../src/lib/channel";
 import { checkForUpdatesDaily } from "../src/updates";
 import { titleCase } from "../src/lib/format";
 import { loadRecents } from "../src/store/recents";
+import {
+  MAX_RECENT_ANALYSES,
+  clearRecentAnalyses,
+  loadRecentAnalyses,
+  recordRecentAnalysis,
+} from "../src/store/recent-analyses";
+import { isAnalysisOffered } from "../src/views/analyses";
 import { largestAt, PX_PER_INCH, withDpi } from "../src/lib/image-dpi";
 import { runScript, scriptImportFiles, type ScriptDoc } from "../src/lib/prism-script";
 import { encodeBmp, encodeTiff } from "../src/lib/tiff";
@@ -22097,6 +22104,65 @@ check("Open Recent loads FileHandle entries, migrating legacy plain paths", () =
     deepStrictEqual(loadRecents(), [
       { kind: "remote", provider: "box", accountId: "u1", fileId: "f9", path: "/Budget.hlx" },
     ]);
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+});
+
+check("Recently-used analyses: recency order, cap at 5, persistence, clear, and the not-applicable check (seq 298)", () => {
+  const stored: Record<string, string> = {};
+  const storage = {
+    getItem: (k: string) => stored[k] ?? null,
+    setItem: (k: string, v: string) => void (stored[k] = v),
+  };
+  Object.assign(globalThis, { localStorage: storage });
+  try {
+    // Empty state: nothing recorded yet, so the picker shows no section.
+    deepStrictEqual(loadRecentAnalyses(), []);
+    // Three different runs land most-recent-first, with display name + timestamp.
+    recordRecentAnalysis("descriptive-statistics", 1000);
+    recordRecentAnalysis("correlation", 2000);
+    recordRecentAnalysis("two-way-anova", 3000);
+    deepStrictEqual(loadRecentAnalyses(), [
+      { type: "two-way-anova", label: "Two-Way ANOVA", at: 3000 },
+      { type: "correlation", label: "Correlation", at: 2000 },
+      { type: "descriptive-statistics", label: "Descriptive Statistics", at: 1000 },
+    ]);
+    // Re-running one moves it to the front instead of duplicating it.
+    recordRecentAnalysis("descriptive-statistics", 4000);
+    deepStrictEqual(
+      loadRecentAnalyses().map((e) => e.type),
+      ["descriptive-statistics", "two-way-anova", "correlation"],
+    );
+    // The list caps at 5: the oldest drops off.
+    recordRecentAnalysis("shapiro-wilk", 5000);
+    recordRecentAnalysis("one-sample-t", 6000);
+    recordRecentAnalysis("outliers", 7000);
+    deepStrictEqual(
+      loadRecentAnalyses().map((e) => e.type),
+      ["outliers", "one-sample-t", "shapiro-wilk", "descriptive-statistics", "two-way-anova"],
+    );
+    strictEqual(MAX_RECENT_ANALYSES, 5);
+    // Persists across relaunch: the stored list reads back the same.
+    strictEqual(JSON.parse(stored["titer.recent-analyses"]).length, 5);
+    strictEqual(loadRecentAnalyses()[0]?.type, "outliers");
+    // Malformed stored entries are dropped, well-formed kept.
+    stored["titer.recent-analyses"] = JSON.stringify([
+      { type: "correlation", label: "Correlation", at: 2000 },
+      { type: "no-such-test", label: "Nope", at: 1 },
+      { type: "outliers", label: 7, at: "soon" },
+      null,
+    ]);
+    deepStrictEqual(loadRecentAnalyses(), [{ type: "correlation", label: "Correlation", at: 2000 }]);
+    // Clear empties the list.
+    recordRecentAnalysis("correlation", 9000);
+    clearRecentAnalyses();
+    deepStrictEqual(loadRecentAnalyses(), []);
+    // The not-applicable check: a Grouped-only test is not offered on a Column table.
+    ok(isAnalysisOffered("two-way-anova", "grouped"));
+    ok(!isAnalysisOffered("two-way-anova", "column"));
+    ok(isAnalysisOffered("descriptive-statistics", "column"));
+    ok(isAnalysisOffered("compare-many-groups", "column"));
   } finally {
     delete (globalThis as { localStorage?: unknown }).localStorage;
   }

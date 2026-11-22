@@ -8,6 +8,7 @@ import type { GraphOptions } from "../../store/types";
 import { ANALYSES } from "../../stats";
 import type { AnalysisParams, AnalysisPickerValue, AnalysisType } from "../../stats/types";
 import { countDataColumns, countDataGroups, hasRowGroups } from ".";
+import { recordRecentAnalysis } from "../../store/recent-analyses";
 import { WIZARDS } from "./wizards";
 import { levelsOf, readTable } from "../../lib/dataset";
 import { REPLICATE_TESTS, summaryTableProblem } from "../../lib/summary-format";
@@ -151,6 +152,8 @@ export function useStartAnalysis() {
     if (!wizard?.questions({}, table, tableType, data?.rowGroups).some(Boolean)) {
       const { type, params } = wizard?.finish({}, table, tableType) ?? { type: picked as AnalysisType };
       launch(tableId, type, params, forGraph);
+      // A direct run is a run: the picker value joins Recently used (seq 298).
+      recordRecentAnalysis(picked);
       return false;
     }
     openSelector({ kind: "analysis-params", tableId, testType: picked, forGraph });
