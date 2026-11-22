@@ -15940,6 +15940,8 @@ check("seq 294: MCP titer_export_graph takes width_in (Rust pins) and the dispat
   const exporter = readFileSync("src/store/mcp-export.ts", "utf8");
   ok(exporter.includes('optNum(job, args, "width_in")'), "the dispatcher must read width_in");
   ok(exporter.includes("graphDrawSize(graph, widthIn, heightIn)"), "the graph export must size from width_in");
+});
+
 check("seq 296: MCP copies a graph/figure image to the clipboard at the requested DPI (titer_copy_graph_image)", async () => {
   const { executeCopyGraphImage } = await import("../src/store/mcp-export");
   // A stub render / clipboard pair: the node harness cannot draw Plotly,
