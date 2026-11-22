@@ -1,9 +1,10 @@
 // Graph / figure / info-sheet jobs for the MCP dispatcher (v1.6.0 L6,
-// inventory §3.4): the seven tools `titer_build_graph`,
+// inventory §3.4): the nine tools `titer_build_graph`,
 // `titer_update_graph`, `titer_clone_graph`, `titer_create_figure`,
-// `titer_update_figure`, `titer_create_info_sheet` and
-// `titer_update_info_sheet` — plus the 1.8.0 menus-batch tools
-// `titer_freeze_graph`, `titer_freeze_figure`,
+// `titer_update_figure`, `titer_create_info_sheet`,
+// `titer_update_info_sheet`, `titer_list_regenerable_graphs` and
+// `titer_regenerate_graphs` (the last two are seq 291's graph-regen pair).
+// — plus the 1.8.0 menus-batch tools `titer_freeze_graph`, `titer_freeze_figure`,
 // `titer_add_drawing_object`, `titer_update_drawing_object`,
 // `titer_delete_drawing_object` and `titer_arrange_drawing_objects`
 // (seq 237/238). `titer_clone_analysis` / `titer_clone_figure` (seq 236)
@@ -37,6 +38,12 @@ import {
   validateFigureSize,
 } from "../lib/figure";
 import { DEFAULT_CLONE_OPTIONS, type CloneOptions } from "../lib/clone-graph";
+import {
+  applyRegenDecisions,
+  clearRegenPlans,
+  getRegenPlans,
+  type RegenDecision,
+} from "../lib/prism-graph-regen";
 import { MAX_INFO_CONSTANTS, MAX_INFO_SHEETS, allConstantNames, newConstantId } from "../lib/info-sheets";
 import type { McpJob } from "../native";
 import {
@@ -814,7 +821,7 @@ const publicPanel = (p: FigurePanel) => ({
   col_span: p.colSpan,
 });
 
-// ── The seven jobs ────────────────────────────────────────────────────
+// ── The nine jobs ────────────────────────────────────────────────────
 
 /** `titer_build_graph`: a graph of `graph_type` on `table_id`, with a
  *  partial `GraphOptions` over the type's defaults (incl. its palette
@@ -1377,4 +1384,129 @@ export function executeArrangeDrawingObjects(job: McpJob, deps: GraphJobDeps): G
   for (const id of objectIds) drawingObject(job, node, id);
   need(job, deps.arrangeDrawingObjects, "arrange drawing objects")(nodeId, op as ArrangeOp, objectIds);
   return { result: { project_id: job.project_id, node_id: nodeId, op, object_ids: objectIds } };
+}
+
+/** `titer_list_regenerable_graphs` (read-only): the import-time
+ *  `GraphPlan[]` for this project — the same plans the preview dialog
+ *  shows. Errors when the project has no plans: not a Prism import, or
+ *  the plans were already consumed by a regenerate run. */
+export function executeListRegenerableGraphs(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
+  void deps;
+  const plans = getRegenPlans(job.project_id);
+  if (!plans || plans.length === 0) {
+    throw jobErr(
+      job,
+      "this project has no import-time graph plans — import a .prism or .pzfx file first, then list again (a regenerate run consumes the plans).",
+    );
+  }
+  return {
+    result: {
+      project_id: job.project_id,
+      proposals: plans.map((p) => ({
+        proposal_id: p.proposalId,
+        prism_title: p.prismTitle,
+        source_table: p.sourceTableName,
+        source_table_id: p.sourceTableId,
+        proposed_graph_type: p.graphType,
+        error: p.error,
+        ...(p.linkedAnalysisId ? { linked_analysis_id: p.linkedAnalysisId } : {}),
+        origin: p.origin,
+        ...(p.heuristicRule ? { heuristic_rule: p.heuristicRule } : {}),
+        reconstructible: p.reconstructible,
+        ...(p.reason ? { reason_if_not: p.reason } : {}),
+        ...(p.derivedError ? { derived_error: p.derivedError } : {}),
+        ...(p.limitNote ? { limit_note: p.limitNote } : {}),
+      })),
+    },
+  };
+}
+
+/** One `decisions` entry, as the tool spells it (snake_case) — read and
+ *  shape-checked here, so a wrong type is a plain error naming the entry
+ *  instead of a silent drop. */
+function readRegenDecision(job: McpJob, value: unknown, index: number): RegenDecision {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw jobErr(job, `“decisions[${index}]” must be an object { proposal_id, action, overrides? }.`);
+  const rec = value as Record<string, unknown>;
+  if (typeof rec.proposal_id !== "string" || rec.proposal_id === "")
+    throw jobErr(job, `“decisions[${index}].proposal_id” must be a non-empty string.`);
+  if (rec.action !== "confirm" && rec.action !== "skip")
+    throw jobErr(job, `“decisions[${index}].action” must be "confirm" or "skip".`);
+  let overrides: RegenDecision["overrides"];
+  if (rec.overrides !== undefined && rec.overrides !== null) {
+    if (typeof rec.overrides !== "object" || Array.isArray(rec.overrides))
+      throw jobErr(job, `“decisions[${index}].overrides” must be an object { graph_type?, error?, name?, linked_analysis_id? }.`);
+    const o = rec.overrides as Record<string, unknown>;
+    for (const key of Object.keys(o)) {
+      if (!["graph_type", "error", "name", "linked_analysis_id"].includes(key))
+        throw jobErr(job, `unknown override “${key}” — use graph_type, error, name or linked_analysis_id.`);
+    }
+    const strField = (key: string): string | undefined => {
+      const v = o[key];
+      if (v === undefined) return undefined;
+      if (typeof v !== "string") throw jobErr(job, `“decisions[${index}].overrides.${key}” must be a string.`);
+      return v;
+    };
+    const graphType = strField("graph_type");
+    const error = strField("error");
+    const name = strField("name");
+    let linkedAnalysisId: string | null | undefined;
+    if (o.linked_analysis_id !== undefined) {
+      if (o.linked_analysis_id !== null && typeof o.linked_analysis_id !== "string")
+        throw jobErr(job, `“decisions[${index}].overrides.linked_analysis_id” must be a string, or null to clear the link.`);
+      linkedAnalysisId = o.linked_analysis_id as string | null;
+    }
+    overrides = {
+      ...(graphType !== undefined ? { graphType } : {}),
+      ...(error !== undefined ? { error } : {}),
+      ...(name !== undefined ? { name } : {}),
+      ...(linkedAnalysisId !== undefined ? { linkedAnalysisId } : {}),
+    };
+  }
+  return {
+    proposalId: rec.proposal_id as string,
+    action: rec.action as "confirm" | "skip",
+    ...(overrides ? { overrides } : {}),
+  };
+}
+
+/** `titer_regenerate_graphs` (write, synchronous — builders are pure
+ *  TS): one decision per proposal is REQUIRED — no "create all", no
+ *  undecided proposal, unknown ids rejected. The decisions run through
+ *  `applyRegenDecisions`, the same validation + creation the preview
+ *  dialog uses (graph type offered for the table, linked analysis exists
+ *  and belongs to the same table). A completed run consumes the plans,
+ *  so the same proposals can't rebuild the same graphs twice. */
+export function executeRegenerateGraphs(job: McpJob, deps: GraphJobDeps): GraphJobOutcome {
+  const args = argsOf(job);
+  if (!Array.isArray(args.decisions))
+    throw jobErr(job, `needs “decisions” as an array — one { proposal_id, action, overrides? } per proposed graph.`);
+  const decisions = args.decisions.map((d, i) => readRegenDecision(job, d, i));
+  const plans = getRegenPlans(job.project_id);
+  if (!plans || plans.length === 0) {
+    throw jobErr(
+      job,
+      "this project has no import-time graph plans — import a .prism or .pzfx file first, then regenerate (a regenerate run consumes the plans).",
+    );
+  }
+  const report = applyRegenDecisions(plans, decisions, {
+    getState: deps.getState,
+    createGraph: need(job, deps.createGraph, "create a graph"),
+    renameNode: need(job, deps.renameNode, "rename a graph"),
+  });
+  clearRegenPlans();
+  return {
+    result: {
+      project_id: job.project_id,
+      created: report.created.map((c) => ({
+        graph_id: c.graphId,
+        graph_type: c.graphType,
+        name: c.name,
+        origin: c.origin,
+      })),
+      skipped: report.skipped.map((s) => ({ proposal_id: s.proposalId, prism_title: s.prismTitle })),
+      ...(report.warnings.length ? { warnings: report.warnings } : {}),
+    },
+    created: { graph_ids: report.created.map((c) => c.graphId) },
+  };
 }

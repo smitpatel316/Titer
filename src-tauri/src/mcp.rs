@@ -2,14 +2,10 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 71 tools: 19 read-only (list/read/job/
+// Settings → AI connections. 73 tools: 20 read-only (list/read/job/
 // activity/cloud reads + feedback + the three 1.7.4 discovery tools + the 1.8 backup list + refresh-linked-data)
-// and 52 mutating, via the L0 Rust→frontend dispatch + job queue —
+// and 53 mutating (incl. the 1.8.2 graph-regenerate pair), via the L0 Rust→frontend dispatch + job queue —
 // run-analysis, build-graph, export and cloud tools included (Phase 2).
-// By default only the 5 Phase 1 read tools are advertised or callable:
-// the server-side allowlist (contract §12, `ALLOWLIST_GROUPS` below)
-// gates both `tools/list` and `tools/call`, and the user enables more
-// groups in Settings → AI Connections.
 //
 // Why rmcp, not tauri-plugin-mcp-commands — see the lane log
 // (~/workspace/.helix-v3-coord/v3-mcp-server.md) and
@@ -47,7 +43,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 71 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 73 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -1427,6 +1423,8 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
             "titer_update_figure",
             "titer_create_info_sheet",
             "titer_update_info_sheet",
+            "titer_list_regenerable_graphs",
+            "titer_regenerate_graphs",
         ],
     },
     AllowlistGroup {
@@ -2189,7 +2187,7 @@ async fn auth_middleware(
 /// the corruption hits every tool that returns non-ASCII text, not just
 /// transform-concentrations. Appending `; charset=utf-8` here, the one
 /// shared path every MCP response flows through, fixes the echo for all
-/// 71 tools. Returns the new header value, or `None` when the type is
+/// 73 tools. Returns the new header value, or `None` when the type is
 /// already labelled or is not one of the textual MCP response types.
 fn utf8_charset(content_type: &str) -> Option<String> {
     let lower = content_type.to_ascii_lowercase();
@@ -3221,6 +3219,38 @@ pub struct UpdateGraphArgs {
     /// defaults apply, keeping the title and size.
     #[serde(default)]
     pub graph_type: Option<String>,
+}
+
+/// One decision in `titer_regenerate_graphs`' `decisions`: which proposal,
+/// and whether to build it or skip it. `overrides` changes the proposal's
+/// graph type, error bars, name or linked analysis (the same fields the
+/// preview dialog's Adjust offers); omit it to build the proposal as
+/// shown. `linked_analysis_id: null` clears the proposed link.
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct RegenDecision {
+    /// The proposal's id, as shown by titer_list_regenerable_graphs.
+    pub proposal_id: String,
+    /// "confirm" or "skip".
+    pub action: String,
+    /// { graph_type?, error?, name?, linked_analysis_id? }.
+    #[serde(default)]
+    pub overrides: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ListRegenerableGraphsArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RegenerateGraphsArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// One decision per proposal — no "create all", no undecided proposal.
+    pub decisions: Vec<RegenDecision>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -5237,10 +5267,12 @@ impl TiterMcpServer {
     /// Import a Prism file (`.prism` / `.pzfx` / `.pzf`) as a new untitled project in
     /// a new window — the same as `titer_open_project` for a Prism path,
     /// kept separate so the intent is explicit. `warnings` carries the
-    /// import report (what the converter skipped).
+    /// import report (what the converter skipped). `regenerable_graphs` /
+    /// `graphs_not_regenerable` say whether to offer the graph-regeneration
+    /// step (`titer_list_regenerable_graphs` / `titer_regenerate_graphs`).
     #[tool(
         name = "titer_import_prism",
-        description = "Import a Prism file (.prism / .pzfx / .pzf) as a new untitled project in a new window — the same as titer_open_project for a Prism path, kept separate so the intent is explicit. warnings carries the import report (what the converter skipped).",
+        description = "Import a Prism file (.prism / .pzfx / .pzf) as a new untitled project in a new window — the same as titer_open_project for a Prism path, kept separate so the intent is explicit. warnings carries the import report (what the converter skipped). regenerable_graphs / graphs_not_regenerable count the graphs the regen tools can / cannot rebuild.",
         annotations(
             title = "Import Prism file",
             read_only_hint = false,
@@ -5272,6 +5304,8 @@ impl TiterMcpServer {
                 "file_path": args.path,
                 "imported_tables": report.get("imported_tables").cloned().unwrap_or(serde_json::Value::Null),
                 "warnings": report.get("warnings").cloned().unwrap_or(serde_json::Value::Null),
+                "regenerable_graphs": report.get("regenerable_graphs").cloned().unwrap_or(serde_json::Value::Null),
+                "graphs_not_regenerable": report.get("graphs_not_regenerable").cloned().unwrap_or(serde_json::Value::Null),
             }))
         }
         .await;
@@ -6070,6 +6104,94 @@ impl TiterMcpServer {
             }
             Err(e) => {
                 self.state.log_call("titer_build_graph", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// List the graphs a Prism import can regenerate (seq 291): the
+    /// import-time proposals for this project — the same plans the
+    /// "Regenerate graphs…" preview shows. Read-only. Errors when the
+    /// project has no plans (not a Prism import, or already consumed by
+    /// a regenerate run). In the graphs allowlist group.
+    #[tool(
+        name = "titer_list_regenerable_graphs",
+        description = "List the graphs a Prism import can regenerate: the import-time proposals for this project (proposal_id, Prism title, source table, proposed graph type, error bars, linked analysis, origin sidecar/heuristic, whether reconstructible and why not). Read-only; errors when the project has no import-time plans (not a Prism import, or already consumed by a regenerate run).",
+        annotations(
+            title = "List regenerable graphs",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn list_regenerable_graphs(
+        &self,
+        Parameters(args): Parameters<ListRegenerableGraphsArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let job = self.state.enqueue_job(&project_id, "list-regenerable-graphs", serde_json::json!({}), serde_json::json!({}))?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "Listing the regenerable graphs finished without reporting them.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Listing the regenerable graphs failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_list_regenerable_graphs", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_list_regenerable_graphs", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Regenerate the graphs a Prism import can rebuild (seq 291): one
+    /// decision per proposal is REQUIRED — no "create all", no undecided
+    /// proposal, unknown ids rejected. Synchronous — the builders are
+    /// pure TS. In the graphs allowlist group (write tool).
+    #[tool(
+        name = "titer_regenerate_graphs",
+        description = "Regenerate the graphs a Prism import can rebuild: decisions is one { proposal_id, action confirm|skip, overrides? } per proposal from titer_list_regenerable_graphs — no create-all, no undecided proposal, unknown ids rejected. overrides changes the proposal's graph_type, error, name or linked_analysis_id (null clears the link). Synchronous. A completed run consumes the plans.",
+        annotations(
+            title = "Regenerate graphs",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn regenerate_graphs(
+        &self,
+        Parameters(args): Parameters<RegenerateGraphsArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "decisions": args.decisions });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let job_args = serde_json::json!({ "decisions": args.decisions });
+            let job = self.state.enqueue_job(&project_id, "regenerate-graphs", job_args, serde_json::json!({}))?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "Regenerating the graphs finished without reporting what it built.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Regenerating the graphs failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_regenerate_graphs", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_regenerate_graphs", call_args, false, Some(&e));
                 Err(e)
             }
         }
@@ -7959,8 +8081,8 @@ impl TiterMcpServer {
         // Inspector 2.13.0 discards tools whose outputSchema has no `type`
         // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
         // returns, so `tools/list` prints `{"tools": []}` even though the
-        // server returns all 71. Every tool returns a JSON object, so stamp
-        // `type: "object"` on all 71 output schemas here — the single choke
+        // server returns all 73. Every tool returns a JSON object, so stamp
+        // `type: "object"` on all 73 output schemas here — the single choke
         // point — instead of touching each tool. `Arc::make_mut`
         // clone-on-writes: rmcp caches the `Value` schema in a thread-local
         // cache shared by all tools, so the cached Arc must never be
@@ -8298,10 +8420,10 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes up to 71 tools, gated by the allowlist in Settings → AI Connections \
+                It exposes up to 73 tools, gated by the allowlist in Settings → AI Connections \
                 (contract §12): by default only the 6 read tools below are enabled, and the user \
                 can enable more groups there — a tool that is not listed cannot be called. \
-                19 of the 71 are read-only and 52 change the open project. \
+                20 of the 73 are read-only and 53 change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_project_summary (the same discovery, as counts plus ids and names), \
                 titer_search (find a node by name), \
@@ -10361,7 +10483,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 71 tools, so it enables every group first.
+        // this test drives all 73 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -10414,8 +10536,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            71,
-            "six read tools + four read-more tools + three discovery tools + seven project tools + ten table tools + eleven analysis tools (incl. three job tools) + fourteen graph/figure/info-sheet/drawing tools + five export tools + nine cloud tools + two destructive tools: {names:?}"
+            73,
+            "six read tools + four read-more tools + three discovery tools + seven project tools + ten table tools + eleven analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + five export tools + nine cloud tools + two destructive tools: {names:?}"
         );
         for name in ["titer_list_backups"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -10492,6 +10614,8 @@ mod tests {
             "titer_update_figure",
             "titer_create_info_sheet",
             "titer_update_info_sheet",
+            "titer_list_regenerable_graphs",
+            "titer_regenerate_graphs",
         ] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
@@ -11607,7 +11731,7 @@ mod tests {
 
     #[test]
     fn allowlist_groups_cover_all_tools_once() {
-        // The inventory pin: every tool in exactly one group, 71 total.
+        // The inventory pin: every tool in exactly one group, 73 total.
         // A lane that adds a tool must assign it a group here, or this
         // fails — an ungrouped tool would otherwise be silently hidden.
         // The count alone did not catch that (four tools shipped ungrouped
@@ -11615,7 +11739,7 @@ mod tests {
         // the part that actually catches it.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 71, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 73, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
@@ -11690,7 +11814,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 71, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 73, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema

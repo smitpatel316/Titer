@@ -32,6 +32,7 @@ import { repointCandidates } from "../lib/repoint-analysis";
 import { applyWand as planWand, type WandReport } from "../lib/wand";
 import { cloneGraphPlan, type CloneOptions, type ClonePlan } from "../lib/clone-graph";
 import { DEFAULT_FIGURE_DPI, DEFAULT_FIGURE_SIZE, DEFAULT_LABEL_STYLE, newFigurePanels } from "../lib/figure";
+import { clearRegenPlans } from "../lib/prism-graph-regen";
 import type { FigureGrid, FigureLabelStyle, FigurePanel, FigureSize, Resolution, SharedLegend } from "./types";
 
 export type { ProjectNode } from "./types";
@@ -1648,7 +1649,14 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       reorderChildren: (parentId, order) => dispatch({ type: "reorderChildren", parentId, order }),
       undo: () => dispatch({ type: "undo" }),
       redo: () => dispatch({ type: "redo" }),
-      loadProject: (payload) => dispatch({ type: "load", ...payload }),
+      loadProject: (payload) => {
+        // A new project replaces the old one, so the previous import's
+        // graph-regen offer dies with it — the plans are import-time only,
+        // never persisted (seq 291). The import paths set fresh plans
+        // after loading.
+        clearRegenPlans();
+        dispatch({ type: "load", ...payload });
+      },
       markProjectSaved: (filePath, savedRevision) => dispatch({ type: "markSaved", filePath, savedRevision }),
     };
   }, []);
