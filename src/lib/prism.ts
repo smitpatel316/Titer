@@ -311,12 +311,32 @@ const DATAFORMAT_SUBCOLUMNS: Record<string, number> = {
   y_high_low: 3,
 };
 
+/**
+ * One entry of a Prism sheet's `inputDataSets`, in either encoding real
+ * files use. Real Prism 11 writes GRAPH sheets' entries as BARE UID
+ * STRINGS (seq 313 — verified on every real .prism graph sheet in the
+ * public corpus) and ANALYSIS sheets' as {uid, title, idx} OBJECTS
+ * (same corpus). Both are accepted everywhere an input is resolved, so
+ * a bare string can never silently drop a dataset or a graph→analysis
+ * link. Titer's own writer emits objects for analysis sheets, matching
+ * real Prism; it writes no graph sheets (known ceiling, seq 289).
+ */
+export type PrismInputDataSet =
+  | string
+  | { uid?: string; title?: string | { string?: string }; idx?: string };
+
+/** The dataset uid of an `inputDataSets` entry, in either encoding. */
+export function inputDatasetUid(entry: PrismInputDataSet | undefined): string | undefined {
+  if (typeof entry === "string") return entry;
+  return entry?.uid;
+}
+
 interface PrismAnalysisSheet {
   /** Sheet title — a plain string, or a rich-text object (see PrismDataSet). */
   title?: string | { string?: string };
   analysisClass?: string;
   inputSheets?: { uid?: string; title?: string }[];
-  inputDataSets?: { uid?: string; title?: string | { string?: string }; idx?: string }[];
+  inputDataSets?: PrismInputDataSet[];
 }
 
 interface PrismAnalysisParameters {
@@ -1266,7 +1286,11 @@ export async function convertPrism(
         continue;
       }
       for (const ds of inputs) {
-        const y = plainTitle(ds.title);
+        const dsUid = inputDatasetUid(ds);
+        // A bare-string entry carries no dataset title (real Prism writes
+        // analysis inputs as objects — the string form is tolerated, not
+        // expected); the node is still named, just without the (dataset).
+        const y = typeof ds === "string" ? undefined : plainTitle(ds.title);
         const node: ProjectNode = {
           id: genId("analysis"),
           type: "analysis",
@@ -1280,7 +1304,7 @@ export async function convertPrism(
         report.analyses.push(node.name);
         // The regen planner links a graph to this analysis by its input
         // dataset's uid — the graph's `inputDataSets` entry.
-        if (ds.uid) prismIndex.analysisNodeByDatasetUid[ds.uid] = node.id;
+        if (dsUid) prismIndex.analysisNodeByDatasetUid[dsUid] = node.id;
       }
     } else if (analysisClass === "SURVIVAL") {
       const node: ProjectNode = {

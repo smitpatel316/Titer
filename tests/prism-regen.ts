@@ -14,6 +14,11 @@
 //       regenerate refuses missing/unknown decisions, a completed run
 //       consumes the plans
 //   R5  the import-time plan registry (set / get / project-id guard / clear)
+//   R6  the REAL Prism encoding (seq 313): graph inputDataSets as BARE
+//       STRINGS — the planner must resolve them end to end, and the
+//       "Source table not imported" reason stays only for genuinely
+//       missing tables; the converter tolerates a bare-string analysis
+//       input too (defensive — real analysis sheets use objects).
 //
 // Fixtures are synthetic `.prism` ZIPs built here (following tests/prism.ts
 // P15) — never Mansi's files, never a real Prism install. The Y CV row
@@ -76,6 +81,9 @@ interface FxGraph {
   auto?: boolean;
   inputs?: string[];
   writeSheet?: boolean;
+  /** Real Prism 11 writes graph inputDataSets as BARE STRINGS (seq 313);
+   *  the synthetic default is {uid} objects. "strings" pins the real encoding. */
+  inputEncoding?: "objects" | "strings";
 }
 interface FxAnalysis {
   uid: string;
@@ -83,6 +91,10 @@ interface FxAnalysis {
   sheetUid: string;
   datasets: { uid: string; title: string }[];
   equation: string;
+  /** Defensive tolerance only: real Prism writes analysis inputDataSets as
+   *  {uid, title, idx} objects (verified across the public corpus) — a
+   *  bare-string entry must still import, never silently drop the link. */
+  inputsBare?: boolean;
 }
 
 const rep = () => ({
@@ -172,7 +184,7 @@ async function buildFxZip(tables: FxTable[], graphs: FxGraph[], analyses: FxAnal
         "@class": "GraphSheet",
         title: g.title,
         isAutoCreated: g.auto !== false,
-        inputDataSets: (g.inputs ?? []).map((u) => ({ uid: u })),
+        inputDataSets: (g.inputs ?? []).map((u) => (g.inputEncoding === "strings" ? u : { uid: u })),
       }),
     );
   }
@@ -184,7 +196,9 @@ async function buildFxZip(tables: FxTable[], graphs: FxGraph[], analyses: FxAnal
         title: a.title,
         analysisClass: "NONLINEAR_REGRESSION",
         inputSheets: [{ uid: a.sheetUid }],
-        inputDataSets: a.datasets.map((d) => ({ uid: d.uid, title: d.title })),
+        inputDataSets: a.inputsBare
+          ? a.datasets.map((d) => d.uid)
+          : a.datasets.map((d) => ({ uid: d.uid, title: d.title })),
       }),
     );
     z.file(
@@ -811,6 +825,158 @@ check("R5 a stale project id sees nothing", getRegenPlans("project-1") === null,
 check("R5 an unkeyed read sees the current plans", getRegenPlans()?.length === 2, "unkeyed read missed");
 clearRegenPlans();
 check("R5 clear empties the registry", getRegenPlans() === null, "plans survived clear");
+
+// ── R6: the real Prism encoding (seq 313) ───────────────────────────────
+//
+// Real Prism 11 writes a graph sheet's inputDataSets as BARE STRINGS
+// (verified on the public corpus: every real .prism graph sheet —
+// 1f-zenodo-16883557, 20240619-collection, 3e/4b-f, angley-summary,
+// b-domain-paper, zenodo-23478977 — lists plain UID strings, never
+// {uid} objects). The R1 fixture writes objects, so it never exercised
+// the real encoding — the planner read input.uid (undefined for a
+// string) and reported every real graph "Source table not imported".
+// This fixture is shaped like the real files: bare-string graph inputs
+// (one per dataset, three UIDs on the grouped graph's row in the
+// 1.8.2 Mac proof's RT-162-A file), analysis sheets still objects.
+const realTables: FxTable[] = [
+  col(71, 81, "Real column", "y_sd_n", "y_sd_n", 3),
+  {
+    sheet: uid(72), table: uid(83), name: "Real grouped", format: "grouped", dataFormat: "y_replicates",
+    datasets: [
+      { uid: uid(84), format: "y_replicates", title: "Control", subs: 2 },
+      { uid: uid(85), format: "y_replicates", title: "Treated", subs: 2 },
+    ],
+    replicatesCount: 2,
+    rows: [["1", "2", "3", "4"], ["5", "6", "7", "8"]],
+  },
+  {
+    sheet: uid(73), table: uid(86), name: "Real XY dose-response", format: "xy", dataFormat: "y_replicates",
+    datasets: [{ uid: uid(87), format: "y_replicates", title: "Response", subs: 3 }],
+    x: { uid: uid(88), title: "Dose" },
+    rows: [["0", "1", "2", "3"], ["1", "4", "5", "6"]],
+  },
+];
+const realGraphs: FxGraph[] = [
+  { uid: uid(171), title: "Real column graph", inputs: [uid(82)], inputEncoding: "strings" },
+  { uid: uid(172), title: "Real grouped graph", inputs: [uid(84), uid(85)], inputEncoding: "strings" },
+  { uid: uid(173), title: "Real XY graph", inputs: [uid(87)], inputEncoding: "strings" },
+  { uid: uid(174), title: "Real missing graph", inputs: ["deadbeef-dead-beef-dead-beefdeadbeef"], inputEncoding: "strings" },
+];
+const realAnalyses: FxAnalysis[] = [
+  {
+    uid: uid(270),
+    title: "Nonlin fit of Real XY dose-response",
+    sheetUid: realTables[2].sheet,
+    datasets: [{ uid: uid(87), title: "Response" }],
+    equation: "Sigmoidal, 4PL, X is log(concentration)",
+    // Converter tolerance pin: a bare-string analysis input must still
+    // import and register the graph→analysis link.
+    inputsBare: true,
+  },
+];
+const realBytes = await buildFxZip(realTables, realGraphs, realAnalyses);
+const realConverted = await convertPrism(realBytes, "regen-real-encoding.prism");
+check("R6 real-encoding fixture converts", realConverted.report.tables.length === 3, `${realConverted.report.tables.length} tables`);
+check(
+  "R6 nonlinear fit imports from a bare-string analysis input",
+  realConverted.report.analyses.length === 1 && realConverted.report.analyses[0].includes("Nonlin fit"),
+  realConverted.report.analyses.join("; "),
+);
+check(
+  "R6 bare-string analysis input still registers the graph→analysis link",
+  realConverted.prismIndex?.analysisNodeByDatasetUid[uid(87)] !== undefined,
+  JSON.stringify(realConverted.prismIndex?.analysisNodeByDatasetUid ?? {}),
+);
+const realPlans = await planGraphRegeneration(await JSZip.loadAsync(realBytes), realConverted);
+check("R6 one plan per graph", realPlans.length === 4, `${realPlans.length} plans`);
+const realByTitle = (title: string) => realPlans.find((p) => p.prismTitle === title)!;
+{
+  const p = realByTitle("Real column graph");
+  check("R6 bare-string input resolves (column)", p.reconstructible && p.graphType === "mean-error" && p.error === "sd", `${p.graphType}/${p.error} ${p.reason ?? ""}`);
+}
+{
+  const p = realByTitle("Real grouped graph");
+  check("R6 bare-string inputs resolve (grouped, 2 datasets)", p.reconstructible && p.graphType === "grouped-bars" && p.error === "sem", `${p.graphType}/${p.error} ${p.reason ?? ""}`);
+}
+{
+  const p = realByTitle("Real XY graph");
+  check(
+    "R6 bare-string input resolves + links the imported analysis (xy)",
+    p.reconstructible && p.graphType === "xy-scatter" && p.error === "sem" && !!p.linkedAnalysisId,
+    `${p.graphType}/${p.error} link=${p.linkedAnalysisId ?? "none"}`,
+  );
+  check(
+    "R6 linked analysis is the imported nonlinear node",
+    realConverted.project.nodes[p.linkedAnalysisId ?? ""]?.analysisType === "nonlinear-regression",
+    realConverted.project.nodes[p.linkedAnalysisId ?? ""]?.name ?? "no node",
+  );
+}
+{
+  const p = realByTitle("Real missing graph");
+  check(
+    "R6 a genuinely missing table keeps the reason (bare-string dead UID)",
+    !p.reconstructible && p.graphType === null && (p.reason ?? "").includes("Source table not imported"),
+    p.reason ?? "reconstructible",
+  );
+}
+{
+  const c = regenPlanCounts(realPlans);
+  check("R6 counts", c.regenerable === 3 && c.notRegenerable === 1, `${c.regenerable}/${c.notRegenerable}`);
+}
+// End to end over the MCP pair: list shows the same plans, regenerate
+// creates the three graphs, and the run consumes the plans.
+{
+  const nodes = realConverted.project.nodes;
+  const created: string[] = [];
+  const deps = {
+    getState: () => ({
+      nodes,
+      rootOrder: realConverted.project.rootOrder,
+      childOrder: realConverted.project.childOrder,
+      activeNodeId: realConverted.project.activeNodeId,
+    }),
+    createGraph: (parentId: string, graphType: GraphType) => {
+      const id = `graph_${created.length + 1}`;
+      created.push(id);
+      nodes[id] = { id, type: "graph", name: "Mean and Error", parentId, graphType };
+      return id;
+    },
+    renameNode: (id: string, name: string) => {
+      if (nodes[id]) nodes[id].name = name;
+    },
+  };
+  clearRegenPlans();
+  setRegenPlans("project-1", realPlans); // mcpJob() keys jobs to project-1
+  const listed = executeListRegenerableGraphs(mcpJob("list-regenerable-graphs", {}), deps);
+  check(
+    "R6 list-regen shows the real-encoding plans",
+    ((listed.result as { proposals: unknown[] }).proposals.length === 4),
+    `${(listed.result as { proposals: unknown[] }).proposals.length} proposals`,
+  );
+  const out = executeRegenerateGraphs(
+    mcpJob("regenerate-graphs", {
+      decisions: realPlans.map((p) => ({ proposal_id: p.proposalId, action: p.reconstructible ? "confirm" : "skip" })),
+    }),
+    deps,
+  );
+  const result = out.result as { created: { graph_id: string; name: string }[] };
+  check("R6 regenerate creates the three graphs", result.created.length === 3 && created.length === 3, `${result.created.length} created`);
+  check(
+    "R6 created graphs carry the Prism titles",
+    JSON.stringify(result.created.map((g) => g.name).sort()) ===
+      JSON.stringify(["Real XY graph", "Real column graph", "Real grouped graph"]),
+    JSON.stringify(result.created.map((g) => g.name)),
+  );
+}
+expectThrow(
+  "R6 a completed run consumes the plans",
+  () => executeListRegenerableGraphs(mcpJob("list-regenerable-graphs", {}), {
+    getState: () => ({ nodes: {}, rootOrder: [], childOrder: {}, activeNodeId: "" }),
+    createGraph: () => "x",
+    renameNode: () => {},
+  }),
+  "no import-time graph plans",
+);
 
 console.log(`\n${checks - failures}/${checks} checks passed.`);
 process.exit(failures ? 1 : 0);

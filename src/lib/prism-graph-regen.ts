@@ -35,8 +35,8 @@
 import type JSZip from "jszip";
 import { GRAPH_OPTIONS_BY_TABLE, newGraphOptions } from "../views/graphs";
 import { remapGraphOptions } from "./template";
-import { plainTitle, replicateCount, replicateRangeProblems, resolveDataFormat } from "./prism";
-import type { ConvertResult, PrismTableIndexEntry } from "./prism";
+import { inputDatasetUid, plainTitle, replicateCount, replicateRangeProblems, resolveDataFormat } from "./prism";
+import type { ConvertResult, PrismInputDataSet, PrismTableIndexEntry } from "./prism";
 import type { PzfxImport } from "./pzfx";
 import type { GraphOptions, GraphType, ProjectNode, TableErrorFormat } from "../store/types";
 
@@ -224,7 +224,9 @@ export function mapSidecarGraph(input: SidecarMappingInput): SidecarMapping {
 interface PrismGraphSheet {
   title?: string | { string?: string };
   isAutoCreated?: boolean;
-  inputDataSets?: { uid?: string; title?: string | { string?: string } }[];
+  /** Real Prism 11 writes these as BARE UID STRINGS (seq 313); the
+   *  {uid} object form is accepted too (older/synthetic fixtures). */
+  inputDataSets?: PrismInputDataSet[];
 }
 
 interface PrismDataSetJson {
@@ -322,7 +324,7 @@ export async function planGraphRegeneration(zip: JSZip, converted: ConvertResult
     let mixedTables = false;
     const resolved: { uid: string; table: PrismTableIndexEntry; set: PrismDataSetJson }[] = [];
     for (const input of inputs) {
-      const uid = input.uid;
+      const uid = inputDatasetUid(input);
       const table = uid ? datasetToTable.get(uid) : undefined;
       const set = uid ? await readZipJson<PrismDataSetJson>(zip, `data/sets/${uid}.json`) : null;
       if (!uid || !table || !set) {
