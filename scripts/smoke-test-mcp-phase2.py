@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Phase 2 live MCP smoke: initialize -> tools/list -> tools/call across
-all 73 tools against a running Titer MCP server.
+all 74 tools against a running Titer MCP server.
 
 Reads endpoint + token from <app_data>/mcp/discovery.json (argv[1]).
 Speaks Streamable HTTP directly (no bridge, no Claude Desktop sign-in):
@@ -78,11 +78,12 @@ EXPECTED_TOOLS = [
     "titer_cloud_upload", "titer_cloud_upload_new",
     "titer_cloud_create_folder", "titer_cloud_move",
     "titer_cloud_metadata", "titer_cloud_revisions",
-    # L8 export (5)
+    # L8 export (6)
     "titer_export_graph", "titer_export_figure", "titer_export_office",
     "titer_export_table_data", "titer_export_all_graphs",
+    "titer_copy_graph_image",
 ]
-assert len(EXPECTED_TOOLS) == 73, len(EXPECTED_TOOLS)
+assert len(EXPECTED_TOOLS) == 74, len(EXPECTED_TOOLS)
 
 
 def main():
@@ -191,15 +192,15 @@ def main():
     check("initialize negotiates 2025-11-25",
           init["result"]["protocolVersion"] == "2025-11-25",
           init["result"]["protocolVersion"])
-    check("initialize instructions name 73 tools",
-          "73 tools" in init["result"].get("instructions", ""),
+    check("initialize instructions name 74 tools",
+          "74 tools" in init["result"].get("instructions", ""),
           init["result"].get("instructions", "")[:80])
     rpc("notifications/initialized", notif=True)
 
-    # 2. tools/list shows all 73 tools, one page
+    # 2. tools/list shows all 74 tools, one page
     lst = rpc("tools/list")
     names = [t["name"] for t in lst["result"]["tools"]]
-    check("tools/list returns 73 tools", len(names) == 73, f"{len(names)}")
+    check("tools/list returns 74 tools", len(names) == 74, f"{len(names)}")
     check("tools/list has no nextCursor", "nextCursor" not in lst["result"])
     for want in EXPECTED_TOOLS:
         check(f"tools/list has {want}", want in names)

@@ -2,9 +2,9 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 73 tools: 20 read-only (list/read/job/
+// Settings → AI connections. 74 tools: 20 read-only (list/read/job/
 // activity/cloud reads + feedback + the three 1.7.4 discovery tools + the 1.8 backup list + refresh-linked-data)
-// and 53 mutating (incl. the 1.8.2 graph-regenerate pair), via the L0 Rust→frontend dispatch + job queue —
+// and 54 mutating (incl. the 1.8.2 graph-regenerate pair), via the L0 Rust→frontend dispatch + job queue —
 // run-analysis, build-graph, export and cloud tools included (Phase 2).
 //
 // Why rmcp, not tauri-plugin-mcp-commands — see the lane log
@@ -43,7 +43,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 73 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 74 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -1437,6 +1437,7 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
             "titer_export_office",
             "titer_export_table_data",
             "titer_export_all_graphs",
+            "titer_copy_graph_image",
         ],
     },
     AllowlistGroup {
@@ -2187,7 +2188,7 @@ async fn auth_middleware(
 /// the corruption hits every tool that returns non-ASCII text, not just
 /// transform-concentrations. Appending `; charset=utf-8` here, the one
 /// shared path every MCP response flows through, fixes the echo for all
-/// 73 tools. Returns the new header value, or `None` when the type is
+/// 74 tools. Returns the new header value, or `None` when the type is
 /// already labelled or is not one of the textual MCP response types.
 fn utf8_charset(content_type: &str) -> Option<String> {
     let lower = content_type.to_ascii_lowercase();
@@ -3649,6 +3650,37 @@ pub struct ExportFigureArgs {
     /// The export height in inches. Omit to use the figure's saved height.
     #[serde(default)]
     pub height_in: Option<f64>,
+}
+
+/// Copy one graph (or a whole figure) to the system clipboard as a PNG
+/// (seq 296): the GUI's one-click copy, driven headlessly — the same
+/// offscreen render at `dpi`, written to the clipboard natively (the
+/// `copy_png_to_clipboard` Tauri command: temp PNG + osascript as PNGf
+/// on macOS — the webview clipboard refuses without a user gesture, and
+/// the MCP path has none). Exactly one of `graph_id` / `figure_id`;
+/// with neither, the active graph/figure is copied. PNG only: OS
+/// clipboards vary, so a vector-PDF clipboard is best-effort on Mac only
+/// and NOT offered by this tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CopyGraphImageArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The graph node's id, as shown by titer_list_projects. Omit for the
+    /// active graph (or pass figure_id for a whole figure).
+    #[serde(default)]
+    pub graph_id: Option<String>,
+    /// The figure node's id, as shown by titer_list_projects. Omit for a
+    /// graph (graph_id, or the active graph/figure).
+    #[serde(default)]
+    pub figure_id: Option<String>,
+    /// "100" | "150" | "300" | "600" | "900" | "1200". Omit for "300".
+    #[serde(default)]
+    pub dpi: Option<String>,
+    /// "color" | "grayscale" | "cmyk". Omit for "color". CMYK falls back
+    /// to colour (the clipboard has no CMYK form, as the UI copy does).
+    #[serde(default)]
+    pub color_mode: Option<String>,
 }
 
 /// Export one graph or figure to Word / PowerPoint / Keynote — the GUI's
@@ -7911,6 +7943,79 @@ impl TiterMcpServer {
         }
     }
 
+    /// Copy one graph (or a whole figure) to the system clipboard as a PNG
+    /// at dpi 100/150/300/600/900/1200 (default 300), rendered offscreen —
+    /// the graph/figure need not be open on screen. The GUI's one-click
+    /// copy, driven headlessly: the same PNG render, written to the
+    /// clipboard natively (temp PNG + osascript as PNGf on macOS — the
+    /// webview clipboard refuses without a user gesture, and the MCP
+    /// path has none). Exactly one of `graph_id` / `figure_id`;
+    /// with neither, the active graph/figure is copied. `color_mode`
+    /// color/grayscale (default color; cmyk falls back to colour — the
+    /// clipboard has no CMYK form). PNG only: a vector-PDF clipboard is
+    /// best-effort on Mac only and is NOT offered here. An error (unknown
+    /// id, nothing plotted) leaves the clipboard untouched. Returns the
+    /// copied id, dpi, colour mode and pixel size.
+    #[tool(
+        name = "titer_copy_graph_image",
+        description = "Copy one graph (or a whole figure) to the system clipboard as a PNG at dpi 100/150/300/600/900/1200 (default 300), rendered offscreen — the graph/figure need not be open on screen. The GUI's one-click copy, driven headlessly (native pasteboard write: temp PNG + osascript as PNGf on macOS). Exactly one of graph_id / figure_id; with neither, the active graph/figure is copied. color_mode color/grayscale (default color; cmyk falls back to colour — the clipboard has no CMYK form). PNG only: a vector-PDF clipboard is best-effort on Mac only and is NOT offered here. An error (unknown id, nothing plotted) leaves the clipboard untouched. Returns the copied id, dpi, colour mode and pixel size.",
+        annotations(
+            title = "Copy graph image",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn copy_graph_image(
+        &self,
+        Parameters(args): Parameters<CopyGraphImageArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let call_args = serde_json::json!({ "project_id": args.project_id, "graph_id": args.graph_id, "figure_id": args.figure_id, "dpi": args.dpi, "color_mode": args.color_mode });
+        let result: Result<serde_json::Value, String> = async {
+            let graph_id = args.graph_id.as_deref().filter(|s| !s.trim().is_empty());
+            let figure_id = args.figure_id.as_deref().filter(|s| !s.trim().is_empty());
+            if graph_id.is_some() && figure_id.is_some() {
+                return Err(
+                    "Pass exactly one of graph_id and figure_id — one image per clipboard write, as the UI's one-click copy."
+                        .to_string(),
+                );
+            }
+            let dpi = args.dpi.as_deref().unwrap_or("300");
+            if !EXPORT_DPIS.contains(&dpi) {
+                return Err(format!(
+                    "Unknown resolution “{dpi}” — the resolutions are 100, 150, 300, 600, 900, 1200 DPI."
+                ));
+            }
+            let color_mode = args.color_mode.as_deref().unwrap_or("color");
+            if !EXPORT_COLOR_MODES.contains(&color_mode) {
+                return Err(format!(
+                    "Unknown colour mode “{color_mode}” — the colour modes are color, grayscale, cmyk."
+                ));
+            }
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let mut job_args = serde_json::json!({ "dpi": dpi, "color_mode": color_mode });
+            if let Some(g) = graph_id {
+                job_args["graph_id"] = serde_json::json!(g);
+            }
+            if let Some(f) = figure_id {
+                job_args["figure_id"] = serde_json::json!(f);
+            }
+            self.run_export_job(&project_id, "copy-graph-image", job_args).await
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_copy_graph_image", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_copy_graph_image", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
     /// Export one graph or figure to Word / PowerPoint / Keynote — the GUI's
     /// one-click Send to Office, driven headlessly. Exactly one of
     /// `graph_id` / `figure_id`.
@@ -8127,8 +8232,8 @@ impl TiterMcpServer {
         // Inspector 2.13.0 discards tools whose outputSchema has no `type`
         // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
         // returns, so `tools/list` prints `{"tools": []}` even though the
-        // server returns all 73. Every tool returns a JSON object, so stamp
-        // `type: "object"` on all 73 output schemas here — the single choke
+        // server returns all 74. Every tool returns a JSON object, so stamp
+        // `type: "object"` on all 74 output schemas here — the single choke
         // point — instead of touching each tool. `Arc::make_mut`
         // clone-on-writes: rmcp caches the `Value` schema in a thread-local
         // cache shared by all tools, so the cached Arc must never be
@@ -8466,10 +8571,10 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes up to 73 tools, gated by the allowlist in Settings → AI Connections \
+                It exposes up to 74 tools, gated by the allowlist in Settings → AI Connections \
                 (contract §12): by default only the 6 read tools below are enabled, and the user \
                 can enable more groups there — a tool that is not listed cannot be called. \
-                20 of the 73 are read-only and 53 change the open project. \
+                20 of the 74 are read-only and 54 change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_project_summary (the same discovery, as counts plus ids and names), \
                 titer_search (find a node by name), \
@@ -10529,7 +10634,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 73 tools, so it enables every group first.
+        // this test drives all 74 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -10582,8 +10687,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            73,
-            "six read tools + four read-more tools + three discovery tools + seven project tools + ten table tools + eleven analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + five export tools + nine cloud tools + two destructive tools: {names:?}"
+            74,
+            "six read tools + four read-more tools + three discovery tools + seven project tools + ten table tools + eleven analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + six export tools + nine cloud tools + two destructive tools: {names:?}"
         );
         for name in ["titer_list_backups"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -10671,7 +10776,13 @@ mod tests {
         for name in ["titer_export_graph"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
-        for name in ["titer_export_figure", "titer_export_office", "titer_export_table_data", "titer_export_all_graphs"] {
+        for name in [
+            "titer_export_figure",
+            "titer_export_office",
+            "titer_export_table_data",
+            "titer_export_all_graphs",
+            "titer_copy_graph_image",
+        ] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
 
@@ -11777,7 +11888,7 @@ mod tests {
 
     #[test]
     fn allowlist_groups_cover_all_tools_once() {
-        // The inventory pin: every tool in exactly one group, 73 total.
+        // The inventory pin: every tool in exactly one group, 74 total.
         // A lane that adds a tool must assign it a group here, or this
         // fails — an ungrouped tool would otherwise be silently hidden.
         // The count alone did not catch that (four tools shipped ungrouped
@@ -11785,7 +11896,7 @@ mod tests {
         // the part that actually catches it.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 73, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 74, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
@@ -11910,7 +12021,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 73, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 74, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema

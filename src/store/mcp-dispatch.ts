@@ -67,11 +67,14 @@ import {
 } from "./mcp-graphs";
 import {
   defaultExportIo,
+  executeCopyGraphImage,
   executeExportAllGraphs,
   executeExportFigure,
   executeExportGraph,
   executeExportOffice,
   executeExportTableData,
+  type ClipboardIo,
+  type CopyGraphImageRenderer,
   type ExportIo,
   type ExportJobDeps,
 } from "./mcp-export";
@@ -183,6 +186,13 @@ export interface JobDeps {
   /** Headless export IO; defaults to the real `write_file` call. A
    *  harness driving the table-data jobs in node injects a stub here. */
   exportIo?: ExportIo;
+  /** Write a PNG to the system clipboard for the copy job (seq 296;
+   *  default: the real `navigator.clipboard` write). A harness
+   *  driving the copy job in node injects a stub here. */
+  clipboard?: ClipboardIo;
+  /** Render a graph/figure to PNG bytes for the copy job (seq 296;
+   *  default: the real offscreen renderers). A harness injects a stub. */
+  copyRender?: CopyGraphImageRenderer;
   /** Read a linked-paste source file (default: the real native reads — text
    *  for delimited files, bytes for `.xlsx`). A harness driving the linked
    *  jobs in node injects a stub here. */
@@ -313,6 +323,8 @@ function toExportDeps(deps: JobDeps): ExportJobDeps {
     // in the app, a stub in a harness), so headless exports draw the
     // graph's overlays from the same cache the views read.
     run: deps.run ?? runAnalysis,
+    clipboard: deps.clipboard,
+    copyRender: deps.copyRender,
   };
 }
 
@@ -2188,6 +2200,8 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       return executeExportOffice(job, toExportDeps(deps));
     case "export-table-data":
       return executeExportTableData(job, toExportDeps(deps));
+    case "copy-graph-image":
+      return executeCopyGraphImage(job, toExportDeps(deps));
     default:
       throw new Error(`Unknown job action “${job.action}”.`);
   }

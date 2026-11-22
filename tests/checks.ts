@@ -15940,6 +15940,144 @@ check("seq 294: MCP titer_export_graph takes width_in (Rust pins) and the dispat
   const exporter = readFileSync("src/store/mcp-export.ts", "utf8");
   ok(exporter.includes('optNum(job, args, "width_in")'), "the dispatcher must read width_in");
   ok(exporter.includes("graphDrawSize(graph, widthIn, heightIn)"), "the graph export must size from width_in");
+check("seq 296: MCP copies a graph/figure image to the clipboard at the requested DPI (titer_copy_graph_image)", async () => {
+  const { executeCopyGraphImage } = await import("../src/store/mcp-export");
+  // A stub render / clipboard pair: the node harness cannot draw Plotly,
+  // so the render is injected — the job's own logic (target resolution,
+  // validation, write-after-render, error leaves clipboard untouched) is
+  // what this pins. The real render + a live paste are Mac proof.
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const graphNode = { id: "g1", type: "graph", name: "Dose response", parentId: null, graphOptions: { width: 640, height: 460 } };
+  const figureNode = {
+    id: "f1", type: "figure", name: "Figure 1", parentId: null,
+    panels: [{ graphId: "g1", label: "A", title: "", row: 0, col: 0, rowSpan: 1, colSpan: 1 }],
+  };
+  const emptyFigure = { id: "f0", type: "figure", name: "Empty figure", parentId: null, panels: [] };
+  const tableNode = { id: "t1", type: "table", name: "Data 1", parentId: null };
+  const state = (active: string | null) => ({
+    nodes: { g1: graphNode, f1: figureNode, f0: emptyFigure, t1: tableNode },
+    rootOrder: ["t1", "g1", "f1", "f0"],
+    childOrder: { t1: [], g1: [], f1: [], f0: [] },
+    activeNodeId: active,
+  });
+  const renders: { kind: string; id: string; dpi: string; colorMode: string }[] = [];
+  const written: Uint8Array[] = [];
+  const render = async (target: { kind: string; node: { id: string } }, dpi: string, colorMode: string) => {
+    renders.push({ kind: target.kind, id: target.node.id, dpi, colorMode });
+    return { bytes: PNG, widthPx: 1920, heightPx: 1380, capped: false, overlays: [] };
+  };
+  const deps = (active: string | null, overrides: Record<string, unknown> = {}) => ({
+    getState: () => state(active),
+    clipboard: { writePng: async (bytes: Uint8Array) => { written.push(bytes); } },
+    copyRender: render,
+    ...overrides,
+  });
+  const job = (args: unknown) => ({ job_id: "j1", project_id: "p", action: "copy-graph-image", args, status: "queued" });
+
+  // A graph at 600 DPI: the rendered bytes land on the clipboard verbatim.
+  const out = await executeCopyGraphImage(job({ graph_id: "g1", dpi: "600" }) as never, deps("g1") as never);
+  deepStrictEqual(renders[0], { kind: "graph", id: "g1", dpi: "600", colorMode: "color" });
+  strictEqual(written.length, 1);
+  strictEqual(written[0], PNG);
+  strictEqual((out.result as { graph_id: string }).graph_id, "g1");
+  strictEqual((out.result as { dpi: string }).dpi, "600");
+  strictEqual((out.result as { format: string }).format, "png");
+  strictEqual((out.result as { width_px: number }).width_px, 1920);
+  strictEqual((out.result as { height_px: number }).height_px, 1380);
+  // A figure id copies the whole figure; grayscale reaches the renderer.
+  const figOut = await executeCopyGraphImage(
+    job({ figure_id: "f1", dpi: "150", color_mode: "grayscale" }) as never,
+    deps("g1") as never,
+  );
+  deepStrictEqual(renders[1], { kind: "figure", id: "f1", dpi: "150", colorMode: "grayscale" });
+  strictEqual(written.length, 2);
+  strictEqual((figOut.result as { figure_id: string }).figure_id, "f1");
+  // No id: the active graph is copied, at the default 300 DPI.
+  await executeCopyGraphImage(job({}) as never, deps("g1") as never);
+  deepStrictEqual(renders[2], { kind: "graph", id: "g1", dpi: "300", colorMode: "color" });
+  strictEqual(written.length, 3);
+  // No id, active figure: the whole figure is copied.
+  await executeCopyGraphImage(job({}) as never, deps("f1") as never);
+  deepStrictEqual(renders[3], { kind: "figure", id: "f1", dpi: "300", colorMode: "color" });
+  strictEqual(written.length, 4);
+  // CMYK has no clipboard form: it falls back to colour, as the UI copy does.
+  await executeCopyGraphImage(job({ graph_id: "g1", color_mode: "cmyk" }) as never, deps("g1") as never);
+  strictEqual(renders[4]!.colorMode, "color");
+  strictEqual(written.length, 5);
+
+  // Every error leaves the clipboard untouched — nothing new written.
+  await rejects(executeCopyGraphImage(job({ graph_id: "nope" }) as never, deps("g1") as never), /has no graph with id/);
+  await rejects(executeCopyGraphImage(job({ figure_id: "nope" }) as never, deps("g1") as never), /has no figure with id/);
+  await rejects(
+    executeCopyGraphImage(job({ graph_id: "g1", figure_id: "f1" }) as never, deps("g1") as never),
+    /exactly one of graph_id and figure_id/,
+  );
+  await rejects(executeCopyGraphImage(job({ graph_id: "g1", dpi: "72" }) as never, deps("g1") as never), /no resolution/);
+  await rejects(
+    executeCopyGraphImage(job({ graph_id: "g1", color_mode: "sepia" }) as never, deps("g1") as never),
+    /no colour mode/,
+  );
+  await rejects(executeCopyGraphImage(job({ figure_id: "f0" }) as never, deps("g1") as never), /add a panel first/);
+  await rejects(executeCopyGraphImage(job({}) as never, deps("t1") as never), /not a graph or figure/);
+  await rejects(executeCopyGraphImage(job({}) as never, deps(null) as never), /no graph or figure is active/);
+  await rejects(
+    executeCopyGraphImage(
+      job({ graph_id: "g1" }) as never,
+      deps("g1", {
+        copyRender: async () => { throw new Error("Graph “Dose response” has nothing to draw"); },
+      }) as never,
+    ),
+    /has nothing to draw/,
+  );
+  await rejects(
+    executeCopyGraphImage(
+      job({ graph_id: "g1" }) as never,
+      deps("g1", {
+        clipboard: { writePng: async () => { throw new Error("clipboard write denied"); } },
+      }) as never,
+    ),
+    /clipboard write denied/,
+  );
+  strictEqual(written.length, 5);
+
+  // The dispatcher routes the job, threading the clipboard + render deps.
+  const routed = await executeJob(job({ graph_id: "g1", dpi: "300" }) as never, {
+    getState: () => state("g1"),
+    cacheAnalysisResult: () => {},
+    clipboard: { writePng: async (bytes: Uint8Array) => { written.push(bytes); } },
+    copyRender: render,
+  } as never);
+  strictEqual((routed.result as { graph_id: string }).graph_id, "g1");
+  strictEqual(written.length, 6);
+
+  // The wiring: the tool is registered in Rust (export group), the
+  // dispatcher has the branch, and the coverage audit covers seq 296.
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(mcp.includes('name = "titer_copy_graph_image"'), "Rust must register titer_copy_graph_image");
+  ok(mcp.includes("pub struct CopyGraphImageArgs"), "Rust must take copy-graph-image args");
+  ok(mcp.includes('"copy-graph-image"'), "Rust must enqueue the copy-graph-image job");
+  ok(mcp.includes('"titer_copy_graph_image",'), "the export allowlist group must include the new tool");
+  const dispatch = readFileSync("src/store/mcp-dispatch.ts", "utf8");
+  ok(dispatch.includes('case "copy-graph-image":'), "the dispatcher must route copy-graph-image");
+  const coverage = readFileSync("tests/mcp-coverage-180.ts", "utf8");
+  ok(coverage.includes('item: "296"'), "the coverage audit must carry a seq 296 row");
+  // The clipboard write is NATIVE, not the webview clipboard: the
+  // webview's navigator.clipboard.write refuses without a user gesture
+  // (NotAllowedError) and the MCP path has none — the first
+  // implementation failed headless on exactly that. The default
+  // ClipboardIo must go through the copy_png_to_clipboard Tauri
+  // command (temp PNG + osascript PNGf), registered in main.rs.
+  const native = readFileSync("src/native.ts", "utf8");
+  ok(native.includes('invoke<void>("copy_png_to_clipboard"'), "native.ts must invoke copy_png_to_clipboard");
+  ok(native.includes("titer-clipboard-"), "native.ts must stage the PNG in a temp file for the shell");
+  const mainRs = readFileSync("src-tauri/src/main.rs", "utf8");
+  ok(mainRs.includes("async fn copy_png_to_clipboard(png_path: String)"), "main.rs must define the copy_png_to_clipboard command");
+  ok(mainRs.includes("copy_png_to_clipboard,"), "main.rs must register copy_png_to_clipboard in the invoke handler");
+  ok(mainRs.includes("«class PNGf»"), "the shell must put the PNG on the pasteboard as PNGf");
+  ok(mainRs.includes("fn copy_png_to_clipboard_blocking"), "the osascript run must live on the blocking pool");
+  const mcpExport = readFileSync("src/store/mcp-export.ts", "utf8");
+  ok(mcpExport.includes("writePng: (bytes) => copyPngToClipboard(bytes)"), "defaultClipboardIo must use the native copy");
+  ok(!mcpExport.includes("await navigator.clipboard.write"), "mcp-export must not call the webview clipboard");
 });
 
 // ── Analyses ─────────────────────────────────────────────────────────────

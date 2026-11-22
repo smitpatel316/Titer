@@ -31,13 +31,14 @@
 // (binomial-test), 203 (distribution equations), 204 (tails + targets),
 // 205 (arithmetic transforms), 206 (column math), 228 (scripts in
 // project file + runOnOpen), 230 (paste-transposed edit op), Mansi-3
-// (sigDisplay pvalue-eq). Counts moved with the tip: 73 tools (was 57
+// (sigDisplay pvalue-eq). Counts moved with the tip: 74 tools (was 57
 // per the old pin, which lagged the registry by two since seq 179
 // export-all-graphs — the registry was 62, not 60, after seq 180
 // merge-project; 70 since seq 232–239 menus batch B; 71 since seq 240–244
 // menus batch C, which adds titer_repoint_analysis; 73 since seq 291
 // graph regenerate, 1.8.2, which adds titer_list_regenerable_graphs +
-// titer_regenerate_graphs),
+// titer_regenerate_graphs; 74 since seq 296, 1.8.3, which adds
+// titer_copy_graph_image),
 // 61 AnalysisType variants / schema keys / runner keys (was 54; 60 since
 // seq 177 select-transform; 61 since #46 compare-slopes).
 // ONE correction vs the audit stands: row 178 said GAP, but Compact
@@ -254,7 +255,7 @@ const scopeText = (scope: string): string => {
   }
 };
 
-const EXPECTED_TOOL_COUNT = 73;
+const EXPECTED_TOOL_COUNT = 74;
 const EXPECTED_ANALYSIS_TYPES = 61;
 const META_OFFERINGS = new Set(["compare-many-groups", "interpolate", "transform"]);
 
@@ -1161,6 +1162,18 @@ const ROWS: Row[] = [
       { kind: "exportFormat", format: "eps" },
       { kind: "exportFormat", format: "bmp" },
       { kind: "exportDpi", dpi: "100" },
+    ],
+  },
+  {
+    item: "296",
+    title: "MCP: copy graph/figure image to clipboard (seq 216 leftover)",
+    status: "covered",
+    note: "Merged on check/v183: titer_copy_graph_image (graph/figure id, dpi 100–1200, color/grayscale) renders offscreen and writes the PNG to the system clipboard via the UI copy's ClipboardItem mechanism; errors leave the clipboard untouched (pinned in tests/checks.ts). Vector-PDF clipboard is best-effort on Mac only and is NOT a gate item.",
+    checks: [
+      { kind: "tool", tool: "titer_copy_graph_image" },
+      { kind: "toolGroup", group: "export", tool: "titer_copy_graph_image" },
+      { kind: "sourceContains", file: "mcpDispatch", text: 'case "copy-graph-image":' },
+      { kind: "sourceContains", file: "mcp.rs", text: '"copy-graph-image"' },
     ],
   },
   {
