@@ -1,6 +1,6 @@
 # MCP server contract — Titer (v1.6.0, Phase 2) ↔ stdio bridge
 
-**Status:** Phase 2 + v1.7.4 P0 + 1.8 backup list + 1.8.0 data-file import + 1.8.0 linked paste + 1.8.0 merge project + 1.8.0 menus batch B + 1.8.0 menus batch C + 1.8.2 graph regenerate + 1.8.3 copy-graph-image (74 tools: read, write, run, graph, export, cloud)
+**Status:** Phase 2 + v1.7.4 P0 + 1.8 backup list + 1.8.0 data-file import + 1.8.0 linked paste + 1.8.0 merge project + 1.8.0 menus batch B + 1.8.0 menus batch C + 1.8.2 graph regenerate + 1.8.3 copy-graph-image + 1.8.3 sample-size-power (75 tools: read, write, run, graph, export, cloud)
 **Server branch:** `check/v16-mcp-phase2` (v1.6.0); the v1.7.4 P0 tools
 (`titer_project_summary`, `titer_search`, `titer_get_analysis_params`,
 `titer_rerun_analysis`, `await_result` on `titer_run_analysis`) were
@@ -123,11 +123,11 @@ SSE stream (`text/event-stream`). Lifecycle:
    `2025-06-18`), `capabilities`, `clientInfo`. Server answers with its
    own `protocolVersion` (the negotiated one — the highest both support),
    `capabilities: { "tools": {} }`, `serverInfo: { "name": "titer",
-    "version": "<app version>" }`, and `instructions` (the 74 tools:
+    "version": "<app version>" }`, and `instructions` (the 75 tools:
     read-only vs mutating, the job model, cloud/export notes — the full
     text lives in `get_info` in `src-tauri/src/mcp.rs`).
  2. `notifications/initialized` — client sends after `initialize`.
- 3. `tools/list` — returns all 74 tools in one page (`nextCursor`
+ 3. `tools/list` — returns all 75 tools in one page (`nextCursor`
    absent). No pagination.
 4. `tools/call` — `{ "name": "<tool>", "arguments": { … } }`.
 5. Sessions: 2025-11-25 clients use protocol-level sessions; the server
@@ -348,6 +348,7 @@ valid analyses for that table type.
 | `titer_clone_analysis` **(1.8.0)** | `project_id?`, `analysis_id` | `{ project_id, analysis_id (new) }` — Duplicate Current Sheet for an analysis (seq 236): the sheet and nothing else, right after its source with a fresh id and a uniquified name. A table's children are not copied; `titer_duplicate_table_family` is the tool for that. |
 | `titer_repoint_analysis` **(1.8, seq 242)** | `project_id?`, `analysis_id`, `table_id` | `{ project_id, analysis_id, table_id, table_name }`. Moves an orphaned analysis (its table was deleted) under another table that offers its test: the saved results stay until the re-run lands, the orphan flag and source name go away. A table that doesn't offer the test is refused, naming the tables that do; a live (non-orphaned) analysis is refused. Undoable via `titer_undo`. |
 | `titer_simulate_data` | `project_id?`, `table_type` (`column` \| `grouped` \| `xy`), `distribution` (`gaussian` \| `lognormal` \| `uniform` \| `binomial` \| `poisson` \| `exponential`), `n` (values per dataset, ≥ 2), `datasets` (≥ 1), `seed` (integer), `mean?`/`sd?`, `meanlog?`/`sdlog?` (of the LOGGED values), `min?`/`max?`, `size?`/`prob?` (0–1), `lambda?`, `rate?` — flat args, no nested object; only the fields its distribution needs are read. | `{ project_id, table_id, rows, data_columns }` — the new table via `createSimulatedTable` ("Simulated data", numbered). `n`/`datasets`/`seed` must be whole numbers (20.0 is not one); the frontend validator (`validateSimulationSpec`, the same function the dialog uses) is the authority on ranges and per-distribution requirements, including the 100,000-value cap. Same seed + settings reproduces the table. Awaited (one webR round-trip), not polled. |
+| `titer_sample_size_power` **(1.8.3, seq 207)** | `project_id?`, `test` (`one-sample-t` \| `two-sample-t` \| `welch-t` \| `paired-t` \| `one-way-anova` \| `pearson-correlation` \| `one-proportion` \| `chi-square`), `solve_for` (`n` \| `power` \| `effect`), `alpha?` (default `0.05`), `alternative?` (`two-sided` \| `one-sided`, default `two-sided`), `effect?` (`d` for t tests, `f` for ANOVA, `r` for correlation, `h` for one proportion, `w` for chi-square), `n?` (per-group n for t tests / ANOVA, n for correlation / one proportion, total N for chi-square), `power?` (0–1), `groups?` (ANOVA k, ≥ 2), `chi_square_df?` (1 for a 2×2 table), `categories?` (goodness-of-fit; df = categories − 1), `sd_ratio?` (Welch, default 1), `p0?`/`p1?` (one proportion, derives h) — flat args, no nested object; only the fields its test needs are read. | `{ test, solve_for, alpha, alternative, effect, n, n_rounded, power, power_at_rounded_n, n_label, effect_label, groups?, chi_square_df?, sd_ratio?, df?, curve: { n, power }, solved_n, solved_power, plain_language }` — the exact n (as R pwr reports it) plus its rounded-up whole number, the power curve (power vs n, through the solved point) and the plain-language line. Pure math, no data table, no server: the frontend validator (`validateSampleSizeParams`, the same function the dialog uses) is the authority on ranges; the engine is the noncentral t / F / chi-square CDFs, pinned against R pwr to 3 decimals in `tests/sample-size-power.ts`. Returns the identical numbers as the dialog. |
 | `titer_apply_method` | `project_id?`, `table_id`, `path` | `{ project_id, table_id, created: { analyses: string[], graphs: string[] } }` (+ `skipped` with reasons, `dropped_links` naming graph links to analyses that weren't applied). Applies a `.pzm` method file's analyses + graphs to the table (Rust reads the file — local paths only, `.pzm` required; the frontend parses it). Only what the table offers is applied. **The created analyses are nodes with params, not runs** — run them with `titer_rerun_analysis` (§7; the §11.3 open item this closed in 1.7.4). A method file with no analyses/graphs at all is an error; a method with some, none of which fit this table, is a successful no-op (`created` empty + `skipped`). |
 | `titer_apply_wand` | `project_id?`, `table_id`, `example_table_id`, `prefix?` | `{ project_id, table_id, created: { analyses: string[], graphs: string[] }, report }` — the existing `WandReport`. Analyse + graph this table like another table (one target table only). Example == target, example with no children, or target with no numeric data are reported as `skipped` entries, not errors. **Copied analyses are nodes with params, not runs** — run them with `titer_rerun_analysis` (§7; the §11.3 open item this closed in 1.7.4). |
 | `titer_run_script` | `project_id?`, `script`, `confirm?` | `{ project_id, replaced: true, effects, effects_executed: false }` or `{ needs_confirm: true, warning }` (two-step confirm, §5.4). `script` is the script TEXT in Prism-script format (one command per line, `//` and `/* */` comments, `ForEach` loops with `%N`/`%S`, Prism coordinates: row 0 = title row, col −1 = row titles, col 0 = X, col ≥ 1 = Y sets). There is **no `path` form** — the UI dialog takes typed/pasted text, and so does this tool. The run replaces the current project content (tables, analyses, graphs, figures) as one Undo step; the old content survives as that Undo step but is not saved to disk. A run that hits an error changes nothing (the job errors with the log lines); a run that changes nothing applies no undo step. |
@@ -600,7 +601,7 @@ is on, §6); everything else is `false`. `idempotent_hint` is per-tool (e.g. `ti
 `titer_rename_node`, `titer_reorder_nodes` are idempotent; create/undo/
 redo/run tools are not).
 
-The allowlist (§12) groups the 74 tools differently — by what the user
+The allowlist (§12) groups the 75 tools differently — by what the user
 turns on, not by what they do. The two groupings overlap (e.g. the
 `destructive` group holds the two tools that delete data or run
 scripts); §12 is the
@@ -614,7 +615,7 @@ The Phase 2 smoke runs against the **real server in a running Titer
 app** via a terminal CLI client (no Claude Desktop sign-in needed).
 It reads endpoint + token from `<app_data>/mcp/discovery.json`, speaks
 Streamable HTTP directly (initialize → tools/list → tools/call across
-all 74 tools), and prints a PASS/FAIL line per check; exit 0 only if
+all 75 tools), and prints a PASS/FAIL line per check; exit 0 only if
 every check passes. **Prerequisite:** in Titer, Settings → AI
 Connections, turn on every group under "What your AI can do" first —
 by default the server advertises only the 6 read tools (§12), and this
@@ -628,7 +629,7 @@ fixture for the Prism-import step:
    (default out dir: a fresh temp dir; exports/saves land there).
 3. `initialize` (`protocolVersion 2025-11-25`), then
    `notifications/initialized`, then `tools/list` — with every group on,
-   expect all 74 tools, nothing else (with only the default groups, §12
+   expect all 75 tools, nothing else (with only the default groups, §12
    says 6).
 4. Create a project → create an XY table → write data → summary with
    values → edit/rename/reorder/undo/redo/duplicate → simulate a
@@ -690,7 +691,7 @@ are expected to differ until the `buildGraphFigure` follow-up (§10.1).
 The in-process Rust smoke (`mcp_smoke_job_plumbing_over_http` in
 `src-tauri/src/mcp.rs`) is the other half: with every group enabled via
 its fixture allowlist record, it asserts `tools/list` returns exactly
- 74 tools and drives the job plumbing + project/table/
+ 75 tools and drives the job plumbing + project/table/
 analysis/cloud/graph/composite/export tools over real HTTP with a
 completer task standing in for the frontend dispatcher. A second
 in-process smoke (`mcp_smoke_allowlist_default_over_http`) covers §12:
@@ -783,7 +784,7 @@ tool must assign it a group, or the suite fails).
 | Discover projects and params (`discovery`) | `titer_project_summary`, `titer_search`, `titer_get_analysis_params` | no |
 | Open and save projects (`project`) | `titer_create_project`, `titer_open_project`, `titer_save_project`, `titer_close_project`, `titer_import_prism`, `titer_import_data_file`, `titer_merge_project` | no |
 | Edit tables (`tables`) | `titer_create_table`, `titer_write_table`, `titer_edit_table`, `titer_freeze_table`, `titer_refresh_linked_data`, `titer_duplicate_table_family`, `titer_rename_node`, `titer_reorder_nodes`, `titer_undo`, `titer_redo` | no |
-| Run analyses (`analyses`) | `titer_run_analysis`, `titer_rerun_analysis`, `titer_freeze_analysis`, `titer_clone_analysis`, `titer_repoint_analysis`, `titer_simulate_data`, `titer_apply_method`, `titer_apply_wand`, `titer_read_job`, `titer_list_jobs`, `titer_cancel_job` | no |
+| Run analyses (`analyses`) | `titer_run_analysis`, `titer_rerun_analysis`, `titer_freeze_analysis`, `titer_clone_analysis`, `titer_repoint_analysis`, `titer_simulate_data`, `titer_sample_size_power`, `titer_apply_method`, `titer_apply_wand`, `titer_read_job`, `titer_list_jobs`, `titer_cancel_job` | no |
 | Build graphs and figures (`graphs`) | `titer_build_graph`, `titer_update_graph`, `titer_clone_graph`, `titer_clone_figure`, `titer_freeze_graph`, `titer_freeze_figure`, `titer_add_drawing_object`, `titer_update_drawing_object`, `titer_delete_drawing_object`, `titer_arrange_drawing_objects`, `titer_create_figure`, `titer_update_figure`, `titer_create_info_sheet`, `titer_update_info_sheet`, `titer_list_regenerable_graphs`, `titer_regenerate_graphs` | no |
 | Export (`export`) | `titer_export_graph`, `titer_export_figure`, `titer_export_office`, `titer_export_table_data`, `titer_export_all_graphs`, `titer_copy_graph_image` | no |
 | Cloud (Box) (`cloud`) | `titer_cloud_status`, `titer_cloud_list`, `titer_cloud_metadata`, `titer_cloud_revisions`, `titer_cloud_download`, `titer_cloud_upload`, `titer_cloud_upload_new`, `titer_cloud_create_folder`, `titer_cloud_move` | no |
@@ -837,5 +838,5 @@ the same human-only boundary as enable/token (D4).
   tools — the five plus `titer_list_backups` — and Antigravity follows
   what the server advertises, so it shows six. The config file format
   does not change.
-- The server still *has* 74 tools. The allowlist decides which subset
+- The server still *has* 75 tools. The allowlist decides which subset
   a given client sees — it does not remove tools from the server.

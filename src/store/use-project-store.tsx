@@ -50,6 +50,9 @@ type Selector =
   | { kind: "wand"; tableId: string }
   | { kind: "clone-graph"; graphId: string }
   | { kind: "simulate-data"; tableId: string }
+  // Sample size & power (seq 207): a guided calculator with no table and
+  // no project — the selector carries no table id by design.
+  | { kind: "sample-size-power" }
   | { kind: "go-to-sheet" }
   | { kind: "script" }
   | { kind: "converter" }

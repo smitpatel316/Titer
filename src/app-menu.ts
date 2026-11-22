@@ -562,6 +562,13 @@ export function useAppMenu(doc: DocumentActions) {
             action: run((l, id) => l.store.openSelector({ kind: "simulate-data", tableId: id })),
           },
           {
+            // Sample size & power (seq 207): a guided calculator, not an
+            // analysis — it needs no table and no project, so it has no
+            // gate: it opens from a blank window too.
+            text: "Sample size & power…",
+            action: () => latest.current.store.openSelector({ kind: "sample-size-power" }),
+          },
+          {
             // Wand (plan 37): analyze + graph this table like another table.
             text: "Use Wand…",
             enabled: hasTable && wandAvailable,
