@@ -233,6 +233,179 @@ export function applyFigurePreset(
   return { panels: assignLabels(kept), grid, unplaced };
 }
 
+// ── Drag and drop (seq 307) ───────────────────────────────────────────────
+
+/** What can be dropped onto a figure cell: a graph dragged from the
+ *  Navigator/sidebar, or one of this figure's own panels dragged onto
+ *  another cell. */
+export type FigureDropSource =
+  | { kind: "graph"; graphId: string; graphName: string }
+  | { kind: "panel"; panel: FigurePanel };
+
+/** A drop's cell: the panel covering it is the target, or none when the cell is empty. */
+export type FigureDropTarget = { row: number; col: number };
+
+/** What a drop would do: the panels to keep, and the confirm to show first
+ *  (null when the drop loses nothing). Null: the drop is a no-op. */
+export interface FigureDropPlan {
+  panels: FigurePanel[];
+  needsConfirm: { title: string; detail: string } | null;
+}
+
+/** The panel covering a cell, if any. */
+function panelAtCell(panels: FigurePanel[], row: number, col: number): FigurePanel | undefined {
+  return panels.find(
+    (p) => row >= p.row && row < p.row + p.rowSpan && col >= p.col && col < p.col + p.colSpan,
+  );
+}
+
+/** A blank panel for a cell a panel just left: the cell stays a panel, empty —
+ *  unless the moved panel now covers part of it, when the cell is left
+ *  genuinely empty instead (a blank must never overlap another panel). */
+function blankFor(
+  left: FigurePanel,
+  placed: FigurePanel,
+): FigurePanel | null {
+  const blank: FigurePanel = {
+    graphId: "",
+    kind: "blank",
+    label: "",
+    title: "",
+    row: left.row,
+    col: left.col,
+    rowSpan: left.rowSpan,
+    colSpan: left.colSpan,
+  };
+  return panelsOverlap(blank, placed) ? null : blank;
+}
+
+/** The panels a drag-and-drop onto `target` would leave: a graph from the
+ *  sidebar assigns to the cell (a new panel on an empty cell, the blank
+ *  panel's cell when it lands on one); a panel dragged onto another cell
+ *  moves there, and its old cell becomes blank. Dropping on an occupied
+ *  panel replaces what it showed — after a confirm, since the old graph (or
+ *  picture) leaves the figure; a panel whose graph is already gone asks for
+ *  none, there is nothing to lose. A graph already in the figure can't be
+ *  dropped again (one panel per graph), and a drop that would overlap
+ *  another panel, or land where it started, is a no-op. `graphIds` is the
+ *  project's graph ids — it tells a live panel from a missing-graph one. */
+export function planFigureDrop(
+  panels: FigurePanel[],
+  grid: FigureGrid,
+  source: FigureDropSource,
+  target: FigureDropTarget,
+  graphIds: ReadonlySet<string> = new Set(),
+): FigureDropPlan | null {
+  const targetPanel = panelAtCell(panels, target.row, target.col);
+
+  if (source.kind === "graph") {
+    // A graph appears in a figure only once.
+    if (panels.some((p) => isGraphPanel(p) && p.graphId === source.graphId)) return null;
+    if (!targetPanel) {
+      return {
+        panels: assignLabels([
+          ...panels,
+          {
+            graphId: source.graphId,
+            graphName: source.graphName,
+            label: "",
+            title: "",
+            row: target.row,
+            col: target.col,
+            rowSpan: 1,
+            colSpan: 1,
+          },
+        ]),
+        needsConfirm: null,
+      };
+    }
+    if (targetPanel.kind === "blank") {
+      // The blank becomes the graph's panel, in its cell.
+      const next = panels.map((p) =>
+        p === targetPanel
+          ? { ...p, kind: "graph" as const, graphId: source.graphId, graphName: source.graphName }
+          : p,
+      );
+      return { panels: assignLabels(next), needsConfirm: null };
+    }
+    if (targetPanel.kind === "image") {
+      // Replacing a picture throws it away: ask first.
+      const next = panels.map((p) =>
+        p === targetPanel
+          ? {
+              ...p,
+              kind: "graph" as const,
+              graphId: source.graphId,
+              graphName: source.graphName,
+              imageData: undefined,
+              imageName: undefined,
+            }
+          : p,
+      );
+      return {
+        panels: assignLabels(next),
+        needsConfirm: {
+          title: `Replace the image in panel “${targetPanel.label}”?`,
+          detail: `Panel ${targetPanel.label} holds an image${targetPanel.imageName ? ` (“${targetPanel.imageName}”)` : ""}. Replace it with “${source.graphName}”? The image will be removed. You can undo this.`,
+        },
+      };
+    }
+    // A graph panel: no confirm when its graph is already gone.
+    if (!graphIds.has(targetPanel.graphId)) {
+      const next = panels.map((p) =>
+        p === targetPanel ? { ...p, graphId: source.graphId, graphName: source.graphName } : p,
+      );
+      return { panels: assignLabels(next), needsConfirm: null };
+    }
+    const shown = targetPanel.graphName ?? targetPanel.graphId;
+    return {
+      panels: assignLabels(
+        panels.map((p) =>
+          p === targetPanel ? { ...p, graphId: source.graphId, graphName: source.graphName } : p,
+        ),
+      ),
+      needsConfirm: {
+        title: `Replace “${shown}” with “${source.graphName}”?`,
+        detail: `Panel ${targetPanel.label} already shows “${shown}”. Replace it with “${source.graphName}”? The replaced graph stays in the project — you can add it back. You can undo this.`,
+      },
+    };
+  }
+
+  // A panel of this figure, moved: find it by its cell and graph (the
+  // caller's object may be a copy, so identity alone won't do).
+  const moved = panels.find(
+    (p) =>
+      p.row === source.panel.row &&
+      p.col === source.panel.col &&
+      p.graphId === source.panel.graphId &&
+      (p.kind ?? "graph") === (source.panel.kind ?? "graph"),
+  );
+  if (!moved || targetPanel === moved) return null;
+  // The moved panel keeps its span, clamped inside the grid.
+  const placed = clampPanel({ ...moved, row: target.row, col: target.col }, grid);
+  const others = panels.filter((p) => p !== moved && p !== targetPanel);
+  if (others.some((p) => panelsOverlap(placed, p))) return null;
+  const rest = [...others, placed];
+  const blank = blankFor(moved, placed);
+  if (blank) rest.push(blank);
+  if (!targetPanel) return { panels: assignLabels(rest), needsConfirm: null };
+  const displacedIsImage = targetPanel.kind === "image";
+  const displacedIsGone = isGraphPanel(targetPanel) && !graphIds.has(targetPanel.graphId);
+  if (targetPanel.kind === "blank" || displacedIsGone)
+    return { panels: assignLabels(rest), needsConfirm: null };
+  const displaced = displacedIsImage
+    ? `the image${targetPanel.imageName ? ` (“${targetPanel.imageName}”)` : ""}`
+    : `“${targetPanel.graphName ?? targetPanel.graphId}”`;
+  const moving = moved.graphName ?? moved.graphId;
+  return {
+    panels: assignLabels(rest),
+    needsConfirm: {
+      title: `Replace ${displaced} with “${moving}”?`,
+      detail: `Panel ${targetPanel.label} already shows ${displaced}. Move “${moving}” there? Panel ${moved.label} will become blank. You can undo this.`,
+    },
+  };
+}
+
 // ── Size ─────────────────────────────────────────────────────────────────
 
 /** A figure's size in pixels at `dpi` (the exported image's size). */

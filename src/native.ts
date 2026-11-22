@@ -72,6 +72,15 @@ export async function confirmRevert(title: string, detail: string): Promise<bool
   return answer === "Revert" || answer === "Ok";
 }
 
+/** A Replace / Cancel confirmation for a drag-and-drop onto an occupied
+ *  figure panel (seq 307): the caller passes the title and detail — the
+ *  drop plan's, from src/lib/figure.ts. */
+export async function confirmReplace(title: string, detail: string): Promise<boolean> {
+  if (!isNative) return window.confirm(`${title}\n\n${detail}`);
+  const answer = await message(detail, { title, kind: "warning", buttons: { ok: "Replace", cancel: "Cancel" } });
+  return answer === "Replace" || answer === "Ok";
+}
+
 /** An Update Now / Later prompt for a newer version of Titer. `forced`:
  *  no Later — the channel says this version must not run, so the dialog
  *  has only Update Now. `installable`: false on a platform with no

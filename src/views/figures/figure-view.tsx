@@ -25,13 +25,27 @@ import {
   duplicateLabels,
   firstFreeCell,
   hasEmptyCell,
+  isGraphPanel,
   missingPanels,
   panelsOverlap,
   parseFigurePreset,
+  planFigureDrop,
   presetLabel,
   sharedLegendCheck,
   validateFigureSize,
 } from "../../lib/figure";
+import {
+  beginFigureDrag,
+  endFigureDrag,
+  figureDropTargetFromPoint,
+  getFigureDrag,
+  getFigureDropHandler,
+  registerFigureDropHandler,
+  setFigureDragTarget,
+  useFigureDrag,
+  type FigureDropTargetRef,
+} from "../../lib/figure-drag";
+import { confirmReplace } from "../../native";
 import { useProjectStore } from "../../store/use-project-store";
 import { useZoom, ZOOM_LIMITS } from "../../store/use-zoom";
 import { fitZoom } from "../../store/use-layout";
@@ -76,6 +90,92 @@ export function FigureView({ node }: { node: ProjectNode }) {
 
   const set = (patch: Parameters<typeof updateFigure>[1]) => updateFigure(node.id, patch);
   const setPanels = (next: FigurePanel[]) => set({ panels: next });
+
+  // Drag-and-drop onto this figure (seq 307): a graph dragged from the
+  // Navigator/sidebar, or one of this figure's own panels dragged onto
+  // another cell. The drop goes through updateFigure, so Undo takes it back.
+  const drag = useFigureDrag();
+  const dropTarget = drag.target?.figureId === node.id ? drag.target : null;
+  React.useEffect(() => {
+    registerFigureDropHandler(async (source, target: FigureDropTargetRef) => {
+      if (target.figureId !== node.id) return false;
+      const graphIds = new Set(
+        Object.values(nodes)
+          .filter((n) => n.type === "graph")
+          .map((n) => n.id),
+      );
+      const plan = planFigureDrop(panels, grid, source, target, graphIds);
+      if (!plan) return false;
+      if (
+        plan.needsConfirm &&
+        !(await confirmReplace(plan.needsConfirm.title, plan.needsConfirm.detail))
+      )
+        return false;
+      setPanels(plan.panels);
+      return true;
+    });
+    return () => registerFigureDropHandler(null);
+    // The handler reads the panels as they are now; re-register on change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panels, grid, nodes, node.id]);
+
+  // A panel's own drag: pointer-based, like the sidebar's reorder drag (no
+  // HTML5 drag-and-drop). A click without movement is still a click — the
+  // drag only starts once the pointer moves past a few pixels.
+  const panelDragRef = React.useRef<{
+    startX: number;
+    startY: number;
+    started: boolean;
+    cleanup: (() => void) | null;
+  } | null>(null);
+  React.useEffect(() => () => panelDragRef.current?.cleanup?.(), []);
+  const startPanelDrag = (e: React.PointerEvent, panel: FigurePanel) => {
+    if (e.button !== 0 || !isGraphPanel(panel)) return;
+    const dragState = { startX: e.clientX, startY: e.clientY, started: false, cleanup: null as (() => void) | null };
+    panelDragRef.current = dragState;
+    const onMove = (ev: PointerEvent) => {
+      if (!dragState.started) {
+        if (Math.hypot(ev.clientX - dragState.startX, ev.clientY - dragState.startY) < 4) return;
+        dragState.started = true;
+        beginFigureDrag({ kind: "panel", panel });
+        document.body.style.cursor = "grabbing";
+      }
+      setFigureDragTarget(figureDropTargetFromPoint(ev.clientX, ev.clientY));
+    };
+    const onUp = () => {
+      dragState.cleanup?.();
+      panelDragRef.current = null;
+      document.body.style.cursor = "";
+      if (!dragState.started) return;
+      const fig = getFigureDrag();
+      if (fig.source && fig.target) void getFigureDropHandler()?.(fig.source, fig.target);
+      endFigureDrag();
+    };
+    dragState.cleanup = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      dragState.cleanup = null;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  };
+
+  // The grid's empty cells, as drop targets while a drag runs (a graph
+  // dropped on one becomes a new panel there).
+  const emptyCells = React.useMemo(() => {
+    const cells: { row: number; col: number }[] = [];
+    for (let row = 0; row < grid.rows; row++)
+      for (let col = 0; col < grid.cols; col++)
+        if (
+          !panels.some(
+            (p) => row >= p.row && row < p.row + p.rowSpan && col >= p.col && col < p.col + p.colSpan,
+          )
+        )
+          cells.push({ row, col });
+    return cells;
+  }, [panels, grid]);
 
   const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
   const selected = panels.find((p) => panelKey(p) === selectedKey) ?? null;
@@ -367,6 +467,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
           <p className="text-small text-secondary">
             A graph can appear in a figure only once — to use it twice, duplicate the graph first. A blank panel
             is an empty cell for layout; an image panel embeds a picture (a gel, blot or photo) beside the graphs.
+            Or drag a graph from the sidebar onto a panel — or drag a panel onto another — to arrange the figure.
           </p>
           {error && <p className="text-small text-red-600">{error}</p>}
           {selected && (
@@ -666,8 +767,18 @@ export function FigureView({ node }: { node: ProjectNode }) {
       <div className="relative min-h-0 flex-1">
         <div ref={canvasRef} className="absolute inset-0 overflow-auto bg-desk">
           {panels.length === 0 ? (
-            <div className="flex h-full items-center justify-center">
-              <p className="text-regular text-secondary">This figure has no panels yet — add a graph above.</p>
+            <div
+              className="flex h-full items-center justify-center"
+              data-figure-drop
+              data-figure-id={node.id}
+              data-drop-row={0}
+              data-drop-col={0}
+            >
+              <p className="text-regular text-secondary">
+                {drag.source
+                  ? "Drop a graph here to add the first panel."
+                  : "This figure has no panels yet — add a graph above."}
+              </p>
             </div>
           ) : (
             <div className="flex min-h-full w-max min-w-full items-center p-12">
@@ -711,16 +822,26 @@ export function FigureView({ node }: { node: ProjectNode }) {
                     const isGraph = (panel.kind ?? "graph") === "graph";
                     const w = Math.round(panel.colSpan * cellW);
                     const h = Math.round(panel.rowSpan * cellH);
+                    // The cell this panel's drop target covers, highlighted while a drag hovers it.
+                    const dropHovered =
+                      dropTarget !== null && dropTarget.row === panel.row && dropTarget.col === panel.col;
                     return (
                       <div
                         key={panelKey(panel)}
+                        data-figure-drop
+                        data-figure-id={node.id}
+                        data-drop-row={panel.row}
+                        data-drop-col={panel.col}
                         className={cn(
                           "relative overflow-hidden ring-1 ring-separator",
                           selectedKey === panelKey(panel) && "ring-2 ring-accent",
+                          dropHovered && "bg-accent/10 ring-2 ring-accent",
+                          isGraph && "cursor-grab",
                         )}
                         style={{ gridRow: `${panel.row + 1} / span ${panel.rowSpan}`, gridColumn: `${panel.col + 1} / span ${panel.colSpan}` }}
                         onClick={() => setSelectedKey(panelKey(panel))}
                         onDoubleClick={() => graph && setActiveNode(graph.id)}
+                        onPointerDown={(e) => startPanelDrag(e, panel)}
                       >
                         {!isGraph && panel.kind === "blank" ? (
                           <>
@@ -787,6 +908,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
                               type="button"
                               className="absolute right-1 bottom-1 rounded bg-black/60 px-1.5 py-0.5 text-small text-white"
                               title="Export this panel (the graph's own export)"
+                              onPointerDown={(e) => e.stopPropagation()}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 const el = plottedRef.current.get(panel.graphId);
@@ -797,6 +919,31 @@ export function FigureView({ node }: { node: ProjectNode }) {
                               Export panel
                             </button>
                           </>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {/* The grid's empty cells: drop targets while a drag runs — a
+                      graph dropped on one becomes a new panel there. */}
+                  {emptyCells.map(({ row, col }) => {
+                    const hovered = dropTarget !== null && dropTarget.row === row && dropTarget.col === col;
+                    return (
+                      <div
+                        key={`empty-${row}-${col}`}
+                        data-figure-drop
+                        data-figure-id={node.id}
+                        data-drop-row={row}
+                        data-drop-col={col}
+                        aria-label={`Empty cell, row ${row + 1}, column ${col + 1}`}
+                        className={cn(
+                          "relative flex items-center justify-center border border-dashed",
+                          drag.source ? "border-separator" : "border-transparent",
+                          hovered && "border-accent bg-accent/10 ring-2 ring-accent",
+                        )}
+                        style={{ gridRow: `${row + 1}`, gridColumn: `${col + 1}` }}
+                      >
+                        {drag.source && (
+                          <p className="px-2 text-center text-small text-secondary">Drop a graph here</p>
                         )}
                       </div>
                     );

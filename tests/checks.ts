@@ -337,6 +337,7 @@ import {
   panelPlotSize,
   panelRects,
   parseFigurePreset,
+  planFigureDrop,
   presetLabel,
   sharedLegendCheck,
   validateFigureSize,
@@ -1467,6 +1468,97 @@ check("Rename / Move To compute their targets and relocate keeps the dirty flag 
   strictEqual(relocatedDirty.filePath, "/Archive/Dose Response.hlx");
   strictEqual(relocatedDirty.isDirty, true);
   strictEqual(relocatedDirty.revision, edited.revision);
+});
+
+// seq 307: Drag-and-drop a graph onto a figure/layout — the drop plan, and
+// the store round-trip: a drop assigns through updateFigure, so Undo takes it back.
+check("seq 307: dragging a graph onto a figure panel assigns, replaces after confirm, moves between panels, and undoes", () => {
+  const grid = { rows: 2, cols: 2 };
+  const graphIds = new Set(["gA", "gB", "gC"]);
+  const pA = { graphId: "gA", graphName: "Dose-response", label: "A", title: "", row: 0, col: 0, rowSpan: 1, colSpan: 1 };
+  const pB = { graphId: "gB", graphName: "Survival", label: "B", title: "", row: 0, col: 1, rowSpan: 1, colSpan: 1 };
+  const blank = { graphId: "", kind: "blank" as const, label: "C", title: "", row: 1, col: 0, rowSpan: 1, colSpan: 1 };
+  const image = { graphId: "", kind: "image" as const, imageData: "data:image/png;base64,x", imageName: "gel.png", label: "D", title: "", row: 1, col: 1, rowSpan: 1, colSpan: 1 };
+
+  // Drag graph C onto an empty cell: a new panel, labelled in reading order.
+  const ontoEmpty = planFigureDrop([pA, pB], grid, { kind: "graph", graphId: "gC", graphName: "Growth" }, { row: 1, col: 0 }, graphIds);
+  ok(ontoEmpty && !ontoEmpty.needsConfirm);
+  deepStrictEqual(ontoEmpty.panels.map((p) => [p.graphId, p.label]), [["gA", "A"], ["gB", "B"], ["gC", "C"]]);
+
+  // Drag graph C onto a blank panel: the blank becomes the graph's panel.
+  const ontoBlank = planFigureDrop([pA, blank], grid, { kind: "graph", graphId: "gC", graphName: "Growth" }, { row: 1, col: 0 }, graphIds);
+  ok(ontoBlank && !ontoBlank.needsConfirm);
+  strictEqual(ontoBlank.panels.length, 2);
+  strictEqual(ontoBlank.panels.find((p) => p.row === 1 && p.col === 0)?.graphId, "gC");
+
+  // Drag graph C onto an occupied panel: replace, but only after a confirm.
+  const ontoOccupied = planFigureDrop([pA, pB], grid, { kind: "graph", graphId: "gC", graphName: "Growth" }, { row: 0, col: 1 }, graphIds);
+  ok(ontoOccupied && ontoOccupied.needsConfirm);
+  ok(ontoOccupied.needsConfirm.title.includes("Survival") && ontoOccupied.needsConfirm.detail.includes("Growth"));
+  strictEqual(ontoOccupied.panels.find((p) => p.row === 0 && p.col === 1)?.graphId, "gC");
+  strictEqual(ontoOccupied.panels.find((p) => p.graphId === "gB"), undefined);
+
+  // Dragging a graph onto an image panel also asks first (the picture would go).
+  const ontoImage = planFigureDrop([pA, image], grid, { kind: "graph", graphId: "gC", graphName: "Growth" }, { row: 1, col: 1 }, graphIds);
+  ok(ontoImage?.needsConfirm);
+  strictEqual(ontoImage.panels.find((p) => p.row === 1 && p.col === 1)?.kind ?? "graph", "graph");
+
+  // A graph already in the figure can't be dropped again (one panel per graph).
+  strictEqual(planFigureDrop([pA, pB], grid, { kind: "graph", graphId: "gA", graphName: "Dose-response" }, { row: 1, col: 0 }, graphIds), null);
+  // A panel whose graph is gone takes a drop with no confirm (nothing to lose).
+  const gone = { graphId: "gX", graphName: "Gone", label: "A", title: "", row: 0, col: 0, rowSpan: 1, colSpan: 1 };
+  const ontoGone = planFigureDrop([gone], grid, { kind: "graph", graphId: "gC", graphName: "Growth" }, { row: 0, col: 0 }, graphIds);
+  ok(ontoGone && !ontoGone.needsConfirm);
+  strictEqual(ontoGone.panels[0].graphId, "gC");
+
+  // Drag panel A onto panel B: B shows A, and A's old cell becomes blank.
+  const moved = planFigureDrop([pA, pB], grid, { kind: "panel", panel: pA }, { row: 0, col: 1 }, graphIds);
+  ok(moved && moved.needsConfirm); // B's graph is displaced, so it asks first
+  deepStrictEqual(
+    moved.panels.map((p) => [p.graphId, p.kind ?? "graph", p.row, p.col]),
+    [["", "blank", 0, 0], ["gA", "graph", 0, 1]],
+  );
+  // …while a move onto an empty cell needs no confirm; the old cell becomes blank.
+  const movedEmpty = planFigureDrop([pA, pB], grid, { kind: "panel", panel: pA }, { row: 1, col: 0 }, graphIds);
+  ok(movedEmpty && !movedEmpty.needsConfirm);
+  deepStrictEqual(
+    movedEmpty.panels.map((p) => [p.graphId, p.row, p.col]),
+    [["", 0, 0], ["gB", 0, 1], ["gA", 1, 0]],
+  );
+  // A panel dropped on its own cell, or a panel that isn't there, is a no-op.
+  strictEqual(planFigureDrop([pA, pB], grid, { kind: "panel", panel: pA }, { row: 0, col: 0 }, graphIds), null);
+  strictEqual(planFigureDrop([pA, pB], grid, { kind: "panel", panel: { ...pA, row: 1, col: 1 } }, { row: 1, col: 0 }, graphIds), null);
+
+  // The drop goes through updateFigure, so Undo restores the previous assignment.
+  let s = makeInitialState();
+  const tableId = s.rootOrder[0];
+  s = reducer(s, { type: "create", node: { id: "gA", type: "graph", name: "Dose-response", parentId: tableId, graphType: "xy-scatter", graphOptions: undefined } });
+  s = reducer(s, { type: "create", node: { id: "gC", type: "graph", name: "Growth", parentId: tableId, graphType: "xy-scatter", graphOptions: undefined } });
+  const before = [{ graphId: "gA", graphName: "Dose-response", label: "A", title: "", row: 0, col: 0, rowSpan: 1, colSpan: 1 }];
+  s = reducer(s, {
+    type: "create",
+    node: { id: "f1", type: "figure", name: "Figure", parentId: null, panels: before, grid: { rows: 1, cols: 2 }, figureSize: { widthIn: 10, heightIn: 7.5 }, labelStyle: { position: "top-left", fontSizePt: 12, bold: true }, figureTitle: "", sharedLegend: "none", dpi: "600" },
+  });
+  const dropped = planFigureDrop(before, { rows: 1, cols: 2 }, { kind: "graph", graphId: "gC", graphName: "Growth" }, { row: 0, col: 1 }, graphIds);
+  ok(dropped && !dropped.needsConfirm);
+  s = reducer(s, { type: "updateFigure", id: "f1", patch: { panels: dropped.panels }, at: Date.now() });
+  deepStrictEqual(s.nodes.f1.panels!.map((p) => p.graphId), ["gA", "gC"]);
+  s = reducer(s, { type: "undo" });
+  deepStrictEqual(s.nodes.f1.panels, before);
+
+  // The wiring: the figure view marks panels as drop targets, the sidebar
+  // starts a figure drag for a graph row, and the replace confirm exists.
+  const figureView = readFileSync("src/views/figures/figure-view.tsx", "utf8");
+  ok(/data-figure-drop/.test(figureView), "figure-view must mark panels (and empty cells) as drop targets");
+  ok(/beginFigureDrag/.test(figureView), "figure-view must start a drag from a panel");
+  ok(/registerFigureDropHandler/.test(figureView), "figure-view must register the drop handler");
+  const sidebar = readFileSync("src/components/project-sidebar.tsx", "utf8");
+  ok(/beginFigureDrag/.test(sidebar), "the sidebar must start a figure drag from a graph row");
+  ok(/figureDropTargetFromPoint/.test(sidebar), "the sidebar must hit-test figure panels while dragging");
+  const native = readFileSync("src/native.ts", "utf8");
+  ok(/export async function confirmReplace/.test(native), "native.ts must offer a Replace / Cancel confirm");
+  const drag = readFileSync("src/lib/figure-drag.ts", "utf8");
+  ok(/export function figureDropTargetFromPoint/.test(drag), "figure-drag must hit-test drop targets by point");
 });
 
 // seq 236: Duplicate Current Sheet — one sheet, nothing else, right after

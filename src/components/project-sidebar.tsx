@@ -20,9 +20,19 @@ import { colorDot } from "../views/graphs/style-menus";
 import { titleCase } from "../lib/format";
 import { highlightStyle, searchProject, SEARCH_FIELD_LABELS } from "../lib/project-search";
 import { clampWidth, SIDEBAR_WIDTH, useLayout } from "../store/use-layout";
+import {
+  beginFigureDrag,
+  endFigureDrag,
+  figureDropTargetFromPoint,
+  getFigureDrag,
+  getFigureDropHandler,
+  setFigureDragTarget,
+} from "../lib/figure-drag";
 
 /** What's currently being dragged. Tables reorder among tables; children reorder
- *  only among siblings of the same table (never across tables, never into a table). */
+ *  only among siblings of the same table (never across tables, never into a table).
+ *  A graph child can also leave the sidebar: dropped on a figure panel, it
+ *  joins the figure (seq 307) — `dragGraph` carries it while the drag runs. */
 type DragInfo = { kind: "table" | "child"; id: string; parentId: string | null };
 type DropTarget = { id: string; position: "before" | "after" };
 type RowDnd = { id: string; onPointerDown: (e: React.PointerEvent) => void };
@@ -95,6 +105,9 @@ export function ProjectSidebar() {
   const dropTargetRef = React.useRef<DropTarget | null>(null);
   const [dropTarget, setDropTarget] = React.useState<DropTarget | null>(null);
   const [draggingId, setDraggingId] = React.useState<string | null>(null);
+  // The graph being dragged out of the sidebar, if the drag started on one
+  // (seq 307): it can land on a figure panel instead of reordering.
+  const dragGraphRef = React.useRef<{ graphId: string; graphName: string } | null>(null);
   // Removes the drag's window listeners; set only while dragging.
   const cleanupRef = React.useRef<(() => void) | null>(null);
 
@@ -112,6 +125,8 @@ export function ProjectSidebar() {
   function endDrag() {
     cleanupRef.current?.();
     dragInfo.current = null;
+    dragGraphRef.current = null;
+    endFigureDrag();
     setTarget(null);
     setDraggingId(null);
     document.body.style.cursor = "";
@@ -126,8 +141,14 @@ export function ProjectSidebar() {
     const target = row ? parseRowDomId(row.id) : null;
     if (!row || !target || target.id === src.id || !allowed(src, target.kind, target.parentId)) {
       setTarget(null);
+      // No reorder target: a graph dragged out of the sidebar can land on
+      // a figure panel instead (seq 307) — the figure view highlights it.
+      setFigureDragTarget(
+        dragGraphRef.current ? figureDropTargetFromPoint(e.clientX, e.clientY) : null,
+      );
       return;
     }
+    setFigureDragTarget(null);
     const rect = row.getBoundingClientRect();
     const position: DropTarget["position"] = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
     setTarget({ id: target.id, position });
@@ -142,15 +163,27 @@ export function ProjectSidebar() {
       if (src.kind === "table") reorderTables(move(rootOrder, src.id, target.id, target.position));
       else if (src.parentId)
         reorderChildren(src.parentId, move(childOrder[src.parentId] ?? [], src.id, target.id, target.position));
+    } else {
+      // Dropped on a figure panel: the figure view's handler applies the
+      // drop (asking first when it would replace something).
+      const fig = getFigureDrag();
+      if (fig.source && fig.target) void getFigureDropHandler()?.(fig.source, fig.target);
     }
     endDrag();
   };
 
-  const rowDnd = (kind: DragInfo["kind"], id: string, parentId: string | null): RowDnd => ({
+  const rowDnd = (
+    kind: DragInfo["kind"],
+    id: string,
+    parentId: string | null,
+    dragGraph?: { graphId: string; graphName: string },
+  ): RowDnd => ({
     id: rowDomId(kind, id, parentId),
     onPointerDown: (e: React.PointerEvent) => {
       if (e.button !== 0) return;
       dragInfo.current = { kind, id, parentId };
+      dragGraphRef.current = dragGraph ?? null;
+      if (dragGraph) beginFigureDrag({ kind: "graph", graphId: dragGraph.graphId, graphName: dragGraph.graphName });
       setDraggingId(id);
       document.body.style.cursor = "grabbing";
       window.addEventListener("pointermove", onPointerMove);
@@ -416,7 +449,12 @@ export function ProjectSidebar() {
                   childMenu(child);
                 }}
                 className={[rowClass(child.id), frozenClass(child)].filter(Boolean).join(" ")}
-                {...rowDnd("child", child.id, table.id)}
+                {...rowDnd(
+                  "child",
+                  child.id,
+                  table.id,
+                  child.type === "graph" ? { graphId: child.id, graphName: child.name } : undefined,
+                )}
               />
             ))}
           </SidebarItem>
