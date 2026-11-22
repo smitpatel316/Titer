@@ -175,6 +175,20 @@ export async function handoffPngToKeynote(
   return sendToKeynote(script, pngPath, outPath);
 }
 
+/** Hands a PNG to the system clipboard on macOS (seq 296): the PNG goes
+ *  to a temp file, and the shell puts it on the pasteboard via osascript
+ *  (`copy_png_to_clipboard` in main.rs) — the webview's
+ *  `navigator.clipboard.write` refuses without a user gesture, and the
+ *  MCP copy path has no gesture. The shell deletes the temp PNG and its
+ *  script file once osascript finishes. Throws on non-macOS. */
+export async function copyPngToClipboard(png: Uint8Array): Promise<void> {
+  if (!isMacOs()) throw new Error("Copying a graph image to the clipboard needs macOS.");
+  const tmp = await tempDir();
+  const pngPath = await join(tmp, `titer-clipboard-${Date.now()}-${Math.random().toString(36).slice(2)}.png`);
+  await writeFile(pngPath, png);
+  await invoke<void>("copy_png_to_clipboard", { pngPath });
+}
+
 /** My Palettes' file in Titer's data folder: its text ("" before the first), and a new one. */
 export const readMyPalettes = () => invoke<string>("read_my_palettes");
 export const writeMyPalettes = (text: string) => invoke("write_my_palettes", { text });

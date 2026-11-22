@@ -758,6 +758,70 @@ fn send_to_keynote_blocking(script: &str, png_path: &str, path: &str) -> Result<
     Ok(path.to_string())
 }
 
+/// Copy a PNG to the system clipboard (seq 296): the MCP copy tool's
+/// write. The webview's `navigator.clipboard.write` refuses without a
+/// user gesture (NotAllowedError), and the MCP path has no gesture, so
+/// the headless copy cannot go through the webview. Instead the PNG the
+/// page wrote to a temp file goes on the pasteboard via osascript
+/// (`set the clipboard to (read POSIX file ... as «class PNGf»)`),
+/// the same temp-file-no-shell-quoting pattern as `send_to_keynote`.
+/// macOS only — anywhere else this refuses outright, before touching
+/// anything (the MCP copy is a Mac-side behaviour). The script goes in
+/// a temp file, not an `osascript -e` argument, so no shell quoting is
+/// involved; the temp script and the temp PNG are deleted once osascript
+/// finishes, whatever it reports. Async, on the blocking pool: osascript
+/// can block on a macOS TCC consent prompt (same class as seq 248's
+/// `write_file`).
+#[tauri::command]
+async fn copy_png_to_clipboard(png_path: String) -> Result<(), String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = png_path;
+        return Err("Copying a graph image to the clipboard needs macOS — this build cannot write the system clipboard.".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        tokio::task::spawn_blocking(move || copy_png_to_clipboard_blocking(&png_path))
+            .await
+            .map_err(|e| e.to_string())?
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn copy_png_to_clipboard_blocking(png_path: &str) -> Result<(), String> {
+    use std::io::Write;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let script_path = std::env::temp_dir().join(format!("titer-clipboard-{stamp}.applescript"));
+    // The PNG path is one this app wrote to its own temp dir under a
+    // generated name — no user text reaches the script — so embedding it
+    // in the `POSIX file` literal needs no escaping.
+    let script = format!("set the clipboard to (read POSIX file \"{png_path}\" as «class PNGf»)");
+    let out = (|| -> Result<std::process::Output, String> {
+        let mut script_file = std::fs::File::create(&script_path)
+            .map_err(|e| format!("Couldn't write the clipboard script: {e}"))?;
+        script_file
+            .write_all(script.as_bytes())
+            .and_then(|()| script_file.sync_all())
+            .map_err(|e| format!("Couldn't write the clipboard script: {e}"))?;
+        drop(script_file);
+        std::process::Command::new("osascript")
+            .arg(&script_path)
+            .output()
+            .map_err(|e| format!("Couldn't run osascript: {e}"))
+    })();
+    let _ = std::fs::remove_file(&script_path);
+    let _ = std::fs::remove_file(png_path);
+    let out = out?;
+    if !out.status.success() {
+        let detail = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("Couldn't put the image on the clipboard: {}", detail.trim()));
+    }
+    Ok(())
+}
+
 // ── My Palettes ──────────────────────────────────────────────────────────
 // The palettes made on this Mac, for every project and window: JSON in Titer's data
 // folder, read and checked by the page (src/store/my-palettes.ts).
@@ -1688,6 +1752,7 @@ fn main() {
             write_file,
             move_file,
             send_to_keynote,
+            copy_png_to_clipboard,
             read_my_palettes,
             write_my_palettes,
             backup_write,

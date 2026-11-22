@@ -1,7 +1,9 @@
 // Headless export jobs for the MCP dispatcher (v1.6.0 L8, GAP-2):
-// the five tools `titer_export_graph`, `titer_export_figure`,
-// `titer_export_office`, `titer_export_table_data` and
-// `titer_export_all_graphs` (seq 179: every graph and figure at once).
+// the six tools `titer_export_graph`, `titer_export_figure`,
+// `titer_export_office`, `titer_export_table_data`,
+// `titer_export_all_graphs` (seq 179: every graph and figure at once)
+// and `titer_copy_graph_image` (seq 296: a graph/figure image to the
+// system clipboard instead of a file).
 //
 // GAP-2 was that every export path rendered through `Plotly.toImage` on
 // a live, mounted DOM element, so a graph that was not open on screen
@@ -70,6 +72,7 @@ import {
   type TableData,
 } from "./types";
 import {
+  copyPngToClipboard,
   ensureSaveExtension,
   handoffPngToKeynote,
   writeFile as nativeWriteFile,
@@ -94,6 +97,21 @@ export interface ExportIo {
 
 export const defaultExportIo: ExportIo = { writeFile: nativeWriteFile };
 
+/** The system clipboard as a PNG writer: the native pasteboard write
+ *  (`copyPngToClipboard` in src/native.ts — temp PNG + osascript as
+ *  PNGf, macOS only). NOT the webview's `navigator.clipboard.write`:
+ *  that refuses without a user gesture (NotAllowedError), and the MCP
+ *  path has no gesture — the first implementation used it and the copy
+ *  failed headless. Injectable so the node harness can drive the copy
+ *  job without a webview. Clipboard images must be raster: always PNG. */
+export interface ClipboardIo {
+  writePng: (bytes: Uint8Array) => Promise<void>;
+}
+
+export const defaultClipboardIo: ClipboardIo = {
+  writePng: (bytes) => copyPngToClipboard(bytes),
+};
+
 /** What an export job needs from the app. */
 export interface ExportJobDeps {
   getState: () => ExportJobState;
@@ -106,6 +124,14 @@ export interface ExportJobDeps {
    *  renderers below. Injectable so the node test harness can drive the
    *  batch without a webview, exactly like `io` for the table jobs. */
   render?: ExportAllRenderer;
+  /** Write a PNG to the system clipboard (seq 296; default: the real
+   *  `navigator.clipboard` write). A harness driving the copy job in
+   *  node injects a stub here. */
+  clipboard?: ClipboardIo;
+  /** How the copy job renders (seq 296). Omitted: the real offscreen
+   *  renderers below. Injectable so the node test harness can drive the
+   *  copy job without a webview, exactly like `render` for the batch. */
+  copyRender?: CopyGraphImageRenderer;
 }
 
 /** An overlay report as the tool returns it: which overlays drew, and
@@ -872,6 +898,157 @@ export async function executeExportOffice(job: McpJob, deps: ExportJobDeps): Pro
   else result.figure_id = figureId;
   if (missing) result.missing = missing;
   if (reason) result.reason = reason;
+  return { result };
+}
+
+// ── Copy graph/figure image to clipboard (seq 296) ────────────────────
+// The UI copy (`copyGraphImage` / `copyFigureImage`) has no MCP path: a
+// headless/agent caller could not put a graph image on the system
+// clipboard. This job is that path — the same offscreen PNG render at
+// `dpi` (the export tools' renderers, same overlays, same grayscale
+// walk), written to the clipboard natively (seq 296 fix: the webview's
+// `navigator.clipboard.write` refuses without a user gesture, and the
+// MCP path has none — so `defaultClipboardIo` goes through the
+// `copy_png_to_clipboard` Tauri command: temp PNG + osascript PNGf).
+// The render and the write are both injectable (see `ExportJobDeps`), so the node
+// harness can drive the job without a webview.
+//
+// Ordering is the guarantee: every validation and the whole render run
+// BEFORE the clipboard write, so an error (unknown id, nothing plotted,
+// a bad dpi, a failed render) returns an MCP error and leaves the
+// clipboard untouched. Vector-PDF clipboard is NOT here: Prism offers
+// copy-as-vector, but OS clipboards vary — PNG is the guaranteed format
+// for v1; PDF on the clipboard is best-effort on Mac only, documented
+// in the tool description, not a gate item.
+
+/** One graph/figure drawn as PNG bytes for the clipboard. */
+export interface CopyRenderOut {
+  bytes: Uint8Array;
+  widthPx: number;
+  heightPx: number;
+  capped: boolean;
+  reason?: string;
+  /** Panels that could not be drawn (figures only). */
+  missing?: number;
+  overlays: GraphOverlayStatus[];
+}
+
+/** Draw one copy target (a graph, or a whole figure) as PNG bytes. */
+export type CopyGraphImageRenderer = (
+  target: { kind: "graph"; node: ProjectNode } | { kind: "figure"; node: ProjectNode },
+  dpi: Resolution,
+  colorMode: ColorMode,
+  nodes: Record<string, ProjectNode>,
+  run?: AnalysisRunner,
+) => Promise<CopyRenderOut>;
+
+/** The real copy renderer: a graph through the headless graph render, a
+ *  figure through its own raster render — the same paths the single-item
+ *  export tools use, so a pasted image matches its exported file. */
+async function defaultCopyRender(
+  target: { kind: "graph"; node: ProjectNode } | { kind: "figure"; node: ProjectNode },
+  dpi: Resolution,
+  colorMode: ColorMode,
+  nodes: Record<string, ProjectNode>,
+  run?: AnalysisRunner,
+): Promise<CopyRenderOut> {
+  if (target.kind === "graph") {
+    const size96 = graphDrawSize(target.node);
+    const out = await renderGraphImage(target.node, nodes, "png", dpi, size96, run, colorMode);
+    return {
+      bytes: out.bytes,
+      widthPx: out.widthPx,
+      heightPx: out.heightPx,
+      capped: out.capped,
+      reason: out.reason,
+      overlays: out.overlays,
+    };
+  }
+  const out = await renderFigureRaster(target.node, nodes, "png", dpi, colorMode);
+  return {
+    bytes: new Uint8Array(await out.blob.arrayBuffer()),
+    widthPx: out.width,
+    heightPx: out.height,
+    capped: out.capped,
+    reason: out.reason,
+    missing: out.missing,
+    overlays: out.overlays,
+  };
+}
+
+/** `copy-graph-image`: render one graph (or a whole figure) offscreen as
+ *  PNG at `dpi` and write it to the system clipboard. Exactly one of
+ *  `graph_id` / `figure_id`; with neither, the active graph/figure is
+ *  copied. `dpi` 100/150/300/600/900/1200 (default 300);
+ *  `color_mode` color/grayscale (default color; cmyk falls back to
+ *  colour, as the UI copy does — the clipboard has no CMYK). */
+export async function executeCopyGraphImage(job: McpJob, deps: ExportJobDeps): Promise<ExportJobOutcome> {
+  const args = argsOf(job);
+  const graphId = optStr(job, args, "graph_id");
+  const figureId = optStr(job, args, "figure_id");
+  if (graphId !== undefined && figureId !== undefined) {
+    throw jobErr(job, "needs exactly one of graph_id and figure_id — one image per clipboard write, as the UI's one-click copy.");
+  }
+  const dpiRaw = optStr(job, args, "dpi") ?? "300";
+  if (!(RESOLUTIONS as readonly string[]).includes(dpiRaw)) {
+    throw jobErr(job, `has no resolution “${dpiRaw}” — the resolutions are ${RESOLUTIONS.join(", ")} DPI.`);
+  }
+  const dpi = dpiRaw as Resolution;
+  const colorModeRaw = optStr(job, args, "color_mode") ?? "color";
+  if (colorModeRaw !== "color" && colorModeRaw !== "grayscale" && colorModeRaw !== "cmyk") {
+    throw jobErr(job, `has no colour mode “${colorModeRaw}” — the colour modes are color, grayscale, cmyk.`);
+  }
+  // CMYK falls back to colour, as the UI copy does (the clipboard has no CMYK).
+  const colorMode = (colorModeRaw === "cmyk" ? "color" : colorModeRaw) as ColorMode;
+  const state = deps.getState();
+  let target: { kind: "graph"; node: ProjectNode } | { kind: "figure"; node: ProjectNode };
+  if (figureId !== undefined) {
+    const figure = figureNode(job, state, figureId);
+    if (!figure.panels?.length) {
+      throw jobErr(job, `cannot copy figure “${figure.name}” — add a panel first.`);
+    }
+    target = { kind: "figure", node: figure };
+  } else if (graphId !== undefined) {
+    target = { kind: "graph", node: graphNode(job, state, graphId) };
+  } else {
+    const active = state.activeNodeId ? state.nodes[state.activeNodeId] : undefined;
+    if (!active) {
+      throw jobErr(job, "needs graph_id or figure_id — no graph or figure is active in this project.");
+    }
+    if (active.type === "graph") {
+      target = { kind: "graph", node: active };
+    } else if (active.type === "figure") {
+      if (!active.panels?.length) {
+        throw jobErr(job, `cannot copy figure “${active.name}” — add a panel first.`);
+      }
+      target = { kind: "figure", node: active };
+    } else {
+      throw jobErr(job, `needs graph_id or figure_id — the active node “${active.name}” is a ${active.type}, not a graph or figure.`);
+    }
+  }
+  // The render runs first and throws before any clipboard write, so a
+  // graph with nothing plotted (or a figure that cannot draw) leaves the
+  // clipboard exactly as it was.
+  const render = deps.copyRender ?? defaultCopyRender;
+  const out = await render(target, dpi, colorMode, state.nodes, deps.run);
+  const clipboard = deps.clipboard ?? defaultClipboardIo;
+  await clipboard.writePng(out.bytes);
+  const result: Record<string, unknown> = {
+    project_id: job.project_id,
+    format: "png",
+    dpi,
+    color_mode: colorMode,
+    width_px: out.widthPx,
+    height_px: out.heightPx,
+    capped: out.capped,
+    ...overlayReport(out.overlays),
+  };
+  if (target.kind === "graph") result.graph_id = target.node.id;
+  else {
+    result.figure_id = target.node.id;
+    if (out.missing) result.missing = out.missing;
+  }
+  if (out.reason) result.reason = out.reason;
   return { result };
 }
 
