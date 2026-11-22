@@ -660,6 +660,45 @@ fn write_atomically(path: &Path, data: &[u8]) -> Result<(), String> {
     })
 }
 
+/// Moves a project file on disk: File ▸ Rename… (same folder) and Move To…
+/// (a new folder) share it. The destination must not exist — a collision is
+/// an error, never an overwrite — and the source must exist. The format
+/// never changes with the name: the destination keeps the source's
+/// extension. A cross-device move (another volume) falls back to copy +
+/// delete, since rename(2) can't cross devices. Async, on the blocking
+/// pool (same class as seq 248's `write_file`: a move into ~/Documents or
+/// ~/Desktop can block on a macOS TCC consent prompt).
+#[tauri::command]
+async fn move_file(from: String, to: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || move_file_blocking(&from, &to))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn move_file_blocking(from: &str, to: &str) -> Result<(), String> {
+    let from_path = Path::new(from);
+    let to_path = Path::new(to);
+    if !from_path.exists() {
+        return Err("The file couldn't be found. It may have been moved or deleted.".into());
+    }
+    if to_path.exists() {
+        let name = to_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        return Err(format!("A file named “{name}” already exists there. Choose a different name."));
+    }
+    if from_path.extension() != to_path.extension() {
+        return Err("The file keeps its extension — renaming never changes the format.".into());
+    }
+    match fs::rename(from_path, to_path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+            fs::copy(from_path, to_path).map_err(|e| e.to_string())?;
+            fs::remove_file(from_path).map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// Send to Keynote (seq 217): runs the AppleScript the page built
 /// (`buildKeynoteScript` in src/lib/office-export.ts) in Keynote via
 /// `osascript`, so Keynote makes the presentation and saves the real .key
@@ -1647,6 +1686,7 @@ fn main() {
             read_data_text,
             read_data_bytes,
             write_file,
+            move_file,
             send_to_keynote,
             read_my_palettes,
             write_my_palettes,
@@ -1971,5 +2011,71 @@ mod tests {
         let found = cli_project_files(["titer".into(), upper.to_string_lossy().into_owned()].into_iter());
         let _ = fs::remove_file(&upper);
         assert_eq!(found.len(), 1, ".HLX should be accepted: {found:?}");
+    }
+
+    // seq 297: File ▸ Rename… / Move To… — the shell's move_file: the file
+    // lands at the new path with its bytes intact, the old path is gone, a
+    // collision is an error that leaves both files untouched, and a missing
+    // source or a changed extension is refused outright.
+    fn move_scratch_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("titer-move-test-{}-{tag}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch dir");
+        dir
+    }
+
+    #[test]
+    fn move_file_renames_and_moves_with_content_intact() {
+        let dir = move_scratch_dir("rename");
+        let from = dir.join("Dose Response.hlx");
+        fs::write(&from, b"{\"project\":true}").expect("fixture");
+        let to = dir.join("Dose Response 2.hlx");
+        move_file_blocking(&from.to_string_lossy(), &to.to_string_lossy()).expect("rename should work");
+        assert!(!from.exists(), "the old path must be gone");
+        assert_eq!(fs::read(&to).expect("moved file"), b"{\"project\":true}", "content must survive the move");
+        let other = dir.join("Archive");
+        fs::create_dir_all(&other).expect("folder");
+        let moved = other.join("Dose Response 2.hlx");
+        move_file_blocking(&to.to_string_lossy(), &moved.to_string_lossy()).expect("move should work");
+        assert!(!to.exists(), "the old path must be gone after a move");
+        assert_eq!(fs::read(&moved).expect("moved file"), b"{\"project\":true}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn move_file_collision_leaves_both_files_untouched() {
+        let dir = move_scratch_dir("collision");
+        let from = dir.join("Dose Response.hlx");
+        let to = dir.join("Dose Response 2.hlx");
+        fs::write(&from, b"mine").expect("fixture");
+        fs::write(&to, b"theirs").expect("fixture");
+        let err = move_file_blocking(&from.to_string_lossy(), &to.to_string_lossy())
+            .expect_err("a collision must be an error, never an overwrite");
+        assert!(err.contains("already exists"), "the error should say the name is taken: {err}");
+        assert_eq!(fs::read(&from).expect("source"), b"mine", "the source must be untouched");
+        assert_eq!(fs::read(&to).expect("destination"), b"theirs", "the destination must be untouched");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn move_file_refuses_a_missing_source_and_a_changed_extension() {
+        let dir = move_scratch_dir("refusals");
+        let missing = dir.join("Gone.hlx");
+        let err = move_file_blocking(
+            &missing.to_string_lossy(),
+            &dir.join("Gone 2.hlx").to_string_lossy(),
+        )
+        .expect_err("a missing source must be an error");
+        assert!(err.contains("couldn't be found"), "the error should say the file is gone: {err}");
+        let from = dir.join("Dose Response.hlx");
+        fs::write(&from, b"mine").expect("fixture");
+        let err = move_file_blocking(
+            &from.to_string_lossy(),
+            &dir.join("Dose Response.prism").to_string_lossy(),
+        )
+        .expect_err("a changed extension must be an error");
+        assert!(err.contains("extension"), "the error should say the extension stays: {err}");
+        assert!(from.exists(), "a refused move leaves the source alone");
+        let _ = fs::remove_dir_all(&dir);
     }
 }

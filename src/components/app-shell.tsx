@@ -16,6 +16,8 @@ import { useMcpSnapshotPublisher } from "../store/mcp-publish";
 import { useMcpJobDispatcher } from "../store/mcp-dispatch";
 import { SavePromptDialog } from "./save-prompt-dialog";
 import { TemplateDialog } from "./template-dialog";
+import { RenameDialog } from "./rename-dialog";
+import { fileName } from "../lib/paths";
 import { WelcomeDialog } from "./welcome-dialog";
 import { openProjectsOrSay } from "../menus";
 import { ConflictDialog } from "./conflict-dialog";
@@ -363,6 +365,13 @@ export function AppShell() {
       <TemplateDialog
         defaultName={documentActions.title}
         onSave={(kind, info) => void documentActions.saveTemplate(kind, info)}
+      />
+
+      <RenameDialog
+        defaultName={
+          documentActions.filePath ? fileName(documentActions.filePath) : documentActions.title
+        }
+        onRename={(name) => void documentActions.renameProject(name)}
       />
 
       {/* The Welcome dialog (seq 167): the gallery + Graph Portfolio + recents

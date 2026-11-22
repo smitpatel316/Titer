@@ -53,6 +53,7 @@ type Selector =
   | { kind: "script" }
   | { kind: "converter" }
   | { kind: "save-prompt" }
+  | { kind: "rename-project" }
   | { kind: "save-template"; templateKind: TemplateKind }
   | { kind: "conflict" }
   | { kind: "remote-picker" }
@@ -263,7 +264,11 @@ type Action =
       /** Changed as it was read (repaired, or from an older Titer): to be saved. */
       edited?: boolean;
     }
-  | { type: "markSaved"; filePath: string | null; savedRevision: number };
+  | { type: "markSaved"; filePath: string | null; savedRevision: number }
+  /** The file moved on disk (File ▸ Rename… / Move To…, seq 297): the path
+   *  changes, nothing else — not in MUTATING, so the revision doesn't move
+   *  and the dirty flag stays exactly as it was. */
+  | { type: "relocate"; filePath: string };
 
 function nextName(prefix: string, taken: string[]): string {
   const used = new Set<number>();
@@ -1069,6 +1074,11 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         filePath: action.filePath,
         isDirty: state.revision !== action.savedRevision,
       };
+    case "relocate":
+      // The file moved on disk (seq 297): only the path changes. The
+      // content, the dirty flag and the revision are untouched — a rename
+      // is not an edit, and never clears unsaved changes.
+      return { ...state, filePath: action.filePath };
   }
 }
 
@@ -1398,6 +1408,9 @@ interface ProjectActions {
     edited?: boolean;
   }) => void;
   markProjectSaved: (filePath: string | null, savedRevision: number) => void;
+  /** The file moved on disk (seq 297): point the project at its new path,
+   *  keeping the dirty flag and the revision as they are. */
+  relocateProject: (filePath: string) => void;
 }
 
 interface ProjectContextValue extends ProjectActions {
@@ -1658,6 +1671,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         dispatch({ type: "load", ...payload });
       },
       markProjectSaved: (filePath, savedRevision) => dispatch({ type: "markSaved", filePath, savedRevision }),
+      relocateProject: (filePath) => dispatch({ type: "relocate", filePath }),
     };
   }, []);
 
