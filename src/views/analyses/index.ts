@@ -125,6 +125,13 @@ export function analysisOptionsForTable(tableType: TableType, data?: TableData):
   });
 }
 
+/** Whether a picker value is offered for this table — the Recently used
+ *  section lists runs from every table type, so a tap on one that doesn't
+ *  fit this table gets the not-applicable note instead of its wizard (seq 298). */
+export function isAnalysisOffered(value: AnalysisPickerValue, tableType: TableType, data?: TableData): boolean {
+  return analysisOptionsForTable(tableType, data).some((o) => o.value === value);
+}
+
 /** The picker offers two meta entries, not tests: "compare-many-groups"
  *  resolves (in the wizard) to one-way ANOVA, Kruskal-Wallis,
  *  repeated-measures ANOVA or Friedman, and "interpolate" to nonlinear

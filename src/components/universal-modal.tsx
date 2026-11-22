@@ -29,6 +29,7 @@ export function UniversalModal<T extends string>({
   detail,
   onSelect,
   onClose,
+  header,
 }: {
   open: boolean;
   title: string;
@@ -37,6 +38,8 @@ export function UniversalModal<T extends string>({
   detail?: (value: T) => React.ReactNode;
   onSelect: (value: T) => void;
   onClose: () => void;
+  /** Shown above the list — the New Analysis picker's Recently used section (seq 298). */
+  header?: React.ReactNode;
 }) {
   const [shown, setShown] = React.useState<T>();
   const list = (
@@ -59,6 +62,7 @@ export function UniversalModal<T extends string>({
 
   return (
     <Dialog open={open} onClose={onClose} title={title} description={description}>
+      {header}
       {detail ? (
         <div className="flex gap-4">
           {list}
