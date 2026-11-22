@@ -2268,6 +2268,54 @@ fn create_blank_window(app: &AppHandle) -> Result<String, String> {
     Ok(label)
 }
 
+/// How long a window-making MCP call waits for the shell's main thread to
+/// answer (seq 312): building a window blocks the calling thread on the
+/// main thread's reply — Tauri's `build()` and the `is_focused` /
+/// position getters all `recv()` with no timeout — so a stalled main
+/// thread used to park the tokio worker for ever. The tool call then hung
+/// to the client's 120 s timeout, and enough parked workers wedged the
+/// whole endpoint while the app sat idle. 30 s is 30× a normal creation;
+/// the whole import still fits under the client's 120 s (30 create + 10
+/// snapshot + 60 job), as does an open (30 create + 60 outcome).
+const WINDOW_CREATE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Run a window-making step on the blocking pool with a timeout, so a
+/// stalled main thread parks a blocking-pool thread — never an async
+/// worker — and the tool answers with a plain error instead of hanging.
+/// A timed-out creation keeps running in the background: the window may
+/// still appear, so the error says to check `titer_list_projects`.
+async fn run_window_create<F, T>(op: F, timeout: Duration) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    let joined = tokio::task::spawn_blocking(op);
+    match tokio::time::timeout(timeout, joined).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(join_err)) => Err(format!("Creating the project window failed: {join_err}")),
+        Err(_) => Err(format!(
+            "The new project window did not open within {}s — Titer's main thread may be waiting (a dialog, or a busy window). The window may still appear; ask titer_list_projects for the open projects and retry if it didn't.",
+            timeout.as_secs()
+        )),
+    }
+}
+
+/// `create_blank_window` on the blocking pool, bounded (seq 312).
+async fn create_blank_window_bounded(app: &AppHandle) -> Result<String, String> {
+    let app = app.clone();
+    run_window_create(move || create_blank_window(&app), WINDOW_CREATE_TIMEOUT).await
+}
+
+/// `crate::open` on the blocking pool, bounded (seq 312).
+async fn open_bounded(app: &AppHandle, opening: crate::Opening) -> Result<String, String> {
+    let app = app.clone();
+    run_window_create(
+        move || crate::open(&app, None, opening).map_err(|e| e.to_string()),
+        WINDOW_CREATE_TIMEOUT,
+    )
+    .await
+}
+
 /// The app handle a window-making tool needs, or the plain error when the
 /// server has none (the in-process smoke test: no Tauri app there).
 fn app_handle_or_err(state: &McpState) -> Result<AppHandle, String> {
@@ -2283,7 +2331,7 @@ async fn import_prism_in_new_window(
     app: &AppHandle,
     path: &str,
 ) -> Result<(String, serde_json::Value), String> {
-    let label = create_blank_window(app)?;
+    let label = create_blank_window_bounded(app).await?;
     if !state.await_snapshot(&label, |_| true, Duration::from_secs(10)).await {
         return Err(format!(
             "The new project window ({label}) did not report back within 10s — it may still be opening. Ask titer_list_projects for the open projects."
@@ -5090,7 +5138,7 @@ impl TiterMcpServer {
         let log_args = serde_json::json!({ "template": args.template });
         let result: Result<serde_json::Value, String> = async {
             let app = app_handle_or_err(&self.state)?;
-            let label = create_blank_window(&app)?;
+            let label = create_blank_window_bounded(&app).await?;
             if !self.state.await_snapshot(&label, |_| true, Duration::from_secs(10)).await {
                 return Err(format!(
                     "The new project window ({label}) did not report back within 10s — it may still be opening. Ask titer_list_projects for the open projects."
@@ -5165,8 +5213,7 @@ impl TiterMcpServer {
                     Ok(serde_json::json!({ "project_id": label, "file_path": args.path, "format": format }))
                 }
                 _ => {
-                    let label =
-                        crate::open(&app, None, crate::opening_for(&args.path)).map_err(|e| e.to_string())?;
+                    let label = open_bounded(&app, crate::opening_for(&args.path)).await?;
                     let path = args.path.clone();
                     // 60 s, not 15 s: a 10 MB .hlx (capsanoicids, 12 tables)
                     // takes ~17.6 s to report loaded on a fresh open, so 15 s
@@ -7231,8 +7278,7 @@ impl TiterMcpServer {
                     label
                 }
                 _ => {
-                    let label =
-                        crate::open(&app, None, crate::opening_for(&cache_path)).map_err(|e| e.to_string())?;
+                    let label = open_bounded(&app, crate::opening_for(&cache_path)).await?;
                     let path = cache_path.clone();
                     // 60 s, not 15 s: same as titer_open_project — a large
                     // .hlx can take ~17.6 s to report loaded, so 15 s flakes
@@ -11803,6 +11849,56 @@ mod tests {
         assert!(message.contains("titer_delete_node"), "names the tool: {message}");
         assert!(message.contains("Destructive actions"), "names the group: {message}");
         assert!(message.contains("Settings → AI Connections"), "points at the toggle: {message}");
+    }
+
+    #[tokio::test]
+    async fn window_create_timeout_fires_on_a_stalled_main_thread() {
+        // seq 312: a window build that never answers (the macOS main
+        // thread stalled) used to park the tokio worker for ever — the
+        // tool call hung to the client's 120 s timeout. The bounded
+        // path must answer with a plain error inside the timeout, and
+        // the awaiting task must be free (not parked) afterwards.
+        // The stand-in stall sleeps 5 s, not for ever: a never-returning
+        // blocking task would also hang this test's runtime shutdown
+        // (dropping a tokio runtime waits for the blocking pool).
+        let start = std::time::Instant::now();
+        let result: Result<String, String> = run_window_create(
+            || {
+                std::thread::sleep(Duration::from_secs(5));
+                Ok("never".to_string())
+            },
+            Duration::from_millis(50),
+        )
+        .await;
+        let elapsed = start.elapsed();
+        let err = result.expect_err("a stalled window build must error, not hang");
+        assert!(err.contains("did not open within"), "names the stall: {err}");
+        assert!(elapsed < Duration::from_secs(5), "answered inside the timeout: {elapsed:?}");
+    }
+
+    #[tokio::test]
+    async fn window_create_fast_op_passes_through() {
+        let result: Result<String, String> =
+            run_window_create(|| Ok("project-1".to_string()), Duration::from_secs(5)).await;
+        assert_eq!(result.expect("fast window build must pass"), "project-1");
+    }
+
+    #[test]
+    fn window_create_timeout_fits_under_the_client_timeout() {
+        // The worst-case import (create + snapshot + job) and open
+        // (create + outcome) must both answer inside the suite's 120 s
+        // client timeout — a bound that doesn't fit is no bound at all.
+        assert!(WINDOW_CREATE_TIMEOUT < Duration::from_secs(120), "create bound: {WINDOW_CREATE_TIMEOUT:?}");
+        assert!(
+            WINDOW_CREATE_TIMEOUT + Duration::from_secs(10) + Duration::from_secs(60) < Duration::from_secs(120),
+            "worst-case import: {:?}",
+            WINDOW_CREATE_TIMEOUT + Duration::from_secs(10) + Duration::from_secs(60)
+        );
+        assert!(
+            WINDOW_CREATE_TIMEOUT + Duration::from_secs(60) < Duration::from_secs(120),
+            "worst-case open: {:?}",
+            WINDOW_CREATE_TIMEOUT + Duration::from_secs(60)
+        );
     }
 
     #[test]
