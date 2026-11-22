@@ -28613,6 +28613,128 @@ check("script: ExportTIF validates resolution and mode, and resolves paths throu
   ok(scriptLog(noPath).includes("SetPath"), scriptLog(noPath));
 });
 
+// Seq 295: ExportPDF / ExportEPS / ExportAllPDF are no longer deferred —
+// they wire to the seq 216 writers (vector PDF via svgToPdf, EPS via
+// svgToEps). The pure engine pins the effects; the render routing (vector
+// PDF/EPS, raster-PDF fallback with a script-log warning, per-sheet batch
+// warning) is pinned on the source, as the headless harness has no DOM to
+// drive Plotly through — the live Mac re-proof verifies the bytes end to
+// end.
+check("script: ExportPDF / ExportEPS / ExportAllPDF write vector PDF/EPS through the seq 216 writers (seq 295)", () => {
+  // ExportPDF: the current graph, default name under SetPath.
+  const pdf = runScript(scriptDoc(), 'SetPath "/tmp/out"\nGoTo G, 1\nExportPDF');
+  strictEqual(pdf.stopped, false, scriptLog(pdf));
+  deepStrictEqual(pdf.effects, [
+    { type: "export-graph", graphId: "g1", format: "pdf", dpi: 300, clear: false, path: "/tmp/out/Graph 1.pdf" },
+  ]);
+  const pdfNamed = runScript(scriptDoc(), 'SetPath "/tmp/out"\nGoTo G, 1\nExportPDF "dose.pdf", 600');
+  strictEqual(pdfNamed.stopped, false, scriptLog(pdfNamed));
+  deepStrictEqual(pdfNamed.effects, [
+    { type: "export-graph", graphId: "g1", format: "pdf", dpi: 600, clear: false, path: "/tmp/out/dose.pdf" },
+  ]);
+  // The old DEFERRED refusal is gone: without a path it asks for SetPath,
+  // not for a PDF writer.
+  const pdfNoPath = runScript(scriptDoc(), "GoTo G, 1\nExportPDF");
+  strictEqual(pdfNoPath.stopped, true);
+  ok(scriptLog(pdfNoPath).includes("SetPath"), scriptLog(pdfNoPath));
+  ok(!scriptLog(pdfNoPath).includes("PDF writer"), scriptLog(pdfNoPath));
+  const pdfBadRes = runScript(scriptDoc(), 'SetPath "/tmp/out"\nGoTo G, 1\nExportPDF "g.pdf", 200');
+  strictEqual(pdfBadRes.stopped, true);
+  ok(scriptLog(pdfBadRes).includes("200"), scriptLog(pdfBadRes));
+  const pdfNoGraph = runScript(scriptDoc(), "ExportPDF");
+  strictEqual(pdfNoGraph.stopped, true);
+  ok(scriptLog(pdfNoGraph).includes("no graph is current"), scriptLog(pdfNoGraph));
+  // ExportEPS: the current graph as vector PostScript; a resolution is
+  // meaningless for EPS and is ignored with a note, like SVG.
+  const eps = runScript(scriptDoc(), 'SetPath "/tmp/out"\nGoTo G, 1\nExportEPS');
+  strictEqual(eps.stopped, false, scriptLog(eps));
+  deepStrictEqual(eps.effects, [
+    { type: "export-graph", graphId: "g1", format: "eps", dpi: 300, clear: false, path: "/tmp/out/Graph 1.eps" },
+  ]);
+  const epsRes = runScript(scriptDoc(), 'SetPath "/tmp/out"\nGoTo G, 1\nExportEPS "g.eps", 600');
+  strictEqual(epsRes.stopped, false, scriptLog(epsRes));
+  ok(scriptLog(epsRes).includes("a resolution doesn't apply to EPS"), scriptLog(epsRes));
+  const epsNoPath = runScript(scriptDoc(), "GoTo G, 1\nExportEPS");
+  strictEqual(epsNoPath.stopped, true);
+  ok(!scriptLog(epsNoPath).includes("PostScript writer"), scriptLog(epsNoPath));
+  // ExportAllPDF: one vector PDF per graph and layout, named after the
+  // sheet (sanitised), same-named sheets de-duplicated.
+  const doc = scriptDoc();
+  doc.nodes.g2 = {
+    id: "g2",
+    type: "graph",
+    name: "Dose/Response: A*B",
+    parentId: "t1",
+    graphType: "xy-scatter",
+    graphOptions: newGraphOptions("xy-scatter"),
+  };
+  doc.nodes.f1 = { id: "f1", type: "figure", name: "Layout 1", parentId: null } as ProjectNode;
+  doc.childOrder.t1 = ["g1", "g2"];
+  doc.rootOrder = ["t1", "f1"];
+  const all = runScript(doc, 'SetPath "/tmp/out"\nExportAllPDF');
+  strictEqual(all.stopped, false, scriptLog(all));
+  deepStrictEqual(all.effects, [
+    { type: "export-graph", graphId: "g1", format: "pdf", dpi: 300, clear: false, path: "/tmp/out/Graph 1.pdf", sheetName: "Graph 1" },
+    { type: "export-graph", graphId: "g2", format: "pdf", dpi: 300, clear: false, path: "/tmp/out/Dose-Response- A-B.pdf", sheetName: "Dose/Response: A*B" },
+    { type: "export-graph", graphId: "f1", format: "pdf", dpi: 300, clear: false, path: "/tmp/out/Layout 1.pdf", sheetName: "Layout 1" },
+  ]);
+  const allFolder = runScript(doc, 'SetPath "/tmp/out"\nExportAllPDF "/tmp/batch"');
+  strictEqual(allFolder.stopped, false, scriptLog(allFolder));
+  ok(allFolder.effects.every((e) => e.type === "export-graph" && e.path.startsWith("/tmp/batch/")));
+  const allRelative = runScript(doc, 'SetPath "/tmp/out"\nExportAllPDF "batch"');
+  strictEqual(allRelative.stopped, false, scriptLog(allRelative));
+  ok(allRelative.effects.every((e) => e.type === "export-graph" && e.path.startsWith("/tmp/out/batch/")));
+  // Same-named sheets never overwrite each other's file.
+  const dupes = scriptDoc();
+  dupes.nodes.g2 = {
+    id: "g2",
+    type: "graph",
+    name: "Graph 1",
+    parentId: "t1",
+    graphType: "xy-scatter",
+    graphOptions: newGraphOptions("xy-scatter"),
+  };
+  dupes.childOrder.t1 = ["g1", "g2"];
+  const dupRun = runScript(dupes, 'SetPath "/tmp/out"\nExportAllPDF');
+  strictEqual(dupRun.stopped, false, scriptLog(dupRun));
+  deepStrictEqual(
+    dupRun.effects.map((e) => (e.type === "export-graph" ? e.path : "")),
+    ["/tmp/out/Graph 1.pdf", "/tmp/out/Graph 1 (2).pdf"],
+  );
+  // No graphs or layouts is a script error, not an empty batch; no folder
+  // and no SetPath names SetPath.
+  const bare = scriptDoc();
+  delete bare.nodes.g1;
+  bare.childOrder.t1 = [];
+  const none = runScript(bare, 'SetPath "/tmp/out"\nExportAllPDF');
+  strictEqual(none.stopped, true);
+  ok(scriptLog(none).includes("no graphs or layouts"), scriptLog(none));
+  const noFolder = runScript(doc, "ExportAllPDF");
+  strictEqual(noFolder.stopped, true);
+  ok(scriptLog(noFolder).includes("SetPath"), scriptLog(noFolder));
+  // The script-dialog help lists all three commands.
+  const help = readFileSync("src/components/script-dialog.tsx", "utf8");
+  for (const cmd of ["ExportPDF", "ExportEPS", "ExportAllPDF"]) {
+    ok(help.includes(cmd), `script-dialog help must list ${cmd}`);
+  }
+  // The render path routes PDF through the vector writer with a raster
+  // fallback, EPS through the PostScript writer, and reports whether the
+  // bytes are vector — so the dialog can warn when a PDF fell back.
+  const render = readFileSync("src/views/graphs/script-graph-export.ts", "utf8");
+  ok(render.includes("svgToPdf"), "script export must route PDF through svgToPdf");
+  ok(render.includes("svgToEps"), "script export must route EPS through svgToEps");
+  ok(render.includes("pdfEncode"), "script PDF must fall back to the raster pdfEncode when vector conversion fails");
+  ok(/instanceof VectorExportError/.test(render), "the raster fallback must trigger only on a vector-conversion failure");
+  ok(render.includes("vector:"), "renderScriptGraph must report whether its bytes are vector");
+  // The effect runner warns in the script log when a PDF fell back to
+  // raster, and names the sheet when one batch item fails — the batch
+  // continues with the other sheets.
+  const effects = readFileSync("src/lib/script-effects.ts", "utf8");
+  ok(effects.includes("raster PDF"), "a raster-fallback PDF must warn in the script log");
+  ok(effects.includes("sheetName"), "a failed batch sheet must be named in the log");
+  ok(effects.includes("batch continues"), "a failed batch sheet must not abort the batch");
+});
+
 // Mac GUI proof #1 (S1 PARTIAL): ExportTIF/BMP/Table failed live — the
 // Tauri write_file allowlist covered only hlx/prism/png/jpg/jpeg/svg, so
 // .tif/.bmp/.csv/.txt were refused ("Titer can't access …"). ExportPNG

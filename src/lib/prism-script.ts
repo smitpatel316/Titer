@@ -50,7 +50,7 @@ export interface ScriptDoc {
   projectName?: string;
 }
 
-export type ExportFormat = "png" | "jpeg" | "svg" | "tif" | "bmp";
+export type ExportFormat = "png" | "jpeg" | "svg" | "tif" | "bmp" | "pdf" | "eps";
 
 /** What the dialog does after a run, in order: rendering a graph or figure
  *  and writing it, writing a text file, saving the project, printing, or
@@ -64,6 +64,9 @@ export type ScriptEffect =
       clear: boolean;
       mode?: "rgbhi" | "gray" | "mono";
       path: string;
+      /** ExportAllPDF only: the sheet's name, so a failed batch item is
+       *  named in the log while the batch continues with the rest. */
+      sheetName?: string;
     }
   | { type: "write-text-file"; path: string; text: string }
   | { type: "save-project" }
@@ -525,6 +528,20 @@ function resolveFilePath(
 
 const csvField = (v: string) => (/[",\n]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v);
 
+/** A sheet name as a file stem: path separators, Windows-illegal and
+ *  control characters become `-`, leading/trailing dots and spaces go,
+ *  over-long stems are cut. Mirrors `sanitizeExportAllStem` in
+ *  lib/export-all.ts — the engine stays pure (no DOM, no Tauri), so it
+ *  carries its own copy; keep the two in step. */
+function sanitizeSheetStem(name: string, fallback: string): string {
+  const stem = name
+    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[.\s]+|[.\s]+$/g, "");
+  return stem ? stem.slice(0, 200) : fallback;
+}
+
 /** A table as CSV text: its column names, then its rows. */
 function tableToCsv(data: TableData): string {
   const lines = [data.columns.map(csvField).join(",")];
@@ -547,9 +564,6 @@ const DEFERRED: Record<string, string> = {
   importlink: "ImportLink links a file into the table — Titer imports are copies, there is nothing to link to",
   insertdatalink:
     "InsertDataLink links inline data into the table — Titer imports are copies, there is nothing to link to",
-  exportpdf: "ExportPDF needs a PDF writer, which the app doesn't have — export PNG, JPG, TIF or SVG instead",
-  exportallpdf: "ExportAllPDF needs a PDF writer, which the app doesn't have — export PNG, JPG, TIF or SVG instead",
-  exporteps: "ExportEPS needs a PostScript writer, which the app doesn't have — export SVG instead",
   exportemf: "ExportEMF is Windows-only in Prism",
   exportwmf: "ExportWMF is Windows-only in Prism",
   exportpcx: "ExportPCX is an obsolete format Prism itself lists for legacy files only",
@@ -1003,7 +1017,9 @@ function execCommand(st: Extract<Statement, { kind: "command" }>, ctx: Ctx) {
     case "exportjpg":
     case "exportsvg":
     case "exporttif":
-    case "exportbmp": {
+    case "exportbmp":
+    case "exportpdf":
+    case "exporteps": {
       const node = currentGraphOrFigure(ctx, line);
       const format: ExportFormat =
         lower === "exportpng"
@@ -1014,7 +1030,11 @@ function execCommand(st: Extract<Statement, { kind: "command" }>, ctx: Ctx) {
               ? "svg"
               : lower === "exporttif"
                 ? "tif"
-                : "bmp";
+                : lower === "exportbmp"
+                  ? "bmp"
+                  : lower === "exportpdf"
+                    ? "pdf"
+                    : "eps";
       const ext = format === "jpeg" ? "jpg" : format;
       const dpi = optInt(line, args[1], "the resolution", 300);
       if (![100, 300, 600, 1200].includes(dpi))
@@ -1036,9 +1056,15 @@ function execCommand(st: Extract<Statement, { kind: "command" }>, ctx: Ctx) {
         else err(line, `unexpected argument "${extra}" for ${name}`);
       }
       if (format === "svg" && args[1] !== undefined) log(ctx, "a resolution doesn't apply to SVG — ignored.");
+      if (format === "eps" && args[1] !== undefined) log(ctx, "a resolution doesn't apply to EPS — ignored.");
       if (format === "jpeg" && clear) {
         clear = false;
         log(ctx, "CLEAR: JPEG has no transparency — exported on white.");
+      }
+      // PDF and EPS are drawn on white too (no transparency in either).
+      if ((format === "pdf" || format === "eps") && clear) {
+        clear = false;
+        log(ctx, `CLEAR: ${format === "pdf" ? "PDF" : "EPS"} has no transparency — exported on white.`);
       }
       if (format === "tif" && mode === undefined) {
         mode = "rgbhi";
@@ -1057,7 +1083,9 @@ function execCommand(st: Extract<Statement, { kind: "command" }>, ctx: Ctx) {
               width: node.graphOptions?.width ?? DEFAULT_GRAPH_OPTIONS.width,
               height: node.graphOptions?.height ?? DEFAULT_GRAPH_OPTIONS.height,
             };
-      if (format !== "svg") {
+      // Vector formats are DPI-less (drawn at 96 DPI): no size cap. A
+      // PDF's resolution only matters if the graph falls back to raster.
+      if (format !== "svg" && format !== "pdf" && format !== "eps") {
         const largest = largestAt(size96, dpi);
         if (largest.width < size96.width)
           err(
@@ -1065,7 +1093,58 @@ function execCommand(st: Extract<Statement, { kind: "command" }>, ctx: Ctx) {
             `at ${dpi} DPI, the largest graph Titer exports is ${largest.width} × ${largest.height} px — choose a lower resolution, or make the graph smaller`,
           );
       }
-      ctx.effects.push({ type: "export-graph", graphId: node.id, format, dpi, clear, mode, path });
+      ctx.effects.push({
+        type: "export-graph",
+        graphId: node.id,
+        format,
+        dpi,
+        clear,
+        ...(mode === undefined ? {} : { mode }),
+        path,
+      });
+      return;
+    }
+    case "exportallpdf": {
+      // Every graph and layout in the project, one vector PDF each, named
+      // after the sheet — a folder argument, or SetPath, is where they
+      // land. Each sheet is its own effect, so a sheet that fails to
+      // render warns in the log and the batch continues with the rest.
+      const folderArg = args[0];
+      if (args.length > 1) err(line, `unexpected argument "${args[1]}" for ${name}`);
+      let folder = folderArg ?? ctx.path;
+      if (folderArg !== undefined && !folder.startsWith("/")) {
+        if (!ctx.path)
+          err(
+            line,
+            `ExportAllPDF's folder "${folder}" is relative and no SetPath is set — give an absolute folder, or set one with SetPath`,
+          );
+        folder = `${ctx.path.replace(/\/$/, "")}/${folder}`;
+      }
+      if (!folder)
+        err(line, `ExportAllPDF needs a folder, or a SetPath — e.g. ExportAllPDF "/Users/you/Desktop"`);
+      const sheets = sheetList(ctx.doc).filter((s) => s.kind === "graph" || s.kind === "figure");
+      if (!sheets.length) err(line, "ExportAllPDF found no graphs or layouts to export");
+      const used = new Set<string>();
+      for (const sheet of sheets) {
+        const sheetNode = ctx.doc.nodes[sheet.id]!;
+        const stem = sanitizeSheetStem(sheetNode.name, sheet.kind === "graph" ? "graph" : "figure");
+        let fileName = `${stem}.pdf`;
+        let n = 2;
+        while (used.has(fileName)) {
+          fileName = `${stem} (${n}).pdf`;
+          n++;
+        }
+        used.add(fileName);
+        ctx.effects.push({
+          type: "export-graph",
+          graphId: sheet.id,
+          format: "pdf",
+          dpi: 300,
+          clear: false,
+          path: `${folder.replace(/\/$/, "")}/${fileName}`,
+          sheetName: sheetNode.name,
+        });
+      }
       return;
     }
     case "openoutput": {

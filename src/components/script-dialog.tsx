@@ -41,6 +41,9 @@ DuplicateDataTable [CLEAR] — copy the current table (CLEAR: empty)
 CreateLayout rows, cols [, orientation, startGraph, count] — a figure from the graphs
 ExportTable ["file" | ALL] — the current table, or every table, as CSV
 ExportPNG / ExportJPG / ExportSVG / ExportTIF / ExportBMP ["file"] [resolution] [mode] [CLEAR] — the current graph or layout (TIF modes: RGBhi, GRAY, MONO; CLEAR is transparent — graphs only, figures stay on white)
+ExportPDF ["file"] [resolution] — the current graph or layout as a vector PDF (the resolution only matters if the graph falls back to a raster PDF)
+ExportEPS ["file"] — the current graph or layout as vector PostScript
+ExportAllPDF ["folder"] — every graph and layout in the project, one vector PDF each, named after the sheet (the folder defaults to SetPath; a sheet that fails warns and the batch continues)
 SetGraphTitle "title" — SetXTitle / SetYTitle / SetAxisTitle X|Y, "title"
 SetAxisLimits X|Y, min, max [, step] — ApplyColorScheme "name"
 OpenOutput ["file"] — WTitle, WVersion, WText, WDate, WCell row, col, WRow row, WCol col, WSheet — CloseOutput
@@ -93,9 +96,13 @@ export function ScriptDialog({ onSave }: { onSave: () => void }) {
       else lines.push("No changes.");
       for (const effect of result.effects) {
         try {
-          await executeEffect(effect, result.doc.nodes, onSave, closeSelector);
+          const warning = await executeEffect(effect, result.doc.nodes, onSave, closeSelector);
+          if (warning) lines.push(warning);
         } catch (err) {
-          lines.push(`Couldn't run ${effect.type}: ${err instanceof Error ? err.message : String(err)}`);
+          const reason = err instanceof Error ? err.message : String(err);
+          if (effect.type === "export-graph" && effect.sheetName)
+            lines.push(`Couldn't export “${effect.sheetName}”: ${reason} — the batch continues with the other sheets.`);
+          else lines.push(`Couldn't run ${effect.type}: ${reason}`);
         }
       }
       setLog(lines);
