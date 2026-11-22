@@ -33,6 +33,7 @@ import { clearRecentAnalyses, loadRecentAnalyses, type RecentAnalysisEntry } fro
 import { AnalysisWizard } from "../views/analyses/analysis-wizard";
 import { WandDialog } from "./wand-dialog";
 import { SimulateDataDialog } from "./simulate-data-dialog";
+import { SampleSizePowerDialog } from "./sample-size-power-dialog";
 import { CloneGraphDialog } from "./clone-graph-dialog";
 import { RegenerateGraphsDialog } from "./regenerate-graphs-dialog";
 import { ScriptDialog } from "./script-dialog";
@@ -219,6 +220,8 @@ export function AppShell() {
       <WandDialog />
 
       <SimulateDataDialog />
+
+      <SampleSizePowerDialog />
 
       <CloneGraphDialog />
 

@@ -26,6 +26,7 @@ import {
   type SimulationSpec,
 } from "../stats/types";
 import { simulateTableData, validateSimulationSpec } from "../stats/simulation/simulate";
+import { solveSampleSizePower, validateSampleSizeParams } from "../stats/sample-size-power";
 import { repointCandidates } from "../lib/repoint-analysis";
 import { parseProjectText, validateAnalysisParams } from "../lib/project-file";
 import { fileName, fileTitle } from "../lib/paths";
@@ -2288,6 +2289,53 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       return executeExportTableData(job, toExportDeps(deps));
     case "copy-graph-image":
       return executeCopyGraphImage(job, toExportDeps(deps));
+    case "sample-size-power": {
+      // Seq 207: the sample-size/power calculator is pure math — no table,
+      // no project content — so the job needs no store deps at all: it
+      // validates the args (the frontend validator is the authority, as
+      // with simulate-data) and runs the same engine the dialog uses, so
+      // the MCP tool returns the identical numbers as the UI.
+      const args = (job.args ?? {}) as Record<string, unknown>;
+      const params = validateSampleSizeParams({
+        test: args.test,
+        solveFor: args.solve_for ?? args.solveFor,
+        alpha: args.alpha,
+        alternative: args.alternative,
+        effect: args.effect,
+        n: args.n,
+        power: args.power,
+        groups: args.groups,
+        chiSquareDf: args.chi_square_df ?? args.chiSquareDf,
+        categories: args.categories,
+        sdRatio: args.sd_ratio ?? args.sdRatio,
+        p0: args.p0,
+        p1: args.p1,
+      });
+      const r = solveSampleSizePower(params);
+      return {
+        result: {
+          test: r.test,
+          solve_for: r.solveFor,
+          alpha: r.alpha,
+          alternative: r.alternative,
+          effect: r.effect,
+          n: r.n,
+          n_rounded: r.nRounded,
+          power: r.power,
+          power_at_rounded_n: r.powerAtRoundedN,
+          n_label: r.nLabel,
+          effect_label: r.effectLabel,
+          groups: r.groups,
+          chi_square_df: r.chiSquareDf,
+          sd_ratio: r.sdRatio,
+          df: r.df,
+          curve: r.curve,
+          solved_n: r.solvedN,
+          solved_power: r.solvedPower,
+          plain_language: r.plainLanguage,
+        },
+      };
+    }
     default:
       throw new Error(`Unknown job action “${job.action}”.`);
   }

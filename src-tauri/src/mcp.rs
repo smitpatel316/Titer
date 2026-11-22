@@ -2,9 +2,9 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 74 tools: 20 read-only (list/read/job/
+// Settings → AI connections. 75 tools: 20 read-only (list/read/job/
 // activity/cloud reads + feedback + the three 1.7.4 discovery tools + the 1.8 backup list + refresh-linked-data)
-// and 54 mutating (incl. the 1.8.2 graph-regenerate pair), via the L0 Rust→frontend dispatch + job queue —
+// and 55 mutating (incl. the 1.8.2 graph-regenerate pair + the 1.8.3 sample-size-power tool), via the L0 Rust→frontend dispatch + job queue —
 // run-analysis, build-graph, export and cloud tools included (Phase 2).
 //
 // Why rmcp, not tauri-plugin-mcp-commands — see the lane log
@@ -43,7 +43,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 74 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 75 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -1397,6 +1397,7 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
             "titer_clone_analysis",
             "titer_repoint_analysis",
             "titer_simulate_data",
+            "titer_sample_size_power",
             "titer_apply_method",
             "titer_apply_wand",
             "titer_read_job",
@@ -2188,7 +2189,7 @@ async fn auth_middleware(
 /// the corruption hits every tool that returns non-ASCII text, not just
 /// transform-concentrations. Appending `; charset=utf-8` here, the one
 /// shared path every MCP response flows through, fixes the echo for all
-/// 74 tools. Returns the new header value, or `None` when the type is
+/// 75 tools. Returns the new header value, or `None` when the type is
 /// already labelled or is not one of the textual MCP response types.
 fn utf8_charset(content_type: &str) -> Option<String> {
     let lower = content_type.to_ascii_lowercase();
@@ -3499,6 +3500,55 @@ pub struct SimulateDataArgs {
     /// Exponential rate (mean = 1 / rate).
     #[serde(default)]
     pub rate: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SampleSizePowerArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The test: one-sample-t, two-sample-t, welch-t, paired-t,
+    /// one-way-anova, pearson-correlation, one-proportion or chi-square.
+    pub test: String,
+    /// What to solve for: n, power or effect.
+    pub solve_for: String,
+    /// Significance level (default 0.05).
+    #[serde(default)]
+    pub alpha: Option<f64>,
+    /// two-sided (default) or one-sided. One-way ANOVA and chi-square are
+    /// upper-tail tests, so the alternative does not change their power.
+    #[serde(default)]
+    pub alternative: Option<String>,
+    /// Effect size: d (t tests), f (ANOVA), r (correlation), h (one
+    /// proportion) or w (chi-square). Omit when solving for the effect —
+    /// or pass p0/p1 instead for one proportion.
+    #[serde(default)]
+    pub effect: Option<f64>,
+    /// Sample size: per-group n (t tests, ANOVA), n (correlation, one
+    /// proportion), total N (chi-square).
+    #[serde(default)]
+    pub n: Option<f64>,
+    /// Target power (0-1).
+    #[serde(default)]
+    pub power: Option<f64>,
+    /// One-way ANOVA group count k (whole number, at least 2).
+    #[serde(default)]
+    pub groups: Option<f64>,
+    /// Chi-square degrees of freedom (1 for a 2x2 table).
+    #[serde(default)]
+    pub chi_square_df: Option<f64>,
+    /// Goodness-of-fit categories (df = categories - 1).
+    #[serde(default)]
+    pub categories: Option<f64>,
+    /// Welch SD ratio (group 1 / group 2; default 1).
+    #[serde(default)]
+    pub sd_ratio: Option<f64>,
+    /// One-proportion null proportion (with p1, derives h).
+    #[serde(default)]
+    pub p0: Option<f64>,
+    /// One-proportion alternative proportion (with p0, derives h).
+    #[serde(default)]
+    pub p1: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -7017,6 +7067,114 @@ impl TiterMcpServer {
         }
     }
 
+    /// Sample size & power (Analysis ▸ Sample size & power…): how many
+    /// subjects a test needs, how much power a sample size gives, or the
+    /// smallest effect it can detect — the R pwr package's job, computed
+    /// locally in the frontend (noncentral t / F / chi-square CDFs, no
+    /// server, no data table). test is one-sample-t, two-sample-t,
+    /// welch-t, paired-t, one-way-anova, pearson-correlation,
+    /// one-proportion or chi-square; solve_for is n, power or effect.
+    /// n is per-group n for the t tests and ANOVA, plain n for
+    /// correlation / one proportion, total N for chi-square. effect is d
+    /// (t tests), f (ANOVA), r (correlation), h (one proportion) or w
+    /// (chi-square); a one-proportion effect can be given as p0/p1
+    /// instead, from which h is derived. groups is the ANOVA group count
+    /// k; chi_square_df is 1 for a 2x2 table, or categories gives the
+    /// goodness-of-fit df (categories - 1); sd_ratio is the Welch SD
+    /// ratio. alpha defaults to 0.05, alternative to two-sided (ANOVA and
+    /// chi-square are upper-tail tests, so it does not change their
+    /// power). The answer is the exact n (as R pwr reports it) plus its
+    /// rounded-up whole number, the power curve (power vs n, through the
+    /// solved point) and the plain-language line — the same numbers the
+    /// dialog returns, from the same engine.
+    #[tool(
+        name = "titer_sample_size_power",
+        description = "Sample size & power: how many subjects a test needs, how much power a sample size gives, or the smallest effect it can detect (the R pwr package's job, computed locally, no data table). test is one-sample-t, two-sample-t, welch-t, paired-t, one-way-anova, pearson-correlation, one-proportion or chi-square; solve_for is n, power or effect. n is per-group n for the t tests and ANOVA, plain n for correlation / one proportion, total N for chi-square. effect is d (t tests), f (ANOVA), r (correlation), h (one proportion) or w (chi-square); a one-proportion effect can be given as p0/p1 instead. groups is the ANOVA group count k; chi_square_df is 1 for a 2x2 table, or categories gives the goodness-of-fit df; sd_ratio is the Welch SD ratio. alpha defaults to 0.05, alternative to two-sided.",
+        annotations(
+            title = "Sample size & power",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn sample_size_power(
+        &self,
+        Parameters(args): Parameters<SampleSizePowerArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        const TESTS: &[&str] = &[
+            "one-sample-t",
+            "two-sample-t",
+            "welch-t",
+            "paired-t",
+            "one-way-anova",
+            "pearson-correlation",
+            "one-proportion",
+            "chi-square",
+        ];
+        let call_args = serde_json::json!({
+            "project_id": args.project_id,
+            "test": args.test,
+            "solve_for": args.solve_for,
+            "alpha": args.alpha,
+            "alternative": args.alternative,
+            "effect": args.effect,
+            "n": args.n,
+            "power": args.power,
+            "groups": args.groups,
+            "chi_square_df": args.chi_square_df,
+            "categories": args.categories,
+            "sd_ratio": args.sd_ratio,
+            "p0": args.p0,
+            "p1": args.p1,
+        });
+        let result: Result<serde_json::Value, String> = async {
+            if !TESTS.contains(&args.test.as_str()) {
+                return Err(format!("Unknown sample-size test “{}”. The tests are {}.", args.test, TESTS.join(", ")));
+            }
+            if !["n", "power", "effect"].contains(&args.solve_for.as_str()) {
+                return Err(format!("Unknown solve_for “{}” — solve for n, power or effect.", args.solve_for));
+            }
+            if let Some(alternative) = &args.alternative {
+                if alternative != "two-sided" && alternative != "one-sided" {
+                    return Err(format!("Unknown alternative “{alternative}” — two-sided or one-sided."));
+                }
+            }
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            self.run_table_job(
+                &project_id,
+                "sample-size-power",
+                serde_json::json!({
+                    "test": args.test,
+                    "solve_for": args.solve_for,
+                    "alpha": args.alpha,
+                    "alternative": args.alternative,
+                    "effect": args.effect,
+                    "n": args.n,
+                    "power": args.power,
+                    "groups": args.groups,
+                    "chi_square_df": args.chi_square_df,
+                    "categories": args.categories,
+                    "sd_ratio": args.sd_ratio,
+                    "p0": args.p0,
+                    "p1": args.p1,
+                }),
+            )
+            .await
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_sample_size_power", call_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_sample_size_power", call_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
     /// Apply a .pzm method file's analyses + graphs to a table (Analysis ▸
     /// Apply Method…). Only what the table offers is applied; the rest is
     /// reported under skipped with its reason, and a graph link to an
@@ -8267,8 +8425,8 @@ impl TiterMcpServer {
         // Inspector 2.13.0 discards tools whose outputSchema has no `type`
         // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
         // returns, so `tools/list` prints `{"tools": []}` even though the
-        // server returns all 74. Every tool returns a JSON object, so stamp
-        // `type: "object"` on all 74 output schemas here — the single choke
+        // server returns all 75. Every tool returns a JSON object, so stamp
+        // `type: "object"` on all 75 output schemas here — the single choke
         // point — instead of touching each tool. `Arc::make_mut`
         // clone-on-writes: rmcp caches the `Value` schema in a thread-local
         // cache shared by all tools, so the cached Arc must never be
@@ -8606,10 +8764,10 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes up to 74 tools, gated by the allowlist in Settings → AI Connections \
+                It exposes up to 75 tools, gated by the allowlist in Settings → AI Connections \
                 (contract §12): by default only the 6 read tools below are enabled, and the user \
                 can enable more groups there — a tool that is not listed cannot be called. \
-                20 of the 74 are read-only and 54 change the open project. \
+                20 of the 75 are read-only and 55 change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_project_summary (the same discovery, as counts plus ids and names), \
                 titer_search (find a node by name), \
@@ -10669,7 +10827,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 74 tools, so it enables every group first.
+        // this test drives all 75 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -10722,8 +10880,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            74,
-            "six read tools + four read-more tools + three discovery tools + seven project tools + ten table tools + eleven analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + six export tools + nine cloud tools + two destructive tools: {names:?}"
+            75,
+            "six read tools + four read-more tools + three discovery tools + seven project tools + ten table tools + twelve analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + six export tools + nine cloud tools + two destructive tools: {names:?}"
         );
         for name in ["titer_list_backups"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -10805,7 +10963,13 @@ mod tests {
         ] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
-        for name in ["titer_simulate_data", "titer_apply_method", "titer_apply_wand", "titer_run_script"] {
+        for name in [
+            "titer_simulate_data",
+            "titer_sample_size_power",
+            "titer_apply_method",
+            "titer_apply_wand",
+            "titer_run_script",
+        ] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
         for name in ["titer_export_graph"] {
@@ -11923,7 +12087,7 @@ mod tests {
 
     #[test]
     fn allowlist_groups_cover_all_tools_once() {
-        // The inventory pin: every tool in exactly one group, 74 total.
+        // The inventory pin: every tool in exactly one group, 75 total.
         // A lane that adds a tool must assign it a group here, or this
         // fails — an ungrouped tool would otherwise be silently hidden.
         // The count alone did not catch that (four tools shipped ungrouped
@@ -11931,7 +12095,7 @@ mod tests {
         // the part that actually catches it.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 74, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 75, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
@@ -12056,7 +12220,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 74, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 75, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema
