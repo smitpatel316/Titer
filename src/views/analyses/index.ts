@@ -15,7 +15,9 @@ export const analysisLabel = (value: AnalysisPickerValue) =>
       ? "Compare more than two groups"
       : value === "interpolate"
         ? "Interpolate a standard curve"
-        : ANALYSES[value].label,
+        : value === "transform"
+          ? "Transform or normalize"
+          : ANALYSES[value].label,
   );
 
 const optionsFor = (order: AnalysisPickerValue[]): SelectorOption<AnalysisPickerValue>[] =>
@@ -27,7 +29,8 @@ const optionsFor = (order: AnalysisPickerValue[]): SelectorOption<AnalysisPicker
  *  logical order rather than sorted by label. ANOVA/Kruskal-Wallis and Repeated-measures
  *  ANOVA/Friedman aren't listed individually — Prism-style, one meta entry cascades to whichever
  *  the wizard's Paired?/Gaussian? answers resolve to. Shapiro-Wilk is its own entry, and is
- *  offered as "Not sure?" on every Gaussian? question too (see `normality-check.ts`). */
+ *  offered as "Not sure?" on every Gaussian? question too (see `normality-check.ts`). Transform
+ *  or Normalize makes a table computed from this one (lib/transform.ts), not an analysis. */
 export const ANALYSIS_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<AnalysisPickerValue>[]> = {
   column: optionsFor([
     "descriptive-statistics",
@@ -45,7 +48,12 @@ export const ANALYSIS_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<Analysi
     "one-sample-t",
     "shapiro-wilk",
     "kolmogorov-smirnov",
+    "one-sample-ks",
+    "chi-square-gof",
+    "binomial-test",
     "outliers",
+    "p-value-stack",
+    "transform",
     "monte-carlo",
     "bland-altman",
     "roc-curve",
@@ -54,6 +62,7 @@ export const ANALYSIS_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<Analysi
   xy: optionsFor([
     "correlation",
     "linear-regression",
+    "compare-slopes",
     "deming-regression",
     "simple-logistic-regression",
     "area-under-curve",
@@ -76,13 +85,24 @@ export const ANALYSIS_OPTIONS_BY_TABLE: Record<TableType, SelectorOption<Analysi
     "bland-altman",
     "interpolate",
     "roc-curve",
+    "transform",
     "plot-function",
   ]),
-  grouped: optionsFor(["two-way-anova", "mixed-effects", "three-way-anova", "multiple-t-tests", "row-means-totals", "plot-function"]),
+  grouped: optionsFor(["two-way-anova", "mixed-effects", "three-way-anova", "multiple-t-tests", "row-means-totals", "transform", "plot-function"]),
   nested: optionsFor(["nested-t-test", "nested-anova", "plot-function"]),
-  multiple: optionsFor(["descriptive-statistics", "shapiro-wilk", "correlation-matrix", "linear-regression", "multiple-regression", "principal-component-analysis", "k-means", "outliers", "multiple-logistic-regression", "poisson-regression", "cox-proportional-hazards", "extract-rearrange", "plot-function"]),
+  multiple: optionsFor(["descriptive-statistics", "shapiro-wilk", "correlation-matrix", "linear-regression", "compare-two-groups", "multiple-regression", "multifactor-anova", "nonlinear-regression", "principal-component-analysis", "k-means", "hierarchical-clustering", "outliers", "multiple-logistic-regression", "poisson-regression", "cox-proportional-hazards", "survival", "extract-rearrange", "select-transform", "transform", "plot-function"]),
   survival: optionsFor(["survival", "cox", "plot-function"]),
-  contingency: [...optionsFor(["chi-square", "plot-function"]), { value: "mcnemar", label: "McNemar's test (paired proportions)" }],
+  contingency: [...optionsFor(["chi-square", "fraction-of-total", "plot-function"]), { value: "mcnemar", label: "McNemar's test (paired proportions)" }],
+  // Each row is a mutually exclusive category, each column a data set: the
+  // analyses are the ones Prism offers on a Parts of Whole table. Fraction
+  // of Total is its home analysis (each value as a share of its column, row
+  // or grand total); Transform or Normalize is Prism's "Transform,
+  // Normalize..." group, Fraction of Total included. "Compare observed
+  // distribution with expected" — the chi-square goodness-of-fit test, or
+  // the binomial test for two categories — is Prism's "Parts of whole
+  // analyses" entry and belongs here too, but it is seq 195's analysis to
+  // build: when it lands, its entry goes in this list.
+  "parts-of-whole": optionsFor(["fraction-of-total", "transform", "plot-function"]),
 };
 
 /** Whether the table has the ≥ 2 row bands a three-way ANOVA needs. */
@@ -93,12 +113,13 @@ export function hasRowGroups(data: TableData | undefined): boolean {
 /** The picker/menu options for a table: the three-way ANOVA is offered only
  *  when the table has ≥ 2 row bands — without them it would be a dead test.
  *  Likewise the nested tests are offered only for their group count (t test
- *  for exactly 2 groups with data, ANOVA for 3+) — the runners validate
- *  either way, so a stale entry point still gets a clear error. */
+ *  for 2+ groups with data — the wizard asks which two when there are more,
+ *  seq 246 — ANOVA for 3+) — the runners validate either way, so a stale
+ *  entry point still gets a clear error. */
 export function analysisOptionsForTable(tableType: TableType, data?: TableData): SelectorOption<AnalysisPickerValue>[] {
   return ANALYSIS_OPTIONS_BY_TABLE[tableType].filter((o) => {
     if (o.value === "three-way-anova") return hasRowGroups(data);
-    if (o.value === "nested-t-test") return data === undefined || countDataGroups(data) === 2;
+    if (o.value === "nested-t-test") return data === undefined || countDataGroups(data) >= 2;
     if (o.value === "nested-anova") return data === undefined || countDataGroups(data) >= 3;
     return true;
   });
@@ -123,7 +144,10 @@ export const META_ANALYSES: Record<string, AnalysisType[]> = {
  *  never run via MCP (BUG-14). The picker/menu themselves keep offering
  *  the meta entries — only this expansion changes. */
 export function analysisTypesOfferedForTable(tableType: TableType, data?: TableData): AnalysisType[] {
-  return analysisOptionsForTable(tableType, data).flatMap((o) => META_ANALYSES[o.value] ?? [o.value as AnalysisType]);
+  return analysisOptionsForTable(tableType, data).flatMap((o) =>
+    // "transform" makes a computed table, not an analysis: it never reaches the MCP gate.
+    o.value === "transform" ? [] : (META_ANALYSES[o.value] ?? [o.value as AnalysisType]),
+  );
 }
 
 /** The key the native Analysis menu depends on for its data-dependent items:

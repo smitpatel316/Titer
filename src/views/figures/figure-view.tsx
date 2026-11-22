@@ -11,9 +11,11 @@ import {
   DEFAULT_FIGURE_DPI,
   DEFAULT_FIGURE_SIZE,
   DEFAULT_LABEL_STYLE,
+  FIGURE_IMAGE_MAX_DATA_URL,
   FIGURE_MAX_COLS,
   FIGURE_RESOLUTIONS,
   LABEL_POSITIONS,
+  validFigureImageData,
 } from "../../lib/figure";
 import {
   assignLabels,
@@ -27,16 +29,35 @@ import {
   validateFigureSize,
 } from "../../lib/figure";
 import { useProjectStore } from "../../store/use-project-store";
+import { useZoom, ZOOM_LIMITS } from "../../store/use-zoom";
 import { fitZoom } from "../../store/use-layout";
 import { GRAPHS } from "../graphs";
-import { DEFAULT_GRAPH_OPTIONS, type FigurePanel, type ProjectNode, type Resolution } from "../../store/types";
+import { DEFAULT_GRAPH_OPTIONS, clamp, type FigurePanel, type ProjectNode, type Resolution } from "../../store/types";
 import { PanelPlot } from "./panel-plot";
+import { DrawingObjectsLayer } from "../../components/drawing-objects";
 import { copyFigureImage, saveFigureImage, sendFigureToOffice } from "./figure-export";
 import type { OfficeTarget } from "../../lib/office-export";
-import { EXPORT_FORMATS, saveGraphImage, type ExportFormat } from "../graphs/graph-export";
+import { isMacOs } from "../../lib/channel";
+import { EXPORT_FORMATS, EXPORT_PRESETS, exportPreset, saveGraphImage, type ExportFormat, type ExportPreset } from "../graphs/graph-export";
+import { COLOR_MODES, type ColorMode } from "../../lib/vector-export";
 
 /** Screen pixels per inch in the editor (the figure keeps its true aspect ratio). */
 const SCREEN_PX_PER_IN = 72;
+
+/** A panel's key in the editor: its graph's id, or its kind + cell for a
+ *  panel with no graph (blank / image) — those remount when they move, which
+ *  costs nothing: they hold no Plotly element. */
+const panelKey = (panel: FigurePanel): string =>
+  (panel.kind ?? "graph") === "graph" ? panel.graphId : `${panel.kind}-${panel.row}-${panel.col}`;
+
+/** A file read as a data URL (for an image panel's embedded picture). */
+const readAsDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("Couldn't read the image file."));
+    reader.readAsDataURL(file);
+  });
 
 export function FigureView({ node }: { node: ProjectNode }) {
   const { nodes, updateFigure, setActiveNode } = useProjectStore();
@@ -46,60 +67,136 @@ export function FigureView({ node }: { node: ProjectNode }) {
   const labelStyle = node.labelStyle ?? { ...DEFAULT_LABEL_STYLE };
   const figureTitle = node.figureTitle ?? "";
   const sharedLegend = node.sharedLegend ?? "none";
+  const figureBackground = node.figureBackground ?? "#ffffff";
   const dpi = node.dpi ?? DEFAULT_FIGURE_DPI;
 
   const set = (patch: Parameters<typeof updateFigure>[1]) => updateFigure(node.id, patch);
   const setPanels = (next: FigurePanel[]) => set({ panels: next });
 
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
-  const selected = panels.find((p) => p.graphId === selectedId) ?? null;
+  const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
+  const selected = panels.find((p) => panelKey(p) === selectedKey) ?? null;
   const [addGraphId, setAddGraphId] = React.useState("");
   const [exportFormat, setExportFormat] = React.useState<ExportFormat>("png");
+  const [exportPresetChoice, setExportPresetChoice] = React.useState<"custom" | ExportPreset>("custom");
+  const [colorMode, setColorMode] = React.useState<ColorMode>("color");
   const [exporting, setExporting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [sizeError, setSizeError] = React.useState<string | null>(null);
   // The drawn panel elements, for per-panel export (the graph's own export path).
   const plottedRef = React.useRef(new Map<string, HTMLElement>());
-  // The view-only fit, as in the graph view: the figure is scaled to the visible
-  // pane (the inspector is a flex sibling, so the pane narrows when it opens).
+  // The view-only zoom, shared with the View ▸ Zoom menu (seq 239): the
+  // figure is scaled to the visible pane until the user zooms by hand
+  // (Ctrl+scroll), which sets an explicit zoom; Reset returns to the fit.
   // The saved figure size never changes — fitting only scales the view.
   const canvasRef = React.useRef<HTMLDivElement>(null);
-  const [fit, setFit] = React.useState(1);
+  const { zoom, explicit: explicitZoom, setFit, setExplicit: setExplicitZoom } = useZoom(node.id);
+  const zoomRef = React.useRef(zoom);
+  zoomRef.current = zoom;
+
+  // A frozen figure (seq 237) draws each panel from its snapshot: the
+  // panels read their parent tables' data, so hand them the snapshot
+  // tables instead of the live ones. Exports still use the live data
+  // (the exporters render from the project, not the view).
+  const figureNodes = React.useMemo(() => {
+    if (!node.frozen || !node.frozenDataByGraph) return nodes;
+    const next = { ...nodes };
+    for (const [graphId, data] of Object.entries(node.frozenDataByGraph)) {
+      const graph = nodes[graphId];
+      const parent = graph?.parentId ? nodes[graph.parentId] : undefined;
+      if (parent) next[parent.id] = { ...parent, data };
+    }
+    return next;
+  }, [nodes, node.frozen, node.frozenDataByGraph]);
+
+  // Ctrl+scroll zooms by hand, as in the graph view (seq 239).
+  React.useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      setExplicitZoom(clamp(zoomRef.current * (1 - e.deltaY * 0.01), ZOOM_LIMITS));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   const graphs = Object.values(nodes).filter((n) => n.type === "graph");
   const available = graphs.filter((g) => !panels.some((p) => p.graphId === g.id));
-  const missing = missingPanels(panels, nodes);
-  const legend = sharedLegendCheck(panels, nodes);
+  const missing = missingPanels(panels, figureNodes);
+  const legend = sharedLegendCheck(panels, figureNodes);
   const dupes = duplicateLabels(panels);
+
+  // Places a panel in the first free cell, growing a row when the grid is
+  // full rather than stacking a panel on top of another.
+  const insertPanel = (panel: FigurePanel) => {
+    const cell = firstFreeCell(panels, grid);
+    const nextGrid = cell ? grid : { rows: grid.rows + 1, cols: grid.cols };
+    const placed: FigurePanel = {
+      ...panel,
+      row: cell ? cell.row : grid.rows,
+      col: cell ? cell.col : 0,
+    };
+    const next = assignLabels([...panels, placed]);
+    set({ panels: next, grid: nextGrid });
+    setSelectedKey(panelKey(placed));
+  };
 
   const addPanel = (graphId: string) => {
     const graph = nodes[graphId];
     if (!graph) return;
-    const cell = firstFreeCell(panels, grid);
-    const row = cell?.row ?? grid.rows - 1;
-    const col = cell?.col ?? grid.cols - 1;
-    // No free cell: grow a row (up to the grid's rows, else a new row) rather
-    // than stacking a panel on top of another.
-    const nextGrid = cell ? grid : { rows: grid.rows + 1, cols: grid.cols };
-    const panel: FigurePanel = {
+    insertPanel({
       graphId,
       graphName: graph.name,
       label: "",
       title: "",
-      row: cell ? row : grid.rows,
-      col: cell ? col : 0,
+      row: 0,
+      col: 0,
       rowSpan: 1,
       colSpan: 1,
-    };
-    const next = assignLabels([...panels, panel]);
-    set({ panels: next, grid: nextGrid });
-    setSelectedId(graphId);
+    });
     setAddGraphId("");
   };
 
-  const removePanel = (graphId: string) => {
-    setPanels(panels.filter((p) => p.graphId !== graphId));
-    if (selectedId === graphId) setSelectedId(null);
+  const addBlankPanel = () => {
+    setError(null);
+    insertPanel({ graphId: "", kind: "blank", label: "", title: "", row: 0, col: 0, rowSpan: 1, colSpan: 1 });
+  };
+
+  const addImagePanel = async (file: File) => {
+    setError(null);
+    let dataUrl: string;
+    try {
+      dataUrl = await readAsDataUrl(file);
+    } catch {
+      setError("Couldn't read the image file.");
+      return;
+    }
+    if (!validFigureImageData(dataUrl)) {
+      setError(
+        dataUrl.length > FIGURE_IMAGE_MAX_DATA_URL
+          ? `That image is too large to embed (at most ${FIGURE_IMAGE_MAX_DATA_URL.toLocaleString()} characters as a data URL). Use a smaller image.`
+          : "That file isn't an image Titer can embed.",
+      );
+      return;
+    }
+    insertPanel({
+      graphId: "",
+      kind: "image",
+      imageData: dataUrl,
+      imageName: file.name,
+      label: "",
+      title: "",
+      row: 0,
+      col: 0,
+      rowSpan: 1,
+      colSpan: 1,
+    });
+  };
+
+  const removePanel = (panel: FigurePanel) => {
+    setPanels(panels.filter((p) => p !== panel));
+    if (selectedKey === panelKey(panel)) setSelectedKey(null);
   };
 
   const movePanel = (panel: FigurePanel, dr: number, dc: number) => {
@@ -160,7 +257,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
   const onExport = async () => {
     setExporting(true);
     try {
-      await saveFigureImage(node, nodes, exportFormat, dpi, node.name);
+      await saveFigureImage(node, nodes, exportFormat, dpi, node.name, colorMode);
     } finally {
       setExporting(false);
     }
@@ -184,11 +281,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
   React.useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
-    const update = () =>
-      setFit((prev) => {
-        const next = fitZoom(el.clientWidth, el.clientHeight, widthPx, heightPx);
-        return next === prev ? prev : next;
-      });
+    const update = () => setFit(fitZoom(el.clientWidth, el.clientHeight, widthPx, heightPx));
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
@@ -211,9 +304,32 @@ export function FigureView({ node }: { node: ProjectNode }) {
           <Button disabled={!addGraphId} onClick={() => addGraphId && addPanel(addGraphId)}>
             Add Panel
           </Button>
+          <div className="flex gap-2">
+            <Button variant="ghost" className="flex-1" onClick={addBlankPanel}>
+              Add Blank Panel
+            </Button>
+            <label className="flex-1">
+              <span className="flex cursor-pointer items-center justify-center rounded border border-separator px-2 py-1 text-regular hover:bg-hover">
+                Add Image Panel…
+              </span>
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                aria-label="Add an image panel"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) void addImagePanel(file);
+                }}
+              />
+            </label>
+          </div>
           <p className="text-small text-secondary">
-            A graph can appear in a figure only once — to use it twice, duplicate the graph first.
+            A graph can appear in a figure only once — to use it twice, duplicate the graph first. A blank panel
+            is an empty cell for layout; an image panel embeds a picture (a gel, blot or photo) beside the graphs.
           </p>
+          {error && <p className="text-small text-red-600">{error}</p>}
           {selected && (
             <div className="flex flex-col gap-2 border-t border-separator pt-2">
               <Field label="Label">
@@ -255,19 +371,20 @@ export function FigureView({ node }: { node: ProjectNode }) {
                 <Button onClick={() => movePanel(selected, 0, 1)}>→</Button>
                 <Button onClick={() => movePanel(selected, -1, 0)}>↑</Button>
                 <Button onClick={() => movePanel(selected, 1, 0)}>↓</Button>
-                <Button
-                  onClick={() => {
-                    const graph = nodes[selected.graphId];
-                    if (graph) setActiveNode(graph.id);
-                  }}
-                >
-                  Open Graph
-                </Button>
-                <Button variant="ghost" onClick={() => removePanel(selected.graphId)}>
+                {(selected.kind ?? "graph") === "graph" && (
+                  <Button
+                    onClick={() => {
+                      const graph = nodes[selected.graphId];
+                      if (graph) setActiveNode(graph.id);
+                    }}
+                  >
+                    Open Graph
+                  </Button>
+                )}
+                <Button variant="ghost" onClick={() => removePanel(selected)}>
                   Remove
                 </Button>
               </div>
-              {error && <p className="text-small text-red-600">{error}</p>}
             </div>
           )}
         </div>
@@ -303,6 +420,25 @@ export function FigureView({ node }: { node: ProjectNode }) {
               onChange={(e) => set({ figureTitle: e.target.value })}
             />
           </Field>
+          <Field label="Background color">
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={figureBackground}
+                aria-label="Figure background color"
+                onChange={(e) => set({ figureBackground: e.target.value })}
+              />
+              <span className="text-small text-secondary">{figureBackground}</span>
+              {node.figureBackground && (
+                <Button variant="ghost" onClick={() => set({ figureBackground: undefined })}>
+                  White
+                </Button>
+              )}
+            </div>
+          </Field>
+          <p className="text-small text-secondary">
+            Blank cells and the margins around panels show the background color, in the editor and on export.
+          </p>
         </div>
       </Section>
       <Section title="Labels">
@@ -345,25 +481,70 @@ export function FigureView({ node }: { node: ProjectNode }) {
       </Section>
       <Section title="Export">
         <div className="flex flex-col gap-2">
-          <RadioList
-            value={exportFormat}
-            onChange={setExportFormat}
-            options={EXPORT_FORMATS}
-          />
-          <Field label="Resolution">
+          <Field label="Preset">
             <Segmented
-              value={dpi}
-              onChange={(v) => set({ dpi: v })}
-              options={FIGURE_RESOLUTIONS.map((r) => ({ value: r as Resolution, label: `${r} DPI` }))}
+              value={exportPresetChoice}
+              onChange={(v) => {
+                setExportPresetChoice(v);
+                if (v !== "custom") {
+                  const picked = exportPreset(v)!;
+                  setExportFormat(picked.format);
+                  set({ dpi: picked.dpi });
+                }
+              }}
+              options={[
+                { value: "custom" as const, label: "Custom" },
+                ...EXPORT_PRESETS.map((p) => ({ value: p.value, label: p.label })),
+              ]}
             />
           </Field>
+          <RadioList
+            value={exportFormat}
+            onChange={(f) => {
+              setExportPresetChoice("custom");
+              setExportFormat(f);
+              // CMYK has no form for PNG/JPEG/SVG/BMP: picking one of
+              // those drops the colour back to Color.
+              if (colorMode === "cmyk" && f !== "eps" && f !== "pdf" && f !== "tiff") setColorMode("color");
+            }}
+            options={EXPORT_FORMATS}
+          />
+          <Field label="Colour">
+            <Segmented
+              value={colorMode}
+              onChange={(v) => setColorMode(v)}
+              // CMYK is offered only for the formats that have a CMYK form.
+              options={
+                (exportFormat === "eps" || exportFormat === "pdf" || exportFormat === "tiff"
+                  ? COLOR_MODES
+                  : COLOR_MODES.filter((m) => m.value !== "cmyk")
+                ).map((m) => ({ value: m.value, label: m.label }))
+              }
+            />
+          </Field>
+          {exportFormat !== "svg" && exportFormat !== "eps" && exportFormat !== "pdf" && (
+            <Field label="Resolution (DPI)">
+              <Segmented
+                value={dpi}
+                onChange={(v) => {
+                  setExportPresetChoice("custom");
+                  set({ dpi: v });
+                }}
+                options={FIGURE_RESOLUTIONS.map((r) => ({ value: r as Resolution, label: `${r} DPI` }))}
+              />
+            </Field>
+          )}
           <Button disabled={!panels.length || exporting} onClick={onExport}>
-            {exporting ? "Exporting…" : `Export Figure (${dpi} DPI)`}
+            {exporting
+              ? "Exporting…"
+              : exportFormat === "svg" || exportFormat === "eps" || exportFormat === "pdf"
+                ? "Export Figure"
+                : `Export Figure (${dpi} DPI)`}
           </Button>
           <Button
             variant="ghost"
             disabled={!panels.length || exporting}
-            onClick={() => copyFigureImage(node, nodes, dpi)}
+            onClick={() => copyFigureImage(node, nodes, dpi, colorMode)}
           >
             Copy Figure (PNG)
           </Button>
@@ -384,9 +565,21 @@ export function FigureView({ node }: { node: ProjectNode }) {
             >
               Send to PowerPoint…
             </Button>
+            {isMacOs() && (
+              <Button
+                variant="ghost"
+                className="flex-1"
+                disabled={!panels.length || exporting}
+                onClick={() => void onSendToOffice("keynote")}
+              >
+                Send to Keynote…
+              </Button>
+            )}
           </div>
           <p className="text-small text-secondary">
             Send to Word / PowerPoint saves a Word or PowerPoint file with the whole figure in it.
+            {isMacOs() &&
+              " Send to Keynote creates the presentation in Keynote instead (macOS only) — Keynote saves the .key file."}
           </p>
           {hasEmptyCell(panels, grid) && (
             <p className="text-small text-secondary">The figure has an empty cell — it exports blank.</p>
@@ -397,7 +590,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
   );
 
   return (
-    <WithInspector title={node.name} tag="Figure" inspector={inspector}>
+    <WithInspector title={node.name} tag="Figure" node={node} settings={inspector}>
       <div className="relative min-h-0 flex-1">
         <div ref={canvasRef} className="absolute inset-0 overflow-auto bg-desk">
           {panels.length === 0 ? (
@@ -426,42 +619,76 @@ export function FigureView({ node }: { node: ProjectNode }) {
                     Duplicate label{ dupes.length === 1 ? "" : "s" }: {dupes.join(", ")}.
                   </p>
                 )}
-                {/* The grid at its saved size, scaled by the fit: the wrapper takes the
+                {/* The grid at its saved size, scaled by the zoom: the wrapper takes the
                     scaled size, so the view scrolls to every edge of it. */}
-                <div style={{ width: widthPx * fit, height: heightPx * fit }}>
+                <div style={{ width: widthPx * zoom, height: heightPx * zoom }}>
                   <div
-                    className="grid bg-white shadow-sheet"
+                    className="relative grid bg-white shadow-sheet"
                     style={{
                       width: widthPx,
                       height: heightPx,
-                      transform: `scale(${fit})`,
+                      transform: `scale(${zoom})`,
                       transformOrigin: "0 0",
                       gridTemplateColumns: `repeat(${grid.cols}, 1fr)`,
                       gridTemplateRows: `repeat(${grid.rows}, 1fr)`,
+                      background: figureBackground,
                     }}
                   >
                   {panels.map((panel) => {
                     const graph = nodes[panel.graphId];
+                    const isGraph = (panel.kind ?? "graph") === "graph";
                     const w = Math.round(panel.colSpan * cellW);
                     const h = Math.round(panel.rowSpan * cellH);
                     return (
                       <div
-                        key={panel.graphId}
+                        key={panelKey(panel)}
                         className={cn(
                           "relative overflow-hidden ring-1 ring-separator",
-                          selectedId === panel.graphId && "ring-2 ring-accent",
+                          selectedKey === panelKey(panel) && "ring-2 ring-accent",
                         )}
                         style={{ gridRow: `${panel.row + 1} / span ${panel.rowSpan}`, gridColumn: `${panel.col + 1} / span ${panel.colSpan}` }}
-                        onClick={() => setSelectedId(panel.graphId)}
+                        onClick={() => setSelectedKey(panelKey(panel))}
                         onDoubleClick={() => graph && setActiveNode(graph.id)}
                       >
-                        {!graph ? (
+                        {!isGraph && panel.kind === "blank" ? (
+                          <>
+                            <div className="flex h-full w-full items-center justify-center">
+                              <p className="text-small text-secondary">Blank panel</p>
+                            </div>
+                            <span className="absolute top-1 left-2 text-regular font-bold">{panel.label}</span>
+                            {panel.title && (
+                              <span className="absolute top-1 left-1/2 -translate-x-1/2 text-small font-bold">
+                                {panel.title}
+                              </span>
+                            )}
+                          </>
+                        ) : !isGraph && panel.kind === "image" ? (
+                          <>
+                            {panel.imageData ? (
+                              <img
+                                src={panel.imageData}
+                                alt={panel.imageName ?? "Image panel"}
+                                className="h-full w-full object-contain"
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center">
+                                <p className="text-small text-secondary">No image yet</p>
+                              </div>
+                            )}
+                            <span className="absolute top-1 left-2 text-regular font-bold">{panel.label}</span>
+                            {panel.title && (
+                              <span className="absolute top-1 left-1/2 -translate-x-1/2 text-small font-bold">
+                                {panel.title}
+                              </span>
+                            )}
+                          </>
+                        ) : !graph ? (
                           <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-white px-2 text-center">
                             <p className="text-regular">Graph deleted — pick a replacement</p>
                             <p className="text-small text-secondary">
                               {panel.graphName ? `“${panel.graphName}” is missing.` : "The graph this panel showed is gone."}
                             </p>
-                            <Button variant="ghost" onClick={() => removePanel(panel.graphId)}>
+                            <Button variant="ghost" onClick={() => removePanel(panel)}>
                               Remove Panel
                             </Button>
                           </div>
@@ -469,7 +696,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
                           <>
                             <PanelPlot
                               graph={graph}
-                              nodes={nodes}
+                              nodes={figureNodes}
                               width={w}
                               height={h}
                               hideLegend={sharedLegend === "shared" && legend.ok}
@@ -492,7 +719,7 @@ export function FigureView({ node }: { node: ProjectNode }) {
                                 e.stopPropagation();
                                 const el = plottedRef.current.get(panel.graphId);
                                 const options = { ...DEFAULT_GRAPH_OPTIONS, ...graph.graphOptions };
-                                if (el) void saveGraphImage(el, { width: options.width, height: options.height }, exportFormat, dpi, graph.name);
+                                if (el) void saveGraphImage(el, { width: options.width, height: options.height }, exportFormat, dpi, graph.name, colorMode);
                               }}
                             >
                               Export panel
@@ -502,6 +729,9 @@ export function FigureView({ node }: { node: ProjectNode }) {
                       </div>
                     );
                   })}
+                  {/* Drawing objects (seq 238), pinned to the figure in its own
+                      px: screen-only, like on a graph, never exported. */}
+                  <DrawingObjectsLayer node={node} zoom={zoom} />
                 </div>
                 </div>
                 {sharedLegend === "shared" && legend.entries && (
@@ -518,6 +748,16 @@ export function FigureView({ node }: { node: ProjectNode }) {
             </div>
           )}
         </div>
+        {explicitZoom !== null && (
+          <button
+            type="button"
+            onClick={() => setExplicitZoom(null)}
+            title="Reset zoom to fit"
+            className="absolute right-3 bottom-3 z-20 rounded-full bg-black/70 px-2.5 py-1 text-small text-white hover:bg-black/80"
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+        )}
       </div>
     </WithInspector>
   );

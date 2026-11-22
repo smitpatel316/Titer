@@ -24,7 +24,14 @@ import { Button, RadioList } from "../ui/controls";
 import { Dialog } from "../ui/dialog";
 import * as native from "../native";
 import { useProjectStore } from "../store/use-project-store";
-import { convertPrism, formatReport, type ConvertResult } from "../lib/prism";
+import { convertPrism, formatReport, loadPrismZip, type ConvertResult } from "../lib/prism";
+import {
+  getRegenPlans,
+  planGraphRegeneration,
+  regenPlanCounts,
+  setRegenPlans,
+  type GraphPlan,
+} from "../lib/prism-graph-regen";
 import { yieldToPaint } from "../lib/yield-to-paint";
 import { formatWriteReport, writePrism, type PrismWriteResult } from "../lib/prism-write";
 import { formatPzfxWriteReport, writePzfx } from "../lib/pzfx-write";
@@ -41,6 +48,8 @@ interface Done {
   project?: ConvertResult["project"];
   bytes?: Uint8Array;
   savedPath?: string;
+  /** Graph-regen plans for the converted project (Prism → Titer only). */
+  graphPlans?: GraphPlan[];
 }
 
 const baseName = (name: string) => name.replace(/\.(prism|hlx)$/i, "");
@@ -48,7 +57,7 @@ const baseName = (name: string) => name.replace(/\.(prism|hlx)$/i, "");
 /** Let the progress line paint before the conversion starts. */
 const paint = yieldToPaint;
 
-export function ConverterDialog() {
+export function ConverterDialog({ onOpenRegenerate }: { onOpenRegenerate?: () => void }) {
   const { selector, closeSelector, get, loadProject } = useProjectStore();
   const [direction, setDirection] = React.useState<Direction>("prism-to-hlx");
   const [progress, setProgress] = React.useState<string | null>(null);
@@ -69,13 +78,26 @@ export function ConverterDialog() {
 
   if (!open) return null;
 
+  // The done panel's regen offer reads the live registry (not
+  // done.graphPlans): a run that consumed the plans hides the button when
+  // the dialog reopens.
+  const liveRegenPlans = done?.direction === "prism-to-hlx" ? getRegenPlans() : null;
+
   const convertPrismFile = async (data: Uint8Array, name: string) => {
     setError(null);
     setDone(null);
     setProgress(`Reading tables from “${name}”…`);
     await paint();
     try {
-      const converted = await convertPrism(data, name);
+      // One unzip for the conversion and the regen planning.
+      const zip = await loadPrismZip(data, name);
+      const converted = await convertPrism(data, name, zip);
+      const graphPlans = await planGraphRegeneration(zip, converted);
+      converted.graphPlans = graphPlans;
+      converted.report.regenerableGraphs = regenPlanCounts(graphPlans).regenerable;
+      // The done panel's "Regenerate graphs…" button reads the live
+      // offer; record it now (opening another project clears it).
+      setRegenPlans(null, graphPlans);
       setProgress(`Converted ${converted.report.tables.length} tables — writing the report…`);
       await paint();
       setDone({
@@ -83,6 +105,7 @@ export function ConverterDialog() {
         sourceName: name,
         reportText: formatReport(converted.report),
         project: converted.project,
+        graphPlans,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "This file couldn't be converted.");
@@ -128,7 +151,7 @@ export function ConverterDialog() {
     setProgress(`Writing ${project.rootOrder.length} tables as .${format}…`);
     await paint();
     try {
-      const version = native.isNative ? await native.appVersion().catch(() => "1.6.2") : "1.6.2";
+      const version = native.isNative ? await native.appVersion().catch(() => "1.8.2") : "1.8.2";
       const payload = {
         nodes: project.nodes,
         rootOrder: project.rootOrder,
@@ -192,18 +215,39 @@ export function ConverterDialog() {
     setDone({ ...done, savedPath: fallback });
   };
 
-  const openInTiter = async () => {
-    if (!done?.project) return;
+  /** Load the converted project (Prism → Titer), with the same dirty
+   *  check "Open in Titer" uses. The load clears the regen registry, so
+   *  the conversion's plans are recorded again for the preview. Returns
+   *  false when the user kept the current project instead. */
+  const openConvertedProject = async () => {
+    if (!done?.project) return false;
     const current = get();
     if (current.isDirty) {
       const discard = await native.confirmDelete(
         "Open Converted Project?",
         "The current project has unsaved changes. Opening the converted project discards them.",
       );
-      if (!discard) return;
+      if (!discard) return false;
     }
     loadProject({ ...done.project, filePath: null, edited: true });
+    if (done.graphPlans?.length) setRegenPlans(null, done.graphPlans);
     closeSelector();
+    return true;
+  };
+
+  const openInTiter = async () => {
+    if (!done?.project) return;
+    await openConvertedProject();
+  };
+
+  /** "Regenerate graphs…" on the done panel: open the converted project
+   *  (it must be open before graphs can be built into it), then open the
+   *  regen preview on it. */
+  const regenerateGraphs = async () => {
+    if (!done?.graphPlans?.length) return;
+    if (!(await openConvertedProject())) return;
+    setRegenPlans(null, done.graphPlans);
+    onOpenRegenerate?.();
   };
 
   const copyReport = async () => {
@@ -270,6 +314,11 @@ export function ConverterDialog() {
                   : "Save .pzfx…"}
             </Button>
             {done.direction === "prism-to-hlx" && <Button onClick={() => void openInTiter()}>Open in Titer</Button>}
+            {done.direction === "prism-to-hlx" && liveRegenPlans?.some((p) => p.reconstructible) && (
+              <Button variant="accent" onClick={() => void regenerateGraphs()}>
+                Regenerate graphs…
+              </Button>
+            )}
             <Button onClick={() => void copyReport()}>{copied ? "Copied" : "Copy report"}</Button>
           </div>
         </div>

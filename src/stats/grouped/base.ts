@@ -87,6 +87,92 @@ export function flattenThreeWay(
   return { values, a, b, c, dropped };
 }
 
+/** One level (or level combination) of a three-way term: its result-table
+ *  label, the label a Dunnett control is matched by inside a simple-effect
+ *  family (`within` — the term without its last factor: an A level for A:B,
+ *  an A:B cell for A:B:C; for a whole-term family the control is matched by
+ *  the full `label` instead), the level of the term's last factor the
+ *  simple-effect split puts it in (`split`), and the values behind it. */
+export interface ThreeWayTermCell {
+  label: string;
+  within: string;
+  split: string;
+  values: number[];
+}
+
+/** The cell means of one three-way term, in first-seen order — the wizard's
+ *  Dunnett-control options and the runner's post-hoc families read the same
+ *  labels from here, so the two can never drift apart. */
+export function threeWayTermCells(
+  term: string,
+  flat: { values: number[]; a: string[]; b: string[]; c: string[] },
+  titles: (string | null)[],
+): ThreeWayTermCell[] {
+  const byKey = new Map<string, ThreeWayTermCell>();
+  const bLabel = (b: string) => rowName(titles, Number(b.slice(1)) - 1);
+  // Each component's key and label: [key, label, within-label]. The within
+  // label drops the term's last factor — so a Dunnett control names the level
+  // compared within each simple-effect family (an A level for A:B, an A:B cell
+  // for A:B:C), and the whole cell for a whole-term family.
+  const partsOf = (i: number): [string, string][] => {
+    const a = flat.a[i];
+    const b = flat.b[i];
+    const c = flat.c[i];
+    switch (term) {
+      case "A":
+        return [[a, a]];
+      case "B":
+        return [[b, bLabel(b)]];
+      case "C":
+        return [[c, c]];
+      case "A:B":
+        return [
+          [a, a],
+          [b, bLabel(b)],
+        ];
+      case "A:C":
+        return [
+          [a, a],
+          [c, c],
+        ];
+      case "B:C":
+        return [
+          [b, bLabel(b)],
+          [c, c],
+        ];
+      case "A:B:C":
+        return [
+          [a, a],
+          [b, bLabel(b)],
+          [c, c],
+        ];
+      default:
+        return [[a, a]];
+    }
+  };
+  const joinLabel = (parts: [string, string][], dropLast: boolean) => {
+    const kept = dropLast ? parts.slice(0, -1) : parts;
+    if (kept.length === 0) return parts[0][1];
+    const [first, ...rest] = kept.map(([, label]) => label);
+    return rest.length ? `${first} (${rest.join(", ")})` : first;
+  };
+  flat.values.forEach((v, i) => {
+    const parts = partsOf(i);
+    const key = parts.map(([k]) => k).join("\n");
+    const cell = byKey.get(key) ?? {
+      label: joinLabel(parts, false),
+      within: joinLabel(parts, true),
+      split: parts[parts.length - 1][0],
+      values: [] as number[],
+    };
+    cell.values.push(v);
+    byKey.set(key, cell);
+  });
+  // Keep the cells in first-seen order: A, B and C levels in table order, and
+  // interactions in the same (A, then B, then C) nesting as the flattened data.
+  return [...byKey.values()];
+}
+
 /** Each group's rows, each holding that row's own replicate values — what
  *  per-row comparisons (Multiple t tests) run against. */
 export function groupRows(columns: Column[]): Map<string, number[][]> {

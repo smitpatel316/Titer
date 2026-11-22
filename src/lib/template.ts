@@ -263,10 +263,12 @@ export const GRAPH_ANALYSIS_ID_KEYS = [
   "regAnalysisId",
   "demingAnalysisId",
   "coxAnalysisId",
+  "ttestAnalysisId",
   "poissonAnalysisId",
   "smoothAnalysisId",
   "pcaAnalysisId",
   "kmeansAnalysisId",
+  "hclustAnalysisId",
   "monteCarloAnalysisId",
 ] as const;
 
@@ -286,6 +288,16 @@ export function remapGraphOptions(
     else {
       delete (next as unknown as Record<string, unknown>)[key];
       dropped.push(key);
+    }
+  }
+  // The multi-source list: each entry remaps through the same map, and one
+  // with no new id drops out; an emptied list goes with it, as a link does.
+  if (Array.isArray(next.sigAnalysisIds)) {
+    const remapped = next.sigAnalysisIds.flatMap((id) => (typeof id === "string" && idMap[id] ? [idMap[id]] : []));
+    if (remapped.length) next.sigAnalysisIds = remapped;
+    else {
+      delete next.sigAnalysisIds;
+      dropped.push("sigAnalysisIds");
     }
   }
   return { options: next, dropped };

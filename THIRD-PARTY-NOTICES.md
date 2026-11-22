@@ -56,6 +56,7 @@ The app ships the following 45 R packages inside `dist/webr-repo` (webR 0.6.0, R
 | numDeriv | 2016.8-1.1 | GPL-2 |
 | outliers | 0.15 | GPL (>= 2) |
 | pROC | 1.19.1 | GPL (>= 3) |
+| pbkrtest | 0.5.5 | GPL (>= 2) |
 | rbibutils | 2.4.1 | GPL-2 |
 | reformulas | 0.4.4 | GPL-3 |
 | rlang | 1.3.0 | MIT + file LICENSE |

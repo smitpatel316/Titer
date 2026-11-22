@@ -15,7 +15,8 @@ export interface TableMove {
   rows?: (row: number) => number | null;
 }
 
-// The params and options holding names (a name, or a list of names).
+// The params and options holding names (a name, or a list of names); the pairs chosen
+// (`compared`, `sigPairs`) hold two each.
 const PARAM_NAMES = [
   "x",
   "y",
@@ -35,9 +36,11 @@ const PARAM_NAMES = [
   "status",
   "covariates",
   "stratifyBy",
+  "response",
+  "groupBy",
 ] as const;
 // prettier-ignore
-const OPTION_NAMES = ["xVariable", "yVariable", "volcanoX", "volcanoY", "volcanoLabel", "volcanoGroupA", "volcanoGroupB", "rightYDataset"] as const;
+const OPTION_NAMES = ["xVariable", "yVariable", "volcanoX", "volcanoY", "volcanoLabel", "volcanoGroupA", "volcanoGroupB", "rightYDataset", "sets"] as const;
 
 /** `node` following a table edit's `move`; `columns`: the table's columns after it (a
  *  point in a column that is gone loses its style). */
@@ -50,8 +53,18 @@ export function followTable(node: ProjectNode, { renamed = {}, rows }: TableMove
     return out as T;
   };
 
+  const renamePair = (key: string) => {
+    const [a, b] = pairOf(key);
+    // A bare group name (no NUL: a hand-set sigPairs entry like "WT") renames
+    // as itself — splitting it as a pair would append an "undefined" half.
+    if (b === undefined) return to(a);
+    return pairKey(to(a), to(b));
+  };
   if (node.analysisParams) {
-    const params = withNames<AnalysisParams>(node.analysisParams, PARAM_NAMES);
+    const params = withNames<AnalysisParams>(node.analysisParams, PARAM_NAMES) as AnalysisParams & {
+      compared?: string[];
+    };
+    if (params.compared) params.compared = params.compared.map(renamePair);
     // Monte Carlo's per-column simulated means/SDs are keyed BY column name,
     // so a rename must rename the keys (not the values, which are numbers).
     // Enzyme inhibition's inhibitor concentrations and dose-response-special's
@@ -68,10 +81,7 @@ export function followTable(node: ProjectNode, { renamed = {}, rows }: TableMove
   }
   if (node.graphOptions) {
     const options = withNames<GraphOptions>(node.graphOptions, OPTION_NAMES);
-    options.sigPairs = options.sigPairs?.map((key) => {
-      const [a, b] = pairOf(key);
-      return pairKey(to(a), to(b));
-    });
+    options.sigPairs = options.sigPairs?.map(renamePair);
     if (options.series) options.series = Object.fromEntries(Object.entries(options.series).map(([k, v]) => [to(k), v]));
     if (options.points) options.points = movePoints(options.points, to, rows, columns);
     return { ...node, graphOptions: options };

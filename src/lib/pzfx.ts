@@ -21,7 +21,7 @@
 //   Survival    → Survival  (X = time, Y = event codes 1/0 per group; the survival
 //                 graph and the survival analysis apply to it)
 //   Contingency → Contingency
-//   PartsOfWhole→ Column    (one Y column, rows named by the row titles)
+//   PartsOfWhole→ Parts of Whole (rows are the categories, one Y column per data set)
 //   Nested      → NO verified marker (see below): a Prism nested table is
 //                 one of Prism's eight formats (Prism 8+), with replicates
 //                 stacked into subcolumns, but no public .pzfx file or reader
@@ -29,11 +29,13 @@
 //                 2026-11-10: no nested file in test-corpus/ or tests/testdata/,
 //                 and the open-source readers (R pzfx 0.3.1, pypzfx) know no
 //                 "Nested" TableType. A OneWay/replicates table therefore
-//                 imports as Column (today's behaviour, unchanged) and the
-//                 user converts it to Nested by hand — do NOT auto-convert
-//                 OneWay/replicates to nested on a heuristic, a plain
-//                 replicates Column table is far more common than a nested one.
-//                 If a distinct marker is ever verified, map it here directly.
+//                 imports as Column (today's behaviour, unchanged) — do NOT
+//                 auto-convert OneWay/replicates to nested on a heuristic,
+//                 a plain replicates Column table is far more common than a
+//                 nested one. There is no convert-to-Nested in Titer yet;
+//                 the .prism import report tells the user to make a new
+//                 Nested table and copy the values across. If a distinct
+//                 marker is ever verified, map it here directly.
 //   HugeTable → the same as Table: Prism writes a table as `<HugeTable>`
 //                 instead of `<Table>` once it passes 52 subcolumns in a
 //                 data set or 104 data sets (R pzfx 0.2.0 NEWS; pypzfx
@@ -68,6 +70,9 @@ export interface PzfxImport {
   /** Info sheets imported, in file order. */
   infoSheets: string[];
   issues: PzfxIssue[];
+  /** Graph-regen plans, when the caller computed them (see
+   *  `planPzfxGraphs` in `src/lib/prism-graph-regen.ts`). */
+  graphPlans?: import("./prism-graph-regen").GraphPlan[];
 }
 
 // ── A small XML reader ───────────────────────────────────────────────────
@@ -195,14 +200,30 @@ function parseXml(text: string): XmlNode {
  *  the reader must not trim or rename them (BUG-4/BUG-7): the .prism import
  *  preserves them, and the exported .pzfx file holds them verbatim, so a
  *  .pzfx round-trip that renames them changes analysis labels and hashes.
- *  No `<Title>` in any known .pzfx file (testdata + corpus) holds a newline,
- *  so exact text needs no whitespace handling. Data `<d>` values keep the
- *  trimmed read below: the number normalizer's anchored regexes need clean
- *  values, and only the RowTitlesColumn's `<d>` values are titles. */
+ *  Data `<d>` values keep the trimmed read below: the number normalizer's
+ *  anchored regexes need clean values, and only the RowTitlesColumn's `<d>`
+ *  values are titles. */
 const rawChildText = (node: XmlNode): string => {
   let out = node.text;
   for (const child of node.children) out += rawChildText(child);
   return out;
+};
+
+/**
+ * A title as Titer stores it — the same rule the `.prism` reader applies
+ * (`cleanText` in src/lib/prism.ts), so the two importers agree and a
+ * `.prism` export→reimport is identical. Prism writes multi-line labels
+ * with a carriage return as the line break (real files: `"+Barb\r\n+Oxy"`,
+ * `"Proton\r\nLeak"` — the old comment here claimed no `<Title>` holds a
+ * newline, which the battery corpus disproves); Titer labels are
+ * single-line, so the break becomes one space. A title that is only
+ * whitespace becomes "" — the caller's fallback applies ("X", "Y",
+ * "Group"). Trailing spaces are PRESERVED (BUG-4/BUG-7): only line breaks
+ * collapse, nothing is trimmed.
+ */
+export const cleanTitle = (value: string): string => {
+  const collapsed = value.replace(/\s*(\r\n|\r|\n)\s*/g, " ");
+  return collapsed.trim() === "" ? "" : collapsed;
 };
 
 const childText = (node: XmlNode): string => rawChildText(node).trim();
@@ -238,7 +259,7 @@ interface PzfxColumn {
 function readColumn(node: XmlNode, rawValues = false): PzfxColumn {
   const titleNode = firstChild(node, "Title");
   return {
-    title: titleNode ? rawChildText(titleNode) : "",
+    title: titleNode ? cleanTitle(rawChildText(titleNode)) : "",
     subcolumns: childrenNamed(node, "Subcolumn").map((s) => readSubcolumn(s, rawValues)),
   };
 }
@@ -342,14 +363,25 @@ const genId = (type: string) => `${type}_${Math.random().toString(36).slice(2, 1
 function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: boolean): ImportedTable | null {
   const warnings: string[] = [];
   const titleNode = firstChild(table, "Title");
-  const name = titleNode ? rawChildText(titleNode) : "";
+  const name = titleNode ? cleanTitle(rawChildText(titleNode)) : "";
   const tableType = table.attrs["TableType"] ?? "";
   const xFormat = table.attrs["XFormat"] ?? "";
   const yFormat = table.attrs["YFormat"] ?? "";
   const displayName = name === "" ? "Untitled table" : `“${name}”`;
 
   const rowTitles = firstChild(table, "RowTitlesColumn");
-  const rowTitleValues = rowTitles ? readColumn(rowTitles, true).subcolumns[0]?.values ?? [] : [];
+  // Row titles go through the same single-line rule as the `.prism` reader
+  // (cleanText on its rowTitles): a multi-line row title collapses, and a
+  // whitespace-only one becomes null, so a `.prism` export→reimport reads
+  // the same titles back. Numeric-looking titles (e.g. `0,0003663697194`)
+  // are untouched — only line breaks collapse, no number normalization.
+  const rowTitleValues = rowTitles
+    ? (readColumn(rowTitles, true).subcolumns[0]?.values ?? []).map((v) => {
+        if (v === null) return null;
+        const cleaned = cleanTitle(v);
+        return cleaned === "" ? null : cleaned;
+      })
+    : [];
   let hasRowTitles = rowTitleValues.some((v) => v !== null && v !== "");
 
   const xColumns = childrenNamed(table, "XColumn").map((c) => readColumn(c));
@@ -450,7 +482,10 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
   const isGroupedReplicates =
     tableType === "TwoWay" && yFormat === "replicates";
   if (tableType === "OneWay" || tableType === "PartsOfWhole" || tableType === "Contingency") {
-    titerType = tableType === "Contingency" ? "contingency" : "column";
+    // A Parts-of-Whole table keeps its type (seq 197): its rows are
+    // mutually exclusive categories and its columns data sets — importing it
+    // as Column would invite group comparisons its values must never get.
+    titerType = tableType === "Contingency" ? "contingency" : tableType === "PartsOfWhole" ? "parts-of-whole" : "column";
     for (const y of yColumns) {
       const names = subcolumnNames(y.title, yFormat, y.subcolumns.length);
       y.subcolumns.forEach((sub, i) => pushColumn(names[i], sub));
@@ -546,7 +581,9 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
             ? "Survival"
             : titerType === "contingency"
               ? "Contingency"
-              : "Column";
+              : titerType === "parts-of-whole"
+                ? "Parts of Whole"
+                : "Column";
     warnings.push(
       `${displayName} was a HugeTable in Prism (${subcolumns} subcolumns per data set) — imported as a ${typeName} table with all values kept.`,
     );
@@ -610,6 +647,9 @@ function importTable(table: XmlNode, issues: PzfxIssue[], groupingSeparators: bo
 
 // ── The file ─────────────────────────────────────────────────────────────
 
+/** The XML namespace a real GraphPad Prism file declares. */
+const PRISM_XML_NS = "http://graphpad.com/prism/Prism.htm";
+
 export function parsePzfx(text: string): PzfxImport {
   let root: XmlNode;
   try {
@@ -622,15 +662,34 @@ export function parsePzfx(text: string): PzfxImport {
       issues: [{ severity: "error", message: err instanceof Error ? err.message : "Not a valid .pzfx file." }],
     };
   }
+  // Prism 8 writes some .pzfx files wrapped in its own XSL stylesheet: the
+  // root is <xsl:stylesheet> and the real file is the nested
+  // <GraphPadPrismFile> child. Descend into that child (a direct child
+  // only — the xsl:template elements hold rendering rules, never data).
+  // A nested element in another namespace is not a Prism file.
+  let wrapped = false;
   if (root.tag !== "GraphPadPrismFile") {
-    return {
-      project: { nodes: {}, rootOrder: [], childOrder: {}, activeNodeId: null },
-      tables: [],
-      infoSheets: [],
-      issues: [{ severity: "error", message: "This file isn't a GraphPad Prism .pzfx file." }],
-    };
+    const nested = root.children.find(
+      (c) => c.tag === "GraphPadPrismFile" && (!c.attrs.xmlns || c.attrs.xmlns === PRISM_XML_NS),
+    );
+    if (!nested) {
+      return {
+        project: { nodes: {}, rootOrder: [], childOrder: {}, activeNodeId: null },
+        tables: [],
+        infoSheets: [],
+        issues: [{ severity: "error", message: "This file isn't a GraphPad Prism .pzfx file." }],
+      };
+    }
+    root = nested;
+    wrapped = true;
   }
   const issues: PzfxIssue[] = [];
+  if (wrapped) {
+    issues.push({
+      severity: "warning",
+      message: "This file wraps its GraphPad Prism data in an XSL stylesheet; the nested Prism file was imported.",
+    });
+  }
   const tables: string[] = [];
   const nodes: Record<string, ProjectNode> = {};
   const rootOrder: string[] = [];

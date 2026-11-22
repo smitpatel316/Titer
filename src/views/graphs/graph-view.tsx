@@ -20,13 +20,15 @@ import {
 } from "../../store/types";
 import type { BindingKineticsParams, BindingSaturationParams, DoseResponseSpecialParams, EnzymeInhibitionParams, LinearRegressionParams, SimpleLogisticRegressionParams, NonlinearRegressionParams, CoxPHParams, PoissonRegressionParams, DemingRegressionParams } from "../../stats/types";
 import { useProjectStore } from "../../store/use-project-store";
+import { useZoom, ZOOM_LIMITS } from "../../store/use-zoom";
 import { groupsOf, isGrouped, readTable, splitXY, xyProblem, type Column } from "../../lib/dataset";
+import { mergedGraphData } from "../../lib/multi-table";
 import { summaryTableProblem } from "../../lib/summary-format";
 import { paletteOf } from "../../lib/palettes";
 import { computeGroupedDEG } from "../../lib/deg";
-import { useAnalysis } from "../analyses/use-analysis";
+import { useAnalysis, useAnalyses } from "../analyses/use-analysis";
 import { infoSheetsOf, resolveGraphOptions } from "../../lib/info-sheets";
-import { GRAPHS, graphSeries, plotColumns } from ".";
+import { choosableSets, GRAPHS, graphSeriesDataset, hasValueAxis, plotColumns } from ".";
 import { addFittedCurve } from "./fitted-curve";
 import { addBindingCurve, addDoseResponseSpecialCurve, addEnzymeInhibitionCurve } from "./binding-curve";
 import { addGeneratedCurves } from "./generated-curves";
@@ -38,20 +40,23 @@ import { addEstimationPlot } from "./estimation-plot";
 import { coxSurvivalColumns } from "./survival";
 import { FormatPanel } from "./format-panel";
 import { copyGraphImage, saveGraphImage, sendGraphToOffice } from "./graph-export";
-import { addNote, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, rightYDataset, unlinkedAnalysisNote, withCaps } from "./plot-helpers";
+import { addNote, applyNumberFormats, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, refLineParts, rightYDataset, unlinkedAnalysisNote, withCaps } from "./plot-helpers";
 import { addLogisticCurve as addAnalysisLogisticCurve } from "./fitted-curve";
 import { useStartAnalysis } from "../analyses/use-analysis-launcher";
 import { loadPlotly } from "./plotly";
 import { fitZoom } from "../../store/use-layout";
 import { AddFloatingNoteButton, FloatingNotesLayer } from "../../components/floating-notes";
+import { DrawingObjectsLayer } from "../../components/drawing-objects";
 import { addRegression } from "./regression-overlay";
 import { addDeming } from "./deming-overlay";
 import { addObservedFitted } from "./observed-fitted";
 import { addScreePlot } from "./scree-plot";
 import { addPcaBiplot } from "./pca-biplot";
 import { addKmeansScatter } from "./kmeans-scatter";
+import { addDendrogram } from "./dendrogram";
+import { addElbowPlot, addGapPlot, addSilhouettePlot } from "./choosing-k";
 import { addMonteCarloHistogram } from "./monte-carlo-histogram";
-import { addSignificance, deriveComparisons } from "./significance-overlay";
+import { addSignificance, deriveComparisons, GROUPED_STARS, sigAnalysisIdsOf, starsFit } from "./significance-overlay";
 import {
   drawnKeys,
   drawnStyle,
@@ -68,19 +73,20 @@ import { genesNamed, volcanoAxes, volcanoPair } from "./volcano";
 import { titleCase } from "../../lib/format";
 import { tooManyBins } from "../../lib/histogram";
 
-// The view's zoom, 25 % to 400 %, as in Pages; WebGL's resolution, which Plotly takes up to 4.
-const ZOOM = { min: 0.25, max: 4 };
+// WebGL's resolution, which Plotly takes up to 4. The zoom range lives in
+// the shared zoom store (src/store/use-zoom.tsx), 25 % to 400 % as in Pages.
 const GL_RATIO = { min: 1, max: 4 };
 
 type Size = { width: number; height: number };
 type Margins = { l: number; r: number; t: number; b: number };
 
 export function GraphView({ node }: { node: ProjectNode }) {
-  const { nodes, rootOrder, updateGraph, openSelector } = useProjectStore();
+  const { nodes, rootOrder, updateGraph, setGraphSources, openSelector } = useProjectStore();
   const type = node.graphType!;
   const family = GRAPHS[type].family;
   const parent = node.parentId ? nodes[node.parentId] : undefined;
-  const data = parent?.data;
+  // A frozen graph (seq 237) draws its snapshot, not the live table.
+  const data = node.frozen && node.frozenData ? node.frozenData : parent?.data;
   // Merged over the defaults, so options added after a file was saved have a value.
   const options = { ...DEFAULT_GRAPH_OPTIONS, ...node.graphOptions };
   // The project's info sheets, for the live `{{Constant}}` hooks below.
@@ -111,17 +117,17 @@ export function GraphView({ node }: { node: ProjectNode }) {
   // The saved size, and a live preview while dragging an axis.
   const size: Size = { width: options.width, height: options.height };
   const [drag, setDrag] = React.useState<Size | null>(null);
-  // The view-only fit: the sheet is scaled to the visible pane until the user
-  // zooms by hand (Ctrl+scroll/pinch), which sets an explicit zoom; Reset returns
-  // to the fit. The saved size never changes — fitting only scales the view.
-  const [fit, setFit] = React.useState(1);
-  const [explicitZoom, setExplicitZoom] = React.useState<number | null>(null);
-  const zoom = explicitZoom ?? fit;
+  // The view-only zoom, shared with the View ▸ Zoom menu (seq 239): the
+  // sheet is scaled to the visible pane until the user zooms by hand
+  // (Ctrl+scroll/pinch), which sets an explicit zoom; Reset returns to the
+  // fit. The saved size never changes — fitting only scales the view.
+  const { zoom, explicit: explicitZoom, fit, setFit, setExplicit: setExplicitZoom } = useZoom(node.id);
   const zoomRef = React.useRef(zoom);
   zoomRef.current = zoom;
   // The margins Plotly drew, which grow for long labels and place the resize grab
   // zones on the real axes.
   const [margins, setMargins] = React.useState<Margins | null>(null);
+  const [newLineAt, setNewLineAt] = React.useState(0);
 
   // ── Data ─────────────────────────────────────────────────────────────
 
@@ -136,6 +142,31 @@ export function GraphView({ node }: { node: ProjectNode }) {
       options.yVariable,
       options.bubbleSizeVariable,
       options.bubbleColorVariable,
+      options.sets?.join("\n"),
+      parent?.tableType,
+    ],
+  );
+  // ── Multi-table (#48) ──────────────────────────────────────────────
+  // The graph's merged dataset: its primary table plus `sourceTableIds`.
+  // The builders, the Data section and the series all read the merged
+  // columns below (`drawColumns`); the analysis overlays keep reading
+  // the primary table's columns, since analyses run on one table.
+  const merged = React.useMemo(
+    () => mergedGraphData(node, nodes),
+    [node, nodes],
+  );
+  const drawDataset = merged?.dataset ?? dataset;
+  const drawColumns = React.useMemo(
+    () => (drawDataset && parent?.tableType ? plotColumns(drawDataset, type, options, parent.tableType) : []),
+    [
+      drawDataset,
+      type,
+      options.center,
+      options.xVariable,
+      options.yVariable,
+      options.bubbleSizeVariable,
+      options.bubbleColorVariable,
+      options.sets?.join("\n"),
       parent?.tableType,
     ],
   );
@@ -168,8 +199,8 @@ export function GraphView({ node }: { node: ProjectNode }) {
         !(type === "survival" && parent?.tableType === "multiple") &&
         parent?.tableType &&
         hasXColumn(parent.tableType) &&
-        dataset
-        ? xyProblem(dataset.columns)
+        drawDataset
+        ? xyProblem(drawDataset.columns)
         : undefined;
 
   // A volcano on a grouped table: Titer computes the DEGs between two of its groups
@@ -180,14 +211,14 @@ export function GraphView({ node }: { node: ProjectNode }) {
       ? groupsOf(dataset.numeric).map((g) => g.name)
       : undefined;
   const volcanoColumns = React.useMemo(() => {
-    if (!volcanoGroups || !data) return columns;
+    if (!volcanoGroups || !data) return drawColumns;
     const [a, b] = volcanoPair(volcanoGroups, options);
     const deg = a && b && a !== b ? computeGroupedDEG(data, a, b, options.volcanoEffect) : [];
     // One row per table row, so a gene keeps its row's number (its key, see volcano.ts).
     const rows: (string | null)[][] = data.rows.map(() => []);
     for (const d of deg) rows[d.row] = [null, d.label, String(d.log2FC), String(d.p), String(d.padj)];
     return readTable({ columns: ["Title", "Gene", "Log2 FC", "P", "FDR"], rows }).columns;
-  }, [columns, data, volcanoGroups?.join("\n"), options.volcanoGroupA, options.volcanoGroupB, options.volcanoEffect]);
+  }, [drawColumns, data, volcanoGroups?.join("\n"), options.volcanoGroupA, options.volcanoGroupB, options.volcanoEffect]);
   // The rows of a grouped table holding values of the two groups that gave no gene.
   const volcanoLeftOut = React.useMemo(() => {
     if (!volcanoGroups || !dataset) return 0;
@@ -199,8 +230,16 @@ export function GraphView({ node }: { node: ProjectNode }) {
     return rows.size - (volcanoColumns.find((c) => c.name === "Log2 FC")?.values.length ?? 0);
   }, [dataset, volcanoColumns, volcanoGroups?.join("\n"), options.volcanoGroupA, options.volcanoGroupB]);
 
-  // The series drawn, one row each in the Series section.
-  const seriesNames = data && parent?.tableType ? graphSeries(type, data, parent.tableType, options) : [];
+  // The tables' series, whose places give their colors, and those shown (the data sets the
+  // graph chose), one row each in the Series section — from the merged
+  // dataset (#48), so an extra table's series are listed too.
+  const choosable = drawDataset && parent?.tableType ? choosableSets(type, drawDataset, parent.tableType) : [];
+  const shownSets = choosable.length ? options.sets : undefined;
+  const allSeries =
+    drawDataset && parent?.tableType ? graphSeriesDataset(type, drawDataset, parent.tableType, options) : [];
+  const seriesNames = shownSets ? allSeries.filter((n) => shownSets.includes(n)) : allSeries;
+  // The data sets it shows that are left in the table: none, and it says so.
+  const setsGone = shownSets && !shownSets.some((n) => choosable.includes(n));
 
   // The grouped volcano maps the computed DEG columns (P values) onto its axes; an XY
   // table's X is its X column. The options the builders draw from resolve the
@@ -216,7 +255,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
           volcanoYIsPValue: true,
         }
       : family === "volcano" && parent?.tableType === "xy"
-        ? { ...options, volcanoX: dataset?.columns[0]?.name }
+        ? { ...options, volcanoX: drawDataset?.columns[0]?.name }
         : options,
     sheets,
   );
@@ -226,21 +265,21 @@ export function GraphView({ node }: { node: ProjectNode }) {
   // The data set on the right Y axis, if the pick is still a series — its
   // values live on the right axis, so they count under y2, not under y.
   const right = family === "xy" ? rightYDataset(options, seriesNames) : undefined;
-  const rightCols = right ? columns.slice(1).filter((c) => c.name === right) : [];
+  const rightCols = right ? drawColumns.slice(1).filter((c) => c.name === right) : [];
   const logLeftOut = {
-    x: family === "xy" && options.xScale !== "linear" ? atOrUnder0(columns.slice(0, 1)) : 0,
+    x: family === "xy" && options.xScale !== "linear" ? atOrUnder0(drawColumns.slice(0, 1)) : 0,
     // A histogram's Y counts values: an empty bin is simply not drawn. A bubble
     // plot's size and color columns are not Y data: only its Y column counts.
     y:
       options.yScale !== "linear" && family !== "histogram"
-        ? atOrUnder0((family === "xy" ? columns.slice(1, type === "bubble-plot" ? 2 : undefined) : columns).filter((c) => c.name !== right))
+        ? atOrUnder0((family === "xy" ? drawColumns.slice(1, type === "bubble-plot" ? 2 : undefined) : drawColumns).filter((c) => c.name !== right))
         : 0,
     y2: right && options.y2Scale !== "linear" ? atOrUnder0(rightCols) : 0,
   };
   const binsTooMany =
     family === "histogram" &&
     tooManyBins(
-      columns.flatMap((c) => c.values),
+      drawColumns.flatMap((c) => c.values),
       options.binWidth,
     );
   const volcanoY =
@@ -256,13 +295,22 @@ export function GraphView({ node }: { node: ProjectNode }) {
   const gone = family === "volcano" ? volcanoAxes([], volcanoColumns, buildOptions).gone : undefined;
   // Box and violin need raw replicates (a box from Mean/SD/N would be silently
   // wrong), as does a grouped volcano (a Welch test on stored Means) — a
-  // summary table says so here instead of drawing.
+  // summary table says so here instead of drawing. Grouped-box is offered on
+  // grouped, nested, xy and contingency tables, so the box block is not
+  // scoped to grouped tables (it says nothing on a non-summary table).
   const summaryLack =
-    data && parent?.tableType === "grouped" && (type === "grouped-box" || family === "volcano")
+    data && (type === "grouped-box" || (parent?.tableType === "grouped" && family === "volcano"))
       ? summaryTableProblem(data, GRAPHS[type].label)
       : undefined;
-  const lack = xyLack ?? summaryLack ?? (gone === undefined ? undefined : `The column “${gone}” is no longer in the table.`);
-  const hasData = !lack && (columns.some((c) => c.values.length > 0) || plotFunctionAnalysis !== undefined);
+  const lack =
+    merged?.problem ??
+    xyLack ??
+    summaryLack ??
+    (gone === undefined
+      ? undefined
+      : `The column “${gone}” is no longer in the table.`) ??
+    (setsGone ? "None of the data sets this graph shows is left in the table: choose some in its Data section." : undefined);
+  const hasData = !lack && (drawColumns.some((c) => c.values.length > 0) || plotFunctionAnalysis !== undefined);
 
   // The figure's traces as last drawn, without the selection ring.
   const [drawn, setDrawn] = React.useState<unknown[]>([]);
@@ -356,18 +404,41 @@ export function GraphView({ node }: { node: ProjectNode }) {
   // ── Overlays from the table's analyses ───────────────────────────────
 
   const analyses = Object.values(nodes).filter((n) => n.type === "analysis" && n.parentId === node.parentId);
-  // Significance brackets read the chosen analysis's own result (the one its view shows).
-  const sigAnalysis = options.sigAnalysisId ? nodes[options.sigAnalysisId] : undefined;
-  const sigOutcome = useAnalysis(
-    family === "column" ? sigAnalysis?.analysisType : undefined,
-    data,
-    sigAnalysis?.analysisParams,
+  // Significance brackets read the chosen analyses' own results (the ones their views
+  // show). One id is the legacy single source; `sigAnalysisIds` names several — a
+  // grouped-scatter's multiple t tests, one per copy table. Each runs on its own
+  // parent table's data (a copy's test reads the copy's numbers, not the graph's
+  // table's), and its brackets land on the graph's rows, which a copy shares with
+  // the original.
+  const stars = family === "column" || GROUPED_STARS.has(type);
+  const sigIdKey = sigAnalysisIdsOf(options).join("\n");
+  const sigAnalyses = sigIdKey
+    .split("\n")
+    .filter(Boolean)
+    .map((id) => nodes[id])
+    .filter((n): n is ProjectNode => n !== undefined && n.type === "analysis");
+  const sigOutcomes = useAnalyses(
+    stars
+      ? sigAnalyses.map((a) => ({
+          id: a.id,
+          type: a.analysisType,
+          data: a.parentId ? nodes[a.parentId]?.data : undefined,
+          params: a.analysisParams,
+        }))
+      : [],
   );
-  // None while its analysis runs (its stars come once R answers).
-  const comparisons = React.useMemo(
-    () => (sigAnalysis && !sigOutcome ? null : deriveComparisons(sigOutcome)),
-    [sigAnalysis, sigOutcome],
-  );
+  // None while its analyses run (their stars come once R answers); none from an analysis
+  // of other data sets than those the graph shows (`starsFit`). The memo reads the
+  // current nodes but keys on the stable pieces, so an unrelated store change doesn't
+  // rebuild the list and redraw the plot.
+  const comparisons = React.useMemo(() => {
+    if (!stars || !sigAnalyses.length) return [];
+    const fitting = sigAnalyses.filter((a) => starsFit(a, choosable, shownSets ?? choosable));
+    if (!fitting.length) return [];
+    if (!sigOutcomes) return null;
+    return fitting.flatMap((a) => deriveComparisons(sigOutcomes[sigAnalyses.indexOf(a)] ?? null, a.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stars, sigIdKey, sigOutcomes, choosable.join("\n"), (shownSets ?? choosable).join("\n")]);
   // An XY scatter draws a regression of its table: a linear one's line and band it computes
   // itself; a nonlinear or logistic one's curve, from its result.
   const regNode = options.regAnalysisId ? nodes[options.regAnalysisId] : undefined;
@@ -487,6 +558,20 @@ export function GraphView({ node }: { node: ProjectNode }) {
     kmeansAnalysis?.analysisParams,
   );
   const kmeansResult = kmeansOutcome && !("error" in kmeansOutcome) ? kmeansOutcome : null;
+  // A dendrogram or a choosing-k plot draws a sibling Hierarchical
+  // clustering's tree and diagnostics — the same cached runAnalysis result
+  // (no extra R call). Without one it draws only its axes, and the Format
+  // panel says to run the analysis first — exactly like the scree plot.
+  const hclustAnalysis = options.hclustAnalysisId ? nodes[options.hclustAnalysisId] : undefined;
+  const hclustOutcome = useAnalysis(
+    (type === "dendrogram" || type === "elbow-plot" || type === "silhouette-plot" || type === "gap-plot") &&
+      hclustAnalysis?.analysisType === "hierarchical-clustering"
+      ? "hierarchical-clustering"
+      : undefined,
+    data,
+    hclustAnalysis?.analysisParams,
+  );
+  const hclustResult = hclustOutcome && !("error" in hclustOutcome) ? hclustOutcome : null;
   // An estimation plot draws a sibling Compare two groups analysis's
   // difference between means with its 95% CI — the same cached runAnalysis
   // result (no extra R call). Without one it draws only the raw data, and
@@ -556,7 +641,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
           fx: (e.clientX - r.left) / r.width,
           fy: (e.clientY - r.top) / r.height,
         };
-      setExplicitZoom((z) => clamp((z ?? zoomRef.current) * (1 - e.deltaY * 0.01), ZOOM));
+      setExplicitZoom(clamp(zoomRef.current * (1 - e.deltaY * 0.01), ZOOM_LIMITS));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -622,9 +707,11 @@ export function GraphView({ node }: { node: ProjectNode }) {
         options,
         type === "kmeans-scatter" && kmeansResult?.kmeansClusters
           ? kmeansResult.kmeansClusters.length
-          : seriesNames.length,
+          : allSeries.length,
+        allSeries,
       );
-      const fig = GRAPHS[type].build(coxSurvivalCols ?? volcanoColumns, buildOptions, paint, dataset?.titles, dataset?.summary);
+      const fig = GRAPHS[type].build(coxSurvivalCols ?? volcanoColumns, buildOptions, paint, drawDataset?.titles, drawDataset?.summary, parent?.tableType);
+      applyNumberFormats(fig, buildOptions);
       fig.data = withCaps(fig.data, options);
       // A graph whose sibling analysis isn't linked draws only its axes or
       // points: say so on the canvas (G-F7), instead of leaving bare axes.
@@ -632,7 +719,8 @@ export function GraphView({ node }: { node: ProjectNode }) {
         const note = unlinkedAnalysisNote(t);
         if (note) addNote(fig, note, options);
       };
-      if (family === "column" && options.sigAnalysisId) addSignificance(fig, columns, type, options, comparisons ?? []);
+      if (stars && (comparisons?.length ?? 0) > 0)
+        addSignificance(fig, columns, type, options, comparisons ?? [], dataset?.titles);
       if (type === "xy-scatter" && curveParams) {
         const { x, ys } = splitXY(columns);
         const fitted = curveParams.ys ?? [curveParams.y ?? ys[0]?.name ?? ""];
@@ -709,8 +797,24 @@ export function GraphView({ node }: { node: ProjectNode }) {
       }
       if (type === "kmeans-scatter") {
         if (kmeansResult)
-          addKmeansScatter(fig, columns, kmeansResult, options, paint, dataset?.titles);
+          addKmeansScatter(fig, columns, kmeansResult, options, paint, drawDataset?.titles);
         else unlinked("kmeans-scatter");
+      }
+      if (type === "dendrogram") {
+        if (hclustResult) addDendrogram(fig, hclustResult, paint, options);
+        else unlinked("dendrogram");
+      }
+      if (type === "elbow-plot") {
+        if (hclustResult) addElbowPlot(fig, hclustResult, paint);
+        else unlinked("elbow-plot");
+      }
+      if (type === "silhouette-plot") {
+        if (hclustResult) addSilhouettePlot(fig, hclustResult, paint, options);
+        else unlinked("silhouette-plot");
+      }
+      if (type === "gap-plot") {
+        if (hclustResult) addGapPlot(fig, hclustResult, paint);
+        else unlinked("gap-plot");
       }
       // The points' names are part of the figure (the volcano places its own, among the
       // genes it names); the selection ring only of the view. Labels clamp to the plot
@@ -731,6 +835,11 @@ export function GraphView({ node }: { node: ProjectNode }) {
               y: onAxis(label.y, options.yScale),
             }));
       if (labels.length) fig.layout.annotations = [...((fig.layout.annotations as unknown[]) ?? []), ...labels];
+      if (hasValueAxis(family) && options.refLines?.length) {
+        const { shapes, annotations } = refLineParts(options, type === "grouped-hbars");
+        fig.layout.shapes = [...((fig.layout.shapes as unknown[]) ?? []), ...shapes];
+        fig.layout.annotations = [...((fig.layout.annotations as unknown[]) ?? []), ...annotations];
+      }
       const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent");
       const ring = selectionRing(fig.data, selected, accent);
       // A graph of individual points picks them by dragging; the others stay still.
@@ -751,6 +860,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
         setSelected(new Set([...selected].filter((key) => keys.has(key))));
       const resolved = (el as { _fullLayout?: PlotlyLayout })._fullLayout;
       if (resolved?._size) setMargins(resolved._size);
+      setNewLineAt(middleOf(type === "grouped-hbars" ? resolved?.xaxis : resolved?.yaxis) ?? 0);
     });
     return () => {
       current = false;
@@ -782,8 +892,9 @@ export function GraphView({ node }: { node: ProjectNode }) {
     poissonParams,
     pcaResult,
     kmeansResult,
+    hclustResult,
     mcResult,
-    seriesNames.length,
+    allSeries.join("\n"),
     selected,
     glRatio,
   ]);
@@ -846,11 +957,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
   React.useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
-    const update = () =>
-      setFit((prev) => {
-        const next = fitZoom(el.clientWidth, el.clientHeight, boxRef.current.width, boxRef.current.height);
-        return next === prev ? prev : next;
-      });
+    const update = () => setFit(fitZoom(el.clientWidth, el.clientHeight, boxRef.current.width, boxRef.current.height));
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
@@ -861,15 +968,49 @@ export function GraphView({ node }: { node: ProjectNode }) {
     <WithInspector
       title={node.name}
       tag={titleCase(GRAPHS[type].label)}
+      node={node}
       actions={<AddFloatingNoteButton node={node} />}
-      inspector={
+      settings={
         <FormatPanel
           graphId={node.id}
+          newLineAt={newLineAt}
+          allSeries={allSeries}
+          sets={choosable}
           graphType={type}
           tableType={parent?.tableType}
+          sourceTables={[
+            ...(parent ? [{ id: parent.id, name: parent.name, primary: true }] : []),
+            ...(node.sourceTableIds ?? []).map((id) => ({
+              id,
+              name: nodes[id]?.name ?? id,
+              primary: false,
+            })),
+          ]}
+          availableSourceTables={rootOrder
+            .filter(
+              (id) =>
+                nodes[id]?.type === "table" &&
+                nodes[id]?.tableType === parent?.tableType &&
+                id !== parent?.id &&
+                !(node.sourceTableIds ?? []).includes(id),
+            )
+            .map((id) => ({ id, name: nodes[id]!.name }))}
+          onAddSourceTable={(id) => setGraphSources(node.id, [...(node.sourceTableIds ?? []), id])}
+          onRemoveSourceTable={(id) =>
+            setGraphSources(
+              node.id,
+              (node.sourceTableIds ?? []).filter((s) => s !== id),
+            )
+          }
           options={options}
           set={set}
           analyses={analyses}
+          allAnalyses={Object.values(nodes).filter((n) => n.type === "analysis")}
+          analysisTables={Object.fromEntries(
+            Object.values(nodes)
+              .filter((n) => n.type === "analysis")
+              .map((a) => [a.id, a.parentId ? nodes[a.parentId]?.name ?? "" : ""]),
+          )}
           comparisons={comparisons}
           seriesNames={seriesNames}
           setSeriesStyle={setSeriesStyle}
@@ -889,20 +1030,24 @@ export function GraphView({ node }: { node: ProjectNode }) {
           logLeftOut={logLeftOut}
           binsTooMany={binsTooMany}
           replicates={parent?.tableType === "xy" && Boolean(parent.data && isGrouped(parent.data))}
+          summary={dataset?.summary}
           onFindGenes={findGenes}
           numericNames={dataset?.numeric.map((c) => c.name) ?? []}
           allNames={dataset?.columns.map((c) => c.name) ?? []}
           fitError={curveOutcome && "error" in curveOutcome ? curveOutcome.error : null}
-          onNewAnalysis={(test) => {
+          onNewAnalysis={(test, sets) => {
             if (!node.parentId) return;
-            if (test) startAnalysis(node.parentId, test);
-            else openSelector({ kind: "new-analysis", tableId: node.parentId });
+            // The new analysis is made for this graph: pre-answered with the
+            // data sets the graph shows, and linked as its stars source.
+            const forGraph = { id: node.id, sets: sets ?? [] };
+            if (test) startAnalysis(node.parentId, test, forGraph);
+            else openSelector({ kind: "new-analysis", tableId: node.parentId, forGraph });
           }}
           canExport={hasData}
-          onSave={(format, dpi) =>
-            plottedRef.current && saveGraphImage(plottedRef.current, size, format, dpi, node.name)
+          onSave={(format, dpi, colorMode) =>
+            plottedRef.current && saveGraphImage(plottedRef.current, size, format, dpi, node.name, colorMode)
           }
-          onCopy={(dpi) => plottedRef.current && copyGraphImage(plottedRef.current, size, dpi)}
+          onCopy={(dpi, colorMode) => plottedRef.current && copyGraphImage(plottedRef.current, size, dpi, colorMode)}
           onSendToOffice={(target, dpi) =>
             plottedRef.current && sendGraphToOffice(plottedRef.current, size, target, dpi, node.name)
           }
@@ -992,6 +1137,9 @@ export function GraphView({ node }: { node: ProjectNode }) {
                       scaled sheet they zoom with it, and the exporters render the
                       Plotly figure only, so they never reach an exported image. */}
                   <FloatingNotesLayer node={node} />
+                  {/* Drawing objects (seq 238), the same way: pinned to the sheet,
+                      screen-only, never exported. */}
+                  <DrawingObjectsLayer node={node} zoom={zoom} />
                 </div>
               </div>
             </div>
@@ -1044,4 +1192,15 @@ type PlotElement = HTMLDivElement & {
 /** The part of Plotly's resolved layout read back after drawing. */
 interface PlotlyLayout {
   _size?: Margins;
+  xaxis?: { range?: number[]; type?: string };
+  yaxis?: { range?: number[]; type?: string };
+}
+
+/** The middle of an axis as drawn, rounded to 2 significant digits (its range is in log10
+ *  on a log axis): where a new reference line goes. */
+function middleOf(axis: PlotlyLayout["xaxis"]): number | undefined {
+  const [a, b] = axis?.range ?? [];
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return undefined;
+  const mid = axis!.type === "log" ? 10 ** ((a + b) / 2) : (a + b) / 2;
+  return mid === 0 ? 0 : Number(mid.toPrecision(2));
 }

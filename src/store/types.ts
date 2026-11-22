@@ -1,7 +1,7 @@
 // Shared project-tree types — kept light so both the store and the table-type
 // modules can depend on it without creating a cycle.
 
-import type { AnalysisParams, AnalysisResult, AnalysisType } from "../stats/types";
+import type { AnalysisParams, AnalysisResult, AnalysisType, SimulationSpec } from "../stats/types";
 import type { SummaryFormat } from "../lib/summary-format";
 
 export type NodeType = "table" | "analysis" | "graph" | "figure" | "info";
@@ -13,7 +13,7 @@ export const NODE_NAMES: Record<NodeType, string> = {
   figure: "Figure",
   info: "Info Sheet",
 };
-export type TableType = "column" | "xy" | "grouped" | "nested" | "multiple" | "contingency" | "survival";
+export type TableType = "column" | "xy" | "grouped" | "nested" | "multiple" | "contingency" | "survival" | "parts-of-whole";
 /** Tables whose first data column is X (a Survival table's is the time). */
 export const hasXColumn = (type: TableType) => type === "xy" || type === "survival";
 // Every graph type; views/graphs/index.ts says what each draws and for which tables.
@@ -25,19 +25,24 @@ export type GraphType =
   | "xy-scatter"
   | "xy-bar"
   | "xy-area"
+  | "xy-spikes"
+  | "xy-bar-scatter"
   | "grouped-bars"
+  | "grouped-bars-scatter"
   | "grouped-scatter"
   | "grouped-before-after"
   | "grouped-box"
   | "grouped-lines"
   | "grouped-stacked"
   | "grouped-hbars"
+  | "floating-bars"
   | "pie"
   | "donut"
   | "schild-plot"
   | "logistic-curve"
   | "heatmap"
   | "survival"
+  | "pow-stacked"
   | "forest-plot"
   | "volcano"
   | "bland-altman"
@@ -48,9 +53,30 @@ export type GraphType =
   | "scree-plot"
   | "pca-biplot"
   | "kmeans-scatter"
+  | "dendrogram"
+  | "elbow-plot"
+  | "silhouette-plot"
+  | "gap-plot"
   | "monte-carlo-histogram"
   | "bubble-plot"
-  | "histogram";
+  | "histogram"
+  | "qq-plot"
+  | "residuals"
+  // Multiple Variables kinds (Prism 11.1 gallery, seq 209): Prism-named
+  // variants of shapes Titer already draws for other tables — a strip plot
+  // is Individual values, a summary symbol / bar chart is Mean-or-median-
+  // and-error as points / bars, box-and-whisker / violin are Box-and-violin
+  // with kind box / violin, and the before-after pair reuses Before-and-after
+  // (with bars for the bar-and-strip variant). Distinct types so the picker
+  // shows Prism's names with Prism's defaults (mean + SD error bars).
+  | "mv-strip-plot"
+  | "mv-summary-symbol"
+  | "mv-bar-strip"
+  | "mv-before-after-bar-strip"
+  | "mv-before-after-strip"
+  | "mv-box-whisker"
+  | "mv-violin"
+  | "mv-bar-chart";
 
 /** The choices of a graph's options, one list each: the types come from them, and a
  *  file's value outside them is read as the option's default. */
@@ -63,11 +89,25 @@ export const GRAPH_CHOICES = {
   stackAs: ["values", "percent"],
   shape: ["bar", "point", "line"],
   kind: ["box", "violin"],
+  // A box's whiskers: min to max, Tukey's 1.5×IQR fences (outliers as points),
+  // the 10–90 / 5–95 / 2.5–97.5 / 1–99 percentiles, or min to max with all
+  // points shown (Prism's whisker choices, FAQ 1481).
+  whisker: ["min-max", "tukey", "p10-90", "p5-95", "p2.5-97.5", "p1-99", "min-max-all"],
+  // A violin's shape: the full density, truncated at the data's min/max, or
+  // one half only (Prism 8.4.0+ truncated vs full; half is the one-sided form).
+  violinVariant: ["full", "truncated", "half"],
+  // How scatter points spread sideways: Standard (width ∝ points at that Y —
+  // Prism's distribution-shaped scatter), Classic (the legacy jitter, kept
+  // exactly), Expanded (a low-discrepancy spread that breaks visual patterns),
+  // Aligned (no spread: dots stacked in a column — Prism's aligned dot plot).
+  scatterStyle: ["standard", "classic", "expanded", "aligned"],
   xyStyle: ["points", "line", "points+line"],
   xyReplicates: ["mean", "each"],
   pieValue: ["sum", "mean"],
-  groupLayout: ["interleaved", "separated"],
-  sigDisplay: ["stars", "pvalue"],
+  groupLayout: ["interleaved", "separated", "superimposed"],
+  sigDisplay: ["stars", "pvalue", "pvalue-eq", "letters"],
+  regBand: ["confidence", "prediction"],
+  residualsAs: ["x", "qq"],
   survivalMode: ["codes", "counts"],
   volcanoEffect: ["log2ratio", "difference"],
   volcanoSignificance: ["pvalue", "fdr"],
@@ -117,6 +157,14 @@ export const GRAPH_LIMITS = {
   pcaY: { min: 1, max: 20 },
 } as const;
 
+/** An axis's number format (Prism's Format Axes "Number format"): automatic
+ *  (Plotly's own ticks), a fixed number of decimal places, or scientific
+ *  notation with that many decimals. `decimals` 0–15; omitted, 2. */
+export interface AxisNumberFormat {
+  format: "auto" | "decimal" | "scientific";
+  decimals?: number;
+}
+
 /**
  * Display options for a graph node. A superset across the families — each graph
  * module reads only the fields it needs (keeps the store flat + easy to extend).
@@ -131,20 +179,36 @@ export interface GraphOptions {
   shape: Choice<"shape">;
   // Box & violin
   kind: Choice<"kind">;
-  showPoints: boolean; // overlay individual points on box/violin
+  showPoints: boolean; // overlay individual points on box/violin and grouped bars
+  // A box's whiskers (min-max, Tukey fences, percentile ranges, min-max with all points).
+  whisker: Choice<"whisker">;
+  // A violin's shape (full density, truncated at the data, or one half only).
+  violinVariant: Choice<"violinVariant">;
+  // How scatter points spread sideways (standard / classic jitter / expanded / aligned).
+  scatterStyle: Choice<"scatterStyle">;
   // Estimation plot: draw violins behind the raw points (else a scatterplot).
   estimationViolin: boolean;
   // XY scatter: markers only, connecting line only, or both
   xyStyle: Choice<"xyStyle">;
   // An XY table's replicates: each X's center and error (`center`, `error`), or each value.
   xyReplicates: Choice<"xyReplicates">;
+  // X error bars on XY graphs (Prism's X-error subcolumn, imported as the
+  // "<X> error" column): drawn from that column's values whenever it exists,
+  // whether or not Y error bars are on — Prism couples them, Titer does not,
+  // so an X-only error display is possible. While on, the error column is
+  // used as the bars, not drawn as a series. Off: the column stays a series,
+  // as before.
+  xError: boolean;
   // Pie/donut (axis-less proportion charts): each column is one slice, sized by the
   // column's total (sum) or mean; percentages vs. raw values on the slice labels.
   pieValue: Choice<"pieValue">;
   pieShowPercent: boolean;
   // Grouped bars/scatter (interleaved bars, horizontal bars, interleaved scatter):
-  // interleave groups within each row, or give each group its own block of
-  // categories (Prism's "Separated" arrangement). Not offered for connected
+  // interleave groups within each row, give each group its own block of
+  // categories (Prism's "Separated" arrangement), or draw every group's bar
+  // from the axis to its value at the same x (Prism's "Superimposed" — a
+  // taller bar hides a shorter one behind it unless the fill is
+  // semi-transparent; see grouped-common.ts). Not offered for connected
   // lines (groups must share the same X axis to show interaction) or stacked
   // bars (stacking already combines groups per category).
   groupLayout: Choice<"groupLayout">;
@@ -176,6 +240,12 @@ export interface GraphOptions {
   y2Min?: number;
   y2Max?: number;
   y2Step?: number;
+  // Each axis's number format (see AxisNumberFormat): omitted = automatic.
+  // Applied to numeric linear axes only — category axes, log axes (whose
+  // ticks are the powers) and custom-tick axes keep their own labels.
+  xNumberFormat?: AxisNumberFormat;
+  yNumberFormat?: AxisNumberFormat;
+  y2NumberFormat?: AxisNumberFormat;
   // An axis limit hooked to an info constant (the constant's name, not its
   // value): resolved live in GraphView, so editing the constant moves the
   // axis. A hooked limit wins over its number above when it resolves.
@@ -185,11 +255,14 @@ export interface GraphOptions {
   xMaxConstant?: string;
   // A histogram's bin width, in the values' units; omitted (or 0 and under), R's own bins.
   binWidth?: number;
-  // Significance annotations (Column family only): read a sibling analysis's
-  // pairwise comparisons and draw brackets. `sigAnalysisId` is the source analysis
-  // node; `sigPairs` are the comparison keys (see significance-overlay) to draw;
-  // `sigDisplay` toggles star marks vs. raw P values.
+  // Significance annotations (Column and grouped graphs): read sibling analyses'
+  // pairwise comparisons and draw brackets. `sigAnalysisId` is the (legacy) single
+  // source analysis node; `sigAnalysisIds` names several — a grouped-scatter's
+  // multiple t tests, one per copy table — and wins when non-empty. `sigPairs` are
+  // the comparison keys (see significance-overlay) to draw; `sigDisplay`: star marks,
+  // raw P values, or letters over every group (no brackets).
   sigAnalysisId?: string;
+  sigAnalysisIds?: string[];
   sigPairs?: string[];
   sigDisplay: Choice<"sigDisplay">;
   // A regression of the table drawn on an XY scatter: a linear one's line and 95% band,
@@ -198,6 +271,10 @@ export interface GraphOptions {
   regAnalysisId?: string;
   regShowLine: boolean;
   regShowBand: boolean;
+  // The band's kind: where the line lies (confidence), or where a new point would (prediction).
+  regBand: Choice<"regBand">;
+  // A residual plot: residuals against X, or their QQ plot.
+  residualsAs: Choice<"residualsAs">;
   regShowEquation: boolean;
   // Deming-regression overlay (XY scatter only): draw a sibling "Deming regression"
   // analysis's fit line (solid) plus the OLS line (dashed) for comparison, both
@@ -236,6 +313,11 @@ export interface GraphOptions {
   // and centres from (see kmeans-scatter.ts) — the graph runs the same
   // cached runAnalysis result. It plots the first two variables.
   kmeansAnalysisId?: string;
+  // Hierarchical clustering (Multiple Variables only): the sibling
+  // "Hierarchical clustering" analysis a dendrogram or a choosing-k plot
+  // draws its tree and diagnostics from (see dendrogram.ts and
+  // choosing-k.ts) — the graph runs the same cached runAnalysis result.
+  hclustAnalysisId?: string;
   // A Multiple Variables table's scatter: its X and Y variables (column names); omitted,
   // the first two holding numbers.
   xVariable?: string;
@@ -326,6 +408,12 @@ export interface GraphOptions {
   // Every series line's thickness (px) and dashes; a series' dashes win.
   lineWidth: number;
   lineDash: LineDash;
+  // The data sets it shows (columns, a grouped table's groups, an XY table's Y data sets),
+  // by name; none: all of them. One table, many graphs of some of its data sets.
+  sets?: string[];
+  // Lines across the plot at values of the value axis (Y; X on horizontal bars): a sham
+  // group's level, a threshold… (`refLineParts` draws them).
+  refLines?: RefLine[];
   // Texts moved by hand: the legend (or a heatmap's color legend), as a fraction of
   // the plot area; the note (a fit's equation), in px from its corner. None: in place.
   legend?: Place;
@@ -366,16 +454,22 @@ export const DEFAULT_GRAPH_OPTIONS: GraphOptions = {
   error: "sem",
   shape: "bar",
   kind: "box",
+  whisker: "min-max",
+  violinVariant: "full",
+  scatterStyle: "classic",
   showPoints: false,
   estimationViolin: false,
   xyStyle: "points",
   xyReplicates: "mean",
+  xError: false,
   pieValue: "sum",
   pieShowPercent: true,
   groupLayout: "interleaved",
   sigDisplay: "stars",
   regShowLine: true,
   regShowBand: true,
+  regBand: "confidence",
+  residualsAs: "x",
   regShowEquation: true,
   demingShowLine: true,
   demingShowOls: true,
@@ -486,6 +580,25 @@ export interface PointStyle {
 }
 
 /** A position: of a text on the graph, or of a name from its point. */
+/** A reference line: where (in the value axis's units), its dashes, thickness (px) and
+ *  color (none: the axes'), and the text at its end. */
+export interface RefLine {
+  value: number;
+  dash: LineDash;
+  width: number;
+  color?: string;
+  label?: string;
+  /** Where its text sits (none: top right): above or below a horizontal line, at its right
+   *  or left end; at the top or bottom of a vertical one, right or left of it. */
+  labelPlace?: RefLabelPlace;
+}
+
+export const REF_LABEL_PLACES = ["top-right", "top-left", "bottom-right", "bottom-left"] as const;
+export type RefLabelPlace = (typeof REF_LABEL_PLACES)[number];
+
+/** How many reference lines a graph holds at most. */
+export const MAX_REF_LINES = 10;
+
 export interface Place {
   x: number;
   y: number;
@@ -506,6 +619,58 @@ export interface FloatingNote {
   x: number;
   y: number;
 }
+
+/** A drawing object on a graph or figure sheet (seq 238): a text box, a
+ *  shape, a line/arrow, or a picture — Prism's Insert Text / Picture /
+ *  Drawing, rendered as a DOM layer over the sheet (like floating notes).
+ *  `x`/`y`/`width`/`height` are px from the sheet's top-left, in the
+ *  sheet's own px, so objects zoom with the sheet. Array order is the
+ *  stacking order (last drawn on top); Arrange reorders it. Objects are
+ *  screen-only for now: the exporters render the Plotly figure, never this
+ *  DOM layer (see floating-notes.tsx) — export inclusion is a follow-up. */
+export type DrawingObjectKind = "text" | "rect" | "ellipse" | "line" | "arrow" | "picture";
+export const DRAWING_OBJECT_KINDS: DrawingObjectKind[] = ["text", "rect", "ellipse", "line", "arrow", "picture"];
+
+/** A picture object holds its image as a data URL, so the `.hlx` file stays
+ *  self-contained; pictures over this many bytes are refused at insert. */
+export const MAX_PICTURE_BYTES = 5_000_000;
+
+export interface DrawingObject {
+  id: string;
+  kind: DrawingObjectKind;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Text objects only: the text shown. */
+  text?: string;
+  /** Text objects only: font size in px (default 14). */
+  fontSize?: number;
+  /** The ink: a text object's color, or a shape/line's stroke. */
+  color?: string;
+  /** Shapes only: fill color, or "none" for unfilled. */
+  fill?: string;
+  /** Shapes/lines only: stroke width in px (default 1.5). */
+  strokeWidth?: number;
+  /** Pictures only: the image as a data URL (PNG/JPEG/GIF/WebP). */
+  src?: string;
+  /** Objects in a group share this id (Arrange > Group); omitted when ungrouped. */
+  groupId?: string;
+}
+
+/** What Arrange does to the selected drawing objects (seq 238): reorder
+ *  them in the stacking order, copy them, group/ungroup them, or delete
+ *  them. "delete" here is the Arrange menu's Delete, not the store's
+ *  deleteDrawingObject — same effect, one name for the menu. */
+export type ArrangeOp =
+  | "bring-to-front"
+  | "send-to-back"
+  | "bring-forward"
+  | "send-backward"
+  | "duplicate"
+  | "group"
+  | "ungroup"
+  | "delete";
 
 /** A sheet's highlight color in the Navigator: Prism lets a sheet be highlighted
  *  in a color of the user's choice, to mark it for review or draw a colleague's
@@ -556,12 +721,53 @@ export interface RowGroup {
 export type TableErrorFormat = "sd" | "sem";
 
 /** A table's error format, defaulting to SEM (the graphs' default). */
-export const tableErrorFormat = (data: TableData): TableErrorFormat =>
-  data.errorFormat === "sd" ? "sd" : "sem";
+export const tableErrorFormat = (data: TableData): TableErrorFormat => (data.errorFormat === "sd" ? "sd" : "sem");
+
+/** One calculated variable (Prism 11, seq 156): a Multiple Variables
+ *  table's column whose values come from a formula over the table's other
+ *  variables, not from typing. `formula` is stored WITHOUT the leading `=`
+ *  (`"A + B"`); the grid and the panel display it with it. `error` is
+ *  recomputed, never trusted from a file: a formula that cannot run records
+ *  why here, and its values stay blank. The engine lives in lib/calcvars.ts. */
+export interface CalculatedVariable {
+  name: string;
+  formula: string;
+  error?: string;
+}
+
+/** One linked paste (Prism 11, seq 168): a block of this table's cells
+ *  pasted from a data file (CSV / TXT / XLSX) that stays linked to it, so
+ *  the table updates when the file changes. `row`/`col` anchor the block's
+ *  top-left cell; `rows`/`cols` are its shape as last pasted (a refresh
+ *  re-pastes the file into the same region, blanking cells the source no
+ *  longer covers). `autoUpdate` is Prism's "Automatically update Prism
+ *  when the data file is changed" checkbox — on, a changed source applies
+ *  on open; off, the user refreshes by hand. `sourcePath` is the file as
+ *  the OS names it (absolute); `sourceName` is its display name. */
+export interface LinkedPaste {
+  sourcePath: string;
+  sourceName: string;
+  kind: "csv" | "xlsx";
+  row: number;
+  col: number;
+  rows: number;
+  cols: number;
+  autoUpdate: boolean;
+}
 
 export interface TableData {
   columns: string[];
   rows: (string | null)[][];
+  /** Calculated variables (Multiple Variables tables only): their formulas,
+   *  in column order. Their values are materialized into `rows` by
+   *  `recomputeCalculated`, so every analysis and graph reads them exactly
+   *  like typed variables. Omitted when the table has none. */
+  calculated?: CalculatedVariable[];
+  /** A linked paste (Prism 11, seq 168): this table's cells pasted from a
+   *  data file that stay linked to it — see `LinkedPaste`. Omitted when
+   *  the table holds no linked block. The link is Titer-local: the
+   *  `.prism` / `.pzfx` writers carry the values only, never the link. */
+  linkedPaste?: LinkedPaste;
   /** A table's error format: what its entered error values are — SD or SEM
    *  (Prism's "Changing a data table format": a table formatted for SEM whose
    *  values are really SD can be switched). It labels the table's summary
@@ -599,7 +805,37 @@ export interface TableData {
   /** Provenance note (e.g. a simulated table's distribution + seed) — kept
    *  with the table in the .hlx file so the data's origin stays auditable. */
   notes?: string;
+  /** The spec a simulated table was drawn from (seq 243): kept with the
+   *  table so Simulate Again can re-run it after reopening. Omitted for
+   *  tables that weren't simulated. */
+  simulation?: SimulationSpec;
 }
+
+/** How a table computed from another transforms its values (lib/transform.ts). */
+export const TRANSFORMS = ["log10", "log2", "ln", "normalize", "percent-of-control", "z-score"] as const;
+/** What a z-score is taken within: each data set, or each row. */
+export const Z_WITHIN = ["set", "row"] as const;
+
+/** A table computed from another (`from`, a table's id): its values transformed, kept in
+ *  step with that table's. `control`: the data set a percent is of; `within`: a z-score's. */
+export interface Transform {
+  from: string;
+  kind: (typeof TRANSFORMS)[number];
+  control?: string;
+  within?: (typeof Z_WITHIN)[number];
+}
+
+/** The Finder's tag colors, in its order, as an item's `tags` name them. */
+export const TAG_COLORS = {
+  red: "#FF3B30",
+  orange: "#FF9500",
+  yellow: "#FFCC00",
+  green: "#34C759",
+  blue: "#007AFF",
+  purple: "#AF52DE",
+  gray: "#8E8E93",
+} as const;
+export type TagColor = keyof typeof TAG_COLORS;
 
 /** One row of an info sheet's structured table: a name and a string value,
  *  as Prism stores it ("2018-07-23", "0.5", ""). Numeric when a hook needs it.
@@ -621,6 +857,18 @@ export interface InfoSheetData {
   linkedTableId?: string | null;
 }
 
+/** A Prism script saved in the project (seq 228): Prism keeps its scripts
+ *  in the project file, and runs them when the project opens or closes.
+ *  `runOnOpen` / `runOnClose` are the two hooks; both off is a script kept
+ *  for running by hand (File ▸ Run Script…). */
+export interface ProjectScript {
+  id: string;
+  name: string;
+  text: string;
+  runOnOpen: boolean;
+  runOnClose: boolean;
+}
+
 export interface ProjectNode {
   id: string;
   type: NodeType;
@@ -634,6 +882,12 @@ export interface ProjectNode {
   highlight?: SheetHighlight;
   tableType?: TableType;
   data?: TableData;
+  /** Tables computed from another only: how (their `data` is computed, never typed). */
+  transform?: Transform;
+  /** The user's note on the item (none: empty), in the right panel's Notes. */
+  notes?: string;
+  /** Its tags, as the Finder's: colors in `TAG_COLORS`' order, shown in the sidebar. */
+  tags?: TagColor[];
   /** Analysis nodes only: which statistical test this node runs. */
   analysisType?: AnalysisType;
   /** Analysis nodes only: wizard-chosen params for the test, when it has any. */
@@ -644,9 +898,19 @@ export interface ProjectNode {
    *  Written to the `.hlx` file with the node, so the results survive a
    *  save and reload. */
   cachedResult?: AnalysisResult;
-  /** Analysis nodes only: frozen — the sheet shows `cachedResult` and stops
-   *  auto-updating when the data change (Prism's freeze button). */
+  /** Frozen — the sheet stops auto-updating when the data change (Prism's
+   *  freeze button). Analyses show `cachedResult`; graphs and figures show
+   *  their frozen data snapshot instead of the live table (seq 237). */
   frozen?: boolean;
+  /** Graph nodes only: the parent table's data as it was when the graph was
+   *  frozen — what a frozen graph draws. Omitted when unfrozen. */
+  frozenData?: TableData;
+  /** Figure nodes only: each panel graph's parent table data as it was when
+   *  the figure was frozen, by graph id. Omitted when unfrozen. */
+  frozenDataByGraph?: Record<string, TableData>;
+  /** Graph and figure nodes only: the text/drawing/picture objects on the
+   *  sheet (seq 238), in stacking order. Omitted when the sheet has none. */
+  drawingObjects?: DrawingObject[];
   /** Analysis nodes only: orphaned — the source table was deleted, so the
    *  results stay as they were and the analysis parameters cannot be changed
    *  (Prism's orphaned results). The node lives at the project root. */
@@ -657,6 +921,11 @@ export interface ProjectNode {
   /** Graph nodes only: which chart this node draws + its display options. */
   graphType?: GraphType;
   graphOptions?: GraphOptions;
+  /** Graph nodes only (#48): the extra tables this graph also plots, by
+   *  id, beyond its primary table (`parentId`). Same table type as the
+   *  primary; their series are qualified with the table's name
+   *  (see src/lib/multi-table.ts). Omitted = a single-table graph. */
+  sourceTableIds?: string[];
   /** Figure nodes only: the panels it composes (see src/lib/figure.ts). */
   panels?: FigurePanel[];
   grid?: FigureGrid;
@@ -664,15 +933,32 @@ export interface ProjectNode {
   labelStyle?: FigureLabelStyle;
   figureTitle?: string;
   sharedLegend?: SharedLegend;
+  /** The page's background colour, as `#rrggbb` (white when absent): blank
+   *  cells and the margins around panels show it, in the editor and on
+   *  export. */
+  figureBackground?: string;
   dpi?: Resolution;
   /** Info sheet nodes only: its constants, notes, and linked table. */
   info?: InfoSheetData;
 }
 
 /** One panel of a multi-panel figure: a reference to an existing graph node,
- *  never a copy of it — editing the graph updates the panel automatically. */
+ *  never a copy of it — editing the graph updates the panel automatically.
+ *  Or a panel with no graph: `kind` "blank" (an empty cell, for layout — a
+ *  spacer, or room for a caption) or "image" (an embedded picture, for a gel,
+ *  blot or photo beside the graphs). A blank/image panel's `graphId` is "". */
 export interface FigurePanel {
   graphId: string;
+  /** Which kind of panel this is (absent reads as "graph", as every panel was
+   *  before this landed — old files need no migration). */
+  kind?: "graph" | "blank" | "image";
+  /** An image panel's picture, as a data URL (embedded in the file, so the
+   *  project stays self-contained; capped — see FIGURE_IMAGE_MAX_DATA_URL).
+   *  A panel with no image yet draws blank until one is picked. */
+  imageData?: string;
+  /** An image panel's file name, for the panel's listing (never trusted for
+   *  lookup — the picture itself is `imageData`). */
+  imageName?: string;
   /** The graph's name when the panel was saved: a hint for the placeholder
    *  shown when the graph is gone ("Graph 'Dose-response' is missing").
    *  Never trusted for lookup — ids are the reference. */
@@ -711,4 +997,4 @@ export interface FigureLabelStyle {
 export type SharedLegend = "none" | "shared";
 
 /** An export resolution, in dots per inch (same choices as a single graph). */
-export type Resolution = "150" | "300" | "600" | "900" | "1200";
+export type Resolution = "100" | "150" | "300" | "600" | "900" | "1200";

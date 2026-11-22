@@ -15,17 +15,42 @@ import {
   TextTIcon,
 } from "@phosphor-icons/react";
 import { Button, Select } from "../../ui/controls";
-import { Section, Stepper } from "../../components/inspector";
+import { titleCase } from "../../lib/format";
+import { Row, Section, Stepper } from "../../components/inspector";
 import { useProjectStore } from "../../store/use-project-store";
 import { allConstantNames } from "../../lib/info-sheets";
 import { paletteColor, paletteOf, reversedPalette, savedPalette, withoutColors } from "../../lib/palettes";
-import { GRAPH_LIMITS, type GraphOptions, type PointStyle, type SeriesStyle } from "../../store/types";
-import { GRAPHS, newGraphOptions } from ".";
-import { EXPORT_FORMATS, RESOLUTIONS, type ExportFormat, type Resolution } from "./graph-export";
+import {
+  GRAPH_LIMITS,
+  MAX_REF_LINES,
+  REF_LABEL_PLACES,
+  SAME_AS_FILL,
+  type AxisNumberFormat,
+  type GraphOptions,
+  type GraphPalette,
+  type PointStyle,
+  type RefLine,
+  type SeriesStyle,
+} from "../../store/types";
+import { GRAPHS, hasValueAxis, newGraphOptions } from ".";
+import {
+  EXPORT_FORMATS,
+  EXPORT_PRESETS,
+  RESOLUTIONS,
+  exportPreset,
+  type ExportFormat,
+  type ExportPreset,
+  type Resolution,
+} from "./graph-export";
+import { COLOR_MODES, type ColorMode } from "../../lib/vector-export";
 import type { OfficeTarget } from "../../lib/office-export";
+import { isMacOs } from "../../lib/channel";
 import {
   Choice,
+  ColorRow,
   ColumnSelectRow,
+  DashRow,
+  Group,
   NumRow,
   OutlineRows,
   PercentRow,
@@ -59,8 +84,12 @@ interface Props extends SectionContext {
   setSeriesStyle: (key: string, style: SeriesStyle) => void;
   selection?: Selection;
   canExport: boolean;
-  onSave: (format: ExportFormat, dpi: Resolution) => void;
-  onCopy: (dpi: Resolution) => void;
+  onSave: (format: ExportFormat, dpi: Resolution, colorMode: ColorMode) => void;
+  onCopy: (dpi: Resolution, colorMode: ColorMode) => void;
+  /** The table's series, in order: each shown one takes its place's color. */
+  allSeries: string[];
+  /** Where a new reference line goes: the middle of the value axis as drawn. */
+  newLineAt: number;
   /** One-click Send to Word / PowerPoint (v2 item 19). */
   onSendToOffice?: (target: OfficeTarget, dpi: Resolution) => void;
 }
@@ -70,6 +99,7 @@ const STYLE_OPTIONS: (keyof GraphOptions)[] = [
   "shape",
   "kind",
   "xyStyle",
+  "residualsAs",
   "groupLayout",
   "bars",
   "showPoints",
@@ -102,16 +132,18 @@ const EXPORT_KEY = "titer.graph.export";
 
 /** The sections, in their one order (each shown only when it has something for the graph). */
 export const SECTIONS = ["Statistics", "Data", "Style", "Series", "Selected points", "Text", "Axes", "Match", "Export"];
-type ExportChoice = { format: ExportFormat; dpi: Resolution };
+type ExportChoice = { format: ExportFormat; dpi: Resolution; colorMode: ColorMode; preset: "custom" | ExportPreset };
 function readExport(): ExportChoice {
   try {
     const saved = JSON.parse(localStorage.getItem(EXPORT_KEY) ?? "{}");
     return {
       format: EXPORT_FORMATS.some((f) => f.value === saved.format) ? saved.format : "png",
       dpi: RESOLUTIONS.includes(saved.dpi) ? saved.dpi : "300",
+      colorMode: COLOR_MODES.some((m) => m.value === saved.colorMode) ? saved.colorMode : "color",
+      preset: EXPORT_PRESETS.some((p) => p.value === saved.preset) ? saved.preset : "custom",
     };
   } catch {
-    return { format: "png", dpi: "300" };
+    return { format: "png", dpi: "300", colorMode: "color", preset: "custom" };
   }
 }
 
@@ -136,7 +168,13 @@ export function FormatPanel(props: Props) {
   const right = family === "xy" ? rightYDataset(options, seriesNames) : undefined;
   const [exported, setExported] = React.useState(readExport);
   const chooseExport = (choice: Partial<ExportChoice>) => {
-    const next = { ...exported, ...choice };
+    // Picking a format or resolution by hand leaves the preset behind.
+    const next = {
+      ...exported,
+      ...choice,
+      preset:
+        choice.preset ?? (choice.format !== undefined || choice.dpi !== undefined ? "custom" : exported.preset),
+    };
     setExported(next);
     remember(EXPORT_KEY, next);
   };
@@ -210,7 +248,7 @@ export function FormatPanel(props: Props) {
             onReverse={() => set({ palette: reversedPalette(palette), series: withoutColors(options.series) })}
           />
           {seriesNames.length > 0 && <SeriesHeader offer={offer} />}
-          {seriesNames.map((name, i) => {
+          {seriesNames.map((name) => {
             const own = options.series?.[name];
             return (
               <SeriesRow
@@ -218,7 +256,10 @@ export function FormatPanel(props: Props) {
                 label={family === "volcano" ? VOLCANO_SERIES[name] : name}
                 palette={palette}
                 style={{
-                  color: own?.color ?? paletteColor(palette, i, seriesNames.length),
+                  // Its color is its place's among the table's series (`allSeries`).
+                  color:
+                    own?.color ??
+                    paletteColor(palette, Math.max(0, props.allSeries.indexOf(name)), props.allSeries.length),
                   shape: own?.shape ?? options.pointShape,
                   dash: own?.dash ?? options.lineDash,
                   pattern: own?.pattern,
@@ -341,7 +382,11 @@ export function FormatPanel(props: Props) {
             "xMaxConstant",
             "xScale",
             "yScale",
+            "xNumberFormat",
+            "yNumberFormat",
+            "y2NumberFormat",
             "axisWidth",
+            "refLines",
             "rightYDataset",
             "y2Label",
             "y2Scale",
@@ -376,6 +421,13 @@ export function FormatPanel(props: Props) {
               onHookChange={(yMinConstant, yMaxConstant) => set({ yMinConstant, yMaxConstant })}
             />
           )}
+          {family !== "heatmap" && axesRangeInputs(graphType).y && (
+            <NumberFormat
+              axis="Y"
+              value={options.yNumberFormat}
+              onChange={(yNumberFormat) => set({ yNumberFormat })}
+            />
+          )}
           {family === "xy" && logScaleOffered(graphType).x && (
             <Scale
               axis="X"
@@ -386,18 +438,25 @@ export function FormatPanel(props: Props) {
           )}
           {(family === "xy" || family === "volcano" || family === "histogram" || family === "multiple") &&
             axesRangeInputs(graphType).x && (
-              <AxisRange
-                axis="X"
-                min={options.xMin}
-                max={options.xMax}
-                step={options.xStep}
-                log={family === "xy" && options.xScale !== "linear"}
-                minHook={options.xMinConstant}
-                maxHook={options.xMaxConstant}
-                constants={constantItems}
-                onChange={(xMin, xMax, xStep) => set({ xMin, xMax, xStep })}
-                onHookChange={(xMinConstant, xMaxConstant) => set({ xMinConstant, xMaxConstant })}
-              />
+              <>
+                <AxisRange
+                  axis="X"
+                  min={options.xMin}
+                  max={options.xMax}
+                  step={options.xStep}
+                  log={family === "xy" && options.xScale !== "linear"}
+                  minHook={options.xMinConstant}
+                  maxHook={options.xMaxConstant}
+                  constants={constantItems}
+                  onChange={(xMin, xMax, xStep) => set({ xMin, xMax, xStep })}
+                  onHookChange={(xMinConstant, xMaxConstant) => set({ xMinConstant, xMaxConstant })}
+                />
+                <NumberFormat
+                  axis="X"
+                  value={options.xNumberFormat}
+                  onChange={(xNumberFormat) => set({ xNumberFormat })}
+                />
+              </>
             )}
           {family === "xy" && seriesNames.length >= 2 && (
             <ColumnSelectRow
@@ -434,6 +493,11 @@ export function FormatPanel(props: Props) {
                 // an empty list hides the hook rows, and this never fires.
                 onHookChange={() => {}}
               />
+              <NumberFormat
+                axis="Right"
+                value={options.y2NumberFormat}
+                onChange={(y2NumberFormat) => set({ y2NumberFormat })}
+              />
             </>
           )}
           <ThicknessRow
@@ -442,6 +506,15 @@ export function FormatPanel(props: Props) {
             limits={GRAPH_LIMITS.axisWidth}
             onChange={(axisWidth) => set({ axisWidth })}
           />
+          {hasValueAxis(family) && (
+            <RefLines
+              lines={options.refLines ?? []}
+              axis={graphType === "grouped-hbars" ? "X" : "Y"}
+              at={props.newLineAt}
+              palette={paletteOf(options)}
+              onChange={(lines) => set({ refLines: lines.length ? lines : undefined })}
+            />
+          )}
           <Choice
             label="X gridlines"
             value={options.gridX}
@@ -501,12 +574,45 @@ export function FormatPanel(props: Props) {
           ]}
         />
         <Choice
+          label="Preset"
+          value={exported.preset}
+          onChange={(preset) =>
+            preset === "custom"
+              ? chooseExport({ preset: "custom" })
+              : chooseExport({ preset, ...exportPreset(preset)! })
+          }
+          items={[
+            { value: "custom" as const, label: "Custom" },
+            ...EXPORT_PRESETS.map((p) => ({ value: p.value, label: p.label })),
+          ]}
+        />
+        <Choice
           label="Format"
           value={exported.format}
-          onChange={(format) => chooseExport({ format })}
+          onChange={(format) =>
+            chooseExport({
+              format,
+              // CMYK has no form for PNG/JPEG/SVG/BMP: picking one of
+              // those drops the colour back to Color.
+              ...(exported.colorMode === "cmyk" && format !== "eps" && format !== "pdf" && format !== "tiff"
+                ? { colorMode: "color" as const }
+                : {}),
+            })
+          }
           items={EXPORT_FORMATS}
         />
-        {exported.format !== "svg" && (
+        <Choice
+          label="Colour"
+          value={exported.colorMode}
+          onChange={(colorMode) => chooseExport({ colorMode })}
+          // CMYK is offered only for the formats that have a CMYK form.
+          items={
+            exported.format === "eps" || exported.format === "pdf" || exported.format === "tiff"
+              ? COLOR_MODES
+              : COLOR_MODES.filter((m) => m.value !== "cmyk")
+          }
+        />
+        {exported.format !== "svg" && exported.format !== "eps" && exported.format !== "pdf" && (
           <Choice
             label="Resolution (DPI)"
             value={exported.dpi}
@@ -519,11 +625,15 @@ export function FormatPanel(props: Props) {
             variant="accent"
             className="flex-1"
             disabled={!props.canExport}
-            onClick={() => props.onSave(exported.format, exported.dpi)}
+            onClick={() => props.onSave(exported.format, exported.dpi, exported.colorMode)}
           >
             Save…
           </Button>
-          <Button className="flex-1" disabled={!props.canExport} onClick={() => props.onCopy(exported.dpi)}>
+          <Button
+            className="flex-1"
+            disabled={!props.canExport}
+            onClick={() => props.onCopy(exported.dpi, exported.colorMode)}
+          >
             Copy
           </Button>
         </div>
@@ -543,11 +653,22 @@ export function FormatPanel(props: Props) {
             >
               Send to PowerPoint…
             </Button>
+            {isMacOs() && (
+              <Button
+                className="flex-1"
+                disabled={!props.canExport}
+                onClick={() => props.onSendToOffice!("keynote", exported.dpi)}
+              >
+                Send to Keynote…
+              </Button>
+            )}
           </div>
         )}
         <p className="text-small text-secondary">
           Send to Word / PowerPoint saves a Word or PowerPoint file with the graph in it — open it in Word or
           PowerPoint.
+          {isMacOs() &&
+            " Send to Keynote creates the presentation in Keynote instead (macOS only) — Keynote saves the .key file."}
         </p>
       </Section>
     </>
@@ -626,6 +747,106 @@ function HookRow({
         <Select value={value} onChange={onChange} options={constants} placeholder="None" />
       </div>
     </div>
+  );
+}
+
+/** The reference lines across the plot: for each, where (on the value axis, `axis`), its
+ *  text, dashes, thickness and color (none: the axes'); added at `at`, removed one by one. */
+function RefLines({
+  lines,
+  axis,
+  at,
+  palette,
+  onChange,
+}: {
+  lines: RefLine[];
+  axis: "X" | "Y";
+  at: number;
+  palette: GraphPalette;
+  onChange: (lines: RefLine[]) => void;
+}) {
+  const change = (i: number, line: Partial<RefLine>) =>
+    onChange(lines.map((l, k) => (k === i ? { ...l, ...line } : l)));
+  return (
+    <>
+      {lines.map((l, i) => (
+        <Group key={i} title={lines.length > 1 ? `Reference line ${i + 1}` : "Reference line"}>
+          <NumRow
+            label={`At ${axis}`}
+            value={l.value}
+            required
+            onChange={(value) => value !== undefined && change(i, { value })}
+          />
+          <TextRow label="Text" value={l.label ?? ""} onChange={(label) => change(i, { label: label || undefined })} />
+          {l.label && (
+            <Row label="Text place">
+              <Select
+                value={l.labelPlace ?? "top-right"}
+                onChange={(labelPlace) => change(i, { labelPlace })}
+                options={REF_LABEL_PLACES.map((p) => ({ value: p, label: titleCase(p.replace("-", " ")) }))}
+              />
+            </Row>
+          )}
+          <DashRow value={l.dash} onChange={(dash) => change(i, { dash })} />
+          <ThicknessRow
+            label="Thickness"
+            value={l.width}
+            limits={GRAPH_LIMITS.lineWidth}
+            onChange={(width) => change(i, { width })}
+          />
+          <ColorRow
+            label="Color"
+            palette={palette}
+            color={l.color}
+            same="Same as Axes"
+            onChange={(color) => change(i, { color: color === SAME_AS_FILL ? undefined : color })}
+          />
+          <Button onClick={() => onChange(lines.filter((_, k) => k !== i))}>Remove Line</Button>
+        </Group>
+      ))}
+      {lines.length < MAX_REF_LINES && (
+        <Button onClick={() => onChange([...lines, { value: at, dash: "dash", width: 1 }])}>Add Reference Line</Button>
+      )}
+    </>
+  );
+}
+
+/** An axis's number format: automatic, a fixed number of decimal places,
+ *  or scientific notation. Back to Automatic clears the format (the file
+ *  stays lean — an absent format reads as automatic). */
+function NumberFormat({
+  axis,
+  value,
+  onChange,
+}: {
+  axis: "X" | "Y" | "Right";
+  value: AxisNumberFormat | undefined;
+  onChange: (v: AxisNumberFormat | undefined) => void;
+}) {
+  const format = value?.format ?? "auto";
+  return (
+    <>
+      <Choice
+        label={`${axis} number format`}
+        value={format}
+        onChange={(f) => onChange(f === "auto" ? undefined : { format: f, decimals: value?.decimals ?? 2 })}
+        items={[
+          { value: "auto", label: "Automatic" },
+          { value: "decimal", label: "Decimal places" },
+          { value: "scientific", label: "Scientific" },
+        ]}
+      />
+      {format !== "auto" && (
+        <Stepper
+          label="Decimal places"
+          value={value?.decimals ?? 2}
+          min={0}
+          max={15}
+          step={1}
+          onChange={(decimals) => onChange({ format, decimals })}
+        />
+      )}
+    </>
   );
 }
 

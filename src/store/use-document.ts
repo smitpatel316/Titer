@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useProjectStore, type ProjectNode } from "./use-project-store";
 import { parseProjectText, serializeProjectFile, PROJECT_FILE_EXTENSION } from "../lib/project-file";
+import { extractFamily } from "../lib/family";
 import {
   extractMethod,
   formatMethodReport,
@@ -13,18 +14,51 @@ import {
   type TemplateInfo,
   type TemplateKind,
 } from "../lib/template";
-import { parsePzfx } from "../lib/pzfx";
+import { WELCOME_KEY, planTemplateApply, shouldShowWelcome, templateById } from "../lib/templates";
+import { parsePzfx, type PzfxImport } from "../lib/pzfx";
+import { parsePzf } from "../lib/pzf";
 import { writePzfx } from "../lib/pzfx-write";
-import { convertPrism, formatReport } from "../lib/prism";
-import { writePrism } from "../lib/prism-write";
+import { formatMergeReport, mergeProjects } from "../lib/project-merge";
+import { convertPrism, formatReport, loadPrismZip } from "../lib/prism";
+import {
+  clearRegenPlans,
+  getRegenPlans,
+  planGraphRegeneration,
+  planPzfxGraphs,
+  regenPlanCounts,
+  setRegenPlans,
+  type GraphPlan,
+} from "../lib/prism-graph-regen";
+import {
+  importTabularFile,
+  isDataFilePath,
+  mergeIntoTable,
+  type TabularTable,
+} from "../lib/tabular-import";
+import { formatWriteReport, writePrism, type PrismWriteReport } from "../lib/prism-write";
 import { loadPrismSaveChoice, nextSaveAction, savePrismSaveChoice } from "../lib/prism-nudge";
+import { AUTOSAVE_DEBOUNCE_MS, isAutosaveEnabled } from "../lib/autosave";
+import {
+  backupDisplayName,
+  backupIdentity,
+  backupIntervalMinutes,
+  backupIsNewerThanSource,
+  isBackupEnabled,
+  isBackupOnSheetSwitch,
+  untitledBackupId,
+} from "../lib/backup";
 import type { SavePromptChoice } from "../components/save-prompt-dialog";
 import * as native from "../native";
 import { loadRecents, MAX_RECENTS, saveRecents, recentKey, type RecentEntry } from "./recents";
 import { consumeMcpCloseAllowance } from "./mcp-document";
+import { importWarnings } from "./mcp-document";
 import { publishMcpSnapshotNow } from "./mcp-publish";
+import { runProjectScriptText } from "../lib/script-effects";
+import type { ScriptDoc } from "../lib/prism-script";
+import type { ProjectScript } from "./types";
 import { openProjectsOrSay, sayGone } from "../menus";
-import { fileName, fileTitle } from "../lib/paths";
+import { fileName, fileTitle, sameFilePath } from "../lib/paths";
+import { refreshLinkedFromFile } from "../views/tables/linked-data";
 import {
   base64ToBytes,
   bytesToBase64,
@@ -46,7 +80,7 @@ const UNTITLED = "Untitled";
 const isProjectFile = (path: string) => path.toLowerCase().endsWith(`.${PROJECT_FILE_EXTENSION}`);
 const isPrismFile = (path: string) => {
   const lower = path.toLowerCase();
-  return lower.endsWith(".prism") || lower.endsWith(".pzfx");
+  return lower.endsWith(".prism") || lower.endsWith(".pzfx") || lower.endsWith(".pzf");
 };
 
 /**
@@ -74,6 +108,14 @@ export function useDocument() {
   // native dialog's window lingered on macOS after dismissal (Quirk 2).
   const [templateNotice, setTemplateNotice] = React.useState<TemplateInfo | null>(null);
   const dismissTemplateNotice = () => setTemplateNotice(null);
+  // The Welcome dialog (seq 167): whether this window opened a file — a
+  // file window never auto-shows it — and whether it is showing. Decided
+  // once, shortly after mount (see the effect by the other mount effects).
+  const openedFile = React.useRef(false);
+  const [welcomeOpen, setWelcomeOpen] = React.useState(false);
+  const welcomeDecided = React.useRef(false);
+  const openWelcome = () => setWelcomeOpen(true);
+  const closeWelcome = () => setWelcomeOpen(false);
   // The "Prism File Imported" notice, shown in-app rather than as a native
   // dialog: the native alert's OK button could not dismiss it on macOS
   // (v1.6.0 Mac proof) — it is the second native sheet on the window in
@@ -82,6 +124,62 @@ export function useDocument() {
   // (Quirk 2's family). The report lines, null when no notice is up.
   const [prismImported, setPrismImported] = React.useState<string[] | null>(null);
   const dismissPrismImported = () => setPrismImported(null);
+  // The "Saved as Prism" notice, shown in-app rather than as a native dialog:
+  // same Quirk-2 family as `prismImported` above — the native alert's OK
+  // button could not dismiss it on macOS. The .prism write report (tables /
+  // analyses written, analyses dropped, the graphs warning) used to be
+  // computed and then thrown away — the drop was silent (Mansi P0 #3). The
+  // report lines, null when no notice is up. Only a manual save shows it:
+  // autosave and the quit-save pass `silent`, so a background save never
+  // pops a dialog.
+  const [prismSavedReport, setPrismSavedReport] = React.useState<string[] | null>(null);
+  const dismissPrismSavedReport = () => setPrismSavedReport(null);
+  // The "Data File Imported" notice, in-app rather than as a native dialog:
+  // same Quirk-2 family as `prismImported` above — the native alert's OK
+  // button could not dismiss it on macOS. Shown only when the import has
+  // something to say (assumptions it made, rows padded, sheets skipped);
+  // a clean import just opens the table. The report lines, null when no
+  // notice is up.
+  const [dataImported, setDataImported] = React.useState<string[] | null>(null);
+  const dismissDataImported = () => setDataImported(null);
+  // The "Linked Data" notice, in-app rather than as a native dialog (Quirk 2,
+  // as above): the linked sources a project open couldn't refresh, each named
+  // with its table. Shown only when a refresh fails; a clean refresh is silent.
+  const [linkedNotice, setLinkedNotice] = React.useState<string[] | null>(null);
+  const dismissLinkedNotice = () => setLinkedNotice(null);
+  // The "Project Merged" notice, in-app for the same Quirk-2 reason: what
+  // File ▸ Merge brought in, and what was renamed, skipped or dropped —
+  // the same report the MCP tool returns. The report lines, null when no
+  // notice is up.
+  const [projectMerged, setProjectMerged] = React.useState<string[] | null>(null);
+  const dismissProjectMerged = () => setProjectMerged(null);
+  // The import-time graph-regen offer (seq 291): the plans, for the
+  // "Regenerate graphs…" button on the report dialog. The registry
+  // (`setRegenPlans`) is the authority the preview dialog and the MCP
+  // tools read; this state is only the button's visibility mirror — the
+  // dialog opens only when the registry still holds plans.
+  const [regenPlans, setRegenPlansState] = React.useState<GraphPlan[] | null>(null);
+  const [regenDialogOpen, setRegenDialogOpen] = React.useState(false);
+  const openRegenDialog = () => {
+    if ((getRegenPlans() ?? []).length > 0) setRegenDialogOpen(true);
+  };
+  /** Cancel: close the preview, keep the offer (the user can reopen it). */
+  const dismissRegenDialog = () => setRegenDialogOpen(false);
+  /** Done: the run consumed the offer — clear the mirror and the registry. */
+  const consumeRegenPlans = () => {
+    setRegenDialogOpen(false);
+    setRegenPlansState(null);
+    clearRegenPlans();
+  };
+  /** Record fresh import-time plans (both the mirror and the registry). */
+  const recordRegenPlans = (plans: GraphPlan[]) => {
+    if (plans.length === 0) {
+      setRegenPlansState(null);
+      return;
+    }
+    setRegenPlansState(plans);
+    setRegenPlans(null, plans);
+  };
   // The window's title while the project isn't saved anywhere.
   const [untitled, setUntitled] = React.useState(UNTITLED);
   // Other windows change the list too: this one reads it again when it comes to the front.
@@ -133,7 +231,7 @@ export function useDocument() {
   // failed for lack of network. Either way the document is never discarded.
   const [offlineNotice, setOfflineNotice] = React.useState<{ mode: "open" | "save" } | null>(null);
 
-  const { filePath, isDirty } = store;
+  const { filePath, isDirty, revision } = store;
   const title = filePath ? fileTitle(filePath) : remote ? fileTitle(remote.path) : untitled;
   const blank = !filePath && !remote && !isDirty && untitled === UNTITLED;
   // Told again when an opening fails, so the shell doesn't keep the file it expected here.
@@ -173,15 +271,14 @@ export function useDocument() {
   const saveAsPrism = async (): Promise<boolean> => {
     const s = latest.current.get();
     const revision = s.revision;
-    const version = native.isNative ? await native.appVersion().catch(() => "1.6.2") : "1.6.2";
+    const version = native.isNative ? await native.appVersion().catch(() => "1.8.2") : "1.8.2";
     let bytes: Uint8Array;
+    let report: PrismWriteReport;
     try {
-      bytes = (
-        await writePrism(
-          { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
-          version,
-        )
-      ).bytes;
+      ({ bytes, report } = await writePrism(
+        { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
+        version,
+      ));
     } catch (err) {
       await native.alert(
         "Couldn't Save as Prism",
@@ -198,6 +295,8 @@ export function useDocument() {
       // The project now lives on local disk, even if it came from the cloud.
       setRemote(null);
       addRecent({ kind: "local", path: target });
+      // The write report, shown — never silently dropped (Mansi P0 #3).
+      setPrismSavedReport(prismSaveReportLines(report, fileName(target)));
       return true;
     } catch (err) {
       const name = fileName(target);
@@ -219,7 +318,7 @@ export function useDocument() {
   const saveAsPzfx = async (): Promise<boolean> => {
     const s = latest.current.get();
     const revision = s.revision;
-    const version = native.isNative ? await native.appVersion().catch(() => "1.6.2") : "1.6.2";
+    const version = native.isNative ? await native.appVersion().catch(() => "1.8.2") : "1.8.2";
     let bytes: Uint8Array;
     try {
       bytes = (
@@ -264,27 +363,30 @@ export function useDocument() {
    *  JSON — the same rule as local files.
    *  A conflict opens the three-choice dialog instead of overwriting; an
    *  offline save shows the offline notice instead of losing the document. */
-  const saveRemote = async (handle: RemoteHandle): Promise<boolean> => {
+  const saveRemote = async (handle: RemoteHandle, silent = false): Promise<boolean> => {
     const s = latest.current.get();
     const revision = s.revision;
     const version = native.isNative ? await native.appVersion().catch(() => "1.0.7") : "1.0.7";
     let bytes: Uint8Array;
+    let prismReport: PrismWriteReport | null = null;
     try {
-      bytes = handle.path.toLowerCase().endsWith(".prism")
-        ? (
-            await writePrism(
-              { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
-              version,
-            )
-          ).bytes
-        : handle.path.toLowerCase().endsWith(".pzfx")
-          ? (
-              await writePzfx(
-                { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
-                version,
-              )
-            ).bytes
-          : new TextEncoder().encode(serializeProjectFile(s));
+      if (handle.path.toLowerCase().endsWith(".prism")) {
+        const written = await writePrism(
+          { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
+          version,
+        );
+        bytes = written.bytes;
+        prismReport = written.report;
+      } else if (handle.path.toLowerCase().endsWith(".pzfx")) {
+        bytes = (
+          await writePzfx(
+            { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
+            version,
+          )
+        ).bytes;
+      } else {
+        bytes = new TextEncoder().encode(serializeProjectFile(s));
+      }
     } catch (err) {
       await native.alert(
         "Couldn't Save Project",
@@ -310,6 +412,9 @@ export function useDocument() {
         path: handle.path,
       });
       setOfflineNotice(null);
+      // A remote .prism save shows the write report too — same as a local
+      // one — unless this was a background (auto/quit) save.
+      if (!silent && prismReport) setPrismSavedReport(prismSaveReportLines(prismReport, fileName(handle.path)));
       return true;
     } catch (err) {
       if (isConflictError(err)) {
@@ -351,6 +456,8 @@ export function useDocument() {
    *  `.prism` — the open keeps its remote handle, unlike a local import,
    *  which starts untitled. Same for a `.pzfx` file. */
   const loadRemote = async (handle: RemoteHandle): Promise<void> => {
+    // A file is coming into this window — the Welcome dialog never auto-shows here.
+    openedFile.current = true;
     const recent: RecentEntry = {
       kind: "remote",
       provider: handle.provider,
@@ -563,24 +670,38 @@ export function useDocument() {
     void loadRemote(makeRemoteHandle(entry.provider, entry.accountId, entry.fileId, entry.path, null));
   };
 
-  const save = async (saveAs = false): Promise<boolean> => {
+  /** `silent` is for background saves (autosave, quit-save): they write the
+   *  file but never pop the .prism write-report dialog — a dialog every
+   *  10 s, or one that blocks quitting, would be worse than the silence it
+   *  replaced. A manual save always shows the report. */
+  const save = async (saveAs = false, options?: { silent?: boolean }): Promise<boolean> => {
     // A remote file saves back to the cloud — unless Save As, which saves a
     // local copy instead (the project then lives on local disk).
-    if (remoteRef.current && !saveAs) return saveRemote(remoteRef.current);
+    if (remoteRef.current && !saveAs) {
+      const ok = await saveRemote(remoteRef.current, options?.silent);
+      // Prism: the backup is rewritten on every save, so it is never older
+      // than the project file.
+      if (ok) void writeBackupSnapshot();
+      return ok;
+    }
     const { filePath } = latest.current;
     // A project already saved as `.prism` saves back as `.prism` — never
     // write `.hlx` JSON into a `.prism` file.
     if (!saveAs && filePath?.toLowerCase().endsWith(".prism")) {
       const s = latest.current.get();
       const revision = s.revision;
-      const version = native.isNative ? await native.appVersion().catch(() => "1.6.2") : "1.6.2";
+      const version = native.isNative ? await native.appVersion().catch(() => "1.8.2") : "1.8.2";
       try {
-        const { bytes } = await writePrism(
+        const { bytes, report } = await writePrism(
           { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
           version,
         );
         await native.writeFile(filePath, bytes);
         latest.current.markProjectSaved(filePath, revision);
+        // Prism: the backup is rewritten on every save.
+        void writeBackupSnapshot();
+        // The write report, shown — never silently dropped (Mansi P0 #3).
+        if (!options?.silent) setPrismSavedReport(prismSaveReportLines(report, fileName(filePath)));
         return true;
       } catch (err) {
         await native.alert(
@@ -596,7 +717,7 @@ export function useDocument() {
     if (!saveAs && filePath?.toLowerCase().endsWith(".pzfx")) {
       const s = latest.current.get();
       const revision = s.revision;
-      const version = native.isNative ? await native.appVersion().catch(() => "1.6.2") : "1.6.2";
+      const version = native.isNative ? await native.appVersion().catch(() => "1.8.2") : "1.8.2";
       try {
         const { bytes } = await writePzfx(
           { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
@@ -604,6 +725,8 @@ export function useDocument() {
         );
         await native.writeFile(filePath, bytes);
         latest.current.markProjectSaved(filePath, revision);
+        // Prism: the backup is rewritten on every save.
+        void writeBackupSnapshot();
         return true;
       } catch (err) {
         await native.alert(
@@ -659,6 +782,14 @@ export function useDocument() {
       // A remote file saved to a local path now lives on local disk.
       setRemote(null);
       addRecent({ kind: "local", path: target });
+      // Prism: the backup is rewritten on every save. The target is passed
+      // explicitly: a Save As just moved the project, and the ref still
+      // holds the old path until the next render.
+      void writeBackupSnapshot({
+        identity: backupIdentity({ filePath: target }),
+        displayName: backupDisplayName({ filePath: target }),
+        sourcePath: target,
+      });
       return true;
     } catch (err) {
       const name = fileName(target);
@@ -668,6 +799,477 @@ export function useDocument() {
         "error",
       );
       return false;
+    }
+  };
+
+  // ── Save a Copy / Save Family As (seq 233/234) ───────────────────────
+  // Both write a `.hlx` file and leave this window exactly as it was: the
+  // current file path, the dirty flag and the revision are untouched, so
+  // the next Save still goes to the file this project came from. A copy is
+  // the whole project; a family is one table's family (see lib/family.ts).
+  // Neither prompts for a format (a `.prism`-origin project copies as
+  // `.hlx`, like Save As would after the prompt) and neither clears the
+  // Prism-origin nudge — the next real Save still asks, as before.
+  const saveCopy = async (): Promise<boolean> => {
+    const target = await native.pickSavePath(
+      "Save a Copy",
+      filePath ? `${fileTitle(filePath)} copy.${PROJECT_FILE_EXTENSION}` : `${untitled} copy.${PROJECT_FILE_EXTENSION}`,
+      "Titer Project",
+      PROJECT_FILE_EXTENSION,
+    );
+    if (!target) return false;
+    const s = latest.current.get();
+    try {
+      await native.writeFile(target, serializeProjectFile(s));
+      addRecent({ kind: "local", path: target });
+      return true;
+    } catch (err) {
+      await native.alert(
+        "Couldn't Save a Copy",
+        `“${fileName(target)}” couldn't be saved there (${err}). Try another folder.`,
+        "error",
+      );
+      return false;
+    }
+  };
+
+  const saveFamilyAs = async (): Promise<boolean> => {
+    const s = latest.current.get();
+    // The active table: the active node itself, or its parent (as the
+    // store's `activeTableId` derives it — the state holds only the node).
+    const activeNode = s.activeNodeId ? s.nodes[s.activeNodeId] : undefined;
+    const tableId = activeNode ? (activeNode.type === "table" ? activeNode.id : activeNode.parentId) : null;
+    const family = tableId ? extractFamily(s, tableId) : null;
+    if (!family) return false;
+    const table = s.nodes[tableId!];
+    const target = await native.pickSavePath(
+      "Save Family As",
+      `${(table?.name ?? "Family").replaceAll("/", "-")}.${PROJECT_FILE_EXTENSION}`,
+      "Titer Project",
+      PROJECT_FILE_EXTENSION,
+    );
+    if (!target) return false;
+    try {
+      await native.writeFile(target, serializeProjectFile(family));
+      addRecent({ kind: "local", path: target });
+      return true;
+    } catch (err) {
+      await native.alert(
+        "Couldn't Save Family",
+        `“${fileName(target)}” couldn't be saved there (${err}). Try another folder.`,
+        "error",
+      );
+      return false;
+    }
+  };
+
+  // ── Autosave (Plane seq 281) ───────────────────────────────────────────
+  // Debounced save, 10 s after the last edit; save on sheet switch; save on
+  // quit (see confirmDiscardWithAutosave below). All three go through the
+  // existing save() above — no saveAs, no dialogs of their own — and only
+  // when the project already has a target (a local path or a remote
+  // handle). Untitled work is never autosaved (crash recovery for it is
+  // Plane seq 226, separate). A failed save is never retried in a loop:
+  // save() already alerted, and the timer only re-arms on the next edit. A
+  // remote conflict pending skips the cycle entirely — autosave never
+  // overwrites over a conflict and never calls resolveConflict's
+  // "overwrite".
+  const autosaveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autosaveInFlight = React.useRef(false);
+  const autosaveRearmPending = React.useRef(false);
+  // save() and conflict are re-created every render; the timer and the
+  // close handler reach the current ones through these refs (same pattern
+  // as `latest` and `handlers`).
+  const saveRef = React.useRef(save);
+  const conflictRef = React.useRef(conflict);
+  React.useEffect(() => {
+    saveRef.current = save;
+    conflictRef.current = conflict;
+  });
+
+  const clearAutosaveTimer = () => {
+    if (autosaveTimer.current !== null) {
+      clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = null;
+    }
+  };
+  const armAutosaveTimer = () => {
+    clearAutosaveTimer();
+    autosaveTimer.current = setTimeout(() => {
+      autosaveTimer.current = null;
+      void attemptAutosave();
+    }, AUTOSAVE_DEBOUNCE_MS);
+  };
+  // The window unmounts with the timer cleared, never firing into a dead
+  // window.
+  React.useEffect(() => clearAutosaveTimer, []);
+
+  /** True when save() would open the format prompt for a Prism-origin
+   *  project with no remembered choice — autosave must never prompt, so
+   *  that cycle is skipped and the manual Save asks instead. */
+  const autosaveWouldPrompt = () =>
+    nextSaveAction({
+      prismOrigin: prismOrigin.current,
+      prompted: prompted.current,
+      remembered: loadPrismSaveChoice(),
+    }) === "prompt";
+
+  /** One autosave attempt through the existing save(). Returns whether the
+   *  save succeeded. While a save is already in flight (manual or auto),
+   *  no second one starts; the attempt is deferred once, and re-armed
+   *  after the flight ends only if that save succeeded and the project is
+   *  still dirty — a failed save waits for the next edit. */
+  const attemptAutosave = async (): Promise<boolean> => {
+    if (!isAutosaveEnabled()) return false;
+    if (autosaveInFlight.current) {
+      autosaveRearmPending.current = true;
+      return false;
+    }
+    const s = latest.current;
+    if (!s.isDirty) return false;
+    if (!s.filePath && !remoteRef.current) return false;
+    if (conflictRef.current) return false;
+    if (autosaveWouldPrompt()) return false;
+    autosaveInFlight.current = true;
+    let ok = false;
+    try {
+      // Silent: a background save never pops the .prism write-report dialog.
+      ok = await saveRef.current(false, { silent: true });
+    } finally {
+      autosaveInFlight.current = false;
+      if (autosaveRearmPending.current) {
+        autosaveRearmPending.current = false;
+        if (ok && latest.current.isDirty) armAutosaveTimer();
+      }
+    }
+    return ok;
+  };
+
+  // Debounce: every edit restarts the 10 s timer (revision bumps on every
+  // mutating action); a clean project, a disabled toggle, an untitled
+  // project, or a pending conflict clears it instead. A failed save leaves
+  // the project dirty but does not re-arm here — the next edit does.
+  React.useEffect(() => {
+    if (!isDirty) {
+      clearAutosaveTimer();
+      return;
+    }
+    if (!isAutosaveEnabled()) return;
+    if (!filePath && !remote) return;
+    if (conflict) return;
+    armAutosaveTimer();
+    return clearAutosaveTimer;
+  }, [isDirty, revision, filePath, remote, conflict]);
+
+  // Save on sheet switch: the switch already happened in the store (a pure
+  // activeNodeId change — no isDirty, no revision bump), so the save below
+  // writes the project with the new sheet active, and a failed save can
+  // never block or undo the switch. The pending debounce timer is cleared
+  // first, so a failed switch-save doesn't retry until the next edit.
+  const prevActiveNodeId = React.useRef<string | null>(null);
+  const activeNodeSeen = React.useRef(false);
+  React.useEffect(() => {
+    const id = store.activeNodeId;
+    if (!activeNodeSeen.current) {
+      activeNodeSeen.current = true;
+      prevActiveNodeId.current = id;
+      return;
+    }
+    if (id === prevActiveNodeId.current) return;
+    prevActiveNodeId.current = id;
+    clearAutosaveTimer();
+    void attemptAutosave();
+    // Backup on sheet switch too (Prism's second trigger) — defined just
+    // below; the effect runs after render, so the closure is live by then.
+    if (isBackupOnSheetSwitch()) void attemptBackup();
+  }, [store.activeNodeId]);
+
+  // ── Automatic backup (Plane seq 226) ───────────────────────────────────
+  // Prism's automatic backup, not 1.7.3's autosave: a SEPARATE `.hlx`
+  // snapshot in Titer's data folder, so a crash leaves something to come
+  // back to — including untitled work, which autosave never touches. Written
+  // on a timer (default every 10 minutes, while the project is dirty) and
+  // on sheet switch, and rewritten on every save so a backup is never older
+  // than the project file; deleted when the project is saved and closed
+  // normally. The next launch offers to restore a backup that is newer than
+  // the saved file. A backup never interrupts work: a failure is swallowed
+  // silently (no prompt, no alert), and the next cycle tries again.
+  //
+  // The timer is NOT a debounce: it fires every interval while the project
+  // stays dirty, even while the user keeps editing — edits must not keep
+  // postponing the backup. So the effect below arms once, when the project
+  // turns dirty, and the fire handler re-arms itself while still dirty.
+  const backupTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backupInFlight = React.useRef(false);
+  const backupFlight = React.useRef<Promise<boolean> | null>(null);
+  const lastBackupRevision = React.useRef(-1);
+  const backupClosing = React.useRef(false);
+  const backupArmed = React.useRef(false);
+  // What this window's backup belongs to, refreshed after every render so
+  // the timer and the close handler — which run long after the render that
+  // set them — always read the current project, not a stale closure.
+  const backupTargetRef = React.useRef<{ identity: string; displayName: string; sourcePath: string | null }>({
+    identity: "",
+    displayName: "",
+    sourcePath: null,
+  });
+  const currentBackupTarget = (): { identity: string; displayName: string; sourcePath: string | null } => {
+    if (filePath) {
+      return { identity: backupIdentity({ filePath }), displayName: backupDisplayName({ filePath }), sourcePath: filePath };
+    }
+    if (remote) {
+      return { identity: backupIdentity({ remote }), displayName: backupDisplayName({ remote }), sourcePath: null };
+    }
+    const id = untitledBackupId(native.windowLabel() ?? "web");
+    return {
+      identity: backupIdentity({ untitledId: id }),
+      displayName: backupDisplayName({ untitledId: id, untitledName: untitled }),
+      sourcePath: null,
+    };
+  };
+  const backupTarget = React.useMemo(currentBackupTarget, [filePath, remote, untitled]);
+  const backupId = backupTarget.identity;
+  React.useEffect(() => {
+    backupTargetRef.current = backupTarget;
+  });
+  const clearBackupTimer = () => {
+    if (backupTimer.current !== null) {
+      clearTimeout(backupTimer.current);
+      backupTimer.current = null;
+    }
+    backupArmed.current = false;
+  };
+  const armBackupTimer = () => {
+    clearBackupTimer();
+    backupArmed.current = true;
+    backupTimer.current = setTimeout(() => {
+      backupTimer.current = null;
+      void attemptBackup().then(() => {
+        // Re-arm while still dirty: the timer is the only writer while the
+        // user keeps editing without switching sheets. A clean project, a
+        // disabled toggle, or a closing window stops the cycle; the next
+        // edit re-arms it through the effect below.
+        if (latest.current.isDirty && isBackupEnabled() && !backupClosing.current) armBackupTimer();
+        else backupArmed.current = false;
+      });
+    }, backupIntervalMinutes() * 60_000);
+  };
+  // The window unmounts with the timer cleared, never firing into a dead
+  // window.
+  React.useEffect(() => clearBackupTimer, []);
+
+  /** One backup snapshot of the current project, unconditionally: the
+   *  callers decide when. Serializes exactly what a save would write (the
+   *  `.hlx` bytes), so the backup loads back through the normal reader.
+   *  `target` overrides the window's current backup target — a save that
+   *  just moved the project (Save As) passes its new path, since the ref
+   *  still holds the old one until the next render. Returns whether the
+   *  snapshot landed, and records the revision it holds, so the timer
+   *  knows the project is covered until the next edit. */
+  const writeBackupSnapshot = async (
+    target: { identity: string; displayName: string; sourcePath: string | null } = backupTargetRef.current,
+  ): Promise<boolean> => {
+    if (!native.isNative) return false;
+    if (!target.identity) return false;
+    const s = latest.current.get();
+    const revision = s.revision;
+    try {
+      const base64 = bytesToBase64(new TextEncoder().encode(serializeProjectFile(s)));
+      await native.backupWrite(target.identity, target.displayName, target.sourcePath, base64);
+      lastBackupRevision.current = revision;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  /** One backup attempt: only when backup is on, the project is dirty, and
+   *  no snapshot has covered this revision yet. While a snapshot is already
+   *  in flight, no second one starts — the timer's re-arm retries on the
+   *  next cycle. A remote conflict pending skips the cycle entirely, like
+   *  autosave: a backup must never race a conflict resolution. */
+  const attemptBackup = async (): Promise<boolean> => {
+    if (!native.isNative) return false;
+    if (!isBackupEnabled()) return false;
+    if (backupClosing.current) return false;
+    if (backupInFlight.current) return false;
+    const s = latest.current;
+    if (!s.isDirty) return false;
+    if (s.revision === lastBackupRevision.current) return false;
+    if (conflictRef.current) return false;
+    backupInFlight.current = true;
+    const flight = (async () => {
+      try {
+        return await writeBackupSnapshot();
+      } finally {
+        backupInFlight.current = false;
+      }
+    })();
+    backupFlight.current = flight;
+    return flight;
+  };
+
+  // Arm once when the project turns dirty; a clean project, a disabled
+  // toggle, or a pending conflict clears the timer instead. (The toggle and
+  // the interval are read when arming — a change in Settings takes effect
+  // on the next edit, not mid-cycle.)
+  React.useEffect(() => {
+    if (!isDirty) {
+      clearBackupTimer();
+      return;
+    }
+    if (!native.isNative) return;
+    if (!isBackupEnabled()) return;
+    if (conflict) return;
+    if (backupArmed.current) return;
+    armBackupTimer();
+  }, [isDirty, filePath, remote, conflict]);
+
+  /** Deletes this window's backup (Prism: deleted when the original is
+   *  saved and closed). A snapshot in flight owns the file: it lands first,
+   *  or the delete would race it and leave a stale backup behind. Missing
+   *  is fine — a project that never backed up deletes nothing — and a
+   *  failure never blocks the close: the 4-day prune cleans it up. */
+  const deleteCurrentBackup = async (): Promise<void> => {
+    if (!native.isNative) return;
+    try {
+      await backupFlight.current?.catch(() => undefined);
+      const entry = await native.backupStatus(backupTargetRef.current.identity);
+      if (entry) await native.backupDelete(entry.key);
+    } catch {
+      // Ignore: see above.
+    }
+  };
+
+  // ── Crash recovery ─────────────────────────────────────────────────────
+  // After a crash the backup remains, and the next launch offers to restore
+  // it — but only once this window knows what project it holds. A window
+  // that is still waiting for its opening (a session restore lands a moment
+  // after mount) must not offer a stale untitled backup for a file that is
+  // about to load over it, so the check waits for the opening to settle:
+  // `applyProjectText` sets it once the project is in the store, and a
+  // window with no opening (a blank window) settles after a grace second.
+  // One check per project identity.
+  const [openingSettled, setOpeningSettled] = React.useState(false);
+  React.useEffect(() => {
+    const timer = setTimeout(() => setOpeningSettled(true), 1000);
+    return () => clearTimeout(timer);
+  }, []);
+  const [backupRecovery, setBackupRecovery] = React.useState<{
+    identity: string;
+    entry: native.BackupEntry;
+  } | null>(null);
+  const recoveryChecked = React.useRef(new Set<string>());
+  React.useEffect(() => {
+    if (!native.isNative) return;
+    if (!openingSettled) return;
+    if (recoveryChecked.current.has(backupId)) return;
+    recoveryChecked.current.add(backupId);
+    void (async () => {
+      let entry: native.BackupEntry | null = null;
+      try {
+        entry = await native.backupStatus(backupId);
+      } catch {
+        return;
+      }
+      if (!entry) return;
+      // The project may have moved on while the check ran: only offer for
+      // the identity this window still holds.
+      if (backupTargetRef.current.identity !== backupId) return;
+      if (!backupIsNewerThanSource(entry.saved_at_ms, entry.source_mtime_ms)) {
+        // Stale: the saved file is newer than the backup — drop it
+        // silently. Restoring it would regress the file.
+        try {
+          await native.backupDelete(entry.key);
+        } catch {
+          // Ignore: the 4-day prune cleans it up.
+        }
+        return;
+      }
+      setBackupRecovery({ identity: backupId, entry });
+    })();
+  }, [backupId, openingSettled]);
+
+  /** The recovery dialog's answer. Restore loads the backup's bytes as
+   *  this window's project — pointed at its file (or untitled), edited, so
+   *  saving writes it back — then deletes the backup: it is the live
+   *  project now, and the next cycle backs it up again. Discard deletes
+   *  the backup and keeps the current file. Keep dismisses the offer and
+   *  leaves the backup on disk (offered again on the next launch, or
+   *  pruned after 4 days). Restoring over unsaved work asks first, like
+   *  any other discard. */
+  const resolveBackupRecovery = async (choice: "restore" | "discard" | "keep"): Promise<void> => {
+    const found = backupRecovery;
+    if (!found) return;
+    if (choice === "restore" && !(await confirmDiscard())) return;
+    setBackupRecovery(null);
+    if (choice !== "restore") {
+      if (choice === "discard") {
+        try {
+          await native.backupDelete(found.entry.key);
+        } catch {
+          // Ignore: the 4-day prune cleans it up.
+        }
+      }
+      return;
+    }
+    // The user may have saved while deciding (the discard prompt's Save
+    // option): re-check that the backup is still newer than the file, or
+    // restoring would regress it. A backup that stopped being newer is
+    // dropped — the file now holds the state.
+    let fresh: native.BackupEntry | null = null;
+    try {
+      fresh = await native.backupStatus(found.identity);
+    } catch {
+      // Ignore: a backup that can't be re-checked is restored as offered.
+    }
+    if (fresh && !backupIsNewerThanSource(fresh.saved_at_ms, fresh.source_mtime_ms)) {
+      try {
+        await native.backupDelete(fresh.key);
+      } catch {
+        // Ignore: the 4-day prune cleans it up.
+      }
+      return;
+    }
+    let text: string;
+    try {
+      text = new TextDecoder().decode(base64ToBytes(await native.backupRead(found.entry.key)));
+    } catch {
+      // Unreadable: the backup is useless — drop it rather than offering
+      // a broken file on every launch.
+      try {
+        await native.backupDelete(found.entry.key);
+      } catch {
+        // Ignore: the 4-day prune cleans it up.
+      }
+      return;
+    }
+    const restored = await applyProjectText(
+      text,
+      {
+        filePath: found.entry.source_path,
+        untitled: !found.entry.source_path,
+        displayName: found.entry.display_name,
+        forceEdited: true,
+      },
+      () => {
+        if (found.entry.source_path) addRecent({ kind: "local", path: found.entry.source_path });
+      },
+    );
+    if (restored) {
+      try {
+        await native.backupDelete(found.entry.key);
+      } catch {
+        // Ignore: the 4-day prune cleans it up.
+      }
+    } else {
+      // The bytes don't parse as a project: the backup is corrupt — drop
+      // it rather than offering it again on the next launch.
+      try {
+        await native.backupDelete(found.entry.key);
+      } catch {
+        // Ignore: the 4-day prune cleans it up.
+      }
     }
   };
 
@@ -736,6 +1338,137 @@ export function useDocument() {
     }
   };
 
+  // Quit-save settle (Plane seq 281): the transpose race. An analysis whose
+  // results are still computing when the quit-save snapshots the project
+  // lands through `cacheAnalysisResult`, which bumps `revision` and sets
+  // `isDirty` (use-project-store.tsx) — and `cachedResult` is file content,
+  // so the file the quit-save just wrote is genuinely stale and the
+  // discard prompt fires, even though the user only just watched the app
+  // save. Waiting alone cannot fix that: nothing clears `isDirty` except
+  // `markProjectSaved`, so a result that landed after the snapshot leaves
+  // the project dirty after any wait. The settle below therefore ends in
+  // one follow-up save, not just a re-check: settle, save once more if
+  // still dirty, then let the prompt decide. One extra save, never a loop.
+  const QUIT_SAVE_SETTLE_MS = 2000;
+  const QUIT_SAVE_QUIET_MS = 250;
+  const QUIT_SAVE_POLL_MS = 50;
+  const quitSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+  /** Wait until the store has gone quiet — no `revision` change for
+   *  `QUIT_SAVE_QUIET_MS` — or the bound runs out. Revision bumps on
+   *  every mutating action, including a landing analysis result, so a
+   *  quiet revision means nothing landed recently; chained recomputes
+   *  keep resetting the quiet clock until the bound caps the wait. */
+  const waitForQuitSettle = async (): Promise<void> => {
+    const startedAt = Date.now();
+    let lastRevision = latest.current.revision;
+    let lastChangeAt = startedAt;
+    while (Date.now() - startedAt < QUIT_SAVE_SETTLE_MS) {
+      await quitSleep(QUIT_SAVE_POLL_MS);
+      if (latest.current.revision !== lastRevision) {
+        lastRevision = latest.current.revision;
+        lastChangeAt = Date.now();
+      } else if (Date.now() - lastChangeAt >= QUIT_SAVE_QUIET_MS) {
+        return;
+      }
+    }
+  };
+
+  /** Run the project's saved scripts for a hook (seq 228): on open, after
+   *  the project loads; on close, before the save question. Each script runs
+   *  through the same engine + effects as the dialog's Run, in the order the
+   *  scripts are saved; a run that stops on an error changes nothing for
+   *  that script (its log is reported) and the later scripts still run.
+   *  Returns false when any script stopped, so the caller can say so — for
+   *  a close, the window stays open. */
+  const runSavedScripts = async (
+    scripts: ProjectScript[] | undefined,
+    hook: "runOnOpen" | "runOnClose",
+    doc: ScriptDoc,
+  ): Promise<boolean> => {
+    const due = (scripts ?? []).filter((s) => s[hook]);
+    if (!due.length) return true;
+    let current = doc;
+    let ok = true;
+    for (const entry of due) {
+      const result = await runProjectScriptText(current, entry.text, () => void saveRef.current());
+      if (result.stopped) {
+        ok = false;
+        await native.alert(
+          `Script “${entry.name}” Stopped`,
+          [`The ${hook === "runOnOpen" ? "run-on-open" : "run-on-close"} script stopped before it finished:`, ...result.log].join("\n"),
+          "error",
+        );
+        continue;
+      }
+      if (JSON.stringify(result.doc) !== JSON.stringify(current)) latest.current.applyScript(result.doc);
+      current = result.doc;
+    }
+    return ok;
+  };
+
+  /** Close with autosave: one save attempt first (only when the toggle is
+   *  on, the project is dirty, and it has a target), then the existing
+   *  discard prompt — which only appears if the project is still dirty
+   *  afterwards, so a successful autosave closes silently. After a
+   *  successful quit-save the store is given a bounded moment to settle
+   *  (an analysis result landing just after the snapshot re-dirties the
+   *  project); if it did, one more save writes it, and only if the
+   *  project is STILL dirty after that does the prompt decide. A failing
+   *  save skips the settle and the second attempt — it already alerted,
+   *  and the prompt decides, exactly as before. Two close requests at
+   *  once share the one attempt, like confirmDiscard itself. */
+  const quitSaveInFlight = React.useRef<Promise<boolean> | null>(null);
+  const confirmDiscardWithAutosave = async (): Promise<boolean> => {
+    if (quitSaveInFlight.current) return quitSaveInFlight.current;
+    const asked = (async () => {
+      // Seq 228: the run-on-close scripts run first, so their changes are
+      // in the project the quit-save then writes. A script that stops
+      // calls the close off — the window stays open, with the log shown.
+      const state = latest.current.get();
+      const closed = await runSavedScripts(state.scripts, "runOnClose", {
+        nodes: state.nodes,
+        rootOrder: state.rootOrder,
+        childOrder: state.childOrder,
+        activeNodeId: state.activeNodeId,
+        projectName: state.projectName,
+      });
+      if (!closed) return false;
+      const quitSaveAllowed = () =>
+        isAutosaveEnabled() &&
+        latest.current.isDirty &&
+        (latest.current.filePath || remoteRef.current) &&
+        !conflictRef.current &&
+        !autosaveWouldPrompt();
+      if (quitSaveAllowed()) {
+        // Silent, like autosave: the quit-save writes the file, and the
+        // report dialog must not hold the window open.
+        const saved = await saveRef.current(false, { silent: true });
+        if (saved) {
+          await waitForQuitSettle();
+          if (quitSaveAllowed()) {
+            await saveRef.current(false, { silent: true });
+          }
+        }
+      }
+      const allowed = await confirmDiscard();
+      if (allowed) {
+        // A clean close: Prism deletes the backup when the original is
+        // saved and closed. Stop the timer first, so no snapshot can land
+        // after the delete.
+        backupClosing.current = true;
+        clearBackupTimer();
+        await deleteCurrentBackup();
+      }
+      return allowed;
+    })();
+    quitSaveInFlight.current = asked;
+    try {
+      return await asked;
+    } finally {
+      quitSaveInFlight.current = null;
+    }
+  };
+
   /** Parses `.hlx` text and loads it as the window's project. `filePath` is
    *  the local path (null for remote/untitled); `afterLoad` runs once the
    *  project is in the store (recents, the remote handle). Returns false
@@ -743,7 +1476,7 @@ export function useDocument() {
    *  remote `loadRemote`, so both report the same issues the same way. */
   const applyProjectText = async (
     text: string,
-    target: { filePath: string | null; untitled: boolean; displayName: string },
+    target: { filePath: string | null; untitled: boolean; displayName: string; forceEdited?: boolean },
     afterLoad: () => void,
   ): Promise<boolean> => {
     try {
@@ -772,12 +1505,38 @@ export function useDocument() {
       }
       // A file changed as it was read (repaired, or from an older Titer) opens edited: saving
       // it keeps the project as it is now. The sample stays untitled, never to be saved.
-      const edited = parsed.updated && !target.untitled;
+      // `forceEdited` is the backup restore: the restored content differs
+      // from the saved file by construction, so it opens edited even though
+      // the text itself parses cleanly.
+      const edited = (parsed.updated && !target.untitled) || target.forceEdited === true;
       prismOrigin.current = false;
       prompted.current = false;
       latest.current.loadProject({ ...parsed.project, filePath: target.filePath, edited });
+      // The window knows its project now: the recovery check may run for
+      // it. Set here, not in `load` — the check must wait until the file
+      // is actually in the store, or it would offer a stale untitled
+      // backup for a file that is about to load over it.
+      setOpeningSettled(true);
       if (target.untitled) setUntitled(fileTitle(target.displayName));
       afterLoad();
+      // Seq 228: the run-on-open scripts run once the project is in the
+      // store — built from the parsed file, not the store's ref, which the
+      // load dispatch hasn't re-rendered yet. A script that stops reports
+      // its log; the project still opens.
+      await runSavedScripts(parsed.project.scripts, "runOnOpen", {
+        nodes: parsed.project.nodes,
+        rootOrder: parsed.project.rootOrder,
+        childOrder: parsed.project.childOrder,
+        activeNodeId: parsed.project.activeNodeId,
+        projectName: parsed.project.projectName,
+      });
+      // Linked paste (seq 168): a local project's auto-updating links
+      // re-read their sources now that the project is in the store — a
+      // source that can't be read is named in the Linked Data notice.
+      if (target.filePath) {
+        const linkedLines = await checkLinkedData(parsed.project.nodes);
+        if (linkedLines.length) setLinkedNotice(linkedLines);
+      }
       // A template that carries instructions (or a description) says so on
       // open (plan 38); any other file clears a stale notice.
       const info = parsed.project.template;
@@ -814,6 +1573,8 @@ export function useDocument() {
 
   /** Opens a project file in this window; `untitled`, as a new document named after it. */
   const load = async (path: string, untitled: boolean) => {
+    // A file is coming into this window — the Welcome dialog never auto-shows here.
+    openedFile.current = true;
     let text: string;
     try {
       text = await native.readText(path);
@@ -862,13 +1623,11 @@ export function useDocument() {
     );
   };
 
-  /** Imports a Prism `.pzfx` file as a new untitled project (File ▸ Import Prism File…,
-   *  or a dropped file). Analyses and graphs aren't in the file — only its data tables —
-   *  so the imported project opens edited: saving keeps it as a Titer project.
+  /** Loads an already-parsed Prism import (`.pzfx` or `.pzf` — same report
+   *  shape) as a new untitled project, and shows the transfer report in-app.
    *  Returns true when the project loaded, so a local import knows to drop
    *  the remote handle. */
-  const importPrismText = async (text: string, name: string): Promise<boolean> => {
-    const imported = parsePzfx(text);
+  const loadImportedProject = async (imported: PzfxImport, name: string): Promise<boolean> => {
     if (imported.tables.length === 0) {
       report();
       await native.alert(
@@ -883,6 +1642,11 @@ export function useDocument() {
     prompted.current = false;
     latest.current.loadProject({ ...imported.project, filePath: null, edited: true });
     setUntitled(name);
+    // The .pzfx heuristic plans (one per imported table, rules H1–H6) —
+    // recorded before the report, so the dialog's button can see them.
+    const plans = planPzfxGraphs(imported);
+    imported.graphPlans = plans;
+    recordRegenPlans(plans);
     const lines = [
       `Imported ${imported.tables.length} table${imported.tables.length === 1 ? "" : "s"} from “${name}”:`,
       ...imported.tables.map((t) => `• ${t}`),
@@ -897,11 +1661,30 @@ export function useDocument() {
       lines.push("", "Notes:", ...imported.issues.slice(0, 12).map((i) => `• ${i.message}`));
       if (imported.issues.length > 12) lines.push(`…and ${imported.issues.length - 12} more.`);
     }
+    if (plans.some((p) => p.reconstructible)) {
+      lines.push(
+        "",
+        "Graphs weren't in this file — “Regenerate graphs…” can rebuild one per imported table (guessed from the table — Prism's graph type isn't in the file).",
+      );
+    }
     // In-app, not native.alert: the native alert's OK button could not dismiss
     // it on macOS (v1.6.0 Mac proof) — see the `prismImported` state above.
     setPrismImported([...lines, "", "Save the project to keep it as a Titer project."]);
     return true;
   };
+
+  /** Imports a Prism `.pzfx` file as a new untitled project (File ▸ Import Prism File…,
+   *  or a dropped file). Analyses and graphs aren't in the file — only its data tables —
+   *  so the imported project opens edited: saving keeps it as a Titer project. */
+  const importPrismText = async (text: string, name: string): Promise<boolean> =>
+    loadImportedProject(parsePzfx(text), name);
+
+  /** Imports a Prism `.pzf` file (the legacy binary format Prism 4/5 wrote)
+   *  as a new untitled project — same report shape as `.pzfx`. Tables import
+   *  as Column (the format records no table type); analyses, graphs and
+   *  layouts don't come across, and the report says so. */
+  const importPzfBytes = async (data: Uint8Array, name: string): Promise<boolean> =>
+    loadImportedProject(parsePzf(data), name);
 
   const importPrismFile = async (path: string) => {
     if (path.toLowerCase().endsWith(".prism")) {
@@ -915,6 +1698,17 @@ export function useDocument() {
       // A local import starts an untitled local project: the remote handle
       // goes, even if the window held a remote file.
       if (await importPrismBytes(bytes, fileTitle(path))) setRemote(null);
+      return;
+    }
+    if (path.toLowerCase().endsWith(".pzf")) {
+      let bytes: Uint8Array;
+      try {
+        bytes = await native.readPrismBytes(path);
+      } catch {
+        report();
+        return native.alert("Couldn't Import File", `“${fileName(path)}” couldn't be read.`, "error");
+      }
+      if (await importPzfBytes(bytes, fileTitle(path))) setRemote(null);
       return;
     }
     let text: string;
@@ -939,7 +1733,11 @@ export function useDocument() {
   const importPrismBytes = async (data: Uint8Array, name: string): Promise<boolean> => {
     let converted;
     try {
-      converted = await convertPrism(data, name);
+      // One unzip for the import and the regen planning: the planner
+      // shares this JSZip instance (never unzips twice).
+      const zip = await loadPrismZip(data, name);
+      converted = await convertPrism(data, name, zip);
+      converted.graphPlans = await planGraphRegeneration(zip, converted);
     } catch (err) {
       report();
       await native.alert(
@@ -954,6 +1752,11 @@ export function useDocument() {
     prompted.current = false;
     latest.current.loadProject({ ...converted.project, filePath: null, edited: true });
     setUntitled(name);
+    // The sidecar plans — recorded before the report, so the dialog's
+    // button can see them and `formatReport` can point at them.
+    const plans = converted.graphPlans ?? [];
+    recordRegenPlans(plans);
+    converted.report.regenerableGraphs = regenPlanCounts(plans).regenerable;
     // In-app, not native.alert: the native alert's OK button could not dismiss
     // it on macOS (v1.6.0 Mac proof) — see the `prismImported` state above.
     setPrismImported([
@@ -964,7 +1767,7 @@ export function useDocument() {
     return true;
   };
 
-  /** File ▸ Import Prism File…: pick a Prism file (`.pzfx` or `.prism`) and import it. In the web build
+  /** File ▸ Import Prism File…: pick a Prism file (`.pzfx`, `.prism` or `.pzf`) and import it. In the web build
    *  (no native shell) the pick is a file input instead. */
   const importPrism = async () => {
     if (native.isNative) {
@@ -982,25 +1785,370 @@ export function useDocument() {
     const picked = await new Promise<{ name: string; data: ArrayBuffer | string } | null>((resolve) => {
       const input = document.createElement("input");
       input.type = "file";
-      input.accept = ".pzfx,.prism";
+      input.accept = ".pzfx,.prism,.pzf";
       input.onchange = () => {
         const file = input.files?.[0];
         if (!file) return resolve(null);
         const reader = new FileReader();
         reader.onload = () => resolve({ name: file.name, data: reader.result as ArrayBuffer | string });
         reader.onerror = () => resolve(null);
-        // A `.prism` file is a ZIP: read bytes, not text.
-        if (file.name.toLowerCase().endsWith(".prism")) reader.readAsArrayBuffer(file);
+        // A `.prism` file is a ZIP and a `.pzf` file is binary: read bytes, not text.
+        if (file.name.toLowerCase().endsWith(".prism") || file.name.toLowerCase().endsWith(".pzf")) reader.readAsArrayBuffer(file);
         else reader.readAsText(file);
       };
       input.click();
     });
     if (!picked) return;
     if (typeof picked.data !== "string") {
-      if (await importPrismBytes(new Uint8Array(picked.data), picked.name.replace(/\.prism$/i, ""))) setRemote(null);
+      const bytes = new Uint8Array(picked.data);
+      if (picked.name.toLowerCase().endsWith(".pzf")) {
+        if (await importPzfBytes(bytes, picked.name.replace(/\.pzf$/i, ""))) setRemote(null);
+      } else if (await importPrismBytes(bytes, picked.name.replace(/\.prism$/i, ""))) setRemote(null);
     } else {
       if (await importPrismText(picked.data, "Prism import")) setRemote(null);
     }
+  };
+
+  /** Appends `incoming`'s sheets to this project (File ▸ Merge, seq 180):
+   *  `mergeProjects` builds the merged content — every incoming sheet
+   *  renamed with Prism's asterisk, links remapped — and the store's
+   *  `mergeProject` applies it as one undo step. The current project's
+   *  sheets, names and active sheet are untouched. `warnings` (a Prism
+   *  conversion's issues, a `.hlx` read's repairs) ride along in the
+   *  notice, after the merge report. */
+  const mergeProjectContent = (
+    incoming: {
+      nodes: Record<string, ProjectNode>;
+      rootOrder: string[];
+      childOrder: Record<string, string[]>;
+      activeNodeId: string | null;
+    },
+    sourceName: string,
+    warnings: string[] = [],
+  ): void => {
+    // A converted Prism file can come back with no sheets at all (the .hlx
+    // and .pzfx readers refuse empties themselves, in `mergeProjectFile`):
+    // nothing to merge is an alert, not a "Merged 0 sheets" notice.
+    if (Object.keys(incoming.nodes).length === 0) {
+      report();
+      void native.alert("Nothing to Merge", `“${sourceName}” has no sheets to merge.`, "error");
+      return;
+    }
+    const s = latest.current.get();
+    const merged = mergeProjects(
+      { nodes: s.nodes, rootOrder: s.rootOrder, childOrder: s.childOrder, activeNodeId: s.activeNodeId },
+      incoming,
+      sourceName,
+    );
+    latest.current.mergeProject({
+      nodes: merged.nodes,
+      rootOrder: merged.rootOrder,
+      childOrder: merged.childOrder,
+      activeNodeId: merged.activeNodeId,
+    });
+    const lines = formatMergeReport(merged.report).split("\n");
+    if (warnings.length > 0) {
+      lines.push("", "Notes:", ...warnings.slice(0, 12).map((w) => `• ${w}`));
+      if (warnings.length > 12) lines.push(`…and ${warnings.length - 12} more.`);
+    }
+    // In-app, not native.alert: the native alert's OK button could not
+    // dismiss it on macOS (v1.6.0 Mac proof) — see `prismImported` above.
+    setProjectMerged(lines);
+  };
+
+  /** Merges the project file at `path` into this one. A `.hlx` / `.pzt`
+   *  file merges as a project; a `.prism` / `.pzfx` file is converted
+   *  first, then merged — the same converters File ▸ Import Prism File
+   *  uses. A file that can't be read or parsed says why, and nothing
+   *  merges. */
+  const mergeProjectFile = async (path: string): Promise<void> => {
+    // Prism's rule: the file to merge "must not be open" — merging this
+    // window's own file would duplicate every sheet under an asterisk.
+    const open = latest.current.get().filePath;
+    if (open && sameFilePath(open, path)) {
+      report();
+      return native.alert(
+        "Already Open",
+        `“${fileName(path)}” is already open in this window — merge a file that isn't open.`,
+        "error",
+      );
+    }
+    const name = fileTitle(path);
+    if (path.toLowerCase().endsWith(".prism")) {
+      let bytes: Uint8Array;
+      try {
+        bytes = await native.readPrismBytes(path);
+      } catch {
+        report();
+        return native.alert("Couldn't Merge File", `“${fileName(path)}” couldn't be read.`, "error");
+      }
+      let converted;
+      try {
+        converted = await convertPrism(bytes, name);
+      } catch (err) {
+        report();
+        return native.alert(
+          "Couldn't Merge File",
+          err instanceof Error ? err.message : "This file couldn't be imported.",
+          "error",
+        );
+      }
+      return mergeProjectContent(converted.project, name, importWarnings(converted.report));
+    }
+    if (path.toLowerCase().endsWith(".pzfx")) {
+      let text: string;
+      try {
+        text = await native.readPrismText(path);
+      } catch {
+        report();
+        return native.alert("Couldn't Merge File", `“${fileName(path)}” couldn't be read.`, "error");
+      }
+      const imported = parsePzfx(text);
+      if (imported.tables.length === 0) {
+        report();
+        return native.alert(
+          "Couldn't Merge File",
+          imported.issues.map((i) => i.message).join("\n") || "No tables in this file could be imported.",
+          "error",
+        );
+      }
+      return mergeProjectContent(imported.project, name, imported.issues.map((i) => i.message));
+    }
+    let text: string;
+    try {
+      text = await native.readText(path);
+    } catch (err) {
+      report();
+      if (isGoneReadError(err)) return sayGone(path);
+      return native.alert(
+        "Couldn't Merge File",
+        `“${fileName(path)}” couldn't be read. It may be damaged, or in an encoding Titer can't read.`,
+        "error",
+      );
+    }
+    let parsed;
+    try {
+      parsed = parseProjectText(text);
+    } catch {
+      report();
+      return native.alert("Couldn't Merge File", "This file is damaged or isn't a valid Titer project.", "error");
+    }
+    if ("error" in parsed) {
+      report();
+      return native.alert("Couldn't Merge File", parsed.error, "error");
+    }
+    return mergeProjectContent(parsed.project, name, parsed.issues.map((i) => i.message));
+  };
+
+  /** File ▸ Merge…: pick a project file (`.hlx`, `.pzt`, `.prism` or
+   *  `.pzfx`) and merge it into this project. In the web build (no native
+   *  shell) the pick is a file input instead. */
+  const mergeProject = async (): Promise<void> => {
+    if (native.isNative) {
+      // Listen first, then open the panel: the shell emits
+      // "merge-file-picked" (path, or null on Cancel) when the user picks.
+      // The old sync invoke blocked the main thread and deadlocked the
+      // picker (Nov 9, macOS + Linux).
+      const off = await native.onMergeFilePicked((path) => {
+        off();
+        if (path) void mergeProjectFile(path);
+      });
+      await native.chooseMergeFile();
+      return;
+    }
+    const picked = await new Promise<{ name: string; data: ArrayBuffer | string } | null>((resolve) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".hlx,.pzt,.prism,.pzfx";
+      input.onchange = () => {
+        const file = input.files?.[0];
+        if (!file) return resolve(null);
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, data: reader.result as ArrayBuffer | string });
+        reader.onerror = () => resolve(null);
+        if (file.name.toLowerCase().endsWith(".prism")) reader.readAsArrayBuffer(file);
+        else reader.readAsText(file);
+      };
+      input.click();
+    });
+    if (!picked) return;
+    const name = picked.name.replace(/\.(hlx|pzt|prism|pzfx)$/i, "");
+    if (typeof picked.data !== "string") {
+      let converted;
+      try {
+        converted = await convertPrism(new Uint8Array(picked.data), name);
+      } catch (err) {
+        return native.alert(
+          "Couldn't Merge File",
+          err instanceof Error ? err.message : "This file couldn't be imported.",
+          "error",
+        );
+      }
+      return mergeProjectContent(converted.project, name, importWarnings(converted.report));
+    }
+    if (picked.name.toLowerCase().endsWith(".pzfx")) {
+      const imported = parsePzfx(picked.data);
+      if (imported.tables.length === 0) {
+        return native.alert(
+          "Couldn't Merge File",
+          imported.issues.map((i) => i.message).join("\n") || "No tables in this file could be imported.",
+          "error",
+        );
+      }
+      return mergeProjectContent(imported.project, name, imported.issues.map((i) => i.message));
+    }
+    let parsed;
+    try {
+      parsed = parseProjectText(picked.data);
+    } catch {
+      return native.alert("Couldn't Merge File", "This file is damaged or isn't a valid Titer project.", "error");
+    }
+    if ("error" in parsed) return native.alert("Couldn't Merge File", parsed.error, "error");
+    return mergeProjectContent(parsed.project, name, parsed.issues.map((i) => i.message));
+  };
+
+  /** Puts an imported data file's table in the project (seq 155): a new
+   *  table, or — when its shape matches the active table (same kind, same
+   *  number of columns) — appended to that table, if the user picks it.
+   *  Unlike a Prism import, this never discards the project, so there is
+   *  no save question. Notes the importer made (assumptions, padded rows,
+   *  skipped sheets) are shown in-app; a clean import just opens the table. */
+  const importDataTable = async (table: TabularTable, name: string): Promise<void> => {
+    const rows = table.data.rows.length;
+    const cols = table.data.columns.length - 1;
+    const activeId = latest.current.activeTableId;
+    const active = activeId ? latest.current.nodes[activeId] : undefined;
+    const merged =
+      active?.type === "table" && active.data && active.tableType
+        ? mergeIntoTable(active.data, active.tableType, table)
+        : null;
+    if (merged && activeId && active) {
+      const choice = await native.askImportTarget(active.name);
+      if (choice === "cancel") return;
+      if (choice === "append") {
+        latest.current.updateTable(activeId, merged, "Import");
+        const renamed = active.data!.columns.some((c, i) => c !== table.data.columns[i]);
+        const lines = [
+          `Added ${rows} row${rows === 1 ? "" : "s"} from “${name}” to “${active.name}”.`,
+          ...(renamed ? ["The imported columns had different names, so the values were added by position, not by name."] : []),
+          ...table.notes.map((n) => `• ${n}`),
+        ];
+        if (table.notes.length > 0 || renamed) setDataImported(lines);
+        return;
+      }
+    }
+    latest.current.createTableWithData(table.tableType, table.data, name);
+    if (table.notes.length > 0) {
+      setDataImported([
+        `Imported ${rows} row${rows === 1 ? "" : "s"} × ${cols} column${cols === 1 ? "" : "s"} from “${name}” as a new table.`,
+        ...table.notes.map((n) => `• ${n}`),
+      ]);
+    }
+  };
+
+  /** Linked paste (Prism 11, seq 168): after a project loads, every table
+   *  whose link says to update itself re-reads its source file — the values
+   *  land as one undo step per table ("Update Linked Data"), and a source
+   *  that can't be read is named, not failed over. A link that updates by
+   *  hand is listed instead, so the user knows it is there to refresh.
+   *  Only for a project opened from a local file, on desktop: the web
+   *  build has no disk paths to re-read, and a remote project's paths name
+   *  another machine's files. Returns the notice lines, if any. */
+  const checkLinkedData = async (nodes: Record<string, ProjectNode>): Promise<string[]> => {
+    if (!native.isNative) return [];
+    const lines: string[] = [];
+    for (const node of Object.values(nodes)) {
+      if (node.type !== "table" || !node.data?.linkedPaste) continue;
+      const link = node.data.linkedPaste;
+      if (!link.autoUpdate) {
+        lines.push(`• “${link.sourceName}” (${node.name}) updates by hand — use Edit ▸ Update Linked Data to refresh it.`);
+        continue;
+      }
+      try {
+        const res = await refreshLinkedFromFile(node.data, node.tableType ?? "column");
+        if (res.changed) latest.current.updateTable(node.id, res.data, "Update Linked Data");
+      } catch (err) {
+        lines.push(
+          `• “${link.sourceName}” (${node.name}) couldn't be updated — ${err instanceof Error ? err.message : "the file couldn't be read."}`,
+        );
+      }
+    }
+    return lines;
+  };
+
+  /** Imports a data file's contents (text for CSV/TXT, bytes for XLSX).
+   *  A file that can't be parsed says why, in plain language. */
+  const importDataContent = async (name: string, content: string | Uint8Array): Promise<void> => {
+    let table: TabularTable;
+    try {
+      table = await importTabularFile(name, content);
+    } catch (err) {
+      report();
+      await native.alert(
+        "Couldn't Import File",
+        err instanceof Error ? err.message : "This file couldn't be imported.",
+        "error",
+      );
+      return;
+    }
+    await importDataTable(table, fileTitle(name));
+  };
+
+  /** Imports a data file at `path` (a dropped file, or the picker). */
+  const importDataFile = async (path: string) => {
+    if (path.toLowerCase().endsWith(".xlsx")) {
+      let bytes: Uint8Array;
+      try {
+        bytes = await native.readDataBytes(path);
+      } catch {
+        report();
+        return native.alert("Couldn't Import File", `“${fileName(path)}” couldn't be read.`, "error");
+      }
+      return importDataContent(path, bytes);
+    }
+    let text: string;
+    try {
+      text = await native.readDataText(path);
+    } catch {
+      report();
+      return native.alert("Couldn't Import File", `“${fileName(path)}” couldn't be read.`, "error");
+    }
+    return importDataContent(path, text);
+  };
+
+  /** File ▸ Import Data File…: pick a data file (`.csv`, `.tsv`, `.txt`
+   *  or `.xlsx`) and import it as a table. In the web build (no native
+   *  shell) the pick is a file input instead. */
+  const importData = async () => {
+    if (native.isNative) {
+      // Listen first, then open the panel: the shell emits
+      // "data-file-picked" (path, or null on Cancel) when the user picks.
+      const off = await native.onDataFilePicked((path) => {
+        off();
+        if (path) void importDataFile(path);
+      });
+      await native.chooseDataFile();
+      return;
+    }
+    const picked = await new Promise<{ name: string; data: ArrayBuffer | string } | null>((resolve) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".csv,.tsv,.txt,.xlsx";
+      input.onchange = () => {
+        const file = input.files?.[0];
+        if (!file) return resolve(null);
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, data: reader.result as ArrayBuffer | string });
+        reader.onerror = () => resolve(null);
+        // An `.xlsx` file is a ZIP: read bytes, not text.
+        if (file.name.toLowerCase().endsWith(".xlsx")) reader.readAsArrayBuffer(file);
+        else reader.readAsText(file);
+      };
+      input.click();
+    });
+    if (!picked) return;
+    if (typeof picked.data !== "string") await importDataContent(picked.name, new Uint8Array(picked.data));
+    else await importDataContent(picked.name, picked.data);
   };
 
   /** Applies a method file's text to the active table (plan 38): clones its
@@ -1132,16 +2280,38 @@ export function useDocument() {
     await applyMethodText(picked.data, picked.name.replace(/\.pzm$/i, ""));
   };
 
+  /** Start from a built-in template (Welcome dialog / File ▸ Welcome…): the
+   *  plan replaces the fresh window's untouched table and adds one anywhere
+   *  else, then opens the template's graphs under the new table. An unknown
+   *  id says so instead of opening a blank table. */
+  const applyTemplate = (templateId: string) => {
+    const template = templateById(templateId);
+    if (!template) {
+      void native.alert("Couldn't Open Template", `There's no built-in template “${templateId}”.`, "error");
+      return;
+    }
+    const s = latest.current.get();
+    const plan = planTemplateApply(template, {
+      nodes: s.nodes,
+      rootOrder: s.rootOrder,
+      childOrder: s.childOrder,
+    });
+    if (plan.replaceTableId) latest.current.removeNode(plan.replaceTableId);
+    const tableId = latest.current.createTableWithData(plan.table.tableType, plan.table.data, plan.table.name);
+    for (const g of plan.graphs) latest.current.createGraph(tableId, g.graphType, g.options);
+  };
+
   const openPaths = (paths: string[]) => {
     // A `.pzt` opens as a project (the shell forgets its name — see
     // `opening_for` in main.rs); a `.pzm` applies to the active table.
     const projects = paths.filter((p) => isProjectFile(p) || isTemplatePath(p));
     const methods = paths.filter(isMethodPath);
-    const prism = paths.filter((p) => p.toLowerCase().endsWith(".pzfx") || p.toLowerCase().endsWith(".prism"));
-    if (paths.length > projects.length + methods.length + prism.length) {
+    const prism = paths.filter(isPrismFile);
+    const data = paths.filter(isDataFilePath);
+    if (paths.length > projects.length + methods.length + prism.length + data.length) {
       void native.alert(
         "Can't Open File",
-        "Titer can only open .hlx project files and .pzt templates, apply .pzm method files, and import .pzfx / .prism Prism files. To convert a Prism file without opening it, use File ▸ Convert….",
+        "Titer can only open .hlx project files and .pzt templates, apply .pzm method files, and import .pzfx / .prism / .pzf Prism files and .csv / .tsv / .txt / .xlsx data files. To convert a Prism file without opening it, use File ▸ Convert….",
       );
     }
     if (projects.length) openProjectsOrSay(projects);
@@ -1167,34 +2337,99 @@ export function useDocument() {
         void native.alert("Imported One Prism File", prismDropSkippedMessage(base(prism[0]), prism.slice(1).map(base)));
       }
     }
+    // One data file at a time: it imports as a new table (or into the
+    // active one, when its shape matches — the picker asks). If several
+    // were dropped, import the first and name the rest, like Prism above.
+    if (data.length) {
+      void importDataFile(data[0]);
+      if (data.length > 1) {
+        const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
+        void native.alert(
+          "Imported One Data File",
+          `Imported ${base(data[0])}; ${data.slice(1).map(base).join(", ")} ${data.length === 2 ? "was" : "were"} not imported — drop one file at a time, or use File ▸ Import Data File….`,
+        );
+      }
+    }
   };
 
   // Subscribed once; the handlers reach the current versions through this ref.
-  const handlers = React.useRef({ confirmDiscard, load, openPaths });
+  const handlers = React.useRef({ confirmDiscard, confirmDiscardWithAutosave, load, openPaths });
   React.useEffect(() => {
-    handlers.current = { confirmDiscard, load, openPaths };
+    handlers.current = { confirmDiscard, confirmDiscardWithAutosave, load, openPaths };
   });
-  React.useEffect(() => native.onCloseRequested(() => handlers.current.confirmDiscard()), []);
+  React.useEffect(() => native.onCloseRequested(() => handlers.current.confirmDiscardWithAutosave()), []);
   React.useEffect(() => native.onDrop((paths) => handlers.current.openPaths(paths)), []);
   React.useEffect(() => native.onOpening(({ path, untitled }) => void handlers.current.load(path, untitled)), []);
+
+  // ── Welcome dialog auto-show (seq 167) ─────────────────────────────────
+  // Decided once, shortly after mount: only the first project window (a
+  // Cmd+N / MCP window must not pop it over work), only while the project
+  // is still blank, and only while the setting says to show it. The delay
+  // gives the shell's opening a chance to arrive — take_opening resolves
+  // within milliseconds of mount, and load() marks openedFile synchronously
+  // on entry, so a file window never sees the dialog.
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      if (welcomeDecided.current) return;
+      welcomeDecided.current = true;
+      const firstWindow = !native.isNative || native.windowLabel() === "project-1";
+      let stored: unknown = null;
+      try {
+        stored = typeof localStorage === "undefined" ? null : localStorage.getItem(WELCOME_KEY);
+      } catch {
+        stored = null;
+      }
+      const s = latest.current.get();
+      if (
+        firstWindow &&
+        shouldShowWelcome(stored, openedFile.current) &&
+        !s.filePath &&
+        !s.isDirty
+      ) {
+        setWelcomeOpen(true);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, []);
 
   return {
     save,
     saveAsPrism,
     saveAsPzfx,
+    saveCopy,
+    saveFamilyAs,
     saveTemplate,
     applyMethod,
+    applyTemplate,
+    welcomeOpen,
+    openWelcome,
+    closeWelcome,
     title,
     recents,
     forgetRecent,
     clearRecents,
     importPrism,
+    importData,
+    mergeProject,
+    projectMerged,
+    dismissProjectMerged,
     projectUpdated,
     dismissProjectUpdated,
     templateNotice,
     dismissTemplateNotice,
     prismImported,
     dismissPrismImported,
+    prismSavedReport,
+    dismissPrismSavedReport,
+    dataImported,
+    dismissDataImported,
+    linkedNotice,
+    dismissLinkedNotice,
+    regenPlans,
+    regenDialogOpen,
+    openRegenDialog,
+    dismissRegenDialog,
+    consumeRegenPlans,
     resolveSavePrompt,
     remote,
     openRemotePicker,
@@ -1204,7 +2439,18 @@ export function useDocument() {
     resolveConflict,
     offlineNotice,
     resolveOfflineNotice,
+    backupRecovery,
+    resolveBackupRecovery,
   };
+}
+
+/** (Mansi P0 #3) The .prism write report as notice lines: the verbatim
+ *  report from `formatWriteReport` — tables / analyses written, analyses
+ *  dropped with their reasons, the graphs warning — plus the file it was
+ *  saved as. The report content itself is untouched; only the surfacing is
+ *  new. Pure, so checks.ts pins the exact wording. */
+export function prismSaveReportLines(report: PrismWriteReport, savedName: string): string[] {
+  return [...formatWriteReport(report).split("\n"), "", `Saved as “${savedName}”.`];
 }
 
 /** (FF-F15) Message for a multi-file Prism drop: the first file imports,

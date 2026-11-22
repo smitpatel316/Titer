@@ -13,8 +13,10 @@ export type AnalysisType =
   | "friedman"
   | "shapiro-wilk"
   | "kolmogorov-smirnov"
+  | "one-sample-ks"
   | "correlation"
   | "linear-regression"
+  | "compare-slopes"
   | "deming-regression"
   | "area-under-curve"
   | "remove-baseline"
@@ -22,6 +24,7 @@ export type AnalysisType =
   | "simple-logistic-regression"
   | "two-way-anova"
   | "three-way-anova"
+  | "multifactor-anova"
   | "multiple-t-tests"
   | "nested-t-test"
   | "nested-anova"
@@ -31,6 +34,7 @@ export type AnalysisType =
   | "poisson-regression"
   | "principal-component-analysis"
   | "k-means"
+  | "hierarchical-clustering"
   | "spline-lowess"
   | "smooth-differentiate-integrate"
   | "binding-saturation"
@@ -38,7 +42,10 @@ export type AnalysisType =
   | "enzyme-inhibition"
   | "dose-response-special"
   | "outliers"
+  | "p-value-stack"
   | "chi-square"
+  | "chi-square-gof"
+  | "binomial-test"
   | "survival"
   | "cox"
   | "mcnemar"
@@ -53,6 +60,7 @@ export type AnalysisType =
   | "normalize"
   | "transpose"
   | "extract-rearrange"
+  | "select-transform"
   | "prune-rows"
   | "fraction-of-total"
   | "row-means-totals"
@@ -61,16 +69,22 @@ export type AnalysisType =
 /** What the New Analysis picker offers: a test, or "Compare more than two groups",
  *  which its wizard resolves to one-way ANOVA, Kruskal-Wallis, repeated-measures ANOVA
  *  or Friedman (as Prism does). */
-export type AnalysisPickerValue = AnalysisType | "compare-many-groups" | "interpolate";
+export type AnalysisPickerValue = AnalysisType | "compare-many-groups" | "interpolate" | "transform";
 
 // The choices of the params, one list each: wizards ask among them, the types come from
 // them, and a file's value outside them is left out (the test takes its default).
 export const TAILS = ["two-sided", "less", "greater"] as const;
 const POSTHOCS = ["none", "tukey", "bonferroni", "sidak", "holm-sidak", "lsd"] as const;
+/** The corrections that compare chosen pairs, each pair's own P adjusted for them alone.
+ *  Upstream Helix calls the uncorrected one `fisher`; Titer's existing name is `lsd`.
+ *  `fdr` is the False Discovery Rate (Benjamini-Hochberg): the P values are the
+ *  uncorrected ones, adjusted step-up across the family (see R_ADJUST). */
+export const PAIR_CORRECTIONS = ["bonferroni", "sidak", "holm-sidak", "lsd", "fdr"] as const;
 /** A one-way ANOVA's comparisons: every pair (Tukey, Bonferroni, Šídák, Holm–Šídák,
- *  Fisher's LSD; with unequal SDs Games-Howell, Dunnett's T3), or each group against
+ *  Fisher's LSD, False Discovery Rate; with unequal SDs Games-Howell, Dunnett's T3,
+ *  False Discovery Rate on Welch t tests), or each group against
  *  a control (Dunnett). */
-export const ANOVA_POSTHOCS = [...POSTHOCS, "dunnett", "games-howell", "t3"] as const;
+export const ANOVA_POSTHOCS = [...POSTHOCS, "dunnett", "games-howell", "t3", "fdr"] as const;
 export const RANK_POSTHOCS = ["none", "dunn", "dunn-sidak", "dunn-holm-sidak"] as const;
 /** The dose-response (sigmoidal) models: what an XY scatter's fitted curve draws, and what can
  *  compare two data sets' curves. */
@@ -81,6 +95,22 @@ export const DOSE_MODELS = [
   "inhibitor-3pl-logx",
   "asymmetric-5pl-logx",
   "asymmetric-5pl-x",
+  // 1.8 classic-curves completion (B6 §Dose-response Stimulation/Inhibition):
+  // the X-concentration 3PLs and the normalized (Bottom=0, Top=100) 3PL/4PLs.
+  "agonist-3pl-x",
+  "inhibitor-3pl-x",
+  "agonist-3pl-normalized-logx",
+  "agonist-4pl-normalized-logx",
+  "agonist-3pl-normalized-x",
+  "agonist-4pl-normalized-x",
+  "inhibitor-3pl-normalized-logx",
+  "inhibitor-4pl-normalized-logx",
+  "inhibitor-3pl-normalized-x",
+  "inhibitor-4pl-normalized-x",
+  // 1.8 classic-curves completion (B6 §Dose-response Special): the
+  // absolute-IC50 models are 4PLs (one midpoint), so they are dose models.
+  "absolute-ic50-logx",
+  "absolute-ic50-x",
   // Binding — Competition (plan 28): the one-site Fit logIC50 is the
   // inhibitor 3PL above; the two-site and homologous competition curves
   // are dose-response curves too, so they live here (wizard dose list,
@@ -90,11 +120,25 @@ export const DOSE_MODELS = [
   "homologous-competition-logx",
 ] as const;
 /** Curves of growth, decay and enzyme kinetics: not standard curves to interpolate. */
-export const KINETIC_MODELS = ["exponential-growth", "one-phase-decay", "michaelis-menten"] as const;
+export const KINETIC_MODELS = [
+  "exponential-growth",
+  "logistic-growth",
+  "gompertz-growth",
+  "one-phase-decay",
+  "michaelis-menten",
+] as const;
+/** The other effective concentrations a dose-response curve can report, in % (EC80…). */
+export const EC_ANYTHING = { min: 1, max: 99 };
 export const NONLINEAR_MODELS = [
   ...DOSE_MODELS,
   "line",
   "semilog-line",
+  // 1.8 classic-curves completion (B6 §Lines): the remaining line forms —
+  // through the origin, horizontal, and the two log-Y lines.
+  "line-through-origin",
+  "horizontal-line",
+  "semilog-y-log",
+  "log-log-line",
   "hyperbola",
   "quadratic",
   "cubic",
@@ -103,12 +147,45 @@ export const NONLINEAR_MODELS = [
   "segmental-linear",
   "quartic",
   "quintic",
+  // 1.8 classic-curves completion (B6 §Polynomial): the sixth order
+  // polynomial and the centered polynomials (B0 is Y at the X mean, not
+  // at X = 0 — same curve as the uncentered same degree).
+  "sextic",
+  "centered-first",
+  "centered-second",
+  "centered-third",
+  "centered-fourth",
+  "centered-fifth",
+  "centered-sixth",
+  // 1.8 classic-curves completion (B6 §Dose-response Special, §Standard,
+  // §Growth, §Linear quadratic, §Classic): two midpoints, so NOT dose
+  // models (curve comparison and ECanything need a single midpoint).
+  "biphasic-logx",
+  "biphasic-x",
+  "bell-shaped-logx",
+  "bell-shaped-x",
+  "pade-11",
+  "power-series",
+  "exponential-plateau",
+  "beta-growth-decay",
+  "lq-fraction-surviving",
+  "lq-percent-surviving",
+  "lq-fraction-dead",
+  "lq-percent-dead",
+  "lq-count-alive",
+  "lq-count-dead",
   ...KINETIC_MODELS,
+  // 1.8 classic-curves completion (B6 §Growth #2): the log-population
+  // growth curve — the log-Y twin of exponential-growth.
+  "exponential-growth-log",
   // Exponential family (plan 08, 1/2: decay first; one-phase-decay is already in KINETIC_MODELS).
   "two-phase-decay",
+  "three-phase-decay",
   "plateau-decay",
   // Plan 08, 2/2: association (growth is already in KINETIC_MODELS).
   "one-phase-association",
+  "two-phase-association",
+  "plateau-association",
   // Plan 09: enzyme kinetics (substrate–velocity; michaelis-menten is
   // already in KINETIC_MODELS).
   "allosteric-sigmoidal",
@@ -120,6 +197,20 @@ export const NONLINEAR_MODELS = [
   "boltzmann-sigmoid",
   "lorentzian",
   "sine-wave",
+  // 1.8 classic-curves completion (B6 diff vs Prism 11.2.0's 152-model list):
+  // the rest of Prism's Gaussian family (sum of two Gaussians, Log Gaussian,
+  // the three cumulative Gaussians, sum of two Lorentzians) and its Sine
+  // waves family (standard sine, damped sine, sinc). Equations from Prism's
+  // Curve Fitting Guide (see modelSpec); B6 line refs in the lane report.
+  "sum-of-two-gaussians",
+  "lognormal",
+  "cumulative-gaussian-percent",
+  "cumulative-gaussian-fraction",
+  "cumulative-gaussian-counts",
+  "sum-of-two-lorentzians",
+  "standard-sine-wave",
+  "damped-sine-wave",
+  "sinc",
   // Plan 28: binding competition (two-site + homologous) — already in
   // DOSE_MODELS above, so they are covered by the spread; do NOT list them
   // again here (a duplicate entry double-runs every NONLINEAR_MODELS sweep
@@ -132,9 +223,37 @@ export const NONLINEAR_MODELS = [
 export const CURVE_COMPARISONS = ["ec50", "all"] as const;
 export const CORRELATION_METHODS = ["pearson", "spearman"] as const;
 /** The Transform functions (Prism's documented standard set — Prism 8 User
- *  Guide, "Transform data"): log10, ln, log2, sqrt, reciprocal, exp, square. */
-export const TRANSFORM_FUNCTIONS = ["log10", "ln", "log2", "sqrt", "reciprocal", "exp", "square"] as const;
+ *  Guide, "Transform data"): log10, ln, log2, sqrt, reciprocal, exp, square —
+ *  plus Prism's arithmetic transforms (seq 205), which apply a constant K to
+ *  every value: Y+K, Y−K, Y×K, Y/K, K−Y, K/Y. The arithmetic functions read
+ *  the constant from TransformDataParams.constant. */
+export const TRANSFORM_FUNCTIONS = [
+  "log10",
+  "ln",
+  "log2",
+  "sqrt",
+  "reciprocal",
+  "exp",
+  "square",
+  "y-plus-k",
+  "y-minus-k",
+  "y-times-k",
+  "y-divided-by-k",
+  "k-minus-y",
+  "k-divided-by-y",
+] as const;
 export type TransformFunction = (typeof TRANSFORM_FUNCTIONS)[number];
+/** The arithmetic Transform functions — the ones that need a constant K
+ *  (TransformDataParams.constant). */
+export const TRANSFORM_ARITHMETIC_FUNCTIONS = [
+  "y-plus-k",
+  "y-minus-k",
+  "y-times-k",
+  "y-divided-by-k",
+  "k-minus-y",
+  "k-divided-by-y",
+] as const;
+export type TransformArithmeticFunction = (typeof TRANSFORM_ARITHMETIC_FUNCTIONS)[number];
 /** Binding — Saturation models (plan 16): one-site total, two-site
  *  specific, and the two-series total+nonspecific fits (NS/Background shared). */
 export const BINDING_SATURATION_MODELS = [
@@ -173,11 +292,66 @@ export const ENZYME_INHIBITION_MODELS = [
 export const DOSE_RESPONSE_SPECIAL_MODELS = ["ec50-shift", "schild", "schild-slope-1", "operational-partial"] as const;
 export const CORRELATION_MODES = ["x-vs-every-y", "two-datasets", "matrix"] as const;
 export const TWO_WAY_DESIGNS = ["ordinary", "repeated-measures", "nonparametric"] as const;
-export const POSTHOC_TARGETS = ["groups", "rows"] as const;
+/** The FDR-approach methods Prism offers after an ANOVA: Benjamini-Hochberg,
+ *  the two-stage Benjamini-Krieger-Yekutieli, and Benjamini-Yekutieli. */
+export const FDR_METHODS = ["bh", "bky", "by"] as const;
+/** The false-discovery rate Q (%), the FDR approach's threshold: a comparison
+ *  is a discovery when its FDR-adjusted P falls below Q. Same range as ROUT's
+ *  Q (0.01–50%): below it almost nothing is ever a discovery, above it nearly
+ *  every comparison with P < 1 is. */
+export const FDR_Q = { min: 0.01, max: 50 };
+/** The FDR Q (%) must lie in 0.01–50 — shared by the wizard question and the
+ *  runners so both reject the same values with the same message. */
+export function fdrQError(q: number): string | undefined {
+  return q >= 0.01 && q <= 50 ? undefined : "Q must be between 0.01 and 50.";
+}
+/** What a two-way ANOVA's comparisons compare (seq 192): groups within each
+ *  row and rows within each group (the simple effects, as before), every cell
+ *  mean against every other cell mean, or the marginal means — the group means
+ *  averaged over rows (main effect of the groups) and the row means averaged
+ *  over groups (main effect of the rows). */
+export const POSTHOC_TARGETS = ["groups", "rows", "cells", "group-means", "row-means"] as const;
+/** A two-way ANOVA's comparisons: those of a repeated-measures one, and on the ordinary one
+ *  each against a control (Dunnett) or every pair without equal SDs (Games-Howell); or the
+ *  FDR approach instead of a family-wise correction (raw P values, Benjamini-Hochberg /
+ *  Benjamini-Krieger-Yekutieli / Benjamini-Yekutieli adjusted, discoveries at Q%). */
+const TWO_WAY_POSTHOCS = [...POSTHOCS, "dunnett", "games-howell", "fdr"] as const;
 /** The terms a three-way ANOVA's post-hoc can follow up (one term only). */
 export const THREE_WAY_TERMS = ["A", "B", "C", "A:B", "A:C", "B:C", "A:B:C"] as const;
+/** A three-way ANOVA's comparisons: the full FWER suite (Tukey, Bonferroni,
+ *  Šídák, Holm–Šídák, Fisher's LSD), each against a control (Dunnett), every
+ *  pair without equal SDs (Games-Howell), or the FDR approach. */
+export const THREE_WAY_POSTHOCS = [...POSTHOCS, "dunnett", "games-howell", "fdr"] as const;
+/** How a three-way ANOVA's post-hoc treats an interaction term: `term`
+ *  compares all its level combinations as one family; `simple` compares the
+ *  first factor's levels within each level of the term's last factor (simple
+ *  effects — each level its own family). On a main effect the two are the same. */
+export const THREE_WAY_POSTHOC_SCOPES = ["term", "simple"] as const;
+/** The most factors a multifactor ANOVA takes (Prism allows any number; the
+ *  cell count — and the term list — grows exponentially, so five is the
+ *  practical cap: five 2-level factors already need 32 cells). */
+export const MULTIFACTOR_MAX_FACTORS = 5;
 export const CORRECTIONS = ["holm", "fdr", "none"] as const;
+/** The multiplicity corrections Prism's multiple-t-tests analysis offers
+ *  (Prism 11 Stats Guide, "Options for multiple t tests"). `holm` /
+ *  `fdr` are Titer's legacy values — plain Holm and Benjamini-Hochberg —
+ *  kept so saved files still load; the wizard offers the full Prism set
+ *  with Holm–Šídák first (Prism's recommended method). FDR methods take
+ *  the desired false discovery rate `q` (percent, default 5). */
+export const MULTIPLE_T_TEST_CORRECTIONS = [
+  "holm-sidak",
+  "holm",
+  "sidak",
+  "bonferroni",
+  "fdr",
+  "fdr-bky",
+  "fdr-by",
+  "none",
+] as const;
 export const CURVE_TESTS = ["logrank", "trend", "gehan"] as const;
+/** A contingency table's test: Fisher's exact test or the chi-square (Yates' or not) on a
+ *  2 × 2, the chi-square or its test for trend (rows in order) on 2 columns. */
+export const CONTINGENCY_TESTS = ["fisher", "yates", "chi-square", "trend"] as const;
 export const BIN_MODES = ["auto", "width", "count"] as const;
 /** ROUT's Q, in percent. */
 export const ROUT_Q = { min: 0.01, max: 50 };
@@ -190,6 +364,43 @@ export function routQError(q: number): string | undefined {
   return q >= 0.01 && q <= 50 ? undefined : "Q must be between 0.01 and 50.";
 }
 
+/** The methods "Analyze a stack of P values" offers (Prism Statistics Guide,
+ *  "How to: Analyzing a stack of P values"): the family-wise (statistical
+ *  significance) methods — Bonferroni-Dunn, Bonferroni-Šídák, Holm,
+ *  Holm–Šídák — and the false-discovery-rate methods — Benjamini–Hochberg,
+ *  Benjamini, Krieger and Yekutieli (adaptive two-stage), Benjamini–
+ *  Yekutieli. */
+export const P_VALUE_STACK_FWER_METHODS = ["bonferroni", "sidak", "holm", "holm-sidak"] as const;
+export const P_VALUE_STACK_FDR_METHODS = ["bh", "bky", "by"] as const;
+export const P_VALUE_STACK_METHODS = [...P_VALUE_STACK_FWER_METHODS, ...P_VALUE_STACK_FDR_METHODS] as const;
+export type PValueStackMethod = (typeof P_VALUE_STACK_METHODS)[number];
+/** Whether the method controls the false discovery rate (else it controls
+ *  the family-wise error rate). */
+export const isFdrPValueMethod = (method: string): boolean =>
+  (P_VALUE_STACK_FDR_METHODS as readonly string[]).includes(method);
+
+/** The family-wise alpha of a stack of P values must lie in 0.001–0.5, the
+ *  range the project file clamps it to: below that nothing is ever
+ *  significant, above it the family-wise claim is meaningless. Shared by the
+ *  wizard question and the runner so both reject the same values with the
+ *  same message. */
+export function pValueAlphaError(alpha: number): string | undefined {
+  return alpha >= 0.001 && alpha <= 0.5 ? undefined : "Alpha must be between 0.001 and 0.5.";
+}
+
+/** Params for "p-value-stack": Prism's "Analyze a stack of P values" — P
+ *  values computed elsewhere, entered in a column, adjusted for multiplicity.
+ *  `method` picks the correction (default Holm–Šídák, Prism's recommendation);
+ *  `q` is the FDR Q (%) for the FDR methods (default 5); `alpha` is the
+ *  family-wise significance level for the FWER methods (default 0.05). */
+export interface PValueStackParams {
+  method?: PValueStackMethod;
+  /** Desired false discovery rate, in percent (FDR methods only). */
+  q?: number;
+  /** Family-wise significance level (FWER methods only). */
+  alpha?: number;
+}
+
 /** Params for "compare-two-groups": resolves to Student/Welch t-test, paired
  *  t-test, ratio or lognormal t-test, Mann-Whitney, or Wilcoxon signed-rank, Prism-wizard style. */
 export interface CompareTwoGroupsParams {
@@ -200,12 +411,21 @@ export interface CompareTwoGroupsParams {
   /** Only meaningful when paired && gaussian: compare ratios (log-transformed)
    *  instead of differences — for data where proportional change is what matters. */
   ratio: boolean;
+  /** Include the effect sizes — Cohen's d, Hedges' g and (unpaired) Glass's Δ — with
+   *  their 95% CIs; false reports the test without them. */
+  effectSizes?: boolean;
   /** Only meaningful when gaussian && !paired: compare the geometric means, a t test on the
    *  logarithms (lognormal t test, Student's or Welch's). Its own param, not `ratio`: a file
    *  of an older Helix may hold a `ratio` left from a paired answer. */
   lognormal?: boolean;
   /** "less"/"greater" follow R's t.test semantics: alternative on (col0 vs col1). */
   tails: (typeof TAILS)[number];
+  /** Multiple Variables tables, unpaired: the response variable, split into its two groups
+   *  by `groupBy`'s levels. A paired test on such a table names its two variables in `sets`
+   *  instead (the existing paired machinery, row by row). */
+  response?: string;
+  /** Multiple Variables tables, unpaired: the grouping variable whose two levels are the groups. */
+  groupBy?: string;
 }
 
 /** Params for "one-sample-t": tests each column against a hypothetical value —
@@ -214,6 +434,45 @@ export interface OneSampleTParams {
   hypotheticalValue: number;
   tails: (typeof TAILS)[number];
   gaussian: boolean;
+  /** The geometric mean tested: a t test of the logarithms against the value's. */
+  lognormal?: boolean;
+  /** Include Cohen's d and Hedges' g with their 95% CIs; false reports the test without them. */
+  effectSizes?: boolean;
+}
+
+/** The theoretical distributions a one-sample Kolmogorov–Smirnov test can
+ *  compare a sample against (seq 170): base R's CDFs, no package needed. */
+export const KS_DISTRIBUTIONS = ["normal", "lognormal", "exponential", "uniform"] as const;
+export type OneSampleKsDistribution = (typeof KS_DISTRIBUTIONS)[number];
+
+/** Params for "one-sample-ks": compare each column against a theoretical
+ *  distribution. `paramsFrom` says where the distribution's parameters come
+ *  from: "specified" uses the entered values (the classical test — the
+ *  reference must be fully specified before seeing the data); "estimated"
+ *  fits them to the sample (then the P value is approximate and
+ *  anti-conservative, as with Prism's KS normality test). Only the chosen
+ *  distribution's parameters are read: `mean`/`sd` (normal),
+ *  `meanlog`/`sdlog` (lognormal), `rate` (exponential), `min`/`max`
+ *  (uniform). */
+export interface OneSampleKsParams {
+  distribution: OneSampleKsDistribution;
+  /** "specified": the entered parameters; "estimated": fitted to the sample. */
+  paramsFrom: "specified" | "estimated";
+  tails: (typeof TAILS)[number];
+  /** Normal mean (specified mode; default 0). */
+  mean?: number;
+  /** Normal SD (specified mode; default 1). */
+  sd?: number;
+  /** Lognormal mean of the logarithms (specified mode; default 0). */
+  meanlog?: number;
+  /** Lognormal SD of the logarithms (specified mode; default 1). */
+  sdlog?: number;
+  /** Exponential rate, mean = 1/rate (specified mode; default 1). */
+  rate?: number;
+  /** Uniform lower limit (specified mode; default 0). */
+  min?: number;
+  /** Uniform upper limit (specified mode; default 1). */
+  max?: number;
 }
 
 /** Params for "anova": optional post-hoc pairwise comparisons between groups. */
@@ -223,6 +482,17 @@ export interface AnovaParams {
   equalSd?: boolean;
   /** Dunnett's control group, by name. */
   control?: string;
+  /** The pairs compared (`pairKey`), when not every pair: Bonferroni, Šídák, Holm-Šídák, Fisher's, False Discovery Rate. */
+  compared?: string[];
+  /** The groups' geometric means compared: the ANOVA and its comparisons run on the logarithms. */
+  lognormal?: boolean;
+  /** Include the effect-size table — eta squared, partial eta squared, Cohen's f, with the
+   *  partial eta squared's 95% CI; false omits it. */
+  effectSizes?: boolean;
+  /** Test for linear trend between the column means and their left-to-right order
+   *  (columns in a natural order, equally spaced): the slope of the means against
+   *  column number, and the P values for linear and (four or more groups) nonlinear trend. */
+  trend?: boolean;
 }
 
 /** Params for "rm-anova": Tukey, Bonferroni, Šídák, Holm–Šídák or Fisher's LSD
@@ -231,6 +501,13 @@ export interface RmAnovaParams {
   posthoc: (typeof POSTHOCS)[number];
   /** false: not assumed, the Geisser-Greenhouse correction applies; absent or true, assumed. */
   sphericity?: boolean;
+  /** The pairs compared (`pairKey`), when not every pair. */
+  compared?: string[];
+  /** A mixed-effects model (REML, Kenward-Roger), every value kept: subjects may miss some. */
+  mixed?: boolean;
+  /** Include the effect-size table — eta squared, partial eta squared, Cohen's f, with the
+   *  partial eta squared's 95% CI; false omits it. */
+  effectSizes?: boolean;
 }
 
 /** Params for "kruskal-wallis": optional Dunn's post-hoc pairwise comparisons between groups
@@ -247,7 +524,13 @@ export interface FriedmanParams {
 }
 
 /** Params for "linear-regression": which Y series to regress on X, and whether to
- *  force the line through the origin (intercept = 0). */
+ *  force the line through the origin (intercept = 0). `compareSlopes` is Prism's
+ *  "Test whether the slopes and intercepts are significantly different" checkbox
+ *  (#46, MCP audit seq 292): with two or more Y data sets it runs the
+ *  slope/intercept comparison ("compare-slopes") instead of fitting each line
+ *  on its own. It needs an XY table (not Multiple Variables `x`/`y`), it is
+ *  not available forced through the origin (Prism disables the option then),
+ *  and the comparison is unweighted, so it refuses a weighting scheme. */
 export interface LinearRegressionParams {
   /** The X variable of a Multiple Variables table; omitted, X is the first data column (XY). */
   x?: string;
@@ -256,9 +539,24 @@ export interface LinearRegressionParams {
   /** An XY table's Y data sets, each regressed on its own (`y` then unused). */
   ys?: string[];
   forceOrigin: boolean;
+  /** Compare the slopes and intercepts of the Y data sets' lines (≥ 2 sets)
+   *  instead of fitting each on its own. */
+  compareSlopes?: boolean;
   /** Weighting (plan 26, same schemes as nonlinear regression except 1/SD²,
    *  which needs the replicate columns this runner never sees). */
   weights?: Exclude<NonlinearWeightScheme, "1/sd2">;
+}
+
+/** Params for "compare-slopes" (XY table, #46): which Y data sets' lines to
+ *  compare — Prism's "Test whether the slopes and intercepts are significantly
+ *  different" (linear regression, ANCOVA-equivalent extra sum-of-squares F
+ *  tests; Zar, Biostatistical Analysis, ch. 18). Omitted, every Y data set.
+ *  Unweighted OLS only: Prism's comparison shares one residual variance, so
+ *  no weighting is offered, and forcing through the origin is not offered
+ *  either — Prism disables the option then (FAQ 677). */
+export interface CompareSlopesParams {
+  /** An XY table's Y data sets to compare; omitted, all of them. */
+  ys?: string[];
 }
 
 /** Params for "deming-regression" (XY table): which Y series to compare with X,
@@ -282,6 +580,16 @@ export interface SimpleLogisticRegressionParams {
 export interface AreaUnderCurveParams {
   /** Baseline Y value the area is measured from (peaks are heights above it). */
   baseline: number;
+  /** Ignore peaks whose height is less than this percent of the distance from
+   *  the series' minimum to maximum Y (Prism's "Ignore peaks that are less
+   *  than __% of the distance from minimum to maximum Y"). 0 (or omitted)
+   *  keeps every peak. A "peak" is a maximal run of points above the
+   *  baseline; a peak under the threshold contributes no area. */
+  ignorePeaksBelow?: number;
+  /** Only peaks above the baseline count: area below the baseline is
+   *  ignored instead of counting as negative. Omitted/false keeps the usual
+   *  rule (area below the baseline is negative). */
+  peaksAboveBaselineOnly?: boolean;
 }
 
 /** The baseline definitions "remove-baseline" offers (Prism's Remove
@@ -292,6 +600,12 @@ export interface AreaUnderCurveParams {
 export const REMOVE_BASELINE_METHODS = ["first-value", "mean-first-n", "mean-of-controls", "constant"] as const;
 export type RemoveBaselineMethod = (typeof REMOVE_BASELINE_METHODS)[number];
 
+/** The column-math operations "remove-baseline" offers (Prism's Remove
+ *  baseline and column math): combine two columns row by row. Divide by
+ *  zero leaves that row blank rather than inventing a value. */
+export const COLUMN_MATH_OPERATIONS = ["subtract", "divide", "multiply", "add"] as const;
+export type ColumnMathOperation = (typeof COLUMN_MATH_OPERATIONS)[number];
+
 /** Params for "remove-baseline": which columns to subtract from (`ys`),
  *  how the baseline is defined, and — for XY tables — the X column whose
  *  values label the result rows. */
@@ -300,7 +614,9 @@ export interface RemoveBaselineParams {
   ys?: string[];
   /** XY tables only: the X column, for the result rows' X values. */
   x?: string;
-  baselineMethod: RemoveBaselineMethod;
+  /** Omitted in column-math mode (the operation names the columns instead),
+   *  and defaulted to "first-value" by the runner when missing. */
+  baselineMethod?: RemoveBaselineMethod;
   /** Mean of the first N values (method "mean-first-n"). */
   firstN?: number;
   /** Control columns whose values are averaged (method "mean-of-controls"). */
@@ -310,6 +626,13 @@ export interface RemoveBaselineParams {
   /** Info-constant hook for the baseline (the constant's name): resolved live
    *  in useAnalysis, so editing the constant re-runs the transform. */
   constantHook?: string;
+  /** Column math (Prism's "Remove baseline and column math"): when set,
+   *  the analysis combines two columns row by row instead of removing a
+   *  baseline — `columnMathOperation` says how, `columnMathA`/`columnMathB`
+   *  name the two columns. `baselineMethod` is ignored in this mode. */
+  columnMathOperation?: ColumnMathOperation;
+  columnMathA?: string;
+  columnMathB?: string;
 }
 
 export const PRUNE_ROWS_CONDITIONS = ["empty", "below", "above", "outside"] as const;
@@ -342,9 +665,18 @@ export type FractionOfTotalTotal = (typeof FRACTION_OF_TOTAL_TOTALS)[number];
 export const FRACTION_OF_TOTAL_FORMATS = ["fraction", "percent"] as const;
 export type FractionOfTotalFormat = (typeof FRACTION_OF_TOTAL_FORMATS)[number];
 
+/** The 95% confidence interval of each proportion "fraction-of-total" may
+ *  carry (Prism's "Confidence interval of a proportion", via Fraction of
+ *  Total): none, or Wilson/Brown — Prism's recommendation — or
+ *  Clopper–Pearson, the exact interval. Always 95%; there is no level
+ *  choice, matching Prism. */
+export const FRACTION_OF_TOTAL_CIS = ["none", "wilson", "clopper-pearson"] as const;
+export type FractionOfTotalCI = (typeof FRACTION_OF_TOTAL_CIS)[number];
+
 /** Params for "fraction-of-total": which columns to divide (`ys`), how the
- *  total is defined, whether the result is a fraction or a percent, and —
- *  for XY tables — the X column whose values label the result rows. */
+ *  total is defined, whether the result is a fraction or a percent, which
+ *  95% CI of each proportion to carry (`ci`, omitted: none), and — for XY
+ *  tables — the X column whose values label the result rows. */
 export interface FractionOfTotalParams {
   /** Omitted: every numeric column except `x` — the wizard always sets it. */
   ys?: string[];
@@ -352,6 +684,10 @@ export interface FractionOfTotalParams {
   x?: string;
   totalBy: FractionOfTotalTotal;
   format: FractionOfTotalFormat;
+  /** Omitted: no confidence interval. The CI treats the original value as
+   *  successes out of the total as trials, so it is blank for a value that
+   *  is not a proportion of its total (below 0, or above the total). */
+  ci?: FractionOfTotalCI;
 }
 
 /** The curves a nonlinear regression fits. `-logx`/`-x` say whether X is log(concentration)
@@ -361,7 +697,15 @@ export type NonlinearModel = (typeof NONLINEAR_MODELS)[number];
 
 /** Params for "nonlinear-regression" (XY table): which Y data set to fit, and which curve. */
 export type NonlinearWeightScheme = "none" | "1/y" | "1/y2" | "1/x" | "1/x2" | "1/sd2";
+/** The fitting method a nonlinear regression uses (seq 200, Prism's Method
+ *  tab): least squares (every point counts equally), robust (Tukey biweight
+ *  — an outlier-resistant refit), or Poisson (counts — maximum Poisson
+ *  likelihood, by iteratively reweighted least squares with weights 1/μ). */
+export const NONLINEAR_FIT_METHODS = ["least-squares", "robust", "poisson"] as const;
+export type NonlinearFitMethod = (typeof NONLINEAR_FIT_METHODS)[number];
 export interface NonlinearRegressionParams {
+  /** Multiple Variables tables: the X variable (the Y variable is `y`). */
+  x?: string;
   /** Omitted defaults to the first Y data column. */
   y?: string;
   /** The Y data sets fitted, each on its own (`y` then unused; no comparison). */
@@ -375,6 +719,16 @@ export interface NonlinearRegressionParams {
   /** Weighting (plan 26): "none" (default) or a scheme — 1/Y, 1/Y², 1/X, 1/X²,
    *  or 1/SD² (replicate SDs across the table's Y columns, per row). */
   weights?: NonlinearWeightScheme;
+  /** Fit only the points inside an X range (Prism 11 Range tab, "Don't fit
+   *  points when X is less than / greater than …", seq 166): points with
+   *  X < `fitXMin` or X > `fitXMax` are ignored entirely — not fitted, not
+   *  counted, not ROUT-checked. Either bound alone is enough; both blank
+   *  (or both absent) fits every point. In Titer X is always explicit
+   *  values, so — unlike Prism before 6.04 — the restriction applies
+   *  however the X column was entered. */
+  fitXMin?: number;
+  /** The range's upper end: points with X > `fitXMax` are not fitted. */
+  fitXMax?: number;
   /** Parameter name -> fixed value (the parameter is held constant, not fitted). nls models only. */
   fixed?: Record<string, number>;
   /** Parameter name -> [lower, upper] bounds (nls models only, via algorithm="port").
@@ -391,6 +745,15 @@ export interface NonlinearRegressionParams {
    *  name is already taken (the other Y data set's column), so the model
    *  comparison uses this field instead. */
   compareModel?: NonlinearModel;
+  /** Center the polynomial (seq 201): fit powers of (X − mean X) instead of
+   *  powers of X. The fitted values and R² are unchanged — only the
+   *  coefficients move (B0 becomes the fitted Y at the mean X, and the
+   *  higher terms are far less collinear, so their standard errors shrink).
+   *  Polynomials only; any other model refuses it. */
+  centered?: boolean;
+  /** How the curve is fitted (seq 200): least squares (default), robust
+   *  (Tukey biweight), or Poisson (counts). */
+  fitMethod?: NonlinearFitMethod;
   /** Extra Y series for a shared-parameter (global) fit. nls models only. */
   globalY?: string[];
   /** Which parameters are shared across the global fit's series (omitted:
@@ -417,6 +780,8 @@ export interface NonlinearRegressionParams {
   /** Find each data set's outliers by ROUT (at `q`, in %) and leave them out of its fit. */
   rout?: boolean;
   q?: number;
+  /** A dose-response curve also reports its ECF (`ecx` = F, in %: EC80…), with its CI. */
+  ecx?: number;
   /** User-defined equation (v2 item 23, model "user-defined" only): the equation as the
    *  user typed it (`Y = A*exp(-k*X) + C`, or just the right-hand side), and each named
    *  parameter's starting value. The fitter fits the parameters from those starts. */
@@ -428,6 +793,8 @@ export interface NonlinearRegressionParams {
  *  (rank-based, non-parametric). */
 export interface CorrelationParams {
   method: (typeof CORRELATION_METHODS)[number];
+  /** Include each r's 95% CI in the matrix; false reports r and P only. */
+  effectSizes?: boolean;
 }
 
 /** Params for "correlation" on an XY table, Prism-style: Pearson vs. Spearman, and
@@ -438,6 +805,8 @@ export interface XYCorrelationParams {
   mode: (typeof CORRELATION_MODES)[number];
   /** Required for "two-datasets": the two column names to correlate. */
   datasets?: [string, string];
+  /** Include each r's 95% CI; false reports r and P only. */
+  effectSizes?: boolean;
 }
 
 /** Params for "multiple-regression": which variable is the dependent (Y), and which
@@ -445,6 +814,9 @@ export interface XYCorrelationParams {
  *  empty) falls back to every other data-bearing variable. */
 export interface MultipleRegressionParams {
   dependent: string;
+  /** A text column is a categorical predictor, dummy-coded with its first level as the reference
+   *  (coefficients named Variable[Level]); a text column with a single level is left out
+   *  (explicitly choosing one errors). */
   predictors?: string[];
 }
 
@@ -455,6 +827,9 @@ export interface MultipleRegressionParams {
  *  params stay type-checked per analysis. */
 export interface MultipleLogisticRegressionParams {
   dependent: string;
+  /** A text column is a categorical predictor, dummy-coded with its first level as the reference
+   *  (coefficients named Variable[Level]); a text column with a single level is left out
+   *  (explicitly choosing one errors). */
   predictors?: string[];
 }
 
@@ -465,6 +840,9 @@ export interface MultipleLogisticRegressionParams {
  *  scaled by sqrt(Pearson dispersion) — for overdispersed counts. */
 export interface PoissonRegressionParams {
   dependent: string;
+  /** A text column is a categorical predictor, dummy-coded with its first level as the reference
+   *  (coefficients named Variable[Level]); a text column with a single level is left out
+   *  (explicitly choosing one errors). */
   predictors?: string[];
   quasi: boolean;
 }
@@ -485,6 +863,31 @@ export interface PrincipalComponentAnalysisParams {
  *  different scales, as Prism does by default). */
 export interface KMeansParams {
   clusters: number;
+  standardise?: boolean;
+}
+
+/** The linkage rules hierarchical clustering can merge clusters by (R
+ *  `hclust` methods): "complete" joins by the farthest pair, "average" by
+ *  the mean pair distance, "single" by the nearest pair, "ward.D2" by the
+ *  smallest increase in within-cluster variance (Ward's method, squared
+ *  Euclidean distances only). */
+export const HCLUST_LINKAGES = ["complete", "average", "single", "ward.D2"] as const;
+export type HclustLinkage = (typeof HCLUST_LINKAGES)[number];
+/** The distances hierarchical clustering can measure between rows (R `dist`
+ *  methods): straight-line ("euclidean") or city-block ("manhattan"). */
+export const HCLUST_DISTANCES = ["euclidean", "manhattan"] as const;
+export type HclustDistance = (typeof HCLUST_DISTANCES)[number];
+
+/** Params for "hierarchical-clustering" (Multiple Variables table): `clusters`
+ *  is k, the number of clusters to cut the tree into (default 2); `linkage`
+ *  is how clusters merge (default "complete"); `distance` is how rows are
+ *  measured apart (default "euclidean"); `standardise` z-scores each variable
+ *  before clustering (default true — recommended when variables are on
+ *  different scales, as Prism does by default). */
+export interface HclustParams {
+  clusters: number;
+  linkage?: HclustLinkage;
+  distance?: HclustDistance;
   standardise?: boolean;
 }
 
@@ -535,32 +938,196 @@ export interface ExtractRearrangeParams {
   completeRows?: boolean;
 }
 
+/** The per-variable transforms "select-transform" offers (Prism 10 User
+ *  Guide, "Select and transform multiple variable tables", and Prism 8's
+ *  "Transform data" standard functions): the seven Transform-data functions
+ *  (`log10`, `ln`, `log2`, `sqrt`, `reciprocal`, `exp`, `square`), the
+ *  unit-change arithmetic (`multiply`, `divide`, `add`, `subtract`, `power`,
+ *  `round`, `pow10`, `negate`, `abs`) and Prism 10's whole-variable
+ *  summaries (`min`, `max`, `mean`, `stdev`, `stderr` — one value per row).
+ *  `multiply`, `divide`, `add`, `subtract`, `power` and `round` take the
+ *  constant K (`round`: whole digits, 0–10). NOT offered: z-score, rank,
+ *  logit/probit (Transform-data-only) and the text transforms
+ *  (CONCATENATE, IF) — a text engine is a separate item. */
+export const SELECT_TRANSFORM_KINDS = [
+  "log10",
+  "ln",
+  "log2",
+  "reciprocal",
+  "sqrt",
+  "square",
+  "exp",
+  "pow10",
+  "negate",
+  "abs",
+  "multiply",
+  "divide",
+  "add",
+  "subtract",
+  "power",
+  "round",
+  "min",
+  "max",
+  "mean",
+  "stdev",
+  "stderr",
+] as const;
+export type SelectTransformKind = (typeof SELECT_TRANSFORM_KINDS)[number];
+
+/** Whether a transform kind needs the constant K. */
+export const SELECT_TRANSFORM_NEEDS_K: readonly SelectTransformKind[] = [
+  "multiply",
+  "divide",
+  "add",
+  "subtract",
+  "power",
+  "round",
+];
+
+/** The row comparisons "select-transform" offers (Prism's Select rows tab):
+ *  greater / less / equal, with `>=`, `<=`, `!=` alongside, and
+ *  `is-not-missing` (Prism 10: keep rows where the variable has a value). */
+export const SELECT_TRANSFORM_OPERATORS = [">", "<", "=", ">=", "<=", "!=", "is-not-missing"] as const;
+export type SelectTransformOperator = (typeof SELECT_TRANSFORM_OPERATORS)[number];
+
+/** One per-variable transform: which variable, which transform, the
+ *  constant K when the transform needs one, and the new column's title
+ *  (omitted: the transform's own name, e.g. "log10(Score)" — as Prism
+ *  names an untitled transform by its definition). */
+export interface SelectTransformSpec {
+  variable: string;
+  kind: SelectTransformKind;
+  k?: number;
+  title?: string;
+}
+
+/** One equation: the new variable's name and its formula over the table's
+ *  variables (the Calculated Variables formula language — `Weight /
+ *  Height^2`, `LOG10(Concentration)`, `IF(Group = 1, A, B)` — which may
+ *  also name a transformed column). */
+export interface SelectTransformEquation {
+  name: string;
+  formula: string;
+}
+
+/** A row-number range, 1-based and inclusive on both ends. */
+export interface SelectTransformRowRange {
+  first: number;
+  last: number;
+}
+
+/** Keep only rows where a variable's value compares to a number — or, for
+ *  `is-not-missing`, where it has a value at all (`value` is not read). */
+export interface SelectTransformRowFilter {
+  variable: string;
+  operator: SelectTransformOperator;
+  value?: number;
+}
+
+/** Keep only rows where one variable compares to another. */
+export interface SelectTransformColumnFilter {
+  variable: string;
+  operator: SelectTransformOperator;
+  otherVariable: string;
+}
+
+/** Params for "select-transform": which variables to keep (`columns`, in
+ *  order — omitted: all of them), the per-variable transforms and the
+ *  equations (each a new column, appended in order after the kept ones),
+ *  and the row selection (a range, a value comparison, a column comparison
+ *  — every criterion given must hold). All three tabs are optional: with
+ *  nothing given, the new table is the source table as it stands. A
+ *  transform's source need not be among `columns` — only its new column
+ *  lands in the output. */
+export interface SelectTransformParams {
+  columns?: string[];
+  transforms?: SelectTransformSpec[];
+  equations?: SelectTransformEquation[];
+  rowRange?: SelectTransformRowRange;
+  rowFilter?: SelectTransformRowFilter;
+  columnFilter?: SelectTransformColumnFilter;
+}
+
 /** Params for "two-way-anova" on a Grouped table's column-groups × row position:
  *  "ordinary" (parametric, independent samples), "repeated-measures" (parametric,
  *  matched by row — each replicate column is the same subject across every row;
  *  incomplete replicate columns are dropped), or "nonparametric" (Scheirer-Ray-Hare).
  *  `posthoc` (parametric designs only) pairwise-compares either groups within each
  *  row or rows within each group ("row means"), Tukey-, Bonferroni-, Šídák- or
- *  Holm–Šídák-corrected, or uncorrected (Fisher's LSD). */
+ *  Holm–Šídák-corrected, or uncorrected (Fisher's LSD); or every cell mean against
+ *  every other (`cells`), or the marginal group / row means (`group-means` /
+ *  `row-means`). `posthoc: "fdr"` runs the FDR approach instead of a family-wise
+ *  correction (see `fdrMethod` / `fdrQ`); Dunnett and Games-Howell are ordinary-design
+ *  only, and the cell / marginal-mean targets are ordinary-design only too. */
 export interface TwoWayAnovaParams {
   design: (typeof TWO_WAY_DESIGNS)[number];
-  posthoc: (typeof POSTHOCS)[number];
+  posthoc: (typeof TWO_WAY_POSTHOCS)[number];
+  /** Dunnett's control, by its name: a group (groups compared within each row),
+   *  a row (rows within each group), a cell ("Group (Row)"), or a marginal group
+   *  / row mean. */
+  control?: string;
   posthocTarget: (typeof POSTHOC_TARGETS)[number];
+  /** The FDR approach's method (`posthoc: "fdr"` only): Benjamini-Hochberg,
+   *  Benjamini-Krieger-Yekutieli (two-stage) or Benjamini-Yekutieli; omitted,
+   *  Benjamini-Hochberg. */
+  fdrMethod?: (typeof FDR_METHODS)[number];
+  /** The FDR approach's Q (%), the maximum false-discovery rate (`posthoc:
+   *  "fdr"` only); omitted, 5. */
+  fdrQ?: number;
   /** Repeated measures: false (new analyses) corrects the row and interaction effects by the
    *  Geisser-Greenhouse epsilon, and compares on each comparison's own error; absent (older
    *  files) or true, sphericity is assumed. */
   sphericity?: boolean;
+  /** Include the effect-size table — eta squared, partial eta squared, Cohen's f, with the
+   *  partial eta squared's 95% CI; false omits it. */
+  effectSizes?: boolean;
 }
 
 /** Params for "three-way-anova" on a Grouped table's column-groups × row
  *  position × row bands: ordinary (parametric) only. `posthoc` pairwise-compares
- *  the means of one term (`posthocTerm`, required when posthoc !== "none"),
- *  Tukey- or Bonferroni-corrected — the Šídák / Holm–Šídák / LSD options in
- *  POSTHOCS are not offered here, and the runner refuses them rather than
- *  silently running Bonferroni. */
+ *  the means of one term (`posthocTerm`, required when posthoc !== "none"):
+ *  Tukey, Bonferroni, Šídák, Holm–Šídák, Fisher's LSD, Dunnett (each against
+ *  `control`), Games-Howell, or the FDR approach (`fdrMethod` / `fdrQ`).
+ *  `posthocScope` splits an interaction term into simple effects (the first
+ *  factor's levels within each level of the term's last factor); on a main
+ *  effect it is the same as comparing the whole term. */
 export interface ThreeWayAnovaParams {
-  posthoc: (typeof POSTHOCS)[number];
+  posthoc: (typeof THREE_WAY_POSTHOCS)[number];
   posthocTerm?: (typeof THREE_WAY_TERMS)[number];
+  /** Include the effect-size table — eta squared, partial eta squared, Cohen's f, with the
+   *  partial eta squared's 95% CI; false omits it. */
+  effectSizes?: boolean;
+  /** Interaction terms only: "term" (default) compares all the term's level
+   *  combinations as one family; "simple" compares simple effects. */
+  posthocScope?: (typeof THREE_WAY_POSTHOC_SCOPES)[number];
+  /** Dunnett's control: a level (or level combination) of the followed-up term,
+   *  by its result-table label — within each family when the scope is simple. */
+  control?: string;
+  /** The FDR approach's method (`posthoc: "fdr"` only): Benjamini-Hochberg,
+   *  Benjamini-Krieger-Yekutieli (two-stage) or Benjamini-Yekutieli; omitted,
+   *  Benjamini-Hochberg. */
+  fdrMethod?: (typeof FDR_METHODS)[number];
+  /** The FDR approach's Q (%), the maximum false-discovery rate (`posthoc:
+   *  "fdr"` only); omitted, 5. */
+  fdrQ?: number;
+}
+
+/** Params for "multifactor-anova" on a Multiple Variables table: one numeric
+ *  response column and 1–5 categorical factor columns (text levels, or numeric
+ *  codes read as categories), fit on the complete rows. Prism's multifactor
+ *  ANOVA tests the main effects and every two- and three-way interaction —
+ *  never a four-way or higher one — ordinary (non-repeated measures) only.
+ *  `posthoc` pairwise-compares the means of one term (`posthocTerm`, e.g.
+ *  "Treatment" or "Treatment:Time"), Tukey- or Bonferroni-corrected — the
+ *  Šídák / Holm–Šídák / LSD options in POSTHOCS are not offered here, and the
+ *  runner refuses them rather than silently running Bonferroni. */
+export interface MultifactorAnovaParams {
+  /** Omitted defaults to the first numeric column. */
+  response?: string;
+  /** Omitted defaults to every other column with at least two levels. */
+  factors?: string[];
+  posthoc: (typeof POSTHOCS)[number];
+  posthocTerm?: string;
 }
 
 /** Params for "nested-anova" on a Nested table: optional post-hoc pairwise
@@ -576,12 +1143,17 @@ export interface NestedAnovaParams {
  *  correction across rows. `paired` runs a paired test, matching replicate columns
  *  by position between the 2 groups. `pooledSd` (parametric only) assumes every row
  *  shares one SD (pooled across rows) instead of estimating each row's independently
- *  — more power when that assumption holds. */
+ *  — more power when that assumption holds. `q` is the desired false discovery
+ *  rate in percent (default 5, range 0.01–50 like ROUT's Q); it only applies
+ *  to the FDR corrections (`fdr`, `fdr-bky`, `fdr-by`), where a row is
+ *  significant when its adjusted P is below Q — the family-wise methods
+ *  flag at adjusted P < 0.05 instead. */
 export interface MultipleTTestsParams {
   paired: boolean;
   gaussian: boolean;
   pooledSd: boolean;
-  correction: (typeof CORRECTIONS)[number];
+  correction: (typeof MULTIPLE_T_TEST_CORRECTIONS)[number];
+  q?: number;
 }
 
 /** Params for "binding-saturation" (XY table): which Y series is the total
@@ -722,13 +1294,44 @@ export interface SmoothDifferentiateIntegrateParams {
  *  ordered and equally spaced, so the chi-square test for trend
  *  (Cochran–Armitage) runs on a qualifying 2×k / k×2 table. */
 export interface ChiSquareParams {
+  /** The test to run (absent: Fisher's on a 2 × 2, else the chi-square). */
+  test?: (typeof CONTINGENCY_TESTS)[number];
   trendOrdered?: boolean;
+  /** Include the effect-size CIs — Cramér's V and (2 × 2) Phi with their 95% CIs; false
+   *  reports the values without them. */
+  effectSizes?: boolean;
 }
 
 /** Params for "mcnemar": the continuity correction (R's mcnemar.test
  *  default, true). */
 export interface McNemarParams {
   continuityCorrection?: boolean;
+}
+
+/** How "chi-square-gof" takes its expected values: "equal" (the same for
+ *  every category), "counts" (the expected counts, which must add up to the
+ *  observed total — fractional values are fine, as in Prism), or "percent"
+ *  (percentages, which must add up to 100). */
+export const GOF_EXPECTED_MODES = ["equal", "counts", "percent"] as const;
+export type GofExpectedMode = (typeof GOF_EXPECTED_MODES)[number];
+
+/** Params for "chi-square-gof" (Column table): the observed counts live in
+ *  one data set (`sets`, the wizard's choice — omitted: the table's only
+ *  data column), and the expected distribution is either equal for every
+ *  category or given per category, in row order, as counts or percentages. */
+export interface ChiSquareGofParams {
+  expectedMode?: GofExpectedMode;
+  /** One per category, in row order — expected counts (`counts`) or
+   *  percentages (`percent`); ignored for "equal". */
+  expectedValues?: number[];
+}
+
+/** Params for "binomial-test" (Column table): the observed counts live in
+ *  one data set (`sets` — omitted: the table's only data column), two rows
+ *  only, and the first row's expected proportion under the null. */
+export interface BinomialTestParams {
+  /** The first category's expected proportion (0–1); omitted: 0.5 (equal). */
+  expectedProportion?: number;
 }
 
 /** Params for "outliers" (Column table): ROUT-style outlier detection — each
@@ -783,9 +1386,13 @@ export interface FrequencyDistributionParams {
 }
 
 /** Params for "transform-data": which function to apply to the values. The
- *  wizard always sets it; the runner defaults to log10 when it is absent. */
+ *  wizard always sets it; the runner defaults to log10 when it is absent.
+ *  `constant` is the K of the arithmetic functions (Y±K, Y×K, Y/K, K−Y, K/Y)
+ *  — required for those, ignored by the rest. */
 export interface TransformDataParams {
   function: TransformFunction;
+  /** The constant K for the arithmetic functions (seq 205). */
+  constant?: number;
 }
 /** Molar concentration units (Prism's set), in descending magnitude: each
  *  step is a factor of 1000. µ is U+00B5 MICRO SIGN, matching the bUnits in
@@ -865,8 +1472,26 @@ export interface NormalizeParams {
   hundredConstantHook?: string;
 }
 
+/** How the denominator degrees of freedom are calculated for a
+ *  mixed-effects fit (Prism 11, "Denominator degrees of freedom in the
+ *  mixed model" — the fit itself never changes, only the reference
+ *  distribution behind the P values):
+ *  - "legacy": each test gets the DF of the matching repeated-measures
+ *    ANOVA error term, worked out from the design — exact when the data
+ *    are complete and balanced, not reliable otherwise (Prism warns when
+ *    values are missing).
+ *  - "satterthwaite": an effective DF per test from the uncertainty in
+ *    the estimated variance components (lmerTest) — the large improvement
+ *    over Legacy on incomplete or unbalanced data.
+ *  - "kenward-roger": Satterthwaite plus a correction of the fixed-effect
+ *    covariance matrix for the bias from estimating the variance
+ *    components (pbkrtest) — the most accurate, and Prism's default. */
+export type MixedEffectsDfMethod = "legacy" | "satterthwaite" | "kenward-roger";
+
 /** Params for "mixed-effects" (Column or Grouped table): a repeated-measures
- *  model fit with lme4::lmer + lmerTest Satterthwaite p-values (plan 20).
+ *  model fit with lme4::lmer (plan 20). The denominator DF behind the
+ *  P values follows `dfMethod` (seq 181) — Satterthwaite via lmerTest
+ *  when omitted, Kenward-Roger via pbkrtest, or the Legacy design DF.
  *  `subjectId` says what a subject is — a table row (Column tables) or a
  *  replicate column within each group (Grouped tables) — and so selects the
  *  layout; the wizard always sets it, the runner auto-detects when it is absent.
@@ -891,6 +1516,13 @@ export interface MixedEffectsParams {
   /** Include the subject-factor × column-factor interaction (default false;
    *  Grouped tables default it on — see the wizard). */
   interaction?: boolean;
+  /** How the denominator degrees of freedom behind the P values are
+   *  calculated (seq 181 — Prism offers all three; Titer previously
+   *  offered none and always used Satterthwaite). Omitted keeps
+   *  "satterthwaite", so saved analyses and the reference pins don't
+   *  move; the wizard always sets it, defaulting to "kenward-roger"
+   *  (Prism's default). */
+  dfMethod?: MixedEffectsDfMethod;
 }
 
 /** Params for "cox-proportional-hazards" (Multiple Variables table): which
@@ -904,7 +1536,10 @@ export interface CoxPHParams {
   time?: string;
   /** Omitted defaults to the second data column. */
   status?: string;
-  /** Omitted (or empty — see the runner) defaults to all remaining data columns. */
+  /** Omitted (or empty — see the runner) defaults to all remaining data columns.
+   *  A text column is a categorical covariate, dummy-coded with its first level
+   *  as the reference (coefficients named Variable[Level]); a text column with a
+   *  single level is left out (explicitly choosing one errors). */
   covariates?: string[];
   ties?: "efron" | "breslow";
   stratifyBy?: string;
@@ -990,24 +1625,31 @@ export interface SimulationSpec {
  *  10,000 (the wizard's max; a 10,000-repeat t-test power run is ~15–25 s). */
 export const MONTE_CARLO_REPEATS = { min: 10, max: 10_000 };
 
-/** The analyses a Monte Carlo run can repeat in v1 (plan 22, sub-task b):
- *  the ones whose per-repeat statistic has a one-call in-R `replicate()`
- *  form (see simulation/monte-carlo.ts). Grouped-table targets (two-way
- *  ANOVA…) are a follow-on — the wizard offers only these. */
+/** The analyses a Monte Carlo run can repeat (plan 22, sub-task b, extended
+ *  seq 204): the ones whose per-repeat statistic has a one-call in-R
+ *  `replicate()` form (see simulation/monte-carlo.ts). Paired-t repeats the
+ *  t test on the paired differences; one-way ANOVA repeats the F test on
+ *  the stacked groups. Grouped-table targets (two-way ANOVA…) are a
+ *  follow-on — the wizard offers only these. Prism repeats any analysis;
+ *  the rest of that gap (nonlinear regression, ANOVA on grouped tables…)
+ *  stays open — each needs its own in-R repeat form. */
 export const MONTE_CARLO_TARGETS = [
   "compare-two-groups",
   "one-sample-t",
   "descriptive-statistics",
   "linear-regression",
   "correlation",
+  "paired-t",
+  "one-way-anova",
 ] as const;
 export type MonteCarloTarget = (typeof MONTE_CARLO_TARGETS)[number];
 
 /** The statistics a Monte Carlo run can summarise, per target: "P value" and
- *  "Mean difference" (compare-two-groups), "P value" and "Mean"
+ *  "Mean difference" (compare-two-groups, paired-t), "P value" and "Mean"
  *  (one-sample-t), "Mean" (descriptive-statistics), "Slope" and
- *  "Y-intercept" (linear-regression), "r" (correlation). */
-export const MONTE_CARLO_STATISTICS = ["P value", "Mean difference", "Mean", "Slope", "Y-intercept", "r"] as const;
+ *  "Y-intercept" (linear-regression), "r" (correlation), "P value" and "F"
+ *  (one-way-anova). */
+export const MONTE_CARLO_STATISTICS = ["P value", "Mean difference", "Mean", "Slope", "Y-intercept", "r", "F"] as const;
 export type MonteCarloStatistic = (typeof MONTE_CARLO_STATISTICS)[number];
 /** Which statistic each target offers, in wizard order. */
 export const MONTE_CARLO_TARGET_STATISTICS: Record<MonteCarloTarget, MonteCarloStatistic[]> = {
@@ -1016,18 +1658,33 @@ export const MONTE_CARLO_TARGET_STATISTICS: Record<MonteCarloTarget, MonteCarloS
   "descriptive-statistics": ["Mean"],
   "linear-regression": ["Slope", "Y-intercept"],
   correlation: ["r"],
+  "paired-t": ["P value", "Mean difference"],
+  "one-way-anova": ["P value", "F"],
 };
+
+/** What distribution the simulated values come from (seq 204): Gaussian
+ *  (the usual bell curve) or Student's t (Prism's Simulate offers a t with
+ *  any df — wider scatter, more outliers). A t draw is scaled so the
+ *  simulated values have the SD the wizard asked for (df > 2, where the t
+ *  has a finite SD); Poisson / binomial simulation stays open. */
+export const MONTE_CARLO_SIMULATION_DISTRIBUTIONS = ["gaussian", "t"] as const;
+export type MonteCarloSimulationDistribution = (typeof MONTE_CARLO_SIMULATION_DISTRIBUTIONS)[number];
 
 /** Params for "monte-carlo" (plan 22, sub-task b): repeat `targetAnalysis`
  *  `repeats` times on simulated data and summarise `summaryStatistic`.
- *  The simulation is Gaussian per data column, with each column's mean/SD
- *  taken from `groupMeans`/`groupSds` when given, else from the column's
- *  observed mean/SD (a parametric bootstrap). The target's own options are
- *  flattened here (not nested as `targetParams`) so the .hlx reader already
- *  knows every key: `equalVariance` (compare-two-groups: Student vs Welch),
- *  `hypotheticalValue` (one-sample-t), `y` (descriptive-statistics /
- *  linear-regression: which column), `method` (correlation: Pearson /
- *  Spearman). Tails are two-sided in v1. */
+ *  The simulation is Gaussian per data column by default, or Student's t
+ *  with `simulationDf` degrees of freedom (seq 204), with each column's
+ *  mean/SD taken from `groupMeans`/`groupSds` when given, else from the
+ *  column's observed mean/SD (a parametric bootstrap). The target's own
+ *  options are flattened here (not nested as `targetParams`) so the .hlx
+ *  reader already knows every key: `equalVariance` (compare-two-groups:
+ *  Student vs Welch), `hypotheticalValue` (one-sample-t, and paired-t's
+ *  mean difference — the wizard leaves it at 0), `y`
+ *  (descriptive-statistics / linear-regression: which column), `method`
+ *  (correlation: Pearson / Spearman). `tails` is the P-value tails for the
+ *  t-test targets (compare-two-groups, one-sample-t, paired-t) — two-sided
+ *  by default, "less"/"greater" one-sided, following R's t.test
+ *  alternative on (first vs second) group; other targets ignore it. */
 export interface MonteCarloParams {
   targetAnalysis: MonteCarloTarget;
   summaryStatistic?: MonteCarloStatistic;
@@ -1042,6 +1699,18 @@ export interface MonteCarloParams {
   /** Which column (descriptive-statistics / linear-regression). */
   y?: string;
   method?: (typeof CORRELATION_METHODS)[number];
+  /** P-value tails for the t-test targets (seq 204); two-sided by default. */
+  tails?: (typeof TAILS)[number];
+  /** What distribution the simulated values come from (seq 204). */
+  simulationDistribution?: MonteCarloSimulationDistribution;
+  /** Degrees of freedom for a t simulation (seq 204); must exceed 2. */
+  simulationDf?: number;
+  /** Paired-t only (seq 204): the mean difference to simulate — the
+   *  differences' observed mean when omitted. */
+  differenceMean?: number;
+  /** Paired-t only (seq 204): the SD of the differences to simulate — the
+   *  differences' observed SD when omitted. */
+  differenceSd?: number;
 }
 
 /** One ROC point: at this threshold (a score value), predict positive iff
@@ -1063,8 +1732,28 @@ export interface RocPoint {
  *  canonical example (mean 0, SD 1, amplitude 100 over X −3..3), which the
  *  fitter does not offer, so it lives here only. A user-defined equation is
  *  NOT plottable: the wizard has no equation input, and its spec can't be
- *  built without one (modelSpec throws), so it is excluded here. */
-export type PlotFunctionModel = Exclude<NonlinearModel, "user-defined"> | "gaussian";
+ *  built without one (modelSpec throws), so it is excluded here.
+ *  Seq 203: the statistical distributions Prism's Plot a function also
+ *  plots (FAQ 1578) — the normal (z), Student's t, F and chi-square
+ *  densities, and the binomial + Poisson mass functions. */
+export type PlotFunctionModel = Exclude<NonlinearModel, "user-defined"> | PlotFunctionDistribution;
+
+/** The statistical distributions "plot-function" can plot (Prism's Plot a
+ *  function, FAQ 1578): the normal (z), Student's t, F and chi-square
+ *  densities, and the binomial + Poisson mass functions. */
+export const PLOT_FUNCTION_DISTRIBUTIONS = [
+  "normal-distribution",
+  "t-distribution",
+  "f-distribution",
+  "chi-square-distribution",
+  "binomial-distribution",
+  "poisson-distribution",
+] as const;
+export type PlotFunctionDistribution = (typeof PLOT_FUNCTION_DISTRIBUTIONS)[number];
+/** The discrete distributions (binomial, Poisson): their X grid is the
+ *  whole numbers in the range, one point each — the line-segments setting
+ *  does not apply to them. */
+export const PLOT_FUNCTION_DISCRETE_DISTRIBUTIONS = ["binomial-distribution", "poisson-distribution"] as const;
 
 /** What "plot-function" plots alongside the function itself (Prism's Options
  *  tab): its first derivative, its second derivative, or its integral — one
@@ -1140,6 +1829,7 @@ export type AnalysisParams = DataSetsParam &
     | CorrelationParams
     | XYCorrelationParams
     | LinearRegressionParams
+    | CompareSlopesParams
     | DemingRegressionParams
     | AreaUnderCurveParams
     | RemoveBaselineParams
@@ -1154,6 +1844,7 @@ export type AnalysisParams = DataSetsParam &
     | SimpleLogisticRegressionParams
     | TwoWayAnovaParams
     | ThreeWayAnovaParams
+    | MultifactorAnovaParams
     | MultipleTTestsParams
     | NestedAnovaParams
     | MultipleRegressionParams
@@ -1161,15 +1852,21 @@ export type AnalysisParams = DataSetsParam &
     | PoissonRegressionParams
     | PrincipalComponentAnalysisParams
     | KMeansParams
+    | HclustParams
     | ExtractRearrangeParams
+    | SelectTransformParams
     | SplineLowessParams
     | SmoothDifferentiateIntegrateParams
     | CoxPHParams
     | MixedEffectsParams
     | ChiSquareParams
+    | ChiSquareGofParams
+    | BinomialTestParams
     | McNemarParams
     | OutliersParams
+    | PValueStackParams
     | ShapiroWilkParams
+    | OneSampleKsParams
     | SurvivalParams
     | CoxParams
     | FrequencyDistributionParams
@@ -1188,6 +1885,12 @@ export type AnalysisParams = DataSetsParam &
 export interface SurvivalParams {
   curveTest: (typeof CURVE_TESTS)[number];
   correction: (typeof CORRECTIONS)[number];
+  /** Multiple Variables tables: the follow-up-time variable, the event-code variable
+   *  (1 = event occurred, 0 = censored) and the grouping variable whose levels are the
+   *  groups compared. */
+  time?: string;
+  status?: string;
+  groupBy?: string;
 }
 
 /** Params for "cox" (Survival table): the group the others' hazards are compared to;
@@ -1238,18 +1941,93 @@ export interface StatRow {
 export interface ComparisonRow {
   group1: string;
   group2: string;
+  /** A grouped table's comparison: the two cells it compares (a group at a table row),
+   *  where a graph draws its bracket. */
+  cells?: [ComparedCell, ComparedCell];
   /** Mean of group1 minus mean of group2. */
   diff: number | null;
+  /** Its 95% CI, adjusted for the comparisons of its family as its P is (none for ranks). */
+  low?: number | null;
+  high?: number | null;
   p: number | null;
+  /** The row's test statistic (a t test's t; the rank tests have none). */
+  t?: number | null;
+  /** Its degrees of freedom (a t test's df; the rank tests have none). */
+  df?: number | null;
+  /** The row's uncorrected P value — `p` is the multiplicity-corrected one
+   *  (multiple-t-tests only; the results view shows both when they differ). */
+  rawP?: number | null;
+  /** Whether this row's (already multiplicity-corrected, where the analysis
+   *  corrects) P value clears the analysis's significance threshold.
+   *  Only set by analyses that flag rows — multiple-t-tests sets it on
+   *  every row; the results view shows a Significant? column when any row
+   *  carries it. */
+  significant?: boolean;
+}
+
+/** A group at a row of a grouped table (`row`: its index in the table). */
+export interface ComparedCell {
+  group: string;
+  row: number;
 }
 
 /** A square correlation matrix: `r[i][j]` is the coefficient between variable i
- *  and j (symmetric, diagonal = 1), `p[i][j]` the matching P value. */
+ *  and j (symmetric, diagonal = 1), `p[i][j]` the matching P value, `lo[i][j]` /
+ *  `hi[i][j]` the coefficient's 95% CI (null where it is undefined: fewer than
+ *  4 pairs, or a perfect r). */
 interface CorrelationMatrix {
   variables: string[];
   r: (number | null)[][];
   p: (number | null)[][];
+  lo?: (number | null)[][];
+  hi?: (number | null)[][];
   label?: string;
+}
+
+/** One predictor's variance inflation factor (seq 198, multiple-regression
+ *  diagnostics): VIF = 1 / (1 − R²ⱼ), where R²ⱼ is that predictor regressed
+ *  on all the others. 1 = no collinearity; above 10 the predictor is
+ *  strongly collinear with the others and its coefficient is imprecise. */
+export interface VifRow {
+  term: string;
+  vif: number | null;
+}
+
+/** One row of a regression ANOVA table (seq 198): the variation the model
+ *  explains (Regression) against what is left (Residual), with the F test
+ *  of the whole model. */
+export interface AnovaRow {
+  source: string;
+  df: number | null;
+  ss: number | null;
+  ms: number | null;
+  f: number | null;
+  p: number | null;
+}
+
+/** A covariance matrix of fitted coefficients (seq 198): `values[i][j]` is
+ *  the covariance between the coefficients of `variables[i]` and
+ *  `variables[j]` (symmetric; the diagonal is each coefficient's variance).
+ *  Reported on the uncentered scale — the intercept's row is the intercept
+ *  as fitted, not the centered fit's. */
+export interface CovarianceMatrix {
+  variables: string[];
+  values: (number | null)[][];
+}
+
+/** One row of an ANOVA's effect-size table (seq 161): one effect's eta
+ *  squared (SS_effect / SS_total), partial eta squared (SS_effect /
+ *  (SS_effect + SS_error)), Cohen's f from the partial eta squared, and
+ *  the partial eta squared's 95% CI (noncentral-F inversion). Nulls where
+ *  the measure doesn't apply (e.g. the matching effect of a repeated-
+ *  measures ANOVA has an eta squared but no partial eta squared). */
+export interface EffectSizeRow {
+  effect: string;
+  eta2: number | null;
+  partialEta2: number | null;
+  cohensF: number | null;
+  partialEta2Lo: number | null;
+  partialEta2Hi: number | null;
 }
 
 /** One group of a survival analysis: its subjects, its events, and its median survival with
@@ -1284,6 +2062,9 @@ export interface RegressionCoefficient {
   stdError: number | null;
   t: number | null;
   p: number | null;
+  /** Denominator degrees of freedom behind `p` (mixed-effects only):
+   *  Satterthwaite / Kenward-Roger are usually fractional, Legacy whole. */
+  df?: number | null;
   /** Its 95% confidence interval (asymptotic for a nonlinear fit). */
   low?: number | null;
   high?: number | null;
@@ -1329,6 +2110,9 @@ export interface CorrelationRow {
   variable: string;
   r: number | null;
   p: number | null;
+  /** r's 95% CI. */
+  low?: number | null;
+  high?: number | null;
 }
 
 /** One baseline-subtracted value ("remove-baseline"): the original value,
@@ -1352,6 +2136,28 @@ export interface BaselineRemovedColumn {
   method: string;
   rows: BaselineRemovedRow[];
 }
+
+/** One row of a column-math result ("remove-baseline"): the row title (or
+ *  row number), the X value at that row (XY tables only), the two values
+ *  combined, and the result — `null` when the operation could not produce
+ *  one (dividing by zero). Only rows holding a value in both columns are
+ *  listed. */
+export interface ColumnMathRow {
+  row: string;
+  x?: number | null;
+  a: number;
+  b: number;
+  result: number | null;
+}
+
+/** A column-math result ("remove-baseline"): the two columns combined, the
+ *  operation, and the row-matched rows. */
+export interface ColumnMathResult {
+  a: string;
+  b: string;
+  operation: ColumnMathOperation;
+  rows: ColumnMathRow[];
+}
 /** One kept or pruned row ("prune-rows"): the row title (or row number),
  *  the X value at that row (XY tables only), and the value held in each
  *  chosen column (`null`: blank). */
@@ -1370,49 +2176,85 @@ export interface PrunedRowsResult {
   pruned: PrunedRowsRow[];
 }
 
+/** One category of a "chi-square-gof" result: its observed count, the count
+ *  the expected distribution predicts, and its share of the chi-square
+ *  statistic, (O − E)² / E. `category` is the row title, or the row number
+ *  when the table has none. */
+export interface GoodnessOfFitCategoryRow {
+  category: string;
+  observed: number;
+  expected: number;
+  contribution: number;
+}
+
 /** One divided value ("fraction-of-total"): the original value, the total
  *  it was divided by, and the resulting fraction (or percent). `value` is
  *  null when the total is 0 — the cell is blank, never NaN or Infinity.
  *  `row` is the row title, or the row number when the table has none; `x`
- *  is the X value at that row (XY tables only). */
+ *  is the X value at that row (XY tables only). `ciLow`/`ciHigh` are the
+ *  95% CI of the proportion, in the same units as `value`, when the analysis
+ *  asked for one — null when the value is not a proportion of its total
+ *  (below 0, or above the total), or when the value itself is blank. */
 export interface FractionOfTotalRow {
   row: string;
   x?: number | null;
   original: number;
   total: number;
   value: number | null;
+  ciLow?: number | null;
+  ciHigh?: number | null;
 }
 
 /** One column's divided values ("fraction-of-total"): the total divided by
- *  — the column total, or the grand total — and whether the values are
- *  fractions or percentages. In row-total mode each row has its own total,
- *  so `total` is null and every row carries its own. */
+ *  — the column total, or the grand total — whether the values are
+ *  fractions or percentages, and which 95% CI of each proportion they
+ *  carry (`ci`, "none" when the analysis asked for none). In row-total
+ *  mode each row has its own total, so `total` is null and every row
+ *  carries its own. */
 export interface FractionOfTotalColumn {
   column: string;
   total: number | null;
   format: FractionOfTotalFormat;
+  ci: FractionOfTotalCI;
   rows: FractionOfTotalRow[];
 }
 
+/** How "row-means-totals" groups the values: `pooled` is one summary per row
+ *  across all the chosen data sets; `per-column` is one summary per row
+ *  within each chosen data set (Prism's "for each data set column"
+ *  option). */
+export const ROW_MEANS_SCOPES = ["pooled", "per-column"] as const;
+export type RowMeansScope = (typeof ROW_MEANS_SCOPES)[number];
+
 /** Params for "row-means-totals": which columns to summarise across each
  *  row (`ys`), and — for XY tables — the X column whose values label the
- *  result rows. */
+ *  result rows. `rowScope` is `pooled` unless the wizard chose
+ *  `per-column`. */
 export interface RowMeansTotalsParams {
   /** Omitted: every numeric column except `x` — the wizard always sets it. */
   ys?: string[];
   /** XY tables only: the X column, for the result rows' X values. */
   x?: string;
+  /** Omitted: `pooled` — one summary per row across the chosen data sets. */
+  rowScope?: RowMeansScope;
 }
 
 /** One row's summary ("row-means-totals"): the total, mean, SD, SEM, median,
  *  t-based 95% CI of the mean, %CV and geometric mean of the values that row
- *  holds across the chosen data sets. `row` is the row title, or the row
+ *  holds across the chosen data sets — plus the minimum, maximum, 25th and
+ *  75th percentiles, 10th and 90th percentiles, geometric SD and the t-based
+ *  95% CI of the geometric mean. `row` is the row title, or the row
  *  number when the table has none; `x` is the X value at that row (XY tables
- *  only). SD, SEM, CI and %CV are null on a one-value row; the geometric mean
- *  is null unless every value is above 0. */
+ *  only). `column` is the data set the summary is within, in per-column mode
+ *  only. SD, SEM, CI and %CV are null on a one-value row; the geometric mean,
+ *  geometric SD and geometric CI are null unless every value is above 0, and
+ *  the geometric SD/CI also need at least 2 values. Quartiles and
+ *  percentiles are R's type 6, the (n + 1)p method — the per-column
+ *  descriptives' method. */
 export interface RowMeansRow {
   row: string;
   x?: number | null;
+  column?: string;
   n: number;
   total: number;
   mean: number | null;
@@ -1423,6 +2265,15 @@ export interface RowMeansRow {
   ciHigh: number | null;
   cv: number | null;
   geoMean: number | null;
+  min: number | null;
+  max: number | null;
+  q1: number | null;
+  q3: number | null;
+  p10: number | null;
+  p90: number | null;
+  geoSd: number | null;
+  geoCiLow: number | null;
+  geoCiHigh: number | null;
 }
 
 /** One Y data set's derived curve ("smooth-differentiate-integrate"): the
@@ -1544,13 +2395,15 @@ export interface NormalizedColumn {
   referenceDescription: string;
   rows: NormalizedRow[];
 }
-/** The extracted table ("extract-rearrange"): the new table's type and its
- *  data — a real table the user can create (via "Create table" in the
- *  results view) and then graph or analyse. `table` carries `groups` /
- *  `replicates` where the target type needs them (XY with subjects,
- *  Grouped), so the created table reads back as that type. */
+/** The extracted table ("extract-rearrange" / "select-transform"): the new
+ *  table's type and its data — a real table the user can create (via
+ *  "Create table" in the results view) and then graph or analyse. `table`
+ *  carries `groups` / `replicates` where the target type needs them (XY
+ *  with subjects, Grouped), so the created table reads back as that type.
+ *  A select-transform builds a Multiple Variables table, so "multiple" is
+ *  a table type here too. */
 export interface ExtractedTable {
-  tableType: ExtractRearrangeTarget;
+  tableType: ExtractRearrangeTarget | "multiple";
   table: TableData;
 }
 
@@ -1589,6 +2442,62 @@ export interface KMeansAssignmentRow {
   cluster: number;
 }
 
+/** One row of a hierarchical clustering's clusters table
+ *  ("hierarchical-clustering"): one cluster's centroid (the mean of its
+ *  members, in the ORIGINAL units — back-transformed when the variables were
+ *  standardised), its size, and its within-cluster sum of squares. Clusters
+ *  are in canonical order: sorted by their first centroid coordinate,
+ *  ascending — R's cutree numbers clusters by leaf order, so without this
+ *  the labels would depend on the tree's shape. */
+export interface HclustClusterRow {
+  cluster: string;
+  centroid: (number | null)[];
+  n: number;
+  withinSs: number | null;
+}
+
+/** One row of a hierarchical clustering's assignments table
+ *  ("hierarchical-clustering"): which (canonical) cluster one complete row
+ *  belongs to, in table order. `row` is the row title, or the row number
+ *  when the table has none. */
+export interface HclustAssignmentRow {
+  row: string;
+  cluster: number;
+}
+
+/** A hierarchical clustering's dendrogram ("hierarchical-clustering"): R's
+ *  `hclust` merge matrix, heights and leaf order, plus the row titles and
+ *  the height the tree is cut at for the chosen k. `merge` is one row per
+ *  merge step (n − 1 rows): R's own convention, kept as-is — a negative
+ *  entry −i is leaf i (1-based, into the complete rows), a positive entry
+ *  j is merge step j (1-based). The sign is what tells a leaf from a step,
+ *  so entries are never re-based to 0.
+ *  `order` is the leaves left-to-right as R plots them (0-based indices
+ *  into the complete rows); `labels` are the complete rows' titles, in
+ *  table order. `cutHeight` is the midpoint between the two merge heights
+ *  the chosen k falls between, or null when k leaves a single cluster. */
+export interface HclustDendrogram {
+  merge: number[][];
+  heights: number[];
+  order: number[];
+  labels: string[];
+  cutHeight: number | null;
+}
+
+/** One row of a hierarchical clustering's choosing-k table
+ *  ("hierarchical-clustering"): for one k, the within-cluster sum of
+ *  squares (the Elbow plot), the average silhouette width (the Silhouette
+ *  plot), and the Gap statistic with its standard error (the Gap plot) —
+ *  the three guides for choosing k. `gap` / `gapSe` are null when the Gap
+ *  statistic could not be computed for that k. */
+export interface ChoosingKRow {
+  k: number;
+  withinSs: number | null;
+  avgSilhouette: number | null;
+  gap: number | null;
+  gapSe: number | null;
+}
+
 /** One row of a PCA variance-explained table ("principal-component-analysis"):
  *  one component's standard deviation, eigenvalue (variance), and share of
  *  the total variance, with the running total. */
@@ -1613,6 +2522,18 @@ export interface PcaLoadingRow {
 export interface PcaScoreRow {
   row: string;
   scores: (number | null)[];
+}
+
+/** One row of a "p-value-stack" result: the P value as entered, its rank
+ *  (1 = smallest; ties in entry order), its multiplicity-adjusted P value
+ *  (or q value, for the FDR methods), and whether it is flagged significant
+ *  (FWER methods) or a discovery (FDR methods). */
+export interface PValueRow {
+  label: string;
+  rank: number;
+  p: number | null;
+  adjusted: number | null;
+  flagged: boolean;
 }
 
 /** One fitted point of a smoother ("spline-lowess"): `y` is the fitted value
@@ -1665,12 +2586,35 @@ export interface DifferenceResult {
   label: string;
 }
 
+/** The data an analysis ran on, shown first (`report/analyzed.ts`). */
+export interface Analyzed {
+  /** The data sets, in order, each with its count when it has one (values, subjects…). */
+  sets: { name: string; n?: number }[];
+  /** How they are read: two compared ("A vs. B"), matched ("A → B"), each against the
+   *  first (a control, a reference), or a list. */
+  how: "vs" | "paired" | "control" | "list";
+  /** What else it ran on: "8 pairs", "on “Dose”", "5 rows"… */
+  detail?: string;
+  /** The table's data sets it left out. */
+  left: string[];
+}
+
+/** One condition of a test, checked by R: whether it holds, and what that means. */
+export interface Check {
+  ok: boolean;
+  text: string;
+}
+
 export interface AnalysisResult {
   testType: AnalysisType;
   /** Resolved test name when params pick a specific variant, e.g. "Welch's t test". */
   subtitle?: string;
+  /** The data it ran on (added to every result by `report`). */
+  analyzed?: Analyzed;
   /** What the results mean, in plain words, under the heading. */
   summary?: string;
+  /** Its conditions, checked by R (normality, equal SDs…). */
+  checks?: Check[];
   /** Optional per-data-set normality table ("shapiro-wilk"). */
   normality?: NormalityRow[];
   /** Human-readable fitted-model equation, e.g. "Y = 2.927*X − 0.3322" (regressions). */
@@ -1683,8 +2627,16 @@ export interface AnalysisResult {
   comparisonsLabel?: string;
   /** Optional correlation matrix (Multiple Variables correlation matrix). */
   matrix?: CorrelationMatrix;
+  /** Optional ANOVA effect-size table (seq 161): one row per effect. */
+  effectSizes?: EffectSizeRow[];
   /** Optional regression coefficients table (multiple regression). */
   coefficients?: RegressionCoefficient[];
+  /** Optional multiple-regression diagnostics (seq 198): one VIF per
+   *  predictor (multicollinearity), the regression ANOVA table, and the
+   *  covariance matrix of the coefficients. */
+  vif?: VifRow[];
+  anovaTable?: AnovaRow[];
+  covariance?: CovarianceMatrix;
   /** A curve fit's best-fit values, one column per data set (two when curves are compared). */
   fit?: { sets: string[]; rows: FitRow[] };
   /** A standard curve's unknowns, interpolated. */
@@ -1698,6 +2650,11 @@ export interface AnalysisResult {
    *  overlays need it to evaluate the curve, and the result alone does not carry it.
    *  Set whenever the run supplied one. */
   customEquation?: string;
+  /** The X a centered polynomial fit was centered at (seq 201): the mean of
+   *  the fitted X values. The fitted-curve overlays need it to evaluate the
+   *  curve (powers of X − centeredX, not of X). Set whenever the run fitted
+   *  a polynomial with `centered`. */
+  centeredX?: number;
   /** Optional variance components ("mixed-effects"): one row per
    *  random-effects grouping (subject intercept + residual in v1). */
   varianceComponents?: VarianceComponent[];
@@ -1713,15 +2670,23 @@ export interface AnalysisResult {
   /** Optional per-column baseline-subtracted values ("remove-baseline"):
    *  one table per column, each with the baseline used recorded. */
   baselineRemoved?: BaselineRemovedColumn[];
+  /** Optional column-math result ("remove-baseline", column-math mode):
+   *  the two columns combined row by row, with the operation recorded. */
+  columnMath?: ColumnMathResult;
   /** Optional kept and pruned rows ("prune-rows"): the kept rows, then
    *  the pruned rows listed so what was dropped stays visible. */
   prunedRows?: PrunedRowsResult;
+  /** Optional per-category observed vs. expected counts ("chi-square-gof"):
+   *  one row per category, with its share of the chi-square statistic. */
+  gofCategories?: GoodnessOfFitCategoryRow[];
   /** Optional per-column divided values ("fraction-of-total"): one table
    *  per column, each with the total divided by recorded. */
   fractionsOfTotal?: FractionOfTotalColumn[];
   /** Optional per-row summaries ("row-means-totals"): one row per table
    *  row holding a value, with that row's total, mean, SD, SEM, 95% CI,
-   *  %CV, median and geometric mean across the chosen data sets. */
+   *  %CV, median, quartiles, min/max, percentiles and geometric mean/SD/CI
+   *  across the chosen data sets — or, in per-column mode, one row per
+   *  table row per data set. */
   rowMeans?: RowMeansRow[];
   /** Optional per-column outlier summary ("outliers"). */
   outlierGroups?: OutlierGroupRow[];
@@ -1769,6 +2734,18 @@ export interface AnalysisResult {
    *  so a stored result is stable across runs. */
   kmeansClusters?: KMeansClusterRow[];
   kmeansAssignments?: KMeansAssignmentRow[];
+  /** Optional hierarchical-clustering tables ("hierarchical-clustering"):
+   *  one row per cluster (its centroid in original units, size and
+   *  within-cluster sum of squares), one row per complete observation (its
+   *  cluster assignment), the dendrogram (merge matrix, heights, leaf order
+   *  and cut height), and the choosing-k diagnostics (within SS, average
+   *  silhouette width, Gap statistic ± SE per k). Cluster labels are
+   *  canonicalised by the runner (sorted by first centroid coordinate),
+   *  so a stored result is stable across runs. */
+  hclustClusters?: HclustClusterRow[];
+  hclustAssignments?: HclustAssignmentRow[];
+  hclustDendrogram?: HclustDendrogram;
+  choosingK?: ChoosingKRow[];
   /** Optional per-point smoother output ("spline-lowess"), the shared
    *  per-point-result mechanism for later plans: `fitted` = the fitted
    *  values at the data X's, in ascending X order; `curve` = the same
@@ -1786,6 +2763,13 @@ export interface AnalysisResult {
   /** Optional parameter values ("plot-function"): one entry per generated
    *  curve — the values it was generated from, tabled in the results view. */
   parameterValues?: PlotFunctionParameterValues[];
+  /** Optional per-P-value rows ("p-value-stack"): one row per entered P
+   *  value, in entry order; `pValueAdjustedLabel` names the adjusted column
+   *  ("Adjusted P value" for the FWER methods, "q value" for the FDR ones)
+   *  and `pValueFlagLabel` the flag column ("Significant" / "Discovery"). */
+  pValueRows?: PValueRow[];
+  pValueAdjustedLabel?: string;
+  pValueFlagLabel?: string;
   /** Optional Monte Carlo summary ("monte-carlo"): the statistic's
    *  distribution across repeats, its 95% percentile interval, the
    *  estimated power (when the statistic is a P value), the observed

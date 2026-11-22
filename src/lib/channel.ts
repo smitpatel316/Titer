@@ -3,7 +3,8 @@
 // Shape is Cricket 07's channel manifest (see UPDATE-LOOP-105.md): the
 // release script uploads the asset, then writes version.json LAST, so a
 // manifest that answers always names an asset that is already there.
-import { fetchWithTimeout, isNewer } from "./version";
+import { isNewer } from "./version";
+import { fetchChannelManifestText } from "../native";
 
 /** The channel manifest. The release pipeline publishes it before v2 ships. */
 export const CHANNEL_MANIFEST_URL = "https://titer.smitpatel.net/channel/version.json";
@@ -63,26 +64,49 @@ function isManifest(value: unknown): value is ChannelManifest {
   return typeof value === "object" && value !== null && typeof (value as ChannelManifest).version === "string";
 }
 
+/** Why the last live manifest fetch failed, if it did: the reason the
+ *  update check shows when it cannot reach the channel either. The P0
+ *  hid this entirely — the dialog said only "check your internet
+ *  connection" while the network was fine. Cleared on a good fetch. */
+let lastFetchError: string | null = null;
+
+/** The last live channel fetch's failure reason, if it failed. */
+export function lastChannelFetchError(): string | null {
+  return lastFetchError;
+}
+
 /** The channel manifest: the live one when it answers, else the cached
  *  one, else null (offline with nothing cached, or the channel not
  *  published yet — a designed state, never an error). A fetch that answers
- *  replaces the cache. */
+ *  replaces the cache. The fetch goes through the shell's curl, not the
+ *  webview: the webview enforces CORS and the channel host sends no
+ *  Access-Control-Allow-Origin, so the in-page fetch failed fast while
+ *  curl answered 200 (P0, Nov 19 2026). */
 export async function fetchChannelManifest(): Promise<ChannelManifest | null> {
   try {
-    const response = await fetchWithTimeout(CHANNEL_MANIFEST_URL, { headers: { Accept: "application/json" } });
-    if (response.ok) {
-      const manifest: unknown = await response.json();
-      if (isManifest(manifest)) {
-        try {
-          localStorage.setItem(CACHED_KEY, JSON.stringify(manifest));
-        } catch {
-          // No storage: the live manifest still counts.
-        }
-        return manifest;
+    const text = await fetchChannelManifestText(CHANNEL_MANIFEST_URL);
+    const manifest: unknown = JSON.parse(text);
+    if (isManifest(manifest)) {
+      lastFetchError = null;
+      try {
+        localStorage.setItem(CACHED_KEY, JSON.stringify(manifest));
+      } catch {
+        // No storage: the live manifest still counts.
       }
+      return manifest;
     }
-  } catch {
-    // Offline, or the channel is not published yet: the cache, if any.
+    // The shell answered, but not with a manifest (an error page, a
+    // wrong shape): say what it was, then fall back to the cache.
+    lastFetchError = `the channel answered, but not with a manifest (${text.slice(0, 120)})`;
+    console.error(`[update] ${lastFetchError}`);
+  } catch (err) {
+    // Offline, the channel not published yet, or the shell's fetch
+    // refused: log the reason — the P0 swallowed it, and the dialog
+    // that followed blamed the internet while the network was fine.
+    // (curl's error names the HTTP status where there is one, e.g.
+    // "returned error: 404".)
+    lastFetchError = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    console.error(`[update] channel manifest fetch failed: ${lastFetchError}`);
   }
   try {
     const cached: unknown = JSON.parse(localStorage.getItem(CACHED_KEY) ?? "null");

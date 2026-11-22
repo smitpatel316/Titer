@@ -7,6 +7,9 @@
 // xdg-open equivalents so the same commands keep their signatures.
 mod cloud;
 mod cloud_box;
+// Automatic backup (Plane seq 226, 1.8.0): the separate-copy store — see
+// backup.rs. The commands below are its frontend face.
+mod backup;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 #[cfg(target_os = "macos")]
 use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
@@ -30,7 +33,9 @@ use tauri::{
 use tauri_plugin_dialog::DialogExt;
 
 // In-app auto-update (v2, item 77): the download / verify / apply /
-// relaunch half. The check half lives in the frontend (src/updates.ts).
+// relaunch half, plus the channel-manifest fetch the webview can't do
+// (CORS — the channel host sends no Access-Control-Allow-Origin, P0 Nov
+// 19 2026). The check half lives in the frontend (src/updates.ts).
 mod updater;
 
 // v3 Phase 1: the in-process MCP server (off by default; see mcp.rs).
@@ -73,6 +78,13 @@ struct ProjectWindows {
     /// the sequence. Cleared when that window is destroyed, or by
     /// `cancel_quit`.
     quit_closing: Option<String>,
+    /// A close-all-driven close is in flight (seq 235, File ▸ Close All):
+    /// like `quit_closing`, but the label of the project window that has
+    /// been asked to close while Titer waits for its answer. Cleared when
+    /// that window is destroyed, or by `cancel_quit`. Unlike a quit, Titer
+    /// itself stays open when the last one goes.
+    closing_all: bool,
+    close_all_closing: Option<String>,
 }
 
 impl Opening {
@@ -249,8 +261,8 @@ fn choose_project(app: AppHandle, window: WebviewWindow) {
     });
 }
 
-/// File ▸ Import Prism File…: the Open panel for a Prism file (`.pzfx` or
-/// `.prism`).
+/// File ▸ Import Prism File…: the Open panel for a Prism file (`.pzfx`,
+/// `.prism` or `.pzf`).
 /// Non-blocking, like choose_project: blocking_pick_file parks the main
 /// thread on a semaphore while the NSOpenPanel needs that same thread to
 /// process clicks — deadlock, Titer (not responding), 0% CPU (confirmed
@@ -261,12 +273,30 @@ fn choose_project(app: AppHandle, window: WebviewWindow) {
 #[tauri::command]
 fn choose_prism_file(app: AppHandle, window: WebviewWindow) {
     let label = window.label().to_string();
-    app.dialog().file().set_title("Import Prism File").add_filter("GraphPad Prism File", &["pzfx", "prism"]).pick_file(
+    app.dialog().file().set_title("Import Prism File").add_filter("GraphPad Prism File", &["pzfx", "prism", "pzf"]).pick_file(
         move |file| {
             let picked = file.and_then(|file| file.into_path().ok()).map(|path| path.to_string_lossy().into_owned());
             let _ = app.emit_to(label.as_str(), "prism-file-picked", picked);
         },
     );
+}
+
+/// File ▸ Import Data File…: the Open panel for a data file (`.csv`,
+/// `.tsv`, `.txt` or `.xlsx`).
+/// Non-blocking, like choose_prism_file (a blocking picker deadlocked the
+/// app Nov 9): the event carries the path, or null on Cancel, so the page
+/// can unsubscribe either way.
+#[tauri::command]
+fn choose_data_file(app: AppHandle, window: WebviewWindow) {
+    let label = window.label().to_string();
+    app.dialog()
+        .file()
+        .set_title("Import Data File")
+        .add_filter("Data File", &["csv", "tsv", "txt", "xlsx"])
+        .pick_file(move |file| {
+            let picked = file.and_then(|file| file.into_path().ok()).map(|path| path.to_string_lossy().into_owned());
+            let _ = app.emit_to(label.as_str(), "data-file-picked", picked);
+        });
 }
 
 /// The project windows, lowest label first ("project-2" before "project-10"),
@@ -309,6 +339,32 @@ fn close_next_project_window(app: &AppHandle) -> bool {
     true
 }
 
+/// Asks ONE project window to close (the lowest label), as the next step of a
+/// close-all: the same one-at-a-time rule as a quit (asking all of them at
+/// once raced their native save dialogs — bugfix/quit-save-dialog).
+/// Returns false when there is no window to close, one is already being
+/// closed, or no close-all is in flight.
+fn close_next_for_close_all(app: &AppHandle) -> bool {
+    let Some(label) = project_labels(app).into_iter().next() else {
+        return false;
+    };
+    let Some(window) = app.get_webview_window(&label) else {
+        return false;
+    };
+    // Check and set under one lock, as the quit's version does: a `cancel_quit`
+    // that landed after the close-all was marked must stop the sequence
+    // before another window is asked.
+    let state = app.state::<Projects>();
+    let mut projects = state.0.lock().unwrap();
+    if !projects.closing_all || projects.close_all_closing.is_some() {
+        return false;
+    }
+    projects.close_all_closing = Some(label);
+    drop(projects);
+    let _ = window.close();
+    true
+}
+
 /// Analysis ▸ Apply Method…: the Open panel for a method file (`.pzm`).
 /// Non-blocking, like choose_prism_file (a blocking picker deadlocked the
 /// app Nov 9): the event carries the path, or null on Cancel, so the page
@@ -324,12 +380,53 @@ fn choose_method_file(app: AppHandle, window: WebviewWindow) {
     );
 }
 
+/// File ▸ Merge…: the Open panel for a project file (`.hlx`, `.pzt`,
+/// `.prism` or `.pzfx`) to merge into this project.
+/// Non-blocking, like choose_prism_file (a blocking picker deadlocked the
+/// app Nov 9): the event carries the path, or null on Cancel, so the page
+/// can unsubscribe either way.
+#[tauri::command]
+fn choose_merge_file(app: AppHandle, window: WebviewWindow) {
+    let label = window.label().to_string();
+    app.dialog()
+        .file()
+        .set_title("Merge Project")
+        .add_filter("Titer Project", &["hlx", "pzt"])
+        .add_filter("GraphPad Prism File", &["pzfx", "prism"])
+        .pick_file(move |file| {
+            let picked = file.and_then(|file| file.into_path().ok()).map(|path| path.to_string_lossy().into_owned());
+            let _ = app.emit_to(label.as_str(), "merge-file-picked", picked);
+        });
+}
+
 /// A window refused to close (its user chose Cancel): Titer doesn't quit after all.
+/// The same cancel stops a close-all in flight, so the rest stay open.
 #[tauri::command]
 fn cancel_quit(projects: State<Projects>) {
     let mut projects = projects.0.lock().unwrap();
     projects.quitting = false;
     projects.quit_closing = None;
+    projects.closing_all = false;
+    projects.close_all_closing = None;
+}
+
+/// Closes every project window through the normal flow (seq 235), as File ▸
+/// Close All does: mark the close-all, close the project windows one at a
+/// time (each asks about its unsaved changes), and Titer stays open once
+/// the last one is gone. A window whose user cancels the close calls
+/// `cancel_quit`, which clears the flag, so the rest stay open. A quit in
+/// flight wins over a close-all.
+#[tauri::command]
+fn close_all(app: AppHandle) {
+    {
+        let state = app.state::<Projects>();
+        let mut projects = state.0.lock().unwrap();
+        if projects.quitting {
+            return;
+        }
+        projects.closing_all = true;
+    }
+    let _ = close_next_for_close_all(&app);
 }
 
 /// Quits through the normal flow, as the macOS quit hook does: mark the
@@ -337,9 +434,16 @@ fn cancel_quit(projects: State<Projects>) {
 /// unsaved changes), and the run loop ends Titer once the last one is gone.
 /// Used by the updater after staging a relaunch. A window whose user cancels
 /// the quit calls `cancel_quit`, which clears the flag, so Titer stays.
+/// A close-all in flight is abandoned first — the quit takes over the sequence.
 #[tauri::command]
 fn quit_app(app: AppHandle) {
-    app.state::<Projects>().0.lock().unwrap().quitting = true;
+    {
+        let state = app.state::<Projects>();
+        let mut projects = state.0.lock().unwrap();
+        projects.closing_all = false;
+        projects.close_all_closing = None;
+        projects.quitting = true;
+    }
     if !close_next_project_window(&app) && project_labels(&app).is_empty() {
         app.exit(0);
     }
@@ -367,6 +471,34 @@ fn save_session(app: &AppHandle) {
     if let Some(file) = session_file(app) {
         let _ = file.parent().map(fs::create_dir_all);
         let _ = fs::write(file, text);
+    }
+}
+
+/// The `.hlx` project files among the command-line arguments (`titer
+/// file.hlx`): flags and anything that isn't an existing `.hlx` file are
+/// skipped, and paths are canonicalized so the window's stored path is
+/// absolute. The first argument is the program itself and is skipped.
+fn cli_project_files(args: impl Iterator<Item = String>) -> Vec<String> {
+    args.skip(1)
+        .filter(|arg| !arg.starts_with('-'))
+        .filter_map(|arg| {
+            let path = fs::canonicalize(&arg).ok()?;
+            let hlx =
+                path.extension().and_then(|ext| ext.to_str()).map(str::to_ascii_lowercase);
+            (hlx.as_deref() == Some("hlx") && path.is_file())
+                .then(|| path.to_string_lossy().into_owned())
+        })
+        .collect()
+}
+
+/// Opens the `.hlx` files passed on the command line, like the Finder's
+/// Opened event on macOS (which has no Linux twin — the argv was silently
+/// ignored, Q-77). Before restore_session, so a file the last session also
+/// held is opened once (`open` dedupes by path) and no blank window is made
+/// when a file was given.
+fn open_cli_args(app: &AppHandle) {
+    for path in cli_project_files(std::env::args()) {
+        let _ = open(app, None, Opening { path, untitled: false });
     }
 }
 
@@ -403,6 +535,9 @@ fn check_extension(path: &str, allowed: &[&str]) -> Result<(), String> {
 /// says what went wrong instead: a missing file is "not found:", a file that
 /// exists but isn't UTF-8 is "not UTF-8:" — the page tells them apart by the
 /// prefix, and only a missing file leaves Open Recent.
+//
+// Sync helper: the `read_text` / `read_prism_text` commands below run it on
+// a blocking-pool thread (seq 248), so the tests call this directly.
 fn read_text_with_bom(path: String, allowed: &[&str]) -> Result<String, String> {
     check_extension(&path, allowed)?;
     let bytes = fs::read(&path).map_err(|e| {
@@ -416,54 +551,172 @@ fn read_text_with_bom(path: String, allowed: &[&str]) -> Result<String, String> 
     Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
 }
 
+/// Reads a project file's text off the main thread (seq 248): a sync
+/// command runs on macOS's main thread via the WKWebView URL-scheme
+/// handler, and the first read of a file under ~/Documents (or
+/// ~/Desktop, ~/Downloads) blocks in `open()` on a TCC consent prompt
+/// until the user answers — parking the main thread and wedging the whole
+/// app (no windows, no job claims, 0% CPU). `spawn_blocking` parks a
+/// blocking-pool thread instead; the app stays responsive.
 #[tauri::command]
-fn read_text(path: String) -> Result<String, String> {
-    read_text_with_bom(path, &["hlx", "pzt", "pzm"])
+async fn read_text(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || read_text_with_bom(path, &["hlx", "pzt", "pzm"]))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// A Prism `.pzfx` file's text, for import. Only `.pzfx` — project files
-/// (`.hlx`, `.pzt`, `.pzm`) go through `read_text`.
+/// (`.hlx`, `.pzt`, `.pzm`) go through `read_text`. Async, like
+/// `read_text` (seq 248): a TCC-blocked read must never park the main thread.
 #[tauri::command]
-fn read_prism_text(path: String) -> Result<String, String> {
-    read_text_with_bom(path, &["pzfx"])
+async fn read_prism_text(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || read_text_with_bom(path, &["pzfx"]))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
-/// A Prism `.prism` file's bytes, for import — a `.prism` file is a ZIP, so
-/// text won't do. Base64, not a JSON number array: a 40 MB file would be a
-/// 40 M-number array the webview would have to parse one number at a time.
+/// A Prism `.prism` or `.pzf` file's bytes, for import — a `.prism` file is
+/// a ZIP and a `.pzf` file is binary, so text won't do for either. Base64,
+/// not a JSON number array: a 40 MB file would be a 40 M-number array the
+/// webview would have to parse one number at a time.
+/// Async, like `read_text` (seq 248): a TCC-blocked read must never park
+/// the main thread.
 #[tauri::command]
-fn read_prism_bytes(path: String) -> Result<String, String> {
-    check_extension(&path, &["prism"])?;
-    fs::read(path).map(|bytes| BASE64.encode(bytes)).map_err(|e| e.to_string())
+async fn read_prism_bytes(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        check_extension(&path, &["prism", "pzf"])?;
+        fs::read(path).map(|bytes| BASE64.encode(bytes)).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A data file's (`.csv`, `.tsv`, `.txt`) text, for import. Only those —
+/// `.xlsx` goes through `read_data_bytes` (a ZIP, so text won't do), and
+/// project files (`.hlx`, `.pzt`, `.pzm`) through `read_text`. Async, like
+/// `read_text` (seq 248): a TCC-blocked read must never park the main thread.
+#[tauri::command]
+async fn read_data_text(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || read_text_with_bom(path, &["csv", "tsv", "txt"]))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// A data file's (`.xlsx`) bytes, for import. Base64, like
+/// `read_prism_bytes`: a JSON number array would make the webview parse a
+/// large file one number at a time. Async, like `read_text` (seq 248): a
+/// TCC-blocked read must never park the main thread.
+#[tauri::command]
+async fn read_data_bytes(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        check_extension(&path, &["xlsx"])?;
+        fs::read(path).map(|bytes| BASE64.encode(bytes)).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Extensions `write_file` may write: every format the app saves or
 /// exports, including the table-export formats the MCP tools advertise
-/// (csv/xlsx/txt). A format missing here fails at the gate before its
+/// (csv/xlsx/txt/xml). A format missing here fails at the gate before its
 /// writer runs (v1.6 BUG D: xlsx was missing, so every xlsx export failed).
 const WRITE_FILE_EXTENSIONS: &[&str] = &[
-    "hlx", "prism", "pzt", "pzm", "pzfx", "png", "jpg", "jpeg", "svg", "pdf", "tif", "tiff", "bmp", "csv", "txt", "xlsx",
-    "docx", "pptx",
+    "hlx", "prism", "pzt", "pzm", "pzfx", "png", "jpg", "jpeg", "svg", "pdf", "tif", "tiff", "bmp", "eps", "csv", "txt", "xlsx",
+    "xml", "docx", "pptx",
 ];
 
 /// Writes the raw request body to the (URL-encoded) `path` header, atomically.
+/// Async (seq 248): a save into ~/Documents, ~/Desktop or ~/Downloads can
+/// block in `open()` on a macOS TCC consent prompt, which would park the
+/// main thread if this were a sync command — so the write runs on a
+/// blocking-pool thread. Only the header/body are read here (no I/O).
 #[tauri::command]
-fn write_file(request: Request) -> Result<(), String> {
+async fn write_file(request: Request<'_>) -> Result<(), String> {
     let header = request.headers().get("path").and_then(|v| v.to_str().ok()).ok_or("missing path")?;
-    let path = percent_encoding::percent_decode_str(header).decode_utf8().map_err(|e| e.to_string())?;
+    let path = percent_encoding::percent_decode_str(header).decode_utf8().map_err(|e| e.to_string())?.into_owned();
     check_extension(&path, WRITE_FILE_EXTENSIONS)?;
     let InvokeBody::Raw(data) = request.body() else { return Err("expected raw bytes".into()) };
-    write_atomically(Path::new(path.as_ref()), data)
+    let data = data.clone();
+    tokio::task::spawn_blocking(move || write_atomically(Path::new(&path), &data))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
-/// A temp file renamed over `path`, so a save is never left half-written.
+/// A temp file renamed over `path`, so a save is never left half-written: its bytes are
+/// on the disk (`sync_all`, a full flush on macOS) before the name points at them, so a
+/// power cut right after can't leave an empty file under the old name.
 fn write_atomically(path: &Path, data: &[u8]) -> Result<(), String> {
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp"); // beside it: "Data.hlx.tmp"
-    fs::write(&tmp, data).and_then(|()| fs::rename(&tmp, path)).map_err(|e| {
+    let write = || -> std::io::Result<()> {
+        let mut file = fs::File::create(&tmp)?;
+        std::io::Write::write_all(&mut file, data)?;
+        file.sync_all()?;
+        fs::rename(&tmp, path)
+    };
+    write().map_err(|e| {
         let _ = fs::remove_file(&tmp); // a failed save leaves nothing behind
         e.to_string()
     })
+}
+
+/// Send to Keynote (seq 217): runs the AppleScript the page built
+/// (`buildKeynoteScript` in src/lib/office-export.ts) in Keynote via
+/// `osascript`, so Keynote makes the presentation and saves the real .key
+/// at `path`. macOS only — anywhere else this refuses outright, before
+/// touching anything (the menu hides the item there, and the MCP tool
+/// refuses the target there first). The script goes in a temp file, not
+/// an `osascript -e` argument, so no shell quoting is involved; the temp
+/// script and the temp PNG the page wrote are deleted once osascript
+/// finishes, whatever it reports. Async, on the blocking pool: osascript
+/// can take seconds while Keynote launches, and a save into ~/Documents
+/// or ~/Desktop can block on a macOS TCC consent prompt (same class as
+/// seq 248's `write_file`).
+#[tauri::command]
+async fn send_to_keynote(script: String, png_path: String, path: String) -> Result<String, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (&script, &png_path, &path);
+        return Err("Send to Keynote needs macOS with Keynote installed — this build cannot drive Keynote.".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        tokio::task::spawn_blocking(move || send_to_keynote_blocking(&script, &png_path, &path))
+            .await
+            .map_err(|e| e.to_string())?
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn send_to_keynote_blocking(script: &str, png_path: &str, path: &str) -> Result<String, String> {
+    use std::io::Write;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let script_path = std::env::temp_dir().join(format!("titer-keynote-{stamp}.applescript"));
+    // Write through a handle so a short write is retried, not silent.
+    let out = (|| -> Result<std::process::Output, String> {
+        let mut script_file = std::fs::File::create(&script_path)
+            .map_err(|e| format!("Couldn't write the Keynote script: {e}"))?;
+        script_file
+            .write_all(script.as_bytes())
+            .and_then(|()| script_file.sync_all())
+            .map_err(|e| format!("Couldn't write the Keynote script: {e}"))?;
+        drop(script_file);
+        std::process::Command::new("osascript")
+            .arg(&script_path)
+            .output()
+            .map_err(|e| format!("Couldn't run osascript (is Keynote installed?): {e}"))
+    })();
+    let _ = std::fs::remove_file(&script_path);
+    let _ = std::fs::remove_file(png_path);
+    let out = out?;
+    if !out.status.success() {
+        let detail = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("Keynote couldn't make the presentation: {}", detail.trim()));
+    }
+    Ok(path.to_string())
 }
 
 // ── My Palettes ──────────────────────────────────────────────────────────
@@ -472,17 +725,85 @@ fn write_atomically(path: &Path, data: &[u8]) -> Result<(), String> {
 
 const PALETTES_FILE: &str = "palettes.json";
 
-/// The file's text, empty before the first palette.
+/// The file's text, empty before the first palette. Async (seq 248):
+/// same class as `read_text` — no blocking disk I/O on the main thread,
+/// even though this file lives in the app-data folder.
 #[tauri::command]
-fn read_my_palettes(app: AppHandle) -> String {
-    app.path().app_data_dir().ok().and_then(|dir| fs::read_to_string(dir.join(PALETTES_FILE)).ok()).unwrap_or_default()
+async fn read_my_palettes(app: AppHandle) -> String {
+    let Some(file) = app.path().app_data_dir().ok().map(|dir| dir.join(PALETTES_FILE)) else {
+        return String::new();
+    };
+    tokio::task::spawn_blocking(move || fs::read_to_string(file).unwrap_or_default())
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]
-fn write_my_palettes(app: AppHandle, text: String) -> Result<(), String> {
+async fn write_my_palettes(app: AppHandle, text: String) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    write_atomically(&dir.join(PALETTES_FILE), text.as_bytes())
+    tokio::task::spawn_blocking(move || {
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        write_atomically(&dir.join(PALETTES_FILE), text.as_bytes())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ── Automatic backup (Plane seq 226, 1.8.0) ──────────────────────────────
+// The commands behind src/lib/backup.ts + the frontend backup engine. All
+// disk work runs on a blocking-pool thread (seq 248), like the palettes
+// above; the store itself lives in backup.rs. Bytes cross as base64, like
+// `read_prism_bytes`: a JSON number array would make the webview parse a
+// large file one number at a time.
+
+/// Writes (or overwrites) this project's backup snapshot.
+#[tauri::command]
+async fn backup_write(
+    app: AppHandle,
+    identity: String,
+    display_name: String,
+    source_path: Option<String>,
+    base64: String,
+) -> Result<backup::BackupEntry, String> {
+    let bytes = BASE64.decode(base64).map_err(|e| e.to_string())?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || {
+        backup::write_backup(&dir, &identity, &display_name, source_path.as_deref(), &bytes)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The backups on disk, newest first (stale and incomplete ones pruned).
+#[tauri::command]
+async fn backup_list(app: AppHandle) -> Result<Vec<backup::BackupEntry>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || backup::list_backups(&dir)).await.map_err(|e| e.to_string())?
+}
+
+/// The backup for one project identity, if it has one within the keep.
+#[tauri::command]
+async fn backup_status(app: AppHandle, identity: String) -> Result<Option<backup::BackupEntry>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || backup::backup_status(&dir, &identity))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// One backup's snapshot bytes, as base64, for restoring.
+#[tauri::command]
+async fn backup_read(app: AppHandle, key: String) -> Result<String, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || backup::read_backup(&dir, &key).map(|bytes| BASE64.encode(bytes)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Deletes a project's backup. Missing is fine.
+#[tauri::command]
+async fn backup_delete(app: AppHandle, key: String) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || backup::delete_backup(&dir, &key)).await.map_err(|e| e.to_string())?
 }
 
 // ── Cloud storage (v2 item 75, Box first) ─────────────────────────────────
@@ -601,10 +922,14 @@ async fn cloud_status(app: AppHandle) -> CloudStatus {
 }
 
 /// Sets the persisted "Always use my own Box app" preference for Box
-/// sign-in (skips the Titer broker; see `load_box_prefer_byo`).
+/// sign-in (skips the Titer broker; see `load_box_prefer_byo`). Async
+/// (seq 248): the preference file is written on a blocking-pool thread,
+/// like every other file-IO command.
 #[tauri::command]
-fn cloud_set_box_prefer_byo(app: AppHandle, prefer_byo: bool) -> Result<(), cloud::CloudError> {
-    save_box_prefer_byo(&app, prefer_byo)
+async fn cloud_set_box_prefer_byo(app: AppHandle, prefer_byo: bool) -> Result<(), cloud::CloudError> {
+    tokio::task::spawn_blocking(move || save_box_prefer_byo(&app, prefer_byo))
+        .await
+        .map_err(|e| cloud::CloudError::provider(e.to_string()))?
 }
 
 /// Saves the user's own Box app credentials (client id + secret) to the OS
@@ -690,16 +1015,22 @@ async fn cloud_download(
 /// The cache copy of a remote file, for opening while offline. The version
 /// is unknown from the cache alone — the in-memory handle keeps the version
 /// from the original download, and saving while offline is refused anyway.
+/// Async (seq 248): the cache read runs on a blocking-pool thread, like
+/// every other file-IO command.
 #[tauri::command]
-fn cloud_read_cache(
+async fn cloud_read_cache(
     app: AppHandle,
     provider: String,
     file_id: String,
     name: String,
 ) -> Result<cloud::RemoteDownload, cloud::CloudError> {
-    let bytes = cloud::read_cache(&app, &provider, &file_id, &name).ok_or_else(|| cloud::CloudError::NotFound {
-        message: "No saved copy of that file is on this computer.".into(),
-    })?;
+    let cache_name = name.clone();
+    let bytes = tokio::task::spawn_blocking(move || cloud::read_cache(&app, &provider, &file_id, &cache_name))
+        .await
+        .map_err(|e| cloud::CloudError::provider(e.to_string()))?
+        .ok_or_else(|| cloud::CloudError::NotFound {
+            message: "No saved copy of that file is on this computer.".into(),
+        })?;
     Ok(cloud::RemoteDownload { base64: BASE64.encode(&bytes), name, version: None, sha1: None, modified_at: None })
 }
 
@@ -887,13 +1218,14 @@ fn set_spinner(window: WebviewWindow, at: Option<(f64, f64)>) {
     });
 }
 
-/// Titer's GitHub page, its releases, or Buy Me a Coffee, in the default
-/// browser: fixed addresses, so the page can't open anything else.
+/// Titer's GitHub page, its releases, the user guide, or Buy Me a Coffee,
+/// in the default browser: fixed addresses, so the page can't open anything else.
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn open_link(link: String) {
     let url = match link.as_str() {
         "github" => c"https://github.com/smitpatel316/Titer",
+        "guide" => c"https://github.com/smitpatel316/Titer",
         "releases" => c"https://github.com/smitpatel316/Titer/releases/latest",
         "coffee" => c"https://www.buymeacoffee.com/smitpatel316",
         _ => return,
@@ -903,6 +1235,27 @@ fn open_link(link: String) {
         let url: *mut AnyObject = objc2::msg_send![objc2::class!(NSURL), URLWithString: text];
         let workspace: *mut AnyObject = objc2::msg_send![objc2::class!(NSWorkspace), sharedWorkspace];
         let _: bool = objc2::msg_send![workspace, openURL: url];
+    }
+}
+
+/// A pre-filled GitHub issue for one saved feedback entry, in the
+/// default browser. The address is fixed (github.com/smitpatel316/Titer
+/// issues/new) — only the title/body query varies, and it is built by
+/// the dialog from the entry the user chose to send. Anything else is
+/// refused, so the page can't open an arbitrary URL.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn open_github_issue(url: String) {
+    const PREFIX: &str = "https://github.com/smitpatel316/Titer/issues/new?";
+    if !url.starts_with(PREFIX) {
+        return;
+    }
+    unsafe {
+        let Ok(text) = std::ffi::CString::new(url) else { return };
+        let url_obj: *mut AnyObject = objc2::msg_send![objc2::class!(NSString), stringWithUTF8String: text.as_ptr()];
+        let url_obj: *mut AnyObject = objc2::msg_send![objc2::class!(NSURL), URLWithString: url_obj];
+        let workspace: *mut AnyObject = objc2::msg_send![objc2::class!(NSWorkspace), sharedWorkspace];
+        let _: bool = objc2::msg_send![workspace, openURL: url_obj];
     }
 }
 
@@ -933,7 +1286,15 @@ fn ask_before_quitting_macos(app: &AppHandle) {
         if !windows_exist {
             return 1; // NSTerminateNow
         }
-        app.state::<Projects>().0.lock().unwrap().quitting = true;
+        // A close-all in flight is abandoned first — the quit takes over
+        // the sequence (see `quit_app`).
+        {
+            let state = app.state::<Projects>();
+            let mut projects = state.0.lock().unwrap();
+            projects.closing_all = false;
+            projects.close_all_closing = None;
+            projects.quitting = true;
+        }
         // One window at a time: asking all of them at once raced their
         // native save dialogs (bugfix/quit-save-dialog). The Destroyed
         // handler asks the next one once this one is gone.
@@ -1035,10 +1396,23 @@ fn accent_color() -> Option<String> {
 fn open_link(link: String) {
     let url = match link.as_str() {
         "github" => "https://github.com/smitpatel316/Titer",
+        "guide" => "https://github.com/smitpatel316/Titer",
         "releases" => "https://github.com/smitpatel316/Titer/releases/latest",
         "coffee" => "https://www.buymeacoffee.com/smitpatel316",
         _ => return,
     };
+    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+}
+
+/// Linux: the same fixed GitHub-issue address as on macOS, opened with
+/// xdg-open. Only the title/body query varies; anything else is refused.
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn open_github_issue(url: String) {
+    const PREFIX: &str = "https://github.com/smitpatel316/Titer/issues/new?";
+    if !url.starts_with(PREFIX) {
+        return;
+    }
     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
 }
 
@@ -1252,7 +1626,17 @@ fn main() {
             );
             ask_before_quitting(app.handle());
             show_menu_pictures();
+            open_cli_args(app.handle());
             restore_session(app.handle());
+            // MCP autostart: if the user previously opted in (persisted
+            // `mcp-opt-in.json` in <app_data>/mcp), start the local AI
+            // server so Antigravity can connect shortly after launch with
+            // no toggle-flip. Fresh installs and users who never opted in
+            // start with the server off (see mcp::mcp_autostart_if_opted_in).
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                mcp::mcp_autostart_if_opted_in(app_handle).await;
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1263,20 +1647,33 @@ fn main() {
             new_project,
             choose_project,
             choose_prism_file,
+            choose_data_file,
             choose_method_file,
+            choose_merge_file,
             cancel_quit,
+            close_all,
             quit_app,
+            updater::fetch_channel_manifest,
             updater::download_update,
             updater::apply_update,
             read_text,
             read_prism_text,
             read_prism_bytes,
+            read_data_text,
+            read_data_bytes,
             write_file,
+            send_to_keynote,
             read_my_palettes,
             write_my_palettes,
+            backup_write,
+            backup_list,
+            backup_status,
+            backup_read,
+            backup_delete,
             set_recent_documents,
             accent_color,
             open_link,
+            open_github_issue,
             set_spinner,
             open_url,
             cloud_status,
@@ -1302,10 +1699,17 @@ fn main() {
             cancel_r,
             mcp::mcp_status,
             mcp::mcp_set_enabled,
+            mcp::mcp_connect_antigravity,
+            mcp::mcp_open_antigravity,
             mcp::mcp_token,
             mcp::mcp_regenerate_token,
             mcp::mcp_claude_code_command,
             mcp::mcp_activity,
+            mcp::mcp_feedback,
+            mcp::mcp_feedback_consent,
+            mcp::mcp_set_feedback_consent,
+            mcp::mcp_allowlist,
+            mcp::mcp_set_allowlist,
             mcp::mcp_publish_snapshot,
             mcp::mcp_publish_result,
             mcp::mcp_take_jobs,
@@ -1334,12 +1738,18 @@ fn main() {
                 projects.documents.remove(&label);
                 projects.openings.remove(&label);
                 let quitting = projects.quitting;
+                let closing_all = projects.closing_all;
                 // Only the window the quit sequence asked to close advances
                 // it; a window the user closed by hand meanwhile leaves the
-                // sequence waiting on its own window's answer.
+                // sequence waiting on its own window's answer. The same
+                // rule holds for a close-all (seq 235).
                 let advance = quitting && projects.quit_closing.as_deref() == Some(label.as_str());
+                let advance_all = closing_all && projects.close_all_closing.as_deref() == Some(label.as_str());
                 if advance {
                     projects.quit_closing = None;
+                }
+                if advance_all {
+                    projects.close_all_closing = None;
                 }
                 drop(projects);
                 // BUG-22: the MCP snapshot registry is Rust-side state too —
@@ -1353,6 +1763,11 @@ fn main() {
                     if quitting {
                         app.exit(0);
                     } else {
+                        // The last window of a close-all is gone: the
+                        // sequence ends (Titer stays open, unlike a quit).
+                        if closing_all {
+                            app.state::<Projects>().0.lock().unwrap().closing_all = false;
+                        }
                         // Titer stays open: the engine window sets the menu bar for no window.
                         let _ = app.emit_to("engine", "no-windows", ());
                     }
@@ -1361,6 +1776,11 @@ fn main() {
                     // (close_next_project_window re-checks `quitting`, so a
                     // cancel that landed meanwhile stops the sequence.)
                     let _ = close_next_project_window(app);
+                } else if advance_all {
+                    // The close-all's current window is gone: ask the next one.
+                    // (close_next_for_close_all re-checks `closing_all`, so a
+                    // cancel that landed meanwhile stops the sequence.)
+                    let _ = close_next_for_close_all(app);
                 }
             }
             // A click on the Dock icon while no window is open: a new project.
@@ -1391,7 +1811,7 @@ mod tests {
     #[test]
     fn read_prism_text_reads_a_pzfx_fixture() {
         let path = fixture("column.pzfx");
-        let text = read_prism_text(path.to_string_lossy().into_owned()).expect("column.pzfx should read");
+        let text = read_text_with_bom(path.to_string_lossy().into_owned(), &["pzfx"]).expect("column.pzfx should read");
         assert!(text.contains("GraphPadPrismFile"), "fixture should be a Prism file");
         assert!(text.contains("Data 1"), "fixture should contain the Data 1 table");
     }
@@ -1399,7 +1819,7 @@ mod tests {
     #[test]
     fn read_prism_text_rejects_other_extensions() {
         for bad in ["column.txt", "column.hlx", "column.pzfx.bak", "column"] {
-            let err = read_prism_text(fixture(bad).to_string_lossy().into_owned())
+            let err = read_text_with_bom(fixture(bad).to_string_lossy().into_owned(), &["pzfx"])
                 .expect_err(&format!("{bad} should be rejected"));
             assert!(err.contains("can't access"), "error should name the refusal: {err}");
         }
@@ -1413,11 +1833,11 @@ mod tests {
 
     #[test]
     fn write_file_accepts_every_export_format() {
-        // titer_export_table_data advertises csv/xlsx/txt (mcp.rs) and the
+        // titer_export_table_data advertises csv/xlsx/txt/xml (mcp.rs) and the
         // graph/figure/office exports write png/svg/pdf/docx/pptx — the
         // write gate must accept all of them (v1.6 BUG D: xlsx was missing
         // from the inline list, so every xlsx export failed at the gate).
-        for ext in ["csv", "xlsx", "txt", "png", "svg", "pdf", "docx", "pptx", "hlx", "pzfx"] {
+        for ext in ["csv", "xlsx", "txt", "xml", "png", "svg", "pdf", "docx", "pptx", "hlx", "pzfx"] {
             assert!(
                 check_extension(&format!("/tmp/x.{ext}"), WRITE_FILE_EXTENSIONS).is_ok(),
                 "{ext} should be writable"
@@ -1428,7 +1848,7 @@ mod tests {
 
     #[test]
     fn read_prism_text_reports_a_missing_file() {
-        let err = read_prism_text(fixture("no-such-file.pzfx").to_string_lossy().into_owned())
+        let err = read_text_with_bom(fixture("no-such-file.pzfx").to_string_lossy().into_owned(), &["pzfx"])
             .expect_err("missing file should error");
         assert!(!err.contains("can't access"), "missing file is an I/O error, not a refusal: {err}");
     }
@@ -1441,17 +1861,17 @@ mod tests {
     // BOM `.hlx` opens instead of failing as "damaged".
     #[test]
     fn read_text_strips_bom() {
-        let text = read_text(fixture("bom.hlx").to_string_lossy().into_owned()).expect("bom.hlx should read");
+        let text = read_text_with_bom(fixture("bom.hlx").to_string_lossy().into_owned(), &["hlx", "pzt", "pzm"]).expect("bom.hlx should read");
         assert!(!text.starts_with('\u{feff}'), "BOM should be stripped: {text:?}");
         assert!(text.starts_with('{'), "text should start at the JSON: {text:?}");
     }
 
     #[test]
     fn read_text_distinguishes_missing_from_unreadable() {
-        let missing = read_text(fixture("no-such-file.hlx").to_string_lossy().into_owned())
+        let missing = read_text_with_bom(fixture("no-such-file.hlx").to_string_lossy().into_owned(), &["hlx", "pzt", "pzm"])
             .expect_err("missing file should error");
         assert!(missing.starts_with("not found:"), "missing file must say so: {missing}");
-        let unreadable = read_text(fixture("latin1.hlx").to_string_lossy().into_owned())
+        let unreadable = read_text_with_bom(fixture("latin1.hlx").to_string_lossy().into_owned(), &["hlx", "pzt", "pzm"])
             .expect_err("non-UTF-8 file should error");
         assert!(!unreadable.starts_with("not found:"), "unreadable file is not missing: {unreadable}");
         assert!(unreadable.contains("UTF-8"), "unreadable file must say it isn't UTF-8: {unreadable}");
@@ -1459,10 +1879,41 @@ mod tests {
 
     #[test]
     fn read_prism_text_strips_bom() {
-        let text =
-            read_prism_text(fixture("bom.pzfx").to_string_lossy().into_owned()).expect("bom.pzfx should read");
+        let text = read_text_with_bom(fixture("bom.pzfx").to_string_lossy().into_owned(), &["pzfx"])
+            .expect("bom.pzfx should read");
         assert!(!text.starts_with('\u{feff}'), "BOM should be stripped: {text:?}");
         assert!(text.starts_with("<?xml"), "text should start at the XML: {text:?}");
+    }
+
+    // ── seq 248: the async file-IO commands (off the main thread) ───────
+    // `read_prism_bytes` is an async command whose blocking read runs on a
+    // blocking-pool thread, so a TCC-blocked `open()` parks that thread,
+    // never the main thread. This pins the async path itself (not just the
+    // sync helper above): a real `.prism` fixture must come back as
+    // base64 that decodes to the ZIP magic.
+    #[tokio::test]
+    async fn read_prism_bytes_async_reads_a_prism_fixture() {
+        let path = fixture("prism").join("prism2R-demo_dataset.prism");
+        let base64 = read_prism_bytes(path.to_string_lossy().into_owned()).await.expect("fixture should read");
+        let bytes = BASE64.decode(base64).expect("command returns base64");
+        assert!(bytes.starts_with(b"PK"), "a .prism file is a ZIP: {bytes:?}");
+        assert!(!bytes.is_empty(), "fixture should have content");
+    }
+
+    // seq 218: the same async path for a `.pzf` fixture — base64 that
+    // decodes to the legacy binary magic, and a `.pzfx` path is refused
+    // (binary reader only: `.pzfx` goes through `read_prism_text`).
+    #[tokio::test]
+    async fn read_prism_bytes_async_reads_a_pzf_fixture() {
+        let path = fixture("aggregates-size.pzf");
+        let base64 = read_prism_bytes(path.to_string_lossy().into_owned()).await.expect("fixture should read");
+        let bytes = BASE64.decode(base64).expect("command returns base64");
+        assert!(bytes.starts_with(b"PCFFGRA4"), "a .pzf file starts with its magic: {bytes:?}");
+        assert!(!bytes.is_empty(), "fixture should have content");
+        let err = read_prism_bytes(fixture("column.pzfx").to_string_lossy().into_owned())
+            .await
+            .expect_err(".pzfx is not a bytes format");
+        assert!(err.contains("can't access"), "{err}");
     }
 
     // ── CC-m6: r_ready must not re-send an in-flight evaluation ──────────
@@ -1505,5 +1956,35 @@ mod tests {
         requests.sent.insert(2);
         requests.mark_starting();
         assert_eq!(requests.take_unsent().len(), 2, "a restart must re-send every waiting request");
+    }
+
+    // ── Q-77: files passed on the command line ───────────────────────────
+    #[test]
+    fn cli_project_files_picks_hlx_and_canonicalizes() {
+        let hlx = fixture("bom.hlx");
+        let found = cli_project_files(["titer".into(), hlx.to_string_lossy().into_owned()].into_iter());
+        assert_eq!(found.len(), 1, "one .hlx arg should be picked: {found:?}");
+        assert_eq!(found[0], fs::canonicalize(&hlx).unwrap().to_string_lossy(), "path should be absolute");
+    }
+
+    #[test]
+    fn cli_project_files_skips_flags_non_hlx_and_missing() {
+        let hlx = fixture("bom.hlx").to_string_lossy().into_owned();
+        let pzfx = fixture("column.pzfx").to_string_lossy().into_owned();
+        let missing = fixture("no-such-file.hlx").to_string_lossy().into_owned();
+        let found = cli_project_files(
+            ["titer".into(), "--verbose".into(), "-x".into(), pzfx, missing, hlx].into_iter(),
+        );
+        assert_eq!(found.len(), 1, "only the existing .hlx should survive: {found:?}");
+    }
+
+    #[test]
+    fn cli_project_files_accepts_uppercase_hlx() {
+        let hlx = fixture("bom.hlx");
+        let upper = hlx.with_extension("HLX");
+        let _ = fs::copy(&hlx, &upper);
+        let found = cli_project_files(["titer".into(), upper.to_string_lossy().into_owned()].into_iter());
+        let _ = fs::remove_file(&upper);
+        assert_eq!(found.len(), 1, ".HLX should be accepted: {found:?}");
     }
 }

@@ -9,8 +9,9 @@
 // Excluded cells ("row,col" keys) follow the cells around: structural edits remap
 // them so they stay attached to their values. (Graphs follow on their own: see
 // store/references.ts.)
-import type { RowGroup, TableData, TableErrorFormat, TableType } from "../../store/types";
+import type { LinkedPaste, RowGroup, TableData, TableErrorFormat, TableType } from "../../store/types";
 import { tableErrorFormat } from "../../store/types";
+import { renameCalculatedReferences } from "../../lib/calcvars";
 import { seriesKeyOf, groupRuns } from "../../lib/columns";
 import { isGrouped, isNested } from "../../lib/dataset";
 import {
@@ -202,6 +203,39 @@ export function toggleExcluded(data: TableData, range: Range): TableData {
 
 // ── Rows and columns ───────────────────────────────────────────────────
 
+/** The link after `count` rows/columns are inserted at `at` on `axis`: the
+ *  anchor moves down/right with its values when the insert lands at or
+ *  above/before it, and stays when the insert is past it. (Prism 11,
+ *  seq 168 — the link engine lives in src/lib/linked-paste.ts; the
+ *  adjustment itself sits here so every structural edit carries it.) */
+export function linkedPasteAfterInsert(
+  link: LinkedPaste,
+  axis: "row" | "col",
+  at: number,
+  count: number,
+): LinkedPaste {
+  if (axis === "row") return link.row >= at ? { ...link, row: link.row + count } : link;
+  return link.col >= at ? { ...link, col: link.col + count } : link;
+}
+
+/** The link after `count` rows/columns are deleted from `at` on `axis` —
+ *  or undefined, when the deletion takes the anchor itself: the region no
+ *  longer lines up with the source, so the link goes rather than refresh
+ *  into the wrong cells. A deletion past the anchor pulls it up/left. */
+export function linkedPasteAfterDelete(
+  link: LinkedPaste,
+  axis: "row" | "col",
+  at: number,
+  count: number,
+): LinkedPaste | undefined {
+  if (axis === "row") {
+    if (link.row >= at && link.row < at + count) return undefined;
+    return link.row >= at + count ? { ...link, row: link.row - count } : link;
+  }
+  if (link.col >= at && link.col < at + count) return undefined;
+  return link.col >= at + count ? { ...link, col: link.col - count } : link;
+}
+
 /** Where each row goes when `count` rows are inserted before row `at`. */
 export const rowsInserted = (at: number, count: number) => (r: number) => (r >= at ? r + count : r);
 /** Where each row goes when `count` rows are deleted from row `at` (null: deleted). */
@@ -217,6 +251,7 @@ export function insertRows(data: TableData, at: number, count: number): TableDat
     rows,
     excluded: remapExcluded(data, (r, c) => [shift(r), c]),
     rowGroups: shiftRowGroupsForInsert(data.rowGroups, at, count),
+    linkedPaste: data.linkedPaste ? linkedPasteAfterInsert(data.linkedPaste, "row", at, count) : undefined,
   };
 }
 
@@ -228,6 +263,7 @@ export function deleteRows(data: TableData, at: number, count: number): TableDat
     rows,
     excluded: remapExcluded(data, (r, c) => (shift(r) === null ? null : [shift(r)!, c])),
     rowGroups: shiftRowGroupsForDelete(data.rowGroups, at, count),
+    linkedPaste: data.linkedPaste ? linkedPasteAfterDelete(data.linkedPaste, "row", at, count) : undefined,
   };
 }
 
@@ -240,7 +276,13 @@ export function insertColumns(data: TableData, at: number, count: number, type: 
     next.splice(at, 0, ...Array<Cell>(count).fill(null));
     return next;
   });
-  return { ...data, columns, rows, excluded: remapExcluded(data, (r, c) => [r, c >= at ? c + count : c]) };
+  return {
+    ...data,
+    columns,
+    rows,
+    excluded: remapExcluded(data, (r, c) => [r, c >= at ? c + count : c]),
+    linkedPaste: data.linkedPaste ? linkedPasteAfterInsert(data.linkedPaste, "col", at, count) : undefined,
+  };
 }
 
 /** The widths of `columns` alone: a column gone takes its width with it. */
@@ -261,6 +303,13 @@ export function deleteColumns(data: TableData, at: number, count: number): Table
     rows: data.rows.map((row) => row.filter(keep)),
     excluded: remapExcluded(data, (r, c) => (c < at ? [r, c] : c >= at + n ? [r, c - n] : null)),
     widths: widthsOf(data.widths, columns),
+    linkedPaste: data.linkedPaste ? linkedPasteAfterDelete(data.linkedPaste, "col", at, n) : undefined,
+    // A deleted calculated variable goes with its column; a formula that
+    // used a deleted source keeps its text and reads as an error until it
+    // is edited or removed (the recompute names the missing variable).
+    calculated: (data.calculated ?? []).filter((v) => columns.includes(v.name)).length
+      ? (data.calculated ?? []).filter((v) => columns.includes(v.name))
+      : undefined,
   };
 }
 
@@ -271,15 +320,18 @@ function renameKey<T>(map: Record<string, T> | undefined, from: string, to: stri
   return { ...rest, [to]: value };
 }
 
-/** Renames column `c`, carrying its width over. */
+/** Renames column `c`, carrying its width over — and, for a Multiple
+ *  Variables table, carrying the rename through its calculated variables'
+ *  formulas, so `=A + B` still reads `A` after `A` becomes `Dose`. */
 export function renameColumn(data: TableData, c: number, name: string): TableData {
   const old = data.columns[c];
   if (!name || name === old || data.columns.includes(name)) return data;
-  return {
+  const next = {
     ...data,
     columns: data.columns.map((n, i) => (i === c ? name : n)),
     widths: renameKey(data.widths, old, name),
   };
+  return renameCalculatedReferences(next, old, name);
 }
 
 /** Renames a group of a grouped table: its shared prefix across all its sub-columns. */
@@ -397,6 +449,9 @@ export function regroupTable(
     replicates,
     excluded: remapExcluded(data, (r, c) => (to(c) < 0 ? null : [r, to(c)])),
     widths: widthsOf(data.widths, columns),
+    // Regrouping rebuilds the columns, but the link's anchor is a position
+    // (seq 168): it stays where it was, and a refresh re-pastes the source
+    // into that same region — values keep their slots, as they do here.
   };
 }
 
@@ -437,7 +492,9 @@ export function applySummaryFormat(data: TableData, format: SummaryFormat): Tabl
         if (c === 0) return row[0] ?? null;
         const [g, s] = newSlot(c);
         const from = 1 + g * oldWidth + s;
-        return from < data.columns.length ? (row[from] ?? null) : null;
+        // A new slot past the old width holds nothing — never the next
+        // group's value (widening 2 → 3 must leave the N slot empty).
+        return s < oldWidth && from < data.columns.length ? (row[from] ?? null) : null;
       }),
     ),
     replicates: newWidth,
@@ -447,6 +504,8 @@ export function applySummaryFormat(data: TableData, format: SummaryFormat): Tabl
       return to === null ? null : [r, to];
     }),
     widths: widthsOf(data.widths, columns),
+    // A format switch rebuilds the sub-columns, but the link's anchor is a
+    // position (seq 168): it stays where it was.
   };
 }
 
@@ -461,11 +520,160 @@ export function applySummaryFormatLoses(data: TableData, format: SummaryFormat):
   );
 }
 
-/** Sets how many replicates each Y data set of an XY table holds: one column each, named
- *  for its data set, or (2 and more) sub-columns "A:Y1", "A:Y2"… under its name. Every
- *  value stays in its data set (the first replicate is the single column). A column still
- *  named as a new one is ("Y2", the second) takes the letter of its place, as a grouped
- *  table's groups do ("B"); a ":" in a name, which would split it, becomes "-" (`renamed`). */
+/** Switches an XY table's Y sub-column format (raw replicates, or
+ *  pre-calculated summaries) — the XY twin of `applySummaryFormat`.
+ *  An XY table's Y data sets sit after its X column (lead 2), or right
+ *  after Title when the X is itself grouped-shaped (lead 1, pre-1.0.9
+ *  files). A table with one column per Y data set has no sets yet: each
+ *  Y column becomes a set of its own (its name, sanitised the way
+ *  `replicateXY` names sets), so picking a summary format on it widens
+ *  each set to the format's width instead of failing. Positional, like
+ *  the grouped version: every value stays in its data set's slot, and
+ *  narrowing to a shorter format drops only the slots past its width. */
+export function applySummaryFormatXY(data: TableData, format: SummaryFormat): TableData {
+  const lead = data.columns[1]?.includes(":") ? 1 : 2;
+  const oldWidth = data.replicates ?? 1;
+  const newWidth = format === "replicates" ? oldWidth : summarySubcolumns(format).length;
+  // The data sets' keys: the grouped runs when the table already has
+  // sets, else one set per Y column (sanitised set names).
+  let keys: string[];
+  if (data.groups && data.replicates) {
+    keys = groupRunKeys(data.columns, lead).slice(0, data.groups);
+    for (let i = keys.length; keys.length < data.groups; i++)
+      if (!keys.includes(columnLetter(i))) keys.push(columnLetter(i));
+  } else {
+    keys = [];
+    const ys = data.columns.slice(lead);
+    ys.forEach((n, i) => {
+      let name = n === columnLabel("xy", i + 1) ? columnLetter(i) : n.replaceAll(":", "-");
+      for (let k = i; keys.includes(name) || ys.slice(i + 1).includes(name); k++) name = columnLetter(k + 1);
+      keys.push(name);
+    });
+  }
+  const columns = [...data.columns.slice(0, lead), ...subColumns(keys, newWidth, format)];
+  const at = (c: number): number | null => {
+    const slot = c - lead;
+    const g = Math.floor(slot / oldWidth);
+    const s = slot % oldWidth;
+    return s < newWidth ? lead + g * newWidth + s : null;
+  };
+  return {
+    ...data,
+    columns,
+    rows: data.rows.map((row) =>
+      columns.map((_, c) => {
+        if (c < lead) return row[c] ?? null;
+        const slot = c - lead;
+        const g = Math.floor(slot / newWidth);
+        const s = slot % newWidth;
+        const from = lead + g * oldWidth + s;
+        // A new slot past the old width holds nothing — never the next
+        // data set's value (widening 2 → 3 must leave the N slot empty).
+        return s < oldWidth && from < data.columns.length ? (row[from] ?? null) : null;
+      }),
+    ),
+    groups: keys.length,
+    replicates: newWidth,
+    summaryFormat: format === "replicates" ? undefined : format,
+    excluded: remapExcluded(data, (r, c) => {
+      if (c < lead) return [r, c];
+      const to = at(c);
+      return to === null ? null : [r, to];
+    }),
+    widths: widthsOf(data.widths, columns),
+  };
+}
+
+/** Whether switching an XY table to `format` deletes a value: a
+ *  sub-column past the new format's width holding one. */
+export function applySummaryFormatXYLoses(data: TableData, format: SummaryFormat): boolean {
+  const lead = data.columns[1]?.includes(":") ? 1 : 2;
+  const oldWidth = data.replicates ?? 1;
+  const newWidth = format === "replicates" ? oldWidth : summarySubcolumns(format).length;
+  if (newWidth >= oldWidth) return false;
+  return data.columns.some(
+    (_, c) => c >= lead && (c - lead) % oldWidth >= newWidth && data.rows.some((row) => row[c]),
+  );
+}
+
+/** Switches a nested table's sub-column format (raw replicates, or
+ *  pre-calculated summaries) — the nested twin of `applySummaryFormat`.
+ *  Every subgroup of every group gets the format's sub-columns
+ *  ("A:S1:Mean", "A:S1:SD", "A:S1:N"), positional like the others: a
+ *  value stays in its (group, subgroup) slot, and narrowing drops only
+ *  the slots past the new width. */
+export function applySummaryFormatNested(data: TableData, format: SummaryFormat): TableData {
+  const groups = data.groups!;
+  const subgroups = data.subgroups!;
+  const oldWidth = data.replicates!;
+  const newWidth = format === "replicates" ? oldWidth : summarySubcolumns(format).length;
+  const keys = [...new Set(data.columns.slice(1).map(seriesKeyOf))].slice(0, groups);
+  for (let i = keys.length; keys.length < groups; i++) if (!keys.includes(columnLetter(i))) keys.push(columnLetter(i));
+  const subsOf = (key: string): string[] => {
+    const subs = [
+      ...new Set(
+        data.columns
+          .slice(1)
+          .filter((n) => seriesKeyOf(n) === key)
+          .map((n) => n.split(":")[1] ?? ""),
+      ),
+    ].filter(Boolean);
+    for (let i = subs.length; subs.length < subgroups; i++) if (!subs.includes(`S${i + 1}`)) subs.push(`S${i + 1}`);
+    return subs.slice(0, subgroups);
+  };
+  const names = (key: string, sub: string): string[] =>
+    format === "replicates"
+      ? Array.from({ length: newWidth }, (_, r) => `${key}:${sub}:R${r + 1}`)
+      : summarySubcolumns(format).map((s) => `${key}:${sub}:${s}`);
+  const columns = ["Title", ...keys.flatMap((key) => subsOf(key).flatMap((sub) => names(key, sub)))];
+  const perGroup = subgroups * oldWidth;
+  const newPerGroup = subgroups * newWidth;
+  const at = (c: number): number | null => {
+    const slot = c - 1;
+    const g = Math.floor(slot / perGroup);
+    const rem = slot % perGroup;
+    const s = Math.floor(rem / oldWidth);
+    const r = rem % oldWidth;
+    return r < newWidth ? 1 + g * newPerGroup + s * newWidth + r : null;
+  };
+  return {
+    ...data,
+    columns,
+    rows: data.rows.map((row) =>
+      columns.map((_, c) => {
+        if (c === 0) return row[0] ?? null;
+        const slot = c - 1;
+        const g = Math.floor(slot / newPerGroup);
+        const rem = slot % newPerGroup;
+        const s = Math.floor(rem / newWidth);
+        const r = rem % newWidth;
+        const from = 1 + g * perGroup + s * oldWidth + r;
+        // A new slot past the old width holds nothing — never the next
+        // subgroup's value (widening 2 → 3 must leave the N slot empty).
+        return r < oldWidth && from < data.columns.length ? (row[from] ?? null) : null;
+      }),
+    ),
+    groups,
+    subgroups,
+    replicates: newWidth,
+    summaryFormat: format === "replicates" ? undefined : format,
+    excluded: remapExcluded(data, (r, c) => {
+      const to = c === 0 ? 0 : at(c);
+      return to === null ? null : [r, to];
+    }),
+    widths: widthsOf(data.widths, columns),
+  };
+}
+
+/** Whether switching a nested table to `format` deletes a value. */
+export function applySummaryFormatNestedLoses(data: TableData, format: SummaryFormat): boolean {
+  const oldWidth = data.replicates!;
+  const newWidth = format === "replicates" ? oldWidth : summarySubcolumns(format).length;
+  if (newWidth >= oldWidth) return false;
+  return data.columns.some(
+    (_, c) => c >= 1 && (c - 1) % oldWidth >= newWidth && data.rows.some((row) => row[c]),
+  );
+}
 export function replicateXY(data: TableData, replicates: number): { data: TableData; renamed: Record<string, string> } {
   const renamed: Record<string, string> = {};
   if (isGrouped(data)) {
@@ -529,7 +737,14 @@ export function renestTable(data: TableData, groups: number, subgroups: number, 
   const columns = [
     "Title",
     ...keys.flatMap((key) =>
-      subsOf(key).flatMap((sub) => Array.from({ length: replicates }, (_, r) => `${key}:${sub}:R${r + 1}`)),
+      // A summary table's subgroups keep their summary names ("A:S1:Mean"…),
+      // so a load-time rebuild or a group-count change never renames them
+      // back to "A:S1:R1" (the name-based mapping then still finds them).
+      subsOf(key).flatMap((sub) =>
+        summaryFormatOf(data) === "replicates"
+          ? Array.from({ length: replicates }, (_, r) => `${key}:${sub}:R${r + 1}`)
+          : summarySubcolumns(summaryFormatOf(data)).map((s) => `${key}:${sub}:${s}`),
+      ),
     ),
   ];
   const from = columns.map((name, c) => (c === 0 ? 0 : data.columns.indexOf(name)));
@@ -543,6 +758,8 @@ export function renestTable(data: TableData, groups: number, subgroups: number, 
     replicates,
     excluded: remapExcluded(data, (r, c) => (to(c) < 0 ? null : [r, to(c)])),
     widths: widthsOf(data.widths, columns),
+    // Renesting rebuilds the columns, but the link's anchor is a position
+    // (seq 168): it stays where it was.
   };
 }
 
@@ -758,4 +975,12 @@ export function parseTSV(text: string): Cell[][] {
   endCell();
   rows.push(row);
   return rows;
+}
+
+/** Rows become columns and columns rows (seq 230, Paste Special ▸ Transpose):
+ *  a ragged block pads short rows with null, so the transpose never drops a
+ *  value that sat past another row's end. Transposing twice returns the block. */
+export function transposeBlock(block: Cell[][]): Cell[][] {
+  const width = block.reduce((w, row) => Math.max(w, row.length), 0);
+  return Array.from({ length: width }, (_, c) => block.map((row) => row[c] ?? null));
 }

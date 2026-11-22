@@ -1,6 +1,6 @@
 {
   "name": "titer",
-  "version": "1.6.2",
+  "version": "1.8.2",
   "description": "Scientific data analysis, simplified — an open-source alternative to GraphPad Prism.",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -15,7 +15,7 @@
     "e2e:build": "VITE_E2E=1 npx tauri build --debug --no-bundle",
     "e2e": "wdio run e2e/wdio.conf.js",
     "sample": "node --import tsx tests/sample-project.ts",
-    "test": "node --import tsx tests/checks.ts && node --import tsx tests/cloud.ts && node --import tsx tests/prism.ts && node --import tsx tests/prism-write.ts && node --import tsx tests/pzfx-write.ts && node --import tsx tests/reference.ts && node --import tsx tests/parity.ts && node --import tsx tests/packages.ts",
+    "test": "node --import tsx tests/checks.ts && node --import tsx tests/cloud.ts && node --import tsx tests/prism.ts && node --import tsx tests/prism-regen.ts && node --import tsx tests/prism-write.ts && node --import tsx tests/pzfx-write.ts && node --import tsx tests/reference.ts && node --import tsx tests/parity.ts && node --import tsx tests/packages.ts && node --import tsx tests/mcp-coverage-180.ts",
     "format": "prettier --write ."
   },
   "dependencies": {

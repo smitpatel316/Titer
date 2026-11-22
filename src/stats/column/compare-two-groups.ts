@@ -2,15 +2,23 @@
 // Welch's t, a paired t test, their lognormal forms, Mann-Whitney, or Wilcoxon signed-rank,
 // based on `paired` / `gaussian` / `equalVariance` / `ratio` / `lognormal` / `tails`. Mirrors GraphPad Prism's
 // cascade of questions instead of listing every variant as its own test.
-import type { CompareTwoGroupsParams, StatRow } from "../types";
+import type { Column, CompareTwoGroupsParams, StatRow } from "../types";
+import { levelsOf } from "../../lib/dataset";
 import {
+  ciRows,
   dataGroups,
   declareGroups,
+  identical,
+  missingColumn,
+  noDifference,
+  noScatter,
   matchedRowsNote,
   pairedGroups,
   pRow,
+  R_EFFECT_CI,
   R_HEDGES,
   rAlt,
+  sameDifferences,
   rBool,
   type ColumnTestSpec,
   type Group,
@@ -22,6 +30,7 @@ const DEFAULTS: CompareTwoGroupsParams = {
   equalVariance: true,
   ratio: false,
   tails: "two-sided",
+  effectSizes: true,
 };
 
 /** A partial params object (e.g. a field stripped on load) still runs —
@@ -59,8 +68,10 @@ function notes(p: CompareTwoGroupsParams): string {
     );
   }
   return p.equalVariance
-    ? `Assumes both groups are sampled from normal distributions with equal variances. ${tail}`
-    : `Assumes normal distributions but allows unequal variances (Welch–Satterthwaite df). ${tail}`;
+    ? `Assumes both groups are sampled from normal distributions with equal variances. ${tail} ` +
+        `Glass's Δ standardises the mean difference by the second group's SD; the effect-size 95% CIs come from the t statistic's noncentrality parameter.`
+    : `Assumes normal distributions but allows unequal variances (Welch–Satterthwaite df). ${tail} ` +
+        `Glass's Δ standardises the mean difference by the second group's SD; the effect-size 95% CIs come from the t statistic's noncentrality parameter (Welch df).`;
 }
 
 function rCode(groups: Group[], p: CompareTwoGroupsParams): string {
@@ -68,7 +79,7 @@ function rCode(groups: Group[], p: CompareTwoGroupsParams): string {
   const alt = `alternative="${rAlt(p.tails)}"`;
   if (!p.gaussian) {
     return (
-      `${decl};w<-suppressWarnings(wilcox.test(g0,g1,paired=${rBool(p.paired)},${alt},conf.int=TRUE));` +
+      `${decl};w<-suppressWarnings(${p.paired ? "wilcox.test(g0,g1,paired=TRUE" : "wilcox.test(g0,g1"},${alt},conf.int=TRUE));` +
       (p.paired
         ? `c(W=unname(w$statistic),p=w$p.value,hl=unname(w$estimate),mdn=median(g0)-median(g1))`
         : `ra<-rank(c(g0,g1));sa<-sum(ra[seq_along(g0)]);` +
@@ -84,11 +95,16 @@ function rCode(groups: Group[], p: CompareTwoGroupsParams): string {
   }
   if (p.paired) {
     return (
-      // Effect size: the mean difference in SDs of the differences.
-      `${decl};tt<-t.test(g0,g1,paired=TRUE,${alt});${R_HEDGES};d<-mean(g0-g1)/sd(g0-g1);` +
+      // Effect size: the mean difference in SDs of the differences. Its 95%
+      // CI (and Hedges' g's) by noncentral-t inversion: t = d·√n, so the
+      // ncp's CI scales by 1/√n; one-tailed, the one-sided bound instead.
+      `${decl};tt<-t.test(g0,g1,paired=TRUE,${alt});${R_HEDGES};${R_EFFECT_CI};d<-mean(g0-g1)/sd(g0-g1);` +
+      `tc<-if("${rAlt(p.tails)}"=="two.sided")tci(tt$statistic,tt$parameter)else tci1(tt$statistic,tt$parameter,"${rAlt(p.tails)}");` +
+      `s<-1/sqrt(length(g0));dLo=tc[1]*s;dHi=tc[2]*s;` +
       `c(t=unname(tt$statistic),df=unname(tt$parameter),p=tt$p.value,` +
       `md=unname(tt$estimate),ci_lo=tt$conf.int[1],ci_hi=tt$conf.int[2],` +
-      `r2=unname(tt$statistic^2/(tt$statistic^2+tt$parameter)),d=d,g=d*J(length(g0)-1))`
+      `r2=unname(tt$statistic^2/(tt$statistic^2+tt$parameter)),d=d,g=d*J(length(g0)-1),` +
+      `dLo=dLo,dHi=dHi,gLo=dLo*J(length(g0)-1),gHi=dHi*J(length(g0)-1))`
     );
   }
   if (p.lognormal) {
@@ -98,16 +114,72 @@ function rCode(groups: Group[], p: CompareTwoGroupsParams): string {
       `gmr=exp(unname(tt$estimate[1]-tt$estimate[2])),ci_lo=exp(tt$conf.int[1]),ci_hi=exp(tt$conf.int[2]))`
     );
   }
-  // Effect size: the mean difference in pooled SDs, whichever t test runs.
+  // Effect size: the mean difference in pooled SDs, whichever t test runs. The F test of
+  // the variances puts the larger on top (F ≥ 1), as Prism does: the same P either way.
+  // Glass's Δ (seq 161) standardises the same difference by the SECOND group's SD —
+  // the control group in Prism's difference (first minus second); the label says so.
+  // The 95% CIs of d, g and Δ come from the t statistic's noncentrality CI (`tci`):
+  // d's scales by √(1/n0 + 1/n1), g's by Hedges' J, Δ's by the pooled-to-control SD
+  // ratio (the ratio held fixed, as in R's `effectsize`); one-tailed, the one-sided
+  // bound instead (`tci1`). Welch's t uses its own (fractional) df.
   return (
-    `${decl};tt<-t.test(g0,g1,var.equal=${rBool(p.equalVariance)},${alt});vt<-var.test(g0,g1);${R_HEDGES};` +
+    `${decl};tt<-t.test(g0,g1,var.equal=${rBool(p.equalVariance)},${alt});vt<-if(var(g0)>=var(g1))var.test(g0,g1) else var.test(g1,g0);${R_HEDGES};${R_EFFECT_CI};` +
     `n0<-length(g0);n1<-length(g1);d<-(mean(g0)-mean(g1))/sqrt(((n0-1)*var(g0)+(n1-1)*var(g1))/(n0+n1-2));` +
+    `sp<-sqrt(((n0-1)*var(g0)+(n1-1)*var(g1))/(n0+n1-2));sc<-sd(g1);gl<-if(sc>0)(mean(g0)-mean(g1))/sc else NA;` +
+    `tc<-if("${rAlt(p.tails)}"=="two.sided")tci(tt$statistic,tt$parameter)else tci1(tt$statistic,tt$parameter,"${rAlt(p.tails)}");` +
+    `s<-sqrt(1/n0+1/n1);dLo=tc[1]*s;dHi=tc[2]*s;rs<-if(sc>0)sp/sc else NA;` +
     `c(t=unname(tt$statistic),df=unname(tt$parameter),p=tt$p.value,` +
     `md=unname(tt$estimate[1]-tt$estimate[2]),ci_lo=tt$conf.int[1],ci_hi=tt$conf.int[2],` +
     `r2=unname(tt$statistic^2/(tt$statistic^2+tt$parameter)),` +
-    `d=d,g=d*J(n0+n1-2),` +
+    `d=d,g=d*J(n0+n1-2),gl=gl,` +
+    `dLo=dLo,dHi=dHi,gLo=dLo*J(n0+n1-2),gHi=dHi*J(n0+n1-2),glLo=dLo*rs,glHi=dHi*rs,` +
     `F=unname(vt$statistic),Fdfn=unname(vt$parameter[1]),Fdfd=unname(vt$parameter[2]),Fp=vt$p.value)`
   );
+}
+
+/** The two groups a Multiple Variables t test compares: the response variable's values
+ *  split by the grouping variable's levels, in first-appearance order — or what is wrong
+ *  with the assignment. Only the rows holding a response value and a level count; a row
+ *  with a blank level, or a non-numeric response, is left out, as pairUp leaves such
+ *  rows out of a paired test. */
+function splitByGroup(columns: Column[], p: CompareTwoGroupsParams): Group[] | { error: string } {
+  if (p.response === undefined)
+    return { error: "Pick a response variable — run the analysis again and choose the variables." };
+  if (p.groupBy === undefined)
+    return { error: "Pick a grouping variable — run the analysis again and choose the variables." };
+  if (p.paired)
+    return {
+      error:
+        "A paired t test compares two variables row by row — pick the two variables instead of a grouping variable.",
+    };
+  const response = columns.find((c) => c.name === p.response);
+  if (!response) return { error: missingColumn(p.response) };
+  if (!response.values.length) return { error: `“${p.response}” holds no numbers yet.` };
+  const groupBy = columns.find((c) => c.name === p.groupBy);
+  if (!groupBy) return { error: missingColumn(p.groupBy) };
+  const levels = levelsOf(groupBy);
+  if (levels.length < 2)
+    return {
+      error:
+        levels.length === 0
+          ? `“${p.groupBy}” holds no values — a grouping variable needs exactly two levels to compare.`
+          : `“${p.groupBy}” holds only “${levels[0]}” — a grouping variable needs exactly two levels to compare.`,
+    };
+  if (levels.length > 2)
+    return {
+      error: `“${p.groupBy}” has ${levels.length} levels (${levels.map((l) => `“${l}”`).join(", ")}) — a t test compares exactly two groups.`,
+    };
+  const at = (r: number) => groupBy.cells[r]?.trim();
+  const groups = levels.map((level) => ({
+    name: level,
+    values: response.rows.filter((r) => at(r) === level).map((r) => response.byRow[r]!),
+  }));
+  const empty = groups.find((g) => !g.values.length);
+  if (empty)
+    return {
+      error: `“${empty.name}” holds no “${p.response}” values — every group needs values to compare.`,
+    };
+  return groups;
 }
 
 export const compareTwoGroupsSpec: ColumnTestSpec<CompareTwoGroupsParams> = {
@@ -119,6 +191,16 @@ export const compareTwoGroupsSpec: ColumnTestSpec<CompareTwoGroupsParams> = {
   // A ratio, or a logarithm, is of values above 0.
   check: (columns, params) => {
     const p = withDefaults(params);
+    if (p.groupBy !== undefined || p.response !== undefined) {
+      const split = splitByGroup(columns, p);
+      if ("error" in split) return split.error;
+      if (!(p.gaussian && p.lognormal)) return undefined;
+      for (const g of split) {
+        const v = g.values.find((v) => v <= 0);
+        if (v !== undefined) return `The lognormal t test needs values above 0; “${g.name}” holds ${v}.`;
+      }
+      return undefined;
+    }
     if (!(p.gaussian && (p.paired ? p.ratio : p.lognormal))) return undefined;
     const two = dataGroups(columns).slice(0, 2);
     for (const g of p.paired ? pairedGroups(two) : two) {
@@ -127,9 +209,32 @@ export const compareTwoGroupsSpec: ColumnTestSpec<CompareTwoGroupsParams> = {
         return `The ${p.paired ? "ratio" : "lognormal"} t test needs values above 0; “${g.name}” holds ${v}.`;
     }
   },
-  // The first two columns holding data; paired, only rows where both have a value.
-  parseGroups: (columns, params) =>
-    withDefaults(params).paired ? pairedGroups(dataGroups(columns).slice(0, 2)) : dataGroups(columns),
+  // The first two columns holding data; paired, only rows where both have a value;
+  // a Multiple Variables assignment, the response split by the grouping variable.
+  parseGroups: (columns, params) => {
+    const p = withDefaults(params);
+    if (p.groupBy !== undefined || p.response !== undefined) {
+      const split = splitByGroup(columns, p);
+      return "error" in split ? [] : split;
+    }
+    return p.paired ? pairedGroups(dataGroups(columns).slice(0, 2)) : dataGroups(columns);
+  },
+  checkGroups: (groups, params) => {
+    const p = withDefaults(params);
+    const [a, b] = groups;
+    const both = `“${a.name}” and “${b.name}”`;
+    if (p.paired) {
+      const [x, y] = p.gaussian && p.ratio ? [a.values.map(Math.log), b.values.map(Math.log)] : [a.values, b.values];
+      if (p.gaussian && sameDifferences(x, y))
+        return `Every ${p.ratio ? "ratio" : "difference"} between ${both} is the same: the paired t test needs some scatter in them.`;
+      if (!p.gaussian && noDifference(x, y))
+        return `${both} are equal in every pair: the Wilcoxon test has no difference to rank.`;
+      return undefined;
+    }
+    if (!p.gaussian) return noScatter(groups, "Mann-Whitney test");
+    if (identical(a.values) && identical(b.values))
+      return `${both} each hold one value repeated: the t test needs some scatter in a group.`;
+  },
   rCode: (groups, params) => rCode(groups, withDefaults(params)),
   rows: (v, groups, params) => {
     const p = withDefaults(params);
@@ -162,8 +267,7 @@ export const compareTwoGroupsSpec: ColumnTestSpec<CompareTwoGroupsParams> = {
           ? []
           : groups.slice(0, 2).map((g, i) => ({ label: `Geometric mean (${g.name})`, value: v[`gm${i}`] }))),
         { label: p.paired ? "Geometric mean ratio" : "Ratio of geometric means", value: v.gmr },
-        { label: "95% CI lower", value: v.ci_lo },
-        { label: "95% CI upper", value: v.ci_hi },
+        ...ciRows(p.tails, v.ci_lo, v.ci_hi, "", true),
       ];
     }
     const rows: StatRow[] = [
@@ -171,11 +275,22 @@ export const compareTwoGroupsSpec: ColumnTestSpec<CompareTwoGroupsParams> = {
       { label: "df", value: v.df },
       pRow("P value", v.p),
       { label: p.paired ? "Mean of differences" : "Mean difference", value: v.md },
-      { label: "95% CI lower", value: v.ci_lo },
-      { label: "95% CI upper", value: v.ci_hi },
+      ...ciRows(p.tails, v.ci_lo, v.ci_hi),
       { label: "R squared", value: v.r2 },
-      { label: "Cohen's d", value: v.d },
-      { label: "Hedges' g", value: v.g },
+      ...(p.effectSizes === false
+        ? []
+        : [
+            { label: "Cohen's d", value: v.d },
+            ...ciRows(p.tails, v.dLo, v.dHi, "Cohen's d "),
+            { label: "Hedges' g", value: v.g },
+            ...ciRows(p.tails, v.gLo, v.gHi, "Hedges' g "),
+            ...(p.paired
+              ? []
+              : [
+                  { label: "Glass's Δ (second group's SD)", value: v.gl },
+                  ...ciRows(p.tails, v.glLo, v.glHi, "Glass's Δ "),
+                ]),
+          ]),
     ];
     if (!p.paired) {
       rows.push(
@@ -218,7 +333,12 @@ export const compareTwoGroupsSpec: ColumnTestSpec<CompareTwoGroupsParams> = {
     return { mode: "difference", estimate, low, high, label: p.paired ? "Mean of differences" : "Difference between means" };
   },
   // Prism compares exactly two data sets: say which two, when the table has more.
+  // A Multiple Variables test's groups are levels of one variable, not columns —
+  // the table's other variables are not "not included" columns.
   notes: (params, groups, columns) => {
+    const p = withDefaults(params);
+    const rows = p.paired ? ` ${matchedRowsNote(dataGroups(columns).slice(0, 2))}` : "";
+    if (p.groupBy !== undefined || p.response !== undefined) return notes(p) + rows;
     const ignored = dataGroups(columns)
       .slice(2)
       .map((c) => c.name);
@@ -226,8 +346,6 @@ export const compareTwoGroupsSpec: ColumnTestSpec<CompareTwoGroupsParams> = {
       ? ` Compares “${groups[0].name}” and “${groups[1].name}”, the first two columns with data; ` +
         `not included: ${ignored.map((n) => `“${n}”`).join(", ")}.`
       : "";
-    const p = withDefaults(params);
-    const rows = p.paired ? ` ${matchedRowsNote(dataGroups(columns).slice(0, 2))}` : "";
     return notes(p) + rows + which;
   },
   subtitle: (params) => subtitle(withDefaults(params)),

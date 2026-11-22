@@ -5,26 +5,29 @@
 // shrinks both degrees of freedom. Optionally followed by Tukey or Bonferroni comparisons of
 // every pair: on the ANOVA's residual mean square while sphericity is assumed, else each
 // pair on its own differences, a paired t test (Maxwell and Delaney, as Prism does).
-import type { RmAnovaParams } from "../types";
+import { PAIR_CORRECTIONS, type RmAnovaParams } from "../types";
 import {
-  adjustComparisonRows,
+  ciOf,
+  comparedPairs,
+  effectSizeRow,
   groupsSetup,
+  matchedFit,
   matchedRowsNote,
   pairedGroups,
   pairIndices,
   posthocOf,
   pRow,
+  R_ADJUST,
+  R_CRIT,
+  R_EFFECT_CI,
+  R_PTUKEY,
   type ColumnTestSpec,
 } from "./base";
 
 /** Tukey, Bonferroni, Šídák, Holm–Šídák or LSD, else none (a file may name another). */
 const posthocIn = (params: RmAnovaParams | undefined) =>
-  params?.posthoc === "tukey" ||
-  params?.posthoc === "bonferroni" ||
-  params?.posthoc === "sidak" ||
-  params?.posthoc === "holm-sidak" ||
-  params?.posthoc === "lsd"
-    ? params.posthoc
+  params?.posthoc === "tukey" || (PAIR_CORRECTIONS as readonly string[]).includes(params?.posthoc ?? "")
+    ? (params!.posthoc as "tukey" | (typeof PAIR_CORRECTIONS)[number])
     : "none";
 
 /** Sphericity is assumed unless the params say it isn't (an analysis from before 1.0.7). */
@@ -36,42 +39,70 @@ export const rmAnovaSpec: ColumnTestSpec<RmAnovaParams> = {
   minValues: 2,
   matched: () => true,
   parseGroups: (columns) => pairedGroups(columns),
+  checkGroups: (groups) =>
+    matchedFit(groups)
+      ? "Every subject's values differ from the others' by the same amounts: there is no scatter left to test the groups on."
+      : undefined,
   rCode: (groups, params) => {
     const k = groups.length;
     const n = groups[0]?.values.length ?? 0;
-    const setup = groupsSetup(groups);
-    const subj = `subj<-factor(rep(1:${n},${k}))`;
-    // Rows: gr (effect of interest), subj (blocking factor), Residuals — in that order.
-    const a = `a<-summary(aov(v~gr+subj))[[1]];mse<-a$"Mean Sq"[3];dfr<-a$Df[3];m<-tapply(v,gr,mean)`;
+    const setup = `${groupsSetup(groups)};M<-cbind(${groups.map((_, i) => `g${i}`).join(",")})`;
+    // The table of aov(v ~ group + subject), from the subjects × groups matrix M (a model
+    // matrix of one column per subject took 15 s for 2,000): rows group, subject, residual.
+    const a =
+      `mm<-mean(M);m<-colMeans(M);S<-c(${n}*sum((m-mm)^2),${k}*sum((rowMeans(M)-mm)^2),` +
+      `sum((M-outer(rowMeans(M),m,"+")+mm)^2));D<-c(${k - 1},${n - 1},${(n - 1) * (k - 1)});Q<-S/D;f<-Q/Q[3];` +
+      `a<-data.frame(Df=D,"Sum Sq"=S,"F value"=f,"Pr(>F)"=pf(f,D,D[3],lower.tail=FALSE),check.names=FALSE);` +
+      `mse<-Q[3];dfr<-D[3]`;
     // Geisser-Greenhouse: epsilon from the groups' covariance, double-centered.
     // A zero denominator means the differences have no variance at all
-    // (sphericity holds exactly) — epsilon is 1, never 0/0.
+    // (sphericity holds exactly) — epsilon is 1, never 0/0. Upstream lacks
+    // this guard; Titer keeps it.
     const gg =
-      `M<-cbind(${groups.map((_, i) => `g${i}`).join(",")});H<-diag(${k})-1/${k};C<-H%*%cov(M)%*%H;` +
+      `H<-diag(${k})-1/${k};C<-H%*%cov(M)%*%H;` +
       `ggd<-(${k - 1})*sum(C*C);e<-if(ggd>0)min(1,sum(diag(C))^2/ggd)else 1`;
     const main = corrected(params)
       ? `F=a$"F value"[1],dfn=e*a$Df[1],dfd=e*a$Df[3],p=pf(a$"F value"[1],e*a$Df[1],e*a$Df[3],lower.tail=FALSE),` +
-        `eta2=a$"Sum Sq"[1]/sum(a$"Sum Sq"),eps=e`
-      : `F=a$"F value"[1],dfn=a$Df[1],dfd=a$Df[3],p=a$"Pr(>F)"[1],eta2=a$"Sum Sq"[1]/sum(a$"Sum Sq")`;
-    const head = `${setup};${subj};${a};${corrected(params) ? gg : ""}`;
+        `eta2=a$"Sum Sq"[1]/sum(a$"Sum Sq"),eps=e,ssT=S[1],ssS=S[2],ssE=S[3],pLo=ec[1],pHi=ec[2]`
+      : `F=a$"F value"[1],dfn=a$Df[1],dfd=a$Df[3],p=a$"Pr(>F)"[1],eta2=a$"Sum Sq"[1]/sum(a$"Sum Sq"),` +
+        `ssT=S[1],ssS=S[2],ssE=S[3],pLo=ec[1],pHi=ec[2]`;
+    // The treatment effect's partial eta squared (seq 161) — SS_treatment /
+    // (SS_treatment + SS_residual) — with its 95% CI from the F statistic's
+    // noncentrality (`etaCI`, N = subjects × groups); the Geisser-Greenhouse
+    // correction, when on, uses the corrected degrees of freedom. Prism also
+    // reports the matching effect's R² (SS_subjects / SS_total).
+    const ec = corrected(params)
+      ? `ec<-etaCI(a$"F value"[1],e*a$Df[1],e*a$Df[3],${n * k})`
+      : `ec<-etaCI(a$"F value"[1],a$Df[1],a$Df[3],${n * k})`;
+    const head = `${R_EFFECT_CI};${setup};${a};${corrected(params) ? gg : ""};${ec}`;
     const posthoc = posthocIn(params);
     if (posthoc === "none") return `${head};c(${main})`;
-    const pairs = pairIndices(k);
-    // Each pair's t, and its degrees of freedom: on the ANOVA's mean square, or on the pair's
-    // own differences (a paired t test, n − 1 df).
+    // The pairs compared: every pair for Tukey's, else all or those chosen. Each pair's |t|,
+    // df and standard error: on the ANOVA's mean square, or on the pair's own differences
+    // (a paired t test, n − 1 df); its P (Tukey's, or the raw ones corrected together,
+    // `adj`), then its 95% CI: its difference ± the t at which its P is 0.05 (`ciOf`).
+    const pairs = posthoc === "tukey" ? pairIndices(k) : comparedPairs(groups, params?.compared);
     const t = (i: number, j: number) =>
       corrected(params)
-        ? `{d<-M[,${i + 1}]-M[,${j + 1}];c(abs(mean(d))/(sd(d)/sqrt(${n})),${n - 1})}`
-        : `c(abs(m[[${i + 1}]]-m[[${j + 1}]])/sqrt(2*mse/${n}),dfr)`;
-    const p = (i: number, j: number) =>
-      `p_${i}_${j}={w<-${t(i, j)};` +
-      (posthoc === "tukey"
-        ? `ptukey(w[1]*sqrt(2),${k},w[2],lower.tail=FALSE)}`
-        : posthoc === "bonferroni"
-          ? `pmin(1,${pairs.length}*2*pt(-w[1],w[2]))}`
-          : // Šídák / Holm–Šídák take the raw P and adjust in TS; LSD reports it as is.
-            `2*pt(-w[1],w[2])}`);
-    return `${head};c(${main},${pairs.map(([i, j]) => p(i, j)).join(",")})`;
+        ? `{d<-M[,${i + 1}]-M[,${j + 1}];s<-sd(d)/sqrt(${n});c(abs(mean(d))/s,${n - 1},s)}`
+        : `{s<-sqrt(2*mse/${n});c(abs(m[[${i + 1}]]-m[[${j + 1}]])/s,dfr,s)}`;
+    // R's correction calls the uncorrected one `fisher`; Titer's name is `lsd`.
+    const how = posthoc === "lsd" ? "fisher" : posthoc;
+    const f = (x: string) =>
+      posthoc === "tukey" ? `ptk(${x}*sqrt(2),${k},w[2])` : `pa(${x},w[2],"${how}",sum(!is.na(ps)))`;
+    const ci = (i: number, j: number) =>
+      posthoc === "holm-sidak"
+        ? []
+        : [`{w<-${t(i, j)};${ciOf(`${i}_${j}`, `m[[${i + 1}]]-m[[${j + 1}]]`, "w[3]", f("x"))}}`];
+    const ps =
+      posthoc === "tukey"
+        ? pairs.map(([i, j]) => `p_${i}_${j}={w<-${t(i, j)};${f("w[1]")}}`)
+        : pairs.map(([i, j], q) => `p_${i}_${j}=ps[${q + 1}]`);
+    const raw =
+      posthoc === "tukey"
+        ? ""
+        : `${R_ADJUST};ps<-adj(c(${pairs.map(([i, j]) => `{w<-${t(i, j)};2*pt(-w[1],w[2])}`).join(",")}),"${how}");`;
+    return `${R_PTUKEY};${R_CRIT};${head};${raw}c(${main},${[...ps, ...pairs.flatMap(([i, j]) => ci(i, j))].join(",")})`;
   },
   rows: (v, _groups, params) => [
     { label: "F", value: v.F },
@@ -81,13 +112,19 @@ export const rmAnovaSpec: ColumnTestSpec<RmAnovaParams> = {
     { label: "R squared (eta squared)", value: v.eta2 },
     ...(corrected(params) ? [{ label: "Geisser-Greenhouse epsilon", value: v.eps }] : []),
   ],
+  // Treatment: partial eta squared (its R² is the eta squared above);
+  // Matching: Prism's R² for the subjects effect (SS_subjects / SS_total) —
+  // an eta squared, not a partial one, so its partial / f / CI stay null.
+  effectSizes: (v, _groups, params) =>
+    params?.effectSizes === false
+      ? undefined
+      : [
+          effectSizeRow("Treatment", v.ssT, v.ssE, (v.ssT ?? 0) + (v.ssS ?? 0) + (v.ssE ?? 0), v.pLo, v.pHi),
+          effectSizeRow("Matching (subjects)", v.ssS, null, (v.ssT ?? 0) + (v.ssS ?? 0) + (v.ssE ?? 0), null, null),
+        ],
   posthoc: (params) => posthocOf({ posthoc: posthocIn(params) }),
-  adjustComparisons: (rows, params) =>
-    posthocIn(params) === "sidak"
-      ? adjustComparisonRows(rows, "sidak")
-      : posthocIn(params) === "holm-sidak"
-        ? adjustComparisonRows(rows, "holm-sidak")
-        : rows,
+  pairs: (groups, params) =>
+    posthocIn(params) === "tukey" ? pairIndices(groups.length) : comparedPairs(groups, params?.compared),
   notes: (params, _groups, columns) =>
     "Compares means across matched groups, blocking on subject; assumes normal distributions. " +
     (corrected(params)

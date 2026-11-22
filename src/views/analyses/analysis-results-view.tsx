@@ -1,9 +1,11 @@
-// The results of an analysis, laid out like a short report: the test's name (with a
-// Significant / Not significant pill when it has one P value), its key statistics,
-// then one compact table per part of the result, the descriptive statistics, and the
+// The results of an analysis, laid out like a short report (no title: the toolbar names
+// it): the data analyzed, what it means in plain words (with a Significant / Not
+// significant pill when it has one P value), its checks, its key statistics, then one
+// compact table per part of the result, the descriptive statistics, and the
 // notes. Numbers keep same-width digits so columns line up; everything is selectable.
 import type * as React from "react";
-import type { AnalysisResult, GroupDescriptives, StatRow } from "../../stats/types";
+import { CheckCircleIcon, WarningIcon } from "@phosphor-icons/react";
+import type { AnalysisResult, Analyzed, Check, GroupDescriptives, StatRow } from "../../stats/types";
 import type { TableData, TableType } from "../../store/types";
 import { Button, cn } from "../../ui/controls";
 import { isSignificant, num, pStars, pValue } from "../../lib/format";
@@ -73,6 +75,65 @@ function Table({ title, columns, rows }: { title?: string; columns: Column[]; ro
   );
 }
 
+/** The data the analysis ran on: its data sets, each a tag with its count, how they're
+ *  compared, and the table's others it left out. */
+function AnalyzedView({ analyzed: { sets, how, detail, left } }: { analyzed: Analyzed }) {
+  const tag = (s: Analyzed["sets"][number]) => (
+    <span key={s.name} className="rounded-md bg-control px-2 py-0.5 whitespace-nowrap">
+      <span className="text-strong">{s.name}</span>
+      {s.n != null && <span className="text-secondary"> n = {s.n}</span>}
+    </span>
+  );
+  const between = how === "vs" ? "vs." : how === "paired" ? "→" : null;
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-strong">Data analyzed</h3>
+      <div className="flex flex-wrap items-center gap-2">
+        {how === "control" && sets.length > 1 ? (
+          <>
+            {tag(sets[0])}
+            <span className="text-secondary">vs. each of</span>
+            {sets.slice(1).map(tag)}
+          </>
+        ) : (
+          sets.map((s, i) => [
+            i > 0 && between && (
+              <span key={`${s.name}-to`} className="text-secondary">
+                {between}
+              </span>
+            ),
+            tag(s),
+          ])
+        )}
+        {detail && <span className="text-secondary">{detail}</span>}
+      </div>
+      {left.length > 0 && <p className="text-small text-secondary">Not included: {left.join(", ")}</p>}
+    </section>
+  );
+}
+
+/** The test's conditions, checked by R: a green tick when one holds, an orange warning when
+ *  it may not. */
+function Checks({ checks }: { checks: Check[] }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-strong">Checks</h3>
+      <ul className="flex max-w-prose flex-col gap-1.5">
+        {checks.map((c, i) => (
+          <li key={i} className="flex gap-2">
+            {c.ok ? (
+              <CheckCircleIcon className="mt-0.5 size-4 shrink-0 text-support-green" />
+            ) : (
+              <WarningIcon className="mt-0.5 size-4 shrink-0 text-support-orange" />
+            )}
+            <span>{c.text}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** The test's own P value, shown as Significant or not by the heading: its only one, or
  *  the one named "P value…" beside a side check (a t test's F test); none when it has
  *  several (one per group or factor). */
@@ -114,6 +175,21 @@ export function AnalysisResultsView({
   onCreateTable?: (tableType: TableType, table: TableData) => void;
 }) {
   const headlineP = headline(result.stats);
+  // Comparisons of means give their 95% CI (adjusted as their P is); ranks don't.
+  // Correlations give theirs once the correlation engine emits them.
+  const withCi = result.comparisons?.some((c) => c.low !== undefined) ?? false;
+  // Multiple-t-tests flags each row significant or not (corrected P against
+  // its threshold); other comparisons leave it unset, so the column only
+  // appears when a row carries a flag.
+  const withSignificant = result.comparisons?.some((c) => c.significant !== undefined) ?? false;
+  // Multiple-t-tests carries each row's t and df (the rank tests have
+  // neither) and its uncorrected P beside the corrected one — when a
+  // correction was applied the table shows both P values, as Prism does.
+  const withT = result.comparisons?.some((c) => c.t !== undefined) ?? false;
+  const withDf = result.comparisons?.some((c) => c.df !== undefined) ?? false;
+  const withAdjustedP =
+    result.comparisons?.some((c) => c.rawP !== undefined && c.rawP !== c.p) ?? false;
+  const withCorrCi = result.correlations?.some((c) => c.low !== undefined) ?? false;
   const showP = headlineP != null && !Number.isNaN(headlineP);
   const groups = result.groups;
   // The 95% CI and Min/Max/Range only come from the Descriptive statistics analysis.
@@ -123,30 +199,38 @@ export function AnalysisResultsView({
   // A Cox regression (plan 10) also carries a hazard ratio per coefficient —
   // its CI above is on the hazard-ratio scale.
   const showHr = (result.coefficients ?? []).some((c) => c.hazardRatio != null);
+  // The denominator DF comes from the mixed-effects runner (seq 181) —
+  // other runners leave it undefined, so the "DF" column only fills then.
+  const showDf = (result.coefficients ?? []).some((c) => c.df != null);
   const showRange = groups.some((g) => g.min != null || g.max != null || g.range != null);
   const matrix = result.matrix;
 
   return (
     <div className="flex max-w-4xl flex-col gap-7 px-8 py-6 text-regular text-primary tabular-nums select-text">
-      {/* The toolbar already names the analysis: the heading says which exact test ran, and
-          whether it is significant. */}
-      {(result.subtitle || showP) && (
-        <header className="flex items-center gap-2.5">
-          {result.subtitle && <h2 className="text-large-strong">{result.subtitle}</h2>}
-          {showP && (
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 text-small-strong",
-                isSignificant(headlineP) ? "bg-support-green/15 text-support-green" : "bg-control text-secondary",
-              )}
-            >
-              {isSignificant(headlineP) ? `Significant ${pStars(headlineP)}` : "Not significant"}
-            </span>
-          )}
-        </header>
+      {result.analyzed && <AnalyzedView analyzed={result.analyzed} />}
+
+      {(result.summary || showP) && (
+        <section className="flex flex-col gap-2">
+          {/* The toolbar names the analysis: no title here, only whether its own P value is
+              significant, beside what it means. */}
+          <h3 className="flex items-center gap-2.5 text-strong">
+            In plain words
+            {showP && (
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-small-strong",
+                  isSignificant(headlineP) ? "bg-support-green/15 text-support-green" : "bg-control text-secondary",
+                )}
+              >
+                {isSignificant(headlineP) ? `Significant ${pStars(headlineP)}` : "Not significant"}
+              </span>
+            )}
+          </h3>
+          {result.summary && <p className="max-w-prose">{result.summary}</p>}
+        </section>
       )}
 
-      {result.summary && <p className="max-w-prose">{result.summary}</p>}
+      {result.checks && <Checks checks={result.checks} />}
 
       {result.normality && (
         <Table
@@ -278,6 +362,28 @@ export function AnalysisResultsView({
         />
       )}
 
+      {result.effectSizes && result.effectSizes.length > 0 && (
+        <Table
+          title="Effect sizes"
+          columns={[
+            { label: "Effect" },
+            { label: "Eta squared", numeric: true },
+            { label: "Partial eta squared", numeric: true },
+            { label: "Cohen's f", numeric: true },
+            { label: "Partial eta squared 95% CI", numeric: true },
+          ]}
+          rows={result.effectSizes.map((e) => [
+            e.effect,
+            num(e.eta2),
+            num(e.partialEta2),
+            num(e.cohensF),
+            e.partialEta2Lo == null && e.partialEta2Hi == null
+              ? "—"
+              : `${num(e.partialEta2Lo)} to ${num(e.partialEta2Hi)}`,
+          ])}
+        />
+      )}
+
       {result.transposed && (
         <Table
           title="Transposed table"
@@ -334,12 +440,26 @@ export function AnalysisResultsView({
           columns={[
             { label: "Comparison" },
             { label: result.comparisonsEffect ?? "Difference", numeric: true },
+            ...(withCi ? [{ label: "95% CI", numeric: true }] : []),
+            ...(withT ? [{ label: "t", numeric: true }] : []),
+            ...(withDf ? [{ label: "df", numeric: true }] : []),
             { label: "P value", numeric: true },
+            ...(withAdjustedP ? [{ label: "Adjusted P value", numeric: true }] : []),
+            ...(withSignificant ? [{ label: "Significant?" }] : []),
           ]}
           rows={result.comparisons.map((c) => [
             c.group2 ? `${c.group1} vs. ${c.group2}` : c.group1,
             num(c.diff),
-            <P p={c.p} />,
+            ...(withCi ? [c.low == null && c.high == null ? "—" : `${num(c.low)} to ${num(c.high)}`] : []),
+            ...(withT ? [num(c.t)] : []),
+            ...(withDf ? [num(c.df)] : []),
+            // The raw P, plain (no stars — a raw P below 0.05 is not
+            // significant once corrected); the adjusted P carries the
+            // significance styling. Without a correction the two are the
+            // same value, so only one P column shows.
+            withAdjustedP ? pValue(c.rawP) : <P p={c.p} />,
+            ...(withAdjustedP ? [<P p={c.p} />] : []),
+            ...(withSignificant ? [c.significant === undefined ? "—" : c.significant ? "Yes" : "No"] : []),
           ])}
         />
       )}
@@ -373,14 +493,42 @@ export function AnalysisResultsView({
               ),
             ])}
           />
+          {matrix.lo && matrix.hi && (
+            <Table
+              title="95% CIs of r"
+              columns={[{ label: "" }, ...matrix.variables.map((v) => ({ label: v, numeric: true }))]}
+              rows={matrix.variables.map((name, i) => [
+                name,
+                ...matrix.variables.map((_, j) =>
+                  i === j || (matrix.lo![i]?.[j] == null && matrix.hi![i]?.[j] == null) ? (
+                    <span className="text-secondary">—</span>
+                  ) : (
+                    `${num(matrix.lo![i]?.[j])} to ${num(matrix.hi![i]?.[j])}`
+                  ),
+                ),
+              ])}
+            />
+          )}
         </>
       )}
 
       {result.correlations && result.correlations.length > 0 && (
         <Table
           title="Correlations (X vs. each Y)"
-          columns={[{ label: "" }, { label: "r", numeric: true }, { label: "P value", numeric: true }]}
-          rows={result.correlations.map((c) => [c.variable, num(c.r), <P p={c.p} />])}
+          columns={[
+            { label: "" },
+            { label: "r", numeric: true },
+            ...(withCorrCi ? [{ label: "95% CI", numeric: true }] : []),
+            { label: "P value", numeric: true },
+          ]}
+          rows={result.correlations.map((c) => [
+            c.variable,
+            num(c.r),
+            ...(withCorrCi
+              ? [c.low == null && c.high == null ? "—" : `${num(c.low)} to ${num(c.high)}`]
+              : []),
+            <P p={c.p} />,
+          ])}
         />
       )}
 
@@ -435,8 +583,27 @@ export function AnalysisResultsView({
         </>
       )}
 
+      {result.gofCategories && result.gofCategories.length > 0 && (
+        <Table
+          title="Observed vs. expected counts"
+          columns={[
+            { label: "Category" },
+            { label: "Observed", numeric: true },
+            { label: "Expected", numeric: true },
+            { label: "(O − E)² / E", numeric: true },
+          ]}
+          rows={result.gofCategories.map((r) => [
+            r.category,
+            num(r.observed),
+            num(r.expected),
+            num(r.contribution),
+          ])}
+        />
+      )}
+
       {result.fractionsOfTotal?.map((col) => {
         const hasX = col.rows.some((r) => r.x !== undefined);
+        const hasCI = col.rows.some((r) => r.ciLow != null && r.ciHigh != null);
         return (
           <Table
             key={col.column}
@@ -447,6 +614,7 @@ export function AnalysisResultsView({
               { label: "Original", numeric: true },
               { label: "Total", numeric: true },
               { label: col.format === "percent" ? "Percent of total" : "Fraction of total", numeric: true },
+              ...(hasCI ? [{ label: "95% CI of proportion", numeric: true }] : []),
             ]}
             rows={col.rows.map((r) => [
               r.row,
@@ -454,6 +622,7 @@ export function AnalysisResultsView({
               num(r.original),
               num(r.total),
               num(r.value),
+              ...(hasCI ? [r.ciLow == null || r.ciHigh == null ? "—" : `${num(r.ciLow)} to ${num(r.ciHigh)}`] : []),
             ])}
           />
         );
@@ -465,6 +634,7 @@ export function AnalysisResultsView({
           columns={[
             { label: "Row" },
             ...(result.rowMeans.some((r) => r.x !== undefined) ? [{ label: "X", numeric: true }] : []),
+            ...(result.rowMeans.some((r) => r.column !== undefined) ? [{ label: "Data set" }] : []),
             { label: "N", numeric: true },
             { label: "Total", numeric: true },
             { label: "Mean", numeric: true },
@@ -473,11 +643,20 @@ export function AnalysisResultsView({
             { label: "95% CI of mean", numeric: true },
             { label: "%CV", numeric: true },
             { label: "Median", numeric: true },
+            { label: "25th percentile", numeric: true },
+            { label: "75th percentile", numeric: true },
+            { label: "Minimum", numeric: true },
+            { label: "Maximum", numeric: true },
+            { label: "10th percentile", numeric: true },
+            { label: "90th percentile", numeric: true },
             { label: "Geometric mean", numeric: true },
+            { label: "Geometric SD", numeric: true },
+            { label: "95% CI of geometric mean", numeric: true },
           ]}
           rows={result.rowMeans.map((r) => [
             r.row,
             ...(result.rowMeans!.some((w) => w.x !== undefined) ? [num(r.x)] : []),
+            ...(result.rowMeans!.some((w) => w.column !== undefined) ? [r.column ?? "—"] : []),
             r.n,
             num(r.total),
             num(r.mean),
@@ -486,7 +665,15 @@ export function AnalysisResultsView({
             r.ciLow == null && r.ciHigh == null ? "—" : `${num(r.ciLow)} to ${num(r.ciHigh)}`,
             r.cv == null ? "—" : `${num(r.cv)}%`,
             num(r.median),
+            num(r.q1),
+            num(r.q3),
+            num(r.min),
+            num(r.max),
+            num(r.p10),
+            num(r.p90),
             num(r.geoMean),
+            num(r.geoSd),
+            r.geoCiLow == null && r.geoCiHigh == null ? "—" : `${num(r.geoCiLow)} to ${num(r.geoCiHigh)}`,
           ])}
         />
       )}
@@ -554,6 +741,26 @@ export function AnalysisResultsView({
         />
       )}
 
+      {result.pValueRows && result.pValueRows.length > 0 && (
+        <Table
+          title="Stack of P values"
+          columns={[
+            { label: "" },
+            { label: "Rank", numeric: true },
+            { label: "P value", numeric: true },
+            { label: result.pValueAdjustedLabel ?? "Adjusted P value", numeric: true },
+            { label: result.pValueFlagLabel ?? "Significant" },
+          ]}
+          rows={result.pValueRows.map((r) => [
+            r.label,
+            r.rank,
+            <P p={r.p} />,
+            r.adjusted == null ? "—" : <P p={r.adjusted} />,
+            r.flagged ? "Yes" : "—",
+          ])}
+        />
+      )}
+
       {result.survivalGroups && result.survivalGroups.length > 0 && (
         <Table
           title="Survival by group"
@@ -600,6 +807,7 @@ export function AnalysisResultsView({
             { label: "Estimate", numeric: true },
             { label: "Std. error", numeric: true },
             { label: result.statisticLabel ?? "t", numeric: true },
+            ...(showDf ? [{ label: "DF", numeric: true }] : []),
             { label: "P value", numeric: true },
             { label: "95% CI", numeric: true },
             ...(showHr ? [{ label: "Hazard ratio", numeric: true }] : []),
@@ -611,9 +819,51 @@ export function AnalysisResultsView({
             num(c.estimate),
             num(c.stdError),
             num(c.t),
+            ...(showDf ? [num(c.df)] : []),
             <P p={c.p} />,
             c.low == null && c.high == null ? "—" : `${num(c.low)} to ${num(c.high)}`,
             ...(showHr ? [num(c.hazardRatio)] : []),
+          ])}
+        />
+      )}
+
+      {result.vif && result.vif.length > 0 && (
+        <Table
+          title="Multicollinearity"
+          columns={[{ label: "" }, { label: "VIF", numeric: true }]}
+          rows={result.vif.map((row) => [row.term, num(row.vif)])}
+        />
+      )}
+
+      {result.anovaTable && result.anovaTable.length > 0 && (
+        <Table
+          title="ANOVA"
+          columns={[
+            { label: "Source" },
+            { label: "DF", numeric: true },
+            { label: "Sum of squares", numeric: true },
+            { label: "Mean square", numeric: true },
+            { label: "F", numeric: true },
+            { label: "P value", numeric: true },
+          ]}
+          rows={result.anovaTable.map((row) => [
+            row.source,
+            num(row.df),
+            num(row.ss),
+            num(row.ms),
+            num(row.f),
+            <P p={row.p} />,
+          ])}
+        />
+      )}
+
+      {result.covariance && result.covariance.variables.length > 0 && (
+        <Table
+          title="Covariance matrix"
+          columns={[{ label: "" }, ...result.covariance.variables.map((v) => ({ label: v, numeric: true }))]}
+          rows={(result.covariance?.variables ?? []).map((name, i) => [
+            name,
+            ...(result.covariance?.values[i]?.map((value) => num(value)) ?? []),
           ])}
         />
       )}
@@ -696,6 +946,52 @@ export function AnalysisResultsView({
           title="Cluster assignments"
           columns={[{ label: "Row" }, { label: "Cluster", numeric: true }]}
           rows={result.kmeansAssignments.map((row) => [row.row, row.cluster])}
+        />
+      )}
+
+      {result.hclustClusters && result.hclustClusters.length > 0 && (
+        <Table
+          title="Clusters"
+          columns={[
+            { label: "Cluster" },
+            ...groups.map((g) => ({ label: g.name, numeric: true })),
+            { label: "n", numeric: true },
+            { label: "Within-cluster SS", numeric: true },
+          ]}
+          rows={result.hclustClusters.map((row) => [
+            row.cluster,
+            ...row.centroid.map((c) => num(c)),
+            row.n,
+            num(row.withinSs),
+          ])}
+        />
+      )}
+
+      {result.hclustAssignments && result.hclustAssignments.length > 0 && (
+        <Table
+          title="Cluster assignments"
+          columns={[{ label: "Row" }, { label: "Cluster", numeric: true }]}
+          rows={result.hclustAssignments.map((row) => [row.row, row.cluster])}
+        />
+      )}
+
+      {result.choosingK && result.choosingK.length > 0 && (
+        <Table
+          title="Choosing k"
+          columns={[
+            { label: "k", numeric: true },
+            { label: "Within-cluster SS", numeric: true },
+            { label: "Average silhouette width", numeric: true },
+            { label: "Gap statistic", numeric: true },
+            { label: "Gap SE", numeric: true },
+          ]}
+          rows={result.choosingK.map((row) => [
+            row.k,
+            num(row.withinSs),
+            num(row.avgSilhouette),
+            num(row.gap),
+            num(row.gapSe),
+          ])}
         />
       )}
 
@@ -783,6 +1079,33 @@ export function AnalysisResultsView({
           />
         );
       })}
+
+      {result.columnMath &&
+        (() => {
+          const math = result.columnMath!;
+          const symbol = { subtract: "−", divide: "/", multiply: "×", add: "+" }[math.operation];
+          const label = `${math.a} ${symbol} ${math.b}`;
+          const hasX = math.rows.some((r) => r.x !== undefined);
+          return (
+            <Table
+              title={`Column math — ${label}`}
+              columns={[
+                { label: "Row" },
+                ...(hasX ? [{ label: "X", numeric: true }] : []),
+                { label: math.a, numeric: true },
+                { label: math.b, numeric: true },
+                { label, numeric: true },
+              ]}
+              rows={math.rows.map((r) => [
+                r.row,
+                ...(hasX ? [num(r.x)] : []),
+                num(r.a),
+                num(r.b),
+                num(r.result),
+              ])}
+            />
+          );
+        })()}
 
       {result.frequencyBins &&
         result.frequencyBins.map((f) => (

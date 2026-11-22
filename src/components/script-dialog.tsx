@@ -4,14 +4,18 @@
 // effects — file writes, graph renders, save, print — in order, against
 // the run's project, and shows the log. One run is one undo step, and a
 // run that hits an error changes nothing.
+//
+// Seq 228: a script can be saved in the project (with its run-on-open /
+// run-on-close hooks), so it travels with the file and runs when the
+// project opens or closes, as Prism's saved scripts do.
 import * as React from "react";
-import { Button } from "../ui/controls";
+import { Button, Checkbox, Input } from "../ui/controls";
 import { Dialog } from "../ui/dialog";
 import { useProjectActions, useProjectStore } from "../store/use-project-store";
-import type { ProjectNode } from "../store/types";
-import { readText, writeFile } from "../native";
-import { runScript, scriptImportFiles, type ScriptEffect } from "../lib/prism-script";
-import { renderScriptGraph } from "../views/graphs/script-graph-export";
+import type { ProjectScript } from "../store/types";
+import { readText } from "../native";
+import { runScript, scriptImportFiles } from "../lib/prism-script";
+import { executeEffect } from "../lib/script-effects";
 
 const SAMPLE_SCRIPT = `// Prism script — reshape the first table and set an info constant.
 // Rows: 0 is the title row, 1 the first data row. Columns: -1 the row
@@ -44,39 +48,9 @@ ForEach # | ForEach Sheet … Next — loops (%N the loop number, %S the sheet n
 SetProjectName "name" — SetSheetTitle "name" [K] — SetScriptDialogTitle "title"
 Save — Print — Beep — RecalcAll — CloseScriptDialog`;
 
-/** One effect, against the run's project. */
-async function executeEffect(
-  effect: ScriptEffect,
-  nodes: Record<string, ProjectNode>,
-  onSave: () => void,
-  closeSelector: () => void,
-) {
-  switch (effect.type) {
-    case "export-graph": {
-      const node = nodes[effect.graphId];
-      if (!node) throw new Error("the graph is gone");
-      const bytes = await renderScriptGraph(node, nodes, effect.format, effect.dpi, effect.clear, effect.mode);
-      await writeFile(effect.path, bytes);
-      return;
-    }
-    case "write-text-file":
-      await writeFile(effect.path, effect.text);
-      return;
-    case "save-project":
-      onSave();
-      return;
-    case "print":
-      window.print();
-      return;
-    case "close-dialog":
-      closeSelector();
-      return;
-  }
-}
-
 export function ScriptDialog({ onSave }: { onSave: () => void }) {
-  const { selector, closeSelector } = useProjectStore();
-  const { get, applyScript } = useProjectActions();
+  const { selector, closeSelector, scripts } = useProjectStore();
+  const { get, applyScript, setScripts } = useProjectActions();
   const [script, setScript] = React.useState(SAMPLE_SCRIPT);
   const [log, setLog] = React.useState<string[]>([]);
   const [running, setRunning] = React.useState(false);
@@ -130,6 +104,44 @@ export function ScriptDialog({ onSave }: { onSave: () => void }) {
     }
   };
 
+  // ── Saved in this project (seq 228) ────────────────────────────────
+  const saved = scripts ?? [];
+  const [saveName, setSaveName] = React.useState("");
+  const [saveOnOpen, setSaveOnOpen] = React.useState(false);
+  const [saveOnClose, setSaveOnClose] = React.useState(false);
+
+  /** Save the editor's script under `saveName` (or update the script of
+   *  that name), with its hooks. Saving is one undo step; the project must
+   *  be saved to keep it in the file. */
+  const saveCurrent = () => {
+    const name = saveName.trim();
+    if (!name || !script.trim()) return;
+    const next: ProjectScript[] = [...saved];
+    const at = next.findIndex((s) => s.name === name);
+    const entry: ProjectScript = {
+      id: at >= 0 ? next[at].id : crypto.randomUUID(),
+      name,
+      text: script,
+      runOnOpen: saveOnOpen,
+      runOnClose: saveOnClose,
+    };
+    if (at >= 0) next[at] = entry;
+    else next.push(entry);
+    setScripts(next);
+    setLog([`Saved “${name}” in this project. Save the project to keep it.`]);
+  };
+
+  const loadSaved = (entry: ProjectScript) => {
+    setScript(entry.text);
+    setSaveName(entry.name);
+    setSaveOnOpen(entry.runOnOpen);
+    setSaveOnClose(entry.runOnClose);
+    setLog([]);
+  };
+
+  const toggleHook = (entry: ProjectScript, hook: "runOnOpen" | "runOnClose") =>
+    setScripts(saved.map((s) => (s.id === entry.id ? { ...s, [hook]: !s[hook] } : s)));
+
   return (
     <Dialog
       open
@@ -165,6 +177,59 @@ export function ScriptDialog({ onSave }: { onSave: () => void }) {
         <details>
           <summary className="cursor-pointer text-small text-secondary">Commands</summary>
           <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap text-small text-secondary">{COMMANDS}</pre>
+        </details>
+        <details open={saved.length > 0}>
+          <summary className="cursor-pointer text-small text-secondary">
+            Saved in this project{saved.length ? ` (${saved.length})` : ""}
+          </summary>
+          <div className="mt-2 flex flex-col gap-2">
+            {saved.map((entry) => (
+              <div key={entry.id} className="flex items-center gap-2 text-regular">
+                <Button
+                  size="small"
+                  onClick={() => loadSaved(entry)}
+                  title={`Load “${entry.name}” into the editor`}
+                >
+                  {entry.name}
+                </Button>
+                <label className="flex items-center gap-1 text-small text-secondary">
+                  <Checkbox checked={entry.runOnOpen} onChange={() => toggleHook(entry, "runOnOpen")} />
+                  Run on open
+                </label>
+                <label className="flex items-center gap-1 text-small text-secondary">
+                  <Checkbox checked={entry.runOnClose} onChange={() => toggleHook(entry, "runOnClose")} />
+                  Run on close
+                </label>
+                <Button size="small" variant="ghost" onClick={() => setScripts(saved.filter((s) => s.id !== entry.id))}>
+                  Delete
+                </Button>
+              </div>
+            ))}
+            <div className="flex items-center gap-2">
+              <Input
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+                placeholder="Script name"
+                aria-label="Script name"
+                className="w-40"
+              />
+              <label className="flex items-center gap-1 text-small text-secondary">
+                <Checkbox checked={saveOnOpen} onChange={setSaveOnOpen} />
+                Run on open
+              </label>
+              <label className="flex items-center gap-1 text-small text-secondary">
+                <Checkbox checked={saveOnClose} onChange={setSaveOnClose} />
+                Run on close
+              </label>
+              <Button size="small" disabled={!saveName.trim() || !script.trim()} onClick={saveCurrent}>
+                Save script
+              </Button>
+            </div>
+            <p className="text-small text-secondary">
+              Saved scripts travel with the project file; a script with Run on open runs when the project opens, one
+              with Run on close when it closes.
+            </p>
+          </div>
         </details>
         {log.length > 0 && (
           <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded bg-surface p-2 text-small">

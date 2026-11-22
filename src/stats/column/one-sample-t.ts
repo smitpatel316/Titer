@@ -1,15 +1,33 @@
 // "Compare one group to a value" — tests whether each column differs from a
-// user-chosen hypothetical value. Resolves to a one-sample t test (parametric)
+// user-chosen hypothetical value. Resolves to a one-sample t test (parametric), its
+// lognormal form (the geometric mean: a t test of the logarithms against the value's),
 // or a Wilcoxon signed-rank test (non-parametric), Prism-wizard style.
 import type { OneSampleTParams } from "../types";
-import { declareGroups, pRow, R_HEDGES, rAlt, type ColumnTestSpec } from "./base";
+import { ciRows, declareGroups, identical, pRow, R_EFFECT_CI, R_HEDGES, rAlt, type ColumnTestSpec } from "./base";
 
-const DEFAULTS: OneSampleTParams = { hypotheticalValue: 0, tails: "two-sided", gaussian: true };
+const DEFAULTS: OneSampleTParams = { hypotheticalValue: 0, tails: "two-sided", gaussian: true, effectSizes: true };
 
 export const oneSampleTSpec: ColumnTestSpec<OneSampleTParams> = {
   testType: "one-sample-t",
   minGroups: 1,
   minValues: 2,
+  check: (_, params) => {
+    const p = { ...DEFAULTS, ...params };
+    if (p.gaussian && p.lognormal && !(p.hypotheticalValue > 0))
+      return `A geometric mean is compared to a value above 0, not ${p.hypotheticalValue}.`;
+  },
+  checkGroups: (groups, params) => {
+    const p = { ...DEFAULTS, ...params };
+    for (const g of groups) {
+      const nonPositive = p.gaussian && p.lognormal ? g.values.find((v) => v <= 0) : undefined;
+      if (nonPositive !== undefined)
+        return `The lognormal t test needs values above 0; “${g.name}” holds ${nonPositive}.`;
+      if (p.gaussian && identical(g.values))
+        return `“${g.name}”'s values are all identical: the one-sample t test needs some scatter.`;
+      if (!p.gaussian && g.values.every((v) => v === p.hypotheticalValue))
+        return `Every value of “${g.name}” equals ${p.hypotheticalValue}: the Wilcoxon test has no difference to rank.`;
+    }
+  },
   rCode: (groups, params) => {
     const p = { ...DEFAULTS, ...params };
     const alt = rAlt(p.tails);
@@ -23,16 +41,35 @@ export const oneSampleTSpec: ColumnTestSpec<OneSampleTParams> = {
       );
       return `${decl};${stmts.join(";")};c(${vals.join(",")})`;
     }
+    if (p.lognormal) {
+      const stmts = groups.map(
+        (_, i) => `tt${i}<-t.test(log(g${i}),mu=log(${p.hypotheticalValue}),alternative="${alt}")`,
+      );
+      const vals = groups.map(
+        (_, i) =>
+          `t${i}=unname(tt${i}$statistic),df${i}=unname(tt${i}$parameter),p${i}=tt${i}$p.value,` +
+          `gm${i}=exp(unname(tt${i}$estimate)),ci_lo${i}=exp(tt${i}$conf.int[1]),ci_hi${i}=exp(tt${i}$conf.int[2])`,
+      );
+      return `${decl};${stmts.join(";")};c(${vals.join(",")})`;
+    }
     const stmts = groups.map((_, i) => `tt${i}<-t.test(g${i},mu=${p.hypotheticalValue},alternative="${alt}")`);
+    // Effect size: the distance to the hypothetical value in SDs. Its 95%
+    // CI (and Hedges' g's) by noncentral-t inversion: t = d·√n, so the
+    // ncp's CI scales by 1/√n; one-tailed, the one-sided bound instead.
+    const tc = groups.map(
+      (_, i) =>
+        `tc${i}<-if("${alt}"=="two.sided")tci(tt${i}$statistic,tt${i}$parameter)else tci1(tt${i}$statistic,tt${i}$parameter,"${alt}");` +
+        `dLo${i}=tc${i}[1]/sqrt(length(g${i}));dHi${i}=tc${i}[2]/sqrt(length(g${i}))`,
+    );
     const vals = groups.map(
       (_, i) =>
         `t${i}=unname(tt${i}$statistic),df${i}=unname(tt${i}$parameter),p${i}=tt${i}$p.value,` +
         `md${i}=unname(tt${i}$estimate)-${p.hypotheticalValue},ci_lo${i}=tt${i}$conf.int[1],ci_hi${i}=tt${i}$conf.int[2],` +
-        // Effect size: the distance to the hypothetical value in SDs.
         `d${i}=(mean(g${i})-${p.hypotheticalValue})/sd(g${i}),` +
-        `g${i}=(mean(g${i})-${p.hypotheticalValue})/sd(g${i})*J(length(g${i})-1)`,
+        `g${i}=(mean(g${i})-${p.hypotheticalValue})/sd(g${i})*J(length(g${i})-1),` +
+        `dLo${i}=dLo${i},dHi${i}=dHi${i},gLo${i}=dLo${i}*J(length(g${i})-1),gHi${i}=dHi${i}*J(length(g${i})-1)`,
     );
-    return `${decl};${R_HEDGES};${stmts.join(";")};c(${vals.join(",")})`;
+    return `${decl};${R_HEDGES};${R_EFFECT_CI};${stmts.join(";")};${tc.join(";")};c(${vals.join(",")})`;
   },
   rows: (v, groups, params) => {
     const p = { ...DEFAULTS, ...params };
@@ -43,15 +80,28 @@ export const oneSampleTSpec: ColumnTestSpec<OneSampleTParams> = {
         { label: `${g.name} — Median vs. hypothetical`, value: v[`mh${i}`] },
       ]);
     }
+    if (p.lognormal)
+      return groups.flatMap((g, i) => [
+        { label: `${g.name} — t`, value: v[`t${i}`] },
+        { label: `${g.name} — df`, value: v[`df${i}`] },
+        pRow(`${g.name} — P value`, v[`p${i}`]),
+        { label: `${g.name} — Geometric mean`, value: v[`gm${i}`] },
+        ...ciRows(p.tails, v[`ci_lo${i}`], v[`ci_hi${i}`], `${g.name} — Geometric mean `, true),
+      ]);
     return groups.flatMap((g, i) => [
       { label: `${g.name} — t`, value: v[`t${i}`] },
       { label: `${g.name} — df`, value: v[`df${i}`] },
       pRow(`${g.name} — P value`, v[`p${i}`]),
       { label: `${g.name} — Mean vs. hypothetical`, value: v[`md${i}`] },
-      { label: `${g.name} — 95% CI lower`, value: v[`ci_lo${i}`] },
-      { label: `${g.name} — 95% CI upper`, value: v[`ci_hi${i}`] },
-      { label: `${g.name} — Cohen's d`, value: v[`d${i}`] },
-      { label: `${g.name} — Hedges' g`, value: v[`g${i}`] },
+      ...ciRows(p.tails, v[`ci_lo${i}`], v[`ci_hi${i}`], `${g.name} — `),
+      ...(p.effectSizes === false
+        ? []
+        : [
+            { label: `${g.name} — Cohen's d`, value: v[`d${i}`] },
+            ...ciRows(p.tails, v[`dLo${i}`], v[`dHi${i}`], `${g.name} — Cohen's d `),
+            { label: `${g.name} — Hedges' g`, value: v[`g${i}`] },
+            ...ciRows(p.tails, v[`gLo${i}`], v[`gHi${i}`], `${g.name} — Hedges' g `),
+          ]),
     ]);
   },
   notes: (params) => {
@@ -60,10 +110,13 @@ export const oneSampleTSpec: ColumnTestSpec<OneSampleTParams> = {
     if (!p.gaussian) {
       return `Non-parametric: tests whether each column's median differs from the hypothetical value ${p.hypotheticalValue}, with no normality assumption. ${tail}`;
     }
+    if (p.lognormal)
+      return `Tests whether each column's geometric mean differs from the hypothetical value ${p.hypotheticalValue}: a t test of the logarithms against log(${p.hypotheticalValue}). Assumes lognormally distributed data. ${tail}`;
     return `Tests whether each column's mean differs from the hypothetical value ${p.hypotheticalValue}. Assumes normally distributed data. ${tail}`;
   },
   subtitle: (params) => {
     const p = { ...DEFAULTS, ...params };
+    if (p.gaussian && p.lognormal) return `Lognormal one-sample t test (H0: geometric mean = ${p.hypotheticalValue})`;
     return p.gaussian
       ? `One-sample t test (H0: mean = ${p.hypotheticalValue})`
       : `Wilcoxon signed-rank test (H0: median = ${p.hypotheticalValue})`;

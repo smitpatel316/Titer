@@ -69,12 +69,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -140,7 +143,10 @@
           "note": {
             "x": 10,
             "y": 250
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-kinase": {
@@ -189,12 +195,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -256,7 +265,10 @@
           "note": {
             "x": 280,
             "y": 180
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-growth": {
@@ -317,12 +329,15 @@
           "estimationViolin": false,
           "xyStyle": "points+line",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -394,7 +409,10 @@
           "legend": {
             "x": 0.04,
             "y": 0.98
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-volume": {
@@ -465,12 +483,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -555,7 +576,10 @@
                 "y": 0
               }
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "g-volume-bars": {
@@ -574,12 +598,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -656,7 +683,10 @@
             "Gemcitabine": {
               "color": "#EE6677"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "g-volume-violin": {
@@ -675,12 +705,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -752,7 +785,10 @@
             "Gemcitabine": {
               "color": "#EE6677"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-pk": {
@@ -802,12 +838,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -873,7 +912,10 @@
           "note": {
             "x": 280,
             "y": 90
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-il6": {
@@ -923,12 +965,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -998,7 +1043,10 @@
               "dash": "dash",
               "shape": "square"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "g-il6-bars": {
@@ -1017,12 +1065,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -1093,7 +1144,10 @@
               "color": "#AA3377",
               "pattern": "diagonal"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-immune": {
@@ -1140,12 +1194,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -1203,7 +1260,10 @@
             "kind": "categorical",
             "colors": ["#CC6677","#332288","#DDCC77","#117733","#88CCEE","#882255","#44AA99","#999933","#AA4499"]
           },
-          "outlineColor": "#FFFFFF"
+          "outlineColor": "#FFFFFF",
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-surv": {
@@ -1315,12 +1375,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -1388,7 +1451,10 @@
             "HLX-101 + Gem": {
               "color": "#AA3377"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-nested": {
@@ -1430,12 +1496,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -1492,7 +1561,10 @@
             "name": "tol-muted",
             "kind": "categorical",
             "colors": ["#CC6677","#332288","#DDCC77","#117733","#88CCEE","#882255","#44AA99","#999933","#AA4499"]
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-rnaseq": {
@@ -11525,12 +11597,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -11651,7 +11726,10 @@
               "outlineColor": "#000000",
               "label": true
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-genes": {
@@ -11702,12 +11780,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -11765,7 +11846,10 @@
             "kind": "diverging",
             "colors": ["#053061","#2166AC","#4393C3","#92C5DE","#D1E5F0","#F7F7F7","#FDDBC7","#F4A582","#D6604D","#B2182B","#67001F"],
             "reversed": true
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-deseq": {
@@ -12796,12 +12880,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -12861,7 +12948,10 @@
           },
           "volcanoX": "log2FoldChange",
           "volcanoY": "padj",
-          "volcanoLabel": "Gene"
+          "volcanoLabel": "Gene",
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-ki67": {
@@ -12915,12 +13005,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -12990,7 +13083,10 @@
             "Week 8": {
               "color": "#4477AA"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-elisa": {
@@ -13045,12 +13141,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -13116,7 +13215,10 @@
           "note": {
             "x": 20,
             "y": 10
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-markers": {
@@ -13220,12 +13322,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -13290,7 +13395,10 @@
             "Tumor size (mm)": {
               "color": "#4477AA"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "g-markers-ki67": {
@@ -13309,12 +13417,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -13379,7 +13490,10 @@
             "Ki-67 (%)": {
               "color": "#4477AA"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-response": {
@@ -13419,12 +13533,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -13491,7 +13608,10 @@
               "color": "#BBBBBB",
               "pattern": "diagonal"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "t-exposure": {
@@ -13579,12 +13699,15 @@
           "estimationViolin": false,
           "xyStyle": "points",
           "xyReplicates": "mean",
+          "xError": false,
           "pieValue": "sum",
           "pieShowPercent": true,
           "groupLayout": "interleaved",
           "sigDisplay": "stars",
           "regShowLine": true,
           "regShowBand": true,
+          "regBand": "confidence",
+          "residualsAs": "x",
           "regShowEquation": true,
           "demingShowLine": true,
           "demingShowOls": true,
@@ -13647,7 +13770,10 @@
             "Response": {
               "color": "#4477AA"
             }
-          }
+          },
+          "whisker": "min-max",
+          "violinVariant": "full",
+          "scatterStyle": "classic"
         }
       },
       "f-main": {

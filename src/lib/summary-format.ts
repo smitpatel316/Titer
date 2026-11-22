@@ -22,6 +22,7 @@ export type SummaryFormat =
   | "mean-sd"
   | "mean-sem"
   | "mean-cv-n"
+  | "mean-cv"
   | "mean-plus-minus"
   | "mean-upper-lower";
 
@@ -46,6 +47,7 @@ export const SUMMARY_FORMATS: SummaryFormatDef[] = [
   { value: "mean-sd", label: "Mean, SD", subcolumns: ["Mean", "SD"], errorKind: "sd", dataFormat: "y_sd" },
   { value: "mean-sem", label: "Mean, SEM", subcolumns: ["Mean", "SEM"], errorKind: "sem", dataFormat: "y_se" },
   { value: "mean-cv-n", label: "Mean, CV, N", subcolumns: ["Mean", "CV", "N"], errorKind: "cv", dataFormat: "y_cv_n" },
+  { value: "mean-cv", label: "Mean, CV", subcolumns: ["Mean", "CV"], errorKind: "cv", dataFormat: "y_cv" },
   {
     value: "mean-plus-minus",
     label: "Mean, +error, −error",

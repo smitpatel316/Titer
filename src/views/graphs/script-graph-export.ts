@@ -8,7 +8,7 @@
 import { DEFAULT_GRAPH_OPTIONS, type ProjectNode, type Resolution } from "../../store/types";
 import { largestAt, PX_PER_INCH, withDpi } from "../../lib/image-dpi";
 import { encodeBmp, encodeTiff } from "../../lib/tiff";
-import { buildPanelFigure } from "../figures/panel-figure";
+import { buildGraphFigure } from "./graph-figure";
 import { renderFigureRaster, renderFigureSvg } from "../figures/figure-export";
 import { loadPlotly, normalizePlotlySvg } from "./plotly";
 import { withoutSelection } from "./selection";
@@ -65,7 +65,7 @@ async function renderGraph(
   };
   const why = format !== "svg" ? tooLarge(size, dpi) : null;
   if (why) throw new Error(why);
-  const fig = buildPanelFigure(graph, nodes);
+  const { figure: fig } = await buildGraphFigure(graph, nodes);
   if (!fig) throw new Error(`Graph “${graph.name}” has nothing to draw.`);
   const el = document.createElement("div");
   el.style.cssText = "position:fixed;left:-10000px;top:0;visibility:hidden;";

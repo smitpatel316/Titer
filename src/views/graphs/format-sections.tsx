@@ -6,6 +6,7 @@ import { Button, Checkbox, Input, Select, cn } from "../../ui/controls";
 import { Row, Stepper } from "../../components/inspector";
 import type { AnalysisPickerValue, AnalysisType, LinearRegressionParams, NonlinearRegressionParams, DoseResponseSpecialParams } from "../../stats/types";
 import { analysisLabel } from "../analyses";
+import { toggled } from "../analyses/wizards";
 import {
   GRAPH_LIMITS,
   SAME_AS_FILL,
@@ -15,8 +16,9 @@ import {
   type TableType,
 } from "../../store/types";
 import { isSignificant, pStars } from "../../lib/format";
+import type { SummaryFormat } from "../../lib/summary-format";
 import { GRAPHS, variablePair } from ".";
-import type { SigComparison } from "./significance-overlay";
+import { expandSigPairs, GROUPED_STARS, lettersComparisons, lettersFit, ranOn, sigAnalysisIdsOf, sigPairKey, sigPairSelected, starsFit, type SigComparison } from "./significance-overlay";
 import { cutoffAsP, cutoffOfP, volcanoAxes, volcanoPair } from "./volcano";
 import { paletteOf } from "../../lib/palettes";
 import { MAX_BINS } from "../../lib/histogram";
@@ -42,9 +44,23 @@ export interface SectionContext {
   set: SetOptions;
   /** The analyses of the graph's table: sources for significance stars and fitted lines. */
   analyses: ProjectNode[];
+  /** Every analysis in the project: a grouped-scatter's significance can
+   *  come from copy tables, not just its own. */
+  allAnalyses?: ProjectNode[];
+  /** Each analysis's parent table name, for the multi-source picker. */
+  analysisTables?: Record<string, string>;
   /** The chosen analysis's pairs; null while it runs. */
   comparisons: SigComparison[] | null;
   seriesNames: string[];
+  /** The data sets it can show or leave out (`choosableSets`). */
+  sets: string[];
+  /** The tables this graph plots (#48): the primary first, then the
+   *  extra sources — with the tables that could still be added, and the
+   *  add/remove handlers. Omitted outside the graph view. */
+  sourceTables?: { id: string; name: string; primary: boolean }[];
+  availableSourceTables?: { id: string; name: string }[];
+  onAddSourceTable?: (id: string) => void;
+  onRemoveSourceTable?: (id: string) => void;
   /** Volcano on a grouped table: the groups it can compare (Titer computes the DEGs). */
   volcanoGroups?: string[];
   /** Its rows holding values of the two groups compared that gave no gene. */
@@ -57,12 +73,16 @@ export interface SectionContext {
   binsTooMany: boolean;
   /** An XY table whose data sets hold replicates. */
   replicates: boolean;
+  /** The table's sub-column format ("replicates", or the summaries its
+   *  sub-columns hold) — only the summary-conditional Data choices read it. */
+  summary?: SummaryFormat;
   numericNames: string[];
   allNames: string[];
   /** The chosen regression's failure, when it couldn't be fitted. */
   fitError: string | null;
-  /** Starts `test` (its wizard), or with none opens the New Analysis picker. */
-  onNewAnalysis: (test?: AnalysisPickerValue) => void;
+  /** Starts `test` (its wizard), or with none opens the New Analysis picker; on `sets`
+   *  (their wizard question answered) when given. */
+  onNewAnalysis: (test?: AnalysisPickerValue, sets?: string[]) => void;
   /** Volcano: selects the genes named (comma-separated); returns the names no gene has. */
   onFindGenes: (query: string) => string[];
 }
@@ -75,6 +95,9 @@ const SIGNIFICANCE_SOURCES = new Set<AnalysisType | undefined>([
   "rm-anova",
   "friedman",
 ]);
+
+/** A grouped graph's: comparisons between its cells. */
+export const GROUPED_SOURCES = new Set<AnalysisType | undefined>(["two-way-anova", "multiple-t-tests"]);
 
 const CENTER_ITEMS = [
   { value: "mean" as const, label: "Mean" },
@@ -127,16 +150,59 @@ export function statisticsControls(c: SectionContext): React.ReactNode {
     }
     return <TtestControls analyses={sources} options={options} set={set} />;
   }
-  if (GRAPHS[graphType].family === "column") {
-    const sources = c.analyses.filter((a) => SIGNIFICANCE_SOURCES.has(a.analysisType));
-    if (!sources.length) {
+  const grouped = GROUPED_STARS.has(graphType);
+  if (GRAPHS[graphType].family === "column" || grouped) {
+    // Its stars come from an analysis of exactly the data sets it shows (`starsFit`): one of
+    // more data sets has P values corrected for comparisons the graph doesn't show.
+    const shown = options.sets?.filter((n) => c.sets.includes(n)) ?? c.sets;
+    const fits = (a: ProjectNode) => starsFit(a, c.sets, shown);
+    const sources = c.analyses.filter((a) => (grouped ? GROUPED_SOURCES : SIGNIFICANCE_SOURCES).has(a.analysisType));
+    const fitting = sources.filter(fits);
+    const chosen = sources.find((a) => a.id === options.sigAnalysisId);
+    const partial = shown.length < c.sets.length;
+    const newAnalysis = () => c.onNewAnalysis(undefined, shown);
+    // A grouped-scatter's significance can come from several analyses — its
+    // multiple t tests, one per copy table — so it picks them, not one.
+    if (graphType === "grouped-scatter")
       return (
-        <NoAnalysis onNewAnalysis={c.onNewAnalysis}>
-          Show significance stars from a test of two groups of this table, or of more groups with multiple comparisons.
+        <MultiSignificanceControls
+          all={c.allAnalyses ?? c.analyses}
+          tables={c.analysisTables ?? {}}
+          comparisons={c.comparisons}
+          options={options}
+          set={set}
+          shown={shown}
+          sets={c.sets}
+          onNewAnalysis={newAnalysis}
+        />
+      );
+    if (!fitting.length && !chosen) {
+      return (
+        <NoAnalysis onNewAnalysis={newAnalysis}>
+          {partial
+            ? `Show significance stars from an analysis of the data sets this graph shows (${listOf(shown)}).`
+            : grouped
+              ? "Show significance stars from a two-way ANOVA of this table with multiple comparisons, or from multiple t tests."
+              : "Show significance stars from a test of two groups of this table, or of more groups with multiple comparisons."}
         </NoAnalysis>
       );
     }
-    return <SignificanceControls analyses={sources} comparisons={c.comparisons} options={options} set={set} />;
+    if (chosen && !fits(chosen)) {
+      return (
+        <>
+          <AnalysisRow
+            analyses={[chosen, ...fitting]}
+            value={chosen.id}
+            onChange={(sigAnalysisId) => set({ sigAnalysisId, sigPairs: [] })}
+          />
+          <NoAnalysis onNewAnalysis={newAnalysis}>
+            This analysis ran on {listOf(ranOn(chosen, c.sets))}, not on the data sets this graph shows ({listOf(shown)}
+            ): its stars aren't drawn. Choose an analysis of these data sets, or make one.
+          </NoAnalysis>
+        </>
+      );
+    }
+    return <SignificanceControls analyses={fitting} comparisons={c.comparisons} options={options} set={set} />;
   }
   if (graphType === "xy-scatter" && c.tableType === "xy") {
     // A linear regression, a Deming regression, or a nonlinear one of one data set (not two curves compared).
@@ -244,6 +310,28 @@ export function statisticsControls(c: SectionContext): React.ReactNode {
     }
     return <KmeansControls analyses={sources} options={options} set={set} />;
   }
+  if (
+    graphType === "dendrogram" ||
+    graphType === "elbow-plot" ||
+    graphType === "silhouette-plot" ||
+    graphType === "gap-plot"
+  ) {
+    const sources = c.analyses.filter((a) => a.analysisType === "hierarchical-clustering");
+    if (!sources.length) {
+      return (
+        <NoAnalysis test="hierarchical-clustering" onNewAnalysis={c.onNewAnalysis}>
+          {graphType === "dendrogram"
+            ? "Draw the merge tree of a Hierarchical clustering of this table, cut into its clusters."
+            : graphType === "elbow-plot"
+              ? "Draw within-cluster sum of squares against k from a Hierarchical clustering of this table."
+              : graphType === "silhouette-plot"
+                ? "Draw average silhouette width against k from a Hierarchical clustering of this table."
+                : "Draw the Gap statistic against k from a Hierarchical clustering of this table."}
+        </NoAnalysis>
+      );
+    }
+    return <HclustControls analyses={sources} options={options} set={set} />;
+  }
   if (graphType === "schild-plot") {
     // The plot draws from a sibling Gaddum/Schild analysis — nothing to
     // configure on the graph itself; without one, offer to start it.
@@ -313,6 +401,12 @@ export function statisticsControls(c: SectionContext): React.ReactNode {
   }
   return null;
 }
+
+/** Names in a sentence: “A”, “B” and “C”. */
+const listOf = (names: string[]) => {
+  const quoted = names.map((n) => `“${n}”`);
+  return quoted.length > 1 ? `${quoted.slice(0, -1).join(", ")} and ${quoted.at(-1)}` : (quoted[0] ?? "");
+};
 
 /** A graph whose statistics come from an analysis the table doesn't have yet: `test`
  *  when only one can give them, else any from the picker. */
@@ -450,6 +544,26 @@ function KmeansControls({
   );
 }
 
+/** Pick a Hierarchical clustering: the dendrogram draws its tree, the
+ *  choosing-k plots its diagnostics. */
+function HclustControls({
+  analyses,
+  options,
+  set,
+}: {
+  analyses: ProjectNode[];
+  options: GraphOptions;
+  set: SetOptions;
+}) {
+  return (
+    <AnalysisRow
+      analyses={analyses}
+      value={options.hclustAnalysisId}
+      onChange={(hclustAnalysisId) => set({ hclustAnalysisId })}
+    />
+  );
+}
+
 /** Pick a Principal component analysis: the scree plot draws its variance
  *  explained, the biplot its scores and loadings — and the biplot also picks
  *  which two components to plot (PC1 vs PC2 by default). */
@@ -493,6 +607,154 @@ function PcaControls({
   );
 }
 
+/** Pick several analyses, then which of each one's pairwise comparisons get a bracket —
+ *  a grouped-scatter's multiple t tests, one per copy table. An analysis of another
+ *  table is listed with its table's name; one that ran on other data sets than the
+ *  graph shows can't annotate it. A comparison's tick is scoped to its analysis, so
+ *  the same row from two copy tables is ticked apart. */
+function MultiSignificanceControls({
+  all,
+  tables,
+  comparisons,
+  options,
+  set,
+  shown,
+  sets,
+  onNewAnalysis,
+}: {
+  all: ProjectNode[];
+  tables: Record<string, string>;
+  comparisons: SigComparison[] | null;
+  options: GraphOptions;
+  set: SetOptions;
+  shown: string[];
+  sets: string[];
+  onNewAnalysis: () => void;
+}) {
+  const ids = sigAnalysisIdsOf(options);
+  const fits = (a: ProjectNode) => starsFit(a, sets, shown);
+  const sources = all.filter((a) => GROUPED_SOURCES.has(a.analysisType));
+  const fitting = sources.filter(fits);
+  // Chosen from every analysis, not just this kind's: a legacy single source
+  // of another kind keeps drawing (graph-view merges it), and stays ticked here.
+  const chosen = ids.map((id) => all.find((a) => a.id === id)).filter((a): a is ProjectNode => !!a);
+  const listed = [...fitting, ...chosen.filter((a) => !fitting.includes(a))];
+  const unfit = chosen.filter((a) => !fits(a));
+  const partial = shown.length < sets.length;
+  const toggleAnalysis = (id: string, on: boolean) => {
+    const next = on ? [...new Set([...ids, id])] : ids.filter((x) => x !== id);
+    set({
+      sigAnalysisIds: next,
+      sigAnalysisId: next[0],
+      // Unchecking drops its pairs (a scoped key matches nothing left);
+      // checking keeps the others' ticks.
+      sigPairs: on
+        ? options.sigPairs ?? []
+        : (options.sigPairs ?? []).filter((k) => !k.startsWith(`${id}\u0001`)),
+    });
+  };
+  if (!fitting.length && !chosen.length) {
+    return (
+      <NoAnalysis onNewAnalysis={onNewAnalysis}>
+        {partial
+          ? `Show significance brackets from multiple t tests of the data sets this graph shows (${listOf(shown)}), one per copy table.`
+          : "Show significance brackets from multiple t tests — one per copy table — or a two-way ANOVA of this table with multiple comparisons."}
+      </NoAnalysis>
+    );
+  }
+  const selected = options.sigPairs ?? [];
+  const togglePair = (c: SigComparison, on: boolean) => {
+    const key = sigPairKey(c);
+    set({ sigPairs: on ? [...selected, key] : selected.filter((k) => k !== key && k !== c.key) });
+  };
+  const lettered = comparisons === null ? [] : lettersComparisons(comparisons);
+  return (
+    <>
+      <Row label="Analyses">
+        <div className="flex flex-col gap-1.5">
+          {listed.map((a) => (
+            <label key={a.id} className="flex items-center gap-2">
+              <Checkbox checked={ids.includes(a.id)} onChange={(checked) => toggleAnalysis(a.id, checked)} />
+              <span className="flex-1 truncate text-small">
+                {a.name}
+                {tables[a.id] ? ` — ${tables[a.id]}` : ""}
+              </span>
+            </label>
+          ))}
+        </div>
+      </Row>
+      {unfit.length ? (
+        <p className="text-small text-secondary">
+          {unfit
+            .map(
+              (a) =>
+                `“${a.name}” ran on ${listOf(ranOn(a, sets))}, not on the data sets this graph shows (${listOf(shown)}): its brackets aren't drawn.`,
+            )
+            .join(" ")}
+        </p>
+      ) : null}
+
+      {ids.length ? (
+        <>
+          <Choice
+            label="Show"
+            value={options.sigDisplay}
+            onChange={(sigDisplay) => set({ sigDisplay })}
+            items={[
+              { value: "stars", label: "Stars" },
+              { value: "pvalue", label: "P value" },
+              { value: "letters", label: "Letters" },
+            ]}
+          />
+          {comparisons === null ? (
+            <p className="text-small text-secondary">Running the analyses…</p>
+          ) : options.sigDisplay === "letters" ? (
+            <p className="text-small text-secondary">
+              {lettersFit(lettered)
+                ? "Groups that share a letter don't differ significantly (P ≥ 0.05); “a” goes to the highest."
+                : "Letters need every pair compared (Tukey's test, say): this analysis compares only some pairs."}
+              {chosen.length > 1 ? " Letters come from the first analysis only." : ""}
+            </p>
+          ) : (
+            chosen.map((a) => {
+              const pairs = comparisons.filter((c) => c.analysisId === a.id);
+              if (!pairs.length) return null;
+              return (
+                <Row key={a.id} label={`${a.name}${tables[a.id] ? ` — ${tables[a.id]}` : ""}`}>
+                  <div className="flex flex-col gap-1.5">
+                    {pairs.map((c) => (
+                      <label key={sigPairKey(c)} className="flex items-center gap-2">
+                        <Checkbox checked={sigPairSelected(selected, c)} onChange={(checked) => togglePair(c, checked)} />
+                        <span className="flex-1 truncate text-small">
+                          {c.group2 ? `${c.group1} vs. ${c.group2}` : c.group1}
+                        </span>
+                        <span
+                          className={cn(
+                            "text-small tabular-nums",
+                            isSignificant(c.p) ? "text-support-green" : "text-secondary",
+                          )}
+                        >
+                          {pStars(c.p)}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </Row>
+              );
+            })
+          )}
+          {comparisons !== null && !comparisons.length && options.sigDisplay !== "letters" ? (
+            <p className="text-small text-secondary">
+              These analyses have no pairwise comparisons. Use multiple t tests, or a test of more groups with multiple
+              comparisons.
+            </p>
+          ) : null}
+        </>
+      ) : null}
+    </>
+  );
+}
+
 /** Pick an analysis, then which of its pairwise comparisons get a bracket. */
 function SignificanceControls({
   analyses,
@@ -506,8 +768,12 @@ function SignificanceControls({
   set: SetOptions;
 }) {
   const selected = options.sigPairs ?? [];
-  const togglePair = (key: string, on: boolean) =>
-    set({ sigPairs: on ? [...selected, key] : selected.filter((k) => k !== key) });
+  const togglePair = (key: string, on: boolean) => {
+    // A group-pair spelling can't lose one row: expand it to per-row keys
+    // first, then add or drop this row's key.
+    const expanded = expandSigPairs(comparisons ?? [], selected);
+    set({ sigPairs: on ? [...expanded, key] : expanded.filter((k) => k !== key) });
+  };
 
   return (
     <>
@@ -526,18 +792,26 @@ function SignificanceControls({
             items={[
               { value: "stars", label: "Stars" },
               { value: "pvalue", label: "P value" },
+              { value: "pvalue-eq", label: "P value (p=)" },
+              { value: "letters", label: "Letters" },
             ]}
           />
           {comparisons === null ? (
             <p className="text-small text-secondary">Running the analysis…</p>
+          ) : options.sigDisplay === "letters" ? (
+            <p className="text-small text-secondary">
+              {lettersFit(comparisons)
+                ? "Groups that share a letter don't differ significantly (P ≥ 0.05); “a” goes to the highest."
+                : "Letters need every pair compared (Tukey's test, say): this analysis compares only some pairs."}
+            </p>
           ) : comparisons.length ? (
             <Row label="Comparisons">
               <div className="flex flex-col gap-1.5">
                 {comparisons.map((c) => (
                   <label key={c.key} className="flex items-center gap-2">
-                    <Checkbox checked={selected.includes(c.key)} onChange={(checked) => togglePair(c.key, checked)} />
+                    <Checkbox checked={sigPairSelected(c, selected)} onChange={(checked) => togglePair(c.key, checked)} />
                     <span className="flex-1 truncate text-small">
-                      {c.group1} vs. {c.group2}
+                      {c.group2 ? `${c.group1} vs. ${c.group2}` : c.group1}
                     </span>
                     <span
                       className={cn(
@@ -660,9 +934,20 @@ function RegressionControls({
           />
           {!curve && (
             <Toggle
-              label="Show 95% CI band"
+              label="Show 95% band"
               checked={options.regShowBand}
               onChange={(regShowBand) => set({ regShowBand })}
+            />
+          )}
+          {!curve && options.regShowBand && (
+            <Choice
+              label="Band"
+              value={options.regBand}
+              onChange={(regBand) => set({ regBand })}
+              items={[
+                { value: "confidence", label: "Confidence" },
+                { value: "prediction", label: "Prediction" },
+              ]}
             />
           )}
           <Toggle
@@ -679,6 +964,115 @@ function RegressionControls({
 // ── Data: what the graph shows of the table ─────────────────────────────
 
 export function dataControls(c: SectionContext): React.ReactNode {
+  const options = dataOptions(c);
+  const sources = c.sourceTables ? (
+    <SourceTablesRow
+      tables={c.sourceTables}
+      available={c.availableSourceTables ?? []}
+      onAdd={c.onAddSourceTable}
+      onRemove={c.onRemoveSourceTable}
+    />
+  ) : null;
+  if (c.sets.length < 2)
+    return (
+      <>
+        {sources}
+        {options}
+      </>
+    );
+  return (
+    <>
+      {sources}
+      <SetsRow sets={c.sets} chosen={c.options.sets} onChange={(sets) => c.set({ sets })} />
+      {options}
+    </>
+  );
+}
+
+/** The tables a graph plots (#48): the primary (fixed), the extra
+ *  sources (each removable), and a picker to add another table of the
+ *  same type. Prism's "New Graph of Existing Data", as a row in the
+ *  Data section: a graph is made on one table, then tables are added
+ *  here. */
+function SourceTablesRow({
+  tables,
+  available,
+  onAdd,
+  onRemove,
+}: {
+  tables: { id: string; name: string; primary: boolean }[];
+  available: { id: string; name: string }[];
+  onAdd?: (id: string) => void;
+  onRemove?: (id: string) => void;
+}) {
+  return (
+    <Row label="Source tables">
+      <div className="flex flex-col gap-1.5">
+        {tables.map((t) => (
+          <div key={t.id} className="flex items-center gap-2">
+            <span className="flex-1 truncate text-small">{t.name}</span>
+            {t.primary ? (
+              <span className="text-small text-secondary">primary</span>
+            ) : (
+              <Button variant="ghost" size="small" onClick={() => onRemove?.(t.id)}>
+                Remove
+              </Button>
+            )}
+          </div>
+        ))}
+        {available.length > 0 && onAdd && (
+          <Select
+            value=""
+            onChange={(id) => {
+              if (id) onAdd(id);
+            }}
+            placeholder="Add a table…"
+            options={available.map((t) => ({ value: t.id, label: t.name }))}
+          />
+        )}
+      </div>
+    </Row>
+  );
+}
+
+/** The data sets the graph shows, ticked in table order (one at least); all: none saved. */
+function SetsRow({
+  sets,
+  chosen,
+  onChange,
+}: {
+  sets: string[];
+  chosen: string[] | undefined;
+  onChange: (sets: string[] | undefined) => void;
+}) {
+  const ticked = chosen?.filter((n) => sets.includes(n)) ?? sets;
+  return (
+    <Row label="Data sets">
+      <div className="flex flex-col gap-1.5">
+        {sets.map((name) => {
+          const on = ticked.includes(name);
+          return (
+            <label key={name} className="flex items-center gap-2">
+              <Checkbox
+                checked={on}
+                onChange={(checked) => {
+                  // One at least: unchecking the last ticked set does nothing.
+                  if (on && ticked.length === 1 && !checked) return;
+                  const next = toggled(sets, ticked, name, checked);
+                  onChange(next.length === sets.length ? undefined : next);
+                }}
+              />
+              <span className="flex-1 truncate text-small">{name}</span>
+            </label>
+          );
+        })}
+      </div>
+    </Row>
+  );
+}
+
+/** What the graph summarizes of its data: center and error bars, values or percents… */
+function dataOptions(c: SectionContext): React.ReactNode {
   const { graphType, options, set } = c;
   // Stacked bars and a histogram show values (counts) or percents.
   const showAs = (values: string) => (
@@ -719,6 +1113,14 @@ export function dataControls(c: SectionContext): React.ReactNode {
           {stackAs}
         </>
       ); // stacked bars have no error bars
+    case "pow-stacked":
+      return stackAs; // one bar per data set, segments are its categories — nothing to center
+    case "floating-bars":
+      // The span's error kind matters only on a summary table (Mean ± error);
+      // on replicates the bars are the cell's min to max whatever it says.
+      return c.summary !== undefined && c.summary !== "replicates" ? (
+        <Choice label="Span" value={options.error} onChange={(error) => set({ error })} items={ERROR_ITEMS} />
+      ) : null;
     case "heatmap":
       return c.tableType === "grouped" ? center : null; // a cell sums up a group's replicates
     case "histogram":
@@ -743,6 +1145,9 @@ export function dataControls(c: SectionContext): React.ReactNode {
       );
     case "pie":
     case "donut":
+      // A Parts-of-Whole pie's slices are its rows, not its columns: there is
+      // no column total or mean to choose — the slice value choice is left out.
+      if (c.tableType === "parts-of-whole") return null;
       return (
         <Choice
           label="Slice value"
@@ -784,6 +1189,8 @@ export function dataControls(c: SectionContext): React.ReactNode {
         )
       );
     case "xy-scatter":
+    case "xy-spikes":
+    case "xy-bar-scatter":
       if (c.tableType === "multiple") return <VariablePair numericNames={c.numericNames} options={options} set={set} />;
       return (
         c.replicates && (
@@ -1178,7 +1585,7 @@ function linesGroup({ graphType, options, set }: SectionContext) {
 
 /** Error bars (and the center line drawn with them): thickness, caps, color, and
  *  which way they go. */
-function errorsGroup({ graphType, options, set, replicates }: SectionContext) {
+function errorsGroup({ graphType, options, set, replicates, allNames }: SectionContext) {
   // An XY graph draws error bars around its replicates' centers.
   const xyErrors =
     replicates &&
@@ -1187,41 +1594,59 @@ function errorsGroup({ graphType, options, set, replicates }: SectionContext) {
       (graphType === "xy-scatter" && options.xyReplicates === "mean"));
   const bars = (WITH_ERROR_BARS.has(graphType) || xyErrors) && options.error !== "none";
   const line = WITH_CENTER_LINE.has(graphType);
-  if (!bars && !line) return null;
+  // An XY table holding an "<X> error" column (Prism's X-error subcolumn, see
+  // pzfx.ts) can draw X error bars too — independently of the Y bars, so an
+  // X-only error display is possible. The toggle shows only while the column
+  // exists; while it is on, the column is the bars, not a series.
+  const xErrorName =
+    GRAPHS[graphType].family === "xy" && allNames.length > 0 ? `${allNames[0]} error` : undefined;
+  const hasXError = xErrorName !== undefined && allNames.includes(xErrorName);
+  if (!bars && !line && !hasXError) return null;
   return (
-    <Group title={!bars ? "Center line" : line ? "Center line and error bars" : "Error bars"}>
-      <ThicknessRow
-        label="Thickness"
-        value={options.errorWidth}
-        limits={GRAPH_LIMITS.errorWidth}
-        onChange={(errorWidth) => set({ errorWidth })}
-      />
-      {bars && (
-        <Stepper
-          label="Caps"
-          value={options.errorCaps}
-          {...GRAPH_LIMITS.errorCaps}
-          step={1}
-          onChange={(errorCaps) => set({ errorCaps })}
+    <Group title={line && bars ? "Center line and error bars" : line ? "Center line" : "Error bars"}>
+      {hasXError && (
+        <Toggle
+          label={`X error bars (${xErrorName})`}
+          checked={options.xError}
+          onChange={(xError) => set({ xError })}
         />
       )}
-      <ColorRow
-        label="Color"
-        palette={paletteOf(options)}
-        color={options.errorColor}
-        same="Same as Series"
-        onChange={(color) => set({ errorColor: color === SAME_AS_FILL ? undefined : color })}
-      />
-      {bars && (
-        <Choice
-          label="Direction"
-          value={options.errorDirection}
-          onChange={(errorDirection) => set({ errorDirection })}
-          items={[
-            { value: "both", label: "Both" },
-            { value: "above", label: graphType === "grouped-hbars" ? "Right" : "Above" },
-          ]}
-        />
+      {(bars || line) && (
+        <>
+          <ThicknessRow
+            label="Thickness"
+            value={options.errorWidth}
+            limits={GRAPH_LIMITS.errorWidth}
+            onChange={(errorWidth) => set({ errorWidth })}
+          />
+          {bars && (
+            <Stepper
+              label="Caps"
+              value={options.errorCaps}
+              {...GRAPH_LIMITS.errorCaps}
+              step={1}
+              onChange={(errorCaps) => set({ errorCaps })}
+            />
+          )}
+          <ColorRow
+            label="Color"
+            palette={paletteOf(options)}
+            color={options.errorColor}
+            same="Same as Series"
+            onChange={(color) => set({ errorColor: color === SAME_AS_FILL ? undefined : color })}
+          />
+          {bars && (
+            <Choice
+              label="Direction"
+              value={options.errorDirection}
+              onChange={(errorDirection) => set({ errorDirection })}
+              items={[
+                { value: "both", label: "Both" },
+                { value: "above", label: graphType === "grouped-hbars" ? "Right" : "Above" },
+              ]}
+            />
+          )}
+        </>
       )}
     </Group>
   );
@@ -1246,7 +1671,10 @@ function ownStyle(context: SectionContext): React.ReactNode {
     />
   );
   const points = GRAPHS[graphType].points?.(options) && pointsGroup(context);
-  // Each row's groups side by side, or each group's rows in a block of its own.
+  // Each row's groups side by side, each group's rows in a block of its own,
+  // or every group's bar from the axis at the same x (Superimposed — a
+  // taller bar hides a shorter one behind it unless the fill is
+  // semi-transparent, so the Fill slider matters there).
   const groups = (
     <Choice
       label="Groups"
@@ -1255,6 +1683,22 @@ function ownStyle(context: SectionContext): React.ReactNode {
       items={[
         { value: "interleaved", label: "Interleaved" },
         { value: "separated", label: "Separated" },
+        { value: "superimposed", label: "Superimposed" },
+      ]}
+    />
+  );
+  // How scatter points spread sideways (Standard / Classic / Expanded /
+  // Aligned dot plot) — offered wherever points are drawn.
+  const scatterStyle = (
+    <Choice
+      label="Scatter"
+      value={options.scatterStyle}
+      onChange={(scatterStyle) => set({ scatterStyle })}
+      items={[
+        { value: "standard", label: "Standard" },
+        { value: "classic", label: "Classic" },
+        { value: "expanded", label: "Expanded" },
+        { value: "aligned", label: "Aligned dot plot" },
       ]}
     />
   );
@@ -1269,11 +1713,39 @@ function ownStyle(context: SectionContext): React.ReactNode {
           { value: "violin", label: "Violin" },
         ]}
       />
+      {options.kind === "box" ? (
+        <Choice
+          label="Whiskers"
+          value={options.whisker}
+          onChange={(whisker) => set({ whisker })}
+          items={[
+            { value: "min-max", label: "Min to max" },
+            { value: "tukey", label: "Tukey (1.5× IQR)" },
+            { value: "p10-90", label: "10–90 percentiles" },
+            { value: "p5-95", label: "5–95 percentiles" },
+            { value: "p2.5-97.5", label: "2.5–97.5 percentiles" },
+            { value: "p1-99", label: "1–99 percentiles" },
+            { value: "min-max-all", label: "Min to max, all points" },
+          ]}
+        />
+      ) : (
+        <Choice
+          label="Violin"
+          value={options.violinVariant}
+          onChange={(violinVariant) => set({ violinVariant })}
+          items={[
+            { value: "full", label: "Full" },
+            { value: "truncated", label: "Truncated at data" },
+            { value: "half", label: "Half" },
+          ]}
+        />
+      )}
       {shapes(options.kind === "violin" ? "Violin" : "Box")}
       {pointsGroup(
         context,
         <Toggle label="Show points" checked={options.showPoints} onChange={(showPoints) => set({ showPoints })} />,
       )}
+      {(options.showPoints || options.whisker === "min-max-all") && scatterStyle}
     </>
   );
   switch (graphType) {
@@ -1284,6 +1756,7 @@ function ownStyle(context: SectionContext): React.ReactNode {
             <Toggle label="Show bars" checked={options.bars} onChange={(bars) => set({ bars })} />
             {options.bars && shapeRows(context)}
           </Group>
+          {scatterStyle}
           {points}
         </>
       );
@@ -1315,6 +1788,7 @@ function ownStyle(context: SectionContext): React.ReactNode {
               onChange={(estimationViolin) => set({ estimationViolin })}
             />
           </Group>
+          {scatterStyle}
           {points}
         </>
       );
@@ -1341,11 +1815,52 @@ function ownStyle(context: SectionContext): React.ReactNode {
           {points}
         </>
       );
+    case "xy-spikes":
+      // Spikes are always stems from the baseline with a marker at each tip:
+      // no Draw-as choice, just the points' style (the stems take the Lines
+      // section, which `styleControls` adds for any graph with lines).
+      return points;
+    case "xy-bar-scatter":
+      return (
+        <>
+          <Choice
+            label="Draw as"
+            value={options.xyStyle}
+            onChange={(xyStyle) => set({ xyStyle })}
+            items={[
+              { value: "points", label: "Points" },
+              { value: "line", label: "Line" },
+              { value: "points+line", label: "Both" },
+            ]}
+          />
+          {points}
+          {shapes("Bars", context.seriesNames.length > 1 && gap)}
+        </>
+      );
     case "xy-bar":
       return shapes("Bars", context.seriesNames.length > 1 && gap);
+    case "residuals":
+      return (
+        <>
+          <Choice
+            label="Plot"
+            value={options.residualsAs}
+            onChange={(residualsAs) => set({ residualsAs })}
+            items={[
+              { value: "x", label: "Against X" },
+              { value: "qq", label: "QQ plot" },
+            ]}
+          />
+          {points}
+        </>
+      );
+    case "qq-plot":
+      return points;
     case "grouped-stacked":
     case "histogram":
       return shapes("Bars");
+    case "floating-bars":
+      return shapes("Bars", gap);
     case "xy-area":
       return shapes("Area");
     case "grouped-bars":
@@ -1354,7 +1869,27 @@ function ownStyle(context: SectionContext): React.ReactNode {
       return (
         <>
           {groups}
-          {graphType === "grouped-scatter" ? points : shapes("Bars", options.groupLayout === "interleaved" && gap)}
+          {graphType === "grouped-scatter" ? (
+            <>
+              {scatterStyle}
+              {points}
+            </>
+          ) : (
+            shapes("Bars", options.groupLayout === "interleaved" && gap)
+          )}
+          {(graphType === "grouped-bars" || graphType === "grouped-hbars") &&
+            pointsGroup(
+              context,
+              <Toggle label="Show points" checked={options.showPoints} onChange={(showPoints) => set({ showPoints })} />,
+            )}
+        </>
+      );
+    case "grouped-bars-scatter":
+      return (
+        <>
+          {groups}
+          {shapes("Bars", options.groupLayout === "interleaved" && gap)}
+          {points}
         </>
       );
     case "grouped-lines":

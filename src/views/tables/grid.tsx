@@ -11,12 +11,21 @@ import { clamp, type TableData, type TableType } from "../../store/types";
 import type { TableMove } from "../../store/references";
 import type { EditCommand } from "../../app-menu";
 import { parseCell } from "../../lib/numeric";
+import { fileName } from "../../lib/paths";
 import { seriesKeyOf } from "../../lib/columns";
 import { isGrouped, isNested, leadOf } from "../../lib/dataset";
-import { alert, popupMenu } from "../../native";
+import { alert, askPasteLink, popupMenu } from "../../native";
 import { XIcon } from "@phosphor-icons/react";
-import { cn, IconButton } from "../../ui/controls";
+import { cn, Button, IconButton } from "../../ui/controls";
+import { CreateSeriesDialog, type CreateSeriesTarget } from "../../components/create-series-dialog";
+import { fillSeries, generateSeries, type SeriesSpec } from "../../lib/series";
 import { gridMenu, type MenuZone } from "./grid-menu";
+import {
+  pasteLinkFromContent,
+  pasteLinkFromPath,
+  pickLinkedSource,
+  refreshLinkedFromFile,
+} from "./linked-data";
 import {
   columnsBeyond,
   dataEdge,
@@ -30,9 +39,18 @@ import {
   setColumnWidth,
   toTSV,
   toggleExcluded,
+  transposeBlock,
   writeBlock,
   type Range,
 } from "./table-data";
+import {
+  calculatedVariable,
+  formulaOfText,
+  isCalculatedColumn,
+  isFormulaText,
+  makeCalculatedVariable,
+  setCalculatedFormula,
+} from "../../lib/calcvars";
 
 const ROW_H = 24;
 const HEAD_H = 26;
@@ -113,9 +131,11 @@ interface GridProps {
   update: (next: TableData, label: string, move?: TableMove) => void;
   /** Shows a grouped table's Groups panel. */
   showGroups: () => void;
+  /** The table is frozen: no editing until unfrozen (seq 165). */
+  tableFrozen?: boolean;
 }
 
-export function Grid({ data, type, update, showGroups }: GridProps) {
+export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps) {
   const nested = isNested(data);
   const grouped = isGrouped(data) || nested;
   const replicates = data.replicates ?? 1;
@@ -158,9 +178,15 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
   const [view, setView] = React.useState({ top: 0, left: 0, width: 800, height: 600 });
   const [sel, setSel] = React.useState<Selection>({ anchor: { r: 0, c: 1 }, focus: { r: 0, c: 1 } });
   const [editing, setEditingState] = React.useState<Editing | null>(null);
+  // Create Series' target: the selection's top-left cell, set from the menu.
+  const [series, setSeries] = React.useState<{ c: number; r: number; count: number } | null>(null);
   // Mirrors `editing` for finishEdit, which runs twice when saving also blurs the editor.
   const editingRef = React.useRef(editing);
   const setEditing = (next: Editing | null) => {
+    // A frozen table opens no editor: its values can't change until unfrozen
+    // (seq 165). Closing still runs — the editor never opens, so there is
+    // nothing to close.
+    if (tableFrozen && next !== null) return;
     editingRef.current = next;
     setEditingState(next);
   };
@@ -246,9 +272,16 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
     );
   };
 
-  const startEdit = (r: number, c: number, value = data.rows[r]?.[c] ?? "", typed = false) => {
+  const startEdit = (r: number, c: number, value?: string, typed = false) => {
+    // A calculated variable edits as its formula, not as the computed value
+    // in the cell — typing over the value would throw the formula away.
+    const shown =
+      value ??
+      (isCalculatedColumn(data, data.columns[c])
+        ? `=${calculatedVariable(data, data.columns[c])!.formula}`
+        : (data.rows[r]?.[c] ?? ""));
     reveal({ r, c });
-    setEditing({ kind: "cell", r, c, value, typed });
+    setEditing({ kind: "cell", r, c, value: shown, typed });
     focusGrid();
   };
   const startRename = (c: number) => {
@@ -280,10 +313,39 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
   const finishEdit = (cancel: boolean, dr = 0, dc = 0) => {
     const ed = editingRef.current;
     if (!ed) return;
-    editingRef.current = null;
     const value = ed.value.trim();
+    if (!cancel && ed.kind === "cell" && type === "multiple" && isFormulaText(value)) {
+      // Prism's `=` gesture: a formula typed into a Multiple Variables table
+      // becomes (or edits) a calculated variable instead of a typed value.
+      // An invalid formula stays in the editor, with the problem named, so
+      // the typed formula is never lost to a silent literal write.
+      const name = data.columns[ed.c];
+      const existing = name !== undefined ? calculatedVariable(data, name) : undefined;
+      const columnEmpty =
+        ed.c >= 1 && ed.c < data.columns.length && data.rows.every((row) => row[ed.c] == null);
+      if (name !== undefined && (existing || columnEmpty)) {
+        const res = existing
+          ? setCalculatedFormula(data, name, formulaOfText(value))
+          : makeCalculatedVariable(data, name, formulaOfText(value));
+        if ("data" in res) {
+          editingRef.current = null;
+          update(res.data, existing ? "Edit Calculated Variable" : "Add Calculated Variable");
+          move(dr, dc, false, { r: ed.r, c: ed.c });
+          setEditing(null);
+          focusGrid();
+          return;
+        }
+        void alert("That formula could not be used", res.error, "error");
+        return;
+      }
+    }
+    editingRef.current = null;
     if (!cancel && ed.kind === "cell") {
-      if (value !== (data.rows[ed.r]?.[ed.c] ?? "")) write(ed.r, ed.c, [[value || null]], "Typing");
+      // A calculated column's values are computed, never typed: a plain
+      // value typed into one is left alone (its formula still rules), and
+      // only a `=` formula above rewrites it.
+      if (!isCalculatedColumn(data, data.columns[ed.c]) && value !== (data.rows[ed.r]?.[ed.c] ?? ""))
+        write(ed.r, ed.c, [[value || null]], "Typing");
       move(dr, dc, false, { r: ed.r, c: ed.c });
     }
     if (!cancel && ed.kind === "column") {
@@ -365,6 +427,60 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
     if (cut) clear(range, "Cut");
   };
 
+  // Linked paste (Prism 11, seq 168): Edit ▸ Paste Link… and the grid menu's
+  // paste the picked file as a link at the selection's top-left cell, so the
+  // table updates when the file changes; Update Linked Data re-reads the
+  // source; Break Link keeps the values and drops the link. The paste asks
+  // first — automatically update, update by hand, or cancel — as Prism's
+  // "Automatically update" checkbox does.
+  const pasteLink = async (g: Range) => {
+    const picked = await pickLinkedSource();
+    if (!picked) return;
+    const sourceName = "path" in picked ? fileName(picked.path) : picked.name;
+    const asked = await askPasteLink(sourceName);
+    if (asked === "cancel") return;
+    try {
+      const res =
+        "path" in picked
+          ? await pasteLinkFromPath(data, type, g.r0, g.c0, picked.path, asked === "auto")
+          : await pasteLinkFromContent(data, type, g.r0, g.c0, picked.name, picked.content, asked === "auto");
+      if (!res.changed) return;
+      update(res.data, "Paste Link");
+      if (res.droppedColumns)
+        await alert(
+          "Some Values Weren't Pasted",
+          `${res.droppedColumns === 1 ? "1 column" : `${res.droppedColumns} columns`} didn't fit in the table. Add groups or sub-columns in the Groups panel, then paste again.`,
+        );
+    } catch (err) {
+      await alert(
+        "Couldn't Paste Link",
+        err instanceof Error ? err.message : "This file couldn't be pasted as a link.",
+        "error",
+      );
+    }
+  };
+  const refreshLink = async () => {
+    try {
+      const res = await refreshLinkedFromFile(data, type);
+      if (!res.changed) return;
+      update(res.data, "Update Linked Data");
+      if (res.droppedColumns)
+        await alert(
+          "Some Values Weren't Updated",
+          `${res.droppedColumns === 1 ? "1 column" : `${res.droppedColumns} columns`} of the linked file didn't fit in the table. Add groups or sub-columns in the Groups panel, then update again.`,
+        );
+    } catch (err) {
+      await alert(
+        "Couldn't Update Linked Data",
+        err instanceof Error ? err.message : "The linked file couldn't be read.",
+        "error",
+      );
+    }
+  };
+  const breakLink = () => {
+    if (data.linkedPaste) update({ ...data, linkedPaste: undefined }, "Break Link");
+  };
+
   const onPaste = (e: React.ClipboardEvent) => {
     if (editing) return;
     e.preventDefault();
@@ -405,9 +521,22 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
       else if (cmd === "find-next") findStep(1);
       else if (cmd === "find-previous") findStep(-1);
       else if (cmd === "select-all") setSel({ anchor: { r: 0, c: 0 }, focus: { r: lastRow, c: lastCol } });
+      // Seq 231: the keys already select this way (Shift+Space / Ctrl+Space);
+      // the menu items dispatch the same selection.
+      else if (cmd === "select-row")
+        setSel({ anchor: { r: range.r0, c: 0 }, focus: { r: range.r1, c: lastCol } });
+      else if (cmd === "select-column")
+        setSel({ anchor: { r: 0, c: range.c0 }, focus: { r: lastRow, c: range.c1 } });
+      // Seq 230: Paste Special reads the clipboard itself (a menu action has
+      // no clipboard event); Transpose swaps the block's rows and columns.
+      else if (cmd === "paste-transpose") void pasteTransposed();
+      else if (cmd === "paste-special") void openPasteSpecial();
       else if (cmd === "fill-down") fillDown();
       else if (cmd === "delete") clear(range);
       else if (cmd === "exclude") update(toggleExcluded(data, range), "Exclude / Include");
+      else if (cmd === "paste-link") void pasteLink(range);
+      else if (cmd === "refresh-link") void refreshLink();
+      else if (cmd === "break-link") breakLink();
     };
     window.addEventListener("titer:edit", onEdit);
     return () => window.removeEventListener("titer:edit", onEdit);
@@ -437,6 +566,66 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
       dir === 1 ? (matches.find(after) ?? matches[0]) : (matches.findLast(before) ?? matches[matches.length - 1]);
     setSel({ anchor: m, focus: m });
     reveal(m);
+  };
+
+  // ── Paste Special (seq 230) ────────────────────────────────────────────
+  // The clipboard text the bar is offering, with its transpose choice.
+  const [pasteOffer, setPasteOffer] = React.useState<{ text: string; transpose: boolean } | null>(null);
+
+  /** The clipboard's text, or null when it can't be read (no permission, or
+   *  nothing copied) — the menu has no clipboard event to fall back on. */
+  const readClipboardText = async (): Promise<string | null> => {
+    try {
+      const text = await navigator.clipboard.readText();
+      return text ? text : null;
+    } catch {
+      return null;
+    }
+  };
+
+  /** Writes `block` at the selection's top-left, as Paste does (growing the
+   *  table, warning about columns that don't fit), and selects what landed. */
+  const pasteBlock = (block: (string | null)[][], label: string) => {
+    if (!block.length || !block[0].length) return;
+    write(range.r0, range.c0, block, label);
+    const beyond = columnsBeyond(data, range.c0, block);
+    if (beyond)
+      void alert(
+        "Some Values Weren't Pasted",
+        `${beyond === 1 ? "1 column" : `${beyond} columns`} didn't fit in the table. Add groups or sub-columns in the Groups panel, then paste again.`,
+      );
+    setSel({
+      anchor: { r: range.r0, c: range.c0 },
+      focus: clampPoint({ r: range.r0 + block.length - 1, c: range.c0 + block[0].length - 1 }),
+    });
+  };
+
+  /** Edit ▸ Paste Transposed: the clipboard's block, rows and columns swapped. */
+  const pasteTransposed = async () => {
+    const text = await readClipboardText();
+    if (text === null) {
+      void alert("Nothing to Paste", "The clipboard is empty or couldn't be read. Copy some cells first, then try again.");
+      return;
+    }
+    pasteBlock(transposeBlock(parseTSV(text)), "Paste Transposed");
+  };
+
+  /** Edit ▸ Paste Special…: offers the clipboard with Values / Transpose. */
+  const openPasteSpecial = async () => {
+    const text = await readClipboardText();
+    if (text === null) {
+      void alert("Nothing to Paste", "The clipboard is empty or couldn't be read. Copy some cells first, then try again.");
+      return;
+    }
+    setPasteOffer({ text, transpose: false });
+    focusGrid();
+  };
+
+  const confirmPasteSpecial = () => {
+    if (!pasteOffer) return;
+    const block = parseTSV(pasteOffer.text);
+    pasteBlock(pasteOffer.transpose ? transposeBlock(block) : block, pasteOffer.transpose ? "Paste Transposed" : "Paste");
+    setPasteOffer(null);
   };
 
   // ── Mouse ────────────────────────────────────────────────────────────
@@ -506,7 +695,39 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
       setSel({ anchor, focus });
       g = toRange({ anchor, focus });
     }
-    void popupMenu(gridMenu({ data, type, zone, range: g, update, rename: startRename, renameGroup: startRenameGroup, showGroups }));
+    void popupMenu(
+      gridMenu({
+        data,
+        type,
+        zone,
+        range: g,
+        update,
+        rename: startRename,
+        renameGroup: startRenameGroup,
+        showGroups,
+        tableFrozen,
+        pasteLink: (r) => void pasteLink(r),
+        refreshLink: () => void refreshLink(),
+        breakLink,
+        createSeries: (r) => setSeries({ c: r.c0, r: r.r0, count: r.r1 - r.r0 + 1 }),
+      }),
+    );
+  };
+
+  /** The Create Series dialog's target, or null when it is closed. */
+  const seriesTarget: CreateSeriesTarget | null = series
+    ? {
+        columnName: data.columns[series.c] ?? `Column ${series.c}`,
+        startRow: series.r,
+        selectedRows: series.count,
+        overwritesFor: (count: number) =>
+          data.rows.slice(series.r, series.r + count).filter((row) => row?.[series.c] != null).length,
+      }
+    : null;
+  const runSeries = (spec: SeriesSpec, startRow: number) => {
+    if (!series) return;
+    update(fillSeries(data, series.c, startRow, generateSeries(spec)), "Create Series");
+    setSeries(null);
   };
 
   /** Drag a header's right edge to resize its column; double-click it to fit the content. */
@@ -598,7 +819,16 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
       onDoubleClick={() => startRename(c)}
       onContextMenu={(e) => showMenu(e, "column")}
     >
-      <span className="truncate">{headers[c]}</span>
+      <span
+        className="truncate"
+        title={
+          isCalculatedColumn(data, data.columns[c])
+            ? `Calculated variable: =${calculatedVariable(data, data.columns[c])!.formula}`
+            : undefined
+        }
+      >
+        {isCalculatedColumn(data, data.columns[c]) ? `ƒx ${headers[c]}` : headers[c]}
+      </span>
       {resizeHandle(c)}
     </div>
   );
@@ -807,6 +1037,37 @@ export function Grid({ data, type, update, showGroups }: GridProps) {
           </IconButton>
         </div>
       )}
+
+      {pasteOffer !== null && (
+        <div className="absolute top-1 right-3 z-30 flex items-center gap-3 rounded-lg bg-surface px-2 py-1 shadow-md ring-1 ring-separator">
+          <span className="text-regular font-medium">Paste Special</span>
+          <label className="flex items-center gap-1 text-regular">
+            <input
+              type="radio"
+              name="paste-special"
+              checked={!pasteOffer.transpose}
+              onChange={() => setPasteOffer({ ...pasteOffer, transpose: false })}
+            />
+            Values
+          </label>
+          <label className="flex items-center gap-1 text-regular">
+            <input
+              type="radio"
+              name="paste-special"
+              checked={pasteOffer.transpose}
+              onChange={() => setPasteOffer({ ...pasteOffer, transpose: true })}
+            />
+            Transpose
+          </label>
+          <Button variant="accent" size="small" onClick={confirmPasteSpecial}>
+            Paste
+          </Button>
+          <IconButton aria-label="Close Paste Special" onClick={() => setPasteOffer(null)}>
+            <XIcon />
+          </IconButton>
+        </div>
+      )}
+      <CreateSeriesDialog open={series !== null} target={seriesTarget} onClose={() => setSeries(null)} onGenerate={runSeries} />
     </div>
   );
 }

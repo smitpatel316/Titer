@@ -1,5 +1,6 @@
 // A data table: the grid, and (grouped tables) the Groups panel. Every edit goes to
 // the project store, which keeps the Undo history for the whole project.
+import * as React from "react";
 import {
   GROUPED_LIMITS,
   tableErrorFormat,
@@ -11,15 +12,18 @@ import {
 import type { TableMove } from "../../store/references";
 import { useProjectActions } from "../../store/use-project-store";
 import { Row, Section, Stepper, WithInspector } from "../../components/inspector";
-import { Button, Input, RadioList, Select } from "../../ui/controls";
+import { Button, IconButton, Input, NumberInput, RadioList, Select } from "../../ui/controls";
 import { useLayout } from "../../store/use-layout";
-import { ColumnsIcon, MinusIcon, PlusIcon } from "@phosphor-icons/react";
-import { Toolbar } from "../../ui/layout";
+import { ColumnsIcon, MinusIcon, PlusIcon, SnowflakeIcon } from "@phosphor-icons/react";
 import { Grid } from "./grid";
 import {
   addRowGroup,
   applySummaryFormat,
   applySummaryFormatLoses,
+  applySummaryFormatNested,
+  applySummaryFormatNestedLoses,
+  applySummaryFormatXY,
+  applySummaryFormatXYLoses,
   changeErrorFormat,
   defaultRowGroups,
   regroupLoses,
@@ -33,9 +37,16 @@ import {
   setRowGroupName,
 } from "./table-data";
 import { isGrouped, isNested } from "../../lib/dataset";
+import {
+  addCalculatedVariable,
+  removeCalculatedVariable,
+  setCalculatedFormula,
+} from "../../lib/calcvars";
 import { SUMMARY_FORMATS, summaryFormatOf, summarySubcolumns, type SummaryFormat } from "../../lib/summary-format";
+import { MAX_SERIES_VALUES, generateXSeries, validateSeriesSpec } from "../../lib/series";
 import { seriesKeyOf } from "../../lib/columns";
-import { confirmDelete } from "../../native";
+import { alert, confirmDelete } from "../../native";
+import { refreshLinkedFromFile } from "./linked-data";
 import { AddFloatingNoteButton, FloatingNotesLayer } from "../../components/floating-notes";
 import { TABLES } from ".";
 
@@ -43,23 +54,77 @@ import { TABLES } from ".";
 
 export function TableView({ node }: { node: ProjectNode }) {
   const data = node.data!;
-  const { updateTable } = useProjectActions();
+  const { updateTable, setTableFrozen } = useProjectActions();
   const update = (next: TableData, label: string, move?: TableMove) => {
     if (next !== data) updateTable(node.id, next, label, move);
   };
   const { setLayout } = useLayout();
-  const tag = TABLES[node.tableType ?? "column"].label;
+  const tag = TABLES[node.tableType ?? "column"].label + (node.frozen ? " · Frozen" : "");
+  // The freeze toggle, next to the floating-note button on every table kind
+  // (seq 165 — the same snowflake the analysis view uses for its results).
+  const actions = (
+    <>
+      <IconButton
+        aria-label={node.frozen ? "Unfreeze table" : "Freeze table"}
+        onClick={() => setTableFrozen(node.id, !node.frozen)}
+      >
+        <SnowflakeIcon weight={node.frozen ? "fill" : "regular"} />
+      </IconButton>
+      <AddFloatingNoteButton node={node} />
+    </>
+  );
+  const link = data.linkedPaste;
+  // Linked paste (Prism 11, seq 168): the table's link, as a slim bar over
+  // the grid — what file it follows, whether it updates itself on open,
+  // and Update / Break Link beside it (the same actions as Edit ▸ Update
+  // Linked Data / Break Link and the grid menu's).
+  const refreshLink = async () => {
+    try {
+      const res = await refreshLinkedFromFile(data, node.tableType ?? "column");
+      if (res.changed) update(res.data, "Update Linked Data");
+    } catch (err) {
+      await alert(
+        "Couldn't Update Linked Data",
+        err instanceof Error ? err.message : "The linked file couldn't be read.",
+        "error",
+      );
+    }
+  };
+  const linkedBar = link ? (
+    <div className="flex shrink-0 items-center gap-2 border-b border-separator bg-surface px-3 py-1 text-xs text-muted">
+      <span>
+        Linked to “{link.sourceName}”
+        {link.autoUpdate ? " — updates automatically when the file changes" : " — updates by hand"}
+      </span>
+      <span className="flex-1" />
+      <Button onClick={() => void refreshLink()}>Update Now</Button>
+      <Button
+        onClick={() => {
+          if (data.linkedPaste) update({ ...data, linkedPaste: undefined }, "Break Link");
+        }}
+      >
+        Break Link
+      </Button>
+    </div>
+  ) : null;
   const grid = (
     <Grid
       data={data}
       type={node.tableType ?? "column"}
       update={update}
       showGroups={() => setLayout({ inspector: true })}
+      tableFrozen={node.frozen}
     />
   );
   // The sheet the notes pin to: the grid fills it, and the layer covers it.
   const sheet = (
     <div className="relative flex min-h-0 flex-1 flex-col">
+      {node.frozen && (
+        <p className="border-b border-separator bg-control px-8 py-2 text-regular text-secondary">
+          Frozen — this table can't be edited until unfrozen.
+        </p>
+      )}
+      {linkedBar}
       {grid}
       <FloatingNotesLayer node={node} />
     </div>
@@ -73,52 +138,123 @@ export function TableView({ node }: { node: ProjectNode }) {
       <WithInspector
         title={node.name}
         tag={tag}
-        inspector={
+        node={node}
+        settings={
           <>
             <ReplicatesPanel data={data} update={update} />
+            <XSeriesPanel data={data} update={update} />
             <FormatPanel data={data} update={update} />
           </>
         }
-        actions={<AddFloatingNoteButton node={node} />}
+        actions={actions}
       >
         {sheet}
       </WithInspector>
     );
   }
-  if (node.tableType === "column") {
+  // A Parts-of-Whole table carries error values the same way a Column table
+  // does (its import sets the error format from the YFormat), so it gets
+  // the same Format panel.
+  if (node.tableType === "column" || node.tableType === "parts-of-whole") {
     return (
       <WithInspector
         title={node.name}
         tag={tag}
-        inspector={<FormatPanel data={data} update={update} />}
-        actions={<AddFloatingNoteButton node={node} />}
+        node={node}
+        settings={<FormatPanel data={data} update={update} />}
+        actions={actions}
+      >
+        {sheet}
+      </WithInspector>
+    );
+  }
+  if (node.tableType === "multiple") {
+    return (
+      <WithInspector
+        title={node.name}
+        tag={tag}
+        node={node}
+        settings={<CalculatedVariablesPanel data={data} update={update} />}
+        actions={actions}
       >
         {sheet}
       </WithInspector>
     );
   }
   if (!isGrouped(data) && !isNested(data)) {
+    // No settings of its own: the right panel shows the table's note only.
     return (
-      <>
-        <Toolbar title={node.name} tag={tag} actions={<AddFloatingNoteButton node={node} />} />
+      <WithInspector title={node.name} tag={tag} node={node} actions={actions}>
         {sheet}
-      </>
+      </WithInspector>
     );
   }
   return (
     <WithInspector
       title={node.name}
       tag={tag}
-      inspector={
+      node={node}
+      settings={
         <>
           <GroupsPanel data={data} update={update} />
           <FormatPanel data={data} update={update} />
         </>
       }
-      actions={<AddFloatingNoteButton node={node} />}
+      actions={actions}
     >
       {sheet}
     </WithInspector>
+  );
+}
+
+/** An XY table's X column as a series (Prism: Format Data Table → generate
+ *  X values): an arithmetic series over the table's stored rows. Prism's
+ *  version deletes existing X values without asking; this one asks first
+ *  when X values would be replaced (Undo brings them back either way). */
+function XSeriesPanel({ data, update }: { data: TableData; update: (next: TableData, label: string) => void }) {
+  const [first, setFirst] = React.useState<number | null>(0);
+  const [step, setStep] = React.useState<number | null>(1);
+  const rows = data.rows.length;
+  const hasX = data.rows.some((row) => row[1] != null);
+  const problem =
+    rows === 0
+      ? null
+      : first === null || step === null
+        ? "Fill in both fields."
+        : validateSeriesSpec({ count: rows, first, mode: "arithmetic", step });
+  const generate = async () => {
+    if (problem || first === null || step === null) return;
+    if (
+      hasX &&
+      !(await confirmDelete(
+        "Replace the X values?",
+        "The series overwrites every X value in this table. You can undo this.",
+      ))
+    )
+      return;
+    update(generateXSeries(data, first, step), "Generate X Values as a Series");
+  };
+  return (
+    <Section title="X Values as a Series" icon={<ColumnsIcon />}>
+      <Row label="Start">
+        <NumberInput value={first} aria-label="Series start value" onChange={setFirst} />
+      </Row>
+      <Row label="Increment">
+        <NumberInput value={step} aria-label="Series increment" onChange={setStep} />
+      </Row>
+      <Button variant="accent" disabled={rows === 0 || problem !== null} onClick={() => void generate()}>
+        Generate X Values
+      </Button>
+      {rows === 0 ? (
+        <p className="text-small text-secondary">Add rows to the table first — the series fills one X per row.</p>
+      ) : (
+        <p className="text-small text-secondary">
+          Fills the X column with {rows} values, {first ?? "…"} onwards in steps of {step ?? "…"}. A series runs at
+          most {MAX_SERIES_VALUES.toLocaleString()} values.
+        </p>
+      )}
+      {problem && <p className="text-small text-red-600">{problem}</p>}
+    </Section>
   );
 }
 
@@ -153,6 +289,134 @@ function FormatPanel({ data, update }: { data: TableData; update: (next: TableDa
   );
 }
 
+/** A Multiple Variables table's calculated variables (Prism 11, seq 156):
+ *  whole-variable formulas that live in the table and update when a source
+ *  value changes. Each one lists its formula (and its error, when it cannot
+ *  run); the add form and the per-variable edit take a formula with or
+ *  without its leading `=`. Removing one deletes its column and its values
+ *  (Undo brings them back). */
+function CalculatedVariablesPanel({
+  data,
+  update,
+}: {
+  data: TableData;
+  update: (next: TableData, label: string) => void;
+}) {
+  const vars = data.calculated ?? [];
+  const [name, setName] = React.useState("");
+  const [formula, setFormula] = React.useState("");
+  const [addError, setAddError] = React.useState<string | null>(null);
+  const [editing, setEditing] = React.useState<string | null>(null);
+  const [editFormula, setEditFormula] = React.useState("");
+  const [editError, setEditError] = React.useState<string | null>(null);
+  // A formula as typed, with or without its leading `=`.
+  const bare = (text: string) => (text.startsWith("=") ? text.slice(1) : text);
+  const add = () => {
+    const res = addCalculatedVariable(data, name, bare(formula));
+    if ("error" in res) {
+      setAddError(res.error);
+      return;
+    }
+    update(res.data, "Add Calculated Variable");
+    setName("");
+    setFormula("");
+    setAddError(null);
+  };
+  const saveEdit = (variable: string) => {
+    const res = setCalculatedFormula(data, variable, bare(editFormula));
+    if ("error" in res) {
+      setEditError(res.error);
+      return;
+    }
+    update(res.data, "Edit Calculated Variable");
+    setEditing(null);
+    setEditError(null);
+  };
+  const remove = async (variable: string) => {
+    if (
+      !(await confirmDelete(
+        `Delete calculated variable “${variable}”?`,
+        "Its column and its values will be deleted too. You can undo this.",
+      ))
+    )
+      return;
+    update(removeCalculatedVariable(data, variable), "Remove Calculated Variable");
+  };
+  return (
+    <Section title="Calculated Variables" icon={<ColumnsIcon />}>
+      {vars.map((v) => (
+        <div key={v.name} className="flex flex-col gap-1 border-b border-separator pb-2 last:border-0 last:pb-0">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-regular font-medium">{v.name}</span>
+            <span className="flex gap-1">
+              <Button
+                size="small"
+                onClick={() => {
+                  setEditing(v.name);
+                  setEditFormula(`=${v.formula}`);
+                  setEditError(null);
+                }}
+              >
+                Edit
+              </Button>
+              <Button size="small" onClick={() => void remove(v.name)}>
+                Remove
+              </Button>
+            </span>
+          </div>
+          {editing === v.name ? (
+            <>
+              <Input
+                value={editFormula}
+                aria-label={`Formula for ${v.name}`}
+                onChange={(e) => setEditFormula(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveEdit(v.name);
+                  else if (e.key === "Escape") setEditing(null);
+                }}
+              />
+              <div className="flex gap-1">
+                <Button size="small" variant="accent" onClick={() => saveEdit(v.name)}>
+                  Save
+                </Button>
+                <Button size="small" onClick={() => setEditing(null)}>
+                  Cancel
+                </Button>
+              </div>
+              {editError && <p className="text-small text-red-600">{editError}</p>}
+            </>
+          ) : (
+            <span className="text-small text-secondary">={v.formula}</span>
+          )}
+          {v.error && <p className="text-small text-red-600">{v.error}</p>}
+        </div>
+      ))}
+      <div className="flex flex-col gap-1">
+        <Input value={name} placeholder="New variable name" aria-label="New variable name" onChange={(e) => setName(e.target.value)} />
+        <Input
+          value={formula}
+          placeholder="=A + B"
+          aria-label="New variable formula"
+          onChange={(e) => setFormula(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") add();
+          }}
+        />
+        <div>
+          <Button variant="accent" onClick={add} disabled={!name.trim() || !formula.trim()}>
+            Add Calculated Variable
+          </Button>
+        </div>
+        {addError && <p className="text-small text-red-600">{addError}</p>}
+      </div>
+      <p className="text-small text-secondary">
+        Type `=` in an empty variable in the grid, or add one here. Values update live when a source changes, and a
+        calculated variable can be used in any analysis like a typed variable.
+      </p>
+    </Section>
+  );
+}
+
 /** A grouped table's structure: groups and sub-columns per group, each change at once.
  *  Taking away a group or sub-column that holds values asks first (Undo brings it back).
  *  A nested table's panel adds the subgroups level (add/remove subgroup within a
@@ -175,6 +439,29 @@ function GroupsPanel({ data, update }: { data: TableData; update: (next: TableDa
       }
       update(renestTable(data, g, s, r), "Change Groups");
     };
+    // The sub-columns' format, as on a grouped table: raw replicates, or
+    // pre-calculated summaries (mean / SD or SEM / N…) entered instead of
+    // replicates, one set per subgroup ("A:S1:Mean", "A:S1:SD", "A:S1:N").
+    const format = summaryFormatOf(data);
+    const formatWidth = format === "replicates" ? replicates : summarySubcolumns(format).length;
+    const changeFormat = async (next: SummaryFormat) => {
+      if (next === format) return;
+      if (applySummaryFormatNestedLoses(data, next)) {
+        const newWidth = next === "replicates" ? replicates : summarySubcolumns(next).length;
+        const dropped = data.columns
+          .slice(1, 1 + replicates)
+          .map((n) => n.slice(n.lastIndexOf(":") + 1))
+          .slice(newWidth);
+        if (
+          !(await confirmDelete(
+            `Delete sub-column ${dropped.map((s) => `“${s}”`).join(", ")} of each subgroup?`,
+            DELETED,
+          ))
+        )
+          return;
+      }
+      update(applySummaryFormatNested(data, next), "Change Sub-column Format");
+    };
     return (
       <Section title="Groups" icon={<ColumnsIcon />}>
         <Stepper
@@ -191,10 +478,23 @@ function GroupsPanel({ data, update }: { data: TableData; update: (next: TableDa
           step={1}
           onChange={(s) => void renest(groups, s, replicates)}
         />
+        {/* A summary format's width is fixed — the Replicates stepper is
+          pinned to it (min = max = its width, so both buttons disable) —
+          and narrowing to a shorter format asks first when a sub-column
+          past its width holds values. */}
+        <div className="flex items-center justify-between">
+          <span className="text-small text-secondary">Sub-column format</span>
+          <Select
+            value={format}
+            onChange={(f) => void changeFormat(f)}
+            options={SUMMARY_FORMATS.map((f) => ({ value: f.value, label: f.label }))}
+          />
+        </div>
         <Stepper
           label="Replicates"
           value={replicates}
-          {...GROUPED_LIMITS.nested.replicates}
+          min={format === "replicates" ? GROUPED_LIMITS.nested.replicates.min : formatWidth}
+          max={format === "replicates" ? GROUPED_LIMITS.nested.replicates.max : formatWidth}
           step={1}
           onChange={(r) => void renest(groups, subgroups, r)}
         />
@@ -350,9 +650,53 @@ function ReplicatesPanel({
       renamed,
     );
   };
+  // The Y sub-columns' format: raw replicates, or pre-calculated summaries
+  // (mean / SD or SEM / N…) entered instead of replicates, one set per Y
+  // data set ("A:Mean", "A:SD", "A:N"). A summary format's width is fixed —
+  // the Replicates stepper is pinned to it — and narrowing to a shorter
+  // format asks first when a sub-column past its width holds values. A
+  // table with one column per Y data set has no sets yet: picking a format
+  // makes each Y column a set of its own.
+  const format = summaryFormatOf(data);
+  const formatWidth = format === "replicates" ? replicates : summarySubcolumns(format).length;
+  const changeFormat = async (next: SummaryFormat) => {
+    if (next === format) return;
+    if (applySummaryFormatXYLoses(data, next)) {
+      const lead = data.columns[1]?.includes(":") ? 1 : 2;
+      const oldWidth = data.replicates ?? 1;
+      const newWidth = next === "replicates" ? oldWidth : summarySubcolumns(next).length;
+      const dropped = data.columns
+        .slice(lead, lead + oldWidth)
+        .map((n) => n.slice(n.indexOf(":") + 1))
+        .slice(newWidth);
+      if (
+        !(await confirmDelete(
+          `Delete sub-column ${dropped.map((s) => `“${s}”`).join(", ")} of each data set?`,
+          DELETED,
+        ))
+      )
+        return;
+    }
+    update(applySummaryFormatXY(data, next), "Change Sub-column Format");
+  };
   return (
     <Section title="Replicates" icon={<ColumnsIcon />}>
-      <Stepper label="Replicates" value={replicates} {...GROUPED_LIMITS.replicates} step={1} onChange={replicate} />
+      <div className="flex items-center justify-between">
+        <span className="text-small text-secondary">Sub-column format</span>
+        <Select
+          value={format}
+          onChange={(f) => void changeFormat(f)}
+          options={SUMMARY_FORMATS.map((f) => ({ value: f.value, label: f.label }))}
+        />
+      </div>
+      <Stepper
+        label="Replicates"
+        value={replicates}
+        min={format === "replicates" ? GROUPED_LIMITS.replicates.min : formatWidth}
+        max={format === "replicates" ? GROUPED_LIMITS.replicates.max : formatWidth}
+        step={1}
+        onChange={replicate}
+      />
       {isGrouped(data) && (
         <Stepper
           label="Data sets"

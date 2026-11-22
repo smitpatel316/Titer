@@ -15,7 +15,9 @@ import { SidePanel, SidebarItem } from "../ui/layout";
 import { popupMenu } from "../native";
 import { useOutline, useProjectActions, type OutlineNode } from "../store/use-project-store";
 import { removeWithConfirm } from "../store/use-document";
-import { NODE_NAMES, SHEET_HIGHLIGHTS, SHEET_HIGHLIGHT_STYLE } from "../store/types";
+import { NODE_NAMES, SHEET_HIGHLIGHTS, SHEET_HIGHLIGHT_STYLE, TAG_COLORS, type TagColor } from "../store/types";
+import { colorDot } from "../views/graphs/style-menus";
+import { titleCase } from "../lib/format";
 import { highlightStyle, searchProject, SEARCH_FIELD_LABELS } from "../lib/project-search";
 import { clampWidth, SIDEBAR_WIDTH, useLayout } from "../store/use-layout";
 
@@ -71,7 +73,7 @@ export function SidebarToggle({ className }: { className?: string }) {
 export function ProjectSidebar() {
   // The outline, not the whole project: editing a table or a graph doesn't redraw the sidebar.
   const { tables, infos, figures, orphaned, activeNodeId } = useOutline();
-  const { get, setActiveNode, renameNode, removeNode, duplicateFamily, openSelector, reorderTables, reorderChildren, createFigure, setSheetHighlight, createInfoSheet } =
+  const { get, setActiveNode, renameNode, removeNode, duplicateFamily, openSelector, reorderTables, reorderChildren, createFigure, setSheetHighlight, createInfoSheet, setTags } =
     useProjectActions();
   const { sidebar, sidebarWidth, setLayout } = useLayout();
 
@@ -163,6 +165,8 @@ export function ProjectSidebar() {
     },
   });
 
+  // A frozen sheet (seq 237) shows in italics, as in Prism's Navigator.
+  const frozenClass = (node: OutlineNode) => (node.frozen ? "italic" : "");
   const rowClass = (id: string): string =>
     [dropClass(dropTarget, id), draggingId === id ? "opacity-40" : ""].filter(Boolean).join(" ");
 
@@ -222,6 +226,23 @@ export function ProjectSidebar() {
     e.preventDefault();
   };
 
+  // The Finder's tags: each color ringed while the item has it; a pick adds or takes it away.
+  const tagsMenu = (node: OutlineNode) => ({
+    text: "Tags",
+    items: (Object.keys(TAG_COLORS) as TagColor[]).map((color) => {
+      const on = node.tags?.includes(color) ?? false;
+      return {
+        text: titleCase(color),
+        icon: colorDot(TAG_COLORS[color], on),
+        action: () =>
+          setTags(
+            node.id,
+            (Object.keys(TAG_COLORS) as TagColor[]).filter((c) => (c === color ? !on : node.tags?.includes(c))),
+          ),
+      };
+    }),
+  });
+
   const tableMenu = (table: OutlineNode & { children: OutlineNode[] }) =>
     void popupMenu([
       { text: "New Analysis…", action: () => openSelector({ kind: "new-analysis", tableId: table.id }) },
@@ -232,6 +253,7 @@ export function ProjectSidebar() {
       { item: "Separator" },
       { text: "Duplicate Family", action: () => duplicateFamily(table.id) },
       { text: "Rename", action: () => setRenaming(table.id) },
+      tagsMenu(table),
       highlightMenu(table),
       // The last table stays: a project is never empty.
       {
@@ -272,6 +294,7 @@ export function ProjectSidebar() {
           ]
         : []),
       { text: "Rename", action: () => setRenaming(child.id) },
+      tagsMenu(child),
       highlightMenu(child),
       { text: `Delete ${NODE_NAMES[child.type]}…`, action: () => removeWithConfirm(child, removeNode) },
     ]);
@@ -358,6 +381,7 @@ export function ProjectSidebar() {
           <SidebarItem
             key={table.id}
             icon={<GridNineIcon className="size-4" />}
+            tags={table.tags?.map((c) => TAG_COLORS[c])}
             title={table.name}
             selected={activeNodeId === table.id}
             highlight={highlightStyle(table.highlight) ?? undefined}
@@ -379,6 +403,7 @@ export function ProjectSidebar() {
                 icon={
                   child.type === "analysis" ? <SigmaIcon className="size-4" /> : <ChartLineIcon className="size-4" />
                 }
+                tags={child.tags?.map((c) => TAG_COLORS[c])}
                 title={child.name}
                 selected={activeNodeId === child.id}
                 highlight={highlightStyle(child.highlight) ?? undefined}
@@ -389,7 +414,7 @@ export function ProjectSidebar() {
                   e.preventDefault();
                   childMenu(child);
                 }}
-                className={rowClass(child.id)}
+                className={[rowClass(child.id), frozenClass(child)].filter(Boolean).join(" ")}
                 {...rowDnd("child", child.id, table.id)}
               />
             ))}
@@ -399,6 +424,7 @@ export function ProjectSidebar() {
           <SidebarItem
             key={info.id}
             icon={<InfoIcon className="size-4" />}
+            tags={info.tags?.map((c) => TAG_COLORS[c])}
             title={info.name}
             selected={activeNodeId === info.id}
             renaming={renaming === info.id}
@@ -414,6 +440,7 @@ export function ProjectSidebar() {
           <SidebarItem
             key={figure.id}
             icon={<LayoutIcon className="size-4" />}
+            tags={figure.tags?.map((c) => TAG_COLORS[c])}
             title={figure.name}
             selected={activeNodeId === figure.id}
             highlight={highlightStyle(figure.highlight) ?? undefined}
@@ -424,12 +451,14 @@ export function ProjectSidebar() {
               e.preventDefault();
               childMenu(figure);
             }}
+            className={frozenClass(figure)}
           />
         ))}
         {orphaned.map((orphan) => (
           <SidebarItem
             key={orphan.id}
             icon={<SigmaIcon className="size-4" />}
+            tags={orphan.tags?.map((c) => TAG_COLORS[c])}
             title={orphan.name}
             suffix="(orphaned)"
             selected={activeNodeId === orphan.id}

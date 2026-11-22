@@ -2,6 +2,7 @@
 // the window, the project windows and what they open, and the menus. Everything else in
 // the app is plain web code.
 import { invoke } from "@tauri-apps/api/core";
+import { join, tempDir } from "@tauri-apps/api/path";
 import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getVersion, setTheme as setAppTheme } from "@tauri-apps/api/app";
@@ -10,6 +11,8 @@ import { Menu, Submenu, type MenuOptions } from "@tauri-apps/api/menu";
 import { message, save } from "@tauri-apps/plugin-dialog";
 import type { RVector } from "./stats/webr";
 import { cancelActiveEvals, interruptR, resetR, type EngineBootStatus } from "./stats/webr";
+import { buildKeynoteScript, keynoteSizePoints } from "./lib/office-export";
+import { isMacOs } from "./lib/channel";
 import {
   createEvalQueue,
   setRQueueSnapshot,
@@ -26,6 +29,10 @@ import type {
 
 /** False when the UI runs in a plain browser (`npm run web`, for development) or in the tests. */
 export const isNative = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+/** True on macOS (the Mac-only menu items, like Close All, hang off this). */
+export const isMac =
+  typeof navigator !== "undefined" && /Mac/.test(navigator.platform ?? navigator.userAgent ?? "");
 
 const win = () => getCurrentWindow();
 
@@ -119,9 +126,69 @@ export function writeFile(path: string, data: string | Uint8Array) {
   return invoke("write_file", bytes, { headers: { path: encodeURIComponent(path) } });
 }
 
+/** Runs the Keynote AppleScript in the shell (`send_to_keynote` in
+ *  main.rs): Keynote makes the presentation and saves the .key at `path`.
+ *  The shell deletes the temp PNG and its script file once osascript
+ *  finishes; macOS-only — the shell refuses anywhere else. */
+export const sendToKeynote = (script: string, pngPath: string, path: string) =>
+  invoke<string>("send_to_keynote", { script, pngPath, path });
+
+/** Hands a PNG to Keynote on macOS (seq 217): the PNG goes to a temp
+ *  file, `buildKeynoteScript` writes the AppleScript for it, and the
+ *  shell runs it in Keynote, which saves the real .key at `outPath` and
+ *  stays open on it, as Prism leaves it. Returns the .key path. Throws
+ *  on non-macOS — the menu hides the item there, and the MCP tool
+ *  refuses the target there first. */
+export async function handoffPngToKeynote(
+  png: Uint8Array,
+  title: string,
+  outPath: string,
+  widthPx: number,
+  heightPx: number,
+  dpi: number,
+): Promise<string> {
+  if (!isMacOs()) throw new Error("Send to Keynote needs macOS with Keynote installed.");
+  const tmp = await tempDir();
+  const pngPath = await join(tmp, `titer-keynote-${Date.now()}-${Math.random().toString(36).slice(2)}.png`);
+  await writeFile(pngPath, png);
+  const { widthPt, heightPt } = keynoteSizePoints(widthPx, heightPx, dpi);
+  const script = buildKeynoteScript({ pngPath, outPath, title, widthPt, heightPt });
+  return sendToKeynote(script, pngPath, outPath);
+}
+
 /** My Palettes' file in Titer's data folder: its text ("" before the first), and a new one. */
 export const readMyPalettes = () => invoke<string>("read_my_palettes");
 export const writeMyPalettes = (text: string) => invoke("write_my_palettes", { text });
+
+// ── Automatic backup (Plane seq 226, 1.8.0) ─────────────────────────────
+// The separate-copy store in src-tauri/src/backup.rs: one `.hlx` snapshot
+// per project, in Titer's data folder. The engine in
+// src/store/use-document.ts calls these; nothing else should.
+
+/** One backup, as the shell lists it. `saved_at_ms` is when the snapshot
+ *  was written; `source_mtime_ms` is when the project file itself was last
+ *  written (null for untitled and cloud projects). */
+export interface BackupEntry {
+  key: string;
+  display_name: string;
+  source_path: string | null;
+  saved_at_ms: number;
+  source_mtime_ms: number | null;
+  size_bytes: number;
+}
+
+/** Writes (or overwrites) this project's backup snapshot. `base64` is the
+ *  `.hlx` serialization of the current project. */
+export const backupWrite = (identity: string, displayName: string, sourcePath: string | null, base64: string) =>
+  invoke<BackupEntry>("backup_write", { identity, displayName, sourcePath, base64 });
+/** The backups on disk, newest first (stale and incomplete ones pruned). */
+export const backupList = () => invoke<BackupEntry[]>("backup_list");
+/** The backup for one project identity, if it has one within the keep. */
+export const backupStatus = (identity: string) => invoke<BackupEntry | null>("backup_status", { identity });
+/** One backup's snapshot bytes, as base64, for restoring. */
+export const backupRead = (key: string) => invoke<string>("backup_read", { key });
+/** Deletes a project's backup. Missing is fine. */
+export const backupDelete = (key: string) => invoke<void>("backup_delete", { key });
 
 // ── AI connections (v3 Phase 1: the in-process MCP server) ─────────────
 // The server is off by default and starts only from Settings → AI
@@ -139,6 +206,21 @@ export interface McpStatus {
 
 export const mcpStatus = () => invoke<McpStatus>("mcp_status");
 export const mcpSetEnabled = (enabled: boolean) => invoke<McpStatus>("mcp_set_enabled", { enabled });
+
+/** What connecting to Antigravity did: `connected` (entry written) or
+ *  `already_connected` (the entry was already there — nothing touched). */
+export interface McpAntigravityConnect {
+  outcome: "connected" | "already_connected";
+  command: string;
+  config_path: string;
+}
+
+/** One-click Antigravity setup: turns the MCP server on (persisted opt-in)
+ *  and writes the stdio `titer` entry into ~/.gemini/config/mcp_config.json.
+ *  No token anywhere — the bridge reads it from Titer's own connection file. */
+export const mcpConnectAntigravity = () => invoke<McpAntigravityConnect>("mcp_connect_antigravity");
+/** Brings Antigravity forward (macOS) so the user can Refresh its MCP servers. */
+export const mcpOpenAntigravity = () => invoke<void>("mcp_open_antigravity");
 /** The local bearer token, for Settings to show (never for an agent). */
 export const mcpToken = () => invoke<string>("mcp_token");
 /** Rotates the token; only while the server is stopped. */
@@ -147,6 +229,54 @@ export const mcpRegenerateToken = () => invoke<string>("mcp_regenerate_token");
 export const mcpClaudeCodeCommand = () => invoke<string>("mcp_claude_code_command");
 /** The Activity log's last lines (newest last). */
 export const mcpActivity = (limit: number) => invoke<string[]>("mcp_activity", { limit });
+
+/** One feedback report saved by `titer_send_feedback`, as Settings lists it. */
+export interface FeedbackEntry {
+  feedback_id: string;
+  ts: number;
+  kind: string;
+  summary: string;
+  details: string;
+  context: {
+    app_version?: string;
+    os?: string;
+    failed_tool?: string;
+    project_file?: string;
+    recent_activity?: { ts?: number; tool: string; ok?: boolean }[];
+  };
+}
+
+/** The saved feedback entries (newest first). */
+export const mcpFeedback = () => invoke<FeedbackEntry[]>("mcp_feedback");
+
+/** One allowlist group as Settings shows it, with its current on/off state. */
+export interface McpAllowlistGroup {
+  id: string;
+  label: string;
+  description: string;
+  tools: string[];
+  enabled: boolean;
+}
+
+/** The tool-allowlist groups (contract §12) with their current on/off state. */
+export const mcpAllowlist = () => invoke<McpAllowlistGroup[]>("mcp_allowlist");
+
+/** Records the enabled allowlist groups (Settings → AI Connections).
+ *  Takes effect for MCP sessions started after the change — a connected
+ *  AI app picks it up when it reconnects. Returns the groups now in effect. */
+export const mcpSetAllowlist = (groups: string[]) =>
+  invoke<McpAllowlistGroup[]>("mcp_set_allowlist", { groups });
+
+/** The user's feedback-sharing choice, if they have made one: `true` Share,
+ *  `false` Don't share, `null` never asked (fresh install or upgrade — the
+ *  first-run prompt shows). Lives in the app-data `mcp/` folder, so it
+ *  survives restarts and the MCP server reads the same record. */
+export const mcpFeedbackConsent = () => invoke<boolean | null>("mcp_feedback_consent");
+
+/** Records the user's feedback-sharing choice (first-run prompt, or the
+ *  Settings toggle). Returns the choice now in effect. */
+export const mcpSetFeedbackConsent = (sharing: boolean) =>
+  invoke<boolean | null>("mcp_set_feedback_consent", { sharing });
 
 /** This window's project, for the MCP server to serve. Published on every
  *  revision change (debounced, see store/mcp-publish.ts). A no-op where
@@ -456,11 +586,23 @@ export function setSpinner(at: [number, number] | null) {
   spinner = spinner.then(() => invoke<void>("set_spinner", { at })).catch(() => {});
 }
 
-/** Titer's GitHub page, its releases, or Buy Me a Coffee, in the default browser. */
-export const openLink = (link: "github" | "releases" | "coffee") => void invoke("open_link", { link });
+/** Titer's GitHub page, its releases, the user guide, or Buy Me a Coffee, in the default browser. */
+export const openLink = (link: "github" | "releases" | "coffee" | "guide") => void invoke("open_link", { link });
+
+/** A pre-filled GitHub issue for one saved feedback entry, in the
+ *  default browser. The shell only opens the fixed Titer issues/new
+ *  address (see `open_github_issue`); anything else is refused. */
+export const openGithubIssue = (url: string) => invoke<void>("open_github_issue", { url });
 
 // ── Updates ──────────────────────────────────────────────────────────────
 // The shell side lives in src-tauri/src/updater.rs.
+
+/** Fetches the channel manifest through the shell's curl, not the
+ *  webview's fetch: the webview enforces CORS and the channel host sends
+ *  no Access-Control-Allow-Origin, so the in-page fetch failed fast while
+ *  curl answered 200 (P0, Nov 19 2026). Returns the manifest body text. */
+export const fetchChannelManifestText = (url: string) =>
+  invoke<string>("fetch_channel_manifest", { url });
 
 /** Downloads the update asset to a temp file and checks its size and
  *  sha256 against the manifest; the temp path. */
@@ -477,6 +619,11 @@ export const applyUpdate = (path: string, version: string) =>
 /** Quits through the normal flow, as Titer ▸ Quit does: each project
  *  window asks about its unsaved changes first. */
 export const quitApp = () => invoke("quit_app");
+
+/** Closes every project window through the normal flow (seq 235): each
+ *  asks about its unsaved changes first, a Cancel stops the sequence,
+ *  and Titer itself stays open. */
+export const closeAll = () => invoke("close_all");
 
 /** Opens a URL in the default browser. Only provider authorize hosts are
  *  allowed (the shell refuses anything else) — used for OAuth sign-in, so
@@ -617,6 +764,74 @@ export async function onPrismFilePicked(handler: (path: string | null) => void) 
   return getCurrentWebviewWindow().listen<string | null>("prism-file-picked", ({ payload }) => handler(payload));
 }
 
+/** File ▸ Import Data File…: the Open panel for a data file (`.csv`,
+ *  `.tsv`, `.txt` or `.xlsx`). Non-blocking: the invoke returns at once,
+ *  and the shell emits "data-file-picked" with the path, or null on Cancel,
+ *  once the user picks. A blocking picker here deadlocked the app (Nov 9,
+ *  macOS + Linux): it parked the main thread while the panel needed that
+ *  thread to process clicks. */
+export const chooseDataFile = () => invoke("choose_data_file");
+
+/** Calls `handler` once with the path picked in the Import Data File
+ *  panel, or null if the user cancelled. Await it before opening the
+ *  panel so the pick is never missed; it returns the unlisten function. */
+export async function onDataFilePicked(handler: (path: string | null) => void) {
+  if (!isNative) return () => {};
+  return getCurrentWebviewWindow().listen<string | null>("data-file-picked", ({ payload }) => handler(payload));
+}
+
+/** A data file's (`.csv`, `.tsv`, `.txt`) text, for import. */
+export const readDataText = (path: string) => invoke<string>("read_data_text", { path });
+
+/** A data file's (`.xlsx`) bytes, for import — an `.xlsx` file is a ZIP, so
+ *  text won't do. The shell returns base64; this decodes it. */
+export async function readDataBytes(path: string): Promise<Uint8Array> {
+  const base64 = await invoke<string>("read_data_bytes", { path });
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** A linked-paste source file's contents (Prism 11, seq 168): bytes for an
+ *  `.xlsx` workbook, text for a delimited file. */
+export async function readLinkedSource(sourcePath: string, kind: "csv" | "xlsx"): Promise<string | Uint8Array> {
+  return kind === "xlsx" ? readDataBytes(sourcePath) : readDataText(sourcePath);
+}
+
+/** Linked paste (Prism 11, seq 168): after picking a source file, ask
+ *  whether the link updates itself when the file changes (Prism's
+ *  "Automatically update" checkbox, checked by default), updates by hand,
+ *  or cancels the paste. In the web build there is no three-way prompt,
+ *  so Cancel is not offered — the paste goes ahead by hand. */
+export async function askPasteLink(sourceName: string): Promise<"auto" | "manual" | "cancel"> {
+  if (!isNative)
+    return window.confirm(`Update “${sourceName}” automatically when the file changes?`) ? "auto" : "manual";
+  const answer = await message(`“${sourceName}” will stay linked to this table.`, {
+    title: "Paste Link",
+    kind: "info",
+    buttons: { yes: "Update Automatically", no: "Update By Hand", cancel: "Cancel" },
+  });
+  if (answer === "Update Automatically" || answer === "Yes") return "auto";
+  if (answer === "Update By Hand" || answer === "No") return "manual";
+  return "cancel";
+}
+
+/** Where an imported data file goes when its shape matches the active
+ *  table: a new table, appended to that table, or nowhere (Cancel). In the
+ *  web build (no native shell) a confirm stands in for the dialog. */
+export async function askImportTarget(tableName: string): Promise<"new" | "append" | "cancel"> {
+  if (!isNative) return window.confirm(`Add the imported data to “${tableName}”, or make a new table?`) ? "append" : "new";
+  const answer = await message(`The imported data fits “${tableName}” — same kind of table, same number of columns.`, {
+    title: "Import Data File",
+    kind: "info",
+    buttons: { yes: "New Table", no: `Add to “${tableName}”`, cancel: "Cancel" },
+  });
+  if (answer === "New Table" || answer === "Yes") return "new";
+  if (answer === `Add to “${tableName}”` || answer === "No") return "append";
+  return "cancel";
+}
+
 /** Analysis ▸ Apply Method…: the Open panel for a method file (`.pzm`).
  *  Non-blocking, like `choosePrismFile`: the invoke returns at once, and the
  *  shell emits "method-file-picked" with the path, or null on Cancel, once
@@ -631,11 +846,28 @@ export async function onMethodFilePicked(handler: (path: string | null) => void)
   return getCurrentWebviewWindow().listen<string | null>("method-file-picked", ({ payload }) => handler(payload));
 }
 
+/** File ▸ Merge…: the Open panel for a project file (`.hlx`, `.pzt`,
+ *  `.prism` or `.pzfx`) to merge into this project. Non-blocking, like
+ *  `choosePrismFile`: the invoke returns at once, and the shell emits
+ *  "merge-file-picked" with the path, or null on Cancel, once the user
+ *  picks. A blocking picker here deadlocked the app (Nov 9, macOS +
+ *  Linux): it parked the main thread while the panel needed that thread
+ *  to process clicks. */
+export const chooseMergeFile = () => invoke("choose_merge_file");
+
+/** Calls `handler` once with the path picked in the Merge panel, or null
+ *  if the user cancelled. Await it before opening the panel so the pick
+ *  is never missed; it returns the unlisten function. */
+export async function onMergeFilePicked(handler: (path: string | null) => void) {
+  if (!isNative) return () => {};
+  return getCurrentWebviewWindow().listen<string | null>("merge-file-picked", ({ payload }) => handler(payload));
+}
+
 /** A Prism `.pzfx` file's text, for import. */
 export const readPrismText = (path: string) => invoke<string>("read_prism_text", { path });
 
-/** A Prism `.prism` file's bytes, for import — a `.prism` file is a ZIP, so
- *  text won't do. The shell returns base64; this decodes it. */
+/** A Prism `.prism` or `.pzf` file's bytes, for import — a `.prism` file is a ZIP
+ *  and a `.pzf` file is binary, so text won't do for either. The shell returns base64; this decodes it. */
 export async function readPrismBytes(path: string): Promise<Uint8Array> {
   const base64 = await invoke<string>("read_prism_bytes", { path });
   const binary = atob(base64);
@@ -649,6 +881,17 @@ export function onNoWindows(handler: () => void) {
   if (!isNative) return () => {};
   const off = getCurrentWebviewWindow().listen("no-windows", handler);
   return () => void off.then((f) => f());
+}
+
+/** This window's label ("project-1", "project-2"…), or null outside the
+ *  shell. The Welcome dialog auto-shows only on the first project window. */
+export function windowLabel(): string | null {
+  if (!isNative) return null;
+  try {
+    return getCurrentWebviewWindow().label;
+  } catch {
+    return null;
+  }
 }
 
 /** Calls `handler` with what this window should open: once its page is ready, and
