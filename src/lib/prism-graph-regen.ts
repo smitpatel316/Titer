@@ -124,11 +124,11 @@ const notReconstructible = (reason: string): SidecarMapping => ({ reconstructibl
  * own format. Unknown format / non-auto / missing source → NO proposal,
  * listed with its reason, never guessed.
  *
- * Y CV OPEN POINT (design §3): the y_cv_n row draws SD bars derived as
- * mean × CV% / 100 — what Prism's Y CV auto graph actually draws still
- * needs confirmation against real Prism 11 before this row ships as
- * fact. The derivation is disclosed on the row (`derivedError`); if
- * Prism draws something else, change this row, do not ship a guess.
+ * Y CV (design §3): the y_cv_n row draws SD bars derived as mean ×
+ * CV% / 100 — CONFIRMED against real Prism 11 (Nov 21, 2026:
+ * cv-test.prism, Group A SD=10 = 100x10/100, Group B SD=10 =
+ * 200x5/100; SEM would have been 5 / 3.33). The derivation is
+ * disclosed on the row (`derivedError`).
  */
 export function mapSidecarGraph(input: SidecarMappingInput): SidecarMapping {
   if (!input.isAutoCreated) {
