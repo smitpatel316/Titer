@@ -1384,6 +1384,8 @@ export function executeArrangeDrawingObjects(job: McpJob, deps: GraphJobDeps): G
   for (const id of objectIds) drawingObject(job, node, id);
   need(job, deps.arrangeDrawingObjects, "arrange drawing objects")(nodeId, op as ArrangeOp, objectIds);
   return { result: { project_id: job.project_id, node_id: nodeId, op, object_ids: objectIds } };
+}
+
 /** `titer_list_regenerable_graphs` (read-only): the import-time
  *  `GraphPlan[]` for this project — the same plans the preview dialog
  *  shows. Errors when the project has no plans: not a Prism import, or
