@@ -156,10 +156,15 @@ export const R_PTUKEY =
  *  the smallest P against m pairs, the next against m − 1…, never below an earlier one),
  *  the False Discovery Rate (Benjamini-Hochberg step-up: the i-th smallest P against m/i
  *  pairs, never below a larger one), or Fisher's LSD (none). Holm-Šidák's step-down and
- *  the FDR's step-up give no CI (`pa` NA): no single critical value covers the family. */
-export const R_ADJUST = `adj<-function(p,how){m<-length(p);if(how=="fisher")return(p);if(how=="bonferroni")return(pmin(1,m*p))
-if(how=="sidak")return(1-(1-p)^m);o<-order(p);if(how=="fdr"){a<-rev(cummin(rev(m/seq_len(m)*p[o])));r<-numeric(m);r[o]<-pmin(1,a);return(r)}
-a<-cummax(1-(1-p[o])^(m-seq_len(m)+1));r<-numeric(m);r[o]<-pmin(1,a);r}
+ *  the FDR's step-up give no CI (`pa` NA): no single critical value covers the family.
+ *  `adj` counts only the non-NA pairs in `m` — as R's `p.adjust` does — and leaves NA
+ *  pairs NA (seq 311: a NaN pair used to inflate m for its siblings, and one NA in the
+ *  FDR branch poisoned the whole family through `cummin`). `pa` takes `m` from its
+ *  caller, which must pass the non-NA count (e.g. `sum(!is.na(ps))`), not the family's
+ *  length, or the CIs come out too wide by the same miscount. */
+export const R_ADJUST = `adj<-function(p,how){idx<-which(!is.na(p));q<-p[idx];m<-length(q);if(how=="fisher")return(p);if(how=="bonferroni"){r<-p;r[idx]<-pmin(1,m*q);return(r)}
+if(how=="sidak"){r<-p;r[idx]<-1-(1-q)^m;return(r)};o<-order(q);if(how=="fdr"){a<-rev(cummin(rev(m/seq_len(m)*q[o])));r<-p;r[idx[o]]<-pmin(1,a);return(r)}
+a<-cummax(1-(1-q[o])^(m-seq_len(m)+1));r<-p;r[idx[o]]<-pmin(1,a);r}
 pa<-function(t,df,how,m){p<-2*pt(-abs(t),df);switch(how,fisher=p,bonferroni=pmin(1,m*p),sidak=1-(1-p)^m,NA)}`;
 
 /** The pairs a test compares: every pair, or those `compared` names (`pairKey`, either way

@@ -15856,6 +15856,106 @@ check("multiple-t-tests null-in-family pins match R p.adjust (cycle 28b)", () =>
   deepStrictEqual(at4(adjustMultipleTTestPValues(ps, "fdr-bky", 5)), [null, 0.4733, 0.0832, 0.9333, 1]);
 });
 
+// Cycle 29 / seq 311: the R-side `adj` in `R_ADJUST` counted NaN pairs in the
+// family size m (and its FDR branch poisoned the whole family). RM-ANOVA,
+// Geisser-Greenhouse, A=B identical per subject so the A-B pair's differences
+// are all 0 (t = 0/0 = NaN); A-C/B-C raw p 0.00382 each. R's p.adjust drops
+// NAs (m = 2): bonferroni 0.00764, Šídák/Holm-Šídák 0.00763, BH 0.00382;
+// the port gave 0.01146 / 0.01142 / 0.01142 / NULL (m = 3).
+check("RM-ANOVA Geisser-Greenhouse post-hoc with a NaN pair counts only the non-NaN pairs (seq 311)", async () => {
+  const A = [10, 12, 11, 13, 10, 12];
+  const B = [10, 12, 11, 13, 10, 12];
+  const C = [15, 14, 18, 16, 13, 19];
+  const table: TableData = {
+    columns: ["Title", "A", "B", "C"],
+    rows: A.map((_, i) => [`S${i + 1}`, String(A[i]), String(B[i]), String(C[i])]),
+  };
+  // R's p.adjust has no Holm-Šídák or Šídák; define both here (NA-dropping,
+  // m = non-NA count), as in the cycle-29 probe.
+  const helpers = `hs<-function(p){q<-p[!is.na(p)];m<-length(q);o<-order(q);a<-cummax(1-(1-q[o])^(m-seq_len(m)+1));r<-numeric(m);r[o]<-pmin(1,a);r}
+sid<-function(p){r<-p;q<-p[!is.na(p)];m<-length(q);r[!is.na(p)]<-pmin(1,1-(1-q)^m);r}`;
+  const raw = await evalNamedVector(
+    `A<-c(${A.join(",")});B<-c(${B.join(",")});C<-c(${C.join(",")});` +
+      `tp<-function(d)tryCatch(t.test(d)$p.value,error=function(e)NA_real_);` +
+      `raw<-c(tp(A-B),tp(A-C),tp(B-C));` +
+      `c(rawAB=raw[1],rawAC=raw[2],rawBC=raw[3])`,
+  );
+  ok(raw.rawAB == null, `A-B raw p is NaN, got ${raw.rawAB}`);
+  const close = (got: number | null | undefined, want: number | null | undefined, label: string) => {
+    const same =
+      (got == null && want == null) ||
+      (got != null && want != null && Math.abs(got - want) <= 1e-6 * Math.max(1, Math.abs(want)));
+    ok(same, `${label}: port=${got}, R=${want}`);
+  };
+  for (const method of ["bonferroni", "sidak", "holm-sidak", "fdr"] as const) {
+    const adjExpr =
+      method === "holm-sidak"
+        ? `${helpers};a<-hs(raw);c(p1=NA_real_,p2=a[1],p3=a[2])`
+        : method === "sidak"
+          ? `${helpers};a<-sid(raw);c(p1=a[1],p2=a[2],p3=a[3])`
+          : method === "fdr"
+            ? `a<-p.adjust(raw,"BH");c(p1=a[1],p2=a[2],p3=a[3])`
+            : `a<-p.adjust(raw,"${method}");c(p1=a[1],p2=a[2],p3=a[3])`;
+    const rAdj = await evalNamedVector(
+      `A<-c(${A.join(",")});B<-c(${B.join(",")});C<-c(${C.join(",")});` +
+        `tp<-function(d)tryCatch(t.test(d)$p.value,error=function(e)NA_real_);` +
+        `raw<-c(tp(A-B),tp(A-C),tp(B-C));${adjExpr}`,
+    );
+    const out = await runAnalysis("rm-anova", table, {
+      sphericity: false,
+      posthoc: method,
+    } as AnalysisParams);
+    if ("error" in out) throw new Error(out.error);
+    const cs = out.comparisons!;
+    close(
+      cs.find((x) => x.group1 === "A" && x.group2 === "B")?.p,
+      rAdj.p1 as number | null,
+      `rm-anova GG ${method} A-B`,
+    );
+    close(
+      cs.find((x) => x.group1 === "A" && x.group2 === "C")?.p,
+      rAdj.p2 as number | null,
+      `rm-anova GG ${method} A-C`,
+    );
+    close(
+      cs.find((x) => x.group1 === "B" && x.group2 === "C")?.p,
+      rAdj.p3 as number | null,
+      `rm-anova GG ${method} B-C`,
+    );
+  }
+});
+
+// Cycle 29 / seq 311, CI side: `pa` inverted CIs against the full family size
+// (m = 3), so the surviving pairs' CIs were ~12% too wide. R-correct m = 2
+// (non-NaN pairs): half-width qt(1-0.025/2, 5) * se = 2.7998; the port gave
+// 3.1279 (m = 3).
+check("RM-ANOVA Geisser-Greenhouse Bonferroni CI uses the non-NaN family size (seq 311)", async () => {
+  const A = [10, 12, 11, 13, 10, 12];
+  const B = [10, 12, 11, 13, 10, 12];
+  const C = [15, 14, 18, 16, 13, 19];
+  const table: TableData = {
+    columns: ["Title", "A", "B", "C"],
+    rows: A.map((_, i) => [`S${i + 1}`, String(A[i]), String(B[i]), String(C[i])]),
+  };
+  const truth = await evalNamedVector(
+    `A<-c(${A.join(",")});C<-c(${C.join(",")});d<-A-C;se<-sd(d)/sqrt(length(d));` +
+      `c(se=se,half_m2=qt(1-0.025/2,5)*se,half_m3=qt(1-0.025/3,5)*se)`,
+  );
+  const out = await runAnalysis("rm-anova", table, {
+    sphericity: false,
+    posthoc: "bonferroni",
+  } as AnalysisParams);
+  if ("error" in out) throw new Error(out.error);
+  const c = out.comparisons!.find((x) => x.group1 === "A" && x.group2 === "C");
+  const half = c != null && c.low != null && c.high != null ? (c.high - c.low) / 2 : null;
+  ok(
+    half != null &&
+      truth.half_m2 != null &&
+      Math.abs(half - truth.half_m2) <= 1e-6 * Math.max(1, Math.abs(truth.half_m2)),
+    `A-C CI half-width: port=${half}, R m=2=${truth.half_m2}, m=3=${truth.half_m3}`,
+  );
+});
+
 check("FDR Q falls back to 5% outside 0.01–50, and the significance threshold is Q for FDR, 0.05 otherwise", () => {
   strictEqual(fdrQ(undefined), 5);
   strictEqual(fdrQ(5), 5);

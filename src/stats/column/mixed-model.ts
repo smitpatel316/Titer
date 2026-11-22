@@ -120,7 +120,7 @@ export async function runMixedModel(columns: Column[], params: RmAnovaParams | u
           `T<-x[paste0("t_",0:${pairs.length - 1})];DF<-x[paste0("df_",0:${pairs.length - 1})];SE<-x[paste0("se_",0:${pairs.length - 1})];` +
           (method === "tukey"
             ? `ps<-mapply(function(t,df)ptk(abs(t)*sqrt(2),${k},df),T,DF);h<-mapply(function(df)crit(function(x)ptk(x*sqrt(2),${k},df)),DF)*SE`
-            : `ps<-adj(2*pt(-abs(T),DF),"${how}");h<-${method === "holm-sidak" ? "NA*SE" : `mapply(function(df)crit(function(x)pa(x,df,"${how}",${pairs.length})),DF)*SE`}`) +
+            : `ps<-adj(2*pt(-abs(T),DF),"${how}");h<-${method === "holm-sidak" ? "NA*SE" : `mapply(function(df)crit(function(x)pa(x,df,"${how}",sum(!is.na(ps)))),DF)*SE`}`) +
           `;D<-x[paste0("d_",0:${pairs.length - 1})];c(x,setNames(ps,paste0("p_",0:${pairs.length - 1})),setNames(D-h,paste0("lo_",0:${pairs.length - 1})),setNames(D+h,paste0("hi_",0:${pairs.length - 1})))`
         : "x") +
       "},error=function(e)c(F=NA))",

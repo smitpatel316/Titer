@@ -89,7 +89,7 @@ export const rmAnovaSpec: ColumnTestSpec<RmAnovaParams> = {
     // R's correction calls the uncorrected one `fisher`; Titer's name is `lsd`.
     const how = posthoc === "lsd" ? "fisher" : posthoc;
     const f = (x: string) =>
-      posthoc === "tukey" ? `ptk(${x}*sqrt(2),${k},w[2])` : `pa(${x},w[2],"${how}",${pairs.length})`;
+      posthoc === "tukey" ? `ptk(${x}*sqrt(2),${k},w[2])` : `pa(${x},w[2],"${how}",sum(!is.na(ps)))`;
     const ci = (i: number, j: number) =>
       posthoc === "holm-sidak"
         ? []

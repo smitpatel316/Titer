@@ -89,7 +89,7 @@ function comparisons(groups: Group[], p: AnovaParams): { setup: string; values: 
       setup:
         `${pooledSetup};${R_ADJUST};` +
         `ps<-adj(c(${chosen.map(([i, j]) => `2*pt(-abs(${diff(i, j)})/${pooled(i, j)},dfe)`).join(",")}),"${how}");` +
-        `cv<-crit(function(x)pa(x,dfe,"${how}",${chosen.length}))`,
+        `cv<-crit(function(x)pa(x,dfe,"${how}",sum(!is.na(ps))))`,
       values: chosen
         .flatMap(([i, j], q) => [
           `p_${i}_${j}=ps[${q + 1}]`,
