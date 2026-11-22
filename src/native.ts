@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { join, tempDir } from "@tauri-apps/api/path";
 import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { WebviewWindow, getCurrentWebviewWindow, getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { getVersion, setTheme as setAppTheme } from "@tauri-apps/api/app";
 import { Image } from "@tauri-apps/api/image";
 import { Menu, Submenu, type MenuOptions } from "@tauri-apps/api/menu";
@@ -925,12 +925,73 @@ let menuBar: (Menu | Submenu)[] = [];
 // build, never ends up over a later one.
 let installing: Promise<void> = Promise.resolve();
 
-/** Installs the app's menu bar: `menus`, then Window and Help, which macOS fills with
- *  the open windows and its menu search. */
+/** One open project window, for the Window menu's list (seq 299). */
+export type OpenProjectWindow = {
+  label: string;
+  /** The window's title — its project file's name, or "Untitled". */
+  title: string;
+  /** True for the window in front. */
+  focused: boolean;
+};
+
+/** The Window menu's open-project list, in open order: the frontmost window
+ *  is checkmarked; picking one focuses it. Empty when no project window is
+ *  open — the section is then left out. */
+export function windowMenuItems(windows: OpenProjectWindow[], focus: (label: string) => void): MenuItems {
+  if (windows.length === 0) return [];
+  return [
+    { item: "Separator" } as const,
+    ...windows.map((w) => ({
+      text: w.title || "Untitled",
+      checked: w.focused,
+      action: () => focus(w.label),
+    })),
+  ];
+}
+
+/** A `project-N` label's N: the shell hands labels out in creation order,
+ *  so sorting by it is open order. Anything else sorts first. */
+const projectLabelIndex = (label: string) => {
+  const n = Number(label.slice("project-".length));
+  return Number.isInteger(n) ? n : -1;
+};
+
+/** The open project windows, in open order, with the frontmost one marked.
+ *  The engine window is not a project window and is left out. No-op
+ *  outside the app (tests, `npm run web`) — the list stays empty there. */
+export async function openProjectWindows(): Promise<OpenProjectWindow[]> {
+  if (!isNative) return [];
+  const windows = (await getAllWebviewWindows())
+    .filter((w) => w.label.startsWith("project-"))
+    .sort((a, b) => projectLabelIndex(a.label) - projectLabelIndex(b.label));
+  return Promise.all(
+    windows.map(async (w) => ({
+      label: w.label,
+      // A window still being made has no title yet: it reads as Untitled.
+      title: (await w.title().catch(() => "")) || "Untitled",
+      focused: await w.isFocused().catch(() => false),
+    })),
+  );
+}
+
+/** Installs the app's menu bar: `menus`, then Window (Minimize / Maximize /
+ *  BringAllToFront, plus the open-project list from seq 299) and Help, which
+ *  macOS fills with its menu search. */
 export function installMenuBar(menus: MenuItems, windowItems: MenuItems, helpItems: MenuItems): Promise<void> {
   if (!isNative) return Promise.resolve();
   const install = async () => {
-    const windows = await Submenu.new({ text: "Window", items: windowItems });
+    // The open-project list (seq 299): every project window by file name,
+    // frontmost checkmarked, picking one focuses it. The menu is rebuilt
+    // whenever the window in front changes, so the list follows windows
+    // opening and closing.
+    const open = await openProjectWindows();
+    const windows = await Submenu.new({
+      text: "Window",
+      items: [
+        ...windowItems,
+        ...windowMenuItems(open, (label) => void WebviewWindow.getByLabel(label).then((w) => w?.setFocus())),
+      ],
+    });
     const help = await Submenu.new({ text: "Help", items: helpItems });
     const menu = await Menu.new({ items: [...menus, windows, help] });
     await menu.setAsAppMenu();
