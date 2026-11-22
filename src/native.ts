@@ -63,6 +63,15 @@ export async function confirmDelete(title: string, detail: string): Promise<bool
   return answer === "Delete" || answer === "Ok";
 }
 
+/** A Revert / Cancel confirmation for File ▸ Revert to Saved (seq 306):
+ *  the caller passes the title and detail — the plain confirm's wording,
+ *  or the externally-changed file's, from src/lib/revert.ts. */
+export async function confirmRevert(title: string, detail: string): Promise<boolean> {
+  if (!isNative) return window.confirm(`${title}\n\n${detail}`);
+  const answer = await message(detail, { title, kind: "warning", buttons: { ok: "Revert", cancel: "Cancel" } });
+  return answer === "Revert" || answer === "Ok";
+}
+
 /** An Update Now / Later prompt for a newer version of Titer. `forced`:
  *  no Later — the channel says this version must not run, so the dialog
  *  has only Update Now. `installable`: false on a platform with no

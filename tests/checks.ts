@@ -19,6 +19,13 @@ import {
   type RQueueSnapshot,
 } from "../src/stats/r-queue";
 import { PARAM_KEYS_BY_ANALYSIS, parseProjectFile, parseProjectText, readPalette, serializeProjectFile, validateAnalysisParams, type ProjectFilePayload } from "../src/lib/project-file";
+import {
+  canRevertToSaved,
+  diskChangedExternally,
+  REVERT_CONFIRM_DETAIL,
+  REVERT_CONFIRM_TITLE,
+  revertExternalChangeTitle,
+} from "../src/lib/revert";
 import { extractFamily } from "../src/lib/family";
 import { applyWand, wandExamples, wandReportMessage } from "../src/lib/wand";
 import {
@@ -1276,6 +1283,90 @@ check("Save a Copy writes the whole project as it stands (seq 234)", () => {
   const again = read(serializeProjectFile(project));
   deepStrictEqual(again.project.nodes, project.nodes);
   deepStrictEqual(again.project.rootOrder, project.rootOrder);
+});
+
+// seq 306: File ▸ Revert to Saved — the enablement rule, the external-change
+// detection, and the reload itself: the disk text comes back, the dirty flag
+// clears, and the file path is kept.
+check("Revert to Saved is enabled only when dirty with a save to go back to, and reloading the disk text clears the dirty flag (seq 306)", () => {
+  // Enablement: dirty + a reloadable local file, or dirty + remote. Clean
+  // or untitled is disabled — and so is a dirty project saved as .prism /
+  // .pzfx, whose file can't be reloaded as a project (import is lossy).
+  ok(canRevertToSaved({ isDirty: true, filePath: "/Research/Dose Response.hlx", remote: false }));
+  ok(canRevertToSaved({ isDirty: true, filePath: "/Research/Template.pzt", remote: false }));
+  ok(canRevertToSaved({ isDirty: true, filePath: null, remote: true }));
+  strictEqual(canRevertToSaved({ isDirty: false, filePath: "/Research/Dose Response.hlx", remote: false }), false);
+  strictEqual(canRevertToSaved({ isDirty: true, filePath: null, remote: false }), false);
+  strictEqual(canRevertToSaved({ isDirty: true, filePath: "/Research/Dose Response.prism", remote: false }), false);
+  strictEqual(canRevertToSaved({ isDirty: true, filePath: "/Research/Dose Response.pzfx", remote: false }), false);
+  strictEqual(canRevertToSaved({ isDirty: false, filePath: null, remote: true }), false);
+  // .HLX in upper case is still a project file.
+  ok(canRevertToSaved({ isDirty: true, filePath: "/Research/Dose Response.HLX", remote: false }));
+
+  // External change: the disk text is compared with the text last saved or
+  // loaded. Identical means no change; different means another program
+  // rewrote it. An unreadable disk or an unknown baseline never claims a
+  // change — the reload reports those itself.
+  strictEqual(diskChangedExternally("same", "same"), false);
+  strictEqual(diskChangedExternally("changed", "same"), true);
+  strictEqual(diskChangedExternally(null, "same"), false);
+  strictEqual(diskChangedExternally("same", null), false);
+
+  // The confirm copy: the exact wording the dialogs show.
+  strictEqual(REVERT_CONFIRM_TITLE, "Revert to Saved");
+  strictEqual(REVERT_CONFIRM_DETAIL, "Discard unsaved changes and revert to the last saved version?");
+  strictEqual(revertExternalChangeTitle("Dose Response.hlx"), "“Dose Response.hlx” Changed on Disk");
+
+  // The reload itself, through the store: a saved project, edited in
+  // memory, loads the disk text back — content matches the disk, the dirty
+  // flag clears, the file path is kept.
+  const dir = mkdtempSync(join(tmpdir(), "titer-revert-306-"));
+  try {
+    const saved = makeInitialState();
+    const tableId = saved.rootOrder[0];
+    const diskText = serializeProjectFile({
+      nodes: saved.nodes,
+      rootOrder: saved.rootOrder,
+      childOrder: saved.childOrder,
+      activeNodeId: saved.activeNodeId,
+    });
+    const path = join(dir, "Dose Response.hlx");
+    writeFileSync(path, diskText);
+    // Open it: clean, at its path.
+    let s = reducer(saved, {
+      type: "load",
+      nodes: saved.nodes,
+      rootOrder: saved.rootOrder,
+      childOrder: saved.childOrder,
+      activeNodeId: saved.activeNodeId,
+      filePath: path,
+    });
+    strictEqual(s.isDirty, false);
+    strictEqual(s.filePath, path);
+    // Edit in memory: rename the table (an undoable edit — dirty now).
+    const diskName = s.nodes[tableId].name;
+    s = reducer(s, { type: "rename", id: tableId, name: "Edited name" });
+    strictEqual(s.isDirty, true);
+    strictEqual(s.nodes[tableId].name, "Edited name");
+    // Revert: read the disk text and load it, as the command does.
+    const reverted = parseProjectText(readFileSync(path, "utf8"));
+    if ("error" in reverted) throw new Error(reverted.error);
+    strictEqual(reverted.updated, false);
+    const back = reducer(s, {
+      type: "load",
+      nodes: reverted.project.nodes,
+      rootOrder: reverted.project.rootOrder,
+      childOrder: reverted.project.childOrder,
+      activeNodeId: reverted.project.activeNodeId,
+      filePath: path,
+    });
+    strictEqual(back.isDirty, false);
+    strictEqual(back.filePath, path);
+    strictEqual(back.nodes[tableId].name, diskName);
+    deepStrictEqual(back.nodes, reverted.project.nodes);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // seq 236: Duplicate Current Sheet — one sheet, nothing else, right after
