@@ -132,8 +132,18 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
         {node.orphaned && (
           <div className="border-b border-separator bg-control px-8 py-2 text-regular text-secondary">
             <p>
-              Orphaned — the source table “{node.sourceTableName ?? "Unknown"}” was deleted. These results are kept
-              as they were; the analysis parameters cannot be changed.
+              {node.orphanedDataSet ? (
+                <>
+                  Orphaned — the data set “{node.orphanedDataSet}” was removed from table “
+                  {node.sourceTableName ?? "Unknown"}”. These results are kept as they were; the analysis parameters
+                  cannot be changed.
+                </>
+              ) : (
+                <>
+                  Orphaned — the source table “{node.sourceTableName ?? "Unknown"}” was deleted. These results are
+                  kept as they were; the analysis parameters cannot be changed.
+                </>
+              )}
             </p>
             {candidates.length > 0 ? (
               <p className="mt-1">

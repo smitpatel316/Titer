@@ -235,7 +235,7 @@ const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId", "proje
 // prettier-ignore
 const NODE_KEYS = Object.keys({
   id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, highlight: 1, tableType: 1, data: 1, transform: 1, notes: 1, tags: 1,
-  analysisType: 1, analysisParams: 1, cachedResult: 1, frozen: 1, orphaned: 1, sourceTableName: 1, graphType: 1, graphOptions: 1,
+  analysisType: 1, analysisParams: 1, cachedResult: 1, frozen: 1, orphaned: 1, sourceTableName: 1, orphanedDataSet: 1, graphType: 1, graphOptions: 1,
   sourceTableIds: 1,
   frozenData: 1, frozenDataByGraph: 1, drawingObjects: 1,
   panels: 1, grid: 1, figureSize: 1, labelStyle: 1, figureTitle: 1, sharedLegend: 1, figureBackground: 1, dpi: 1,
@@ -1872,6 +1872,8 @@ function readNode(
     if (node.frozen !== true) delete node.frozen;
     if (node.orphaned !== true) delete node.orphaned;
     if (typeof node.sourceTableName !== "string") delete node.sourceTableName;
+    // The removed set (seq 309) only means anything on an orphaned sheet.
+    if (node.orphaned !== true || typeof node.orphanedDataSet !== "string") delete node.orphanedDataSet;
     const cached = readCachedResult(node.cachedResult, node.analysisType as string, node.name, issues);
     if (cached) node.cachedResult = cached;
     else delete node.cachedResult;
@@ -1951,6 +1953,7 @@ function readNode(
     }
     delete node.orphaned;
     delete node.sourceTableName;
+    delete node.orphanedDataSet;
     delete node.cachedResult;
   }
   return node;
@@ -2206,6 +2209,7 @@ export function parseProjectFile(
       if (nodeOf(node.parentId)?.type === "table") {
         delete node.orphaned;
         delete node.sourceTableName;
+        delete node.orphanedDataSet;
       } else {
         node.parentId = null;
       }

@@ -47,6 +47,7 @@ import { MAX_SERIES_VALUES, generateXSeries, validateSeriesSpec } from "../../li
 import { seriesKeyOf } from "../../lib/columns";
 import { alert, confirmDelete } from "../../native";
 import { refreshLinkedFromFile } from "./linked-data";
+import { DataSetsDialog } from "../../components/dataset-manager-dialog";
 import { AddFloatingNoteButton, FloatingNotesLayer } from "../../components/floating-notes";
 import { TABLES } from ".";
 
@@ -107,12 +108,15 @@ export function TableView({ node }: { node: ProjectNode }) {
       </Button>
     </div>
   ) : null;
+  // The Data sets dialog (seq 309): reorder / add / remove the table's sets.
+  const [dataSetsOpen, setDataSetsOpen] = React.useState(false);
   const grid = (
     <Grid
       data={data}
       type={node.tableType ?? "column"}
       update={update}
       showGroups={() => setLayout({ inspector: true })}
+      showDataSets={() => setDataSetsOpen(true)}
       tableFrozen={node.frozen}
     />
   );
@@ -127,6 +131,7 @@ export function TableView({ node }: { node: ProjectNode }) {
       {linkedBar}
       {grid}
       <FloatingNotesLayer node={node} />
+      <DataSetsDialog open={dataSetsOpen} node={node} onClose={() => setDataSetsOpen(false)} />
     </div>
   );
 

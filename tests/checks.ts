@@ -164,6 +164,13 @@ import { tCrit95 } from "../src/lib/student-t";
 import { clopperPearsonCI, proportionCI, wilsonCI } from "../src/stats/proportion-ci";
 import { groupRuns, pairKey } from "../src/lib/columns";
 import {
+  addDataSet,
+  dataSetsOf,
+  dependentAnalyses,
+  removeDataSet,
+  reorderDataSet,
+} from "../src/lib/dataset-manager";
+import {
   NAMED_COLORS,
   PALETTES,
   isTiterPalette,
@@ -176,7 +183,7 @@ import {
 } from "../src/lib/palettes";
 import { deletePalette, keepPalette, loadMyPalettes } from "../src/store/my-palettes";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, graphSeriesDataset, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
-import { datasetColumns, isGrouped, isNested, readTable, setColumns, splitXY, xyPoints, type Dataset } from "../src/lib/dataset";
+import { datasetColumns, isGrouped, isNested, readTable, seriesOf, setColumns, splitXY, xyPoints, type Dataset } from "../src/lib/dataset";
 import {
   mergeGraphTables,
   mergedGraphData,
@@ -2600,6 +2607,7 @@ const mcpLaggingHarness = (withRevisionWait: boolean) => {
       }),
     createSimulatedTable: neverUnused,
     updateTable: (id, data, label, move) => dispatch({ type: "updateTable", id, data, label, move }),
+    removeDataSet: (id, data, setName, label) => dispatch({ type: "removeDataSet", id, data, setName, label }),
     duplicateFamily: (id) => dispatch({ type: "duplicateFamily", id }),
     renameNode: (id, name) => dispatch({ type: "rename", id, name }),
     removeNode: (id) => dispatch({ type: "remove", id }),
@@ -7193,6 +7201,7 @@ check("renaming a nested table's top-level group renames all its sub-columns, an
       },
       createSeries: () => {},
       showGroups: () => {},
+      showDataSets: () => {},
       pasteLink: () => {},
       refreshLink: () => {},
       breakLink: () => {},
@@ -7201,6 +7210,7 @@ check("renaming a nested table's top-level group renames all its sub-columns, an
   const texts = items.map((i) => ("text" in i ? i.text : ""));
   ok(texts.includes("Rename Group"));
   ok(texts.includes("Rename Subgroup"));
+  ok(texts.includes("Data Sets…"), "the grid menu offers the Data sets dialog (seq 309)");
   const groupItem = items.find((i) => "text" in i && i.text === "Rename Group");
   const action = groupItem && "action" in groupItem ? groupItem.action : undefined;
   action?.("Rename Group");
@@ -22808,6 +22818,200 @@ check("an orphaned flag on an analysis whose table survived is cleared on reload
   strictEqual(kept.sourceTableName, undefined);
   deepStrictEqual(kept.cachedResult, frozenResult);
   deepStrictEqual(readBack.project.childOrder.t1, ["a1"]);
+});
+
+// ── Data-set manager (seq 309) ──────────────────────────────────────────
+
+check("seq 309: reordering data sets moves their columns and values, and the graphs' series follow", () => {
+  let t = newGroupedTable(2, 2); // A:Y1 A:Y2 B:Y1 B:Y2
+  t = { ...t, rows: [["r1", "1", "2", "3", "4"], ["r2", "5", "6", "7", "8"]] };
+  deepStrictEqual(
+    dataSetsOf(t, "grouped").map((s) => s.name),
+    ["A", "B"],
+  );
+  const moved = reorderDataSet(t, "grouped", 1, 0);
+  deepStrictEqual(moved.columns, ["Title", "B:Y1", "B:Y2", "A:Y1", "A:Y2"]);
+  deepStrictEqual(moved.rows, [
+    ["r1", "3", "4", "1", "2"],
+    ["r2", "7", "8", "5", "6"],
+  ]);
+  // A graph reads its series from the table, in table order — so the
+  // reorder shows there without any graph edit.
+  deepStrictEqual(seriesOf(moved, "grouped"), ["B", "A"]);
+  // Out of range, or no move: the table comes back unchanged.
+  strictEqual(reorderDataSet(t, "grouped", 0, 0), t);
+  strictEqual(reorderDataSet(t, "grouped", 2, 0), t);
+});
+
+check("seq 309: adding a data set makes a new empty one; removing one drops its columns, and the last set is refused", () => {
+  let t = newGroupedTable(2, 2); // A:Y1 A:Y2 B:Y1 B:Y2
+  t = { ...t, rows: [["r1", "1", "2", "3", "4"], ["r2", "5", "6", "7", "8"]] };
+  const added = addDataSet(t, "grouped");
+  deepStrictEqual(
+    dataSetsOf(added, "grouped").map((s) => s.name),
+    ["A", "B", "C"],
+  );
+  strictEqual(added.groups, 3);
+  deepStrictEqual(added.columns, ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2", "C:Y1", "C:Y2"]);
+  ok(
+    added.rows.every((row) => row[5] === null && row[6] === null),
+    "the new set holds no values",
+  );
+  const removed = removeDataSet(t, "grouped", 1);
+  ok(!("error" in removed), "removing B succeeds");
+  deepStrictEqual(removed.data.columns, ["Title", "A:Y1", "A:Y2"]);
+  deepStrictEqual(removed.data.rows, [
+    ["r1", "1", "2"],
+    ["r2", "5", "6"],
+  ]);
+  strictEqual(removed.data.groups, 1);
+  const last = removeDataSet(removed.data, "grouped", 0);
+  ok("error" in last, "the last set can't go");
+  ok(last.error.includes("last data set"), `the refusal explains why: ${"error" in last ? last.error : ""}`);
+});
+
+check("seq 309: removing a data set orphans the analyses that ran on it, in one undo step", () => {
+  // The cached result must match its test, or the loader drops it on reload.
+  const anovaResult: AnalysisResult = { testType: "anova", stats: [{ label: "F", value: 2 }], groups: [], notes: "" };
+  const grouped: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Assay",
+    parentId: null,
+    tableType: "grouped",
+    data: {
+      ...newGroupedTable(2, 2),
+      rows: [
+        ["r1", "1", "2", "3", "4"],
+        ["r2", "5", "6", "7", "8"],
+      ],
+    },
+  };
+  const onB: ProjectNode = {
+    id: "a1",
+    type: "analysis",
+    name: "B only",
+    parentId: "t1",
+    analysisType: "anova",
+    analysisParams: { sets: ["B"] },
+    cachedResult: anovaResult,
+  };
+  const onA: ProjectNode = {
+    id: "a2",
+    type: "analysis",
+    name: "A only",
+    parentId: "t1",
+    analysisType: "anova",
+    analysisParams: { sets: ["A"] },
+    cachedResult: anovaResult,
+  };
+  let s = reducer(makeInitialState(), {
+    type: "load",
+    nodes: { t1: grouped, a1: onB, a2: onA },
+    rootOrder: ["t1"],
+    childOrder: { t1: ["a1", "a2"] },
+    activeNodeId: "t1",
+    filePath: null,
+  });
+  deepStrictEqual(
+    dependentAnalyses(s.nodes, "t1", "B").map((n) => n.id),
+    ["a1"],
+  );
+  const removed = removeDataSet(grouped.data!, "grouped", 1);
+  ok(!("error" in removed));
+  s = reducer(s, { type: "removeDataSet", id: "t1", data: removed.data, setName: "B", label: "Remove Data Set" });
+  deepStrictEqual(s.nodes.t1.data!.columns, ["Title", "A:Y1", "A:Y2"]);
+  // The analysis that ran on B is orphaned — frozen results, re-pointable
+  // (seq 242) — and moves to the project root, like a deleted table's.
+  const orphan = s.nodes.a1;
+  strictEqual(orphan.orphaned, true);
+  strictEqual(orphan.parentId, null);
+  strictEqual(orphan.sourceTableName, "Assay");
+  strictEqual(orphan.orphanedDataSet, "B");
+  deepStrictEqual(orphan.cachedResult, anovaResult);
+  strictEqual(s.rootOrder.includes("a1"), true);
+  deepStrictEqual(s.childOrder.t1, ["a2"]);
+  // The analysis that ran on A is untouched, still under the table.
+  strictEqual(s.nodes.a2.orphaned, undefined);
+  strictEqual(s.nodes.a2.parentId, "t1");
+  // One undo step takes the table and the orphaning back together.
+  strictEqual(s.past.at(-1)?.label, "Remove Data Set");
+  s = reducer(s, { type: "undo" });
+  deepStrictEqual(s.nodes.t1.data!.columns, ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"]);
+  strictEqual(s.nodes.a1.orphaned, undefined);
+  strictEqual(s.nodes.a1.parentId, "t1");
+  deepStrictEqual(s.childOrder.t1, ["a1", "a2"]);
+  // The orphaned set survives a save and reload, so the banner still names it.
+  const file = {
+    nodes: { t1: grouped, a1: { ...onB, parentId: null, orphaned: true, sourceTableName: "Assay", orphanedDataSet: "B" } },
+    rootOrder: ["t1", "a1"],
+    childOrder: { t1: [] },
+    activeNodeId: "a1",
+  };
+  const readBack = read(serializeProjectFile(file));
+  strictEqual(readBack.updated, false);
+  strictEqual(readBack.project.nodes.a1.orphanedDataSet, "B");
+});
+
+check("seq 309 MCP: edit-table add-data-set / reorder-data-set / remove-data-set, with the dependent-analysis warning", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-309-table", "create-table", {
+    table_type: "grouped",
+    columns: ["", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+    rows: [
+      ["r1", 1, 2, 3, 4],
+      ["r2", 5, 6, 7, 8],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  const added = await harness.run("job-309-add", "edit-table", { table_id: tableId, op: "add-data-set" });
+  deepStrictEqual((added.result as { data_sets: string[] }).data_sets, ["A", "B", "C"]);
+  const moved = await harness.run("job-309-reorder", "edit-table", {
+    table_id: tableId,
+    op: "reorder-data-set",
+    name: "B",
+    at: 0,
+  });
+  deepStrictEqual((moved.result as { data_sets: string[] }).data_sets, ["B", "A", "C"]);
+  // The last set can't go: a two-set table refuses its second removal.
+  await harness.run("job-309-remove-c", "edit-table", { table_id: tableId, op: "remove-data-set", name: "C" });
+  await harness.run("job-309-remove-a", "edit-table", { table_id: tableId, op: "remove-data-set", name: "A" });
+  await rejects(
+    harness.run("job-309-remove-last", "edit-table", { table_id: tableId, op: "remove-data-set", name: "B" }),
+    /last data set/,
+  );
+  // Add a set back, so the dependent-analysis removal below has a set left after it.
+  // (The new set takes the next free letter from its place — "C", not "A".)
+  const readded = await harness.run("job-309-readd", "edit-table", { table_id: tableId, op: "add-data-set" });
+  deepStrictEqual((readded.result as { data_sets: string[] }).data_sets, ["B", "C"]);
+  // A dependent analysis blocks the removal until confirmed, then orphans.
+  harness.dispatch({
+    type: "create",
+    node: {
+      id: "a1",
+      type: "analysis",
+      name: "B only",
+      parentId: tableId,
+      analysisType: "anova",
+      analysisParams: { sets: ["B"] },
+      cachedResult: { testType: "anova", stats: [{ label: "F", value: 2 }], groups: [], notes: "" },
+    },
+  });
+  harness.sync();
+  await rejects(
+    harness.run("job-309-remove-warn", "edit-table", { table_id: tableId, op: "remove-data-set", name: "B" }),
+    /data set “B” can't be removed yet/,
+  );
+  strictEqual(harness.state().nodes[tableId]?.data?.columns.includes("B:Y1"), true);
+  const confirmed = await harness.run("job-309-remove-confirm", "edit-table", {
+    table_id: tableId,
+    op: "remove-data-set",
+    name: "B",
+    confirm: true,
+  });
+  deepStrictEqual((confirmed.result as { orphaned_analyses: string[] }).orphaned_analyses, ["B only"]);
+  strictEqual(harness.state().nodes.a1?.orphaned, true);
 });
 
 // ── Clone a graph ────────────────────────────────────────────────────────

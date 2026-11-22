@@ -29,6 +29,7 @@ import { ANALYSES } from "../stats";
 import { followTable, type TableMove } from "./references";
 import { pushHistory } from "../lib/sheet-navigation";
 import { repointCandidates } from "../lib/repoint-analysis";
+import { dependentAnalyses } from "../lib/dataset-manager";
 import { applyWand as planWand, type WandReport } from "../lib/wand";
 import { cloneGraphPlan, type CloneOptions, type ClonePlan } from "../lib/clone-graph";
 import { DEFAULT_FIGURE_DPI, DEFAULT_FIGURE_SIZE, DEFAULT_LABEL_STYLE, newFigurePanels } from "../lib/figure";
@@ -201,6 +202,11 @@ type Action =
   | { type: "arrangeDrawingObjects"; nodeId: string; op: ArrangeOp; objectIds: string[] }
   /** `label` names the edit in the Edit menu; `move`: what it renamed or moved. */
   | { type: "updateTable"; id: string; data: TableData; label: string; move?: TableMove }
+  /** Remove one data set from a table (seq 309): the table takes its new
+   *  data (one undo step with the orphaning), and the analyses that ran on
+   *  `setName` become orphaned — frozen results, re-pointable via seq 242 —
+   *  as when their table is deleted. */
+  | { type: "removeDataSet"; id: string; data: TableData; setName: string; label: string }
   | { type: "updateGraph"; id: string; options: GraphOptions; at: number }
   /** A graph's extra source tables (#48): the ids, in order; empty clears
    *  them (the graph goes back to its primary table alone). */
@@ -873,6 +879,73 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       update(action.id, action.data);
       return { ...state, nodes, isDirty: true };
     }
+    case "removeDataSet": {
+      const node = state.nodes[action.id];
+      if (!node || node.type !== "table" || node.frozen || action.data === node.data) return state;
+      // A table computed from this one as a percent of the removed set
+      // keeps its values, which can be typed from then on — as when its
+      // source table is deleted outright. Detach before the table update,
+      // so the recompute doesn't blank the kept values first.
+      let detached = state;
+      const controlsGone = Object.values(state.nodes).some(
+        (n) => n.transform?.from === action.id && n.transform.control === action.setName,
+      );
+      if (controlsGone) {
+        const nodes = { ...state.nodes };
+        for (const n of Object.values(nodes)) {
+          if (n.transform?.from === action.id && n.transform.control === action.setName) {
+            const { transform: _, ...rest } = n;
+            nodes[n.id] = rest;
+          }
+        }
+        detached = { ...state, nodes };
+      }
+      // One dispatch, one undo step: the table update (which follows the
+      // table's other children) plus the orphaning below.
+      const after = applyAction(detached, {
+        type: "updateTable",
+        id: action.id,
+        data: action.data,
+        label: action.label,
+      });
+      const dependents = dependentAnalyses(after.nodes, action.id, action.setName);
+      const orphanIds = new Set(dependents.map((d) => d.id));
+      const nodes: Record<string, ProjectNode> = { ...after.nodes };
+      for (const n of Object.values(nodes)) {
+        if (orphanIds.has(n.id)) {
+          // The analysis that ran on the removed set is orphaned — frozen
+          // results, re-pointable (seq 242) — and moves to the project root,
+          // like a deleted table's.
+          nodes[n.id] = {
+            ...n,
+            parentId: null,
+            orphaned: true,
+            sourceTableName: node.name,
+            orphanedDataSet: action.setName,
+          };
+        } else if (
+          n.type === "graph" &&
+          n.parentId === action.id &&
+          n.graphOptions?.sets?.includes(action.setName)
+        ) {
+          // A graph that plotted the set explicitly stops naming it; the
+          // graph itself keeps drawing the sets that remain.
+          const sets = n.graphOptions.sets.filter((s) => s !== action.setName);
+          const graphOptions = { ...n.graphOptions };
+          if (sets.length) graphOptions.sets = sets;
+          else delete graphOptions.sets;
+          nodes[n.id] = { ...n, graphOptions };
+        }
+      }
+      const childOrder: Record<string, string[]> = { ...after.childOrder };
+      if (orphanIds.size) {
+        childOrder[action.id] = (childOrder[action.id] ?? []).filter((id) => !orphanIds.has(id));
+      }
+      const rootOrder = orphanIds.size
+        ? [...after.rootOrder.filter((id) => !orphanIds.has(id)), ...dependents.map((d) => d.id)]
+        : after.rootOrder;
+      return { ...after, nodes, rootOrder, childOrder, isDirty: true };
+    }
     case "updateGraph": {
       const node = state.nodes[action.id];
       if (!node || node.type !== "graph") return state;
@@ -1100,6 +1173,7 @@ const UNDOABLE = new Set<Action["type"]>([
   "deleteDrawingObject",
   "arrangeDrawingObjects",
   "updateTable",
+  "removeDataSet",
   "updateGraph",
   "setGraphSources",
   "updateGraphs",
@@ -1178,6 +1252,8 @@ function changeName(action: Action): string {
               : "Arrange Objects";
     case "updateTable":
       return action.label;
+    case "removeDataSet":
+      return "Remove Data Set";
     case "updateGraph":
       return "Format Change";
     case "setGraphSources":
@@ -1370,6 +1446,10 @@ interface ProjectActions {
   /** `label` names the edit for Undo ("Paste"); `move`: the columns or groups it renamed
    *  and the rows it moved, which the table's analyses and graphs then follow. */
   updateTable: (id: string, data: TableData, label: string, move?: TableMove) => void;
+  /** Remove one data set from a table (seq 309): `data` is the table after
+   *  the removal, `setName` the removed set — the analyses that ran on it
+   *  become orphaned, in the same undo step. */
+  removeDataSet: (id: string, data: TableData, setName: string, label: string) => void;
   updateGraph: (id: string, options: GraphOptions) => void;
   /** An item's note (empty: none). */
   setNotes: (id: string, notes: string) => void;
@@ -1648,6 +1728,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       arrangeDrawingObjects: (nodeId, op, objectIds) =>
         dispatch({ type: "arrangeDrawingObjects", nodeId, op, objectIds }),
       updateTable: (id, data, label, move) => dispatch({ type: "updateTable", id, data, label, move }),
+      removeDataSet: (id, data, setName, label) => dispatch({ type: "removeDataSet", id, data, setName, label }),
       updateGraph: (id, options) => dispatch({ type: "updateGraph", id, options, at: Date.now() }),
       setNotes: (id, notes) => dispatch({ type: "setNotes", id, notes, at: Date.now() }),
       setTags: (id, tags) => dispatch({ type: "setTags", id, tags }),

@@ -131,11 +131,13 @@ interface GridProps {
   update: (next: TableData, label: string, move?: TableMove) => void;
   /** Shows a grouped table's Groups panel. */
   showGroups: () => void;
+  /** Opens the Data Sets dialog (seq 309). */
+  showDataSets: () => void;
   /** The table is frozen: no editing until unfrozen (seq 165). */
   tableFrozen?: boolean;
 }
 
-export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps) {
+export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen }: GridProps) {
   const nested = isNested(data);
   const grouped = isGrouped(data) || nested;
   const replicates = data.replicates ?? 1;
@@ -705,6 +707,7 @@ export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps)
         rename: startRename,
         renameGroup: startRenameGroup,
         showGroups,
+        showDataSets,
         tableFrozen,
         pasteLink: (r) => void pasteLink(r),
         refreshLink: () => void refreshLink(),

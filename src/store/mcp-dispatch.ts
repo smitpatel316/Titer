@@ -110,6 +110,13 @@ import {
   type LinkedPaste,
 } from "../lib/linked-paste";
 import { fillSeries, generateSeries, validateSeriesSpec, type SeriesMode } from "../lib/series";
+import {
+  addDataSet,
+  dataSetsOf,
+  dependentAnalyses,
+  removeDataSet,
+  reorderDataSet,
+} from "../lib/dataset-manager";
 import { SUMMARY_FORMATS, summaryFormatOf, summarySubcolumns, type SummaryFormat } from "../lib/summary-format";
 import {
   applySummaryFormat,
@@ -208,6 +215,9 @@ export interface JobDeps {
     /** A table of simulated values ("Simulated data", numbered). */
     createSimulatedTable: (tableType: TableType, data: TableData) => void;
     updateTable: (id: string, data: TableData, label: string, move?: TableMove) => void;
+    /** Remove one data set from a table (seq 309): the analyses that ran
+     *  on it orphan in the same undo step. */
+    removeDataSet: (id: string, data: TableData, setName: string, label: string) => void;
     duplicateFamily: (id: string) => void;
     /** Duplicate one sheet, nothing else (seq 236). */
     duplicateNode: (id: string) => void;
@@ -1682,10 +1692,80 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           next = fillSeries(data, column, at, generateSeries(spec));
           break;
         }
+        case "add-data-set": {
+          // Data sets (seq 309): the dialog's Add — a new empty set at the end.
+          label = "Add Data Set";
+          next = addDataSet(data, type);
+          break;
+        }
+        case "reorder-data-set": {
+          // Data sets (seq 309): the dialog's Up/Down — move the named set
+          // to data-set position `at` (0-based). The graphs' series follow
+          // the table order, so no graph edit is needed.
+          const name = argString(job, job.args, "name");
+          const sets = dataSetsOf(data, type);
+          const from = sets.findIndex((s) => s.name === name);
+          if (from < 0) {
+            throw jobErr(
+              job,
+              `has no data set “${name}” — the sets are ${sets.map((s) => s.name).join(", ")}.`,
+            );
+          }
+          const to = argInt(job, job.args, "at");
+          if (to < 0 || to >= sets.length) {
+            throw jobErr(
+              job,
+              `has no data-set position ${to} — the table has ${sets.length} data sets (0 to ${sets.length - 1}).`,
+            );
+          }
+          if (from === to) break; // already there: no-op success
+          label = "Reorder Data Sets";
+          next = reorderDataSet(data, type, from, to);
+          break;
+        }
+        case "remove-data-set": {
+          // Data sets (seq 309): the dialog's Remove. Without `confirm`, an
+          // analysis that runs on the set blocks the removal with its name
+          // instead of orphaning silently; with `confirm: true` the removal
+          // goes through the store's removeDataSet, so the orphaning lands
+          // in the same undo step. The last set is refused outright.
+          const name = argString(job, job.args, "name");
+          const sets = dataSetsOf(data, type);
+          const index = sets.findIndex((s) => s.name === name);
+          if (index < 0) {
+            throw jobErr(
+              job,
+              `has no data set “${name}” — the sets are ${sets.map((s) => s.name).join(", ")}.`,
+            );
+          }
+          const dependents = dependentAnalyses(state.nodes, tableId, name);
+          const confirm = argOptBool(job, job.args, "confirm", false);
+          if (dependents.length > 0 && !confirm) {
+            throw jobErr(
+              job,
+              `data set “${name}” can't be removed yet — ${dependents.map((n) => `“${n.name}”`).join(", ")} ${dependents.length > 1 ? "run" : "runs"} on it. Pass confirm: true to remove it and orphan ${dependents.length > 1 ? "those analyses" : "that analysis"} (frozen results, re-pointable).`,
+            );
+          }
+          const removed = removeDataSet(data, type, index);
+          if ("error" in removed) throw jobErr(job, removed.error);
+          const beforeRevision = state.revision;
+          actions.removeDataSet(tableId, removed.data, name, "Remove Data Set");
+          await settleAfterDispatch(deps, beforeRevision);
+          return {
+            result: {
+              project_id: job.project_id,
+              table_id: tableId,
+              rows: removed.data.rows.length,
+              data_columns: removed.data.columns.length - 1,
+              data_sets: dataSetsOf(removed.data, type).map((s) => s.name),
+              orphaned_analyses: dependents.map((n) => n.name),
+            },
+          };
+        }
         default:
           throw jobErr(
             job,
-            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-summary-format, paste-link, remove-link, generate-series, paste-transposed.`,
+            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-summary-format, paste-link, remove-link, generate-series, paste-transposed, add-data-set, reorder-data-set, remove-data-set.`,
           );
       }
       if (next === null) {
@@ -1698,6 +1778,9 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
             rows: data.rows.length,
             data_columns: data.columns.length - 1,
             ...(op === "set-summary-format" ? { summary_format: summaryFormatOf(data) } : {}),
+            ...(op === "add-data-set" || op === "reorder-data-set"
+              ? { data_sets: dataSetsOf(data, type).map((s) => s.name) }
+              : {}),
           },
         };
       }
@@ -1715,6 +1798,9 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           rows: next.rows.length,
           data_columns: next.columns.length - 1,
           ...(op === "set-summary-format" ? { summary_format: next.summaryFormat ?? "replicates" } : {}),
+          ...(op === "add-data-set" || op === "reorder-data-set"
+            ? { data_sets: dataSetsOf(next, type).map((s) => s.name) }
+            : {}),
         },
       };
     }
