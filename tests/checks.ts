@@ -312,7 +312,7 @@ import {
 } from "../src/lib/figure";
 import { buildGraphFigure, type AnalysisRunner } from "../src/views/graphs/graph-figure";
 import { overlayReport } from "../src/store/mcp-export";
-import { createEvalDedupe, ensureSaveExtension } from "../src/native";
+import { createEvalDedupe, ensureSaveExtension, windowMenuItems, type OpenProjectWindow } from "../src/native";
 import { defaultExportAllFolder, planExportAll } from "../src/lib/export-all";
 import { engineStatusText, getEngineStatus, onEngineStatus, setEngineStatus } from "../src/stats/engine-status";
 import {
@@ -1737,6 +1737,43 @@ check("seq 241: Help offers the User Guide (F1) and the shell opens only the fix
   const guideUrls = shell.match(/"https:\/\/github\.com\/smitpatel316\/Titer"/g) ?? [];
   ok(guideUrls.length >= 4, `open_link's guide arm is missing (exact repo URL appears ${guideUrls.length}×, want 4: github + guide in both cfgs)`);
   ok(/"guide" =>/.test(shell), "open_link has no guide arm");
+});
+
+// ── seq 299 (Window menu: open-project window list) ─────────────────────
+
+// seq 299: the Window menu lists every open project window by file name,
+// in open order, with the frontmost window checkmarked; picking one focuses
+// it. Untitled projects show as "Untitled"; with no project window open
+// there is no list section.
+check("seq 299: Window menu lists open project windows, frontmost checkmarked, click focuses", () => {
+  const focused: string[] = [];
+  const open: OpenProjectWindow[] = [
+    { label: "project-0", title: "Doses", focused: false },
+    { label: "project-1", title: "", focused: true },
+    { label: "project-2", title: "Untitled", focused: false },
+  ];
+  const items = windowMenuItems(open, (label) => void focused.push(label));
+  // A separator, then one entry per window, in open order.
+  strictEqual(items.length, 4);
+  ok("item" in items[0] && items[0].item === "Separator", "window list lacks its leading separator");
+  const entries = items.slice(1);
+  deepStrictEqual(
+    entries.map((e) => ("text" in e ? e.text : "")),
+    ["Doses", "Untitled", "Untitled"],
+  );
+  deepStrictEqual(
+    entries.map((e) => ("checked" in e ? e.checked : false)),
+    [false, true, false],
+  );
+  // Clicking an entry focuses that window, and only that one.
+  for (const e of entries) if ("action" in e && e.action) e.action("test");
+  deepStrictEqual(focused, ["project-0", "project-1", "project-2"]);
+  // No project window open, no list section.
+  deepStrictEqual(windowMenuItems([], () => {}), []);
+  // And the shell actually wires the live list into the Window submenu.
+  const native = readFileSync("src/native.ts", "utf8");
+  ok(/windowMenuItems\(/.test(native), "installMenuBar never builds the window list");
+  ok(/getAllWebviewWindows/.test(native), "native never enumerates the open windows");
 });
 
 // seq 242 (re-point orphaned analysis): only tables that offer the test
