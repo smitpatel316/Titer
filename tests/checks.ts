@@ -8161,6 +8161,47 @@ check("two-way ANOVA: FDR post-hoc adjusts the LSD P values; cells and marginal 
   ok(rmFdr.comparisons!.every((c) => c.low == null && c.high == null), "RM FDR comparisons carry no CI");
 });
 
+// Seq 314 — Scheirer-Ray-Hare: the H statistics are the Type I sequential sums of
+// squares on the ranks (Group first — the rcompanion reference), over var(ranks).
+// The Type III sums the code used to compute give Group H 23.0225 / Row H 16.9112 on
+// this unbalanced fixture (one missing cell); the reference values are 22.7207 /
+// 16.9987 / 1.14606. Pinned against an independent hand-computation (numpy) from the
+// same numbers — see .helix-v18/fix-314-srh/srh-cellmeans.py — and the E2E q41 pins.
+check("Scheirer-Ray-Hare: H statistics match the Type I reference on an unbalanced design (seq 314)", async () => {
+  const data: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2", "A:Y3", "B:Y1", "B:Y2", "B:Y3", "C:Y1", "C:Y2", "C:Y3"],
+    rows: [
+      ["Day 1", "10", "11", "12", "14", "15", "13", "9", "10", "11"],
+      ["Day 2", "12", "13", "14", "18", "19", "17", "10", null, "12"],
+      ["Day 3", "15", "14", "16", "22", "24", "21", "11", "12", "13"],
+      ["Day 4", "18", "19", "17", "27", "26", "28", "12", "14", "13"],
+      ["Day 5", "20", "21", "22", "31", "30", "33", "13", "13", "15"],
+    ],
+    groups: 3,
+    replicates: 3,
+  };
+  const out = await runAnalysis("two-way-anova", data, {
+    design: "nonparametric",
+    posthoc: "none",
+    posthocTarget: "groups",
+  } as AnalysisParams);
+  if ("error" in out) throw new Error(`Scheirer-Ray-Hare failed: ${out.error}`);
+  const stat = (label: string) => out.stats.find((s) => s.label === label)?.value;
+  const close = (label: string, want: number, tol = 1e-3) => {
+    const got = stat(label);
+    ok(got != null && Math.abs(got - want) < tol, `${label}: got ${got}, want ${want}`);
+  };
+  close("Group H", 22.7207);
+  close("Row H", 16.9987);
+  close("Interaction H", 1.14606);
+  close("Group P value", 1.16486e-5, 1e-9);
+  close("Row P value", 0.00193405, 1e-7);
+  close("Interaction P value", 0.997147, 1e-5);
+  strictEqual(stat("Group DFn"), 2);
+  strictEqual(stat("Row DFn"), 4);
+  strictEqual(stat("Interaction DFn"), 8);
+});
+
 // Seq 192 — three-way engine: the full post-hoc suite runs on a term, simple
 // effects split an interaction into one family per level of its last factor,
 // and the FDR approach matches R's p.adjust on the LSD raw P values.
