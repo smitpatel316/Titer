@@ -918,6 +918,10 @@ export interface ProjectNode {
   /** Analysis nodes only: the source table's name when orphaned, for the
    *  banner ("the source table “Doses” was deleted"). */
   sourceTableName?: string;
+  /** Analysis nodes only: the data set whose removal orphaned the analysis
+   *  (seq 309) — the source table survives, so the banner names the set
+   *  instead ("the data set “B” was removed from table “Assay”"). */
+  orphanedDataSet?: string;
   /** Graph nodes only: which chart this node draws + its display options. */
   graphType?: GraphType;
   graphOptions?: GraphOptions;

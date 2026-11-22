@@ -313,6 +313,60 @@ export function deleteColumns(data: TableData, at: number, count: number): Table
   };
 }
 
+/** Reorders the table's columns to `order` (a permutation of 0..n-1): every
+ *  row's cells, the excluded cells and the linked paste's anchor follow
+ *  their column. Widths and calculated variables are keyed by column name,
+ *  so they need no remap. Anything but a permutation returns the table
+ *  unchanged. (Data-set manager, seq 309: a reorder moves a set's block.) */
+export function permuteColumns(data: TableData, order: number[]): TableData {
+  if (order.length !== data.columns.length || new Set(order).size !== order.length) return data;
+  const at = (c: number) => order.indexOf(c);
+  return {
+    ...data,
+    columns: order.map((c) => data.columns[c]),
+    rows: data.rows.map((row) => order.map((c) => row[c] ?? null)),
+    excluded: remapExcluded(data, (r, c) => [r, at(c)]),
+    linkedPaste: data.linkedPaste ? { ...data.linkedPaste, col: at(data.linkedPaste.col) } : undefined,
+  };
+}
+
+/** Deletes the columns at `columns` (any set, in any order): every row's
+ *  cells, the excluded cells, the widths and the linked paste follow — a
+ *  link anchored in a deleted column goes, as on a delete. At least one
+ *  data column remains. (Data-set manager, seq 309: a remove drops a set's
+ *  columns, which need not sit together.) */
+export function dropColumns(data: TableData, columns: number[]): TableData {
+  const drop = new Set(columns.filter((c) => c >= 1 && c < data.columns.length));
+  if (drop.size === 0 || data.columns.length - 1 - drop.size < 1) return data;
+  const kept: number[] = [];
+  data.columns.forEach((_, c) => {
+    if (!drop.has(c)) kept.push(c);
+  });
+  const at = (c: number) => kept.indexOf(c);
+  const nextColumns = kept.map((c) => data.columns[c]);
+  return {
+    ...data,
+    columns: nextColumns,
+    rows: data.rows.map((row) => kept.map((c) => row[c] ?? null)),
+    excluded: remapExcluded(data, (r, c) => {
+      const to = at(c);
+      return to < 0 ? null : [r, to];
+    }),
+    widths: widthsOf(data.widths, nextColumns),
+    linkedPaste: data.linkedPaste
+      ? at(data.linkedPaste.col) < 0
+        ? undefined
+        : { ...data.linkedPaste, col: at(data.linkedPaste.col) }
+      : undefined,
+    // A deleted calculated variable goes with its column; a formula that
+    // used a deleted source keeps its text and reads as an error until it
+    // is edited or removed (the recompute names the missing variable).
+    calculated: (data.calculated ?? []).filter((v) => nextColumns.includes(v.name)).length
+      ? (data.calculated ?? []).filter((v) => nextColumns.includes(v.name))
+      : undefined,
+  };
+}
+
 /** Moves `map[from]` to `map[to]` (widths are keyed by column name). */
 function renameKey<T>(map: Record<string, T> | undefined, from: string, to: string): Record<string, T> | undefined {
   if (!map || map[from] === undefined) return map;

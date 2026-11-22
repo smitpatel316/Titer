@@ -42,6 +42,8 @@ interface MenuContext {
   createSeries: (range: Range) => void;
   /** Shows a grouped table's Groups panel. */
   showGroups: () => void;
+  /** Opens the Data Sets dialog (seq 309). */
+  showDataSets: () => void;
   /** The table is frozen: the mutating items are disabled (seq 165). */
   tableFrozen?: boolean;
   /** Pastes a picked file as a link at `range`'s top-left cell (seq 168). */
@@ -52,7 +54,7 @@ interface MenuContext {
   breakLink: () => void;
 }
 
-export function gridMenu({ data, type, zone, range, update, rename, renameGroup, showGroups, tableFrozen, pasteLink, refreshLink, breakLink, createSeries }: MenuContext): MenuItems {
+export function gridMenu({ data, type, zone, range, update, rename, renameGroup, showGroups, showDataSets, tableFrozen, pasteLink, refreshLink, breakLink, createSeries }: MenuContext): MenuItems {
   const nested = isNested(data);
   const grouped = isGrouped(data) || nested;
   const rows = range.r1 - range.r0 + 1;
@@ -166,6 +168,11 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
 
   if (grouped || type === "xy")
     items.push(SEPARATOR, { text: type === "xy" ? "Show Replicates" : "Show Groups", action: showGroups });
+
+  // The Data sets dialog (seq 309): the table's sets in one place — reorder,
+  // add, remove — on every table, from any zone. It opens on a frozen table
+  // too; the dialog itself disables its edits there.
+  items.push(SEPARATOR, { text: "Data Sets…", action: showDataSets });
 
   if (zone === "row") {
     const text = `Delete ${plural(rows, "Row")}`;

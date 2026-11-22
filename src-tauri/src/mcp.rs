@@ -2881,7 +2881,8 @@ pub struct EditTableArgs {
     /// delete-columns, rename-column, rename-group, exclude-cells,
     /// include-cells, freeze-title, convert-comma-decimals,
     /// set-summary-format, add-calculated-variable, set-calculated-variable,
-    /// remove-calculated-variable, paste-link, remove-link, generate-series or paste-transposed (seq 230).
+    /// remove-calculated-variable, paste-link, remove-link, generate-series, paste-transposed (seq 230),
+    /// add-data-set, reorder-data-set or remove-data-set (seq 309).
     pub op: String,
     /// insert/delete-rows, insert/delete-columns: the 0-based row or
     /// column to act at (rows and columns are 0-based; column 0 holds the
@@ -2944,6 +2945,11 @@ pub struct EditTableArgs {
     /// or mean-upper-lower (grouped, xy and nested tables only).
     #[serde(default)]
     pub format: Option<String>,
+    /// remove-data-set: pass true once the dispatcher has warned that an
+    /// analysis runs on the set, to remove it and orphan that analysis
+    /// (seq 309). Without it the removal is refused and names the analysis.
+    #[serde(default)]
+    pub confirm: Option<bool>,
 }
 
 /// Args for `titer_refresh_linked_data`: the table whose linked source file
@@ -4624,7 +4630,7 @@ impl TiterMcpServer {
     /// file as a link, or break that link.
     #[tool(
         name = "titer_edit_table",
-        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, set-summary-format, add-calculated-variable, set-calculated-variable, remove-calculated-variable, paste-link, remove-link, generate-series or paste-transposed. Rows and columns are 0-based; column 0 holds the row titles. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. paste-transposed { rows, at_row, at_col } pastes the block with rows and columns swapped, as Edit ▸ Paste Transposed does. paste-link { source_path, row?, column?, auto_update? } pastes a data file (.csv, .tsv, .txt or .xlsx) as a link at (row, column) — the values land and stay linked, so titer_refresh_linked_data re-reads the file into the same region later; auto_update (default true) refreshes the link when the project opens. remove-link { } keeps the values and drops the link. generate-series { column, at, count, first, mode, step } fills a column with an arithmetic series (add step, default) or a geometric one (multiply by step): column defaults to the X column (1) on XY and Survival tables, at defaults to row 0, count to the table's stored rows, first to 0, step to 1; at most 10,000 values. set-summary-format { format } changes a grouped, xy or nested table's sub-column format between raw replicates and pre-calculated summaries (mean-sd-n, mean-sem-n, mean-sd, mean-sem, mean-cv-n, mean-cv, mean-plus-minus, mean-upper-lower, or replicates); values stay in their group's slot.",
+        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, set-summary-format, add-calculated-variable, set-calculated-variable, remove-calculated-variable, paste-link, remove-link, generate-series or paste-transposed, add-data-set, reorder-data-set or remove-data-set. Rows and columns are 0-based; column 0 holds the row titles. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. paste-transposed { rows, at_row, at_col } pastes the block with rows and columns swapped, as Edit ▸ Paste Transposed does. paste-link { source_path, row?, column?, auto_update? } pastes a data file (.csv, .tsv, .txt or .xlsx) as a link at (row, column) — the values land and stay linked, so titer_refresh_linked_data re-reads the file into the same region later; auto_update (default true) refreshes the link when the project opens. remove-link { } keeps the values and drops the link. generate-series { column, at, count, first, mode, step } fills a column with an arithmetic series (add step, default) or a geometric one (multiply by step): column defaults to the X column (1) on XY and Survival tables, at defaults to row 0, count to the table's stored rows, first to 0, step to 1; at most 10,000 values. set-summary-format { format } changes a grouped, xy or nested table's sub-column format between raw replicates and pre-calculated summaries (mean-sd-n, mean-sem-n, mean-sd, mean-sem, mean-cv-n, mean-cv, mean-plus-minus, mean-upper-lower, or replicates); values stay in their group's slot. add-data-set { } appends a new empty data set (a column, or a group on grouped / nested / XY-with-replicates tables). reorder-data-set { name, at } moves the named data set to data-set position at (0-based); graphs built from the table follow the new order. remove-data-set { name, confirm? } removes the named data set with its values — the last set is refused; when an analysis runs on the set the removal is refused until confirm: true is passed, and then that analysis becomes orphaned (frozen results, re-pointable).",
         annotations(
             title = "Edit table",
             read_only_hint = false,
@@ -4687,6 +4693,9 @@ impl TiterMcpServer {
                 "generate-series",
                 "remove-link",
                 "paste-transposed",
+                "add-data-set",
+                "reorder-data-set",
+                "remove-data-set",
             ];
             if !OPS.contains(&args.op.as_str()) {
                 return Err(format!("No edit op “{}” — the ops are {}.", args.op, OPS.join(", ")));
@@ -4757,6 +4766,25 @@ impl TiterMcpServer {
                     Some(rows) if !rows.is_empty() => {}
                     _ => return Err("op paste-transposed needs rows (at least one row of values).".into()),
                 },
+                // Data sets (seq 309): the dialog's ops as MCP — the named
+                // set, and the destination position for a reorder.
+                "remove-data-set" => match &args.name {
+                    Some(n) if !n.trim().is_empty() => {}
+                    _ => return Err("op remove-data-set needs a non-empty name (the data set to remove).".into()),
+                },
+                "reorder-data-set" => {
+                    match &args.name {
+                        Some(n) if !n.trim().is_empty() => {}
+                        _ => {
+                            return Err(
+                                "op reorder-data-set needs a non-empty name (the data set to move).".into()
+                            )
+                        }
+                    }
+                    if args.at.is_none() {
+                        return Err("op reorder-data-set needs at (the 0-based data-set position to move to).".into());
+                    }
+                }
                 "paste-link" => {
                     match &args.source_path {
                         Some(p) if !p.trim().is_empty() => {}
@@ -4802,6 +4830,7 @@ impl TiterMcpServer {
                     "step": args.step,
                     "mode": args.mode,
                     "format": args.format,
+                    "confirm": args.confirm,
                 }),
             )
             .await
