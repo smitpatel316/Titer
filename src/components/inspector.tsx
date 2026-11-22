@@ -90,6 +90,7 @@ export function WithInspector({
       </div>
       <SidePanel
         side="right"
+        pane="inspector"
         open={open}
         width={inspectorWidth}
         minWidth={INSPECTOR_WIDTH.min}

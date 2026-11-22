@@ -302,6 +302,7 @@ export function ProjectSidebar() {
   return (
     <SidePanel
       side="left"
+      pane="navigator"
       open={sidebar}
       width={sidebarWidth}
       minWidth={SIDEBAR_WIDTH.min}

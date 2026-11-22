@@ -4,6 +4,7 @@
 import * as React from "react";
 import { CaretRightIcon } from "@phosphor-icons/react";
 import { cn } from "./controls";
+import type { PaneId } from "../lib/pane-focus";
 
 /** Top bar of a pane: a title, a tag saying what it is (a gray pill), and buttons on the
  *  right. Dragging it moves the window. Its left inset is `--toolbar-inset`: room for the
@@ -40,6 +41,7 @@ export function SidePanel({
   header,
   footer,
   children,
+  pane,
 }: {
   side: "left" | "right";
   open: boolean;
@@ -49,6 +51,8 @@ export function SidePanel({
   header: React.ReactNode;
   footer?: React.ReactNode;
   children: React.ReactNode;
+  /** The F6 pane-cycle stop this panel is (seq 300): Navigator, Inspector. */
+  pane?: PaneId;
 }) {
   const [resizing, setResizing] = React.useState(false);
   const start = React.useRef({ x: 0, width });
@@ -66,6 +70,7 @@ export function SidePanel({
 
   return (
     <aside
+      data-pane={pane}
       inert={!open && !resizing}
       style={{ width: open ? width : 0 }}
       className={cn(

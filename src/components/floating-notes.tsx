@@ -82,7 +82,11 @@ export function FloatingNotesLayer({ node }: { node: ProjectNode }) {
   };
 
   return (
-    <div ref={layerRef} className="floating-notes-layer pointer-events-none absolute inset-0 z-20 overflow-hidden">
+    <div
+      ref={layerRef}
+      data-pane="notes"
+      className="floating-notes-layer pointer-events-none absolute inset-0 z-20 overflow-hidden"
+    >
       {notes.map((note) => {
         const shown = drag?.id === note.id ? drag : note;
         const editing = editingId === note.id;

@@ -41,6 +41,7 @@ import { PRINT_SETTINGS_CHANGED_EVENT, loadPrintSettings, printPageCss } from ".
 import { useStartAnalysis } from "../views/analyses/use-analysis-launcher";
 import { GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
 import { goToSheetEntries } from "../lib/sheet-navigation";
+import { installPaneFocusCycling } from "../lib/pane-focus";
 
 // The traffic lights sit at x 20–80, centered in the 52 px toolbars (`trafficLightPosition`
 // in tauri.conf.json). With the sidebar hidden, its button follows them (or starts the
@@ -53,6 +54,10 @@ const HIDDEN_SIDEBAR = {
 export function AppShell() {
   const documentActions = useDocument();
   useAppMenu(documentActions);
+  // Seq 300: F6 / Shift+F6 cycles keyboard focus between the panes
+  // (Navigator → sheet → floating notes → Inspector), with a visible ring
+  // on the pane holding focus. Installed once, for the window's life.
+  React.useEffect(() => installPaneFocusCycling(), []);
   // v3 Phase 1: this window's project goes to the MCP server on every edit.
   useMcpSnapshotPublisher();
   // v1.6.0 L0: this window runs the MCP jobs Rust queues for it.
@@ -120,6 +125,7 @@ export function AppShell() {
       {!sidebar && <SidebarToggle className={`fixed top-3 z-10 print:hidden ${hidden.button}`} />}
       <ProjectSidebar />
       <main
+        data-pane="sheet"
         className="flex min-w-0 flex-1 flex-col"
         style={{ "--toolbar-inset": sidebar ? "16px" : hidden.inset } as React.CSSProperties}
       >
