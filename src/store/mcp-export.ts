@@ -36,6 +36,7 @@ import {
   EXPORT_FORMATS,
   EXPORT_PRESETS,
   RESOLUTIONS,
+  drawSizeAtWidth,
   exportPreset,
   type ExportFormat,
 } from "../views/graphs/graph-export";
@@ -230,6 +231,17 @@ function graphNode(job: McpJob, state: ExportJobState, graphId: string): Project
   return node;
 }
 
+/** A draw size inside the graph limits, or a plain error naming them. */
+function checkedSize(width: number, height: number): { width: number; height: number } {
+  const { width: wLim, height: hLim } = GRAPH_LIMITS;
+  if (width < wLim.min || width > wLim.max || height < hLim.min || height > hLim.max) {
+    throw new Error(
+      `The graph would be ${width} × ${height} px — graphs export between ${wLim.min}–${wLim.max} px wide and ${hLim.min}–${hLim.max} px tall.`,
+    );
+  }
+  return { width, height };
+}
+
 /** The graph's drawn size in 96-DPI px — its saved `GraphOptions`
  *  width/height, exactly as the graph view draws it
  *  (`graph-view.tsx`: `{...DEFAULT_GRAPH_OPTIONS, ...node.graphOptions}`),
@@ -244,17 +256,16 @@ export function graphDrawSize(
   const saved = { ...DEFAULT_GRAPH_OPTIONS, ...graph.graphOptions };
   if (widthIn !== undefined && !(widthIn > 0)) throw new Error("width_in must be greater than 0.");
   if (heightIn !== undefined && !(heightIn > 0)) throw new Error("height_in must be greater than 0.");
+  // A width alone resolves through the dialog's math (`drawSizeAtWidth`):
+  // the same width draws the same size from the dialog and from MCP.
+  if (widthIn !== undefined && heightIn === undefined) {
+    const { width, height } = drawSizeAtWidth({ width: saved.width, height: saved.height }, widthIn);
+    return checkedSize(width, height);
+  }
   let width = widthIn !== undefined ? Math.round(widthIn * PX_PER_INCH) : saved.width;
   let height = heightIn !== undefined ? Math.round(heightIn * PX_PER_INCH) : saved.height;
-  if (widthIn !== undefined && heightIn === undefined) height = Math.round((width * saved.height) / saved.width);
   if (heightIn !== undefined && widthIn === undefined) width = Math.round((height * saved.width) / saved.height);
-  const { width: wLim, height: hLim } = GRAPH_LIMITS;
-  if (width < wLim.min || width > wLim.max || height < hLim.min || height > hLim.max) {
-    throw new Error(
-      `The graph would be ${width} × ${height} px — graphs export between ${wLim.min}–${wLim.max} px wide and ${hLim.min}–${hLim.max} px tall.`,
-    );
-  }
-  return { width, height };
+  return checkedSize(width, height);
 }
 
 /** The export's pixel size at `dpi`, capped to the largest image Titer

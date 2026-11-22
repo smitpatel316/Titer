@@ -15619,6 +15619,117 @@ check("seq 290: MCP advertises the publication preset on the export tools (Rust 
   ok(exporter.includes("exportPreset"), "dispatcher must resolve the preset");
 });
 
+// ── Publication export size (seq 294) ──────────────────────────────────────
+// Pre-fix pins (Nov 22): seq 216 built the formats/DPI/colour/figure-size
+// override, but a single graph still exports at its own pixel size — no
+// per-export "Size (final width)" choice in the dialog, and no shared
+// width→draw-size math between the dialog and MCP. Each check below failed
+// on the a9d3165 base and passes with the lane. The new dialog APIs are
+// imported dynamically so a missing export fails only its own check, not
+// the file. The Plotly draw itself cannot run in node (no DOM/webview),
+// so the pins cover everything node-testable — the draw size, the pixel
+// size, and the declared vector widths — and the real-Plotly end-to-end
+// proof is owed on the Mac.
+check("seq 294: the export size presets resolve to inches; custom cm converts; blank/invalid falls back to the graph's own size", async () => {
+  const { EXPORT_SIZE_PRESETS, exportFinalWidthIn } = await import("../src/views/graphs/graph-export");
+  deepStrictEqual(
+    EXPORT_SIZE_PRESETS.map((p) => p.value),
+    ["graph", "3.25", "5", "7", "custom"],
+  );
+  strictEqual(exportFinalWidthIn("graph", undefined, "in"), undefined);
+  strictEqual(exportFinalWidthIn("3.25", undefined, "in"), 3.25);
+  strictEqual(exportFinalWidthIn("5", undefined, "in"), 5);
+  strictEqual(exportFinalWidthIn("7", undefined, "in"), 7);
+  const tenCm = exportFinalWidthIn("custom", 10, "cm");
+  ok(tenCm !== undefined && Math.abs(tenCm - 10 / 2.54) < 1e-9, `10 cm is ${tenCm} in, want ${10 / 2.54}`);
+  strictEqual(exportFinalWidthIn("custom", 4, "in"), 4);
+  // Blank, zero or negative custom values fall back to the graph's own size
+  // (a blank field is Auto, as the axis limits are) — never an error.
+  strictEqual(exportFinalWidthIn("custom", undefined, "in"), undefined);
+  strictEqual(exportFinalWidthIn("custom", 0, "in"), undefined);
+  strictEqual(exportFinalWidthIn("custom", -2, "cm"), undefined);
+});
+
+check("seq 294: a 3.25 in graph at 300 DPI is 975 px wide; the draw size keeps the aspect ratio; dialog and MCP agree", async () => {
+  const { drawSizeAtWidth } = await import("../src/views/graphs/graph-export");
+  const { exportPixelSize, graphDrawSize } = await import("../src/store/mcp-export");
+  const own = { width: 640, height: 480 };
+  deepStrictEqual(drawSizeAtWidth(own, 3.25), { width: 312, height: 234 });
+  deepStrictEqual(drawSizeAtWidth(own, 5), { width: 480, height: 360 });
+  deepStrictEqual(drawSizeAtWidth(own, 7), { width: 672, height: 504 });
+  const px = exportPixelSize(drawSizeAtWidth(own, 3.25), "png", 300);
+  strictEqual(px.widthPx, 975);
+  strictEqual(px.heightPx, 731);
+  strictEqual(px.capped, false);
+  // 10 cm is 378 px wide at 96 DPI.
+  strictEqual(drawSizeAtWidth(own, 10 / 2.54).width, 378);
+  // MCP's width_in resolves through the same math: same graph, same width.
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Plot",
+    parentId: "t1",
+    graphType: "xy-scatter",
+    graphOptions: { ...newGraphOptions("xy-scatter"), width: 640, height: 480 },
+  };
+  deepStrictEqual(graphDrawSize(graph, 3.25), drawSizeAtWidth(own, 3.25));
+  // Unset: the graph's own size, exactly as before.
+  deepStrictEqual(graphDrawSize(graph), own);
+  throws(() => graphDrawSize(graph, 0), /width_in must be greater than 0/);
+});
+
+check("seq 294: vector outputs declare the chosen width — SVG 312 px, EPS 234 pt, PDF 234 pt; 10 cm declares 283.5 pt", () => {
+  // The resized root is what Plotly draws at the chosen width (the inner
+  // drawing stays 640-scale; only the declared page size is asserted).
+  const svg312 = seq216Svg.replace(
+    'width="640" height="480" viewBox="0 0 640 480"',
+    'width="312" height="234" viewBox="0 0 312 234"',
+  );
+  const m = svg312.match(/<svg[^>]*width="(\d+)"/);
+  ok(m, "the SVG declares a width");
+  ok(Math.abs(Number(m![1]) / 96 - 3.25) < 1 / 96, "312 px = 3.25 in at 96 DPI");
+  const eps = new TextDecoder().decode(svgToEps(svg312));
+  ok(eps.includes("%%BoundingBox: 0 0 234 175.5"), "EPS declares 234 pt = 3.25 in wide");
+  const pdf = new TextDecoder().decode(svgToPdf(svg312));
+  ok(pdf.includes("/MediaBox [0 0 234 175.5]"), "PDF declares a 234 pt = 3.25 in wide page");
+  // 10 cm: 378 px wide → 283.5 pt = 10.0001 cm, within 0.05 cm of 10 cm.
+  const svg10cm = seq216Svg.replace(
+    'width="640" height="480" viewBox="0 0 640 480"',
+    'width="378" height="284" viewBox="0 0 378 284"',
+  );
+  const eps10 = new TextDecoder().decode(svgToEps(svg10cm));
+  ok(eps10.includes("%%BoundingBox: 0 0 283.5 213"), "EPS declares 283.5 pt = 10 cm wide");
+  const pdf10 = new TextDecoder().decode(svgToPdf(svg10cm));
+  ok(pdf10.includes("/MediaBox [0 0 283.5 213]"), "PDF declares a 283.5 pt = 10 cm wide page");
+});
+
+check("seq 294: the graph Export section offers a Size (final width) control with presets and a custom in/cm value", () => {
+  const panel = readFileSync("src/views/graphs/format-panel.tsx", "utf8");
+  ok(panel.includes('label="Size (final width)"'), "the size picker is labelled Size (final width)");
+  ok(panel.includes("EXPORT_SIZE_PRESETS"), "the panel renders the export size presets");
+  const exporter = readFileSync("src/views/graphs/graph-export.ts", "utf8");
+  ok(exporter.includes("Single column (3.25 in)"), "the single-column preset is offered");
+  ok(exporter.includes("Full page (7 in)"), "the full-page preset is offered");
+  ok(panel.includes("customWidth") && panel.includes("customUnit"), "a custom width with an in/cm unit is offered");
+  ok(panel.includes("exportFinalWidthIn"), "the panel resolves the choice to inches");
+  const view = readFileSync("src/views/graphs/graph-view.tsx", "utf8");
+  ok(view.includes("drawSizeAtWidth"), "the graph view draws at the chosen width, aspect preserved");
+  ok(view.includes("widthIn"), "the chosen width reaches the save/copy calls");
+});
+
+check("seq 294: MCP titer_export_graph takes width_in (Rust pins) and the dispatcher threads it", () => {
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(mcp.includes("pub width_in: Option<f64>"), "ExportGraphArgs must take width_in");
+  ok(
+    mcp.includes("width_in/height_in override the graph's saved size in inches"),
+    "the graph tool must describe the width override",
+  );
+  ok(mcp.includes('job_args["width_in"]'), "width_in must reach the job call args");
+  const exporter = readFileSync("src/store/mcp-export.ts", "utf8");
+  ok(exporter.includes('optNum(job, args, "width_in")'), "the dispatcher must read width_in");
+  ok(exporter.includes("graphDrawSize(graph, widthIn, heightIn)"), "the graph export must size from width_in");
+});
+
 // ── Analyses ─────────────────────────────────────────────────────────────
 
 // P-value adjustments (plan 25): Šídák and Holm–Šídák are pure TypeScript
