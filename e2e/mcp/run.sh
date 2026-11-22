@@ -62,6 +62,13 @@ else
 fi
 mkdir -p "$OUT_DIR"
 rm -f "$DISC"  # never read a stale discovery file (wrong token/endpoint)
+# The 1.8.2 server gates tools behind allowlist groups; a fresh install
+# advertises only the 6 read-group tools, so every mutating case fails.
+# Pre-seed mcp-allowlist.json with all 10 groups in the scratch app-data
+# (the Settings-toggles equivalent); the server reads it per session.
+MCP_DIR="$(dirname "$DISC")"
+mkdir -p "$MCP_DIR"
+printf '{"groups": ["read", "read_more", "discovery", "project", "tables", "analyses", "graphs", "export", "cloud", "destructive"], "ts": %s}' "$(date +%s)" > "$MCP_DIR/mcp-allowlist.json"
 echo "scratch app-data: $SCRATCH"
 echo "discovery: $DISC"
 

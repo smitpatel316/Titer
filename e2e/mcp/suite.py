@@ -1,7 +1,7 @@
 # Titer CI regression suite (check/e2e-ci) — driven by MCP, not GUI clicks.
 #
 # Every case runs against the built debug app through its in-process MCP
-# server (51 tools), the same driver pattern the readiness battery uses
+# server (73 tools), the same driver pattern the readiness battery uses
 # (work/battery_driver.py): import, run analysis, export, reopen, assert.
 # Identical on Linux and Mac; no display-automation fragility.
 #
@@ -262,9 +262,9 @@ class Suite:
     def c_tools_list(self):
         names = self.mcp.initialize()
         missing = [t for t in NEEDED_TOOLS if t not in names]
-        assert len(names) == 51, f"expected 51 tools, got {len(names)}: {names}"
+        assert len(names) == 73, f"expected 73 tools, got {len(names)}: {names}"
         assert not missing, f"missing tools: {missing}"
-        return f"51 tools, all {len(NEEDED_TOOLS)} needed tools present"
+        return f"73 tools, all {len(NEEDED_TOOLS)} needed tools present"
 
     def c_import_prism_demo(self):
         path = os.path.join(self.repo, "tests/testdata/prism/prism2R-demo_dataset.prism")
