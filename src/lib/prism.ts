@@ -1027,7 +1027,7 @@ export async function convertPrism(data: Uint8Array, sourceName: string): Promis
       helixType = "column";
       issues.push({
         severity: "warning",
-        message: `${displayName}: Prism nested tables import as Column — convert it to Nested by hand in Titer.`,
+        message: `${displayName}: Prism nested tables import as Column — there is no convert-to-Nested in Titer yet; make a new Nested table (Table ▸ New Table ▸ Nested) with the same groups, subgroups and replicates, then copy the values across.`,
       });
     } else {
       helixType = "column";
