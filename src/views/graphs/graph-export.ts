@@ -47,6 +47,51 @@ export function exportPreset(preset: string): { format: ExportFormat; dpi: Resol
   return found ? { format: found.format, dpi: found.dpi } : null;
 }
 
+/** The export's final width (seq 294): Prism's export-size choice — the
+ *  size given is the final size (width) of the exported graph, aspect
+ *  ratio preserved — as a preset, the graph's own size, or a custom value
+ *  in inches or cm. */
+export const EXPORT_SIZE_PRESETS = [
+  { value: "graph", label: "Graph's own size" },
+  { value: "3.25", label: "Single column (3.25 in)" },
+  { value: "5", label: "5 in" },
+  { value: "7", label: "Full page (7 in)" },
+  { value: "custom", label: "Custom…" },
+] as const;
+export type ExportSizePreset = (typeof EXPORT_SIZE_PRESETS)[number]["value"];
+export type ExportSizeUnit = "in" | "cm";
+
+/** The final width in inches a size choice resolves to, or undefined for
+ *  the graph's own size. A custom value in cm converts at 2.54 cm/in. A
+ *  blank, zero or negative custom value resolves to undefined — the
+ *  export falls back to the graph's own size rather than failing (a blank
+ *  field is Auto, as the axis limits are). */
+export function exportFinalWidthIn(
+  size: string,
+  customWidth: number | undefined,
+  customUnit: ExportSizeUnit,
+): number | undefined {
+  if (size === "graph") return undefined;
+  if (size === "custom") {
+    if (customWidth === undefined || !(customWidth > 0)) return undefined;
+    return customUnit === "cm" ? customWidth / 2.54 : customWidth;
+  }
+  const preset = Number(size);
+  return Number.isFinite(preset) && preset > 0 ? preset : undefined;
+}
+
+/** The draw size, in 96-DPI px, of a graph exported at `widthIn` final
+ *  width: the width in px, the height derived from the graph's own aspect
+ *  ratio. The MCP graph export's `width_in` resolves through the same
+ *  math (`graphDrawSize` in `src/store/mcp-export.ts`), so a dialog
+ *  export and an MCP export at the same width are the same size — and a
+ *  vector export drawn at this size declares the width in points (its px
+ *  size × 72/96), so 3.25 in draws at 312 px and declares 234 pt. */
+export function drawSizeAtWidth(own: Size, widthIn: number): Size {
+  const width = Math.round(widthIn * PX_PER_INCH);
+  return { width, height: Math.round((width * own.height) / own.width) };
+}
+
 // The folder of the last export, offered again for the next one this session.
 let lastFolder: string | null = null;
 

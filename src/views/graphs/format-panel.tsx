@@ -36,10 +36,14 @@ import { GRAPHS, hasValueAxis, newGraphOptions } from ".";
 import {
   EXPORT_FORMATS,
   EXPORT_PRESETS,
+  EXPORT_SIZE_PRESETS,
   RESOLUTIONS,
+  exportFinalWidthIn,
   exportPreset,
   type ExportFormat,
   type ExportPreset,
+  type ExportSizePreset,
+  type ExportSizeUnit,
   type Resolution,
 } from "./graph-export";
 import { COLOR_MODES, type ColorMode } from "../../lib/vector-export";
@@ -84,8 +88,10 @@ interface Props extends SectionContext {
   setSeriesStyle: (key: string, style: SeriesStyle) => void;
   selection?: Selection;
   canExport: boolean;
-  onSave: (format: ExportFormat, dpi: Resolution, colorMode: ColorMode) => void;
-  onCopy: (dpi: Resolution, colorMode: ColorMode) => void;
+  /** Save / copy at the export's final width (`widthIn` undefined = the
+   *  graph's own size). */
+  onSave: (format: ExportFormat, dpi: Resolution, colorMode: ColorMode, widthIn?: number) => void;
+  onCopy: (dpi: Resolution, colorMode: ColorMode, widthIn?: number) => void;
   /** The table's series, in order: each shown one takes its place's color. */
   allSeries: string[];
   /** Where a new reference line goes: the middle of the value axis as drawn. */
@@ -132,7 +138,17 @@ const EXPORT_KEY = "titer.graph.export";
 
 /** The sections, in their one order (each shown only when it has something for the graph). */
 export const SECTIONS = ["Statistics", "Data", "Style", "Series", "Selected points", "Text", "Axes", "Match", "Export"];
-type ExportChoice = { format: ExportFormat; dpi: Resolution; colorMode: ColorMode; preset: "custom" | ExportPreset };
+type ExportChoice = {
+  format: ExportFormat;
+  dpi: Resolution;
+  colorMode: ColorMode;
+  preset: "custom" | ExportPreset;
+  /** The export's final width (seq 294): the graph's own size, a preset,
+   *  or a custom value in inches or cm. */
+  size: ExportSizePreset;
+  customWidth?: number;
+  customUnit: ExportSizeUnit;
+};
 function readExport(): ExportChoice {
   try {
     const saved = JSON.parse(localStorage.getItem(EXPORT_KEY) ?? "{}");
@@ -141,9 +157,13 @@ function readExport(): ExportChoice {
       dpi: RESOLUTIONS.includes(saved.dpi) ? saved.dpi : "300",
       colorMode: COLOR_MODES.some((m) => m.value === saved.colorMode) ? saved.colorMode : "color",
       preset: EXPORT_PRESETS.some((p) => p.value === saved.preset) ? saved.preset : "custom",
+      size: EXPORT_SIZE_PRESETS.some((p) => p.value === saved.size) ? saved.size : "graph",
+      customWidth:
+        typeof saved.customWidth === "number" && saved.customWidth > 0 ? saved.customWidth : undefined,
+      customUnit: saved.customUnit === "cm" ? "cm" : "in",
     };
   } catch {
-    return { format: "png", dpi: "300", colorMode: "color", preset: "custom" };
+    return { format: "png", dpi: "300", colorMode: "color", preset: "custom", size: "graph", customUnit: "in" };
   }
 }
 
@@ -620,19 +640,57 @@ export function FormatPanel(props: Props) {
             items={RESOLUTIONS.map((dpi) => ({ value: dpi, label: dpi }))}
           />
         )}
+        <Choice
+          label="Size (final width)"
+          value={exported.size}
+          onChange={(size) => chooseExport({ size })}
+          items={[...EXPORT_SIZE_PRESETS]}
+          wrap
+        />
+        {exported.size === "custom" && (
+          <>
+            <NumRow
+              label="Custom width"
+              value={exported.customWidth}
+              onChange={(customWidth) => chooseExport({ customWidth })}
+            />
+            <Choice
+              label="Unit"
+              value={exported.customUnit}
+              onChange={(customUnit) => chooseExport({ customUnit })}
+              items={[
+                { value: "in" as const, label: "inches" },
+                { value: "cm" as const, label: "cm" },
+              ]}
+            />
+          </>
+        )}
         <div className="flex gap-2">
           <Button
             variant="accent"
             className="flex-1"
             disabled={!props.canExport}
-            onClick={() => props.onSave(exported.format, exported.dpi, exported.colorMode)}
+            onClick={() =>
+              props.onSave(
+                exported.format,
+                exported.dpi,
+                exported.colorMode,
+                exportFinalWidthIn(exported.size, exported.customWidth, exported.customUnit),
+              )
+            }
           >
             Save…
           </Button>
           <Button
             className="flex-1"
             disabled={!props.canExport}
-            onClick={() => props.onCopy(exported.dpi, exported.colorMode)}
+            onClick={() =>
+              props.onCopy(
+                exported.dpi,
+                exported.colorMode,
+                exportFinalWidthIn(exported.size, exported.customWidth, exported.customUnit),
+              )
+            }
           >
             Copy
           </Button>

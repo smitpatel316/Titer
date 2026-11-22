@@ -39,7 +39,7 @@ import { addForestPlot } from "./forest-plot";
 import { addEstimationPlot } from "./estimation-plot";
 import { coxSurvivalColumns } from "./survival";
 import { FormatPanel } from "./format-panel";
-import { copyGraphImage, saveGraphImage, sendGraphToOffice } from "./graph-export";
+import { copyGraphImage, drawSizeAtWidth, saveGraphImage, sendGraphToOffice } from "./graph-export";
 import { addNote, applyNumberFormats, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, refLineParts, rightYDataset, unlinkedAnalysisNote, withCaps } from "./plot-helpers";
 import { addLogisticCurve as addAnalysisLogisticCurve } from "./fitted-curve";
 import { useStartAnalysis } from "../analyses/use-analysis-launcher";
@@ -1044,10 +1044,16 @@ export function GraphView({ node }: { node: ProjectNode }) {
             else openSelector({ kind: "new-analysis", tableId: node.parentId, forGraph });
           }}
           canExport={hasData}
-          onSave={(format, dpi, colorMode) =>
-            plottedRef.current && saveGraphImage(plottedRef.current, size, format, dpi, node.name, colorMode)
-          }
-          onCopy={(dpi, colorMode) => plottedRef.current && copyGraphImage(plottedRef.current, size, dpi, colorMode)}
+          onSave={(format, dpi, colorMode, widthIn) => {
+            // The export's final width (seq 294): the chosen width redraws
+            // at that size, aspect preserved; unset, the graph's own size.
+            const draw = widthIn === undefined ? size : drawSizeAtWidth(size, widthIn);
+            plottedRef.current && saveGraphImage(plottedRef.current, draw, format, dpi, node.name, colorMode);
+          }}
+          onCopy={(dpi, colorMode, widthIn) => {
+            const draw = widthIn === undefined ? size : drawSizeAtWidth(size, widthIn);
+            plottedRef.current && copyGraphImage(plottedRef.current, draw, dpi, colorMode);
+          }}
           onSendToOffice={(target, dpi) =>
             plottedRef.current && sendGraphToOffice(plottedRef.current, size, target, dpi, node.name)
           }
