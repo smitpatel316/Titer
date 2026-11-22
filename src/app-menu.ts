@@ -21,6 +21,7 @@ import { GRAPH_OPTIONS_BY_TABLE } from "./views/graphs";
 import { useStartAnalysis } from "./views/analyses/use-analysis-launcher";
 import { SECTIONS } from "./views/graphs/format-panel";
 import { linkedSheetIds, pingPongTarget } from "./lib/sheet-navigation";
+import { canRevertToSaved } from "./lib/revert";
 import { applyResimulation, simulateTableData } from "./stats/simulation/simulate";
 
 /** Text-editing commands go to a focused text field natively, everything else to the
@@ -108,7 +109,7 @@ export function useAppMenu(doc: DocumentActions) {
     [],
   );
 
-  const { activeTableId, activeNodeId, activeNode, isDirty, nodes, childOrder, recentNodeIds, undoName, redoName } =
+  const { activeTableId, activeNodeId, activeNode, isDirty, filePath, nodes, childOrder, recentNodeIds, undoName, redoName } =
     store;
 
   // A text field being typed in has its own Undo, so the menu follows the focus.
@@ -312,6 +313,15 @@ export function useAppMenu(doc: DocumentActions) {
           sep,
           { text: "Save", accelerator: "CmdOrCtrl+S", enabled: isDirty, action: () => latest.current.doc.save() },
           { text: "Save As…", accelerator: "CmdOrCtrl+Shift+S", action: () => latest.current.doc.save(true) },
+          {
+            // Revert to the last saved version (seq 306, Prism menus B11):
+            // the unsaved changes go, the disk version comes back, the file
+            // path stays. Disabled when clean or untitled — and for a
+            // `.prism` / `.pzfx` file, whose reload would be a lossy import.
+            text: "Revert to Saved…",
+            enabled: canRevertToSaved({ isDirty, filePath, remote: doc.remote !== null }),
+            action: () => void latest.current.doc.revertToSaved(),
+          },
           {
             // A copy of the whole project (seq 234): the current file stays put.
             text: "Save a Copy…",
@@ -825,7 +835,9 @@ export function useAppMenu(doc: DocumentActions) {
     settingsHere,
     shown,
     isDirty,
+    filePath,
     doc.recents,
+    doc.remote,
     theme,
     sidebar,
     gallery,

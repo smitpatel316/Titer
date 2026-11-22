@@ -60,6 +60,14 @@ import { openProjectsOrSay, sayGone } from "../menus";
 import { fileName, fileTitle, sameFilePath } from "../lib/paths";
 import { refreshLinkedFromFile } from "../views/tables/linked-data";
 import {
+  diskChangedExternally,
+  isReloadableProjectPath,
+  REVERT_CONFIRM_DETAIL,
+  REVERT_CONFIRM_TITLE,
+  revertExternalChangeDetail,
+  revertExternalChangeTitle,
+} from "../lib/revert";
+import {
   base64ToBytes,
   bytesToBase64,
   cloudErrorMessage,
@@ -247,6 +255,14 @@ export function useDocument() {
   const prismOrigin = React.useRef(false);
   const prompted = React.useRef(false);
   const pendingPrompt = React.useRef<((choice: SavePromptChoice, remember: boolean) => void) | null>(null);
+  // Revert to Saved (seq 306): the file's text as this window last read or
+  // wrote it. Comparing it with the text on disk now is what tells a file
+  // another program rewrote since open from the last saved version — the
+  // plain confirm would misdescribe that one. Null when the baseline can't
+  // be compared (a `.prism` / `.pzfx` save, a remote file): the check then
+  // never claims a change. Set by `load` and by the `.hlx` save below, and
+  // by `revertToSaved` itself after a revert lands.
+  const lastSavedTextRef = React.useRef<string | null>(null);
 
   /** The save prompt's answer: remember it if asked, close the dialog, and
    *  let the save waiting on it continue. */
@@ -295,6 +311,9 @@ export function useDocument() {
       // The project now lives on local disk, even if it came from the cloud.
       setRemote(null);
       addRecent({ kind: "local", path: target });
+      // A `.prism` save has no comparable baseline: the file holds Prism
+      // bytes, not the `.hlx` text — and Revert is disabled for it anyway.
+      lastSavedTextRef.current = null;
       // The write report, shown — never silently dropped (Mansi P0 #3).
       setPrismSavedReport(prismSaveReportLines(report, fileName(target)));
       return true;
@@ -343,6 +362,8 @@ export function useDocument() {
       // The project now lives on local disk, even if it came from the cloud.
       setRemote(null);
       addRecent({ kind: "local", path: target });
+      // A `.pzfx` save has no comparable baseline, like `.prism` above.
+      lastSavedTextRef.current = null;
       return true;
     } catch (err) {
       const name = fileName(target);
@@ -551,6 +572,9 @@ export function useDocument() {
         setRemote(next);
         setUntitled(fileTitle(handle.path));
         addRecent(recent);
+        // A remote file has no local disk text to compare (seq 306): the
+        // revert baseline is cleared, so the check never claims a change.
+        lastSavedTextRef.current = null;
       },
     );
   };
@@ -700,6 +724,8 @@ export function useDocument() {
         latest.current.markProjectSaved(filePath, revision);
         // Prism: the backup is rewritten on every save.
         void writeBackupSnapshot();
+        // No comparable baseline: the file holds Prism bytes now (seq 306).
+        lastSavedTextRef.current = null;
         // The write report, shown — never silently dropped (Mansi P0 #3).
         if (!options?.silent) setPrismSavedReport(prismSaveReportLines(report, fileName(filePath)));
         return true;
@@ -727,6 +753,8 @@ export function useDocument() {
         latest.current.markProjectSaved(filePath, revision);
         // Prism: the backup is rewritten on every save.
         void writeBackupSnapshot();
+        // No comparable baseline: the file holds .pzfx bytes now (seq 306).
+        lastSavedTextRef.current = null;
         return true;
       } catch (err) {
         await native.alert(
@@ -776,9 +804,13 @@ export function useDocument() {
     // flag if something changes during the write itself.
     const s = latest.current.get();
     const revision = s.revision;
+    // The exact text written: the revert baseline (seq 306) — the file on
+    // disk holds this text until something else rewrites it.
+    const text = serializeProjectFile(s);
     try {
-      await native.writeFile(target, serializeProjectFile(s));
+      await native.writeFile(target, text);
       latest.current.markProjectSaved(target, revision);
+      lastSavedTextRef.current = text;
       // A remote file saved to a local path now lives on local disk.
       setRemote(null);
       addRecent({ kind: "local", path: target });
@@ -1613,6 +1645,11 @@ export function useDocument() {
         "error",
       );
     }
+    // The baseline for Revert's external-change check (seq 306): the text
+    // on disk as this window read it. Untitled (the sample) has no file to
+    // compare against. Set even when the parse below fails — the file on
+    // disk is still this text, and a failed open leaves the project as is.
+    if (!untitled) lastSavedTextRef.current = text;
     setRemote(null);
     await applyProjectText(
       text,
@@ -1621,6 +1658,64 @@ export function useDocument() {
         if (!untitled) addRecent({ kind: "local", path });
       },
     );
+  };
+
+  /** File ▸ Revert to Saved (seq 306, Prism menus B11): discard the unsaved
+   *  changes and take the last saved version. The confirm comes first —
+   *  Cancel keeps the edits. The reload itself is the existing reload path
+   *  (`load` / `loadRemote`), so a file that vanished or can't be read is
+   *  reported exactly as an open would be, and the edits stay put. A file
+   *  another program rewrote since this window opened or saved it gets the
+   *  conflict wording instead of the plain confirm: the version on disk is
+   *  no longer the last saved version, and the dialog must not claim it is.
+   *  A revert that lands rewrites the backup snapshot, like a save does —
+   *  otherwise the snapshot of the discarded edits would be offered back
+   *  on the next launch. A pending remote conflict blocks the command: the
+   *  conflict dialog owns those edits until it is resolved. The file path
+   *  never moves. Disabled (by the menu) when clean, untitled, or saved as
+   *  `.prism` / `.pzfx` — the guards here are belt and braces. */
+  const revertToSaved = async (): Promise<void> => {
+    const s = latest.current;
+    const path = s.filePath;
+    const handle = remoteRef.current;
+    if (!s.isDirty) return;
+    if (!path && !handle) return;
+    if (path && !isReloadableProjectPath(path)) return;
+    if (conflictRef.current) return;
+    // Read the disk text first, for the external-change check. A read that
+    // fails is not reported here — `load` below reports it, as an open
+    // would, and the revert simply doesn't happen.
+    let diskText: string | null = null;
+    if (path) {
+      try {
+        diskText = await native.readText(path);
+      } catch {
+        diskText = null;
+      }
+    }
+    const name = path ? fileName(path) : handle ? fileName(handle.path) : untitled;
+    const externallyChanged = path !== null && diskChangedExternally(diskText, lastSavedTextRef.current);
+    const confirmed = externallyChanged
+      ? await native.confirmRevert(revertExternalChangeTitle(name), revertExternalChangeDetail(name))
+      : await native.confirmRevert(REVERT_CONFIRM_TITLE, REVERT_CONFIRM_DETAIL);
+    if (!confirmed) return;
+    if (path) await load(path, false);
+    else if (handle) await loadRemote(handle);
+    // A failed open leaves the store untouched (still dirty, same path):
+    // only a revert that actually landed refreshes the baseline and the
+    // backup, so a stale snapshot of the discarded edits is never offered
+    // back. A snapshot still in flight owns the file first, like the close
+    // path's delete does.
+    const after = latest.current;
+    if (!after.isDirty && after.filePath === path) {
+      if (diskText !== null) lastSavedTextRef.current = diskText;
+      try {
+        await backupFlight.current?.catch(() => undefined);
+      } catch {
+        // Ignore: the backup is best-effort, never a revert failure.
+      }
+      void writeBackupSnapshot();
+    }
   };
 
   /** Loads an already-parsed Prism import (`.pzfx` or `.pzf` — same report
@@ -2397,6 +2492,7 @@ export function useDocument() {
     saveCopy,
     saveFamilyAs,
     saveTemplate,
+    revertToSaved,
     applyMethod,
     applyTemplate,
     welcomeOpen,
