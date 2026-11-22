@@ -15502,6 +15502,82 @@ check("seq 216: raster PDF in CMYK/Grayscale uses the matching colour space", ()
   );
 });
 
+// ── TIFF discoverability (seq 290) ───────────────────────────────────────
+// Pre-fix pins (Nov 22): the TIFF encoder already writes true resolution
+// at 300/600/1200 DPI with correct DPI tags (verified Nov 21) — the gap
+// is discoverability: no one-click publication preset, and the DPI choice
+// is not labelled as a publication choice. Each check below failed on the
+// 11ef509 base and passes with the lane. The new APIs are imported
+// dynamically so a missing export fails only its own check, not the file.
+check("seq 290: the Publication preset is TIFF at 300 DPI; unknown presets are null", async () => {
+  const { EXPORT_PRESETS, exportPreset } = await import("../src/views/graphs/graph-export");
+  deepStrictEqual(exportPreset("publication"), { format: "tiff", dpi: "300" });
+  strictEqual(exportPreset("nope"), null);
+  deepStrictEqual(
+    EXPORT_PRESETS.map((p) => p.value),
+    ["publication"],
+  );
+  ok(EXPORT_PRESETS[0]!.label.includes("300 DPI"), "the preset names its resolution");
+});
+
+check("seq 290: the graph Export section offers the Publication preset above a labelled Resolution (DPI) picker", () => {
+  const panel = readFileSync("src/views/graphs/format-panel.tsx", "utf8");
+  ok(panel.includes("EXPORT_PRESETS"), "the panel renders the export presets");
+  ok(panel.includes('label="Preset"'), "the preset picker is labelled");
+  ok(panel.includes('label="Resolution (DPI)"'), "the DPI picker is labelled Resolution (DPI)");
+});
+
+check("seq 290: the figure Export section offers the Publication preset and a labelled Resolution (DPI) picker", () => {
+  const view = readFileSync("src/views/figures/figure-view.tsx", "utf8");
+  ok(view.includes("EXPORT_PRESETS"), "the figure export renders the export presets");
+  ok(view.includes('label="Preset"'), "the preset picker is labelled");
+  ok(view.includes('label="Resolution (DPI)"'), "the DPI picker is labelled Resolution (DPI)");
+});
+
+check("seq 290: MCP export accepts a preset — publication is TIFF at 300 DPI, explicit args win", async () => {
+  const { exportFormatDpi } = await import("../src/store/mcp-export");
+  const job = (args: unknown): McpJob => ({ job_id: "j1", project_id: "p", action: "export-graph", args, status: "queued" });
+  deepStrictEqual(exportFormatDpi(job({ preset: "publication" }), { preset: "publication" }), {
+    format: "tiff",
+    dpi: "300",
+    colorMode: "color",
+  });
+  // An explicit resolution wins over the preset's; an explicit format does too.
+  deepStrictEqual(exportFormatDpi(job({ preset: "publication", dpi: "600" }), { preset: "publication", dpi: "600" }), {
+    format: "tiff",
+    dpi: "600",
+    colorMode: "color",
+  });
+  deepStrictEqual(exportFormatDpi(job({ preset: "publication", format: "png" }), { preset: "publication", format: "png" }), {
+    format: "png",
+    dpi: "300",
+    colorMode: "color",
+  });
+  throws(() => exportFormatDpi(job({ preset: "nope" }), { preset: "nope" }), /presets are publication/);
+  // No preset: the old behaviour — format required, DPI defaults to 300.
+  deepStrictEqual(exportFormatDpi(job({ format: "png" }), { format: "png" }), {
+    format: "png",
+    dpi: "300",
+    colorMode: "color",
+  });
+  throws(() => exportFormatDpi(job({}), {}), /needs format/);
+});
+
+check("seq 290: MCP advertises the publication preset on the export tools (Rust pins)", () => {
+  const mcp = readFileSync("src-tauri/src/mcp.rs", "utf8");
+  ok(mcp.includes("preset publication = TIFF at 300 DPI"), "export descriptions must name what the preset picks");
+  ok(mcp.includes("export_preset"), "Rust must resolve the preset to a format + resolution");
+  for (const args of ["ExportGraphArgs", "ExportFigureArgs", "ExportAllGraphsArgs"]) {
+    ok(mcp.includes(`pub struct ${args}`), `${args} must exist`);
+  }
+  ok(mcp.includes("pub preset: Option<String>"), "the export arg structs must take a preset");
+  ok(mcp.includes('"preset": args.preset'), "the preset must reach the job call args");
+  // The frontend dispatcher mirrors the preset: it reads and resolves it.
+  const exporter = readFileSync("src/store/mcp-export.ts", "utf8");
+  ok(exporter.includes('"preset"'), "dispatcher must read a preset arg");
+  ok(exporter.includes("exportPreset"), "dispatcher must resolve the preset");
+});
+
 // ── Analyses ─────────────────────────────────────────────────────────────
 
 // P-value adjustments (plan 25): Šídák and Holm–Šídák are pure TypeScript
