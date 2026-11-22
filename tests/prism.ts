@@ -499,5 +499,96 @@ if (corpusDir) {
   }
 }
 
+// P17 (seq 305): a Prism nested table imports as Column with the values
+// intact, and the import report tells the user exactly what to do —
+// there is no convert-to-Nested in Titer yet, so make a new Nested table
+// and copy the values across. Generated fixture (same shape as P15),
+// never a real Prism file: format "nested", y_replicates, two datasets
+// of three replicates each.
+{
+  const z = new JSZip();
+  const sheetUid = "77777777-7777-7777-7777-777777777777";
+  const tableUid = "88888888-8888-8888-8888-888888888888";
+  const aUid = "99999999-9999-9999-9999-999999999999";
+  const bUid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+  z.file(
+    "document.json",
+    JSON.stringify({
+      "@class": "Document",
+      createdBy: { name: "Prism", version: "10.3.0" },
+      formatVersion: "1-4-1",
+      sheets: { graphs: [], layouts: [], analyses: [], info: [], data: [sheetUid] },
+      sheetAttributesMap: { [sheetUid]: { title: "Nested data" } },
+    }),
+  );
+  z.file(
+    `data/sheets/${sheetUid}/sheet.json`,
+    JSON.stringify({
+      "@class": "DataSheet",
+      title: "Nested data",
+      table: {
+        uid: tableUid,
+        format: "nested",
+        dataFormat: "y_replicates",
+        replicatesCount: 3,
+        dataSets: [aUid, bUid],
+      },
+    }),
+  );
+  z.file(`data/tables/${tableUid}/content.json`, JSON.stringify({ numberOfColumns: 6, numberOfRows: 3, version: 1 }));
+  z.file(`data/tables/${tableUid}/data.csv`, "10,11,12,20,21,22\n30,31,32,40,41,42\n50,51,52,60,61,62\n");
+  const rep = () => ({
+    "@class": "DriverReplicate",
+    valueType: "real",
+    commonAttributes: ["NUMERIC"],
+    decimalsLength: 1,
+    significantDigitsCount: 7,
+    lastRow: 2,
+    firstRow: 0,
+  });
+  for (const [uid, title] of [
+    [aUid, "Group A"],
+    [bUid, "Group B"],
+  ] as const) {
+    z.file(
+      `data/sets/${uid}.json`,
+      JSON.stringify({
+        "@class": "DataSet",
+        uid,
+        format: "y_replicates",
+        title,
+        attributes: ["DS_ATTR_Y"],
+        replicates: [rep(), rep(), rep()],
+      }),
+    );
+  }
+  const bytes = new Uint8Array(await z.generateAsync({ type: "uint8array" }));
+  const { project, report } = await convertPrism(bytes, "nested-synthetic.prism");
+  const table = project.rootOrder
+    .map((id) => project.nodes[id])
+    .find((n) => n?.type === "table" && n.name === "Nested data");
+  const wantMessage =
+    "“Nested data”: Prism nested tables import as Column — there is no convert-to-Nested in Titer yet; make a new Nested table (Table ▸ New Table ▸ Nested) with the same groups, subgroups and replicates, then copy the values across.";
+  check(
+    "P17 nested imports as Column, values intact",
+    table?.tableType === "column" &&
+      JSON.stringify(table?.data?.columns ?? []) ===
+        JSON.stringify(["Title", "Group A_1", "Group A_2", "Group A_3", "Group B_1", "Group B_2", "Group B_3"]) &&
+      JSON.stringify(table?.data?.rows ?? []) ===
+        JSON.stringify([
+          [null, "10", "11", "12", "20", "21", "22"],
+          [null, "30", "31", "32", "40", "41", "42"],
+          [null, "50", "51", "52", "60", "61", "62"],
+        ]),
+    `type=${table?.tableType} cols=${(table?.data?.columns ?? []).join(",")}`,
+  );
+  check(
+    "P17 nested message names the manual path",
+    report.issues.some((i) => i.severity === "warning" && i.message === wantMessage) &&
+      formatReport(report).includes(wantMessage),
+    report.issues.map((i) => i.message).join(" | ") || "no issues",
+  );
+}
+
 console.log(`\n${checks - failures}/${checks} checks passed.`);
 process.exit(failures ? 1 : 0);

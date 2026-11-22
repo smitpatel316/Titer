@@ -29,11 +29,13 @@
 //                 2026-11-10: no nested file in test-corpus/ or tests/testdata/,
 //                 and the open-source readers (R pzfx 0.3.1, pypzfx) know no
 //                 "Nested" TableType. A OneWay/replicates table therefore
-//                 imports as Column (today's behaviour, unchanged) and the
-//                 user converts it to Nested by hand — do NOT auto-convert
-//                 OneWay/replicates to nested on a heuristic, a plain
-//                 replicates Column table is far more common than a nested one.
-//                 If a distinct marker is ever verified, map it here directly.
+//                 imports as Column (today's behaviour, unchanged) — do NOT
+//                 auto-convert OneWay/replicates to nested on a heuristic,
+//                 a plain replicates Column table is far more common than a
+//                 nested one. There is no convert-to-Nested in Titer yet;
+//                 the .prism import report tells the user to make a new
+//                 Nested table and copy the values across. If a distinct
+//                 marker is ever verified, map it here directly.
 //   HugeTable → the same as Table: Prism writes a table as `<HugeTable>`
 //                 instead of `<Table>` once it passes 52 subcolumns in a
 //                 data set or 104 data sets (R pzfx 0.2.0 NEWS; pypzfx
