@@ -10,19 +10,24 @@ import { runScript, scriptImportFiles, type ScriptDoc, type ScriptEffect } from 
 import { renderScriptGraph } from "../views/graphs/script-graph-export";
 import type { ProjectNode } from "../store/types";
 
-/** One effect, against the run's project. */
+/** One effect, against the run's project. Returns a warning line for the
+ *  script log when the effect itself succeeded but deserves one (a PDF
+ *  that fell back to raster); anything else is silent, and a failure
+ *  throws for the caller's per-effect catch. */
 export async function executeEffect(
   effect: ScriptEffect,
   nodes: Record<string, ProjectNode>,
   onSave: () => void,
   closeSelector: () => void,
-) {
+): Promise<string | void> {
   switch (effect.type) {
     case "export-graph": {
       const node = nodes[effect.graphId];
       if (!node) throw new Error("the graph is gone");
-      const bytes = await renderScriptGraph(node, nodes, effect.format, effect.dpi, effect.clear, effect.mode);
-      await writeFile(effect.path, bytes);
+      const out = await renderScriptGraph(node, nodes, effect.format, effect.dpi, effect.clear, effect.mode);
+      await writeFile(effect.path, out.bytes);
+      if (effect.format === "pdf" && !out.vector)
+        return `“${node.name}” has content that can't be drawn as vectors (an image or gradient fill), so it was exported as a raster PDF instead of a vector one.`;
       return;
     }
     case "write-text-file":
@@ -63,9 +68,15 @@ export async function runProjectScriptText(
   if (result.stopped) return { doc, log, stopped: true };
   for (const effect of result.effects) {
     try {
-      await executeEffect(effect, result.doc.nodes, onSave, () => {});
+      const warning = await executeEffect(effect, result.doc.nodes, onSave, () => {});
+      if (warning) log.push(warning);
     } catch (err) {
-      log.push(`Couldn't run ${effect.type}: ${err instanceof Error ? err.message : String(err)}`);
+      const reason = err instanceof Error ? err.message : String(err);
+      // A failed ExportAllPDF sheet is named and the batch continues with
+      // the other sheets; any other failed effect keeps the plain line.
+      if (effect.type === "export-graph" && effect.sheetName)
+        log.push(`Couldn't export “${effect.sheetName}”: ${reason} — the batch continues with the other sheets.`);
+      else log.push(`Couldn't run ${effect.type}: ${reason}`);
     }
   }
   return { doc: result.doc, log, stopped: false };
