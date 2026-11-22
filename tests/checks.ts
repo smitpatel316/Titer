@@ -53,6 +53,18 @@ import {
   type TemplateInfo,
 } from "../src/lib/template";
 import { highlightStyle, searchProject } from "../src/lib/project-search";
+import {
+  PANE_ORDER,
+  PANE_RING_CLASS,
+  availablePanes,
+  currentPane,
+  cyclePaneFocus,
+  firstFocusable,
+  handlePaneCycleKey,
+  nextPaneId,
+  syncPaneRingFromFocus,
+  type PaneId,
+} from "../src/lib/pane-focus";
 import { galleryItems } from "../src/lib/gallery";
 import { loadPrintSettings, printPageCss, savePrintSettings } from "../src/lib/print-settings";
 import { formatMergeReport, mergeProjects, type MergeInput as ProjectMergeInput } from "../src/lib/project-merge";
@@ -1891,6 +1903,373 @@ check("seq 240: setActive tracks recent sheets; the View menu offers Go to Sheet
   ok(/Previous Sheet/.test(menu) && /CmdOrCtrl\+Alt\+Z/.test(menu), "View menu lacks Previous Sheet (CmdOrCtrl+Alt+Z)");
   const shell = readFileSync("src/components/app-shell.tsx", "utf8");
   ok(/go-to-sheet/.test(shell), "app-shell doesn't render the Go to Sheet dialog");
+});
+
+// ── seq 300 (F6 / Shift+F6 pane cycling) ───────────────────────────────
+// The cycle runs against the real DOM in the app; here it runs against a
+// minimal fake that implements only the DOM surface pane-focus.ts uses
+// (querySelector(All), closest, getClientRects, classList, focus), so the
+// pin exercises the real module, not a re-implementation of it. The fake
+// mirrors the real layout: the notes layer and the inspector live inside
+// the sheet's <main>, after its toolbar buttons.
+class FakeClassList {
+  private readonly items = new Set<string>();
+  add(c: string): void {
+    this.items.add(c);
+  }
+  remove(c: string): void {
+    this.items.delete(c);
+  }
+  toggle(c: string, force?: boolean): void {
+    const on = force ?? !this.items.has(c);
+    if (on) this.items.add(c);
+    else this.items.delete(c);
+  }
+  contains(c: string): boolean {
+    return this.items.has(c);
+  }
+}
+
+type FakeElInit = {
+  tag: string;
+  pane?: PaneId;
+  attrs?: Record<string, string>;
+  disabled?: boolean;
+  tabIndex?: number;
+  rects?: number;
+  inert?: boolean;
+  children?: FakeEl[];
+};
+
+class FakeEl {
+  readonly tagName: string;
+  parent: FakeEl | null = null;
+  readonly children: FakeEl[];
+  readonly attrs = new Map<string, string>();
+  readonly disabled: boolean;
+  readonly tabIndex: number | undefined;
+  readonly rectCount: number;
+  readonly classList = new FakeClassList();
+  doc: FakeDoc | null = null;
+
+  constructor(init: FakeElInit) {
+    this.tagName = init.tag.toUpperCase();
+    this.children = init.children ?? [];
+    for (const c of this.children) c.parent = this;
+    if (init.pane) this.attrs.set("data-pane", init.pane);
+    if (init.inert) this.attrs.set("inert", "");
+    if (init.tabIndex !== undefined) this.attrs.set("tabindex", String(init.tabIndex));
+    for (const [k, v] of Object.entries(init.attrs ?? {})) this.attrs.set(k, v);
+    this.disabled = init.disabled ?? false;
+    this.tabIndex = init.tabIndex;
+    this.rectCount = init.rects ?? 1;
+  }
+
+  getAttribute(name: string): string | null {
+    return this.attrs.get(name) ?? null;
+  }
+
+  closest(selector: string): FakeEl | null {
+    let el: FakeEl | null = this;
+    while (el) {
+      if (selector === "[data-pane]" && el.attrs.has("data-pane")) return el;
+      if (selector === "[inert]" && el.attrs.has("inert")) return el;
+      if (selector === "dialog" && el.tagName === "DIALOG") return el;
+      el = el.parent;
+    }
+    return null;
+  }
+
+  // Mirrors the fixed focusable selector in pane-focus.ts: a control (or a
+  // tabbable element) that isn't disabled, hidden, or tabbed out of order.
+  private isFocusableCandidate(): boolean {
+    if (this.disabled) return false;
+    if (this.tabIndex === -1) return false;
+    const tag = this.tagName.toLowerCase();
+    if (tag === "input" && this.attrs.get("type") === "hidden") return false;
+    if (["a", "button", "input", "select", "textarea"].includes(tag)) {
+      if (tag === "a" && !this.attrs.has("href")) return false;
+      return true;
+    }
+    return this.attrs.has("tabindex");
+  }
+
+  querySelectorAll(_selector: string): FakeEl[] {
+    const out: FakeEl[] = [];
+    const walk = (el: FakeEl) => {
+      for (const c of el.children) {
+        if (c.isFocusableCandidate()) out.push(c);
+        walk(c);
+      }
+    };
+    walk(this);
+    return out;
+  }
+
+  querySelector(selector: string): FakeEl | null {
+    return this.querySelectorAll(selector)[0] ?? null;
+  }
+
+  getClientRects(): unknown[] {
+    return Array.from({ length: this.rectCount }, () => ({}));
+  }
+
+  focus(): void {
+    if (this.doc) this.doc.activeElement = this;
+  }
+}
+
+class FakeDoc {
+  readonly roots: FakeEl[];
+  activeElement: FakeEl | null = null;
+  constructor(roots: FakeEl[]) {
+    this.roots = roots;
+    const wire = (el: FakeEl) => {
+      el.doc = this;
+      for (const c of el.children) wire(c);
+    };
+    for (const r of roots) wire(r);
+  }
+  querySelector(selector: string): FakeEl | null {
+    const m = selector.match(/^\[data-pane="([^"]+)"\]$/);
+    if (!m) return null;
+    const walk = (el: FakeEl): FakeEl | null => {
+      if (el.getAttribute("data-pane") === m[1]) return el;
+      for (const c of el.children) {
+        const hit = walk(c);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    for (const r of this.roots) {
+      const hit = walk(r);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  querySelectorAll(selector: string): FakeEl[] {
+    if (selector !== "[data-pane]") return [];
+    const out: FakeEl[] = [];
+    const walk = (el: FakeEl) => {
+      if (el.getAttribute("data-pane")) out.push(el);
+      for (const c of el.children) walk(c);
+    };
+    for (const r of this.roots) walk(r);
+    return out;
+  }
+}
+
+type FakePaneDocOpts = {
+  notes?: number;
+  inspectorOpen?: boolean;
+  sidebarOpen?: boolean;
+  saveEnabled?: boolean;
+  sheetKind?: "grid" | "graph" | "results";
+};
+
+/** The app's panes as the fake sees them: Navigator (search + tree),
+ *  sheet (Save strip, then the view's toolbar, then the notes layer and
+ *  the inspector nested inside it), in document order. */
+function fakePaneDoc(opts: FakePaneDocOpts = {}): { doc: FakeDoc; panes: Record<PaneId, FakeEl> } {
+  const navigator = new FakeEl({
+    tag: "aside",
+    pane: "navigator",
+    inert: opts.sidebarOpen === false,
+    children: [
+      new FakeEl({ tag: "input", attrs: { "aria-label": "Search project" } }),
+      new FakeEl({ tag: "div", tabIndex: 0, attrs: { role: "tree" } }),
+    ],
+  });
+  const sheetFirst = new FakeEl({
+    tag: "button",
+    attrs: {
+      "aria-label":
+        opts.sheetKind === "graph" ? "Format" : opts.sheetKind === "results" ? "Retry" : "Freeze table",
+    },
+  });
+  const noteButtons: FakeEl[] = [];
+  for (let i = 0; i < (opts.notes ?? 1); i++)
+    noteButtons.push(new FakeEl({ tag: "button", attrs: { "aria-label": "Delete note" } }));
+  const notes = new FakeEl({ tag: "div", pane: "notes", children: noteButtons });
+  const inspector = new FakeEl({
+    tag: "aside",
+    pane: "inspector",
+    inert: opts.inspectorOpen === false,
+    children: [new FakeEl({ tag: "textarea", attrs: { "aria-label": "Note" } })],
+  });
+  const sheet = new FakeEl({
+    tag: "main",
+    pane: "sheet",
+    children: [
+      new FakeEl({ tag: "button", attrs: { "aria-label": "Save" }, disabled: opts.saveEnabled === false }),
+      sheetFirst,
+      new FakeEl({ tag: "button", attrs: { "aria-label": "Add note" } }),
+      notes,
+      inspector,
+    ],
+  });
+  const doc = new FakeDoc([navigator, sheet]);
+  return { doc, panes: { navigator, sheet, notes, inspector } };
+}
+
+function ringed(doc: FakeDoc): PaneId[] {
+  return (doc.querySelectorAll("[data-pane]") as unknown as FakeEl[])
+    .filter((el) => el.classList.contains(PANE_RING_CLASS))
+    .map((el) => el.getAttribute("data-pane") as PaneId);
+}
+
+// seq 300: F6 walks Navigator → sheet → notes → inspector and back to
+// Navigator; each stop focuses the pane's first control and rings the pane.
+check("seq 300: F6 cycles Navigator → sheet → notes → inspector and back", () => {
+  const { doc, panes } = fakePaneDoc();
+  const asDoc = doc as unknown as Document;
+  // Starting in the grid: the sheet's Save button has DOM focus.
+  (panes.sheet.querySelectorAll("")[0] as FakeEl).focus();
+  strictEqual(currentPane(asDoc), "sheet");
+  strictEqual(cyclePaneFocus(asDoc, 1), "notes");
+  strictEqual(doc.activeElement?.getAttribute("aria-label"), "Delete note");
+  deepStrictEqual(ringed(doc), ["notes"]);
+  strictEqual(cyclePaneFocus(asDoc, 1), "inspector");
+  strictEqual(doc.activeElement?.getAttribute("aria-label"), "Note");
+  deepStrictEqual(ringed(doc), ["inspector"]);
+  strictEqual(cyclePaneFocus(asDoc, 1), "navigator");
+  strictEqual(doc.activeElement?.getAttribute("aria-label"), "Search project");
+  deepStrictEqual(ringed(doc), ["navigator"]);
+  strictEqual(cyclePaneFocus(asDoc, 1), "sheet");
+  strictEqual(doc.activeElement?.getAttribute("aria-label"), "Save");
+  deepStrictEqual(ringed(doc), ["sheet"]);
+});
+
+// seq 300: Shift+F6 walks the same stops in reverse, and a full reverse
+// cycle returns to the starting pane.
+check("seq 300: Shift+F6 reverses the cycle", () => {
+  const { doc, panes } = fakePaneDoc();
+  const asDoc = doc as unknown as Document;
+  (panes.sheet.querySelectorAll("")[0] as FakeEl).focus();
+  strictEqual(cyclePaneFocus(asDoc, -1), "navigator");
+  strictEqual(doc.activeElement?.getAttribute("aria-label"), "Search project");
+  strictEqual(cyclePaneFocus(asDoc, -1), "inspector");
+  strictEqual(cyclePaneFocus(asDoc, -1), "notes");
+  strictEqual(cyclePaneFocus(asDoc, -1), "sheet");
+  strictEqual(doc.activeElement?.getAttribute("aria-label"), "Save");
+  deepStrictEqual(ringed(doc), ["sheet"]);
+});
+
+// seq 300: a pane with nothing focusable is skipped — no notes, a closed
+// (inert) inspector, a hidden sidebar.
+check("seq 300: panes with nothing focusable are skipped", () => {
+  // No notes, inspector closed: only Navigator and sheet remain.
+  const bare = fakePaneDoc({ notes: 0, inspectorOpen: false });
+  const bareDoc = bare.doc as unknown as Document;
+  deepStrictEqual(availablePanes(bareDoc), ["navigator", "sheet"]);
+  (bare.panes.sheet.querySelectorAll("")[0] as FakeEl).focus();
+  strictEqual(cyclePaneFocus(bareDoc, 1), "navigator");
+  strictEqual(cyclePaneFocus(bareDoc, 1), "sheet");
+  strictEqual(cyclePaneFocus(bareDoc, -1), "navigator");
+  // Sidebar hidden too: the sheet is the only stop, so F6 stays there.
+  const onlySheet = fakePaneDoc({ notes: 0, inspectorOpen: false, sidebarOpen: false });
+  deepStrictEqual(availablePanes(onlySheet.doc as unknown as Document), ["sheet"]);
+  (onlySheet.panes.sheet.querySelectorAll("")[0] as FakeEl).focus();
+  strictEqual(cyclePaneFocus(onlySheet.doc as unknown as Document, 1), "sheet");
+  // Sidebar hidden but notes + inspector open: Navigator is skipped.
+  const noNav = fakePaneDoc({ sidebarOpen: false });
+  deepStrictEqual(availablePanes(noNav.doc as unknown as Document), ["sheet", "notes", "inspector"]);
+  (noNav.panes.sheet.querySelectorAll("")[0] as FakeEl).focus();
+  strictEqual(cyclePaneFocus(noNav.doc as unknown as Document, 1), "notes");
+  strictEqual(cyclePaneFocus(noNav.doc as unknown as Document, 1), "inspector");
+  strictEqual(cyclePaneFocus(noNav.doc as unknown as Document, 1), "sheet");
+});
+
+// seq 300: the cycle works from every sheet kind — grid, graph, results —
+// and lands on that sheet's own first control (Save disabled here, so the
+// view's first toolbar button) when it comes back round.
+check("seq 300: F6 works from grid, graph and results sheets", () => {
+  for (const kind of ["grid", "graph", "results"] as const) {
+    const { doc, panes } = fakePaneDoc({ sheetKind: kind, notes: 0, inspectorOpen: false, saveEnabled: false });
+    const asDoc = doc as unknown as Document;
+    const first = firstFocusable(panes.sheet as unknown as Element);
+    strictEqual(first?.getAttribute("aria-label"), kind === "graph" ? "Format" : kind === "results" ? "Retry" : "Freeze table");
+    (first as unknown as FakeEl).focus();
+    strictEqual(currentPane(asDoc), "sheet");
+    strictEqual(cyclePaneFocus(asDoc, 1), "navigator");
+    strictEqual(cyclePaneFocus(asDoc, -1), "sheet");
+    strictEqual(doc.activeElement?.getAttribute("aria-label"), first?.getAttribute("aria-label"));
+  }
+});
+
+// seq 300: the order itself — forward from outside any pane starts at the
+// Navigator, backward at the Inspector; both ends wrap.
+check("seq 300: nextPaneId wraps and starts at an end when focus is outside any pane", () => {
+  deepStrictEqual(PANE_ORDER, ["navigator", "sheet", "notes", "inspector"]);
+  strictEqual(nextPaneId(null, 1, ["navigator", "sheet"]), "navigator");
+  strictEqual(nextPaneId(null, -1, ["navigator", "sheet"]), "sheet");
+  strictEqual(nextPaneId("navigator", -1, PANE_ORDER), "inspector");
+  strictEqual(nextPaneId("inspector", 1, PANE_ORDER), "navigator");
+  strictEqual(nextPaneId("sheet", 1, ["sheet", "notes"]), "notes");
+  strictEqual(nextPaneId("sheet", 1, ["navigator"]), "navigator");
+  strictEqual(nextPaneId("navigator", 1, []), null);
+});
+
+// seq 300: only a bare F6 / Shift+F6 cycles — modifiers, other keys, and a
+// modal dialog keep the focus where it is.
+check("seq 300: F6 is ignored with modifiers, inside dialogs, and for other keys", () => {
+  const { doc, panes } = fakePaneDoc();
+  const asDoc = doc as unknown as Document;
+  (panes.sheet.querySelectorAll("")[0] as FakeEl).focus();
+  const key = (over: Record<string, unknown>) =>
+    handlePaneCycleKey(asDoc, { key: "F6", shiftKey: false, target: doc.activeElement, ...over } as never);
+  strictEqual(key({ key: "F6", metaKey: true }), false);
+  strictEqual(key({ key: "F6", ctrlKey: true }), false);
+  strictEqual(key({ key: "F6", altKey: true }), false);
+  strictEqual(key({ key: "Tab" }), false);
+  strictEqual(key({ key: "F5" }), false);
+  strictEqual(currentPane(asDoc), "sheet");
+  // Inside a modal dialog the dialog owns the keyboard.
+  const dialog = new FakeEl({
+    tag: "dialog",
+    children: [new FakeEl({ tag: "button", attrs: { "aria-label": "OK" } })],
+  });
+  const dialogButton = dialog.querySelectorAll("")[0] as FakeEl;
+  dialogButton.doc = doc;
+  dialogButton.focus();
+  strictEqual(
+    handlePaneCycleKey(asDoc, { key: "F6", shiftKey: false, target: dialogButton } as never),
+    false,
+  );
+  strictEqual(doc.activeElement, dialogButton);
+  // And a bare F6 still cycles.
+  (panes.sheet.querySelectorAll("")[0] as FakeEl).focus();
+  strictEqual(key({}), true);
+  strictEqual(currentPane(asDoc), "notes");
+});
+
+// seq 300: the ring follows DOM focus — tabbing or clicking into a pane
+// rings that pane, and focus outside any pane clears it.
+check("seq 300: the focus ring follows DOM focus into a pane", () => {
+  const { doc, panes } = fakePaneDoc();
+  const asDoc = doc as unknown as Document;
+  syncPaneRingFromFocus(asDoc, panes.navigator.querySelectorAll("")[0] as unknown as Element);
+  deepStrictEqual(ringed(doc), ["navigator"]);
+  syncPaneRingFromFocus(asDoc, panes.notes.querySelectorAll("")[0] as unknown as Element);
+  deepStrictEqual(ringed(doc), ["notes"]);
+  syncPaneRingFromFocus(asDoc, null);
+  deepStrictEqual(ringed(doc), []);
+});
+
+// seq 300: the wiring — the shell installs the handler, every pane carries
+// its data-pane marker, and the ring rule exists.
+check("seq 300: the shell installs the F6 handler and the panes carry data-pane markers", () => {
+  const shell = readFileSync("src/components/app-shell.tsx", "utf8");
+  ok(/installPaneFocusCycling/.test(shell), "app-shell doesn't install the F6 pane cycling");
+  ok(/data-pane="sheet"/.test(shell), "app-shell doesn't mark the sheet pane");
+  const sidebar = readFileSync("src/components/project-sidebar.tsx", "utf8");
+  ok(/pane="navigator"/.test(sidebar), "sidebar doesn't mark the Navigator pane");
+  const inspector = readFileSync("src/components/inspector.tsx", "utf8");
+  ok(/pane="inspector"/.test(inspector), "inspector doesn't mark the Inspector pane");
+  const notes = readFileSync("src/components/floating-notes.tsx", "utf8");
+  ok(/data-pane="notes"/.test(notes), "floating notes layer doesn't mark the notes pane");
+  const css = readFileSync("src/styles.css", "utf8");
+  ok(/f6-pane-active/.test(css), "styles.css has no rule for the F6 pane ring");
 });
 
 // seq 241 (Help → User Guide): the Help menu opens the guide, and the

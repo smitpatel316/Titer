@@ -99,6 +99,13 @@
   }
 }
 
+/* ── F6 pane cycling (seq 300) ─────────────────────────────────────────
+ * The pane holding the keyboard focus gets a visible ring: an inset
+ * shadow, so it never moves the layout, in the accent color. */
+[data-pane].f6-pane-active {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
 /* ── Graphs (Plotly) ─────────────────────────────────────────────────
  * Graphs are static (Prism-style): no zoom or pan, so no drag cursors. */
 .js-plotly-plot .drag {
