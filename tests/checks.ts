@@ -26,6 +26,7 @@ import {
   REVERT_CONFIRM_TITLE,
   revertExternalChangeTitle,
 } from "../src/lib/revert";
+import { moveTargetPath, renameTargetPath } from "../src/lib/paths";
 import { extractFamily } from "../src/lib/family";
 import { applyWand, wandExamples, wandReportMessage } from "../src/lib/wand";
 import {
@@ -1367,6 +1368,82 @@ check("Revert to Saved is enabled only when dirty with a save to go back to, and
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// seq 297: File ▸ Rename… / Move To… — the target paths, and the store's
+// relocate: the path moves, the dirty flag and the revision don't (a rename
+// is not an edit, and must never clear unsaved changes).
+check("Rename / Move To compute their targets and relocate keeps the dirty flag (seq 297)", () => {
+  // Rename: the same folder, the same extension — whether the typed name
+  // carries the extension or not. A typed different extension never
+  // changes the file's format.
+  deepStrictEqual(renameTargetPath("/Research/Dose Response.hlx", "Dose Response 2"), {
+    ok: true,
+    path: "/Research/Dose Response 2.hlx",
+  });
+  deepStrictEqual(renameTargetPath("/Research/Dose Response.hlx", "Dose Response 2.hlx"), {
+    ok: true,
+    path: "/Research/Dose Response 2.hlx",
+  });
+  deepStrictEqual(renameTargetPath("/Research/Dose Response.hlx", "Dose Response 2.prism"), {
+    ok: true,
+    path: "/Research/Dose Response 2.hlx",
+  });
+  deepStrictEqual(renameTargetPath("/Research/Old.prism", "New"), {
+    ok: true,
+    path: "/Research/New.prism",
+  });
+  // Names that can't be a file are refused, not cleaned up silently.
+  strictEqual(renameTargetPath("/Research/Dose Response.hlx", "   ").ok, false);
+  strictEqual(renameTargetPath("/Research/Dose Response.hlx", "a/b").ok, false);
+  strictEqual(renameTargetPath("/Research/Dose Response.hlx", "a\\b").ok, false);
+  strictEqual(renameTargetPath("/Research/Dose Response.hlx", "..").ok, false);
+  strictEqual(renameTargetPath("/Research/Dose Response.hlx", ".hlx").ok, false);
+  // Move: the same file name, under the new folder.
+  deepStrictEqual(moveTargetPath("/Research/Dose Response.hlx", "/Archive"), {
+    ok: true,
+    path: "/Archive/Dose Response.hlx",
+  });
+  deepStrictEqual(moveTargetPath("/Research/Dose Response.hlx", "/Archive/"), {
+    ok: true,
+    path: "/Archive/Dose Response.hlx",
+  });
+  strictEqual(moveTargetPath("/Research/Dose Response.hlx", "   ").ok, false);
+
+  // Relocate: the path moves; a clean project stays clean, a dirty one
+  // stays dirty, and the revision doesn't move either way.
+  const initial = makeInitialState();
+  const loaded = reducer(initial, {
+    type: "load",
+    nodes: initial.nodes,
+    rootOrder: initial.rootOrder,
+    childOrder: initial.childOrder,
+    activeNodeId: initial.activeNodeId,
+    filePath: "/Research/Dose Response.hlx",
+  });
+  strictEqual(loaded.filePath, "/Research/Dose Response.hlx");
+  strictEqual(loaded.isDirty, false);
+  const relocated = reducer(loaded, { type: "relocate", filePath: "/Research/Dose Response 2.hlx" });
+  strictEqual(relocated.filePath, "/Research/Dose Response 2.hlx");
+  strictEqual(relocated.isDirty, false);
+  strictEqual(relocated.revision, loaded.revision);
+  // Dirty stays dirty across a relocate.
+  const edited = reducer(loaded, {
+    type: "create",
+    node: {
+      id: "a1",
+      type: "analysis",
+      name: "Descriptive statistics",
+      parentId: loaded.rootOrder[0],
+      analysisType: "descriptive-statistics",
+      analysisParams: { columns: ["Y1"] } as AnalysisParams,
+    },
+  });
+  strictEqual(edited.isDirty, true);
+  const relocatedDirty = reducer(edited, { type: "relocate", filePath: "/Archive/Dose Response.hlx" });
+  strictEqual(relocatedDirty.filePath, "/Archive/Dose Response.hlx");
+  strictEqual(relocatedDirty.isDirty, true);
+  strictEqual(relocatedDirty.revision, edited.revision);
 });
 
 // seq 236: Duplicate Current Sheet — one sheet, nothing else, right after

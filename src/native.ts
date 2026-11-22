@@ -8,7 +8,7 @@ import { WebviewWindow, getCurrentWebviewWindow, getAllWebviewWindows } from "@t
 import { getVersion, setTheme as setAppTheme } from "@tauri-apps/api/app";
 import { Image } from "@tauri-apps/api/image";
 import { Menu, Submenu, type MenuOptions } from "@tauri-apps/api/menu";
-import { message, save } from "@tauri-apps/plugin-dialog";
+import { message, open, save } from "@tauri-apps/plugin-dialog";
 import type { RVector } from "./stats/webr";
 import { cancelActiveEvals, interruptR, resetR, type EngineBootStatus } from "./stats/webr";
 import { buildKeynoteScript, keynoteSizePoints } from "./lib/office-export";
@@ -124,6 +124,16 @@ export function ensureSaveExtension(path: string, ext: string): string {
   if (/\.([^/.]+)$/.test(base)) return path;
   return `${path.replace(/\.+$/, "")}.${ext}`;
 }
+
+/** A folder picker (File ▸ Move To…): the native dialog, starting in the
+ *  given folder. Null when the user cancels. */
+export async function pickFolder(title: string, defaultPath: string) {
+  return open({ title, defaultPath, directory: true, multiple: false });
+}
+
+/** Moves a file on disk (File ▸ Rename… / Move To…): the shell refuses a
+ *  collision and a missing source — see `move_file` in main.rs. */
+export const moveFile = (from: string, to: string) => invoke<void>("move_file", { from, to });
 
 // ── Files ──────────────────────────────────────────────────────────────
 

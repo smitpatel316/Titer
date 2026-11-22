@@ -57,7 +57,7 @@ import { runProjectScriptText } from "../lib/script-effects";
 import type { ScriptDoc } from "../lib/prism-script";
 import type { ProjectScript } from "./types";
 import { openProjectsOrSay, sayGone } from "../menus";
-import { fileName, fileTitle, sameFilePath } from "../lib/paths";
+import { fileName, fileTitle, moveTargetPath, parentDir, renameTargetPath, sameFilePath } from "../lib/paths";
 import { refreshLinkedFromFile } from "../views/tables/linked-data";
 import {
   diskChangedExternally,
@@ -895,6 +895,73 @@ export function useDocument() {
     }
   };
 
+  // ── Rename / Move To (seq 297) ───────────────────────────────────────
+  // The file moves on disk; the open project follows it: new path, new
+  // title, new recent entry — content, dirty flag and revision untouched
+  // (the store's `relocate`). A collision is an error dialog and nothing
+  // moves; a rename to the same name, or a move into the same folder, is a
+  // no-op. Untitled projects never reach here — the menu disables both
+  // commands without a saved path — but the guard stands anyway.
+  /** Moves the file on disk and points the open project at its new path:
+   *  title, recents and backup follow. A failed move alerts and changes
+   *  nothing. */
+  const relocateProjectFile = async (
+    target: string,
+    currentPath: string,
+    alertTitle: string,
+  ): Promise<boolean> => {
+    try {
+      await native.moveFile(currentPath, target);
+    } catch (err) {
+      await native.alert(alertTitle, err instanceof Error ? err.message : String(err), "error");
+      return false;
+    }
+    latest.current.relocateProject(target);
+    forgetRecent({ kind: "local", path: currentPath });
+    addRecent({ kind: "local", path: target });
+    // The backup follows the file: the old snapshot is deleted, so crash
+    // recovery never offers a project at a path that no longer exists, and
+    // a fresh one lands under the new identity (same shape as after Save As).
+    void deleteBackupFor(backupIdentity({ filePath: currentPath }));
+    void writeBackupSnapshot({
+      identity: backupIdentity({ filePath: target }),
+      displayName: backupDisplayName({ filePath: target }),
+      sourcePath: target,
+    });
+    return true;
+  };
+
+  /** File ▸ Rename…: the dialog hands back the new name; the file is
+   *  renamed in place and the project follows it. False when nothing
+   *  moved (invalid name, same name, collision, or no saved file). */
+  const renameProject = async (newName: string): Promise<boolean> => {
+    const { filePath } = latest.current;
+    if (!filePath || !native.isNative) return false;
+    const target = renameTargetPath(filePath, newName);
+    if (!target.ok) {
+      await native.alert("Couldn't Rename Project", target.error, "error");
+      return false;
+    }
+    if (sameFilePath(target.path, filePath)) return true;
+    return relocateProjectFile(target.path, filePath, "Couldn't Rename Project");
+  };
+
+  /** File ▸ Move To…: a folder picker, then the file moves there under its
+   *  current name and the project follows it. */
+  const moveProject = async (): Promise<boolean> => {
+    const { filePath } = latest.current;
+    if (!filePath || !native.isNative) return false;
+    const folder = await native.pickFolder("Move Project To", parentDir(filePath));
+    if (!folder) return false;
+    const target = moveTargetPath(filePath, folder);
+    if (!target.ok) {
+      await native.alert("Couldn't Move Project", target.error, "error");
+      return false;
+    }
+    if (sameFilePath(target.path, filePath)) return true;
+    return relocateProjectFile(target.path, filePath, "Couldn't Move Project");
+  };
+
   // ── Autosave (Plane seq 281) ───────────────────────────────────────────
   // Debounced save, 10 s after the last edit; save on sheet switch; save on
   // quit (see confirmDiscardWithAutosave below). All three go through the
@@ -1157,21 +1224,25 @@ export function useDocument() {
     armBackupTimer();
   }, [isDirty, filePath, remote, conflict]);
 
-  /** Deletes this window's backup (Prism: deleted when the original is
+  /** Deletes the backup for `identity` (Prism: deleted when the original is
    *  saved and closed). A snapshot in flight owns the file: it lands first,
    *  or the delete would race it and leave a stale backup behind. Missing
    *  is fine — a project that never backed up deletes nothing — and a
-   *  failure never blocks the close: the 4-day prune cleans it up. */
-  const deleteCurrentBackup = async (): Promise<void> => {
+   *  failure never blocks the caller: the 4-day prune cleans it up. */
+  const deleteBackupFor = async (identity: string): Promise<void> => {
     if (!native.isNative) return;
     try {
       await backupFlight.current?.catch(() => undefined);
-      const entry = await native.backupStatus(backupTargetRef.current.identity);
+      const entry = await native.backupStatus(identity);
       if (entry) await native.backupDelete(entry.key);
     } catch {
       // Ignore: see above.
     }
   };
+
+  /** Deletes this window's backup. */
+  const deleteCurrentBackup = async (): Promise<void> =>
+    deleteBackupFor(backupTargetRef.current.identity);
 
   // ── Crash recovery ─────────────────────────────────────────────────────
   // After a crash the backup remains, and the next launch offers to restore
@@ -2491,6 +2562,8 @@ export function useDocument() {
     save,
     saveCopy,
     saveFamilyAs,
+    renameProject,
+    moveProject,
     saveTemplate,
     revertToSaved,
     applyMethod,
@@ -2499,6 +2572,7 @@ export function useDocument() {
     openWelcome,
     closeWelcome,
     title,
+    filePath,
     recents,
     forgetRecent,
     clearRecents,

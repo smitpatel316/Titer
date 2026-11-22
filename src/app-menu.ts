@@ -328,6 +328,21 @@ export function useAppMenu(doc: DocumentActions) {
             action: () => void latest.current.doc.saveCopy(),
           },
           {
+            // Rename the file on disk, same folder (seq 297): the project
+            // follows it — new path, title and recent entry; unsaved
+            // changes kept. No saved file yet, no rename (Save As… is the path).
+            text: "Rename…",
+            enabled: filePath !== null,
+            action: () => latest.current.store.openSelector({ kind: "rename-project" }),
+          },
+          {
+            // Move the file to another folder (seq 297): the project follows
+            // it, as for Rename. Same no-saved-file rule.
+            text: "Move To…",
+            enabled: filePath !== null,
+            action: () => void latest.current.doc.moveProject(),
+          },
+          {
             // One table's family as its own project (seq 233): the current file stays put.
             text: "Save Family As…",
             enabled: hasTable,
