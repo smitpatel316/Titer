@@ -18,6 +18,7 @@ import {
   type DecimalSeparator,
 } from "../../lib/decimal-format";
 import { CELL_BACKGROUND_HEX, type CellBackgroundColor } from "../../lib/cell-colors";
+import { displayXCell } from "../../lib/date-time";
 import { fileName } from "../../lib/paths";
 import { seriesKeyOf } from "../../lib/columns";
 import { isGrouped, isNested, leadOf } from "../../lib/dataset";
@@ -1139,12 +1140,17 @@ function Cells({
   for (let r = r0; r <= r1; r++) {
     for (let c = c0; c <= c1; c++) {
       const value = data.rows[r]?.[c];
-      const shown = displayCellValue(
-        value ?? null,
-        c >= 1 ? decimals?.[data.columns[c]] : undefined,
-        separator,
-        r === active.r && c === active.c,
-      );
+      // A date/elapsed X cell that can't be read shows "?" (seq 332) — the
+      // original text stays in the cell, so editing it starts from what was typed.
+      const shown =
+        c === 1 && (data.xFormat === "date" || data.xFormat === "elapsed")
+          ? displayXCell(value ?? null, data.xFormat, data.xConversion)
+          : displayCellValue(
+              value ?? null,
+              c >= 1 ? decimals?.[data.columns[c]] : undefined,
+              separator,
+              r === active.r && c === active.c,
+            );
       const isHit = Boolean(found && value?.toLowerCase().includes(found));
       const tint = cellBackgrounds?.[`${r},${c}`];
       cells.push(

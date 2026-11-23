@@ -12,6 +12,7 @@
 import type { LinkedPaste, RowGroup, TableData, TableErrorFormat, TableType } from "../../store/types";
 import type { CellBackgroundColor } from "../../lib/cell-colors";
 import { tableErrorFormat } from "../../store/types";
+import { isXColumnFormat, sameConversion, type XColumnFormat, type XConversion } from "../../lib/date-time";
 import { renameCalculatedReferences } from "../../lib/calcvars";
 import { normalizeDecimalInput, type DecimalSeparator } from "../../lib/decimal-format";
 import { parseCell } from "../../lib/numeric";
@@ -489,6 +490,41 @@ export function changeErrorFormat(data: TableData, format: TableErrorFormat): Ta
   const renamed = columns.some((c, i) => c !== data.columns[i]);
   if (tableErrorFormat(data) === format && !renamed) return data;
   return { ...data, errorFormat: format, columns };
+}
+
+/** What an XY table's X column holds — "numbers" when nothing is recorded. */
+export const xFormatOf = (data: TableData): XColumnFormat =>
+  data.xFormat === undefined ? "numbers" : data.xFormat;
+
+/**
+ * An XY table's X format, changed (Prism 11, seq 332): the format is
+ * recorded, and the conversion with it when one is given. Switching back to
+ * numbers clears the format but keeps the conversion, so switching back to
+ * dates restores the units and start date. The cells are never touched — a
+ * date column switched to numbers still holds its date text, and switching
+ * back re-reads it. Returns the table unchanged when nothing would change,
+ * so the switch leaves no undo entry behind.
+ */
+export function changeXFormat(data: TableData, format: XColumnFormat, conversion?: XConversion): TableData {
+  if (!isXColumnFormat(format)) return data;
+  const nextConversion = conversion === undefined ? data.xConversion : conversion;
+  if (xFormatOf(data) === format && sameConversion(data.xConversion, nextConversion)) return data;
+  return {
+    ...data,
+    xFormat: format === "numbers" ? undefined : format,
+    xConversion: nextConversion,
+  };
+}
+
+/**
+ * An XY table's X conversion, changed (units, start date, day-first): only
+ * the conversion moves, never the format or the cells. Returns the table
+ * unchanged when the conversion already holds, so the change leaves no undo
+ * entry behind.
+ */
+export function changeXConversion(data: TableData, conversion: XConversion): TableData {
+  if (sameConversion(data.xConversion, conversion)) return data;
+  return { ...data, xConversion: { ...conversion } };
 }
 
 /** A grouped table's group names, in run order (duplicates kept). */

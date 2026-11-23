@@ -2893,7 +2893,7 @@ pub struct EditTableArgs {
     /// The grid-menu op: insert-rows, delete-rows, insert-columns,
     /// delete-columns, rename-column, rename-group, exclude-cells,
     /// include-cells, set-cell-background, freeze-title,
-    /// convert-comma-decimals, set-summary-format, add-calculated-variable,
+    /// convert-comma-decimals, set-summary-format, set-x-format, add-calculated-variable,
     /// set-calculated-variable, remove-calculated-variable,
     /// set-variable-type, paste-link,
     /// remove-link, generate-series or paste-transposed (seq 230).
@@ -2971,6 +2971,20 @@ pub struct EditTableArgs {
     /// never overwrites it afterwards.
     #[serde(default)]
     pub variable_type: Option<String>,
+    /// set-x-format: the X format — numbers, date or elapsed (XY tables only).
+    #[serde(default)]
+    pub x_format: Option<String>,
+    /// set-x-format: the unit dates/elapsed times convert to — seconds,
+    /// minutes, hours, days, weeks or years.
+    #[serde(default)]
+    pub x_units: Option<String>,
+    /// set-x-format: the conversion's start date, "YYYY-MM-DD" (date X only;
+    /// omitted = the earliest date in the column).
+    #[serde(default)]
+    pub x_start_date: Option<String>,
+    /// set-x-format: read ambiguous slash dates day-first (date X only).
+    #[serde(default)]
+    pub x_day_first: Option<bool>,
 }
 
 /// Args for `titer_refresh_linked_data`: the table whose linked source file
@@ -4664,7 +4678,7 @@ impl TiterMcpServer {
     /// file as a link, or break that link.
     #[tool(
         name = "titer_edit_table",
-        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, set-cell-background, freeze-title, convert-comma-decimals, set-summary-format, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-variable-type, paste-link, remove-link, generate-series or paste-transposed. Rows and columns are 0-based; column 0 holds the row titles. set-cell-background { at_row, at_col, color } paints one cell with one of Prism's 8 cell colors (yellow, red, blue, green, purple, orange, tan, gray), or null to clear it; the value stays, and an empty cell or a row title can be painted too. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. set-variable-type { column, variable_type } sets a Multiple Variables column's type by hand — categorical, continuous or label — and auto-detect never overwrites a hand-set type; read the types back from titer_list_tables' variable_type fields. paste-transposed { rows, at_row, at_col } pastes the block with rows and columns swapped, as Edit ▸ Paste Transposed does. paste-link { source_path, row?, column?, auto_update? } pastes a data file (.csv, .tsv, .txt or .xlsx) as a link at (row, column) — the values land and stay linked, so titer_refresh_linked_data re-reads the file into the same region later; auto_update (default true) refreshes the link when the project opens. remove-link { } keeps the values and drops the link. generate-series { column, at, count, first, mode, step } fills a column with an arithmetic series (add step, default) or a geometric one (multiply by step): column defaults to the X column (1) on XY and Survival tables, at defaults to row 0, count to the table's stored rows, first to 0, step to 1; at most 10,000 values. set-summary-format { format } changes a grouped, xy or nested table's sub-column format between raw replicates and pre-calculated summaries (mean-sd-n, mean-sem-n, mean-sd, mean-sem, mean-cv-n, mean-cv, mean-plus-minus, mean-upper-lower, or replicates); values stay in their group's slot.",
+        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, set-cell-background, freeze-title, convert-comma-decimals, set-summary-format, set-x-format, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-variable-type, paste-link, remove-link, generate-series or paste-transposed. Rows and columns are 0-based; column 0 holds the row titles. set-cell-background { at_row, at_col, color } paints one cell with one of Prism's 8 cell colors (yellow, red, blue, green, purple, orange, tan, gray), or null to clear it; the value stays, and an empty cell or a row title can be painted too. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. set-variable-type { column, variable_type } sets a Multiple Variables column's type by hand — categorical, continuous or label — and auto-detect never overwrites a hand-set type; read the types back from titer_list_tables' variable_type fields. paste-transposed { rows, at_row, at_col } pastes the block with rows and columns swapped, as Edit ▸ Paste Transposed does. paste-link { source_path, row?, column?, auto_update? } pastes a data file (.csv, .tsv, .txt or .xlsx) as a link at (row, column) — the values land and stay linked, so titer_refresh_linked_data re-reads the file into the same region later; auto_update (default true) refreshes the link when the project opens. remove-link { } keeps the values and drops the link. generate-series { column, at, count, first, mode, step } fills a column with an arithmetic series (add step, default) or a geometric one (multiply by step): column defaults to the X column (1) on XY and Survival tables, at defaults to row 0, count to the table's stored rows, first to 0, step to 1; at most 10,000 values. set-summary-format { format } changes a grouped, xy or nested table's sub-column format between raw replicates and pre-calculated summaries (mean-sd-n, mean-sem-n, mean-sd, mean-sem, mean-cv-n, mean-cv, mean-plus-minus, mean-upper-lower, or replicates); values stay in their group's slot. set-x-format { x_format, x_units?, x_start_date?, x_day_first? } changes an XY table's X format between numbers, dates and elapsed times, with the unit dates/elapsed times convert to (seconds, minutes, hours, days, weeks or years; default days) and the start date dates count from (YYYY-MM-DD; default the earliest date in the column); x_day_first reads ambiguous slash dates day-first. The cells keep their typed text; a cell that can't be read shows \"?\" and counts as missing.",
         annotations(
             title = "Edit table",
             read_only_hint = false,
@@ -4700,6 +4714,10 @@ impl TiterMcpServer {
             "mode": args.mode,
             "format": args.format,
             "variable_type": args.variable_type,
+            "x_format": args.x_format,
+            "x_units": args.x_units,
+            "x_start_date": args.x_start_date,
+            "x_day_first": args.x_day_first,
         });
         let outcome: Result<serde_json::Value, String> = async {
             let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
@@ -4727,6 +4745,7 @@ impl TiterMcpServer {
                 "freeze-title",
                 "convert-comma-decimals",
                 "set-summary-format",
+                "set-x-format",
                 "add-calculated-variable",
                 "set-calculated-variable",
                 "remove-calculated-variable",
@@ -4818,6 +4837,40 @@ impl TiterMcpServer {
                         }
                     }
                 }
+                "set-x-format" => {
+                    const FORMATS: &[&str] = &["numbers", "date", "elapsed"];
+                    match &args.x_format {
+                        Some(f) if FORMATS.contains(&f.as_str()) => {}
+                        _ => {
+                            return Err(format!(
+                                "op set-x-format needs x_format, one of: {}.",
+                                FORMATS.join(", ")
+                            ))
+                        }
+                    }
+                    if let Some(u) = &args.x_units {
+                        const UNITS: &[&str] = &["seconds", "minutes", "hours", "days", "weeks", "years"];
+                        if !UNITS.contains(&u.as_str()) {
+                            return Err(format!(
+                                "op set-x-format needs x_units, one of: {}.",
+                                UNITS.join(", ")
+                            ));
+                        }
+                    }
+                    if let Some(d) = &args.x_start_date {
+                        // The shape of a YYYY-MM-DD date; whether it is a
+                        // real date is the dispatcher's call.
+                        let ok = d.len() == 10
+                            && d.as_bytes()[4] == b'-'
+                            && d.as_bytes()[7] == b'-'
+                            && d.chars().enumerate().all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit());
+                        if !ok {
+                            return Err(format!(
+                                "op set-x-format needs x_start_date as YYYY-MM-DD, not “{d}”."
+                            ));
+                        }
+                    }
+                }
                 "remove-calculated-variable" => match &args.name {
                     Some(n) if !n.trim().is_empty() => {}
                     _ => return Err(format!("op {} needs a non-empty name.", args.op)),
@@ -4890,6 +4943,10 @@ impl TiterMcpServer {
                     "mode": args.mode,
                     "format": args.format,
                     "variable_type": args.variable_type,
+                    "x_format": args.x_format,
+                    "x_units": args.x_units,
+                    "x_start_date": args.x_start_date,
+                    "x_day_first": args.x_day_first,
                 }),
             )
             .await
@@ -9282,6 +9339,14 @@ fn table_summary(
             "row_groups": data.get("rowGroups"),
         });
     }
+    // An XY table's X format (seq 332): what the X column holds and how it
+    // converts to numbers. The stored conversion is reported as stored —
+    // a numbers table keeps its last conversion, dormant, so switching back
+    // to dates restores it.
+    if table_type == "xy" {
+        out["x_format"] = serde_json::json!(data.get("xFormat").and_then(|v| v.as_str()).unwrap_or("numbers"));
+        out["x_conversion"] = data.get("xConversion").cloned().unwrap_or(serde_json::Value::Null);
+    }
     if include_values {
         let capped = max_rows.clamp(1, HARD_MAX_ROWS);
         let mut values = Vec::new();
@@ -9849,6 +9914,24 @@ mod tests {
         let snap = snapshot();
         let err = table_summary("project-1", &snap, "a1", false, 100).expect_err("an analysis is not a table");
         assert!(err.contains("not a table"), "{err}");
+    }
+
+    #[test]
+    fn table_summary_x_format_on_xy() {
+        // Seq 332: an XY table's X format and conversion ride on the summary.
+        let mut snap = snapshot();
+        snap["nodes"]["t1"]["data"]["xFormat"] = serde_json::json!("date");
+        snap["nodes"]["t1"]["data"]["xConversion"] =
+            serde_json::json!({ "units": "weeks", "startDate": "2024-01-01", "dayFirst": true });
+        let out = table_summary("project-1", &snap, "t1", false, 100).expect("summary");
+        assert_eq!(out["x_format"], "date");
+        assert_eq!(out["x_conversion"]["units"], "weeks");
+        assert_eq!(out["x_conversion"]["startDate"], "2024-01-01");
+        assert_eq!(out["x_conversion"]["dayFirst"], true);
+        // A table with no format stored reads as numbers, with no conversion.
+        let out = table_summary("project-1", &snapshot(), "t1", false, 100).expect("summary");
+        assert_eq!(out["x_format"], "numbers");
+        assert_eq!(out["x_conversion"], serde_json::Value::Null);
     }
 
     #[test]

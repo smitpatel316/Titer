@@ -71,6 +71,7 @@ import JSZip from "jszip";
 import type { ProjectFilePayload } from "./project-file";
 import type { NonlinearModel } from "../stats/types";
 import { groupRuns } from "./columns";
+import { isoDateOf, prismUnits, xZeroMs, type XConversion } from "./date-time";
 import { summaryFormatDef } from "./summary-format";
 
 export interface PrismWriteIssue {
@@ -590,13 +591,31 @@ export async function writePrism(project: ProjectFilePayload, appVersion: string
     const setUids: string[] = [];
     let xUid: string | undefined;
     if (xColumn) {
+      // A date/elapsed X column (seq 332) keeps its format in the file, so
+      // a .prism round-trip preserves it. The CSV column still holds the raw
+      // date/elapsed text, and the importer re-reads the format from here.
+      // An elapsed X's "elapsed" format spelling is Titer's own — real
+      // Prism's acceptance of it is unverified, so the round-trip pin is
+      // the proof for the format string itself.
+      const xIsDate = tableType === "xy" && data.xFormat === "date";
+      const xIsElapsed = tableType === "xy" && data.xFormat === "elapsed";
+      const xConversion: XConversion = data.xConversion ?? { units: "days" };
+      const xZeroDate = xIsDate ? isoDateOf(xZeroMs(xColumn.values, xConversion)) : undefined;
       xUid = crypto.randomUUID().toUpperCase();
       setJson(`data/sets/${xUid}.json`, {
         "@class": "DataSet",
         uid: xUid,
-        format: "y_single",
+        format: xIsDate ? "date" : xIsElapsed ? "elapsed" : "y_single",
         title: xColumn.name,
         attributes: ["DS_ATTR_X"],
+        ...(xIsDate || xIsElapsed
+          ? {
+              dateTimeConversion: {
+                units: prismUnits(xConversion.units),
+                ...(xZeroDate === undefined ? {} : { zeroDate: xZeroDate }),
+              },
+            }
+          : {}),
         replicates: [
           {
             ...replicateEntry(0, rowCount - 1, excludedCellAttributes(excludedByColumn.get(0))),

@@ -27,6 +27,8 @@ import {
   applySummaryFormatXY,
   applySummaryFormatXYLoses,
   changeErrorFormat,
+  changeXConversion,
+  changeXFormat,
   defaultRowGroups,
   regroupLoses,
   regroupTable,
@@ -37,7 +39,9 @@ import {
   rowGroupTotal,
   setRowGroupCount,
   setRowGroupName,
+  xFormatOf,
 } from "./table-data";
+import { DATE_UNITS, type XColumnFormat, type XConversion } from "../../lib/date-time";
 import { isGrouped, isNested } from "../../lib/dataset";
 import {
   addCalculatedVariable,
@@ -153,6 +157,7 @@ export function TableView({ node }: { node: ProjectNode }) {
           <>
             <ReplicatesPanel data={data} update={update} />
             <XSeriesPanel data={data} update={update} />
+            <XFormatPanel data={data} update={update} />
             <FormatPanel data={data} update={update} />
           </>
         }
@@ -278,6 +283,77 @@ function XSeriesPanel({ data, update }: { data: TableData; update: (next: TableD
  *  values are really SD can be switched). Switching relabels its summary
  *  error columns (`_SD` ↔ `_SEM`, values untouched) and sets the default
  *  error bars of graphs made from the table; graphs already made keep their own. */
+/** An XY table's X column format (Prism 11, seq 332): what the X values
+ *  are — plain numbers, dates, or elapsed times — and how dates/elapsed
+ *  times convert to numbers for analyses and graphs. The cells keep their
+ *  typed text either way; a cell that can't be read shows "?" in the grid
+ *  and counts as missing. The axis itself still plots the converted
+ *  numbers — date/elapsed axis labels are a later lane (part D). */
+function XFormatPanel({ data, update }: { data: TableData; update: (next: TableData, label: string) => void }) {
+  const format: XColumnFormat = xFormatOf(data);
+  const conversion: XConversion = data.xConversion ?? { units: "days" };
+  const setConversion = (next: XConversion) => {
+    update(changeXConversion(data, next), "Change X Conversion");
+  };
+  return (
+    <Section title="X Format" icon={<ColumnsIcon />}>
+      <Row label="X values">
+        <RadioList
+          value={format}
+          onChange={(next) => {
+            if (next === format) return;
+            update(changeXFormat(data, next), "Change X Format");
+          }}
+          options={[
+            { value: "numbers", label: "Numbers" },
+            { value: "date", label: "Dates" },
+            { value: "elapsed", label: "Elapsed time" },
+          ]}
+        />
+      </Row>
+      {format !== "numbers" && (
+        <>
+          <Row label="Convert to">
+            <Select
+              value={conversion.units}
+              onChange={(units) => setConversion({ ...conversion, units })}
+              options={DATE_UNITS.map((u) => ({ value: u, label: `${u.charAt(0).toUpperCase()}${u.slice(1)}` }))}
+            />
+          </Row>
+          {format === "date" && (
+            <>
+              <Row label="Start date">
+                <Input
+                  type="date"
+                  aria-label="Start date"
+                  value={conversion.startDate ?? ""}
+                  onChange={(e) =>
+                    setConversion({
+                      ...conversion,
+                      startDate: e.target.value === "" ? undefined : e.target.value,
+                    })
+                  }
+                />
+              </Row>
+              <Row label="Day first">
+                <Checkbox
+                  checked={conversion.dayFirst ?? false}
+                  onChange={(dayFirst) => setConversion({ ...conversion, dayFirst: dayFirst ? true : undefined })}
+                />
+              </Row>
+            </>
+          )}
+          <p className="text-small text-secondary">
+            {format === "date"
+              ? "Dates convert to numbers in the unit above, counted from the start date (blank = the earliest date in the column). A year is 365.25 days. Slash dates read month-first unless Day first is on."
+              : "Elapsed times convert to numbers in the unit above (\"1:30:00\" is one hour thirty minutes). A cell that can't be read shows \"?\" and counts as missing."}
+          </p>
+        </>
+      )}
+    </Section>
+  );
+}
+
 function FormatPanel({ data, update }: { data: TableData; update: (next: TableData, label: string) => void }) {
   const format: TableErrorFormat = tableErrorFormat(data);
   return (

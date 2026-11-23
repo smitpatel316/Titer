@@ -4,6 +4,7 @@
 // per table version. An edit makes a new TableData, so the cache is never stale.
 import { hasXColumn, type TableData, type TableType } from "../store/types";
 import { summaryFormatOf, type SummaryFormat } from "./summary-format";
+import { convertXCell, xZeroMs, type XConversion } from "./date-time";
 import { excludedKey, seriesKeyOf } from "./columns";
 import { parseCell } from "./numeric";
 
@@ -83,9 +84,21 @@ export function readTable(data: TableData): Dataset {
     const excluded = new Set(data.excluded);
     // The columns from `lead` on are a grouped table's: each in its group.
     const lead = leadOf(data);
+    // A date/elapsed X column (seq 332): the first data column converts to
+    // numbers with the table's units + start date, so every analysis and
+    // graph sees numbers while the cells keep their typed text. The zero is
+    // computed once for the whole column, not per cell.
+    let xByRow: (number | null)[] | null = null;
+    if (data.xFormat === "date" || data.xFormat === "elapsed") {
+      const format = data.xFormat;
+      const xCells = data.rows.map((row, r) => (excluded.has(excludedKey(r, 1)) ? null : (row[1] ?? null)));
+      const conversion: XConversion = data.xConversion ?? { units: "days" };
+      const zero = format === "date" ? xZeroMs(xCells, conversion) : null;
+      xByRow = xCells.map((cell) => convertXCell(cell, format, conversion, zero));
+    }
     const columns = data.columns.slice(1).map((name, i): Column => {
       const cells = data.rows.map((row, r) => (excluded.has(excludedKey(r, i + 1)) ? null : (row[i + 1] ?? null)));
-      const byRow = cells.map(parseCell);
+      const byRow = i === 0 && xByRow !== null ? xByRow : cells.map(parseCell);
       const rows = byRow.flatMap((v, r) => (v == null ? [] : [r]));
       const set = i + 1 >= lead ? seriesKeyOf(name) : undefined;
       return { name, cells, byRow, values: rows.map((r) => byRow[r]!), rows, ...(set === undefined ? {} : { set }) };

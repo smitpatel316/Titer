@@ -130,6 +130,8 @@ import {
   applySummaryFormatXY,
   applySummaryFormatXYLoses,
   changeErrorFormat,
+  changeXConversion,
+  changeXFormat,
   columnsBeyond,
   defaultRowGroups,
   deleteColumns,
@@ -159,6 +161,7 @@ import {
   toTSV,
   transposeBlock,
   writeBlock,
+  xFormatOf,
 } from "../src/views/tables/table-data";
 import { resultCellBackgroundKey } from "../src/lib/cell-colors";
 import { flattenThreeWay, rowGroupBands } from "../src/stats/grouped/base";
@@ -183,6 +186,13 @@ import {
 import { deletePalette, keepPalette, loadMyPalettes } from "../src/store/my-palettes";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, graphSeriesDataset, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
 import { datasetColumns, isGrouped, isNested, readTable, setColumns, splitXY, xyPoints, type Dataset } from "../src/lib/dataset";
+import {
+  convertXCell,
+  displayXCell,
+  parseDateCell,
+  parseElapsedCell,
+} from "../src/lib/date-time";
+import { writePzfx } from "../src/lib/pzfx-write";
 import {
   mergeGraphTables,
   mergedGraphData,
@@ -33671,6 +33681,303 @@ check("seq 331: MCP set-variable-type sets a column's type by hand and sticks th
     }),
     /has no column 9/,
   );
+});
+
+// ── seq 332: dates / elapsed time X on XY tables (HALF A) ───────────────
+// Prism lets an XY X column hold dates or elapsed times instead of plain
+// numbers, and converts them to numbers (user-chosen units + start date)
+// before any analysis or graph sees them. The cells keep their typed text;
+// the conversion happens in readTable, so every consumer sees numbers while
+// the grid still shows what was typed. A cell that can't be read shows "?"
+// in the grid and counts as missing.
+
+check("seq 332: a date X column converts to days from the earliest date", () => {
+  const data: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "2024-01-16", "10"],
+      [null, "2024-01-17", "20"],
+      [null, "2024-01-26", "30"],
+    ],
+    xFormat: "date",
+  };
+  const ds = readTable(data);
+  deepStrictEqual(ds.columns[0].byRow, [0, 1, 10]);
+  deepStrictEqual(ds.columns[0].values, [0, 1, 10]);
+  strictEqual(ds.columns[1].values.length, 3);
+});
+
+check("seq 332: an unparseable date shows '?' and counts as missing", () => {
+  strictEqual(displayXCell("not a date", "date"), "?");
+  strictEqual(displayXCell("2024-01-16", "date"), "2024-01-16");
+  strictEqual(displayXCell("", "date"), "");
+  strictEqual(displayXCell(null, "date"), "");
+  const data: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "2024-01-16", "10"],
+      [null, "not a date", "20"],
+      [null, "2024-01-18", "30"],
+    ],
+    xFormat: "date",
+  };
+  const ds = readTable(data);
+  deepStrictEqual(ds.columns[0].byRow, [0, null, 2]);
+  deepStrictEqual(ds.columns[0].values, [0, 2]);
+  // The Y value on the "?" row is still there, but the pair drops out of
+  // the fit: xyPoints pairs X with Y, and the "?" row has no X.
+  deepStrictEqual(xyPoints(ds.columns[0], ds.sets[1]).y, [10, 30]);
+});
+
+check("seq 332: conversion to days with a chosen start date matches hand-computed values", () => {
+  const data: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "2024-01-16", "10"],
+      [null, "2024-01-17", "20"],
+    ],
+    xFormat: "date",
+    xConversion: { units: "days", startDate: "2024-01-01" },
+  };
+  deepStrictEqual(readTable(data).columns[0].values, [15, 16]);
+});
+
+check("seq 332: a date X converts to years at 365.25 days, matching Prism's own x_date fixture", () => {
+  // The .pzfx corpus fixture x_date: "16-Jan-2004" → 0, "9-Apr-2009" →
+  // 5.22929500342231 years. 2004-01-16 → 2009-04-09 is 1910 days, and
+  // 1910 / 365.25 is Prism's number.
+  const zero = parseDateCell("2004-01-16");
+  const value = parseDateCell("2009-04-09");
+  if (zero === null || value === null) throw new Error("fixture dates did not parse");
+  const years = convertXCell("2009-04-09", "date", { units: "years", startDate: "2004-01-16" }, zero);
+  ok(years !== null && Math.abs(years - 5.22929500342231) < 1e-9, `expected 5.22929500342231, got ${years}`);
+  ok(value !== null && Math.abs((value - zero) / 86400000 - 1910) < 1e-9);
+});
+
+check("seq 332: elapsed hh:mm:ss parses and converts; unparseable elapsed shows '?'", () => {
+  strictEqual(parseElapsedCell("1:30:00"), 5400);
+  strictEqual(parseElapsedCell("0:45:30"), 2730);
+  strictEqual(parseElapsedCell("0:00:30.5"), 30.5);
+  strictEqual(parseElapsedCell("90"), 90);
+  strictEqual(parseElapsedCell("1:30"), 90);
+  strictEqual(parseElapsedCell("1:60:00"), null);
+  strictEqual(parseElapsedCell("banana"), null);
+  strictEqual(displayXCell("banana", "elapsed"), "?");
+  strictEqual(displayXCell("1:30:00", "elapsed"), "1:30:00");
+  const data: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "1:30:00", "10"],
+      [null, "0:45:30", "20"],
+      [null, "2:00:00", "30"],
+    ],
+    xFormat: "elapsed",
+    xConversion: { units: "minutes" },
+  };
+  deepStrictEqual(readTable(data).columns[0].values, [90, 45.5, 120]);
+});
+
+check("seq 332: slash dates honor the day-first preference; a first component over 12 is always the day", () => {
+  strictEqual(parseDateCell("03/04/2024", false), Date.UTC(2024, 2, 4));
+  strictEqual(parseDateCell("03/04/2024", true), Date.UTC(2024, 3, 3));
+  strictEqual(parseDateCell("13/04/2024", false), Date.UTC(2024, 3, 13));
+  strictEqual(parseDateCell("13/04/2024", true), Date.UTC(2024, 3, 13));
+  strictEqual(parseDateCell("16-Jan-2004"), Date.UTC(2004, 0, 16));
+  strictEqual(parseDateCell("Sep 6, 2024"), Date.UTC(2024, 8, 6));
+  strictEqual(parseDateCell("6 Sep 2024"), Date.UTC(2024, 8, 6));
+  strictEqual(parseDateCell("2024"), Date.UTC(2024, 0, 1));
+  strictEqual(parseDateCell("2024-02-30"), null);
+  strictEqual(parseDateCell("banana"), null);
+});
+
+check("seq 332: the X format and conversion survive a .hlx save/reload; bogus entries drop", () => {
+  const payload: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "Dates",
+        parentId: null,
+        tableType: "xy",
+        data: {
+          columns: ["Title", "X", "Y"],
+          rows: [[null, "2024-01-16", "10"]],
+          xFormat: "date",
+          xConversion: { units: "weeks", startDate: "2024-01-01", dayFirst: true },
+        },
+      },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const reread = read(serializeProjectFile(payload));
+  strictEqual(reread.updated, false);
+  const data = reread.project.nodes.t1!.data!;
+  strictEqual(data.xFormat, "date");
+  deepStrictEqual(data.xConversion, { units: "weeks", startDate: "2024-01-01", dayFirst: true });
+  // A hand-edited file holding a bogus format or unit loses both, instead
+  // of carrying a lie into the conversion.
+  const broken = JSON.parse(serializeProjectFile(payload)) as { project: Record<string, any> };
+  broken.project.nodes.t1.data.xFormat = "months";
+  broken.project.nodes.t1.data.xConversion = { units: "fortnights" };
+  const rereadBroken = read(JSON.stringify(broken));
+  strictEqual(rereadBroken.project.nodes.t1!.data!.xFormat, undefined);
+  strictEqual(rereadBroken.project.nodes.t1!.data!.xConversion, undefined);
+});
+
+check("seq 332: .prism round-trip preserves a date X format and its conversion", async () => {
+  const payload: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "Dates",
+        parentId: null,
+        tableType: "xy",
+        data: {
+          columns: ["Title", "X", "Y"],
+          rows: [
+            [null, "2024-01-16", "10"],
+            [null, "2024-01-17", "20"],
+          ],
+          xFormat: "date",
+          xConversion: { units: "weeks", startDate: "2024-01-01", dayFirst: true },
+        },
+      },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const written = await writePrism(payload, "1.8.2");
+  const back = await convertPrism(written.bytes, "round-trip.prism");
+  const backNode = Object.values(back.project.nodes).find((n) => n.type === "table");
+  if (!backNode || backNode.type !== "table") throw new Error("no table node after round-trip");
+  strictEqual(backNode.data!.xFormat, "date");
+  // The .prism format carries units + zero date, but no day-first flag —
+  // that part is Titer-side only and does not survive the round-trip.
+  deepStrictEqual(backNode.data!.xConversion, { units: "weeks", startDate: "2024-01-01" });
+  deepStrictEqual(backNode.data!.rows, payload.nodes.t1.data!.rows);
+});
+
+check("seq 332: .pzfx writes a date X as years since the first date with an XAdvancedColumn of date strings", () => {
+  const payload: ProjectFilePayload = {
+    nodes: {
+      t1: {
+        id: "t1",
+        type: "table",
+        name: "Dates",
+        parentId: null,
+        tableType: "xy",
+        data: {
+          columns: ["Title", "X", "Y"],
+          rows: [
+            [null, "2024-01-16", "10"],
+            [null, "2024-01-17", "20"],
+            [null, "2024-01-26", "30"],
+          ],
+          xFormat: "date",
+        },
+      },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const xml = new TextDecoder().decode(writePzfx(payload, "1.8.2").bytes);
+  ok(xml.includes('XFormat="date"'), "expected XFormat=\"date\" in the written .pzfx");
+  ok(xml.includes("16-Jan-2024") && xml.includes("17-Jan-2024") && xml.includes("26-Jan-2024"), "expected the date strings in an XAdvancedColumn");
+  // The XColumn holds years since the first date (Prism's own shape):
+  // 0, 1/365.25, 10/365.25.
+  const xCol = /<XColumn[^>]*>([\s\S]*?)<\/XColumn>/.exec(xml)?.[1] ?? "";
+  const values = [...xCol.matchAll(/<d>([^<]*)<\/d>/g)].map((m) => Number(m[1]));
+  strictEqual(values.length, 3);
+  ok(Math.abs(values[0] - 0) < 1e-9 && Math.abs(values[1] - 1 / 365.25) < 1e-9 && Math.abs(values[2] - 10 / 365.25) < 1e-9, `expected years [0, ${1 / 365.25}, ${10 / 365.25}], got ${values}`);
+});
+
+check("seq 332: MCP set-x-format sets the format by hand; a non-XY table and bogus values refuse it", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-332-table", "create-table", {
+    table_type: "xy",
+    columns: ["", "X", "Y"],
+    rows: [
+      ["1", "2024-01-16", "10"],
+      ["2", "2024-01-17", "20"],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  await harness.run("job-332-set", "edit-table", {
+    table_id: tableId,
+    op: "set-x-format",
+    x_format: "date",
+    x_units: "weeks",
+    x_start_date: "2024-01-01",
+    x_day_first: true,
+  });
+  harness.sync();
+  const data = harness.state().nodes[tableId]!.data!;
+  strictEqual(data.xFormat, "date");
+  deepStrictEqual(data.xConversion, { units: "weeks", startDate: "2024-01-01", dayFirst: true });
+  // Setting it again is a no-op success: no second undo step.
+  const pastLen = harness.state().past.length;
+  await harness.run("job-332-set-again", "edit-table", {
+    table_id: tableId,
+    op: "set-x-format",
+    x_format: "date",
+    x_units: "weeks",
+    x_start_date: "2024-01-01",
+    x_day_first: true,
+  });
+  harness.sync();
+  strictEqual(harness.state().past.length, pastLen);
+  // Errors: a non-XY table, an unknown format, unknown units, a bad start date.
+  const col = await harness.run("job-332-col", "create-table", {
+    table_type: "column",
+    columns: ["", "A"],
+    rows: [["1", "1"]],
+  });
+  const colId = (col.result as { table_id: string }).table_id;
+  harness.sync();
+  await rejects(
+    harness.run("job-332-bad-table", "edit-table", { table_id: colId, op: "set-x-format", x_format: "date" }),
+    /only XY tables/,
+  );
+  await rejects(
+    harness.run("job-332-bad-format", "edit-table", { table_id: tableId, op: "set-x-format", x_format: "months" }),
+    /numbers, date or elapsed/,
+  );
+  await rejects(
+    harness.run("job-332-bad-units", "edit-table", { table_id: tableId, op: "set-x-format", x_format: "date", x_units: "fortnights" }),
+    /seconds, minutes, hours, days, weeks or years/,
+  );
+  await rejects(
+    harness.run("job-332-bad-start", "edit-table", { table_id: tableId, op: "set-x-format", x_format: "date", x_start_date: "not a date" }),
+    /start date/,
+  );
+});
+
+check("seq 332: changing the X format leaves the Y values alone and is a no-op when nothing changes", () => {
+  const data: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [[null, "2024-01-16", "10"]],
+    xFormat: "date",
+    xConversion: { units: "days" },
+  };
+  strictEqual(xFormatOf(data), "date");
+  strictEqual(xFormatOf({ columns: ["Title", "X", "Y"], rows: [] }), "numbers");
+  const asNumbers = changeXFormat(data, "numbers");
+  strictEqual(asNumbers.xFormat, undefined);
+  deepStrictEqual(asNumbers.rows, data.rows);
+  const asWeeks = changeXFormat(asNumbers, "date", { units: "weeks" });
+  strictEqual(asWeeks.xFormat, "date");
+  deepStrictEqual(asWeeks.xConversion, { units: "weeks" });
+  // Same format, no new conversion: the same object back, no undo step.
+  strictEqual(changeXFormat(data, "date"), data);
+  const converted = changeXConversion(data, { units: "weeks" });
+  deepStrictEqual(converted.xConversion, { units: "weeks" });
+  strictEqual(changeXConversion(data, { units: "days" }), data);
 });
 
 // ── Run ──────────────────────────────────────────────────────────────────

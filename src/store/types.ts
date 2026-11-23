@@ -2,6 +2,7 @@
 // modules can depend on it without creating a cycle.
 
 import type { AnalysisParams, AnalysisResult, AnalysisType, SimulationSpec } from "../stats/types";
+import type { XColumnFormat, XConversion } from "../lib/date-time";
 import type { SummaryFormat } from "../lib/summary-format";
 import type { CellBackgroundColor } from "../lib/cell-colors";
 
@@ -833,6 +834,10 @@ export interface TableData {
    *  made from the table; a graph's own error setting still wins for that
    *  graph. Omitted = SEM, the graphs' default. */
   errorFormat?: TableErrorFormat;
+  /** What an XY table's X column holds: plain numbers, dates, or elapsed times (Prism 11, seq 332). */
+  xFormat?: XColumnFormat;
+  /** How a date/elapsed X column converts to numbers (units + start date). */
+  xConversion?: XConversion;
   /** Grouped tables only: number of top-level group headers (Group A, B, …). */
   groups?: number;
   /** Grouped tables only: replicate sub-columns per group. */
