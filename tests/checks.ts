@@ -36275,6 +36275,46 @@ check("seq 390: the Prism 8 .pzfx schema itself has no level-order field", () =>
   ok(/MultipleVariables/.test(xsd), "sanity: the schema does know MV tables (ExtTableType)");
 });
 
+// ── seq 391: Hanes-Woolf + Lineweaver-Burk missing from the transform
+// schema enums ─────────────────────────────────────────────────────────
+// The seq 381 (Hanes-Woolf) and seq 384 (Lineweaver-Burk) lanes
+// implemented the transforms but never added them to the transform-data
+// function/xFunction enums in src-tauri/src/analysis-params-schema.json,
+// so MCP clients could not discover or validate them. These pins assert
+// both names appear in both enums — so a future transform cannot silently
+// skip the schema again. (The Rust schema test
+// analysis_params_schema_covers_all_types passes regardless; it does not
+// require full coverage.)
+function transformDataEnums391() {
+  const schema = JSON.parse(
+    readFileSync(new URL("../src-tauri/src/analysis-params-schema.json", import.meta.url), "utf8"),
+  ) as Record<string, { params: { name: string; enum?: string[] }[] }>;
+  const params = schema["transform-data"]?.params ?? [];
+  const byName = (name: string) => params.find((p) => p.name === name)?.enum ?? [];
+  return { fn: byName("function"), xFn: byName("xFunction") };
+}
+
+check("seq 391: the transform-data function enum advertises hanes-woolf and lineweaver-burk", () => {
+  const { fn } = transformDataEnums391();
+  for (const name of ["hanes-woolf", "lineweaver-burk"] as const) {
+    ok(fn.includes(name), `function enum must include ${name}, got: ${JSON.stringify(fn)}`);
+  }
+  // Sanity: the siblings that were already advertised are still there.
+  for (const name of ["eadie-hofstee", "log-log", "hill-plot", "scatchard"] as const) {
+    ok(fn.includes(name), `function enum must still include ${name}`);
+  }
+});
+
+check("seq 391: the transform-data xFunction enum advertises hanes-woolf and lineweaver-burk", () => {
+  const { xFn } = transformDataEnums391();
+  for (const name of ["hanes-woolf", "lineweaver-burk"] as const) {
+    ok(xFn.includes(name), `xFunction enum must include ${name}, got: ${JSON.stringify(xFn)}`);
+  }
+  for (const name of ["eadie-hofstee", "log-log", "hill-plot", "scatchard"] as const) {
+    ok(xFn.includes(name), `xFunction enum must still include ${name}`);
+  }
+});
+
 check("seq 378: a write-table replace keeps the row-label source when its column survives, drops it when the column is gone", async () => {
   const harness = mcpLaggingHarness(true);
   const base = setLabelVariable(mv331bTyped(), "ID");
