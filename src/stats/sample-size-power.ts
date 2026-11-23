@@ -177,6 +177,15 @@ function asNumber(value: unknown, name: string): number {
 
 /** The validated parameters, with defaults filled in. Throws with a
  *  plain message naming the bad field — never a made-up number. */
+/** JSON has no `undefined`: a value that crossed the Rust→JS boundary
+ *  arrives as `null` when the caller omitted it (the Rust dispatcher
+ *  serializes omitted `Option`s as null). Treat both as absent — the
+ *  validator is the authority on params, and every JSON caller speaks
+ *  null. (Seq 207 Mac proof failure, Nov 23 2026: the MCP tool rejected
+ *  its own documented minimal call with "alpha must be a number (got
+ *  null)" because only `undefined` counted as absent.) */
+const absent = (v: unknown): boolean => v === undefined || v === null;
+
 export function validateSampleSizeParams(params: unknown): SampleSizeParams {
   if (params === null || typeof params !== "object" || Array.isArray(params)) {
     fail("sample-size params must be an object");
@@ -190,16 +199,16 @@ export function validateSampleSizeParams(params: unknown): SampleSizeParams {
   if (solveFor !== "n" && solveFor !== "power" && solveFor !== "effect") {
     fail(`Unknown solve_for "${String(solveFor)}" — solve for n, power or effect.`);
   }
-  const alpha = p.alpha === undefined ? 0.05 : asNumber(p.alpha, "alpha");
+  const alpha = absent(p.alpha) ? 0.05 : asNumber(p.alpha, "alpha");
   if (alpha <= 0 || alpha >= 1) fail(`alpha must be between 0 and 1 (got ${alpha})`);
-  const alternative = p.alternative === undefined ? "two-sided" : p.alternative;
+  const alternative = absent(p.alternative) ? "two-sided" : p.alternative;
   if (alternative !== "two-sided" && alternative !== "one-sided") {
     fail(`Unknown alternative "${String(alternative)}" — two-sided or one-sided.`);
   }
   const out: SampleSizeParams = { test: test as SampleSizeTest, solveFor, alpha, alternative };
   // The effect: explicit, or derived from p0/p1 for one proportion — never both.
-  const hasEffect = p.effect !== undefined;
-  const hasProportions = p.p0 !== undefined || p.p1 !== undefined;
+  const hasEffect = !absent(p.effect);
+  const hasProportions = !absent(p.p0) || !absent(p.p1);
   if (test === "one-proportion" && hasProportions) {
     if (hasEffect) fail("one-proportion: pass effect (h) or p0/p1, not both");
     const p0 = asNumber(p.p0, "p0");
@@ -214,12 +223,12 @@ export function validateSampleSizeParams(params: unknown): SampleSizeParams {
   } else if (hasEffect) {
     out.effect = asNumber(p.effect, "effect");
   }
-  if (p.n !== undefined) out.n = asNumber(p.n, "n");
-  if (p.power !== undefined) out.power = asNumber(p.power, "power");
-  if (p.groups !== undefined) out.groups = asNumber(p.groups, "groups");
-  if (p.chiSquareDf !== undefined) out.chiSquareDf = asNumber(p.chiSquareDf, "chiSquareDf");
-  if (p.categories !== undefined) out.categories = asNumber(p.categories, "categories");
-  if (p.sdRatio !== undefined) out.sdRatio = asNumber(p.sdRatio, "sdRatio");
+  if (!absent(p.n)) out.n = asNumber(p.n, "n");
+  if (!absent(p.power)) out.power = asNumber(p.power, "power");
+  if (!absent(p.groups)) out.groups = asNumber(p.groups, "groups");
+  if (!absent(p.chiSquareDf)) out.chiSquareDf = asNumber(p.chiSquareDf, "chiSquareDf");
+  if (!absent(p.categories)) out.categories = asNumber(p.categories, "categories");
+  if (!absent(p.sdRatio)) out.sdRatio = asNumber(p.sdRatio, "sdRatio");
 
   // What each solve-for needs, and the ranges of what it got.
   if (solveFor !== "effect") {

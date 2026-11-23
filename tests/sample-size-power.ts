@@ -188,6 +188,24 @@ for (const [params, pattern] of bad) {
   throws(() => validateSampleSizeParams(params), pattern, `bad params must throw: ${JSON.stringify(params)}`);
 }
 
+// ── JSON null means absent (Rust serializes omitted Options as null) ─────
+// The live MCP path sends every omitted field as null (serde_json::json!
+// on Option<T>), never undefined — the validator must treat null exactly
+// like undefined, or the tool rejects its own documented minimal call
+// (seq 207 Mac proof failure, Nov 23 2026: "alpha must be a number (got
+// null)" on {test: two-sample-t, solve_for: n, effect: 0.5, power: 0.8}).
+{
+  const nullParams = validateSampleSizeParams({
+    test: "two-sample-t", solveFor: "n", effect: 0.5, power: 0.8,
+    alpha: null, alternative: null, n: null, groups: null,
+    chiSquareDf: null, categories: null, sdRatio: null, p0: null, p1: null,
+  });
+  strictEqual(nullParams.alpha, 0.05, "null alpha must default to 0.05");
+  strictEqual(nullParams.alternative, "two-sided", "null alternative must default to two-sided");
+  const nullSolved = solveSampleSizePower(nullParams);
+  ok(close3(nullSolved.n, 63.76561), `null-payload n: ${nullSolved.n} (want 63.76561)`);
+}
+
 // ── MCP: the job returns the same numbers as the UI engine ────────────────
 {
   const job = (args: unknown) =>
@@ -204,6 +222,18 @@ for (const [params, pattern] of bad) {
   const direct = solve({ test: "two-sample-t", solveFor: "n", effect: 0.5, power: 0.8 });
   strictEqual(mcp.n, direct.n, "MCP and UI must return the identical n (same engine)");
   strictEqual(mcp.power, direct.power, "MCP and UI must return the identical power");
+  // The Rust dispatcher serializes omitted Options as JSON null — the live
+  // MCP payload carries null for every omitted field. Same numbers as the
+  // JS-shaped call, or the tool is unusable as documented (seq 207 proof
+  // failure, Nov 23 2026).
+  const nullMcp = await executeJob(
+    job({ test: "two-sample-t", solve_for: "n", effect: 0.5, power: 0.8, alpha: null, alternative: null, n: null, groups: null, chi_square_df: null, categories: null, sd_ratio: null, p0: null, p1: null }),
+    deps,
+  );
+  const nullResult = nullMcp.result as { n: number; power: number };
+  ok(close3(nullResult.n, 63.76561), `MCP null-payload n: ${nullResult.n} (want 63.76561)`);
+  strictEqual(nullResult.n, direct.n, "MCP null payload and UI must return the identical n");
+  strictEqual(nullResult.power, direct.power, "MCP null payload and UI must return the identical power");
   // Bad MCP args reject, naming the problem.
   await rejects(
     executeJob(job({ test: "two-sample-t", solve_for: "n", effect: 0.5 }), deps),
