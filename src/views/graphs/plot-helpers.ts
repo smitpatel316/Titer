@@ -11,6 +11,7 @@ import {
   type PointShape,
   type PointStyle,
   type RefLabelPlace,
+  type SeriesStyle,
 } from "../../store/types";
 import { xyPoints, xyRows, type Column, type DataSet } from "../../lib/dataset";
 import { pointKeyOf } from "../../lib/columns";
@@ -484,8 +485,27 @@ export const pointName = (
 export const centerOf = (v: number[], center: GraphOptions["center"]) =>
   center === "median" ? median(v) : center === "geomean" ? (geometricMean(v) ?? NaN) : mean(v);
 
-/** Center value per column (mean, median or geometric mean). */
-export const centers = (cols: Column[], center: GraphOptions["center"]) => cols.map((c) => centerOf(c.values, center));
+/** A series' center choice: its own, else the graph's (seq 375). */
+export const seriesCenter = (
+  styles: Record<string, SeriesStyle> | undefined,
+  key: string,
+  fallback: GraphOptions["center"],
+): GraphOptions["center"] => styles?.[key]?.center ?? fallback;
+
+/** A series' error choice: its own, else the graph's (seq 375). */
+export const seriesError = (
+  styles: Record<string, SeriesStyle> | undefined,
+  key: string,
+  fallback: GraphOptions["error"],
+): GraphOptions["error"] => styles?.[key]?.error ?? fallback;
+
+/** Center value per column (mean, median or geometric mean) — each column taking
+ *  its series' override when it has one, else the graph's choice. */
+export const centers = (
+  cols: Column[],
+  center: GraphOptions["center"],
+  styles?: Record<string, SeriesStyle>,
+) => cols.map((c) => centerOf(c.values, seriesCenter(styles, c.name, center)));
 
 /** The error of `v` around its `center` value, as the two sides Plotly draws:
  *  `error` above the center, `errorMinus` below it (null for the symmetric
@@ -578,11 +598,14 @@ export function xyDrawn(
     };
   }
   const rows = xyRows(x, set);
-  const y = rows.values.map((v) => centerOf(v, options.center));
+  // One dataset, one series: its center/error override (seq 375) governs every X.
+  const sCenter = seriesCenter(options.series, set.name, options.center);
+  const sError = seriesError(options.series, set.name, options.error);
+  const y = rows.values.map((v) => centerOf(v, sCenter));
   const errs =
-    options.error === "none"
+    sError === "none"
       ? null
-      : rows.values.map((v, i) => (v.length < 2 ? { error: 0, errorMinus: null } : errorOf(v, options.error, y[i])));
+      : rows.values.map((v, i) => (v.length < 2 ? { error: 0, errorMinus: null } : errorOf(v, sError, y[i])));
   return {
     x: rows.x,
     y,
@@ -603,14 +626,17 @@ export function xyDrawn(
  *  the columns' plotted centers, one per column: the asymmetric kinds are
  *  measured from them. A null side becomes NaN ("no error bar", the grouped
  *  builders' convention); `errorMinus` is null outright when the kind is
- *  symmetric, so callers pass it only where it exists. */
+ *  symmetric, so callers pass it only where it exists. Each column takes its
+ *  series' error override when it has one, else the graph's kind — and off
+ *  stays off unless a series overrides to a real kind. */
 export const errors = (
   cols: Column[],
   kind: GraphOptions["error"],
   center: number[],
+  styles?: Record<string, SeriesStyle>,
 ): { error: number[]; errorMinus: number[] | null } | null => {
-  if (kind === "none") return null;
-  const pairs = cols.map((c, i) => errorOf(c.values, kind, center[i]));
+  if (kind === "none" && !cols.some((c) => seriesError(styles, c.name, kind) !== "none")) return null;
+  const pairs = cols.map((c, i) => errorOf(c.values, seriesError(styles, c.name, kind), center[i]));
   const minus = pairs.map((p) => p.errorMinus);
   return {
     error: pairs.map((p) => p.error ?? NaN),

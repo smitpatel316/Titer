@@ -558,13 +558,15 @@ function readStyles(v: unknown): Record<string, SeriesStyle> | undefined {
   const out = Object.entries(v)
     .filter((e): e is [string, Obj] => isObj(e[1]))
     .map(([key, raw]) => {
-      const style = canonical(raw, ["color", "shape", "dash", "pattern"]);
+      const style = canonical(raw, ["color", "shape", "dash", "pattern", "center", "error"]);
       const shape = oneOf(GRAPH_CHOICES.pointShape, style.shape);
       const dash = oneOf(GRAPH_CHOICES.lineDash, style.dash);
       const pattern = oneOf(FILL_PATTERNS, style.pattern);
+      const center = oneOf(GRAPH_CHOICES.center, style.center);
+      const error = oneOf(GRAPH_CHOICES.error, style.error);
       return [
         key,
-        defined({ ...style, color: isHex(style.color) ? style.color : undefined, shape, dash, pattern }),
+        defined({ ...style, color: isHex(style.color) ? style.color : undefined, shape, dash, pattern, center, error }),
       ] as const;
     })
     .filter(([, style]) => Object.keys(style).length);

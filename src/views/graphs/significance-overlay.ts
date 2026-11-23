@@ -5,7 +5,7 @@
 // DATA coordinates for Y, placing each bracket above the tallest drawn column
 // (bars/points/error bars), and extends the Y auto-range to fit.
 import type { AnalysisOutcome, ComparedCell } from "../../stats/types";
-import type { GraphOptions, GraphType, ProjectNode } from "../../store/types";
+import type { GraphOptions, GraphType, ProjectNode, SeriesStyle } from "../../store/types";
 import type { Column } from "../../lib/dataset";
 import type { GraphFigure } from ".";
 import { isSignificant, pEquals, pStars, pText } from "../../lib/format";
@@ -19,6 +19,8 @@ import {
   rowCountOf,
   rowLabels,
   separatedPositions,
+  seriesCenter,
+  seriesError,
 } from "./plot-helpers";
 import { groupsOf } from "../../lib/dataset";
 import { pairKey } from "../../lib/columns";
@@ -144,9 +146,10 @@ function columnTops(
   graphType: GraphType,
   center: GraphOptions["center"],
   error: GraphOptions["error"],
+  styles?: Record<string, SeriesStyle>,
 ): number[] {
-  const middle = centers(columns, center);
-  const err = errors(columns, error, middle);
+  const middle = centers(columns, center, styles);
+  const err = errors(columns, error, middle, styles);
   return columns.map((c, i) => {
     if (c.values.length === 0 || Number.isNaN(middle[i])) return 0;
     const errTop = middle[i] + (err?.error[i] ?? 0);
@@ -487,7 +490,14 @@ function groupedSpots(
           ? r - 0.4 + (0.8 * (g + 0.5)) / n
           : r + groupOffset(g, n);
   return groups.flatMap((group, g) => {
-    const { center, error } = perRowStats(group.columns, rows, options.center, options.error);
+    // One group, one series: its center/error override governs every row, so a
+    // bracket clears the marks as actually drawn.
+    const { center, error } = perRowStats(
+      group.columns,
+      rows,
+      seriesCenter(options.series, group.name, options.center),
+      seriesError(options.series, group.name, options.error),
+    );
     return Array.from({ length: rows }, (_, r) => {
       const values = group.columns.flatMap((c) => (c.byRow[r] == null ? [] : [c.byRow[r]!]));
       const bar = center[r] == null ? -Infinity : center[r]! + (error?.[r] ?? 0);
@@ -515,10 +525,10 @@ export function addSignificance(
   const selected = letters ? lettersComparisons(comparisons) : comparisons.filter((c) => sigPairSelected(c, options.sigPairs ?? []));
   if (!selected.length) return;
   const grouped = GROUPED_STARS.has(graphType);
-  const middle = centers(columns, options.center);
+  const middle = centers(columns, options.center, options.series);
   const spots = grouped
     ? groupedSpots(columns, graphType, options, titles)
-    : columnTops(columns, graphType, options.center, options.error).map((top, i) => ({
+    : columnTops(columns, graphType, options.center, options.error, options.series).map((top, i) => ({
         key: columns[i].name,
         x: i,
         top,

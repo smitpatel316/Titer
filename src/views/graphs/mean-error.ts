@@ -31,8 +31,8 @@ function build(
       ? shown.map((c) => c.name.slice(0, c.name.lastIndexOf(":")))
       : shown.map((c) => c.name);
   const idx = shown.map((_, i) => i);
-  const y = centers(shown, options.center);
-  const errs = errors(shown, options.error, y);
+  const y = centers(shown, options.center, options.series);
+  const errs = errors(shown, options.error, y, options.series);
   const data: unknown[] = [];
 
   if (options.shape === "line") {

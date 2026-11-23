@@ -258,7 +258,7 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, applyDateAxis, applyNumberFormats, axesRangeInputs, baseLayout, centers, curveXs, errorOf, groupedBarLayout, groupedScatterLayout, hasTableXAxis, heatmapLayout, jitter, legendRightMargin, legendWidthPx, logScaleOffered, movedText, numberTickformat, paintOf, perRowStats, perRowSummaryStats, scatterOffsets, summaryErrorAt, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xErrorColumn, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, applyDateAxis, applyNumberFormats, axesRangeInputs, baseLayout, centers, curveXs, errorOf, errors, groupedBarLayout, groupedScatterLayout, hasTableXAxis, heatmapLayout, jitter, legendRightMargin, legendWidthPx, logScaleOffered, movedText, numberTickformat, paintOf, perRowStats, perRowSummaryStats, scatterOffsets, summaryErrorAt, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xErrorColumn, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -5491,6 +5491,156 @@ check("seq 351: a summary table cannot derive range/IQR/geometric errors from st
   deepStrictEqual(summaryErrorAt(sets[0].columns, 0, "mean-sd-n", "geoci"), { error: null, errorMinus: null });
   // The stored kinds still convert exactly.
   deepStrictEqual(summaryErrorAt(sets[0].columns, 0, "mean-sd-n", "sd"), { error: 2, errorMinus: null });
+});
+
+// seq 375 half A: per-series center/error overrides — model + paint threading.
+// A [1,2,4,8,16]: mean 6.2, median 4, geomean 4. B [1,2,3,10,20]: mean 7.2, median 3.
+check("seq 375: a per-series center override changes only that series", () => {
+  const cols = readTable({
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "1", "1"],
+      ["r2", "2", "2"],
+      ["r3", "4", "3"],
+      ["r4", "8", "10"],
+      ["r5", "16", "20"],
+    ],
+  }).columns;
+  deepStrictEqual(centers(cols, "mean"), [6.2, 7.2]);
+  // Geomean is exp(mean of ln) — 4 up to a last-ulp rounding, so a tolerance.
+  const geo = centers(cols, "mean", { A: { center: "geomean" } });
+  ok(Math.abs(geo[0]! - 4) < 1e-9, JSON.stringify(geo));
+  deepStrictEqual(geo[1], 7.2);
+  deepStrictEqual(centers(cols, "mean", { B: { center: "median" } }), [6.2, 3]);
+  // An unknown series key changes nothing; an empty styles record is the default.
+  deepStrictEqual(centers(cols, "mean", { C: { center: "median" } }), [6.2, 7.2]);
+  deepStrictEqual(centers(cols, "mean", {}), [6.2, 7.2]);
+});
+
+check("seq 375: a per-series error override changes only that series", () => {
+  const cols = readTable({
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "1", "1"],
+      ["r2", "2", "2"],
+      ["r3", "4", "3"],
+      ["r4", "8", "10"],
+      ["r5", "16", "20"],
+    ],
+  }).columns;
+  const center = centers(cols, "mean");
+  // Graph error "sd"; B overridden to "none" blanks only B's bar.
+  const errs = errors(cols, "sd", center, { B: { error: "none" } })!;
+  ok(Math.abs(errs.error[0]! - errorOf([1, 2, 4, 8, 16], "sd", 6.2).error!) < 1e-9, JSON.stringify(errs));
+  ok(Number.isNaN(errs.error[1]!), JSON.stringify(errs));
+  strictEqual(errs.errorMinus, null);
+  // Graph error "sd"; A overridden to "range" gets asymmetric sides only for A
+  // (max 16 − mean 6.2 above, mean 6.2 − min 1 below); B stays symmetric.
+  const ranged = errors(cols, "sd", center, { A: { error: "range" } })!;
+  ok(Math.abs(ranged.error[0]! - 9.8) < 1e-9, JSON.stringify(ranged));
+  ok(Math.abs(ranged.error[1]! - errorOf([1, 2, 3, 10, 20], "sd", 7.2).error!) < 1e-9, JSON.stringify(ranged));
+  deepStrictEqual(ranged.errorMinus, [5.2, NaN]);
+});
+
+check("seq 375: a file keeps valid per-series center/error and drops invalid ones", () => {
+  const file = JSON.parse(serializeProjectFile(payload));
+  file.project.nodes.g1.graphOptions.series = {
+    Y1: { center: "median", error: "range" },
+    Y2: { Center: "Geomean", Error: "Geosd" },
+    Y3: { center: "bogus", error: "bogus" },
+  };
+  const { project } = read(JSON.stringify(file));
+  const o = project.nodes.g1.graphOptions!;
+  deepStrictEqual(o.series, {
+    Y1: { center: "median", error: "range" },
+    Y2: { center: "geomean", error: "geosd" },
+  });
+});
+
+check("seq 375: mean-error draws a per-series median while the rest take the graph mean", () => {
+  const dataset = readTable({
+    columns: ["Title", "Lognormal", "Skewed"],
+    rows: [
+      [null, "1", "1"],
+      [null, "2", "2"],
+      [null, "4", "3"],
+      [null, "8", "10"],
+      [null, "16", "20"],
+    ],
+  });
+  const options = {
+    ...newGraphOptions("mean-error"),
+    center: "mean" as const,
+    error: "sd" as const,
+    series: { Lognormal: { center: "median" as const } },
+  };
+  const fig = GRAPHS["mean-error"].build(dataset.numeric, options, paintOf(options, 2));
+  const traces = fig.data as { y: number[]; error_y?: { array: number[] } }[];
+  const bars = traces.filter((t) => t.error_y);
+  strictEqual(bars.length, 2);
+  deepStrictEqual(bars[0].y, [4]);
+  deepStrictEqual(bars[1].y, [7.2]);
+});
+
+check("seq 375: geometric kinds blank only the overridden series on non-positive data", () => {
+  const cols = readTable({
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "1", "1"],
+      ["r2", "2", "2"],
+      ["r3", "-4", "4"],
+    ],
+  }).columns;
+  const c = centers(cols, "mean", { A: { center: "geomean" } });
+  ok(Number.isNaN(c[0]), JSON.stringify(c));
+  deepStrictEqual(c[1], 7 / 3);
+});
+
+check("seq 375: XY replicates take the dataset's center/error override", () => {
+  const cols = readTable({
+    columns: ["Title", "X", "Y:Y1", "Y:Y2"],
+    rows: [
+      ["r1", "1", "1", "2"],
+      ["r2", "2", "4", "8"],
+    ],
+  }).columns;
+  const options = {
+    ...newGraphOptions("xy-scatter"),
+    center: "geomean" as const,
+    error: "range" as const,
+    xyReplicates: "mean" as const,
+    series: { Y: { center: "median" as const, error: "sd" as const } },
+  };
+  const drawn = xyDrawn(cols[0]!, { name: "Y", columns: [cols[1]!, cols[2]!] }, options);
+  deepStrictEqual(drawn.x, [1, 2]);
+  deepStrictEqual(drawn.y, [1.5, 6]);
+  ok(Math.abs(drawn.errors![0] - Math.sqrt(0.5)) < 1e-9, JSON.stringify(drawn));
+  ok(Math.abs(drawn.errors![1] - Math.sqrt(8)) < 1e-9, JSON.stringify(drawn));
+  strictEqual(drawn.errorMinus, undefined);
+});
+
+check("seq 375: grouped bars take a per-group center override", () => {
+  const columns = readTable({
+    columns: ["Title", "A:Y1", "A:Y2", "A:Y3", "B:Y1", "B:Y2", "B:Y3"],
+    rows: [
+      [null, "1", "2", "10", "1", "2", "3"],
+      [null, "3", "4", "5", "10", "20", "30"],
+    ],
+  }).columns;
+  // Group A row 1 [1,2,10]: mean 13/3, median 2. Group B is unchanged either way.
+  const plain = GRAPHS["grouped-bars"].build(
+    columns,
+    newGraphOptions("grouped-bars"),
+    paintOf(newGraphOptions("grouped-bars"), 2),
+  ).data as { name: string; y: (number | null)[] }[];
+  deepStrictEqual(plain.map((t) => t.name), ["A", "B"]);
+  deepStrictEqual(plain[0].y, [13 / 3, 4]);
+  deepStrictEqual(plain[1].y, [2, 20]);
+  const options = { ...newGraphOptions("grouped-bars"), series: { A: { center: "median" as const } } };
+  const fig = GRAPHS["grouped-bars"].build(columns, options, paintOf(options, 2));
+  const traces = fig.data as { name: string; y: (number | null)[] }[];
+  deepStrictEqual(traces[0].y, [2, 4]);
+  deepStrictEqual(traces[1].y, [2, 20]);
 });
 
 check("summary subcolumns: grouped bars draw the mean with the stored error (SEM by default)", () => {
