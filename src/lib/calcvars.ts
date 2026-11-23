@@ -117,7 +117,7 @@ function tokenize(input: string): { tokens: Token[] } | { error: string } {
 
 // ── Parser (recursive descent) ─────────────────────────────────────────
 
-type Expr =
+export type Expr =
   | { kind: "num"; value: number }
   | { kind: "var"; name: string }
   | { kind: "unary"; op: "-" | "NOT"; expr: Expr }
@@ -884,6 +884,12 @@ function evalExpr(e: Expr, ctx: EvalContext): number | null {
     }
   }
 }
+
+/** Evaluate a parsed formula in one row's context — the entry point for
+ *  callers outside calculated variables (the user-defined transform, seq
+ *  341, reuses this evaluator rather than building a second expression
+ *  language). */
+export const evaluateFormula = (ast: Expr, ctx: EvalContext): number | null => evalExpr(ast, ctx);
 
 // ── Table integration ──────────────────────────────────────────────────
 

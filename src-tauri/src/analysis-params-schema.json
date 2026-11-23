@@ -3224,7 +3224,29 @@
           "y-times-k",
           "y-divided-by-k",
           "k-minus-y",
-          "k-divided-by-y"
+          "k-divided-by-y",
+          "logit",
+          "probit",
+          "rank",
+          "zscore",
+          "sin",
+          "cos",
+          "tan",
+          "arcsin",
+          "abs",
+          "y-plus-random",
+          "round-k",
+          "y-power-k",
+          "ten-power-y",
+          "two-power-y",
+          "neg-log10",
+          "x-divided-by-y",
+          "y-divided-by-x",
+          "y-minus-x",
+          "y-plus-x",
+          "y-times-x",
+          "x-minus-y",
+          "user-defined"
         ],
         "default": "log10",
         "required": false
@@ -3234,6 +3256,86 @@
         "type": "number",
         "required": false,
         "description": "The constant K for the arithmetic functions (seq 205)."
+      },
+      {
+        "name": "constants",
+        "type": "object",
+        "value_shape": "object mapping a column name to a number",
+        "required": false,
+        "description": "A constant K per data set, keyed by data-set name — overrides `constant` for that set (seq 341)."
+      },
+      {
+        "name": "x",
+        "type": "string",
+        "required": false,
+        "description": "The X column (XY tables): the value paired with each Y value for the cross-column functions, and the column the X function applies to (seq 341)."
+      },
+      {
+        "name": "xFunction",
+        "type": "string",
+        "enum": [
+          "log10",
+          "ln",
+          "log2",
+          "sqrt",
+          "reciprocal",
+          "exp",
+          "square",
+          "y-plus-k",
+          "y-minus-k",
+          "y-times-k",
+          "y-divided-by-k",
+          "k-minus-y",
+          "k-divided-by-y",
+          "logit",
+          "probit",
+          "rank",
+          "zscore",
+          "sin",
+          "cos",
+          "tan",
+          "arcsin",
+          "abs",
+          "y-plus-random",
+          "round-k",
+          "y-power-k",
+          "ten-power-y",
+          "two-power-y",
+          "neg-log10",
+          "x-divided-by-y",
+          "y-divided-by-x",
+          "y-minus-x",
+          "y-plus-x",
+          "y-times-x",
+          "x-minus-y"
+        ],
+        "required": false,
+        "description": "The function applied to the X values (XY tables); omitted: X passes through unchanged (seq 341)."
+      },
+      {
+        "name": "interchange",
+        "type": "boolean",
+        "default": false,
+        "required": false,
+        "description": "Swap the X and Y roles before transforming (XY tables): the Y function applies to the old X values, the X function to the old Y values (seq 341)."
+      },
+      {
+        "name": "errorMode",
+        "type": "string",
+        "enum": [
+          "mean-only",
+          "erase",
+          "to-ci"
+        ],
+        "default": "mean-only",
+        "required": false,
+        "description": "How error bars on a mean±SD/SEM table are handled (seq 341); the default is mean-only."
+      },
+      {
+        "name": "formula",
+        "type": "string",
+        "required": false,
+        "description": "The user-defined transform (function \"user-defined\", seq 341): lines separated by `;` or newlines, each optionally starting with a designator `<Name>` (only that data set) or `<~Name>` (all data sets except it), then an expression with an optional `Y =` prefix."
       },
       {
         "name": "sets",

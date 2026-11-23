@@ -139,6 +139,11 @@ ENUM_OVERRIDES = {
     # (the old override did, and the schema carried it twice).
     ("plot-function", "equation"): [m for m in ARRAYS["NONLINEAR_MODELS"]
                                      if m != "user-defined"] + ARRAYS["PLOT_FUNCTION_DISTRIBUTIONS"],
+    # A user-defined transform applies to the Y values only (the runner
+    # refuses it as an X function, seq 341) — the formula is the Y
+    # transform, so the X function is a built-in one.
+    ("transform-data", "xFunction"): [f for f in ARRAYS["TRANSFORM_FUNCTIONS"]
+                                      if f != "user-defined"],
     ("plot-function", "extra"): ["none", "first-derivative",
                                  "second-derivative", "integral"],
 }
@@ -419,7 +424,8 @@ for f in (ROOT / "src/stats").rglob("*.ts"):
 #    `standardise !== false`
 #  normalize.ts: `?? "percent-of-largest"`; prune-rows.ts: `?? "empty"`
 #  remove-baseline.ts: `?? "first-value"`; smooth-...ts: `?? "smooth"`
-#  spline-lowess.ts: `?? "lowess"`, `?? 2/3`; transform-data.ts: `?? "log10"`
+#  spline-lowess.ts: `?? "lowess"`, `?? 2/3`; transform-data.ts: `?? "log10"`,
+#  `?? "mean-only"` for errorMode (seq 341), interchange off unless set
 #  correlation.ts (xy): `!== "spearman"` -> pearson, `?? "x-vs-every-y"`
 #  principal-component-analysis.ts: `!== "covariance"` -> correlation
 #    (components: 0 = all, types.ts PrincipalComponentAnalysisParams)
@@ -460,6 +466,8 @@ RUNNER_FALLBACKS = {
     ("spline-lowess", "method"): "lowess",
     ("spline-lowess", "f"): 2 / 3,
     ("transform-data", "function"): "log10",
+    ("transform-data", "errorMode"): "mean-only",
+    ("transform-data", "interchange"): False,
     ("correlation", "method"): "pearson",
     ("correlation", "mode"): "x-vs-every-y",
     ("principal-component-analysis", "scale"): "correlation",

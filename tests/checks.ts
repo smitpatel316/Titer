@@ -290,7 +290,7 @@ import {
   prettyBreaks,
   sturgesCount,
 } from "../src/stats/column/frequency-distribution";
-import { transformValue } from "../src/stats/column/transform-data";
+import { rankValues, seededGaussian, transformValue, zscoreValues } from "../src/stats/column/transform-data";
 import { binomialPmf, chiSquarePdf, fPdf, normalPdf, poissonPmf, tPdf } from "../src/stats/distributions";
 import {
   concentrationFactor,
@@ -26070,6 +26070,564 @@ check("transform-data wizard asks for K only for the arithmetic functions", () =
   deepStrictEqual(wizard.finish({ function: "log10" }, table), {
     type: "transform-data",
     params: { function: "log10" },
+  });
+});
+
+// ── Transform function library beyond arithmetic (1.9, seq 341) ──────────
+// Prism's remaining documented transforms: logit, probit, rank, zscore,
+// trig, ABS, Y+Random, rounding, Y^K, 10^Y, 2^Y, −log10; the X/Y
+// cross-column functions; X transforms + interchange; per-data-set K;
+// error-bar handling on mean±SD/SEM tables; user-defined transforms via the
+// calcvars evaluator. Hand-computed fixtures (Python/scipy): logit is
+// ln(Y/(1−Y)); probit is Φ⁻¹(Y)+5; rank is average ranks, smallest = 1;
+// zscore is (v − mean)/sample-SD. Pre-fix these fail: the new function
+// names are not in TRANSFORM_FUNCTIONS yet, so the runner blanks them.
+
+check("transformValue applies the seq 341 pure functions (logit, probit, trig, ABS, powers, rounding)", () => {
+  const close = (a: number | null, b: number) => a !== null && Math.abs(a - b) < 1e-12;
+  // Logit: ln(Y/(1−Y)); undefined outside (0, 1).
+  ok(close(transformValue("logit" as never, 0.25), -1.0986122886681098));
+  strictEqual(transformValue("logit" as never, 0.5), 0);
+  ok(close(transformValue("logit" as never, 0.75), 1.0986122886681098));
+  ok(close(transformValue("logit" as never, 0.9), 2.1972245773362196));
+  strictEqual(transformValue("logit" as never, 0), null);
+  strictEqual(transformValue("logit" as never, 1), null);
+  strictEqual(transformValue("logit" as never, -0.1), null);
+  strictEqual(transformValue("logit" as never, 1.5), null);
+  // Probit: Φ⁻¹(Y)+5 (Acklam's approximation, error < 1.2e-9 — hence the
+  // looser 1e-6 here); undefined outside (0, 1).
+  const closeProbit = (a: number | null, b: number) => a !== null && Math.abs(a - b) < 1e-6;
+  strictEqual(transformValue("probit" as never, 0.5), 5);
+  ok(closeProbit(transformValue("probit" as never, 0.025), 3.0400360154599455));
+  ok(closeProbit(transformValue("probit" as never, 0.975), 6.959963984540054));
+  ok(closeProbit(transformValue("probit" as never, 0.001), 1.9097676938321868));
+  strictEqual(transformValue("probit" as never, 0), null);
+  strictEqual(transformValue("probit" as never, 1), null);
+  // Trig (radians): arcsin is undefined outside [−1, 1].
+  strictEqual(transformValue("sin" as never, 0), 0);
+  ok(close(transformValue("sin" as never, Math.PI / 2), 1));
+  strictEqual(transformValue("cos" as never, 0), 1);
+  ok(close(transformValue("tan" as never, Math.PI / 4), 1));
+  ok(close(transformValue("arcsin" as never, 0.5), Math.PI / 6));
+  strictEqual(transformValue("arcsin" as never, 2), null);
+  strictEqual(transformValue("arcsin" as never, -2), null);
+  // ABS and −log10.
+  strictEqual(transformValue("abs" as never, -3), 3);
+  strictEqual(transformValue("abs" as never, 0), 0);
+  strictEqual(transformValue("neg-log10" as never, 100), -2);
+  strictEqual(transformValue("neg-log10" as never, 0), null);
+  strictEqual(transformValue("neg-log10" as never, -1), null);
+  // Y rounded to K digits; K must be an integer 0–15.
+  ok(close(transformValue("round-k" as never, 1.23456, 2), 1.23));
+  ok(close(transformValue("round-k" as never, 3.14159, 2), 3.14));
+  strictEqual(transformValue("round-k" as never, 1.23456, 0), 1);
+  ok(close(transformValue("round-k" as never, 1.23456, 3), 1.235));
+  strictEqual(transformValue("round-k" as never, 1.23456), null);
+  strictEqual(transformValue("round-k" as never, 1.23456, 2.5), null);
+  strictEqual(transformValue("round-k" as never, 1.23456, 16), null);
+  // Y^K, 10^Y, 2^Y; a negative base to a non-integer power is undefined.
+  strictEqual(transformValue("y-power-k" as never, 2, 3), 8);
+  strictEqual(transformValue("y-power-k" as never, 4, 0.5), 2);
+  strictEqual(transformValue("y-power-k" as never, -2, 2), 4);
+  strictEqual(transformValue("y-power-k" as never, -2, 0.5), null);
+  strictEqual(transformValue("y-power-k" as never, 0, -1), null);
+  strictEqual(transformValue("y-power-k" as never, 2), null);
+  strictEqual(transformValue("ten-power-y" as never, 2), 100);
+  strictEqual(transformValue("ten-power-y" as never, 0), 1);
+  strictEqual(transformValue("ten-power-y" as never, 1000), null);
+  strictEqual(transformValue("two-power-y" as never, 3), 8);
+  strictEqual(transformValue("two-power-y" as never, 0), 1);
+  // Y+Random adds Gaussian noise (mean 0, SD = K) from the run's seeded
+  // generator: with a stub draw of 0.5 the shift is exactly 0.5·K, and
+  // without a generator (or K) there is nothing to add.
+  strictEqual(transformValue("y-plus-random" as never, 10, 2, undefined, "y", () => 0.5), 11);
+  strictEqual(transformValue("y-plus-random" as never, 10, 2), null);
+  strictEqual(transformValue("y-plus-random" as never, 10), null);
+  // Rank, zscore and user-defined are column/formula functions, not
+  // single-value ones: transformValue has no column to read, so it blanks.
+  strictEqual(transformValue("rank" as never, 3), null);
+  strictEqual(transformValue("zscore" as never, 3), null);
+  strictEqual(transformValue("user-defined" as never, 3), null);
+});
+
+check("transformValue applies the seq 341 cross-column functions against the paired X value", () => {
+  const close = (a: number | null, b: number) => a !== null && Math.abs(a - b) < 1e-12;
+  // role "y": value is Y, `other` is the paired X.
+  strictEqual(transformValue("y-divided-by-x" as never, 2, undefined, 10, "y"), 0.2);
+  strictEqual(transformValue("x-divided-by-y" as never, 2, undefined, 10, "y"), 5);
+  strictEqual(transformValue("y-minus-x" as never, 2, undefined, 10, "y"), -8);
+  strictEqual(transformValue("y-plus-x" as never, 2, undefined, 10, "y"), 12);
+  strictEqual(transformValue("y-times-x" as never, 2, undefined, 10, "y"), 20);
+  strictEqual(transformValue("x-minus-y" as never, 2, undefined, 10, "y"), 8);
+  // role "x": value is X, `other` is the paired Y — the same absolute
+  // (Y, X) formulas, so Y/X is 0.2 either way round.
+  strictEqual(transformValue("y-divided-by-x" as never, 10, undefined, 2, "x"), 0.2);
+  strictEqual(transformValue("x-divided-by-y" as never, 10, undefined, 2, "x"), 5);
+  // A missing paired value, or a division by a paired 0, blanks.
+  strictEqual(transformValue("y-divided-by-x" as never, 2), null);
+  strictEqual(transformValue("y-divided-by-x" as never, 2, undefined, 0, "y"), null);
+  strictEqual(transformValue("x-divided-by-y" as never, 0, undefined, 10, "y"), null);
+  // Pure functions ignore the paired value and the role.
+  ok(close(transformValue("log10" as never, 100, undefined, 999, "x"), 2));
+});
+
+check("transform-data ranks and z-scores whole columns (seq 341)", async () => {
+  const table = (values: (number | string)[]): TableData => ({
+    columns: ["Title", "V"],
+    rows: values.map((v) => [null, String(v)]),
+  });
+  // Rank: smallest = 1, ties share the average rank ([3,1,3,2] → [3.5,1,3.5,2]).
+  const ranked = await runAnalysis("transform-data", table([3, 1, 3, 2]), { function: "rank" } as never);
+  if ("error" in ranked) throw new Error(ranked.error);
+  deepStrictEqual(ranked.transformed?.[0].values, [3.5, 1, 3.5, 2]);
+  strictEqual(ranked.subtitle, "Transform data — rank(Y)");
+  // Z-score: (v − mean)/sample-SD over the column's values.
+  const z = await runAnalysis("transform-data", table([1, 2, 3, 4, 5]), { function: "zscore" } as never);
+  if ("error" in z) throw new Error(z.error);
+  const close = (a: (number | null)[], b: number[]) =>
+    a.length === b.length && a.every((v, i) => v !== null && Math.abs(v - b[i]) < 1e-12);
+  ok(
+    close(z.transformed?.[0].values ?? [], [-1.2649110640673518, -0.6324555320336759, 0, 0.6324555320336759, 1.2649110640673518]),
+    `unexpected z-scores: ${JSON.stringify(z.transformed?.[0].values)}`,
+  );
+  // A single value, or a constant column (SD 0), has no z-score: blank.
+  const one = await runAnalysis("transform-data", table([7]), { function: "zscore" } as never);
+  if ("error" in one) throw new Error(one.error);
+  deepStrictEqual(one.transformed?.[0].values, [null]);
+  const flat = await runAnalysis("transform-data", table([5, 5, 5]), { function: "zscore" } as never);
+  if ("error" in flat) throw new Error(flat.error);
+  deepStrictEqual(flat.transformed?.[0].values, [null, null, null]);
+});
+
+check("transform-data applies the cross-column functions on an XY table (seq 341)", async () => {
+  const xy: TableData = {
+    columns: ["Title", "X", "A", "B"],
+    rows: [
+      [null, "10", "2", "10"],
+      [null, "20", "4", "20"],
+      [null, "30", "5", "30"],
+    ],
+  };
+  const close = (a: (number | null)[], b: number[]) =>
+    a.length === b.length && a.every((v, i) => v !== null && Math.abs(v - b[i]) < 1e-12);
+  const div = await runAnalysis("transform-data", xy, { function: "y-divided-by-x", x: "X" } as never);
+  if ("error" in div) throw new Error(div.error);
+  // The X column itself is the pairing source, not a Y column: no X entry.
+  strictEqual(div.transformed?.length, 2);
+  ok(close(div.transformed?.[0].values ?? [], [0.2, 0.2, 1 / 6]), `Y/X A: ${JSON.stringify(div.transformed?.[0].values)}`);
+  ok(close(div.transformed?.[1].values ?? [], [1, 1, 1]), `Y/X B: ${JSON.stringify(div.transformed?.[1].values)}`);
+  strictEqual(div.subtitle, "Transform data — Y/X");
+  const cross = await runAnalysis("transform-data", xy, { function: "x-divided-by-y", x: "X" } as never);
+  if ("error" in cross) throw new Error(cross.error);
+  deepStrictEqual(cross.transformed?.[0].values, [5, 5, 6]);
+  const minus = await runAnalysis("transform-data", xy, { function: "y-minus-x", x: "X" } as never);
+  if ("error" in minus) throw new Error(minus.error);
+  deepStrictEqual(minus.transformed?.[0].values, [-8, -16, -25]);
+  const times = await runAnalysis("transform-data", xy, { function: "y-times-x", x: "X" } as never);
+  if ("error" in times) throw new Error(times.error);
+  deepStrictEqual(times.transformed?.[0].values, [20, 80, 150]);
+  // A cross-column function without its X column is a clean error, not a
+  // column of blanks; a named-but-missing X column is named too.
+  deepStrictEqual(await runAnalysis("transform-data", xy, { function: "y-divided-by-x" } as never), {
+    error: "“Y/X” needs the X column — name it in `x` and try again.",
+  });
+  const gone = await runAnalysis("transform-data", xy, { function: "y-divided-by-x", x: "Nope" } as never);
+  if (!("error" in gone) || !gone.error.includes("“Nope”"))
+    throw new Error(`expected the missing-X error, got ${JSON.stringify(gone)}`);
+});
+
+check("transform-data transforms X and interchanges X/Y on an XY table (seq 341)", async () => {
+  const xy: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "1", "10"],
+      [null, "4", "100"],
+      [null, "9", "1000"],
+    ],
+  };
+  const close = (a: (number | null)[], b: number[]) =>
+    a.length === b.length && a.every((v, i) => v !== null && Math.abs(v - b[i]) < 1e-12);
+  // The Y function applies to Y; the X function to X (one X entry, after
+  // the Y entries).
+  const both = await runAnalysis("transform-data", xy, { function: "log10", x: "X", xFunction: "sqrt" } as never);
+  if ("error" in both) throw new Error(both.error);
+  strictEqual(both.transformed?.length, 2);
+  deepStrictEqual(both.transformed?.[0].values, [1, 2, 3]);
+  ok(close(both.transformed?.[1].values ?? [], [1, 2, 3]), `sqrt(X): ${JSON.stringify(both.transformed?.[1].values)}`);
+  strictEqual(both.transformed?.[1].column, "X");
+  if (!both.notes.includes("X values transformed with sqrt(Y)."))
+    throw new Error(`expected the X-function note, got ${JSON.stringify(both.notes)}`);
+  // Interchange: the Y function applies to the old X values, the X function
+  // to the old Y values — the transform runs AFTER the swap, as in Prism.
+  const swapped = await runAnalysis("transform-data", xy, { function: "log10", x: "X", xFunction: "sqrt", interchange: true } as never);
+  if ("error" in swapped) throw new Error(swapped.error);
+  strictEqual(swapped.transformed?.length, 2);
+  ok(close(swapped.transformed?.[0].values ?? [], [0, 0.6020599913279624, 0.9542425094393249]), `log10(old X): ${JSON.stringify(swapped.transformed?.[0].values)}`);
+  strictEqual(swapped.transformed?.[0].column, "X");
+  ok(
+    close(swapped.transformed?.[1].values ?? [], [3.1622776601683795, 10, 31.622776601683793]),
+    `sqrt(old Y): ${JSON.stringify(swapped.transformed?.[1].values)}`,
+  );
+  strictEqual(swapped.transformed?.[1].column, "A");
+  if (!swapped.notes.includes("X and Y interchanged before transforming"))
+    throw new Error(`expected the interchange note, got ${JSON.stringify(swapped.notes)}`);
+  // Interchange without an X function passes the old Y values through
+  // unchanged (the swap itself is the transform).
+  const swapOnly = await runAnalysis("transform-data", xy, { function: "log10", x: "X", interchange: true } as never);
+  if ("error" in swapOnly) throw new Error(swapOnly.error);
+  strictEqual(swapOnly.transformed?.length, 2);
+  deepStrictEqual(swapOnly.transformed?.[1].values, [10, 100, 1000]);
+  strictEqual(swapOnly.transformed?.[1].label, "unchanged");
+  // Interchange needs the X column too.
+  deepStrictEqual(await runAnalysis("transform-data", xy, { function: "log10", interchange: true } as never), {
+    error: "Interchange needs the X column — name it in `x` and try again.",
+  });
+});
+
+check("transform-data honours a per-data-set K (seq 341)", async () => {
+  const table: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      [null, "1", "1"],
+      [null, "2", "2"],
+    ],
+  };
+  const per = await runAnalysis("transform-data", table, { function: "y-times-k", constants: { A: 10, B: 100 } } as never);
+  if ("error" in per) throw new Error(per.error);
+  deepStrictEqual(per.transformed?.[0].values, [10, 20]);
+  deepStrictEqual(per.transformed?.[1].values, [100, 200]);
+  if (!per.notes.includes("K = 10 for data set “A”") || !per.notes.includes("K = 100 for data set “B”"))
+    throw new Error(`expected the per-set K note, got ${JSON.stringify(per.notes)}`);
+  // A set with no entry falls back to the single constant.
+  const mixed = await runAnalysis("transform-data", table, { function: "y-times-k", constant: 3, constants: { A: 10 } } as never);
+  if ("error" in mixed) throw new Error(mixed.error);
+  deepStrictEqual(mixed.transformed?.[0].values, [10, 20]);
+  deepStrictEqual(mixed.transformed?.[1].values, [3, 6]);
+  // A set with neither entry is a clean error naming the set, not blanks.
+  const missing = await runAnalysis("transform-data", table, { function: "y-times-k", constants: { A: 10 } } as never);
+  deepStrictEqual(missing, { error: "“Y×K” needs a constant K for data set “B” — enter one and try again." });
+  // Y+Random's K is the noise SD: it must be positive.
+  const badSd = await runAnalysis("transform-data", table, { function: "y-plus-random", constant: 0 } as never);
+  deepStrictEqual(badSd, { error: "“Y+Random” needs a constant K greater than 0 — K is the noise SD." });
+});
+
+check("transform-data handles error bars on a mean±SD/SEM table (seq 341)", async () => {
+  const summary: TableData = {
+    columns: ["Title", "A:Mean", "A:SD", "A:N", "B:Mean", "B:SD", "B:N"],
+    rows: [
+      [null, "10", "2", "5", "100", "10", "5"],
+      [null, "20", "4", "5", null, null, null],
+    ],
+    summaryFormat: "mean-sd-n",
+  };
+  const close = (a: (number | null)[], b: (number | null)[]) =>
+    a.length === b.length &&
+    a.every((v, i) => (b[i] === null ? v === null : v !== null && Math.abs(v - b[i]) < 1e-9));
+  // Mean-only is the default: the mean is transformed, the error bars and
+  // N pass through unchanged, and the descriptives cover the means only.
+  const meanOnly = await runAnalysis("transform-data", summary, { function: "log10" });
+  if ("error" in meanOnly) throw new Error(meanOnly.error);
+  deepStrictEqual(
+    meanOnly.transformed?.map((t) => t.column),
+    ["A:Mean", "A:SD", "A:N", "B:Mean", "B:SD", "B:N"],
+  );
+  ok(close(meanOnly.transformed?.[0].values ?? [], [1, 1.3010299956639813]), `A mean: ${JSON.stringify(meanOnly.transformed?.[0].values)}`);
+  deepStrictEqual(meanOnly.transformed?.[1].values, [2, 4]);
+  strictEqual(meanOnly.transformed?.[1].label, "unchanged");
+  deepStrictEqual(meanOnly.transformed?.[2].values, [5, 5]);
+  ok(close(meanOnly.transformed?.[3].values ?? [], [2, null]), `B mean: ${JSON.stringify(meanOnly.transformed?.[3].values)}`);
+  strictEqual(meanOnly.groups.length, 2, `descriptives should cover the two means only, got ${JSON.stringify(meanOnly.groups)}`);
+  if (!meanOnly.notes.includes("Error bars were left unchanged"))
+    throw new Error(`expected the mean-only note, got ${JSON.stringify(meanOnly.notes)}`);
+  // Erase: the error columns go away; N stays (it is a count, not an error bar).
+  const erased = await runAnalysis("transform-data", summary, { function: "log10", errorMode: "erase" } as never);
+  if ("error" in erased) throw new Error(erased.error);
+  deepStrictEqual(
+    erased.transformed?.map((t) => t.column),
+    ["A:Mean", "A:N", "B:Mean", "B:N"],
+  );
+  if (!erased.notes.includes("Error bars were erased"))
+    throw new Error(`expected the erase note, got ${JSON.stringify(erased.notes)}`);
+  // To-CI: each mean's 95% CI (t with N−1 df) is transformed at both ends,
+  // so the resulting interval is asymmetric; the SD columns are replaced by
+  // the CI bounds and N stays.
+  const ci = await runAnalysis("transform-data", summary, { function: "log10", errorMode: "to-ci" } as never);
+  if ("error" in ci) throw new Error(ci.error);
+  deepStrictEqual(
+    ci.transformed?.map((t) => t.column),
+    ["A:Mean", "A:Lower 95% CI", "A:Upper 95% CI", "A:N", "B:Mean", "B:Lower 95% CI", "B:Upper 95% CI", "B:N"],
+  );
+  ok(
+    close(ci.transformed?.[1].values ?? [], [0.8760255998486322, 1.1770555955126132]),
+    `A lower CI: ${JSON.stringify(ci.transformed?.[1].values)}`,
+  );
+  ok(
+    close(ci.transformed?.[2].values ?? [], [1.0963303816444274, 1.3973603773084085]),
+    `A upper CI: ${JSON.stringify(ci.transformed?.[2].values)}`,
+  );
+  ok(
+    close(ci.transformed?.[5].values ?? [], [1.9424216023001457, null]),
+    `B lower CI: ${JSON.stringify(ci.transformed?.[5].values)}`,
+  );
+  ok(
+    close(ci.transformed?.[6].values ?? [], [2.0508306005346855, null]),
+    `B upper CI: ${JSON.stringify(ci.transformed?.[6].values)}`,
+  );
+  if (!ci.notes.includes("converted to 95% confidence intervals"))
+    throw new Error(`expected the to-CI note, got ${JSON.stringify(ci.notes)}`);
+  // ±error bounds need no N: they convert directly.
+  const pm: TableData = {
+    columns: ["Title", "A:Mean", "A:+error", "A:−error"],
+    rows: [[null, "10", "2", "1"]],
+    summaryFormat: "mean-plus-minus",
+  };
+  const pmCi = await runAnalysis("transform-data", pm, { function: "log10", errorMode: "to-ci" } as never);
+  if ("error" in pmCi) throw new Error(pmCi.error);
+  ok(
+    close(pmCi.transformed?.[1].values ?? [], [0.9542425094393249]),
+    `±error lower CI: ${JSON.stringify(pmCi.transformed?.[1].values)}`,
+  );
+  ok(
+    close(pmCi.transformed?.[2].values ?? [], [1.0791812460476249]),
+    `±error upper CI: ${JSON.stringify(pmCi.transformed?.[2].values)}`,
+  );
+  // SEM without an N column has no t to use, so the 95% normal value
+  // (z = 1.96) stands in — and the notes say so.
+  const sem: TableData = {
+    columns: ["Title", "A:Mean", "A:SEM"],
+    rows: [[null, "10", String(2 / Math.sqrt(5))]],
+    summaryFormat: "mean-sem",
+  };
+  const semCi = await runAnalysis("transform-data", sem, { function: "log10", errorMode: "to-ci" } as never);
+  if ("error" in semCi) throw new Error(semCi.error);
+  ok(
+    close(semCi.transformed?.[1].values ?? [], [0.9162936205423272]),
+    `SEM lower CI: ${JSON.stringify(semCi.transformed?.[1].values)}`,
+  );
+  ok(
+    close(semCi.transformed?.[2].values ?? [], [1.070150401978776]),
+    `SEM upper CI: ${JSON.stringify(semCi.transformed?.[2].values)}`,
+  );
+  if (!semCi.notes.includes("z = 1.96"))
+    throw new Error(`expected the z-fallback note, got ${JSON.stringify(semCi.notes)}`);
+  // An error mode on a table with no error bars changes nothing — and says so.
+  const plain = await runAnalysis(
+    "transform-data",
+    { columns: ["Title", "V"], rows: [[null, "1"], [null, "10"]] },
+    { function: "log10", errorMode: "erase" } as never,
+  );
+  if ("error" in plain) throw new Error(plain.error);
+  if (!plain.notes.includes("No error bars in this table"))
+    throw new Error(`expected the no-error-bars note, got ${JSON.stringify(plain.notes)}`);
+});
+
+check("transform-data refuses the combinations it cannot do honestly (seq 341)", async () => {
+  // Interchange and error-bar handling cannot be combined: the swap would
+  // leave the error structure without a home.
+  const summary: TableData = {
+    columns: ["Title", "A:Mean", "A:SD", "A:N"],
+    rows: [[null, "10", "2", "5"]],
+    summaryFormat: "mean-sd-n",
+  };
+  const swapped = await runAnalysis("transform-data", summary, { function: "log10", x: "A:Mean", interchange: true } as never);
+  if (!("error" in swapped) || !swapped.error.includes("cannot be combined"))
+    throw new Error(`expected the interchange+error-bars error, got ${JSON.stringify(swapped)}`);
+  // Rank/zscore cannot convert error bars to CIs: ranking a bound is not
+  // an interval.
+  const ranked = await runAnalysis("transform-data", summary, { function: "rank", errorMode: "to-ci" } as never);
+  if (!("error" in ranked) || !ranked.error.includes("cannot convert error bars"))
+    throw new Error(`expected the rank+to-ci error, got ${JSON.stringify(ranked)}`);
+  // A user-defined transform is a Y function, not an X function.
+  const xy: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [[null, "10", "1"]],
+  };
+  const xUser = await runAnalysis("transform-data", xy, { function: "log10", x: "X", xFunction: "user-defined" } as never);
+  if (!("error" in xUser) || !xUser.error.includes("applies to the Y values"))
+    throw new Error(`expected the user-defined-X error, got ${JSON.stringify(xUser)}`);
+});
+
+check("transform-data applies a user-defined transform through the calcvars evaluator (seq 341)", async () => {
+  const table: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      [null, "1", "10"],
+      [null, "2", "20"],
+      [null, "3", "30"],
+    ],
+  };
+  // IF/AND/OR/NOT and comparisons come from the evaluator, not a second language.
+  const cond = await runAnalysis("transform-data", table, { function: "user-defined", formula: "IF(Y<2, Y, Y*10)" } as never);
+  if ("error" in cond) throw new Error(cond.error);
+  deepStrictEqual(cond.transformed?.[0].values, [1, 20, 30]);
+  deepStrictEqual(cond.transformed?.[1].values, [100, 200, 300]);
+  // Designators: <B> applies only to B; <~A> to every set except A; a line
+  // with no designator applies to all sets. First matching line wins.
+  const scoped = await runAnalysis("transform-data", table, { function: "user-defined", formula: "<B> Y*2; Y+100" } as never);
+  if ("error" in scoped) throw new Error(scoped.error);
+  deepStrictEqual(scoped.transformed?.[0].values, [101, 102, 103]);
+  deepStrictEqual(scoped.transformed?.[1].values, [20, 40, 60]);
+  const except = await runAnalysis("transform-data", table, { function: "user-defined", formula: "<~A> Y*2" } as never);
+  if ("error" in except) throw new Error(except.error);
+  deepStrictEqual(except.transformed?.[0].values, [1, 2, 3]);
+  strictEqual(except.transformed?.[0].label, "unchanged");
+  deepStrictEqual(except.transformed?.[1].values, [20, 40, 60]);
+  // A column name is a variable (the row's value in that column); X reads
+  // the paired X value.
+  const named = await runAnalysis("transform-data", table, { function: "user-defined", formula: "B*2" } as never);
+  if ("error" in named) throw new Error(named.error);
+  deepStrictEqual(named.transformed?.[0].values, [20, 40, 60]);
+  const xy: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "10", "1"],
+      [null, "20", "2"],
+      [null, "30", "3"],
+    ],
+  };
+  const withX = await runAnalysis("transform-data", xy, { function: "user-defined", formula: "Y+X", x: "X" } as never);
+  if ("error" in withX) throw new Error(withX.error);
+  deepStrictEqual(withX.transformed?.[0].values, [11, 22, 33]);
+  // An impossible transform leaves the value blank, as in Prism (dividing
+  // by zero blanks the row); an unknown variable is a clean error naming it.
+  const blank = await runAnalysis("transform-data", table, { function: "user-defined", formula: "Y/0" } as never);
+  if ("error" in blank) throw new Error(blank.error);
+  deepStrictEqual(blank.transformed?.[0].values, [null, null, null]);
+  strictEqual(blank.transformed?.[0].excluded, 3);
+  const unknown = await runAnalysis("transform-data", table, { function: "user-defined", formula: "Y+ZZZ" } as never);
+  if (!("error" in unknown) || !unknown.error.includes("“ZZZ”"))
+    throw new Error(`expected the unknown-variable error, got ${JSON.stringify(unknown)}`);
+  const noFormula = await runAnalysis("transform-data", table, { function: "user-defined" } as never);
+  if (!("error" in noFormula) || !noFormula.error.includes("formula"))
+    throw new Error(`expected the missing-formula error, got ${JSON.stringify(noFormula)}`);
+});
+
+check("transform-data Y+Random is deterministic: the same run twice gives the same values (seq 341)", async () => {
+  const table: TableData = {
+    columns: ["Title", "V"],
+    rows: [[null, "10"], [null, "20"], [null, "30"], [null, "40"]],
+  };
+  const params = { function: "y-plus-random", constant: 1 } as never;
+  const first = await runAnalysis("transform-data", table, params);
+  if ("error" in first) throw new Error(first.error);
+  const second = await runAnalysis("transform-data", table, params);
+  if ("error" in second) throw new Error(second.error);
+  deepStrictEqual(second.transformed?.[0].values, first.transformed?.[0].values);
+  // The noise moved the values (and not all by the same amount).
+  const values = first.transformed?.[0].values ?? [];
+  ok(values.every((v) => v !== null), `expected numbers, got ${JSON.stringify(values)}`);
+  ok(values.some((v, i) => v !== null && v !== [10, 20, 30, 40][i]), "expected the noise to move a value");
+  if (!first.notes.includes("fixed seed"))
+    throw new Error(`expected the fixed-seed note, got ${JSON.stringify(first.notes)}`);
+  // The exact noise: mulberry32 (seed 341) uniforms through Box-Muller,
+  // one draw per value in row order — hand-computed in Python from the
+  // same algorithm (the mirror matches the implementation bit-for-bit).
+  const close = (a: (number | null)[], b: number[]) =>
+    a.length === b.length && a.every((v, i) => v !== null && Math.abs(v - b[i]) < 1e-12);
+  ok(
+    close(first.transformed?.[0].values ?? [], [11.669504704513379, 18.75781711135121, 30.33879947647709, 39.58483186321247]),
+    `unexpected Y+Random values: ${JSON.stringify(first.transformed?.[0].values)}`,
+  );
+});
+
+check("rankValues and zscoreValues compute the column functions directly (seq 341)", () => {
+  deepStrictEqual(rankValues([3, 1, 3, 2]), [3.5, 1, 3.5, 2]);
+  deepStrictEqual(rankValues([null, 2, 1]), [null, 2, 1]);
+  deepStrictEqual(rankValues([]), []);
+  const close = (a: (number | null)[], b: (number | null)[]) =>
+    a.length === b.length &&
+    a.every((v, i) => (b[i] === null ? v === null : v !== null && Math.abs(v - b[i]) < 1e-12));
+  ok(close(zscoreValues([1, 2, 3, 4, 5]), [-1.2649110640673518, -0.6324555320336759, 0, 0.6324555320336759, 1.2649110640673518]));
+  ok(close(zscoreValues([null, 1, 3]), [null, -0.7071067811865476, 0.7071067811865476]));
+  deepStrictEqual(zscoreValues([5]), [null]);
+  deepStrictEqual(zscoreValues([5, 5, 5]), [null, null, null]);
+  // The seeded generator is deterministic per seed, and different seeds
+  // draw differently.
+  const a = seededGaussian(341);
+  const b = seededGaussian(341);
+  const c = seededGaussian(342);
+  deepStrictEqual([a(), a(), a()], [b(), b(), b()]);
+  ok(a() !== c(), "expected a different seed to draw differently");
+});
+
+check("transform-data wizard offers the seq 341 functions and builds the seq 341 params", () => {
+  const wizard = WIZARDS["transform-data"]!;
+  const ids = (a: Record<string, string | number>, table: Dataset, type?: TableType) =>
+    wizard.questions(a, table, type).filter(Boolean).map((q) => (q as Question).id);
+  const fnOptions = (a: Record<string, string | number>, table: Dataset, type?: TableType) => {
+    const q = wizard.questions(a, table, type).find((qq) => qq && (qq as Question).id === "function") as
+      | { options: { value: string }[] }
+      | undefined;
+    return q?.options.map((o) => o.value) ?? [];
+  };
+  // A plain column table: the new pure functions are offered, the
+  // cross-column ones are not (there is no X column to pair with).
+  const plain = readTable({ columns: ["Title", "V"], rows: [["", "1"], ["", "2"]] });
+  const plainFns = fnOptions({}, plain);
+  for (const fn of ["logit", "probit", "rank", "zscore", "sin", "cos", "tan", "arcsin", "abs", "y-plus-random", "round-k", "y-power-k", "ten-power-y", "two-power-y", "neg-log10", "user-defined"])
+    if (!plainFns.includes(fn)) throw new Error(`expected ${fn} offered on a column table, got ${JSON.stringify(plainFns)}`);
+  for (const fn of ["x-divided-by-y", "y-divided-by-x", "y-minus-x", "y-plus-x", "y-times-x", "x-minus-y"])
+    if (plainFns.includes(fn)) throw new Error(`did not expect ${fn} offered on a column table`);
+  deepStrictEqual(ids({ function: "round-k" }, plain), ["function", "constant"]);
+  deepStrictEqual(ids({ function: "user-defined" }, plain), ["function", "formula"]);
+  deepStrictEqual(ids({ function: "y-plus-random" }, plain), ["function", "constant"]);
+  // A K that round-k cannot use is refused by the constant question.
+  const kQ = wizard.questions({ function: "round-k" }, plain).find((qq) => qq && (qq as Question).id === "constant") as
+    | { validate?: (v: number) => string | undefined }
+    | undefined;
+  if (!kQ?.validate) throw new Error("expected a constant question with validation for round-k");
+  if (kQ.validate(2) !== undefined) throw new Error("expected K = 2 to validate for round-k");
+  if (kQ.validate(2.5) === undefined) throw new Error("expected K = 2.5 to fail validation for round-k");
+  if (kQ.validate(16) === undefined) throw new Error("expected K = 16 to fail validation for round-k");
+  // The GUI path builds the same params the MCP path takes: a user-defined
+  // transform from the wizard runs identically to one passed directly.
+  deepStrictEqual(wizard.finish({ function: "user-defined", formula: "Y*2" }, plain), {
+    type: "transform-data",
+    params: { function: "user-defined", formula: "Y*2" },
+  });
+  // An XY table offers the cross-column functions, asks about X, and the
+  // finish names the X column (the cross function needs it).
+  const xy = readTable({
+    columns: ["Title", "X", "A"],
+    rows: [["", "10", "1"], ["", "20", "2"]],
+  });
+  const xyFns = fnOptions({}, xy, "xy");
+  if (!xyFns.includes("y-divided-by-x")) throw new Error(`expected y-divided-by-x offered on an XY table`);
+  deepStrictEqual(ids({ function: "log10" }, xy, "xy"), ["function", "transformX", "interchange"]);
+  deepStrictEqual(ids({ function: "log10", transformX: "yes" }, xy, "xy"), ["function", "transformX", "xFunction", "interchange"]);
+  deepStrictEqual(wizard.finish({ function: "y-divided-by-x" }, xy, "xy"), {
+    type: "transform-data",
+    params: { function: "y-divided-by-x", x: "X" },
+  });
+  deepStrictEqual(wizard.finish({ function: "log10", transformX: "yes", xFunction: "sqrt", interchange: "no" }, xy, "xy"), {
+    type: "transform-data",
+    params: { function: "log10", x: "X", xFunction: "sqrt" },
+  });
+  // Per-data-set K: two sets, per-dataset mode asks one K per set and the
+  // finish keys them by data-set name.
+  const two = readTable({ columns: ["Title", "A", "B"], rows: [["", "1", "1"], ["", "2", "2"]] });
+  deepStrictEqual(ids({ function: "y-times-k" }, two), ["sets", "function", "kMode", "constant"]);
+  deepStrictEqual(ids({ function: "y-times-k", kMode: "per-dataset" }, two), ["sets", "function", "kMode", "k_0", "k_1"]);
+  deepStrictEqual(
+    wizard.finish({ function: "y-times-k", kMode: "per-dataset", k_0: 10, k_1: 100, sets: ["A", "B"] }, two),
+    { type: "transform-data", params: { function: "y-times-k", constants: { A: 10, B: 100 }, sets: ["A", "B"] } },
+  );
+  deepStrictEqual(
+    wizard.finish({ function: "y-times-k", kMode: "same", constant: 5, sets: ["A", "B"] }, two),
+    { type: "transform-data", params: { function: "y-times-k", constant: 5, sets: ["A", "B"] } },
+  );
+  // A summary table asks how the error bars are handled.
+  const summary = readTable({
+    columns: ["Title", "A:Mean", "A:SD", "A:N"],
+    rows: [["", "10", "2", "5"]],
+    groups: 1,
+    replicates: 3,
+    summaryFormat: "mean-sd-n",
+  });
+  deepStrictEqual(ids({ function: "log10" }, summary), ["function", "errorMode"]);
+  deepStrictEqual(wizard.finish({ function: "log10", errorMode: "to-ci" }, summary), {
+    type: "transform-data",
+    params: { function: "log10", errorMode: "to-ci" },
   });
 });
 

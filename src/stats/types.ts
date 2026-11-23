@@ -225,8 +225,13 @@ export const CORRELATION_METHODS = ["pearson", "spearman"] as const;
 /** The Transform functions (Prism's documented standard set — Prism 8 User
  *  Guide, "Transform data"): log10, ln, log2, sqrt, reciprocal, exp, square —
  *  plus Prism's arithmetic transforms (seq 205), which apply a constant K to
- *  every value: Y+K, Y−K, Y×K, Y/K, K−Y, K/Y. The arithmetic functions read
- *  the constant from TransformDataParams.constant. */
+ *  every value: Y+K, Y−K, Y×K, Y/K, K−Y, K/Y — plus the rest of Prism's
+ *  documented set (seq 341): logit, probit, rank, zscore, trig, ABS,
+ *  Y+Random, rounding, Y^K, 10^Y, 2^Y, −log10, the X/Y cross-column functions
+ *  and user-defined transforms. The arithmetic functions read the constant
+ *  from TransformDataParams.constant (or per-data-set from `constants`).
+ *  The six pharmacology transforms (Eadie-Hofstee, Hanes-Woolf, Hill,
+ *  Lineweaver-Burk, Log-log, Scatchard) are NOT here — a separate follow-up. */
 export const TRANSFORM_FUNCTIONS = [
   "log10",
   "ln",
@@ -241,6 +246,28 @@ export const TRANSFORM_FUNCTIONS = [
   "y-divided-by-k",
   "k-minus-y",
   "k-divided-by-y",
+  "logit",
+  "probit",
+  "rank",
+  "zscore",
+  "sin",
+  "cos",
+  "tan",
+  "arcsin",
+  "abs",
+  "y-plus-random",
+  "round-k",
+  "y-power-k",
+  "ten-power-y",
+  "two-power-y",
+  "neg-log10",
+  "x-divided-by-y",
+  "y-divided-by-x",
+  "y-minus-x",
+  "y-plus-x",
+  "y-times-x",
+  "x-minus-y",
+  "user-defined",
 ] as const;
 export type TransformFunction = (typeof TRANSFORM_FUNCTIONS)[number];
 /** The arithmetic Transform functions — the ones that need a constant K
@@ -254,6 +281,35 @@ export const TRANSFORM_ARITHMETIC_FUNCTIONS = [
   "k-divided-by-y",
 ] as const;
 export type TransformArithmeticFunction = (typeof TRANSFORM_ARITHMETIC_FUNCTIONS)[number];
+/** The Transform functions that need a constant K (seq 205 arithmetic plus
+ *  seq 341: Y^K, rounding to K digits, Y+Random's noise SD). */
+export const TRANSFORM_K_FUNCTIONS = [
+  ...TRANSFORM_ARITHMETIC_FUNCTIONS,
+  "y-power-k",
+  "round-k",
+  "y-plus-random",
+] as const;
+export type TransformKFunction = (typeof TRANSFORM_K_FUNCTIONS)[number];
+/** The cross-column Transform functions (seq 341): they read the paired X
+ *  value for each Y value (TransformDataParams.x names the X column). */
+export const TRANSFORM_CROSS_FUNCTIONS = [
+  "x-divided-by-y",
+  "y-divided-by-x",
+  "y-minus-x",
+  "y-plus-x",
+  "y-times-x",
+  "x-minus-y",
+] as const;
+export type TransformCrossFunction = (typeof TRANSFORM_CROSS_FUNCTIONS)[number];
+/** The column Transform functions (seq 341): they read the whole column, not
+ *  one value at a time — rank and zscore need the column's other values. */
+export const TRANSFORM_COLUMN_FUNCTIONS = ["rank", "zscore"] as const;
+export type TransformColumnFunction = (typeof TRANSFORM_COLUMN_FUNCTIONS)[number];
+/** How error bars on a mean±SD/SEM table are handled (seq 341): transform
+ *  the mean only (error bars and N pass through unchanged), erase the error
+ *  bars, or convert them to 95% CIs first and transform both ends. */
+export const TRANSFORM_ERROR_MODES = ["mean-only", "erase", "to-ci"] as const;
+export type TransformErrorMode = (typeof TRANSFORM_ERROR_MODES)[number];
 /** Binding — Saturation models (plan 16): one-site total, two-site
  *  specific, and the two-series total+nonspecific fits (NS/Background shared). */
 export const BINDING_SATURATION_MODELS = [
@@ -1399,11 +1455,25 @@ export interface FrequencyDistributionParams {
 /** Params for "transform-data": which function to apply to the values. The
  *  wizard always sets it; the runner defaults to log10 when it is absent.
  *  `constant` is the K of the arithmetic functions (Y±K, Y×K, Y/K, K−Y, K/Y)
- *  — required for those, ignored by the rest. */
+ *  — required for those, ignored by the rest. Seq 341 adds: `constants` (a
+ *  K per data set), `x`/`xFunction`/`interchange` (XY tables), `errorMode`
+ *  (mean±SD/SEM tables) and `formula` (user-defined transforms). */
 export interface TransformDataParams {
   function: TransformFunction;
   /** The constant K for the arithmetic functions (seq 205). */
   constant?: number;
+  /** A constant K per data set, keyed by data-set name — overrides `constant` for that set (seq 341). */
+  constants?: Record<string, number>;
+  /** The X column (XY tables): the value paired with each Y value for the cross-column functions, and the column the X function applies to (seq 341). */
+  x?: string;
+  /** The function applied to the X values (XY tables); omitted: X passes through unchanged (seq 341). */
+  xFunction?: TransformFunction;
+  /** Swap the X and Y roles before transforming (XY tables): the Y function applies to the old X values, the X function to the old Y values (seq 341). */
+  interchange?: boolean;
+  /** How error bars on a mean±SD/SEM table are handled (seq 341); the default is mean-only. */
+  errorMode?: TransformErrorMode;
+  /** The user-defined transform (function "user-defined", seq 341): lines separated by `;` or newlines, each optionally starting with a designator `<Name>` (only that data set) or `<~Name>` (all data sets except it), then an expression with an optional `Y =` prefix. */
+  formula?: string;
 }
 /** Molar concentration units (Prism's set), in descending magnitude: each
  *  step is a factor of 1000. µ is U+00B5 MICRO SIGN, matching the bUnits in
