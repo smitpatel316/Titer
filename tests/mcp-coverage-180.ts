@@ -1200,7 +1200,7 @@ const ROWS: Row[] = [
     item: "341",
     title: "Transform function library beyond arithmetic",
     status: "covered",
-    note: "Merged on check/v19: transform-data gained Prism's remaining documented functions (logit, probit, rank, zscore, trig, ABS, Y+Random, rounding, Y^K, 10^Y, 2^Y, −log10, the X/Y cross-column functions, user-defined) plus a per-data-set K (constants), X function + interchange (xFunction, interchange), error-bar handling (errorMode) and a user-defined formula (formula).",
+    note: "Merged on check/v19: transform-data gained Prism's remaining documented functions (logit, probit, rank, zscore, trig, ABS, Y+Random, rounding, Y^K, 10^Y, 2^Y, −log10, the X/Y cross-column functions, user-defined) plus a per-data-set K (constants), X function + interchange (xFunction, interchange), error-bar handling (errorMode) and a user-defined formula (formula). Scatchard (seq 386) added later as a cross-column function: X becomes Y, Y becomes Y/X.",
     checks: [
       { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "logit" },
       { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "probit" },
@@ -1224,6 +1224,7 @@ const ROWS: Row[] = [
       { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "y-times-x" },
       { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "x-minus-y" },
       { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "eadie-hofstee" },
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "scatchard" },
       { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "user-defined" },
       { kind: "analysisParam", type: "transform-data", param: "constants" },
       { kind: "analysisParam", type: "transform-data", param: "x" },

@@ -3249,8 +3249,8 @@
           "x-minus-y",
           "eadie-hofstee",
           "user-defined",
-          "hill-plot"
-
+          "hill-plot",
+          "scatchard"
         ],
         "default": "log10",
         "required": false
@@ -3314,8 +3314,8 @@
           "y-times-x",
           "x-minus-y",
           "eadie-hofstee",
-          "hill-plot"
-
+          "hill-plot",
+          "scatchard"
         ],
         "required": false,
         "description": "The function applied to the X values (XY tables); omitted: X passes through unchanged (seq 341)."

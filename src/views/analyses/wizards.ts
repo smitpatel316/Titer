@@ -3032,6 +3032,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
               ["y-times-x", "Y×X — multiply Y by X"],
               ["x-minus-y", "X−Y — subtract Y from X"],
               ["hanes-woolf", "Hanes-Woolf — X/Y, for enzyme kinetics"],
+              ["scatchard", "Scatchard — Y/X vs Y (bound/free vs bound)"],
             ] as [string, string][])
           : []),
         ["user-defined", "User-defined — write your own formula"],
@@ -3101,6 +3102,9 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         xName !== undefined &&
           fn !== "hill-plot" &&
           fn !== "eadie-hofstee" &&
+          // Scatchard rewrites X itself (X becomes Y), so there is no
+          // separate X function to ask about (seq 386).
+          fn !== "scatchard" &&
           choice("transformX", "Transform the X values too?", [
             ["no", "No — leave the X values as they are"],
             ["yes", "Yes — apply a function to the X values as well"],

@@ -18,8 +18,8 @@
 // goes through the existing xFn path with log10 (the wizard pairs them by
 // default; an MCP caller passes xFunction: "log10") — plus Hanes-Woolf
 // (seq 381): Y becomes X/Y, X unchanged — plus the Hill plot (seq 383).
-// Only Scatchard remains a separate follow-up. Eadie-Hofstee (seq 380)
-// is here, as an X transform (X becomes Y/X, Y unchanged). Pure
+// plus Eadie-Hofstee (seq 380), as an X transform (X becomes Y/X, Y
+// unchanged) — plus Scatchard (seq 386): X becomes Y, Y becomes Y/X. Pure
 // TypeScript, no R for the values themselves; the transformed
 // groups' descriptives come from `describe` (R), like every other analysis.
 // The one exception is the to-CI error mode, whose t critical values come
@@ -103,7 +103,7 @@ export const TRANSFORM_LABEL: Record<TransformFunction, string> = {
   "x-minus-y": "X−Y",
   "eadie-hofstee": "Y/X",
   "hanes-woolf": "Hanes-Woolf",
-
+  scatchard: "Scatchard",
   "user-defined": "user-defined",
   "hill-plot": "Hill plot",
 };
@@ -148,7 +148,7 @@ const EXCLUDED_REASON: Record<TransformFunction, string> = {
   "x-minus-y": "the paired X value is missing",
   "eadie-hofstee": "Y/X is undefined when X is 0 or the paired value is missing",
   "hanes-woolf": "X/Y is undefined when Y is 0 or the paired value is missing",
-
+  scatchard: "the paired value is missing, or X is 0",
   "user-defined": "the formula left it blank (dividing by zero, or a value outside a function's domain)",
   "hill-plot": "the Hill plot is undefined for Y ≤ 0 or Y ≥ Ymax",
 };
@@ -414,6 +414,18 @@ export function transformValue(
       // and for Y ≥ Ymax (the denominator is not positive).
       if (value <= 0 || value >= ymax!) return null;
       out = Math.log10(value / (ymax! - value));
+    break;
+    case "scatchard":
+      // The Scatchard re-plot (seq 386): the Y value becomes Y/X
+      // (bound/free) and the X value becomes the paired Y (bound). An X
+      // of 0 leaves the Y blank; a missing paired value blanks either way
+      // (the cross-column guard above).
+      if (role === "y") {
+        if (x === 0) return null;
+        out = y! / x!;
+      } else {
+        out = y!;
+      }
       break;
     case "rank":
     case "zscore":
@@ -653,10 +665,13 @@ export async function runTransformData(
   // one. The X column is NOT required for a Hill plot: without one, only
   // the Y values transform (needsX below still uses the caller's xFunction).
   const xFn = fn === "eadie-hofstee" ? "eadie-hofstee" : rawXFn;
+  if (fn === "scatchard" && xFn !== undefined)
+    return { error: "“Scatchard” already rewrites the X values (X becomes Y) — leave the X function unset." };
   const hillXFn: TransformFunction | undefined =
     fn === "hill-plot" && xFn === undefined && params?.xIsLog !== true ? "log10" : undefined;
-  const effXFn = xFn ?? hillXFn;
-
+  // Scatchard's X rewrite rides the X-transform path: the X entry is built
+  // with the same function (role "x" returns the paired Y).
+  const effXFn = fn === "scatchard" ? "scatchard" : (xFn ?? hillXFn);
   const errorMode: TransformErrorMode = params?.errorMode ?? "mean-only";
   if (!["mean-only", "erase", "to-ci"].includes(errorMode))
     return { error: `Unknown error handling: “${errorMode}”.` };
@@ -1016,6 +1031,9 @@ export async function runTransformData(
     effXFn !== undefined ? `X values transformed with ${TRANSFORM_LABEL[effXFn]}.` : "",
     fn === "hill-plot" && params?.xIsLog === true && xCol
       ? "X values were entered as log(concentration), so they were left unchanged."
+      : "",
+    fn === "scatchard"
+      ? "Scatchard: X becomes Y (bound) and Y becomes Y/X (bound/free) — a display-only re-plot, not a first step in analyzing the data."
       : "",
     interchange
       ? "X and Y interchanged before transforming: the Y function applies to the values that were in X, and the X function to the values that were in Y."
