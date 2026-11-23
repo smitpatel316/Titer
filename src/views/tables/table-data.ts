@@ -387,6 +387,8 @@ export function deleteColumns(data: TableData, at: number, count: number): Table
     widths: widthsOf(data.widths, columns),
     decimals: decimalsOf(data.decimals, columns),
     variableTypes: variableTypesOfColumns(data.variableTypes, columns),
+    // A deleted row-label source goes with its column.
+    labelVariable: data.labelVariable !== undefined && columns.includes(data.labelVariable) ? data.labelVariable : undefined,
     linkedPaste: data.linkedPaste ? linkedPasteAfterDelete(data.linkedPaste, "col", at, n) : undefined,
     // A deleted calculated variable goes with its column; a formula that
     // used a deleted source keeps its text and reads as an error until it
@@ -416,6 +418,7 @@ export function renameColumn(data: TableData, c: number, name: string): TableDat
     widths: renameKey(data.widths, old, name),
     decimals: renameKey(data.decimals, old, name),
     variableTypes: renameKey(data.variableTypes, old, name),
+    labelVariable: data.labelVariable === old ? name : data.labelVariable,
   };
   return renameCalculatedReferences(next, old, name);
 }

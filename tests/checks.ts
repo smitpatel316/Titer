@@ -89,13 +89,22 @@ import {
 import {
   categoricalLevels,
   detectVariableType,
+  labelVariableOf,
+  levelSuggestions,
   readVariableTypes,
   refreshVariableTypes,
   renameLevel,
+  rowLabelsOf,
+  setLabelVariable,
   setVariableType,
   setVariableTypeAuto,
   variableTypesOf,
 } from "../src/lib/variable-types";
+import {
+  CATEGORY_AUTOCOMPLETE_KEY,
+  loadCategoryAutocomplete,
+  saveCategoryAutocomplete,
+} from "../src/lib/category-autocomplete";
 import { writePrism, type PrismWriteReport } from "../src/lib/prism-write";
 import {
   infoSheetsOf,
@@ -33978,6 +33987,226 @@ check("seq 332: changing the X format leaves the Y values alone and is a no-op w
   const converted = changeXConversion(data, { units: "weeks" });
   deepStrictEqual(converted.xConversion, { units: "weeks" });
   strictEqual(changeXConversion(data, { units: "days" }), data);
+});
+
+// ── seq 331: MV variable types (HALF B) ─────────────────────────────────
+// Half A typed the columns; half B makes the types drive the app: analyses
+// respect them instead of re-deriving numeric/text from the cells, a label
+// variable is never offered to an analysis, categories autocomplete while
+// typing, and a label variable can serve as the graph's row-label source.
+
+// Group is a numeric-coded categorical, ID and Site are labels by hand (8
+// rows are too few for the >10 auto-detect).
+const mv331b = (): TableData => ({
+  columns: ["Title", "Y", "Group", "Sex", "ID", "Site"],
+  rows: [
+    ["1", "12", "1", "Female", "S001", "X"],
+    ["2", "15", "2", "Male", "S002", "Y"],
+    ["3", "11", "1", "female", "S003", "X"],
+    ["4", "18", "2", "Male", "S004", "Y"],
+    ["5", "14", "1", "male", "S005", "X"],
+    ["6", "17", "2", "Female", "S006", "Y"],
+    ["7", "13", "1", "Male", "S007", "X"],
+    ["8", "19", "2", "female", "S008", "Y"],
+  ],
+});
+const mv331bTyped = (): TableData => {
+  let data = refreshVariableTypes(mv331b());
+  data = setVariableType(data, "Group", "categorical");
+  data = setVariableType(data, "ID", "label");
+  data = setVariableType(data, "Site", "label");
+  return data;
+};
+
+check("seq 331: readTable threads the resolved variable type onto each column (HALF B)", () => {
+  const dataset = readTable(mv331bTyped());
+  deepStrictEqual(
+    dataset.columns.map((c) => [c.name, c.variableType]),
+    [
+      ["Y", "continuous"],
+      ["Group", "categorical"],
+      ["Sex", "categorical"],
+      ["ID", "label"],
+      ["Site", "label"],
+    ],
+  );
+  deepStrictEqual(dataset.variableTypes?.ID, { type: "label", manual: true });
+  // A table nobody typed yet carries no type info at all, so every consumer
+  // falls back to what it did before types existed.
+  const plain = readTable(mv331b());
+  ok(plain.columns.every((c) => c.variableType === undefined));
+  deepStrictEqual(plain.variableTypes ?? {}, {});
+});
+
+check("seq 331: a numeric-coded categorical dummy-codes, a label never enters a regression (HALF B)", () => {
+  const columns = readTable(mv331bTyped()).columns;
+  const def = selectPredictors(columns, { dependent: "Y" });
+  // The default set is every data-bearing column but the dependent and the
+  // labels — Group enters dummy-coded, not as a number.
+  deepStrictEqual(
+    def.design.map((d) => d.term),
+    ["Group[2]", "Sex[Male]", "Sex[female]", "Sex[male]"],
+  );
+  deepStrictEqual(def.design[0].values, [0, 1, 0, 1, 0, 1, 0, 1]);
+  deepStrictEqual(def.categorical, [
+    { name: "Group", reference: "1", levels: ["1", "2"] },
+    { name: "Sex", reference: "Female", levels: ["Female", "Male", "female", "male"] },
+  ]);
+  deepStrictEqual(def.predictors, [], "no numeric-kind predictor: Group is a factor, Sex is text");
+  deepStrictEqual(def.dropped, []);
+  deepStrictEqual(def.rows, [0, 1, 2, 3, 4, 5, 6, 7]);
+  // Choosing a label as a predictor, or as the dependent, is refused by name.
+  const asPredictor = selectPredictors(columns, { dependent: "Y", predictors: ["ID"] });
+  ok(asPredictor.error?.includes("label variable"), `expected a label error, got: ${asPredictor.error}`);
+  ok(asPredictor.error?.includes("“ID”"), `the error should name the column, got: ${asPredictor.error}`);
+  const asDependent = selectPredictors(columns, { dependent: "ID", predictors: ["Group"] });
+  ok(asDependent.error?.includes("label variable"), `expected a label error, got: ${asDependent.error}`);
+  // The same refusal reaches the MCP run-analysis path (no R: the selector
+  // errors before any fit runs).
+  return (async () => {
+    const out = await runAnalysis("multiple-regression", mv331bTyped(), {
+      dependent: "Y",
+      predictors: ["ID"],
+    });
+    ok("error" in out && out.error.includes("label variable"), JSON.stringify(out));
+  })();
+});
+
+check("seq 331: a numeric label column is never the default dependent (HALF B)", () => {
+  const data: TableData = {
+    columns: ["Title", "ID", "Y"],
+    rows: [
+      ["1", "101", "2"],
+      ["2", "102", "3"],
+      ["3", "103", "5"],
+      ["4", "104", "7"],
+      ["5", "105", "11"],
+    ],
+  };
+  const typed = setVariableType(refreshVariableTypes(data), "ID", "label");
+  const sel = selectPredictors(readTable(typed).columns, {});
+  strictEqual(sel.dep?.name, "Y", "the default dependent skips the numeric label column");
+  deepStrictEqual(sel.design.map((d) => d.term), []);
+});
+
+check("seq 331: the analysis wizards never offer a label variable (HALF B)", () => {
+  const table = readTable(mv331bTyped());
+  type AnyWizard = NonNullable<(typeof WIZARDS)[keyof typeof WIZARDS]>;
+  const namesQ = (w: AnyWizard, a: Answers, t: Dataset, id: string) =>
+    (w.questions(a, t).filter(Boolean) as Question[]).find((q) => q.id === id) as
+      | { kind: "names"; options: string[] }
+      | undefined;
+  const choiceQ = (w: AnyWizard, a: Answers, t: Dataset, id: string, ty?: TableType) =>
+    (w.questions(a, t, ty).filter(Boolean) as Question[]).find((q) => q.id === id) as
+      | { kind: "choice"; options: { value: string }[] }
+      | undefined;
+  // Regression predictors: Group (numeric-coded) and Sex; ID and Site absent.
+  const reg = WIZARDS["multiple-regression"]!;
+  deepStrictEqual(namesQ(reg, { dependent: "Y" }, table, "predictors")?.options, ["Group", "Sex"]);
+  deepStrictEqual(
+    choiceQ(reg, {}, table, "dependent")?.options.map((o) => o.value),
+    ["Y", "Group"],
+  );
+  // A t test's grouping variable: Group's two codes qualify; the two-level
+  // label Site does not.
+  const ttest = WIZARDS["compare-two-groups"]!;
+  deepStrictEqual(
+    choiceQ(ttest, { paired: "unpaired", response: "Y" }, table, "groupBy", "multiple")?.options.map((o) => o.value),
+    ["Group"],
+  );
+  // Multifactor factors: Group and Sex; the labels are not factors.
+  const multi = WIZARDS["multifactor-anova"]!;
+  deepStrictEqual(namesQ(multi, { response: "Y" }, table, "factors")?.options, ["Group", "Sex"]);
+  // Cox covariates: Sex only, once time and status are taken.
+  const cox = WIZARDS["cox-proportional-hazards"]!;
+  deepStrictEqual(namesQ(cox, { time: "Y", status: "Group" }, table, "covariates")?.options, ["Sex"]);
+  // A numeric column set to label drops out of the numeric offerings too.
+  const numericLabel = readTable(setVariableType(mv331bTyped(), "Group", "label"));
+  deepStrictEqual(choiceQ(reg, {}, numericLabel, "dependent")?.options.map((o) => o.value), ["Y"]);
+  deepStrictEqual(namesQ(reg, { dependent: "Y" }, numericLabel, "predictors")?.options, ["Sex"]);
+});
+
+check("seq 331: category autocomplete suggests the column's levels, prefix-matched (HALF B)", () => {
+  const data = mv331bTyped();
+  deepStrictEqual(levelSuggestions(data, "Sex", "m"), ["Male"]);
+  deepStrictEqual(levelSuggestions(data, "Sex", "M"), ["Male"], "the prefix match ignores case");
+  deepStrictEqual(levelSuggestions(data, "Sex", "male"), [], "an exact level is not suggested back");
+  deepStrictEqual(levelSuggestions(data, "Sex", ""), ["Female", "Male"], "an empty cell offers every level");
+  deepStrictEqual(levelSuggestions(data, "Sex", "z"), []);
+  deepStrictEqual(levelSuggestions(data, "Y", ""), [], "a continuous column has no levels to suggest");
+  deepStrictEqual(levelSuggestions(data, "Nope", ""), []);
+  // The preference: on by default, off when saved off, on for anything unusable.
+  strictEqual(loadCategoryAutocomplete(), true);
+  const store = new Map<string, string>();
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+  };
+  try {
+    saveCategoryAutocomplete(false);
+    strictEqual(loadCategoryAutocomplete(), false);
+    store.set(CATEGORY_AUTOCOMPLETE_KEY, "yes");
+    strictEqual(loadCategoryAutocomplete(), true);
+    store.set(CATEGORY_AUTOCOMPLETE_KEY, "");
+    strictEqual(loadCategoryAutocomplete(), true);
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+});
+
+check("seq 331: a label variable can serve as the row-label source (HALF B)", () => {
+  const data = mv331bTyped();
+  strictEqual(labelVariableOf(data), undefined, "no label variable is chosen yet");
+  strictEqual(setLabelVariable(data, "Sex"), data, "a categorical column cannot be the row-label source");
+  strictEqual(setLabelVariable(data, "Nope"), data, "an unknown column cannot be the row-label source");
+  const labelled = setLabelVariable(data, "ID");
+  strictEqual(labelled.labelVariable, "ID");
+  strictEqual(labelVariableOf(labelled), "ID");
+  deepStrictEqual(rowLabelsOf(labelled), ["S001", "S002", "S003", "S004", "S005", "S006", "S007", "S008"]);
+  deepStrictEqual(rowLabelsOf(data), ["1", "2", "3", "4", "5", "6", "7", "8"], "without one, the row titles are the labels");
+  strictEqual(setLabelVariable(labelled, undefined).labelVariable, undefined, "clearing goes back to row titles");
+  // A rename carries the choice; deleting the column drops it.
+  const renamed = renameColumn(labelled, 4, "SubjectID");
+  strictEqual(renamed.labelVariable, "SubjectID");
+  strictEqual(labelVariableOf(renamed), "SubjectID");
+  strictEqual(deleteColumns(renamed, 4, 1).labelVariable, undefined);
+  // The choice persists through a .hlx save/reload; a bogus one drops.
+  const payload: ProjectFilePayload = {
+    nodes: {
+      mv: { id: "mv", type: "table", name: "Subjects", parentId: null, tableType: "multiple", data: labelled },
+    },
+    rootOrder: ["mv"],
+    childOrder: { mv: [] },
+    activeNodeId: "mv",
+  };
+  const resaved = parseProjectFile(JSON.parse(serializeProjectFile(payload)));
+  if ("error" in resaved) throw new Error(resaved.error);
+  strictEqual((resaved.project.nodes.mv as ProjectNode).data?.labelVariable, "ID");
+  const tampered = JSON.parse(serializeProjectFile(payload)) as Record<string, unknown>;
+  (tampered.project as Record<string, Record<string, { data: Record<string, unknown> }>>).nodes.mv.data.labelVariable = "Gone";
+  const reparsed = parseProjectFile(tampered);
+  if ("error" in reparsed) throw new Error(reparsed.error);
+  strictEqual((reparsed.project.nodes.mv as ProjectNode).data?.labelVariable, undefined);
+});
+
+check("seq 331: point labels show the label variable's values when one is chosen (HALF B)", () => {
+  const labelled = setLabelVariable(mv331bTyped(), "ID");
+  const dataset = readTable(labelled);
+  deepStrictEqual(dataset.rowLabels, ["S001", "S002", "S003", "S004", "S005", "S006", "S007", "S008"]);
+  const options = {
+    ...newGraphOptions("individual"),
+    points: { "Y#0": { label: true }, "Y#1": { label: true } },
+  };
+  const names = pointLabels(
+    GRAPHS.individual.build(dataset.numeric, options, paintOf(options, 1)).data,
+    options.points,
+    dataset.rowLabels,
+    13,
+  );
+  deepStrictEqual(
+    names.map((n) => n.text),
+    ["S001", "S002"],
+  );
 });
 
 // ── Run ──────────────────────────────────────────────────────────────────

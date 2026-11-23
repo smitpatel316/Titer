@@ -17,8 +17,13 @@ import {
   loadDecimalSeparator,
   type DecimalSeparator,
 } from "../../lib/decimal-format";
+import {
+  CATEGORY_AUTOCOMPLETE_CHANGED_EVENT,
+  loadCategoryAutocomplete,
+} from "../../lib/category-autocomplete";
 import { CELL_BACKGROUND_HEX, type CellBackgroundColor } from "../../lib/cell-colors";
 import { displayXCell } from "../../lib/date-time";
+import { levelSuggestions } from "../../lib/variable-types";
 import { fileName } from "../../lib/paths";
 import { seriesKeyOf } from "../../lib/columns";
 import { isGrouped, isNested, leadOf } from "../../lib/dataset";
@@ -208,6 +213,17 @@ export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps)
     window.addEventListener(DECIMAL_SEPARATOR_CHANGED_EVENT, onSep);
     return () => window.removeEventListener(DECIMAL_SEPARATOR_CHANGED_EVENT, onSep);
   }, []);
+  // Category autocomplete (Preferences ▸ Data Entry): the grid re-reads the
+  // preference at once, like the decimal separator.
+  const [autocomplete, setAutocomplete] = React.useState(loadCategoryAutocomplete);
+  React.useEffect(() => {
+    const onAc = () => setAutocomplete(loadCategoryAutocomplete());
+    window.addEventListener(CATEGORY_AUTOCOMPLETE_CHANGED_EVENT, onAc);
+    return () => window.removeEventListener(CATEGORY_AUTOCOMPLETE_CHANGED_EVENT, onAc);
+  }, []);
+  // The highlighted autocomplete suggestion (-1: none) — reset on every
+  // keystroke and every new edit, so a stale highlight never fills a value.
+  const [suggestIdx, setSuggestIdx] = React.useState(-1);
 
   // Keep the selection inside the table when it shrinks (undo, delete, resize).
   const clampPoint = (p: Point): Point => ({
@@ -298,6 +314,7 @@ export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps)
         : (data.rows[r]?.[c] ?? ""));
     reveal({ r, c });
     setEditing({ kind: "cell", r, c, value: shown, typed });
+    setSuggestIdx(-1);
     focusGrid();
   };
   const startRename = (c: number) => {
@@ -401,6 +418,27 @@ export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps)
       ArrowRight: [0, 1],
     };
     if (editing) {
+      // While category suggestions are open, the arrows move through them
+      // and Enter fills the highlighted one instead of saving — the typed
+      // arrow-to-save below only runs when no list is open.
+      if (editing.kind === "cell" && suggestions.length > 0) {
+        if (e.key === "ArrowDown") {
+          setSuggestIdx((i) => Math.min(i + 1, suggestions.length - 1));
+          e.preventDefault();
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          setSuggestIdx((i) => Math.max(i - 1, -1));
+          e.preventDefault();
+          return;
+        }
+        if (e.key === "Enter" && suggestion !== undefined) {
+          setEditing({ ...editing, value: suggestion });
+          setSuggestIdx(-1);
+          e.preventDefault();
+          return;
+        }
+      }
       if (e.key === "Enter") finishEdit(false, e.shiftKey ? -1 : 1);
       else if (e.key === "Tab") finishEdit(false, 0, e.shiftKey ? -1 : 1);
       else if (e.key === "Escape") finishEdit(true);
@@ -803,6 +841,16 @@ export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps)
   const cellEditing = editing?.kind === "cell" ? editing : null;
   const inputAt = cellEditing ?? active;
 
+  /** The levels offered while typing a category: the active cell's column,
+   *  when it is a categorical column of a Multiple Variables table and the
+   *  preference is on. Anything else suggests nothing. */
+  const suggestions =
+    cellEditing && type === "multiple" && autocomplete
+      ? levelSuggestions(data, data.columns[cellEditing.c] ?? "", cellEditing.value)
+      : [];
+  const suggestion =
+    suggestIdx >= 0 && suggestIdx < suggestions.length ? suggestions[suggestIdx] : undefined;
+
   const rows: number[] = [];
   for (let r = r0; r <= r1; r++) rows.push(r);
   const selectedCols = (c: number) => c >= range.c0 && c <= range.c1;
@@ -885,13 +933,14 @@ export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps)
       data-grid-idle={cellEditing ? undefined : ""}
       style={box(inputAt.c, inputAt.r * ROW_H, ROW_H)}
       className={cn(EDITOR, !cellEditing && "opacity-0")}
-      onChange={(e) =>
+      onChange={(e) => {
+        setSuggestIdx(-1);
         setEditing(
           cellEditing
             ? { ...cellEditing, value: e.target.value }
             : { kind: "cell", r: active.r, c: active.c, value: e.target.value, typed: true },
-        )
-      }
+        );
+      }}
       onBlur={() => editingRef.current?.kind === "cell" && finishEdit(false)}
       onKeyDown={onCellKey}
       onCopy={onCopy}
@@ -919,6 +968,32 @@ export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps)
           />
         )}
         {inFrozen(inputAt.c) === frozenPane && cellInput}
+        {suggestions.length > 0 && inFrozen(inputAt.c) === frozenPane && (
+          <div
+            className="absolute z-30 max-h-40 overflow-auto rounded border border-separator bg-surface shadow-md"
+            style={{ ...box(inputAt.c, (inputAt.r + 1) * ROW_H, 0), height: "auto" }}
+            role="listbox"
+            aria-label="Category suggestions"
+          >
+            {suggestions.map((level, i) => (
+              <div
+                key={level}
+                role="option"
+                aria-selected={i === suggestIdx}
+                className={cn("cursor-pointer px-2 py-1 text-regular", i === suggestIdx && "bg-accent/10")}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  if (!cellEditing) return;
+                  setEditing({ ...cellEditing, value: level });
+                  setSuggestIdx(-1);
+                  focusGrid();
+                }}
+              >
+                {level}
+              </div>
+            ))}
+          </div>
+        )}
       </>
     );
   };

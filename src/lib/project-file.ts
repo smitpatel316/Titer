@@ -248,7 +248,7 @@ const NODE_KEYS = Object.keys({
 // prettier-ignore
 const DATA_KEYS = Object.keys({
   columns: 1, rows: 1, groups: 1, replicates: 1, subgroups: 1, rowGroups: 1, excluded: 1, cellBackgrounds: 1,
-  widths: 1, decimals: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1, linkedPaste: 1, simulation: 1, variableTypes: 1, xFormat: 1, xConversion: 1,
+  widths: 1, decimals: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1, linkedPaste: 1, simulation: 1, variableTypes: 1, labelVariable: 1, xFormat: 1, xConversion: 1,
 } satisfies Record<keyof TableData, 1>);
 
 // Graph options without a default, by the kind of value they hold.
@@ -815,6 +815,13 @@ function readData(
     // known type: a hand-edited file holding a bogus type, or an entry for
     // a column that is gone, loses that entry on its own.
     variableTypes: readVariableTypes(d.variableTypes, columns),
+    // A row-label source survives only when it names a data column that is
+    // still there — the type is checked at use time, not here, so a column
+    // set back to Label later picks the choice up again.
+    labelVariable:
+      typeof d.labelVariable === "string" && columns.slice(1).includes(d.labelVariable)
+        ? d.labelVariable
+        : undefined,
     // A simulated table's spec survives only when it is a valid spec:
     // a hand-edited one is dropped, so the table can't re-run on a lie.
     simulation: readSimulationSpec(d.simulation),

@@ -825,7 +825,7 @@ export function GraphView({ node }: { node: ProjectNode }) {
           : pointLabels(
               fig.data,
               options.points,
-              dataset?.titles,
+              dataset?.rowLabels ?? dataset?.titles,
               options.fontSize,
               labelPlotGeometry(fig.data, fig.layout, options),
             ).map((label) => ({

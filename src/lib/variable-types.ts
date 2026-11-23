@@ -155,6 +155,54 @@ export function renameLevel(data: TableData, name: string, oldLevel: string, new
   return changed ? { ...data, rows } : data;
 }
 
+/** The table's chosen row-label source: the stored `labelVariable` when it
+ *  names a data column whose resolved type is Label — a column set to
+ *  another type afterwards stops being the source until it is a label
+ *  again, so a stale choice never labels points with analysis values. A
+ *  table nobody typed yet has no source at all. */
+export function labelVariableOf(data: TableData): string | undefined {
+  if (data.variableTypes === undefined) return undefined;
+  const name = data.labelVariable;
+  if (name === undefined) return undefined;
+  return variableTypesOf(data)[name]?.type === "label" ? name : undefined;
+}
+
+/** The values a graph shows beside its points: the chosen label variable's
+ *  cells, row by row, or the row titles when none is chosen. A blank label
+ *  cell reads as a blank title, so pointLabels falls back to "Row N". */
+export function rowLabelsOf(data: TableData): (string | null)[] {
+  const name = labelVariableOf(data);
+  if (name === undefined) return data.rows.map((row) => row[0] ?? null);
+  const c = data.columns.indexOf(name);
+  return data.rows.map((row) => row[c] ?? null);
+}
+
+/** Chooses (or clears, with `undefined`) the table's row-label source.
+ *  Setting one only sticks when it names a label-typed column; anything
+ *  else — a categorical or continuous column, an unknown name — is a no-op,
+ *  so a label variable is the only thing that can label a graph's points. */
+export function setLabelVariable(data: TableData, name: string | undefined): TableData {
+  if (name === undefined) {
+    return data.labelVariable === undefined ? data : { ...data, labelVariable: undefined };
+  }
+  if (data.variableTypes === undefined) return data;
+  if (variableTypesOf(data)[name]?.type !== "label") return data;
+  return data.labelVariable === name ? data : { ...data, labelVariable: name };
+}
+
+/** The levels of categorical column `name` starting with `prefix`
+ *  (case-insensitive), in level order — the autocomplete suggestions while
+ *  typing a category. A level that is exactly what was typed is not
+ *  suggested back, and a non-categorical or unknown column suggests nothing. */
+export function levelSuggestions(data: TableData, name: string, prefix: string): string[] {
+  if (data.variableTypes === undefined) return [];
+  if (variableTypesOf(data)[name]?.type !== "categorical") return [];
+  const clean = prefix.trim().toLowerCase();
+  return categoricalLevels(data, name)
+    .map((l) => l.name)
+    .filter((level) => level.toLowerCase().startsWith(clean) && level.toLowerCase() !== clean);
+}
+
 /** A stored `variableTypes` record, put straight: only entries naming a
  *  data column with a known type survive — a hand-edited file holding a
  *  bogus type, a Title-column entry, or an entry for a column that is

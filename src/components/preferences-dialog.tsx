@@ -23,6 +23,7 @@ import {
   saveDecimalSeparator,
   type DecimalSeparator,
 } from "../lib/decimal-format";
+import { loadCategoryAutocomplete, saveCategoryAutocomplete } from "../lib/category-autocomplete";
 import { isNative, mcpFeedbackConsent, mcpSetFeedbackConsent } from "../native";
 
 function Section({ id, title, children }: { id: PreferenceSection; title: string; children: React.ReactNode }) {
@@ -43,6 +44,7 @@ export function PreferencesDialog() {
   const [theme, setThemeState] = React.useState<Theme>(loadTheme);
   const [print, setPrint] = React.useState<PrintSettings>(loadPrintSettings);
   const [decimalSeparator, setDecimalSeparator] = React.useState<DecimalSeparator>(loadDecimalSeparator);
+  const [categoryAutocomplete, setCategoryAutocomplete] = React.useState(loadCategoryAutocomplete);
   const [feedbackSharing, setFeedbackSharing] = React.useState<boolean | null>(null);
   const [feedbackBusy, setFeedbackBusy] = React.useState(false);
 
@@ -140,6 +142,20 @@ export function PreferencesDialog() {
           <p className="text-small text-secondary">
             How numbers are entered, pasted, shown, copied and exported as text. Stored values always keep full
             precision with a period.
+          </p>
+          <label className="flex items-center justify-between gap-4 text-regular">
+            Suggest categories while typing
+            <Checkbox
+              checked={categoryAutocomplete}
+              onChange={(v) => {
+                setCategoryAutocomplete(v);
+                saveCategoryAutocomplete(v);
+              }}
+            />
+          </label>
+          <p className="text-small text-secondary">
+            In a categorical column, typing offers the column's existing levels, so a typo can't silently make a
+            second level.
           </p>
         </Section>
 
