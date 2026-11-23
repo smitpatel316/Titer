@@ -608,12 +608,15 @@ export const FILL_PATTERNS = [
 export type FillPattern = (typeof FILL_PATTERNS)[number];
 
 /** How one series is drawn: its color (#RRGGBB), its points' shape, its line's dashes,
- *  and the pattern over its bars, areas or slices. */
+ *  and the pattern over its bars, areas or slices. `center`/`error` override the graph's
+ *  center/error choice for this series alone (seq 375); unset means the graph's choice. */
 export interface SeriesStyle {
   color?: string;
   shape?: PointShape;
   dash?: LineDash;
   pattern?: FillPattern;
+  center?: Choice<"center">;
+  error?: Choice<"error">;
 }
 
 /** How one point is drawn, over its series' and the graph's style; `label`: it shows

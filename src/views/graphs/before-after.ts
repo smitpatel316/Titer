@@ -313,8 +313,8 @@ function buildMvBeforeAfterBarStrip(
   titles?: (string | null)[],
 ): GraphFigure {
   const names = columns.map((c) => c.name);
-  const center = centers(columns, options.center);
-  const errs = errors(columns, options.error, center);
+  const center = centers(columns, options.center, options.series);
+  const errs = errors(columns, options.error, center, options.series);
   const data: unknown[] = [];
 
   columns.forEach((c, i) => {
