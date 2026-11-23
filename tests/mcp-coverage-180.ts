@@ -563,17 +563,20 @@ const ROWS: Row[] = [
   },
   {
     item: "372",
-    title: "Calculated variables: conditional aggregation (part A)",
+    title: "Calculated variables: conditional aggregation (part A) + window functions (part B)",
     status: "covered",
     note:
       "The *IF family (MINIF/MAXIF/SUMIF/MEANIF/STDEVIF/STDERRIF/COUNTIF/COUNTAIF) + the WHERE-clause form, " +
-      "through the existing titer_edit_table add/set-calculated-variable ops. Part B (window functions: OVER / " +
-      "ORDER BY / ROWS) is NOT covered by this row — separate follow-up.",
+      "and window functions (OVER / WHERE / ORDER BY / ROWS on the windowable aggregates, CENTER / " +
+      "STANDARDIZE / ZSCORE / RANK, and the *IF family with OVER) — all through the existing " +
+      "titer_edit_table add/set-calculated-variable ops.",
     checks: [
       { kind: "tool", tool: "titer_edit_table" },
       { kind: "sourceContains", file: "src/lib/calcvars.ts", text: "CONDITIONAL_AGGREGATES" },
       { kind: "sourceContains", file: "src/lib/calcvars.ts", text: "kind: \"condagg\"" },
       { kind: "sourceContains", file: "src/lib/calcvars.ts", text: "conditionalAggregate" },
+      { kind: "sourceContains", file: "src/lib/calcvars.ts", text: "kind: \"window\"" },
+      { kind: "sourceContains", file: "src/lib/calcvars.ts", text: "computeWindow" },
     ],
   },
   {

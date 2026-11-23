@@ -9,10 +9,13 @@
 // Conditional aggregation (seq 372, part A) IS built here: the *IF family
 // (MINIF / MAXIF / SUMIF / MEANIF / STDEVIF / STDERRIF / COUNTIF /
 // COUNTAIF) and the WHERE-clause form (`SUM(F) WHERE C <= 14`), verified
-// against hand-computed values — Prism's docs are the spec, since the
-// window functions are Pro-gated and licence-blocked on this install and
-// no real-Prism verification was possible. Window functions (OVER / ORDER
-// BY / ROWS) are still NOT built — they are part B of seq 372.
+// against hand-computed values. Window functions (seq 372, part B) ARE
+// built here too: OVER / WHERE / ORDER BY / ROWS on the windowable
+// aggregates (MEAN, STDEV, STDERR, COUNT, COUNTA, single-variable
+// MIN/MAX/SUM), the row-wise CENTER / STANDARDIZE / ZSCORE / RANK, and
+// the conditional aggregates — verified against hand-computed values, since
+// the window functions are Pro-gated and licence-blocked on this install
+// and no real-Prism verification was possible.
 // Descriptive aggregates over a whole variable (MEAN(A), SUM(A)…) ARE in:
 // they are the 11.0 core's whole-variable arithmetic, broadcast as one
 // value per row.
@@ -121,7 +124,31 @@ type Expr =
   | { kind: "call"; name: string; args: Expr[] }
   /** A conditional aggregate (seq 372, part A): `name` over the rows where
    *  `condition` holds, broadcast as one value per row. */
-  | { kind: "condagg"; name: string; variable: string; condition: Expr };
+  | { kind: "condagg"; name: string; variable: string; condition: Expr }
+  /** A window function (seq 372, part B): `name` over a window of rows —
+   *  the partition group, optionally filtered (WHERE / the *IF condition),
+   *  ordered, and framed. `name` is the normalized aggregate (STDEV →
+   *  SD, STDERR → SEM) or a row-wise function (CENTER / STANDARDIZE /
+   *  ZSCORE / RANK); for a conditional aggregate it is the base aggregate
+   *  (SUMIF → SUM) with `condition` set. With no clauses the window is
+   *  the whole variable. */
+  | {
+      kind: "window";
+      name: string;
+      variable: string;
+      condition?: Expr;
+      partition?: Expr;
+      orderBy?: { expr: Expr; desc: boolean }[];
+      frame?: { start: FrameBound; end: FrameBound };
+    };
+
+/** One end of a ROWS frame, as the docs spell it. */
+type FrameBound =
+  | { kind: "unbounded-preceding" }
+  | { kind: "n-preceding"; n: number }
+  | { kind: "current" }
+  | { kind: "n-following"; n: number }
+  | { kind: "unbounded-following" };
 
 /** The elementwise functions: name → argument counts it takes. */
 const ELEMENTWISE: Record<string, number[]> = {
@@ -164,6 +191,19 @@ const CONDITIONAL_AGGREGATES: Record<string, string> = {
   COUNTAIF: "COUNTA",
 };
 const CONSTANTS: Record<string, number> = { PI: Math.PI, E: Math.E };
+
+/** Prism's spellings of the sample SD / SEM, as the windowable names. */
+const normalizeAggregate = (name: string): string =>
+  name === "STDEV" ? "SD" : name === "STDERR" ? "SEM" : name;
+/** The aggregates that take window clauses (the docs' list — MEDIAN and
+ *  VAR are whole-variable only, and take no OVER / ORDER BY / ROWS). */
+const WINDOWABLE_AGGREGATES = ["MEAN", "SD", "SEM", "COUNT", "COUNTA", "MIN", "MAX", "SUM"];
+/** The row-wise window functions: one value per row, relative to its
+ *  window. They are window nodes with or without clauses — with no
+ *  clauses the window is the whole variable. */
+const ROW_WISE = ["CENTER", "STANDARDIZE", "ZSCORE", "RANK"];
+/** A clause keyword, as the parser sees it after a call's closing paren. */
+const WINDOW_KEYWORDS = ["OVER", "WHERE", "ORDER", "ROWS"];
 
 class Parser {
   private pos = 0;
@@ -294,14 +334,23 @@ class Parser {
         const close = this.peek();
         if (close?.kind !== "rparen") throw new Error(`“${t.name}” has arguments with no closing “)”.`);
         this.pos++;
-        if (AGGREGATES.includes(upper) && args.length === 1) {
-          // `SUM(F) WHERE C <= 14` (seq 372, part A): the WHERE form of a
-          // conditional aggregate. A non-variable argument keeps today's
-          // behaviour — the call node, which evaluates blank.
-          if (args[0].kind === "var" && this.eatIdent("WHERE")) {
-            return { kind: "condagg", name: upper, variable: args[0].name, condition: this.or() };
-          }
-          return { kind: "call", name: upper, args };
+        // A window clause follows the call: OVER / WHERE / ORDER BY / ROWS
+        // (seq 372, part B). The clause parser owns the WHERE-only form
+        // too, so part A's `SUM(F) WHERE C <= 14` still lands as condagg.
+        const next = this.peek();
+        if (next?.kind === "ident" && WINDOW_KEYWORDS.includes(next.name.toUpperCase())) {
+          return this.parseWindowedCall(upper, args, t.name);
+        }
+        // A row-wise window function with no clauses: the window is the
+        // whole variable (`ZSCORE(E)` is the whole-column z-score).
+        if (ROW_WISE.includes(upper)) {
+          if (args.length !== 1 || args[0].kind !== "var")
+            throw new Error(`“${t.name}” takes one variable, e.g. “${upper}(E)”.`);
+          return { kind: "window", name: upper, variable: args[0].name };
+        }
+        const aggName = normalizeAggregate(upper);
+        if (AGGREGATES.includes(aggName) && args.length === 1) {
+          return { kind: "call", name: aggName, args };
         }
         const condBase = CONDITIONAL_AGGREGATES[upper];
         if (condBase) {
@@ -315,7 +364,7 @@ class Parser {
         }
         const allowed = ELEMENTWISE[upper];
         if (!allowed) {
-          if (AGGREGATES.includes(upper))
+          if (AGGREGATES.includes(aggName))
             throw new Error(
               `“${t.name}” takes one variable, not ${args.length} argument${args.length === 1 ? "" : "s"}.`,
             );
@@ -332,6 +381,133 @@ class Parser {
       return { kind: "var", name: t.name };
     }
     throw new Error(`unexpected ${t.kind === "op" ? `“${t.op}”` : t.kind} where a value was expected.`);
+  }
+
+  /** Parses a window function's clauses after its call's closing paren.
+   *  Clause order is OVER → WHERE → ORDER BY → ROWS; every clause is
+   *  optional. A clause expression reads greedily — `MEAN(E) OVER B * 100`
+   *  groups by `B * 100`, as the docs warn — so a window function inside
+   *  a larger formula needs parentheses around it. */
+  private parseWindowedCall(upper: string, args: Expr[], typedName: string): Expr {
+    const aggName = normalizeAggregate(upper);
+    const condBase = CONDITIONAL_AGGREGATES[upper];
+    const rowWise = ROW_WISE.includes(upper);
+    const isPlainAgg = AGGREGATES.includes(aggName);
+    if (!condBase && !rowWise && !isPlainAgg) {
+      throw new Error(
+        `“${typedName}” cannot take window clauses — window functions are MEAN, STDEV, STDERR, COUNT, ` +
+          `COUNTA, MIN, MAX, SUM, CENTER, STANDARDIZE, ZSCORE, RANK, and the conditional aggregates.`,
+      );
+    }
+    if (condBase) {
+      if (args.length !== 2)
+        throw new Error(
+          `“${typedName}” takes 2 arguments — a variable and a condition, e.g. “${upper}(F, C <= 14)”.`,
+        );
+      if (args[0].kind !== "var")
+        throw new Error(`“${typedName}” takes a variable and a condition — write “${upper}(F, C <= 14)”.`);
+    } else if (args.length !== 1) {
+      throw new Error(
+        `“${typedName}” takes one variable, not ${args.length} argument${args.length === 1 ? "" : "s"}.`,
+      );
+    } else if (args[0].kind !== "var") {
+      throw new Error(`“${typedName}” takes a variable — write “${upper}(F)”, not “${upper}(…)”.`);
+    }
+    let partition: Expr | undefined;
+    let condition: Expr | undefined = condBase ? args[1] : undefined;
+    let orderBy: { expr: Expr; desc: boolean }[] | undefined;
+    let frame: { start: FrameBound; end: FrameBound } | undefined;
+    if (this.eatIdent("OVER")) partition = this.or();
+    if (this.eatIdent("WHERE")) {
+      if (condition !== undefined)
+        throw new Error(
+          `“${typedName}” already has a condition — write the filter once, either as “${upper}(F, C <= 14)” ` +
+            `or as “${upper}(F) WHERE C <= 14”.`,
+        );
+      condition = this.or();
+    }
+    if (this.eatIdent("ORDER")) {
+      if (!this.eatIdent("BY")) throw new Error(`“ORDER” needs “BY” — write “ORDER BY C”.`);
+      orderBy = [];
+      for (;;) {
+        const expr = this.or();
+        let desc = false;
+        if (this.eatIdent("DESC")) desc = true;
+        else this.eatIdent("ASC");
+        orderBy.push({ expr, desc });
+        if (this.peek()?.kind === "comma") {
+          this.pos++;
+          continue;
+        }
+        break;
+      }
+    }
+    if (this.eatIdent("ROWS")) frame = this.parseFrame();
+    const next = this.peek();
+    if (next?.kind === "ident" && WINDOW_KEYWORDS.includes(next.name.toUpperCase())) {
+      throw new Error("window clauses must appear in the order OVER, WHERE, ORDER BY, ROWS.");
+    }
+    const variable = (args[0] as { kind: "var"; name: string }).name;
+    // A WHERE on its own, on a plain aggregate, keeps part A's condagg
+    // shape — including MEDIAN and VAR, which take no window clauses.
+    if (!partition && !orderBy && !frame && condition !== undefined && !condBase && !rowWise) {
+      return { kind: "condagg", name: aggName, variable, condition };
+    }
+    if (!condBase && !rowWise && !WINDOWABLE_AGGREGATES.includes(aggName)) {
+      throw new Error(
+        `“${typedName}” cannot take window clauses — use MEAN, STDEV, STDERR, COUNT, COUNTA, MIN, MAX, ` +
+          `or SUM for windowed calculations.`,
+      );
+    }
+    return {
+      kind: "window",
+      name: rowWise ? upper : (condBase ?? aggName),
+      variable,
+      ...(condition !== undefined ? { condition } : {}),
+      ...(partition !== undefined ? { partition } : {}),
+      ...(orderBy !== undefined ? { orderBy } : {}),
+      ...(frame !== undefined ? { frame } : {}),
+    };
+  }
+
+  /** Parses a ROWS frame: one or two boundaries. A single boundary
+   *  defaults the other side to the current row. */
+  private parseFrame(): { start: FrameBound; end: FrameBound } {
+    const bound = (): FrameBound => {
+      if (this.eatIdent("UNBOUNDED")) {
+        if (this.eatIdent("PRECEDING")) return { kind: "unbounded-preceding" };
+        if (this.eatIdent("FOLLOWING")) return { kind: "unbounded-following" };
+        throw new Error(`“UNBOUNDED” needs “PRECEDING” or “FOLLOWING” — write “ROWS UNBOUNDED PRECEDING”.`);
+      }
+      if (this.eatIdent("CURRENT")) {
+        if (!this.eatIdent("ROW")) throw new Error(`“CURRENT” needs “ROW” — write “ROWS CURRENT ROW”.`);
+        return { kind: "current" };
+      }
+      const t = this.peek();
+      if (t?.kind === "num") {
+        this.pos++;
+        if (!Number.isInteger(t.value) || t.value < 0)
+          throw new Error(`a ROWS boundary takes a whole number of rows — write “ROWS 1 PRECEDING”.`);
+        if (this.eatIdent("PRECEDING")) return { kind: "n-preceding", n: t.value };
+        if (this.eatIdent("FOLLOWING")) return { kind: "n-following", n: t.value };
+        throw new Error(`a ROWS boundary needs “PRECEDING” or “FOLLOWING” — write “ROWS 1 PRECEDING”.`);
+      }
+      throw new Error(
+        `a ROWS boundary takes “UNBOUNDED PRECEDING”, “N PRECEDING”, “CURRENT ROW”, or a FOLLOWING form — ` +
+          `write “ROWS UNBOUNDED PRECEDING”.`,
+      );
+    };
+    const first = bound();
+    const next = this.peek();
+    const secondFollows =
+      (next?.kind === "ident" && ["UNBOUNDED", "CURRENT"].includes(next.name.toUpperCase())) ||
+      next?.kind === "num";
+    if (!secondFollows) {
+      if (first.kind === "unbounded-preceding" || first.kind === "n-preceding" || first.kind === "current")
+        return { start: first, end: { kind: "current" } };
+      return { start: { kind: "current" }, end: first };
+    }
+    return { start: first, end: bound() };
   }
 }
 
@@ -362,6 +538,11 @@ export function dependenciesOf(ast: Expr): string[] {
     } else if (e.kind === "condagg") {
       if (!found.includes(e.variable)) found.push(e.variable);
       walk(e.condition);
+    } else if (e.kind === "window") {
+      if (!found.includes(e.variable)) found.push(e.variable);
+      if (e.condition) walk(e.condition);
+      if (e.partition) walk(e.partition);
+      e.orderBy?.forEach(({ expr }) => walk(expr));
     } else if (e.kind === "call") e.args.forEach(walk);
   };
   walk(ast);
@@ -372,12 +553,17 @@ export function dependenciesOf(ast: Expr): string[] {
 
 /** What one row's evaluation reads: a variable's value in that row, and a
  *  variable's whole column (for aggregates). `valueAt` reads any row, so a
- *  conditional aggregate can run its condition row by row. */
+ *  conditional aggregate can run its condition row by row. `row` is the
+ *  row this context evaluates; `windowColumn` reads a window function's
+ *  whole-column pass at that row (window functions are computed once per
+ *  formula in `recomputeCalculated`, never per row). */
 export interface EvalContext {
   value: (name: string) => number | null;
   values: (name: string) => number[];
   valueAt: (name: string, row: number) => number | null;
   rowCount: number;
+  row: number;
+  windowColumn?: (node: Expr) => (number | null)[] | undefined;
 }
 
 const truthy = (v: number | null): boolean | null => (v == null ? null : v !== 0);
@@ -414,6 +600,140 @@ function conditionalAggregate(name: string, values: number[]): number | null {
   return aggregate(name, values);
 }
 
+/** What a window's whole-column pass reads: any row's value, a row's raw
+ *  cell text (a text partition groups by its text), and any helper
+ *  expression evaluated at any row. */
+interface WindowHelpers {
+  rowCount: number;
+  valueAt: (name: string, row: number) => number | null;
+  rawTextAt: (name: string, row: number) => string | null;
+  evalAt: (expr: Expr, row: number) => number | null;
+}
+
+type WindowExpr = Extract<Expr, { kind: "window" }>;
+
+/** A row's partition key: a bare variable groups by its value — a number
+ *  when the cell holds one, its text when it holds text — and any other
+ *  expression groups by its number. A blank key puts the row in no group,
+ *  so its result stays blank. */
+function partitionKeyOf(expr: Expr, row: number, h: WindowHelpers): string | number | null {
+  if (expr.kind === "var") {
+    const v = h.valueAt(expr.name, row);
+    if (v != null) return v;
+    const text = h.rawTextAt(expr.name, row);
+    if (text != null && text !== "") return text;
+    return null;
+  }
+  return h.evalAt(expr, row);
+}
+
+/** A frame boundary as a position in the group's order. */
+function frameIndex(bound: FrameBound, pos: number, len: number): number {
+  switch (bound.kind) {
+    case "unbounded-preceding":
+      return 0;
+    case "n-preceding":
+      return pos - bound.n;
+    case "current":
+      return pos;
+    case "n-following":
+      return pos + bound.n;
+    case "unbounded-following":
+      return len - 1;
+  }
+}
+
+/** A window function's whole column, one value per row (seq 372, part B).
+ *  Rows split into partition groups; each group orders by ORDER BY (table
+ *  order without it, nulls last, ties keeping table order); a ROWS frame
+ *  slices that order around each row. WHERE picks which rows contribute —
+ *  without ROWS a row that does not match still gets its group's result,
+ *  with ROWS it gets blank. Blanks never contribute a value. COUNT counts
+ *  numeric values only and, as the docs say, reports only on rows whose
+ *  own value is not blank. */
+function computeWindow(node: WindowExpr, h: WindowHelpers): (number | null)[] {
+  const n = h.rowCount;
+  const out: (number | null)[] = new Array(n).fill(null);
+  const orderBy = node.orderBy ?? [];
+  const keys: (string | number | null)[] = [];
+  const matches: boolean[] = [];
+  const orderKeys: (number | null)[][] = [];
+  for (let r = 0; r < n; r++) {
+    keys.push(node.partition ? partitionKeyOf(node.partition, r, h) : 0);
+    matches.push(!node.condition || truthy(h.evalAt(node.condition, r)) === true);
+    orderKeys.push(orderBy.map(({ expr }) => h.evalAt(expr, r)));
+  }
+  const groups = new Map<string | number, number[]>();
+  for (let r = 0; r < n; r++) {
+    const key = keys[r];
+    if (key == null) continue;
+    const rows = groups.get(key);
+    if (rows) rows.push(r);
+    else groups.set(key, [r]);
+  }
+  const compare = (a: number, b: number): number => {
+    for (let k = 0; k < orderBy.length; k++) {
+      const av = orderKeys[a][k];
+      const bv = orderKeys[b][k];
+      if (av === bv) continue;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      const d = av - bv;
+      if (d !== 0) return orderBy[k].desc ? -d : d;
+    }
+    return 0;
+  };
+  for (const rows of groups.values()) {
+    const ordered = [...rows].sort(compare);
+    const len = ordered.length;
+    for (let p = 0; p < len; p++) {
+      const r = ordered[p];
+      let lo = 0;
+      let hi = len - 1;
+      if (node.frame) {
+        lo = Math.max(0, frameIndex(node.frame.start, p, len));
+        hi = Math.min(len - 1, frameIndex(node.frame.end, p, len));
+      }
+      // With ROWS, a row that does not match the filter gets no result.
+      if (node.frame && !matches[r]) {
+        out[r] = null;
+        continue;
+      }
+      const values: number[] =
+        lo > hi
+          ? []
+          : ordered
+              .slice(lo, hi + 1)
+              .filter((j) => matches[j])
+              .map((j) => h.valueAt(node.variable, j))
+              .filter((v): v is number => v != null);
+      const own = h.valueAt(node.variable, r);
+      if (node.name === "CENTER") {
+        out[r] = own == null || values.length === 0 ? null : own - mean(values);
+      } else if (node.name === "STANDARDIZE" || node.name === "ZSCORE") {
+        // The docs: blank with fewer than two values, or all identical.
+        const s = values.length < 2 ? null : sd(values);
+        out[r] = own == null || s == null || s === 0 ? null : (own - mean(values)) / s;
+      } else if (node.name === "RANK") {
+        if (own == null) {
+          out[r] = null;
+        } else {
+          // Ascending, smallest is 1; ties share the average of the
+          // positions they occupy; blanks are left out.
+          const less = values.filter((v) => v < own).length;
+          const equal = values.filter((v) => v === own).length;
+          out[r] = 1 + less + (equal - 1) / 2;
+        }
+      } else if (node.name === "COUNT") {
+        out[r] = own == null ? null : values.length;
+      } else {
+        out[r] = node.condition ? conditionalAggregate(node.name, values) : aggregate(node.name, values);
+      }
+    }
+  }
+  return out;
+}
+
 function evalExpr(e: Expr, ctx: EvalContext): number | null {
   switch (e.kind) {
     case "num":
@@ -431,6 +751,8 @@ function evalExpr(e: Expr, ctx: EvalContext): number | null {
           values: ctx.values,
           valueAt: ctx.valueAt,
           rowCount: ctx.rowCount,
+          row: j,
+          windowColumn: ctx.windowColumn,
         };
         if (truthy(evalExpr(e.condition, rowCtx)) === true) {
           const v = ctx.valueAt(e.variable, j);
@@ -438,6 +760,12 @@ function evalExpr(e: Expr, ctx: EvalContext): number | null {
         }
       }
       return conditionalAggregate(e.name, matched);
+    }
+    case "window": {
+      // A window function reads its whole-column pass at this row — the
+      // pass runs in recomputeCalculated, so this case never computes.
+      const column = ctx.windowColumn?.(e);
+      return column?.[ctx.row] ?? null;
     }
     case "unary": {
       const v = evalExpr(e.expr, ctx);
@@ -647,29 +975,62 @@ export function recomputeCalculated(data: TableData): TableData {
       failed.add(name);
       continue;
     }
+    // A calculated input reads its computed values; a plain one reads the
+    // table (excluded cells read as blank — readTable already applies them).
+    const readValueAt = (dep: string, j: number): number | null => {
+      const done = computed.get(dep);
+      if (done) return done[j] ?? null;
+      return byName.get(dep)?.byRow[j] ?? null;
+    };
+    const makeRowCtx = (r: number): EvalContext => ({
+      value: (dep) => readValueAt(dep, r),
+      values: (dep) => {
+        const done = computed.get(dep);
+        if (done) return done.filter((v): v is number => v != null);
+        return byName.get(dep)?.values ?? [];
+      },
+      valueAt: readValueAt,
+      rowCount: data.rows.length,
+      row: r,
+      windowColumn: (node) => ensureWindow(node),
+    });
+    // Window functions evaluate as a whole-column pass: each window node
+    // in this formula gets its full column computed once (a window inside
+    // another window's clause computes on demand, through the same map),
+    // then every row reads its own entry from it.
+    const windowColumns = new Map<Expr, (number | null)[]>();
+    const ensureWindow = (node: Expr): (number | null)[] => {
+      const done = windowColumns.get(node);
+      if (done) return done;
+      const values = computeWindow(node as WindowExpr, {
+        rowCount: data.rows.length,
+        valueAt: readValueAt,
+        rawTextAt: (dep, j) => byName.get(dep)?.cells[j] ?? null,
+        evalAt: (expr, j) => evalExpr(expr, makeRowCtx(j)),
+      });
+      windowColumns.set(node, values);
+      return values;
+    };
+    const windowNodes: Expr[] = [];
+    const collectWindows = (e: Expr): void => {
+      if (e.kind === "unary") collectWindows(e.expr);
+      else if (e.kind === "binary") {
+        collectWindows(e.left);
+        collectWindows(e.right);
+      } else if (e.kind === "condagg") collectWindows(e.condition);
+      else if (e.kind === "call") e.args.forEach(collectWindows);
+      else if (e.kind === "window") {
+        windowNodes.push(e);
+        if (e.condition) collectWindows(e.condition);
+        if (e.partition) collectWindows(e.partition);
+        e.orderBy?.forEach(({ expr }) => collectWindows(expr));
+      }
+    };
+    collectWindows(ast);
+    for (const w of windowNodes) ensureWindow(w);
     const values: (number | null)[] = [];
     for (let r = 0; r < data.rows.length; r++) {
-      // A calculated input reads its computed values; a plain one reads the
-      // table (excluded cells read as blank — readTable already applies them).
-      const rowCtx: EvalContext = {
-        value: (dep) => {
-          const done = computed.get(dep);
-          if (done) return done[r] ?? null;
-          return byName.get(dep)?.byRow[r] ?? null;
-        },
-        values: (dep) => {
-          const done = computed.get(dep);
-          if (done) return done.filter((v): v is number => v != null);
-          return byName.get(dep)?.values ?? [];
-        },
-        valueAt: (dep, j) => {
-          const done = computed.get(dep);
-          if (done) return done[j] ?? null;
-          return byName.get(dep)?.byRow[j] ?? null;
-        },
-        rowCount: data.rows.length,
-      };
-      values.push(evalExpr(ast, rowCtx));
+      values.push(evalExpr(ast, makeRowCtx(r)));
     }
     computed.set(name, values);
   }
