@@ -85,14 +85,29 @@ export function getFigureDropHandler(): FigureDropHandler | null {
 }
 
 /** The drop target under a point, if any: a figure panel or an empty cell,
- *  marked with `data-figure-drop` and its figure id and cell. */
+ *  marked with `data-figure-drop` and its figure id and cell.
+ *  Hit-tested by bounding rect, not the browser's point hit-test (seq 394):
+ *  pressing a Plotly chart makes WebKit's point hit-test return null for
+ *  the rest of the drag — the chart's mousedown handler owns the gesture —
+ *  so a panel drag started on a chart never found its target, while a drag
+ *  started on plain HTML hit-tested fine. Rects are immune to that quirk.
+ *  Smallest containing rect wins, so a nested drop target beats its parent. */
 export function figureDropTargetFromPoint(x: number, y: number): FigureDropTargetRef | null {
-  const el = document.elementFromPoint(x, y) as HTMLElement | null;
-  const target = el?.closest("[data-figure-drop]") as HTMLElement | null;
-  if (!target) return null;
-  const figureId = target.dataset.figureId;
-  const row = Number(target.dataset.dropRow);
-  const col = Number(target.dataset.dropCol);
+  let best: HTMLElement | null = null;
+  let bestArea = Number.POSITIVE_INFINITY;
+  for (const el of document.querySelectorAll("[data-figure-drop]")) {
+    const r = (el as HTMLElement).getBoundingClientRect();
+    if (x < r.left || x >= r.right || y < r.top || y >= r.bottom) continue;
+    const area = r.width * r.height;
+    if (area < bestArea) {
+      best = el as HTMLElement;
+      bestArea = area;
+    }
+  }
+  if (!best) return null;
+  const figureId = best.dataset.figureId;
+  const row = Number(best.dataset.dropRow);
+  const col = Number(best.dataset.dropCol);
   if (!figureId || !Number.isFinite(row) || !Number.isFinite(col)) return null;
   return { figureId, row, col };
 }

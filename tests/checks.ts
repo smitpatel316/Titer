@@ -343,6 +343,15 @@ import {
   validateFigureSize,
 } from "../src/lib/figure";
 import { buildGraphFigure, type AnalysisRunner } from "../src/views/graphs/graph-figure";
+import {
+  beginFigureDrag,
+  endFigureDrag,
+  figureDropTargetFromPoint,
+  getFigureDrag,
+  getFigureDropHandler,
+  registerFigureDropHandler,
+  setFigureDragTarget,
+} from "../src/lib/figure-drag";
 import { overlayReport } from "../src/store/mcp-export";
 import { createEvalDedupe, ensureSaveExtension, windowMenuItems, type OpenProjectWindow } from "../src/native";
 import { defaultExportAllFolder, planExportAll } from "../src/lib/export-all";
@@ -1559,6 +1568,70 @@ check("seq 307: dragging a graph onto a figure panel assigns, replaces after con
   ok(/export async function confirmReplace/.test(native), "native.ts must offer a Replace / Cancel confirm");
   const drag = readFileSync("src/lib/figure-drag.ts", "utf8");
   ok(/export function figureDropTargetFromPoint/.test(drag), "figure-drag must hit-test drop targets by point");
+});
+
+// seq 394: figure drag-and-drop broken live on Mac (pointer path). The
+// pointer events all fire in WebKit; the break is the hit-test: pressing a
+// Plotly chart makes WebKit's `document.elementFromPoint` return null for
+// the rest of the drag, so a panel drag started on a chart never found its
+// target (a drag started on plain HTML hit-tested fine). The fix hit-tests
+// by bounding rect. This pin drives the real hit-test with a stubbed
+// document whose elementFromPoint always returns null — the WebKit/Plotly
+// condition — so it FAILS on the old code and PASSES on the fix.
+check("figure drop hit-test works when elementFromPoint returns null (seq 394)", () => {
+  const fakePanel = (row: number, col: number, left: number, top: number, w: number, h: number) => ({
+    dataset: { figureId: "f-main", dropRow: String(row), dropCol: String(col) },
+    getBoundingClientRect: () => ({ left, top, right: left + w, bottom: top + h, width: w, height: h }),
+  });
+  const targets = [
+    fakePanel(0, 0, 100, 100, 200, 200),
+    fakePanel(1, 0, 120, 120, 50, 50),
+    fakePanel(0, 1, 300, 100, 200, 200),
+  ];
+  const prevDocument = (globalThis as unknown as Record<string, unknown>).document;
+  (globalThis as unknown as Record<string, unknown>).document = {
+    elementFromPoint: () => null,
+    querySelectorAll: (sel: string) => (sel === "[data-figure-drop]" ? targets : []),
+  };
+  try {
+    deepStrictEqual(figureDropTargetFromPoint(250, 150), { figureId: "f-main", row: 0, col: 0 });
+    deepStrictEqual(figureDropTargetFromPoint(350, 150), { figureId: "f-main", row: 0, col: 1 });
+    deepStrictEqual(figureDropTargetFromPoint(150, 150), { figureId: "f-main", row: 1, col: 0 });
+    deepStrictEqual(figureDropTargetFromPoint(300, 150), { figureId: "f-main", row: 0, col: 1 });
+    strictEqual(figureDropTargetFromPoint(50, 50), null);
+    strictEqual(figureDropTargetFromPoint(550, 150), null);
+  } finally {
+    (globalThis as unknown as Record<string, unknown>).document = prevDocument;
+  }
+
+  // The hit-test must not go back to elementFromPoint.
+  const drag = readFileSync("src/lib/figure-drag.ts", "utf8");
+  ok(!/elementFromPoint/.test(drag), "figure-drag must not hit-test via elementFromPoint (seq 394: WebKit returns null after a chart press)");
+
+  // The live drop sequence the panel's onUp runs: begin → set target →
+  // handler(source, target) → end. Pins the seam, not just planFigureDrop.
+  const seen: Array<{ source: unknown; target: unknown }> = [];
+  registerFigureDropHandler((source, target) => {
+    seen.push({ source, target });
+    return true;
+  });
+  try {
+    beginFigureDrag({ kind: "graph", graphId: "gC", graphName: "Growth" });
+    setFigureDragTarget({ figureId: "f-main", row: 0, col: 1 });
+    const fig = getFigureDrag();
+    ok(fig.source && fig.target);
+    void getFigureDropHandler()?.(fig.source, fig.target);
+    deepStrictEqual(seen, [
+      {
+        source: { kind: "graph", graphId: "gC", graphName: "Growth" },
+        target: { figureId: "f-main", row: 0, col: 1 },
+      },
+    ]);
+    endFigureDrag();
+    deepStrictEqual(getFigureDrag(), { source: null, target: null });
+  } finally {
+    registerFigureDropHandler(null);
+  }
 });
 
 // seq 236: Duplicate Current Sheet — one sheet, nothing else, right after
