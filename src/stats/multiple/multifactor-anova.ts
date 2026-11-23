@@ -306,12 +306,21 @@ export async function runMultifactorAnova(
     const ss = v[`${keyOf(term.rTerm)}SS`] ?? null;
     const partial = ss != null && ssResid != null ? ss / (ss + ssResid) : null;
     const eta = ss != null && v.sstot != null && v.sstot !== 0 ? ss / v.sstot : null;
+    // Prism's Source of Variation Summary, per term (seq 389): % of total
+    // variation = 100 × eta squared; Cohen's f = √(partial / (1 − partial)),
+    // the same formula effectSizeRow uses — null when partial is null, 1
+    // (a perfect fit has no error term to scale against), or non-finite.
+    const pctTotal = eta != null ? 100 * eta : null;
+    const cohensF =
+      partial == null || !Number.isFinite(partial) || partial >= 1 ? null : Math.sqrt(partial / (1 - partial));
     return [
       { label: `${term.label} F`, value: v[`${keyOf(term.rTerm)}F`] ?? null },
       { label: `${term.label} DFn`, value: v[`${keyOf(term.rTerm)}Df`] ?? null },
       pRow(`${term.label} P value`, v[`${keyOf(term.rTerm)}P`] ?? null),
-      { label: `${term.label} partial eta squared`, value: partial },
+      { label: `${term.label} % of total variation`, value: pctTotal },
       { label: `${term.label} eta squared`, value: eta },
+      { label: `${term.label} partial eta squared`, value: partial },
+      { label: `${term.label} Cohen's f`, value: cohensF },
     ];
   };
   const stats = [...terms.flatMap(effect), { label: "DFd (residual)", value: v.dfResid ?? null }];
