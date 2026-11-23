@@ -2572,7 +2572,9 @@ export function applyUnstableFlags(
   handling: NonlinearDifficultFitHandling = "unstable",
   derived?: DerivedRow[],
 ): { unstableParameters: string[]; condition: number | null } {
-  if (handling === "none" || hessian === null) return { unstableParameters: [], condition: null };
+  // The three handlings are exclusive: only "unstable" runs this check
+  // ("ambiguous" has its own below, "none" reports plain values).
+  if (handling !== "unstable" || hessian === null) return { unstableParameters: [], condition: null };
   const { unstable, condition } = identifyUnstableParameters(hessian, terms);
   const flagged = new Set(unstable.map(labelTerm));
   for (const c of coefficients) if (flagged.has(c.term)) c.unstable = true;
@@ -2584,6 +2586,70 @@ export function applyUnstableFlags(
     }
   }
   return { unstableParameters: unstable, condition };
+}
+
+/** Prism's ambiguity threshold (FAQ 1462): a dependency above 0.9999
+ *  labels the fit ambiguous. */
+export const AMBIGUOUS_DEPENDENCY_THRESHOLD = 0.9999;
+
+/** Dependency of each fitted parameter (Prism's dependency method, FAQ 931
+ *  "How dependency is calculated"): dep_i = 1 − s²/(V_ii·HH_ii), where V
+ *  is the fit's covariance matrix (V_ii = SE_i²), HH the Gauss–Newton
+ *  Hessian JᵀWJ, and s² = Sy.x². The FAQ's refit definition — 1 − (SE
+ *  with all other parameters fixed, corrected by √(df_fixed/df_full),
+ *  over SE in the full fit)² — equals this closed form: the fixed SE is
+ *  s/√HH_ii, and the correction converts it to the full fit's df scale
+ *  (verified against the refit on the FAQ 931 example values, Nov 23,
+ *  2026). `coefficients` and the Hessian rows are in the same
+ *  (spec.terms) order. Null per parameter when dependency is undefined
+ *  there: no Hessian (lm fits), no Sy.x, a zero standard error
+ *  (noiseless data), or a non-positive Hessian diagonal. Values are
+ *  clamped to [0, 1] — the formula is exact, so anything outside it is
+ *  rounding. */
+export function parameterDependencies(
+  hessian: number[][] | null,
+  coefficients: RegressionCoefficient[],
+  syx: number | null,
+): (number | null)[] {
+  if (hessian === null || syx == null || !Number.isFinite(syx) || syx <= 0) return coefficients.map(() => null);
+  return coefficients.map((c, i) => {
+    const se = c.stdError;
+    const hh = hessian[i]?.[i];
+    if (se == null || !Number.isFinite(se) || se <= 0 || hh == null || !Number.isFinite(hh) || hh <= 0) return null;
+    return Math.min(1, Math.max(0, 1 - (syx * syx) / (se * se * hh)));
+  });
+}
+
+/** Run the ambiguous-fit check on a fit's coefficients (seq 387): attach
+ *  each parameter's dependency (`dependency`, null when undefined) and,
+ *  when `handling` is "ambiguous", flag the ones whose dependency exceeds
+ *  0.9999 (`ambiguous: true`) and return their raw parameter names. The
+ *  other handlings never flag: "unstable" has its own check, "none"
+ *  reports plain values. `terms` are the fitted parameters in Hessian
+ *  order. Pass `syx` null for a robust/Poisson refit — its IRLS weights
+ *  break the V↔HH relation dependency needs (vcov uses the weighted
+ *  deviance while Sy.x is recomputed on the raw residuals). */
+export function applyAmbiguousFlags(
+  coefficients: RegressionCoefficient[],
+  hessian: number[][] | null,
+  terms: string[],
+  syx: number | null,
+  handling: NonlinearDifficultFitHandling = "unstable",
+): { ambiguousParameters: string[] } {
+  const dependencies = parameterDependencies(hessian, coefficients, syx);
+  coefficients.forEach((c, i) => {
+    c.dependency = dependencies[i] ?? null;
+  });
+  if (handling !== "ambiguous") return { ambiguousParameters: [] };
+  const ambiguousParameters: string[] = [];
+  coefficients.forEach((c, i) => {
+    const d = dependencies[i];
+    if (d != null && d > AMBIGUOUS_DEPENDENCY_THRESHOLD) {
+      c.ambiguous = true;
+      ambiguousParameters.push(terms[i]!);
+    }
+  });
+  return { ambiguousParameters };
 }
 
 /** R statements that, after `m` is fitted, compute the summary quantities
@@ -2785,6 +2851,9 @@ export interface NonlinearFit {
   /** Seq 323: the parameters the data do not determine (raw term names),
    *  when the check ran and found any. */
   unstableParameters?: string[];
+  /** Seq 387: the parameters whose dependency exceeds 0.9999 (raw term
+   *  names), when the ambiguous-fit handling ran and found any. */
+  ambiguousParameters?: string[];
 }
 
 /** Warm-start an nls fit string from the current fit (seq 200): replace
@@ -2913,6 +2982,17 @@ export async function fitModelSpec(
         options?.difficultFitHandling ?? "unstable",
         derived,
       );
+      // Dependency is computed on every least-squares fit (the Diagnostics
+      // option only controls whether it is shown); a robust/Poisson refit
+      // passes null, so its coefficients carry no dependency.
+      const syx = stats.find((s) => s.label === "Sy.x")?.value ?? null;
+      const { ambiguousParameters } = applyAmbiguousFlags(
+        coefficients,
+        hessian,
+        eff.terms,
+        method === "least-squares" ? syx : null,
+        options?.difficultFitHandling ?? "unstable",
+      );
       return {
         coefficients,
         derived,
@@ -2921,6 +3001,7 @@ export async function fitModelSpec(
         ...(attempt ? { retried: true, retryMethod: attempt.method } : {}),
         ...(condition != null ? { hessianCondition: condition } : {}),
         ...(unstableParameters.length ? { unstableParameters } : {}),
+        ...(ambiguousParameters.length ? { ambiguousParameters } : {}),
       };
     } catch (err) {
       lastErr = err;

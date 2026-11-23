@@ -4238,10 +4238,22 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ]),
         // Seq 323 (Prism's Confidence tab): what happens when a parameter
         // is unstable — the data don't determine it (the fit's Hessian
-        // condition number exceeds 10/√ε, about 6.7×10⁸).
-        choice("difficultFitHandling", "What should happen when a parameter is unstable (the data don't determine it)?", [
+        // condition number exceeds 10/√ε, about 6.7×10⁸). Seq 387: a
+        // third mode, identify ambiguous fits (Prism's older method —
+        // a parameter whose dependency exceeds 0.9999 is flagged, with
+        // ~ values and very wide CIs).
+        choice("difficultFitHandling", "How should difficult fits be handled (parameters the data don't determine)?", [
           ["unstable", "Identify unstable parameters (recommended — Prism's default)"],
+          ["ambiguous", "Identify ambiguous fits (Prism's older method — dependency above 0.9999)"],
           ["none", "Neither — report best-fit values no matter what"],
+        ]),
+        // Seq 387 (Prism's Diagnostics tab): report each parameter's
+        // dependency — how much the other parameters can compensate for
+        // a change in it. The values are computed on every fit; this
+        // only controls whether the results sheet shows them.
+        choice("reportDependency", "Report each parameter's dependency?", [
+          ["no", "No"],
+          ["yes", "Yes — show dependency for each parameter"],
         ]),
         // Seq 166 (Prism 11 Range tab): "Don't fit points when X is less
         // than / greater than …" — points outside the range are ignored
@@ -4515,6 +4527,8 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ...(a.difficultFitHandling !== undefined && a.difficultFitHandling !== "unstable"
             ? { difficultFitHandling: a.difficultFitHandling as NonlinearRegressionParams["difficultFitHandling"] }
             : {}),
+          // Seq 387: the dependency report is opt-in (Prism's Diagnostics tab).
+          ...(a.reportDependency === "yes" ? { reportDependency: true } : {}),
           ...compareModel,
           ...global,
           ...sharedParams,

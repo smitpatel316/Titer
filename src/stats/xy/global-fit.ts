@@ -100,6 +100,9 @@ export interface GlobalFitResult {
   hessianCondition?: number;
   /** Seq 323: the parameters the data do not determine (raw term names). */
   unstableParameters?: string[];
+  /** Seq 387: the parameters whose dependency exceeds 0.9999 (raw term
+   *  names), when the ambiguous-fit handling ran and found any. */
+  ambiguousParameters?: string[];
 }
 
 /** R² of `ys` against their fitted values (null when Y is constant, or
@@ -171,7 +174,7 @@ export async function runGlobalFit(
     terms,
     derived: def.derived,
   };
-  const { coefficients, derived, stats, rCode, hessianCondition, unstableParameters } = await fitModelSpec(
+  const { coefficients, derived, stats, rCode, hessianCondition, unstableParameters, ambiguousParameters } = await fitModelSpec(
     stackedX,
     stackedY,
     spec,
@@ -201,5 +204,6 @@ export async function runGlobalFit(
     rCode,
     ...(hessianCondition != null ? { hessianCondition } : {}),
     ...(unstableParameters?.length ? { unstableParameters } : {}),
+    ...(ambiguousParameters?.length ? { ambiguousParameters } : {}),
   };
 }
