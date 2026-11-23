@@ -836,14 +836,17 @@ const ROWS: Row[] = [
   },
   {
     item: "331",
-    title: "MV variable types (HALF A)",
+    title: "MV variable types (HALF A + B)",
     status: "covered",
-    note: "Auto-detect + manual override + level rename on Multiple Variables tables: variable_type + variable_type_manual on titer_list_tables columns (MV only), titer_edit_table set-variable-type op; .hlx round-trip via readVariableTypes.",
+    note: "Auto-detect + manual override + level rename on Multiple Variables tables: variable_type + variable_type_manual on titer_list_tables columns (MV only), titer_edit_table set-variable-type op; .hlx round-trip via readVariableTypes. Half B: types drive the analyses (label variables never offered or fitted, numeric-coded categoricals dummy-code), categories autocomplete, a label variable can serve as the graph's row-label source.",
     checks: [
       { kind: "editOpsContains", op: "set-variable-type" },
       { kind: "sourceContains", file: "mcpDispatch", text: "set-variable-type" },
       { kind: "structContains", struct: "EditTableArgs", text: "variable_type" },
       { kind: "sourceContainsRe", scope: "src", re: "variableTypes" },
+      { kind: "sourceContainsRe", scope: "stats", re: "is a label variable" },
+      { kind: "sourceContainsRe", scope: "src", re: "labelVariable" },
+      { kind: "sourceContainsRe", scope: "src", re: "levelSuggestions" },
     ],
   },
 

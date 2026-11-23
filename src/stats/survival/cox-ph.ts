@@ -21,6 +21,7 @@ import {
   completeRowsDroppingEmptyText,
   droppedNoCompleteNote,
   expandDesign,
+  labelPredictorError,
   type DesignColumn,
 } from "../multiple/predictors";
 import { levelsOf } from "../../lib/dataset";
@@ -47,8 +48,11 @@ export async function runCoxPH(
   params: CoxPHParams | undefined,
 ): Promise<AnalysisOutcome> {
   // Usable columns: numeric, or text with levels — a text column is a
-  // categorical covariate, dummy-coded (seq 224).
-  const usable = columns.filter((c) => c.values.length > 0 || levelsOf(c).length > 0);
+  // categorical covariate, dummy-coded (seq 224). A label variable is never
+  // usable: not as time, status or covariate (seq 331 half B).
+  const usable = columns.filter(
+    (c) => c.variableType !== "label" && (c.values.length > 0 || levelsOf(c).length > 0),
+  );
   const vars = usable.filter((c) => c.values.length > 0);
   if (usable.length < 3) {
     return { error: "Cox regression needs a time column, a status column and at least one covariate." };
@@ -57,6 +61,8 @@ export async function runCoxPH(
     if (name === undefined) return fallback ?? { error: `Cox regression needs a ${role} column.` };
     const found = columns.find((c) => c.name === name);
     if (!found) return { error: `The column “${name}” is no longer in the table. Create this analysis again to choose another.` };
+    if (found.variableType === "label")
+      return { error: `“${name}” is a label variable — it cannot be the ${role} column.` };
     if (!found.values.length) return { error: `The column “${name}” holds no numbers — it cannot be the ${role} column.` };
     return found;
   };
@@ -79,6 +85,10 @@ export async function runCoxPH(
   if (explicit && covariateCols.length < chosen.length) {
     const missing = chosen.find((name) => !covariateCols.some((c) => c.name === name));
     return { error: `The column “${missing}” is no longer in the table. Create this analysis again to choose another.` };
+  }
+  const labelCovariate = covariateCols.find((c) => c.variableType === "label");
+  if (labelCovariate) {
+    return { error: labelPredictorError(labelCovariate.name, "covariate") };
   }
   const emptyCovariate = covariateCols.find((c) => c.values.length === 0 && levelsOf(c).length === 0);
   if (emptyCovariate) {

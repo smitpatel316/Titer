@@ -821,6 +821,12 @@ export interface TableData {
    *  every edit. Omitted when the table has no typed columns (a fresh
    *  table, or a non-MV table). */
   variableTypes?: Record<string, VariableTypeInfo>;
+  /** The row-label source (seq 331 half B): the name of a label-typed
+   *  column whose cells name the points on the table's graphs, instead of
+   *  the row titles. Omitted = row titles. The choice only resolves while
+   *  the column is label-typed (see `labelVariableOf`); a hand-edited file
+   *  naming a column that is gone loses it on read. */
+  labelVariable?: string;
   /** A linked paste (Prism 11, seq 168): this table's cells pasted from a
    *  data file that stay linked to it — see `LinkedPaste`. Omitted when
    *  the table holds no linked block. The link is Titer-local: the

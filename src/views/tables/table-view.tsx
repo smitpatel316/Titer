@@ -47,7 +47,9 @@ import {
 } from "../../lib/calcvars";
 import {
   categoricalLevels,
+  labelVariableOf,
   renameLevel,
+  setLabelVariable,
   setVariableType,
   setVariableTypeAuto,
   variableTypesOf,
@@ -318,7 +320,7 @@ function FormatPanel({ data, update }: { data: TableData; update: (next: TableDa
  *  (any case); renaming onto another level merges the two, so a typo folds
  *  into its level. A calculated column's levels come from its formula, so
  *  its levels show without a rename box. */
-function VariableTypesPanel({
+export function VariableTypesPanel({
   data,
   update,
 }: {
@@ -331,6 +333,7 @@ function VariableTypesPanel({
   const types = variableTypesOf(data);
   const columns = data.columns.slice(1);
   const shown = columns.filter((name) => filter === "all" || types[name].type === filter);
+  const labelColumns = columns.filter((name) => types[name].type === "label");
   const typeLabel = (t: VariableType) =>
     t === "categorical" ? "Categorical" : t === "continuous" ? "Continuous" : "Label";
   const clearRename = (key: string) =>
@@ -341,6 +344,19 @@ function VariableTypesPanel({
     });
   return (
     <Section title="Variable Types">
+      {labelColumns.length > 0 && (
+        <div className="flex items-center gap-2" title="Which variable names the points on this table's graphs">
+          <span className="min-w-0 flex-1 truncate text-regular font-medium">Row labels</span>
+          <Select<string>
+            value={labelVariableOf(data) ?? ""}
+            onChange={(next) => update(setLabelVariable(data, next === "" ? undefined : next), "Set Row Labels")}
+            options={[
+              { value: "", label: "Row titles" },
+              ...labelColumns.map((name) => ({ value: name, label: name })),
+            ]}
+          />
+        </div>
+      )}
       <Segmented<"all" | VariableType>
         value={filter}
         onChange={setFilter}

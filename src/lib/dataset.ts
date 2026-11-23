@@ -2,10 +2,11 @@
 // share, so they always agree on the data: excluded cells read as blank, each cell
 // is parsed once (numeric.ts decides what a number is), and the reading is cached
 // per table version. An edit makes a new TableData, so the cache is never stale.
-import { hasXColumn, type TableData, type TableType } from "../store/types";
+import { hasXColumn, type TableData, type TableType, type VariableType, type VariableTypeInfo } from "../store/types";
 import { summaryFormatOf, type SummaryFormat } from "./summary-format";
 import { excludedKey, seriesKeyOf } from "./columns";
 import { parseCell } from "./numeric";
+import { rowLabelsOf, variableTypesOf } from "./variable-types";
 
 /** One data column, as every engine sees it. */
 export interface Column {
@@ -21,6 +22,11 @@ export interface Column {
   /** The data set it belongs to: a grouped table's group or an XY table's data set of
    *  replicates ("A" for "A:Y1"), else (absent) the column itself. */
   set?: string;
+  /** The column's resolved MV variable type (seq 331): categorical,
+   *  continuous or label, as the Variable Types panel shows it. Absent on
+   *  tables nobody typed yet (non-MV tables, or an MV table before its
+   *  first edit) — consumers fall back to the cells, as before. */
+  variableType?: VariableType;
 }
 
 export interface Dataset {
@@ -38,6 +44,13 @@ export interface Dataset {
   /** A nested table's groups with their subgroups (empty for other tables) —
    *  the structure the nested tests read, alongside `sets`. */
   nested: NestedGroup[];
+  /** The resolved MV variable types, keyed by column name — the pickers'
+   *  reading, so a label variable is never offered to an analysis. Empty
+   *  on tables nobody typed yet. */
+  variableTypes?: Record<string, VariableTypeInfo>;
+  /** The values the graphs show beside their points: the chosen label
+   *  variable's cells, or the row titles when none is chosen. */
+  rowLabels?: (string | null)[];
   /** A grouped table's sub-column format: "replicates", or the summaries its
    *  sub-columns hold (see src/lib/summary-format.ts) — the graphs' and the
    *  stats' shared reading, so a summary table is never mistaken for replicates. */
@@ -81,6 +94,10 @@ export function readTable(data: TableData): Dataset {
   let dataset = cache.get(data);
   if (!dataset) {
     const excluded = new Set(data.excluded);
+    // The resolved variable types, when the table has any — an MV table
+    // refreshed by the store funnel, never a non-MV table (whose columns
+    // stay typeless and read exactly as before).
+    const types = data.variableTypes ? variableTypesOf(data) : {};
     // The columns from `lead` on are a grouped table's: each in its group.
     const lead = leadOf(data);
     const columns = data.columns.slice(1).map((name, i): Column => {
@@ -88,7 +105,16 @@ export function readTable(data: TableData): Dataset {
       const byRow = cells.map(parseCell);
       const rows = byRow.flatMap((v, r) => (v == null ? [] : [r]));
       const set = i + 1 >= lead ? seriesKeyOf(name) : undefined;
-      return { name, cells, byRow, values: rows.map((r) => byRow[r]!), rows, ...(set === undefined ? {} : { set }) };
+      const variableType = types[name]?.type;
+      return {
+        name,
+        cells,
+        byRow,
+        values: rows.map((r) => byRow[r]!),
+        rows,
+        ...(set === undefined ? {} : { set }),
+        ...(variableType === undefined ? {} : { variableType }),
+      };
     });
     dataset = {
       titles: data.rows.map((row) => row[0] ?? null),
@@ -100,6 +126,8 @@ export function readTable(data: TableData): Dataset {
           ? byGroup(columns)
           : columns.map((c) => ({ name: c.name, columns: [c] })),
       nested: isNested(data) ? nestedGroupsOf(columns) : [],
+      variableTypes: types,
+      rowLabels: rowLabelsOf(data),
       summary: summaryFormatOf(data),
     };
     cache.set(data, dataset);

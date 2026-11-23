@@ -477,15 +477,21 @@ const fittedYs = (a: Answers) => {
   return ys === undefined ? {} : ys.length === 1 ? { y: ys[0] } : { ys };
 };
 const yNames = (table: Dataset) => splitXY(table.columns).ys.map((c) => c.name);
-const dataNames = (table: Dataset) => table.numeric.map((c) => c.name);
+const dataNames = (table: Dataset) =>
+  table.numeric.filter((c) => !isLabel(table, c.name)).map((c) => c.name);
+
+/** Whether the named column is a label variable on this table — never
+ *  offered to an analysis (seq 331 half B). Untyped tables have no labels,
+ *  so every offering reads exactly as before on them. */
+const isLabel = (table: Dataset, name: string) => table.variableTypes?.[name]?.type === "label";
 
 /** The variables usable as regression predictors / Cox covariates: numeric
  *  columns, plus text columns with at least two levels — a text column is
  *  dummy-coded (seq 224), so a single-level text column cannot be a
- *  predictor and is not offered. */
+ *  predictor and is not offered. A label variable is never offered. */
 const predictorNames = (table: Dataset, exclude?: string) =>
   table.columns
-    .filter((c) => c.name !== exclude && (c.values.length > 0 || levelsOf(c).length >= 2))
+    .filter((c) => c.name !== exclude && !isLabel(table, c.name) && (c.values.length > 0 || levelsOf(c).length >= 2))
     .map((c) => c.name);
 
 /** The levels of the named column (distinct non-blank cell texts, first-appearance
@@ -497,19 +503,23 @@ const levelsOfName = (table: Dataset, name: string | undefined): string[] => {
 
 /** The variables with exactly two levels — a t test's grouping-variable candidates. */
 const twoLevelNames = (table: Dataset, exclude?: string) =>
-  table.columns.filter((c) => c.name !== exclude && levelsOf(c).length === 2).map((c) => c.name);
+  table.columns
+    .filter((c) => c.name !== exclude && !isLabel(table, c.name) && levelsOf(c).length === 2)
+    .map((c) => c.name);
 
 /** The variables with at least two levels — a survival analysis's grouping candidates. */
 const groupingNames = (table: Dataset, exclude?: (string | undefined)[]) =>
   table.columns
-    .filter((c) => !(exclude ?? []).includes(c.name) && levelsOf(c).length >= 2)
+    .filter((c) => !(exclude ?? []).includes(c.name) && !isLabel(table, c.name) && levelsOf(c).length >= 2)
     .map((c) => c.name);
 
 /** The numeric variables holding only 0/1 — a survival analysis's event-code candidates
  *  (or every numeric variable, when none is binary: the runner then says so). */
 const binaryNames = (table: Dataset, exclude?: string) => {
   const binary = table.numeric
-    .filter((c) => c.name !== exclude && c.values.length > 0 && c.values.every((v) => v === 0 || v === 1))
+    .filter(
+      (c) => c.name !== exclude && !isLabel(table, c.name) && c.values.length > 0 && c.values.every((v) => v === 0 || v === 1),
+    )
     .map((c) => c.name);
   return binary.length > 0 ? binary : dataNames(table).filter((n) => n !== exclude);
 };
@@ -5262,9 +5272,12 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       const byName = new Map(table.columns.map((c) => [c.name, c]));
       const all = table.columns.map((c) => c.name);
       // Only columns with ≥ 2 levels can be a factor (a numeric-coded factor
-      // counts — its codes are its levels). When none qualifies, offer every
-      // column but the response and let the runner say so.
-      const factorable = all.filter((n) => n !== response && levelsOf(byName.get(n)!).length >= 2);
+      // counts — its codes are its levels). A label variable is never a
+      // factor. When none qualifies, offer every column but the response and
+      // let the runner say so.
+      const factorable = all.filter(
+        (n) => n !== response && !isLabel(table, n) && levelsOf(byName.get(n)!).length >= 2,
+      );
       const factorOptions = factorable.length > 0 ? factorable : all.filter((n) => n !== response);
       const terms = multifactorTerms((a.factors as string[] | undefined) ?? []);
       return [
