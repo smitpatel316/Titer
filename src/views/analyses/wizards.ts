@@ -3,7 +3,7 @@
 // and how the answers make the test's params; analysis-wizard.tsx asks them.
 // A test without an entry here runs as soon as it is picked.
 import { DOSE_MODELS, CONCENTRATION_UNITS, GOF_EXPECTED_MODES, MONTE_CARLO_REPEATS, MONTE_CARLO_TARGET_STATISTICS, MULTIFACTOR_MAX_FACTORS, NONLINEAR_MODELS, PAIR_CORRECTIONS, ROUT_Q, SELECT_TRANSFORM_KINDS, SELECT_TRANSFORM_NEEDS_K, fdrQError, isFdrPValueMethod, pValueAlphaError, routQError, type ConcentrationUnit, type LinearRegressionParams, type MonteCarloParams, type MonteCarloSimulationDistribution, type MonteCarloStatistic, type MonteCarloTarget, type NonlinearModel, type PValueStackParams, type SelectTransformKind, type SelectTransformOperator } from "../../stats/types";
-import type { PlotFunctionExtra, PlotFunctionModel } from "../../stats/types";
+import type { PlotFunctionExtra, PlotFunctionModel, TransformDataParams } from "../../stats/types";
 import {
   PLOT_FUNCTION_DEFAULTS,
   PLOT_FUNCTION_LABEL,
@@ -17,7 +17,7 @@ import { hasXColumn, type RowGroup, type TableType, type Transform } from "../..
 import { MODEL_LABEL, termLabel } from "../../stats/xy/nonlinear-regression";
 import { isPolynomialModel, modelSpec } from "../../stats/xy/nonlinear-fit";
 import { parseCustomParameters, parseUserEquation } from "../../stats/xy/user-defined";
-import { isArithmeticTransform } from "../../stats/column/transform-data";
+import { isCrossTransform, isKTransform, parseUserFormula } from "../../stats/column/transform-data";
 import { pairedDifferences } from "../../stats/simulation/monte-carlo";
 import { dataGroups, incompleteRows, pairedGroups, pairIndices } from "../../stats/column/base";
 import { flattenThreeWay, groupRows, rowGroupBands, rowName, threeWayTermCells } from "../../stats/grouped/base";
@@ -535,6 +535,15 @@ const someSets = (table: Dataset, min: number): Question[] => {
   if (sets.length <= min) return [];
   const ask = min > 1 ? `Choose the data sets to analyze (at least ${min}).` : "Choose the data sets to analyze.";
   return [{ id: "sets", ask, kind: "names", options: sets, min }];
+};
+
+/** The transform-data wizard's X column and Y data sets: on an XY table the
+ *  X column is the pairing column, not a data set to transform — so the sets
+ *  question offers the Y sets only, and the finish can name the X column. */
+const transformXY = (table: Dataset, type?: TableType) => {
+  const xName = type === "xy" ? splitXY(table.columns).x?.name : undefined;
+  const ySetNames = xName ? setNames(table).filter((n) => n !== xName) : setNames(table);
+  return { xName, ySetNames };
 };
 
 /** The one data set a test reads, asked as a single choice only when there
@@ -2263,14 +2272,44 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
     }),
   },
 
-  // Transform data (v2, item 1): one function applied to every value of the
-  // chosen columns. Prism's standard set (log10, ln, log2, sqrt, reciprocal,
-  // exp, square); a value the function is undefined for is left blank in
-  // the results sheet, never NaN — the runner states the reason in its notes.
+  // Transform data (v2, item 1; extended 1.9, seq 341): one function applied
+  // to every value of the chosen columns. Prism's standard set (log10, ln,
+  // log2, sqrt, reciprocal, exp, square) plus the arithmetic transforms
+  // (seq 205) and the rest of Prism's documented set (seq 341): logit,
+  // probit, rank, zscore, trig, ABS, Y+Random, rounding, Y^K, 10^Y, 2^Y,
+  // −log10, the X/Y cross-column functions (XY tables only — there is no X
+  // column to pair with on other tables), X transforms + interchange (XY),
+  // a K per data set, error-bar handling on summary tables, and
+  // user-defined transforms (one formula line per data set, `;`-separated).
+  // A value the function is undefined for is left blank in the results
+  // sheet, never NaN — the runner states the reason in its notes.
   "transform-data": {
-    questions: (a, table) => [
-      ...someSets(table, 1),
-      choice("function", "Which function should be applied to the values?", [
+    questions: (a, table, type) => {
+      const fn = (a.function as TransformFunction | undefined) ?? "log10";
+      const { xName, ySetNames } = transformXY(table, type);
+      const chosen = chosenSets(a) ?? ySetNames;
+      const setsQ: Question[] =
+        ySetNames.length <= 1
+          ? []
+          : [{ id: "sets", ask: "Choose the data sets to analyze.", kind: "names", options: ySetNames, min: 1 }];
+      const kValidate = (f: TransformFunction) => (v: number): string | undefined => {
+        if (f === "round-k" && (!Number.isInteger(v) || v < 0 || v > 15))
+          return "K must be a whole number from 0 to 15 for rounding.";
+        if (f === "y-plus-random" && v <= 0) return "K must be greater than 0 — K is the noise SD.";
+        if (f === "y-divided-by-k" && v === 0) return "K must not be 0 for Y/K — dividing by 0 is undefined.";
+        return undefined;
+      };
+      const kQuestion = (id: string, ask: string, f: TransformFunction): Question => ({
+        id,
+        ask,
+        kind: "number",
+        label: "Constant K",
+        initial: 1,
+        validate: kValidate(f),
+      });
+      // The Y function: the full set, but the cross-column functions only
+      // where an X column exists to pair with (an XY table with X values).
+      const fnOptions: [string, string][] = [
         ["log10", "log10(Y) — logarithm, base 10"],
         ["ln", "ln(Y) — natural logarithm"],
         ["log2", "log2(Y) — logarithm, base 2"],
@@ -2284,28 +2323,127 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ["y-divided-by-k", "Y/K — divide every value by a constant"],
         ["k-minus-y", "K−Y — subtract every value from a constant"],
         ["k-divided-by-y", "K/Y — divide a constant by every value"],
-      ]),
-      isArithmeticTransform((a.function as TransformFunction | undefined) ?? "log10") && {
-        id: "constant",
-        ask: "What is the constant K to apply?",
-        kind: "number",
-        label: "Constant K",
-        initial: 1,
-        validate: (v) =>
-          a.function === "y-divided-by-k" && v === 0
-            ? "K must not be 0 for Y/K — dividing by 0 is undefined."
-            : undefined,
-      },
-    ],
-    finish: (a) => ({
-      type: "transform-data",
-      params: withSets(a, {
-        function: (a.function as TransformFunction | undefined) ?? "log10",
-        ...(isArithmeticTransform((a.function as TransformFunction | undefined) ?? "log10")
-          ? { constant: a.constant as number }
-          : {}),
-      }),
-    }),
+        ["logit", "logit(Y) — ln(Y/(1−Y)), for proportions"],
+        ["probit", "probit(Y) — Φ⁻¹(Y)+5, for proportions"],
+        ["rank", "rank(Y) — smallest value = 1"],
+        ["zscore", "zscore(Y) — standard deviations from the mean"],
+        ["sin", "sin(Y) — sine (radians)"],
+        ["cos", "cos(Y) — cosine (radians)"],
+        ["tan", "tan(Y) — tangent (radians)"],
+        ["arcsin", "arcsin(Y) — inverse sine (radians)"],
+        ["abs", "|Y| — absolute value"],
+        ["y-plus-random", "Y+Random — add Gaussian noise (SD = K)"],
+        ["round-k", "round(Y, K) — round to K digits after the decimal"],
+        ["y-power-k", "Y^K — raise every value to the power K"],
+        ["ten-power-y", "10^Y — 10 to the power of Y"],
+        ["two-power-y", "2^Y — 2 to the power of Y"],
+        ["neg-log10", "−log10(Y) — negative logarithm, base 10"],
+        ...(xName
+          ? ([
+              ["x-divided-by-y", "X/Y — divide X by Y"],
+              ["y-divided-by-x", "Y/X — divide Y by X"],
+              ["y-minus-x", "Y−X — subtract X from Y"],
+              ["y-plus-x", "Y+X — add X to Y"],
+              ["y-times-x", "Y×X — multiply Y by X"],
+              ["x-minus-y", "X−Y — subtract Y from X"],
+            ] as [string, string][])
+          : []),
+        ["user-defined", "User-defined — write your own formula"],
+      ];
+      // The X function takes any built-in function (a user-defined transform
+      // applies to the Y values only — the runner refuses it for X).
+      const xFnOptions = fnOptions.filter(([v]) => v !== "user-defined");
+      const xFn = (a.xFunction as TransformFunction | undefined) ?? "log10";
+      return [
+        ...setsQ,
+        choice("function", "Which function should be applied to the values?", fnOptions),
+        isKTransform(fn) &&
+          chosen.length > 1 &&
+          choice("kMode", "One K for every data set, or a different K per data set?", [
+            ["same", "Same K for every data set"],
+            ["per-dataset", "A different K for each data set"],
+          ]),
+        isKTransform(fn) &&
+          (chosen.length <= 1 || a.kMode !== "per-dataset") &&
+          kQuestion("constant", "What is the constant K to apply?", fn),
+        ...(isKTransform(fn) && chosen.length > 1 && a.kMode === "per-dataset"
+          ? chosen.map((name, i) => kQuestion(`k_${i}`, `What is K for data set “${name}”?`, fn))
+          : []),
+        fn === "user-defined" && {
+          id: "formula",
+          ask: "Write the transform as a formula — one line per data set, separated by “;”, with an optional designator such as <B> or <~A> at the start of a line.",
+          kind: "text",
+          label: "Formula",
+          initial: "",
+          placeholder: "Y = IF(Y<0, Y, Y*Y)",
+          parse: (text: string) => {
+            const r = parseUserFormula(text, table.columns);
+            return "error" in r ? { error: r.error } : {};
+          },
+        },
+        table.summary !== "replicates" &&
+          choice("errorMode", "This table holds pre-calculated means and error bars. How should the error bars be handled?", [
+            ["mean-only", "Transform the mean only — the error bars stay as they are"],
+            ["erase", "Erase the error bars"],
+            ["to-ci", "Convert the error bars to 95% confidence intervals first, then transform both ends"],
+          ]),
+        xName !== undefined &&
+          choice("transformX", "Transform the X values too?", [
+            ["no", "No — leave the X values as they are"],
+            ["yes", "Yes — apply a function to the X values as well"],
+          ]),
+        xName !== undefined &&
+          a.transformX === "yes" &&
+          choice("xFunction", "Which function should be applied to the X values?", xFnOptions),
+        xName !== undefined &&
+          a.transformX === "yes" &&
+          isKTransform(xFn) &&
+          kQuestion("xConstant", "What is the constant K for the X values?", xFn),
+        xName !== undefined &&
+          choice("interchange", "Interchange X and Y before transforming?", [
+            ["no", "No — transform Y with the chosen function"],
+            ["yes", "Yes — swap X and Y first (the Y function applies to the old X values)"],
+          ]),
+      ];
+    },
+    finish: (a, table, type) => {
+      const fn = (a.function as TransformFunction | undefined) ?? "log10";
+      const { xName, ySetNames } = transformXY(table, type);
+      const xFn = a.transformX === "yes" ? ((a.xFunction as TransformFunction | undefined) ?? "log10") : undefined;
+      const interchange = xName !== undefined && a.interchange === "yes";
+      const needsX =
+        xName !== undefined && (isCrossTransform(fn) || xFn !== undefined || interchange || fn === "user-defined");
+      const params: { function: TransformFunction } & Partial<TransformDataParams> = { function: fn };
+      // The K: one constant, or one per data set (keyed by data-set name);
+      // the X column's K joins the per-set map under the X column's name.
+      const constants: Record<string, number> = {};
+      if (isKTransform(fn) && a.kMode === "per-dataset") {
+        const chosen = chosenSets(a) ?? ySetNames;
+        chosen.forEach((name, i) => {
+          const k = a[`k_${i}`] as number | undefined;
+          if (k !== undefined) constants[name] = k;
+        });
+      } else if (isKTransform(fn) && a.constant !== undefined) {
+        params.constant = a.constant as number;
+      }
+      if (xFn !== undefined && isKTransform(xFn) && a.xConstant !== undefined && xName) {
+        constants[xName] = a.xConstant as number;
+      }
+      if (Object.keys(constants).length > 0) params.constants = constants;
+      if (fn === "user-defined" && a.formula !== undefined) params.formula = a.formula as string;
+      if (a.errorMode !== undefined) params.errorMode = a.errorMode as TransformDataParams["errorMode"];
+      if (xFn !== undefined) params.xFunction = xFn;
+      if (interchange) params.interchange = true;
+      if (needsX && xName) params.x = xName;
+      const out = withSets(a, params) as typeof params & { sets?: string[] };
+      // The X column travels with the run when it is needed: setColumns only
+      // keeps the chosen sets, so name it alongside them (unless every set
+      // is in play, when it travels anyway).
+      if (needsX && xName && out.sets && !out.sets.includes(xName)) {
+        return { type: "transform-data", params: { ...out, sets: [...out.sets, xName] } };
+      }
+      return { type: "transform-data", params: out };
+    },
   },
   // Transform concentrations (v2): one numeric column (an XY table's X
   // dose column, or any Y / Column-table column) between molar units.

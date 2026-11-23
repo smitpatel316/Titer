@@ -98,6 +98,7 @@ import {
   TAILS,
   THREE_WAY_POSTHOC_SCOPES,
   THREE_WAY_TERMS,
+  TRANSFORM_ERROR_MODES,
   TRANSFORM_FUNCTIONS,
   TWO_WAY_DESIGNS,
 } from "../stats/types";
@@ -468,6 +469,16 @@ const PARAMS = {
   rout: "yes/no", x: "name",
   // Transform data (v2): which function to apply.
   function: TRANSFORM_FUNCTIONS,
+  // Transform data (seq 341): a constant K per data set; the X column's
+  // function; whether X and Y are interchanged first; how error bars on a
+  // mean±SD/SEM table are handled; the user-defined formula (a free string,
+  // like nonlinear regression's customEquation — NOT the plot-function
+  // `equation`, which is a model name).
+  constants: "numbers-by-name",
+  xFunction: TRANSFORM_FUNCTIONS,
+  interchange: "yes/no",
+  errorMode: TRANSFORM_ERROR_MODES,
+  formula: "name",
   // Plot a function (v2): the equation, the X range, how many line segments
   // draw each curve, the extra series, and the curves themselves (each a
   // label + its parameter values, read by the "plot-curves" kind below).
@@ -1066,7 +1077,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "descriptive-statistics": ["sets"],
   "frequency-distribution": ["binMode", "binWidth", "binCount", "startAt", "sets"],
   "fraction-of-total": ["ys", "x", "totalBy", "format", "ci", "sets"],
-  "transform-data": ["function", "constant", "sets"],
+  "transform-data": ["function", "constant", "constants", "x", "xFunction", "interchange", "errorMode", "formula", "sets"],
   "transform-concentrations": ["column", "fromUnit", "toUnit", "sets"],
   "remove-baseline": ["ys", "x", "baselineMethod", "firstN", "controls", "constant", "constantHook", "columnMathOperation", "columnMathA", "columnMathB", "sets"],
   normalize: [
