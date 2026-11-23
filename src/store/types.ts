@@ -827,6 +827,16 @@ export interface TableData {
    *  the column is label-typed (see `labelVariableOf`); a hand-edited file
    *  naming a column that is gone loses it on read. */
   labelVariable?: string;
+  /** A Multiple Variables table's per-column level orders (seq 340, Prism
+   *  11.2): the display order of a categorical column's levels, keyed by
+   *  column name (so a rename carries it, like `variableTypes`) to an
+   *  array of normalized level keys (trimmed, lowercased — "Male" and
+   *  "male" share one position). Omitted = Entry order (first appearance
+   *  in the table). A hand-edited file holding a bogus entry loses it on
+   *  read; a level whose rows are gone drops out of the resolved order,
+   *  and a new level appends at the end. Blank cells are no level, so
+   *  there is no (blank) level to pin at the top. */
+  levelOrder?: Record<string, string[]>;
   /** A linked paste (Prism 11, seq 168): this table's cells pasted from a
    *  data file that stay linked to it — see `LinkedPaste`. Omitted when
    *  the table holds no linked block. The link is Titer-local: the

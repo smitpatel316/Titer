@@ -18,7 +18,7 @@
 // source row). A Contingency cell counts its source rows (+count each), and
 // a negative or non-integer count is not used.
 import type { AnalysisOutcome, ExtractRearrangeParams } from "../types";
-import type { Column } from "../../lib/dataset";
+import { orderLevels, type Column } from "../../lib/dataset";
 import type { TableData } from "../../store/types";
 import { GROUPED_LIMITS } from "../../store/types";
 
@@ -35,7 +35,8 @@ const textOf = (cell: string | null | undefined): string | undefined => {
   return t ? t : undefined;
 };
 
-/** Distinct non-blank cell texts, in first-appearance order. */
+/** Distinct non-blank cell texts, in first-appearance order — or in the
+ *  column's stored level order (seq 340) when it has one. */
 function levelsOf(column: Column): string[] {
   const seen = new Set<string>();
   const levels: string[] = [];
@@ -46,7 +47,7 @@ function levelsOf(column: Column): string[] {
       levels.push(t);
     }
   }
-  return levels;
+  return orderLevels(levels, column.levelOrder);
 }
 
 /** A level inside a column name: ":" would read as a sub-column separator

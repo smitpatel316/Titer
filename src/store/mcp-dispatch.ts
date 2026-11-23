@@ -107,7 +107,7 @@ import {
   type LinkedPaste,
 } from "../lib/linked-paste";
 import { fillSeries, generateSeries, validateSeriesSpec, type SeriesMode } from "../lib/series";
-import { isVariableType, setVariableType, variableTypesOf } from "../lib/variable-types";
+import { entryLevelKeys, isVariableType, refreshLevelOrder, setLevelOrder, setVariableType, variableTypesOf } from "../lib/variable-types";
 import { SUMMARY_FORMATS, summaryFormatOf, summarySubcolumns, type SummaryFormat } from "../lib/summary-format";
 import {
   CELL_BACKGROUND_COLORS,
@@ -821,6 +821,12 @@ function buildTableData(
       Object.entries(base.variableTypes).filter(([name, info]) => info.manual && columns.includes(name)),
     );
     if (Object.keys(manual).length) data.variableTypes = { ...data.variableTypes, ...manual };
+  }
+  // A replace keeps a Multiple Variables column's level order (seq 340):
+  // the stored order carries over, clipped to the surviving columns, and
+  // a level typed into the replacement appends at the end.
+  if (type === "multiple" && base.levelOrder) {
+    return refreshLevelOrder({ ...data, levelOrder: base.levelOrder });
   }
   return data;
 }
@@ -1785,6 +1791,49 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           next = setVariableType(data, name, variableType);
           break;
         }
+        case "set-level-order": {
+          // Seq 340: a Multiple Variables column's level order, set by hand
+          // — the MCP twin of the Variable Types panel's Level Order
+          // section. A later write appends a new level at the end (the
+          // store funnel maintains the stored order on every edit).
+          if (type !== "multiple") {
+            throw jobErr(
+              job,
+              `cannot set a level order — only Multiple Variables tables have level orders, and this is a ${type} table.`,
+            );
+          }
+          const column = argInt(job, job.args, "column");
+          const levelOrder = argStringArray(job, job.args, "level_order");
+          if (column < 1 || column >= data.columns.length) {
+            throw jobErr(
+              job,
+              `has no column ${column} — data columns run 1 to ${data.columns.length - 1} (column 0 is the row titles).`,
+            );
+          }
+          const name = data.columns[column];
+          if (variableTypesOf(data)[name]?.type !== "categorical") {
+            throw jobErr(
+              job,
+              `column “${name}” is not a categorical variable — only a categorical column has a level order.`,
+            );
+          }
+          if (levelOrder.length === 0) {
+            throw jobErr(job, `needs level_order to name at least one level.`);
+          }
+          const entry = entryLevelKeys(data, name);
+          const unknown = levelOrder.find((l) => !entry.includes(l.trim().toLowerCase()));
+          if (unknown !== undefined) {
+            throw jobErr(
+              job,
+              `column “${name}” has no level “${unknown}” — ask titer_list_tables for the column's levels first.`,
+            );
+          }
+          const ordered = setLevelOrder(data, name, levelOrder);
+          if (ordered === data) break; // already that way: no-op success
+          label = "Set Level Order";
+          next = ordered;
+          break;
+        }
         case "paste-transposed": {
           // Seq 230, the MCP half of Edit ▸ Paste Transposed: `rows` is the
           // clipboard block; it lands transposed (rows become columns) at
@@ -1854,7 +1903,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         default:
           throw jobErr(
             job,
-            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, set-cell-background, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-variable-type, set-summary-format, paste-link, remove-link, generate-series, paste-transposed.`,
+            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, set-cell-background, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-variable-type, set-level-order, set-summary-format, paste-link, remove-link, generate-series, paste-transposed.`,
           );
       }
       if (next === null) {
