@@ -96,6 +96,36 @@ export function FigureView({ node }: { node: ProjectNode }) {
   // another cell. The drop goes through updateFigure, so Undo takes it back.
   const drag = useFigureDrag();
   const dropTarget = drag.target?.figureId === node.id ? drag.target : null;
+  // TEMP PROBE (seq 394 diagnosis only — DELETE before the fix lands):
+  // traces the pointer path into a fixed debug bar (no React re-render can
+  // disturb the drag) and window.__dragTrace, so a Linux GUI run shows
+  // exactly which step dies in WebKit: PD / MV / PC (pointercancel) / UP /
+  // DROP / CONFIRM. Also logs window-level pointerdown/pointercancel in
+  // capture phase, to tell "never reaches the page" from "React never runs".
+  const debugRef = React.useRef<HTMLDivElement | null>(null);
+  const setDebug = (s: string) => {
+    const w = window as unknown as Record<string, unknown>;
+    const trace = ((w.__dragTrace as string[] | undefined) ?? []) as string[];
+    trace.push(`${new Date().toISOString().slice(17, 23)} ${s}`);
+    w.__dragTrace = trace.slice(-40);
+    if (debugRef.current) debugRef.current.textContent = `DEBUG: ${trace.slice(-3).join(" | ")}`;
+  };
+  React.useEffect(() => {
+    const onWinPD = (e: PointerEvent) =>
+      setDebug(`WIN-PD ${(e.target as HTMLElement | null)?.tagName ?? "?"} btn=${e.button}`);
+    const onWinPC = (e: PointerEvent) =>
+      setDebug(`WIN-PC ${(e.target as HTMLElement | null)?.tagName ?? "?"} type=${e.type}`);
+    const onWinPU = (e: PointerEvent) => setDebug(`WIN-PU ${(e.target as HTMLElement | null)?.tagName ?? "?"} btn=${e.button}`);
+    window.addEventListener("pointerdown", onWinPD, true);
+    window.addEventListener("pointercancel", onWinPC, true);
+    window.addEventListener("pointerup", onWinPU, true);
+    return () => {
+      window.removeEventListener("pointerdown", onWinPD, true);
+      window.removeEventListener("pointercancel", onWinPC, true);
+      window.removeEventListener("pointerup", onWinPU, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   React.useEffect(() => {
     registerFigureDropHandler(async (source, target: FigureDropTargetRef) => {
       if (target.figureId !== node.id) return false;
@@ -105,12 +135,14 @@ export function FigureView({ node }: { node: ProjectNode }) {
           .map((n) => n.id),
       );
       const plan = planFigureDrop(panels, grid, source, target, graphIds);
+      setDebug(`DROP src=${source.kind} target=${target.row},${target.col} plan=${plan ? (plan.needsConfirm ? "confirm" : "direct") : "null"}`);
       if (!plan) return false;
       if (
         plan.needsConfirm &&
         !(await confirmReplace(plan.needsConfirm.title, plan.needsConfirm.detail))
       )
         return false;
+      setDebug(`CONFIRM-OK setPanels`);
       setPanels(plan.panels);
       return true;
     });
@@ -130,19 +162,25 @@ export function FigureView({ node }: { node: ProjectNode }) {
   } | null>(null);
   React.useEffect(() => () => panelDragRef.current?.cleanup?.(), []);
   const startPanelDrag = (e: React.PointerEvent, panel: FigurePanel) => {
+    setDebug(`PD ${panel.graphId} btn=${e.button} kind=${panel.kind ?? "graph"}`);
     if (e.button !== 0 || !isGraphPanel(panel)) return;
     const dragState = { startX: e.clientX, startY: e.clientY, started: false, cleanup: null as (() => void) | null };
     panelDragRef.current = dragState;
     const onMove = (ev: PointerEvent) => {
+      const d = Math.hypot(ev.clientX - dragState.startX, ev.clientY - dragState.startY);
       if (!dragState.started) {
-        if (Math.hypot(ev.clientX - dragState.startX, ev.clientY - dragState.startY) < 4) return;
+        if (d < 4) return;
         dragState.started = true;
         beginFigureDrag({ kind: "panel", panel });
         document.body.style.cursor = "grabbing";
+        setDebug(`MV-START ${ev.clientX},${ev.clientY} d=${d.toFixed(1)}`);
       }
-      setFigureDragTarget(figureDropTargetFromPoint(ev.clientX, ev.clientY));
+      const t = figureDropTargetFromPoint(ev.clientX, ev.clientY);
+      setDebug(`MV ${ev.clientX},${ev.clientY} target=${t ? `${t.row},${t.col}` : "null"}`);
+      setFigureDragTarget(t);
     };
-    const onUp = () => {
+    const onUp = (ev: PointerEvent) => {
+      setDebug(`UP type=${ev.type} started=${dragState.started}`);
       dragState.cleanup?.();
       panelDragRef.current = null;
       document.body.style.cursor = "";
@@ -763,6 +801,14 @@ export function FigureView({ node }: { node: ProjectNode }) {
   );
 
   return (
+    <>
+      {/* TEMP PROBE (seq 394) — fixed debug bar; DELETE with the probe. */}
+      <div
+        ref={debugRef}
+        style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 99999, background: "#ff0", color: "#000", font: "12px monospace", padding: "2px 6px", pointerEvents: "none" }}
+      >
+        DEBUG: (waiting)
+      </div>
     <WithInspector title={node.name} tag="Figure" node={node} settings={inspector}>
       <div className="relative min-h-0 flex-1">
         <div ref={canvasRef} className="absolute inset-0 overflow-auto bg-desk">
@@ -979,5 +1025,6 @@ export function FigureView({ node }: { node: ProjectNode }) {
         )}
       </div>
     </WithInspector>
+    </>
   );
 }
