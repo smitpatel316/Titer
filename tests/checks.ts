@@ -27547,6 +27547,48 @@ check("calcvars: a window formula flows through MCP, round-trips through .hlx, a
   deepStrictEqual(calcValues(loaded.data!, "MeanB"), ["270", "270", "270", "270", "150", "150", "150", "150", "150"]);
 });
 
+check("calcvars: plain COUNT only reports in rows with non-blank values (seq 376)", () => {
+  // Prism's rule, from the Prism 11 User Guide function reference
+  // (available_functions_transforms.htm, COUNT(Variable)): "Unlike the
+  // other statistics functions, COUNT only reports in rows that contain
+  // non-blank values." The windowed COUNT already follows it
+  // (calcvars.ts: windowed COUNT blanks blank rows, "as the docs say") —
+  // the plain whole-variable COUNT did not, broadcasting to every row.
+  // COUNTA is one of "the other statistics functions", so it keeps
+  // broadcasting to every row; the *IF family is a condagg, untouched.
+  const base = mvTable(["Title", "A", "B", "C"], [
+    [null, "10", null, "1"],
+    [null, null, null, "2"],
+    [null, "20", null, "3"],
+    [null, "30", null, "4"],
+    [null, null, null, "5"],
+  ]);
+  const add = (name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(base, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  const all = (v: string | null): (string | null)[] => Array(5).fill(v);
+  // Blank in the middle (row 2) and at the end (row 5): only the rows
+  // with a value report the count.
+  deepStrictEqual(add("CountA", "COUNT(A)"), ["3", null, "3", "3", null]);
+  // An all-blank column has no row with a value: nothing reports.
+  deepStrictEqual(add("CountB", "COUNT(B)"), all(null));
+  // No-blank control: every row reports.
+  deepStrictEqual(add("CountC", "COUNT(C)"), all("5"));
+  // The other summary functions still broadcast to every row, blanks
+  // included — COUNT is the only exception.
+  deepStrictEqual(add("MeanA", "MEAN(A)"), all("20"));
+  deepStrictEqual(add("SumA", "SUM(A)"), all("60"));
+  deepStrictEqual(add("CountAA", "COUNTA(A)"), all("3"));
+  // The blank propagates through a larger formula, like any blank.
+  deepStrictEqual(add("CountPlus", "COUNT(A) + 1"), ["4", null, "4", "4", null]);
+  // Conditional COUNTIF is a condagg, not this call case: it still
+  // broadcasts, and still returns 0 when nothing matches.
+  deepStrictEqual(add("CountIf", "COUNTIF(A, A > 15)"), all("2"));
+  deepStrictEqual(add("CountIfNone", "COUNTIF(A, A > 100)"), all("0"));
+});
+
 // ── Simulate data + Monte Carlo (plan 22) ───────────────────────────────
 
 check("simulationRCode draws each distribution from the right R call", () => {
