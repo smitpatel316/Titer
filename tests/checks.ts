@@ -95,6 +95,7 @@ import {
   type GraphOptions,
   type GraphType,
   type ProjectNode,
+  type RowGroup,
   type TableType,
   type TableData,
 } from "../src/store/types";
@@ -181,12 +182,15 @@ import { dagostinoPearson } from "../src/stats/column/shapiro-wilk";
 import { runRout } from "../src/stats/column/rout";
 import { adjustStackPValues, bkyTrueNullEstimate, fisherCombinedP, runPValueStack, stoufferCombinedP } from "../src/stats/column/p-values";
 import {
+  answersFromParams,
+  canEditAnalysisParams,
   CHECKLIST_KEYS,
   CHECKLISTS,
   checklistFor,
   parseGroupLevels,
   toggled,
   WIZARDS,
+  wizardForAnalysis,
   type Answers,
   type Question,
 } from "../src/views/analyses/wizards";
@@ -360,7 +364,7 @@ import {
   type ColorMode,
 } from "../src/lib/vector-export";
 import { EXPORT_FORMATS, RESOLUTIONS } from "../src/views/graphs/graph-export";
-import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnovaParams, ChiSquareGofParams, ComparedCell, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, RemoveBaselineParams, SimulationSpec, ThreeWayAnovaParams } from "../src/stats/types";
+import type { AnalysisOutcome, AnalysisParams, AnalysisResult, AnalysisType, AnovaParams, ChiSquareGofParams, ComparedCell, DoseResponseSpecialParams, LinearRegressionParams, MonteCarloParams, NonlinearRegressionParams, PlotFunctionParams, RegressionCoefficient, RemoveBaselineParams, SimulationSpec, ThreeWayAnovaParams } from "../src/stats/types";
 import { simulationRCode, validateSimulationSpec } from "../src/stats/simulation/simulate";
 import { aicc, coefficientsForSet, invertMethod, invertModel, nestedPair } from "../src/stats/xy/nonlinear-regression";
 import { evaluate as evaluateCurve } from "../src/views/graphs/fitted-curve";
@@ -3263,6 +3267,696 @@ check("one-way ANOVA completion: Brown-Forsythe, FDR and trend (seq 191)", () =>
       i.assumption.includes("natural order"),
     ),
     "the trend test adds its ordering assumption to the checklist",
+  );
+});
+
+// seq 373: changing an analysis's parameters in place re-opens its wizard
+// pre-filled from the stored params — answersFromParams, the inverse of each
+// wizard's finish. Every mapped wizard round-trips: finish(answersFromParams)
+// is the params it started from, and those params validate (the Apply path
+// runs validateAnalysisParams on the finished params, as the MCP rerun does).
+const seq373Column = (): TableData => ({
+  columns: ["Title", "A", "B", "C", "D"],
+  rows: [
+    [null, "1", "2", "3", "4"],
+    [null, "2", "3", "4", "5"],
+    [null, "3", "4", "5", "6"],
+  ],
+});
+const seq373Xy = (): TableData => ({
+  columns: ["Title", "X", "A", "B"],
+  rows: [
+    [null, "1", "10", "20"],
+    [null, "2", "11", "21"],
+    [null, "3", "12", "22"],
+  ],
+});
+const seq373Xy3 = (): TableData => ({
+  columns: ["Title", "X", "A", "B", "C"],
+  rows: [
+    [null, "1", "10", "20", "30"],
+    [null, "2", "11", "21", "31"],
+    [null, "3", "12", "22", "32"],
+  ],
+});
+const seq373Two = (): TableData => ({
+  columns: ["Title", "A", "B"],
+  rows: [
+    [null, "1", "2"],
+    [null, "2", "3"],
+    [null, "3", "4"],
+  ],
+});
+const seq373One = (): TableData => ({
+  columns: ["Title", "A"],
+  rows: [
+    [null, "1"],
+    [null, "2"],
+    [null, "3"],
+  ],
+});
+const seq373Grouped3 = (): TableData => ({
+  columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2", "C:Y1", "C:Y2"],
+  rows: [
+    [null, "1", "2", "3", "4", "5", "6"],
+    [null, "2", "3", "4", "5", "6", "7"],
+    [null, "3", "4", "5", "6", "7", "8"],
+  ],
+  groups: 3,
+  replicates: 2,
+});
+const seq373Grouped2x1 = (): TableData => ({
+  columns: ["Title", "A:Y1", "B:Y1"],
+  rows: [
+    [null, "1", "2"],
+    [null, "2", "3"],
+  ],
+  groups: 2,
+  replicates: 1,
+});
+const seq373ThreeWayBands: RowGroup[] = [
+  { name: "WT", count: 2 },
+  { name: "KO", count: 1 },
+];
+const seq373Gaps = (): TableData => ({
+  columns: ["Title", "A", "B", "C"],
+  rows: [
+    [null, "1", "2", null],
+    [null, "2", "3", "4"],
+    [null, "3", "4", "5"],
+  ],
+});
+const seq373Nested3 = (): TableData => ({
+  columns: [
+    "Title",
+    "A:S1:R1",
+    "A:S1:R2",
+    "A:S2:R1",
+    "A:S2:R2",
+    "B:S1:R1",
+    "B:S1:R2",
+    "B:S2:R1",
+    "B:S2:R2",
+    "C:S1:R1",
+    "C:S1:R2",
+    "C:S2:R1",
+    "C:S2:R2",
+  ],
+  rows: [
+    [null, "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
+    [null, "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"],
+  ],
+  groups: 3,
+  subgroups: 2,
+  replicates: 2,
+});
+const seq373Nested4 = (): TableData => ({
+  columns: [
+    "Title",
+    "A:S1:R1",
+    "A:S1:R2",
+    "A:S2:R1",
+    "A:S2:R2",
+    "B:S1:R1",
+    "B:S1:R2",
+    "B:S2:R1",
+    "B:S2:R2",
+    "C:S1:R1",
+    "C:S1:R2",
+    "C:S2:R1",
+    "C:S2:R2",
+    "D:S1:R1",
+    "D:S1:R2",
+    "D:S2:R1",
+    "D:S2:R2",
+  ],
+  rows: [
+    [null, "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"],
+    [null, "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17"],
+  ],
+  groups: 4,
+  subgroups: 2,
+  replicates: 2,
+});
+const seq373Mv = (): TableData => ({
+  columns: ["Title", "Age", "Height", "Weight", "Group"],
+  rows: [
+    [null, "20", "170", "60", "Control"],
+    [null, "25", "175", "70", "Treated"],
+    [null, "30", "180", "80", "Control"],
+    [null, "35", "165", "65", "Treated"],
+  ],
+});
+const seq373MvSurvival = (): TableData => ({
+  columns: ["Title", "Time", "Status", "Group"],
+  rows: [
+    [null, "5", "1", "Control"],
+    [null, "8", "0", "Treated"],
+    [null, "12", "1", "Control"],
+    [null, "3", "0", "Treated"],
+  ],
+});
+const seq373MvCox = (): TableData => ({
+  columns: ["Title", "Time", "Status", "Age", "Sex"],
+  rows: [
+    [null, "5", "1", "20", "0"],
+    [null, "8", "0", "25", "1"],
+    [null, "12", "1", "30", "0"],
+    [null, "3", "0", "35", "1"],
+  ],
+});
+const seq373MvLogistic = (): TableData => ({
+  columns: ["Title", "Outcome", "Age", "Weight"],
+  rows: [
+    [null, "0", "20", "60"],
+    [null, "1", "25", "70"],
+    [null, "0", "30", "80"],
+    [null, "1", "35", "65"],
+  ],
+});
+const seq373MvPoisson = (): TableData => ({
+  columns: ["Title", "Counts", "Age"],
+  rows: [
+    [null, "3", "20"],
+    [null, "5", "25"],
+    [null, "2", "30"],
+    [null, "7", "35"],
+  ],
+});
+const seq373Chi2x2 = (): TableData => ({
+  columns: ["Title", "A", "B"],
+  rows: [
+    [null, "10", "20"],
+    [null, "30", "40"],
+  ],
+});
+const seq373ChiTrend = (): TableData => ({
+  columns: ["Title", "A", "B"],
+  rows: [
+    [null, "10", "20"],
+    [null, "30", "40"],
+    [null, "50", "60"],
+  ],
+});
+/** A stored params object survives a round trip through the edit wizard. */
+const seq373RoundTrip = (
+  type: AnalysisType,
+  params: AnalysisParams,
+  table: Dataset,
+  tableType?: TableType,
+) => {
+  const key = wizardForAnalysis(type, params);
+  ok(key !== null, `${type} should map to a wizard`);
+  const answers = answersFromParams(type, params, table, tableType);
+  ok(answers !== null, `${type} should invert its stored params`);
+  const finished = WIZARDS[key!]!.finish(answers!, table, tableType);
+  deepStrictEqual(finished, { type, params }, `${type} round-trip through its wizard`);
+  deepStrictEqual(
+    validateAnalysisParams(type, finished.params).errors,
+    [],
+    `${type} finished params validate (the Apply path)`,
+  );
+};
+
+check("seq 373: set-based wizards round-trip stored params to answers", () => {
+  const table = readTable(seq373Column());
+  seq373RoundTrip("descriptive-statistics", { sets: ["A", "C"] }, table);
+  seq373RoundTrip(
+    "one-sample-t",
+    { sets: ["A"], hypotheticalValue: 5, gaussian: true, lognormal: true, tails: "greater" },
+    table,
+  );
+  seq373RoundTrip(
+    "one-sample-t",
+    { sets: ["A"], hypotheticalValue: 0, gaussian: false, tails: "two-sided" },
+    table,
+  );
+  seq373RoundTrip("shapiro-wilk", { sets: ["A"], test: "anderson-darling", lognormal: true }, table);
+  seq373RoundTrip(
+    "one-sample-ks",
+    { sets: ["A"], distribution: "normal", paramsFrom: "specified", tails: "two-sided", mean: 0, sd: 2 },
+    table,
+  );
+  seq373RoundTrip(
+    "one-sample-ks",
+    { sets: ["A"], distribution: "exponential", paramsFrom: "estimated", tails: "less" },
+    table,
+  );
+  seq373RoundTrip(
+    "frequency-distribution",
+    { sets: ["A"], binMode: "width", binWidth: 5, startAt: 0 },
+    table,
+  );
+  seq373RoundTrip(
+    "frequency-distribution",
+    { sets: ["A"], binMode: "count", binCount: 8, startAt: 0 },
+    table,
+  );
+  seq373RoundTrip("frequency-distribution", { sets: ["A"], binMode: "auto" }, table);
+  seq373RoundTrip("outliers", { sets: ["A", "B"], q: 1 }, table);
+  seq373RoundTrip(
+    "outliers",
+    { sets: ["A"], method: "grubbs", alpha: 0.05, iterate: true },
+    table,
+  );
+  seq373RoundTrip(
+    "outliers",
+    { sets: ["A"], method: "grubbs", alpha: 0.01, iterate: false },
+    table,
+  );
+  seq373RoundTrip("p-value-stack", { sets: ["A"], method: "bh", q: 5 }, table);
+  seq373RoundTrip("p-value-stack", { sets: ["A"], method: "holm", alpha: 0.05 }, table);
+  seq373RoundTrip("transform-data", { sets: ["A", "B"], function: "y-times-k", constant: 3 }, table);
+  seq373RoundTrip("transform-data", { sets: ["A"], function: "log10" }, table);
+  seq373RoundTrip("correlation-matrix", { sets: ["A", "B", "C"], method: "spearman" }, table);
+  seq373RoundTrip(
+    "chi-square-gof",
+    { sets: ["A"], expectedMode: "percent", expectedValues: [25, 25, 25, 25] },
+    table,
+  );
+  seq373RoundTrip("chi-square-gof", { sets: ["A"], expectedMode: "equal" }, table);
+  seq373RoundTrip("binomial-test", { sets: ["A"], expectedProportion: 0.5 }, table);
+  // One set only: the wizard never asks which set, but the stored set still
+  // rides along in the answers (finish reads it).
+  const one = readTable(seq373One());
+  seq373RoundTrip("one-sample-t", { sets: ["A"], hypotheticalValue: 5, gaussian: true, tails: "two-sided" }, one);
+  seq373RoundTrip("binomial-test", { sets: ["A"], expectedProportion: 0.5 }, one);
+  seq373RoundTrip("chi-square-gof", { sets: ["A"], expectedMode: "equal" }, one);
+});
+
+check("seq 373: comparison wizards round-trip stored params to answers", () => {
+  const table = readTable(seq373Column());
+  seq373RoundTrip(
+    "compare-two-groups",
+    { sets: ["A", "B"], paired: false, gaussian: true, equalVariance: false, ratio: false, tails: "two-sided" },
+    table,
+  );
+  seq373RoundTrip(
+    "compare-two-groups",
+    { sets: ["A", "B"], paired: true, gaussian: true, equalVariance: true, ratio: true, tails: "less" },
+    table,
+  );
+  seq373RoundTrip(
+    "compare-two-groups",
+    { sets: ["A", "B"], paired: false, gaussian: false, equalVariance: true, ratio: false, tails: "two-sided" },
+    table,
+  );
+  // Two sets only: the wizard never asks which two to compare, but the
+  // stored sets still ride along in the answers (finish reads them).
+  const two = readTable(seq373Two());
+  seq373RoundTrip(
+    "compare-two-groups",
+    { sets: ["A", "B"], paired: false, gaussian: true, equalVariance: false, ratio: false, tails: "two-sided" },
+    two,
+  );
+  seq373RoundTrip(
+    "anova",
+    { sets: ["A", "B", "C"], posthoc: "none", equalSd: true, trend: true },
+    table,
+  );
+  seq373RoundTrip(
+    "anova",
+    { sets: ["A", "B", "C"], posthoc: "dunnett", equalSd: true, control: "A" },
+    table,
+  );
+  seq373RoundTrip(
+    "anova",
+    { sets: ["A", "B", "C", "D"], posthoc: "fdr", equalSd: false },
+    table,
+  );
+  seq373RoundTrip(
+    "anova",
+    { sets: ["A", "B", "C"], posthoc: "bonferroni", equalSd: true, compared: [pairKey("A", "B")] },
+    table,
+  );
+  seq373RoundTrip("kruskal-wallis", { sets: ["A", "B", "C"], posthoc: "dunn" }, table);
+  seq373RoundTrip("friedman", { sets: ["A", "B", "C"], posthoc: "none" }, table);
+  seq373RoundTrip("rm-anova", { sets: ["A", "B", "C"], posthoc: "none", sphericity: false }, table);
+  const gaps = readTable(seq373Gaps());
+  seq373RoundTrip("rm-anova", { sets: ["A", "B", "C"], posthoc: "none", mixed: true }, gaps);
+  const grouped = readTable(seq373Grouped3());
+  seq373RoundTrip(
+    "multiple-t-tests",
+    { sets: ["A", "B"], paired: false, gaussian: true, pooledSd: false, correction: "fdr", q: 5 },
+    grouped,
+  );
+  seq373RoundTrip(
+    "multiple-t-tests",
+    { sets: ["A", "B"], paired: true, gaussian: false, pooledSd: false, correction: "holm-sidak" },
+    grouped,
+  );
+  const nested3 = readTable(seq373Nested3());
+  seq373RoundTrip("nested-t-test", { sets: ["A", "C"] }, nested3);
+  const nested4 = readTable(seq373Nested4());
+  seq373RoundTrip("nested-anova", { sets: ["A", "B", "C", "D"], posthoc: "tukey" }, nested4);
+  seq373RoundTrip("nested-anova", { posthoc: "none" }, nested3);
+  seq373RoundTrip(
+    "two-way-anova",
+    { sets: ["A", "B", "C"], design: "ordinary", posthoc: "tukey", posthocTarget: "rows" },
+    grouped,
+  );
+  seq373RoundTrip(
+    "two-way-anova",
+    { sets: ["A", "B", "C"], design: "repeated-measures", sphericity: true, posthoc: "none", posthocTarget: "groups" },
+    grouped,
+  );
+  seq373RoundTrip(
+    "two-way-anova",
+    { sets: ["A", "B", "C"], design: "ordinary", posthoc: "dunnett", posthocTarget: "groups", control: "A" },
+    grouped,
+  );
+  seq373RoundTrip(
+    "two-way-anova",
+    { sets: ["A", "B", "C"], design: "ordinary", posthoc: "fdr", posthocTarget: "groups", fdrMethod: "bky", fdrQ: 10 },
+    grouped,
+  );
+  seq373RoundTrip(
+    "two-way-anova",
+    { sets: ["A", "B", "C"], design: "nonparametric", posthoc: "none", posthocTarget: "groups" },
+    grouped,
+  );
+  const grouped2x1 = readTable(seq373Grouped2x1());
+  seq373RoundTrip(
+    "two-way-anova",
+    { design: "ordinary", posthoc: "none", posthocTarget: "groups" },
+    grouped2x1,
+  );
+  seq373RoundTrip(
+    "three-way-anova",
+    { sets: ["A", "B", "C"], posthoc: "tukey", posthocTerm: "B" },
+    grouped,
+  );
+  seq373RoundTrip(
+    "three-way-anova",
+    { sets: ["A", "B", "C"], posthoc: "tukey", posthocTerm: "A:B", posthocScope: "simple" },
+    grouped,
+  );
+  // Dunnett's control options come from the wizard's own control question.
+  const w3 = WIZARDS["three-way-anova"]!;
+  const controlQ = w3
+    .questions({ sets: ["A", "B", "C"], posthoc: "dunnett", posthocTerm: "A" }, grouped, undefined, seq373ThreeWayBands)
+    .find((q) => q && q.id === "control") as Question & { options: { value: string }[] };
+  ok(controlQ.options.length > 0, "three-way Dunnett offers a control");
+  seq373RoundTrip(
+    "three-way-anova",
+    { sets: ["A", "B", "C"], posthoc: "dunnett", posthocTerm: "A", control: controlQ.options[0].value },
+    grouped,
+  );
+  const mv = readTable(seq373Mv());
+  seq373RoundTrip(
+    "multifactor-anova",
+    { response: "Response", factors: ["Treatment", "Time"], posthoc: "tukey", posthocTerm: "Treatment:Time" },
+    mv,
+    "multiple",
+  );
+  seq373RoundTrip(
+    "multifactor-anova",
+    { response: "Response", factors: ["Treatment", "Time"], posthoc: "none" },
+    mv,
+    "multiple",
+  );
+});
+
+check("seq 373: XY wizards round-trip stored params to answers", () => {
+  const table = readTable(seq373Xy());
+  const table3 = readTable(seq373Xy3());
+  seq373RoundTrip("linear-regression", { ys: ["A", "B"], forceOrigin: false }, table, "xy");
+  seq373RoundTrip("linear-regression", { ys: ["A", "B"], compareSlopes: true, forceOrigin: false }, table, "xy");
+  seq373RoundTrip("linear-regression", { y: "A", forceOrigin: false, weights: "1/y2" }, table, "xy");
+  seq373RoundTrip("linear-regression", { y: "A", forceOrigin: true }, table, "xy");
+  seq373RoundTrip("compare-slopes", { ys: ["A", "B"] }, table, "xy");
+  seq373RoundTrip("compare-slopes", { ys: ["A"] }, table, "xy");
+  seq373RoundTrip("deming-regression", { y: "A", lambda: 2 }, table, "xy");
+  seq373RoundTrip("simple-logistic-regression", { y: "A" }, table, "xy");
+  seq373RoundTrip(
+    "area-under-curve",
+    { baseline: 5, ignorePeaksBelow: 10, peaksAboveBaselineOnly: true },
+    table,
+    "xy",
+  );
+  seq373RoundTrip("area-under-curve", { baseline: 0 }, table, "xy");
+  seq373RoundTrip("spline-lowess", { y: "A", method: "lowess", f: 0.5 }, table, "xy");
+  seq373RoundTrip("spline-lowess", { y: "A", method: "spline", spar: 0.8 }, table, "xy");
+  seq373RoundTrip("spline-lowess", { y: "A", method: "spline", spar: null }, table, "xy");
+  seq373RoundTrip(
+    "smooth-differentiate-integrate",
+    { ys: ["A", "B"], x: "X", operation: "integral", window: 9, order: 3, smoothResults: true, baseline: 2, startValue: 1 },
+    table,
+    "xy",
+  );
+  seq373RoundTrip(
+    "smooth-differentiate-integrate",
+    { ys: ["A"], x: "X", operation: "smooth", window: 5, order: 2, smoothResults: false },
+    table,
+    "xy",
+  );
+  seq373RoundTrip("bland-altman", { sets: ["A", "B"] }, table, "xy");
+  seq373RoundTrip("roc-curve", { truth: "A", score: "B", positive: 12 }, table, "xy");
+  seq373RoundTrip("correlation", { method: "spearman", mode: "two-datasets", datasets: ["A", "B"] }, table, "xy");
+  seq373RoundTrip("correlation", { method: "pearson", mode: "x-vs-every-y" }, table, "xy");
+  seq373RoundTrip("correlation", { method: "pearson", mode: "matrix" }, table, "xy");
+  seq373RoundTrip("survival", { curveTest: "gehan", correction: "fdr" }, table3, "xy");
+  seq373RoundTrip("survival", { curveTest: "logrank", correction: "holm" }, table, "xy");
+  seq373RoundTrip("cox", { reference: "A" }, table, "xy");
+  seq373RoundTrip("binding-saturation", { y: "A", model: "two-site-specific" }, table, "xy");
+  seq373RoundTrip("binding-saturation", { y: "A", model: "one-site-total-and-ns", y2: "B" }, table, "xy");
+  seq373RoundTrip(
+    "binding-kinetics",
+    { y: "A", model: "association-one-phase", ligandConcentration: 5, koff: 0.1 },
+    table,
+    "xy",
+  );
+  seq373RoundTrip(
+    "binding-kinetics",
+    { y: "A", model: "association-then-dissociation", hotNM: 1, time0: 10 },
+    table,
+    "xy",
+  );
+  seq373RoundTrip("binding-kinetics", { y: "A", model: "dissociation-one-phase" }, table, "xy");
+  seq373RoundTrip(
+    "nonlinear-regression",
+    { y: "A", model: "sigmoidal-4pl-logx", interpolate: true },
+    table,
+    "xy",
+  );
+});
+
+check("seq 373: Multiple Variables wizards round-trip stored params to answers", () => {
+  const mv = readTable(seq373Mv());
+  seq373RoundTrip(
+    "compare-two-groups",
+    { response: "Weight", groupBy: "Group", paired: false, gaussian: false, equalVariance: true, ratio: false, tails: "two-sided" },
+    mv,
+    "multiple",
+  );
+  seq373RoundTrip(
+    "compare-two-groups",
+    { sets: ["Age", "Height"], paired: true, gaussian: true, equalVariance: true, ratio: false, tails: "two-sided" },
+    mv,
+    "multiple",
+  );
+  seq373RoundTrip("linear-regression", { x: "Height", y: "Weight", forceOrigin: false }, mv, "multiple");
+  const survival = readTable(seq373MvSurvival());
+  seq373RoundTrip(
+    "survival",
+    { time: "Time", status: "Status", groupBy: "Group", curveTest: "logrank", correction: "holm" },
+    survival,
+    "multiple",
+  );
+  seq373RoundTrip("multiple-regression", { dependent: "Weight", predictors: ["Age", "Height"] }, mv, "multiple");
+  const logistic = readTable(seq373MvLogistic());
+  seq373RoundTrip("multiple-logistic-regression", { dependent: "Outcome", predictors: ["Age", "Weight"] }, logistic, "multiple");
+  const poisson = readTable(seq373MvPoisson());
+  seq373RoundTrip("poisson-regression", { dependent: "Counts", predictors: ["Age"], quasi: true }, poisson, "multiple");
+  seq373RoundTrip("poisson-regression", { dependent: "Counts", predictors: ["Age"], quasi: false }, poisson, "multiple");
+  const cox = readTable(seq373MvCox());
+  seq373RoundTrip(
+    "cox-proportional-hazards",
+    { time: "Time", status: "Status", covariates: ["Age", "Sex"], ties: "efron", stratifyBy: "Sex" },
+    cox,
+    "multiple",
+  );
+  seq373RoundTrip(
+    "cox-proportional-hazards",
+    { time: "Time", status: "Status", covariates: ["Age"], ties: "breslow" },
+    cox,
+    "multiple",
+  );
+});
+
+check("seq 373: transform and table-shape wizards round-trip stored params to answers", () => {
+  const table = readTable(seq373Column());
+  const xy = readTable(seq373Xy());
+  seq373RoundTrip("transform-concentrations", { column: "A", fromUnit: "mM", toUnit: "µM" }, table);
+  seq373RoundTrip(
+    "normalize",
+    { ys: ["A"], x: "X", normalizeMethod: "percent-of-largest", asPercent: true },
+    xy,
+    "xy",
+  );
+  seq373RoundTrip(
+    "normalize",
+    { ys: ["A"], x: "X", normalizeMethod: "zero-to-hundred", zeroDef: "constant", zeroConstant: 5, hundredDef: "largest" },
+    xy,
+    "xy",
+  );
+  seq373RoundTrip(
+    "normalize",
+    { ys: ["A"], x: "X", normalizeMethod: "percent-of-constant", asPercent: false, constantHook: "Ref" },
+    xy,
+    "xy",
+  );
+  seq373RoundTrip(
+    "remove-baseline",
+    { columnMathOperation: "subtract", columnMathA: "A", columnMathB: "B", x: "X" },
+    xy,
+    "xy",
+  );
+  seq373RoundTrip(
+    "remove-baseline",
+    { ys: ["A", "B"], x: "X", baselineMethod: "mean-first-n", firstN: 3 },
+    xy,
+    "xy",
+  );
+  seq373RoundTrip(
+    "remove-baseline",
+    { ys: ["A"], x: "X", baselineMethod: "constant", constantHook: "Blank" },
+    xy,
+    "xy",
+  );
+  seq373RoundTrip("prune-rows", { ys: ["A"], x: "X", condition: "below", threshold: 5 }, xy, "xy");
+  seq373RoundTrip("prune-rows", { ys: ["A"], x: "X", condition: "outside", low: 0, high: 100 }, xy, "xy");
+  seq373RoundTrip(
+    "fraction-of-total",
+    { ys: ["A"], x: "X", totalBy: "row", format: "percent", ci: "wilson" },
+    xy,
+    "xy",
+  );
+  seq373RoundTrip("row-means-totals", { ys: ["A"], x: "X", rowScope: "per-column" }, xy, "xy");
+  seq373RoundTrip("chi-square", { test: "fisher", trendOrdered: false }, readTable(seq373Chi2x2()));
+  seq373RoundTrip("chi-square", { trendOrdered: true }, readTable(seq373ChiTrend()));
+  seq373RoundTrip("mcnemar", { continuityCorrection: false }, table);
+  seq373RoundTrip("mcnemar", { continuityCorrection: true }, table);
+  seq373RoundTrip("principal-component-analysis", { scale: "covariance", components: 3 }, table);
+  seq373RoundTrip("principal-component-analysis", { scale: "correlation", components: 0 }, table);
+  seq373RoundTrip("k-means", { clusters: 4, standardise: false }, table);
+  seq373RoundTrip("k-means", { clusters: 2, standardise: true }, table);
+  seq373RoundTrip(
+    "hierarchical-clustering",
+    { clusters: 3, linkage: "ward.D2", distance: "manhattan", standardise: true },
+    table,
+  );
+  seq373RoundTrip(
+    "mixed-effects",
+    { subjectId: "replicate", randomStructure: "intercept", fixedFactors: ["Group", "Row"], interaction: true, dfMethod: "kenward-roger" },
+    readTable(seq373Grouped3()),
+  );
+  seq373RoundTrip(
+    "mixed-effects",
+    { sets: ["A", "B", "C"], subjectId: "row", randomStructure: "intercept", fixedFactors: ["Condition"], dfMethod: "kenward-roger" },
+    table,
+  );
+  seq373RoundTrip(
+    "mixed-effects",
+    {
+      sets: ["A", "B", "C"],
+      subjectId: "row",
+      randomStructure: "intercept",
+      fixedFactors: ["Treatment", "Condition"],
+      subjectFactor: { name: "Treatment", levels: ["Control", "Control", "Treated"] },
+      dfMethod: "satterthwaite",
+    },
+    table,
+  );
+  seq373RoundTrip(
+    "enzyme-inhibition",
+    { model: "mixed", y: ["A", "B"], inhibitorConcentrations: { A: 0, B: 5 } },
+    readTable(seq373Xy()),
+    "xy",
+  );
+  seq373RoundTrip(
+    "enzyme-inhibition",
+    { model: "morrison", y: ["A"], enzymeConcentration: 2, substrateConcentration: 10, kmForMorrison: 5 },
+    readTable(seq373Xy()),
+    "xy",
+  );
+  seq373RoundTrip(
+    "enzyme-inhibition",
+    { model: "morrison", y: ["A"], enzymeConcentration: 2 },
+    readTable(seq373Xy()),
+    "xy",
+  );
+  seq373RoundTrip(
+    "dose-response-special",
+    { model: "schild", ys: ["A", "B", "C"], antagonistConcentrations: { A: 0, B: 1, C: 10 }, bUnits: "nM", fixHillSlope: true },
+    readTable(seq373Xy3()),
+    "xy",
+  );
+  seq373RoundTrip(
+    "dose-response-special",
+    { model: "ec50-shift", ys: ["A", "B"], antagonistConcentrations: { A: 0, B: 2 }, bUnits: "M" },
+    readTable(seq373Xy()),
+    "xy",
+  );
+});
+
+check("seq 373: wizardForAnalysis maps types to wizards, and canEditAnalysisParams gates the entry", () => {
+  strictEqual(wizardForAnalysis("anova"), "compare-many-groups");
+  strictEqual(wizardForAnalysis("kruskal-wallis"), "compare-many-groups");
+  strictEqual(wizardForAnalysis("rm-anova"), "compare-many-groups");
+  strictEqual(wizardForAnalysis("friedman"), "compare-many-groups");
+  strictEqual(
+    wizardForAnalysis("nonlinear-regression", { y: "A", model: "sigmoidal-4pl-logx", interpolate: true }),
+    "interpolate",
+  );
+  strictEqual(wizardForAnalysis("nonlinear-regression", { y: "A", model: "line" }), null);
+  strictEqual(wizardForAnalysis("kolmogorov-smirnov"), null);
+  strictEqual(wizardForAnalysis("transpose"), null);
+  strictEqual(wizardForAnalysis("monte-carlo"), null);
+  strictEqual(wizardForAnalysis("plot-function"), null);
+  strictEqual(wizardForAnalysis("extract-rearrange"), null);
+  strictEqual(wizardForAnalysis("select-transform"), null);
+  strictEqual(wizardForAnalysis("one-sample-t"), "one-sample-t");
+  strictEqual(wizardForAnalysis(undefined), null);
+  const base: Pick<ProjectNode, "id" | "type" | "name" | "parentId" | "analysisType" | "analysisParams"> = {
+    id: "a1",
+    type: "analysis",
+    name: "A",
+    parentId: "t1",
+    analysisType: "one-sample-t",
+    analysisParams: { sets: ["A"], hypotheticalValue: 5, gaussian: true, tails: "two-sided" },
+  };
+  strictEqual(canEditAnalysisParams(base).editable, true);
+  strictEqual(canEditAnalysisParams({ ...base, frozen: true }).editable, false);
+  ok(/frozen/i.test(canEditAnalysisParams({ ...base, frozen: true }).reason ?? ""), "frozen names the reason");
+  strictEqual(canEditAnalysisParams({ ...base, orphaned: true }).editable, false);
+  ok(/orphan/i.test(canEditAnalysisParams({ ...base, orphaned: true }).reason ?? ""), "orphaned names the reason");
+  strictEqual(canEditAnalysisParams({ ...base, analysisType: "monte-carlo" }).editable, false);
+  strictEqual(canEditAnalysisParams({ ...base, analysisType: "nonlinear-regression" }).editable, false);
+  strictEqual(
+    canEditAnalysisParams({
+      ...base,
+      analysisType: "nonlinear-regression",
+      analysisParams: { y: "A", model: "line", interpolate: true },
+    }).editable,
+    true,
+  );
+  // The entry points exist: toolbar button, Analysis menu (CmdOrCtrl+T),
+  // navigator context menu, and the edit branch of the wizard host.
+  const view = readFileSync("src/views/analyses/analysis-view.tsx", "utf8");
+  ok(/Change parameters/.test(view) && /SlidersHorizontalIcon/.test(view), "toolbar lacks the Change parameters button");
+  ok(/edit-analysis-params/.test(view), "toolbar doesn't open the edit selector");
+  const menu = readFileSync("src/app-menu.ts", "utf8");
+  ok(/Change Parameters…/.test(menu) && /CmdOrCtrl\+T/.test(menu), "Analysis menu lacks Change Parameters… (CmdOrCtrl+T)");
+  const sidebar = readFileSync("src/components/project-sidebar.tsx", "utf8");
+  ok(/Change Parameters…/.test(sidebar), "navigator context menu lacks Change Parameters…");
+  const wizard = readFileSync("src/views/analyses/analysis-wizard.tsx", "utf8");
+  ok(
+    /edit-analysis-params/.test(wizard) &&
+      /Apply/.test(wizard) &&
+      /validateAnalysisParams/.test(wizard) &&
+      /setAnalysisParams/.test(wizard),
+    "wizard host lacks the edit branch (Apply + validate + setAnalysisParams)",
   );
 });
 

@@ -45,6 +45,7 @@ type Selector =
   | { kind: "new-table" }
   | { kind: "new-analysis"; tableId: string; forGraph?: ForGraph }
   | { kind: "analysis-params"; tableId: string; testType: AnalysisPickerValue; forGraph?: ForGraph }
+  | { kind: "edit-analysis-params"; nodeId: string }
   | { kind: "new-graph"; tableId: string }
   | { kind: "wand"; tableId: string }
   | { kind: "clone-graph"; graphId: string }

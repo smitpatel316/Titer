@@ -1311,6 +1311,18 @@ const ROWS: Row[] = [
     note: "Merged on check/v18: executeSaveProject returns write_report (tables/analyses written vs dropped + summary) for .prism/.pzfx, null for .hlx (Mansi P0 #6, cherry-picked from fix/18-m2-mcp-result).",
     checks: [{ kind: "saveResultHasReport" }],
   },
+  {
+    item: "373",
+    title: "Change an analysis's parameters in place (GUI)",
+    status: "covered",
+    note: "GUI path for the seq 172 engine (titer_rerun_analysis + setAnalysisParams): answersFromParams re-opens the wizard pre-filled from stored params, Apply validates and dispatches setAnalysisParams; toolbar button, Analysis menu Change Parameters… (CmdOrCtrl+T), navigator context menu. Unmapped types (Monte Carlo, plot-function, plain nonlinear-regression, extract-rearrange, select-transform, Kolmogorov-Smirnov, transpose) stay disabled with a reason.",
+    checks: [
+      { kind: "sourceContainsRe", scope: "src", re: "answersFromParams" },
+      { kind: "sourceContainsRe", scope: "src", re: "edit-analysis-params" },
+      { kind: "sourceContainsRe", scope: "src", re: "Change Parameters" },
+      { kind: "sourceContainsRe", scope: "src", re: "CmdOrCtrl\\+T" },
+    ],
+  },
 
   // ── No meaningful MCP operation ──
   { item: "225", title: "Unified Preferences dialog", status: "na", note: "App settings, not project operations; MCP has no settings surface (allowlist toggles are Tauri commands for the Settings UI, by design).", checks: [] },
