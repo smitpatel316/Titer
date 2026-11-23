@@ -12,6 +12,8 @@
 import type { LinkedPaste, RowGroup, TableData, TableErrorFormat, TableType } from "../../store/types";
 import { tableErrorFormat } from "../../store/types";
 import { renameCalculatedReferences } from "../../lib/calcvars";
+import { normalizeDecimalInput, type DecimalSeparator } from "../../lib/decimal-format";
+import { parseCell } from "../../lib/numeric";
 import { seriesKeyOf, groupRuns } from "../../lib/columns";
 import { isGrouped, isNested } from "../../lib/dataset";
 import {
@@ -117,8 +119,10 @@ function remapExcluded(data: TableData, fn: (r: number, c: number) => [number, n
  * Writes `block` with its top-left corner at (r, c): typing (1×1) and pasting.
  * Adds rows as needed, and columns too unless the table is grouped (whose
  * columns come from its group structure). `type` names any new columns.
+ * With a comma decimal separator, a decimal comma typed or pasted ("1,5")
+ * stores as its canonical point form ("1.5") — see decimal-format.ts.
  */
-export function writeBlock(data: TableData, r: number, c: number, block: Cell[][], type: TableType): TableData {
+export function writeBlock(data: TableData, r: number, c: number, block: Cell[][], type: TableType, separator: DecimalSeparator = "."): TableData {
   const blockWidth = block.reduce((w, row) => Math.max(w, row.length), 0);
   const needCols = isGrouped(data) || isNested(data) ? 0 : c + blockWidth - data.columns.length;
   const columns = needCols > 0 ? [...data.columns, ...freshColumnNames(data.columns, type, needCols)] : data.columns;
@@ -130,7 +134,7 @@ export function writeBlock(data: TableData, r: number, c: number, block: Cell[][
     if (!line && (!src || src.length === width)) return src ?? Array<Cell>(width).fill(null);
     const row = [...(src ?? []), ...Array<Cell>(width - (src?.length ?? 0)).fill(null)];
     line?.forEach((value, j) => {
-      if (c + j < width) row[c + j] = value === "" ? null : value;
+      if (c + j < width) row[c + j] = value === null || value === "" ? null : normalizeDecimalInput(value, separator);
     });
     return row;
   });
@@ -291,6 +295,12 @@ function widthsOf(widths: TableData["widths"], columns: string[]): TableData["wi
   return kept?.length ? Object.fromEntries(kept) : undefined;
 }
 
+/** The decimal settings of `columns` alone: a column gone takes its setting with it. */
+function decimalsOf(decimals: TableData["decimals"], columns: string[]): TableData["decimals"] {
+  const kept = decimals && Object.entries(decimals).filter(([name]) => columns.includes(name));
+  return kept?.length ? Object.fromEntries(kept) : undefined;
+}
+
 /** Deletes `count` columns from column `at` (≥ 1); at least one data column remains. */
 export function deleteColumns(data: TableData, at: number, count: number): TableData {
   const n = Math.min(count, data.columns.length - 2);
@@ -303,6 +313,7 @@ export function deleteColumns(data: TableData, at: number, count: number): Table
     rows: data.rows.map((row) => row.filter(keep)),
     excluded: remapExcluded(data, (r, c) => (c < at ? [r, c] : c >= at + n ? [r, c - n] : null)),
     widths: widthsOf(data.widths, columns),
+    decimals: decimalsOf(data.decimals, columns),
     linkedPaste: data.linkedPaste ? linkedPasteAfterDelete(data.linkedPaste, "col", at, n) : undefined,
     // A deleted calculated variable goes with its column; a formula that
     // used a deleted source keeps its text and reads as an error until it
@@ -330,6 +341,7 @@ export function renameColumn(data: TableData, c: number, name: string): TableDat
     ...data,
     columns: data.columns.map((n, i) => (i === c ? name : n)),
     widths: renameKey(data.widths, old, name),
+    decimals: renameKey(data.decimals, old, name),
   };
   return renameCalculatedReferences(next, old, name);
 }
@@ -341,10 +353,13 @@ export function renameGroup(data: TableData, oldKey: string, newKey: string): Ta
   }
   const rename = (n: string) => (seriesKeyOf(n) === oldKey && n.includes(":") ? newKey + n.slice(n.indexOf(":")) : n);
   const widths = data.widths && Object.fromEntries(Object.entries(data.widths).map(([n, w]) => [rename(n), w]));
+  const decimals =
+    data.decimals && Object.fromEntries(Object.entries(data.decimals).map(([n, d]) => [rename(n), d]));
   return {
     ...data,
     columns: data.columns.map(rename),
     widths,
+    decimals,
   };
 }
 
@@ -364,10 +379,13 @@ export function renameSubgroup(data: TableData, groupKey: string, oldSub: string
   const rename = (n: string) =>
     isSub(n) && parts(n)[1] === oldSub ? `${groupKey}:${newSub}:${parts(n)[2]}` : n;
   const widths = data.widths && Object.fromEntries(Object.entries(data.widths).map(([n, w]) => [rename(n), w]));
+  const decimals =
+    data.decimals && Object.fromEntries(Object.entries(data.decimals).map(([n, d]) => [rename(n), d]));
   return {
     ...data,
     columns: data.columns.map(rename),
     widths,
+    decimals,
   };
 }
 
@@ -449,6 +467,7 @@ export function regroupTable(
     replicates,
     excluded: remapExcluded(data, (r, c) => (to(c) < 0 ? null : [r, to(c)])),
     widths: widthsOf(data.widths, columns),
+    decimals: decimalsOf(data.decimals, columns),
     // Regrouping rebuilds the columns, but the link's anchor is a position
     // (seq 168): it stays where it was, and a refresh re-pastes the source
     // into that same region — values keep their slots, as they do here.
@@ -504,6 +523,7 @@ export function applySummaryFormat(data: TableData, format: SummaryFormat): Tabl
       return to === null ? null : [r, to];
     }),
     widths: widthsOf(data.widths, columns),
+    decimals: decimalsOf(data.decimals, columns),
     // A format switch rebuilds the sub-columns, but the link's anchor is a
     // position (seq 168): it stays where it was.
   };
@@ -581,6 +601,7 @@ export function applySummaryFormatXY(data: TableData, format: SummaryFormat): Ta
       return to === null ? null : [r, to];
     }),
     widths: widthsOf(data.widths, columns),
+    decimals: decimalsOf(data.decimals, columns),
   };
 }
 
@@ -662,6 +683,7 @@ export function applySummaryFormatNested(data: TableData, format: SummaryFormat)
       return to === null ? null : [r, to];
     }),
     widths: widthsOf(data.widths, columns),
+    decimals: decimalsOf(data.decimals, columns),
   };
 }
 
@@ -681,7 +703,7 @@ export function replicateXY(data: TableData, replicates: number): { data: TableD
     const one = regroupTable(data, data.groups!, 1, "xy");
     const columns = one.columns.map((n, c) => (c < 2 ? n : seriesKeyOf(n)));
     return {
-      data: { ...one, columns, groups: undefined, replicates: undefined, widths: widthsOf(one.widths, columns) },
+      data: { ...one, columns, groups: undefined, replicates: undefined, widths: widthsOf(one.widths, columns), decimals: decimalsOf(one.decimals, columns) },
       renamed,
     };
   }
@@ -758,6 +780,7 @@ export function renestTable(data: TableData, groups: number, subgroups: number, 
     replicates,
     excluded: remapExcluded(data, (r, c) => (to(c) < 0 ? null : [r, to(c)])),
     widths: widthsOf(data.widths, columns),
+    decimals: decimalsOf(data.decimals, columns),
     // Renesting rebuilds the columns, but the link's anchor is a position
     // (seq 168): it stays where it was.
   };
@@ -928,14 +951,17 @@ export function convertCommaDecimals(data: TableData): TableData {
 
 // ── Clipboard ──────────────────────────────────────────────────────────
 
-/** Stored cells of `range` as tab-separated text, the format Excel and Numbers exchange. */
-export function toTSV(data: TableData, range: Range): string {
+/** Stored cells of `range` as tab-separated text, the format Excel and Numbers exchange.
+ *  Values keep full precision — a decimal-places setting never rounds them — and
+ *  numeric cells take the decimal separator. */
+export function toTSV(data: TableData, range: Range, separator: DecimalSeparator = "."): string {
   const lines: string[] = [];
   for (let r = range.r0; r <= Math.min(range.r1, data.rows.length - 1); r++) {
     const cells: string[] = [];
     for (let c = range.c0; c <= Math.min(range.c1, data.columns.length - 1); c++) {
       const v = data.rows[r]?.[c] ?? "";
-      cells.push(/[\t\n"]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+      const shown = v !== "" && separator === "," && parseCell(v) !== null ? v.replace(".", ",") : v;
+      cells.push(/[\t\n"]/.test(shown) ? `"${shown.replace(/"/g, '""')}"` : shown);
     }
     lines.push(cells.join("\t"));
   }
