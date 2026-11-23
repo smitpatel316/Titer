@@ -26541,6 +26541,19 @@ check("transformValue applies the seq 341 cross-column functions against the pai
   ok(close(transformValue("log10" as never, 100, undefined, 999, "x"), 2));
 });
 
+check("transformValue applies Scatchard: Y becomes Y/X, X becomes the paired Y (seq 386)", () => {
+  // role "y": value is Y, `other` is the paired X — bound over free.
+  strictEqual(transformValue("scatchard" as never, 2, undefined, 10, "y"), 0.2);
+  strictEqual(transformValue("scatchard" as never, 8, undefined, 4, "y"), 2);
+  // role "x": value is X, `other` is the paired Y — the new X is bound.
+  strictEqual(transformValue("scatchard" as never, 10, undefined, 2, "x"), 2);
+  strictEqual(transformValue("scatchard" as never, 4, undefined, 8, "x"), 8);
+  // An X of 0 leaves the Y blank; a missing paired value blanks either way.
+  strictEqual(transformValue("scatchard" as never, 5, undefined, 0, "y"), null);
+  strictEqual(transformValue("scatchard" as never, 5, undefined, undefined, "y"), null);
+  strictEqual(transformValue("scatchard" as never, 5, undefined, undefined, "x"), null);
+});
+
 check("transform-data ranks and z-scores whole columns (seq 341)", async () => {
   const table = (values: (number | string)[]): TableData => ({
     columns: ["Title", "V"],
@@ -26604,6 +26617,42 @@ check("transform-data applies the cross-column functions on an XY table (seq 341
   const gone = await runAnalysis("transform-data", xy, { function: "y-divided-by-x", x: "Nope" } as never);
   if (!("error" in gone) || !gone.error.includes("“Nope”"))
     throw new Error(`expected the missing-X error, got ${JSON.stringify(gone)}`);
+});
+
+check("transform-data applies Scatchard on an XY table (seq 386)", async () => {
+  const xy: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "1", "2"],
+      [null, "2", "4"],
+      [null, "4", "8"],
+      [null, "0", "5"],
+    ],
+  };
+  const out = await runAnalysis("transform-data", xy, { function: "scatchard", x: "X" } as never);
+  if ("error" in out) throw new Error(out.error);
+  // Two entries: the Y column (bound/free) first, then the X column (bound).
+  strictEqual(out.transformed?.length, 2);
+  strictEqual(out.transformed?.[0].column, "A");
+  deepStrictEqual(out.transformed?.[0].values, [2, 2, 2, null]);
+  strictEqual(out.transformed?.[1].column, "X");
+  deepStrictEqual(out.transformed?.[1].values, [2, 4, 8, 5]);
+  strictEqual(out.subtitle, "Transform data — Scatchard");
+  if (!out.notes.includes("display-only"))
+    throw new Error(`expected the display-only note, got ${JSON.stringify(out.notes)}`);
+  // The X=0 row's Y is blank, so it is excluded from the Y entry's N.
+  const nRow = out.stats.find((s) => s.label === "Scatchard(A) — N");
+  strictEqual(nRow?.value, 3);
+  const exRow = out.stats.find((s) => s.label === "Scatchard(A) — excluded");
+  strictEqual(exRow?.value, 1);
+  // Scatchard without its X column is a clean error, not a column of blanks.
+  deepStrictEqual(await runAnalysis("transform-data", xy, { function: "scatchard" } as never), {
+    error: "“Scatchard” needs the X column — name it in `x` and try again.",
+  });
+  // An explicit X function conflicts with Scatchard's own X rewrite.
+  const clash = await runAnalysis("transform-data", xy, { function: "scatchard", x: "X", xFunction: "sqrt" } as never);
+  if (!("error" in clash) || !clash.error.includes("Scatchard"))
+    throw new Error(`expected the X-function clash error, got ${JSON.stringify(clash)}`);
 });
 
 check("transform-data transforms X and interchanges X/Y on an XY table (seq 341)", async () => {
@@ -26998,6 +27047,35 @@ check("transform-data wizard offers the seq 341 functions and builds the seq 341
   deepStrictEqual(wizard.finish({ function: "log10", errorMode: "to-ci" }, summary), {
     type: "transform-data",
     params: { function: "log10", errorMode: "to-ci" },
+  });
+});
+
+check("transform-data wizard offers Scatchard on XY tables only, and names its X column (seq 386)", () => {
+  const wizard = WIZARDS["transform-data"]!;
+  const fnOptions = (a: Record<string, string | number>, table: Dataset, type?: TableType) => {
+    const q = wizard.questions(a, table, type).find((qq) => qq && (qq as Question).id === "function") as
+      | { options: { value: string }[] }
+      | undefined;
+    return q?.options.map((o) => o.value) ?? [];
+  };
+  const ids = (a: Record<string, string | number>, table: Dataset, type?: TableType) =>
+    wizard.questions(a, table, type).filter(Boolean).map((q) => (q as Question).id);
+  // A plain column table: no X column to pair with, so no Scatchard.
+  const plain = readTable({ columns: ["Title", "V"], rows: [["", "1"], ["", "2"]] });
+  if (fnOptions({}, plain).includes("scatchard"))
+    throw new Error(`did not expect scatchard offered on a column table`);
+  // An XY table offers it, asks no X-function question (Scatchard rewrites
+  // X itself), and the finish names the X column like the MCP path.
+  const xy = readTable({
+    columns: ["Title", "X", "A"],
+    rows: [["", "10", "1"], ["", "20", "2"]],
+  });
+  if (!fnOptions({}, xy, "xy").includes("scatchard"))
+    throw new Error(`expected scatchard offered on an XY table`);
+  deepStrictEqual(ids({ function: "scatchard" }, xy, "xy"), ["function", "interchange"]);
+  deepStrictEqual(wizard.finish({ function: "scatchard" }, xy, "xy"), {
+    type: "transform-data",
+    params: { function: "scatchard", x: "X" },
   });
 });
 

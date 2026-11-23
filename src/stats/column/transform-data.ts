@@ -12,8 +12,9 @@
 // Y+Random, rounding, Y^K, 10^Y, 2^Y, −log10, the X/Y cross-column functions,
 // X transforms + interchange, per-data-set K, error-bar handling on
 // mean±SD/SEM tables, and user-defined transforms through the calcvars
-// evaluator. The six pharmacology transforms are a separate follow-up, not
-// here. Pure TypeScript, no R for the values themselves; the transformed
+// evaluator. The other five pharmacology transforms are a separate
+// follow-up, not here; Scatchard (seq 386) is, as a cross-column function.
+// Pure TypeScript, no R for the values themselves; the transformed
 // groups' descriptives come from `describe` (R), like every other analysis.
 // The one exception is the to-CI error mode, whose t critical values come
 // from the pure-TS `tCrit95` (src/lib/student-t.ts).
@@ -92,6 +93,7 @@ export const TRANSFORM_LABEL: Record<TransformFunction, string> = {
   "y-plus-x": "Y+X",
   "y-times-x": "Y×X",
   "x-minus-y": "X−Y",
+  scatchard: "Scatchard",
   "user-defined": "user-defined",
 };
 
@@ -131,6 +133,7 @@ const EXCLUDED_REASON: Record<TransformFunction, string> = {
   "y-plus-x": "the paired X value is missing",
   "y-times-x": "the paired X value is missing",
   "x-minus-y": "the paired X value is missing",
+  scatchard: "the paired value is missing, or X is 0",
   "user-defined": "the formula left it blank (dividing by zero, or a value outside a function's domain)",
 };
 
@@ -365,6 +368,18 @@ export function transformValue(
     case "x-minus-y":
       out = x! - y!;
       break;
+    case "scatchard":
+      // The Scatchard re-plot (seq 386): the Y value becomes Y/X
+      // (bound/free) and the X value becomes the paired Y (bound). An X
+      // of 0 leaves the Y blank; a missing paired value blanks either way
+      // (the cross-column guard above).
+      if (role === "y") {
+        if (x === 0) return null;
+        out = y! / x!;
+      } else {
+        out = y!;
+      }
+      break;
     case "rank":
     case "zscore":
     case "user-defined":
@@ -592,6 +607,11 @@ export async function runTransformData(
     return { error: `Unknown transform function for X: “${xFn}”.` };
   if (xFn === "user-defined")
     return { error: "A user-defined transform applies to the Y values — choose a built-in function for the X values." };
+  if (fn === "scatchard" && xFn !== undefined)
+    return { error: "“Scatchard” already rewrites the X values (X becomes Y) — leave the X function unset." };
+  // Scatchard's X rewrite rides the X-transform path: the X entry is built
+  // with the same function (role "x" returns the paired Y).
+  const effXFn = fn === "scatchard" ? "scatchard" : xFn;
   const errorMode: TransformErrorMode = params?.errorMode ?? "mean-only";
   if (!["mean-only", "erase", "to-ci"].includes(errorMode))
     return { error: `Unknown error handling: “${errorMode}”.` };
@@ -754,11 +774,11 @@ export async function runTransformData(
   };
   /** How one column's values are transformed by the X function. */
   const xTransform = (column: Column): ValueTransform => {
-    if (isColumnTransform(xFn!)) {
-      return { one: () => null, whole: xFn === "rank" ? rankValues : zscoreValues };
+    if (isColumnTransform(effXFn!)) {
+      return { one: () => null, whole: effXFn === "rank" ? rankValues : zscoreValues };
     }
-    const k = isKTransform(xFn!) ? resolveK(column) : undefined;
-    return { one: (value, _row, paired) => transformValue(xFn!, value, k, paired, "x", rng) };
+    const k = isKTransform(effXFn!) ? resolveK(column) : undefined;
+    return { one: (value, _row, paired) => transformValue(effXFn!, value, k, paired, "x", rng) };
   };
 
   /** One results entry from a column and its transform (null: pass through). */
@@ -849,9 +869,9 @@ export async function runTransformData(
       );
       noteK(column, fn);
     }
-    if (xFn !== undefined && xCol && xCol.values.length > 0) {
-      entries.push(buildEntry(xCol, TRANSFORM_LABEL[xFn], xTransform(xCol), "data", EXCLUDED_REASON[xFn], yCols[0]));
-      noteK(xCol, xFn);
+    if (effXFn !== undefined && xCol && xCol.values.length > 0) {
+      entries.push(buildEntry(xCol, TRANSFORM_LABEL[effXFn], xTransform(xCol), "data", EXCLUDED_REASON[effXFn], yCols[0]));
+      noteK(xCol, effXFn);
     }
   } else if (interchange) {
     // Interchange: the old X column takes the Y function (paired with the
@@ -866,11 +886,11 @@ export async function runTransformData(
       noteK(xCol, fn);
     }
     for (const column of yCols) {
-      if (xFn === undefined) {
+      if (effXFn === undefined) {
         entries.push(buildEntry(column, "unchanged", null, "passthrough", ""));
       } else {
-        entries.push(buildEntry(column, TRANSFORM_LABEL[xFn], xTransform(column), "data", EXCLUDED_REASON[xFn], xCol));
-        noteK(column, xFn);
+        entries.push(buildEntry(column, TRANSFORM_LABEL[effXFn!], xTransform(column), "data", EXCLUDED_REASON[effXFn!], xCol));
+        noteK(column, effXFn!);
       }
     }
   } else {
@@ -883,9 +903,9 @@ export async function runTransformData(
       );
       noteK(column, fn);
     }
-    if (xFn !== undefined && xCol && xCol.values.length > 0) {
-      entries.push(buildEntry(xCol, TRANSFORM_LABEL[xFn], xTransform(xCol), "data", EXCLUDED_REASON[xFn], yCols[0]));
-      noteK(xCol, xFn);
+    if (effXFn !== undefined && xCol && xCol.values.length > 0) {
+      entries.push(buildEntry(xCol, TRANSFORM_LABEL[effXFn], xTransform(xCol), "data", EXCLUDED_REASON[effXFn], yCols[0]));
+      noteK(xCol, effXFn);
     }
   }
 
@@ -929,6 +949,9 @@ export async function runTransformData(
     "The source table is unchanged — these are the transformed values as a results sheet.",
     kNote,
     xFn !== undefined ? `X values transformed with ${TRANSFORM_LABEL[xFn]}.` : "",
+    fn === "scatchard"
+      ? "Scatchard: X becomes Y (bound) and Y becomes Y/X (bound/free) — a display-only re-plot, not a first step in analyzing the data."
+      : "",
     interchange
       ? "X and Y interchanged before transforming: the Y function applies to the values that were in X, and the X function to the values that were in Y."
       : "",

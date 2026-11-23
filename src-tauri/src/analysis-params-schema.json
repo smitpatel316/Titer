@@ -3246,6 +3246,7 @@
           "y-plus-x",
           "y-times-x",
           "x-minus-y",
+          "scatchard",
           "user-defined"
         ],
         "default": "log10",
@@ -3307,7 +3308,8 @@
           "y-minus-x",
           "y-plus-x",
           "y-times-x",
-          "x-minus-y"
+          "x-minus-y",
+          "scatchard"
         ],
         "required": false,
         "description": "The function applied to the X values (XY tables); omitted: X passes through unchanged (seq 341)."
