@@ -27001,6 +27001,94 @@ check("transform-data wizard offers the seq 341 functions and builds the seq 341
   });
 });
 
+// ── Log-log transform (1.9, seq 385) ──────────────────────────────────────
+// Prism's Log-log (Transform data — Transforms for pharmacology and
+// biochemistry): X becomes log10(X), Y becomes log10(Y) — a display-only
+// re-plot. The Y side reuses log10; the X side goes through the existing
+// xFn path with log10 (the wizard pairs them by default; an MCP caller
+// passes xFunction: "log10"). A value ≤ 0 leaves that transformed value
+// blank, like log10. Pre-fix these fail: "log-log" is not in
+// TRANSFORM_FUNCTIONS yet, so the runner blanks it.
+check("transform-data log-log transforms both axes (seq 385)", async () => {
+  // log-log is log10, one value at a time — undefined for values ≤ 0.
+  strictEqual(transformValue("log-log" as never, 100), 2);
+  strictEqual(transformValue("log-log" as never, 1), 0);
+  strictEqual(transformValue("log-log" as never, 0), null);
+  strictEqual(transformValue("log-log" as never, -10), null);
+  const xy: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "1", "10"],
+      [null, "10", "100"],
+      [null, "100", "1000"],
+    ],
+  };
+  // The scope fixture: X=[1,10,100], Y=[10,100,1000] → X'=[0,1,2], Y'=[1,2,3].
+  const both = await runAnalysis("transform-data", xy, { function: "log-log", x: "X", xFunction: "log10" } as never);
+  if ("error" in both) throw new Error(both.error);
+  strictEqual(both.transformed?.length, 2);
+  deepStrictEqual(both.transformed?.[0].values, [1, 2, 3]);
+  strictEqual(both.transformed?.[0].column, "A");
+  deepStrictEqual(both.transformed?.[1].values, [0, 1, 2]);
+  strictEqual(both.transformed?.[1].column, "X");
+  strictEqual(both.subtitle, "Transform data — log-log");
+  // A zero/negative row leaves that transformed value blank, on both axes.
+  const gapped: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "1", "10"],
+      [null, "0", "0"],
+      [null, "-10", "1000"],
+    ],
+  };
+  const blank = await runAnalysis("transform-data", gapped, { function: "log-log", x: "X", xFunction: "log10" } as never);
+  if ("error" in blank) throw new Error(blank.error);
+  deepStrictEqual(blank.transformed?.[0].values, [1, null, 3]);
+  strictEqual(blank.transformed?.[0].excluded, 1);
+  deepStrictEqual(blank.transformed?.[1].values, [0, null, null]);
+  strictEqual(blank.transformed?.[1].excluded, 2);
+  // Without an X function the X column is left alone (the MCP contract:
+  // an omitted xFunction leaves X unchanged) — one Y entry only.
+  const yOnly = await runAnalysis("transform-data", xy, { function: "log-log", x: "X" } as never);
+  if ("error" in yOnly) throw new Error(yOnly.error);
+  strictEqual(yOnly.transformed?.length, 1);
+  deepStrictEqual(yOnly.transformed?.[0].values, [1, 2, 3]);
+  // The GUI path builds the same params the MCP path takes: picking log-log
+  // pairs the X values with log10 by default, and the run gives the same
+  // values either way.
+  const wizard = WIZARDS["transform-data"]!;
+  const fnOptions = (a: Record<string, string | number>, table: Dataset, type?: TableType) => {
+    const q = wizard.questions(a, table, type).find((qq) => qq && (qq as Question).id === "function") as
+      | { options: { value: string }[] }
+      | undefined;
+    return q?.options.map((o) => o.value) ?? [];
+  };
+  // The wizard reads a Dataset (readTable), not the runner's TableData.
+  const xyData = readTable({
+    columns: ["Title", "X", "A"],
+    rows: [
+      ["", "1", "10"],
+      ["", "10", "100"],
+      ["", "100", "1000"],
+    ],
+  });
+  if (!fnOptions({}, xyData, "xy").includes("log-log")) throw new Error("expected log-log offered on an XY table");
+  const plain = readTable({ columns: ["Title", "V"], rows: [["", "1"], ["", "2"]] });
+  if (!fnOptions({}, plain).includes("log-log")) throw new Error("expected log-log offered on a column table");
+  deepStrictEqual(wizard.finish({ function: "log-log" }, xyData, "xy"), {
+    type: "transform-data",
+    params: { function: "log-log", x: "X", xFunction: "log10" },
+  });
+  deepStrictEqual(wizard.finish({ function: "log-log", transformX: "no", interchange: "no" }, xyData, "xy"), {
+    type: "transform-data",
+    params: { function: "log-log", x: "X" },
+  });
+  const finished = wizard.finish({ function: "log-log" }, xyData, "xy");
+  const viaWizard = await runAnalysis("transform-data", xy, finished.params as never);
+  if ("error" in viaWizard) throw new Error(viaWizard.error);
+  deepStrictEqual(viaWizard.transformed, both.transformed);
+});
+
 // ── Calculated Variables (v1.8, seq 156) ──────────────────────────────────
 // Prism 11's in-table formulas for Multiple Variables tables: type `=` in an
 // empty variable; the whole column computes live from the table's other

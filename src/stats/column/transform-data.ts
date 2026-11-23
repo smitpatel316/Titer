@@ -12,8 +12,10 @@
 // Y+Random, rounding, Y^K, 10^Y, 2^Y, −log10, the X/Y cross-column functions,
 // X transforms + interchange, per-data-set K, error-bar handling on
 // mean±SD/SEM tables, and user-defined transforms through the calcvars
-// evaluator. The six pharmacology transforms are a separate follow-up, not
-// here. Pure TypeScript, no R for the values themselves; the transformed
+// evaluator. The pharmacology transforms are a separate follow-up — log-log
+// (seq 385) is here: the Y side is log10, and the X side goes through the
+// existing xFn path with log10 (the wizard pairs them by default; an MCP
+// caller passes xFunction: "log10"). Pure TypeScript, no R for the values themselves; the transformed
 // groups' descriptives come from `describe` (R), like every other analysis.
 // The one exception is the to-CI error mode, whose t critical values come
 // from the pure-TS `tCrit95` (src/lib/student-t.ts).
@@ -86,6 +88,7 @@ export const TRANSFORM_LABEL: Record<TransformFunction, string> = {
   "ten-power-y": "10^Y",
   "two-power-y": "2^Y",
   "neg-log10": "−log10(Y)",
+  "log-log": "log-log",
   "x-divided-by-y": "X/Y",
   "y-divided-by-x": "Y/X",
   "y-minus-x": "Y−X",
@@ -125,6 +128,7 @@ const EXCLUDED_REASON: Record<TransformFunction, string> = {
   "ten-power-y": "10^Y overflowed (the result is too large)",
   "two-power-y": "2^Y overflowed (the result is too large)",
   "neg-log10": "−log10 is undefined for values ≤ 0",
+  "log-log": "log10 is undefined for values ≤ 0",
   "x-divided-by-y": "X/Y is undefined when Y is 0 or the paired value is missing",
   "y-divided-by-x": "Y/X is undefined when X is 0 or the paired value is missing",
   "y-minus-x": "the paired X value is missing",
@@ -251,6 +255,7 @@ export function transformValue(
   let out: number;
   switch (fn) {
     case "log10":
+    case "log-log":
       if (value <= 0) return null;
       out = Math.log10(value);
       break;

@@ -261,6 +261,7 @@ export const TRANSFORM_FUNCTIONS = [
   "ten-power-y",
   "two-power-y",
   "neg-log10",
+  "log-log",
   "x-divided-by-y",
   "y-divided-by-x",
   "y-minus-x",

@@ -1237,6 +1237,13 @@ const ROWS: Row[] = [
     ],
   },
   {
+    item: "385",
+    title: "Log-log transform",
+    status: "covered",
+    note: "Merged on check/v19: transform-data gained the log-log function — log10 of both X and Y (X via the existing xFn path with log10, Y via log10); wizard entry + MCP schema enum.",
+    checks: [{ kind: "analysisParamEnum", type: "transform-data", param: "function", value: "log-log" }],
+  },
+  {
     item: "206",
     title: "Remove-baseline column math",
     status: "covered",
