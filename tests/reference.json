@@ -19689,7 +19689,7 @@
     "n": 25
    }
   ],
-  "notes": "Least-squares fit (\"Three-phase decay\") of “D3” on “X”. 95% CIs are asymptotic (from each parameter's standard error). Starting values: Plateau = 36.77, Span1 = 36.61, K1 = 1, Span2 = 21.97, K2 = 0.1, Span3 = 14.65, K3 = 0.01.",
+  "notes": "Least-squares fit (\"Three-phase decay\") of “D3” on “X”. 95% CIs are asymptotic (from each parameter's standard error). “Plateau” and “Span3” are unstable (Hessian condition 4.7e+16) — the data do not determine them, so their best-fit value and 95% CI are not reported (Prism's unstable-parameter check: the Hessian condition number exceeds 10/√ε, about 6.7×10⁸). Starting values: Plateau = 36.77, Span1 = 36.61, K1 = 1, Span2 = 21.97, K2 = 0.1, Span3 = 14.65, K3 = 0.01.",
   "coefficients": [
    {
     "term": "Plateau",
@@ -19698,7 +19698,8 @@
     "t": 2193.993245,
     "p": 2.651420087e-50,
     "low": 9.990415298,
-    "high": 10.00956686
+    "high": 10.00956686,
+    "unstable": true
    },
    {
     "term": "Span1",
@@ -19743,7 +19744,8 @@
     "t": 4702.212807,
     "p": 2.912617913e-56,
     "low": 19.99107244,
-    "high": 20.00894422
+    "high": 20.00894422,
+    "unstable": true
    },
    {
     "term": "K3",
@@ -26823,7 +26825,8 @@
     "t": 169488034300,
     "p": 1.644771907e-87,
     "low": 100000000,
-    "high": 100000000
+    "high": 100000000,
+    "unstable": true
    },
    {
     "term": "Koff",
@@ -26918,7 +26921,8 @@
     "t": 695747312900,
     "p": 2.065841153e-24,
     "low": 100000000,
-    "high": 100000000
+    "high": 100000000,
+    "unstable": true
    },
    {
     "term": "Koff",
@@ -27248,7 +27252,8 @@
     "t": 4.085125917,
     "p": 0.000771135656,
     "low": 483537.198,
-    "high": 1516462.802
+    "high": 1516462.802,
+    "unstable": true
    }
   ]
  },

@@ -343,6 +343,8 @@ const PARAMS = {
   centered: "yes/no",
   // Seq 200: the nonlinear fitting method (least squares / robust / Poisson).
   fitMethod: ["least-squares", "robust", "poisson"],
+  // Seq 323: difficult-fit handling (identify unstable parameters / neither).
+  difficultFitHandling: ["unstable", "none"],
   compareModel: [...NONLINEAR_MODELS],
   globalY: "names",
   sharedParams: "names",
@@ -1127,7 +1129,7 @@ export const PARAM_KEYS_BY_ANALYSIS: Record<string, readonly ParamKey[]> = {
   "area-under-curve": ["baseline", "ignorePeaksBelow", "peaksAboveBaselineOnly", "sets"],
   "row-means-totals": ["ys", "x", "rowScope", "sets"],
   "nonlinear-regression": [
-    "x", "y", "ys", "model", "centered", "fitMethod", "compareWith", "compare", "interpolate", "weights", "fitXMin", "fitXMax", "fixed", "bounds", "fixedConstants",
+    "x", "y", "ys", "model", "centered", "fitMethod", "difficultFitHandling", "compareWith", "compare", "interpolate", "weights", "fitXMin", "fitXMax", "fixed", "bounds", "fixedConstants",
     "boundsConstants", "compareModel", "globalY", "sharedParams", "ligandConcentration", "ligandKd",
     "ligandConcentrationConstant", "ligandKdConstant", "fitKi", "rout", "q", "ecx", "customEquation", "customParameters",
     "sets",

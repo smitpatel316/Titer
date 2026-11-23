@@ -703,6 +703,14 @@ export type NonlinearWeightScheme = "none" | "1/y" | "1/y2" | "1/x" | "1/x2" | "
  *  likelihood, by iteratively reweighted least squares with weights 1/μ). */
 export const NONLINEAR_FIT_METHODS = ["least-squares", "robust", "poisson"] as const;
 export type NonlinearFitMethod = (typeof NONLINEAR_FIT_METHODS)[number];
+/** How a difficult fit is handled (seq 323, Prism's Confidence tab):
+ *  "unstable" (default since Prism 9.0) identifies parameters the data do
+ *  not determine — the fit's Hessian condition number exceeds 10/√ε
+ *  (about 6.7×10⁸) — and reports their best-fit value as "Unstable" with
+ *  a "Very wide" CI; "none" reports best-fit values no matter what.
+ *  Diagnostic only — it never alters fitted values. */
+export const NONLINEAR_DIFFICULT_FIT_HANDLINGS = ["unstable", "none"] as const;
+export type NonlinearDifficultFitHandling = (typeof NONLINEAR_DIFFICULT_FIT_HANDLINGS)[number];
 export interface NonlinearRegressionParams {
   /** Multiple Variables tables: the X variable (the Y variable is `y`). */
   x?: string;
@@ -754,6 +762,9 @@ export interface NonlinearRegressionParams {
   /** How the curve is fitted (seq 200): least squares (default), robust
    *  (Tukey biweight), or Poisson (counts). */
   fitMethod?: NonlinearFitMethod;
+  /** How a difficult fit is handled (seq 323): identify unstable
+   *  parameters (default) or report best-fit values no matter what. */
+  difficultFitHandling?: NonlinearDifficultFitHandling;
   /** Extra Y series for a shared-parameter (global) fit. nls models only. */
   globalY?: string[];
   /** Which parameters are shared across the global fit's series (omitted:
@@ -2062,6 +2073,11 @@ export interface RegressionCoefficient {
   stdError: number | null;
   t: number | null;
   p: number | null;
+  /** Seq 323: true when the data do not determine this parameter (Prism's
+   *  unstable-parameter check — the fit's Hessian condition number exceeds
+   *  10/√ε). The numeric estimate is kept (the overlays draw the curve
+   *  from it); the results view shows "Unstable" / "Very wide" instead. */
+  unstable?: boolean;
   /** Denominator degrees of freedom behind `p` (mixed-effects only):
    *  Satterthwaite / Kenward-Roger are usually fractional, Legacy whole. */
   df?: number | null;

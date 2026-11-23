@@ -13,6 +13,7 @@
 import type {
   AnalysisOutcome,
   Column,
+  NonlinearDifficultFitHandling,
   NonlinearFitMethod,
   NonlinearModel,
   RegressionCoefficient,
@@ -2050,6 +2051,9 @@ export interface FitOptions {
   /** The fitting method (seq 200): least squares (default), robust (Tukey
    *  biweight IRLS) or Poisson (weights 1/fitted IRLS). */
   fitMethod?: NonlinearFitMethod;
+  /** How a difficult fit is handled (seq 323): identify unstable
+   *  parameters (default) or report best-fit values no matter what. */
+  difficultFitHandling?: NonlinearDifficultFitHandling;
 }
 
 export interface AppliedFitOptions {
@@ -2420,6 +2424,143 @@ export function prepareFit(
   return { xCol, yCol, xs, ys, rows, columns: pointColumns, rangeExcluded };
 }
 
+/** Seq 323 — Prism's unstable-parameter check (Prism 8/9 Curve Fitting
+ *  Guide, "How Prism identifies unstable parameters"): after the fit,
+ *  Prism prepares the Hessian matrix — one row/column per fitted parameter,
+ *  the Gauss–Newton Hessian JᵀWJ of the (weighted) sum of squares — and
+ *  calls a parameter unstable when the matrix's condition number (2-norm,
+ *  λmax/λmin) exceeds 10/√ε, ε = 2.22e-16 ("about 670 million"; the 10 is
+ *  not a typo). It then removes the parameter that most reduces the
+ *  condition, marks it unstable, and repeats until the condition is low
+ *  enough. The unstable parameter's best-fit value shows "Unstable" and its
+ *  CI "Very wide". The docs are silent on ties, so this implementation
+ *  breaks them toward the parameter loading most on the smallest
+ *  eigenvector (the direction the data constrain least), then toward the
+ *  first in order. Diagnostic only — it never alters fitted values. */
+export const UNSTABLE_CONDITION_THRESHOLD = 10 / Math.sqrt(Number.EPSILON);
+
+/** Eigenvalues + eigenvectors of a symmetric matrix, by cyclic Jacobi
+ *  rotations (no dependency, and the matrices here are tiny — one row per
+ *  fitted parameter). `vectors` holds the eigenvectors as columns, in the
+ *  same order as `values`. */
+function jacobiEigh(a: number[][]): { values: number[]; vectors: number[][] } {
+  const n = a.length;
+  const d = a.map((row) => [...row]);
+  const v: number[][] = a.map((row, i) => row.map((_, j) => (i === j ? 1 : 0)));
+  const frob = Math.sqrt(d.flat().reduce((s, x) => s + x * x, 0));
+  if (frob === 0) return { values: d.map(() => 0), vectors: v };
+  for (let sweep = 0; sweep < 100; sweep++) {
+    let off = 0;
+    for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++) off += d[p][q] ** 2;
+    if (Math.sqrt(off) < 1e-14 * frob) break;
+    for (let p = 0; p < n; p++) {
+      for (let q = p + 1; q < n; q++) {
+        const apq = d[p][q];
+        if (apq === 0) continue;
+        const tau = (d[q][q] - d[p][p]) / (2 * apq);
+        // Numerical Recipes' sign: +1 when tau >= 0 (Math.sign(0) is 0,
+        // which would skip the rotation exactly when the diagonals are
+        // equal — the 45° case — and leave the pair unannihilated).
+        const t = (tau >= 0 ? 1 : -1) / (Math.abs(tau) + Math.sqrt(1 + tau * tau));
+        const c = 1 / Math.sqrt(1 + t * t);
+        const s = t * c;
+        for (let k = 0; k < n; k++) {
+          const dkp = d[k][p];
+          const dkq = d[k][q];
+          d[k][p] = c * dkp - s * dkq;
+          d[k][q] = s * dkp + c * dkq;
+        }
+        for (let k = 0; k < n; k++) {
+          const dpk = d[p][k];
+          const dqk = d[q][k];
+          d[p][k] = c * dpk - s * dqk;
+          d[q][k] = s * dpk + c * dqk;
+        }
+        for (let k = 0; k < n; k++) {
+          const vkp = v[k][p];
+          const vkq = v[k][q];
+          v[k][p] = c * vkp - s * vkq;
+          v[k][q] = s * vkp + c * vkq;
+        }
+      }
+    }
+  }
+  return { values: d.map((row, i) => row[i]), vectors: v };
+}
+
+/** The 2-norm condition number λmax/λmin of a symmetric Hessian. A
+ *  non-positive smallest eigenvalue means the matrix is numerically
+ *  singular (a Gauss–Newton Hessian is positive semidefinite, so this is
+ *  rounding, not a real negative curvature) — Infinity. A single parameter
+ *  is never unstable: its 1×1 condition is 1 by definition. */
+export function hessianConditionNumber(hessian: number[][]): number {
+  const { values } = jacobiEigh(hessian);
+  if (values.length <= 1) return 1;
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  if (!(min > 0) || !Number.isFinite(max)) return Infinity;
+  return max / min;
+}
+
+/** Prism's greedy elimination on a Hessian: the parameters the data do not
+ *  determine, in the order they are removed, plus the full matrix's
+ *  condition number. `hessian` must be finite and square, `names` its
+ *  parameters in row/column order. */
+export function identifyUnstableParameters(
+  hessian: number[][],
+  names: string[],
+): { unstable: string[]; condition: number } {
+  if (hessian.length !== names.length || hessian.some((row) => row.length !== names.length))
+    throw new Error("identifyUnstableParameters needs a square Hessian matching its parameter names.");
+  const sub = (idx: number[]): number[][] => idx.map((i) => idx.map((j) => hessian[i][j]));
+  const condition = hessianConditionNumber(hessian);
+  let remaining = names.map((_, i) => i);
+  let current = condition;
+  const unstable: string[] = [];
+  while (current > UNSTABLE_CONDITION_THRESHOLD && remaining.length > 1) {
+    const { values, vectors } = jacobiEigh(sub(remaining));
+    const minAt = values.indexOf(Math.min(...values));
+    const small = remaining.map((_, k) => vectors[k][minAt]);
+    let best: { k: number; cond: number; loading: number } | null = null;
+    for (let k = 0; k < remaining.length; k++) {
+      const rest = remaining.filter((_, j) => j !== k);
+      const c = hessianConditionNumber(sub(rest));
+      const loading = Math.abs(small[k] ?? 0);
+      if (best === null) {
+        best = { k, cond: c, loading };
+        continue;
+      }
+      const tol = 1e-9 * Math.max(1, best.cond);
+      if (c < best.cond - tol) best = { k, cond: c, loading };
+      else if (Math.abs(c - best.cond) <= tol && loading > best.loading + 1e-9) best = { k, cond: c, loading };
+    }
+    unstable.push(names[remaining[best!.k]]!);
+    remaining = remaining.filter((_, j) => j !== best!.k);
+    current = best!.cond;
+  }
+  return { unstable, condition };
+}
+
+/** Run the unstable-parameter check on a fit's coefficients: flags the
+ *  unstable ones (`unstable: true`) and returns their raw parameter names
+ *  plus the fit's Hessian condition number (null when the check is off or
+ *  there is no Hessian to check). `terms` are the fitted parameters in
+ *  Hessian order; `labelTerm` maps them to the coefficients' display
+ *  terms. */
+export function applyUnstableFlags(
+  coefficients: RegressionCoefficient[],
+  hessian: number[][] | null,
+  terms: string[],
+  labelTerm: (term: string) => string,
+  handling: NonlinearDifficultFitHandling = "unstable",
+): { unstableParameters: string[]; condition: number | null } {
+  if (handling === "none" || hessian === null) return { unstableParameters: [], condition: null };
+  const { unstable, condition } = identifyUnstableParameters(hessian, terms);
+  const flagged = new Set(unstable.map(labelTerm));
+  for (const c of coefficients) if (flagged.has(c.term)) c.unstable = true;
+  return { unstableParameters: unstable, condition };
+}
+
 /** R statements that, after `m` is fitted, compute the summary quantities
  *  (`s`, `co`, `cf`, `df`, `ss`, `sst`, `r2`, `syx`) plus the covariance
  *  (`V`), the t critical value (`q`) and a coefficient's 95% CI (`pci`) —
@@ -2432,10 +2573,19 @@ export function fitSummaryStatements(spec: ModelSpec, weighted = false): string 
   const r2 = spec.kind === "lm" && !weighted ? "s$r.squared" : "1-ss/sst";
   const ss = weighted ? "sum(w*residuals(m)^2)" : "sum(residuals(m)^2)";
   const sst = weighted ? "sum(w*(y-sum(w*y)/sum(w))^2)" : "sum((y-mean(y))^2)";
+  // Seq 323 (nls only — lm objects have no $m$gradient): the Gauss–Newton
+  // Hessian HGᵀHG for the unstable-parameter check. nls's gradient is
+  // already √w-weighted (it is the gradient of the weighted residuals), so
+  // the Hessian is the plain product — multiplying by w again would square
+  // the weights (verified against an analytic Jacobian in R, Nov 22: a
+  // 1/Y²-weighted 4PL's gradient rows are √w × the analytic Jacobian).
+  const hessian =
+    spec.kind === "nls" ? `HG<-m$m$gradient();HH<-t(HG)%*%HG;` : "";
   return (
     `s<-summary(m);co<-s$coefficients;cf<-coef(m);` +
     `df<-df.residual(m);ss<-${ss};sst<-${sst};r2<-${r2};syx<-sqrt(ss/df);` +
     `V<-vcov(m);q<-qt(0.975,df);pci<-function(p)cf[[p]]+c(-1,1)*q*sqrt(V[p,p]);` +
+    hessian +
     // A function of the coefficients and its CI by the delta method (central differences).
     `dl<-function(f){e<-f(cf);g<-sapply(names(cf),function(p){h<-1e-6*max(1,abs(cf[[p]]));a<-cf;b<-cf;a[[p]]<-a[[p]]+h;b[[p]]<-b[[p]]-h;(f(a)-f(b))/(2*h)});` +
     `s<-sqrt(drop(t(g)%*%V[names(cf),names(cf)]%*%g));c(e,e-q*s,e+q*s)};`
@@ -2499,7 +2649,14 @@ export function fitEntries(spec: ModelSpec, prefix = ""): string {
       return parts.join(",");
     })
     .join(",");
-  return `${prefix}r2=r2,${prefix}df=df,${prefix}ss=ss,${prefix}syx=syx,${coefAssigns}${derivedAssigns ? "," + derivedAssigns : ""}`;
+  // Seq 323 (nls only — the Hessian statements run only there): the full
+  // Hessian, row-major, so the check can read it back without a second R
+  // call. lm fits carry no `hh` entries and parseFit reads `hessian: null`.
+  const hessianAssigns =
+    spec.kind === "nls"
+      ? spec.terms.flatMap((_, i) => spec.terms.map((_, j) => `${prefix}hh${i}_${j}=HH[${i + 1},${j + 1}]`)).join(",")
+      : "";
+  return `${prefix}r2=r2,${prefix}df=df,${prefix}ss=ss,${prefix}syx=syx,${coefAssigns}${derivedAssigns ? "," + derivedAssigns : ""}${hessianAssigns ? "," + hessianAssigns : ""}`;
 }
 
 /** A derived quantity's value, with its 95% CI when the spec defines one
@@ -2520,7 +2677,15 @@ export function parseFit(
   n: number,
   labelTerm: (term: string) => string = (t) => t,
   prefix = "",
-): { coefficients: RegressionCoefficient[]; derived: DerivedRow[]; stats: StatRow[] } {
+): {
+  coefficients: RegressionCoefficient[];
+  derived: DerivedRow[];
+  stats: StatRow[];
+  /** The fit's Gauss–Newton Hessian (seq 323), when the R vector carries
+   *  it (nls fits); null for lm fits or when any entry is missing or
+   *  non-finite. */
+  hessian: number[][] | null;
+} {
   const coefficients: RegressionCoefficient[] = spec.terms.map((term, i) => ({
     term: labelTerm(term),
     estimate: v[`${prefix}b${i}`] ?? null,
@@ -2545,7 +2710,23 @@ export function parseFit(
     { label: "Degrees of freedom", value: v[`${prefix}df`] },
     { label: "N", value: n },
   ];
-  return { coefficients, derived, stats };
+  const hessian: number[][] | null =
+    spec.kind === "nls"
+      ? (() => {
+          const rows: number[][] = [];
+          for (let i = 0; i < spec.terms.length; i++) {
+            const row: number[] = [];
+            for (let j = 0; j < spec.terms.length; j++) {
+              const e = v[`${prefix}hh${i}_${j}`];
+              if (e == null || !Number.isFinite(e)) return null;
+              row.push(e);
+            }
+            rows.push(row);
+          }
+          return rows;
+        })()
+      : null;
+  return { coefficients, derived, stats, hessian };
 }
 
 export interface NonlinearFit {
@@ -2561,6 +2742,12 @@ export interface NonlinearFit {
    *  winning `retryFits` entry ("port", "relaxed tolerance", …). The
    *  runner names it in the result note. */
   retryMethod?: string;
+  /** Seq 323: the fit's Hessian condition number (2-norm), when the fit
+   *  is nonlinear and the check ran. */
+  hessianCondition?: number;
+  /** Seq 323: the parameters the data do not determine (raw term names),
+   *  when the check ran and found any. */
+  unstableParameters?: string[];
 }
 
 /** Warm-start an nls fit string from the current fit (seq 200): replace
@@ -2678,13 +2865,24 @@ export async function fitModelSpec(
     }
     try {
       const v = await evalNamedVector(rCode);
-      const { coefficients, derived, stats } = parseFit(v, eff, xs.length, labelTerm);
+      const { coefficients, derived, stats, hessian } = parseFit(v, eff, xs.length, labelTerm);
+      // Seq 323: the unstable-parameter check, on by default — the
+      // coefficients it flags carry `unstable: true` into the results.
+      const { unstableParameters, condition } = applyUnstableFlags(
+        coefficients,
+        hessian,
+        eff.terms,
+        labelTerm,
+        options?.difficultFitHandling ?? "unstable",
+      );
       return {
         coefficients,
         derived,
         stats,
         rCode,
         ...(attempt ? { retried: true, retryMethod: attempt.method } : {}),
+        ...(condition != null ? { hessianCondition: condition } : {}),
+        ...(unstableParameters.length ? { unstableParameters } : {}),
       };
     } catch (err) {
       lastErr = err;
