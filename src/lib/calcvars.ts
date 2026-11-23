@@ -825,6 +825,11 @@ function evalExpr(e: Expr, ctx: EvalContext): number | null {
     case "call": {
       // A one-variable aggregate reads the whole column, not one row.
       if (AGGREGATES.includes(e.name) && e.args.length === 1 && e.args[0].kind === "var") {
+        // Prism: unlike the other summary functions, COUNT only reports
+        // in rows that contain non-blank values (function reference,
+        // COUNT(Variable)) — the windowed COUNT already blanks blank
+        // rows the same way, so the plain form matches it here.
+        if (e.name === "COUNT" && ctx.value(e.args[0].name) == null) return null;
         return aggregate(e.name, ctx.values(e.args[0].name));
       }
       if (e.name === "IF") {
