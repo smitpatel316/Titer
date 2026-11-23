@@ -190,6 +190,20 @@ export interface Derived {
   high?: string;
 }
 
+/** Seq 388: the fitted parameters a derived quantity's R expressions name
+ *  (`cf[["LogEC50"]]`, `pci("K")`, `V["Top","Bottom"]`, `b[["K"]]` in a
+ *  delta-method `dl(...)`) — in the spec's term order. Fixed parameters
+ *  never appear: the effective spec substitutes them out of the
+ *  expressions before the fit. */
+export function derivedSources(d: Derived, terms: string[]): string[] {
+  const names = new Set<string>();
+  const hay = [d.expr, d.low ?? "", d.high ?? ""].join(" ");
+  for (const m of hay.matchAll(/(?:cf|b)\[\["([^"]+)"\]\]|pci\("([^"]+)"\)|V\["([^"]+)"/g))
+    names.add(m[1] ?? m[2] ?? m[3]!);
+  for (const m of hay.matchAll(/V\["[^"]+","([^"]+)"\]/g)) names.add(m[1]!);
+  return terms.filter((t) => names.has(t));
+}
+
 /** 10 to a log coefficient, its CI 10 to the coefficient's. */
 const tenTo = (label: string, p: string): Derived => ({
   label,
@@ -2546,18 +2560,29 @@ export function identifyUnstableParameters(
  *  plus the fit's Hessian condition number (null when the check is off or
  *  there is no Hessian to check). `terms` are the fitted parameters in
  *  Hessian order; `labelTerm` maps them to the coefficients' display
- *  terms. */
+ *  terms. `derived` (seq 388): a derived quantity whose source parameter
+ *  is unstable carries that source's display name (`unstableSources`) —
+ *  the results note names it. Prism's docs define no rule for derived
+ *  values of unstable parameters, so the value itself stays reported. */
 export function applyUnstableFlags(
   coefficients: RegressionCoefficient[],
   hessian: number[][] | null,
   terms: string[],
   labelTerm: (term: string) => string,
   handling: NonlinearDifficultFitHandling = "unstable",
+  derived?: DerivedRow[],
 ): { unstableParameters: string[]; condition: number | null } {
   if (handling === "none" || hessian === null) return { unstableParameters: [], condition: null };
   const { unstable, condition } = identifyUnstableParameters(hessian, terms);
   const flagged = new Set(unstable.map(labelTerm));
   for (const c of coefficients) if (flagged.has(c.term)) c.unstable = true;
+  if (derived) {
+    for (const row of derived) {
+      const src = (row.sources ?? []).map(labelTerm).filter((s) => flagged.has(s));
+      if (src.length) row.unstableSources = src;
+      else delete row.unstableSources;
+    }
+  }
   return { unstableParameters: unstable, condition };
 }
 
@@ -2660,10 +2685,17 @@ export function fitEntries(spec: ModelSpec, prefix = ""): string {
 }
 
 /** A derived quantity's value, with its 95% CI when the spec defines one
- *  (binding/global-fit specs define none — their rows stay value-only). */
+ *  (binding/global-fit specs define none — their rows stay value-only).
+ *  `sources` (seq 388) are the fitted parameters the quantity's R
+ *  expressions name (raw term names); `unstableSources` are the ones the
+ *  unstable-parameter check flagged, as the results show them — the
+ *  results note names them, since Prism's docs define no rule for derived
+ *  values of unstable parameters. */
 export interface DerivedRow extends StatRow {
   low?: number | null;
   high?: number | null;
+  sources?: string[];
+  unstableSources?: string[];
 }
 
 /** The fit's coefficients, derived quantities and goodness-of-fit rows, read
@@ -2696,7 +2728,12 @@ export function parseFit(
     high: v[`${prefix}ch${i}`] ?? null,
   }));
   const derived: DerivedRow[] = (spec.derived ?? []).map((d, i) => {
-    const row: DerivedRow = { label: d.label, value: v[`${prefix}d${i}`] ?? null };
+    const sources = derivedSources(d, spec.terms);
+    const row: DerivedRow = {
+      label: d.label,
+      value: v[`${prefix}d${i}`] ?? null,
+      ...(sources.length ? { sources } : {}),
+    };
     if (d.low !== undefined && d.high !== undefined) {
       row.low = v[`${prefix}dl${i}`] ?? null;
       row.high = v[`${prefix}dh${i}`] ?? null;
@@ -2874,6 +2911,7 @@ export async function fitModelSpec(
         eff.terms,
         labelTerm,
         options?.difficultFitHandling ?? "unstable",
+        derived,
       );
       return {
         coefficients,

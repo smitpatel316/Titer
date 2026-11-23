@@ -230,7 +230,7 @@ import { buildPanelFigure } from "../src/views/figures/panel-figure";
 import type { McpJob } from "../src/native";
 import { nestedMeans } from "../src/stats/nested/base";
 import { runNestedTTest } from "../src/stats/nested/nested-t-test";
-import { fitModelSpec, identifyUnstableParameters, modelSpec, prepareFit, UNSTABLE_CONDITION_THRESHOLD } from "../src/stats/xy/nonlinear-fit";
+import { applyUnstableFlags, derivedSources, fitModelSpec, identifyUnstableParameters, modelSpec, prepareFit, UNSTABLE_CONDITION_THRESHOLD, type DerivedRow, type ModelSpec } from "../src/stats/xy/nonlinear-fit";
 import { adjustComparisonRows, adjustFdrComparisonRows, adjustFdrPValues, adjustPValues, describe, describedBy, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
 import { analysisTitle, titleAfterApply } from "../src/stats/index";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
@@ -12120,6 +12120,110 @@ check("seq 323 difficult-fit handling in the curve wizard", () => {
     wizard.finish({ ys: ["A"], kind: "other", model: "line", difficultFitHandling: "unstable" }, twoY).params,
     { y: "A", model: "line" },
   );
+});
+
+// Seq 388: derived quantities from unstable parameters — Prism's docs
+// define "Unstable"/"Very wide" for fitted parameters only and never say
+// what happens to a transform of an unstable parameter (docs verdict,
+// Nov 23: "Unstable" + "Choosing transforms of parameters to report"
+// read; no rule found), so the derived value stays reported and the
+// results note names the unstable source parameter(s) instead of
+// silently showing a number.
+check("seq 388 derived quantities name their source parameters", () => {
+  const src = (spec: ModelSpec, label: string) =>
+    derivedSources(spec.derived!.find((d) => d.label === label)!, spec.terms);
+  const spec4 = modelSpec("sigmoidal-4pl-logx");
+  deepStrictEqual(src(spec4, "EC50"), ["LogEC50"]);
+  deepStrictEqual(src(spec4, "Span"), ["Bottom", "Top"]);
+  // Absolute IC50 lives on its own model, not the 4PL.
+  deepStrictEqual(src(modelSpec("absolute-ic50-logx"), "Absolute IC50"), ["Bottom", "Top", "LogEC50", "HillSlope"]);
+  const specD = modelSpec("one-phase-decay");
+  deepStrictEqual(src(specD, "Half-life"), ["K"]);
+  deepStrictEqual(src(specD, "Tau"), ["K"]);
+  deepStrictEqual(src(specD, "Span"), ["Y0", "Plateau"]);
+  // A constant derived row names no parameter.
+  deepStrictEqual(src(modelSpec("agonist-3pl-normalized-logx"), "Span"), []);
+});
+
+check("seq 388 a derived row is flagged with its unstable sources", () => {
+  const coef = (term: string): RegressionCoefficient => ({ term, estimate: 1, stdError: 1, t: 1, p: 0.5, low: 0, high: 2 });
+  // LogEC50 badly scaled (cond 1e9): unstable; Top is not.
+  const coefficients = [coef("Top"), coef("LogEC50")];
+  const derived: DerivedRow[] = [
+    { label: "EC50", value: 1, sources: ["LogEC50"] },
+    { label: "Span", value: 1, sources: ["Top", "Bottom"] },
+  ];
+  const { unstableParameters } = applyUnstableFlags(
+    coefficients,
+    [[1, 0], [0, 1e-9]],
+    ["Top", "LogEC50"],
+    (t) => t,
+    "unstable",
+    derived,
+  );
+  deepStrictEqual(unstableParameters, ["LogEC50"]);
+  ok(coefficients[1].unstable === true, "LogEC50 should be flagged");
+  deepStrictEqual(derived[0].unstableSources, ["LogEC50"]);
+  ok(derived[1].unstableSources === undefined, `Span's sources are stable, got ${JSON.stringify(derived[1].unstableSources)}`);
+  // The control off: nothing flagged, no sources.
+  const derivedOff: DerivedRow[] = [{ label: "EC50", value: 1, sources: ["LogEC50"] }];
+  applyUnstableFlags([coef("Top"), coef("LogEC50")], [[1, 0], [0, 1e-9]], ["Top", "LogEC50"], (t) => t, "none", derivedOff);
+  ok(derivedOff[0].unstableSources === undefined, "control off should flag nothing");
+});
+
+// Seq 388: the shared choke point — fitModelSpec carries the unstable
+// sources on its derived rows, so the global-fit / binding / enzyme
+// paths (which all run through it) see them too.
+check("seq 388 fitModelSpec carries unstable sources on derived rows", async () => {
+  const xs = [-9, -8.5, -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4];
+  const ys = xs.map((x, i) => 1 + (1e5 - 1) / (1 + 10 ** (-8.5 - x)) + 0.8 * Math.sin(1.7 * i + 0.5));
+  const w = ys.map((y) => 1 / (y * y));
+  const fit = await fitModelSpec(xs, ys, modelSpec("sigmoidal-4pl-logx"), "", (t) => t, { weights: w });
+  deepStrictEqual(fit.unstableParameters, ["LogEC50", "HillSlope"]);
+  deepStrictEqual(fit.derived.find((d) => d.label === "EC50")?.unstableSources, ["LogEC50"]);
+  ok(fit.derived.find((d) => d.label === "Span")?.unstableSources === undefined, "Span's sources (Top, Bottom) are stable here");
+});
+
+check("seq 388 a derived row from an unstable parameter is noted, not silently numbered", async () => {
+  const xs = [-9, -8.5, -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4];
+  const ys = xs.map((x, i) => 1 + (1e5 - 1) / (1 + 10 ** (-8.5 - x)) + 0.8 * Math.sin(1.7 * i + 0.5));
+  const table: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  };
+  const out = await runAnalysis("nonlinear-regression", table, { y: "Y", model: "sigmoidal-4pl-logx", weights: "1/y2" });
+  ok(!("error" in out), `weighted 4PL fit failed: ${"error" in out ? out.error : ""}`);
+  const logEC50 = out.coefficients?.find((c) => c.term === "LogEC50");
+  ok(logEC50?.unstable === true, `LogEC50 should be flagged unstable, got ${JSON.stringify(logEC50)}`);
+  // The EC50 row names its unstable source in the notes...
+  ok(
+    out.notes?.includes("“EC50” is derived from “LogEC50”"),
+    `notes should name EC50's unstable source, got ${out.notes}`,
+  );
+  // ...while Span, whose sources are stable, gets no such note...
+  ok(!out.notes?.includes("“Span” is derived"), `Span should not be noted, got ${out.notes}`);
+  // ...and the value itself stays reported (a number, not suppressed).
+  const ec50 = out.fit?.rows.find((r) => r.label === "EC50");
+  ok(
+    ec50?.values?.[0] != null && Number.isFinite(ec50.values[0]),
+    `EC50 should still report a value, got ${JSON.stringify(ec50)}`,
+  );
+});
+
+check("seq 388 a derived row from stable parameters is not noted", async () => {
+  const xsD = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20];
+  const ysD = xsD.map((x, i) => (1e5 - 1) * Math.exp(-0.5 * x) + 1 + 0.02 * Math.sin(1.7 * i + 0.5));
+  const decayTable: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xsD.map((x, i) => ["", String(x), String(ysD[i])]),
+  };
+  const out = await runAnalysis("nonlinear-regression", decayTable, { y: "Y", model: "one-phase-decay", weights: "1/y2" });
+  ok(!("error" in out), `weighted decay fit failed: ${"error" in out ? out.error : ""}`);
+  ok(out.coefficients?.find((c) => c.term === "Y0")?.unstable === true, "Y0 should be flagged unstable");
+  // Half-life derives from K (stable): no note...
+  ok(!out.notes?.includes("“Half-life” is derived"), `Half-life should not be noted, got ${out.notes}`);
+  // ...but Span derives from Y0 (unstable): it is noted.
+  ok(out.notes?.includes("“Span” is derived from “Y0”"), `notes should name Span's unstable source, got ${out.notes}`);
 });
 
 // v2 item 23: user-defined equations for nonlinear regression — the user types their own

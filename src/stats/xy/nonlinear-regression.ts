@@ -1526,6 +1526,7 @@ async function compareModels(
     effA.terms,
     termLabel,
     params?.difficultFitHandling ?? "unstable",
+    parsedA.derived,
   );
   const aiccA = v.aiccA ?? null;
   const aiccB = v.aiccB ?? null;
@@ -1970,7 +1971,11 @@ async function runGlobalNonlinear(
     `95% CIs are asymptotic (from each parameter's standard error). ` +
     `R² is per data set; the sum of squares, Sy.x and degrees of freedom are for all series together.` +
     unstableNote([
-      { coefficients, ...(result.hessianCondition != null ? { hessianCondition: result.hessianCondition } : {}) },
+      {
+        coefficients,
+        ...(result.derived ? { derived: result.derived } : {}),
+        ...(result.hessianCondition != null ? { hessianCondition: result.hessianCondition } : {}),
+      },
     ]) +
     rangeNotes(params, series.reduce((s, x) => s + x.rangeExcluded, 0)) +
     (Object.keys(fixed).length
@@ -2574,6 +2579,7 @@ export async function runNonlinearRegression(
       (other ? spec : effSpec).terms,
       termLabel,
       params?.difficultFitHandling ?? "unstable",
+      p.derived,
     );
     return { ...p, ...(condition != null ? { hessianCondition: condition } : {}) };
   });
@@ -2582,6 +2588,10 @@ export async function runNonlinearRegression(
     parsed.forEach((p, i) => {
       p.coefficients.forEach((c) => {
         c.term = `${sets[i].name} — ${c.term}`;
+      });
+      // Seq 388: the derived rows' unstable sources name their set too.
+      p.derived.forEach((d) => {
+        if (d.unstableSources) d.unstableSources = d.unstableSources.map((s) => `${sets[i].name} — ${s}`);
       });
     });
   } else {
@@ -2686,23 +2696,45 @@ function frameworkNotes(
 /** The unstable-parameter warning for the results notes (seq 323): which
  *  parameters the data do not determine, and — for a single fit — how bad
  *  the conditioning is. Terms are the coefficients' display terms (they
- *  already name their set when several were fitted). */
-function unstableNote(parsed: { coefficients: RegressionCoefficient[]; hessianCondition?: number }[]): string {
+ *  already name their set when several were fitted). Seq 388: a derived
+ *  quantity whose source parameter is unstable is named too — Prism's
+ *  docs define no rule for derived values of unstable parameters, so its
+ *  value stays reported and the note warns it is not reliable. */
+function unstableNote(
+  parsed: { coefficients: RegressionCoefficient[]; derived?: DerivedRow[]; hessianCondition?: number }[],
+): string {
   const clauses: string[] = [];
   for (const p of parsed) {
     const terms = p.coefficients.filter((c) => c.unstable).map((c) => c.term);
-    if (!terms.length) continue;
-    const list =
-      terms.length === 1
-        ? `“${terms[0]}”`
-        : `${terms.slice(0, -1).map((t) => `“${t}”`).join(", ")} and “${terms[terms.length - 1]}”`;
-    const cond =
-      p.hessianCondition != null && Number.isFinite(p.hessianCondition)
-        ? ` (Hessian condition ${p.hessianCondition.toExponential(1)})`
-        : "";
-    clauses.push(
-      `${list} ${terms.length === 1 ? "is" : "are"} unstable${cond} — the data do not determine ${terms.length === 1 ? "it" : "them"}, so ${terms.length === 1 ? "its" : "their"} best-fit value and 95% CI are not reported (Prism's unstable-parameter check: the Hessian condition number exceeds 10/√ε, about 6.7×10⁸).`,
-    );
+    // Seq 388: derived quantities whose source parameters are unstable.
+    const derivedClauses = (p.derived ?? []).flatMap((d) => {
+      const src = d.unstableSources ?? [];
+      if (!src.length) return [];
+      const list =
+        src.length === 1
+          ? `“${src[0]}”`
+          : `${src.slice(0, -1).map((t) => `“${t}”`).join(", ")} and “${src[src.length - 1]}”`;
+      return [
+        `“${d.label}” is derived from ${list}, which ${src.length === 1 ? "is" : "are"} unstable — the data do not determine ${src.length === 1 ? "it" : "them"}, so “${d.label}”’s value and 95% CI are not reliable.`,
+      ];
+    });
+    if (!terms.length && !derivedClauses.length) continue;
+    const parts: string[] = [];
+    if (terms.length) {
+      const list =
+        terms.length === 1
+          ? `“${terms[0]}”`
+          : `${terms.slice(0, -1).map((t) => `“${t}”`).join(", ")} and “${terms[terms.length - 1]}”`;
+      const cond =
+        p.hessianCondition != null && Number.isFinite(p.hessianCondition)
+          ? ` (Hessian condition ${p.hessianCondition.toExponential(1)})`
+          : "";
+      parts.push(
+        `${list} ${terms.length === 1 ? "is" : "are"} unstable${cond} — the data do not determine ${terms.length === 1 ? "it" : "them"}, so ${terms.length === 1 ? "its" : "their"} best-fit value and 95% CI are not reported (Prism's unstable-parameter check: the Hessian condition number exceeds 10/√ε, about 6.7×10⁸).`,
+      );
+    }
+    parts.push(...derivedClauses);
+    clauses.push(parts.join(" "));
   }
   return clauses.length ? ` ${clauses.join(" ")}` : "";
 }

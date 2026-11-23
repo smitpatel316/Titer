@@ -26241,7 +26241,10 @@
   "stats": [
    {
     "label": "Half-life",
-    "value": 1.386294364
+    "value": 1.386294364,
+    "sources": [
+     "Kobs"
+    ]
    },
    {
     "label": "R squared",
@@ -26320,11 +26323,17 @@
   "stats": [
    {
     "label": "Half-life",
-    "value": 2.310490602
+    "value": 2.310490602,
+    "sources": [
+     "Koff"
+    ]
    },
    {
     "label": "Residence time",
-    "value": 3.333333333
+    "value": 3.333333333,
+    "sources": [
+     "Koff"
+    ]
    },
    {
     "label": "R squared",
@@ -26403,11 +26412,17 @@
   "stats": [
    {
     "label": "Half-life (fast)",
-    "value": 0.6931471806
+    "value": 0.6931471806,
+    "sources": [
+     "KFast"
+    ]
    },
    {
     "label": "Half-life (slow)",
-    "value": 6.931471806
+    "value": 6.931471806,
+    "sources": [
+     "KSlow"
+    ]
    },
    {
     "label": "R squared",
@@ -26504,11 +26519,17 @@
   "stats": [
    {
     "label": "Half-life (fast)",
-    "value": 0.6931471806
+    "value": 0.6931471806,
+    "sources": [
+     "KFast"
+    ]
    },
    {
     "label": "Half-life (slow)",
-    "value": 6.931471806
+    "value": 6.931471806,
+    "sources": [
+     "KSlow"
+    ]
    },
    {
     "label": "R squared",
@@ -26605,7 +26626,10 @@
   "stats": [
    {
     "label": "Half-life",
-    "value": 1.386294364
+    "value": 1.386294364,
+    "sources": [
+     "Kobs"
+    ]
    },
    {
     "label": "kon",
@@ -26692,7 +26716,10 @@
   "stats": [
    {
     "label": "Half-life",
-    "value": 1.386294364
+    "value": 1.386294364,
+    "sources": [
+     "Kobs"
+    ]
    },
    {
     "label": "R squared",
@@ -26771,11 +26798,26 @@
   "stats": [
    {
     "label": "Kinetic Kd (nM)",
-    "value": 1
+    "value": 1,
+    "sources": [
+     "Kon",
+     "Koff"
+    ],
+    "unstableSources": [
+     "Kon"
+    ]
    },
    {
     "label": "Eq",
-    "value": 50
+    "value": 50,
+    "sources": [
+     "Kon",
+     "Koff",
+     "Bmax"
+    ],
+    "unstableSources": [
+     "Kon"
+    ]
    },
    {
     "label": "R squared",
@@ -26867,11 +26909,26 @@
   "stats": [
    {
     "label": "Kinetic Kd (nM)",
-    "value": 1
+    "value": 1,
+    "sources": [
+     "Kon",
+     "Koff"
+    ],
+    "unstableSources": [
+     "Kon"
+    ]
    },
    {
     "label": "Eq",
-    "value": 50
+    "value": 50,
+    "sources": [
+     "Kon",
+     "Koff",
+     "Bmax"
+    ],
+    "unstableSources": [
+     "Kon"
+    ]
    },
    {
     "label": "R squared",
