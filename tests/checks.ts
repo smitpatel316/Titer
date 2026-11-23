@@ -91,13 +91,19 @@ import {
   detectVariableType,
   labelVariableOf,
   levelSuggestions,
+  moveLevel,
+  orderedLevelKeys,
+  readLevelOrder,
   readVariableTypes,
+  refreshLevelOrder,
   refreshVariableTypes,
   renameLevel,
   rowLabelsOf,
   setLabelVariable,
+  setLevelOrder,
   setVariableType,
   setVariableTypeAuto,
+  sortLevelOrder,
   variableTypesOf,
 } from "../src/lib/variable-types";
 import {
@@ -195,7 +201,7 @@ import {
 } from "../src/lib/palettes";
 import { deletePalette, keepPalette, loadMyPalettes } from "../src/store/my-palettes";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, graphSeriesDataset, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
-import { datasetColumns, isGrouped, isNested, readTable, setColumns, splitXY, xyPoints, type Dataset } from "../src/lib/dataset";
+import { datasetColumns, isGrouped, isNested, levelsOf, readTable, setColumns, splitXY, xyPoints, type Dataset } from "../src/lib/dataset";
 import {
   convertXCell,
   displayXCell,
@@ -34509,6 +34515,300 @@ check("seq 332 (MCP): update-graph accepts the date/elapsed axis formats and ref
   await rejects(
     harness.run("job-332d-bad", "update-graph", { graph_id: "g1", options: { xDateFormat: "Fortnightly" } }),
     /must be one of/,
+  );
+});
+
+// ── seq 340: MV categorical level ordering ────────────────────────────────
+
+// A Multiple Variables table's categorical levels have a stored order
+// (Prism 11.2 Level Order): drag/step/preset commands set it, new levels
+// append at the end, renames keep their position, and the analyses read
+// their levels — including the dummy-coding reference — in that order.
+// Entry order (first appearance in the table) is the default; Prism's docs
+// don't define Entry vs Row operationally, so Titer reads them as: Entry is
+// the order levels entered the table (the stored order, once one exists),
+// Row re-derives first-appearance order from the current rows. Blank cells
+// are no level at all, so there is no (blank) level to pin at the top.
+const mv340 = (): TableData => ({
+  columns: ["Title", "Group", "Score"],
+  rows: [
+    ["1", "Beta", "10"],
+    ["2", "Alpha", "20"],
+    ["3", "Beta", "30"],
+    ["4", "Gamma", "40"],
+    ["5", "Alpha", "50"],
+    ["6", "Beta", "60"],
+    ["7", "Alpha", "70"],
+    ["8", "Gamma", "80"],
+  ],
+});
+const mv340Levels = (data: TableData): string[] => categoricalLevels(data, "Group").map((l) => l.name);
+
+check("seq 340: the default level order is Entry order, not size-then-name", () => {
+  // Entry: Beta, Alpha, Gamma. Size-then-name would read Alpha, Beta,
+  // Gamma (Beta and Alpha tie at 3, Gamma has 2) — the panel used to sort
+  // that way; the stored order now replaces it.
+  deepStrictEqual(mv340Levels(mv340()), ["Beta", "Alpha", "Gamma"]);
+  deepStrictEqual(orderedLevelKeys(mv340(), "Group"), ["beta", "alpha", "gamma"]);
+  deepStrictEqual(orderedLevelKeys(mv340(), "Nope"), []);
+  deepStrictEqual(categoricalLevels(mv340(), "Score"), [], "a continuous column has no levels");
+});
+
+check("seq 340: a stored order is kept, and a new level appends at the end", () => {
+  const fresh = mv340();
+  const ordered = setLevelOrder(fresh, "Group", ["Gamma", "Alpha", "Beta"]);
+  deepStrictEqual(ordered.levelOrder, { Group: ["gamma", "alpha", "beta"] });
+  deepStrictEqual(mv340Levels(ordered), ["Gamma", "Alpha", "Beta"]);
+  // Setting the same order again, or the entry order on a fresh table, is a
+  // no-op: no phantom undo step.
+  strictEqual(setLevelOrder(ordered, "Group", ["Gamma", "Alpha", "Beta"]), ordered);
+  strictEqual(setLevelOrder(fresh, "Group", ["Beta", "Alpha", "Gamma"]), fresh);
+  // An unknown level drops; a level left out of the list appends in Entry
+  // order; duplicate keys collapse to one.
+  deepStrictEqual(setLevelOrder(fresh, "Group", ["Gamma", "Nope", "Alpha"]).levelOrder, {
+    Group: ["gamma", "alpha", "beta"],
+  });
+  deepStrictEqual(setLevelOrder(fresh, "Group", ["Beta", "Beta", "Gamma"]).levelOrder, {
+    Group: ["beta", "gamma", "alpha"],
+  });
+  strictEqual(setLevelOrder(fresh, "Nope", ["Beta"]), fresh, "an unknown column is a no-op");
+  // A new level typed into the table appends at the end of the stored order.
+  const added = writeBlock(ordered, 8, 1, [["Delta"]], "multiple");
+  const refreshed = refreshLevelOrder(added);
+  deepStrictEqual(refreshed.levelOrder, { Group: ["gamma", "alpha", "beta", "delta"] });
+  deepStrictEqual(mv340Levels(refreshed), ["Gamma", "Alpha", "Beta", "Delta"]);
+  // A refresh that moves nothing returns the same record.
+  strictEqual(refreshLevelOrder(ordered), ordered);
+  // A level whose rows are all deleted drops from the resolved order, and a
+  // deleted column takes its stored order with it.
+  const noGamma = deleteRows(ordered, 3, 1);
+  const noGamma2 = deleteRows(noGamma, 6, 1);
+  deepStrictEqual(orderedLevelKeys(refreshLevelOrder(noGamma2), "Group"), ["alpha", "beta"]);
+  const gone = deleteColumns(ordered, 1, 1);
+  strictEqual(gone.levelOrder, undefined);
+  strictEqual(gone.columns.join(","), "Title,Score");
+});
+
+check("seq 340: moving a level (drag / step buttons) reorders it", () => {
+  const ordered = setLevelOrder(mv340(), "Group", ["Beta", "Alpha", "Gamma"]);
+  // Drag Gamma (index 2) to the top.
+  deepStrictEqual(mv340Levels(moveLevel(ordered, "Group", 2, 0)), ["Gamma", "Beta", "Alpha"]);
+  // Step Beta (index 0) down one.
+  deepStrictEqual(mv340Levels(moveLevel(ordered, "Group", 0, 1)), ["Alpha", "Beta", "Gamma"]);
+  // Step Alpha (index 1) to the bottom.
+  deepStrictEqual(mv340Levels(moveLevel(ordered, "Group", 1, 2)), ["Beta", "Gamma", "Alpha"]);
+  // Out of range, or a move onto itself, is a no-op.
+  strictEqual(moveLevel(ordered, "Group", 0, 0), ordered);
+  strictEqual(moveLevel(ordered, "Group", -1, 2), ordered);
+  strictEqual(moveLevel(ordered, "Group", 0, 3), ordered);
+  const fresh = mv340();
+  strictEqual(moveLevel(fresh, "Nope", 0, 1), fresh);
+});
+
+check("seq 340: sort presets produce the expected orders", () => {
+  const data = mv340();
+  deepStrictEqual(mv340Levels(sortLevelOrder(data, "Group", "entry", "asc")), ["Beta", "Alpha", "Gamma"]);
+  deepStrictEqual(mv340Levels(sortLevelOrder(data, "Group", "entry", "desc")), ["Gamma", "Alpha", "Beta"]);
+  deepStrictEqual(mv340Levels(sortLevelOrder(data, "Group", "name", "asc")), ["Alpha", "Beta", "Gamma"]);
+  deepStrictEqual(mv340Levels(sortLevelOrder(data, "Group", "name", "desc")), ["Gamma", "Beta", "Alpha"]);
+  // Frequency desc: Beta and Alpha tie at 3, so Entry order breaks the tie.
+  deepStrictEqual(mv340Levels(sortLevelOrder(data, "Group", "frequency", "desc")), ["Beta", "Alpha", "Gamma"]);
+  deepStrictEqual(mv340Levels(sortLevelOrder(data, "Group", "frequency", "asc")), ["Gamma", "Beta", "Alpha"]);
+  deepStrictEqual(mv340Levels(sortLevelOrder(data, "Group", "row", "asc")), ["Beta", "Alpha", "Gamma"]);
+  // Entry vs Row, told apart: a custom order, then the first row deleted.
+  // Entry keeps the stored positions; Row re-derives from the current rows.
+  const custom = setLevelOrder(data, "Group", ["Gamma", "Alpha", "Beta"]);
+  const cut = deleteRows(custom, 0, 1);
+  deepStrictEqual(mv340Levels(sortLevelOrder(cut, "Group", "entry", "asc")), ["Gamma", "Alpha", "Beta"]);
+  deepStrictEqual(mv340Levels(sortLevelOrder(cut, "Group", "row", "asc")), ["Alpha", "Beta", "Gamma"]);
+  deepStrictEqual(mv340Levels(sortLevelOrder(cut, "Group", "row", "desc")), ["Gamma", "Beta", "Alpha"]);
+});
+
+check("seq 340: renaming a level keeps its position; merging keeps the surviving level's", () => {
+  const ordered = setLevelOrder(mv340(), "Group", ["Gamma", "Alpha", "Beta"]);
+  const renamed = renameLevel(ordered, "Group", "Beta", "Beta2");
+  deepStrictEqual(renamed.levelOrder, { Group: ["gamma", "alpha", "beta2"] });
+  deepStrictEqual(mv340Levels(renamed), ["Gamma", "Alpha", "Beta2"]);
+  // Renaming onto another level merges: Gamma keeps its position, Alpha's
+  // key drops.
+  const merged = renameLevel(ordered, "Group", "Alpha", "Gamma");
+  deepStrictEqual(merged.levelOrder, { Group: ["gamma", "beta"] });
+  deepStrictEqual(mv340Levels(merged), ["Gamma", "Beta"]);
+  // A rename carries the stored order through a column rename, too.
+  const recolumned = renameColumn(ordered, 1, "Arm");
+  deepStrictEqual(recolumned.levelOrder, { Arm: ["gamma", "alpha", "beta"] });
+  deepStrictEqual(
+    categoricalLevels(recolumned, "Arm").map((l) => l.name),
+    ["Gamma", "Alpha", "Beta"],
+  );
+});
+
+check("seq 340: the stored order persists through a .hlx save/reload; bogus entries drop", () => {
+  const data = setLevelOrder(mv340(), "Group", ["Gamma", "Alpha", "Beta"]);
+  const payload: ProjectFilePayload = {
+    nodes: {
+      mv: { id: "mv", type: "table", name: "Arms", parentId: null, tableType: "multiple", data },
+    },
+    rootOrder: ["mv"],
+    childOrder: { mv: [] },
+    activeNodeId: "mv",
+  };
+  const resaved = parseProjectFile(JSON.parse(serializeProjectFile(payload)));
+  if ("error" in resaved) throw new Error(resaved.error);
+  deepStrictEqual((resaved.project.nodes.mv as ProjectNode).data?.levelOrder, {
+    Group: ["gamma", "alpha", "beta"],
+  });
+  // A hand-edited file holding a bogus order, a non-array, or an entry for
+  // a column that is gone loses that entry on its own.
+  const tampered = JSON.parse(serializeProjectFile(payload)) as Record<string, unknown>;
+  const tamperedData = (tampered.project as Record<string, Record<string, { data: Record<string, unknown> }>>).nodes
+    .mv.data;
+  tamperedData.levelOrder = {
+    Group: ["gamma", "alpha", "beta"],
+    // Score is a data column, so its entry survives shape validation — but
+    // its values are normalized and de-duplicated like any other order.
+    Score: ["gamma", 3, "", "  ALPHA  "],
+    Gone: ["a"],
+    Bad: "gamma",
+  };
+  const reparsed = parseProjectFile(tampered);
+  if ("error" in reparsed) throw new Error(reparsed.error);
+  deepStrictEqual((reparsed.project.nodes.mv as ProjectNode).data?.levelOrder, {
+    Group: ["gamma", "alpha", "beta"],
+    Score: ["gamma", "alpha"],
+  });
+  // The reader itself is strict the same way, on its own.
+  deepStrictEqual(readLevelOrder({ Group: ["Beta", "beta", 7, ""], Nope: ["x"] }, ["Title", "Group"]), {
+    Group: ["beta"],
+  });
+  strictEqual(readLevelOrder("nope", ["Title", "Group"]), undefined);
+  strictEqual(readLevelOrder({}, ["Title", "Group"]), undefined);
+});
+
+check("seq 340: levelsOf and the dummy-coding reference follow the stored order", () => {
+  const ordered = setLevelOrder(mv340(), "Group", ["Gamma", "Alpha", "Beta"]);
+  const dataset = readTable(ordered);
+  const group = dataset.columns.find((c) => c.name === "Group")!;
+  deepStrictEqual(levelsOf(group), ["Gamma", "Alpha", "Beta"]);
+  deepStrictEqual(group.levelOrder, ["gamma", "alpha", "beta"]);
+  // Without a stored order, levelsOf reads first-appearance order as before.
+  deepStrictEqual(levelsOf(readTable(mv340()).columns.find((c) => c.name === "Group")!), [
+    "Beta",
+    "Alpha",
+    "Gamma",
+  ]);
+  // The dummy-coding reference is the first level in the stored order.
+  const def = selectPredictors(dataset.columns, { dependent: "Score", predictors: ["Group"] });
+  deepStrictEqual(def.categorical, [{ name: "Group", reference: "Gamma", levels: ["Gamma", "Alpha", "Beta"] }]);
+  deepStrictEqual(def.design.map((d) => d.term), ["Group[Alpha]", "Group[Beta]"]);
+  // And the reference follows a re-sort.
+  const resorted = setLevelOrder(mv340(), "Group", ["Alpha", "Beta", "Gamma"]);
+  const def2 = selectPredictors(readTable(resorted).columns, { dependent: "Score", predictors: ["Group"] });
+  strictEqual(def2.categorical[0]?.reference, "Alpha");
+});
+
+check("seq 340: category autocomplete follows the stored order", () => {
+  // Autocomplete only runs on a typed table (the grid's MV tables are
+  // typed by the store funnel), so the fixture goes through the detector.
+  const typed = refreshVariableTypes(mv340());
+  const ordered = setLevelOrder(typed, "Group", ["Gamma", "Alpha", "Beta"]);
+  deepStrictEqual(levelSuggestions(ordered, "Group", ""), ["Gamma", "Alpha", "Beta"]);
+  deepStrictEqual(levelSuggestions(ordered, "Group", "a"), ["Alpha"]);
+  deepStrictEqual(levelSuggestions(typed, "Group", ""), ["Beta", "Alpha", "Gamma"]);
+});
+
+check("seq 340: MCP set-level-order sets the order and a later write appends a new level", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-340-table", "create-table", {
+    table_type: "multiple",
+    columns: ["", "Group", "Score"],
+    rows: [
+      ["1", "Beta", "10"],
+      ["2", "Alpha", "20"],
+      ["3", "Beta", "30"],
+      ["4", "Gamma", "40"],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  await harness.run("job-340-set", "edit-table", {
+    table_id: tableId,
+    op: "set-level-order",
+    column: 1,
+    level_order: ["Gamma", "Alpha", "Beta"],
+  });
+  harness.sync();
+  deepStrictEqual(harness.state().nodes[tableId]!.data!.levelOrder, { Group: ["gamma", "alpha", "beta"] });
+  // Setting it again is a no-op success: no second undo step.
+  const pastLen = harness.state().past.length;
+  await harness.run("job-340-set-again", "edit-table", {
+    table_id: tableId,
+    op: "set-level-order",
+    column: 1,
+    level_order: ["Gamma", "Alpha", "Beta"],
+  });
+  harness.sync();
+  strictEqual(harness.state().past.length, pastLen);
+  // A later write adds a new level: it appends at the end of the stored order.
+  await harness.run("job-340-write", "write-table", {
+    table_id: tableId,
+    columns: ["", "Group", "Score"],
+    rows: [
+      ["1", "Beta", "10"],
+      ["2", "Alpha", "20"],
+      ["3", "Beta", "30"],
+      ["4", "Gamma", "40"],
+      ["5", "Delta", "50"],
+    ],
+  });
+  harness.sync();
+  deepStrictEqual(harness.state().nodes[tableId]!.data!.levelOrder, {
+    Group: ["gamma", "alpha", "beta", "delta"],
+  });
+  // Errors: a non-MV table, an unknown column, an unknown level, and a
+  // column that isn't categorical.
+  const col = await harness.run("job-340-col", "create-table", {
+    table_type: "column",
+    columns: ["", "A"],
+    rows: [["1", "1"]],
+  });
+  const colId = (col.result as { table_id: string }).table_id;
+  harness.sync();
+  await rejects(
+    harness.run("job-340-bad-table", "edit-table", {
+      table_id: colId,
+      op: "set-level-order",
+      column: 1,
+      level_order: ["A"],
+    }),
+    /only Multiple Variables tables/,
+  );
+  await rejects(
+    harness.run("job-340-bad-col", "edit-table", {
+      table_id: tableId,
+      op: "set-level-order",
+      column: 9,
+      level_order: ["Beta"],
+    }),
+    /has no column 9/,
+  );
+  await rejects(
+    harness.run("job-340-bad-level", "edit-table", {
+      table_id: tableId,
+      op: "set-level-order",
+      column: 1,
+      level_order: ["Gamma", "Nope"],
+    }),
+    /has no level/,
+  );
+  await rejects(
+    harness.run("job-340-bad-type", "edit-table", {
+      table_id: tableId,
+      op: "set-level-order",
+      column: 2,
+      level_order: ["10"],
+    }),
+    /not a categorical variable/,
   );
 });
 

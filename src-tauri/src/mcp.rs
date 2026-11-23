@@ -2985,6 +2985,11 @@ pub struct EditTableArgs {
     /// set-x-format: read ambiguous slash dates day-first (date X only).
     #[serde(default)]
     pub x_day_first: Option<bool>,
+    /// set-level-order (seq 340): the level order — a Multiple Variables
+    /// categorical column's levels in display order, as a list of level
+    /// names. A new level typed into the column later appends at the end.
+    #[serde(default)]
+    pub level_order: Option<Vec<String>>,
 }
 
 /// Args for `titer_refresh_linked_data`: the table whose linked source file
@@ -4678,7 +4683,7 @@ impl TiterMcpServer {
     /// file as a link, or break that link.
     #[tool(
         name = "titer_edit_table",
-        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, set-cell-background, freeze-title, convert-comma-decimals, set-summary-format, set-x-format, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-variable-type, paste-link, remove-link, generate-series or paste-transposed. Rows and columns are 0-based; column 0 holds the row titles. set-cell-background { at_row, at_col, color } paints one cell with one of Prism's 8 cell colors (yellow, red, blue, green, purple, orange, tan, gray), or null to clear it; the value stays, and an empty cell or a row title can be painted too. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. set-variable-type { column, variable_type } sets a Multiple Variables column's type by hand — categorical, continuous or label — and auto-detect never overwrites a hand-set type; read the types back from titer_list_tables' variable_type fields. paste-transposed { rows, at_row, at_col } pastes the block with rows and columns swapped, as Edit ▸ Paste Transposed does. paste-link { source_path, row?, column?, auto_update? } pastes a data file (.csv, .tsv, .txt or .xlsx) as a link at (row, column) — the values land and stay linked, so titer_refresh_linked_data re-reads the file into the same region later; auto_update (default true) refreshes the link when the project opens. remove-link { } keeps the values and drops the link. generate-series { column, at, count, first, mode, step } fills a column with an arithmetic series (add step, default) or a geometric one (multiply by step): column defaults to the X column (1) on XY and Survival tables, at defaults to row 0, count to the table's stored rows, first to 0, step to 1; at most 10,000 values. set-summary-format { format } changes a grouped, xy or nested table's sub-column format between raw replicates and pre-calculated summaries (mean-sd-n, mean-sem-n, mean-sd, mean-sem, mean-cv-n, mean-cv, mean-plus-minus, mean-upper-lower, or replicates); values stay in their group's slot. set-x-format { x_format, x_units?, x_start_date?, x_day_first? } changes an XY table's X format between numbers, dates and elapsed times, with the unit dates/elapsed times convert to (seconds, minutes, hours, days, weeks or years; default days) and the start date dates count from (YYYY-MM-DD; default the earliest date in the column); x_day_first reads ambiguous slash dates day-first. The cells keep their typed text; a cell that can't be read shows \"?\" and counts as missing.",
+        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, set-cell-background, freeze-title, convert-comma-decimals, set-summary-format, set-x-format, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-variable-type, set-level-order, paste-link, remove-link, generate-series or paste-transposed. Rows and columns are 0-based; column 0 holds the row titles. set-cell-background { at_row, at_col, color } paints one cell with one of Prism's 8 cell colors (yellow, red, blue, green, purple, orange, tan, gray), or null to clear it; the value stays, and an empty cell or a row title can be painted too. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. set-variable-type { column, variable_type } sets a Multiple Variables column's type by hand — categorical, continuous or label — and auto-detect never overwrites a hand-set type; read the types back from titer_list_tables' variable_type fields. set-level-order { column, level_order } sets a Multiple Variables categorical column's level order — its levels in display order, as a list of level names — and a new level typed into the column later appends at the end; read the order back from titer_list_tables' level_order fields. paste-transposed { rows, at_row, at_col } pastes the block with rows and columns swapped, as Edit ▸ Paste Transposed does. paste-link { source_path, row?, column?, auto_update? } pastes a data file (.csv, .tsv, .txt or .xlsx) as a link at (row, column) — the values land and stay linked, so titer_refresh_linked_data re-reads the file into the same region later; auto_update (default true) refreshes the link when the project opens. remove-link { } keeps the values and drops the link. generate-series { column, at, count, first, mode, step } fills a column with an arithmetic series (add step, default) or a geometric one (multiply by step): column defaults to the X column (1) on XY and Survival tables, at defaults to row 0, count to the table's stored rows, first to 0, step to 1; at most 10,000 values. set-summary-format { format } changes a grouped, xy or nested table's sub-column format between raw replicates and pre-calculated summaries (mean-sd-n, mean-sem-n, mean-sd, mean-sem, mean-cv-n, mean-cv, mean-plus-minus, mean-upper-lower, or replicates); values stay in their group's slot. set-x-format { x_format, x_units?, x_start_date?, x_day_first? } changes an XY table's X format between numbers, dates and elapsed times, with the unit dates/elapsed times convert to (seconds, minutes, hours, days, weeks or years; default days) and the start date dates count from (YYYY-MM-DD; default the earliest date in the column); x_day_first reads ambiguous slash dates day-first. The cells keep their typed text; a cell that can't be read shows \"?\" and counts as missing.",
         annotations(
             title = "Edit table",
             read_only_hint = false,
@@ -4718,6 +4723,7 @@ impl TiterMcpServer {
             "x_units": args.x_units,
             "x_start_date": args.x_start_date,
             "x_day_first": args.x_day_first,
+            "level_order": args.level_order,
         });
         let outcome: Result<serde_json::Value, String> = async {
             let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
@@ -4750,6 +4756,7 @@ impl TiterMcpServer {
                 "set-calculated-variable",
                 "remove-calculated-variable",
                 "set-variable-type",
+                "set-level-order",
                 "paste-link",
                 "generate-series",
                 "remove-link",
@@ -4888,6 +4895,20 @@ impl TiterMcpServer {
                         }
                     }
                 }
+                "set-level-order" => {
+                    if args.column.is_none() {
+                        return Err("op set-level-order needs column (the data column's index).".into());
+                    }
+                    match &args.level_order {
+                        Some(list) if !list.is_empty() && list.iter().all(|l| !l.trim().is_empty()) => {}
+                        _ => {
+                            return Err(
+                                "op set-level-order needs level_order (a non-empty array of non-empty level names)."
+                                    .into(),
+                            )
+                        }
+                    }
+                }
                 "paste-transposed" => match &args.rows {
                     Some(rows) if !rows.is_empty() => {}
                     _ => return Err("op paste-transposed needs rows (at least one row of values).".into()),
@@ -4947,6 +4968,7 @@ impl TiterMcpServer {
                     "x_units": args.x_units,
                     "x_start_date": args.x_start_date,
                     "x_day_first": args.x_day_first,
+                    "level_order": args.level_order,
                 }),
             )
             .await
@@ -9212,6 +9234,98 @@ fn cell_number(cell: &serde_json::Value) -> Option<f64> {
     }
 }
 
+/// A Multiple Variables column's categorical levels in display order (seq
+/// 340): the stored order first, new levels appended in entry order.
+/// Null when the column isn't categorical. The stored type wins when the
+/// table carries one; else the panel's auto-detect (all numbers →
+/// continuous, more than 10 distinct values → label, other text →
+/// categorical). Excluded rows still hold levels, so they count here.
+fn level_order_summary(
+    data: &serde_json::Value,
+    header: &str,
+    grid_col: usize,
+    rows: &[Vec<serde_json::Value>],
+) -> serde_json::Value {
+    let stored_type = data
+        .get("variableTypes")
+        .and_then(|v| v.get(header))
+        .and_then(|v| v.get("type"))
+        .and_then(|t| t.as_str());
+    // Entry order: first-seen spelling per case-insensitive key.
+    let mut seen: Vec<(String, String)> = Vec::new();
+    for row in rows {
+        let Some(cell) = row.get(grid_col) else { continue };
+        let Some(s) = cell.as_str() else { continue };
+        let t = s.trim();
+        if t.is_empty() {
+            continue;
+        }
+        let key = t.to_lowercase();
+        if !seen.iter().any(|(k, _)| *k == key) {
+            seen.push((key, t.to_string()));
+        }
+    }
+    let is_categorical = match stored_type {
+        Some(t) => t == "categorical",
+        None => {
+            // Auto-detect: no values → continuous; all numbers →
+            // continuous; more than 10 distinct values → label. A comma
+            // decimal counts as a number, as the panel's detector does.
+            if seen.is_empty() {
+                false
+            } else {
+                let all_numeric = rows.iter().all(|row| {
+                    let Some(cell) = row.get(grid_col) else {
+                        return true;
+                    };
+                    if cell_number(cell).is_some() {
+                        return true;
+                    }
+                    let Some(s) = cell.as_str() else {
+                        return true;
+                    };
+                    let t = s.trim();
+                    if t.is_empty() {
+                        return true;
+                    }
+                    let body = t.strip_prefix(['+', '-']).unwrap_or(t);
+                    let mut parts = body.split(',');
+                    matches!((parts.next(), parts.next(), parts.next()), (Some(a), Some(b), None)
+                        if !a.is_empty() && !b.is_empty() && a.bytes().all(|c| c.is_ascii_digit()) && b.bytes().all(|c| c.is_ascii_digit()))
+                });
+                !all_numeric && seen.len() <= 10
+            }
+        }
+    };
+    if !is_categorical {
+        return serde_json::Value::Null;
+    }
+    let stored: Vec<String> = data
+        .get("levelOrder")
+        .and_then(|v| v.get(header))
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+    let mut ordered: Vec<String> = Vec::new();
+    for k in &stored {
+        if seen.iter().any(|(key, _)| key == k) && !ordered.contains(k) {
+            ordered.push(k.clone());
+        }
+    }
+    for (k, _) in &seen {
+        if !ordered.contains(k) {
+            ordered.push(k.clone());
+        }
+    }
+    let display = |k: &str| {
+        seen.iter()
+            .find(|(key, _)| key == k)
+            .map(|(_, d)| d.clone())
+            .unwrap_or_default()
+    };
+    serde_json::json!(ordered.iter().map(|k| display(k)).collect::<Vec<_>>())
+}
+
 fn table_summary(
     project_id: &str,
     snapshot: &serde_json::Value,
@@ -9316,6 +9430,13 @@ fn table_summary(
                 .unwrap_or((None, None));
             summary["variable_type"] = serde_json::json!(vtype);
             summary["variable_type_manual"] = serde_json::json!(manual);
+            // The column's levels in display order (seq 340): the stored
+            // order first, a new level appended in entry order. Null when
+            // the column isn't categorical. Unlike variable_type above,
+            // which stays null for a column nobody typed yet, this reads
+            // the auto-detected type when there is no stored entry — the
+            // panel shows an untyped text column's levels in Entry order.
+            summary["level_order"] = level_order_summary(&data, header, grid_col, &rows);
         }
         column_summaries.push(summary);
     }
@@ -9896,6 +10017,54 @@ mod tests {
         let xy = table_summary("project-1", &snapshot(), "t1", false, 100).expect("summary");
         assert!(xy["columns"][0].get("variable_type").is_none());
         assert!(xy["columns"][0].get("variable_type_manual").is_none());
+    }
+
+    #[test]
+    fn table_summary_level_order_on_multiple() {
+        // Seq 340: a Multiple Variables column's levels in display order —
+        // the stored order first, a new level appended in entry order.
+        // Null when the column isn't categorical. A column nobody typed
+        // yet reads its auto-detected order (an untyped text column's
+        // levels in Entry order); a non-MV table carries no level_order key.
+        let snap = json!({
+            "filePath": "/tmp/MV.hlx",
+            "revision": 1,
+            "nodes": {
+                "m1": {
+                    "id": "m1", "type": "table", "name": "Subjects", "parentId": null,
+                    "tableType": "multiple",
+                    "data": {
+                        "columns": ["", "Sex", "Age", "ID"],
+                        "rows": [
+                            ["1", "Female", "34", "S001"],
+                            ["2", "Male", "41", "S002"],
+                            ["3", "female", "29", "S003"],
+                        ],
+                        "variableTypes": {
+                            "Sex": { "type": "categorical", "manual": true },
+                        },
+                        // Stored as normalized keys; "female" shares the
+                        // "Female" key, so the display spelling is the
+                        // first-seen one.
+                        "levelOrder": { "Sex": ["male", "female"] },
+                    }
+                },
+            },
+            "rootOrder": ["m1"],
+            "childOrder": { "m1": [] },
+            "activeNodeId": "m1",
+        });
+        let out = table_summary("project-1", &snap, "m1", false, 100).expect("summary");
+        // Stored order wins, in first-seen display spelling.
+        assert_eq!(out["columns"][0]["level_order"], json!(["Male", "Female"]));
+        // Age is numeric: no levels.
+        assert_eq!(out["columns"][1]["level_order"], serde_json::Value::Null);
+        // ID has no stored entry but is text: auto-detected categorical,
+        // levels in Entry order.
+        assert_eq!(out["columns"][2]["level_order"], json!(["S001", "S002", "S003"]));
+        // The XY fixture carries no level_order key.
+        let xy = table_summary("project-1", &snapshot(), "t1", false, 100).expect("summary");
+        assert!(xy["columns"][0].get("level_order").is_none());
     }
 
     #[test]

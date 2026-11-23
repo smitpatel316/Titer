@@ -849,6 +849,19 @@ const ROWS: Row[] = [
       { kind: "sourceContainsRe", scope: "src", re: "levelSuggestions" },
     ],
   },
+  {
+    item: "340",
+    title: "MV categorical level ordering",
+    status: "covered",
+    note: "A Multiple Variables categorical column's levels in a stored order (Prism 11.2): level_order on titer_list_tables columns (MV only; null when the column isn't categorical), titer_edit_table set-level-order op; .hlx round-trip via readLevelOrder. The order is the panel's Level Order section (drag-and-drop + Top/Up/Down/Bottom + Entry/Name/Row/Frequency sort presets) and the dummy-coding reference (the first level) and the graphs' level order follow it. A renamed level keeps its position; a new level appends at the end. Blank cells are no level, so there is no (blank) level to pin at the top.",
+    checks: [
+      { kind: "editOpsContains", op: "set-level-order" },
+      { kind: "sourceContains", file: "mcpDispatch", text: "set-level-order" },
+      { kind: "structContains", struct: "EditTableArgs", text: "level_order" },
+      { kind: "sourceContainsRe", scope: "src", re: "levelOrder" },
+      { kind: "sourceContainsRe", scope: "stats", re: "levelOrder" },
+    ],
+  },
 
   {
     item: "332",

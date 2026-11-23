@@ -105,13 +105,52 @@ export function setVariableTypeAuto(data: TableData, name: string, auto: boolean
 
 /** One level of a categorical column: its display name (first-seen spelling),
  *  its included rows and its excluded rows. Levels group case-insensitively,
- *  so "Male" and "male" are one level; blank cells are no level. Sorted by
- *  size, then name. */
+ *  so "Male" and "male" are one level; blank cells are no level. Listed in
+ *  the column's level order — the stored order when one exists, else Entry
+ *  order (first appearance in the table), per seq 340. */
 export interface VariableLevel {
   name: string;
   count: number;
   excluded: number;
 }
+/** A level's key: its trimmed text, lowercased — the form the stored order
+ *  keeps, so "Male" and "male" share one position. */
+export const levelKey = (value: string): string => value.trim().toLowerCase();
+
+/** A column's level keys in Entry order — first appearance scanning the
+ *  rows top to bottom, blanks skipped. Type-agnostic: the raw entry record,
+ *  which the stored order is built from. */
+export function entryLevelKeys(data: TableData, name: string): string[] {
+  const c = data.columns.indexOf(name);
+  if (c < 1) return [];
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  for (const row of data.rows) {
+    const cell = row[c];
+    if (cell === null) continue;
+    const k = levelKey(cell);
+    if (k && !seen.has(k)) {
+      seen.add(k);
+      keys.push(k);
+    }
+  }
+  return keys;
+}
+
+/** A categorical column's levels in their resolved order: the stored order
+ *  first (levels whose rows are gone drop out), then any level not yet in
+ *  it, in Entry order — so a new level always appends at the end. A column
+ *  that isn't categorical, or has no levels, has no order. */
+export function orderedLevelKeys(data: TableData, name: string): string[] {
+  if (variableTypesOf(data)[name]?.type !== "categorical") return [];
+  const entry = entryLevelKeys(data, name);
+  const stored = data.levelOrder?.[name];
+  if (!stored) return entry;
+  const resolved = stored.filter((k) => entry.includes(k));
+  for (const k of entry) if (!resolved.includes(k)) resolved.push(k);
+  return resolved;
+}
+
 export function categoricalLevels(data: TableData, name: string): VariableLevel[] {
   const c = data.columns.indexOf(name);
   if (c < 1) return [];
@@ -126,17 +165,174 @@ export function categoricalLevels(data: TableData, name: string): VariableLevel[
     else level.count += 1;
     byKey.set(key, level);
   });
-  return [...byKey.values()].sort(
-    (a, b) => b.count + b.excluded - (a.count + a.excluded) || a.name.localeCompare(b.name),
-  );
+  return orderedLevelKeys(data, name)
+    .map((k) => byKey.get(k))
+    .filter((l): l is VariableLevel => l !== undefined);
+}
+
+/** Sets column `name`'s level order by hand (seq 340, Prism 11.2 Level
+ *  Order): `order` holds level names in the wanted order — unknown names
+ *  drop, duplicates collapse, and any level left out appends in Entry
+ *  order, so a set can never lose a level. Returns `data` unchanged when
+ *  the column doesn't exist, has no levels, or the order already holds. */
+export function setLevelOrder(data: TableData, name: string, order: string[]): TableData {
+  const c = data.columns.indexOf(name);
+  if (c < 1) return data;
+  const entry = entryLevelKeys(data, name);
+  const stored = data.levelOrder?.[name];
+  if (entry.length === 0) {
+    if (!stored) return data;
+    const { [name]: _dropped, ...rest } = data.levelOrder!;
+    return { ...data, levelOrder: Object.keys(rest).length ? rest : undefined };
+  }
+  const seen = new Set<string>();
+  const resolved: string[] = [];
+  for (const key of order) {
+    const k = levelKey(key);
+    if (k && entry.includes(k) && !seen.has(k)) {
+      seen.add(k);
+      resolved.push(k);
+    }
+  }
+  for (const k of entry) if (!seen.has(k)) resolved.push(k);
+  const current = stored ?? entry;
+  if (resolved.length === current.length && resolved.every((k, i) => k === current[i])) return data;
+  return { ...data, levelOrder: { ...data.levelOrder, [name]: resolved } };
+}
+
+/** Moves the level at index `from` to index `to` in column `name`'s order —
+ *  the drag-and-drop and step-button primitive (top/up/down/bottom are
+ *  moves to 0 / from−1 / from+1 / last). Returns `data` unchanged when
+ *  either index is out of range or the move goes nowhere. */
+export function moveLevel(data: TableData, name: string, from: number, to: number): TableData {
+  const order = orderedLevelKeys(data, name);
+  if (from < 0 || from >= order.length || to < 0 || to >= order.length || from === to) return data;
+  const next = [...order];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return setLevelOrder(data, name, next);
+}
+
+/** One of Prism's sort presets for a column's levels (mv_format_data_table.htm
+ *  §12): Entry, Name, Row or Frequency, each ascending or descending. Each
+ *  is a one-time command that sets a new static order, never a rule that
+ *  re-applies when data changes. Prism's docs don't define Entry vs Row
+ *  operationally; Titer reads them as: Entry is the order levels entered
+ *  the table — the stored order, once one exists (a new level appends);
+ *  Row re-derives first-appearance order from the current rows, so it can
+ *  differ from Entry after rows were deleted or inserted. Name sorts by
+ *  display name; Frequency by row count (ties keep Entry order). */
+export type LevelOrderPreset = "entry" | "name" | "row" | "frequency";
+export function sortLevelOrder(
+  data: TableData,
+  name: string,
+  preset: LevelOrderPreset,
+  direction: "asc" | "desc",
+): TableData {
+  const entry = entryLevelKeys(data, name);
+  if (entry.length === 0) return data;
+  if (variableTypesOf(data)[name]?.type !== "categorical") return data;
+  const dir = direction === "desc" ? -1 : 1;
+  let order: string[];
+  switch (preset) {
+    case "entry":
+      // The stored order, once one exists: Entry is the order levels
+      // entered the table, and the stored order is that record.
+      order = orderedLevelKeys(data, name);
+      if (direction === "desc") order.reverse();
+      break;
+    case "row":
+      order = [...entry];
+      if (direction === "desc") order.reverse();
+      break;
+    case "name": {
+      const display = new Map(categoricalLevels(data, name).map((l) => [levelKey(l.name), l.name]));
+      order = [...entry].sort((a, b) => dir * (display.get(a) ?? a).localeCompare(display.get(b) ?? b));
+      break;
+    }
+    case "frequency": {
+      const counts = new Map(
+        categoricalLevels(data, name).map((l) => [levelKey(l.name), l.count + l.excluded]),
+      );
+      // A direction-aware comparator, not a reverse: ties keep Entry order
+      // in both directions.
+      order = [...entry].sort((a, b) => dir * ((counts.get(a) ?? 0) - (counts.get(b) ?? 0)));
+      break;
+    }
+  }
+  return setLevelOrder(data, name, order);
+}
+
+/** Maintains the stored level orders after an edit (the store funnel calls
+ *  it beside refreshVariableTypes): a level whose rows are gone drops out,
+ *  a new level appends at the end, a deleted column takes its order with
+ *  it. Returns `data` unchanged when nothing moves, so the funnel can call
+ *  it on every edit without minting undo steps. */
+export function refreshLevelOrder(data: TableData): TableData {
+  if (!data.levelOrder) return data;
+  let changed = false;
+  const next: Record<string, string[]> = {};
+  for (const [name, stored] of Object.entries(data.levelOrder)) {
+    if (!data.columns.slice(1).includes(name)) {
+      changed = true;
+      continue;
+    }
+    const entry = entryLevelKeys(data, name);
+    const seen = new Set<string>();
+    const kept: string[] = [];
+    for (const raw of stored) {
+      const k = levelKey(raw);
+      if (k && entry.includes(k) && !seen.has(k)) {
+        seen.add(k);
+        kept.push(k);
+      }
+    }
+    const resolved = [...kept];
+    for (const k of entry) if (!seen.has(k)) resolved.push(k);
+    if (resolved.length === 0) {
+      changed = true;
+      continue;
+    }
+    next[name] = resolved;
+    if (resolved.length !== stored.length || resolved.some((k, i) => k !== stored[i])) changed = true;
+  }
+  return changed ? { ...data, levelOrder: Object.keys(next).length ? next : undefined } : data;
+}
+
+/** A stored `levelOrder` record, put straight: only entries naming a data
+ *  column with an array of level names survive — a hand-edited file
+ *  holding a non-array, non-string entries, or an entry for a column that
+ *  is gone loses that entry on its own, never the table. Keys are
+ *  normalized and de-duplicated; an entry that normalizes to nothing drops. */
+export function readLevelOrder(raw: unknown, columns: string[]): Record<string, string[]> | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const out: Record<string, string[]> = {};
+  for (const [name, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!columns.slice(1).includes(name)) continue;
+    if (!Array.isArray(v)) continue;
+    const seen = new Set<string>();
+    const keys: string[] = [];
+    for (const item of v) {
+      if (typeof item !== "string") continue;
+      const k = levelKey(item);
+      if (k && !seen.has(k)) {
+        seen.add(k);
+        keys.push(k);
+      }
+    }
+    if (keys.length) out[name] = keys;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 /** Renames one level of column `name`: every row holding it (any case) takes
  *  the new name. Renaming onto another level merges the two — that is how a
  *  typo ("Mael") is folded into its level ("Male"). Exclusions stay: they
- *  are positions, and no row moves. Returns `data` unchanged when the
- *  column or the level doesn't exist, or the new name is blank or the same
- *  level in another case. */
+ *  are positions, and no row moves. The stored level order follows the
+ *  rename: the renamed level keeps its position, and on a merge the
+ *  surviving level keeps its position while the folded key drops.
+ *  Returns `data` unchanged when the column or the level doesn't exist, or
+ *  the new name is blank or the same level in another case. */
 export function renameLevel(data: TableData, name: string, oldLevel: string, newLevel: string): TableData {
   const c = data.columns.indexOf(name);
   const clean = newLevel.trim();
@@ -152,7 +348,24 @@ export function renameLevel(data: TableData, name: string, oldLevel: string, new
     }
     return row;
   });
-  return changed ? { ...data, rows } : data;
+  if (!changed) return data;
+  const order = data.levelOrder?.[name];
+  let levelOrder = data.levelOrder;
+  if (order) {
+    const oldKey = levelKey(oldLevel);
+    const newKey = levelKey(clean);
+    const idx = order.indexOf(oldKey);
+    if (idx >= 0) {
+      if (order.includes(newKey)) {
+        levelOrder = { ...data.levelOrder, [name]: order.filter((k) => k !== oldKey) };
+      } else {
+        const next = [...order];
+        next[idx] = newKey;
+        levelOrder = { ...data.levelOrder, [name]: next };
+      }
+    }
+  }
+  return { ...data, rows, levelOrder };
 }
 
 /** The table's chosen row-label source: the stored `labelVariable` when it

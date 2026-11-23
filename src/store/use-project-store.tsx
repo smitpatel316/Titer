@@ -19,7 +19,7 @@ import {
 } from "./types";
 import { TRANSFORM_NAMES, transformTable } from "../lib/transform";
 import { recomputeCalculated } from "../lib/calcvars";
-import { refreshVariableTypes } from "../lib/variable-types";
+import { refreshLevelOrder, refreshVariableTypes } from "../lib/variable-types";
 import { remapQualifiedOptions, restoreForeignPoints } from "../lib/multi-table";
 import { MAX_INFO_SHEETS, newInfoSheetData } from "../lib/info-sheets";
 import type { AnalysisParams, AnalysisPickerValue, AnalysisResult, AnalysisType } from "../stats/types";
@@ -862,6 +862,9 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         // type (orange) sticks; a Transform keeps its computed types as-is.
         if (!before.transform) data = recomputeCalculated(data);
         if (!before.transform && before.tableType === "multiple") data = refreshVariableTypes(data);
+        // The stored level orders are maintained by the same funnel (seq 340):
+        // a new level appends at the end, a level whose rows are gone drops out.
+        if (!before.transform && before.tableType === "multiple") data = refreshLevelOrder(data);
         nodes[id] = { ...before, data };
         // The table's analyses and graphs follow its renamed columns and groups, its moved
         // rows and its deleted columns.

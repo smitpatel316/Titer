@@ -12,7 +12,7 @@
 // No TukeyHSD call.
 import type { AnalysisOutcome, ComparisonRow, MultifactorAnovaParams } from "../types";
 import { MULTIFACTOR_MAX_FACTORS } from "../types";
-import type { Column } from "../../lib/dataset";
+import { orderLevels, type Column } from "../../lib/dataset";
 import { dataGroups, describe, missingColumn, pairIndices, pRow, rStr, rVec } from "../column/base";
 import { evalNamedVector } from "../webr";
 import { mean, sd } from "../../lib/summary";
@@ -23,7 +23,8 @@ const textOf = (cell: string | null | undefined): string | undefined => {
   return t ? t : undefined;
 };
 
-/** Distinct non-blank cell texts, in first-appearance order. */
+/** Distinct non-blank cell texts, in first-appearance order — or in the
+ *  column's stored level order (seq 340) when it has one. */
 function levelsOf(column: Column): string[] {
   const seen = new Set<string>();
   const levels: string[] = [];
@@ -34,7 +35,7 @@ function levelsOf(column: Column): string[] {
       levels.push(t);
     }
   }
-  return levels;
+  return orderLevels(levels, column.levelOrder);
 }
 
 /** One tested term: its factors (by index into the factor list), its display

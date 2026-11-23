@@ -28,7 +28,7 @@
 // 39). A chosen name that is not a column at all never reaches here:
 // runAnalysis errors on it first with missingColumn.
 import { dataGroups, type Group } from "../column/base";
-import { levelsOf } from "../../lib/dataset";
+import { levelsOf, orderLevels } from "../../lib/dataset";
 import { sd } from "../../lib/summary";
 import type { Column } from "../types";
 
@@ -149,7 +149,9 @@ export function anyValueRows(used: Column[]): number[] {
 
 /** A text column's distinct levels on the given rows, first-appearance order.
  *  Levels read from the raw cell text, so a numeric-coded categorical's
- *  codes are its levels too. */
+ *  codes are its levels too. When the column carries a stored level order
+ *  (seq 340), the levels come back in that order — so the dummy-coding
+ *  reference (the first level) follows the table's order. */
 export function levelsOnRows(column: Column, rows: readonly number[]): string[] {
   const seen = new Set<string>();
   const levels: string[] = [];
@@ -160,7 +162,7 @@ export function levelsOnRows(column: Column, rows: readonly number[]): string[] 
       levels.push(t);
     }
   }
-  return levels;
+  return orderLevels(levels, column.levelOrder);
 }
 
 /** Expand chosen columns into design columns on the given complete rows: a

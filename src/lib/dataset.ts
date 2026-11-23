@@ -7,7 +7,7 @@ import { summaryFormatOf, type SummaryFormat } from "./summary-format";
 import { convertXCell, xZeroMs, type XConversion } from "./date-time";
 import { excludedKey, seriesKeyOf } from "./columns";
 import { parseCell } from "./numeric";
-import { rowLabelsOf, variableTypesOf } from "./variable-types";
+import { orderedLevelKeys, rowLabelsOf, variableTypesOf } from "./variable-types";
 
 /** One data column, as every engine sees it. */
 export interface Column {
@@ -28,6 +28,11 @@ export interface Column {
    *  tables nobody typed yet (non-MV tables, or an MV table before its
    *  first edit) — consumers fall back to the cells, as before. */
   variableType?: VariableType;
+  /** The column's categorical levels in their stored order (seq 340), as
+   *  normalized keys — present only when the table stores an order for
+   *  this column. Absent = Entry order (first appearance in the table),
+   *  which is what `levelsOf` reads anyway. */
+  levelOrder?: string[];
 }
 
 export interface Dataset {
@@ -119,6 +124,10 @@ export function readTable(data: TableData): Dataset {
       const rows = byRow.flatMap((v, r) => (v == null ? [] : [r]));
       const set = i + 1 >= lead ? seriesKeyOf(name) : undefined;
       const variableType = types[name]?.type;
+      // The stored level order, when the table holds one for this column —
+      // the level functions below read their levels in this order. Absent
+      // = Entry order, which is what the discovery order already is.
+      const levelOrder = data.levelOrder?.[name] ? orderedLevelKeys(data, name) : undefined;
       return {
         name,
         cells,
@@ -127,6 +136,7 @@ export function readTable(data: TableData): Dataset {
         rows,
         ...(set === undefined ? {} : { set }),
         ...(variableType === undefined ? {} : { variableType }),
+        ...(levelOrder === undefined ? {} : { levelOrder }),
       };
     });
     dataset = {
@@ -182,10 +192,31 @@ export function xyRows(x: Column, set: DataSet): { x: number[]; values: number[]
   };
 }
 
+/** Reorders discovered level names by a stored level order (seq 340): a
+ *  level whose normalized key sits in the order takes that position; a
+ *  level the order doesn't name stays after them, in discovery order. Two
+ *  spellings of one level ("Female" / "female") share a key and keep their
+ *  discovery order — the sort is stable. Without an order, the list is
+ *  returned as discovered. */
+export function orderLevels(levels: string[], levelOrder?: readonly string[]): string[] {
+  if (!levelOrder || levelOrder.length === 0) return levels;
+  const pos = new Map(levelOrder.map((k, i) => [k, i]));
+  return [...levels].sort((a, b) => {
+    const pa = pos.get(a.trim().toLowerCase());
+    const pb = pos.get(b.trim().toLowerCase());
+    if (pa === undefined && pb === undefined) return 0;
+    if (pa === undefined) return 1;
+    if (pb === undefined) return -1;
+    return pa - pb;
+  });
+}
+
 /** Distinct non-blank cell texts of a column, in first-appearance order — a
  *  grouping variable's levels (integer codes or text, e.g. "Female"/"Male").
  *  The Multiple Variables analyses split their rows by these (a t test's two
- *  groups, a survival analysis's groups), as Extract and rearrange does. */
+ *  groups, a survival analysis's groups), as Extract and rearrange does.
+ *  When the column carries a stored level order (seq 340), the levels come
+ *  back in that order instead. */
 export function levelsOf(column: Column): string[] {
   const seen = new Set<string>();
   const levels: string[] = [];
@@ -196,7 +227,7 @@ export function levelsOf(column: Column): string[] {
       levels.push(t);
     }
   }
-  return levels;
+  return orderLevels(levels, column.levelOrder);
 }
 
 /** The columns of one Y data set: the column itself, its replicate columns —

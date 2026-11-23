@@ -372,6 +372,15 @@ function variableTypesOfColumns(
   return kept?.length ? Object.fromEntries(kept) : undefined;
 }
 
+/** The level orders of `columns` alone: a column gone takes its order with it. */
+function levelOrderOfColumns(
+  orders: TableData["levelOrder"],
+  columns: string[],
+): TableData["levelOrder"] {
+  const kept = orders && Object.entries(orders).filter(([name]) => columns.includes(name));
+  return kept?.length ? Object.fromEntries(kept) : undefined;
+}
+
 /** Deletes `count` columns from column `at` (≥ 1); at least one data column remains. */
 export function deleteColumns(data: TableData, at: number, count: number): TableData {
   const n = Math.min(count, data.columns.length - 2);
@@ -389,6 +398,7 @@ export function deleteColumns(data: TableData, at: number, count: number): Table
     variableTypes: variableTypesOfColumns(data.variableTypes, columns),
     // A deleted row-label source goes with its column.
     labelVariable: data.labelVariable !== undefined && columns.includes(data.labelVariable) ? data.labelVariable : undefined,
+    levelOrder: levelOrderOfColumns(data.levelOrder, columns),
     linkedPaste: data.linkedPaste ? linkedPasteAfterDelete(data.linkedPaste, "col", at, n) : undefined,
     // A deleted calculated variable goes with its column; a formula that
     // used a deleted source keeps its text and reads as an error until it
@@ -419,6 +429,7 @@ export function renameColumn(data: TableData, c: number, name: string): TableDat
     decimals: renameKey(data.decimals, old, name),
     variableTypes: renameKey(data.variableTypes, old, name),
     labelVariable: data.labelVariable === old ? name : data.labelVariable,
+    levelOrder: renameKey(data.levelOrder, old, name),
   };
   return renameCalculatedReferences(next, old, name);
 }

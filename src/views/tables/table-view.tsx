@@ -52,11 +52,14 @@ import {
 import {
   categoricalLevels,
   labelVariableOf,
+  moveLevel,
   renameLevel,
   setLabelVariable,
   setVariableType,
   setVariableTypeAuto,
+  sortLevelOrder,
   variableTypesOf,
+  type LevelOrderPreset,
 } from "../../lib/variable-types";
 import { SUMMARY_FORMATS, summaryFormatOf, summarySubcolumns, type SummaryFormat } from "../../lib/summary-format";
 import { MAX_SERIES_VALUES, generateXSeries, validateSeriesSpec } from "../../lib/series";
@@ -395,7 +398,16 @@ function FormatPanel({ data, update }: { data: TableData; update: (next: TableDa
  *  overwrites a manual type. Renaming a level rewrites every row holding it
  *  (any case); renaming onto another level merges the two, so a typo folds
  *  into its level. A calculated column's levels come from its formula, so
- *  its levels show without a rename box. */
+ *  its levels show without a rename box.
+ *  Level Order (Prism 11.2, seq 340): a categorical column's levels list in
+ *  their stored order — the order the graphs and the dummy-coding reference
+ *  follow (the first level is the reference). Drag a level to move it, click
+ *  one to select it and use the Top / Up / Down / Bottom buttons, or sort
+ *  with a preset (Entry, Name, Row or Frequency, ascending or descending —
+ *  a one-time command that sets a new static order, not a persistent rule).
+ *  A renamed level keeps its position; a level typed into the table later
+ *  appends at the end. Blank cells are no level, so there is no (blank)
+ *  level to pin at the top. */
 export function VariableTypesPanel({
   data,
   update,
@@ -406,6 +418,10 @@ export function VariableTypesPanel({
   const [filter, setFilter] = React.useState<"all" | VariableType>("all");
   const [open, setOpen] = React.useState<string | null>(null);
   const [renames, setRenames] = React.useState<Record<string, string>>({});
+  const [sortPreset, setSortPreset] = React.useState<LevelOrderPreset>("entry");
+  const [sortDirection, setSortDirection] = React.useState<"asc" | "desc">("asc");
+  const [selectedLevel, setSelectedLevel] = React.useState<string | null>(null);
+  const [dragIndex, setDragIndex] = React.useState<number | null>(null);
   const types = variableTypesOf(data);
   const columns = data.columns.slice(1);
   const shown = columns.filter((name) => filter === "all" || types[name].type === filter);
@@ -486,7 +502,13 @@ export function VariableTypesPanel({
             {info.type === "categorical" && (
               <>
                 <div>
-                  <Button size="small" onClick={() => setOpen(expanded ? null : name)}>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setOpen(expanded ? null : name);
+                      setSelectedLevel(null);
+                    }}
+                  >
                     {expanded ? "Hide levels" : `Show levels (${levels.length})`}
                   </Button>
                 </div>
@@ -494,42 +516,120 @@ export function VariableTypesPanel({
                   (levels.length === 0 ? (
                     <p className="text-small text-secondary">No values yet — levels appear as you type them.</p>
                   ) : (
-                    levels.map((level) => {
-                      const key = `${name}:${level.name}`;
-                      const draft = renames[key] ?? level.name;
-                      const canRename =
-                        !calculated &&
-                        draft.trim() !== "" &&
-                        draft.trim().toLowerCase() !== level.name.toLowerCase();
-                      const rename = () => {
-                        update(renameLevel(data, name, level.name, draft), "Rename Level");
-                        clearRename(key);
-                      };
-                      return (
-                        <div key={level.name} className="flex items-center gap-2 pl-4">
-                          <span className="min-w-0 flex-1 truncate text-small">
-                            {level.name} · {level.count}
-                            {level.excluded > 0 ? ` (${level.excluded} excluded)` : ""}
-                          </span>
-                          {!calculated && (
-                            <>
-                              <Input
-                                value={draft}
-                                aria-label={`Rename level ${level.name}`}
-                                className="w-28"
-                                onChange={(e) => setRenames((r) => ({ ...r, [key]: e.target.value }))}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" && canRename) rename();
-                                }}
-                              />
-                              <Button size="small" disabled={!canRename} onClick={rename}>
-                                Rename
-                              </Button>
-                            </>
-                          )}
+                    <>
+                      {levels.length > 1 && (
+                        <div className="flex items-center gap-2 pl-4">
+                          <span className="text-small text-secondary">Sort</span>
+                          <Select<LevelOrderPreset>
+                            value={sortPreset}
+                            onChange={setSortPreset}
+                            options={[
+                              { value: "entry", label: "Entry" },
+                              { value: "name", label: "Name" },
+                              { value: "row", label: "Row" },
+                              { value: "frequency", label: "Frequency" },
+                            ]}
+                          />
+                          <Select<"asc" | "desc">
+                            value={sortDirection}
+                            onChange={setSortDirection}
+                            options={[
+                              { value: "asc", label: "Ascending" },
+                              { value: "desc", label: "Descending" },
+                            ]}
+                          />
+                          <Button
+                            size="small"
+                            onClick={() =>
+                              update(sortLevelOrder(data, name, sortPreset, sortDirection), "Sort Levels")
+                            }
+                          >
+                            Apply
+                          </Button>
                         </div>
-                      );
-                    })
+                      )}
+                      {(() => {
+                        const selectedIdx = levels.findIndex((l) => l.name === selectedLevel);
+                        if (selectedIdx < 0) return null;
+                        const move = (to: number) =>
+                          update(moveLevel(data, name, selectedIdx, to), "Move Level");
+                        return (
+                          <div className="flex items-center gap-1 pl-4">
+                            <Button size="small" disabled={selectedIdx === 0} onClick={() => move(0)}>
+                              Top
+                            </Button>
+                            <Button size="small" disabled={selectedIdx === 0} onClick={() => move(selectedIdx - 1)}>
+                              Up
+                            </Button>
+                            <Button
+                              size="small"
+                              disabled={selectedIdx === levels.length - 1}
+                              onClick={() => move(selectedIdx + 1)}
+                            >
+                              Down
+                            </Button>
+                            <Button
+                              size="small"
+                              disabled={selectedIdx === levels.length - 1}
+                              onClick={() => move(levels.length - 1)}
+                            >
+                              Bottom
+                            </Button>
+                          </div>
+                        );
+                      })()}
+                      {levels.map((level, idx) => {
+                        const key = `${name}:${level.name}`;
+                        const draft = renames[key] ?? level.name;
+                        const canRename =
+                          !calculated &&
+                          draft.trim() !== "" &&
+                          draft.trim().toLowerCase() !== level.name.toLowerCase();
+                        const rename = () => {
+                          update(renameLevel(data, name, level.name, draft), "Rename Level");
+                          clearRename(key);
+                        };
+                        return (
+                          <div
+                            key={level.name}
+                            draggable
+                            onDragStart={() => setDragIndex(idx)}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={() => {
+                              if (dragIndex !== null && dragIndex !== idx) {
+                                update(moveLevel(data, name, dragIndex, idx), "Move Level");
+                              }
+                              setDragIndex(null);
+                            }}
+                            onDragEnd={() => setDragIndex(null)}
+                            onClick={() => setSelectedLevel(level.name)}
+                            className="flex items-center gap-2 pl-4"
+                            title="Drag to reorder — click to select, then Top / Up / Down / Bottom"
+                          >
+                            <span className="min-w-0 flex-1 truncate text-small">
+                              {level.name} · {level.count}
+                              {level.excluded > 0 ? ` (${level.excluded} excluded)` : ""}
+                            </span>
+                            {!calculated && (
+                              <>
+                                <Input
+                                  value={draft}
+                                  aria-label={`Rename level ${level.name}`}
+                                  className="w-28"
+                                  onChange={(e) => setRenames((r) => ({ ...r, [key]: e.target.value }))}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" && canRename) rename();
+                                  }}
+                                />
+                                <Button size="small" disabled={!canRename} onClick={rename}>
+                                  Rename
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </>
                   ))}
                 {calculated && (
                   <p className="text-small text-secondary">A calculated column's levels come from its formula.</p>
