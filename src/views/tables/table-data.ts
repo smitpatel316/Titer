@@ -10,6 +10,7 @@
 // them so they stay attached to their values. (Graphs follow on their own: see
 // store/references.ts.)
 import type { LinkedPaste, RowGroup, TableData, TableErrorFormat, TableType } from "../../store/types";
+import type { CellBackgroundColor } from "../../lib/cell-colors";
 import { tableErrorFormat } from "../../store/types";
 import { renameCalculatedReferences } from "../../lib/calcvars";
 import { normalizeDecimalInput, type DecimalSeparator } from "../../lib/decimal-format";
@@ -205,6 +206,63 @@ export function toggleExcluded(data: TableData, range: Range): TableData {
   return { ...data, excluded: excluded.size ? [...excluded] : undefined };
 }
 
+/** Moves cell background colors through `fn` (null drops a cell) — the
+ *  `cellBackgrounds` twin of `remapExcluded`, so every structural edit
+ *  carries the colors with the values they flag. */
+function remapCellBackgrounds(
+  data: TableData,
+  fn: (r: number, c: number) => [number, number] | null,
+): Record<string, CellBackgroundColor> | undefined {
+  const out: Record<string, CellBackgroundColor> = {};
+  for (const [key, color] of Object.entries(data.cellBackgrounds ?? {})) {
+    const [r, c] = key.split(",").map(Number);
+    const moved = fn(r, c);
+    if (moved) out[`${moved[0]},${moved[1]}`] = color;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Prism's paint-bucket (seq 325): paints every cell of `range` with
+ *  `color`, or clears the range when `color` is null. A color is
+ *  presentation only — the values stay, and clearing a value never drops
+ *  its color (unlike an exclusion: a tinted empty cell is a cell flagged
+ *  to be filled in). Returns the table unchanged when nothing moves, so
+ *  the grid takes no undo step for a no-op paint. */
+export function setCellBackground(data: TableData, range: Range, color: CellBackgroundColor | null): TableData {
+  const next = { ...(data.cellBackgrounds ?? {}) };
+  let changed = false;
+  for (let r = range.r0; r <= Math.min(range.r1, data.rows.length - 1); r++) {
+    for (let c = range.c0; c <= Math.min(range.c1, data.columns.length - 1); c++) {
+      const key = `${r},${c}`;
+      if (color === null) {
+        if (key in next) {
+          delete next[key];
+          changed = true;
+        }
+      } else if (next[key] !== color) {
+        next[key] = color;
+        changed = true;
+      }
+    }
+  }
+  if (!changed) return data;
+  return { ...data, cellBackgrounds: Object.keys(next).length ? next : undefined };
+}
+
+/** The range's color when every stored cell in it wears the same one,
+ *  `"mixed"` when several (or some colored and some not), `null` when none
+ *  is colored — the menu's checkmark and its None entry read this. */
+export function rangeCellBackground(data: TableData, range: Range): CellBackgroundColor | "mixed" | null {
+  const seen = new Set<CellBackgroundColor | null>();
+  for (let r = range.r0; r <= Math.min(range.r1, data.rows.length - 1); r++) {
+    for (let c = range.c0; c <= Math.min(range.c1, data.columns.length - 1); c++) {
+      seen.add(data.cellBackgrounds?.[`${r},${c}`] ?? null);
+      if (seen.size > 1) return "mixed";
+    }
+  }
+  return seen.size === 1 ? [...seen][0] : null;
+}
+
 // ── Rows and columns ───────────────────────────────────────────────────
 
 /** The link after `count` rows/columns are inserted at `at` on `axis`: the
@@ -254,6 +312,7 @@ export function insertRows(data: TableData, at: number, count: number): TableDat
     ...data,
     rows,
     excluded: remapExcluded(data, (r, c) => [shift(r), c]),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => [shift(r), c]),
     rowGroups: shiftRowGroupsForInsert(data.rowGroups, at, count),
     linkedPaste: data.linkedPaste ? linkedPasteAfterInsert(data.linkedPaste, "row", at, count) : undefined,
   };
@@ -266,6 +325,7 @@ export function deleteRows(data: TableData, at: number, count: number): TableDat
     ...data,
     rows,
     excluded: remapExcluded(data, (r, c) => (shift(r) === null ? null : [shift(r)!, c])),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => (shift(r) === null ? null : [shift(r)!, c])),
     rowGroups: shiftRowGroupsForDelete(data.rowGroups, at, count),
     linkedPaste: data.linkedPaste ? linkedPasteAfterDelete(data.linkedPaste, "row", at, count) : undefined,
   };
@@ -285,6 +345,7 @@ export function insertColumns(data: TableData, at: number, count: number, type: 
     columns,
     rows,
     excluded: remapExcluded(data, (r, c) => [r, c >= at ? c + count : c]),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => [r, c >= at ? c + count : c]),
     linkedPaste: data.linkedPaste ? linkedPasteAfterInsert(data.linkedPaste, "col", at, count) : undefined,
   };
 }
@@ -312,6 +373,7 @@ export function deleteColumns(data: TableData, at: number, count: number): Table
     columns,
     rows: data.rows.map((row) => row.filter(keep)),
     excluded: remapExcluded(data, (r, c) => (c < at ? [r, c] : c >= at + n ? [r, c - n] : null)),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => (c < at ? [r, c] : c >= at + n ? [r, c - n] : null)),
     widths: widthsOf(data.widths, columns),
     decimals: decimalsOf(data.decimals, columns),
     linkedPaste: data.linkedPaste ? linkedPasteAfterDelete(data.linkedPaste, "col", at, n) : undefined,
@@ -466,6 +528,7 @@ export function regroupTable(
     groups,
     replicates,
     excluded: remapExcluded(data, (r, c) => (to(c) < 0 ? null : [r, to(c)])),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => (to(c) < 0 ? null : [r, to(c)])),
     widths: widthsOf(data.widths, columns),
     decimals: decimalsOf(data.decimals, columns),
     // Regrouping rebuilds the columns, but the link's anchor is a position
@@ -519,6 +582,10 @@ export function applySummaryFormat(data: TableData, format: SummaryFormat): Tabl
     replicates: newWidth,
     summaryFormat: format === "replicates" ? undefined : format,
     excluded: remapExcluded(data, (r, c) => {
+      const to = c === 0 ? 0 : at(c);
+      return to === null ? null : [r, to];
+    }),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => {
       const to = c === 0 ? 0 : at(c);
       return to === null ? null : [r, to];
     }),
@@ -596,6 +663,11 @@ export function applySummaryFormatXY(data: TableData, format: SummaryFormat): Ta
     replicates: newWidth,
     summaryFormat: format === "replicates" ? undefined : format,
     excluded: remapExcluded(data, (r, c) => {
+      if (c < lead) return [r, c];
+      const to = at(c);
+      return to === null ? null : [r, to];
+    }),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => {
       if (c < lead) return [r, c];
       const to = at(c);
       return to === null ? null : [r, to];
@@ -679,6 +751,10 @@ export function applySummaryFormatNested(data: TableData, format: SummaryFormat)
     replicates: newWidth,
     summaryFormat: format === "replicates" ? undefined : format,
     excluded: remapExcluded(data, (r, c) => {
+      const to = c === 0 ? 0 : at(c);
+      return to === null ? null : [r, to];
+    }),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => {
       const to = c === 0 ? 0 : at(c);
       return to === null ? null : [r, to];
     }),
@@ -779,6 +855,7 @@ export function renestTable(data: TableData, groups: number, subgroups: number, 
     subgroups,
     replicates,
     excluded: remapExcluded(data, (r, c) => (to(c) < 0 ? null : [r, to(c)])),
+    cellBackgrounds: remapCellBackgrounds(data, (r, c) => (to(c) < 0 ? null : [r, to(c)])),
     widths: widthsOf(data.widths, columns),
     decimals: decimalsOf(data.decimals, columns),
     // Renesting rebuilds the columns, but the link's anchor is a position

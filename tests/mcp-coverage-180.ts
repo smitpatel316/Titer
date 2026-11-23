@@ -254,7 +254,7 @@ const scopeText = (scope: string): string => {
   }
 };
 
-const EXPECTED_TOOL_COUNT = 73;
+const EXPECTED_TOOL_COUNT = 74;
 const EXPECTED_ANALYSIS_TYPES = 61;
 const META_OFFERINGS = new Set(["compare-many-groups", "interpolate", "transform"]);
 
@@ -1326,6 +1326,19 @@ const ROWS: Row[] = [
     status: "covered",
     note: "Merged on check/v18: graph_type param on titer_update_graph + changeGraphType dispatch + Change Graph Type menu (seq 244). The check named 'kind'; the implementation calls the field graph_type (verified in UpdateGraphArgs), so the check is corrected to the real field name.",
     checks: [{ kind: "structContains", struct: "UpdateGraphArgs", text: "graph_type" }],
+  },
+  {
+    item: "325",
+    title: "Cell background color",
+    status: "covered",
+    note: "Merged on check/v19: Prism's paint-bucket — 8 colors (yellow, red, blue, green, purple, orange, tan, gray) on data cells (titer_edit_table set-cell-background op; titer_write_table cell_backgrounds replaces or preserves them) and on results cells (titer_set_result_cell_background, addressed by section|row|col, survives recompute). Colors persist in the .hlx; .pzfx carries no per-cell color, so there is no round-trip.",
+    checks: [
+      { kind: "tool", tool: "titer_set_result_cell_background" },
+      { kind: "sourceContains", file: "mcpDispatch", text: "set-cell-background" },
+      { kind: "sourceContains", file: "mcpDispatch", text: "set-result-cell-background" },
+      { kind: "structContains", struct: "WriteTableArgs", text: "cell_backgrounds" },
+      { kind: "structContains", struct: "EditTableArgs", text: "set-cell-background" },
+    ],
   },
   {
     item: "#46",

@@ -57,7 +57,7 @@ use rmcp::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs,
     io::Read,
     path::PathBuf,
@@ -76,6 +76,13 @@ const SUPPORTED_PROTOCOL_VERSIONS: &[ProtocolVersion] = &[ProtocolVersion::V_202
 /// Preferred listen ports, tried in order on 127.0.0.1; the first free one
 /// wins and is written to the discovery file (see docs/mcp-server-contract.md).
 const PORTS: &[u16] = &[18741, 18742, 18743, 18744, 18745, 18746, 18747, 18748, 18749, 18750];
+
+/// Prism's 8 cell background colors (seq 325): the names the TS side
+/// stores and the paint-bucket menu offers. Shared by `titer_edit_table`
+/// (set-cell-background) and `titer_set_result_cell_background`.
+const CELL_BACKGROUND_COLORS: &[&str] = &[
+    "yellow", "red", "blue", "green", "purple", "orange", "tan", "gray",
+];
 
 /// The MCP endpoint path, and the file names under <app_data>/mcp/.
 const MCP_PATH: &str = "/mcp";
@@ -1394,6 +1401,7 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
             "titer_run_analysis",
             "titer_rerun_analysis",
             "titer_freeze_analysis",
+            "titer_set_result_cell_background",
             "titer_clone_analysis",
             "titer_repoint_analysis",
             "titer_simulate_data",
@@ -2861,6 +2869,12 @@ pub struct WriteTableArgs {
     /// table's marks; when omitted the marks are preserved.
     #[serde(default)]
     pub excluded: Option<Vec<String>>,
+    /// Cell background colors (seq 325), as "row,col" -> color-name pairs:
+    /// when given they replace the table's colors (an empty map clears
+    /// them); when omitted the colors are preserved. The colors are
+    /// yellow, red, blue, green, purple, orange, tan or gray.
+    #[serde(default)]
+    pub cell_backgrounds: Option<BTreeMap<String, String>>,
     /// Grouped tables only: the row bands (factor-C levels), each a
     /// {"name", "count"} pair; the counts must tile the rows exactly.
     /// When given they replace the table's bands (an empty list clears
@@ -2878,9 +2892,10 @@ pub struct EditTableArgs {
     pub table_id: String,
     /// The grid-menu op: insert-rows, delete-rows, insert-columns,
     /// delete-columns, rename-column, rename-group, exclude-cells,
-    /// include-cells, freeze-title, convert-comma-decimals,
-    /// set-summary-format, add-calculated-variable, set-calculated-variable,
-    /// remove-calculated-variable, paste-link, remove-link, generate-series or paste-transposed (seq 230).
+    /// include-cells, set-cell-background, freeze-title,
+    /// convert-comma-decimals, set-summary-format, add-calculated-variable,
+    /// set-calculated-variable, remove-calculated-variable, paste-link,
+    /// remove-link, generate-series or paste-transposed (seq 230).
     pub op: String,
     /// insert/delete-rows, insert/delete-columns: the 0-based row or
     /// column to act at (rows and columns are 0-based; column 0 holds the
@@ -2900,6 +2915,13 @@ pub struct EditTableArgs {
     /// exclude-cells / include-cells: the cells, as "row,col" strings.
     #[serde(default)]
     pub cells: Option<Vec<String>>,
+    /// set-cell-background: one of Prism's 8 cell colors — yellow, red,
+    /// blue, green, purple, orange, tan or gray — or null to clear the
+    /// cell. The field must be present for the op: absent is an error,
+    /// null clears. (An `Option<Option<String>>`: JSON null is Some(None),
+    /// a missing key is None.)
+    #[serde(default)]
+    pub color: Option<Option<String>>,
     /// freeze-title: whether the row-title column stays visible scrolling.
     #[serde(default)]
     pub frozen: Option<bool>,
@@ -3089,6 +3111,27 @@ pub struct FreezeAnalysisArgs {
     /// true freezes (the result survives later data edits), false unfreezes
     /// (it re-runs on next read).
     pub frozen: bool,
+}
+
+/// Args for `titer_set_result_cell_background` (seq 325): paint one cell
+/// of one results table with one of Prism's 8 cell colors, or clear it.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SetResultCellBackgroundArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The analysis node's id, as shown by titer_list_projects.
+    pub analysis_id: String,
+    /// The results table's section: its title — or "Normality" and
+    /// "Statistics" for the two untitled tables.
+    pub section: String,
+    /// The cell's 0-based row within that table.
+    pub row: usize,
+    /// The cell's 0-based column within that table.
+    pub col: usize,
+    /// One of Prism's 8 cell colors — yellow, red, blue, green, purple,
+    /// orange, tan or gray — or null to clear the cell.
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -4518,6 +4561,7 @@ impl TiterMcpServer {
             "rows": args.rows.len(),
             "label": args.label,
             "excluded": args.excluded.as_ref().map(|e| e.len()),
+            "cell_backgrounds": args.cell_backgrounds.as_ref().map(|c| c.len()),
             "row_groups": args.row_groups.as_ref().map(|g| g.len()),
         });
         let outcome: Result<serde_json::Value, String> = async {
@@ -4556,6 +4600,30 @@ impl TiterMcpServer {
                     }
                 }
             }
+            // Cell background colors (seq 325) may sit on column 0 (a
+            // flagged row title) — the only bounds check is the table
+            // itself — and the color must be one of Prism's 8.
+            if let Some(colors) = &args.cell_backgrounds {
+                for (key, color) in colors {
+                    let (r, c) = key
+                        .split_once(',')
+                        .and_then(|(r, c)| Some((r.parse::<usize>().ok()?, c.parse::<usize>().ok()?)))
+                        .unwrap_or((usize::MAX, usize::MAX));
+                    if r >= args.rows.len() || c >= args.columns.len() {
+                        return Err(format!(
+                            "Cell background “{key}” is outside the new table ({} rows, {} columns).",
+                            args.rows.len(),
+                            args.columns.len()
+                        ));
+                    }
+                    if !CELL_BACKGROUND_COLORS.contains(&color.as_str()) {
+                        return Err(format!(
+                            "Cell background “{key}” names color “{color}” — the colors are {}.",
+                            CELL_BACKGROUND_COLORS.join(", ")
+                        ));
+                    }
+                }
+            }
             self.run_table_job(
                 &id,
                 "write-table",
@@ -4565,6 +4633,7 @@ impl TiterMcpServer {
                     "rows": args.rows,
                     "label": args.label,
                     "excluded": args.excluded,
+                    "cell_backgrounds": args.cell_backgrounds,
                     "row_groups": args.row_groups,
                 }),
             )
@@ -4589,7 +4658,7 @@ impl TiterMcpServer {
     /// file as a link, or break that link.
     #[tool(
         name = "titer_edit_table",
-        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, set-summary-format, add-calculated-variable, set-calculated-variable, remove-calculated-variable, paste-link, remove-link, generate-series or paste-transposed. Rows and columns are 0-based; column 0 holds the row titles. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. paste-transposed { rows, at_row, at_col } pastes the block with rows and columns swapped, as Edit ▸ Paste Transposed does. paste-link { source_path, row?, column?, auto_update? } pastes a data file (.csv, .tsv, .txt or .xlsx) as a link at (row, column) — the values land and stay linked, so titer_refresh_linked_data re-reads the file into the same region later; auto_update (default true) refreshes the link when the project opens. remove-link { } keeps the values and drops the link. generate-series { column, at, count, first, mode, step } fills a column with an arithmetic series (add step, default) or a geometric one (multiply by step): column defaults to the X column (1) on XY and Survival tables, at defaults to row 0, count to the table's stored rows, first to 0, step to 1; at most 10,000 values. set-summary-format { format } changes a grouped, xy or nested table's sub-column format between raw replicates and pre-calculated summaries (mean-sd-n, mean-sem-n, mean-sd, mean-sem, mean-cv-n, mean-cv, mean-plus-minus, mean-upper-lower, or replicates); values stay in their group's slot.",
+        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, set-cell-background, freeze-title, convert-comma-decimals, set-summary-format, add-calculated-variable, set-calculated-variable, remove-calculated-variable, paste-link, remove-link, generate-series or paste-transposed. Rows and columns are 0-based; column 0 holds the row titles. set-cell-background { at_row, at_col, color } paints one cell with one of Prism's 8 cell colors (yellow, red, blue, green, purple, orange, tan, gray), or null to clear it; the value stays, and an empty cell or a row title can be painted too. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. paste-transposed { rows, at_row, at_col } pastes the block with rows and columns swapped, as Edit ▸ Paste Transposed does. paste-link { source_path, row?, column?, auto_update? } pastes a data file (.csv, .tsv, .txt or .xlsx) as a link at (row, column) — the values land and stay linked, so titer_refresh_linked_data re-reads the file into the same region later; auto_update (default true) refreshes the link when the project opens. remove-link { } keeps the values and drops the link. generate-series { column, at, count, first, mode, step } fills a column with an arithmetic series (add step, default) or a geometric one (multiply by step): column defaults to the X column (1) on XY and Survival tables, at defaults to row 0, count to the table's stored rows, first to 0, step to 1; at most 10,000 values. set-summary-format { format } changes a grouped, xy or nested table's sub-column format between raw replicates and pre-calculated summaries (mean-sd-n, mean-sem-n, mean-sd, mean-sem, mean-cv-n, mean-cv, mean-plus-minus, mean-upper-lower, or replicates); values stay in their group's slot.",
         annotations(
             title = "Edit table",
             read_only_hint = false,
@@ -4613,6 +4682,11 @@ impl TiterMcpServer {
             "column": args.column,
             "name": args.name,
             "cells": args.cells.as_ref().map(|c| c.len()),
+            "color": match &args.color {
+                None => serde_json::Value::Null,
+                Some(None) => serde_json::Value::Null,
+                Some(Some(c)) => serde_json::Value::String(c.clone()),
+            },
             "frozen": args.frozen,
             "source_path": args.source_path,
             "first": args.first,
@@ -4642,6 +4716,7 @@ impl TiterMcpServer {
                 "rename-group",
                 "exclude-cells",
                 "include-cells",
+                "set-cell-background",
                 "freeze-title",
                 "convert-comma-decimals",
                 "set-summary-format",
@@ -4677,6 +4752,27 @@ impl TiterMcpServer {
                     Some(cells) if !cells.is_empty() => {}
                     _ => return Err(format!("op {} needs cells (at least one “row,col” string).", args.op)),
                 },
+                "set-cell-background" => {
+                    // The cell (at_row/at_col) and the color; a null color
+                    // clears it. The color must be present — absent is a
+                    // missing argument, not a clear.
+                    if args.at_row.is_none() || args.at_col.is_none() {
+                        return Err("op set-cell-background needs at_row and at_col (the cell's 0-based row and column).".into());
+                    }
+                    match &args.color {
+                        None => {
+                            return Err("op set-cell-background needs color (one of the 8 colors, or null to clear).".into());
+                        }
+                        Some(None) => {}
+                        Some(Some(c)) if CELL_BACKGROUND_COLORS.contains(&c.as_str()) => {}
+                        Some(Some(c)) => {
+                            return Err(format!(
+                                "op set-cell-background has color “{c}” — the colors are {}.",
+                                CELL_BACKGROUND_COLORS.join(", ")
+                            ));
+                        }
+                    }
+                }
                 "freeze-title" => {
                     if args.frozen.is_none() {
                         return Err("op freeze-title needs frozen (true or false).".into());
@@ -4755,6 +4851,11 @@ impl TiterMcpServer {
                     "column": args.column,
                     "name": args.name,
                     "cells": args.cells,
+                    "color": match &args.color {
+                        None => serde_json::Value::Null,
+                        Some(None) => serde_json::Value::Null,
+                        Some(Some(c)) => serde_json::Value::String(c.clone()),
+                    },
                     "frozen": args.frozen,
                     "formula": args.formula,
                     "rows": args.rows,
@@ -5864,6 +5965,70 @@ impl TiterMcpServer {
             }
             Err(e) => {
                 self.state.log_call("titer_freeze_analysis", freeze_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Paint one cell of one results table with one of Prism's 8 cell
+    /// colors (seq 325 — the paint-bucket menu), or clear it with null.
+    /// The color is presentation only: it never re-runs the analysis and
+    /// never changes a value, and it survives a recompute while the
+    /// table's shape holds. A frozen or orphaned analysis can be painted.
+    #[tool(
+        name = "titer_set_result_cell_background",
+        description = "Paint one cell of one results table with one of Prism's 8 cell colors (yellow, red, blue, green, purple, orange, tan, gray), or clear it with null: { analysis_id, section, row, col, color }. section is the results table's title (\"Normality\" or \"Statistics\" for the two untitled tables); row and col are 0-based within that table. The color is presentation only — it never re-runs the analysis, never changes a value, and survives a recompute while the table's shape holds.",
+        annotations(
+            title = "Set result cell background",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn set_result_cell_background(
+        &self,
+        Parameters(args): Parameters<SetResultCellBackgroundArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let paint_args = serde_json::json!({ "project_id": args.project_id, "analysis_id": args.analysis_id, "section": args.section, "row": args.row, "col": args.col, "color": args.color });
+        let result: Result<serde_json::Value, String> = async {
+            if let Some(color) = &args.color {
+                if !CELL_BACKGROUND_COLORS.contains(&color.as_str()) {
+                    return Err(format!(
+                        "color “{color}” is not one of Prism's 8 cell colors: {}.",
+                        CELL_BACKGROUND_COLORS.join(", ")
+                    ));
+                }
+            }
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            {
+                let snapshots = self.state.snapshots();
+                let snap = snapshots.get(&project_id).ok_or_else(|| {
+                    format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+                })?;
+                snapshot_node(snap, &args.analysis_id, "analysis")?;
+            }
+            let job = self.state.enqueue_job(
+                &project_id,
+                "set-result-cell-background",
+                serde_json::json!({ "analysis_id": args.analysis_id, "section": args.section, "row": args.row, "col": args.col, "color": args.color }),
+                serde_json::json!({ "analysis_id": args.analysis_id }),
+            )?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status == JobStatus::Done {
+                done.result.ok_or_else(|| "The paint finished without reporting.".to_string())
+            } else {
+                Err(done.error.unwrap_or_else(|| "Painting the results cell failed.".to_string()))
+            }
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_set_result_cell_background", paint_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_set_result_cell_background", paint_args, false, Some(&e));
                 Err(e)
             }
         }

@@ -3,6 +3,7 @@
 
 import type { AnalysisParams, AnalysisResult, AnalysisType, SimulationSpec } from "../stats/types";
 import type { SummaryFormat } from "../lib/summary-format";
+import type { CellBackgroundColor } from "../lib/cell-colors";
 
 export type NodeType = "table" | "analysis" | "graph" | "figure" | "info";
 /** What an item is, as menus name it ("Delete Graph…"). */
@@ -834,6 +835,13 @@ export interface TableData {
    * every analysis and graph via `readTable()`. Omitted when nothing is excluded.
    */
   excluded?: string[];
+  /**
+   * Per-cell background colors (seq 325): `"row,col"` keys in full-grid coords
+   * → one of Prism's 8 named colors (`CellBackgroundColor`). Presentation state
+   * only — unlike `excluded`, a colored value is still read by every analysis
+   * and graph. Omitted when no cell is colored.
+   */
+  cellBackgrounds?: Record<string, CellBackgroundColor>;
   /** Column widths (px) the user set, keyed by column name; others fit their content. */
   widths?: Record<string, number>;
   /** Per-column decimal places (Prism 11, seq 333): how many decimals the
@@ -941,6 +949,13 @@ export interface ProjectNode {
    *  Written to the `.hlx` file with the node, so the results survive a
    *  save and reload. */
   cachedResult?: AnalysisResult;
+  /** Analysis nodes only: per-cell background colors of the results tables
+   *  (seq 325), keyed `"section|row|col"` — the section is the results
+   *  table's title (or an explicit key for untitled tables), row/col are
+   *  0-based within that table. Presentation state: a color survives
+   *  recompute (it stays at its address even if the values move) and a
+   *  save/reload. Omitted when no results cell is colored. */
+  resultCellBackgrounds?: Record<string, CellBackgroundColor>;
   /** Frozen — the sheet stops auto-updating when the data change (Prism's
    *  freeze button). Analyses show `cachedResult`; graphs and figures show
    *  their frozen data snapshot instead of the live table (seq 237). */

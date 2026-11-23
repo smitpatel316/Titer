@@ -51,7 +51,7 @@ function Running() {
 
 export function AnalysisView({ node }: { node: ProjectNode }) {
   const { nodes, createTableWithData } = useProjectStore();
-  const { cacheAnalysisResult, openSelector, setAnalysisFrozen, repointAnalysis } = useProjectActions();
+  const { cacheAnalysisResult, openSelector, setAnalysisFrozen, repointAnalysis, setResultCellBackground } = useProjectActions();
   // Change Parameters (seq 373): re-opens this test's wizard pre-filled from
   // the stored params. Frozen, orphaned and unmapped tests stay disabled,
   // with the reason as the tooltip.
@@ -176,6 +176,8 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
           <AnalysisResultsView
             result={shown}
             onCreateTable={(tableType, table) => createTableWithData(tableType, table, "Extracted data")}
+            cellBackgrounds={node.resultCellBackgrounds}
+            onSetCellBackground={(key, color) => setResultCellBackground(node.id, key, color)}
           />
         ) : liveData && !outcome ? (
           <Running />

@@ -49,6 +49,7 @@ import {
   TRANSFORMS,
   Z_WITHIN,
 } from "../store/types";
+import { isCellBackgroundColor, parseResultCellBackgroundKey, type CellBackgroundColor } from "./cell-colors";
 import {
   type AnalysisParams,
   type AnalysisResult,
@@ -235,7 +236,7 @@ const PROJECT_KEYS = ["nodes", "rootOrder", "childOrder", "activeNodeId", "proje
 // prettier-ignore
 const NODE_KEYS = Object.keys({
   id: 1, type: 1, name: 1, parentId: 1, floatingNotes: 1, highlight: 1, tableType: 1, data: 1, transform: 1, notes: 1, tags: 1,
-  analysisType: 1, analysisParams: 1, cachedResult: 1, frozen: 1, orphaned: 1, sourceTableName: 1, graphType: 1, graphOptions: 1,
+  analysisType: 1, analysisParams: 1, cachedResult: 1, resultCellBackgrounds: 1, frozen: 1, orphaned: 1, sourceTableName: 1, graphType: 1, graphOptions: 1,
   sourceTableIds: 1,
   frozenData: 1, frozenDataByGraph: 1, drawingObjects: 1,
   panels: 1, grid: 1, figureSize: 1, labelStyle: 1, figureTitle: 1, sharedLegend: 1, figureBackground: 1, dpi: 1,
@@ -243,7 +244,7 @@ const NODE_KEYS = Object.keys({
 } satisfies Record<keyof ProjectNode, 1>);
 // prettier-ignore
 const DATA_KEYS = Object.keys({
-  columns: 1, rows: 1, groups: 1, replicates: 1, subgroups: 1, rowGroups: 1, excluded: 1,
+  columns: 1, rows: 1, groups: 1, replicates: 1, subgroups: 1, rowGroups: 1, excluded: 1, cellBackgrounds: 1,
   widths: 1, decimals: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1, linkedPaste: 1, simulation: 1,
 } satisfies Record<keyof TableData, 1>);
 
@@ -710,6 +711,11 @@ function readData(
     return r < rows.length && c < columns.length;
   };
   const excluded = Array.isArray(d.excluded) ? d.excluded.filter(onCell) : [];
+  // Cell background colors survive only as in-bounds "row,col" keys naming
+  // one of Prism's 8 colors; anything else is dropped, like a bogus exclusion.
+  const cellBackgrounds = isObj(d.cellBackgrounds)
+    ? Object.fromEntries(Object.entries(d.cellBackgrounds).filter(([k, v]) => onCell(k) && isCellBackgroundColor(v)))
+    : {};
   const widths = isObj(d.widths)
     ? Object.fromEntries(
         Object.entries(d.widths).filter(([name, w]) => columns.includes(name) && isFiniteNumber(w) && w > 0),
@@ -753,6 +759,7 @@ function readData(
     subgroups: grouping && isCount(d.subgroups) ? d.subgroups : undefined,
     rowGroups: rowGroups.groups,
     excluded: excluded.length ? excluded : undefined,
+    cellBackgrounds: Object.keys(cellBackgrounds).length ? (cellBackgrounds as Record<string, CellBackgroundColor>) : undefined,
     widths: Object.keys(widths).length ? (widths as Record<string, number>) : undefined,
     decimals: Object.keys(decimals).length ? (decimals as Record<string, number>) : undefined,
     freezeTitle: d.freezeTitle === true || undefined,
@@ -1793,6 +1800,18 @@ function readFigure(
 }
 
 /** `tableColors`: where a table leaves the colors it kept for its graphs. */
+/** Results-cell background colors (seq 325): a map of `"section|row|col"`
+ *  keys to one of Prism's 8 named colors. Only well-formed keys naming a
+ *  real color survive; anything else is dropped. */
+function readResultCellBackgrounds(raw: unknown): Record<string, CellBackgroundColor> | undefined {
+  if (!isObj(raw)) return undefined;
+  const out: Record<string, CellBackgroundColor> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (parseResultCellBackgroundKey(k) && isCellBackgroundColor(v)) out[k] = v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 function readNode(
   id: string,
   raw: unknown,
@@ -1906,6 +1925,12 @@ function readNode(
     const cached = readCachedResult(node.cachedResult, node.analysisType as string, node.name, issues);
     if (cached) node.cachedResult = cached;
     else delete node.cachedResult;
+    // Results-cell background colors (seq 325): only well-formed
+    // "section|row|col" keys naming one of the 8 colors survive — a
+    // hand-edited file holding anything else loses the bad entries.
+    const resultCellBackgrounds = readResultCellBackgrounds(n.resultCellBackgrounds);
+    if (resultCellBackgrounds) node.resultCellBackgrounds = resultCellBackgrounds;
+    else delete node.resultCellBackgrounds;
   } else if (type === "info") {
     // An info sheet lives at the project root, never under a table.
     node.parentId = null;

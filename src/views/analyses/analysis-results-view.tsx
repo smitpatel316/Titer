@@ -4,11 +4,15 @@
 // compact table per part of the result, the descriptive statistics, and the
 // notes. Numbers keep same-width digits so columns line up; everything is selectable.
 import type * as React from "react";
+import { createContext, useContext } from "react";
 import { CheckCircleIcon, WarningIcon } from "@phosphor-icons/react";
 import type { AnalysisResult, Analyzed, Check, GroupDescriptives, StatRow } from "../../stats/types";
 import type { TableData, TableType } from "../../store/types";
 import { Button, cn } from "../../ui/controls";
 import { isSignificant, num, pStars, pValue } from "../../lib/format";
+import { CELL_BACKGROUND_HEX, resultCellBackgroundKey, type CellBackgroundColor } from "../../lib/cell-colors";
+import { cellBackgroundMenuItems } from "../tables/grid-menu";
+import { popupMenu } from "../../native";
 
 /** A P value with its stars, green when significant. */
 function P({ p }: { p: number | null | undefined }) {
@@ -25,10 +29,36 @@ const verdict = (p: number | null) => (p == null ? "—" : p > 0.05 ? "Yes" : <s
 
 type Column = { label: string; numeric?: boolean };
 
+/** Cell background colors for the results tables (seq 325), carried by
+ *  context so the fifty table call sites below stay untouched: the paint
+ *  lives on the `Table` component, which reads its section's colors from
+ *  here. `onPick` is absent in static renders (tests), where the tables
+ *  are read-only. */
+const ResultsCellColors = createContext<{
+  backgrounds?: Record<string, CellBackgroundColor>;
+  onPick?: (key: string, color: CellBackgroundColor | null) => void;
+}>({});
+
 /** One part of the result: a titled table, as wide as its content. The first
- *  column names the rows; numeric columns align right. */
-function Table({ title, columns, rows }: { title?: string; columns: Column[]; rows: React.ReactNode[][] }) {
+ *  column names the rows; numeric columns align right. `section` is the
+ *  stable key for cell-color addresses (seq 325) — the title, unless the
+ *  table is untitled or shares its title, in which case the call site
+ *  passes one. Colors attach to the (section, row, column) address, so a
+ *  recompute keeps each color on its cell while the shape holds. */
+function Table({
+  title,
+  section,
+  columns,
+  rows,
+}: {
+  title?: string;
+  section?: string;
+  columns: Column[];
+  rows: React.ReactNode[][];
+}) {
   const hasHeader = columns.some((c) => c.label);
+  const key = section ?? title ?? "Results";
+  const { backgrounds, onPick } = useContext(ResultsCellColors);
   return (
     <section className="flex flex-col gap-2">
       {title && <h3 className="text-strong">{title}</h3>}
@@ -54,18 +84,36 @@ function Table({ title, columns, rows }: { title?: string; columns: Column[]; ro
           <tbody>
             {rows.map((row, i) => (
               <tr key={i} className="even:bg-control">
-                {row.map((cell, j) => (
-                  <td
-                    key={j}
-                    className={cn(
-                      "px-3 py-1.5 whitespace-nowrap",
-                      columns[j]?.numeric ? "text-right" : "text-left",
-                      j === 0 && hasHeader && "pr-6",
-                    )}
-                  >
-                    {cell}
-                  </td>
-                ))}
+                {row.map((cell, j) => {
+                  const tint = backgrounds?.[resultCellBackgroundKey(key, i, j)];
+                  return (
+                    <td
+                      key={j}
+                      className={cn(
+                        "px-3 py-1.5 whitespace-nowrap",
+                        columns[j]?.numeric ? "text-right" : "text-left",
+                        j === 0 && hasHeader && "pr-6",
+                      )}
+                      style={tint ? { backgroundColor: CELL_BACKGROUND_HEX[tint] } : undefined}
+                      onContextMenu={
+                        onPick
+                          ? (e) => {
+                              e.preventDefault();
+                              const cellKey = resultCellBackgroundKey(key, i, j);
+                              void popupMenu(
+                                cellBackgroundMenuItems(backgrounds?.[cellKey] ?? null, (color) =>
+                                  onPick(cellKey, color),
+                                ),
+                                { clientX: e.clientX, clientY: e.clientY },
+                              );
+                            }
+                          : undefined
+                      }
+                    >
+                      {cell}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>
@@ -166,13 +214,21 @@ const DESCRIPTIVE_ROWS: [string, (g: GroupDescriptives) => React.ReactNode][] = 
 
 /** `onCreateTable` (the analysis view wires it to the store) adds the
  *  extracted table to the project — without it (tests, static renders) the
- *  table is shown but the button is absent. */
+ *  table is shown but the button is absent. `cellBackgrounds` /
+ *  `onSetCellBackground` (seq 325) paint the results cells: without them
+ *  the tables are read-only, as in tests. */
 export function AnalysisResultsView({
   result,
   onCreateTable,
+  cellBackgrounds,
+  onSetCellBackground,
 }: {
   result: AnalysisResult;
   onCreateTable?: (tableType: TableType, table: TableData) => void;
+  /** The analysis node's painted results cells, by `"section|row|col"` address. */
+  cellBackgrounds?: Record<string, CellBackgroundColor>;
+  /** Paints (or clears, with null) one results cell. */
+  onSetCellBackground?: (key: string, color: CellBackgroundColor | null) => void;
 }) {
   const headlineP = headline(result.stats);
   // Comparisons of means give their 95% CI (adjusted as their P is); ranks don't.
@@ -206,8 +262,9 @@ export function AnalysisResultsView({
   const matrix = result.matrix;
 
   return (
-    <div className="flex max-w-4xl flex-col gap-7 px-8 py-6 text-regular text-primary tabular-nums select-text">
-      {result.analyzed && <AnalyzedView analyzed={result.analyzed} />}
+    <ResultsCellColors.Provider value={{ backgrounds: cellBackgrounds, onPick: onSetCellBackground }}>
+      <div className="flex max-w-4xl flex-col gap-7 px-8 py-6 text-regular text-primary tabular-nums select-text">
+        {result.analyzed && <AnalyzedView analyzed={result.analyzed} />}
 
       {(result.summary || showP) && (
         <section className="flex flex-col gap-2">
@@ -234,6 +291,7 @@ export function AnalysisResultsView({
 
       {result.normality && (
         <Table
+          section="Normality"
           columns={[
             { label: "" },
             { label: "W", numeric: true },
@@ -354,6 +412,7 @@ export function AnalysisResultsView({
 
       {result.stats.length > 0 && (
         <Table
+          section="Statistics"
           columns={[{ label: "" }, { label: "", numeric: true }]}
           rows={result.stats.map((s) => [
             <span className="text-secondary">{s.label}</span>,
@@ -1218,6 +1277,7 @@ export function AnalysisResultsView({
         ))}
 
       {result.notes && <p className="max-w-prose text-small text-secondary">{result.notes}</p>}
-    </div>
+      </div>
+    </ResultsCellColors.Provider>
   );
 }

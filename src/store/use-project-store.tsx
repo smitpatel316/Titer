@@ -30,6 +30,7 @@ import { followTable, type TableMove } from "./references";
 import { pushHistory } from "../lib/sheet-navigation";
 import { repointCandidates } from "../lib/repoint-analysis";
 import { applyWand as planWand, type WandReport } from "../lib/wand";
+import type { CellBackgroundColor } from "../lib/cell-colors";
 import { cloneGraphPlan, type CloneOptions, type ClonePlan } from "../lib/clone-graph";
 import { DEFAULT_FIGURE_DPI, DEFAULT_FIGURE_SIZE, DEFAULT_LABEL_STYLE, newFigurePanels } from "../lib/figure";
 import { clearRegenPlans } from "../lib/prism-graph-regen";
@@ -219,6 +220,10 @@ type Action =
   | { type: "updateFloatingNotes"; id: string; notes: FloatingNote[]; at: number }
   /** `highlight`: the sheet's Navigator color, or null to clear it. */
   | { type: "setHighlight"; id: string; highlight: SheetHighlight | null }
+  /** Paint (or clear) one results-table cell (seq 325): `key` is a
+   *  `"section|row|col"` address, `color` one of Prism's 8 names or null
+   *  to clear it. Presentation only — the values never change. */
+  | { type: "setResultCellBackground"; id: string; key: string; color: CellBackgroundColor | null }
   | {
       type: "updateFigure";
       id: string;
@@ -870,8 +875,8 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         }
         // Its values changed, not only a column's width: the tables computed from it follow.
         const old = before.data;
-        const same = (k: "rows" | "columns" | "excluded" | "groups" | "replicates") => old?.[k] === data[k];
-        if (same("rows") && same("columns") && same("excluded") && same("groups") && same("replicates")) return;
+        const same = (k: "rows" | "columns" | "excluded" | "cellBackgrounds" | "groups" | "replicates") => old?.[k] === data[k];
+        if (same("rows") && same("columns") && same("excluded") && same("cellBackgrounds") && same("groups") && same("replicates")) return;
         for (const t of Object.values(nodes)) {
           if (t.transform?.from === id) update(t.id, transformTable(data, t.tableType!, t.transform, t.data));
         }
@@ -964,6 +969,24 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       const next = { ...node };
       if (action.highlight) next.highlight = action.highlight;
       else delete next.highlight;
+      return {
+        ...state,
+        nodes: { ...state.nodes, [action.id]: next },
+        isDirty: true,
+      };
+    }
+    case "setResultCellBackground": {
+      const node = state.nodes[action.id];
+      if (!node || node.type !== "analysis") return state;
+      const key = action.key;
+      const current = node.resultCellBackgrounds?.[key];
+      if (current === (action.color ?? undefined)) return state;
+      const next = { ...node };
+      const colors = { ...(node.resultCellBackgrounds ?? {}) };
+      if (action.color) colors[key] = action.color;
+      else delete colors[key];
+      if (Object.keys(colors).length) next.resultCellBackgrounds = colors;
+      else delete next.resultCellBackgrounds;
       return {
         ...state,
         nodes: { ...state.nodes, [action.id]: next },
@@ -1110,6 +1133,7 @@ const UNDOABLE = new Set<Action["type"]>([
   "setTags",
   "setScripts",
   "setHighlight",
+  "setResultCellBackground",
   "updateFigure",
   "applyScript",
   "reorderRoot",
@@ -1197,6 +1221,8 @@ function changeName(action: Action): string {
       return "Note Change";
     case "setHighlight":
       return "Highlight Sheet";
+    case "setResultCellBackground":
+      return "Cell Background Color";
     case "updateFigure":
       return "Figure Change";
     case "applyScript":
@@ -1357,6 +1383,9 @@ interface ProjectActions {
    *  snapshots the parent tables' data, so the sheet draws the snapshot
    *  while the live data keep changing. */
   setGraphFrozen: (id: string, kind: "graph" | "figure", frozen: boolean) => void;
+  /** Paint (or clear) one results-table cell (seq 325): `key` is a
+   *  `"section|row|col"` address, `color` one of Prism's 8 names or null. */
+  setResultCellBackground: (id: string, key: string, color: CellBackgroundColor | null) => void;
   /** Add a text/drawing/picture object to a graph or figure sheet (seq 238). */
   addDrawingObject: (nodeId: string, object: DrawingObject) => void;
   /** Change one drawing object (its id and kind never change). */
@@ -1654,6 +1683,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       updateGraphs: (updates) => dispatch({ type: "updateGraphs", updates, at: Date.now() }),
       updateFloatingNotes: (id, notes) => dispatch({ type: "updateFloatingNotes", id, notes, at: Date.now() }),
       setSheetHighlight: (id, highlight) => dispatch({ type: "setHighlight", id, highlight }),
+      setResultCellBackground: (id, key, color) => dispatch({ type: "setResultCellBackground", id, key, color }),
       openSelector: (selector) => dispatch({ type: "openSelector", selector }),
       closeSelector: () => dispatch({ type: "closeSelector" }),
       setOpenError: (error) => dispatch({ type: "setOpenError", error }),

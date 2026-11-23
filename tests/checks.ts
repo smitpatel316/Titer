@@ -142,6 +142,7 @@ import {
   replicateXY,
   rowsDeleted,
   rowsInserted,
+  setCellBackground,
   setRowGroupCount,
   setRowGroupName,
   toggleExcluded,
@@ -149,6 +150,7 @@ import {
   transposeBlock,
   writeBlock,
 } from "../src/views/tables/table-data";
+import { resultCellBackgroundKey } from "../src/lib/cell-colors";
 import { flattenThreeWay, rowGroupBands } from "../src/stats/grouped/base";
 import { gridMenu } from "../src/views/tables/grid-menu";
 import { analysisOptionsForTable, analysisOptionsKey } from "../src/views/analyses";
@@ -2322,6 +2324,72 @@ check("MCP run-analysis refuses a frozen analysis before running it", async () =
   deepStrictEqual(seen, []);
 });
 
+// Results tables (seq 325) are painted by address — section, row, column —
+// so a color survives a recompute while the table's shape holds, and a
+// frozen analysis can still be painted (the color never re-runs anything).
+check("MCP set-result-cell-background paints and clears a results cell (seq 325)", async () => {
+  const { harness } = await rerunHarness();
+  harness.deps.setResultCellBackground = (id, key, color) =>
+    harness.dispatch({ type: "setResultCellBackground", id, key, color });
+  const key = resultCellBackgroundKey("Statistics", 0, 1);
+  const done = await harness.run("job-325r-a", "set-result-cell-background", {
+    analysis_id: "a1",
+    section: "Statistics",
+    row: 0,
+    col: 1,
+    color: "red",
+  });
+  deepStrictEqual((done.result as { color: string }).color, "red");
+  deepStrictEqual(harness.state().nodes["a1"]?.resultCellBackgrounds, { [key]: "red" });
+  // A recompute keeps the color on its cell (same-shape result).
+  harness.dispatch({
+    type: "cacheAnalysisResult",
+    id: "a1",
+    result: { testType: "anova", stats: [], groups: [], notes: "" },
+  });
+  deepStrictEqual(harness.state().nodes["a1"]?.resultCellBackgrounds, { [key]: "red" });
+  // Clearing removes it; a bogus color, a negative row, and an unknown
+  // analysis are refused.
+  await harness.run("job-325r-b", "set-result-cell-background", {
+    analysis_id: "a1",
+    section: "Statistics",
+    row: 0,
+    col: 1,
+    color: null,
+  });
+  strictEqual(harness.state().nodes["a1"]?.resultCellBackgrounds, undefined);
+  await rejects(
+    harness.run("job-325r-c", "set-result-cell-background", {
+      analysis_id: "a1",
+      section: "Statistics",
+      row: 0,
+      col: 1,
+      color: "pink",
+    }),
+    /one of yellow, red, blue, green, purple, orange, tan, gray/,
+  );
+  await rejects(
+    harness.run("job-325r-d", "set-result-cell-background", {
+      analysis_id: "a1",
+      section: "Statistics",
+      row: -1,
+      col: 1,
+      color: "red",
+    }),
+    /must be a whole number, at least 0/,
+  );
+  await rejects(
+    harness.run("job-325r-e", "set-result-cell-background", {
+      analysis_id: "nope",
+      section: "Statistics",
+      row: 0,
+      col: 1,
+      color: "red",
+    }),
+    /No analysis with id/,
+  );
+});
+
 // The generated MCP params schema (titer_get_analysis_params) must stay
 // in step with the validator: same types, same param names per type, and
 // every listed enum value must pass validateAnalysisParams.
@@ -2396,6 +2464,83 @@ check("write-table with excluded omitted (null) preserves the marks (v1.6 F5)", 
   harness.sync();
   await harness.run("job-f5d", "write-table", { table_id: tid, columns, rows, excluded: [] });
   strictEqual(data().excluded, undefined);
+});
+
+// Cell background colors (seq 325) are Prism's paint-bucket: one cell, one
+// of the 8 colors, or null to clear it. The value stays — the color is
+// presentation only — and painting the same color again is a no-op
+// success (no undo step, no revision bump).
+check("MCP edit-table set-cell-background paints and clears one cell (seq 325)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const created = await harness.run("job-325a", "create-table", {
+    table_type: "xy",
+    name: "Doses",
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["r1", 0, 1],
+      ["r2", 1, 2],
+    ],
+  });
+  const tid = (created.result as { table_id: string }).table_id;
+  const data = () => harness.state().nodes[tid]?.data!;
+  harness.sync();
+  await harness.run("job-325b", "edit-table", { table_id: tid, op: "set-cell-background", at_row: 0, at_col: 1, color: "yellow" });
+  deepStrictEqual(data().cellBackgrounds, { "0,1": "yellow" });
+  strictEqual(data().rows[0][1], "0"); // the value is untouched (stored as "0")
+  const before = harness.state().revision;
+  await harness.run("job-325c", "edit-table", { table_id: tid, op: "set-cell-background", at_row: 0, at_col: 1, color: "yellow" });
+  strictEqual(harness.state().revision, before);
+  // Clearing removes the color; a bogus color and an out-of-range cell are refused.
+  harness.sync();
+  await harness.run("job-325d", "edit-table", { table_id: tid, op: "set-cell-background", at_row: 0, at_col: 1, color: null });
+  strictEqual(data().cellBackgrounds, undefined);
+  await rejects(
+    harness.run("job-325e", "edit-table", { table_id: tid, op: "set-cell-background", at_row: 0, at_col: 1, color: "pink" }),
+    /the colors are/,
+  );
+  await rejects(
+    harness.run("job-325f", "edit-table", { table_id: tid, op: "set-cell-background", at_row: 9, at_col: 1, color: "red" }),
+    /has no cell/,
+  );
+});
+
+// write-table with cell_backgrounds follows the excluded convention (F5):
+// omitted (null) preserves the colors, an explicit map replaces them, an
+// empty map clears them.
+check("write-table with cell_backgrounds omitted preserves the colors (seq 325)", async () => {
+  const harness = mcpLaggingHarness(true);
+  const created = await harness.run("job-325w-a", "create-table", {
+    table_type: "xy",
+    name: "Doses",
+    columns: ["Title", "X", "Y1"],
+    rows: [
+      ["r1", 0, 1],
+      ["r2", 1, 2],
+    ],
+  });
+  const tid = (created.result as { table_id: string }).table_id;
+  const data = () => harness.state().nodes[tid]?.data!;
+  const columns = ["Title", "X", "Y1"];
+  const rows = [
+    ["r1", 0, 1],
+    ["r2", 1, 2],
+  ];
+  harness.sync();
+  await harness.run("job-325w-b", "edit-table", { table_id: tid, op: "set-cell-background", at_row: 0, at_col: 1, color: "yellow" });
+  deepStrictEqual(data().cellBackgrounds, { "0,1": "yellow" });
+  harness.sync();
+  await harness.run("job-325w-c", "write-table", { table_id: tid, columns, rows, cell_backgrounds: null });
+  deepStrictEqual(data().cellBackgrounds, { "0,1": "yellow" });
+  harness.sync();
+  await harness.run("job-325w-d", "write-table", { table_id: tid, columns, rows, cell_backgrounds: { "1,2": "red" } });
+  deepStrictEqual(data().cellBackgrounds, { "1,2": "red" });
+  harness.sync();
+  await harness.run("job-325w-e", "write-table", { table_id: tid, columns, rows, cell_backgrounds: {} });
+  strictEqual(data().cellBackgrounds, undefined);
+  await rejects(
+    harness.run("job-325w-f", "write-table", { table_id: tid, columns, rows, cell_backgrounds: { "0,1": "pink" } }),
+    /the colors are/,
+  );
 });
 
 check("write-table with zero rows is refused and leaves the table untouched (BUG-17)", async () => {
@@ -4228,6 +4373,41 @@ check("a table's error format survives a save and reload; a bogus one reads as S
   const bogus: ProjectNode = { ...table, data: { ...table.data!, errorFormat: "ci" as never } };
   const bogusFile = { ...payload, nodes: { ...payload.nodes, t1: bogus } };
   strictEqual(read(serializeProjectFile(bogusFile)).project.nodes.t1.data!.errorFormat, undefined);
+});
+
+// Cell background colors (seq 325) persist in the .hlx like excluded
+// flags; a bogus color name or an out-of-bounds address is dropped on
+// load rather than kept.
+check("cell background colors survive a save and reload; bogus ones are dropped (seq 325)", () => {
+  const colored: ProjectNode = {
+    ...table,
+    data: { ...table.data!, cellBackgrounds: { "0,1": "yellow", "1,0": "gray" } },
+  };
+  const coloredFile = { ...payload, nodes: { ...payload.nodes, t1: colored } };
+  deepStrictEqual(read(serializeProjectFile(coloredFile)).project.nodes.t1.data!.cellBackgrounds, {
+    "0,1": "yellow",
+    "1,0": "gray",
+  });
+  const bogus: ProjectNode = {
+    ...table,
+    data: { ...table.data!, cellBackgrounds: { "0,1": "pink", "9,9": "yellow" } as never },
+  };
+  const bogusFile = { ...payload, nodes: { ...payload.nodes, t1: bogus } };
+  strictEqual(read(serializeProjectFile(bogusFile)).project.nodes.t1.data!.cellBackgrounds, undefined);
+});
+
+check("results cell background colors survive a save and reload (seq 325)", () => {
+  const colored: ProjectNode = { ...analysis, resultCellBackgrounds: { "Statistics|0|1": "red" } };
+  const coloredFile = { ...payload, nodes: { ...payload.nodes, a1: colored } };
+  deepStrictEqual(read(serializeProjectFile(coloredFile)).project.nodes.a1.resultCellBackgrounds, {
+    "Statistics|0|1": "red",
+  });
+  const bogus: ProjectNode = {
+    ...analysis,
+    resultCellBackgrounds: { "Statistics|0|1": "pink", "Nope": "red" } as never,
+  };
+  const bogusFile = { ...payload, nodes: { ...payload.nodes, a1: bogus } };
+  strictEqual(read(serializeProjectFile(bogusFile)).project.nodes.a1.resultCellBackgrounds, undefined);
 });
 
 // Floating notes (v2): color-coded notes pinned to a sheet — shown on screen,
@@ -7376,6 +7556,48 @@ check("clearing an excluded cell drops its exclusion, so no phantom * and no aut
   // …while overwriting an excluded cell with a value keeps it excluded.
   const kept = writeBlock(t, 0, 1, [["7"]], "xy");
   deepStrictEqual(kept.excluded, ["0,1"]);
+});
+
+// Cell background colors (seq 325) are Prism's paint-bucket: a color is
+// presentation only — the value stays, an empty cell or a row title can
+// be painted (a cell flagged to be filled in), and painting the same
+// color again is a no-op that returns the input unchanged.
+check("cell background colors paint one cell or a range, clear, and never change a value (seq 325)", () => {
+  const t = treatments(["Y1", "Y2"]); // 3 rows: [null, "1", "2"], …
+  const painted = setCellBackground(t, { r0: 0, r1: 0, c0: 1, c1: 1 }, "yellow");
+  deepStrictEqual(painted.cellBackgrounds, { "0,1": "yellow" });
+  strictEqual(painted.rows[0][1], "1");
+  strictEqual(setCellBackground(painted, { r0: 0, r1: 0, c0: 1, c1: 1 }, "yellow"), painted);
+  // A range paints every cell in it, row titles included.
+  const ranged = setCellBackground(painted, { r0: 0, r1: 1, c0: 0, c1: 2 }, "red");
+  deepStrictEqual(ranged.cellBackgrounds, {
+    "0,0": "red",
+    "0,1": "red",
+    "0,2": "red",
+    "1,0": "red",
+    "1,1": "red",
+    "1,2": "red",
+  });
+  // Clearing one cell leaves the rest; clearing the last color drops the field.
+  const cleared = setCellBackground(ranged, { r0: 0, r1: 0, c0: 1, c1: 1 }, null);
+  deepStrictEqual(cleared.cellBackgrounds, { "0,0": "red", "0,2": "red", "1,0": "red", "1,1": "red", "1,2": "red" });
+  const allCleared = setCellBackground(cleared, { r0: 0, r1: 1, c0: 0, c1: 2 }, null);
+  strictEqual(allCleared.cellBackgrounds, undefined);
+  // An empty cell keeps its color when cleared of its value (unlike an
+  // exclusion, which a cleared value drops).
+  const flagged = setCellBackground(t, { r0: 0, r1: 0, c0: 0, c1: 0 }, "gray");
+  strictEqual(writeBlock(flagged, 0, 0, [[null]], "column").cellBackgrounds?.["0,0"], "gray");
+});
+
+// Like exclusions, colors follow their cells through row/column edits —
+// and go with a cell when its row or column is deleted.
+check("cell background colors follow their cells through insert/delete rows and columns (seq 325)", () => {
+  const t = setCellBackground(treatments(["Y1", "Y2"]), { r0: 1, r1: 1, c0: 2, c1: 2 }, "blue");
+  deepStrictEqual(insertRows(t, 0, 1).cellBackgrounds, { "2,2": "blue" });
+  deepStrictEqual(deleteRows(t, 0, 1).cellBackgrounds, { "0,2": "blue" });
+  strictEqual(deleteRows(t, 1, 1).cellBackgrounds, undefined);
+  deepStrictEqual(insertColumns(t, 1, 1, "column").cellBackgrounds, { "1,3": "blue" });
+  strictEqual(deleteColumns(t, 2, 1).cellBackgrounds, undefined);
 });
 
 check("Create Series fills a column with an arithmetic series, formatted without float noise (seq 169)", () => {
