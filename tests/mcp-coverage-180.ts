@@ -786,6 +786,18 @@ const ROWS: Row[] = [
     note: "Covered via save_project (tip path); fix in flight on fix/18-289-prism-ranges.",
     checks: [{ kind: "tool", tool: "titer_save_project" }],
   },
+  {
+    item: "332",
+    title: "Dates / elapsed time X (HALF A)",
+    status: "covered",
+    note: "X-column format (numbers/date/elapsed) + conversion (units/start date/day-first) on XY tables: x_format + x_conversion on titer_read_table_summary (XY only), titer_edit_table set-x-format op; .hlx round-trip via readXFormat/readXConversion; .prism round-trip preserves the format. Part D (axis scales) is a separate lane.",
+    checks: [
+      { kind: "editOpsContains", op: "set-x-format" },
+      { kind: "sourceContains", file: "mcpDispatch", text: "set-x-format" },
+      { kind: "structContains", struct: "EditTableArgs", text: "x_format" },
+      { kind: "sourceContainsRe", scope: "src", re: "xFormat" },
+    ],
+  },
 
   // ── Covered in flight (surface on the named branch, not on this tip) ──
   {

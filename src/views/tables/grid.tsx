@@ -11,6 +11,7 @@ import { clamp, type TableData, type TableType } from "../../store/types";
 import type { TableMove } from "../../store/references";
 import type { EditCommand } from "../../app-menu";
 import { parseCell } from "../../lib/numeric";
+import { displayXCell } from "../../lib/date-time";
 import { fileName } from "../../lib/paths";
 import { seriesKeyOf } from "../../lib/columns";
 import { isGrouped, isNested, leadOf } from "../../lib/dataset";
@@ -1100,6 +1101,12 @@ function Cells({
   for (let r = r0; r <= r1; r++) {
     for (let c = c0; c <= c1; c++) {
       const value = data.rows[r]?.[c];
+      // A date/elapsed X cell that can't be read shows "?" (seq 332) — the
+      // original text stays in the cell, so editing it starts from what was typed.
+      const shown =
+        c === 1 && (data.xFormat === "date" || data.xFormat === "elapsed")
+          ? displayXCell(value ?? null, data.xFormat, data.xConversion)
+          : value;
       cells.push(
         <div
           key={`${r}:${c}`}
@@ -1111,7 +1118,7 @@ function Cells({
           )}
           style={{ left: xs[c] - xs[origin], top: r * ROW_H, width: xs[c + 1] - xs[c], height: ROW_H }}
         >
-          {value}
+          {shown}
         </div>,
       );
     }

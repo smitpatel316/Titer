@@ -53,6 +53,14 @@
 import type { ProjectFilePayload } from "./project-file";
 import type { PrismWriteReport } from "./prism-write";
 import { groupRuns } from "./columns";
+import {
+  convertXCell,
+  earliestDateMs,
+  formatPrismDate,
+  parseDateCell,
+  parseElapsedCell,
+  type XConversion,
+} from "./date-time";
 import { summaryFormatDef, type SummaryFormat } from "./summary-format";
 
 export interface PzfxWriteResult {
@@ -277,13 +285,18 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
       rows.add(Number(m[1]));
       excludedByColumn.set(Number(m[2]), rows);
     }
-    const dElements = (ci: number): string =>
+    const dElementsFor = (values: (string | null)[], ci: number): string =>
       Array.from({ length: rowCount }, (_, r) => {
-        const value = cell(r, ci);
+        const value = values[r] ?? null;
         const excluded = excludedByColumn.get(ci)?.has(r) ?? false;
         if (value === null) return excluded ? `<d Excluded="1"/>` : `<d/>`;
         return excluded ? `<d Excluded="1">${escapeXml(value)}</d>` : `<d>${escapeXml(value)}</d>`;
       }).join("");
+    const dElements = (ci: number): string =>
+      dElementsFor(
+        Array.from({ length: rowCount }, (_, r) => cell(r, ci)),
+        ci,
+      );
 
     // Columns after Title: X first for xy/survival, then Y columns.
     const allColumns: WriteColumn[] = data.columns.slice(1).map((colName, i) => ({
@@ -319,6 +332,9 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
     let yFormat: string | null = null;
     let replicates: number | undefined;
     let xAdvanced: string | null = null;
+    // A converted X column's <d> elements, when the X subcolumn is written
+    // from converted values instead of the raw cells (seq 332).
+    let xOverride: string | null = null;
     let emitRowTitles = hasRowTitles;
 
     if (tableType === "grouped") {
@@ -444,10 +460,47 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
     }
     if (tableType === "xy") {
       prismTableType = "XY";
-      // Date X: a "<X> (date)" column wins; else row titles that all look
-      // like Prism dates become the XAdvancedColumn (and stop being row
-      // titles); else the X axis is numbers.
-      if (dateColumn) {
+      // The new model (seq 332): an XY table whose X column is marked
+      // date/elapsed carries its conversion in the table data, not in a
+      // "(date)" side column. It wins over the legacy detection below — but
+      // only when the X cells actually read as dates/elapsed times, so a
+      // table imported from .pzfx (numeric years + a "(date)" column) keeps
+      // its legacy shape instead of being rewritten from its X values.
+      const xConv: XConversion = data.xConversion ?? { units: "days" };
+      const xModelDate =
+        data.xFormat === "date" &&
+        xColumn !== null &&
+        xColumn.values.some((v) => parseDateCell(v, xConv.dayFirst) !== null);
+      const xModelElapsed =
+        data.xFormat === "elapsed" && xColumn !== null && xColumn.values.some((v) => parseElapsedCell(v) !== null);
+      if (xModelDate) {
+        // Prism's own shape (the x_date fixture): the XColumn holds years
+        // since the first date, and the XAdvancedColumn holds the date
+        // strings in Prism's "16-Jan-2004" shape. The conversion's own
+        // start date does NOT move the XColumn — Prism computes its display
+        // from the first date.
+        const firstDate = earliestDateMs(xColumn!.values, xConv);
+        const years = xColumn!.values.map((v) => {
+          const ms = parseDateCell(v, xConv.dayFirst);
+          return ms === null || firstDate === null ? null : String((ms - firstDate) / 86400000 / 365.25);
+        });
+        const dateStrings = xColumn!.values.map((v) => {
+          const ms = parseDateCell(v, xConv.dayFirst);
+          return ms === null ? v : formatPrismDate(ms);
+        });
+        xFormat = "date";
+        xOverride = dElementsFor(years, 1);
+        xAdvanced = `<XAdvancedColumn Version="1" Width="114" Decimals="0" Subcolumns="1"><Title>${escapeXml(xColumn!.name)}</Title><Subcolumn>${dElementsFor(dateStrings, 1)}</Subcolumn></XAdvancedColumn>`;
+      } else if (xModelElapsed) {
+        // Elapsed X in .pzfx is plain numbers in the table's units — the
+        // format flag doesn't survive here, only the converted values do.
+        const converted = xColumn!.values.map((v) => {
+          const n = convertXCell(v, "elapsed", xConv, null);
+          return n === null ? null : String(n);
+        });
+        xFormat = "numbers";
+        xOverride = dElementsFor(converted, 1);
+      } else if (dateColumn) {
         xFormat = "date";
         const dateCi = allColumns.indexOf(dateColumn) + 1;
         xAdvanced = `<XAdvancedColumn Version="1" Width="114" Decimals="0" Subcolumns="1"><Title>${escapeXml(xColumn!.name)}</Title><Subcolumn>${dElements(dateCi)}</Subcolumn></XAdvancedColumn>`;
@@ -511,7 +564,7 @@ export function writePzfx(project: ProjectFilePayload, appVersion: string): Pzfx
       const xXml =
         xColumn === null
           ? ""
-          : `<XColumn Width="${xFormat === "date" ? 114 : 89}" Decimals="${xFormat === "date" ? 14 : 0}" Subcolumns="${xError ? 2 : 1}"><Title>${escapeXml(xColumn.name)}</Title><Subcolumn>${dElements(1)}</Subcolumn>${xError ? `<Subcolumn>${dElements(allColumns.indexOf(xError) + 1)}</Subcolumn>` : ""}</XColumn>`;
+          : `<XColumn Width="${xFormat === "date" ? 114 : 89}" Decimals="${xFormat === "date" ? 14 : 0}" Subcolumns="${xError ? 2 : 1}"><Title>${escapeXml(xColumn.name)}</Title><Subcolumn>${xOverride ?? dElements(1)}</Subcolumn>${xError ? `<Subcolumn>${dElements(allColumns.indexOf(xError) + 1)}</Subcolumn>` : ""}</XColumn>`;
       const id = `Table${tableIds.length}`;
       tableIds.push(id);
       // A table past Prism's huge size writes as <HugeTable>, not <Table>.

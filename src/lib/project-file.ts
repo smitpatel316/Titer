@@ -109,6 +109,7 @@ import { GRAPHS, GRAPH_OPTIONS_BY_TABLE } from "../views/graphs";
 import { ANALYSES } from "../stats";
 import { isGrouped, isNested } from "./dataset";
 import { isSummaryFormatValue, summarySubcolumns } from "./summary-format";
+import { isDateUnit, isoDateOf, parseDateCell, type XColumnFormat, type XConversion } from "./date-time";
 import { groupRuns } from "./columns";
 import { regroupDropped, regroupTable, renestDropped, renestTable } from "../views/tables/table-data";
 import { readCalculated, recomputeCalculated } from "./calcvars";
@@ -245,6 +246,7 @@ const NODE_KEYS = Object.keys({
 const DATA_KEYS = Object.keys({
   columns: 1, rows: 1, groups: 1, replicates: 1, subgroups: 1, rowGroups: 1, excluded: 1,
   widths: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1, linkedPaste: 1, simulation: 1,
+  xFormat: 1, xConversion: 1,
 } satisfies Record<keyof TableData, 1>);
 
 // Graph options without a default, by the kind of value they hold.
@@ -675,6 +677,30 @@ function describeDroppedBand(b: unknown): string {
   return typeof b.count === "number" ? `${name} (count ${b.count})` : `${name} (no count)`;
 }
 
+/** An XY table's X format as a file holds it (Prism 11, seq 332): only
+ *  "date" or "elapsed" survives, and only on an XY table — a hand-edited
+ *  file holding anything else, or any format on another table type, reads
+ *  as plain numbers. "numbers" is the default, so it is never stored. */
+function readXFormat(v: unknown, type: unknown): XColumnFormat | undefined {
+  if (type !== "xy") return undefined;
+  return v === "date" || v === "elapsed" ? v : undefined;
+}
+
+/** An X conversion as a file holds it: a bad unit is days, an unparseable
+ *  start date is dropped (the earliest date becomes the zero instead), and
+ *  a conversion that is all-default is dropped — it would read as the
+ *  default anyway. The conversion is kept even when the format is numbers,
+ *  so switching back to dates restores the units and start date. */
+function readXConversion(v: unknown): XConversion | undefined {
+  if (!isObj(v)) return undefined;
+  const units = isDateUnit(v.units) ? v.units : "days";
+  const parsedStart = typeof v.startDate === "string" ? parseDateCell(v.startDate) : null;
+  const startDate = isoDateOf(parsedStart);
+  const dayFirst = v.dayFirst === true ? true : undefined;
+  if (units === "days" && startDate === undefined && dayFirst === undefined) return undefined;
+  return { units, ...(startDate === undefined ? {} : { startDate }), ...(dayFirst === undefined ? {} : { dayFirst }) };
+}
+
 /** A table's data, and the colors it kept for its graphs. */
 /** A table's data, put straight: no value beyond its last column (`beyond` counts those left
  *  out), exclusions and widths only on cells and columns it has, and a grouped table's
@@ -742,6 +768,10 @@ function readData(
     // Only "sd" or "sem" survives: a hand-edited file holding anything else
     // reads as SEM, the default, instead of carrying a bogus format.
     errorFormat: d.errorFormat === "sd" || d.errorFormat === "sem" ? d.errorFormat : undefined,
+    // A date/elapsed X column survives only on an XY table, with a valid
+    // conversion (seq 332).
+    xFormat: readXFormat(d.xFormat, type),
+    xConversion: readXConversion(d.xConversion),
     calculated,
     linkedPaste,
     // A simulated table's spec survives only when it is a valid spec:
@@ -1594,6 +1624,11 @@ function readFrozenData(raw: unknown): TableData | undefined {
     freezeTitle: d.freezeTitle === true || undefined,
     errorFormat: oneOf(["sd", "sem"] as const, d.errorFormat),
     summaryFormat: isSummaryFormatValue(d.summaryFormat) ? d.summaryFormat : undefined,
+    // A frozen snapshot holds no table type, so the format is accepted on
+    // its own merits — the snapshot comes from the app's own tables, never
+    // from a hand-edited file.
+    xFormat: d.xFormat === "date" || d.xFormat === "elapsed" ? d.xFormat : undefined,
+    xConversion: readXConversion(d.xConversion),
     notes: typeof d.notes === "string" && d.notes ? d.notes : undefined,
   }) as TableData;
 }

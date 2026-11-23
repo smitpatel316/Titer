@@ -109,9 +109,17 @@ import {
 import { fillSeries, generateSeries, validateSeriesSpec, type SeriesMode } from "../lib/series";
 import { SUMMARY_FORMATS, summaryFormatOf, summarySubcolumns, type SummaryFormat } from "../lib/summary-format";
 import {
+  isDateUnit,
+  isXColumnFormat,
+  parseDateCell,
+  type XColumnFormat,
+  type XConversion,
+} from "../lib/date-time";
+import {
   applySummaryFormat,
   applySummaryFormatNested,
   applySummaryFormatXY,
+  changeXFormat,
   convertCommaDecimals,
   deleteColumns,
   deleteRows,
@@ -126,6 +134,7 @@ import {
   shiftRowGroupsForDelete,
   transposeBlock,
   writeBlock,
+  xFormatOf,
 } from "../views/tables/table-data";
 import { TABLES } from "../views/tables/index";
 
@@ -1576,6 +1585,51 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
                 : applySummaryFormat(data, format);
           break;
         }
+        case "set-x-format": {
+          // Seq 332: what an XY table's X column holds (numbers, dates or
+          // elapsed times) and how dates/elapsed times convert to numbers —
+          // the MCP twin of the X Format panel. The cells keep their typed
+          // text; the conversion is what the analyses and graphs see.
+          if (type !== "xy") {
+            throw jobErr(
+              job,
+              `cannot set an X format — only XY tables have an X column, and this is a ${type} table.`,
+            );
+          }
+          const format = argString(job, job.args, "x_format") as XColumnFormat;
+          if (!isXColumnFormat(format)) {
+            throw jobErr(
+              job,
+              `has no X format “${format}” — the formats are numbers, date or elapsed.`,
+            );
+          }
+          const units = argOptString(job, job.args, "x_units");
+          if (units !== undefined && !isDateUnit(units)) {
+            throw jobErr(
+              job,
+              `has no X unit “${units}” — the units are seconds, minutes, hours, days, weeks or years.`,
+            );
+          }
+          const startDate = argOptString(job, job.args, "x_start_date");
+          if (startDate !== undefined && parseDateCell(startDate) === null) {
+            throw jobErr(job, `has no start date “${startDate}” — give a date the X column can read, like 2024-01-16.`);
+          }
+          const dayFirst = argOptBool(job, job.args, "x_day_first", data.xConversion?.dayFirst ?? false);
+          const conversion: XConversion = {
+            units: units ?? data.xConversion?.units ?? "days",
+            ...(startDate === undefined
+              ? data.xConversion?.startDate === undefined
+                ? {}
+                : { startDate: data.xConversion.startDate }
+              : { startDate }),
+            ...(dayFirst ? { dayFirst } : {}),
+          };
+          const nextData = changeXFormat(data, format, conversion);
+          if (nextData === data) break; // already that format and conversion: no-op success
+          label = "Change X Format";
+          next = nextData;
+          break;
+        }
         case "add-calculated-variable":
         case "set-calculated-variable":
         case "remove-calculated-variable": {
@@ -1673,7 +1727,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         default:
           throw jobErr(
             job,
-            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-summary-format, paste-link, remove-link, generate-series, paste-transposed.`,
+            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-summary-format, set-x-format, paste-link, remove-link, generate-series, paste-transposed.`,
           );
       }
       if (next === null) {
@@ -1686,6 +1740,9 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
             rows: data.rows.length,
             data_columns: data.columns.length - 1,
             ...(op === "set-summary-format" ? { summary_format: summaryFormatOf(data) } : {}),
+            ...(op === "set-x-format"
+              ? { x_format: xFormatOf(data), x_conversion: data.xConversion ?? null }
+              : {}),
           },
         };
       }
@@ -1703,6 +1760,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           rows: next.rows.length,
           data_columns: next.columns.length - 1,
           ...(op === "set-summary-format" ? { summary_format: next.summaryFormat ?? "replicates" } : {}),
+          ...(op === "set-x-format" ? { x_format: xFormatOf(next), x_conversion: next.xConversion ?? null } : {}),
         },
       };
     }

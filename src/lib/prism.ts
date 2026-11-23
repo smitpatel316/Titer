@@ -44,6 +44,7 @@ import type { ProjectFilePayload } from "./project-file";
 import type { ProjectNode, TableData, TableType } from "../store/types";
 import type { NonlinearModel } from "../stats/types";
 import { parseCsv } from "./prism-csv";
+import { parseDateCell, parseElapsedCell, prismDateTimeConversion, type XColumnFormat, type XConversion } from "./date-time";
 import { newConstantId, readInfoConstants } from "./info-sheets";
 
 export interface ConvertIssue {
@@ -884,6 +885,9 @@ export async function convertPrism(
     let xTitle: string | null = null;
     let xCount: number | null = 0;
     let xFormat = "";
+    // An XY table's date/elapsed X format, when the file carries one (seq 332).
+    let xDateFormat: XColumnFormat | undefined;
+    let xDateConversion: XConversion | undefined;
     if (table.xDataSet) {
       if (xSet) {
         const t = plainTitle(xSet.title);
@@ -1026,6 +1030,24 @@ export async function convertPrism(
           message: `${displayName}: the X dataset has ${xCount} subcolumns; only the first was imported as X.`,
         });
       }
+      // An XY table whose X dataset says date/elapsed (seq 332): keep the
+      // format and its conversion, so a .prism round-trip preserves it. Only
+      // when at least one X value actually reads as a date/elapsed time — a
+      // numeric X with a date format stays numbers. Survival X is handled
+      // above (durations in days), never as a date column.
+      if (format === "xy" && xFormat.startsWith("date") && xCols[0]?.some((v) => parseDateCell(v) !== null)) {
+        xDateFormat = "date";
+        xDateConversion = prismDateTimeConversion(xSet?.dateTimeConversion);
+        if (xSet?.dateTimeConversion?.units === "Months") {
+          issues.push({
+            severity: "warning",
+            message: `${displayName}: the X dates use “Months” units, which Titer doesn't convert (a month isn't a fixed length) — days were used instead.`,
+          });
+        }
+      } else if (format === "xy" && xFormat === "elapsed" && xCols[0]?.some((v) => parseElapsedCell(v) !== null)) {
+        xDateFormat = "elapsed";
+        xDateConversion = prismDateTimeConversion(xSet?.dateTimeConversion);
+      }
     }
     let groups: number | undefined;
     let replicates: number | undefined;
@@ -1139,6 +1161,9 @@ export async function convertPrism(
         ...columns.map((c) => c.values[r] ?? null),
       ]),
       ...(groups !== undefined && replicates !== undefined ? { groups, replicates } : {}),
+      ...(xDateFormat === undefined
+        ? {}
+        : { xFormat: xDateFormat, ...(xDateConversion === undefined ? {} : { xConversion: xDateConversion }) }),
     };
     // Excluded cells (BUG-10): real Prism flags struck-through cells in
     // the dataset JSON (see excludedRowsBySubcolumn); the values stay in
