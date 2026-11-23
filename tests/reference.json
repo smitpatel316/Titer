@@ -44793,6 +44793,14 @@
     "value": 0.9857433809
    },
    {
+    "label": "Treatment partial eta squared 95% CI lower",
+    "value": 0.8824597554
+   },
+   {
+    "label": "Treatment partial eta squared 95% CI upper",
+    "value": 0.9867508891
+   },
+   {
     "label": "Treatment Cohen's f",
     "value": 8.315218406
    },
@@ -44820,6 +44828,14 @@
    {
     "label": "Time partial eta squared",
     "value": 0.9857433809
+   },
+   {
+    "label": "Time partial eta squared 95% CI lower",
+    "value": 0.8824597554
+   },
+   {
+    "label": "Time partial eta squared 95% CI upper",
+    "value": 0.9867508891
    },
    {
     "label": "Time Cohen's f",
@@ -44851,6 +44867,14 @@
     "value": 0.9442532691
    },
    {
+    "label": "Genotype partial eta squared 95% CI lower",
+    "value": 0.6215698524
+   },
+   {
+    "label": "Genotype partial eta squared 95% CI upper",
+    "value": 0.949345462
+   },
+   {
     "label": "Genotype Cohen's f",
     "value": 4.115613151
    },
@@ -44878,6 +44902,14 @@
    {
     "label": "Treatment:Time partial eta squared",
     "value": 0.8557618926
+   },
+   {
+    "label": "Treatment:Time partial eta squared 95% CI lower",
+    "value": 0.3034078283
+   },
+   {
+    "label": "Treatment:Time partial eta squared 95% CI upper",
+    "value": 0.8746857598
    },
    {
     "label": "Treatment:Time Cohen's f",
@@ -44909,6 +44941,14 @@
     "value": 0.00700525394
    },
    {
+    "label": "Treatment:Genotype partial eta squared 95% CI lower",
+    "value": 0
+   },
+   {
+    "label": "Treatment:Genotype partial eta squared 95% CI upper",
+    "value": 0.2063628584
+   },
+   {
     "label": "Treatment:Genotype Cohen's f",
     "value": 0.08399210511
    },
@@ -44938,6 +44978,14 @@
     "value": 0.718050721
    },
    {
+    "label": "Time:Genotype partial eta squared 95% CI lower",
+    "value": 0.09259680417
+   },
+   {
+    "label": "Time:Genotype partial eta squared 95% CI upper",
+    "value": 0.7696925782
+   },
+   {
     "label": "Time:Genotype Cohen's f",
     "value": 1.595849997
    },
@@ -44965,6 +45013,14 @@
    {
     "label": "Treatment:Time:Genotype partial eta squared",
     "value": 0.3636363636
+   },
+   {
+    "label": "Treatment:Time:Genotype partial eta squared 95% CI lower",
+    "value": 0
+   },
+   {
+    "label": "Treatment:Time:Genotype partial eta squared 95% CI upper",
+    "value": 0.5355176858
    },
    {
     "label": "Treatment:Time:Genotype Cohen's f",
@@ -45085,6 +45141,14 @@
     "value": 0.9857433809
    },
    {
+    "label": "Treatment partial eta squared 95% CI lower",
+    "value": 0.8824597554
+   },
+   {
+    "label": "Treatment partial eta squared 95% CI upper",
+    "value": 0.9867508891
+   },
+   {
     "label": "Treatment Cohen's f",
     "value": 8.315218406
    },
@@ -45112,6 +45176,14 @@
    {
     "label": "Time partial eta squared",
     "value": 0.9857433809
+   },
+   {
+    "label": "Time partial eta squared 95% CI lower",
+    "value": 0.8824597554
+   },
+   {
+    "label": "Time partial eta squared 95% CI upper",
+    "value": 0.9867508891
    },
    {
     "label": "Time Cohen's f",
@@ -45143,6 +45215,14 @@
     "value": 0.9442532691
    },
    {
+    "label": "Genotype partial eta squared 95% CI lower",
+    "value": 0.6215698524
+   },
+   {
+    "label": "Genotype partial eta squared 95% CI upper",
+    "value": 0.949345462
+   },
+   {
     "label": "Genotype Cohen's f",
     "value": 4.115613151
    },
@@ -45170,6 +45250,14 @@
    {
     "label": "Treatment:Time partial eta squared",
     "value": 0.8557618926
+   },
+   {
+    "label": "Treatment:Time partial eta squared 95% CI lower",
+    "value": 0.3034078283
+   },
+   {
+    "label": "Treatment:Time partial eta squared 95% CI upper",
+    "value": 0.8746857598
    },
    {
     "label": "Treatment:Time Cohen's f",
@@ -45201,6 +45289,14 @@
     "value": 0.00700525394
    },
    {
+    "label": "Treatment:Genotype partial eta squared 95% CI lower",
+    "value": 0
+   },
+   {
+    "label": "Treatment:Genotype partial eta squared 95% CI upper",
+    "value": 0.2063628584
+   },
+   {
     "label": "Treatment:Genotype Cohen's f",
     "value": 0.08399210511
    },
@@ -45230,6 +45326,14 @@
     "value": 0.718050721
    },
    {
+    "label": "Time:Genotype partial eta squared 95% CI lower",
+    "value": 0.09259680417
+   },
+   {
+    "label": "Time:Genotype partial eta squared 95% CI upper",
+    "value": 0.7696925782
+   },
+   {
     "label": "Time:Genotype Cohen's f",
     "value": 1.595849997
    },
@@ -45257,6 +45361,14 @@
    {
     "label": "Treatment:Time:Genotype partial eta squared",
     "value": 0.3636363636
+   },
+   {
+    "label": "Treatment:Time:Genotype partial eta squared 95% CI lower",
+    "value": 0
+   },
+   {
+    "label": "Treatment:Time:Genotype partial eta squared 95% CI upper",
+    "value": 0.5355176858
    },
    {
     "label": "Treatment:Time:Genotype Cohen's f",
@@ -45416,6 +45528,14 @@
     "value": 0.9857433809
    },
    {
+    "label": "Treatment partial eta squared 95% CI lower",
+    "value": 0.8824597554
+   },
+   {
+    "label": "Treatment partial eta squared 95% CI upper",
+    "value": 0.9867508891
+   },
+   {
     "label": "Treatment Cohen's f",
     "value": 8.315218406
    },
@@ -45443,6 +45563,14 @@
    {
     "label": "Time partial eta squared",
     "value": 0.9857433809
+   },
+   {
+    "label": "Time partial eta squared 95% CI lower",
+    "value": 0.8824597554
+   },
+   {
+    "label": "Time partial eta squared 95% CI upper",
+    "value": 0.9867508891
    },
    {
     "label": "Time Cohen's f",
@@ -45474,6 +45602,14 @@
     "value": 0.9442532691
    },
    {
+    "label": "Genotype partial eta squared 95% CI lower",
+    "value": 0.6215698524
+   },
+   {
+    "label": "Genotype partial eta squared 95% CI upper",
+    "value": 0.949345462
+   },
+   {
     "label": "Genotype Cohen's f",
     "value": 4.115613151
    },
@@ -45501,6 +45637,14 @@
    {
     "label": "Treatment:Time partial eta squared",
     "value": 0.8557618926
+   },
+   {
+    "label": "Treatment:Time partial eta squared 95% CI lower",
+    "value": 0.3034078283
+   },
+   {
+    "label": "Treatment:Time partial eta squared 95% CI upper",
+    "value": 0.8746857598
    },
    {
     "label": "Treatment:Time Cohen's f",
@@ -45532,6 +45676,14 @@
     "value": 0.00700525394
    },
    {
+    "label": "Treatment:Genotype partial eta squared 95% CI lower",
+    "value": 0
+   },
+   {
+    "label": "Treatment:Genotype partial eta squared 95% CI upper",
+    "value": 0.2063628584
+   },
+   {
     "label": "Treatment:Genotype Cohen's f",
     "value": 0.08399210511
    },
@@ -45561,6 +45713,14 @@
     "value": 0.718050721
    },
    {
+    "label": "Time:Genotype partial eta squared 95% CI lower",
+    "value": 0.09259680417
+   },
+   {
+    "label": "Time:Genotype partial eta squared 95% CI upper",
+    "value": 0.7696925782
+   },
+   {
     "label": "Time:Genotype Cohen's f",
     "value": 1.595849997
    },
@@ -45588,6 +45748,14 @@
    {
     "label": "Treatment:Time:Genotype partial eta squared",
     "value": 0.3636363636
+   },
+   {
+    "label": "Treatment:Time:Genotype partial eta squared 95% CI lower",
+    "value": 0
+   },
+   {
+    "label": "Treatment:Time:Genotype partial eta squared 95% CI upper",
+    "value": 0.5355176858
    },
    {
     "label": "Treatment:Time:Genotype Cohen's f",
@@ -45879,6 +46047,14 @@
     "value": 0.9445807892
    },
    {
+    "label": "Treatment partial eta squared 95% CI lower",
+    "value": 0.7802413751
+   },
+   {
+    "label": "Treatment partial eta squared 95% CI upper",
+    "value": 0.9421939599
+   },
+   {
     "label": "Treatment Cohen's f",
     "value": 4.128472405
    },
@@ -45906,6 +46082,14 @@
    {
     "label": "Time partial eta squared",
     "value": 0.9666124608
+   },
+   {
+    "label": "Time partial eta squared 95% CI lower",
+    "value": 0.8610787893
+   },
+   {
+    "label": "Time partial eta squared 95% CI upper",
+    "value": 0.9647657361
    },
    {
     "label": "Time Cohen's f",
@@ -45937,6 +46121,14 @@
     "value": 0.6322132652
    },
    {
+    "label": "Genotype partial eta squared 95% CI lower",
+    "value": 0.1720198197
+   },
+   {
+    "label": "Genotype partial eta squared 95% CI upper",
+    "value": 0.6659890704
+   },
+   {
     "label": "Genotype Cohen's f",
     "value": 1.311093823
    },
@@ -45964,6 +46156,14 @@
    {
     "label": "Sex partial eta squared",
     "value": 0.003460207612
+   },
+   {
+    "label": "Sex partial eta squared 95% CI lower",
+    "value": 0
+   },
+   {
+    "label": "Sex partial eta squared 95% CI upper",
+    "value": 0.1158936821
    },
    {
     "label": "Sex Cohen's f",
@@ -45995,6 +46195,14 @@
     "value": 0.7251098956
    },
    {
+    "label": "Treatment:Time partial eta squared 95% CI lower",
+    "value": 0.2812047064
+   },
+   {
+    "label": "Treatment:Time partial eta squared 95% CI upper",
+    "value": 0.741169876
+   },
+   {
     "label": "Treatment:Time Cohen's f",
     "value": 1.624135888
    },
@@ -46022,6 +46230,14 @@
    {
     "label": "Treatment:Genotype partial eta squared",
     "value": 0.3193752077
+   },
+   {
+    "label": "Treatment:Genotype partial eta squared 95% CI lower",
+    "value": 0.007818316205
+   },
+   {
+    "label": "Treatment:Genotype partial eta squared 95% CI upper",
+    "value": 0.4344409713
    },
    {
     "label": "Treatment:Genotype Cohen's f",
@@ -46053,6 +46269,14 @@
     "value": 0.003460207612
    },
    {
+    "label": "Treatment:Sex partial eta squared 95% CI lower",
+    "value": 0
+   },
+   {
+    "label": "Treatment:Sex partial eta squared 95% CI upper",
+    "value": 0.1158936821
+   },
+   {
     "label": "Treatment:Sex Cohen's f",
     "value": 0.0589255651
    },
@@ -46080,6 +46304,14 @@
    {
     "label": "Time:Genotype partial eta squared",
     "value": 0.3193752077
+   },
+   {
+    "label": "Time:Genotype partial eta squared 95% CI lower",
+    "value": 0.007818316205
+   },
+   {
+    "label": "Time:Genotype partial eta squared 95% CI upper",
+    "value": 0.4344409713
    },
    {
     "label": "Time:Genotype Cohen's f",
@@ -46111,6 +46343,14 @@
     "value": 0.003460207612
    },
    {
+    "label": "Time:Sex partial eta squared 95% CI lower",
+    "value": 0
+   },
+   {
+    "label": "Time:Sex partial eta squared 95% CI upper",
+    "value": 0.1158936821
+   },
+   {
     "label": "Time:Sex Cohen's f",
     "value": 0.0589255651
    },
@@ -46138,6 +46378,14 @@
    {
     "label": "Genotype:Sex partial eta squared",
     "value": 0.2433808136
+   },
+   {
+    "label": "Genotype:Sex partial eta squared 95% CI lower",
+    "value": 0
+   },
+   {
+    "label": "Genotype:Sex partial eta squared 95% CI upper",
+    "value": 0.3787732221
    },
    {
     "label": "Genotype:Sex Cohen's f",
@@ -46169,6 +46417,14 @@
     "value": 0.3193752077
    },
    {
+    "label": "Treatment:Time:Genotype partial eta squared 95% CI lower",
+    "value": 0.007818316205
+   },
+   {
+    "label": "Treatment:Time:Genotype partial eta squared 95% CI upper",
+    "value": 0.4344409713
+   },
+   {
     "label": "Treatment:Time:Genotype Cohen's f",
     "value": 0.6850096943
    },
@@ -46196,6 +46452,14 @@
    {
     "label": "Treatment:Time:Sex partial eta squared",
     "value": 0.003460207612
+   },
+   {
+    "label": "Treatment:Time:Sex partial eta squared 95% CI lower",
+    "value": 0
+   },
+   {
+    "label": "Treatment:Time:Sex partial eta squared 95% CI upper",
+    "value": 0.1158936821
    },
    {
     "label": "Treatment:Time:Sex Cohen's f",
@@ -46227,6 +46491,14 @@
     "value": 0.003460207612
    },
    {
+    "label": "Treatment:Genotype:Sex partial eta squared 95% CI lower",
+    "value": 0
+   },
+   {
+    "label": "Treatment:Genotype:Sex partial eta squared 95% CI upper",
+    "value": 0.1158936821
+   },
+   {
     "label": "Treatment:Genotype:Sex Cohen's f",
     "value": 0.0589255651
    },
@@ -46254,6 +46526,14 @@
    {
     "label": "Time:Genotype:Sex partial eta squared",
     "value": 0.003460207612
+   },
+   {
+    "label": "Time:Genotype:Sex partial eta squared 95% CI lower",
+    "value": 0
+   },
+   {
+    "label": "Time:Genotype:Sex partial eta squared 95% CI upper",
+    "value": 0.1158936821
    },
    {
     "label": "Time:Genotype:Sex Cohen's f",
@@ -46436,6 +46716,14 @@
    {
     "label": "Treatment partial eta squared",
     "value": 0.9796587487
+   },
+   {
+    "label": "Treatment partial eta squared 95% CI lower",
+    "value": 0.7770568698
+   },
+   {
+    "label": "Treatment partial eta squared 95% CI upper",
+    "value": 0.989106593
    },
    {
     "label": "Treatment Cohen's f",

@@ -13,7 +13,7 @@
 import type { AnalysisOutcome, ComparisonRow, MultifactorAnovaParams } from "../types";
 import { MULTIFACTOR_MAX_FACTORS } from "../types";
 import { orderLevels, type Column } from "../../lib/dataset";
-import { dataGroups, describe, missingColumn, pairIndices, pRow, rStr, rVec } from "../column/base";
+import { ciRows, dataGroups, describe, missingColumn, pairIndices, pRow, R_EFFECT_CI, rStr, rVec } from "../column/base";
 import { labelPredictorError } from "./predictors";
 import { evalNamedVector } from "../webr";
 import { mean, sd } from "../../lib/summary";
@@ -286,17 +286,29 @@ export async function runMultifactorAnova(
   // Each term is pulled out by matching drop1's row names — drop1 returns one row
   // per term in formula order ("<none>", then the terms). "Sum of Sq" is the
   // term's Type III sum of squares (the rise in RSS when it is dropped).
+  // Partial eta squared's 95% CI (seq 392) comes from the same helper the
+  // sibling ANOVAs use (`etaCI`, N = total observations), computed per term
+  // from its matched F and Df — never by assumed row index. A null/non-finite
+  // F gives a null CI: etaCI returns c(NA, NA) for it, and evalNamedVector
+  // maps NA to null.
   const keyOf = (term: string) => term.replace(/:/g, "");
   const pick = (term: string, col: string) => `a$${col}[match("${term}",rn)]`;
   const rCode =
-    `${setup};${factors.map((_, i) => `contrasts(F${i + 1})<-"contr.sum"`).join(";")};` +
+    `${R_EFFECT_CI};${setup};${factors.map((_, i) => `contrasts(F${i + 1})<-"contr.sum"`).join(";")};` +
     `f<-aov(${formula});a<-drop1(f,~.,test="F");dfr<-df.residual(f);mse<-deviance(f)/dfr;rn<-rownames(a);` +
     `sstot<-sum((v-mean(v))^2);` +
+    `${terms
+      .map(
+        (t) =>
+          `ec${keyOf(t.rTerm)}<-etaCI(${pick(t.rTerm, '"F value"')},${pick(t.rTerm, "Df")},dfr,length(v))`,
+      )
+      .join(";")};` +
     `c(${terms
       .map(
         (t) =>
           `${keyOf(t.rTerm)}F=${pick(t.rTerm, '"F value"')},${keyOf(t.rTerm)}Df=${pick(t.rTerm, "Df")},` +
-          `${keyOf(t.rTerm)}P=${pick(t.rTerm, '"Pr(>F)"')},${keyOf(t.rTerm)}SS=${pick(t.rTerm, '"Sum of Sq"')}`,
+          `${keyOf(t.rTerm)}P=${pick(t.rTerm, '"Pr(>F)"')},${keyOf(t.rTerm)}SS=${pick(t.rTerm, '"Sum of Sq"')},` +
+          `${keyOf(t.rTerm)}Lo=ec${keyOf(t.rTerm)}[1],${keyOf(t.rTerm)}Hi=ec${keyOf(t.rTerm)}[2]`,
       )
       .join(",")},dfResid=dfr,mse=mse,sstot=sstot)`;
 
@@ -320,6 +332,14 @@ export async function runMultifactorAnova(
       { label: `${term.label} % of total variation`, value: pctTotal },
       { label: `${term.label} eta squared`, value: eta },
       { label: `${term.label} partial eta squared`, value: partial },
+      // Partial eta squared's 95% CI (seq 392), flat rows in the same stats
+      // table — the same label style the sibling ANOVAs' ciRows use.
+      ...ciRows(
+        "two-sided",
+        v[`${keyOf(term.rTerm)}Lo`] ?? null,
+        v[`${keyOf(term.rTerm)}Hi`] ?? null,
+        `${term.label} partial eta squared `,
+      ),
       { label: `${term.label} Cohen's f`, value: cohensF },
     ];
   };
