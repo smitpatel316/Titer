@@ -230,14 +230,18 @@ export const CORRELATION_METHODS = ["pearson", "spearman"] as const;
  *  Y+Random, rounding, Y^K, 10^Y, 2^Y, −log10, the X/Y cross-column functions
  *  and user-defined transforms. The arithmetic functions read the constant
  *  from TransformDataParams.constant (or per-data-set from `constants`).
- *  The six pharmacology transforms (Eadie-Hofstee, Hanes-Woolf, Hill,
- *  Lineweaver-Burk, Log-log, Scatchard) are NOT here — a separate follow-up. */
+ *  The other five pharmacology transforms (Eadie-Hofstee, Hanes-Woolf, Hill,
+ *  Log-log, Scatchard) are NOT here — separate follow-ups. Lineweaver-Burk
+ *  landed here (seq 384): it is the reciprocal under its own name, so the
+ *  Y side reads `lineweaver-burk` and the X side the existing `reciprocal`
+ *  through the `xFn` path. */
 export const TRANSFORM_FUNCTIONS = [
   "log10",
   "ln",
   "log2",
   "sqrt",
   "reciprocal",
+  "lineweaver-burk",
   "exp",
   "square",
   "y-plus-k",

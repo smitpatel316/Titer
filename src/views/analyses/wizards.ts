@@ -2956,7 +2956,9 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
   // −log10, the X/Y cross-column functions (XY tables only — there is no X
   // column to pair with on other tables), X transforms + interchange (XY),
   // a K per data set, error-bar handling on summary tables, and
-  // user-defined transforms (one formula line per data set, `;`-separated).
+  // user-defined transforms (one formula line per data set, `;`-separated) —
+  // plus Lineweaver-Burk (seq 384), the double-reciprocal re-plot: Y
+  // through `lineweaver-burk`, X through the `xFn` path with `reciprocal`.
   // A value the function is undefined for is left blank in the results
   // sheet, never NaN — the runner states the reason in its notes.
   "transform-data": {
@@ -2991,6 +2993,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ["log2", "log2(Y) — logarithm, base 2"],
         ["sqrt", "sqrt(Y) — square root"],
         ["reciprocal", "1/Y — reciprocal"],
+        ["lineweaver-burk", "Lineweaver-Burk — 1/Y, the double-reciprocal re-plot (transform X with 1/X too)"],
         ["exp", "exp(Y) — e to the power of Y"],
         ["square", "Y² — square"],
         ["y-plus-k", "Y+K — add a constant to every value"],

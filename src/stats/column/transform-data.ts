@@ -12,8 +12,10 @@
 // Y+Random, rounding, Y^K, 10^Y, 2^Y, −log10, the X/Y cross-column functions,
 // X transforms + interchange, per-data-set K, error-bar handling on
 // mean±SD/SEM tables, and user-defined transforms through the calcvars
-// evaluator. The six pharmacology transforms are a separate follow-up, not
-// here. Pure TypeScript, no R for the values themselves; the transformed
+// evaluator — plus Lineweaver-Burk (seq 384), the double-reciprocal re-plot:
+// Y through `lineweaver-burk`, X through the existing `xFn` path with
+// `reciprocal`. The other five pharmacology transforms are a separate
+// follow-up, not here. Pure TypeScript, no R for the values themselves; the transformed
 // groups' descriptives come from `describe` (R), like every other analysis.
 // The one exception is the to-CI error mode, whose t critical values come
 // from the pure-TS `tCrit95` (src/lib/student-t.ts).
@@ -63,6 +65,7 @@ export const TRANSFORM_LABEL: Record<TransformFunction, string> = {
   log2: "log2(Y)",
   sqrt: "sqrt(Y)",
   reciprocal: "1/Y",
+  "lineweaver-burk": "Lineweaver-Burk",
   exp: "exp(Y)",
   square: "Y²",
   "y-plus-k": "Y+K",
@@ -102,6 +105,7 @@ const EXCLUDED_REASON: Record<TransformFunction, string> = {
   log2: "log2 is undefined for values ≤ 0",
   sqrt: "the square root is undefined for negative values",
   reciprocal: "the reciprocal is undefined for 0",
+  "lineweaver-burk": "the reciprocal is undefined for 0",
   exp: "exp overflowed (the result is too large)",
   square: "squaring overflowed (the result is too large)",
   "y-plus-k": "adding overflowed (the result is too large)",
@@ -267,6 +271,13 @@ export function transformValue(
       out = Math.sqrt(value);
       break;
     case "reciprocal":
+      if (value === 0) return null;
+      out = 1 / value;
+      break;
+    case "lineweaver-burk":
+      // The double-reciprocal re-plot's Y side: 1/Y, exactly the reciprocal
+      // under its own name (the X side comes through the `xFn` path with
+      // `reciprocal` — see the scope, seq 384).
       if (value === 0) return null;
       out = 1 / value;
       break;

@@ -27001,6 +27001,111 @@ check("transform-data wizard offers the seq 341 functions and builds the seq 341
   });
 });
 
+// ── Lineweaver-Burk transform (1.9, seq 384) ──────────────────────────────
+// Prism's double-reciprocal re-plot for enzyme kinetics: X becomes 1/X and
+// Y becomes 1/Y, display-only (Prism: use it to display data, never as a
+// first step in analysis). The Y side is the new `lineweaver-burk` function
+// (a reciprocal under its own name); the X side reuses the existing `xFn`
+// path with `reciprocal`. Hand-computed fixture: X=[1,2,4], Y=[2,4,8] →
+// X'=[1,0.5,0.25], Y'=[0.5,0.25,0.125]; a zero row leaves that transformed
+// value blank. Pre-fix these fail: the name is not in TRANSFORM_FUNCTIONS
+// yet, so the runner blanks it.
+
+check("transformValue and transform-data apply the Lineweaver-Burk double-reciprocal re-plot (seq 384)", async () => {
+  // One value: the reciprocal, blank for 0.
+  strictEqual(transformValue("lineweaver-burk" as never, 2), 0.5);
+  strictEqual(transformValue("lineweaver-burk" as never, 4), 0.25);
+  strictEqual(transformValue("lineweaver-burk" as never, 1), 1);
+  strictEqual(transformValue("lineweaver-burk" as never, -2), -0.5);
+  strictEqual(transformValue("lineweaver-burk" as never, 0), null);
+  // The full re-plot: Y through `lineweaver-burk`, X through the existing
+  // `xFn` path with `reciprocal` — Y entries first, then the X entry.
+  const xy: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "1", "2"],
+      [null, "2", "4"],
+      [null, "4", "8"],
+    ],
+  };
+  const lb = await runAnalysis("transform-data", xy, { function: "lineweaver-burk", x: "X", xFunction: "reciprocal" } as never);
+  if ("error" in lb) throw new Error(lb.error);
+  strictEqual(lb.transformed?.length, 2);
+  deepStrictEqual(lb.transformed?.[0].values, [0.5, 0.25, 0.125]);
+  strictEqual(lb.transformed?.[0].column, "A");
+  deepStrictEqual(lb.transformed?.[1].values, [1, 0.5, 0.25]);
+  strictEqual(lb.transformed?.[1].column, "X");
+  strictEqual(lb.subtitle, "Transform data — Lineweaver-Burk");
+  if (!lb.notes.includes("X values transformed with 1/Y."))
+    throw new Error(`expected the X-function note, got ${JSON.stringify(lb.notes)}`);
+  // A zero row leaves that transformed value blank, on both sides.
+  const zero: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "0", "0"],
+      [null, "1", "2"],
+    ],
+  };
+  const zb = await runAnalysis("transform-data", zero, { function: "lineweaver-burk", x: "X", xFunction: "reciprocal" } as never);
+  if ("error" in zb) throw new Error(zb.error);
+  deepStrictEqual(zb.transformed?.[0].values, [null, 0.5]);
+  strictEqual(zb.transformed?.[0].excluded, 1);
+  deepStrictEqual(zb.transformed?.[1].values, [null, 1]);
+  strictEqual(zb.transformed?.[1].excluded, 1);
+  // `lineweaver-burk` is also offered as an X function itself (same values
+  // as `reciprocal` there); without an X function the X column is simply
+  // left out, not transformed.
+  const asX = await runAnalysis("transform-data", xy, { function: "log10", x: "X", xFunction: "lineweaver-burk" } as never);
+  if ("error" in asX) throw new Error(asX.error);
+  deepStrictEqual(asX.transformed?.[1].values, [1, 0.5, 0.25]);
+  strictEqual(asX.transformed?.[1].label, "Lineweaver-Burk");
+  const yOnly = await runAnalysis("transform-data", xy, { function: "lineweaver-burk", x: "X" } as never);
+  if ("error" in yOnly) throw new Error(yOnly.error);
+  strictEqual(yOnly.transformed?.length, 1);
+  deepStrictEqual(yOnly.transformed?.[0].values, [0.5, 0.25, 0.125]);
+});
+
+check("transform-data wizard offers Lineweaver-Burk and builds its params (seq 384)", async () => {
+  const wizard = WIZARDS["transform-data"]!;
+  const fnOptions = (a: Record<string, string | number>, table: Dataset, type?: TableType) => {
+    const q = wizard.questions(a, table, type).find((qq) => qq && (qq as Question).id === "function") as
+      | { options: { value: string }[] }
+      | undefined;
+    return q?.options.map((o) => o.value) ?? [];
+  };
+  const plain = readTable({ columns: ["Title", "V"], rows: [["", "1"], ["", "2"]] });
+  if (!fnOptions({}, plain).includes("lineweaver-burk"))
+    throw new Error(`expected lineweaver-burk offered on a column table`);
+  const xy = readTable({
+    columns: ["Title", "X", "A"],
+    rows: [
+      ["", "1", "2"],
+      ["", "2", "4"],
+      ["", "4", "8"],
+    ],
+  });
+  if (!fnOptions({}, xy, "xy").includes("lineweaver-burk"))
+    throw new Error(`expected lineweaver-burk offered on an XY table`);
+  // The GUI path builds the same params the MCP path takes.
+  deepStrictEqual(
+    wizard.finish({ function: "lineweaver-burk", transformX: "yes", xFunction: "reciprocal", interchange: "no" }, xy, "xy"),
+    {
+      type: "transform-data",
+      params: { function: "lineweaver-burk", x: "X", xFunction: "reciprocal" },
+    },
+  );
+  // ...and those params run identically to the ones passed directly.
+  const viaGui = await runAnalysis(
+    "transform-data",
+    { columns: ["Title", "X", "A"], rows: [[null, "1", "2"], [null, "2", "4"], [null, "4", "8"]] },
+    wizard.finish({ function: "lineweaver-burk", transformX: "yes", xFunction: "reciprocal", interchange: "no" }, xy, "xy")
+      .params as never,
+  );
+  if ("error" in viaGui) throw new Error(viaGui.error);
+  deepStrictEqual(viaGui.transformed?.[0].values, [0.5, 0.25, 0.125]);
+  deepStrictEqual(viaGui.transformed?.[1].values, [1, 0.5, 0.25]);
+});
+
 // ── Calculated Variables (v1.8, seq 156) ──────────────────────────────────
 // Prism 11's in-table formulas for Multiple Variables tables: type `=` in an
 // empty variable; the whole column computes live from the table's other
