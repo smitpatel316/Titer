@@ -12,8 +12,8 @@
 // Y+Random, rounding, Y^K, 10^Y, 2^Y, −log10, the X/Y cross-column functions,
 // X transforms + interchange, per-data-set K, error-bar handling on
 // mean±SD/SEM tables, and user-defined transforms through the calcvars
-// evaluator. The six pharmacology transforms are a separate follow-up, not
-// here. Pure TypeScript, no R for the values themselves; the transformed
+// evaluator. Hanes-Woolf (seq 381) is here; the other five pharmacology
+// transforms are separate follow-ups, not here. Pure TypeScript, no R for the values themselves; the transformed
 // groups' descriptives come from `describe` (R), like every other analysis.
 // The one exception is the to-CI error mode, whose t critical values come
 // from the pure-TS `tCrit95` (src/lib/student-t.ts).
@@ -92,6 +92,7 @@ export const TRANSFORM_LABEL: Record<TransformFunction, string> = {
   "y-plus-x": "Y+X",
   "y-times-x": "Y×X",
   "x-minus-y": "X−Y",
+  "hanes-woolf": "Hanes-Woolf",
   "user-defined": "user-defined",
 };
 
@@ -131,6 +132,7 @@ const EXCLUDED_REASON: Record<TransformFunction, string> = {
   "y-plus-x": "the paired X value is missing",
   "y-times-x": "the paired X value is missing",
   "x-minus-y": "the paired X value is missing",
+  "hanes-woolf": "X/Y is undefined when Y is 0 or the paired value is missing",
   "user-defined": "the formula left it blank (dividing by zero, or a value outside a function's domain)",
 };
 
@@ -364,6 +366,13 @@ export function transformValue(
       break;
     case "x-minus-y":
       out = x! - y!;
+      break;
+    case "hanes-woolf":
+      // Hanes-Woolf (seq 381): X/Y, for enzyme kinetics — X unchanged (the
+      // X column is the pairing source, not a Y column, so it never takes
+      // this function); Y = 0 blanks, like every other division.
+      if (y === 0) return null;
+      out = x! / y!;
       break;
     case "rank":
     case "zscore":

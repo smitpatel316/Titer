@@ -230,8 +230,9 @@ export const CORRELATION_METHODS = ["pearson", "spearman"] as const;
  *  Y+Random, rounding, Y^K, 10^Y, 2^Y, −log10, the X/Y cross-column functions
  *  and user-defined transforms. The arithmetic functions read the constant
  *  from TransformDataParams.constant (or per-data-set from `constants`).
- *  The six pharmacology transforms (Eadie-Hofstee, Hanes-Woolf, Hill,
- *  Lineweaver-Burk, Log-log, Scatchard) are NOT here — a separate follow-up. */
+ *  The remaining five pharmacology transforms (Eadie-Hofstee, Hill,
+ *  Lineweaver-Burk, Log-log, Scatchard) are NOT here — separate follow-ups
+ *  (seq 380, 383–386); Hanes-Woolf (seq 381) is. */
 export const TRANSFORM_FUNCTIONS = [
   "log10",
   "ln",
@@ -267,6 +268,7 @@ export const TRANSFORM_FUNCTIONS = [
   "y-plus-x",
   "y-times-x",
   "x-minus-y",
+  "hanes-woolf",
   "user-defined",
 ] as const;
 export type TransformFunction = (typeof TRANSFORM_FUNCTIONS)[number];
@@ -299,6 +301,7 @@ export const TRANSFORM_CROSS_FUNCTIONS = [
   "y-plus-x",
   "y-times-x",
   "x-minus-y",
+  "hanes-woolf",
 ] as const;
 export type TransformCrossFunction = (typeof TRANSFORM_CROSS_FUNCTIONS)[number];
 /** The column Transform functions (seq 341): they read the whole column, not
