@@ -7,6 +7,11 @@ import type { TableMove } from "../../store/references";
 import type { MenuItems } from "../../native";
 import { isGrouped, isNested, leadOf } from "../../lib/dataset";
 import {
+  CELL_BACKGROUND_COLORS,
+  CELL_BACKGROUND_LABELS,
+  type CellBackgroundColor,
+} from "../../lib/cell-colors";
+import {
   convertCommaDecimals,
   deleteColumns,
   deleteRows,
@@ -14,8 +19,10 @@ import {
   insertColumns,
   insertRows,
   isRangeExcluded,
+  rangeCellBackground,
   rowsDeleted,
   rowsInserted,
+  setCellBackground,
   toggleExcluded,
   type Range,
 } from "./table-data";
@@ -25,6 +32,32 @@ export type MenuZone = "cell" | "row" | "column";
 type Item = MenuItems[number];
 
 const SEPARATOR = { item: "Separator" } as const;
+
+/** Prism's paint-bucket (seq 325) as menu items: the 8 colors, checked on
+ *  the range's uniform color, then None to clear. Shared by the data grid's
+ *  context menu and the results tables' cell menu — the pick closes over
+ *  the caller's update. */
+export function cellBackgroundMenuItems(
+  current: CellBackgroundColor | "mixed" | null,
+  onPick: (color: CellBackgroundColor | null) => void,
+): Item[] {
+  return [
+    ...CELL_BACKGROUND_COLORS.map(
+      (color) =>
+        ({
+          text: CELL_BACKGROUND_LABELS[color],
+          checked: current === color,
+          action: () => onPick(color),
+        }) as Item,
+    ),
+    SEPARATOR,
+    {
+      text: "None",
+      enabled: current !== null,
+      action: () => onPick(null),
+    },
+  ];
+}
 
 const plural = (n: number, word: string) => (n > 1 ? `${n} ${word}s` : word);
 
@@ -69,6 +102,19 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
       enabled: !tableFrozen,
       action: () => update(toggleExcluded(data, range), exclude),
     },
+    // Prism's paint-bucket (seq 325): Titer has no Change menu, so the
+    // grid's right-click menu carries it — beside Exclude, the other
+    // per-cell flag.
+    {
+      text: "Cell Background Color",
+      enabled: !tableFrozen,
+      items: cellBackgroundMenuItems(rangeCellBackground(data, range), (color) =>
+        update(
+          setCellBackground(data, range, color),
+          color === null ? "Clear Cell Background Color" : `Cell Background Color: ${CELL_BACKGROUND_LABELS[color]}`,
+        ),
+      ),
+    } as Item,
     SEPARATOR,
     { item: "Cut" },
     { item: "Copy" },

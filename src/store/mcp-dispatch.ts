@@ -109,6 +109,13 @@ import {
 import { fillSeries, generateSeries, validateSeriesSpec, type SeriesMode } from "../lib/series";
 import { SUMMARY_FORMATS, summaryFormatOf, summarySubcolumns, type SummaryFormat } from "../lib/summary-format";
 import {
+  CELL_BACKGROUND_COLORS,
+  CELL_BACKGROUND_LABELS,
+  isCellBackgroundColor,
+  resultCellBackgroundKey,
+  type CellBackgroundColor,
+} from "../lib/cell-colors";
+import {
   applySummaryFormat,
   applySummaryFormatNested,
   applySummaryFormatXY,
@@ -123,6 +130,7 @@ import {
   renameGroup,
   rowsDeleted,
   rowsInserted,
+  setCellBackground,
   shiftRowGroupsForDelete,
   transposeBlock,
   writeBlock,
@@ -154,6 +162,8 @@ export interface JobDeps {
   renameNode?: (id: string, name: string) => void;
   /** Freeze or unfreeze an analysis node (default: the real store action). */
   setAnalysisFrozen?: (id: string, frozen: boolean) => void;
+  /** Paint (or clear) one results-table cell (seq 325; default: the real store action). */
+  setResultCellBackground?: (id: string, key: string, color: CellBackgroundColor | null) => void;
   /** Freeze or unfreeze a table node (default: the real store action). */
   setTableFrozen?: (id: string, frozen: boolean) => void;
   /** Replace an analysis node's params (default: the real store action). */
@@ -588,6 +598,7 @@ function buildTableData(
   base?: TableData,
   excludedIn?: unknown,
   rowGroupsIn?: unknown,
+  cellBackgroundsIn?: unknown,
 ): TableData {
   if (!Array.isArray(columnsIn) || columnsIn.length === 0) {
     throw jobErr(job, "needs columns to be a non-empty array of strings (column 0 is the row-title column).");
@@ -726,6 +737,43 @@ function buildTableData(
   } else if (base.excluded) {
     const kept = base.excluded.filter(onCell);
     if (kept.length) data.excluded = kept;
+  }
+  // Cell background colors (seq 325), the same convention as `excluded`:
+  // when the call passes a map it replaces the table's colors (an empty map
+  // clears them); when omitted the base colors carry over, clipped to the
+  // new table — a color on a dropped row or column goes with it. Unlike an
+  // exclusion, a color may sit on column 0 (a flagged row title) and on an
+  // empty cell (a cell flagged to be filled in), so the bounds check here
+  // has no value or column-0 restriction.
+  const onColorCell = (k: unknown): k is string => {
+    const [r, c] =
+      typeof k === "string" && /^\d+,\d+$/.test(k) ? k.split(",").map(Number) : [Infinity, Infinity];
+    return r < rows.length && c < columns.length;
+  };
+  if (cellBackgroundsIn !== undefined && cellBackgroundsIn !== null) {
+    if (typeof cellBackgroundsIn !== "object" || Array.isArray(cellBackgroundsIn)) {
+      throw jobErr(job, "needs cell_backgrounds to be an object mapping “row,col” to a color name.");
+    }
+    const colors: Record<string, CellBackgroundColor> = {};
+    for (const [key, value] of Object.entries(cellBackgroundsIn as Record<string, unknown>)) {
+      if (!onColorCell(key)) {
+        throw jobErr(
+          job,
+          `has a cell background “${key}” outside the new table (${rows.length} rows, ${columns.length} columns).`,
+        );
+      }
+      if (!isCellBackgroundColor(value)) {
+        throw jobErr(
+          job,
+          `has a cell background “${key}” naming “${String(value)}” — the colors are ${CELL_BACKGROUND_COLORS.join(", ")}.`,
+        );
+      }
+      colors[key] = value;
+    }
+    if (Object.keys(colors).length) data.cellBackgrounds = colors;
+  } else if (base.cellBackgrounds) {
+    const kept = Object.fromEntries(Object.entries(base.cellBackgrounds).filter(([k]) => onColorCell(k)));
+    if (Object.keys(kept).length) data.cellBackgrounds = kept;
   }
   if (!rowGroupsGiven && base.rowGroups) {
     const oldCount = base.rows.length;
@@ -1034,6 +1082,60 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         created: { analysis_id: analysisId },
       };
     }
+    case "set-result-cell-background": {
+      // Prism's paint-bucket for results tables (seq 325): one cell of one
+      // results table, one of the 8 colors, or null to clear it. The color
+      // attaches to the (section, row, column) address, so it survives a
+      // recompute while the table's shape holds. A frozen or orphaned
+      // analysis can still be painted — the color is presentation only,
+      // and painting never re-runs the analysis.
+      const args = (job.args ?? {}) as {
+        analysis_id?: unknown;
+        section?: unknown;
+        row?: unknown;
+        col?: unknown;
+        color?: unknown;
+      };
+      const analysisId = reqString(args.analysis_id, "analysis_id");
+      const section = reqString(args.section, "section");
+      if (typeof args.row !== "number" || !Number.isInteger(args.row) || args.row < 0) {
+        throw new Error(`Job argument “row” must be a whole number, at least 0.`);
+      }
+      if (typeof args.col !== "number" || !Number.isInteger(args.col) || args.col < 0) {
+        throw new Error(`Job argument “col” must be a whole number, at least 0.`);
+      }
+      const color = args.color === undefined || args.color === null ? null : args.color;
+      if (color !== null && !isCellBackgroundColor(color)) {
+        throw new Error(
+          `Job argument “color” must be one of ${CELL_BACKGROUND_COLORS.join(", ")}, or null to clear.`,
+        );
+      }
+      const state = deps.getState();
+      const node = state.nodes[analysisId];
+      if (!node || node.type !== "analysis") {
+        throw new Error(
+          node
+            ? `“${analysisId}” is not an analysis (it is a ${node.type}).`
+            : `No analysis with id “${analysisId}” in this project.`,
+        );
+      }
+      const paint =
+        deps.setResultCellBackground ??
+        (() => {
+          throw new Error("This window can't paint results cells (no setResultCellBackground).");
+        });
+      paint(analysisId, resultCellBackgroundKey(section, args.row, args.col), color);
+      return {
+        result: {
+          project_id: job.project_id,
+          analysis_id: analysisId,
+          section,
+          row: args.row,
+          col: args.col,
+          color,
+        },
+      };
+    }
     case "freeze-table": {
       // `setTableFrozen` — a frozen table can't be edited until unfrozen
       // (seq 165); freezing is idempotent, unfreezing restores edits.
@@ -1306,7 +1408,8 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
       const label = argOptString(job, job.args, "label") ?? "Edit Table";
       const excluded = (job.args as Record<string, unknown> | null | undefined)?.excluded;
       const rowGroups = (job.args as Record<string, unknown> | null | undefined)?.row_groups;
-      const data = buildTableData(job, type, columns, rows, node.data, excluded, rowGroups);
+      const cellBackgrounds = (job.args as Record<string, unknown> | null | undefined)?.cell_backgrounds;
+      const data = buildTableData(job, type, columns, rows, node.data, excluded, rowGroups, cellBackgrounds);
       if (JSON.stringify(data) === JSON.stringify(node.data)) {
         // The same table back: no undo step, no dirty flag.
         return {
@@ -1478,6 +1581,32 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
             return ar - br || ac - bc;
           });
           next = { ...data, excluded: sorted.length ? sorted : undefined };
+          break;
+        }
+        case "set-cell-background": {
+          // Prism's paint-bucket (seq 325): one cell, one of the 8 colors,
+          // or null to clear it. A color is presentation only — the value
+          // stays, and an empty cell or a row title (column 0) can be
+          // painted too (a cell flagged to be filled in, a row flagged).
+          const row = argInt(job, job.args, "at_row");
+          const col = argInt(job, job.args, "at_col");
+          if (row < 0 || row >= data.rows.length || col < 0 || col >= data.columns.length) {
+            throw jobErr(
+              job,
+              `has no cell (${row}, ${col}) — the table holds ${data.rows.length} rows and ${data.columns.length} columns.`,
+            );
+          }
+          const colorRaw = (job.args as Record<string, unknown> | null | undefined)?.color;
+          const color = colorRaw === undefined || colorRaw === null ? null : colorRaw;
+          if (color !== null && !isCellBackgroundColor(color)) {
+            throw jobErr(
+              job,
+              `has color “${String(colorRaw)}” — the colors are ${CELL_BACKGROUND_COLORS.join(", ")}, or null to clear.`,
+            );
+          }
+          label = color === null ? "Clear Cell Background Color" : `Cell Background Color: ${CELL_BACKGROUND_LABELS[color]}`;
+          const painted = setCellBackground(data, { r0: row, r1: row, c0: col, c1: col }, color);
+          if (painted !== data) next = painted; // already that color: no-op success, no undo step
           break;
         }
         case "freeze-title": {
@@ -1673,7 +1802,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         default:
           throw jobErr(
             job,
-            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-summary-format, paste-link, remove-link, generate-series, paste-transposed.`,
+            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, set-cell-background, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-summary-format, paste-link, remove-link, generate-series, paste-transposed.`,
           );
       }
       if (next === null) {
@@ -2208,6 +2337,7 @@ export function useMcpJobDispatcher() {
   const createAnalysis = actions.createAnalysis;
   const renameNode = actions.renameNode;
   const setAnalysisFrozen = actions.setAnalysisFrozen;
+  const setResultCellBackground = actions.setResultCellBackground;
   const setTableFrozen = actions.setTableFrozen;
   const setAnalysisParams = actions.setAnalysisParams;
   const applyWand = actions.applyWand;
@@ -2285,6 +2415,7 @@ export function useMcpJobDispatcher() {
                 createAnalysis,
                 renameNode,
                 setAnalysisFrozen,
+                setResultCellBackground,
                 setTableFrozen,
                 setAnalysisParams,
                 applyWand,

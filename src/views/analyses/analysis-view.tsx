@@ -50,7 +50,7 @@ function Running() {
 
 export function AnalysisView({ node }: { node: ProjectNode }) {
   const { nodes, createTableWithData } = useProjectStore();
-  const { cacheAnalysisResult, setAnalysisFrozen, repointAnalysis } = useProjectActions();
+  const { cacheAnalysisResult, setAnalysisFrozen, repointAnalysis, setResultCellBackground } = useProjectActions();
   // The tables this orphaned analysis may move to (seq 242): only the
   // ones offering its test, so the re-run it is waiting for can run there.
   const candidates = node.orphaned ? repointCandidates(node, nodes) : [];
@@ -163,6 +163,8 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
           <AnalysisResultsView
             result={shown}
             onCreateTable={(tableType, table) => createTableWithData(tableType, table, "Extracted data")}
+            cellBackgrounds={node.resultCellBackgrounds}
+            onSetCellBackground={(key, color) => setResultCellBackground(node.id, key, color)}
           />
         ) : liveData && !outcome ? (
           <Running />

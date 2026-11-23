@@ -26,6 +26,7 @@ import { readTable } from "./dataset";
 import { parseCell } from "./numeric";
 import { maxOf, mean, median, minOf, sd, sem } from "./summary";
 import type { CalculatedVariable, TableData } from "../store/types";
+import type { CellBackgroundColor } from "./cell-colors";
 
 /** One calculated variable: its column's name and its formula (without `=`).
  *  `error` is recomputed, never trusted from a file: a formula that cannot
@@ -709,6 +710,7 @@ export function removeCalculatedVariable(data: TableData, name: string): TableDa
     rows: data.rows.map((row) => row.filter((_, i) => i !== c)),
     calculated: (data.calculated ?? []).filter((v) => v.name !== name),
     excluded: remapExcludedAfterDelete(data, c),
+    cellBackgrounds: remapCellBackgroundsAfterDelete(data, c),
     widths: widthsWithout(data.widths, name),
   };
 }
@@ -721,6 +723,18 @@ function remapExcludedAfterDelete(data: TableData, c: number): string[] | undefi
     out.push(`${r},${col > c ? col - 1 : col}`);
   }
   return out.length ? out : undefined;
+}
+
+/** The `cellBackgrounds` twin of `remapExcludedAfterDelete`: a deleted
+ *  column takes its colors with it, and the columns after it shift left. */
+function remapCellBackgroundsAfterDelete(data: TableData, c: number): Record<string, CellBackgroundColor> | undefined {
+  const out: Record<string, CellBackgroundColor> = {};
+  for (const [key, color] of Object.entries(data.cellBackgrounds ?? {})) {
+    const [r, col] = key.split(",").map(Number);
+    if (col === c) continue;
+    out[`${r},${col > c ? col - 1 : col}`] = color;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 function widthsWithout(widths: TableData["widths"], name: string): TableData["widths"] {

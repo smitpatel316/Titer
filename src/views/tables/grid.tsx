@@ -11,6 +11,7 @@ import { clamp, type TableData, type TableType } from "../../store/types";
 import type { TableMove } from "../../store/references";
 import type { EditCommand } from "../../app-menu";
 import { parseCell } from "../../lib/numeric";
+import { CELL_BACKGROUND_HEX, type CellBackgroundColor } from "../../lib/cell-colors";
 import { fileName } from "../../lib/paths";
 import { seriesKeyOf } from "../../lib/columns";
 import { isGrouped, isNested, leadOf } from "../../lib/dataset";
@@ -834,7 +835,7 @@ export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps)
   );
 
   const cells = (from: number, to: number, origin: number) => (
-    <Cells data={data} excluded={excluded} query={query} xs={xs} r0={r0} r1={r1} c0={from} c1={to} origin={origin} />
+    <Cells data={data} excluded={excluded} cellBackgrounds={data.cellBackgrounds} query={query} xs={xs} r0={r0} r1={r1} c0={from} c1={to} origin={origin} />
   );
 
   const cellEvents = {
@@ -1077,6 +1078,7 @@ export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps)
 function Cells({
   data,
   excluded,
+  cellBackgrounds,
   query,
   xs,
   r0,
@@ -1087,6 +1089,7 @@ function Cells({
 }: {
   data: TableData;
   excluded: Set<string>;
+  cellBackgrounds?: Record<string, CellBackgroundColor>;
   query: string | null;
   xs: number[];
   r0: number;
@@ -1100,6 +1103,8 @@ function Cells({
   for (let r = r0; r <= r1; r++) {
     for (let c = c0; c <= c1; c++) {
       const value = data.rows[r]?.[c];
+      const isHit = Boolean(found && value?.toLowerCase().includes(found));
+      const tint = cellBackgrounds?.[`${r},${c}`];
       cells.push(
         <div
           key={`${r}:${c}`}
@@ -1107,9 +1112,17 @@ function Cells({
             "absolute truncate border-r border-b border-separator px-1.5 leading-[24px]",
             value && parseCell(value) !== null && "text-right tabular-nums",
             excluded.has(`${r},${c}`) && "text-excluded italic after:content-['*']",
-            found && value?.toLowerCase().includes(found) && "bg-yellow-300/50",
+            isHit && "bg-yellow-300/50",
           )}
-          style={{ left: xs[c] - xs[origin], top: r * ROW_H, width: xs[c + 1] - xs[c], height: ROW_H }}
+          style={{
+            left: xs[c] - xs[origin],
+            top: r * ROW_H,
+            width: xs[c + 1] - xs[c],
+            height: ROW_H,
+            // A painted cell keeps its tint; a search hit still shows
+            // yellow while finding, so the match stays visible.
+            ...(tint && !isHit ? { backgroundColor: CELL_BACKGROUND_HEX[tint] } : {}),
+          }}
         >
           {value}
         </div>,
