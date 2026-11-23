@@ -106,6 +106,19 @@ export const GRAPH_CHOICES = {
   pieValue: ["sum", "mean"],
   groupLayout: ["interleaved", "separated", "superimposed"],
   sigDisplay: ["stars", "pvalue", "pvalue-eq", "letters"],
+  // Compact Letter Display format (Prism's Format CLD dialog): where the
+  // letters sit — above the data, or outside the graphing area in one row
+  // per letter (outside only allows stacked); their direction — auto
+  // (horizontal above the data, stacked outside), horizontal, vertical up
+  // or down, or stacked; and their identifiers — upper case, lower case
+  // (Prism's default), or numbers.
+  lettersLocation: ["above", "outside"],
+  lettersDirection: ["auto", "horizontal", "vertical-up", "vertical-down", "stacked"],
+  lettersIdentifier: ["upper", "lower", "numbers"],
+  // The letters' font family ("default" is the app's font); the family is
+  // chosen from this list rather than typed free, so a file can't carry an
+  // unusable one (see LETTERS_FONT_FAMILIES in significance-overlay).
+  lettersFont: ["default", "arial", "helvetica", "times", "georgia", "courier", "verdana"],
   regBand: ["confidence", "prediction"],
   residualsAs: ["x", "qq"],
   survivalMode: ["codes", "counts"],
@@ -146,6 +159,8 @@ export const GRAPH_LIMITS = {
   xTitleGap: { min: 0, max: 40 },
   yTitleGap: { min: 0, max: 40 },
   fontSize: { min: 8, max: 28 },
+  /** A Compact Letter Display label's size, in px (Prism's CLD font size). */
+  lettersSize: { min: 6, max: 36 },
   volcanoLabelCount: { min: 0, max: 50 },
   volcanoFcThreshold: { min: 0, max: Infinity },
   volcanoPThreshold: { min: 0, max: Infinity },
@@ -265,6 +280,20 @@ export interface GraphOptions {
   sigAnalysisIds?: string[];
   sigPairs?: string[];
   sigDisplay: Choice<"sigDisplay">;
+  // Compact Letter Display format (see GRAPH_CHOICES above for the option
+  // sets): where the letters sit, their direction, their identifiers, their
+  // font family, their size in px, their color, and whether the size is
+  // automatic — smaller with more groups (14 for ≤4 groups, 12 for ≤8,
+  // 10 for ≤12, else 8; see lettersAutoSize in significance-overlay).
+  // Defaults reproduce today's rendering: above, horizontal, lowercase,
+  // system font, 14 px, the default ink.
+  lettersLocation: Choice<"lettersLocation">;
+  lettersDirection: Choice<"lettersDirection">;
+  lettersIdentifier: Choice<"lettersIdentifier">;
+  lettersFont: Choice<"lettersFont">;
+  lettersSize: number;
+  lettersColor: string;
+  lettersFontAuto: boolean;
   // A regression of the table drawn on an XY scatter: a linear one's line and 95% band,
   // computed from the plotted pairs (regression-overlay.ts, checked against R's), or a
   // nonlinear one's curve from its result (fitted-curve.ts); and its note.
@@ -466,6 +495,13 @@ export const DEFAULT_GRAPH_OPTIONS: GraphOptions = {
   pieShowPercent: true,
   groupLayout: "interleaved",
   sigDisplay: "stars",
+  lettersLocation: "above",
+  lettersDirection: "auto",
+  lettersIdentifier: "lower",
+  lettersFont: "default",
+  lettersSize: 14,
+  lettersColor: "#111827", // INK (plot-helpers) — the default letters color
+  lettersFontAuto: false,
   regShowLine: true,
   regShowBand: true,
   regBand: "confidence",

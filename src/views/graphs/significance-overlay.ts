@@ -12,6 +12,7 @@ import { isSignificant, pEquals, pStars, pText } from "../../lib/format";
 import {
   centers,
   errors,
+  FONT,
   groupOffset,
   INK,
   perRowStats,
@@ -180,7 +181,7 @@ function significanceOverlay(
   display: GraphOptions["sigDisplay"],
   scale: GraphOptions["yScale"],
   local: boolean,
-): { shapes: unknown[]; annotations: unknown[]; top: number } {
+): { shapes: unknown[]; annotations: unknown[]; top: number; topMargin?: number } {
   const log = scale !== "linear";
   const lift = (t: number) => (log ? (t > 0 ? Math.log10(t) : -Infinity) : t);
   const tops = spots.map((s) => lift(s.top)).filter(Number.isFinite);
@@ -329,12 +330,63 @@ export function compactLetters(order: string[], differ: [string, string][]): Map
   return new Map(order.map((m) => [m, sets.flatMap((s, k) => (s.has(m) ? [letter(k)] : [])).join("")]));
 }
 
-/** Letters over every member of each family, a little above what is drawn there. */
+/** The font family a `lettersFont` choice draws with ("default" is the app's
+ *  font, as everywhere else in the graph). */
+export const LETTERS_FONT_FAMILIES: Record<GraphOptions["lettersFont"], string> = {
+  default: FONT,
+  arial: "Arial, sans-serif",
+  helvetica: "Helvetica, Arial, sans-serif",
+  times: "'Times New Roman', Times, serif",
+  georgia: "Georgia, serif",
+  courier: "'Courier New', Courier, monospace",
+  verdana: "Verdana, sans-serif",
+};
+
+/** A Compact Letter Display string ("ab", "a1") as identifiers: upper or
+ *  lower case, or numbers — each letter's 1-based index, comma-separated
+ *  ("1, 2"). The inverse of the letter scheme in `compactLetters`: a lone
+ *  letter is its place in the alphabet, a letter with digits adds 26 per
+ *  overflow step ("a1" is the 27th letter). */
+export function formatLetters(text: string, identifier: GraphOptions["lettersIdentifier"]): string {
+  if (identifier === "upper") return text.toUpperCase();
+  if (identifier === "lower") return text;
+  return [...text.matchAll(/[a-z]\d*/g)]
+    .map((m) => {
+      const token = m[0];
+      const extra = token.length > 1 ? Number.parseInt(token.slice(1), 10) : 0;
+      return String(token.charCodeAt(0) - 97 + 26 * extra + 1);
+    })
+    .join(", ");
+}
+
+/** The automatic letters size (Prism's "Automatically determine the font"):
+ *  smaller with more groups, so a crowded graph's letters still fit. */
+export function lettersAutoSize(nGroups: number): number {
+  return nGroups <= 4 ? 14 : nGroups <= 8 ? 12 : nGroups <= 12 ? 10 : 8;
+}
+
+/** The direction the letters actually draw in: outside the graphing area
+ *  only allows stacked (Prism's rule), and "auto" is horizontal above the
+ *  data, stacked outside. */
+export function resolveLettersDirection(
+  location: GraphOptions["lettersLocation"],
+  direction: GraphOptions["lettersDirection"],
+): "horizontal" | "vertical-up" | "vertical-down" | "stacked" {
+  if (location === "outside") return "stacked";
+  return direction === "auto" ? "horizontal" : direction;
+}
+
+/** Letters over every member of each family, a little above what is drawn
+ *  there — or outside the graphing area, in one row per letter (Prism's
+ *  "Outside the graph" location, which only allows stacked letters arranged
+ *  so each letter is at the same height across groups). `topMargin` is the
+ *  top margin the figure needs for the outside rows, if any. */
 function lettersOverlay(
   spots: Spot[],
   comparisons: SigComparison[],
-  scale: GraphOptions["yScale"],
-): { shapes: unknown[]; annotations: unknown[]; top: number } {
+  options: GraphOptions,
+): { shapes: unknown[]; annotations: unknown[]; top: number; topMargin?: number } {
+  const scale = options.yScale;
   const log = scale !== "linear";
   const lift = (t: number) => (log ? (t > 0 ? Math.log10(t) : -Infinity) : t);
   const tops = spots.map((s) => lift(s.top)).filter(Number.isFinite);
@@ -344,29 +396,68 @@ function lettersOverlay(
   const at = new Map(spots.map((s) => [s.key, s]));
   const annotations: unknown[] = [];
   let top = maxTop;
-  if (lettersFit(comparisons))
-    for (const family of familiesOf(comparisons).values()) {
+  let topMargin: number | undefined;
+  if (lettersFit(comparisons)) {
+    const location = options.lettersLocation ?? "above";
+    const direction = resolveLettersDirection(location, options.lettersDirection ?? "auto");
+    const identifier = options.lettersIdentifier ?? "lower";
+    const families = [...familiesOf(comparisons).values()];
+    const memberCount = new Set(families.flatMap((f) => [...new Set(f.flatMap(endsOf))])).size;
+    const size = options.lettersFontAuto ? lettersAutoSize(memberCount) : (options.lettersSize ?? 14);
+    const font = { family: LETTERS_FONT_FAMILIES[options.lettersFont ?? "default"], color: options.lettersColor ?? INK, size };
+    const outside = location === "outside";
+    // Outside, the rows stack in paper coordinates above the plot (the
+    // first row closest to it); the row gap is one letter height plus
+    // padding, in paper units of the plot's height.
+    const plotHeight = Math.max(1, (options.height ?? 460) - 48);
+    const rowGap = (size + 6) / plotHeight;
+    const tokens = (text: string) => [...text.matchAll(/[a-z]\d*/g)].map((m) => m[0]);
+    let rows = 0;
+    for (const family of families) {
       const members = [...new Set(family.flatMap(endsOf))].filter((m) => at.has(m));
       const order = members.sort((a, b) => at.get(b)!.mid - at.get(a)!.mid);
       const differ = family.filter((c) => isSignificant(c.p)).map(endsOf);
       for (const [key, text] of compactLetters(order, differ)) {
         const spot = at.get(key)!;
-        const y = lift(spot.top) + unit * 0.3;
-        if (!Number.isFinite(y)) continue;
-        annotations.push({
-          xref: "x",
-          yref: "y",
-          x: spot.x,
-          y,
-          text,
-          showarrow: false,
-          yanchor: "bottom",
-          font: { color: INK, size: 14 },
-        });
-        top = Math.max(top, y + unit);
+        const pieces = direction === "stacked" ? tokens(text) : [text];
+        rows = Math.max(rows, pieces.length);
+        for (let i = 0; i < pieces.length; i++) {
+          const piece = formatLetters(pieces[i]!, identifier);
+          if (outside) {
+            annotations.push({
+              xref: "x",
+              yref: "paper",
+              x: spot.x,
+              y: 1.03 + i * rowGap,
+              text: piece,
+              showarrow: false,
+              xanchor: "center",
+              yanchor: "bottom",
+              font,
+            });
+            continue;
+          }
+          const y = lift(spot.top) + unit * (0.3 + 0.45 * i);
+          if (!Number.isFinite(y)) continue;
+          annotations.push({
+            xref: "x",
+            yref: "y",
+            x: spot.x,
+            y,
+            text: piece,
+            showarrow: false,
+            xanchor: "center",
+            yanchor: "bottom",
+            ...(direction === "vertical-up" ? { textangle: 90 } : direction === "vertical-down" ? { textangle: -90 } : {}),
+            font,
+          });
+          top = Math.max(top, y + unit);
+        }
       }
     }
-  return { shapes: [], annotations, top: log ? 10 ** top : top };
+    if (outside) topMargin = (options.title ? 44 : 16) + rows * (size + 6) + 8;
+  }
+  return { shapes: [], annotations, top: log ? 10 ** top : top, ...(topMargin !== undefined ? { topMargin } : {}) };
 }
 
 /** The grouped graphs that draw stars: each group's values at a row stand side by side. */
@@ -434,7 +525,7 @@ export function addSignificance(
         mid: middle[i] ?? 0,
       }));
   const overlay = letters
-    ? lettersOverlay(spots, selected, options.yScale)
+    ? lettersOverlay(spots, selected, options)
     : significanceOverlay(
         spots,
         selected.map((c) => ({ ...c, ends: endsOf(c) })),
@@ -444,6 +535,14 @@ export function addSignificance(
       );
   fig.layout.shapes = [...((fig.layout.shapes as unknown[]) ?? []), ...overlay.shapes];
   fig.layout.annotations = [...((fig.layout.annotations as unknown[]) ?? []), ...overlay.annotations];
+  // Outside letters live above the plot in paper coordinates, so the figure
+  // needs a taller top margin to fit them (the layout's margin is already
+  // applied by the time overlays run — see graph-figure.ts).
+  if (overlay.topMargin !== undefined) {
+    const margin = (fig.layout.margin ??= {}) as Record<string, unknown>;
+    const t = typeof margin.t === "number" ? margin.t : 16;
+    margin.t = Math.max(t, overlay.topMargin);
+  }
   const yaxis = (fig.layout.yaxis ??= {}) as Record<string, unknown>;
   const range = (yaxis.autorangeoptions ??= {}) as Record<string, unknown>;
   range.include = overlay.top;

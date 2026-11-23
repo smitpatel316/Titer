@@ -208,6 +208,10 @@ const CHOICE_FIELDS: Record<string, keyof typeof GRAPH_CHOICES> = {
   groupLayout: "groupLayout",
   stackAs: "stackAs",
   sigDisplay: "sigDisplay",
+  lettersLocation: "lettersLocation",
+  lettersDirection: "lettersDirection",
+  lettersIdentifier: "lettersIdentifier",
+  lettersFont: "lettersFont",
   regBand: "regBand",
   residualsAs: "residualsAs",
   survivalMode: "survivalMode",
@@ -259,6 +263,7 @@ const BOOLEAN_FIELDS = [
   "survivalShowAtRisk",
   "volcanoYIsPValue",
   "volcanoShowThresholds",
+  "lettersFontAuto",
 ];
 
 /** Plain string fields. */
@@ -280,6 +285,7 @@ const STRING_FIELDS = [
   "outlineColor",
   "pointOutlineColor",
   "errorColor",
+  "lettersColor",
 ];
 
 /** The options that name a sibling analysis (see `GraphOptions`): the

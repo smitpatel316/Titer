@@ -607,6 +607,87 @@ function PcaControls({
   );
 }
 
+/** The Compact Letter Display format controls (Prism's Format CLD dialog):
+ *  where the letters sit, their direction, their identifiers, and their
+ *  font — shared by the single- and multi-analysis significance controls.
+ *  Outside the graph only allows stacked letters (Prism's rule), so the
+ *  direction choice gives way to a note there. */
+export function LettersFormatControls({ options, set }: { options: GraphOptions; set: SetOptions }) {
+  const outside = options.lettersLocation === "outside";
+  const color = /^#[0-9a-fA-F]{6}$/.test(options.lettersColor ?? "") ? options.lettersColor! : "#111827";
+  return (
+    <>
+      <Choice
+        label="Location"
+        value={options.lettersLocation}
+        onChange={(lettersLocation) => set({ lettersLocation })}
+        items={[
+          { value: "above", label: "Above the data" },
+          { value: "outside", label: "Outside the graph" },
+        ]}
+      />
+      {outside ? (
+        <p className="text-small text-secondary">Outside the graph, the letters stack in one row per letter.</p>
+      ) : (
+        <Choice
+          label="Direction"
+          value={options.lettersDirection}
+          onChange={(lettersDirection) => set({ lettersDirection })}
+          items={[
+            { value: "auto", label: "Automatic" },
+            { value: "horizontal", label: "Horizontal" },
+            { value: "vertical-up", label: "Vertical (up)" },
+            { value: "vertical-down", label: "Vertical (down)" },
+            { value: "stacked", label: "Stacked" },
+          ]}
+        />
+      )}
+      <Choice
+        label="Labels"
+        value={options.lettersIdentifier}
+        onChange={(lettersIdentifier) => set({ lettersIdentifier })}
+        items={[
+          { value: "upper", label: "Upper case" },
+          { value: "lower", label: "Lower case" },
+          { value: "numbers", label: "Numbers" },
+        ]}
+      />
+      <Choice
+        label="Font"
+        value={options.lettersFont}
+        onChange={(lettersFont) => set({ lettersFont })}
+        wrap
+        items={[
+          { value: "default", label: "Default" },
+          { value: "arial", label: "Arial" },
+          { value: "helvetica", label: "Helvetica" },
+          { value: "times", label: "Times" },
+          { value: "georgia", label: "Georgia" },
+          { value: "courier", label: "Courier" },
+          { value: "verdana", label: "Verdana" },
+        ]}
+      />
+      <Toggle
+        label="Automatically determine the font size"
+        checked={options.lettersFontAuto}
+        onChange={(lettersFontAuto) => set({ lettersFontAuto })}
+      />
+      {options.lettersFontAuto ? null : (
+        <Stepper label="Font size" value={options.lettersSize} min={6} max={36} step={1} onChange={(lettersSize) => set({ lettersSize })} />
+      )}
+      <Row label="Font color">
+        <input
+          type="color"
+          aria-label="Letters color"
+          value={color}
+          onChange={(e) => set({ lettersColor: e.target.value })}
+          className="size-6 cursor-pointer appearance-none rounded-full bg-transparent p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-edge [&::-webkit-color-swatch-wrapper]:p-0"
+        />
+      </Row>
+    </>
+  );
+}
+
 /** Pick several analyses, then which of each one's pairwise comparisons get a bracket —
  *  a grouped-scatter's multiple t tests, one per copy table. An analysis of another
  *  table is listed with its table's name; one that ran on other data sets than the
@@ -709,12 +790,15 @@ function MultiSignificanceControls({
           {comparisons === null ? (
             <p className="text-small text-secondary">Running the analyses…</p>
           ) : options.sigDisplay === "letters" ? (
-            <p className="text-small text-secondary">
-              {lettersFit(lettered)
-                ? "Groups that share a letter don't differ significantly (P ≥ 0.05); “a” goes to the highest."
-                : "Letters need every pair compared (Tukey's test, say): this analysis compares only some pairs."}
-              {chosen.length > 1 ? " Letters come from the first analysis only." : ""}
-            </p>
+            <>
+              <p className="text-small text-secondary">
+                {lettersFit(lettered)
+                  ? "Groups that share a letter don't differ significantly (P ≥ 0.05); “a” goes to the highest."
+                  : "Letters need every pair compared (Tukey's test, say): this analysis compares only some pairs."}
+                {chosen.length > 1 ? " Letters come from the first analysis only." : ""}
+              </p>
+              <LettersFormatControls options={options} set={set} />
+            </>
           ) : (
             chosen.map((a) => {
               const pairs = comparisons.filter((c) => c.analysisId === a.id);
@@ -799,11 +883,14 @@ function SignificanceControls({
           {comparisons === null ? (
             <p className="text-small text-secondary">Running the analysis…</p>
           ) : options.sigDisplay === "letters" ? (
-            <p className="text-small text-secondary">
-              {lettersFit(comparisons)
-                ? "Groups that share a letter don't differ significantly (P ≥ 0.05); “a” goes to the highest."
-                : "Letters need every pair compared (Tukey's test, say): this analysis compares only some pairs."}
-            </p>
+            <>
+              <p className="text-small text-secondary">
+                {lettersFit(comparisons)
+                  ? "Groups that share a letter don't differ significantly (P ≥ 0.05); “a” goes to the highest."
+                  : "Letters need every pair compared (Tukey's test, say): this analysis compares only some pairs."}
+              </p>
+              <LettersFormatControls options={options} set={set} />
+            </>
           ) : comparisons.length ? (
             <Row label="Comparisons">
               <div className="flex flex-col gap-1.5">

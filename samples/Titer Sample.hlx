@@ -1,7 +1,7 @@
 {
   "app": "titer",
   "schemaVersion": 1,
-  "savedAt": "2026-11-14T07:14:59.755Z",
+  "savedAt": "2026-11-22T23:40:54.532Z",
   "project": {
     "nodes": {
       "t-viab": {
@@ -146,7 +146,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-kinase": {
@@ -268,7 +275,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-growth": {
@@ -412,7 +426,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-volume": {
@@ -579,7 +600,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "g-volume-bars": {
@@ -686,7 +714,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "g-volume-violin": {
@@ -788,7 +823,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-pk": {
@@ -915,7 +957,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-il6": {
@@ -1046,7 +1095,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "g-il6-bars": {
@@ -1147,7 +1203,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-immune": {
@@ -1263,7 +1326,14 @@
           "outlineColor": "#FFFFFF",
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-surv": {
@@ -1454,7 +1524,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-nested": {
@@ -1564,7 +1641,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-rnaseq": {
@@ -11729,7 +11813,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-genes": {
@@ -11849,7 +11940,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-deseq": {
@@ -12951,7 +13049,14 @@
           "volcanoLabel": "Gene",
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-ki67": {
@@ -13086,7 +13191,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-elisa": {
@@ -13218,7 +13330,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-markers": {
@@ -13398,7 +13517,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "g-markers-ki67": {
@@ -13493,7 +13619,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-response": {
@@ -13611,7 +13744,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "t-exposure": {
@@ -13773,7 +13913,14 @@
           },
           "whisker": "min-max",
           "violinVariant": "full",
-          "scatterStyle": "classic"
+          "scatterStyle": "classic",
+          "lettersLocation": "above",
+          "lettersDirection": "auto",
+          "lettersIdentifier": "lower",
+          "lettersFont": "default",
+          "lettersSize": 14,
+          "lettersColor": "#111827",
+          "lettersFontAuto": false
         }
       },
       "f-main": {
