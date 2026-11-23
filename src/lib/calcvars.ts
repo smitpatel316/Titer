@@ -6,13 +6,16 @@
 // like a typed variable, because the values are materialized into the
 // table's rows (see `recomputeCalculated`).
 //
-// The formula core only: Prism 11.2's window functions (OVER / WHERE /
-// ORDER BY / ROWS) and conditional aggregation (MEANIF / SUMIF / COUNTIF)
-// are deliberately NOT built here — they are Pro-gated and licence-blocked
-// on this install, so they were designed from the release notes, not
-// verified in Prism. Descriptive aggregates over a whole variable
-// (MEAN(A), SUM(A)…) ARE in: they are the 11.0 core's whole-variable
-// arithmetic, broadcast as one value per row.
+// Conditional aggregation (seq 372, part A) IS built here: the *IF family
+// (MINIF / MAXIF / SUMIF / MEANIF / STDEVIF / STDERRIF / COUNTIF /
+// COUNTAIF) and the WHERE-clause form (`SUM(F) WHERE C <= 14`), verified
+// against hand-computed values — Prism's docs are the spec, since the
+// window functions are Pro-gated and licence-blocked on this install and
+// no real-Prism verification was possible. Window functions (OVER / ORDER
+// BY / ROWS) are still NOT built — they are part B of seq 372.
+// Descriptive aggregates over a whole variable (MEAN(A), SUM(A)…) ARE in:
+// they are the 11.0 core's whole-variable arithmetic, broadcast as one
+// value per row.
 //
 // Semantics, kept spreadsheet-plain: a missing source value makes that
 // row's result blank (a value that has no formula result is blank, as a
@@ -115,7 +118,10 @@ type Expr =
   | { kind: "var"; name: string }
   | { kind: "unary"; op: "-" | "NOT"; expr: Expr }
   | { kind: "binary"; op: string; left: Expr; right: Expr }
-  | { kind: "call"; name: string; args: Expr[] };
+  | { kind: "call"; name: string; args: Expr[] }
+  /** A conditional aggregate (seq 372, part A): `name` over the rows where
+   *  `condition` holds, broadcast as one value per row. */
+  | { kind: "condagg"; name: string; variable: string; condition: Expr };
 
 /** The elementwise functions: name → argument counts it takes. */
 const ELEMENTWISE: Record<string, number[]> = {
@@ -142,8 +148,21 @@ const ELEMENTWISE: Record<string, number[]> = {
 };
 /** The whole-variable aggregates: one variable argument, broadcast as one
  *  value per row. MIN and MAX are both: one argument aggregates, two or more
- *  compare row by row. */
-const AGGREGATES = ["MEAN", "SUM", "COUNT", "MEDIAN", "SD", "SEM", "VAR", "MIN", "MAX"];
+ *  compare row by row. COUNTA counts the non-blank values, like COUNT. */
+const AGGREGATES = ["MEAN", "SUM", "COUNT", "MEDIAN", "SD", "SEM", "VAR", "MIN", "MAX", "COUNTA"];
+/** The conditional aggregates (seq 372, part A): name → the aggregate they
+ *  filter. Two arguments: the variable to aggregate, and the condition —
+ *  the comparison/AND/OR/NOT language, evaluated row by row. */
+const CONDITIONAL_AGGREGATES: Record<string, string> = {
+  MINIF: "MIN",
+  MAXIF: "MAX",
+  SUMIF: "SUM",
+  MEANIF: "MEAN",
+  STDEVIF: "SD",
+  STDERRIF: "SEM",
+  COUNTIF: "COUNT",
+  COUNTAIF: "COUNTA",
+};
 const CONSTANTS: Record<string, number> = { PI: Math.PI, E: Math.E };
 
 class Parser {
@@ -275,7 +294,25 @@ class Parser {
         const close = this.peek();
         if (close?.kind !== "rparen") throw new Error(`“${t.name}” has arguments with no closing “)”.`);
         this.pos++;
-        if (AGGREGATES.includes(upper) && args.length === 1) return { kind: "call", name: upper, args };
+        if (AGGREGATES.includes(upper) && args.length === 1) {
+          // `SUM(F) WHERE C <= 14` (seq 372, part A): the WHERE form of a
+          // conditional aggregate. A non-variable argument keeps today's
+          // behaviour — the call node, which evaluates blank.
+          if (args[0].kind === "var" && this.eatIdent("WHERE")) {
+            return { kind: "condagg", name: upper, variable: args[0].name, condition: this.or() };
+          }
+          return { kind: "call", name: upper, args };
+        }
+        const condBase = CONDITIONAL_AGGREGATES[upper];
+        if (condBase) {
+          if (args.length !== 2)
+            throw new Error(
+              `“${t.name}” takes 2 arguments — a variable and a condition, e.g. “${upper}(F, C <= 14)”.`,
+            );
+          if (args[0].kind !== "var")
+            throw new Error(`“${t.name}” takes a variable and a condition — write “${upper}(F, C <= 14)”.`);
+          return { kind: "condagg", name: condBase, variable: args[0].name, condition: args[1] };
+        }
         const allowed = ELEMENTWISE[upper];
         if (!allowed) {
           if (AGGREGATES.includes(upper))
@@ -322,6 +359,9 @@ export function dependenciesOf(ast: Expr): string[] {
     else if (e.kind === "binary") {
       walk(e.left);
       walk(e.right);
+    } else if (e.kind === "condagg") {
+      if (!found.includes(e.variable)) found.push(e.variable);
+      walk(e.condition);
     } else if (e.kind === "call") e.args.forEach(walk);
   };
   walk(ast);
@@ -331,16 +371,19 @@ export function dependenciesOf(ast: Expr): string[] {
 // ── Evaluation ─────────────────────────────────────────────────────────
 
 /** What one row's evaluation reads: a variable's value in that row, and a
- *  variable's whole column (for aggregates). */
+ *  variable's whole column (for aggregates). `valueAt` reads any row, so a
+ *  conditional aggregate can run its condition row by row. */
 export interface EvalContext {
   value: (name: string) => number | null;
   values: (name: string) => number[];
+  valueAt: (name: string, row: number) => number | null;
+  rowCount: number;
 }
 
 const truthy = (v: number | null): boolean | null => (v == null ? null : v !== 0);
 
 function aggregate(name: string, values: number[]): number | null {
-  if (name === "COUNT") return values.length;
+  if (name === "COUNT" || name === "COUNTA") return values.length;
   if (values.length === 0) return null;
   switch (name) {
     case "MEAN":
@@ -364,12 +407,38 @@ function aggregate(name: string, values: number[]): number | null {
   }
 }
 
+/** A conditional aggregate over the rows that matched (seq 372, part A):
+ *  SUM/COUNT/COUNTA return 0 when nothing matches; the rest blank. */
+function conditionalAggregate(name: string, values: number[]): number | null {
+  if (values.length === 0) return name === "SUM" || name === "COUNT" || name === "COUNTA" ? 0 : null;
+  return aggregate(name, values);
+}
+
 function evalExpr(e: Expr, ctx: EvalContext): number | null {
   switch (e.kind) {
     case "num":
       return e.value;
     case "var":
       return ctx.value(e.name);
+    case "condagg": {
+      // The condition runs row by row; the matching rows' values aggregate
+      // into one broadcast value. A blank condition never matches, and a
+      // blank value never counts — blanks are excluded from calculation.
+      const matched: number[] = [];
+      for (let j = 0; j < ctx.rowCount; j++) {
+        const rowCtx: EvalContext = {
+          value: (name) => ctx.valueAt(name, j),
+          values: ctx.values,
+          valueAt: ctx.valueAt,
+          rowCount: ctx.rowCount,
+        };
+        if (truthy(evalExpr(e.condition, rowCtx)) === true) {
+          const v = ctx.valueAt(e.variable, j);
+          if (v != null) matched.push(v);
+        }
+      }
+      return conditionalAggregate(e.name, matched);
+    }
     case "unary": {
       const v = evalExpr(e.expr, ctx);
       if (v == null) return null;
@@ -593,6 +662,12 @@ export function recomputeCalculated(data: TableData): TableData {
           if (done) return done.filter((v): v is number => v != null);
           return byName.get(dep)?.values ?? [];
         },
+        valueAt: (dep, j) => {
+          const done = computed.get(dep);
+          if (done) return done[j] ?? null;
+          return byName.get(dep)?.byRow[j] ?? null;
+        },
+        rowCount: data.rows.length,
       };
       values.push(evalExpr(ast, rowCtx));
     }

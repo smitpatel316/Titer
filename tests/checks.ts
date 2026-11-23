@@ -25681,6 +25681,189 @@ check("calcvars: formulas and values round-trip through .hlx, and a stale value 
   ok(!serializeProjectFile({ ...payload, nodes: { t1: { ...payload.nodes.t1, data: base } } }).includes("calculated"));
 });
 
+const condBase = (): TableData =>
+  mvTable(["Title", "A", "C", "F"], [
+    [null, "1", "10", "1"],
+    [null, "1", "14", "2"],
+    [null, "2", "20", "3"],
+    [null, "2", "5", "4"],
+    [null, "1", "14", "5"],
+    [null, "1", null, "6"],
+    [null, "2", "3", null],
+  ]);
+
+check("calcvars: conditional aggregation — the *IF family filters rows by a condition (seq 372, part A)", () => {
+  const base = condBase();
+  const add = (name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(base, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  const all = (v: string | null): (string | null)[] => Array(7).fill(v);
+  // C <= 14 matches rows 1, 2, 4, 5, 7; F is blank on row 7, so [1, 2, 4, 5].
+  // Values are pinned against the independent Python computation in
+  // ~/workspace/.helix-v19/372-fixtures.py (sample SD, SEM = SD/sqrt(n)).
+  deepStrictEqual(add("SumIf", "SUMIF(F, C <= 14)"), all("12"));
+  deepStrictEqual(add("MeanIf", "MEANIF(F, C <= 14)"), all("3"));
+  deepStrictEqual(add("CountIf", "COUNTIF(F, C <= 14)"), all("4"));
+  deepStrictEqual(add("CountAIf", "COUNTAIF(F, C <= 14)"), all("4"));
+  deepStrictEqual(add("MinIf", "MINIF(F, C <= 14)"), all("1"));
+  deepStrictEqual(add("MaxIf", "MAXIF(F, C <= 14)"), all("5"));
+  deepStrictEqual(add("StdevIf", "STDEVIF(F, C <= 14)"), all("1.825741858"));
+  deepStrictEqual(add("StderrIf", "STDERRIF(F, C <= 14)"), all("0.9128709292"));
+  // Nothing matches: SUM/COUNT/COUNTA return 0; the rest blank.
+  deepStrictEqual(add("SumNone", "SUMIF(F, C > 100)"), all("0"));
+  deepStrictEqual(add("CountNone", "COUNTIF(F, C > 100)"), all("0"));
+  deepStrictEqual(add("CountANone", "COUNTAIF(F, C > 100)"), all("0"));
+  deepStrictEqual(add("MeanNone", "MEANIF(F, C > 100)"), all(null));
+  deepStrictEqual(add("MinNone", "MINIF(F, C > 100)"), all(null));
+  deepStrictEqual(add("StdevNone", "STDEVIF(F, C > 100)"), all(null));
+  // AND / OR / NOT conditions, and a condition on the value column itself.
+  deepStrictEqual(add("SumAnd", "SUMIF(F, C <= 14 AND A = 1)"), all("8"));
+  deepStrictEqual(add("SumOr", "SUMIF(F, C > 14 OR A = 2)"), all("7"));
+  deepStrictEqual(add("SumSelf", "SUMIF(F, F > 2)"), all("18"));
+  deepStrictEqual(add("SumNot", "SUMIF(F, NOT (C <= 14))"), all("3"));
+  // A conditional aggregate inside a larger formula broadcasts like any aggregate.
+  deepStrictEqual(add("Centred", "F - MEANIF(F, C <= 14)"), ["-2", "-1", "0", "1", "2", "3", null]);
+  // A condition may read another calculated variable (dependency order).
+  const withD = addCalculatedVariable(base, "D", "C * 2");
+  if ("error" in withD) throw new Error(withD.error);
+  const sumD = addCalculatedVariable(withD.data, "SumD", "SUMIF(F, D <= 28)");
+  if ("error" in sumD) throw new Error(sumD.error);
+  deepStrictEqual(calcValues(sumD.data, "SumD"), all("12"));
+});
+
+check("calcvars: the WHERE-clause form is the same conditional aggregate (seq 372, part A)", () => {
+  const base = condBase();
+  const add = (name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(base, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  const all = (v: string | null): (string | null)[] => Array(7).fill(v);
+  deepStrictEqual(add("SumW", "SUM(F) WHERE C <= 14"), all("12"));
+  deepStrictEqual(add("MeanW", "MEAN(F) WHERE C <= 14"), all("3"));
+  deepStrictEqual(add("CountW", "COUNT(F) WHERE C <= 14"), all("4"));
+  deepStrictEqual(add("CountAW", "COUNTA(F) WHERE C <= 14"), all("4"));
+  deepStrictEqual(add("MedianW", "MEDIAN(F) WHERE C <= 14"), all("3"));
+  deepStrictEqual(add("MaxW", "MAX(F) WHERE C <= 14"), all("5"));
+  deepStrictEqual(add("SumWNone", "SUM(F) WHERE C > 100"), all("0"));
+  deepStrictEqual(add("MinWNone", "MIN(F) WHERE C > 100"), all(null));
+  deepStrictEqual(add("SumWAnd", "SUM(F) WHERE C <= 14 AND A = 1"), all("8"));
+  // The two forms agree, and a WHERE aggregate composes inside a formula.
+  deepStrictEqual(
+    add("CentredW", "F - (SUM(F) WHERE C <= 14) / (COUNT(F) WHERE C <= 14)"),
+    ["-2", "-1", "0", "1", "2", "3", null],
+  );
+  // Errors: wrong arity, a non-variable first argument, a WHERE on a
+  // non-aggregate, an unknown variable in the condition, a self-reference.
+  const arity = addCalculatedVariable(base, "G", "SUMIF(F)");
+  ok("error" in arity && arity.error.includes("2 arguments"), JSON.stringify(arity));
+  const notVar = addCalculatedVariable(base, "G", "SUMIF(A + F, C > 0)");
+  ok("error" in notVar && notVar.error.includes("variable"), JSON.stringify(notVar));
+  const whereNonAgg = addCalculatedVariable(base, "G", "LOG(F) WHERE C > 0");
+  ok("error" in whereNonAgg && whereNonAgg.error.includes("could not be read"), JSON.stringify(whereNonAgg));
+  const unknown = addCalculatedVariable(base, "G", "SUMIF(F, Missing > 0)");
+  deepStrictEqual(unknown, { error: "unknown variable “Missing” — the table has no variable with that name." });
+  const withG = addCalculatedVariable(base, "G", "A + 1");
+  if ("error" in withG) throw new Error(withG.error);
+  const self = setCalculatedFormula(withG.data, "G", "SUMIF(F, G > 0)");
+  deepStrictEqual(self, { error: "“G” refers to itself — a calculated variable cannot use its own values." });
+  // A circular reference through a condition is named, like any other cycle.
+  const cyclic = recomputeCalculated({
+    ...base,
+    columns: ["Title", "A", "C", "F", "G", "H"],
+    rows: condBase().rows.map((r) => [...r, null, null]),
+    calculated: [
+      { name: "G", formula: "SUMIF(F, H > 0)" },
+      { name: "H", formula: "G + 1" },
+    ],
+  });
+  deepStrictEqual(calcValues(cyclic, "G"), all(null));
+  ok(cyclic.calculated?.[0].error?.includes("circular reference"), JSON.stringify(cyclic.calculated));
+  ok(cyclic.calculated?.[1].error?.includes("circular reference"), JSON.stringify(cyclic.calculated));
+});
+
+check("calcvars: a conditional formula flows through MCP, round-trips through .hlx, and follows source edits (seq 372, part A)", async () => {
+  // MCP: the same formula through titer_edit_table computes the same values
+  // as the GUI path (addCalculatedVariable).
+  const harness = mcpLaggingHarness(true);
+  const created = await harness.run("job-372a", "create-table", {
+    table_type: "multiple",
+    name: "Cond",
+    columns: ["Title", "A", "C", "F"],
+    rows: [
+      ["r1", 1, 10, 1],
+      ["r2", 1, 14, 2],
+      ["r3", 2, 20, 3],
+      ["r4", 2, 5, 4],
+      ["r5", 1, 14, 5],
+      ["r6", 1, null, 6],
+      ["r7", 2, 3, null],
+    ],
+  });
+  const tid = (created.result as { table_id: string }).table_id;
+  const data = () => harness.state().nodes[tid]?.data!;
+  harness.sync();
+  await harness.run("job-372b", "edit-table", {
+    table_id: tid,
+    op: "add-calculated-variable",
+    name: "SumIf",
+    formula: "SUMIF(F, C <= 14)",
+  });
+  deepStrictEqual(
+    data().rows.map((r) => r[4]),
+    ["12", "12", "12", "12", "12", "12", "12"],
+  );
+  // set-calculated-variable to the WHERE form gives the same values.
+  harness.sync();
+  await harness.run("job-372c", "edit-table", {
+    table_id: tid,
+    op: "set-calculated-variable",
+    name: "SumIf",
+    formula: "SUM(F) WHERE C <= 14",
+  });
+  deepStrictEqual(
+    data().rows.map((r) => r[4]),
+    ["12", "12", "12", "12", "12", "12", "12"],
+  );
+  // A bad conditional formula is refused through MCP and leaves the table alone.
+  harness.sync();
+  await rejects(
+    harness.run("job-372d", "edit-table", {
+      table_id: tid,
+      op: "set-calculated-variable",
+      name: "SumIf",
+      formula: "SUMIF(F)",
+    }),
+    /2 arguments/,
+  );
+  deepStrictEqual(
+    data().rows.map((r) => r[4]),
+    ["12", "12", "12", "12", "12", "12", "12"],
+  );
+  // GUI path: edits to a source recompute the conditional variable, and the
+  // formula round-trips through .hlx with its values.
+  const base = condBase();
+  const added = addCalculatedVariable(base, "SumIf", "SUMIF(F, C <= 14)");
+  if ("error" in added) throw new Error(added.error);
+  const edited = recomputeCalculated(writeBlock(added.data, 0, 2, [["30"]], "multiple"));
+  deepStrictEqual(calcValues(edited, "SumIf"), ["11", "11", "11", "11", "11", "11", "11"]);
+  const payload: ProjectFilePayload = {
+    nodes: {
+      t1: { id: "t1", type: "table", name: "MV", parentId: null, tableType: "multiple", data: added.data },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const parsed = read(serializeProjectFile(payload));
+  strictEqual(parsed.updated, false);
+  const loaded = parsed.project.nodes.t1 as ProjectNode;
+  deepStrictEqual(loaded.data?.calculated, [{ name: "SumIf", formula: "SUMIF(F, C <= 14)" }]);
+  deepStrictEqual(calcValues(loaded.data!, "SumIf"), ["12", "12", "12", "12", "12", "12", "12"]);
+});
+
 // ── Simulate data + Monte Carlo (plan 22) ───────────────────────────────
 
 check("simulationRCode draws each distribution from the right R call", () => {

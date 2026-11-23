@@ -562,6 +562,21 @@ const ROWS: Row[] = [
     ],
   },
   {
+    item: "372",
+    title: "Calculated variables: conditional aggregation (part A)",
+    status: "covered",
+    note:
+      "The *IF family (MINIF/MAXIF/SUMIF/MEANIF/STDEVIF/STDERRIF/COUNTIF/COUNTAIF) + the WHERE-clause form, " +
+      "through the existing titer_edit_table add/set-calculated-variable ops. Part B (window functions: OVER / " +
+      "ORDER BY / ROWS) is NOT covered by this row — separate follow-up.",
+    checks: [
+      { kind: "tool", tool: "titer_edit_table" },
+      { kind: "sourceContains", file: "src/lib/calcvars.ts", text: "CONDITIONAL_AGGREGATES" },
+      { kind: "sourceContains", file: "src/lib/calcvars.ts", text: "kind: \"condagg\"" },
+      { kind: "sourceContains", file: "src/lib/calcvars.ts", text: "conditionalAggregate" },
+    ],
+  },
+  {
     item: "158",
     title: "Classic analyses from Multiple Variables tables",
     status: "covered",
