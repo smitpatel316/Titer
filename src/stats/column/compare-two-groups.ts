@@ -4,6 +4,7 @@
 // cascade of questions instead of listing every variant as its own test.
 import type { Column, CompareTwoGroupsParams, StatRow } from "../types";
 import { levelsOf } from "../../lib/dataset";
+import { labelPredictorError } from "../multiple/predictors";
 import {
   ciRows,
   dataGroups,
@@ -157,6 +158,11 @@ function splitByGroup(columns: Column[], p: CompareTwoGroupsParams): Group[] | {
   if (!response.values.length) return { error: `“${p.response}” holds no numbers yet.` };
   const groupBy = columns.find((c) => c.name === p.groupBy);
   if (!groupBy) return { error: missingColumn(p.groupBy) };
+  // A label never groups the comparison (seq 379): refused by name, like
+  // a label predictor in regression — a numeric-coded categorical still
+  // works, because its type says categorical, not label.
+  if (groupBy.variableType === "label")
+    return { error: labelPredictorError(p.groupBy, "grouping variable") };
   const levels = levelsOf(groupBy);
   if (levels.length < 2)
     return {

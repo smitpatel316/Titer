@@ -34318,6 +34318,160 @@ check("seq 331: point labels show the label variable's values when one is chosen
   );
 });
 
+// ── seq 379: label variables refused as grouping variables / factors ──
+// Seq 331 half B refused labels as regression/Cox predictors; the grouping
+// paths had no such check — an MCP run_analysis naming a label as the
+// grouping variable ran instead of erroring. The four entry points below
+// (compare-two-groups groupBy, survival groupBy, multifactor factors,
+// extract-rearrange grouping / rowFactor / columnFactor / rowVariable /
+// outcome) refuse a label with the same named error. Deliberately NOT
+// rejected: extract-rearrange `subject` (a replicate identifier — subject
+// IDs are what labels are for) and `rowTitles` (the label's natural home).
+
+// Group and Sex are independent (all four combinations, twice each), so a
+// two-way fit has no empty cell; ID and Site are labels by hand.
+const mv379 = (): TableData => ({
+  columns: ["Title", "Y", "Group", "Sex", "ID", "Site", "Status"],
+  rows: [
+    ["1", "12", "1", "Female", "S001", "X", "1"],
+    ["2", "15", "2", "Male", "S002", "Y", "1"],
+    ["3", "11", "1", "Male", "S003", "X", "0"],
+    ["4", "18", "2", "Female", "S004", "Y", "0"],
+    ["5", "14", "1", "Female", "S005", "X", "0"],
+    ["6", "17", "2", "Male", "S006", "Y", "1"],
+    ["7", "13", "1", "Male", "S007", "X", "1"],
+    ["8", "19", "2", "Female", "S008", "Y", "0"],
+  ],
+});
+const mv379Typed = (): TableData => {
+  let data = refreshVariableTypes(mv379());
+  data = setVariableType(data, "Group", "categorical");
+  data = setVariableType(data, "ID", "label");
+  data = setVariableType(data, "Site", "label");
+  return data;
+};
+
+check("seq 379: a label variable is refused as the compare-two-groups grouping variable", () => {
+  const columns = readTable(mv379Typed()).columns;
+  deepStrictEqual(
+    columns.map((c) => [c.name, c.variableType]),
+    [
+      ["Y", "continuous"],
+      ["Group", "categorical"],
+      ["Sex", "categorical"],
+      ["ID", "label"],
+      ["Site", "label"],
+      ["Status", "continuous"],
+    ],
+  );
+  // A label as the grouping variable is refused by name; a categorical
+  // (text or numeric-coded) still works.
+  const tParams = { paired: false, gaussian: true, equalVariance: true, ratio: false, tails: "two-sided" } as const;
+  const asLabel = compareTwoGroupsSpec.check!(columns, { ...tParams, response: "Y", groupBy: "ID" });
+  ok(asLabel?.includes("label variable"), `expected a label error, got: ${asLabel}`);
+  ok(asLabel?.includes("“ID”"), `the error should name the column, got: ${asLabel}`);
+  ok(asLabel?.includes("grouping variable"), `the error should name the role, got: ${asLabel}`);
+  const asSite = compareTwoGroupsSpec.check!(columns, { ...tParams, response: "Y", groupBy: "Site" });
+  ok(asSite?.includes("“Site”"), `expected Site named, got: ${asSite}`);
+  strictEqual(compareTwoGroupsSpec.check!(columns, { ...tParams, response: "Y", groupBy: "Sex" }), undefined);
+  strictEqual(compareTwoGroupsSpec.check!(columns, { ...tParams, response: "Y", groupBy: "Group" }), undefined);
+  // The same refusal reaches the MCP run-analysis path (no R: the spec
+  // check errors before any test runs).
+  return (async () => {
+    const out = await runAnalysis("compare-two-groups", mv379Typed(), { ...tParams, response: "Y", groupBy: "ID" });
+    ok("error" in out && out.error.includes("label variable"), JSON.stringify(out));
+  })();
+});
+
+check("seq 379: a label variable is refused as the survival grouping variable", async () => {
+  const data = mv379Typed();
+  const params = { curveTest: "logrank", correction: "holm", time: "Y", status: "Status" } as const;
+  const asLabel = await runAnalysis("survival", data, { ...params, groupBy: "ID" });
+  ok("error" in asLabel && asLabel.error.includes("label variable"), JSON.stringify(asLabel));
+  ok("error" in asLabel && asLabel.error.includes("“ID”"), JSON.stringify(asLabel));
+  const asSite = await runAnalysis("survival", data, { ...params, groupBy: "Site" });
+  ok("error" in asSite && asSite.error.includes("“Site”"), JSON.stringify(asSite));
+  // A categorical grouping still runs (two groups each).
+  const bySex = await runAnalysis("survival", data, { ...params, groupBy: "Sex" });
+  ok(!("error" in bySex), JSON.stringify(bySex));
+  deepStrictEqual(bySex.survivalGroups?.map((g) => g.group), ["Female", "Male"]);
+  const byGroup = await runAnalysis("survival", data, { ...params, groupBy: "Group" });
+  ok(!("error" in byGroup), JSON.stringify(byGroup));
+  deepStrictEqual(byGroup.survivalGroups?.map((g) => g.group), ["1", "2"]);
+});
+
+check("seq 379: a label variable is refused as a multifactor ANOVA factor", async () => {
+  const data = mv379Typed();
+  const asLabel = await runAnalysis("multifactor-anova", data, { response: "Y", factors: ["ID"], posthoc: "none" });
+  ok("error" in asLabel && asLabel.error.includes("label variable"), JSON.stringify(asLabel));
+  ok("error" in asLabel && asLabel.error.includes("“ID”"), JSON.stringify(asLabel));
+  ok("error" in asLabel && asLabel.error.includes("factor"), JSON.stringify(asLabel));
+  const asSite = await runAnalysis("multifactor-anova", data, { response: "Y", factors: ["Site"], posthoc: "none" });
+  ok("error" in asSite && asSite.error.includes("“Site”"), JSON.stringify(asSite));
+  // Categorical factors (text and numeric-coded) still fit, two-way included.
+  const twoWay = await runAnalysis("multifactor-anova", data, { response: "Y", factors: ["Group", "Sex"], posthoc: "none" });
+  ok(!("error" in twoWay), JSON.stringify(twoWay));
+  ok(twoWay.stats.some((s) => s.label === "Group:Sex F"), JSON.stringify(twoWay.stats));
+  // The default factor set never auto-picks a label: a table with only a
+  // label beside the response has no factor at all.
+  const labelOnly: TableData = setVariableType(
+    refreshVariableTypes({
+      columns: ["Title", "Y", "ID"],
+      rows: [
+        ["1", "12", "S001"],
+        ["2", "15", "S002"],
+        ["3", "11", "S003"],
+        ["4", "18", "S004"],
+        ["5", "14", "S005"],
+        ["6", "17", "S006"],
+        ["7", "13", "S007"],
+        ["8", "19", "S008"],
+      ],
+    }),
+    "ID",
+    "label",
+  );
+  const auto = await runAnalysis("multifactor-anova", labelOnly, { response: "Y", posthoc: "none" });
+  ok("error" in auto && auto.error.includes("needs at least one factor"), JSON.stringify(auto));
+});
+
+check("seq 379: a label variable is refused as an extract-rearrange grouping / factor", async () => {
+  const data = mv379Typed();
+  const run = (params: object) => runAnalysis("extract-rearrange", data, params);
+  // XY / Column grouping.
+  const xyLabel = await run({ target: "xy", x: "Y", response: "Group", grouping: "ID" });
+  ok("error" in xyLabel && xyLabel.error.includes("label variable"), JSON.stringify(xyLabel));
+  ok("error" in xyLabel && xyLabel.error.includes("“ID”"), JSON.stringify(xyLabel));
+  const colLabel = await run({ target: "column", response: "Y", grouping: "Site" });
+  ok("error" in colLabel && colLabel.error.includes("“Site”"), JSON.stringify(colLabel));
+  const xyOk = await run({ target: "xy", x: "Y", response: "Group", grouping: "Sex" });
+  ok(!("error" in xyOk), JSON.stringify(xyOk));
+  // Grouped factors.
+  const rowLabel = await run({ target: "grouped", response: "Y", rowFactor: "ID", columnFactor: "Group" });
+  ok("error" in rowLabel && rowLabel.error.includes("“ID”"), JSON.stringify(rowLabel));
+  const colFactorLabel = await run({ target: "grouped", response: "Y", rowFactor: "Sex", columnFactor: "Site" });
+  ok("error" in colFactorLabel && colFactorLabel.error.includes("“Site”"), JSON.stringify(colFactorLabel));
+  const groupedOk = await run({ target: "grouped", response: "Y", rowFactor: "Sex", columnFactor: "Group" });
+  ok(!("error" in groupedOk), JSON.stringify(groupedOk));
+  // Contingency axes.
+  const rowVar = await run({ target: "contingency", rowVariable: "ID", outcome: "Group" });
+  ok("error" in rowVar && rowVar.error.includes("“ID”"), JSON.stringify(rowVar));
+  const outcome = await run({ target: "contingency", rowVariable: "Sex", outcome: "Site" });
+  ok("error" in outcome && outcome.error.includes("“Site”"), JSON.stringify(outcome));
+  const contOk = await run({ target: "contingency", rowVariable: "Sex", outcome: "Group" });
+  ok(!("error" in contOk), JSON.stringify(contOk));
+  deepStrictEqual(contOk.extracted?.table.rows, [
+    ["Female", "2", "2"],
+    ["Male", "2", "2"],
+  ]);
+  // Labels still belong where they are the identifier: as the subject
+  // (replicate IDs) and as the row-titles source.
+  const subjOk = await run({ target: "xy", x: "Y", response: "Group", subject: "ID" });
+  ok(!("error" in subjOk), JSON.stringify(subjOk));
+  const titlesOk = await run({ target: "xy", x: "Y", response: "Group", rowTitles: "ID" });
+  ok(!("error" in titlesOk), JSON.stringify(titlesOk));
+});
+
 // ── seq 332: dates / elapsed time X on XY tables (PART D — axis scales) ─
 // Part D puts the date/elapsed scale on the X axis itself: the Format Axes
 // dialog picks the display format, and the axis draws date labels (smart

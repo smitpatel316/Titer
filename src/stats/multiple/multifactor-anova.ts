@@ -14,6 +14,7 @@ import type { AnalysisOutcome, ComparisonRow, MultifactorAnovaParams } from "../
 import { MULTIFACTOR_MAX_FACTORS } from "../types";
 import { orderLevels, type Column } from "../../lib/dataset";
 import { dataGroups, describe, missingColumn, pairIndices, pRow, rStr, rVec } from "../column/base";
+import { labelPredictorError } from "./predictors";
 import { evalNamedVector } from "../webr";
 import { mean, sd } from "../../lib/summary";
 
@@ -157,12 +158,21 @@ export async function runMultifactorAnova(
   if (named !== undefined && named.length > 0) {
     const missing = named.find((n) => !byName.has(n));
     if (missing !== undefined) return { error: missingColumn(missing) };
+    // A label never enters as a factor (seq 379): refused by name, like a
+    // label predictor in regression.
+    const labelFactor = named.find((n) => byName.get(n)?.variableType === "label");
+    if (labelFactor !== undefined) return { error: labelPredictorError(labelFactor, "factor") };
     if (named.includes(response.name)) {
       return { error: `“${response.name}” is the response — it can't also be a factor.` };
     }
     factorNames = [...new Set(named)];
   } else {
-    factorNames = columns.filter((c) => c !== response && levelsOf(c).length >= 2).map((c) => c.name);
+    // The default set never auto-picks a label either: a label column's
+    // texts are levels, so without this guard it would be picked as a
+    // factor on any table where it is the only other levelled column.
+    factorNames = columns
+      .filter((c) => c !== response && c.variableType !== "label" && levelsOf(c).length >= 2)
+      .map((c) => c.name);
   }
   if (factorNames.length === 0) {
     return {
