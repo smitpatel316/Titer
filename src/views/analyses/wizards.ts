@@ -3018,6 +3018,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ["two-power-y", "2^Y — 2 to the power of Y"],
         ["neg-log10", "−log10(Y) — negative logarithm, base 10"],
         ["log-log", "log-log — log10 of both X and Y"],
+        ["hill-plot", "Hill plot — log10(Y/(Ymax−Y)), for dose-response data"],
         ...(xName
           ? ([
               ["x-divided-by-y", "X/Y — divide X by Y"],
@@ -3052,6 +3053,18 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ...(isKTransform(fn) && chosen.length > 1 && a.kMode === "per-dataset"
           ? chosen.map((name, i) => kQuestion(`k_${i}`, `What is K for data set “${name}”?`, fn))
           : []),
+        // The Hill plot (seq 383): Ymax is the maximum response — Y becomes
+        // log10(Y/(Ymax−Y)). Prefilled 100 (the usual case: Y as a percent
+        // of the maximum); change it when Y is not a percent.
+        fn === "hill-plot" && {
+          id: "ymax",
+          ask: "What is Ymax — the maximum response?",
+          kind: "number",
+          label: "Ymax",
+          initial: 100,
+          validate: (v: number): string | undefined =>
+            !Number.isFinite(v) || v <= 0 ? "Ymax must be a number greater than 0." : undefined,
+        },
         fn === "user-defined" && {
           id: "formula",
           ask: "Write the transform as a formula — one line per data set, separated by “;”, with an optional designator such as <B> or <~A> at the start of a line.",
@@ -3070,19 +3083,32 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             ["erase", "Erase the error bars"],
             ["to-ci", "Convert the error bars to 95% confidence intervals first, then transform both ends"],
           ]),
+        // The Hill plot's X units (seq 383): concentrations take log10(X);
+        // log(concentration) leaves X as it is. The generic X-function
+        // questions below are hidden for the Hill plot — xIsLog governs X.
         xName !== undefined &&
+          fn === "hill-plot" &&
+          choice("xUnits", "Were the X values entered as concentrations or as log(concentration)?", [
+            ["concentrations", "Concentrations — take log10(X)"],
+            ["log", "log(concentration) — leave X as it is"],
+          ]),
+        xName !== undefined &&
+          fn !== "hill-plot" &&
           choice("transformX", "Transform the X values too?", [
             ["no", "No — leave the X values as they are"],
             ["yes", "Yes — apply a function to the X values as well"],
           ]),
         xName !== undefined &&
+          fn !== "hill-plot" &&
           a.transformX === "yes" &&
           choice("xFunction", "Which function should be applied to the X values?", xFnOptions),
         xName !== undefined &&
+          fn !== "hill-plot" &&
           a.transformX === "yes" &&
           isKTransform(xFn) &&
           kQuestion("xConstant", "What is the constant K for the X values?", xFn),
         xName !== undefined &&
+          fn !== "hill-plot" &&
           choice("interchange", "Interchange X and Y before transforming?", [
             ["no", "No — transform Y with the chosen function"],
             ["yes", "Yes — swap X and Y first (the Y function applies to the old X values)"],
@@ -3104,7 +3130,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       const interchange = xName !== undefined && a.interchange === "yes";
       const needsX =
         xName !== undefined &&
-        (isCrossTransform(fn) || xFn !== undefined || interchange || fn === "user-defined" || fn === "log-log");
+        (isCrossTransform(fn) || xFn !== undefined || interchange || fn === "user-defined" || fn === "log-log" || fn === "hill-plot");
       const params: { function: TransformFunction } & Partial<TransformDataParams> = { function: fn };
       // The K: one constant, or one per data set (keyed by data-set name);
       // the X column's K joins the per-set map under the X column's name.
@@ -3123,6 +3149,10 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
       }
       if (Object.keys(constants).length > 0) params.constants = constants;
       if (fn === "user-defined" && a.formula !== undefined) params.formula = a.formula as string;
+      if (fn === "hill-plot") {
+        if (a.ymax !== undefined) params.ymax = a.ymax as number;
+        if (a.xUnits === "log") params.xIsLog = true;
+      }
       if (a.errorMode !== undefined) params.errorMode = a.errorMode as TransformDataParams["errorMode"];
       if (xFn !== undefined) params.xFunction = xFn;
       if (interchange) params.interchange = true;

@@ -1244,6 +1244,17 @@ const ROWS: Row[] = [
     checks: [{ kind: "analysisParamEnum", type: "transform-data", param: "function", value: "log-log" }],
   },
   {
+    item: "383",
+    title: "Hill plot transform",
+    status: "covered",
+    note: "Merged on check/v19: transform-data gained the Hill plot (Y becomes log10(Y/(Ymax−Y)) with a required Ymax; X becomes log10(X) unless entered as log(concentration) via xIsLog) plus the wizard's Ymax prompt and X-units choice.",
+    checks: [
+      { kind: "analysisParamEnum", type: "transform-data", param: "function", value: "hill-plot" },
+      { kind: "analysisParam", type: "transform-data", param: "ymax" },
+      { kind: "analysisParam", type: "transform-data", param: "xIsLog" },
+    ],
+  },
+  {
     item: "206",
     title: "Remove-baseline column math",
     status: "covered",

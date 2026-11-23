@@ -27269,6 +27269,150 @@ check("transform-data log-log transforms both axes (seq 385)", async () => {
   deepStrictEqual(viaWizard.transformed, both.transformed);
 });
 
+// ── Hill plot transform (1.9, seq 383) ────────────────────────────────────
+// Prism's pharmacology re-plot: Y becomes log10(Y/(Ymax−Y)) — Prism prompts
+// for Ymax — and X becomes log10(X) unless the data were entered as
+// log(concentration). Y ≤ 0 or Y ≥ Ymax leaves the transformed Y blank (the
+// log of a non-positive number has no value). Hand-computed fixture:
+// X=[1,10,100], Y=[10,50,90], Ymax=100 → X'=[0,1,2],
+// Y'=[log10(1/9), 0, log10(9)] ≈ [−0.9542, 0, 0.9542]. Pre-fix these fail:
+// "hill-plot" is not in TRANSFORM_FUNCTIONS yet, so the runner blanks it.
+
+check("transformValue applies the Hill plot (seq 383)", () => {
+  const close = (a: number | null, b: number) => a !== null && Math.abs(a - b) < 1e-12;
+  // log10(Y/(Ymax−Y)) with Ymax = 100: Y=10 → log10(1/9), Y=50 → 0,
+  // Y=90 → log10(9).
+  ok(close(transformValue("hill-plot" as never, 10, undefined, undefined, "y", undefined, 100), -0.9542425094393249));
+  strictEqual(transformValue("hill-plot" as never, 50, undefined, undefined, "y", undefined, 100), 0);
+  ok(close(transformValue("hill-plot" as never, 90, undefined, undefined, "y", undefined, 100), 0.9542425094393249));
+  // Y ≤ 0 or Y ≥ Ymax has no Hill value; without a Ymax there is nothing
+  // to divide by (the runner refuses such a run outright; this is the backstop).
+  strictEqual(transformValue("hill-plot" as never, 0, undefined, undefined, "y", undefined, 100), null);
+  strictEqual(transformValue("hill-plot" as never, 100, undefined, undefined, "y", undefined, 100), null);
+  strictEqual(transformValue("hill-plot" as never, 120, undefined, undefined, "y", undefined, 100), null);
+  strictEqual(transformValue("hill-plot" as never, -5, undefined, undefined, "y", undefined, 100), null);
+  strictEqual(transformValue("hill-plot" as never, 50, undefined, undefined, "y", undefined, undefined), null);
+  strictEqual(transformValue("hill-plot" as never, 50, undefined, undefined, "y", undefined, 0), null);
+});
+
+check("transform-data runs the Hill plot on an XY table (seq 383)", async () => {
+  const xy: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "1", "10"],
+      [null, "10", "50"],
+      [null, "100", "90"],
+    ],
+  };
+  const close = (a: (number | null)[], b: number[]) =>
+    a.length === b.length && a.every((v, i) => v !== null && Math.abs(v - b[i]) < 1e-12);
+  // Concentrations by default: X becomes log10(X), Y becomes
+  // log10(Y/(Ymax−Y)) — one Y entry, then one X entry.
+  const out = await runAnalysis("transform-data", xy, { function: "hill-plot", ymax: 100, x: "X" } as never);
+  if ("error" in out) throw new Error(out.error);
+  strictEqual(out.subtitle, "Transform data — Hill plot");
+  strictEqual(out.transformed?.length, 2);
+  ok(close(out.transformed?.[0].values ?? [], [-0.9542425094393249, 0, 0.9542425094393249]), `Hill Y: ${JSON.stringify(out.transformed?.[0].values)}`);
+  strictEqual(out.transformed?.[0].column, "A");
+  deepStrictEqual(out.transformed?.[1].values, [0, 1, 2]);
+  strictEqual(out.transformed?.[1].column, "X");
+  // Entered as log(concentration): X is unchanged (passed through, not
+  // logged), Y transforms exactly as above.
+  const logged = await runAnalysis("transform-data", xy, { function: "hill-plot", ymax: 100, x: "X", xIsLog: true } as never);
+  if ("error" in logged) throw new Error(logged.error);
+  strictEqual(logged.transformed?.length, 2);
+  ok(close(logged.transformed?.[0].values ?? [], [-0.9542425094393249, 0, 0.9542425094393249]), `Hill Y (xIsLog): ${JSON.stringify(logged.transformed?.[0].values)}`);
+  deepStrictEqual(logged.transformed?.[1].values, [1, 10, 100]);
+  strictEqual(logged.transformed?.[1].column, "X");
+  strictEqual(logged.transformed?.[1].label, "unchanged");
+  if (!logged.notes.includes("log(concentration), so they were left unchanged"))
+    throw new Error(`expected the xIsLog note, got ${JSON.stringify(logged.notes)}`);
+  // A Y of 0 or Ymax leaves that row blank and is counted, never NaN.
+  const blanks: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "1", "0"],
+      [null, "10", "50"],
+      [null, "100", "100"],
+    ],
+  };
+  const blanked = await runAnalysis("transform-data", blanks, { function: "hill-plot", ymax: 100, x: "X" } as never);
+  if ("error" in blanked) throw new Error(blanked.error);
+  deepStrictEqual(blanked.transformed?.[0].values, [null, 0, null]);
+  strictEqual(blanked.transformed?.[0].excluded, 2);
+  if (!blanked.notes.includes("undefined for Y ≤ 0 or Y ≥ Ymax"))
+    throw new Error(`expected the blank reason in the notes, got ${JSON.stringify(blanked.notes)}`);
+  // Without an X column the Y values still transform — only Y is reported.
+  const columnTable: TableData = {
+    columns: ["Title", "A"],
+    rows: [
+      [null, "10"],
+      [null, "50"],
+      [null, "90"],
+    ],
+  };
+  const yOnly = await runAnalysis("transform-data", columnTable, { function: "hill-plot", ymax: 100 } as never);
+  if ("error" in yOnly) throw new Error(yOnly.error);
+  strictEqual(yOnly.transformed?.length, 1);
+  ok(close(yOnly.transformed?.[0].values ?? [], [-0.9542425094393249, 0, 0.9542425094393249]), `Hill Y only: ${JSON.stringify(yOnly.transformed?.[0].values)}`);
+  // A missing Ymax, or one that is not greater than 0, is a clean error —
+  // never a column of blanks.
+  deepStrictEqual(await runAnalysis("transform-data", xy, { function: "hill-plot", x: "X" } as never), {
+    error: "“Hill plot” needs a Ymax — enter one and try again.",
+  });
+  deepStrictEqual(await runAnalysis("transform-data", xy, { function: "hill-plot", ymax: 0, x: "X" } as never), {
+    error: "“Hill plot” needs a Ymax greater than 0.",
+  });
+});
+
+check("transform-data wizard offers the Hill plot and builds its params (seq 383)", () => {
+  const wizard = WIZARDS["transform-data"]!;
+  const ids = (a: Record<string, string | number>, table: Dataset, type?: TableType) =>
+    wizard.questions(a, table, type).filter(Boolean).map((q) => (q as Question).id);
+  const fnOptions = (a: Record<string, string | number>, table: Dataset, type?: TableType) => {
+    const q = wizard.questions(a, table, type).find((qq) => qq && (qq as Question).id === "function") as
+      | { options: { value: string }[] }
+      | undefined;
+    return q?.options.map((o) => o.value) ?? [];
+  };
+  // Offered on a plain column table (Y transforms without an X column) and
+  // on an XY table.
+  const plain = readTable({ columns: ["Title", "V"], rows: [["", "1"], ["", "2"]] });
+  if (!fnOptions({}, plain).includes("hill-plot")) throw new Error("expected hill-plot offered on a column table");
+  const xy = readTable({
+    columns: ["Title", "X", "A"],
+    rows: [["", "10", "1"], ["", "20", "2"]],
+  });
+  if (!fnOptions({}, xy, "xy").includes("hill-plot")) throw new Error("expected hill-plot offered on an XY table");
+  // A plain table asks for Ymax and nothing else; an XY table asks for
+  // Ymax and the X units — the generic X-function and interchange questions
+  // are hidden for the Hill plot (xIsLog governs X).
+  deepStrictEqual(ids({ function: "hill-plot" }, plain), ["function", "ymax"]);
+  deepStrictEqual(ids({ function: "hill-plot" }, xy, "xy"), ["function", "ymax", "xUnits"]);
+  // A Ymax of 0 or less is refused by the Ymax question.
+  const ymaxQ = wizard.questions({ function: "hill-plot" }, plain).find((qq) => qq && (qq as Question).id === "ymax") as
+    | { validate?: (v: number) => string | undefined }
+    | undefined;
+  if (!ymaxQ?.validate) throw new Error("expected a Ymax question with validation for hill-plot");
+  if (ymaxQ.validate(100) !== undefined) throw new Error("expected Ymax = 100 to validate for hill-plot");
+  if (ymaxQ.validate(0) === undefined) throw new Error("expected Ymax = 0 to fail validation for hill-plot");
+  if (ymaxQ.validate(-5) === undefined) throw new Error("expected Ymax = -5 to fail validation for hill-plot");
+  // The GUI path builds the same params the MCP path takes: concentrations
+  // (the default) name the X column and leave xIsLog unset; log X sets it.
+  deepStrictEqual(wizard.finish({ function: "hill-plot", ymax: 100 }, xy, "xy"), {
+    type: "transform-data",
+    params: { function: "hill-plot", ymax: 100, x: "X" },
+  });
+  deepStrictEqual(wizard.finish({ function: "hill-plot", ymax: 100, xUnits: "log" }, xy, "xy"), {
+    type: "transform-data",
+    params: { function: "hill-plot", ymax: 100, xIsLog: true, x: "X" },
+  });
+  deepStrictEqual(wizard.finish({ function: "hill-plot", ymax: 100 }, plain), {
+    type: "transform-data",
+    params: { function: "hill-plot", ymax: 100 },
+  });
+});
+
 // ── Calculated Variables (v1.8, seq 156) ──────────────────────────────────
 // Prism 11's in-table formulas for Multiple Variables tables: type `=` in an
 // empty variable; the whole column computes live from the table's other

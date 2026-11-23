@@ -230,12 +230,14 @@ export const CORRELATION_METHODS = ["pearson", "spearman"] as const;
  *  Y+Random, rounding, Y^K, 10^Y, 2^Y, −log10, the X/Y cross-column functions
  *  and user-defined transforms. The arithmetic functions read the constant
  *  from TransformDataParams.constant (or per-data-set from `constants`).
- *  The other three pharmacology transforms (Eadie-Hofstee, Hill,
- *  Scatchard) are NOT here — separate follow-ups. Lineweaver-Burk
- *  landed here (seq 384): it is the reciprocal under its own name, so the
+ *  Lineweaver-Burk landed here (seq 384): it is the reciprocal under its own name, so the
  *  Y side reads `lineweaver-burk` and the X side the existing `reciprocal`
  *  through the `xFn` path. Log-log landed here (seq 385): both sides
- *  log10. Hanes-Woolf landed here (seq 381): Y becomes X/Y, X unchanged. */
+ *  log10. Hanes-Woolf landed here (seq 381): Y becomes X/Y, X unchanged.
+ *  The Hill plot landed in seq 383 (Y becomes log10(Y/(Ymax−Y)), X becomes
+ *  log10(X) unless entered as log(concentration)). The other two
+ *  pharmacology transforms (Eadie-Hofstee, Scatchard) are separate
+ *  follow-ups. */
 export const TRANSFORM_FUNCTIONS = [
   "log10",
   "ln",
@@ -275,6 +277,7 @@ export const TRANSFORM_FUNCTIONS = [
   "x-minus-y",
   "hanes-woolf",
   "user-defined",
+  "hill-plot",
 ] as const;
 export type TransformFunction = (typeof TRANSFORM_FUNCTIONS)[number];
 /** The arithmetic Transform functions — the ones that need a constant K
@@ -1482,6 +1485,14 @@ export interface TransformDataParams {
   errorMode?: TransformErrorMode;
   /** The user-defined transform (function "user-defined", seq 341): lines separated by `;` or newlines, each optionally starting with a designator `<Name>` (only that data set) or `<~Name>` (all data sets except it), then an expression with an optional `Y =` prefix. */
   formula?: string;
+  /** The maximum response Ymax for the Hill plot (function "hill-plot",
+   *  seq 383): Y becomes log10(Y/(Ymax−Y)). Required — the run errors
+   *  without it — and it must be greater than 0. */
+  ymax?: number;
+  /** Whether the X values were entered as log(concentration) (function
+   *  "hill-plot", seq 383): true leaves X unchanged; omitted or false
+   *  means concentrations, so X becomes log10(X). */
+  xIsLog?: boolean;
 }
 /** Molar concentration units (Prism's set), in descending magnitude: each
  *  step is a factor of 1000. µ is U+00B5 MICRO SIGN, matching the bUnits in
