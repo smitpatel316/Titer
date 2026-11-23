@@ -67,11 +67,12 @@ export function buildGroupedBars(
   // fill is semi-transparent (the Format panel says so); the gap between
   // bars has nothing to separate here. Stacked bars never superimpose.
 
-  // A summary table's stats carry a lower side too (asymmetric errors); a
-  // replicates table's don't — normalised to the same shape here.
+  // A summary table's stats and a replicates table's both carry a lower
+  // side for the asymmetric kinds (range, IQR, geometric SD/CI) — the two
+  // shapes are normalised to the same { center, error, errorMinus }.
   const stats = groups.map((g) =>
     summary === "replicates"
-      ? { ...perRowStats(g.columns, rows, options.center, showError ? options.error : "none"), errorMinus: null }
+      ? perRowStats(g.columns, rows, options.center, showError ? options.error : "none")
       : perRowSummaryStats(g.columns, rows, summary, showError ? options.error : "none"),
   );
   // 100 % stacked bars: each group's share of its row's total.
@@ -227,7 +228,7 @@ export function buildGroupedLines(
   const data = groups.map((g, i) => {
     const { center, error, errorMinus } =
       summary === "replicates"
-        ? { ...perRowStats(g.columns, rows, options.center, options.error), errorMinus: null }
+        ? perRowStats(g.columns, rows, options.center, options.error)
         : perRowSummaryStats(g.columns, rows, summary, options.error);
     return {
       type: "scatter",
@@ -314,7 +315,7 @@ export function buildGroupedScatter(
     // Center line + optional error whiskers at each row for this group.
     const { center, error, errorMinus } =
       summary === "replicates"
-        ? { ...perRowStats(g.columns, rows, options.center, options.error), errorMinus: null }
+        ? perRowStats(g.columns, rows, options.center, options.error)
         : perRowSummaryStats(g.columns, rows, summary, options.error);
     const lineX: (number | null)[] = [];
     const lineY: (number | null)[] = [];

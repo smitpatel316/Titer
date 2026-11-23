@@ -32,7 +32,7 @@ function build(
       : shown.map((c) => c.name);
   const idx = shown.map((_, i) => i);
   const y = centers(shown, options.center);
-  const errs = errors(shown, options.error);
+  const errs = errors(shown, options.error, y);
   const data: unknown[] = [];
 
   if (options.shape === "line") {
@@ -47,7 +47,9 @@ function build(
   }
 
   shown.forEach((c, i) => {
-    const error_y = errs ? paint.errorBars(c.name, i, [errs[i]]) : { visible: false };
+    const error_y = errs
+      ? paint.errorBars(c.name, i, [errs.error[i]], errs.errorMinus ? [errs.errorMinus[i]] : undefined)
+      : { visible: false };
 
     data.push(
       options.shape === "bar"

@@ -145,10 +145,10 @@ function columnTops(
   error: GraphOptions["error"],
 ): number[] {
   const middle = centers(columns, center);
-  const err = errors(columns, error);
+  const err = errors(columns, error, middle);
   return columns.map((c, i) => {
-    if (c.values.length === 0) return 0;
-    const errTop = middle[i] + (err?.[i] ?? 0);
+    if (c.values.length === 0 || Number.isNaN(middle[i])) return 0;
+    const errTop = middle[i] + (err?.error[i] ?? 0);
     return graphType === "mean-error" ? errTop : c.values.reduce((a, b) => Math.max(a, b), errTop);
   });
 }

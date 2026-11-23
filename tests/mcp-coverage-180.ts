@@ -619,6 +619,25 @@ const ROWS: Row[] = [
     ],
   },
   {
+    item: "351",
+    title: "Error-bar center/error choices: geometric mean, range, median + IQR",
+    status: "covered",
+    note:
+      "Merged on check/v19: geometric mean center + range / IQR / geometric SD / geometric 95% CI errors " +
+      "in GRAPH_CHOICES (center/error), computed on the single centers()/errorOf() path with asymmetric " +
+      "arrayminus bars; build_graph/update_graph take them as GraphOptions.",
+    checks: [
+      { kind: "graphChoice", choice: "center", value: "geomean" },
+      { kind: "graphChoice", choice: "error", value: "range" },
+      { kind: "graphChoice", choice: "error", value: "iqr" },
+      { kind: "graphChoice", choice: "error", value: "geosd" },
+      { kind: "graphChoice", choice: "error", value: "geoci" },
+      { kind: "sourceContains", file: "src/views/graphs/plot-helpers.ts", text: "geometricMean(v) ?? NaN" },
+      { kind: "tool", tool: "titer_build_graph" },
+      { kind: "tool", tool: "titer_update_graph" },
+    ],
+  },
+  {
     item: "179",
     title: "Export All Graphs/Layouts",
     status: "covered",
