@@ -27589,6 +27589,57 @@ check("calcvars: plain COUNT only reports in rows with non-blank values (seq 376
   deepStrictEqual(add("CountIfNone", "COUNTIF(A, A > 100)"), all("0"));
 });
 
+check("calcvars: COUNTA counts text values, not just numbers (seq 377)", () => {
+  // Prism's rule, from the Prism 11 User Guide function reference
+  // (available_functions_transforms.htm, COUNTA(Variable)): "Returns the
+  // count of non-blank values in a variable, including text values. ...
+  // COUNTA(A) returns 3 when A contains [10, blank, 30, blank, "abc"]."
+  // The window-functions page says the same ("COUNTA also counts text
+  // values"). Titer's values() is numeric-only, so COUNTA was identical
+  // to COUNT — text cells never counted. A cell with only spaces counts
+  // as blank (the COUNTAIF entry says so). Excluded cells read as blank.
+  const base = mvTable(["Title", "G", "A", "B", "C", "T"], [
+    [null, "1", "10", "x", "1", "1"],
+    [null, "1", "abc", "y", "2", "   "],
+    [null, "1", null, null, "3", "3"],
+    [null, "2", "30", "z", "4", null],
+    [null, "2", "def", null, "5", "x"],
+    [null, "2", null, "w", "6", null],
+  ]);
+  const add = (t: TableData, name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(t, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  const all = (v: string | null): (string | null)[] => Array(6).fill(v);
+  // Text cells count: A holds 10, abc, 30, def — four non-blank cells.
+  deepStrictEqual(add(base, "CountAA", "COUNTA(A)"), all("4"));
+  // COUNT is unchanged: numeric only, and (seq 376) only on rows with a
+  // numeric value of their own — the text rows stay blank.
+  deepStrictEqual(add(base, "CountA", "COUNT(A)"), ["2", null, null, "2", null, null]);
+  // An all-text column: COUNTA counts its text, COUNT reports nothing.
+  deepStrictEqual(add(base, "CountAB", "COUNTA(B)"), all("4"));
+  deepStrictEqual(add(base, "CountB", "COUNT(B)"), all(null));
+  // A numeric column is unchanged for both functions.
+  deepStrictEqual(add(base, "CountAC", "COUNTA(C)"), all("6"));
+  deepStrictEqual(add(base, "CountC", "COUNT(C)"), all("6"));
+  // Spaces-only counts as blank: T holds 1, 3, x — three non-blank cells.
+  deepStrictEqual(add(base, "CountAT", "COUNTA(T)"), all("3"));
+  deepStrictEqual(add(base, "CountT", "COUNT(T)"), ["2", null, "2", null, null, null]);
+  // COUNTAIF counts text in the matching rows too; COUNTIF stays numeric.
+  deepStrictEqual(add(base, "CountAIfHi", "COUNTAIF(A, C > 3)"), all("2"));
+  deepStrictEqual(add(base, "CountAIfLo", "COUNTAIF(A, C <= 3)"), all("2"));
+  deepStrictEqual(add(base, "CountAIfNone", "COUNTAIF(A, A > 100)"), all("0"));
+  deepStrictEqual(add(base, "CountIfHi", "COUNTIF(A, C > 3)"), all("1"));
+  // The windowed COUNTA counts text within each group as well.
+  deepStrictEqual(add(base, "CountAWin", "COUNTA(A) OVER G"), all("2"));
+  deepStrictEqual(add(base, "CountWin", "COUNT(A) OVER G"), ["1", null, null, "1", null, null]);
+  // Excluded cells read as blank: excluding A's "10" drops both counts.
+  const excluded = { ...base, excluded: ["0,2"] };
+  deepStrictEqual(add(excluded, "CountAX", "COUNTA(A)"), all("3"));
+  deepStrictEqual(add(excluded, "CountX", "COUNT(A)"), [null, null, null, "1", null, null]);
+});
+
 // ── Simulate data + Monte Carlo (plan 22) ───────────────────────────────
 
 check("simulationRCode draws each distribution from the right R call", () => {

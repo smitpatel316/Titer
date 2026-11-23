@@ -720,6 +720,15 @@ export async function runTransformData(
         if (col) return col.values;
         return columns.filter((c) => c.set === name).flatMap((c) => c.values);
       },
+      // Seq 377: the raw cell text COUNTA reads (values() is numeric-only).
+      // A set name has no single cell — its numbers still count through
+      // valueAt; its text has no reading here.
+      rawTextAt: (name, r) => {
+        if (name === "Y") return column.cells[r] ?? null;
+        if (name === "X") return xCol?.cells[r] ?? null;
+        const col = columns.find((c) => c.name === name);
+        return col?.cells[r] ?? null;
+      },
       // Seq 372 extended EvalContext with the row index, the row count and
       // an any-row read (window functions read them); a user-defined
       // transform formula is evaluated one row at a time, so they are this
