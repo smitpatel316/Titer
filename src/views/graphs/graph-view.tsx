@@ -22,6 +22,7 @@ import type { BindingKineticsParams, BindingSaturationParams, DoseResponseSpecia
 import { useProjectStore } from "../../store/use-project-store";
 import { useZoom, ZOOM_LIMITS } from "../../store/use-zoom";
 import { groupsOf, isGrouped, readTable, splitXY, xyProblem, type Column } from "../../lib/dataset";
+import { xZeroMs } from "../../lib/date-time";
 import { mergedGraphData } from "../../lib/multi-table";
 import { summaryTableProblem } from "../../lib/summary-format";
 import { paletteOf } from "../../lib/palettes";
@@ -40,7 +41,7 @@ import { addEstimationPlot } from "./estimation-plot";
 import { coxSurvivalColumns } from "./survival";
 import { FormatPanel } from "./format-panel";
 import { copyGraphImage, saveGraphImage, sendGraphToOffice } from "./graph-export";
-import { addNote, applyNumberFormats, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, refLineParts, rightYDataset, unlinkedAnalysisNote, withCaps } from "./plot-helpers";
+import { addNote, applyDateAxis, applyNumberFormats, hasTableXAxis, INK, MOVABLE, marginsFor, movedText, onAxis, paintOf, refLineParts, rightYDataset, unlinkedAnalysisNote, withCaps } from "./plot-helpers";
 import { addLogisticCurve as addAnalysisLogisticCurve } from "./fitted-curve";
 import { useStartAnalysis } from "../analyses/use-analysis-launcher";
 import { loadPlotly } from "./plotly";
@@ -712,6 +713,18 @@ export function GraphView({ node }: { node: ProjectNode }) {
       );
       const fig = GRAPHS[type].build(coxSurvivalCols ?? volcanoColumns, buildOptions, paint, drawDataset?.titles, drawDataset?.summary, parent?.tableType);
       applyNumberFormats(fig, buildOptions);
+      // A date/elapsed X column (seq 332 part D): the X axis draws date
+      // labels (or elapsed labels) instead of plain numbers — on the graphs
+      // whose X is the table's X column, from the primary table's format
+      // (an extra source table's own format does not move the shared axis).
+      if (hasTableXAxis(type, buildOptions) && data && (data.xFormat === "date" || data.xFormat === "elapsed")) {
+        const conversion = data.xConversion ?? { units: "days" };
+        applyDateAxis(fig, buildOptions, {
+          format: data.xFormat,
+          conversion,
+          zeroMs: data.xFormat === "date" ? xZeroMs(dataset?.columns[0]?.cells ?? [], conversion) : null,
+        });
+      }
       fig.data = withCaps(fig.data, options);
       // A graph whose sibling analysis isn't linked draws only its axes or
       // points: say so on the canvas (G-F7), instead of leaving bare axes.

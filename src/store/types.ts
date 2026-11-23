@@ -87,6 +87,13 @@ export const GRAPH_CHOICES = {
   xScale: ["linear", "log10", "log2"],
   yScale: ["linear", "log10", "log2"],
   y2Scale: ["linear", "log10", "log2"],
+  // A date/elapsed X axis's tick labels (seq 332 part D): the display format
+  // for the dates / elapsed times on an XY graph's X axis. Literal lists,
+  // not spreads of axis-dates.ts: the mcp-coverage gate parses these arrays
+  // literally — and a CHECK pin keeps them equal to DATE_DISPLAY_FORMATS /
+  // ELAPSED_DISPLAY_FORMATS, so the two copies can't drift.
+  xDateFormat: ["16-jan-2004", "jan 16, 2004", "2024-01-16", "16 jan 2004", "jan 2004", "2004", "16-jan", "01/16/2004"],
+  xElapsedFormat: ["h", "h:mm", "h:mm:ss", "h:mm:ss.ms"],
   stackAs: ["values", "percent"],
   shape: ["bar", "point", "line"],
   kind: ["box", "violin"],
@@ -247,6 +254,12 @@ export interface GraphOptions {
   xNumberFormat?: AxisNumberFormat;
   yNumberFormat?: AxisNumberFormat;
   y2NumberFormat?: AxisNumberFormat;
+  // A date/elapsed X axis's tick labels (seq 332 part D): the display format
+  // for the dates / elapsed times on an XY graph's X axis. The defaults are
+  // Prism's own shapes ("16-Jan-2004", "h:mm:ss"); a file's bogus value
+  // reads as the default (see readOptions).
+  xDateFormat: Choice<"xDateFormat">;
+  xElapsedFormat: Choice<"xElapsedFormat">;
   // An axis limit hooked to an info constant (the constant's name, not its
   // value): resolved live in GraphView, so editing the constant moves the
   // axis. A hooked limit wins over its number above when it resolves.
@@ -500,6 +513,8 @@ export const DEFAULT_GRAPH_OPTIONS: GraphOptions = {
   xScale: "linear",
   yScale: "linear",
   y2Scale: "linear",
+  xDateFormat: "16-jan-2004",
+  xElapsedFormat: "h:mm:ss",
   axisWidth: 1,
   gridX: "none",
   gridY: "none",

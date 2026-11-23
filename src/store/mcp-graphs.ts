@@ -223,6 +223,8 @@ const CHOICE_FIELDS: Record<string, keyof typeof GRAPH_CHOICES> = {
   xScale: "xScale",
   yScale: "yScale",
   y2Scale: "y2Scale",
+  xDateFormat: "xDateFormat",
+  xElapsedFormat: "xElapsedFormat",
 };
 
 /** Numerics with a `GRAPH_LIMITS` entry (the limit's key is the option's name). */

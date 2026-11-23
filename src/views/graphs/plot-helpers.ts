@@ -15,6 +15,8 @@ import {
 import { xyPoints, xyRows, type Column, type DataSet } from "../../lib/dataset";
 import { pointKeyOf } from "../../lib/columns";
 import type { GraphFigure } from ".";
+import { dateAxisTicksForValues, elapsedAxisTicksForValues } from "../../lib/axis-dates";
+import type { XConversion } from "../../lib/date-time";
 import { paletteColor, paletteOf, withOpacity } from "../../lib/palettes";
 import { boxOf, mean, median, quantile, sd, sem } from "../../lib/summary";
 import { summaryFormatDef, type SummaryFormat } from "../../lib/summary-format";
@@ -773,6 +775,87 @@ export function applyNumberFormats(fig: GraphFigure, options: GraphOptions): voi
     if (axis.tickmode === "array") continue;
     axis.tickformat = tickformat;
   }
+}
+
+/** The graph types whose X axis is the table's X column (seq 332 part D):
+ *  the core XY plots, a residual plot against X (not its QQ form, whose X
+ *  is a z-score), and the curves plotted against X. Every other xy-family
+ *  type plots something else on X — a survival curve's time, a volcano's
+ *  effect size, a ROC curve's 1 − specificity — so no date axis applies. */
+export const TABLE_X_GRAPH_TYPES = [
+  "xy-scatter",
+  "xy-bar",
+  "xy-area",
+  "xy-spikes",
+  "xy-bar-scatter",
+  "residuals",
+  "smooth-curve",
+  "logistic-curve",
+] as const;
+
+/** Whether this graph's X axis is the table's X column, so a date/elapsed
+ *  X deserves date/elapsed tick labels on it. */
+export function hasTableXAxis(type: GraphType, options: GraphOptions): boolean {
+  if (type === "residuals") return options.residualsAs === "x";
+  return (TABLE_X_GRAPH_TYPES as readonly string[]).includes(type);
+}
+
+/** What a date/elapsed X axis needs: the table's format + conversion, and
+ *  the conversion's zero (xZeroMs) for dates. */
+export interface DateAxisInfo {
+  format: "date" | "elapsed";
+  conversion: XConversion;
+  zeroMs: number | null;
+}
+
+/**
+ * Draws a date/elapsed X axis on a built figure (seq 332 part D): the
+ * axis's numeric range becomes date labels (smart spacing) or elapsed
+ * labels, at the display format the Format Axes dialog chose. Runs after
+ * applyNumberFormats — a date axis replaces the number format, so any
+ * tickformat on X is dropped. Skips log axes (dates have no log scale),
+ * category axes, and figures with no X data to span; the manual min/max
+ * still bound the range, and a date step (xStep) is ignored — the smart
+ * spacing picks the step. Mutates the figure in place.
+ */
+export function applyDateAxis(fig: GraphFigure, options: GraphOptions, info: DateAxisInfo | null): void {
+  if (!info || options.xScale !== "linear") return;
+  const axis = fig.layout.xaxis as Record<string, unknown> | undefined;
+  if (!axis || typeof axis !== "object") return;
+  if (axis.type === "category" || axis.type === "log") return;
+  // The visible range: the manual min/max when set, else the plotted X.
+  let lo: number | undefined;
+  let hi: number | undefined;
+  const range = axis.range as unknown;
+  if (
+    Array.isArray(range) &&
+    range.length === 2 &&
+    typeof range[0] === "number" &&
+    typeof range[1] === "number"
+  ) {
+    [lo, hi] = range;
+  } else {
+    const xs: number[] = [];
+    for (const trace of fig.data as { x?: unknown }[]) {
+      if (!Array.isArray(trace.x)) continue;
+      for (const v of trace.x) if (typeof v === "number" && Number.isFinite(v)) xs.push(v);
+    }
+    if (xs.length === 0) return;
+    lo = Math.min(...xs);
+    hi = Math.max(...xs);
+  }
+  if (lo === undefined || hi === undefined || !Number.isFinite(lo) || !Number.isFinite(hi)) return;
+  const ticks =
+    info.format === "date"
+      ? info.zeroMs === null
+        ? null
+        : dateAxisTicksForValues(lo, hi, info.conversion, info.zeroMs, options.xDateFormat)
+      : elapsedAxisTicksForValues(lo, hi, info.conversion, options.xElapsedFormat);
+  if (!ticks || ticks.tickvals.length === 0) return;
+  axis.tickmode = "array";
+  axis.tickvals = ticks.tickvals;
+  axis.ticktext = ticks.ticktext;
+  delete axis.tickformat;
 }
 
 /** A logarithmic axis: ticks at the powers of `base` (only those in range show), small

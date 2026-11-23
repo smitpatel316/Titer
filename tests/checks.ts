@@ -88,6 +88,7 @@ import {
 import JSZip from "jszip";
 import {
   DEFAULT_GRAPH_OPTIONS,
+  GRAPH_CHOICES,
   GRAPH_LIMITS,
   SAME_AS_FILL,
   type DrawingObject,
@@ -168,6 +169,8 @@ import {
   xZeroMs,
 } from "../src/lib/date-time";
 import {
+  DATE_DISPLAY_FORMATS,
+  ELAPSED_DISPLAY_FORMATS,
   dateAxisTicksForValues,
   elapsedAxisTicksForValues,
   formatDateTick,
@@ -30792,29 +30795,43 @@ check("seq 332: changing the X format leaves the Y values alone and is a no-op w
 // plain numbers. Fits already see converted numbers (readTable, half A) —
 // the pins below prove the fit entry points agree.
 
+check("seq 332: the axis display formats in GRAPH_CHOICES match axis-dates.ts", () => {
+  // GRAPH_CHOICES carries literal lists — the mcp-coverage gate parses them
+  // literally, so it can't read spreads. This pin keeps the two copies
+  // equal, so a format added in one place lands in the other.
+  deepStrictEqual([...GRAPH_CHOICES.xDateFormat], [...DATE_DISPLAY_FORMATS]);
+  deepStrictEqual([...GRAPH_CHOICES.xElapsedFormat], [...ELAPSED_DISPLAY_FORMATS]);
+});
+
 check("seq 332: a date axis renders date labels in several display formats", () => {
   const zero = Date.UTC(2024, 0, 16);
-  strictEqual(formatDateTick(zero, "16-Jan-2004"), "16-Jan-2024");
-  strictEqual(formatDateTick(zero, "Jan 16, 2004"), "Jan 16, 2024");
+  strictEqual(formatDateTick(zero, "16-jan-2004"), "16-Jan-2024");
+  strictEqual(formatDateTick(zero, "jan 16, 2004"), "Jan 16, 2024");
   const conversion = { units: "days" } as const;
   // A 10-day span: daily ticks would be 11, over the 8-tick cap, so the
   // spacing steps to 2 days — ticks at 0, 2, 4, 6, 8, 10 days.
-  const iso = dateAxisTicksForValues(0, 10, conversion, zero, "16-Jan-2004");
+  const iso = dateAxisTicksForValues(0, 10, conversion, zero, "16-jan-2004");
   deepStrictEqual(iso.tickvals, [0, 2, 4, 6, 8, 10]);
   deepStrictEqual(iso.ticktext, ["16-Jan-2024", "18-Jan-2024", "20-Jan-2024", "22-Jan-2024", "24-Jan-2024", "26-Jan-2024"]);
-  deepStrictEqual(dateAxisTicksForValues(0, 10, conversion, zero, "Jan 16, 2004").ticktext, [
+  deepStrictEqual(dateAxisTicksForValues(0, 10, conversion, zero, "jan 16, 2004").ticktext, [
     "Jan 16, 2024", "Jan 18, 2024", "Jan 20, 2024", "Jan 22, 2024", "Jan 24, 2024", "Jan 26, 2024",
   ]);
   deepStrictEqual(dateAxisTicksForValues(0, 10, conversion, zero, "2024-01-16").ticktext, [
     "2024-01-16", "2024-01-18", "2024-01-20", "2024-01-22", "2024-01-24", "2024-01-26",
   ]);
-  // A 5-year span in month-year and year formats: yearly ticks.
+  // A 5-year span in month-year and year formats: yearly ticks on Jan 1.
+  // A calendar year is not exactly 365.25 days, so the tick *values* are
+  // fractional years (Jan 1 2021 is 366/365.25 years out) — the labels are
+  // what the reader sees, and Jan 1 2025 sits just past the 5-year edge.
   const years = { units: "years" } as const;
   const zero20 = Date.UTC(2020, 0, 1);
-  deepStrictEqual(dateAxisTicksForValues(0, 5, years, zero20, "Jan 2004").ticktext, [
-    "Jan 2020", "Jan 2021", "Jan 2022", "Jan 2023", "Jan 2024", "Jan 2025",
+  const five = dateAxisTicksForValues(0, 5, years, zero20, "2004");
+  deepStrictEqual(five.ticktext, ["2020", "2021", "2022", "2023", "2024"]);
+  ok(five.tickvals.length === 5 && five.tickvals[0] === 0, "five yearly ticks from the zero");
+  ok(five.tickvals.every((v, i) => i === 0 || v > five.tickvals[i - 1]), "ticks increase");
+  deepStrictEqual(dateAxisTicksForValues(0, 5, years, zero20, "jan 2004").ticktext, [
+    "Jan 2020", "Jan 2021", "Jan 2022", "Jan 2023", "Jan 2024",
   ]);
-  deepStrictEqual(dateAxisTicksForValues(0, 5, years, zero20, "2004").ticktext, ["2020", "2021", "2022", "2023", "2024", "2025"]);
 });
 
 check("seq 332: an elapsed axis renders h:mm:ss labels (and h, h:mm:ss.ms)", () => {
@@ -30822,33 +30839,34 @@ check("seq 332: an elapsed axis renders h:mm:ss labels (and h, h:mm:ss.ms)", () 
   strictEqual(formatElapsedTick(5400, "h:mm:ss"), "1:30:00");
   strictEqual(formatElapsedTick(5400, "h"), "1.5");
   strictEqual(formatElapsedTick(30.5, "h:mm:ss.ms"), "0:00:30.500");
-  // 0–5400 s (1.5 h): 600 s steps would be 10 ticks, over the cap, so the
-  // spacing steps to 900 s — ticks every 15 minutes.
+  // 0–5400 s (1.5 h): the step nearest five ticks is 1800 s (4 ticks) —
+  // 900 s would be 7, nearer the cap than the aim.
   const hms = elapsedAxisTicksForValues(0, 5400, conversion, "h:mm:ss");
-  deepStrictEqual(hms.tickvals, [0, 900, 1800, 2700, 3600, 4500, 5400]);
-  deepStrictEqual(hms.ticktext, ["0:00:00", "0:15:00", "0:30:00", "0:45:00", "1:00:00", "1:15:00", "1:30:00"]);
-  deepStrictEqual(elapsedAxisTicksForValues(0, 5400, conversion, "h").ticktext, ["0", "0.25", "0.5", "0.75", "1", "1.25", "1.5"]);
-  deepStrictEqual(elapsedAxisTicksForValues(0, 5400, conversion, "h:mm").ticktext, ["0:00", "0:15", "0:30", "0:45", "1:00", "1:15", "1:30"]);
+  deepStrictEqual(hms.tickvals, [0, 1800, 3600, 5400]);
+  deepStrictEqual(hms.ticktext, ["0:00:00", "0:30:00", "1:00:00", "1:30:00"]);
+  deepStrictEqual(elapsedAxisTicksForValues(0, 5400, conversion, "h").ticktext, ["0", "0.5", "1", "1.5"]);
+  deepStrictEqual(elapsedAxisTicksForValues(0, 5400, conversion, "h:mm").ticktext, ["0:00", "0:30", "1:00", "1:30"]);
   deepStrictEqual(elapsedAxisTicksForValues(0, 5400, conversion, "h:mm:ss.ms").ticktext, [
-    "0:00:00.000", "0:15:00.000", "0:30:00.000", "0:45:00.000", "1:00:00.000", "1:15:00.000", "1:30:00.000",
+    "0:00:00.000", "0:30:00.000", "1:00:00.000", "1:30:00.000",
   ]);
 });
 
 check("seq 332: smart date spacing picks sensible ticks and aligns them", () => {
   const zero = Date.UTC(2024, 0, 16);
   // A 3-hour span steps hourly, aligned to the hour.
-  deepStrictEqual(dateAxisTicksForValues(0, 3, { units: "hours" }, zero, "16-Jan-2004").tickvals, [0, 1, 2, 3]);
+  deepStrictEqual(dateAxisTicksForValues(0, 3, { units: "hours" }, zero, "16-jan-2004").tickvals, [0, 1, 2, 3]);
   // A 10-day span steps 2 days, aligned to midnight (all ticks whole days).
-  const ten = dateAxisTicksForValues(0, 10, { units: "days" }, zero, "16-Jan-2004");
+  const ten = dateAxisTicksForValues(0, 10, { units: "days" }, zero, "16-jan-2004");
   ok(ten.tickvals.length <= 8, `expected at most 8 ticks, got ${ten.tickvals.length}`);
   ok(ten.tickvals.every((v) => Number.isInteger(v)), "day ticks land on whole days");
-  // A 5-year span steps yearly, aligned to Jan 1.
+  // A 5-year span steps yearly, aligned to Jan 1 (labels are the assertion —
+  // the values are fractional years, a calendar year not being 365.25 days).
   const five = dateAxisTicksForValues(0, 5, { units: "years" }, Date.UTC(2020, 0, 1), "2004");
-  deepStrictEqual(five.tickvals, [0, 1, 2, 3, 4, 5]);
+  deepStrictEqual(five.ticktext, ["2020", "2021", "2022", "2023", "2024"]);
   // A degenerate range (all X the same) still yields one tick, not none.
-  deepStrictEqual(dateAxisTicksForValues(4, 4, { units: "days" }, zero, "16-Jan-2004").tickvals, [4]);
-  // Elapsed: a 90-second span steps 15 s.
-  deepStrictEqual(elapsedAxisTicksForValues(0, 90, { units: "seconds" }, "h:mm:ss").tickvals, [0, 15, 30, 45, 60, 75, 90]);
+  deepStrictEqual(dateAxisTicksForValues(4, 4, { units: "days" }, zero, "16-jan-2004").tickvals, [4]);
+  // Elapsed: a 90-second span steps 30 s (4 ticks, nearest the five-tick aim).
+  deepStrictEqual(elapsedAxisTicksForValues(0, 90, { units: "seconds" }, "h:mm:ss").tickvals, [0, 30, 60, 90]);
 });
 
 check("seq 332: a fit on a date X converts to numbers and matches hand-computed values", () => {
@@ -30859,17 +30877,18 @@ check("seq 332: a fit on a date X converts to numbers and matches hand-computed 
       [null, "2024-01-17", "20"],
       [null, "2024-01-18", "30"],
       [null, "2024-01-26", "40"],
+      [null, "2024-01-27", "50"],
     ],
     xFormat: "date",
   };
   const ds = readTable(data);
   const pts = xyPoints(ds.columns[0], ds.sets[1]);
-  deepStrictEqual(pts.x, [0, 1, 2, 10]);
+  deepStrictEqual(pts.x, [0, 1, 2, 10, 11]);
   const fit = fitLinear(pts.x, pts.y, false);
   if (fit === null) throw new Error("the date-X fit must exist");
-  // Hand-computed OLS: Sxy = 155, Sxx = 62.75, x̄ = 3.25, ȳ = 25.
-  ok(Math.abs(fit.slope - 155 / 62.75) < 1e-9, `expected slope ${155 / 62.75}, got ${fit.slope}`);
-  ok(Math.abs(fit.intercept - (25 - (155 / 62.75) * 3.25)) < 1e-9, `expected intercept, got ${fit.intercept}`);
+  // Hand-computed OLS: Sxy = 310, Sxx = 110.8, x̄ = 4.8, ȳ = 30.
+  ok(Math.abs(fit.slope - 310 / 110.8) < 1e-9, `expected slope ${310 / 110.8}, got ${fit.slope}`);
+  ok(Math.abs(fit.intercept - (30 - (310 / 110.8) * 4.8)) < 1e-9, `expected intercept, got ${fit.intercept}`);
   // The same points as plain numbers fit identically — the conversion, not
   // the fit, is what changed.
   const numeric: TableData = {
@@ -30879,15 +30898,17 @@ check("seq 332: a fit on a date X converts to numbers and matches hand-computed 
       [null, "1", "20"],
       [null, "2", "30"],
       [null, "10", "40"],
+      [null, "11", "50"],
     ],
   };
   const npts = xyPoints(readTable(numeric).columns[0], readTable(numeric).sets[1]);
   const nfit = fitLinear(npts.x, npts.y, false);
   deepStrictEqual({ slope: fit.slope, intercept: fit.intercept }, { slope: nfit!.slope, intercept: nfit!.intercept });
-  // The nonlinear-fit entry point sees the same converted X.
+  // The nonlinear-fit entry point sees the same converted X (a 4PL needs at
+  // least 5 points, hence the fifth row above).
   const prepared = prepareFit(readTable(data).columns, "Y", "sigmoidal-4pl-x");
   if ("error" in prepared) throw new Error(prepared.error);
-  deepStrictEqual(prepared.xs, [0, 1, 2, 10]);
+  deepStrictEqual(prepared.xs, [0, 1, 2, 10, 11]);
   // And an elapsed X converts to seconds for the fit.
   const elapsed: TableData = {
     columns: ["Title", "X", "Y"],
@@ -30896,13 +30917,14 @@ check("seq 332: a fit on a date X converts to numbers and matches hand-computed 
       [null, "0:01:00", "20"],
       [null, "0:01:30", "30"],
       [null, "0:02:00", "40"],
+      [null, "0:02:30", "50"],
     ],
     xFormat: "elapsed",
     xConversion: { units: "seconds" },
   };
   const eprepared = prepareFit(readTable(elapsed).columns, "Y", "sigmoidal-4pl-x");
   if ("error" in eprepared) throw new Error(eprepared.error);
-  deepStrictEqual(eprepared.xs, [30, 60, 90, 120]);
+  deepStrictEqual(eprepared.xs, [30, 60, 90, 120, 150]);
 });
 
 check("seq 332: a real xy-scatter figure draws date labels on its X axis", () => {
@@ -30916,7 +30938,7 @@ check("seq 332: a real xy-scatter figure draws date labels on its X axis", () =>
     xFormat: "date",
   };
   const ds = readTable(data);
-  const options = { ...newGraphOptions("xy-scatter"), xDateFormat: "16-Jan-2004" as const };
+  const options = { ...newGraphOptions("xy-scatter"), xDateFormat: "16-jan-2004" as const };
   const columns = plotColumns(ds, "xy-scatter", options, "xy");
   const fig = GRAPHS["xy-scatter"].build(columns, options, paintOf(options, 1, ["Y"]), ds.titles, ds.summary, "xy");
   const xaxis = fig.layout.xaxis as Record<string, unknown>;
@@ -30978,7 +31000,7 @@ check("seq 332: the X date/elapsed display format survives a .hlx save/reload; b
         name: "Scatter",
         parentId: "t1",
         graphType: "xy-scatter",
-        graphOptions: { ...newGraphOptions("xy-scatter"), xDateFormat: "Jan 16, 2004", xElapsedFormat: "h:mm" },
+        graphOptions: { ...newGraphOptions("xy-scatter"), xDateFormat: "jan 16, 2004", xElapsedFormat: "h:mm" },
       },
     },
     rootOrder: ["t1"],
@@ -30987,7 +31009,7 @@ check("seq 332: the X date/elapsed display format survives a .hlx save/reload; b
   };
   const reread = read(serializeProjectFile(payload));
   strictEqual(reread.updated, false);
-  strictEqual(reread.project.nodes.g1!.graphOptions!.xDateFormat, "Jan 16, 2004");
+  strictEqual(reread.project.nodes.g1!.graphOptions!.xDateFormat, "jan 16, 2004");
   strictEqual(reread.project.nodes.g1!.graphOptions!.xElapsedFormat, "h:mm");
   // A hand-edited file holding a bogus format falls back to the default,
   // instead of carrying a lie into the axis.
@@ -30995,7 +31017,7 @@ check("seq 332: the X date/elapsed display format survives a .hlx save/reload; b
   broken.project.nodes.g1.graphOptions.xDateFormat = "Fortnightly";
   broken.project.nodes.g1.graphOptions.xElapsedFormat = "fortnights";
   const rereadBroken = read(JSON.stringify(broken));
-  strictEqual(rereadBroken.project.nodes.g1!.graphOptions!.xDateFormat, "16-Jan-2004");
+  strictEqual(rereadBroken.project.nodes.g1!.graphOptions!.xDateFormat, "16-jan-2004");
   strictEqual(rereadBroken.project.nodes.g1!.graphOptions!.xElapsedFormat, "h:mm:ss");
 });
 
@@ -31024,7 +31046,7 @@ check("seq 332: .prism round-trip preserves a date X format with an axis scale s
         name: "Scatter",
         parentId: "t1",
         graphType: "xy-scatter",
-        graphOptions: { ...newGraphOptions("xy-scatter"), xDateFormat: "Jan 16, 2004" },
+        graphOptions: { ...newGraphOptions("xy-scatter"), xDateFormat: "jan 16, 2004" },
       },
     },
     rootOrder: ["t1"],
@@ -31050,8 +31072,8 @@ check("seq 332 (MCP): update-graph accepts the date/elapsed axis formats and ref
     node: { id: "g1", type: "graph", name: "Scatter", parentId: "t2", graphType: "xy-scatter", graphOptions: newGraphOptions("xy-scatter") },
   });
   harness.sync();
-  await harness.run("job-332d-opt", "update-graph", { graph_id: "g1", options: { xDateFormat: "Jan 16, 2004", xElapsedFormat: "h:mm" } });
-  strictEqual(harness.state().nodes.g1.graphOptions?.xDateFormat, "Jan 16, 2004");
+  await harness.run("job-332d-opt", "update-graph", { graph_id: "g1", options: { xDateFormat: "jan 16, 2004", xElapsedFormat: "h:mm" } });
+  strictEqual(harness.state().nodes.g1.graphOptions?.xDateFormat, "jan 16, 2004");
   strictEqual(harness.state().nodes.g1.graphOptions?.xElapsedFormat, "h:mm");
   await rejects(
     harness.run("job-332d-bad", "update-graph", { graph_id: "g1", options: { xDateFormat: "Fortnightly" } }),
