@@ -25864,6 +25864,397 @@ check("calcvars: a conditional formula flows through MCP, round-trips through .h
   deepStrictEqual(calcValues(loaded.data!, "SumIf"), ["12", "12", "12", "12", "12", "12", "12"]);
 });
 
+const animalBase = (): TableData =>
+  // Prism's canonical animal data (window_functions.htm): A is the animal,
+  // B the treatment, C the day, E the tumor volume, F the dose. E is
+  // bracketed in the formulas below — a bare E is Euler's constant in this
+  // formula language (seq 156), so only [E] reads the column.
+  mvTable(["Title", "A", "B", "C", "E", "F"], [
+    [null, "M1", "Control", "0", "100", "0"],
+    [null, "M1", "Control", "7", "180", "0"],
+    [null, "M1", "Control", "14", "300", "0"],
+    [null, "M1", "Control", "21", "500", "0"],
+    [null, "M2", "Treated", "0", "100", "5"],
+    [null, "M2", "Treated", "7", "140", "5"],
+    [null, "M2", "Treated", "14", "160", "5"],
+    [null, "M2", "Treated", "21", "180", "5"],
+    [null, "M2", "Treated", "28", "170", "5"],
+  ]);
+
+check("calcvars: window functions — OVER partitions rows into groups (seq 372, part B)", () => {
+  const base = animalBase();
+  const add = (name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(base, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  // Values are pinned against the independent Python computation in
+  // ~/workspace/.helix-v19/372-window-fixtures.py; the docs' own numbers
+  // (270 / 150, 0 / 15, 0 / 80 / 200 / 400) are asserted there too.
+  deepStrictEqual(add("MeanB", "MEAN([E]) OVER B"), ["270", "270", "270", "270", "150", "150", "150", "150", "150"]);
+  deepStrictEqual(add("CountB", "COUNT([E]) OVER B WHERE [E] >= 170"), ["3", "3", "3", "3", "2", "2", "2", "2", "2"]);
+  deepStrictEqual(add("SumIfA", "SUMIF(F, C <= 14) OVER A"), ["0", "0", "0", "0", "15", "15", "15", "15", "15"]);
+  // The partition can be any expression: day 0 rows against all later days.
+  deepStrictEqual(add("MeanDay", "MEAN([E]) OVER C > 0"), [
+    "100",
+    "232.8571429",
+    "232.8571429",
+    "232.8571429",
+    "100",
+    "232.8571429",
+    "232.8571429",
+    "232.8571429",
+    "232.8571429",
+  ]);
+  // Row-wise functions within each treatment group (sample SD, n − 1).
+  deepStrictEqual(add("CentreB", "CENTER([E]) OVER B"), ["-170", "-90", "30", "230", "-50", "-10", "10", "30", "20"]);
+  deepStrictEqual(add("ZscoreB", "ZSCORE([E]) OVER B"), [
+    "-0.9771621232",
+    "-0.517321124",
+    "0.1724403747",
+    "1.322042873",
+    "-1.58113883",
+    "-0.316227766",
+    "0.316227766",
+    "0.9486832981",
+    "0.632455532",
+  ]);
+  deepStrictEqual(add("StdB", "STANDARDIZE([E]) OVER B"), [
+    "-0.9771621232",
+    "-0.517321124",
+    "0.1724403747",
+    "1.322042873",
+    "-1.58113883",
+    "-0.316227766",
+    "0.316227766",
+    "0.9486832981",
+    "0.632455532",
+  ]);
+  deepStrictEqual(add("RankB", "RANK([E]) OVER B"), ["1", "2", "3", "4", "1", "2", "3", "5", "4"]);
+  // STDEV / STDERR are Prism's spellings of SD / SEM.
+  deepStrictEqual(add("StdevB", "STDEV([E]) OVER B"), [
+    "173.973178",
+    "173.973178",
+    "173.973178",
+    "173.973178",
+    "31.6227766",
+    "31.6227766",
+    "31.6227766",
+    "31.6227766",
+    "31.6227766",
+  ]);
+  deepStrictEqual(add("StderrB", "STDERR([E]) OVER B"), [
+    "86.986589",
+    "86.986589",
+    "86.986589",
+    "86.986589",
+    "14.14213562",
+    "14.14213562",
+    "14.14213562",
+    "14.14213562",
+    "14.14213562",
+  ]);
+  // No clauses at all: the window is the whole variable.
+  deepStrictEqual(add("ZAll", "ZSCORE([E])"), [
+    "-0.8207781865",
+    "-0.1853370099",
+    "0.7678247551",
+    "2.356427697",
+    "-0.8207781865",
+    "-0.5030575982",
+    "-0.344197304",
+    "-0.1853370099",
+    "-0.2647671569",
+  ]);
+  deepStrictEqual(add("RankAll", "RANK([E])"), ["1.5", "6.5", "8", "9", "1.5", "3", "4", "6.5", "5"]);
+});
+
+check("calcvars: window functions — ORDER BY and ROWS make running and moving calculations (seq 372, part B)", () => {
+  const base = animalBase();
+  const add = (name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(base, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  deepStrictEqual(add("Cum", "SUM(F) OVER A ORDER BY C ROWS UNBOUNDED PRECEDING"), [
+    "0",
+    "0",
+    "0",
+    "0",
+    "5",
+    "10",
+    "15",
+    "20",
+    "25",
+  ]);
+  deepStrictEqual(add("Move", "MEAN([E]) OVER A ORDER BY C ROWS 1 PRECEDING 1 FOLLOWING"), [
+    "140",
+    "193.3333333",
+    "326.6666667",
+    "400",
+    "120",
+    "133.3333333",
+    "160",
+    "170",
+    "175",
+  ]);
+  deepStrictEqual(add("RunMax", "MAX([E]) OVER A ORDER BY C ROWS UNBOUNDED PRECEDING"), [
+    "100",
+    "180",
+    "300",
+    "500",
+    "100",
+    "140",
+    "160",
+    "180",
+    "180",
+  ]);
+  deepStrictEqual(add("RunCount", "COUNT([E]) OVER A ORDER BY C ROWS UNBOUNDED PRECEDING"), [
+    "1",
+    "2",
+    "3",
+    "4",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+  ]);
+  deepStrictEqual(add("RunCountDesc", "COUNT([E]) OVER A ORDER BY C DESC ROWS UNBOUNDED PRECEDING"), [
+    "4",
+    "3",
+    "2",
+    "1",
+    "5",
+    "4",
+    "3",
+    "2",
+    "1",
+  ]);
+  // A single boundary defaults the other side to the current row.
+  deepStrictEqual(add("OnePrec", "MEAN([E]) OVER A ORDER BY C ROWS 1 PRECEDING"), [
+    "100",
+    "140",
+    "240",
+    "400",
+    "100",
+    "120",
+    "150",
+    "170",
+    "175",
+  ]);
+  deepStrictEqual(add("OneFoll", "MEAN([E]) OVER A ORDER BY C ROWS 1 FOLLOWING"), [
+    "140",
+    "240",
+    "400",
+    "500",
+    "120",
+    "150",
+    "170",
+    "175",
+    "170",
+  ]);
+  // Without ROWS the window is the whole group, even with ORDER BY.
+  deepStrictEqual(add("NoRows", "SUM(F) OVER A ORDER BY C"), ["0", "0", "0", "0", "25", "25", "25", "25", "25"]);
+  // ROWS without ORDER BY runs in table order.
+  deepStrictEqual(add("CumNoOrder", "SUM(F) OVER A ROWS UNBOUNDED PRECEDING"), [
+    "0",
+    "0",
+    "0",
+    "0",
+    "5",
+    "10",
+    "15",
+    "20",
+    "25",
+  ]);
+  // Multi-key ORDER BY breaks ties on the second key.
+  const mk = mvTable(["Title", "G", "K1", "K2", "V"], [
+    [null, "1", "2", "1", "10"],
+    [null, "1", "1", "2", "20"],
+    [null, "1", "1", "1", "30"],
+    [null, "1", "2", "0", "40"],
+  ]);
+  const mkAdd = addCalculatedVariable(mk, "Cum", "SUM(V) OVER G ORDER BY K1, K2 ROWS UNBOUNDED PRECEDING");
+  if ("error" in mkAdd) throw new Error(mkAdd.error);
+  deepStrictEqual(calcValues(mkAdd.data, "Cum"), ["100", "50", "30", "90"]);
+});
+
+check("calcvars: window functions — larger formulas, WHERE with ROWS, blanks and errors (seq 372, part B)", () => {
+  const base = animalBase();
+  const add = (name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(base, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  // A window function inside a larger formula needs parentheses.
+  deepStrictEqual(add("BaseSub", "[E] - (MEANIF([E], C = 0) OVER A)"), [
+    "0",
+    "80",
+    "200",
+    "400",
+    "0",
+    "40",
+    "60",
+    "80",
+    "70",
+  ]);
+  deepStrictEqual(add("Pct", "100 * [E] / (SUM([E]) OVER A)"), [
+    "9.259259259",
+    "16.66666667",
+    "27.77777778",
+    "46.2962963",
+    "13.33333333",
+    "18.66666667",
+    "21.33333333",
+    "24",
+    "22.66666667",
+  ]);
+  deepStrictEqual(add("DivMean", "[E] / (MEAN([E]) OVER B)"), [
+    "0.3703703704",
+    "0.6666666667",
+    "1.111111111",
+    "1.851851852",
+    "0.6666666667",
+    "0.9333333333",
+    "1.066666667",
+    "1.2",
+    "1.133333333",
+  ]);
+  // Without the parentheses the partition reads greedily: B * 100 is blank
+  // for a text partition, so the whole formula blanks — the docs' warning.
+  deepStrictEqual(add("Greedy", "[E] / SUM([E]) OVER B * 100"), [null, null, null, null, null, null, null, null, null]);
+  // WHERE with ROWS: only matching rows get a result.
+  deepStrictEqual(add("WhereRows", "COUNT([E]) OVER A WHERE [E] >= 170 ORDER BY C ROWS UNBOUNDED PRECEDING"), [
+    null,
+    "1",
+    "2",
+    "3",
+    null,
+    null,
+    null,
+    "1",
+    "2",
+  ]);
+  // A blank partition blanks the row; a blank value still gets its group's
+  // aggregate, but COUNT and the row-wise functions blank on it.
+  const edge = mvTable(["Title", "G", "V"], [
+    [null, "1", "10"],
+    [null, "1", "20"],
+    [null, "1", null],
+    [null, null, "30"],
+    [null, "2", "40"],
+  ]);
+  const edgeAdd = (name: string, formula: string): (string | null)[] => {
+    const res = addCalculatedVariable(edge, name, formula);
+    if ("error" in res) throw new Error(res.error);
+    return calcValues(res.data, name);
+  };
+  deepStrictEqual(edgeAdd("EMean", "MEAN(V) OVER G"), ["15", "15", "15", null, "40"]);
+  deepStrictEqual(edgeAdd("ECount", "COUNT(V) OVER G"), ["2", "2", null, null, "1"]);
+  deepStrictEqual(edgeAdd("ERank", "RANK(V) OVER G"), ["1", "2", null, null, "1"]);
+  deepStrictEqual(edgeAdd("EZ", "ZSCORE(V) OVER G"), ["-0.7071067812", "0.7071067812", null, null, null]);
+  // Errors: clauses out of order, a window on MEDIAN, an unknown partition
+  // variable, a bad ROWS boundary, and a self-reference.
+  const badOrder = addCalculatedVariable(base, "G", "MEAN([E]) ORDER BY C OVER B");
+  ok("error" in badOrder && badOrder.error.includes("order OVER, WHERE, ORDER BY, ROWS"), JSON.stringify(badOrder));
+  const medianOver = addCalculatedVariable(base, "G", "MEDIAN([E]) OVER B");
+  ok(
+    "error" in medianOver && medianOver.error.includes("cannot take window clauses"),
+    JSON.stringify(medianOver),
+  );
+  const unknownPart = addCalculatedVariable(base, "G", "MEAN([E]) OVER Missing");
+  deepStrictEqual(unknownPart, { error: "unknown variable “Missing” — the table has no variable with that name." });
+  const badRows = addCalculatedVariable(base, "G", "MEAN([E]) OVER A ORDER BY C ROWS 2 BANANAS");
+  ok("error" in badRows && badRows.error.includes("could not be read"), JSON.stringify(badRows));
+  const withG = addCalculatedVariable(base, "G", "C + 1");
+  if ("error" in withG) throw new Error(withG.error);
+  const self = setCalculatedFormula(withG.data, "G", "MEAN([E]) OVER G");
+  deepStrictEqual(self, { error: "“G” refers to itself — a calculated variable cannot use its own values." });
+});
+
+check("calcvars: a window formula flows through MCP, round-trips through .hlx, and follows source edits (seq 372, part B)", async () => {
+  // MCP: the same formula through titer_edit_table computes the same values
+  // as the GUI path (addCalculatedVariable).
+  const harness = mcpLaggingHarness(true);
+  const created = await harness.run("job-372w", "create-table", {
+    table_type: "multiple",
+    name: "Animals",
+    columns: ["Title", "A", "B", "C", "E", "F"],
+    rows: [
+      ["r1", "M1", "Control", 0, 100, 0],
+      ["r2", "M1", "Control", 7, 180, 0],
+      ["r3", "M1", "Control", 14, 300, 0],
+      ["r4", "M1", "Control", 21, 500, 0],
+      ["r5", "M2", "Treated", 0, 100, 5],
+      ["r6", "M2", "Treated", 7, 140, 5],
+      ["r7", "M2", "Treated", 14, 160, 5],
+      ["r8", "M2", "Treated", 21, 180, 5],
+      ["r9", "M2", "Treated", 28, 170, 5],
+    ],
+  });
+  const tid = (created.result as { table_id: string }).table_id;
+  const data = () => harness.state().nodes[tid]?.data!;
+  harness.sync();
+  await harness.run("job-372x", "edit-table", {
+    table_id: tid,
+    op: "add-calculated-variable",
+    name: "MeanB",
+    formula: "MEAN([E]) OVER B",
+  });
+  deepStrictEqual(
+    data().rows.map((r) => r[6]),
+    ["270", "270", "270", "270", "150", "150", "150", "150", "150"],
+  );
+  // set-calculated-variable to a framed cumulative sum.
+  harness.sync();
+  await harness.run("job-372y", "edit-table", {
+    table_id: tid,
+    op: "set-calculated-variable",
+    name: "MeanB",
+    formula: "SUM(F) OVER A ORDER BY C ROWS UNBOUNDED PRECEDING",
+  });
+  deepStrictEqual(
+    data().rows.map((r) => r[6]),
+    ["0", "0", "0", "0", "5", "10", "15", "20", "25"],
+  );
+  // A bad window formula is refused through MCP and leaves the table alone.
+  harness.sync();
+  await rejects(
+    harness.run("job-372z", "edit-table", {
+      table_id: tid,
+      op: "set-calculated-variable",
+      name: "MeanB",
+      formula: "MEAN([E]) ORDER BY C OVER B",
+    }),
+    /order OVER, WHERE, ORDER BY, ROWS/,
+  );
+  deepStrictEqual(
+    data().rows.map((r) => r[6]),
+    ["0", "0", "0", "0", "5", "10", "15", "20", "25"],
+  );
+  // GUI path: edits to a source recompute the windowed variable, and the
+  // formula round-trips through .hlx with its values.
+  const base = animalBase();
+  const added = addCalculatedVariable(base, "MeanB", "MEAN([E]) OVER B");
+  if ("error" in added) throw new Error(added.error);
+  const edited = recomputeCalculated(writeBlock(added.data, 0, 4, [["200"]], "multiple"));
+  deepStrictEqual(calcValues(edited, "MeanB"), ["295", "295", "295", "295", "150", "150", "150", "150", "150"]);
+  const payload: ProjectFilePayload = {
+    nodes: {
+      t1: { id: "t1", type: "table", name: "MV", parentId: null, tableType: "multiple", data: added.data },
+    },
+    rootOrder: ["t1"],
+    childOrder: { t1: [] },
+    activeNodeId: "t1",
+  };
+  const parsed = read(serializeProjectFile(payload));
+  strictEqual(parsed.updated, false);
+  const loaded = parsed.project.nodes.t1 as ProjectNode;
+  deepStrictEqual(loaded.data?.calculated, [{ name: "MeanB", formula: "MEAN([E]) OVER B" }]);
+  deepStrictEqual(calcValues(loaded.data!, "MeanB"), ["270", "270", "270", "270", "150", "150", "150", "150", "150"]);
+});
+
 // ── Simulate data + Monte Carlo (plan 22) ───────────────────────────────
 
 check("simulationRCode draws each distribution from the right R call", () => {
