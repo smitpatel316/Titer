@@ -53,7 +53,7 @@ import type {
   TwoWayAnovaParams,
   XYCorrelationParams,
 } from "./types";
-import { missingColumn, runColumnTest, type ColumnTestSpec } from "./column/base";
+import { missingColumn, posthocShort, runColumnTest, type ColumnTestSpec } from "./column/base";
 import { runDescriptiveStatistics } from "./column/descriptive-statistics";
 import { compareTwoGroupsSpec } from "./column/compare-two-groups";
 import { oneSampleTSpec } from "./column/one-sample-t";
@@ -496,6 +496,32 @@ export const ANALYSES: Record<AnalysisType, Analysis> = {
     minColumns: 1,
     run: (c, p, t) => runSelectTransform(c, p as SelectTransformParams, t),
   },
+};
+
+/** The name an analysis node carries, from its type + params — ONE derivation
+ *  for creation (createAnalysis) and for Change Parameters (Apply): the test's
+ *  subtitle plus the post-hoc short label ("One-way ANOVA + Dunnett (vs. vehicle)").
+ *  Types whose params carry no post-hoc read as their plain label/subtitle, so a
+ *  fresh node and an edited node agree. A post-hoc the short labels don't cover
+ *  leaves the title bare rather than inventing a name. */
+export const analysisTitle = (type: AnalysisType, params: AnalysisParams | undefined): string => {
+  const base = ANALYSES[type].name?.(params) ?? ANALYSES[type].label;
+  const short = posthocShort(params as { posthoc?: string; control?: string } | undefined);
+  return short ? `${base} + ${short}` : base;
+};
+
+/** The title Apply should set, or null to leave it alone: rename only while the
+ *  title is still the derived one for the old params — a hand-renamed (or legacy
+ *  rich) title keeps its name, and an unchanged derivation is a no-op. */
+export const titleAfterApply = (
+  type: AnalysisType,
+  oldParams: AnalysisParams | undefined,
+  oldName: string,
+  newParams: AnalysisParams | undefined,
+): string | null => {
+  if (oldName !== analysisTitle(type, oldParams)) return null;
+  const next = analysisTitle(type, newParams);
+  return next === oldName ? null : next;
 };
 
 /** Whether the wizard for `type` may run: `blocked` when a required package

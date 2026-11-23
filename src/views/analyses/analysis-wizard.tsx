@@ -12,7 +12,7 @@ import { alert } from "../../native";
 import { checkNormality } from "./normality-check";
 import { useAnalysisLauncher } from "./use-analysis-launcher";
 import { analysisLabel } from ".";
-import { packageGate } from "../../stats";
+import { packageGate, titleAfterApply } from "../../stats";
 import { ensurePackages } from "../../stats/webr";
 import {
   answersFor,
@@ -86,7 +86,13 @@ export function AnalysisWizard() {
             alert("These parameters are not valid", errors.join(" "));
             return;
           }
-          setAnalysisParams(node.id, checked ?? params);
+          const next = checked ?? params;
+          // Apply renames the node to match the new params (seq 373 follow-up) —
+          // but only while its title is still the derived one for the old params;
+          // a hand-renamed title keeps its name. The rename rides the same
+          // undoable action as the params, so one undo restores both.
+          const newTitle = titleAfterApply(analysisType, storedParams, node.name, next);
+          setAnalysisParams(node.id, next, newTitle ?? undefined);
           closeSelector();
         }}
       />

@@ -172,6 +172,7 @@ import { nestedMeans } from "../src/stats/nested/base";
 import { runNestedTTest } from "../src/stats/nested/nested-t-test";
 import { prepareFit } from "../src/stats/xy/nonlinear-fit";
 import { adjustComparisonRows, adjustFdrComparisonRows, adjustFdrPValues, adjustPValues, describe, describedBy, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
+import { analysisTitle, titleAfterApply } from "../src/stats/index";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
 import { hclustAvgSilhouette, hclustClusterWithinSs, hclustDistanceMatrix, hclustSuggestedK, hclustWithinSs } from "../src/stats/multiple/hierarchical-clustering";
 import { dendrogramSegments } from "../src/views/graphs/dendrogram";
@@ -3955,6 +3956,85 @@ check("seq 373: wizardForAnalysis maps types to wizards, and canEditAnalysisPara
       /setAnalysisParams/.test(wizard),
     "wizard host lacks the edit branch (Apply + validate + setAnalysisParams)",
   );
+});
+
+// seq 373 follow-up: Apply renames the analysis node to match the new params.
+// Before the fix the title stayed whatever creation gave it — Dunnett→Tukey
+// left "One-way ANOVA + Dunnett (vs. vehicle)" on Tukey results. One title
+// derivation serves creation and Apply (analysisTitle): the test's subtitle
+// plus the post-hoc short label, so a fresh Dunnett ANOVA is named exactly
+// what Apply renames an edited one to. The rename rides the same undoable
+// setAnalysisParams action as the params, and only fires while the title is
+// still the derived one for the old params — a hand-renamed (or legacy) title
+// is left alone, and a type the derivation can't cover keeps its title.
+check("seq 373 follow-up: Apply renames the analysis node to match the new params", () => {
+  strictEqual(
+    analysisTitle("anova", { posthoc: "dunnett", equalSd: true, control: "Vehicle" }),
+    "One-way ANOVA + Dunnett (vs. vehicle)",
+  );
+  strictEqual(analysisTitle("anova", { posthoc: "tukey", equalSd: true }), "One-way ANOVA + Tukey");
+  strictEqual(analysisTitle("anova", { posthoc: "none", equalSd: true }), "One-way ANOVA");
+  strictEqual(analysisTitle("anova", { equalSd: true } as AnalysisParams), "One-way ANOVA");
+  strictEqual(analysisTitle("outliers", { q: 1 }), "Identify outliers");
+  strictEqual(
+    titleAfterApply(
+      "anova",
+      { posthoc: "dunnett", control: "Vehicle" },
+      "One-way ANOVA + Dunnett (vs. vehicle)",
+      { posthoc: "tukey" },
+    ),
+    "One-way ANOVA + Tukey",
+  );
+  strictEqual(
+    titleAfterApply("anova", { posthoc: "dunnett", control: "Vehicle" }, "My ANOVA", { posthoc: "tukey" }),
+    null,
+    "a hand-renamed title is left alone",
+  );
+  strictEqual(
+    titleAfterApply("anova", { posthoc: "tukey" }, "One-way ANOVA + Tukey", { posthoc: "tukey" }),
+    null,
+    "the same title is a no-op",
+  );
+  strictEqual(
+    titleAfterApply("outliers", { q: 1 }, "Outliers (ROUT, Q = 1%)", { q: 5 }),
+    null,
+    "a legacy rich name the derivation can't reproduce is left alone",
+  );
+  // Params + title in one action: one undo step restores both.
+  let s = makeInitialState();
+  const t1 = s.rootOrder[0];
+  s = reducer(s, {
+    type: "create",
+    node: {
+      id: "a1",
+      type: "analysis",
+      name: "One-way ANOVA + Dunnett (vs. vehicle)",
+      parentId: t1,
+      analysisType: "anova",
+      analysisParams: { posthoc: "dunnett", equalSd: true, control: "Vehicle" } as AnalysisParams,
+    },
+  });
+  s = reducer(s, {
+    type: "setAnalysisParams",
+    id: "a1",
+    params: { posthoc: "tukey", equalSd: true } as AnalysisParams,
+    name: "One-way ANOVA + Tukey",
+  });
+  strictEqual(s.nodes.a1.name, "One-way ANOVA + Tukey");
+  deepStrictEqual(s.nodes.a1.analysisParams, { posthoc: "tukey", equalSd: true });
+  s = reducer(s, { type: "undo" });
+  strictEqual(s.nodes.a1.name, "One-way ANOVA + Dunnett (vs. vehicle)");
+  deepStrictEqual(s.nodes.a1.analysisParams, { posthoc: "dunnett", equalSd: true, control: "Vehicle" });
+  s = reducer(s, { type: "redo" });
+  strictEqual(s.nodes.a1.name, "One-way ANOVA + Tukey");
+  // Without a name the params-only call (the MCP rerun path) leaves the title alone.
+  s = reducer(s, {
+    type: "setAnalysisParams",
+    id: "a1",
+    params: { posthoc: "bonferroni", equalSd: true } as AnalysisParams,
+  });
+  strictEqual(s.nodes.a1.name, "One-way ANOVA + Tukey");
+  deepStrictEqual(s.nodes.a1.analysisParams, { posthoc: "bonferroni", equalSd: true });
 });
 
 // Quirk 2: the "Project Updated" notice must not go through the native dialog —
