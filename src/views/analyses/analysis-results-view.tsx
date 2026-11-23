@@ -816,12 +816,16 @@ export function AnalysisResultsView({
             // Prism's wording for the Hill slope (4PL and allosteric) — kept
             // for stored results predating the dedup rename.
             c.term === "HillSlope" ? "Hill slope" : c.term,
-            num(c.estimate),
-            num(c.stdError),
-            num(c.t),
+            // Seq 323: an unstable parameter's best-fit value shows
+            // "Unstable" and its CI "Very wide" (Prism's display); the
+            // numeric estimate stays on the result (the overlays draw the
+            // curve from it), and its t/P are meaningless, so they show "—".
+            c.unstable ? "Unstable" : num(c.estimate),
+            c.unstable ? "Unstable" : num(c.stdError),
+            c.unstable ? "—" : num(c.t),
             ...(showDf ? [num(c.df)] : []),
-            <P p={c.p} />,
-            c.low == null && c.high == null ? "—" : `${num(c.low)} to ${num(c.high)}`,
+            <P p={c.unstable ? null : c.p} />,
+            c.unstable ? "Very wide" : c.low == null && c.high == null ? "—" : `${num(c.low)} to ${num(c.high)}`,
             ...(showHr ? [num(c.hazardRatio)] : []),
           ])}
         />

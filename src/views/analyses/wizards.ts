@@ -3362,6 +3362,13 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ["robust", "Robust regression (Tukey biweight — outliers barely move the fit)"],
           ["poisson", "Poisson (for counts — maximum Poisson likelihood)"],
         ]),
+        // Seq 323 (Prism's Confidence tab): what happens when a parameter
+        // is unstable — the data don't determine it (the fit's Hessian
+        // condition number exceeds 10/√ε, about 6.7×10⁸).
+        choice("difficultFitHandling", "What should happen when a parameter is unstable (the data don't determine it)?", [
+          ["unstable", "Identify unstable parameters (recommended — Prism's default)"],
+          ["none", "Neither — report best-fit values no matter what"],
+        ]),
         // Seq 166 (Prism 11 Range tab): "Don't fit points when X is less
         // than / greater than …" — points outside the range are ignored
         // entirely. Either bound alone is enough; both blank fits all.
@@ -3630,6 +3637,9 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ...(a.centered === "yes" ? { centered: true } : {}),
           ...(a.fitMethod !== undefined && a.fitMethod !== "least-squares"
             ? { fitMethod: a.fitMethod as NonlinearRegressionParams["fitMethod"] }
+            : {}),
+          ...(a.difficultFitHandling !== undefined && a.difficultFitHandling !== "unstable"
+            ? { difficultFitHandling: a.difficultFitHandling as NonlinearRegressionParams["difficultFitHandling"] }
             : {}),
           ...compareModel,
           ...global,

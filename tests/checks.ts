@@ -169,7 +169,7 @@ import { buildPanelFigure } from "../src/views/figures/panel-figure";
 import type { McpJob } from "../src/native";
 import { nestedMeans } from "../src/stats/nested/base";
 import { runNestedTTest } from "../src/stats/nested/nested-t-test";
-import { prepareFit } from "../src/stats/xy/nonlinear-fit";
+import { fitModelSpec, identifyUnstableParameters, modelSpec, prepareFit, UNSTABLE_CONDITION_THRESHOLD } from "../src/stats/xy/nonlinear-fit";
 import { adjustComparisonRows, adjustFdrComparisonRows, adjustFdrPValues, adjustPValues, describe, describedBy, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
 import { hclustAvgSilhouette, hclustClusterWithinSs, hclustDistanceMatrix, hclustSuggestedK, hclustWithinSs } from "../src/stats/multiple/hierarchical-clustering";
@@ -9303,6 +9303,7 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
     "model",
     "weights",
     "fitMethod",
+    "difficultFitHandling",
     "fitRange",
     "compareWith",
     "compareModel",
@@ -9318,6 +9319,7 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
       "model",
       "weights",
       "fitMethod",
+      "difficultFitHandling",
       "fitRange",
       "compareWith",
       "compareModel",
@@ -9330,7 +9332,7 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
   );
   deepStrictEqual(
     asked({ y: "A", kind: "dose", model: "homologous-competition-logx" }).map((q) => q.id),
-    ["ys", "kind", "model", "weights", "fitMethod", "fitRange", "compareWith", "compareModel", "global", "constrain", "ligandConcentration"],
+    ["ys", "kind", "model", "weights", "fitMethod", "difficultFitHandling", "fitRange", "compareWith", "compareModel", "global", "constrain", "ligandConcentration"],
   );
   ok(!asked({ y: "A", kind: "dose", model: "sigmoidal-4pl-logx" }).some((q) => q.id === "fitKi"));
   deepStrictEqual(
@@ -10173,6 +10175,146 @@ check("seq 200 fitting method in the curve wizard", () => {
   );
   deepStrictEqual(
     wizard.finish({ ys: ["A"], kind: "other", model: "line", fitMethod: "least-squares" }, twoY).params,
+    { y: "A", model: "line" },
+  );
+});
+
+// Seq 323: Prism's unstable-parameter check — the fit's Hessian (JᵀWJ)
+// condition number against 10/√ε (≈ 6.7×10⁸, Prism 8/9 Curve Fitting
+// Guide), with greedy elimination of the parameter that most reduces the
+// condition. The hand-built expectations below are numpy's eigvalsh on the
+// same matrices (verified independently in Python, Nov 22, 2026).
+check("seq 323 unstable-parameter detection on hand-built Hessians", () => {
+  const th = UNSTABLE_CONDITION_THRESHOLD;
+  ok(th === 671088640, `threshold should be 10/sqrt(eps) = 671088640, got ${th}`);
+  const unstable = (h: number[][], names: string[]) => identifyUnstableParameters(h, names).unstable;
+  const condition = (h: number[][], names: string[]) => identifyUnstableParameters(h, names).condition;
+  // A single badly-scaled parameter (cond 1e9) is unstable; 1e8 is not.
+  deepStrictEqual(unstable([[1, 0], [0, 1e-9]], ["A", "B"]), ["B"]);
+  ok(Math.abs(condition([[1, 0], [0, 1e-9]], ["A", "B"]) - 1e9) / 1e9 < 1e-9, "cond of diag(1,1e-9) should be 1e9");
+  deepStrictEqual(unstable([[1, 0], [0, 1e-8]], ["A", "B"]), []);
+  deepStrictEqual(unstable([[1, 0], [0, 1]], ["A", "B"]), []);
+  // Exactly at the threshold is stable; one unit above it is not.
+  deepStrictEqual(unstable([[1, 0], [0, 1 / 671088640]], ["A", "B"]), []);
+  deepStrictEqual(unstable([[1, 0], [0, 1 / 671088641]], ["A", "B"]), ["B"]);
+  // A near-collinear pair (cond ~2e9): removing either leaves cond 1 — the
+  // tie breaks toward the parameter loading most on the smallest eigenvector
+  // (equal loadings here, so the first in order).
+  deepStrictEqual(
+    unstable([[1, 0.999999999, 0], [0.999999999, 1, 0], [0, 0, 1]], ["P1", "P2", "P3"]),
+    ["P1"],
+  );
+  // Two bad scalings are eliminated one at a time, worst first.
+  deepStrictEqual(
+    unstable([[1, 0, 0], [0, 1e-9, 0], [0, 0, 1e-18]], ["A", "B", "C"]),
+    ["C", "B"],
+  );
+  // A clear winner: only removing the 1e-9 diagonal brings cond below threshold.
+  deepStrictEqual(
+    unstable([[1, 0.9, 0], [0.9, 1, 0], [0, 0, 1e-9]], ["A", "B", "C"]),
+    ["C"],
+  );
+  ok(
+    Math.abs(condition([[1, 0.9, 0], [0.9, 1, 0], [0, 0, 1e-9]], ["A", "B", "C"]) - 1.9e9) / 1.9e9 < 1e-3,
+    "cond of the clear-winner Hessian should be ~1.9e9",
+  );
+});
+
+// Seq 323: the Hessian condition is computed on the fit itself — a
+// well-determined 4PL stays far below the threshold, while a one-phase decay
+// spanning 1e5 → 1 with 1/Y² weights trips it (its Y0 is determined only by
+// the heavily down-weighted early points). The R cond values below were
+// cross-checked against an independent Python (numpy) computation on the
+// same fitted parameters (4PL 4154.74, decay 5.169e12 — agreement to 0.02%).
+check("seq 323 the Hessian condition is computed on the fit", async () => {
+  const xs4 = [-9, -8.5, -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4];
+  const ys4 = xs4.map((x, i) => 100 / (1 + 10 ** (-6.5 - x)) + 0.8 * Math.sin(1.7 * i + 0.5));
+  const fit4 = await fitModelSpec(xs4, ys4, modelSpec("sigmoidal-4pl-logx"));
+  ok(
+    fit4.hessianCondition != null && fit4.hessianCondition > 4000 && fit4.hessianCondition < 4300,
+    `well-determined 4PL Hessian condition should be ~4155, got ${fit4.hessianCondition}`,
+  );
+  deepStrictEqual(fit4.unstableParameters ?? [], []);
+  const xsD = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20];
+  const ysD = xsD.map((x, i) => (1e5 - 1) * Math.exp(-0.5 * x) + 1 + 0.02 * Math.sin(1.7 * i + 0.5));
+  const wD = ysD.map((y) => 1 / (y * y));
+  const fitD = await fitModelSpec(xsD, ysD, modelSpec("one-phase-decay"), "", (t) => t, { weights: wD });
+  ok(
+    fitD.hessianCondition != null && fitD.hessianCondition > 1e12,
+    `weighted decay Hessian condition should exceed 1e12, got ${fitD.hessianCondition}`,
+  );
+  deepStrictEqual(fitD.unstableParameters ?? [], ["Y0"]);
+  // The control off: the same fit reports nothing unstable.
+  const fitDNone = await fitModelSpec(xsD, ysD, modelSpec("one-phase-decay"), "", (t) => t, {
+    weights: wD,
+    difficultFitHandling: "none",
+  });
+  deepStrictEqual(fitDNone.unstableParameters ?? [], []);
+});
+
+// Seq 323: an unstable parameter is flagged on the results sheet, and the
+// Confidence-tab control turns the check off (the value is then reported).
+check("seq 323 an unstable parameter is flagged on the results sheet", async () => {
+  const xsD = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20];
+  const ysD = xsD.map((x, i) => (1e5 - 1) * Math.exp(-0.5 * x) + 1 + 0.02 * Math.sin(1.7 * i + 0.5));
+  const decayTable: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xsD.map((x, i) => ["", String(x), String(ysD[i])]),
+  };
+  const out = await runAnalysis("nonlinear-regression", decayTable, { y: "Y", model: "one-phase-decay", weights: "1/y2" });
+  ok(!("error" in out), `weighted decay fit failed: ${"error" in out ? out.error : ""}`);
+  const y0 = out.coefficients?.find((c) => c.term === "Y0");
+  ok(y0?.unstable === true, `Y0 should be flagged unstable, got ${JSON.stringify(y0)}`);
+  ok(out.coefficients?.find((c) => c.term === "Plateau")?.unstable !== true, "Plateau should not be flagged");
+  ok(out.coefficients?.find((c) => c.term === "K")?.unstable !== true, "K should not be flagged");
+  ok(
+    out.notes?.includes("Y0") && out.notes?.includes("unstable"),
+    `notes should name Y0 as unstable, got ${out.notes}`,
+  );
+  // The control off: Y0 is reported with its value, and no warning.
+  const off = await runAnalysis("nonlinear-regression", decayTable, {
+    y: "Y",
+    model: "one-phase-decay",
+    weights: "1/y2",
+    difficultFitHandling: "none",
+  });
+  ok(!("error" in off), `decay fit with the control off failed: ${"error" in off ? off.error : ""}`);
+  const y0off = off.coefficients?.find((c) => c.term === "Y0");
+  ok(
+    y0off?.unstable !== true && y0off?.estimate != null && Math.abs(y0off.estimate - 99973) < 1,
+    `Y0 should be reported (~99973) with the control off, got ${y0off?.estimate}`,
+  );
+  ok(!off.notes?.includes("unstable"), `notes should not warn with the control off, got ${off.notes}`);
+  // A well-determined 4PL reports nothing unstable.
+  const xs4 = [-9, -8.5, -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4];
+  const ys4 = xs4.map((x, i) => 100 / (1 + 10 ** (-6.5 - x)) + 0.8 * Math.sin(1.7 * i + 0.5));
+  const table4: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xs4.map((x, i) => ["", String(x), String(ys4[i])]),
+  };
+  const out4 = await runAnalysis("nonlinear-regression", table4, { y: "Y", model: "sigmoidal-4pl-logx" });
+  ok(!("error" in out4), `4PL fit failed: ${"error" in out4 ? out4.error : ""}`);
+  ok(!out4.coefficients?.some((c) => c.unstable), "well-determined 4PL should flag nothing unstable");
+  ok(!out4.notes?.includes("unstable"), `4PL notes should not warn, got ${out4.notes}`);
+});
+
+check("seq 323 difficult-fit handling in the curve wizard", () => {
+  const wizard = WIZARDS["nonlinear-regression"]!;
+  const twoY = readTable({ columns: ["Title", "X", "A", "B"], rows: [["", "1", "2", "3"]] });
+  const asked = (a: Record<string, string | string[]>) =>
+    wizard.questions(a, twoY).flatMap((q) => (q ? [q] : []));
+  const ids = (a: Record<string, string | string[]>) => asked(a).map((q) => q.id);
+  ok(
+    ids({ kind: "dose", model: "sigmoidal-4pl-logx" }).includes("difficultFitHandling"),
+    "dose-response should ask about difficult fits",
+  );
+  ok(ids({ kind: "other", model: "line" }).includes("difficultFitHandling"), "line should ask too");
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "line", difficultFitHandling: "none" }, twoY).params,
+    { y: "A", model: "line", difficultFitHandling: "none" },
+  );
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "line", difficultFitHandling: "unstable" }, twoY).params,
     { y: "A", model: "line" },
   );
 });
@@ -11362,6 +11504,7 @@ check("a nonlinear regression on a Multiple Variables table names its X and Y", 
     "model",
     "weights",
     "fitMethod",
+    "difficultFitHandling",
     "fitRange",
     "rout",
     "compareModel",

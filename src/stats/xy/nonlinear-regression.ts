@@ -22,7 +22,7 @@ import type {
   StatRow,
 } from "../types";
 import { describe, missingColumn, pRow, rVec } from "../column/base";
-import { NONLINEAR_FIT_METHODS, routQError } from "../types";
+import { NONLINEAR_DIFFICULT_FIT_HANDLINGS, NONLINEAR_FIT_METHODS, routQError } from "../types";
 import { num } from "../../lib/format";
 import { maxOf, minOf } from "../../lib/summary";
 import { pointKeyOf } from "../../lib/columns";
@@ -34,6 +34,7 @@ import {
   EXPONENTIAL_MODELS,
   CLASSIC_MODELS,
   applyFitOptions,
+  applyUnstableFlags,
   ecAnything,
   fitEntries,
   fitError,
@@ -1518,6 +1519,14 @@ async function compareModels(
     return fitError(err, model);
   }
   const parsedA = parseFit(v, effA, first.xs.length, termLabel, "a_");
+  // Seq 323: the primary model's fit carries the unstable-parameter check.
+  const { condition: conditionA } = applyUnstableFlags(
+    parsedA.coefficients,
+    parsedA.hessian,
+    effA.terms,
+    termLabel,
+    params?.difficultFitHandling ?? "unstable",
+  );
   const aiccA = v.aiccA ?? null;
   const aiccB = v.aiccB ?? null;
   const delta = aiccA != null && aiccB != null ? aiccA - aiccB : null;
@@ -1553,7 +1562,7 @@ async function compareModels(
         ? "AICc ties the two models."
         : "AICc could not be computed (too few points for the correction).");
   const sets = [{ name: first.yCol.name, xs: first.xs, ys: first.ys }];
-  return assembleResult(model, spec, xCol, first.yCol, undefined, sets, [parsedA], [], [], titles, first, undefined, undefined, params, stats, extraNotes);
+  return assembleResult(model, spec, xCol, first.yCol, undefined, sets, [{ ...parsedA, ...(conditionA != null ? { hessianCondition: conditionA } : {}) }], [], [], titles, first, undefined, undefined, params, stats, extraNotes);
 }
 
 /** fitModelSpec's retry ladder, as R: try each `m<-nls(...)` fit string in
@@ -1641,6 +1650,9 @@ async function runGlobalNonlinear(
 ): Promise<AnalysisOutcome> {
   const fixed = params?.fixed ?? {};
   const bounds = params?.bounds ?? {};
+  // Seq 323: the stacked global fit honors the difficult-fit control
+  // (validated in runNonlinearRegression before this branch is reached).
+  const difficultFitHandling = params?.difficultFitHandling ?? "unstable";
   const extraNames = params!.globalY!;
   const series: {
     name: string;
@@ -1784,7 +1796,7 @@ async function runGlobalNonlinear(
   const fitSeries = series.map((s) => ({ name: s.name, x: s.xs, y: s.ys, covariate: 0 }));
   let result: GlobalFitResult | undefined;
   try {
-    result = await runGlobalFit(fitSeries, def);
+    result = await runGlobalFit(fitSeries, def, { difficultFitHandling });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // R3-11x: a shared start is the mean of the single-curve fits, so when
@@ -1870,7 +1882,7 @@ async function runGlobalNonlinear(
     if (driven) restarts.push(driven);
     for (const restart of restarts) {
       try {
-        result = await runGlobalFit(fitSeries, restart);
+        result = await runGlobalFit(fitSeries, restart, { difficultFitHandling });
         break;
       } catch {
         // Try the next restart; the original error is reported below.
@@ -1957,6 +1969,9 @@ async function runGlobalNonlinear(
     `fitted separately per data set: ${perSeriesParams.length ? perSeriesParams.map(termLabel).join(", ") : "none"}. ` +
     `95% CIs are asymptotic (from each parameter's standard error). ` +
     `R² is per data set; the sum of squares, Sy.x and degrees of freedom are for all series together.` +
+    unstableNote([
+      { coefficients, ...(result.hessianCondition != null ? { hessianCondition: result.hessianCondition } : {}) },
+    ]) +
     rangeNotes(params, series.reduce((s, x) => s + x.rangeExcluded, 0)) +
     (Object.keys(fixed).length
       ? ` Fixed: ${Object.entries(fixed)
@@ -2133,6 +2148,11 @@ export async function runNonlinearRegression(
   const fitMethod = params?.fitMethod ?? "least-squares";
   if (!(NONLINEAR_FIT_METHODS as readonly string[]).includes(fitMethod))
     return { error: "Choose a fitting method: least squares, robust, or Poisson." };
+  // Seq 323: difficult-fit handling — identify unstable parameters, or
+  // neither. A bogus value is refused, not defaulted.
+  const difficultFitHandling = params?.difficultFitHandling ?? "unstable";
+  if (!(NONLINEAR_DIFFICULT_FIT_HANDLINGS as readonly string[]).includes(difficultFitHandling))
+    return { error: "Choose how difficult fits are handled: identify unstable parameters, or neither." };
   const comparingModels = params?.compareModel !== undefined;
   if (comparingModels && params.compareModel === model)
     return { error: "Choose a different model to compare with." };
@@ -2217,7 +2237,12 @@ export async function runNonlinearRegression(
       return { error: "Each Y data set can be fitted once — pick each data set at most once." };
     const yColsAll = yCols.flatMap((s) => s.columns);
     const multiSets: { name: string; xs: number[]; ys: number[]; rows: number[]; columns: string[] }[] = [];
-    const multiParsed: { coefficients: RegressionCoefficient[]; derived: DerivedRow[]; stats: StatRow[] }[] = [];
+    const multiParsed: {
+      coefficients: RegressionCoefficient[];
+      derived: DerivedRow[];
+      stats: StatRow[];
+      hessianCondition?: number;
+    }[] = [];
     const multiYCols: Column[] = [];
     let routOutliers: CurveOutlier[] = [];
     let anyRetried = false;
@@ -2234,6 +2259,7 @@ export async function runNonlinearRegression(
         ...(fixedNames.length ? { fixed } : {}),
         ...(boundNames.length ? { bounds } : {}),
         ...(fitMethod !== "least-squares" ? { fitMethod } : {}),
+        ...(difficultFitHandling !== "unstable" ? { difficultFitHandling } : {}),
       };
       let applied: AppliedFitOptions;
       try {
@@ -2298,7 +2324,12 @@ export async function runNonlinearRegression(
         c.term = `${name} — ${c.term}`;
       });
       multiSets.push({ name, xs: prep.xs, ys: prep.ys, rows: prep.rows, columns: prep.columns });
-      multiParsed.push({ coefficients: fitted.coefficients, derived: fitted.derived, stats: fitted.stats });
+      multiParsed.push({
+        coefficients: fitted.coefficients,
+        derived: fitted.derived,
+        stats: fitted.stats,
+        ...(fitted.hessianCondition != null ? { hessianCondition: fitted.hessianCondition } : {}),
+      });
       multiYCols.push(prep.yCol);
     }
     return assembleResult(
@@ -2339,6 +2370,7 @@ export async function runNonlinearRegression(
     ...(fixedNames.length ? { fixed } : {}),
     ...(boundNames.length ? { bounds } : {}),
     ...(fitMethod !== "least-squares" ? { fitMethod } : {}),
+    ...(difficultFitHandling !== "unstable" ? { difficultFitHandling } : {}),
   };
   let effSpec: ModelSpec;
   let extraAssignments = "";
@@ -2531,8 +2563,20 @@ export async function runNonlinearRegression(
   }
 
   // Comparison / interpolation paths: parse each set's prefixed entries.
+  // Seq 323: each set's fit carries the unstable-parameter check (marked
+  // before the set-prefixing below, which renames the terms).
   const prefix = other ? ["a_", "b_"] : [""];
-  const parsed = sets.map((s, i) => parseFit(v, other ? spec : effSpec, s.xs.length, termLabel, prefix[i]));
+  const parsed = sets.map((s, i) => {
+    const p = parseFit(v, other ? spec : effSpec, s.xs.length, termLabel, prefix[i]);
+    const { condition } = applyUnstableFlags(
+      p.coefficients,
+      p.hessian,
+      (other ? spec : effSpec).terms,
+      termLabel,
+      params?.difficultFitHandling ?? "unstable",
+    );
+    return { ...p, ...(condition != null ? { hessianCondition: condition } : {}) };
+  });
   if (other) {
     // Comparison coefficients name their set ("Control — Bottom").
     parsed.forEach((p, i) => {
@@ -2639,6 +2683,30 @@ function frameworkNotes(
   return parts.length ? ` ${parts.join(" ")}` : "";
 }
 
+/** The unstable-parameter warning for the results notes (seq 323): which
+ *  parameters the data do not determine, and — for a single fit — how bad
+ *  the conditioning is. Terms are the coefficients' display terms (they
+ *  already name their set when several were fitted). */
+function unstableNote(parsed: { coefficients: RegressionCoefficient[]; hessianCondition?: number }[]): string {
+  const clauses: string[] = [];
+  for (const p of parsed) {
+    const terms = p.coefficients.filter((c) => c.unstable).map((c) => c.term);
+    if (!terms.length) continue;
+    const list =
+      terms.length === 1
+        ? `“${terms[0]}”`
+        : `${terms.slice(0, -1).map((t) => `“${t}”`).join(", ")} and “${terms[terms.length - 1]}”`;
+    const cond =
+      p.hessianCondition != null && Number.isFinite(p.hessianCondition)
+        ? ` (Hessian condition ${p.hessianCondition.toExponential(1)})`
+        : "";
+    clauses.push(
+      `${list} ${terms.length === 1 ? "is" : "are"} unstable${cond} — the data do not determine ${terms.length === 1 ? "it" : "them"}, so ${terms.length === 1 ? "its" : "their"} best-fit value and 95% CI are not reported (Prism's unstable-parameter check: the Hessian condition number exceeds 10/√ε, about 6.7×10⁸).`,
+    );
+  }
+  return clauses.length ? ` ${clauses.join(" ")}` : "";
+}
+
 /** The result all three paths share: fit block + coefficients + notes, with
  *  the exponential/enzyme extras (equation, starting values, warnings) and
  *  the comparison F test / interpolation sentences when they apply.
@@ -2653,7 +2721,7 @@ async function assembleResult(
   yCol: Column,
   otherCol: Column | undefined,
   sets: { name: string; xs: number[]; ys: number[] }[],
-  parsed: { coefficients: RegressionCoefficient[]; derived: DerivedRow[]; stats: StatRow[] }[],
+  parsed: { coefficients: RegressionCoefficient[]; derived: DerivedRow[]; stats: StatRow[]; hessianCondition?: number }[],
   interpolated: InterpolatedRow[],
   v: RVector | [],
   _titles: (string | null)[],
@@ -2774,6 +2842,7 @@ async function assembleResult(
     `${methodLabel} ("${MODEL_LABEL[model]}") of ${sets.map((s) => `“${s.name}”`).join(" and ")} on “${xCol.name}”. ` +
     `95% CIs are asymptotic (from each parameter's standard error${spec.terms.includes("S") ? "; the asymmetry S's, on its log" : ""}).` +
     frameworkNotes(params, coefficients, first) +
+    unstableNote(parsed) +
     (centeredX != null
       ? ` Centered at the mean of X (${num(centeredX)}): B0 is the fitted Y there, and the higher terms are powers of (X − ${num(centeredX)}).`
       : "") +

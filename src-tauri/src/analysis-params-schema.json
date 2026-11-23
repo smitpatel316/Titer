@@ -1691,6 +1691,16 @@
         "description": "How the curve is fitted (seq 200): least squares (default), robust (Tukey biweight), or Poisson (counts)."
       },
       {
+        "name": "difficultFitHandling",
+        "type": "string",
+        "enum": [
+          "unstable",
+          "none"
+        ],
+        "required": false,
+        "description": "How a difficult fit is handled (seq 323): identify unstable parameters (default) or report best-fit values no matter what."
+      },
+      {
         "name": "compareWith",
         "type": "string",
         "required": false,

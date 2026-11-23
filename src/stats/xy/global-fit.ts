@@ -30,7 +30,7 @@
 // nonlinear fit, not a plan-18 one. Per-series R² is computed here from
 // the model's closed-form evaluator (the same function the graph overlay
 // uses), so the fit and the overlay can never disagree.
-import type { RegressionCoefficient, StatRow } from "../types";
+import type { NonlinearDifficultFitHandling, RegressionCoefficient, StatRow } from "../types";
 import { rVec } from "../column/base";
 import { fitModelSpec, type ModelSpec } from "./nonlinear-fit";
 
@@ -96,6 +96,10 @@ export interface GlobalFitResult {
   perSeries: GlobalFitPerSeries[];
   /** The exact R code that was evaluated (for debugging). */
   rCode: string;
+  /** Seq 323: the stacked fit's Hessian condition number, when the check ran. */
+  hessianCondition?: number;
+  /** Seq 323: the parameters the data do not determine (raw term names). */
+  unstableParameters?: string[];
 }
 
 /** R² of `ys` against their fitted values (null when Y is constant, or
@@ -115,7 +119,11 @@ const rNum = (v: number): string => (v === Infinity ? "Inf" : v === -Infinity ? 
 /** Fit `def` to `series` with one stacked nls() call. The caller owns
  *  validation (series count, point counts, covariate rules) — this helper
  *  only fits what it is given. */
-export async function runGlobalFit(series: GlobalFitSeries[], def: GlobalModelDef): Promise<GlobalFitResult> {
+export async function runGlobalFit(
+  series: GlobalFitSeries[],
+  def: GlobalModelDef,
+  options?: { difficultFitHandling?: NonlinearDifficultFitHandling },
+): Promise<GlobalFitResult> {
   const stackedX = series.flatMap((s) => s.x);
   const stackedY = series.flatMap((s) => s.y);
   // g is the 1-based series index per point; B repeats each series'
@@ -163,7 +171,14 @@ export async function runGlobalFit(series: GlobalFitSeries[], def: GlobalModelDe
     terms,
     derived: def.derived,
   };
-  const { coefficients, derived, stats, rCode } = await fitModelSpec(stackedX, stackedY, spec, extra);
+  const { coefficients, derived, stats, rCode, hessianCondition, unstableParameters } = await fitModelSpec(
+    stackedX,
+    stackedY,
+    spec,
+    extra,
+    (t) => t,
+    { ...(options?.difficultFitHandling !== undefined ? { difficultFitHandling: options.difficultFitHandling } : {}) },
+  );
 
   const coefOf = (term: string) => coefficients.find((c) => c.term === term)?.estimate ?? null;
   const perSeries: GlobalFitPerSeries[] = series.map((s, i) => {
@@ -178,5 +193,13 @@ export async function runGlobalFit(series: GlobalFitSeries[], def: GlobalModelDe
     }
     return { name: s.name, n: s.x.length, rSquared: rSquared(s.y, fitted), params };
   });
-  return { coefficients, derived, stats, perSeries, rCode };
+  return {
+    coefficients,
+    derived,
+    stats,
+    perSeries,
+    rCode,
+    ...(hessianCondition != null ? { hessianCondition } : {}),
+    ...(unstableParameters?.length ? { unstableParameters } : {}),
+  };
 }
