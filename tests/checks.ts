@@ -35982,6 +35982,101 @@ check("seq 340: MCP set-level-order sets the order and a later write appends a n
   );
 });
 
+ // ── seq 390: MV level order in .prism/.pzfx ──────────────────────────────
+
+// Investigation verdict: NOT A GAP — a format ceiling, not a missing
+// feature. Neither format carries a level-order field in any file Prism
+// wrote that Titer can observe:
+//   • .pzfx: the Prism 8 XSD's Table/YColumn/XColumn vocabularies have no
+//     level-order, variable-type or label-variable field, and the Prism
+//     8.0.1-written MV table in the corpus (zenodo-18255034, Table12) is
+//     Title + YColumns only. Prism 11-written files still carry
+//     PrismXMLVersion="5.00" with no new Table attribute or element (the
+//     only addition is file-level MostRecentVersion). Variable types
+//     themselves (Prism 9+) have no XML representation — they live in the
+//     compressed <Template> blob, which is opaque (graph-import spike
+//     NO-GO) — and Titer writes an empty <Template> by design (BUG-21: a
+//     non-empty blob fails to open in Prism 11.2.0), so the blob is not a
+//     writable channel either. The writer demotes MV tables to OneWay
+//     with a warning (pzfx-write.ts).
+//   • .prism: the writer demotes MV tables to Column with a warning and
+//     content.json carries only counts; real Prism's data.bin is opaque.
+// One confirmation is still owed, not a blocker for the verdict: no Prism
+// 11.2-written .pzfx holding an MV table exists in the corpus, so an
+// MV-only 11.2 XML element cannot be excluded from files alone — the
+// seq 310 Mac-slot fixture (a Prism-written .pzfx with reordered levels)
+// settles it. Until then these pins record the ceiling: the order is kept
+// in .hlx only (seq 340) and is dropped, with a warning, on both Prism
+// writes. If either format ever gains a field, these pins fail on
+// purpose — re-investigate then, do not invent a field now.
+check("seq 390: a .pzfx write carries no level-order field and the order is lost on read-back", () => {
+  const data = setLevelOrder(mv340(), "Group", ["Gamma", "Alpha", "Beta"]);
+  const payload: ProjectFilePayload = {
+    nodes: {
+      mv: { id: "mv", type: "table", name: "Arms", parentId: null, tableType: "multiple", data },
+    },
+    rootOrder: ["mv"],
+    childOrder: { mv: [] },
+    activeNodeId: "mv",
+  };
+  const written = writePzfx(payload, "1.0.7");
+  const xml = new TextDecoder().decode(written.bytes);
+  ok(!/levelorder/i.test(xml), "the written .pzfx must carry no level-order field");
+  ok(!/variabletype/i.test(xml), "the written .pzfx must carry no variable-type field either");
+  ok(!/labelvariable/i.test(xml), "the written .pzfx must carry no label-variable field either");
+  ok(xml.includes('TableType="OneWay"'), "an MV table is written as a plain OneWay table");
+  ok(
+    written.report.issues.some(
+      (i) => i.severity === "warning" && /Multiple variables table/.test(i.message),
+    ),
+    "the write report warns the MV table was demoted",
+  );
+  // Read-back: values and names survive, the order does not — and the
+  // table comes back a plain Column table, not an MV table.
+  const back = parsePzfx(xml);
+  const table = Object.values(back.project.nodes).find((n) => n?.type === "table");
+  strictEqual(table?.tableType, "column");
+  deepStrictEqual(table?.data?.columns, data.columns);
+  deepStrictEqual(table?.data?.rows, data.rows);
+  strictEqual(table?.data?.levelOrder, undefined, "levelOrder does not survive a .pzfx round-trip");
+});
+
+check("seq 390: a .prism write carries no level-order field", async () => {
+  const data = setLevelOrder(mv340(), "Group", ["Gamma", "Alpha", "Beta"]);
+  const payload: ProjectFilePayload = {
+    nodes: {
+      mv: { id: "mv", type: "table", name: "Arms", parentId: null, tableType: "multiple", data },
+    },
+    rootOrder: ["mv"],
+    childOrder: { mv: [] },
+    activeNodeId: "mv",
+  };
+  const written = await writePrism(payload, "1.0.7");
+  ok(
+    written.report.issues.some(
+      (i) => i.severity === "warning" && /Multiple variables table/.test(i.message),
+    ),
+    "the write report warns the MV table was demoted",
+  );
+  const zip = await JSZip.loadAsync(written.bytes);
+  for (const entry of Object.values(zip.files)) {
+    if (entry.dir) continue;
+    const text = await entry.async("string");
+    ok(!/levelorder/i.test(text), `${entry.name} must not carry a level order`);
+    ok(!/variabletype/i.test(text), `${entry.name} must not carry a variable type`);
+  }
+});
+
+check("seq 390: the Prism 8 .pzfx schema itself has no level-order field", () => {
+  // The schema is the format's own vocabulary: if a later Prism XSD ever
+  // gains a level-order (or variable-type) field, this fails and the
+  // investigation re-opens — it is not a pin to waive past.
+  const xsd = readFileSync("tests/testdata/Prism8XMLSchema-stripped.xsd", "utf8");
+  ok(!/levelorder/i.test(xsd), "the .pzfx schema defines no level-order field");
+  ok(!/variabletype/i.test(xsd), "the .pzfx schema defines no variable-type field");
+  ok(/MultipleVariables/.test(xsd), "sanity: the schema does know MV tables (ExtTableType)");
+});
+
 check("seq 378: a write-table replace keeps the row-label source when its column survives, drops it when the column is gone", async () => {
   const harness = mcpLaggingHarness(true);
   const base = setLabelVariable(mv331bTyped(), "ID");
