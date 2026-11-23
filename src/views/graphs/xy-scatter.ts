@@ -90,5 +90,7 @@ export const xyScatter: GraphModule = {
   family: "xy",
   points: (options) => options.xyStyle !== "line",
   lines: (options) => options.xyStyle !== "points",
+  // Replicates are summarized only when shown as their center.
+  summarizes: (options) => options.xyReplicates === "mean",
   build,
 };

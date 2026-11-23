@@ -66,5 +66,7 @@ export const xySpikes: GraphModule = {
   family: "xy",
   points: () => true,
   lines: () => true,
+  // Replicates are summarized only when shown as their center.
+  summarizes: (options) => options.xyReplicates === "mean",
   build,
 };

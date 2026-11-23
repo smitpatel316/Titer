@@ -7,5 +7,6 @@ export const groupedScatter: GraphModule = {
   label: "Interleaved scatter",
   family: "grouped",
   points: () => true,
+  summarizes: () => true,
   build: buildGroupedScatter,
 };

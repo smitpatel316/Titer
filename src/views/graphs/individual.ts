@@ -80,5 +80,6 @@ export const individual: GraphModule = {
   defaults: { fill: 0.5 },
   points: () => true,
   patterns: (options) => options.bars,
+  summarizes: () => true,
   build,
 };

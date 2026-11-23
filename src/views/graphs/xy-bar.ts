@@ -42,4 +42,11 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?:
   };
 }
 
-export const xyBar: GraphModule = { label: "Column or bar", family: "xy", patterns: () => true, build };
+export const xyBar: GraphModule = {
+  label: "Column or bar",
+  family: "xy",
+  patterns: () => true,
+  // A bar stands for one value per X: replicates as their center, whatever `xyReplicates`.
+  summarizes: () => true,
+  build,
+};

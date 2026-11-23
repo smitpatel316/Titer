@@ -298,6 +298,7 @@ export const beforeAfter: GraphModule = {
   family: "column",
   points: () => true,
   lines: () => true,
+  summarizes: () => true,
   build: buildBeforeAfter,
 };
 
@@ -374,5 +375,6 @@ export const groupedBeforeAfter: GraphModule = {
   family: "grouped",
   points: () => true,
   lines: () => true,
+  summarizes: () => true,
   build: buildGroupedBeforeAfter,
 };

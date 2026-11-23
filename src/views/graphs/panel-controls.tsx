@@ -7,13 +7,17 @@ import { colorName, paletteBackground, paletteNamed } from "../../lib/palettes";
 import { TINT, visibleOutline } from "./plot-helpers";
 import { PaletteDialog, draftFrom, type PaletteDraft } from "./palette-dialog";
 import {
+  CENTER_SHORT,
+  chooseCenter,
   chooseColor,
   chooseDash,
+  chooseError,
   choosePalette,
   choosePattern,
   chooseShape,
   chooseSwatch,
   DASH_ARRAYS,
+  ERROR_SHORT,
   PATTERN_PATHS,
   SHAPE_PATHS,
 } from "./style-menus";
@@ -129,29 +133,35 @@ function PatternIcon({ color, pattern }: { color: string; pattern?: FillPattern 
 }
 
 /** What a series offers besides its color, while the graph draws it: its points'
- *  shape, its line's dashes, the pattern over its fill. */
+ *  shape, its line's dashes, the pattern over its fill — and, where the graph
+ *  summarizes (seq 375), its own center and error bars. */
 interface SeriesOffer {
   shape?: boolean;
   dash?: boolean;
   pattern?: boolean;
+  center?: boolean;
+  error?: boolean;
 }
 
-// The columns of the series' rows, in order, and what heads each.
+// The columns of the series' rows, in order, what heads each, and how wide the
+// cell is: the picture buttons fit w-12; the center/error words need w-24.
 const COLUMNS = [
-  ["color", "Color"],
-  ["shape", "Shape"],
-  ["dash", "Line"],
-  ["pattern", "Pattern"],
+  ["color", "Color", "w-12"],
+  ["shape", "Shape", "w-12"],
+  ["dash", "Line", "w-12"],
+  ["pattern", "Pattern", "w-12"],
+  ["center", "Center", "w-24"],
+  ["error", "Error", "w-24"],
 ] as const;
-const CELL = "flex w-12 shrink-0 justify-center";
+const CELL = "flex shrink-0 justify-center";
 
 /** What each column of the series' rows sets, above them. */
 export function SeriesHeader({ offer }: { offer: SeriesOffer }) {
   return (
     <div className="flex items-center gap-1">
       <span className="flex-1" />
-      {COLUMNS.filter(([key]) => key === "color" || offer[key]).map(([key, title]) => (
-        <span key={key} className={cn(CELL, "text-small text-secondary")}>
+      {COLUMNS.filter(([key]) => key === "color" || offer[key]).map(([key, title, width]) => (
+        <span key={key} className={cn(CELL, width, "text-small text-secondary")}>
           {title}
         </span>
       ))}
@@ -167,7 +177,9 @@ const PictureButton = ({ label, icon, onClick }: { label: string; icon: React.Re
 );
 
 /** One series' name, then one button per thing it offers, each its own native menu:
- *  its color, then its points' shape, its line's dashes, its fill's pattern. Every
+ *  its color, then its points' shape, its line's dashes, its fill's pattern —
+ *  and, where the graph summarizes (seq 375), its center and error bars, each
+ *  Default (the graph's choice, shown as such) or its own kind. Every
  *  series offers the same, so the buttons line up in columns under `SeriesHeader`. Only
  *  the color is drawn in color: the others in gray, so the columns read apart (their
  *  menus show the series' color). */
@@ -176,16 +188,26 @@ export function SeriesRow({
   palette,
   style,
   offer,
+  center,
+  error,
+  own,
   onChange,
 }: {
   label: string;
   palette: GraphPalette;
   style: { color: string; shape: PointShape; dash: LineDash; pattern?: FillPattern };
   offer: SeriesOffer;
+  /** The graph's Center / Error bars choices — what Default means for this series. */
+  center: GraphOptions["center"];
+  error: GraphOptions["error"];
+  /** This series' own overrides, if any (undefined = all Default). */
+  own?: SeriesStyle;
   onChange: (style: SeriesStyle) => void;
 }) {
   const { color } = style;
-  const cell = (button: React.ReactNode) => <span className={CELL}>{button}</span>;
+  const cell = (button: React.ReactNode, width = "w-12") => <span className={cn(CELL, width)}>{button}</span>;
+  const centerText = own?.center ? CENTER_SHORT[own.center] : `Default (${CENTER_SHORT[center]})`;
+  const errorText = own?.error ? ERROR_SHORT[own.error] : `Default (${ERROR_SHORT[error]})`;
   return (
     <div className="flex items-center gap-1 text-secondary">
       <span className="flex-1 truncate text-small text-primary">{label}</span>
@@ -219,6 +241,32 @@ export function SeriesRow({
             icon={<PatternIcon color="currentColor" pattern={style.pattern} />}
             onClick={() => void choosePattern(color, style.pattern, (pattern) => onChange({ pattern }))}
           />,
+        )}
+      {offer.center &&
+        cell(
+          <button
+            type="button"
+            aria-label={`${label} center: ${centerText}`}
+            title={centerText}
+            className="w-24 truncate text-small text-secondary"
+            onClick={() => void chooseCenter(own?.center, center, (c) => onChange({ center: c }))}
+          >
+            {centerText}
+          </button>,
+          "w-24",
+        )}
+      {offer.error &&
+        cell(
+          <button
+            type="button"
+            aria-label={`${label} error bars: ${errorText}`}
+            title={errorText}
+            className="w-24 truncate text-small text-secondary"
+            onClick={() => void chooseError(own?.error, error, (e) => onChange({ error: e }))}
+          >
+            {errorText}
+          </button>,
+          "w-24",
         )}
     </div>
   );

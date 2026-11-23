@@ -379,10 +379,10 @@ function validatedSeries(job: McpJob, value: unknown): Record<string, unknown> {
   if (!isPlainObject(value)) throw jobErr(job, `“series” must be an object keyed by series name.`);
   const out: Record<string, unknown> = {};
   for (const [name, style] of Object.entries(value)) {
-    if (!isPlainObject(style)) throw jobErr(job, `“series.${name}” must be an object { color?, shape?, dash?, pattern? }.`);
+    if (!isPlainObject(style)) throw jobErr(job, `“series.${name}” must be an object { color?, shape?, dash?, pattern?, center?, error? }.`);
     for (const key of Object.keys(style))
-      if (!["color", "shape", "dash", "pattern"].includes(key))
-        throw jobErr(job, `unknown series style “${key}” on “${name}” — use color, shape, dash or pattern.`);
+      if (!["color", "shape", "dash", "pattern", "center", "error"].includes(key))
+        throw jobErr(job, `unknown series style “${key}” on “${name}” — use color, shape, dash, pattern, center or error.`);
     if (style.color !== undefined && typeof style.color !== "string")
       throw jobErr(job, `“series.${name}.color” must be a color string.`);
     if (style.shape !== undefined && !((GRAPH_CHOICES.pointShape as readonly string[]).includes(style.shape as string)))
@@ -391,6 +391,10 @@ function validatedSeries(job: McpJob, value: unknown): Record<string, unknown> {
       throw jobErr(job, `“series.${name}.dash” must be one of: ${GRAPH_CHOICES.lineDash.join(", ")}.`);
     if (style.pattern !== undefined && !((FILL_PATTERNS as readonly string[]).includes(style.pattern as string)))
       throw jobErr(job, `“series.${name}.pattern” must be one of: ${FILL_PATTERNS.join(", ")}.`);
+    if (style.center !== undefined && !((GRAPH_CHOICES.center as readonly string[]).includes(style.center as string)))
+      throw jobErr(job, `“series.${name}.center” must be one of: ${GRAPH_CHOICES.center.join(", ")}.`);
+    if (style.error !== undefined && !((GRAPH_CHOICES.error as readonly string[]).includes(style.error as string)))
+      throw jobErr(job, `“series.${name}.error” must be one of: ${GRAPH_CHOICES.error.join(", ")}.`);
     out[name] = style;
   }
   return out;

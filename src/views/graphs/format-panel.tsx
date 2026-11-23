@@ -223,12 +223,15 @@ export function FormatPanel(props: Props) {
   const palette = paletteOf(options);
   // What each series offers besides its color, while the graph draws it: its points'
   // shape, its line's dashes (a Mean & error line is one gray connector, not a series'),
-  // the pattern over its fill.
+  // the pattern over its fill — and, where the graph summarizes (seq 375), its own
+  // center and error bars (Default = the graph's choice).
   const module = GRAPHS[graphType];
   const offer = {
     shape: module.points?.(options),
     dash: module.lines?.(options) && family !== "column",
     pattern: module.patterns?.(options),
+    center: module.summarizes?.(options),
+    error: module.summarizes?.(options),
   };
   const statistics = statisticsControls(props);
   const data = dataControls(props);
@@ -281,6 +284,9 @@ export function FormatPanel(props: Props) {
                   pattern: own?.pattern,
                 }}
                 offer={offer}
+                center={options.center}
+                error={options.error}
+                own={own}
                 onChange={(style) => setSeriesStyle(name, style)}
               />
             );
@@ -308,6 +314,8 @@ export function FormatPanel(props: Props) {
             palette={palette}
             style={{ ...selection.style, dash: options.lineDash }}
             offer={{ shape: true }}
+            center={options.center}
+            error={options.error}
             onChange={({ color, shape }) => selection.set(color ? { color } : { shape })}
           />
           <Stepper

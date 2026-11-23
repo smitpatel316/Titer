@@ -3,10 +3,12 @@
 // line's dashes, an outline's color, the selected points' style. Each line shows what
 // it picks, drawn here as a picture.
 import {
+  GRAPH_CHOICES,
   GRAPH_LIMITS,
   PALETTE_KINDS,
   SAME_AS_FILL,
   type FillPattern,
+  type GraphOptions,
   type GraphPalette,
   type LineDash,
   type PointShape,
@@ -315,3 +317,62 @@ export function chooseSelectionStyle(
 /** Points' shape, drawn in `color` (every point's: a neutral gray). */
 export const chooseShape = (current: PointShape, pick: (shape: PointShape) => void, color = NEUTRAL) =>
   popupMenu(shapeItems(color, current, pick));
+
+/** The short label a series' center/error cell shows (the full label lives in
+ *  the Format panel's Center / Error bars rows). */
+export const CENTER_SHORT: Record<GraphOptions["center"], string> = {
+  mean: "Mean",
+  median: "Median",
+  geomean: "Geomean",
+};
+export const ERROR_SHORT: Record<GraphOptions["error"], string> = {
+  none: "None",
+  sd: "SD",
+  sem: "SEM",
+  ci: "95% CI",
+  range: "Range",
+  iqr: "IQR",
+  geosd: "Geo SD",
+  geoci: "Geo 95% CI",
+};
+
+/** A series' center override: Default (the graph's choice, shown as such),
+ *  then the three kinds. Picking Default clears the override (`undefined`). */
+export const chooseCenter = (
+  current: GraphOptions["center"] | undefined,
+  graphDefault: GraphOptions["center"],
+  pick: (center: GraphOptions["center"] | undefined) => void,
+) =>
+  popupMenu([
+    {
+      text: `Default (${CENTER_SHORT[graphDefault]})`,
+      checked: current === undefined,
+      action: () => pick(undefined),
+    },
+    separator,
+    ...(GRAPH_CHOICES.center).map((center) => ({
+      text: CENTER_SHORT[center],
+      checked: current === center,
+      action: () => pick(center),
+    })),
+  ]);
+
+/** A series' error override: Default (the graph's choice), then the eight kinds. */
+export const chooseError = (
+  current: GraphOptions["error"] | undefined,
+  graphDefault: GraphOptions["error"],
+  pick: (error: GraphOptions["error"] | undefined) => void,
+) =>
+  popupMenu([
+    {
+      text: `Default (${ERROR_SHORT[graphDefault]})`,
+      checked: current === undefined,
+      action: () => pick(undefined),
+    },
+    separator,
+    ...(GRAPH_CHOICES.error).map((error) => ({
+      text: ERROR_SHORT[error],
+      checked: current === error,
+      action: () => pick(error),
+    })),
+  ]);

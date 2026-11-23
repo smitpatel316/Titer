@@ -52,5 +52,7 @@ export const xyArea: GraphModule = {
   family: "xy",
   defaults: { fill: 0.5, outline: 2 },
   patterns: () => true,
+  // An area joins one value per X: replicates as their center, whatever `xyReplicates`.
+  summarizes: () => true,
   build,
 };

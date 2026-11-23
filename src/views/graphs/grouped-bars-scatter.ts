@@ -8,6 +8,7 @@ export const groupedBarsScatter: GraphModule = {
   family: "grouped",
   points: () => true,
   patterns: () => true,
+  summarizes: () => true,
   build: (columns, options, paint, titles, summary) =>
     buildGroupedBarsScatter(columns, options, paint, titles, summary),
 };

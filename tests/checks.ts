@@ -5643,6 +5643,181 @@ check("seq 375: grouped bars take a per-group center override", () => {
   deepStrictEqual(traces[1].y, [2, 20]);
 });
 
+// seq 375 half B: Series UI + MCP acceptance for per-series center/error.
+check("seq 375: MCP accepts per-series center/error in the series object", () => {
+  const nodes: Record<string, ProjectNode> = {
+    table_1: { id: "table_1", type: "table", name: "T", parentId: null, tableType: "column",
+      data: {
+        columns: ["Title", "A", "B"],
+        rows: [
+          ["r1", "1", "1"],
+          ["r2", "2", "2"],
+        ],
+      },
+    },
+    graph_1: {
+      id: "graph_1",
+      type: "graph",
+      name: "G",
+      parentId: "table_1",
+      graphType: "mean-error",
+      graphOptions: newGraphOptions("mean-error"),
+    },
+  };
+  const state = { nodes, rootOrder: ["table_1"], childOrder: { table_1: ["graph_1"] }, activeNodeId: "table_1" };
+  const updated: { id: string; options: GraphOptions }[] = [];
+  const deps: GraphJobDeps = {
+    getState: () => state,
+    createGraph: () => "graph_2",
+    updateGraph: (id, options) => {
+      updated.push({ id, options });
+    },
+  };
+  const job = (jobId: string, options: unknown) => ({
+    job_id: jobId,
+    project_id: "project-1",
+    action: "update-graph",
+    args: { graph_id: "graph_1", options },
+    status: "queued" as const,
+  });
+  executeUpdateGraph(
+    job("job-375b-mcp", { center: "mean", error: "sd", series: { A: { center: "median" }, B: { error: "none" } } }),
+    deps,
+  );
+  strictEqual(updated[0]?.id, "graph_1");
+  deepStrictEqual(updated[0]?.options.series, { A: { center: "median" }, B: { error: "none" } });
+  // The graph-level choices ride along untouched.
+  strictEqual(updated[0]?.options.center, "mean");
+  strictEqual(updated[0]?.options.error, "sd");
+});
+
+check("seq 375: MCP rejects invalid per-series center/error", () => {
+  const nodes: Record<string, ProjectNode> = {
+    table_1: { id: "table_1", type: "table", name: "T", parentId: null, tableType: "column",
+      data: {
+        columns: ["Title", "A", "B"],
+        rows: [
+          ["r1", "1", "1"],
+          ["r2", "2", "2"],
+        ],
+      },
+    },
+    graph_1: {
+      id: "graph_1",
+      type: "graph",
+      name: "G",
+      parentId: "table_1",
+      graphType: "mean-error",
+      graphOptions: newGraphOptions("mean-error"),
+    },
+  };
+  const state = { nodes, rootOrder: ["table_1"], childOrder: { table_1: ["graph_1"] }, activeNodeId: "table_1" };
+  const deps: GraphJobDeps = {
+    getState: () => state,
+    createGraph: () => "graph_2",
+    updateGraph: () => {},
+  };
+  const job = (jobId: string, options: unknown) => ({
+    job_id: jobId,
+    project_id: "project-1",
+    action: "update-graph",
+    args: { graph_id: "graph_1", options },
+    status: "queued" as const,
+  });
+  throws(() => executeUpdateGraph(job("job-375b-bad-center", { series: { A: { center: "bogus" } } }), deps), /must be one of: mean, median, geomean/);
+  throws(() => executeUpdateGraph(job("job-375b-bad-error", { series: { A: { error: "bogus" } } }), deps), /must be one of: none, sd, sem, ci, range, iqr, geosd, geoci/);
+  // An unknown series key still fails as one, not as a bad value.
+  throws(() => executeUpdateGraph(job("job-375b-bad-key", { series: { A: { size: 5 } } }), deps), /unknown series style/);
+});
+
+check("seq 375: dropping a series center/error via MCP falls back to the graph choice", () => {
+  const nodes: Record<string, ProjectNode> = {
+    table_1: { id: "table_1", type: "table", name: "T", parentId: null, tableType: "column",
+      data: {
+        columns: ["Title", "A", "B"],
+        rows: [
+          ["r1", "1", "1"],
+          ["r2", "2", "2"],
+        ],
+      },
+    },
+    graph_1: {
+      id: "graph_1",
+      type: "graph",
+      name: "G",
+      parentId: "table_1",
+      graphType: "mean-error",
+      graphOptions: newGraphOptions("mean-error"),
+    },
+  };
+  const state = { nodes, rootOrder: ["table_1"], childOrder: { table_1: ["graph_1"] }, activeNodeId: "table_1" };
+  const updated: { id: string; options: GraphOptions }[] = [];
+  const deps: GraphJobDeps = {
+    getState: () => state,
+    createGraph: () => "graph_2",
+    updateGraph: (id, options) => {
+      updated.push({ id, options });
+    },
+  };
+  const job = (jobId: string, options: unknown) => ({
+    job_id: jobId,
+    project_id: "project-1",
+    action: "update-graph",
+    args: { graph_id: "graph_1", options },
+    status: "queued" as const,
+  });
+  executeUpdateGraph(job("job-375b-set", { series: { A: { center: "median", error: "range" } } }), deps);
+  deepStrictEqual(updated[0]?.options.series, { A: { center: "median", error: "range" } });
+  // The series object replaces wholesale: a later call without the overrides
+  // leaves A with no center/error, so the paint path falls back to the graph's.
+  executeUpdateGraph(job("job-375b-clear", { series: { A: { color: "#E69F00" } } }), deps);
+  deepStrictEqual(updated[1]?.options.series, { A: { color: "#E69F00" } });
+  const cols = readTable({
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "1", "1"],
+      ["r2", "2", "2"],
+      ["r3", "4", "3"],
+      ["r4", "8", "10"],
+      ["r5", "16", "20"],
+    ],
+  }).columns;
+  deepStrictEqual(centers(cols, "mean", updated[1]?.options.series), [6.2, 7.2]);
+});
+
+check("seq 375: a series record with center/error and other styles survives a .hlx round-trip", () => {
+  const file = JSON.parse(serializeProjectFile(payload));
+  file.project.nodes.g1.graphOptions.series = {
+    Y1: { color: "#E69F00", shape: "circle", center: "median", error: "range" },
+    Y2: { color: "#56B4E9", dash: "dash", center: "geomean" },
+  };
+  const { project } = read(JSON.stringify(file));
+  const o = project.nodes.g1.graphOptions!;
+  deepStrictEqual(o.series, {
+    Y1: { color: "#E69F00", shape: "circle", center: "median", error: "range" },
+    Y2: { color: "#56B4E9", dash: "dash", center: "geomean" },
+  });
+});
+
+check("seq 375: the Series section offers center/error where the graph summarizes", () => {
+  ok(GRAPHS["mean-error"].summarizes?.(newGraphOptions("mean-error")) === true);
+  ok(GRAPHS["individual"].summarizes?.(newGraphOptions("individual")) === true);
+  ok(GRAPHS["before-after"].summarizes?.(newGraphOptions("before-after")) === true);
+  ok(GRAPHS["grouped-bars"].summarizes?.(newGraphOptions("grouped-bars")) === true);
+  ok(GRAPHS["grouped-lines"].summarizes?.(newGraphOptions("grouped-lines")) === true);
+  // Stacked bars center but never draw error bars; a pie summarizes nothing.
+  ok(GRAPHS["grouped-stacked"].summarizes === undefined);
+  ok(GRAPHS["pie"].summarizes === undefined);
+  // XY scatter summarizes only when replicates are shown as their center.
+  const xyMean = { ...newGraphOptions("xy-scatter"), xyReplicates: "mean" as const };
+  const xyEach = { ...newGraphOptions("xy-scatter"), xyReplicates: "each" as const };
+  ok(GRAPHS["xy-scatter"].summarizes?.(xyMean) === true);
+  ok(GRAPHS["xy-scatter"].summarizes?.(xyEach) === false);
+  // Bars and areas always stand for one value per X — replicates as their center.
+  ok(GRAPHS["xy-bar"].summarizes?.(newGraphOptions("xy-bar")) === true);
+  ok(GRAPHS["xy-area"].summarizes?.(newGraphOptions("xy-area")) === true);
+});
+
 check("summary subcolumns: grouped bars draw the mean with the stored error (SEM by default)", () => {
   const dataset = readTable(summaryTable());
   const options = newGraphOptions("grouped-bars");

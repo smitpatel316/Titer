@@ -98,6 +98,10 @@ export interface GraphModule {
   lines?: (options: GraphOptions) => boolean;
   /** Whether it fills bars, areas or slices a series' pattern can cover. */
   patterns?: (options: GraphOptions) => boolean;
+  /** Whether it draws a center with error bars these options summarize — the
+   *  Series section then offers a per-series center/error override (seq 375).
+   *  Absent where nothing is summarized (a pie, a stacked bar's segments). */
+  summarizes?: (options: GraphOptions) => boolean;
   build: (
     columns: Column[],
     options: GraphOptions,

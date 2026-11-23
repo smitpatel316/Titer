@@ -71,5 +71,7 @@ export const xyBarScatter: GraphModule = {
   points: (options) => options.xyStyle !== "line",
   lines: (options) => options.xyStyle !== "points",
   patterns: () => true,
+  // Its bars are each X's center, whatever `xyReplicates` (the scatter half follows it).
+  summarizes: () => true,
   build,
 };

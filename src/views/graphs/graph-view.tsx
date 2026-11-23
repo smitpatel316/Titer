@@ -100,8 +100,13 @@ export function GraphView({ node }: { node: ProjectNode }) {
     if (!same) updateGraph(node.id, { ...options, ...patch });
   };
   // A series styled by hand (the Series section's Reset puts them all back).
-  const setSeriesStyle = (key: string, style: SeriesStyle) =>
-    set({ series: { ...options.series, [key]: { ...options.series?.[key], ...style } } });
+  // Picking Default for a style clears that key (seq 375: an override set to
+  // `undefined` must not linger in the stored record as a dead key).
+  const setSeriesStyle = (key: string, style: SeriesStyle) => {
+    const next = { ...options.series?.[key], ...style };
+    for (const k of Object.keys(next)) if (next[k as keyof SeriesStyle] === undefined) delete next[k as keyof SeriesStyle];
+    set({ series: { ...options.series, [key]: next } });
+  };
 
   // The points picked on the graph, by key: a click picks one, ⌘- or ⇧-click adds or
   // removes one, a click elsewhere or Escape clears them. Never saved, never undone;

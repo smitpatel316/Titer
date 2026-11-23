@@ -83,5 +83,6 @@ export const meanError: GraphModule = {
   points: (options) => options.shape !== "bar",
   lines: (options) => options.shape === "line",
   patterns: (options) => options.shape === "bar",
+  summarizes: () => true,
   build,
 };
