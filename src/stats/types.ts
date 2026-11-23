@@ -235,9 +235,10 @@ export const CORRELATION_METHODS = ["pearson", "spearman"] as const;
  *  through the `xFn` path. Log-log landed here (seq 385): both sides
  *  log10. Hanes-Woolf landed here (seq 381): Y becomes X/Y, X unchanged.
  *  The Hill plot landed in seq 383 (Y becomes log10(Y/(Ymax−Y)), X becomes
- *  log10(X) unless entered as log(concentration)). The other two
- *  pharmacology transforms (Eadie-Hofstee, Scatchard) are separate
- *  follow-ups. */
+ *  log10(X) unless entered as log(concentration)). Eadie-Hofstee (seq 380) IS here: an X transform (X becomes Y/X, Y
+ *  unchanged), so it is also in TRANSFORM_CROSS_FUNCTIONS below. The
+ *  only remaining pharmacology transform (Scatchard) is a separate
+ *  follow-up. */
 export const TRANSFORM_FUNCTIONS = [
   "log10",
   "ln",
@@ -275,6 +276,7 @@ export const TRANSFORM_FUNCTIONS = [
   "y-plus-x",
   "y-times-x",
   "x-minus-y",
+  "eadie-hofstee",
   "hanes-woolf",
   "user-defined",
   "hill-plot",
@@ -309,6 +311,7 @@ export const TRANSFORM_CROSS_FUNCTIONS = [
   "y-plus-x",
   "y-times-x",
   "x-minus-y",
+  "eadie-hofstee",
   "hanes-woolf",
 ] as const;
 export type TransformCrossFunction = (typeof TRANSFORM_CROSS_FUNCTIONS)[number];

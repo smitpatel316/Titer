@@ -18,8 +18,9 @@
 // goes through the existing xFn path with log10 (the wizard pairs them by
 // default; an MCP caller passes xFunction: "log10") — plus Hanes-Woolf
 // (seq 381): Y becomes X/Y, X unchanged — plus the Hill plot (seq 383).
-// The other two pharmacology transforms are separate follow-ups, not here.
-// Pure TypeScript, no R for the values themselves; the transformed
+// Only Scatchard remains a separate follow-up. Eadie-Hofstee (seq 380)
+// is here, as an X transform (X becomes Y/X, Y unchanged). Pure
+// TypeScript, no R for the values themselves; the transformed
 // groups' descriptives come from `describe` (R), like every other analysis.
 // The one exception is the to-CI error mode, whose t critical values come
 // from the pure-TS `tCrit95` (src/lib/student-t.ts).
@@ -100,7 +101,9 @@ export const TRANSFORM_LABEL: Record<TransformFunction, string> = {
   "y-plus-x": "Y+X",
   "y-times-x": "Y×X",
   "x-minus-y": "X−Y",
+  "eadie-hofstee": "Y/X",
   "hanes-woolf": "Hanes-Woolf",
+
   "user-defined": "user-defined",
   "hill-plot": "Hill plot",
 };
@@ -143,7 +146,9 @@ const EXCLUDED_REASON: Record<TransformFunction, string> = {
   "y-plus-x": "the paired X value is missing",
   "y-times-x": "the paired X value is missing",
   "x-minus-y": "the paired X value is missing",
+  "eadie-hofstee": "Y/X is undefined when X is 0 or the paired value is missing",
   "hanes-woolf": "X/Y is undefined when Y is 0 or the paired value is missing",
+
   "user-defined": "the formula left it blank (dividing by zero, or a value outside a function's domain)",
   "hill-plot": "the Hill plot is undefined for Y ≤ 0 or Y ≥ Ymax",
 };
@@ -376,6 +381,12 @@ export function transformValue(
       out = x! / y!;
       break;
     case "y-divided-by-x":
+      if (x === 0) return null;
+      out = y! / x!;
+      break;
+    case "eadie-hofstee":
+      // The same Y/X formula, as the X transform: X becomes Y/X (the
+      // Eadie-Hofstee re-plot), Y passing through unchanged at the runner.
       if (x === 0) return null;
       out = y! / x!;
       break;
@@ -626,10 +637,14 @@ export async function runTransformData(
   if (!(TRANSFORM_FUNCTIONS as readonly string[]).includes(fn))
     return { error: `Unknown transform function: “${fn}”.` };
   const label = TRANSFORM_LABEL[fn];
-  const xFn = params?.xFunction;
-  if (xFn !== undefined && !(TRANSFORM_FUNCTIONS as readonly string[]).includes(xFn))
-    return { error: `Unknown transform function for X: “${xFn}”.` };
-  if (xFn === "user-defined")
+  // Eadie-Hofstee (seq 380) is an X transform, not a Y one: the run rewrites
+  // X to Y/X and leaves Y untouched, so the X-function slot below does the
+  // rewriting (paired with the first Y column). An explicit X function or an
+  // interchange alongside it would fight that rewriting — refused clean.
+  const rawXFn = params?.xFunction;
+  if (rawXFn !== undefined && !(TRANSFORM_FUNCTIONS as readonly string[]).includes(rawXFn))
+    return { error: `Unknown transform function for X: “${rawXFn}”.` };
+  if (rawXFn === "user-defined")
     return { error: "A user-defined transform applies to the Y values — choose a built-in function for the X values." };
   // Hill plot (seq 383): X becomes log10(X) unless the data were entered
   // as log(concentration) — the X transform rides the existing xFunction
@@ -637,13 +652,19 @@ export async function runTransformData(
   // had asked for log10 on X. An explicit xFunction wins over the derived
   // one. The X column is NOT required for a Hill plot: without one, only
   // the Y values transform (needsX below still uses the caller's xFunction).
+  const xFn = fn === "eadie-hofstee" ? "eadie-hofstee" : rawXFn;
   const hillXFn: TransformFunction | undefined =
     fn === "hill-plot" && xFn === undefined && params?.xIsLog !== true ? "log10" : undefined;
   const effXFn = xFn ?? hillXFn;
+
   const errorMode: TransformErrorMode = params?.errorMode ?? "mean-only";
   if (!["mean-only", "erase", "to-ci"].includes(errorMode))
     return { error: `Unknown error handling: “${errorMode}”.` };
   const interchange = params?.interchange === true;
+  if (fn === "eadie-hofstee" && rawXFn !== undefined)
+    return { error: "Eadie-Hofstee already transforms the X values — choose no X function." };
+  if (fn === "eadie-hofstee" && interchange)
+    return { error: "Eadie-Hofstee already transforms the X values — interchange X and Y first, then run it." };
 
   // The user-defined formula is parsed up front, so a bad formula (or a
   // variable no column answers to) is a clean error before anything runs —
@@ -796,6 +817,7 @@ export async function runTransformData(
 
   /** How one column's values are transformed by the run's Y function. */
   const yTransform = (column: Column): ValueTransform | null => {
+    if (fn === "eadie-hofstee") return null; // Y passes through unchanged.
     if (fn === "user-defined") {
       const ast = lineForColumn(formulaLines!, column);
       if (ast == null) return null; // No line applies: pass through unchanged.
@@ -1000,6 +1022,9 @@ export async function runTransformData(
       : "",
     effXFn !== undefined && isCrossTransform(effXFn) && yCols[0]
       ? `The X function pairs each X value with the first Y column (“${yCols[0].name}”).`
+      : "",
+    fn === "eadie-hofstee"
+      ? "Eadie-Hofstee: X becomes Y/X and Y is unchanged — a display-only re-plot, not a first step in analysis (fit the original data)."
       : "",
     fn === "y-plus-random" ? "Y+Random adds Gaussian noise (mean 0, SD = K) from a fixed seed, so repeating the run gives the same values." : "",
     fn === "user-defined" ? `Applied the user-defined transform: ${params!.formula!.trim()}.` : "",

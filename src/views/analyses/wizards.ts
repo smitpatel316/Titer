@@ -2959,6 +2959,9 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
   // user-defined transforms (one formula line per data set, `;`-separated) —
   // plus Lineweaver-Burk (seq 384), the double-reciprocal re-plot: Y
   // through `lineweaver-burk`, X through the `xFn` path with `reciprocal`.
+  // Eadie-Hofstee (seq 380) is an X transform — X becomes Y/X, Y unchanged —
+  // so it asks no transform-X or interchange question.
+
   // A value the function is undefined for is left blank in the results
   // sheet, never NaN — the runner states the reason in its notes.
   "transform-data": {
@@ -3023,6 +3026,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ? ([
               ["x-divided-by-y", "X/Y — divide X by Y"],
               ["y-divided-by-x", "Y/X — divide Y by X"],
+              ["eadie-hofstee", "Eadie-Hofstee — plot Y against Y/X (X becomes Y/X; Y unchanged)"],
               ["y-minus-x", "Y−X — subtract X from Y"],
               ["y-plus-x", "Y+X — add X to Y"],
               ["y-times-x", "Y×X — multiply Y by X"],
@@ -3086,6 +3090,8 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         // The Hill plot's X units (seq 383): concentrations take log10(X);
         // log(concentration) leaves X as it is. The generic X-function
         // questions below are hidden for the Hill plot — xIsLog governs X.
+        // Eadie-Hofstee (seq 380) already transforms X (and an interchange
+        // would fight it), so those questions are hidden for it too.
         xName !== undefined &&
           fn === "hill-plot" &&
           choice("xUnits", "Were the X values entered as concentrations or as log(concentration)?", [
@@ -3094,21 +3100,25 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ]),
         xName !== undefined &&
           fn !== "hill-plot" &&
+          fn !== "eadie-hofstee" &&
           choice("transformX", "Transform the X values too?", [
             ["no", "No — leave the X values as they are"],
             ["yes", "Yes — apply a function to the X values as well"],
           ]),
         xName !== undefined &&
           fn !== "hill-plot" &&
+          fn !== "eadie-hofstee" &&
           a.transformX === "yes" &&
           choice("xFunction", "Which function should be applied to the X values?", xFnOptions),
         xName !== undefined &&
           fn !== "hill-plot" &&
+          fn !== "eadie-hofstee" &&
           a.transformX === "yes" &&
           isKTransform(xFn) &&
           kQuestion("xConstant", "What is the constant K for the X values?", xFn),
         xName !== undefined &&
           fn !== "hill-plot" &&
+          fn !== "eadie-hofstee" &&
           choice("interchange", "Interchange X and Y before transforming?", [
             ["no", "No — transform Y with the chosen function"],
             ["yes", "Yes — swap X and Y first (the Y function applies to the old X values)"],

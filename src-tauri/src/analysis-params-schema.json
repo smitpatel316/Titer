@@ -3247,8 +3247,10 @@
           "y-plus-x",
           "y-times-x",
           "x-minus-y",
+          "eadie-hofstee",
           "user-defined",
           "hill-plot"
+
         ],
         "default": "log10",
         "required": false
@@ -3311,7 +3313,9 @@
           "y-plus-x",
           "y-times-x",
           "x-minus-y",
+          "eadie-hofstee",
           "hill-plot"
+
         ],
         "required": false,
         "description": "The function applied to the X values (XY tables); omitted: X passes through unchanged (seq 341)."

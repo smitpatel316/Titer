@@ -27413,6 +27413,114 @@ check("transform-data wizard offers the Hill plot and builds its params (seq 383
   });
 });
 
+// ── Eadie-Hofstee transform (1.9, seq 380) ──────────────────────────────
+// Prism's pharmacology re-plot: X becomes Y/X, Y passes through unchanged.
+// A display-only re-plot for enzyme-kinetic results — never a first step in
+// analysis (fit the original data).
+check("transformValue applies Eadie-Hofstee as Y/X in either role (seq 380)", () => {
+  // role "x": value is X, `other` is the paired Y — Y/X.
+  strictEqual(transformValue("eadie-hofstee" as never, 2, undefined, 8, "x"), 4);
+  // role "y": value is Y, `other` is the paired X — the same absolute (Y, X) formula.
+  strictEqual(transformValue("eadie-hofstee" as never, 8, undefined, 2, "y"), 4);
+  // X = 0 has no transform (blank); a missing paired value blanks too.
+  strictEqual(transformValue("eadie-hofstee" as never, 0, undefined, 8, "x"), null);
+  strictEqual(transformValue("eadie-hofstee" as never, 2), null);
+  // A zero Y is a valid numerator: 0/X = 0.
+  strictEqual(transformValue("eadie-hofstee" as never, 2, undefined, 0, "x"), 0);
+});
+
+check("transform-data runs Eadie-Hofstee: X becomes Y/X, Y unchanged (seq 380)", async () => {
+  const xy: TableData = {
+    columns: ["Title", "X", "A"],
+    rows: [
+      [null, "1", "2"],
+      [null, "2", "4"],
+      [null, "4", "8"],
+      [null, "0", "5"],
+    ],
+  };
+  const close = (a: (number | null)[], b: number[]) =>
+    a.length === b.length && a.every((v, i) => v !== null && Math.abs(v - b[i]) < 1e-12);
+  const out = await runAnalysis("transform-data", xy, { function: "eadie-hofstee", x: "X" } as never);
+  if ("error" in out) throw new Error(out.error);
+  strictEqual(out.transformed?.length, 2);
+  // Y passes through unchanged.
+  deepStrictEqual(out.transformed?.[0].values, [2, 4, 8, 5]);
+  strictEqual(out.transformed?.[0].column, "A");
+  strictEqual(out.transformed?.[0].label, "unchanged");
+  // X becomes Y/X; the X = 0 row has no transform (blank, counted excluded).
+  deepStrictEqual(out.transformed?.[1].values, [2, 2, 2, null]);
+  strictEqual(out.transformed?.[1].column, "X");
+  strictEqual(out.transformed?.[1].label, "Y/X");
+  strictEqual(out.transformed?.[1].excluded, 1);
+  strictEqual(out.subtitle, "Transform data — Y/X");
+  if (!out.notes.includes("Eadie-Hofstee: X becomes Y/X and Y is unchanged"))
+    throw new Error(`expected the Eadie-Hofstee note, got ${JSON.stringify(out.notes)}`);
+  if (!out.notes.includes("X values transformed with Y/X."))
+    throw new Error(`expected the X-function note, got ${JSON.stringify(out.notes)}`);
+  // Without the X column: a clean error, not a column of blanks.
+  deepStrictEqual(await runAnalysis("transform-data", xy, { function: "eadie-hofstee" } as never), {
+    error: "“Y/X” needs the X column — name it in `x` and try again.",
+  });
+  // An X function alongside Eadie-Hofstee is refused — it already transforms X.
+  const clash = await runAnalysis("transform-data", xy, { function: "eadie-hofstee", x: "X", xFunction: "log10" } as never);
+  if (!("error" in clash) || !clash.error.includes("Eadie-Hofstee"))
+    throw new Error(`expected the X-function clash error, got ${JSON.stringify(clash)}`);
+  // Interchange + Eadie-Hofstee is refused too.
+  const swap = await runAnalysis("transform-data", xy, { function: "eadie-hofstee", x: "X", interchange: true } as never);
+  if (!("error" in swap) || !swap.error.includes("Eadie-Hofstee"))
+    throw new Error(`expected the interchange error, got ${JSON.stringify(swap)}`);
+  // Eadie-Hofstee as the X function: Y takes the Y function, X becomes Y/X.
+  const xSlot = await runAnalysis("transform-data", xy, { function: "log10", x: "X", xFunction: "eadie-hofstee" } as never);
+  if ("error" in xSlot) throw new Error(xSlot.error);
+  ok(
+    close(xSlot.transformed?.[0].values ?? [], [0.3010299956639812, 0.6020599913279624, 0.9030899869919435, 0.6989700043360189]),
+    `log10(Y): ${JSON.stringify(xSlot.transformed?.[0].values)}`,
+  );
+  deepStrictEqual(xSlot.transformed?.[1].values, [2, 2, 2, null]);
+  strictEqual(xSlot.transformed?.[1].column, "X");
+});
+
+check("transform-data wizard offers Eadie-Hofstee on XY tables and builds its params (seq 380)", () => {
+  const wizard = WIZARDS["transform-data"]!;
+  const ids = (a: Record<string, string | number>, table: Dataset, type?: TableType) =>
+    wizard.questions(a, table, type).filter(Boolean).map((q) => (q as Question).id);
+  const fnOptions = (a: Record<string, string | number>, table: Dataset, type?: TableType) => {
+    const q = wizard.questions(a, table, type).find((qq) => qq && (qq as Question).id === "function") as
+      | { options: { value: string }[] }
+      | undefined;
+    return q?.options.map((o) => o.value) ?? [];
+  };
+  // A plain column table: no X column to pair with, so no Eadie-Hofstee.
+  const plain = readTable({ columns: ["Title", "V"], rows: [["", "1"], ["", "2"]] });
+  if (fnOptions({}, plain).includes("eadie-hofstee"))
+    throw new Error(`did not expect eadie-hofstee offered on a column table`);
+  // An XY table offers it — and Eadie-Hofstee already transforms X, so there
+  // is no transform-X or interchange question after it.
+  const xy = readTable({
+    columns: ["Title", "X", "A"],
+    rows: [["", "10", "1"], ["", "20", "2"]],
+  });
+  if (!fnOptions({}, xy, "xy").includes("eadie-hofstee")) throw new Error(`expected eadie-hofstee offered on an XY table`);
+  deepStrictEqual(ids({ function: "eadie-hofstee" }, xy, "xy"), ["function"]);
+  deepStrictEqual(wizard.finish({ function: "eadie-hofstee" }, xy, "xy"), {
+    type: "transform-data",
+    params: { function: "eadie-hofstee", x: "X" },
+  });
+  // The MCP path takes the same params: they validate (the rerun path runs
+  // validateAnalysisParams on the finished params), as an X function too.
+  deepStrictEqual(validateAnalysisParams("transform-data", { function: "eadie-hofstee", x: "X" }).errors, []);
+  deepStrictEqual(validateAnalysisParams("transform-data", { function: "log10", x: "X", xFunction: "eadie-hofstee" }).errors, []);
+  // The MCP schema advertises it, in both the Y-function and X-function enums.
+  const schema = JSON.parse(
+    readFileSync(new URL("../src-tauri/src/analysis-params-schema.json", import.meta.url), "utf8"),
+  ) as Record<string, { params: { name: string; enum?: string[] }[] }>;
+  for (const key of ["function", "xFunction"]) {
+    const param = schema["transform-data"].params.find((p) => p.name === key);
+    if (!param?.enum?.includes("eadie-hofstee")) throw new Error(`expected eadie-hofstee in the schema's transform-data.${key} enum`);
+  }
+});
+
 // ── Calculated Variables (v1.8, seq 156) ──────────────────────────────────
 // Prism 11's in-table formulas for Multiple Variables tables: type `=` in an
 // empty variable; the whole column computes live from the table's other
