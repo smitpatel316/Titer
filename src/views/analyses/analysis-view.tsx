@@ -1,7 +1,7 @@
 // Host for an analysis node: runs the chosen test on the parent table and
 // renders the result.
 import * as React from "react";
-import { SnowflakeIcon } from "@phosphor-icons/react";
+import { SlidersHorizontalIcon, SnowflakeIcon } from "@phosphor-icons/react";
 import type { ProjectNode } from "../../store/types";
 import { useProjectActions, useProjectStore } from "../../store/use-project-store";
 import { Button, IconButton } from "../../ui/controls";
@@ -11,6 +11,7 @@ import { ANALYSES } from "../../stats";
 import { cancelActiveEvals } from "../../stats/webr";
 import { titleCase } from "../../lib/format";
 import { AnalysisResultsView } from "./analysis-results-view";
+import { canEditAnalysisParams } from "./wizards";
 import { AddFloatingNoteButton, FloatingNotesLayer } from "../../components/floating-notes";
 import { useAnalysis, useEngineBootStatus, useRQueue } from "./use-analysis";
 import { publishAnalysisResult } from "../../store/mcp-publish";
@@ -50,7 +51,11 @@ function Running() {
 
 export function AnalysisView({ node }: { node: ProjectNode }) {
   const { nodes, createTableWithData } = useProjectStore();
-  const { cacheAnalysisResult, setAnalysisFrozen, repointAnalysis } = useProjectActions();
+  const { cacheAnalysisResult, openSelector, setAnalysisFrozen, repointAnalysis } = useProjectActions();
+  // Change Parameters (seq 373): re-opens this test's wizard pre-filled from
+  // the stored params. Frozen, orphaned and unmapped tests stay disabled,
+  // with the reason as the tooltip.
+  const edit = canEditAnalysisParams(node);
   // The tables this orphaned analysis may move to (seq 242): only the
   // ones offering its test, so the re-run it is waiting for can run there.
   const candidates = node.orphaned ? repointCandidates(node, nodes) : [];
@@ -110,6 +115,14 @@ export function AnalysisView({ node }: { node: ProjectNode }) {
       node={node}
       actions={
         <>
+          <IconButton
+            aria-label="Change parameters"
+            title={edit.editable ? "Change parameters" : edit.reason}
+            disabled={!edit.editable}
+            onClick={() => openSelector({ kind: "edit-analysis-params", nodeId: node.id })}
+          >
+            <SlidersHorizontalIcon />
+          </IconButton>
           {!node.orphaned && (
             <IconButton
               aria-label={node.frozen ? "Unfreeze results" : "Freeze results"}

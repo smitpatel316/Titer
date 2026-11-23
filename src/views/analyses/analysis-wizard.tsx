@@ -5,8 +5,10 @@ import * as React from "react";
 import { Button, Checkbox, Field, Input, NumberInput, RadioList } from "../../ui/controls";
 import { Dialog } from "../../ui/dialog";
 import { readTable } from "../../lib/dataset";
+import { validateAnalysisParams } from "../../lib/project-file";
 import type { TableData, TableType } from "../../store/types";
 import { useProjectActions, useProjectStore } from "../../store/use-project-store";
+import { alert } from "../../native";
 import { checkNormality } from "./normality-check";
 import { useAnalysisLauncher } from "./use-analysis-launcher";
 import { analysisLabel } from ".";
@@ -14,11 +16,13 @@ import { packageGate } from "../../stats";
 import { ensurePackages } from "../../stats/webr";
 import {
   answersFor,
+  answersFromParams,
   chosenSets,
   parseUnknowns,
   toggled,
   TRANSFORM_WIZARD,
   WIZARDS,
+  wizardForAnalysis,
   type Answer,
   type Answers,
   type Question,
@@ -29,8 +33,65 @@ const NOT_SURE = { value: "check", label: "Not sure — check for normality firs
 
 export function AnalysisWizard() {
   const { nodes, selector, closeSelector } = useProjectStore();
-  const { createTransformed } = useProjectActions();
+  const { createTransformed, setAnalysisParams } = useProjectActions();
   const launch = useAnalysisLauncher();
+  // Change Parameters (seq 373): the same wizard, pre-filled from the stored
+  // params, applying in place instead of creating a node. The entry points
+  // gate on canEditAnalysisParams, so this only ever sees a live node — the
+  // guards below are for a stale selector (the node frozen or deleted since).
+  if (selector?.kind === "edit-analysis-params") {
+    const node = nodes[selector.nodeId];
+    if (!node || node.type !== "analysis" || !node.analysisType) return null;
+    // Hoisted: property narrowing on `node` doesn't survive into the onDone
+    // closure below.
+    const analysisType = node.analysisType;
+    const storedParams = node.analysisParams ?? {};
+    const parent = node.parentId ? nodes[node.parentId] : undefined;
+    const { data, tableType } = parent ?? {};
+    if (!data) return null;
+    const wizardKey = wizardForAnalysis(analysisType, storedParams);
+    if (wizardKey === null) return null;
+    const wizard = WIZARDS[wizardKey];
+    if (!wizard) return null;
+    const initial = answersFromParams(analysisType, storedParams, readTable(data), tableType);
+    if (initial === null) return null;
+    return (
+      <Steps
+        title={analysisLabel(analysisType)}
+        data={data}
+        tableType={tableType}
+        onClose={closeSelector}
+        wizard={wizard}
+        initial={initial}
+        done="Apply"
+        finish={wizard.finish}
+        onDone={(a) => {
+          const table = readTable(data);
+          const { type, params } = wizard.finish(a, table, tableType);
+          // Every analysis wizard returns params; the type leaves it
+          // optional, so this is only for the type checker.
+          if (params === undefined) return;
+          // The wizard can resolve a different test from changed answers
+          // (parametric ↔ non-parametric); changing parameters keeps the
+          // same test — a different test starts as a new analysis instead.
+          if (type !== analysisType) {
+            alert(
+              "These answers would change the test",
+              `“${analysisLabel(analysisType)}” would become “${analysisLabel(type)}”. Change Parameters keeps the same test — start the other test from the Analysis menu instead.`,
+            );
+            return;
+          }
+          const { errors, params: checked } = validateAnalysisParams(analysisType, params);
+          if (errors.length) {
+            alert("These parameters are not valid", errors.join(" "));
+            return;
+          }
+          setAnalysisParams(node.id, checked ?? params);
+          closeSelector();
+        }}
+      />
+    );
+  }
   if (selector?.kind !== "analysis-params") return null;
   const { data, tableType } = nodes[selector.tableId] ?? {};
   if (!data) return null;
