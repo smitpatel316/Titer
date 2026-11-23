@@ -176,7 +176,8 @@ const ELEMENTWISE: Record<string, number[]> = {
 };
 /** The whole-variable aggregates: one variable argument, broadcast as one
  *  value per row. MIN and MAX are both: one argument aggregates, two or more
- *  compare row by row. COUNTA counts the non-blank values, like COUNT. */
+ *  compare row by row. COUNTA counts the non-blank values, text included —
+ *  unlike COUNT, which counts numeric values only. */
 const AGGREGATES = ["MEAN", "SUM", "COUNT", "MEDIAN", "SD", "SEM", "VAR", "MIN", "MAX", "COUNTA"];
 /** The conditional aggregates (seq 372, part A): name → the aggregate they
  *  filter. Two arguments: the variable to aggregate, and the condition —
@@ -554,14 +555,17 @@ export function dependenciesOf(ast: Expr): string[] {
 
 /** What one row's evaluation reads: a variable's value in that row, and a
  *  variable's whole column (for aggregates). `valueAt` reads any row, so a
- *  conditional aggregate can run its condition row by row. `row` is the
- *  row this context evaluates; `windowColumn` reads a window function's
- *  whole-column pass at that row (window functions are computed once per
- *  formula in `recomputeCalculated`, never per row). */
+ *  conditional aggregate can run its condition row by row. `rawTextAt`
+ *  reads a cell's raw text (null: blank or excluded) — the text COUNTA
+ *  reads, since `values` is numeric-only. `row` is the row this context
+ *  evaluates; `windowColumn` reads a window function's whole-column pass
+ *  at that row (window functions are computed once per formula in
+ *  `recomputeCalculated`, never per row). */
 export interface EvalContext {
   value: (name: string) => number | null;
   values: (name: string) => number[];
   valueAt: (name: string, row: number) => number | null;
+  rawTextAt: (name: string, row: number) => string | null;
   rowCount: number;
   row: number;
   windowColumn?: (node: Expr) => (number | null)[] | undefined;
@@ -569,7 +573,18 @@ export interface EvalContext {
 
 const truthy = (v: number | null): boolean | null => (v == null ? null : v !== 0);
 
+/** A cell counts for COUNTA when it holds anything but blank: a number,
+ *  or text — even text, per the docs. Cells with only spaces count as
+ *  blank (the COUNTAIF entry says so). `value` is the cell's numeric
+ *  reading, `text` its raw cell text. */
+const cellIsNonBlank = (text: string | null, value: number | null): boolean =>
+  value != null || (text != null && text.trim() !== "");
+
 function aggregate(name: string, values: number[]): number | null {
+  // COUNTA through here is numeric-only — the real COUNTA paths (the call
+  // case, the condagg case, the window loop) count non-blank cells from
+  // their raw text instead, so text is never missed. This arm stays as
+  // the fallback for any caller that only has numbers.
   if (name === "COUNT" || name === "COUNTA") return values.length;
   if (values.length === 0) return null;
   switch (name) {
@@ -651,7 +666,7 @@ function frameIndex(bound: FrameBound, pos: number, len: number): number {
  *  without ROWS a row that does not match still gets its group's result,
  *  with ROWS it gets blank. Blanks never contribute a value. COUNT counts
  *  numeric values only and, as the docs say, reports only on rows whose
- *  own value is not blank. */
+ *  own value is not blank; COUNTA also counts text values. */
 function computeWindow(node: WindowExpr, h: WindowHelpers): (number | null)[] {
   const n = h.rowCount;
   const out: (number | null)[] = new Array(n).fill(null);
@@ -727,6 +742,11 @@ function computeWindow(node: WindowExpr, h: WindowHelpers): (number | null)[] {
         }
       } else if (node.name === "COUNT") {
         out[r] = own == null ? null : values.length;
+      } else if (node.name === "COUNTA") {
+        // The docs: COUNTA also counts text values — count the frame's
+        // non-blank cells, not just its numbers.
+        const frame = lo > hi ? [] : ordered.slice(lo, hi + 1).filter((j) => matches[j]);
+        out[r] = frame.filter((j) => cellIsNonBlank(h.rawTextAt(node.variable, j), h.valueAt(node.variable, j))).length;
       } else {
         out[r] = node.condition ? conditionalAggregate(node.name, values) : aggregate(node.name, values);
       }
@@ -746,11 +766,13 @@ function evalExpr(e: Expr, ctx: EvalContext): number | null {
       // into one broadcast value. A blank condition never matches, and a
       // blank value never counts — blanks are excluded from calculation.
       const matched: number[] = [];
+      let matchedNonBlank = 0;
       for (let j = 0; j < ctx.rowCount; j++) {
         const rowCtx: EvalContext = {
           value: (name) => ctx.valueAt(name, j),
           values: ctx.values,
           valueAt: ctx.valueAt,
+          rawTextAt: ctx.rawTextAt,
           rowCount: ctx.rowCount,
           row: j,
           windowColumn: ctx.windowColumn,
@@ -758,8 +780,12 @@ function evalExpr(e: Expr, ctx: EvalContext): number | null {
         if (truthy(evalExpr(e.condition, rowCtx)) === true) {
           const v = ctx.valueAt(e.variable, j);
           if (v != null) matched.push(v);
+          // COUNTA also counts text values (the docs), so a matching row
+          // counts when its cell holds anything but blank.
+          if (cellIsNonBlank(ctx.rawTextAt(e.variable, j), v)) matchedNonBlank++;
         }
       }
+      if (e.name === "COUNTA") return matchedNonBlank;
       return conditionalAggregate(e.name, matched);
     }
     case "window": {
@@ -830,6 +856,16 @@ function evalExpr(e: Expr, ctx: EvalContext): number | null {
         // COUNT(Variable)) — the windowed COUNT already blanks blank
         // rows the same way, so the plain form matches it here.
         if (e.name === "COUNT" && ctx.value(e.args[0].name) == null) return null;
+        if (e.name === "COUNTA") {
+          // COUNTA also counts text values (the docs) — values() is
+          // numeric-only, so count the column's non-blank cells from
+          // their raw text instead.
+          let n = 0;
+          for (let j = 0; j < ctx.rowCount; j++) {
+            if (cellIsNonBlank(ctx.rawTextAt(e.args[0].name, j), ctx.valueAt(e.args[0].name, j))) n++;
+          }
+          return n;
+        }
         return aggregate(e.name, ctx.values(e.args[0].name));
       }
       if (e.name === "IF") {
@@ -1002,6 +1038,7 @@ export function recomputeCalculated(data: TableData): TableData {
         return byName.get(dep)?.values ?? [];
       },
       valueAt: readValueAt,
+      rawTextAt: (dep, j) => byName.get(dep)?.cells[j] ?? null,
       rowCount: data.rows.length,
       row: r,
       windowColumn: (node) => ensureWindow(node),
