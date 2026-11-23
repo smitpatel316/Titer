@@ -258,6 +258,10 @@ export function AnalysisResultsView({
   // The denominator DF comes from the mixed-effects runner (seq 181) —
   // other runners leave it undefined, so the "DF" column only fills then.
   const showDf = (result.coefficients ?? []).some((c) => c.df != null);
+  // Seq 387: the Dependency column, shown only when the run asked for it
+  // (reportDependency) and at least one coefficient carries a value.
+  const showDependency =
+    result.showDependency === true && (result.coefficients ?? []).some((c) => c.dependency != null);
   const showRange = groups.some((g) => g.min != null || g.max != null || g.range != null);
   const matrix = result.matrix;
 
@@ -870,6 +874,7 @@ export function AnalysisResultsView({
             { label: "P value", numeric: true },
             { label: "95% CI", numeric: true },
             ...(showHr ? [{ label: "Hazard ratio", numeric: true }] : []),
+            ...(showDependency ? [{ label: "Dependency", numeric: true }] : []),
           ]}
           rows={result.coefficients.map((c) => [
             // Prism's wording for the Hill slope (4PL and allosteric) — kept
@@ -879,13 +884,16 @@ export function AnalysisResultsView({
             // "Unstable" and its CI "Very wide" (Prism's display); the
             // numeric estimate stays on the result (the overlays draw the
             // curve from it), and its t/P are meaningless, so they show "—".
-            c.unstable ? "Unstable" : num(c.estimate),
-            c.unstable ? "Unstable" : num(c.stdError),
+            // Seq 387: an ambiguous one's value and SE are preceded by ~
+            // (Prism does the same) and its CI is "Very wide".
+            c.unstable ? "Unstable" : c.ambiguous ? `~${num(c.estimate)}` : num(c.estimate),
+            c.unstable ? "Unstable" : c.ambiguous ? `~${num(c.stdError)}` : num(c.stdError),
             c.unstable ? "—" : num(c.t),
             ...(showDf ? [num(c.df)] : []),
             <P p={c.unstable ? null : c.p} />,
-            c.unstable ? "Very wide" : c.low == null && c.high == null ? "—" : `${num(c.low)} to ${num(c.high)}`,
+            c.unstable ? "Very wide" : c.ambiguous ? "Very wide" : c.low == null && c.high == null ? "—" : `${num(c.low)} to ${num(c.high)}`,
             ...(showHr ? [num(c.hazardRatio)] : []),
+            ...(showDependency ? [num(c.dependency)] : []),
           ])}
         />
       )}

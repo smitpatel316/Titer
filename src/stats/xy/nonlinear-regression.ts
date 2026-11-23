@@ -34,6 +34,7 @@ import {
   EXPONENTIAL_MODELS,
   CLASSIC_MODELS,
   applyFitOptions,
+  applyAmbiguousFlags,
   applyUnstableFlags,
   ecAnything,
   fitEntries,
@@ -1528,6 +1529,18 @@ async function compareModels(
     params?.difficultFitHandling ?? "unstable",
     parsedA.derived,
   );
+  // Seq 387: and the ambiguous-fit check — dependency needs Sy.x, and a
+  // robust/Poisson refit passes null (its IRLS weights break the V↔HH
+  // relation), so its coefficients carry no dependency.
+  applyAmbiguousFlags(
+    parsedA.coefficients,
+    parsedA.hessian,
+    effA.terms,
+    (params?.fitMethod ?? "least-squares") === "least-squares"
+      ? (parsedA.stats.find((s) => s.label === "Sy.x")?.value ?? null)
+      : null,
+    params?.difficultFitHandling ?? "unstable",
+  );
   const aiccA = v.aiccA ?? null;
   const aiccB = v.aiccB ?? null;
   const delta = aiccA != null && aiccB != null ? aiccA - aiccB : null;
@@ -1977,6 +1990,7 @@ async function runGlobalNonlinear(
         ...(result.hessianCondition != null ? { hessianCondition: result.hessianCondition } : {}),
       },
     ]) +
+    ambiguousNote([{ coefficients }]) +
     rangeNotes(params, series.reduce((s, x) => s + x.rangeExcluded, 0)) +
     (Object.keys(fixed).length
       ? ` Fixed: ${Object.entries(fixed)
@@ -1997,6 +2011,9 @@ async function runGlobalNonlinear(
     groups,
     notes,
     coefficients,
+    // Seq 387: the results sheet shows a Dependency column when the run
+    // asked for it (the values are on the coefficients either way).
+    ...(params?.reportDependency === true ? { showDependency: true } : {}),
     ...(routOutliers.length ? { curveOutliers: routOutliers } : {}),
     // The homologous curve needs [L] to draw (the overlay reads it off
     // the result) — without it the curve is undefined.
@@ -2154,10 +2171,13 @@ export async function runNonlinearRegression(
   if (!(NONLINEAR_FIT_METHODS as readonly string[]).includes(fitMethod))
     return { error: "Choose a fitting method: least squares, robust, or Poisson." };
   // Seq 323: difficult-fit handling — identify unstable parameters, or
-  // neither. A bogus value is refused, not defaulted.
+  // neither. Seq 387: a third mode, identify ambiguous fits (Prism's
+  // older method). A bogus value is refused, not defaulted.
   const difficultFitHandling = params?.difficultFitHandling ?? "unstable";
   if (!(NONLINEAR_DIFFICULT_FIT_HANDLINGS as readonly string[]).includes(difficultFitHandling))
-    return { error: "Choose how difficult fits are handled: identify unstable parameters, or neither." };
+    return {
+      error: "Choose how difficult fits are handled: identify ambiguous fits, identify unstable parameters, or neither.",
+    };
   const comparingModels = params?.compareModel !== undefined;
   if (comparingModels && params.compareModel === model)
     return { error: "Choose a different model to compare with." };
@@ -2581,6 +2601,16 @@ export async function runNonlinearRegression(
       params?.difficultFitHandling ?? "unstable",
       p.derived,
     );
+    // Seq 387: the ambiguous-fit check (same Sy.x / least-squares rule as the comparison path).
+    applyAmbiguousFlags(
+      p.coefficients,
+      p.hessian,
+      (other ? spec : effSpec).terms,
+      (params?.fitMethod ?? "least-squares") === "least-squares"
+        ? (p.stats.find((s) => s.label === "Sy.x")?.value ?? null)
+        : null,
+      params?.difficultFitHandling ?? "unstable",
+    );
     return { ...p, ...(condition != null ? { hessianCondition: condition } : {}) };
   });
   if (other) {
@@ -2739,6 +2769,27 @@ function unstableNote(
   return clauses.length ? ` ${clauses.join(" ")}` : "";
 }
 
+/** The ambiguous-fit warning for the results notes (seq 387, Prism's older
+ *  method — FAQ 1462): which parameters' dependency exceeds 0.9999, so
+ *  their best-fit values are preceded by ~ and their 95% CIs are "very
+ *  wide". Terms are the coefficients' display terms (they already name
+ *  their set when several were fitted). */
+function ambiguousNote(parsed: { coefficients: RegressionCoefficient[] }[]): string {
+  const clauses: string[] = [];
+  for (const p of parsed) {
+    const terms = p.coefficients.filter((c) => c.ambiguous).map((c) => c.term);
+    if (!terms.length) continue;
+    const list =
+      terms.length === 1
+        ? `“${terms[0]}”`
+        : `${terms.slice(0, -1).map((t) => `“${t}”`).join(", ")} and “${terms[terms.length - 1]}”`;
+    clauses.push(
+      `This fit is ambiguous: ${list} ${terms.length === 1 ? "has" : "have"} a dependency above 0.9999 — the data do not determine ${terms.length === 1 ? "it" : "them"}, so ${terms.length === 1 ? "its" : "their"} best-fit value and standard error are preceded by ~ and ${terms.length === 1 ? "its" : "their"} 95% CI is reported as "very wide" (Prism's ambiguous-fit check: dependency above 0.9999).`,
+    );
+  }
+  return clauses.length ? ` ${clauses.join(" ")}` : "";
+}
+
 /** The result all three paths share: fit block + coefficients + notes, with
  *  the exponential/enzyme extras (equation, starting values, warnings) and
  *  the comparison F test / interpolation sentences when they apply.
@@ -2875,6 +2926,7 @@ async function assembleResult(
     `95% CIs are asymptotic (from each parameter's standard error${spec.terms.includes("S") ? "; the asymmetry S's, on its log" : ""}).` +
     frameworkNotes(params, coefficients, first) +
     unstableNote(parsed) +
+    ambiguousNote(parsed) +
     (centeredX != null
       ? ` Centered at the mean of X (${num(centeredX)}): B0 is the fitted Y there, and the higher terms are powers of (X − ${num(centeredX)}).`
       : "") +
@@ -2992,6 +3044,9 @@ async function assembleResult(
     notes: notes + (extraNotes.length ? ` ${extraNotes.join(" ")}` : ""),
     coefficients,
     ...(params?.interpolate ? { interpolated } : {}),
+    // Seq 387: the results sheet shows a Dependency column when the run
+    // asked for it (the values are on the coefficients either way).
+    ...(params?.reportDependency === true ? { showDependency: true } : {}),
     ...(rout?.outliers.length ? { curveOutliers: rout.outliers } : {}),
     // The overlays need [L] to evaluate a homologous curve (plan 28).
     ...(params?.ligandConcentration != null ? { ligandConcentration: params.ligandConcentration } : {}),

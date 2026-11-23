@@ -1258,6 +1258,16 @@ const ROWS: Row[] = [
     ],
   },
   {
+    item: "387",
+    title: "Ambiguous-fit handling (dependency method)",
+    status: "covered",
+    note: "Merged on check/v19: dependency per parameter (FAQ 931 closed form 1 − s²/(V_ii·HH_ii), verified against the refit definition on the FAQ's worked example), a third difficultFitHandling mode \"ambiguous\" (dependency > 0.9999 flags the fit ambiguous, ~ values and very wide CIs), and a reportDependency Diagnostics option (Prism's Diagnostics tab). Pinned in checks.ts (FAQ 931 + FAQ 1462 fixtures).",
+    checks: [
+      { kind: "analysisParamEnum", type: "nonlinear-regression", param: "difficultFitHandling", value: "ambiguous" },
+      { kind: "analysisParam", type: "nonlinear-regression", param: "reportDependency" },
+    ],
+  },
+  {
     item: "206",
     title: "Remove-baseline column math",
     status: "covered",

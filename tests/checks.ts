@@ -230,7 +230,7 @@ import { buildPanelFigure } from "../src/views/figures/panel-figure";
 import type { McpJob } from "../src/native";
 import { nestedMeans } from "../src/stats/nested/base";
 import { runNestedTTest } from "../src/stats/nested/nested-t-test";
-import { applyUnstableFlags, derivedSources, fitModelSpec, identifyUnstableParameters, modelSpec, prepareFit, UNSTABLE_CONDITION_THRESHOLD, type DerivedRow, type ModelSpec } from "../src/stats/xy/nonlinear-fit";
+import { AMBIGUOUS_DEPENDENCY_THRESHOLD, applyUnstableFlags, derivedSources, fitModelSpec, identifyUnstableParameters, modelSpec, parameterDependencies, prepareFit, UNSTABLE_CONDITION_THRESHOLD, type DerivedRow, type ModelSpec } from "../src/stats/xy/nonlinear-fit";
 import { adjustComparisonRows, adjustFdrComparisonRows, adjustFdrPValues, adjustPValues, describe, describedBy, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
 import { analysisTitle, titleAfterApply } from "../src/stats/index";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
@@ -11107,6 +11107,7 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
     "weights",
     "fitMethod",
     "difficultFitHandling",
+    "reportDependency",
     "fitRange",
     "compareWith",
     "compareModel",
@@ -11123,6 +11124,7 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
       "weights",
       "fitMethod",
       "difficultFitHandling",
+      "reportDependency",
       "fitRange",
       "compareWith",
       "compareModel",
@@ -11135,7 +11137,7 @@ check("fitting a curve asks its kind, then its model, then what to compare", () 
   );
   deepStrictEqual(
     asked({ y: "A", kind: "dose", model: "homologous-competition-logx" }).map((q) => q.id),
-    ["ys", "kind", "model", "weights", "fitMethod", "difficultFitHandling", "fitRange", "compareWith", "compareModel", "global", "constrain", "ligandConcentration"],
+    ["ys", "kind", "model", "weights", "fitMethod", "difficultFitHandling", "reportDependency", "fitRange", "compareWith", "compareModel", "global", "constrain", "ligandConcentration"],
   );
   ok(!asked({ y: "A", kind: "dose", model: "sigmoidal-4pl-logx" }).some((q) => q.id === "fitKi"));
   deepStrictEqual(
@@ -12224,6 +12226,251 @@ check("seq 388 a derived row from stable parameters is not noted", async () => {
   ok(!out.notes?.includes("“Half-life” is derived"), `Half-life should not be noted, got ${out.notes}`);
   // ...but Span derives from Y0 (unstable): it is noted.
   ok(out.notes?.includes("“Span” is derived from “Y0”"), `notes should name Span's unstable source, got ${out.notes}`);
+});
+
+// Seq 387: Prism's dependency method (FAQ 931) — dependency_i = 1 − s²/(V_ii·HH_ii),
+// with V the fit's covariance matrix (V_ii = SE_i²), HH the Gauss–Newton
+// Hessian JᵀWJ and s² = Sy.x². The hand-built expectations below are the
+// closed form evaluated on paper: a diagonal Hessian is orthogonal
+// (dependency 0); HH = [[1, 0.9], [0.9, 1]] with s² = 1 gives
+// V_ii = 1/(1 − 0.81) and dependency 1 − 1/5.263… = 0.81 for both.
+check("seq 387 dependency from the covariance matrix and Hessian", () => {
+  ok(AMBIGUOUS_DEPENDENCY_THRESHOLD === 0.9999, `ambiguity threshold should be 0.9999, got ${AMBIGUOUS_DEPENDENCY_THRESHOLD}`);
+  const mk = (se: number): RegressionCoefficient => ({ term: "P", estimate: 1, stdError: se, t: null, p: null, low: null, high: null });
+  deepStrictEqual(
+    parameterDependencies(
+      [
+        [1, 0],
+        [0, 1],
+      ],
+      [mk(1), mk(1)],
+      1,
+    ),
+    [0, 0],
+  );
+  const se2 = Math.sqrt(1 / 0.19);
+  const deps = parameterDependencies(
+    [
+      [1, 0.9],
+      [0.9, 1],
+    ],
+    [mk(se2), mk(se2)],
+    1,
+  );
+  ok(deps[0] != null && Math.abs(deps[0] - 0.81) < 1e-9, `dep of the first parameter should be 0.81, got ${deps[0]}`);
+  ok(deps[1] != null && Math.abs(deps[1] - 0.81) < 1e-9, `dep of the second parameter should be 0.81, got ${deps[1]}`);
+  // Undefined when there is nothing to compute it from: no Hessian (lm
+  // fits), no Sy.x, a zero standard error (noiseless data), or a
+  // non-positive Hessian diagonal.
+  deepStrictEqual(parameterDependencies(null, [mk(1)], 1), [null]);
+  deepStrictEqual(parameterDependencies([[1]], [mk(1)], null), [null]);
+  deepStrictEqual(parameterDependencies([[1]], [mk(0)], 1), [null]);
+  deepStrictEqual(parameterDependencies([[0]], [mk(1)], 1), [null]);
+});
+
+// Seq 387: FAQ 931's worked example — a one-phase exponential decay
+// (20 points, MLAB Applications Manual pp. 128–130). Prism reports K
+// 0.2149 ± 0.0248 and dependencies K 0.866, Span 0.613, Plateau 0.813
+// (the scope's 0.865/0.815 are the FAQ's rounded-SE arithmetic; the
+// values pinned here are the page's own numbers, re-derived in Python
+// from the data, Nov 23, 2026). The closed form is verified against the
+// refit definition in the same check: fix Span and Plateau at their
+// best-fit values, refit K alone (SE 0.008605, df 19), correct by
+// sqrt(19/17) for the df change, and the ratio gives the same 0.866.
+check("seq 387 FAQ 931 dependency reproduces Prism's worked example", async () => {
+  const xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+  const ys = [
+    39.814, 32.269, 29.431, 27.481, 26.086, 25.757, 24.932, 23.928, 22.415, 22.548, 21.9, 20.527, 20.695, 20.105,
+    19.516, 19.64, 19.346, 18.927, 18.857, 17.652,
+  ];
+  const table: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  };
+  const base = {
+    y: "Y",
+    model: "user-defined",
+    customEquation: "Y = Plateau + Span*exp(-K*X)",
+    customParameters: { Plateau: 18, Span: 25, K: 0.2 },
+  } as const;
+  const out = await runAnalysis("nonlinear-regression", table, base);
+  ok(!("error" in out), `FAQ 931 decay fit failed: ${"error" in out ? out.error : ""}`);
+  const coef = (term: string) => out.coefficients?.find((c) => c.term === term);
+  ok(coef("K")?.estimate != null && Math.abs(coef("K")!.estimate! - 0.2149) < 0.001, `K should be ~0.2149, got ${coef("K")?.estimate}`);
+  ok(coef("K")?.stdError != null && Math.abs(coef("K")!.stdError! - 0.0248) < 0.001, `K's SE should be ~0.0248, got ${coef("K")?.stdError}`);
+  ok(coef("K")?.dependency != null && Math.abs(coef("K")!.dependency! - 0.866) < 0.005, `K's dependency should be ~0.866, got ${coef("K")?.dependency}`);
+  ok(
+    coef("Span")?.dependency != null && Math.abs(coef("Span")!.dependency! - 0.613) < 0.005,
+    `Span's dependency should be ~0.613, got ${coef("Span")?.dependency}`,
+  );
+  ok(
+    coef("Plateau")?.dependency != null && Math.abs(coef("Plateau")!.dependency! - 0.813) < 0.005,
+    `Plateau's dependency should be ~0.813, got ${coef("Plateau")?.dependency}`,
+  );
+  // The refit definition: Span and Plateau fixed at their best-fit values.
+  const refit = await runAnalysis("nonlinear-regression", table, {
+    ...base,
+    fixed: { Span: coef("Span")!.estimate!, Plateau: coef("Plateau")!.estimate! },
+  });
+  ok(!("error" in refit), `FAQ 931 refit failed: ${"error" in refit ? refit.error : ""}`);
+  const seFixed = refit.coefficients?.find((c) => c.term === "K")?.stdError;
+  ok(seFixed != null && Math.abs(seFixed - 0.008605) < 0.0005, `refit SE of K should be ~0.008605, got ${seFixed}`);
+  const depRefit = 1 - ((seFixed! * Math.sqrt(19 / 17)) / coef("K")!.stdError!) ** 2;
+  ok(
+    Math.abs(depRefit - coef("K")!.dependency!) < 0.002,
+    `refit dependency ${depRefit} should match the closed form ${coef("K")!.dependency}`,
+  );
+});
+
+// Seq 387: FAQ 1462's dose-response example — a 4PL whose data never reach
+// the top plateau. Hand-built fixture (true Bottom 0, Top 100, LogEC50
+// −7.31, HillSlope 1; X −10 to −7.5; σ = 1.5 noise, seed 13): the
+// unconstrained fit runs away (EC50 far outside the data, Prism's
+// signature) and is ambiguous, while Bottom = 0 / Top = 100 constrained
+// recovers EC50 ≈ 49 nM with a tight CI — FAQ 1462's 49 nM, 39–63 nM.
+// The FAQ's constrained dependency of 0.05 comes from Prism's sample X
+// design; this fixture's design gives ~0.69 — still far below the 0.9999
+// ambiguity threshold, and the EC50/CI match the FAQ.
+check("seq 387 FAQ 1462 an unconstrained dose-response fit is ambiguous, constrained it is not", async () => {
+  const xs = [-10, -9.75, -9.5, -9.25, -9, -8.75, -8.5, -8.25, -8, -7.75, -7.5];
+  const ys = [2.943893, -4.255733, 2.078608, 1.239577, 3.97826, 4.082017, 8.805844, 10.346663, 16.181165, 27.507357, 39.882054];
+  const table: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  };
+  const out = await runAnalysis("nonlinear-regression", table, {
+    y: "Y",
+    model: "sigmoidal-4pl-logx",
+    difficultFitHandling: "ambiguous",
+  });
+  ok(!("error" in out), `ambiguous 4PL fit failed: ${"error" in out ? out.error : ""}`);
+  const logEC50 = out.coefficients?.find((c) => c.term === "LogEC50");
+  const top = out.coefficients?.find((c) => c.term === "Top");
+  ok(logEC50?.ambiguous === true, `LogEC50 should be flagged ambiguous, got ${JSON.stringify(logEC50)}`);
+  ok(
+    (logEC50?.dependency ?? 0) > 0.9999,
+    `LogEC50 dependency should exceed 0.9999, got ${logEC50?.dependency}`,
+  );
+  ok(top?.ambiguous === true, `Top should be flagged ambiguous, got ${JSON.stringify(top)}`);
+  ok(out.notes?.includes("ambiguous"), `notes should label the fit ambiguous, got ${out.notes}`);
+  // Prism's signature: the best-fit EC50 is far outside the data (X is log10 M, so the value is in M).
+  const ec50 = out.fit?.rows.find((r) => r.label === "EC50")?.values?.[0];
+  ok(ec50 != null && ec50 > 1e-6, `EC50 should be wild (>1e-6 M), got ${ec50}`);
+  // "Neither" still reports plain values.
+  const off = await runAnalysis("nonlinear-regression", table, {
+    y: "Y",
+    model: "sigmoidal-4pl-logx",
+    difficultFitHandling: "none",
+  });
+  ok(!("error" in off), `4PL fit with the control off failed: ${"error" in off ? off.error : ""}`);
+  ok(!off.coefficients?.some((c) => c.ambiguous), "with the control off nothing should be flagged ambiguous");
+  ok(!off.notes?.includes("ambiguous"), `notes should not warn with the control off, got ${off.notes}`);
+  // The default (unstable) mode flags by condition number instead — never as ambiguous.
+  const def = await runAnalysis("nonlinear-regression", table, { y: "Y", model: "sigmoidal-4pl-logx" });
+  ok(!("error" in def), `default 4PL fit failed: ${"error" in def ? def.error : ""}`);
+  ok(!def.coefficients?.some((c) => c.ambiguous), "unstable mode should not flag ambiguous");
+  ok(def.coefficients?.some((c) => c.unstable), "unstable mode should flag the undetermined parameters instead");
+  // Constrain Bottom = 0, Top = 100 (FAQ 1462's salvage): no longer ambiguous.
+  const fixed = await runAnalysis("nonlinear-regression", table, {
+    y: "Y",
+    model: "sigmoidal-4pl-logx",
+    difficultFitHandling: "ambiguous",
+    fixed: { Bottom: 0, Top: 100 },
+  });
+  ok(!("error" in fixed), `constrained 4PL fit failed: ${"error" in fixed ? fixed.error : ""}`);
+  ok(!fixed.coefficients?.some((c) => c.ambiguous), "constrained fit should flag nothing ambiguous");
+  const lec = fixed.coefficients?.find((c) => c.term === "LogEC50");
+  ok(
+    (lec?.dependency ?? 1) < 0.8,
+    `constrained LogEC50 dependency should be well below 0.9999, got ${lec?.dependency}`,
+  );
+  const ec50c = fixed.fit?.rows.find((r) => r.label === "EC50")?.values?.[0];
+  ok(ec50c != null && ec50c > 4e-8 && ec50c < 6e-8, `constrained EC50 should be ~49 nM, got ${ec50c}`);
+  const lo = lec?.low != null ? 10 ** lec.low * 1e9 : null;
+  const hi = lec?.high != null ? 10 ** lec.high * 1e9 : null;
+  ok(lo != null && lo > 30 && lo < 45, `EC50 CI low should be ~39 nM, got ${lo}`);
+  ok(hi != null && hi > 55 && hi < 75, `EC50 CI high should be ~63 nM, got ${hi}`);
+  // Dependency values survive recompute.
+  const again = await runAnalysis("nonlinear-regression", table, {
+    y: "Y",
+    model: "sigmoidal-4pl-logx",
+    difficultFitHandling: "ambiguous",
+  });
+  ok(!("error" in again), `recomputed 4PL fit failed: ${"error" in again ? again.error : ""}`);
+  deepStrictEqual(
+    again.coefficients?.map((c) => c.dependency),
+    out.coefficients?.map((c) => c.dependency),
+  );
+});
+
+// Seq 387: the Confidence-tab choice selects the mode, and the Diagnostics
+// option reports dependency (Prism's Diagnostics tab).
+check("seq 387 ambiguous-fit handling in the curve wizard", () => {
+  const wizard = WIZARDS["nonlinear-regression"]!;
+  const twoY = readTable({ columns: ["Title", "X", "A", "B"], rows: [["", "1", "2", "3"]] });
+  const asked = (a: Record<string, string | string[]>) =>
+    wizard.questions(a, twoY).flatMap((q) => (q ? [q] : []));
+  const ids = (a: Record<string, string | string[]>) => asked(a).map((q) => q.id);
+  ok(
+    ids({ kind: "dose", model: "sigmoidal-4pl-logx" }).includes("difficultFitHandling"),
+    "dose-response should ask about difficult fits",
+  );
+  ok(
+    ids({ kind: "dose", model: "sigmoidal-4pl-logx" }).includes("reportDependency"),
+    "dose-response should offer the dependency report",
+  );
+  ok(ids({ kind: "other", model: "line" }).includes("reportDependency"), "line should offer it too");
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "line", difficultFitHandling: "ambiguous" }, twoY).params,
+    { y: "A", model: "line", difficultFitHandling: "ambiguous" },
+  );
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "line", reportDependency: "yes" }, twoY).params,
+    { y: "A", model: "line", reportDependency: true },
+  );
+  deepStrictEqual(
+    wizard.finish({ ys: ["A"], kind: "other", model: "line", reportDependency: "no" }, twoY).params,
+    { y: "A", model: "line" },
+  );
+});
+
+// Seq 387: reportDependency asks the results sheet to show the dependency
+// column (the values themselves are computed on every nonlinear fit); a
+// bogus handling is refused naming the three choices.
+check("seq 387 reportDependency surfaces dependency on the results sheet", async () => {
+  const xs = [-9, -8.5, -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4];
+  const ys = xs.map((x, i) => 100 / (1 + 10 ** (-6.5 - x)) + 0.8 * Math.sin(1.7 * i + 0.5));
+  const table: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: xs.map((x, i) => ["", String(x), String(ys[i])]),
+  };
+  const withDep = await runAnalysis("nonlinear-regression", table, {
+    y: "Y",
+    model: "sigmoidal-4pl-logx",
+    reportDependency: true,
+  });
+  ok(!("error" in withDep), `4PL fit with reportDependency failed: ${"error" in withDep ? withDep.error : ""}`);
+  ok(withDep.showDependency === true, "reportDependency should set showDependency on the result");
+  ok(
+    withDep.coefficients?.find((c) => c.term === "LogEC50")?.dependency != null,
+    "the LogEC50 coefficient should carry its dependency",
+  );
+  const without = await runAnalysis("nonlinear-regression", table, { y: "Y", model: "sigmoidal-4pl-logx" });
+  ok(!("error" in without), `plain 4PL fit failed: ${"error" in without ? without.error : ""}`);
+  ok(without.showDependency !== true, "without the option the result should not ask for the dependency column");
+  ok(
+    without.coefficients?.find((c) => c.term === "LogEC50")?.dependency != null,
+    "dependency is computed regardless of the display option",
+  );
+  const bogus = await runAnalysis("nonlinear-regression", table, {
+    y: "Y",
+    model: "sigmoidal-4pl-logx",
+    difficultFitHandling: "bogus" as never,
+  });
+  ok(
+    "error" in bogus && bogus.error.includes("ambiguous"),
+    `bogus handling should be refused naming the choices, got ${JSON.stringify(bogus)}`,
+  );
 });
 
 // v2 item 23: user-defined equations for nonlinear regression — the user types their own
@@ -13412,6 +13659,7 @@ check("a nonlinear regression on a Multiple Variables table names its X and Y", 
     "weights",
     "fitMethod",
     "difficultFitHandling",
+    "reportDependency",
     "fitRange",
     "rout",
     "compareModel",

@@ -779,9 +779,12 @@ export type NonlinearFitMethod = (typeof NONLINEAR_FIT_METHODS)[number];
  *  "unstable" (default since Prism 9.0) identifies parameters the data do
  *  not determine — the fit's Hessian condition number exceeds 10/√ε
  *  (about 6.7×10⁸) — and reports their best-fit value as "Unstable" with
- *  a "Very wide" CI; "none" reports best-fit values no matter what.
- *  Diagnostic only — it never alters fitted values. */
-export const NONLINEAR_DIFFICULT_FIT_HANDLINGS = ["unstable", "none"] as const;
+ *  a "Very wide" CI; "ambiguous" (seq 387, Prism's older method, Prism
+ *  7.0–8.1) flags a parameter whose dependency exceeds 0.9999 — its
+ *  best-fit value and SE are preceded by ~ and its CI is "Very wide";
+ *  "none" reports best-fit values no matter what. Diagnostic only — it
+ *  never alters fitted values. */
+export const NONLINEAR_DIFFICULT_FIT_HANDLINGS = ["unstable", "ambiguous", "none"] as const;
 export type NonlinearDifficultFitHandling = (typeof NONLINEAR_DIFFICULT_FIT_HANDLINGS)[number];
 export interface NonlinearRegressionParams {
   /** Multiple Variables tables: the X variable (the Y variable is `y`). */
@@ -835,8 +838,14 @@ export interface NonlinearRegressionParams {
    *  (Tukey biweight), or Poisson (counts). */
   fitMethod?: NonlinearFitMethod;
   /** How a difficult fit is handled (seq 323): identify unstable
-   *  parameters (default) or report best-fit values no matter what. */
+   *  parameters (default), identify ambiguous fits (seq 387, Prism's
+   *  older method), or report best-fit values no matter what. */
   difficultFitHandling?: NonlinearDifficultFitHandling;
+  /** Report each parameter's dependency (seq 387, Prism's Diagnostics
+   *  tab): the results sheet gains a Dependency column. The values are
+   *  computed on every nonlinear fit either way; this only controls the
+   *  display. */
+  reportDependency?: boolean;
   /** Extra Y series for a shared-parameter (global) fit. nls models only. */
   globalY?: string[];
   /** Which parameters are shared across the global fit's series (omitted:
@@ -2172,6 +2181,16 @@ export interface RegressionCoefficient {
    *  10/√ε). The numeric estimate is kept (the overlays draw the curve
    *  from it); the results view shows "Unstable" / "Very wide" instead. */
   unstable?: boolean;
+  /** Seq 387: true when this parameter's dependency exceeds 0.9999 and
+   *  the fit ran with the ambiguous handling — Prism precedes its
+   *  best-fit value and standard error with ~ and reports its CI as
+   *  "very wide". The numeric estimate is kept, as with `unstable`. */
+  ambiguous?: boolean;
+  /** Seq 387: this parameter's dependency (0–1; how much the other
+   *  parameters can compensate for a change in it), null when undefined
+   *  (no Hessian, noiseless data, robust/Poisson refit). Computed on
+   *  every nonlinear fit; shown only when the run asked for it. */
+  dependency?: number | null;
   /** Denominator degrees of freedom behind `p` (mixed-effects only):
    *  Satterthwaite / Kenward-Roger are usually fractional, Legacy whole. */
   df?: number | null;
@@ -2749,6 +2768,9 @@ export interface AnalysisResult {
   covariance?: CovarianceMatrix;
   /** A curve fit's best-fit values, one column per data set (two when curves are compared). */
   fit?: { sets: string[]; rows: FitRow[] };
+  /** Seq 387: the results sheet shows a Dependency column for the
+   *  coefficients (set when the run asked for it with reportDependency). */
+  showDependency?: boolean;
   /** A standard curve's unknowns, interpolated. */
   interpolated?: InterpolatedRow[];
   /** The radioligand concentration [L] a homologous-competition fit used
