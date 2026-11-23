@@ -211,7 +211,7 @@ import {
 import { initialAnswer, namesShortfall } from "../src/views/analyses/analysis-wizard";
 import { coxSurvivalColumns } from "../src/views/graphs/survival";
 import { checkNormality } from "../src/views/analyses/normality-check";
-import { addNote, applyNumberFormats, axesRangeInputs, baseLayout, curveXs, groupedBarLayout, groupedScatterLayout, heatmapLayout, jitter, legendRightMargin, legendWidthPx, logScaleOffered, movedText, numberTickformat, paintOf, perRowSummaryStats, scatterOffsets, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xErrorColumn, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
+import { addNote, applyNumberFormats, axesRangeInputs, baseLayout, centers, curveXs, errorOf, groupedBarLayout, groupedScatterLayout, heatmapLayout, jitter, legendRightMargin, legendWidthPx, logScaleOffered, movedText, numberTickformat, paintOf, perRowStats, perRowSummaryStats, scatterOffsets, summaryErrorAt, summaryMeanColumn, textWidth, unlinkedAnalysisNote, vectorTraces, visibleOutline, whiskerBounds, withCaps, xErrorColumn, xyDrawn, xyLayout } from "../src/views/graphs/plot-helpers";
 import {
   drawnKeys,
   drawnStyle,
@@ -5099,6 +5099,173 @@ check("summary subcolumns: per-row stats read the stored error, converting SD↔
     error: [3],
     errorMinus: [2],
   });
+});
+
+// seq 351: error-bar center/error choices — geometric mean, range, IQR,
+// geometric SD factor and geometric 95% CI. Fixtures hand-computed in
+// Python (~/workspace/.helix-v19/351-fixtures.py): the lognormal column
+// [1,2,4,8,16] has geometric mean 4 exactly; the skewed column
+// [1,2,3,10,20,30,40,50] has median 15, Q1 2.25, Q3 37.5.
+check("seq 351: geometric mean center matches the hand-computed value", () => {
+  const cols = readTable({
+    columns: ["Title", "A"],
+    rows: [["r1", "1"], ["r2", "2"], ["r3", "4"], ["r4", "8"], ["r5", "16"]],
+  }).columns;
+  // exp(mean of ln) is 4 up to a last-ulp rounding, so a tolerance, not an exact match.
+  const gm = centers(cols, "geomean");
+  ok(Math.abs(gm[0] - 4) < 1e-9, JSON.stringify(gm));
+  deepStrictEqual(centers(cols, "mean"), [6.2]);
+  deepStrictEqual(centers(cols, "median"), [4]);
+});
+
+check("seq 351: geometric SD factor and geometric 95% CI match hand-computed values", () => {
+  const v = [1, 2, 4, 8, 16];
+  // Geometric SD factor exp(SD of ln) = 2.992059427797328; the bars run
+  // geoMean × factor above and geoMean / factor below.
+  const gs = errorOf(v, "geosd", 4);
+  ok(Math.abs(gs.error! - 7.968237711189312) < 1e-9, JSON.stringify(gs));
+  ok(Math.abs(gs.errorMinus! - 2.6631281575363994) < 1e-9, JSON.stringify(gs));
+  // Geometric 95% CI exp(mean of ln ± t·SEM of ln) = [1.0258…, 15.5975…];
+  // 1e-7, not 1e-9: the bound moves ~8× any tCrit95 bisection error.
+  const gci = errorOf(v, "geoci", 4);
+  ok(Math.abs(gci.error! - 11.597502780236702) < 1e-7, JSON.stringify(gci));
+  ok(Math.abs(gci.errorMinus! - 2.9741947653137593) < 1e-7, JSON.stringify(gci));
+});
+
+check("seq 351: range and IQR errors are asymmetric around the center", () => {
+  // Range [3,1,4,1,5]: mean 2.8 → plus 2.2, minus 1.8.
+  const range = errorOf([3, 1, 4, 1, 5], "range", 2.8);
+  ok(Math.abs(range.error! - 2.2) < 1e-9, JSON.stringify(range));
+  ok(Math.abs(range.errorMinus! - 1.8) < 1e-9, JSON.stringify(range));
+  // IQR [1,2,3,10,20,30,40,50]: median 15, Q1 2.25, Q3 37.5.
+  deepStrictEqual(errorOf([1, 2, 3, 10, 20, 30, 40, 50], "iqr", 15), { error: 22.5, errorMinus: 12.75 });
+  // The symmetric kinds keep a null lower side; off means no bar at all.
+  deepStrictEqual(errorOf([1, 2, 4, 8, 16], "sd", 6.2).errorMinus, null);
+  deepStrictEqual(errorOf([1, 2, 4, 8, 16], "sem", 6.2).errorMinus, null);
+  deepStrictEqual(errorOf([1, 2, 4, 8, 16], "ci", 6.2).errorMinus, null);
+  deepStrictEqual(errorOf([1, 2, 4, 8, 16], "none", 6.2), { error: null, errorMinus: null });
+});
+
+check("seq 351: per-row stats carry the asymmetric lower side for range and IQR", () => {
+  const cols = readTable({
+    columns: ["Title", "A", "B", "C"],
+    rows: [
+      ["r1", "1", "10", "100"],
+      ["r2", "2", "20", "200"],
+      ["r3", "3", "30", "300"],
+    ],
+  }).columns;
+  // Row 1 [1,10,100]: median 10, Q1 1, Q3 100 → plus 90, minus 9.
+  // Row 2 [2,20,200]: median 20, Q1 2, Q3 200 → plus 180, minus 18.
+  // Row 3 [3,30,300]: median 30, Q1 3, Q3 300 → plus 270, minus 27.
+  deepStrictEqual(perRowStats(cols, 3, "median", "iqr"), {
+    center: [10, 20, 30],
+    error: [90, 180, 270],
+    errorMinus: [9, 18, 27],
+  });
+  deepStrictEqual(perRowStats(cols, 3, "mean", "range"), {
+    center: [37, 74, 111],
+    error: [63, 126, 189],
+    errorMinus: [36, 72, 108],
+  });
+});
+
+check("seq 351: mean-error draws geometric-mean centers with asymmetric bars per dataset", () => {
+  const dataset = readTable({
+    columns: ["Title", "Lognormal", "Skewed"],
+    rows: [
+      [null, "1", "1"],
+      [null, "2", "2"],
+      [null, "4", "3"],
+      [null, "8", "10"],
+      [null, "16", "20"],
+    ],
+  });
+  const options = { ...newGraphOptions("mean-error"), center: "geomean" as const, error: "geosd" as const };
+  const fig = GRAPHS["mean-error"].build(dataset.numeric, options, paintOf(options, 2));
+  const traces = fig.data as { y: number[]; error_y?: { array: number[]; arrayminus?: number[] } }[];
+  const bars = traces.filter((t) => t.error_y);
+  strictEqual(bars.length, 2);
+  ok(Math.abs(bars[0].y[0] - 4) < 1e-9, JSON.stringify(bars[0]));
+  ok(Math.abs(bars[1].y[0] - 4.128917917333368) < 1e-9, JSON.stringify(bars[1]));
+  ok(Math.abs(bars[0].error_y!.array[0] - 7.968237711189312) < 1e-9, JSON.stringify(bars[0].error_y));
+  ok(Math.abs(bars[0].error_y!.arrayminus![0] - 2.6631281575363994) < 1e-9, JSON.stringify(bars[0].error_y));
+  ok(Math.abs(bars[1].error_y!.array[0] - 9.793871042985396) < 1e-9, JSON.stringify(bars[1].error_y));
+  ok(Math.abs(bars[1].error_y!.arrayminus![0] - 2.9044532488919526) < 1e-9, JSON.stringify(bars[1].error_y));
+  // Median + IQR on the same two columns: Lognormal [1,2,4,8,16] has median 4,
+  // Q1 1.5, Q3 12; Skewed [1,2,3,10,20] has median 3, Q1 1.5, Q3 15.
+  const iqrOptions = { ...newGraphOptions("mean-error"), center: "median" as const, error: "iqr" as const };
+  const iqrFig = GRAPHS["mean-error"].build(dataset.numeric, iqrOptions, paintOf(iqrOptions, 2));
+  const iqrBars = (iqrFig.data as { y: number[]; error_y?: { array: number[]; arrayminus?: number[] } }[]).filter(
+    (t) => t.error_y,
+  );
+  strictEqual(iqrBars.length, 2);
+  deepStrictEqual(iqrBars[0].y, [4]);
+  deepStrictEqual(iqrBars[0].error_y?.array, [8]);
+  deepStrictEqual(iqrBars[0].error_y?.arrayminus, [2.5]);
+  deepStrictEqual(iqrBars[1].y, [3]);
+  deepStrictEqual(iqrBars[1].error_y?.array, [12]);
+  deepStrictEqual(iqrBars[1].error_y?.arrayminus, [1.5]);
+});
+
+check("seq 351: XY replicates as geometric means with range bars per X", () => {
+  const cols = readTable({
+    columns: ["Title", "X", "Y:Y1", "Y:Y2"],
+    rows: [
+      ["r1", "1", "1", "2"],
+      ["r2", "2", "4", "8"],
+    ],
+  }).columns;
+  const options = {
+    ...newGraphOptions("xy-scatter"),
+    center: "geomean" as const,
+    error: "range" as const,
+    xyReplicates: "mean" as const,
+  };
+  const drawn = xyDrawn(cols[0]!, { name: "Y", columns: [cols[1]!, cols[2]!] }, options);
+  deepStrictEqual(drawn.x, [1, 2]);
+  ok(Math.abs(drawn.y[0] - Math.SQRT2) < 1e-9, JSON.stringify(drawn));
+  ok(Math.abs(drawn.y[1] - Math.sqrt(32)) < 1e-9, JSON.stringify(drawn));
+  ok(Math.abs(drawn.errors![0] - (2 - Math.SQRT2)) < 1e-9, JSON.stringify(drawn));
+  ok(Math.abs(drawn.errors![1] - (8 - Math.sqrt(32))) < 1e-9, JSON.stringify(drawn));
+  ok(Math.abs(drawn.errorMinus![0] - (Math.SQRT2 - 1)) < 1e-9, JSON.stringify(drawn));
+  ok(Math.abs(drawn.errorMinus![1] - (Math.sqrt(32) - 4)) < 1e-9, JSON.stringify(drawn));
+});
+
+check("seq 351: geometric kinds blank without a plotted value on non-positive data", () => {
+  const cols = readTable({
+    columns: ["Title", "A"],
+    rows: [["r1", "-1"], ["r2", "2"], ["r3", "3"]],
+  }).columns;
+  deepStrictEqual(centers(cols, "geomean"), [NaN]);
+  deepStrictEqual(errorOf([-1, 2, 3], "geosd", 4 / 3), { error: null, errorMinus: null });
+  deepStrictEqual(errorOf([-1, 2, 3], "geoci", 4 / 3), { error: null, errorMinus: null });
+  // Zero is non-positive too.
+  deepStrictEqual(errorOf([0, 2, 3], "geosd", 5 / 3), { error: null, errorMinus: null });
+  // The graph draws no point and no bar for the undefined center…
+  const geoOptions = { ...newGraphOptions("mean-error"), center: "geomean" as const, error: "geosd" as const };
+  const geoFig = GRAPHS["mean-error"].build(cols, geoOptions, paintOf(geoOptions, 1));
+  const geoBars = geoFig.data as { y: number[]; error_y?: { array: number[] } }[];
+  const geoBar = geoBars.find((t) => t.error_y)!;
+  ok(Number.isNaN(geoBar.y[0]), JSON.stringify(geoBar));
+  ok(Number.isNaN(geoBar.error_y!.array[0]), JSON.stringify(geoBar));
+  // …and with a mean center the point stays but its geometric error bar blanks.
+  const meanOptions = { ...newGraphOptions("mean-error"), center: "mean" as const, error: "geosd" as const };
+  const meanFig = GRAPHS["mean-error"].build(cols, meanOptions, paintOf(meanOptions, 1));
+  const meanBars = meanFig.data as { y: number[]; error_y?: { array: number[] } }[];
+  const meanBar = meanBars.find((t) => t.error_y)!;
+  deepStrictEqual(meanBar.y, [4 / 3]);
+  ok(Number.isNaN(meanBar.error_y!.array[0]), JSON.stringify(meanBar));
+});
+
+check("seq 351: a summary table cannot derive range/IQR/geometric errors from stored Mean/SD/N", () => {
+  const sets = readTable(summaryTable()).sets;
+  deepStrictEqual(summaryErrorAt(sets[0].columns, 0, "mean-sd-n", "range"), { error: null, errorMinus: null });
+  deepStrictEqual(summaryErrorAt(sets[0].columns, 0, "mean-sd-n", "iqr"), { error: null, errorMinus: null });
+  deepStrictEqual(summaryErrorAt(sets[0].columns, 0, "mean-sd-n", "geosd"), { error: null, errorMinus: null });
+  deepStrictEqual(summaryErrorAt(sets[0].columns, 0, "mean-sd-n", "geoci"), { error: null, errorMinus: null });
+  // The stored kinds still convert exactly.
+  deepStrictEqual(summaryErrorAt(sets[0].columns, 0, "mean-sd-n", "sd"), { error: 2, errorMinus: null });
 });
 
 check("summary subcolumns: grouped bars draw the mean with the stored error (SEM by default)", () => {

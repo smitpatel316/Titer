@@ -49,7 +49,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?:
         ...(drawn.keys
           ? seriesPoints(paint, set.name, i, drawn.keys)
           : { marker: seriesMarker(paint, set.name, i) }),
-        ...(drawn.errors ? { error_y: paint.errorBars(set.name, i, drawn.errors) } : {}),
+        ...(drawn.errors ? { error_y: paint.errorBars(set.name, i, drawn.errors, drawn.errorMinus) } : {}),
         hoverinfo: "x+y",
       },
     ];

@@ -33,7 +33,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint, _titles?:
         y: bars.y,
         ...(set.name === right ? { yaxis: "y2" } : {}),
         marker: paint.bars(set.name, i),
-        ...(bars.errors ? { error_y: paint.errorBars(set.name, i, bars.errors) } : {}),
+        ...(bars.errors ? { error_y: paint.errorBars(set.name, i, bars.errors, bars.errorMinus) } : {}),
         hoverinfo: "x+y",
       },
       {

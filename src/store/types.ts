@@ -81,8 +81,8 @@ export type GraphType =
 /** The choices of a graph's options, one list each: the types come from them, and a
  *  file's value outside them is read as the option's default. */
 export const GRAPH_CHOICES = {
-  center: ["mean", "median"],
-  error: ["none", "sd", "sem", "ci"],
+  center: ["mean", "median", "geomean"],
+  error: ["none", "sd", "sem", "ci", "range", "iqr", "geosd", "geoci"],
   xScale: ["linear", "log10", "log2"],
   yScale: ["linear", "log10", "log2"],
   y2Scale: ["linear", "log10", "log2"],

@@ -17,6 +17,7 @@ import type { AnalysisParams, AnalysisResult, AnalysisType } from "../src/stats/
 import { hasXColumn, type GraphOptions, type GraphType, type TableData, type TableType, type Transform } from "../src/store/types";
 import { GRAPHS, graphSeries, newGraphOptions, plotColumns, type GraphFigure } from "../src/views/graphs";
 import { errorOf, paintOf } from "../src/views/graphs/plot-helpers";
+import { mean } from "../src/lib/summary";
 import { pairUp, readTable, splitXY, xyPoints } from "../src/lib/dataset";
 import { countDataColumns, countDataGroups } from "../src/views/analyses";
 import { WIZARDS } from "../src/views/analyses/wizards";
@@ -4273,8 +4274,8 @@ async function disagreements(): Promise<string[]> {
   // A graph's 95% CI error bar is R's t.test interval of the mean, half its width.
   for (const c of readTable(column).numeric) {
     const r = await evalNamedVector(`ci<-t.test(${rVec(c.values)})$conf.int;c(h=(ci[2]-ci[1])/2)`);
-    if (r.h == null || Math.abs(errorOf(c.values, "ci") - r.h) > 1e-9)
-      out.push(`95% CI error bar of ${c.name}: graph ${errorOf(c.values, "ci")}, R ${r.h}`);
+    if (r.h == null || Math.abs(errorOf(c.values, "ci", mean(c.values)).error! - r.h) > 1e-9)
+      out.push(`95% CI error bar of ${c.name}: graph ${errorOf(c.values, "ci", mean(c.values)).error}, R ${r.h}`);
   }
   // Descriptive statistics' quartiles are the (n + 1)p method, worked out here by hand;
   // a value at or under 0 leaves no geometric mean.

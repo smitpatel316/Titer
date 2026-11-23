@@ -102,6 +102,7 @@ export const GROUPED_SOURCES = new Set<AnalysisType | undefined>(["two-way-anova
 const CENTER_ITEMS = [
   { value: "mean" as const, label: "Mean" },
   { value: "median" as const, label: "Median" },
+  { value: "geomean" as const, label: "Geometric mean" },
 ];
 // The graphs that draw a center with error bars; Individual values and Interleaved
 // scatter draw it as a short line, styled with them.
@@ -120,6 +121,10 @@ const ERROR_ITEMS = [
   { value: "sd" as const, label: "SD" },
   { value: "sem" as const, label: "SEM" },
   { value: "ci" as const, label: "95% CI" },
+  { value: "range" as const, label: "Range" },
+  { value: "iqr" as const, label: "Interquartile range" },
+  { value: "geosd" as const, label: "Geometric SD" },
+  { value: "geoci" as const, label: "Geometric 95% CI" },
 ];
 
 // ── Statistics: what's computed and drawn on the graph ──────────────────
@@ -1184,11 +1189,22 @@ function dataOptions(c: SectionContext): React.ReactNode {
   const error = (
     <Choice label="Error bars" value={options.error} onChange={(error) => set({ error })} items={ERROR_ITEMS} />
   );
+  // The geometric kinds need all-positive values: a set with a zero or
+  // negative value plots without a point or error bar, never a wrong one.
+  const geoNote =
+    (options.center === "geomean" || options.error === "geosd" || options.error === "geoci") &&
+    (
+      <p className="text-small text-secondary">
+        Geometric mean needs all-positive values — a data set with a zero or negative value plots without a point
+        or error bar.
+      </p>
+    );
   if (WITH_ERROR_BARS.has(graphType)) {
     return (
       <>
         {center}
         {error}
+        {geoNote}
       </>
     );
   }
@@ -1313,6 +1329,22 @@ function dataOptions(c: SectionContext): React.ReactNode {
             {error}
           </>
         )
+      );
+    case "mv-strip-plot":
+    case "mv-summary-symbol":
+    case "mv-bar-strip":
+    case "mv-before-after-bar-strip":
+    case "mv-bar-chart":
+      // The MV error-bar kinds reuse the column builders (individual /
+      // mean-error / before-after bar-and-strip), so they take the same
+      // center and error choices — the box and violin MV kinds draw no
+      // center or error bars and keep the default (no controls).
+      return (
+        <>
+          {center}
+          {error}
+          {geoNote}
+        </>
       );
     case "volcano":
       return (

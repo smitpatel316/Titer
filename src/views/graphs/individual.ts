@@ -9,7 +9,7 @@ import { pointKeyOf } from "../../lib/columns";
 
 function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFigure {
   const center = centers(columns, options.center);
-  const errs = errors(columns, options.error);
+  const errs = errors(columns, options.error, center);
   const data: unknown[] = [];
 
   columns.forEach((c, i) => {
@@ -42,7 +42,7 @@ function build(columns: Column[], options: GraphOptions, paint: Paint): GraphFig
         x: [i],
         y: [center[i]],
         marker: { opacity: 0 },
-        error_y: paint.errorBars(c.name, i, [errs[i]]),
+        error_y: paint.errorBars(c.name, i, [errs.error[i]], errs.errorMinus ? [errs.errorMinus[i]] : undefined),
         hoverinfo: "skip",
       });
     }
