@@ -609,11 +609,22 @@ const ROWS: Row[] = [
     note:
       "CORRECTED vs the audit (which said GAP): compactLetters is implemented " +
       "(significance-overlay.ts), sigDisplay 'letters' is a valid choice, and " +
-      "build_graph/update_graph take partial GraphOptions.",
+      "build_graph/update_graph take partial GraphOptions. The 1.9 remainder " +
+      "adds the CLD format options (Prism's Format CLD dialog): location, " +
+      "direction, identifier, font/size/color incl. auto-size — the overlay " +
+      "honors them, the Format panel exposes them, and checks.ts pins them.",
     checks: [
       { kind: "sourceContains", file: "sigOverlay", text: "export function compactLetters" },
       { kind: "sourceContains", file: "sigOverlay", text: 'options.sigDisplay === "letters"' },
+      { kind: "sourceContains", file: "sigOverlay", text: "export function formatLetters" },
       { kind: "graphChoice", choice: "sigDisplay", value: "letters" },
+      { kind: "graphChoice", choice: "lettersLocation", value: "outside" },
+      { kind: "graphChoice", choice: "lettersDirection", value: "stacked" },
+      { kind: "graphChoice", choice: "lettersIdentifier", value: "numbers" },
+      { kind: "graphChoice", choice: "lettersFont", value: "arial" },
+      { kind: "graphOption", field: "lettersSize" },
+      { kind: "graphOption", field: "lettersColor" },
+      { kind: "graphOption", field: "lettersFontAuto" },
       { kind: "tool", tool: "titer_build_graph" },
       { kind: "tool", tool: "titer_update_graph" },
     ],

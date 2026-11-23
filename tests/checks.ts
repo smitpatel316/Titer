@@ -222,9 +222,11 @@ import { previewFigure } from "../src/views/graphs/match-preview";
 import type { OutlineNode } from "../src/store/use-project-store";
 import {
   addSignificance,
+  compactLetters,
   deriveComparisons,
   expandSigPairs,
   lettersComparisons,
+  lettersFit,
   sigAnalysisIdsOf,
   sigPairKey,
   sigPairSelected,
@@ -232,6 +234,7 @@ import {
 } from "../src/views/graphs/significance-overlay";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { LettersFormatControls } from "../src/views/graphs/format-sections";
 import { AnalysisResultsView, headline } from "../src/views/analyses/analysis-results-view";
 import { loadPrismSaveChoice, nextSaveAction } from "../src/lib/prism-nudge";
 import {
@@ -12184,6 +12187,252 @@ check("sigDisplay pvalue-eq labels brackets p=0.03, and a multiple-t-tests run d
   const texts = (fig.layout.annotations as { text: string }[]).map((a) => a.text);
   strictEqual(texts.length, 3);
   ok(texts.every((t) => /^p(=|<)0/.test(t)), `p= labels, got ${texts.join(", ")}`);
+});
+
+// ── seq 178: Compact Letter Display format options ────────────────────────
+// Fixture: a column graph with three groups; A differs from B and C, B and
+// C do not differ — so the letters are A="a", B="b", C="b".
+const cldColumns = readTable({
+  columns: ["Title", "A", "B", "C"],
+  rows: [
+    [null, "10", "5", "1"],
+    [null, "11", "6", "2"],
+    [null, "12", "7", "3"],
+  ],
+}).columns;
+const cldComparisons: SigComparison[] = [
+  { key: pairKey("A", "B"), group1: "A", group2: "B", p: 0.01 },
+  { key: pairKey("A", "C"), group1: "A", group2: "C", p: 0.001 },
+  { key: pairKey("B", "C"), group1: "B", group2: "C", p: 0.4 },
+];
+type CldAnnotation = {
+  text: string;
+  x: number;
+  y: number;
+  yref?: string;
+  textangle?: number;
+  font?: { color?: string; size?: number; family?: string };
+};
+const cldAnnotations = (fig: GraphFigure): CldAnnotation[] => (fig.layout.annotations as CldAnnotation[] | undefined) ?? [];
+const cldFigure = (options: Partial<GraphOptions>, comparisons: SigComparison[] = cldComparisons): GraphFigure => {
+  const fig: GraphFigure = { data: [], layout: {} };
+  addSignificance(fig, cldColumns, "individual", { ...newGraphOptions("individual"), sigDisplay: "letters", ...options }, comparisons);
+  return fig;
+};
+
+// seq 178: the Compact Letter Display algorithm itself — a functional pin
+// (the coverage row was sourceContains-only until now). Canonical
+// insert-absorb families: all differ, none differ, the middle group sharing
+// with both neighbours, and a chain where the absorb step drops the
+// two-letter {C,D} set (so D ends up with two letters, "ac").
+check("seq 178: compactLetters assigns one letter per group when all pairs differ, one shared letter when none do, and two letters to a middle group", () => {
+  const show = (m: Map<string, string>) => Object.fromEntries(m);
+  deepStrictEqual(show(compactLetters(["A", "B", "C"], [["A", "B"], ["A", "C"], ["B", "C"]])), { A: "a", B: "b", C: "c" });
+  deepStrictEqual(show(compactLetters(["A", "B", "C"], [])), { A: "a", B: "a", C: "a" });
+  deepStrictEqual(show(compactLetters(["A", "B", "C"], [["A", "C"]])), { A: "a", B: "ab", C: "b" });
+  deepStrictEqual(
+    show(compactLetters(["A", "B", "C", "D"], [["A", "B"], ["B", "C"], ["C", "D"]])),
+    { A: "ab", B: "c", C: "b", D: "ac" },
+  );
+  // The letter scheme overflows past "z" into "a1", "b1", ...
+  const many = Array.from({ length: 28 }, (_, i) => `G${i}`);
+  const allPairs = many.flatMap((g, i) => many.slice(i + 1).map((h) => [g, h] as [string, string]));
+  const overflow = compactLetters(many, allPairs);
+  strictEqual(overflow.get("G25"), "z");
+  strictEqual(overflow.get("G26"), "a1");
+  strictEqual(overflow.get("G27"), "b1");
+});
+
+// seq 178: the defaults reproduce today's rendering — above the data,
+// horizontal, lowercase, system font, 14 px, INK — so existing files and
+// the old pins keep their letters.
+check("seq 178: the default letters render above the data, horizontal, lowercase, 14 px in the default color", () => {
+  const anns = cldAnnotations(cldFigure({}));
+  deepStrictEqual(anns.map((a) => a.text), ["a", "b", "b"]);
+  ok(anns.every((a) => a.yref === "y"), "letters sit on the data axis");
+  ok(anns.every((a) => a.textangle === undefined), "horizontal by default");
+  ok(anns.every((a) => a.font?.size === 14), `size 14, got ${anns.map((a) => a.font?.size).join(", ")}`);
+  ok(anns.every((a) => a.font?.color === "#111827"), `default color, got ${anns.map((a) => a.font?.color).join(", ")}`);
+});
+
+// seq 178: the identifier option changes the letters — upper case, or
+// numbers (each letter's 1-based index, comma-separated).
+check("seq 178: lettersIdentifier upper cases the letters and numbers turns them into 1-based numbers", () => {
+  deepStrictEqual(cldAnnotations(cldFigure({ lettersIdentifier: "upper" })).map((a) => a.text), ["A", "B", "B"]);
+  deepStrictEqual(cldAnnotations(cldFigure({ lettersIdentifier: "numbers" })).map((a) => a.text), ["1", "2", "2"]);
+  deepStrictEqual(cldAnnotations(cldFigure({ lettersIdentifier: "lower" })).map((a) => a.text), ["a", "b", "b"]);
+});
+
+// seq 178: the direction option rotates the letters (vertical up/down) and
+// stacks them — one annotation per letter token, so a group with two
+// letters draws two annotations at increasing heights.
+check("seq 178: lettersDirection vertical-up/down rotates the letters and stacked draws one annotation per letter", () => {
+  const up = cldAnnotations(cldFigure({ lettersDirection: "vertical-up" }));
+  ok(up.length === 3 && up.every((a) => a.textangle === 90), `vertical-up, got ${up.map((a) => a.textangle).join(", ")}`);
+  const down = cldAnnotations(cldFigure({ lettersDirection: "vertical-down" }));
+  ok(down.length === 3 && down.every((a) => a.textangle === -90), `vertical-down, got ${down.map((a) => a.textangle).join(", ")}`);
+  // A differs from C only, so B carries two letters ("ab") — stacked draws
+  // four annotations, B's two at increasing heights.
+  const middleTwo: SigComparison[] = [
+    { key: pairKey("A", "B"), group1: "A", group2: "B", p: 0.4 },
+    { key: pairKey("A", "C"), group1: "A", group2: "C", p: 0.001 },
+    { key: pairKey("B", "C"), group1: "B", group2: "C", p: 0.4 },
+  ];
+  deepStrictEqual(cldAnnotations(cldFigure({}, middleTwo)).map((a) => a.text), ["a", "ab", "b"]);
+  const stacked = cldAnnotations(cldFigure({ lettersDirection: "stacked" }, middleTwo));
+  deepStrictEqual(stacked.map((a) => a.text), ["a", "a", "b", "b"]);
+  const bStack = stacked.filter((a) => a.x === 1);
+  strictEqual(bStack.length, 2);
+  ok(bStack[1]!.y > bStack[0]!.y, "stacked letters rise");
+});
+
+// seq 178: the location option moves the letters outside the graphing area
+// (paper coordinates above the plot) and grows the top margin to fit them.
+check("seq 178: lettersLocation outside puts the letters in paper coordinates above the plot and grows the top margin", () => {
+  const fig = cldFigure({ lettersLocation: "outside" });
+  const anns = cldAnnotations(fig);
+  strictEqual(anns.length, 3);
+  ok(anns.every((a) => a.yref === "paper"), `outside the graph, got ${anns.map((a) => a.yref).join(", ")}`);
+  ok(anns.every((a) => a.y > 1), `above the plot, got ${anns.map((a) => a.y).join(", ")}`);
+  // One row of 14 px letters: 16 (title-less top) + 1 row * (14 + 6) + 8.
+  strictEqual((fig.layout.margin as { t?: number } | undefined)?.t, 44);
+  // Outside forces stacked: a two-letter group draws one annotation per
+  // letter even with no direction set.
+  const middleTwo: SigComparison[] = [
+    { key: pairKey("A", "B"), group1: "A", group2: "B", p: 0.4 },
+    { key: pairKey("A", "C"), group1: "A", group2: "C", p: 0.001 },
+    { key: pairKey("B", "C"), group1: "B", group2: "C", p: 0.4 },
+  ];
+  deepStrictEqual(cldAnnotations(cldFigure({ lettersLocation: "outside" }, middleTwo)).map((a) => a.text), ["a", "a", "b", "b"]);
+});
+
+// seq 178: the font option sets the family, size and color — and the
+// auto-size option sizes by group count (14 for ≤4 groups, 12 for ≤8)
+// instead of the fixed size.
+check("seq 178: lettersFont/lettersSize/lettersColor set the font, and lettersFontAuto sizes by group count", () => {
+  const styled = cldAnnotations(cldFigure({ lettersFont: "arial", lettersSize: 20, lettersColor: "#ff0000" }));
+  ok(styled.every((a) => a.font?.family?.includes("Arial")), `Arial, got ${styled.map((a) => a.font?.family).join(", ")}`);
+  ok(styled.every((a) => a.font?.size === 20), `size 20, got ${styled.map((a) => a.font?.size).join(", ")}`);
+  ok(styled.every((a) => a.font?.color === "#ff0000"), `red, got ${styled.map((a) => a.font?.color).join(", ")}`);
+  // Six groups, all pairs differing, auto size beats the fixed size.
+  const sixNames = Array.from({ length: 6 }, (_, i) => `G${i}`);
+  const six = readTable({
+    columns: ["Title", ...sixNames],
+    rows: [0, 1, 2].map((r) => [null, ...sixNames.map((_, i) => String(10 - i + r))]),
+  }).columns;
+  const sixPairs: SigComparison[] = [];
+  for (let i = 0; i < 6; i++) {
+    for (let j = i + 1; j < 6; j++) {
+      sixPairs.push({ key: pairKey(`G${i}`, `G${j}`), group1: `G${i}`, group2: `G${j}`, p: 0.01 });
+    }
+  }
+  const autoFig: GraphFigure = { data: [], layout: {} };
+  addSignificance(
+    autoFig,
+    six,
+    "individual",
+    { ...newGraphOptions("individual"), sigDisplay: "letters", lettersFontAuto: true, lettersSize: 20 },
+    sixPairs,
+  );
+  const auto = cldAnnotations(autoFig);
+  strictEqual(auto.length, 6);
+  ok(auto.every((a) => a.font?.size === 12), `auto size for 6 groups is 12, got ${auto.map((a) => a.font?.size).join(", ")}`);
+});
+
+// seq 178: the letters still gate on a complete pairwise family — an
+// incomplete family draws nothing.
+check("seq 178: letters still gate on a complete pairwise family — an incomplete family draws no letters", () => {
+  const incomplete = cldComparisons.slice(0, 2); // A-B and A-C only: B-C missing
+  strictEqual(lettersFit(incomplete), false);
+  strictEqual(cldAnnotations(cldFigure({}, incomplete)).length, 0);
+  strictEqual(lettersFit(cldComparisons), true);
+});
+
+// seq 178 (MCP): setting the letters options through titer_update_graph
+// lands in the stored graph options and the overlay draws them.
+check("seq 178 (MCP): update-graph with letters options stores them and the overlay draws them", async () => {
+  const harness = mcpLaggingHarness(true);
+  harness.dispatch({
+    type: "create",
+    node: { id: "t2", type: "table", name: "Groups", parentId: null, tableType: "column", data: { columns: ["Title", "A", "B", "C"], rows: [[null, "1", "2", "3"]] } },
+  });
+  harness.dispatch({
+    type: "create",
+    node: { id: "g1", type: "graph", name: "Columns", parentId: "t2", graphType: "individual", graphOptions: newGraphOptions("individual") },
+  });
+  harness.sync();
+  await harness.run("job-178-mcp", "update-graph", {
+    graph_id: "g1",
+    options: { lettersLocation: "outside", lettersIdentifier: "upper", lettersSize: 20 },
+  });
+  const stored = harness.state().nodes.g1.graphOptions!;
+  strictEqual(stored.lettersLocation, "outside");
+  strictEqual(stored.lettersIdentifier, "upper");
+  strictEqual(stored.lettersSize, 20);
+  const anns = cldAnnotations(cldFigure({ lettersLocation: stored.lettersLocation, lettersIdentifier: stored.lettersIdentifier, lettersSize: stored.lettersSize }));
+  deepStrictEqual(anns.map((a) => a.text), ["A", "B", "B"]);
+  ok(anns.every((a) => a.yref === "paper" && a.font?.size === 20), "the overlay draws the stored options");
+});
+
+// seq 178 (.hlx): the letters options survive a save/load round-trip —
+// the file reader keeps validated choices, clamped sizes and booleans.
+check("seq 178 (.hlx): the letters options round-trip through a saved project", () => {
+  const graph: ProjectNode = {
+    id: "g1",
+    type: "graph",
+    name: "Columns",
+    parentId: "t1",
+    graphType: "individual",
+    graphOptions: {
+      ...newGraphOptions("individual"),
+      lettersLocation: "outside",
+      lettersDirection: "stacked",
+      lettersIdentifier: "numbers",
+      lettersFont: "arial",
+      lettersSize: 20,
+      lettersColor: "#ff0000",
+      lettersFontAuto: true,
+    },
+  };
+  const table: ProjectNode = {
+    id: "t1",
+    type: "table",
+    name: "Groups",
+    parentId: null,
+    tableType: "column",
+    data: { columns: ["Title", "A", "B", "C"], rows: [[null, "1", "2", "3"]] },
+  };
+  const payload: ProjectFilePayload = { nodes: { t1: table, g1: graph }, rootOrder: ["t1"], childOrder: { t1: ["g1"], g1: [] }, activeNodeId: "g1" };
+  const roundTripped = read(serializeProjectFile(payload));
+  strictEqual(roundTripped.updated, false);
+  const kept = roundTripped.project.nodes.g1.graphOptions!;
+  strictEqual(kept.lettersLocation, "outside");
+  strictEqual(kept.lettersDirection, "stacked");
+  strictEqual(kept.lettersIdentifier, "numbers");
+  strictEqual(kept.lettersFont, "arial");
+  strictEqual(kept.lettersSize, 20);
+  strictEqual(kept.lettersColor, "#ff0000");
+  strictEqual(kept.lettersFontAuto, true);
+});
+
+// seq 178 (Format panel): the letters controls render — location,
+// direction, labels, font, auto-size toggle and color — and outside the
+// graph the direction choice gives way to the stacked note (the size
+// stepper still shows: the size still applies to the outside rows).
+check("seq 178 (panel): the letters format controls render, and outside the graph the direction choice becomes the stacked note", () => {
+  const render = (options: GraphOptions) =>
+    renderToStaticMarkup(createElement(LettersFormatControls, { options, set: () => {} }));
+  const def = render(newGraphOptions("individual"));
+  for (const label of ["Location", "Direction", "Labels", "Font", "Font size", "Automatically determine the font size"]) {
+    ok(def.includes(label), `default controls lack “${label}”`);
+  }
+  ok(def.includes('type="color"'), "default controls lack the color picker");
+  const outside = render({ ...newGraphOptions("individual"), lettersLocation: "outside" });
+  ok(outside.includes("stack in one row per letter"), "outside lacks the stacked note");
+  ok(!outside.includes("Direction"), "outside still offers a direction choice");
+  ok(outside.includes("Font size"), "outside hides the size stepper");
+  const auto = render({ ...newGraphOptions("individual"), lettersFontAuto: true });
+  ok(!auto.includes("Font size"), "auto-size still shows the size stepper");
 });
 
 check("a group-pair sigPairs selection expands to per-row keys for the Format panel", () => {

@@ -303,7 +303,7 @@ export function sortPairsByX(
 }
 
 /** The graphs' font. */
-const FONT = "system-ui, -apple-system, sans-serif";
+export const FONT = "system-ui, -apple-system, sans-serif";
 // Texts are measured in it before drawing; where there is no page (the tests), estimated.
 const measure = typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d");
 
