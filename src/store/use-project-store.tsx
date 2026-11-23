@@ -25,7 +25,7 @@ import type { AnalysisParams, AnalysisPickerValue, AnalysisResult, AnalysisType 
 import { TABLES } from "../views/tables";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, newGraphOptions } from "../views/graphs";
 import type { TemplateKind } from "../lib/template";
-import { ANALYSES } from "../stats";
+import { analysisTitle } from "../stats";
 import { followTable, type TableMove } from "./references";
 import { pushHistory } from "../lib/sheet-navigation";
 import { repointCandidates } from "../lib/repoint-analysis";
@@ -157,8 +157,11 @@ type Action =
   | { type: "setTableFrozen"; id: string; frozen: boolean }
   /** Replace an analysis node's params (a rerun with overrides, via MCP):
    *  the next run — and the UI — see the new params. Orphaned sheets
-   *  keep their params (their source table is gone). */
-  | { type: "setAnalysisParams"; id: string; params: AnalysisParams }
+   *  keep their params (their source table is gone). `name` renames the node
+   *  in the same undo step (Change Parameters Apply, seq 373 follow-up):
+   *  the title tracks the params. Absent, the title is left alone (the MCP
+   *  rerun path, which passes no name). */
+  | { type: "setAnalysisParams"; id: string; params: AnalysisParams; name?: string }
   /** Move an orphaned analysis under another table that offers its test
    *  (seq 242): the saved results stay until the re-run lands, and the
    *  orphan flag + source name go away. Refuses anything else. */
@@ -513,7 +516,14 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
       if (!node || node.type !== "analysis" || node.orphaned) return state;
       return {
         ...state,
-        nodes: { ...state.nodes, [action.id]: { ...node, analysisParams: action.params } },
+        nodes: {
+          ...state.nodes,
+          [action.id]: {
+            ...node,
+            analysisParams: action.params,
+            ...(action.name !== undefined ? { name: action.name } : {}),
+          },
+        },
         isDirty: true,
       };
     }
@@ -1329,8 +1339,9 @@ interface ProjectActions {
   setAnalysisFrozen: (id: string, frozen: boolean) => void;
   /** Freeze (or unfreeze) a data table: frozen, it can't be edited. */
   setTableFrozen: (id: string, frozen: boolean) => void;
-  /** Replace an analysis node's params (a rerun with overrides). */
-  setAnalysisParams: (id: string, params: AnalysisParams) => void;
+  /** Replace an analysis node's params (a rerun with overrides). `name`
+   *  renames the node in the same undo step (Change Parameters Apply). */
+  setAnalysisParams: (id: string, params: AnalysisParams, name?: string) => void;
   /** Move an orphaned analysis under a table that offers its test (seq 242). */
   repointAnalysis: (id: string, tableId: string) => void;
   /** Change a graph's type, keeping its title and size (seq 244). */
@@ -1517,14 +1528,13 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       },
       // Named for the test it runs, as in Prism.
       createAnalysis: (parentId, analysisType, analysisParams) => {
-        const { label, name } = ANALYSES[analysisType];
         const id = genId("analysis");
         dispatch({
           type: "create",
           node: {
             id,
             type: "analysis",
-            name: name?.(analysisParams) ?? label,
+            name: analysisTitle(analysisType, analysisParams),
             parentId,
             analysisType,
             analysisParams,
@@ -1621,7 +1631,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       cacheAnalysisResult: (id, result) => dispatch({ type: "cacheAnalysisResult", id, result }),
       setAnalysisFrozen: (id, frozen) => dispatch({ type: "setAnalysisFrozen", id, frozen }),
       setTableFrozen: (id, frozen) => dispatch({ type: "setTableFrozen", id, frozen }),
-      setAnalysisParams: (id, params) => dispatch({ type: "setAnalysisParams", id, params }),
+      setAnalysisParams: (id, params, name?) =>
+        dispatch({ type: "setAnalysisParams", id, params, ...(name !== undefined ? { name } : {}) }),
       repointAnalysis: (id, tableId) => dispatch({ type: "repointAnalysis", id, tableId }),
       changeGraphType: (id, graphType, options) =>
         dispatch({ type: "changeGraphType", id, graphType, ...(options ? { options } : {}) }),

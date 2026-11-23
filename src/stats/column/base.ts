@@ -405,6 +405,35 @@ export const posthocOf = (params: { posthoc?: string; control?: string } | undef
       ? POSTHOC_LABELS[params.posthoc]
       : undefined;
 
+/** The post-hoc's short label for an analysis title ("Tukey", "Dunnett (vs. vehicle)"):
+ *  the bare method name, with the control for Dunnett — the sample's rich titles
+ *  ("One-way ANOVA + Dunnett (vs. vehicle)", "Two-way RM ANOVA + Tukey") in code
+ *  form. None for "none" or no posthoc, or for a method with no short form.
+ *  Distinct from POSTHOC_LABELS (the comparisons-table headings, "Tukey's
+ *  multiple comparisons test") and from two-way-anova's POSTHOC_LABEL_SHORT
+ *  (possessive headings, "Tukey's") — titles take the bare name. */
+const POSTHOC_SHORT: Record<string, string> = {
+  tukey: "Tukey",
+  bonferroni: "Bonferroni",
+  sidak: "Šídák",
+  "holm-sidak": "Holm–Šídák",
+  fdr: "False Discovery Rate",
+  lsd: "Fisher's LSD",
+  fisher: "Fisher's LSD",
+  dunn: "Dunn",
+  "dunn-sidak": "Dunn–Šídák",
+  "dunn-holm-sidak": "Dunn–Holm–Šídák",
+  "games-howell": "Games-Howell",
+  t3: "Dunnett's T3",
+};
+
+export const posthocShort = (params: { posthoc?: string; control?: string } | undefined) => {
+  if (!params?.posthoc || params.posthoc === "none") return undefined;
+  if (params.posthoc === "dunnett")
+    return params.control ? `Dunnett (vs. ${params.control.toLowerCase()})` : "Dunnett";
+  return POSTHOC_SHORT[params.posthoc];
+};
+
 export interface ColumnTestSpec<P = unknown> {
   testType: AnalysisType;
   /** Minimum number of data columns the test requires. */
