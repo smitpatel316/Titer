@@ -108,6 +108,7 @@ import {
 } from "../lib/linked-paste";
 import { fillSeries, generateSeries, validateSeriesSpec, type SeriesMode } from "../lib/series";
 import { entryLevelKeys, isVariableType, refreshLevelOrder, setLevelOrder, setVariableType, variableTypesOf } from "../lib/variable-types";
+import { decimalPlacesOf, decimalsSupported, setDecimalPlaces } from "../lib/decimal-format";
 import { SUMMARY_FORMATS, summaryFormatOf, summarySubcolumns, type SummaryFormat } from "../lib/summary-format";
 import {
   CELL_BACKGROUND_COLORS,
@@ -1896,6 +1897,45 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           next = ordered;
           break;
         }
+        case "set-decimal-places": {
+          // Seq 374: a data column's decimal places, set by hand — the MCP
+          // twin of the grid's Decimal Places submenu. Display-only: the
+          // stored values keep full precision, only the grid rounds what it
+          // shows. places is 0–6, or null to clear back to Default (full
+          // precision); an out-of-range value errors plainly, never silently
+          // clamps (the GUI clamps, MCP errors). Not offered on contingency
+          // or survival tables, per decimalsSupported.
+          if (!decimalsSupported(type)) {
+            throw jobErr(
+              job,
+              `cannot set decimal places — ${type} tables do not offer decimal places.`,
+            );
+          }
+          const column = argInt(job, job.args, "column");
+          if (column < 1 || column >= data.columns.length) {
+            throw jobErr(
+              job,
+              `has no column ${column} — data columns run 1 to ${data.columns.length - 1} (column 0 is the row titles).`,
+            );
+          }
+          const raw = (job.args as Record<string, unknown> | null | undefined)?.places;
+          if (raw === undefined) {
+            throw jobErr(job, `needs places (0–6, or null to clear to Default).`);
+          }
+          const places =
+            raw === null
+              ? undefined
+              : typeof raw === "number" && Number.isInteger(raw) && raw >= 0 && raw <= 6
+                ? raw
+                : (() => {
+                    throw jobErr(job, `needs places to be 0–6, not ${JSON.stringify(raw)}.`);
+                  })();
+          const name = data.columns[column];
+          if (decimalPlacesOf(data, name) === places) break; // already that way: no-op success
+          label = places === undefined ? "Decimal Places: Default" : `Decimal Places: ${places}`;
+          next = setDecimalPlaces(data, name, places);
+          break;
+        }
         case "paste-transposed": {
           // Seq 230, the MCP half of Edit ▸ Paste Transposed: `rows` is the
           // clipboard block; it lands transposed (rows become columns) at
@@ -1965,7 +2005,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         default:
           throw jobErr(
             job,
-            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, set-cell-background, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-variable-type, set-level-order, set-summary-format, set-x-format, paste-link, remove-link, generate-series, paste-transposed.`,
+            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, set-cell-background, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-variable-type, set-level-order, set-decimal-places, set-summary-format, set-x-format, paste-link, remove-link, generate-series, paste-transposed.`,
           );
       }
       if (next === null) {
