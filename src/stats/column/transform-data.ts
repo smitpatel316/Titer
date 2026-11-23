@@ -16,8 +16,9 @@
 // Y through `lineweaver-burk`, X through the existing `xFn` path with
 // `reciprocal` — plus log-log (seq 385): the Y side is log10, and the X side
 // goes through the existing xFn path with log10 (the wizard pairs them by
-// default; an MCP caller passes xFunction: "log10"). The other four
-// pharmacology transforms are a separate follow-up, not here. Pure TypeScript,
+// default; an MCP caller passes xFunction: "log10") — plus Hanes-Woolf
+// (seq 381): Y becomes X/Y, X unchanged. The other three pharmacology
+// transforms are separate follow-ups, not here. Pure TypeScript,
 // no R for the values themselves; the transformed
 // groups' descriptives come from `describe` (R), like every other analysis.
 // The one exception is the to-CI error mode, whose t critical values come
@@ -99,6 +100,7 @@ export const TRANSFORM_LABEL: Record<TransformFunction, string> = {
   "y-plus-x": "Y+X",
   "y-times-x": "Y×X",
   "x-minus-y": "X−Y",
+  "hanes-woolf": "Hanes-Woolf",
   "user-defined": "user-defined",
 };
 
@@ -140,6 +142,7 @@ const EXCLUDED_REASON: Record<TransformFunction, string> = {
   "y-plus-x": "the paired X value is missing",
   "y-times-x": "the paired X value is missing",
   "x-minus-y": "the paired X value is missing",
+  "hanes-woolf": "X/Y is undefined when Y is 0 or the paired value is missing",
   "user-defined": "the formula left it blank (dividing by zero, or a value outside a function's domain)",
 };
 
@@ -381,6 +384,13 @@ export function transformValue(
       break;
     case "x-minus-y":
       out = x! - y!;
+      break;
+    case "hanes-woolf":
+      // Hanes-Woolf (seq 381): X/Y, for enzyme kinetics — X unchanged (the
+      // X column is the pairing source, not a Y column, so it never takes
+      // this function); Y = 0 blanks, like every other division.
+      if (y === 0) return null;
+      out = x! / y!;
       break;
     case "rank":
     case "zscore":

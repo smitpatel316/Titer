@@ -3026,6 +3026,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
               ["y-plus-x", "Y+X — add X to Y"],
               ["y-times-x", "Y×X — multiply Y by X"],
               ["x-minus-y", "X−Y — subtract Y from X"],
+              ["hanes-woolf", "Hanes-Woolf — X/Y, for enzyme kinetics"],
             ] as [string, string][])
           : []),
         ["user-defined", "User-defined — write your own formula"],

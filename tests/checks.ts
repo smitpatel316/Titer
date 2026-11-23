@@ -26541,6 +26541,81 @@ check("transformValue applies the seq 341 cross-column functions against the pai
   ok(close(transformValue("log10" as never, 100, undefined, 999, "x"), 2));
 });
 
+check("transformValue applies the Hanes-Woolf transform (X/Y) (seq 381)", () => {
+  // role "y": value is Y, `other` is the paired X — X/Y.
+  strictEqual(transformValue("hanes-woolf" as never, 2, undefined, 10, "y"), 5);
+  strictEqual(transformValue("hanes-woolf" as never, 4, undefined, 2, "y"), 0.5);
+  // role "x": value is X, `other` is the paired Y — the same absolute
+  // (Y, X) formula, so X/Y is 5 either way round.
+  strictEqual(transformValue("hanes-woolf" as never, 10, undefined, 2, "x"), 5);
+  // Y = 0 (X/0) leaves the transformed Y blank, never Infinity; a missing
+  // paired value blanks too.
+  strictEqual(transformValue("hanes-woolf" as never, 0, undefined, 10, "y"), null);
+  strictEqual(transformValue("hanes-woolf" as never, 2), null);
+});
+
+check("transform-data applies the Hanes-Woolf transform on an XY table (seq 381)", async () => {
+  const xy: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "1", "2"],
+      [null, "2", "4"],
+      [null, "4", "8"],
+    ],
+  };
+  const hw = await runAnalysis("transform-data", xy, { function: "hanes-woolf", x: "X" } as never);
+  if ("error" in hw) throw new Error(hw.error);
+  // The X column itself is the pairing source, not a Y column: no X entry.
+  strictEqual(hw.transformed?.length, 1);
+  deepStrictEqual(hw.transformed?.[0].values, [0.5, 0.5, 0.5]);
+  strictEqual(hw.subtitle, "Transform data — Hanes-Woolf");
+  // A Y = 0 row leaves its transformed Y blank.
+  const withZero: TableData = {
+    columns: ["Title", "X", "Y"],
+    rows: [
+      [null, "1", "2"],
+      [null, "2", "0"],
+      [null, "4", "8"],
+    ],
+  };
+  const zero = await runAnalysis("transform-data", withZero, { function: "hanes-woolf", x: "X" } as never);
+  if ("error" in zero) throw new Error(zero.error);
+  deepStrictEqual(zero.transformed?.[0].values, [0.5, null, 0.5]);
+  // Without its X column it is a clean error, not a column of blanks.
+  deepStrictEqual(await runAnalysis("transform-data", xy, { function: "hanes-woolf" } as never), {
+    error: "“Hanes-Woolf” needs the X column — name it in `x` and try again.",
+  });
+});
+
+check("transform-data wizard offers Hanes-Woolf on an XY table only (seq 381)", () => {
+  const wizard = WIZARDS["transform-data"]!;
+  const fnOptions = (a: Record<string, string | number>, table: Dataset, type?: TableType) => {
+    const q = wizard.questions(a, table, type).find((qq) => qq && (qq as Question).id === "function") as
+      | { options: { value: string }[] }
+      | undefined;
+    return q?.options.map((o) => o.value) ?? [];
+  };
+  const plain = readTable({ columns: ["Title", "V"], rows: [["", "1"], ["", "2"]] });
+  if (fnOptions({}, plain).includes("hanes-woolf"))
+    throw new Error("did not expect hanes-woolf offered on a column table");
+  const xy = readTable({
+    columns: ["Title", "X", "Y"],
+    rows: [
+      ["", "1", "2"],
+      ["", "2", "4"],
+    ],
+  });
+  if (!fnOptions({}, xy, "xy").includes("hanes-woolf"))
+    throw new Error(`expected hanes-woolf offered on an XY table, got ${JSON.stringify(fnOptions({}, xy, "xy"))}`);
+  // The GUI path builds the same params the MCP path takes (run_analysis
+  // validates `function` against TRANSFORM_FUNCTIONS, which now lists it) —
+  // and the finish names the X column, because the cross function needs it.
+  deepStrictEqual(wizard.finish({ function: "hanes-woolf" }, xy, "xy"), {
+    type: "transform-data",
+    params: { function: "hanes-woolf", x: "X" },
+  });
+});
+
 check("transform-data ranks and z-scores whole columns (seq 341)", async () => {
   const table = (values: (number | string)[]): TableData => ({
     columns: ["Title", "V"],
