@@ -231,7 +231,7 @@ import type { McpJob } from "../src/native";
 import { nestedMeans } from "../src/stats/nested/base";
 import { runNestedTTest } from "../src/stats/nested/nested-t-test";
 import { applyUnstableFlags, derivedSources, fitModelSpec, identifyUnstableParameters, modelSpec, prepareFit, UNSTABLE_CONDITION_THRESHOLD, type DerivedRow, type ModelSpec } from "../src/stats/xy/nonlinear-fit";
-import { adjustComparisonRows, adjustFdrComparisonRows, adjustFdrPValues, adjustPValues, describe, describedBy, incompleteRows, missingColumn, rVec } from "../src/stats/column/base";
+import { adjustComparisonRows, adjustFdrComparisonRows, adjustFdrPValues, adjustPValues, describe, describedBy, incompleteRows, missingColumn, R_EFFECT_CI, rVec } from "../src/stats/column/base";
 import { analysisTitle, titleAfterApply } from "../src/stats/index";
 import { droppedPredictorsNote, selectPredictors } from "../src/stats/multiple/predictors";
 import { hclustAvgSilhouette, hclustClusterWithinSs, hclustDistanceMatrix, hclustSuggestedK, hclustWithinSs } from "../src/stats/multiple/hierarchical-clustering";
@@ -35554,6 +35554,79 @@ check("seq 389: Cohen's f is null when partial eta squared is 1", async () => {
   // R's drop1 returns floating-point noise for the zero-SS term (mse ~1e-30,
   // interaction SS ~1e-32), so its partial eta squared is a meaningless
   // ratio of two residuals rather than 0/0.
+});
+
+// ── seq 392: multifactor partial-eta-squared CIs via etaCI ──
+// Same balanced 2×2 fixture as seq 389 (SS_Fert = 32, SS_Wat = 8,
+// SS_int = 0, SS_resid = 8, N = 8): Fertilizer F = 16, Watering F = 4,
+// interaction F = 0, all d1 = 1, d2 = 4. Expected CIs are the etaCI
+// closed form (base.ts:663, the same helper + argument order as the
+// one-way ANOVA's anova.ts:233 call), computed through webR itself —
+// etaCI(16,1,4,8) = [0.038710166725199904, 0.867640122887004],
+// etaCI(4,1,4,8) = [0, 0.6974633393355257]; F = 0 collapses the CI to
+// [0, 0] by fci's construction (pf(0, …) = 0, so both bounds fall to 0).
+// Each CI contains its term's partial eta squared (0.8 / 0.5 / 0).
+check("seq 392: multifactor ANOVA reports the partial eta squared 95% CI per term", async () => {
+  const data: TableData = refreshVariableTypes({
+    columns: ["Title", "Y", "Fertilizer", "Watering"],
+    rows: [
+      ["1", "-1", "Low", "Low"],
+      ["2", "1", "Low", "Low"],
+      ["3", "1", "Low", "High"],
+      ["4", "3", "Low", "High"],
+      ["5", "3", "High", "Low"],
+      ["6", "5", "High", "Low"],
+      ["7", "5", "High", "High"],
+      ["8", "7", "High", "High"],
+    ],
+  });
+  const out = await runAnalysis("multifactor-anova", data, {
+    response: "Y",
+    factors: ["Fertilizer", "Watering"],
+    posthoc: "none",
+  });
+  ok(!("error" in out), JSON.stringify(out));
+  const row = (label: string) => out.stats.find((s) => s.label === label)?.value;
+  const close = (got: number | null | undefined, want: number, tol = 1e-9) => {
+    ok(got !== null && got !== undefined && Math.abs(got - want) <= tol, `expected ${want}, got ${got}`);
+  };
+  close(row("Fertilizer partial eta squared 95% CI lower"), 0.038710166725199904);
+  close(row("Fertilizer partial eta squared 95% CI upper"), 0.867640122887004);
+  strictEqual(row("Watering partial eta squared 95% CI lower"), 0);
+  close(row("Watering partial eta squared 95% CI upper"), 0.6974633393355257);
+  strictEqual(row("Fertilizer:Watering partial eta squared 95% CI lower"), 0);
+  strictEqual(row("Fertilizer:Watering partial eta squared 95% CI upper"), 0);
+  // The CI rows sit right after their term's partial-eta-squared row,
+  // in the same stats table as the other effect-size rows.
+  const labels = out.stats.map((s) => s.label);
+  const at = (label: string) => labels.indexOf(label);
+  for (const term of ["Fertilizer", "Watering", "Fertilizer:Watering"]) {
+    ok(at(`${term} partial eta squared`) < at(`${term} partial eta squared 95% CI lower`), `seq 392 order ${term} lo`);
+    ok(at(`${term} partial eta squared 95% CI lower`) < at(`${term} partial eta squared 95% CI upper`), `seq 392 order ${term} hi`);
+    ok(at(`${term} partial eta squared 95% CI upper`) < at(`${term} Cohen's f`), `seq 392 order ${term} f`);
+  }
+  // The CI survives recompute: a second run reports the same bounds.
+  const out2 = await runAnalysis("multifactor-anova", data, {
+    response: "Y",
+    factors: ["Fertilizer", "Watering"],
+    posthoc: "none",
+  });
+  ok(!("error" in out2), JSON.stringify(out2));
+  const row2 = (label: string) => out2.stats.find((s) => s.label === label)?.value;
+  close(row2("Fertilizer partial eta squared 95% CI lower"), 0.038710166725199904);
+  close(row2("Fertilizer partial eta squared 95% CI upper"), 0.867640122887004);
+});
+
+// A null F gives a null CI, never an invented bound: etaCI(NA, …) is
+// c(NA, NA) by the helper's own guard (fci returns NA,NA for a
+// non-finite F), and evalNamedVector maps NA to null. No multifactor
+// design reaches a null F through the runner (empty cells and rank
+// deficiency are refused up front), so this pins the helper contract
+// directly through webR, the same engine the runner uses.
+check("seq 392: etaCI returns a null CI for a null F statistic", async () => {
+  const v = await evalNamedVector(`${R_EFFECT_CI};c(lo=etaCI(NA,1,4,8)[1],hi=etaCI(NA,1,4,8)[2])`);
+  strictEqual(v.lo, null, "etaCI(NA) lower is null");
+  strictEqual(v.hi, null, "etaCI(NA) upper is null");
 });
 
 check("seq 379: a label variable is refused as an extract-rearrange grouping / factor", async () => {
