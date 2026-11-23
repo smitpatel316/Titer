@@ -21,6 +21,7 @@ import type { AnalysisOutcome, ExtractRearrangeParams } from "../types";
 import { orderLevels, type Column } from "../../lib/dataset";
 import type { TableData } from "../../store/types";
 import { GROUPED_LIMITS } from "../../store/types";
+import { labelPredictorError } from "./predictors";
 
 /** A table holds at most 20 sub-columns per data set (Helix's replicate cap). */
 const MAX_SUBCOLUMNS = GROUPED_LIMITS.replicates.max;
@@ -99,6 +100,11 @@ export async function runExtractRearrange(
     if (name === undefined) return undefined;
     return pick(name, role);
   };
+  /** A label variable never fills a grouping / factor role (seq 379):
+   *  refused by name, like a label predictor in regression. `subject`
+   *  and `rowTitles` are not checked here — a label belongs there. */
+  const rejectLabel = (col: Column | undefined, noun: string): string | undefined =>
+    col?.variableType === "label" ? labelPredictorError(col.name, noun) : undefined;
   /** This row's level in a column (undefined: no column, or a blank cell). */
   const at = (r: number, column: Column | undefined): string | undefined =>
     column === undefined ? undefined : textOf(column.cells[r]);
@@ -115,6 +121,8 @@ export async function runExtractRearrange(
     if (isError(response)) return { error: response };
     const grouping = pickOptional(params.grouping, "grouping variable");
     if (isError(grouping)) return { error: grouping };
+    const groupingLabel = rejectLabel(grouping, "grouping variable");
+    if (groupingLabel) return { error: groupingLabel };
     const subject = pickOptional(params.subject, "subject variable");
     if (isError(subject)) return { error: subject };
     const rowTitles = pickOptional(params.rowTitles, "row-titles variable");
@@ -211,6 +219,8 @@ export async function runExtractRearrange(
     if (isError(response)) return { error: response };
     const grouping = pickOptional(params.grouping, "grouping variable");
     if (isError(grouping)) return { error: grouping };
+    const groupingLabel = rejectLabel(grouping, "grouping variable");
+    if (groupingLabel) return { error: groupingLabel };
     const subject = pickOptional(params.subject, "subject variable");
     if (isError(subject)) return { error: subject };
     const rowTitles = pickOptional(params.rowTitles, "row-titles variable");
@@ -298,8 +308,12 @@ export async function runExtractRearrange(
     if (isError(response)) return { error: response };
     const rowFactor = pick(params.rowFactor, "row factor");
     if (isError(rowFactor)) return { error: rowFactor };
+    const rowFactorLabel = rejectLabel(rowFactor, "factor");
+    if (rowFactorLabel) return { error: rowFactorLabel };
     const columnFactor = pick(params.columnFactor, "column factor");
     if (isError(columnFactor)) return { error: columnFactor };
+    const columnFactorLabel = rejectLabel(columnFactor, "factor");
+    if (columnFactorLabel) return { error: columnFactorLabel };
     const subject = pickOptional(params.subject, "subject variable");
     if (isError(subject)) return { error: subject };
     if (!response.values.length)
@@ -363,8 +377,12 @@ export async function runExtractRearrange(
   // Contingency.
   const rowVariable = pick(params.rowVariable, "row variable");
   if (isError(rowVariable)) return { error: rowVariable };
+  const rowVariableLabel = rejectLabel(rowVariable, "factor");
+  if (rowVariableLabel) return { error: rowVariableLabel };
   const outcome = pick(params.outcome, "column variable");
   if (isError(outcome)) return { error: outcome };
+  const outcomeLabel = rejectLabel(outcome, "factor");
+  if (outcomeLabel) return { error: outcomeLabel };
   const count = pickOptional(params.count, "count variable");
   if (isError(count)) return { error: count };
   if (rowVariable.name === outcome.name)
