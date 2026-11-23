@@ -2990,6 +2990,13 @@ pub struct EditTableArgs {
     /// names. A new level typed into the column later appends at the end.
     #[serde(default)]
     pub level_order: Option<Vec<String>>,
+    /// set-decimal-places (seq 374): the decimal places — 0–6 — or null
+    /// to clear back to Default (full precision). The field must be
+    /// present for the op: absent is an error, null clears. (An
+    /// `Option<Option<i64>>`: JSON null is Some(None), a missing key is
+    /// None.)
+    #[serde(default)]
+    pub places: Option<Option<i64>>,
 }
 
 /// Args for `titer_refresh_linked_data`: the table whose linked source file
@@ -4683,7 +4690,7 @@ impl TiterMcpServer {
     /// file as a link, or break that link.
     #[tool(
         name = "titer_edit_table",
-        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, set-cell-background, freeze-title, convert-comma-decimals, set-summary-format, set-x-format, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-variable-type, set-level-order, paste-link, remove-link, generate-series or paste-transposed. Rows and columns are 0-based; column 0 holds the row titles. set-cell-background { at_row, at_col, color } paints one cell with one of Prism's 8 cell colors (yellow, red, blue, green, purple, orange, tan, gray), or null to clear it; the value stays, and an empty cell or a row title can be painted too. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. set-variable-type { column, variable_type } sets a Multiple Variables column's type by hand — categorical, continuous or label — and auto-detect never overwrites a hand-set type; read the types back from titer_list_tables' variable_type fields. set-level-order { column, level_order } sets a Multiple Variables categorical column's level order — its levels in display order, as a list of level names — and a new level typed into the column later appends at the end; read the order back from titer_list_tables' level_order fields. paste-transposed { rows, at_row, at_col } pastes the block with rows and columns swapped, as Edit ▸ Paste Transposed does. paste-link { source_path, row?, column?, auto_update? } pastes a data file (.csv, .tsv, .txt or .xlsx) as a link at (row, column) — the values land and stay linked, so titer_refresh_linked_data re-reads the file into the same region later; auto_update (default true) refreshes the link when the project opens. remove-link { } keeps the values and drops the link. generate-series { column, at, count, first, mode, step } fills a column with an arithmetic series (add step, default) or a geometric one (multiply by step): column defaults to the X column (1) on XY and Survival tables, at defaults to row 0, count to the table's stored rows, first to 0, step to 1; at most 10,000 values. set-summary-format { format } changes a grouped, xy or nested table's sub-column format between raw replicates and pre-calculated summaries (mean-sd-n, mean-sem-n, mean-sd, mean-sem, mean-cv-n, mean-cv, mean-plus-minus, mean-upper-lower, or replicates); values stay in their group's slot. set-x-format { x_format, x_units?, x_start_date?, x_day_first? } changes an XY table's X format between numbers, dates and elapsed times, with the unit dates/elapsed times convert to (seconds, minutes, hours, days, weeks or years; default days) and the start date dates count from (YYYY-MM-DD; default the earliest date in the column); x_day_first reads ambiguous slash dates day-first. The cells keep their typed text; a cell that can't be read shows \"?\" and counts as missing.",
+        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, set-cell-background, freeze-title, convert-comma-decimals, set-summary-format, set-x-format, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-variable-type, set-level-order, set-decimal-places, paste-link, remove-link, generate-series or paste-transposed. Rows and columns are 0-based; column 0 holds the row titles. set-cell-background { at_row, at_col, color } paints one cell with one of Prism's 8 cell colors (yellow, red, blue, green, purple, orange, tan, gray), or null to clear it; the value stays, and an empty cell or a row title can be painted too. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. set-variable-type { column, variable_type } sets a Multiple Variables column's type by hand — categorical, continuous or label — and auto-detect never overwrites a hand-set type; read the types back from titer_list_tables' variable_type fields. set-level-order { column, level_order } sets a Multiple Variables categorical column's level order — its levels in display order, as a list of level names — and a new level typed into the column later appends at the end; read the order back from titer_list_tables' level_order fields. set-decimal-places { column, places } sets a data column's decimal places — 0–6, or null to clear back to Default (full precision); read the setting back from titer_list_tables' decimals fields. paste-transposed { rows, at_row, at_col } pastes the block with rows and columns swapped, as Edit ▸ Paste Transposed does. paste-link { source_path, row?, column?, auto_update? } pastes a data file (.csv, .tsv, .txt or .xlsx) as a link at (row, column) — the values land and stay linked, so titer_refresh_linked_data re-reads the file into the same region later; auto_update (default true) refreshes the link when the project opens. remove-link { } keeps the values and drops the link. generate-series { column, at, count, first, mode, step } fills a column with an arithmetic series (add step, default) or a geometric one (multiply by step): column defaults to the X column (1) on XY and Survival tables, at defaults to row 0, count to the table's stored rows, first to 0, step to 1; at most 10,000 values. set-summary-format { format } changes a grouped, xy or nested table's sub-column format between raw replicates and pre-calculated summaries (mean-sd-n, mean-sem-n, mean-sd, mean-sem, mean-cv-n, mean-cv, mean-plus-minus, mean-upper-lower, or replicates); values stay in their group's slot. set-x-format { x_format, x_units?, x_start_date?, x_day_first? } changes an XY table's X format between numbers, dates and elapsed times, with the unit dates/elapsed times convert to (seconds, minutes, hours, days, weeks or years; default days) and the start date dates count from (YYYY-MM-DD; default the earliest date in the column); x_day_first reads ambiguous slash dates day-first. The cells keep their typed text; a cell that can't be read shows \"?\" and counts as missing.",
         annotations(
             title = "Edit table",
             read_only_hint = false,
@@ -4724,6 +4731,11 @@ impl TiterMcpServer {
             "x_start_date": args.x_start_date,
             "x_day_first": args.x_day_first,
             "level_order": args.level_order,
+            "places": match &args.places {
+                None => serde_json::Value::Null,
+                Some(None) => serde_json::Value::Null,
+                Some(Some(p)) => serde_json::json!(p),
+            },
         });
         let outcome: Result<serde_json::Value, String> = async {
             let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
@@ -4757,6 +4769,7 @@ impl TiterMcpServer {
                 "remove-calculated-variable",
                 "set-variable-type",
                 "set-level-order",
+                "set-decimal-places",
                 "paste-link",
                 "generate-series",
                 "remove-link",
@@ -4909,6 +4922,22 @@ impl TiterMcpServer {
                         }
                     }
                 }
+                "set-decimal-places" => {
+                    if args.column.is_none() {
+                        return Err("op set-decimal-places needs column (the data column's index).".into());
+                    }
+                    match &args.places {
+                        None => {
+                            return Err(
+                                "op set-decimal-places needs places (0–6, or null to clear to Default).".into(),
+                            )
+                        }
+                        Some(Some(n)) if !(0..=6).contains(n) => {
+                            return Err(format!("op set-decimal-places needs places 0–6, not {n}."))
+                        }
+                        _ => {}
+                    }
+                }
                 "paste-transposed" => match &args.rows {
                     Some(rows) if !rows.is_empty() => {}
                     _ => return Err("op paste-transposed needs rows (at least one row of values).".into()),
@@ -4969,6 +4998,11 @@ impl TiterMcpServer {
                     "x_start_date": args.x_start_date,
                     "x_day_first": args.x_day_first,
                     "level_order": args.level_order,
+                    "places": match &args.places {
+                        None => serde_json::Value::Null,
+                        Some(None) => serde_json::Value::Null,
+                        Some(Some(p)) => serde_json::json!(p),
+                    },
                 }),
             )
             .await
@@ -9438,6 +9472,15 @@ fn table_summary(
             // panel shows an untyped text column's levels in Entry order.
             summary["level_order"] = level_order_summary(&data, header, grid_col, &rows);
         }
+        // The column's decimal places (seq 374): the stored setting, or
+        // null when the column shows full precision. Present on every data
+        // column — the setting lives on the column, and the GUI/MCP only
+        // offer it where decimalsSupported allows.
+        summary["decimals"] = serde_json::json!(
+            data.get("decimals")
+                .and_then(|d| d.get(header.as_str()))
+                .and_then(|v| v.as_i64())
+        );
         column_summaries.push(summary);
     }
     let mut out = serde_json::json!({
@@ -10065,6 +10108,44 @@ mod tests {
         // The XY fixture carries no level_order key.
         let xy = table_summary("project-1", &snapshot(), "t1", false, 100).expect("summary");
         assert!(xy["columns"][0].get("level_order").is_none());
+    }
+
+    #[test]
+    fn table_summary_decimals_on_column() {
+        // Seq 374: a data column's decimal places read back on
+        // table_summary — the stored setting, or null when the column
+        // shows full precision. Unlike variable_type / level_order, the
+        // key is present on every table type: the setting lives on the
+        // column, and the GUI/MCP only offer it where decimalsSupported
+        // allows.
+        let snap = json!({
+            "filePath": "/tmp/Dec.hlx",
+            "revision": 1,
+            "nodes": {
+                "c1": {
+                    "id": "c1", "type": "table", "name": "Dec", "parentId": null,
+                    "tableType": "column",
+                    "data": {
+                        "columns": ["", "A", "B"],
+                        "rows": [
+                            ["r1", "1.23456", "2.5"],
+                            ["r2", "3.14159", "4"],
+                        ],
+                        "decimals": { "A": 2 },
+                    }
+                },
+            },
+            "rootOrder": ["c1"],
+            "childOrder": { "c1": [] },
+            "activeNodeId": "c1",
+        });
+        let out = table_summary("project-1", &snap, "c1", false, 100).expect("summary");
+        assert_eq!(out["columns"][0]["decimals"], 2);
+        // B has no stored entry: null, not a guessed value.
+        assert_eq!(out["columns"][1]["decimals"], serde_json::Value::Null);
+        // The XY fixture carries no decimals setting: null on its columns.
+        let xy = table_summary("project-1", &snapshot(), "t1", false, 100).expect("summary");
+        assert_eq!(xy["columns"][0]["decimals"], serde_json::Value::Null);
     }
 
     #[test]

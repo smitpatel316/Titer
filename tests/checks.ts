@@ -34812,6 +34812,215 @@ check("seq 340: MCP set-level-order sets the order and a later write appends a n
   );
 });
 
+// seq 374: MCP set-decimal-places (seq 333 follow-up). On the pre-fix code
+// there is no such op, so the first edit-table call fails with "has no edit
+// op". The op sets a data column's decimal places (0–6) or clears it back
+// to Default with null; the stored values keep full precision throughout.
+check("seq 374: MCP set-decimal-places sets the places, clears to Default, and keeps full precision", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-374-table", "create-table", {
+    table_type: "column",
+    columns: ["", "A", "B"],
+    rows: [
+      ["r1", "1.23456", "2.5"],
+      ["r2", "3.14159", "4"],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  const data = () => harness.state().nodes[tableId]!.data!;
+  // Set 2 places on column A: the setting lands, the stored values keep
+  // full precision, and copy/export still carry it.
+  await harness.run("job-374-set", "edit-table", {
+    table_id: tableId,
+    op: "set-decimal-places",
+    column: 1,
+    places: 2,
+  });
+  harness.sync();
+  deepStrictEqual(data().decimals, { A: 2 });
+  deepStrictEqual(data().rows, [
+    ["r1", "1.23456", "2.5"],
+    ["r2", "3.14159", "4"],
+  ]);
+  strictEqual(toTSV(data(), { r0: 0, r1: 1, c0: 0, c1: 2 }), "r1\t1.23456\t2.5\nr2\t3.14159\t4");
+  // Setting it again is a no-op success: no second undo step.
+  const pastLen = harness.state().past.length;
+  await harness.run("job-374-set-again", "edit-table", {
+    table_id: tableId,
+    op: "set-decimal-places",
+    column: 1,
+    places: 2,
+  });
+  harness.sync();
+  strictEqual(harness.state().past.length, pastLen);
+  // 0 and 6 both work; clearing with null drops the setting.
+  await harness.run("job-374-zero", "edit-table", {
+    table_id: tableId,
+    op: "set-decimal-places",
+    column: 1,
+    places: 0,
+  });
+  harness.sync();
+  deepStrictEqual(data().decimals, { A: 0 });
+  await harness.run("job-374-six", "edit-table", {
+    table_id: tableId,
+    op: "set-decimal-places",
+    column: 2,
+    places: 6,
+  });
+  harness.sync();
+  deepStrictEqual(data().decimals, { A: 0, B: 6 });
+  await harness.run("job-374-clear", "edit-table", {
+    table_id: tableId,
+    op: "set-decimal-places",
+    column: 1,
+    places: null,
+  });
+  harness.sync();
+  deepStrictEqual(data().decimals, { B: 6 });
+  await harness.run("job-374-clear-b", "edit-table", {
+    table_id: tableId,
+    op: "set-decimal-places",
+    column: 2,
+    places: null,
+  });
+  harness.sync();
+  strictEqual(data().decimals, undefined);
+  // A write-table replace keeps the setting.
+  await harness.run("job-374-set2", "edit-table", {
+    table_id: tableId,
+    op: "set-decimal-places",
+    column: 1,
+    places: 2,
+  });
+  harness.sync();
+  await harness.run("job-374-write", "write-table", {
+    table_id: tableId,
+    columns: ["", "A", "B"],
+    rows: [
+      ["r1", "1.23456", "2.5"],
+      ["r2", "3.14159", "4"],
+    ],
+  });
+  harness.sync();
+  deepStrictEqual(data().decimals, { A: 2 });
+  // The setting survives a .hlx save/load round-trip.
+  const st = harness.state();
+  const payload: ProjectFilePayload = {
+    nodes: st.nodes,
+    rootOrder: st.rootOrder,
+    childOrder: st.childOrder,
+    activeNodeId: st.activeNodeId,
+  };
+  const back = read(serializeProjectFile(payload));
+  deepStrictEqual((back.project.nodes[tableId] as ProjectNode).data?.decimals, { A: 2 });
+  strictEqual(back.updated, false);
+  // Errors: an unsupported table kind, an unknown column, column 0, and
+  // out-of-range / fractional / mistyped / missing places — MCP errors
+  // plainly, never silently clamps.
+  const cont = await harness.run("job-374-cont", "create-table", {
+    table_type: "contingency",
+    columns: ["", "A", "B"],
+    rows: [
+      ["r1", 5, 7],
+      ["r2", 3, 9],
+    ],
+  });
+  const contId = (cont.result as { table_id: string }).table_id;
+  harness.sync();
+  await rejects(
+    harness.run("job-374-bad-table", "edit-table", {
+      table_id: contId,
+      op: "set-decimal-places",
+      column: 1,
+      places: 2,
+    }),
+    /do not offer decimal places/,
+  );
+  const surv = await harness.run("job-374-surv", "create-table", {
+    table_type: "survival",
+    columns: ["", "X", "A"],
+    rows: [
+      ["1", "0", "10"],
+      ["2", "5", "8"],
+    ],
+  });
+  const survId = (surv.result as { table_id: string }).table_id;
+  harness.sync();
+  await rejects(
+    harness.run("job-374-bad-surv", "edit-table", {
+      table_id: survId,
+      op: "set-decimal-places",
+      column: 1,
+      places: 2,
+    }),
+    /do not offer decimal places/,
+  );
+  await rejects(
+    harness.run("job-374-bad-col", "edit-table", {
+      table_id: tableId,
+      op: "set-decimal-places",
+      column: 9,
+      places: 2,
+    }),
+    /has no column 9/,
+  );
+  await rejects(
+    harness.run("job-374-bad-col0", "edit-table", {
+      table_id: tableId,
+      op: "set-decimal-places",
+      column: 0,
+      places: 2,
+    }),
+    /has no column 0/,
+  );
+  await rejects(
+    harness.run("job-374-bad-high", "edit-table", {
+      table_id: tableId,
+      op: "set-decimal-places",
+      column: 1,
+      places: 7,
+    }),
+    /needs places to be 0–6/,
+  );
+  await rejects(
+    harness.run("job-374-bad-neg", "edit-table", {
+      table_id: tableId,
+      op: "set-decimal-places",
+      column: 1,
+      places: -1,
+    }),
+    /needs places to be 0–6/,
+  );
+  await rejects(
+    harness.run("job-374-bad-frac", "edit-table", {
+      table_id: tableId,
+      op: "set-decimal-places",
+      column: 1,
+      places: 2.5,
+    }),
+    /needs places to be 0–6/,
+  );
+  await rejects(
+    harness.run("job-374-bad-type", "edit-table", {
+      table_id: tableId,
+      op: "set-decimal-places",
+      column: 1,
+      places: "2",
+    }),
+    /needs places to be 0–6/,
+  );
+  await rejects(
+    harness.run("job-374-bad-missing", "edit-table", {
+      table_id: tableId,
+      op: "set-decimal-places",
+      column: 1,
+    }),
+    /needs places/,
+  );
+});
+
 // ── Run ──────────────────────────────────────────────────────────────────
 
 // Descriptives are computed by R since the v1.0.7 rebase, so checks that run

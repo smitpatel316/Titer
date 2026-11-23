@@ -882,6 +882,19 @@ const ROWS: Row[] = [
     ],
   },
 
+  {
+    item: "374",
+    title: "MCP set-decimal-places op",
+    status: "covered",
+    note: "Per-column decimal places via MCP (seq 333 follow-up): titer_edit_table set-decimal-places op (places 0–6, or null to clear to Default); decimals on titer_list_tables columns for read-back; .hlx round-trip via readDecimals. Out-of-range places error plainly, never silently clamp.",
+    checks: [
+      { kind: "editOpsContains", op: "set-decimal-places" },
+      { kind: "sourceContains", file: "mcpDispatch", text: "set-decimal-places" },
+      { kind: "structContains", struct: "EditTableArgs", text: "places" },
+      { kind: "sourceContainsRe", scope: "src", re: "setDecimalPlaces" },
+    ],
+  },
+
   // ── Covered in flight (surface on the named branch, not on this tip) ──
   {
     item: "157",
