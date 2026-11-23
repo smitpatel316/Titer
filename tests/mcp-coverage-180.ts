@@ -852,14 +852,20 @@ const ROWS: Row[] = [
 
   {
     item: "332",
-    title: "Dates / elapsed time X (HALF A)",
+    title: "Dates / elapsed time X (HALF A + PART D)",
     status: "covered",
-    note: "X-column format (numbers/date/elapsed) + conversion (units/start date/day-first) on XY tables: x_format + x_conversion on titer_read_table_summary (XY only), titer_edit_table set-x-format op; .hlx round-trip via readXFormat/readXConversion; .prism round-trip preserves the format. Part D (axis scales) is a separate lane.",
+    note: "X-column format (numbers/date/elapsed) + conversion (units/start date/day-first) on XY tables: x_format + x_conversion on titer_read_table_summary (XY only), titer_edit_table set-x-format op; .hlx round-trip via readXFormat/readXConversion; .prism round-trip preserves the format. Part D: date/elapsed axis scales — xDateFormat + xElapsedFormat graph options (Format Axes dialog), smart-spaced date ticks / elapsed ticks via applyDateAxis on the table-X graphs; fits see converted numbers via readTable.",
     checks: [
       { kind: "editOpsContains", op: "set-x-format" },
       { kind: "sourceContains", file: "mcpDispatch", text: "set-x-format" },
       { kind: "structContains", struct: "EditTableArgs", text: "x_format" },
       { kind: "sourceContainsRe", scope: "src", re: "xFormat" },
+      { kind: "graphOption", field: "xDateFormat" },
+      { kind: "graphOption", field: "xElapsedFormat" },
+      { kind: "graphChoice", choice: "xDateFormat", value: "16-jan-2004" },
+      { kind: "graphChoice", choice: "xElapsedFormat", value: "h:mm:ss" },
+      { kind: "sourceContains", file: "graphView", text: "applyDateAxis" },
+      { kind: "sourceContainsRe", scope: "graphs", re: "hasTableXAxis" },
     ],
   },
 

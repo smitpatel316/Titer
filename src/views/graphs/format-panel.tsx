@@ -62,8 +62,14 @@ import {
   ThicknessRow,
   Toggle,
 } from "./panel-controls";
-import { axesRangeInputs, logScaleOffered, rightYDataset } from "./plot-helpers";
+import { axesRangeInputs, hasTableXAxis, logScaleOffered, rightYDataset } from "./plot-helpers";
 import { dataControls, statisticsControls, styleControls, type SectionContext } from "./format-sections";
+import {
+  DATE_DISPLAY_FORMAT_LABELS,
+  DATE_DISPLAY_FORMATS,
+  ELAPSED_DISPLAY_FORMAT_LABELS,
+  ELAPSED_DISPLAY_FORMATS,
+} from "../../lib/axis-dates";
 import { VOLCANO_SERIES } from "./volcano";
 import { MatchSection } from "./match-graph";
 import { useLayout } from "../../store/use-layout";
@@ -163,6 +169,16 @@ export function FormatPanel(props: Props) {
   const constants = React.useMemo(() => allConstantNames(nodes, rootOrder), [nodes, rootOrder]);
   const constantItems = constants.map((name) => ({ value: name, label: name }));
   const hasAxes = family !== "pie";
+  // The primary table's X format (seq 332): a date/elapsed X turns the X
+  // axis into a date/elapsed scale — no log scale, no number format, and
+  // the display format picker below (only where the graph's X is the
+  // table's X column at all).
+  const xFormat = React.useMemo(() => {
+    const graph = nodes[props.graphId];
+    const parent = graph?.parentId ? nodes[graph.parentId] : undefined;
+    return parent?.data?.xFormat;
+  }, [nodes, props.graphId]);
+  const isDateX = xFormat === "date" || xFormat === "elapsed";
   // The data set on the right Y axis, if the pick is still a series (a stale or
   // renamed name silently falls back to the left axis — see rightYDataset).
   const right = family === "xy" ? rightYDataset(options, seriesNames) : undefined;
@@ -382,6 +398,8 @@ export function FormatPanel(props: Props) {
             "xMaxConstant",
             "xScale",
             "yScale",
+            "xDateFormat",
+            "xElapsedFormat",
             "xNumberFormat",
             "yNumberFormat",
             "y2NumberFormat",
@@ -428,7 +446,7 @@ export function FormatPanel(props: Props) {
               onChange={(yNumberFormat) => set({ yNumberFormat })}
             />
           )}
-          {family === "xy" && logScaleOffered(graphType).x && (
+          {family === "xy" && !isDateX && logScaleOffered(graphType).x && (
             <Scale
               axis="X"
               value={options.xScale}
@@ -451,11 +469,40 @@ export function FormatPanel(props: Props) {
                   onChange={(xMin, xMax, xStep) => set({ xMin, xMax, xStep })}
                   onHookChange={(xMinConstant, xMaxConstant) => set({ xMinConstant, xMaxConstant })}
                 />
-                <NumberFormat
-                  axis="X"
-                  value={options.xNumberFormat}
-                  onChange={(xNumberFormat) => set({ xNumberFormat })}
-                />
+                {!isDateX && (
+                  <NumberFormat
+                    axis="X"
+                    value={options.xNumberFormat}
+                    onChange={(xNumberFormat) => set({ xNumberFormat })}
+                  />
+                )}
+                {hasTableXAxis(graphType, options) && xFormat === "date" && (
+                  <>
+                    <Choice
+                      label="X date format"
+                      value={options.xDateFormat}
+                      onChange={(xDateFormat) => set({ xDateFormat })}
+                      items={DATE_DISPLAY_FORMATS.map((value) => ({ value, label: DATE_DISPLAY_FORMAT_LABELS[value] }))}
+                      wrap
+                    />
+                    <p className="text-small text-secondary">
+                      Ticks are spaced automatically on a date axis; the step setting above is ignored.
+                    </p>
+                  </>
+                )}
+                {hasTableXAxis(graphType, options) && xFormat === "elapsed" && (
+                  <>
+                    <Choice
+                      label="X elapsed format"
+                      value={options.xElapsedFormat}
+                      onChange={(xElapsedFormat) => set({ xElapsedFormat })}
+                      items={ELAPSED_DISPLAY_FORMATS.map((value) => ({ value, label: ELAPSED_DISPLAY_FORMAT_LABELS[value] }))}
+                    />
+                    <p className="text-small text-secondary">
+                      Ticks are spaced automatically on an elapsed-time axis; the step setting above is ignored.
+                    </p>
+                  </>
+                )}
               </>
             )}
           {family === "xy" && seriesNames.length >= 2 && (
