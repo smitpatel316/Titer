@@ -2957,6 +2957,8 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
   // column to pair with on other tables), X transforms + interchange (XY),
   // a K per data set, error-bar handling on summary tables, and
   // user-defined transforms (one formula line per data set, `;`-separated).
+  // Eadie-Hofstee (seq 380) is an X transform — X becomes Y/X, Y unchanged —
+  // so it asks no transform-X or interchange question.
   // A value the function is undefined for is left blank in the results
   // sheet, never NaN — the runner states the reason in its notes.
   "transform-data": {
@@ -3018,6 +3020,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
           ? ([
               ["x-divided-by-y", "X/Y — divide X by Y"],
               ["y-divided-by-x", "Y/X — divide Y by X"],
+              ["eadie-hofstee", "Eadie-Hofstee — plot Y against Y/X (X becomes Y/X; Y unchanged)"],
               ["y-minus-x", "Y−X — subtract X from Y"],
               ["y-plus-x", "Y+X — add X to Y"],
               ["y-times-x", "Y×X — multiply Y by X"],
@@ -3063,19 +3066,26 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
             ["erase", "Erase the error bars"],
             ["to-ci", "Convert the error bars to 95% confidence intervals first, then transform both ends"],
           ]),
+        // Eadie-Hofstee already transforms X (and an interchange would fight
+        // it), so neither question is asked for it — the runner refuses both
+        // combinations too, for the MCP path.
         xName !== undefined &&
+          fn !== "eadie-hofstee" &&
           choice("transformX", "Transform the X values too?", [
             ["no", "No — leave the X values as they are"],
             ["yes", "Yes — apply a function to the X values as well"],
           ]),
         xName !== undefined &&
+          fn !== "eadie-hofstee" &&
           a.transformX === "yes" &&
           choice("xFunction", "Which function should be applied to the X values?", xFnOptions),
         xName !== undefined &&
+          fn !== "eadie-hofstee" &&
           a.transformX === "yes" &&
           isKTransform(xFn) &&
           kQuestion("xConstant", "What is the constant K for the X values?", xFn),
         xName !== undefined &&
+          fn !== "eadie-hofstee" &&
           choice("interchange", "Interchange X and Y before transforming?", [
             ["no", "No — transform Y with the chosen function"],
             ["yes", "Yes — swap X and Y first (the Y function applies to the old X values)"],
