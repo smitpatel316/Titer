@@ -34812,6 +34812,109 @@ check("seq 340: MCP set-level-order sets the order and a later write appends a n
   );
 });
 
+check("seq 378: a write-table replace keeps the row-label source when its column survives, drops it when the column is gone", async () => {
+  const harness = mcpLaggingHarness(true);
+  const base = setLabelVariable(mv331bTyped(), "ID");
+  strictEqual(labelVariableOf(base), "ID");
+  harness.dispatch({
+    type: "create",
+    node: { id: "mv378", type: "table", name: "Subjects", parentId: null, tableType: "multiple", data: base },
+  });
+  harness.sync();
+  // Same columns, same values: the choice carries over.
+  await harness.run("job-378-keep", "write-table", {
+    table_id: "mv378",
+    columns: ["Title", "Y", "Group", "Sex", "ID", "Site"],
+    rows: [
+      ["1", "12", "1", "Female", "S001", "X"],
+      ["2", "15", "2", "Male", "S002", "Y"],
+      ["3", "11", "1", "female", "S003", "X"],
+      ["4", "18", "2", "Male", "S004", "Y"],
+      ["5", "14", "1", "male", "S005", "X"],
+      ["6", "17", "2", "Female", "S006", "Y"],
+      ["7", "13", "1", "Male", "S007", "X"],
+      ["8", "19", "2", "female", "S008", "Y"],
+    ],
+  });
+  harness.sync();
+  const kept = harness.state().nodes["mv378"]!.data!;
+  strictEqual(kept.labelVariable, "ID");
+  strictEqual(labelVariableOf(kept), "ID");
+  // The label column is gone from the replacement: the choice drops with it.
+  await harness.run("job-378-drop", "write-table", {
+    table_id: "mv378",
+    columns: ["Title", "Y", "Group", "Sex", "Site"],
+    rows: [
+      ["1", "12", "1", "Female", "X"],
+      ["2", "15", "2", "Male", "Y"],
+      ["3", "11", "1", "female", "X"],
+      ["4", "18", "2", "Male", "Y"],
+      ["5", "14", "1", "male", "X"],
+      ["6", "17", "2", "Female", "Y"],
+      ["7", "13", "1", "Male", "X"],
+      ["8", "19", "2", "female", "Y"],
+    ],
+  });
+  harness.sync();
+  const dropped = harness.state().nodes["mv378"]!.data!;
+  strictEqual(dropped.labelVariable, undefined);
+  strictEqual(labelVariableOf(dropped), undefined);
+});
+
+check("seq 378: a non-MV replace stays untouched and a kept label survives a .hlx round-trip", async () => {
+  const harness = mcpLaggingHarness(true);
+  // A column table never carries a row-label source.
+  const made = await harness.run("job-378-col", "create-table", {
+    table_type: "column",
+    columns: ["", "A"],
+    rows: [["1", "1"]],
+  });
+  const colId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  await harness.run("job-378-col-write", "write-table", {
+    table_id: colId,
+    columns: ["", "A"],
+    rows: [["1", "2"]],
+  });
+  harness.sync();
+  strictEqual(harness.state().nodes[colId]!.data!.labelVariable, undefined);
+  // The kept label survives a .hlx save/reload after the replace.
+  const base = setLabelVariable(mv331bTyped(), "ID");
+  harness.dispatch({
+    type: "create",
+    node: { id: "mv378b", type: "table", name: "Subjects", parentId: null, tableType: "multiple", data: base },
+  });
+  harness.sync();
+  await harness.run("job-378-rt", "write-table", {
+    table_id: "mv378b",
+    columns: ["Title", "Y", "Group", "Sex", "ID", "Site"],
+    rows: [
+      ["1", "12", "1", "Female", "S001", "X"],
+      ["2", "15", "2", "Male", "S002", "Y"],
+      ["3", "11", "1", "female", "S003", "X"],
+      ["4", "18", "2", "Male", "S004", "Y"],
+      ["5", "14", "1", "male", "S005", "X"],
+      ["6", "17", "2", "Female", "S006", "Y"],
+      ["7", "13", "1", "Male", "S007", "X"],
+      ["8", "19", "2", "female", "S008", "Y"],
+    ],
+  });
+  harness.sync();
+  const kept = harness.state().nodes["mv378b"]!.data!;
+  strictEqual(kept.labelVariable, "ID");
+  const payload: ProjectFilePayload = {
+    nodes: {
+      mv: { id: "mv", type: "table", name: "Subjects", parentId: null, tableType: "multiple", data: kept },
+    },
+    rootOrder: ["mv"],
+    childOrder: { mv: [] },
+    activeNodeId: "mv",
+  };
+  const resaved = parseProjectFile(JSON.parse(serializeProjectFile(payload)));
+  if ("error" in resaved) throw new Error(resaved.error);
+  strictEqual((resaved.project.nodes.mv as ProjectNode).data?.labelVariable, "ID");
+});
+
 // ── Run ──────────────────────────────────────────────────────────────────
 
 // Descriptives are computed by R since the v1.0.7 rebase, so checks that run

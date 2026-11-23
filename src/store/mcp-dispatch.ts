@@ -831,6 +831,14 @@ function buildTableData(
     );
     if (Object.keys(manual).length) data.variableTypes = { ...data.variableTypes, ...manual };
   }
+  // A replace keeps a Multiple Variables table's row-label source (seq 378):
+  // the chosen label variable carries over when its column survives, and
+  // drops with the column when it doesn't — the same clip-to-surviving
+  // pattern as levelOrder/decimals. labelVariableOf still guards the read,
+  // so a stale choice never labels points with analysis values.
+  if (type === "multiple" && base.labelVariable && columns.includes(base.labelVariable)) {
+    data.labelVariable = base.labelVariable;
+  }
   // A replace keeps a Multiple Variables column's level order (seq 340):
   // the stored order carries over, clipped to the surviving columns, and
   // a level typed into the replacement appends at the end.
