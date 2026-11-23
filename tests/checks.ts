@@ -9713,6 +9713,116 @@ check("effect sizes (seq 161): partial eta squared, Glass's delta and the CIs", 
   close(stat(chi3, "Cramér's V 95% CI upper"), 0.477728, 1e-4, "Cramér's V 95% CI upper");
 });
 
+// Seq 161 remainder (b): pins for the two-way / three-way / RM-ANOVA
+// partial eta-squared 95% CIs. The CIs are computed in R by `etaCI`
+// (noncentral-F inversion, lambda / (lambda + N)); the expected values
+// below were computed independently in Python/scipy (ncf inversion mirroring
+// fci/etaCI — NOT the app's code path; script
+// ~/workspace/.helix-v19/eta-ci-scipy.py). Agreement is ~1e-9 on every bound.
+// Zero lower bounds are the non-significant effects: the noncentrality CI
+// starts at 0 when even lambda = 0 leaves the F CDF on the wrong side.
+check("effect-size CIs are pinned for two-way / three-way / RM-ANOVA (seq 161)", async () => {
+  const close = (got: number | null | undefined, want: number, tol: number, label: string) => {
+    if (got == null || Math.abs(got - want) > tol) throw new Error(`${label}: got ${got}, expected ${want}`);
+  };
+  const row = (
+    out: { effectSizes?: { effect: string; partialEta2: number | null; partialEta2Lo: number | null; partialEta2Hi: number | null }[] },
+    effect: string,
+  ) => {
+    const r = out.effectSizes?.find((e) => e.effect === effect);
+    if (!r) throw new Error(`expected an effect-size row for ${effect}`);
+    return r;
+  };
+  // Ordinary two-way ANOVA, replicated 2x2 design, N = 16, DFd = 8.
+  const twoTable: TableData = {
+    columns: ["Title", "A:Y1", "A:Y2", "B:Y1", "B:Y2"],
+    rows: [
+      ["R1", "12.1", "13.2", "14.3", "15.1"],
+      ["R2", "11.4", "12.8", "15.1", "16.2"],
+      ["R3", "13.2", "12.9", "13.8", "14.9"],
+      ["R4", "12.8", "13.5", "16.2", "15.8"],
+    ],
+    groups: 2,
+    replicates: 2,
+  };
+  const twoParams = { design: "ordinary", posthoc: "none", posthocTarget: "groups" } as AnalysisParams;
+  const two = await runAnalysis("two-way-anova", twoTable, twoParams);
+  if ("error" in two) throw new Error(`two-way should run, got ${two.error}`);
+  // Group F = 54.555, Row F = 1.635, Interaction F = 2.182.
+  close(row(two, "Group").partialEta2, 0.872113, 1e-6, "two-way Group partial eta squared");
+  close(row(two, "Group").partialEta2Lo, 0.40302, 1e-4, "two-way Group partial eta squared 95% CI lower");
+  close(row(two, "Group").partialEta2Hi, 0.89026, 1e-4, "two-way Group partial eta squared 95% CI upper");
+  close(row(two, "Row").partialEta2, 0.3801, 1e-6, "two-way Row partial eta squared");
+  close(row(two, "Row").partialEta2Lo, 0, 1e-9, "two-way Row partial eta squared 95% CI lower");
+  close(row(two, "Row").partialEta2Hi, 0.51076, 1e-4, "two-way Row partial eta squared 95% CI upper");
+  close(row(two, "Interaction").partialEta2, 0.450044, 1e-6, "two-way Interaction partial eta squared");
+  close(row(two, "Interaction").partialEta2Lo, 0, 1e-9, "two-way Interaction partial eta squared 95% CI lower");
+  close(row(two, "Interaction").partialEta2Hi, 0.564214, 1e-4, "two-way Interaction partial eta squared 95% CI upper");
+  const twoOff = await runAnalysis("two-way-anova", twoTable, { ...twoParams, effectSizes: false });
+  if ("error" in twoOff) throw new Error(`two-way should run, got ${twoOff.error}`);
+  strictEqual(twoOff.effectSizes, undefined, "effectSizes false omits the two-way table");
+  // Three-way ANOVA (seq 192 fixture), N = 16, DFd = 8, all seven terms.
+  const threeTable: TableData = {
+    columns: ["Title", "Placebo:Y1", "Placebo:Y2", "Drug:Y1", "Drug:Y2"],
+    rows: [
+      ["Day 1", "10.0", "10.3", "11.1", "11.5"],
+      ["Day 2", "14.1", "15.3", "19.4", "20.5"],
+      ["Day 1", "11.1", "10.1", "13.7", "11.7"],
+      ["Day 2", "11.1", "11.7", "14.8", "13.7"],
+    ],
+    groups: 2,
+    replicates: 2,
+    rowGroups: [
+      { name: "WT", count: 2 },
+      { name: "KO", count: 2 },
+    ],
+  };
+  const three = await runAnalysis("three-way-anova", threeTable, { posthoc: "none" } as AnalysisParams);
+  if ("error" in three) throw new Error(`three-way should run, got ${three.error}`);
+  const threeWant: [string, number, number, number][] = [
+    // effect, partial eta squared, CI lower, CI upper (F in parens)
+    ["A — Group", 0.871821, 0.402192, 0.890024], // F = 54.413
+    ["B — Row", 0.927361, 0.594373, 0.936057], // F = 102.134
+    ["C — Row group", 0.72967, 0.140086, 0.78131], // F = 21.593
+    ["A:B", 0.553959, 0.02062, 0.659887], // F = 9.936
+    ["A:C", 0.099917, 0, 0.348458], // F = 0.888
+    ["B:C", 0.86141, 0.373682, 0.881642], // F = 49.724
+    ["A:B:C", 0.372068, 0, 0.541686], // F = 4.740
+  ];
+  for (const [effect, partial, lo, hi] of threeWant) {
+    const r = row(three, effect);
+    close(r.partialEta2, partial, 1e-6, `three-way ${effect} partial eta squared`);
+    close(r.partialEta2Lo, lo, lo === 0 ? 1e-9 : 1e-4, `three-way ${effect} partial eta squared 95% CI lower`);
+    close(r.partialEta2Hi, hi, 1e-4, `three-way ${effect} partial eta squared 95% CI upper`);
+  }
+  const threeOff = await runAnalysis("three-way-anova", threeTable, { posthoc: "none", effectSizes: false } as AnalysisParams);
+  if ("error" in threeOff) throw new Error(`three-way should run, got ${threeOff.error}`);
+  strictEqual(threeOff.effectSizes, undefined, "effectSizes false omits the three-way table");
+  // Repeated-measures one-way ANOVA (seq 311 fixture), sphericity assumed,
+  // N = 6 subjects x 3 groups = 18, F = 25.851, DFn = 2, DFd = 10.
+  const rmA = [10, 12, 11, 13, 10, 12];
+  const rmB = [10, 12, 11, 13, 10, 12];
+  const rmC = [15, 14, 18, 16, 13, 19];
+  const rmTable: TableData = {
+    columns: ["Title", "A", "B", "C"],
+    rows: rmA.map((_, i) => [`S${i + 1}`, String(rmA[i]), String(rmB[i]), String(rmC[i])]),
+  };
+  const rm = await runAnalysis("rm-anova", rmTable, { sphericity: true, posthoc: "none" } as AnalysisParams);
+  if ("error" in rm) throw new Error(`rm-anova should run, got ${rm.error}`);
+  close(row(rm, "Treatment").partialEta2, 0.837931, 1e-6, "RM Treatment partial eta squared");
+  close(row(rm, "Treatment").partialEta2Lo, 0.382902, 1e-4, "RM Treatment partial eta squared 95% CI lower");
+  close(row(rm, "Treatment").partialEta2Hi, 0.865531, 1e-4, "RM Treatment partial eta squared 95% CI upper");
+  // Matching (subjects) is an eta squared, not a partial one, so its
+  // partial / CI stay null by design.
+  const matching = row(rm, "Matching (subjects)");
+  strictEqual(matching.partialEta2, null, "RM Matching partial eta squared stays null");
+  strictEqual(matching.partialEta2Lo, null, "RM Matching CI lower stays null");
+  strictEqual(matching.partialEta2Hi, null, "RM Matching CI upper stays null");
+  const rmOff = await runAnalysis("rm-anova", rmTable, { sphericity: true, posthoc: "none", effectSizes: false } as AnalysisParams);
+  if ("error" in rmOff) throw new Error(`rm-anova should run, got ${rmOff.error}`);
+  strictEqual(rmOff.effectSizes, undefined, "effectSizes false omits the RM table");
+});
+
 check("a two-way ANOVA of one value per cell asks nothing and runs the ordinary one", () => {
   const wizard = WIZARDS["two-way-anova"]!;
   const single = readTable({
