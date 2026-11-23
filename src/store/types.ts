@@ -792,6 +792,20 @@ export interface LinkedPaste {
   autoUpdate: boolean;
 }
 
+/** A Multiple Variables column's type (Prism 11, seq 331): Categorical
+ *  (text or coded levels, any number of levels), Continuous (numbers
+ *  incl. integers), Label (IDs/names/notes, never used in analyses,
+ *  unlimited count). */
+export type VariableType = "categorical" | "continuous" | "label";
+export const VARIABLE_TYPES = ["categorical", "continuous", "label"] as const;
+/** One column's variable type, and whether the user set it by hand (orange
+ *  in Prism) or it was auto-detected from its values (gray). */
+export interface VariableTypeInfo {
+  type: VariableType;
+  /** True when the user set the type by hand; false = auto-detected. */
+  manual: boolean;
+}
+
 export interface TableData {
   columns: string[];
   rows: (string | null)[][];
@@ -800,6 +814,13 @@ export interface TableData {
    *  `recomputeCalculated`, so every analysis and graph reads them exactly
    *  like typed variables. Omitted when the table has none. */
   calculated?: CalculatedVariable[];
+  /** A Multiple Variables table's per-column variable types (seq 331):
+   *  the resolved type of each data column, keyed by column name (so a
+   *  rename carries it, like `widths`). An entry marked manual sticks —
+   *  auto-detect never overwrites it; an auto entry is re-detected on
+   *  every edit. Omitted when the table has no typed columns (a fresh
+   *  table, or a non-MV table). */
+  variableTypes?: Record<string, VariableTypeInfo>;
   /** A linked paste (Prism 11, seq 168): this table's cells pasted from a
    *  data file that stay linked to it — see `LinkedPaste`. Omitted when
    *  the table holds no linked block. The link is Titer-local: the

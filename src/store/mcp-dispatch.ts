@@ -107,6 +107,7 @@ import {
   type LinkedPaste,
 } from "../lib/linked-paste";
 import { fillSeries, generateSeries, validateSeriesSpec, type SeriesMode } from "../lib/series";
+import { isVariableType, setVariableType, variableTypesOf } from "../lib/variable-types";
 import { SUMMARY_FORMATS, summaryFormatOf, summarySubcolumns, type SummaryFormat } from "../lib/summary-format";
 import {
   CELL_BACKGROUND_COLORS,
@@ -705,6 +706,10 @@ function buildTableData(
     }
     if (bands.length) data.rowGroups = bands;
   }
+  // A Multiple Variables table's columns are typed on the way in: the
+  // values decide (auto) — a replace re-detects the auto ones from the new
+  // values while its manual entries (kept below) stick.
+  if (type === "multiple") data.variableTypes = variableTypesOf(data);
   if (!base) return data;
 
   // A replace keeps what the call did not replace: the marks, the bands,
@@ -807,6 +812,15 @@ function buildTableData(
   if (base.calculated) {
     const kept = base.calculated.filter((v) => columns.includes(v.name));
     if (kept.length) data.calculated = kept;
+  }
+  // A replace keeps a Multiple Variables column's manual type (auto-detect
+  // never overwrites a hand-set type); the auto types were re-detected
+  // from the new values above.
+  if (type === "multiple" && base.variableTypes) {
+    const manual = Object.fromEntries(
+      Object.entries(base.variableTypes).filter(([name, info]) => info.manual && columns.includes(name)),
+    );
+    if (Object.keys(manual).length) data.variableTypes = { ...data.variableTypes, ...manual };
   }
   return data;
 }
@@ -1740,6 +1754,37 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
           next = res.data;
           break;
         }
+        case "set-variable-type": {
+          // Seq 331: a Multiple Variables column's type, set by hand
+          // (manual) — the MCP twin of the Variable Types panel's picker.
+          // Auto-detect never overwrites a manual type afterwards.
+          if (type !== "multiple") {
+            throw jobErr(
+              job,
+              `cannot set a variable type — only Multiple Variables tables have variable types, and this is a ${type} table.`,
+            );
+          }
+          const column = argInt(job, job.args, "column");
+          const variableType = argString(job, job.args, "variable_type");
+          if (!isVariableType(variableType)) {
+            throw jobErr(
+              job,
+              `has no variable type “${variableType}” — the types are categorical, continuous and label.`,
+            );
+          }
+          if (column < 1 || column >= data.columns.length) {
+            throw jobErr(
+              job,
+              `has no column ${column} — data columns run 1 to ${data.columns.length - 1} (column 0 is the row titles).`,
+            );
+          }
+          const name = data.columns[column];
+          const current = variableTypesOf(data)[name];
+          if (current.type === variableType && current.manual) break; // already that way: no-op success
+          label = "Set Variable Type";
+          next = setVariableType(data, name, variableType);
+          break;
+        }
         case "paste-transposed": {
           // Seq 230, the MCP half of Edit ▸ Paste Transposed: `rows` is the
           // clipboard block; it lands transposed (rows become columns) at
@@ -1809,7 +1854,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
         default:
           throw jobErr(
             job,
-            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, set-cell-background, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-summary-format, paste-link, remove-link, generate-series, paste-transposed.`,
+            `has no edit op “${op}” — the ops are insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, set-cell-background, freeze-title, convert-comma-decimals, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-variable-type, set-summary-format, paste-link, remove-link, generate-series, paste-transposed.`,
           );
       }
       if (next === null) {

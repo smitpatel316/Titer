@@ -114,6 +114,7 @@ import { isSummaryFormatValue, summarySubcolumns } from "./summary-format";
 import { groupRuns } from "./columns";
 import { regroupDropped, regroupTable, renestDropped, renestTable } from "../views/tables/table-data";
 import { readCalculated, recomputeCalculated } from "./calcvars";
+import { readVariableTypes } from "./variable-types";
 import { readLinkedPaste } from "./linked-paste";
 import { readSimulationSpec } from "../stats/simulation/simulate";
 import { transformTable } from "./transform";
@@ -246,7 +247,7 @@ const NODE_KEYS = Object.keys({
 // prettier-ignore
 const DATA_KEYS = Object.keys({
   columns: 1, rows: 1, groups: 1, replicates: 1, subgroups: 1, rowGroups: 1, excluded: 1, cellBackgrounds: 1,
-  widths: 1, decimals: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1, linkedPaste: 1, simulation: 1,
+  widths: 1, decimals: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1, linkedPaste: 1, simulation: 1, variableTypes: 1,
 } satisfies Record<keyof TableData, 1>);
 
 // Graph options without a default, by the kind of value they hold.
@@ -781,6 +782,10 @@ function readData(
     errorFormat: d.errorFormat === "sd" || d.errorFormat === "sem" ? d.errorFormat : undefined,
     calculated,
     linkedPaste,
+    // A variable type survives only as an entry naming a data column with a
+    // known type: a hand-edited file holding a bogus type, or an entry for
+    // a column that is gone, loses that entry on its own.
+    variableTypes: readVariableTypes(d.variableTypes, columns),
     // A simulated table's spec survives only when it is a valid spec:
     // a hand-edited one is dropped, so the table can't re-run on a lie.
     simulation: readSimulationSpec(d.simulation),

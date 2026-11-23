@@ -834,6 +834,18 @@ const ROWS: Row[] = [
     note: "Covered via save_project (tip path); fix in flight on fix/18-289-prism-ranges.",
     checks: [{ kind: "tool", tool: "titer_save_project" }],
   },
+  {
+    item: "331",
+    title: "MV variable types (HALF A)",
+    status: "covered",
+    note: "Auto-detect + manual override + level rename on Multiple Variables tables: variable_type + variable_type_manual on titer_list_tables columns (MV only), titer_edit_table set-variable-type op; .hlx round-trip via readVariableTypes.",
+    checks: [
+      { kind: "editOpsContains", op: "set-variable-type" },
+      { kind: "sourceContains", file: "mcpDispatch", text: "set-variable-type" },
+      { kind: "structContains", struct: "EditTableArgs", text: "variable_type" },
+      { kind: "sourceContainsRe", scope: "src", re: "variableTypes" },
+    ],
+  },
 
   // ── Covered in flight (surface on the named branch, not on this tip) ──
   {
