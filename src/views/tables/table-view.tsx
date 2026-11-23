@@ -3,16 +3,18 @@
 import * as React from "react";
 import {
   GROUPED_LIMITS,
+  TAG_COLORS,
   tableErrorFormat,
   type ProjectNode,
   type RowGroup,
   type TableData,
   type TableErrorFormat,
+  type VariableType,
 } from "../../store/types";
 import type { TableMove } from "../../store/references";
 import { useProjectActions } from "../../store/use-project-store";
 import { Row, Section, Stepper, WithInspector } from "../../components/inspector";
-import { Button, IconButton, Input, NumberInput, RadioList, Select } from "../../ui/controls";
+import { Button, Checkbox, IconButton, Input, NumberInput, RadioList, Segmented, Select } from "../../ui/controls";
 import { useLayout } from "../../store/use-layout";
 import { ColumnsIcon, MinusIcon, PlusIcon, SnowflakeIcon } from "@phosphor-icons/react";
 import { Grid } from "./grid";
@@ -39,9 +41,17 @@ import {
 import { isGrouped, isNested } from "../../lib/dataset";
 import {
   addCalculatedVariable,
+  isCalculatedColumn,
   removeCalculatedVariable,
   setCalculatedFormula,
 } from "../../lib/calcvars";
+import {
+  categoricalLevels,
+  renameLevel,
+  setVariableType,
+  setVariableTypeAuto,
+  variableTypesOf,
+} from "../../lib/variable-types";
 import { SUMMARY_FORMATS, summaryFormatOf, summarySubcolumns, type SummaryFormat } from "../../lib/summary-format";
 import { MAX_SERIES_VALUES, generateXSeries, validateSeriesSpec } from "../../lib/series";
 import { seriesKeyOf } from "../../lib/columns";
@@ -174,7 +184,12 @@ export function TableView({ node }: { node: ProjectNode }) {
         title={node.name}
         tag={tag}
         node={node}
-        settings={<CalculatedVariablesPanel data={data} update={update} />}
+        settings={
+          <>
+            <VariableTypesPanel data={data} update={update} />
+            <CalculatedVariablesPanel data={data} update={update} />
+          </>
+        }
         actions={actions}
       >
         {sheet}
@@ -295,6 +310,156 @@ function FormatPanel({ data, update }: { data: TableData; update: (next: TableDa
  *  run); the add form and the per-variable edit take a formula with or
  *  without its leading `=`. Removing one deletes its column and its values
  *  (Undo brings them back). */
+/** Variable Types (Prism 11, seq 331): a Multiple Variables table's per-column
+ *  types — Categorical, Continuous or Label — and a categorical column's
+ *  levels. A gray dot is auto-detected from the values, an orange dot is set
+ *  by hand (the Auto checkbox flips between the two); auto-detect never
+ *  overwrites a manual type. Renaming a level rewrites every row holding it
+ *  (any case); renaming onto another level merges the two, so a typo folds
+ *  into its level. A calculated column's levels come from its formula, so
+ *  its levels show without a rename box. */
+function VariableTypesPanel({
+  data,
+  update,
+}: {
+  data: TableData;
+  update: (next: TableData, label: string) => void;
+}) {
+  const [filter, setFilter] = React.useState<"all" | VariableType>("all");
+  const [open, setOpen] = React.useState<string | null>(null);
+  const [renames, setRenames] = React.useState<Record<string, string>>({});
+  const types = variableTypesOf(data);
+  const columns = data.columns.slice(1);
+  const shown = columns.filter((name) => filter === "all" || types[name].type === filter);
+  const typeLabel = (t: VariableType) =>
+    t === "categorical" ? "Categorical" : t === "continuous" ? "Continuous" : "Label";
+  const clearRename = (key: string) =>
+    setRenames((r) => {
+      const next = { ...r };
+      delete next[key];
+      return next;
+    });
+  return (
+    <Section title="Variable Types">
+      <Segmented<"all" | VariableType>
+        value={filter}
+        onChange={setFilter}
+        options={[
+          { value: "all", label: "All" },
+          { value: "categorical", label: "Categorical" },
+          { value: "continuous", label: "Continuous" },
+          { value: "label", label: "Label" },
+        ]}
+        wrap
+      />
+      {shown.map((name) => {
+        const info = types[name];
+        const calculated = isCalculatedColumn(data, name);
+        const levels = info.type === "categorical" ? categoricalLevels(data, name) : [];
+        const expanded = open === name;
+        return (
+          <div
+            key={name}
+            className="flex flex-col gap-1 border-b border-separator pb-2 last:border-0 last:pb-0"
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className="size-2 shrink-0 rounded-full"
+                style={{ background: info.manual ? TAG_COLORS.orange : TAG_COLORS.gray }}
+                title={info.manual ? "Set by hand" : "Auto-detected from the values"}
+              />
+              <span className="min-w-0 flex-1 truncate text-regular font-medium">{name}</span>
+              <Select<VariableType>
+                value={info.type}
+                onChange={(next) => update(setVariableType(data, name, next), "Set Variable Type")}
+                options={[
+                  { value: "categorical", label: "Categorical" },
+                  { value: "continuous", label: "Continuous" },
+                  { value: "label", label: "Label" },
+                ]}
+              />
+              <label className="flex shrink-0 items-center gap-1 text-small text-secondary">
+                <Checkbox
+                  checked={!info.manual}
+                  onChange={(auto) =>
+                    update(
+                      setVariableTypeAuto(data, name, auto),
+                      auto ? "Auto-detect Variable Type" : "Set Variable Type",
+                    )
+                  }
+                />
+                Auto
+              </label>
+            </div>
+            {info.type === "categorical" && (
+              <>
+                <div>
+                  <Button size="small" onClick={() => setOpen(expanded ? null : name)}>
+                    {expanded ? "Hide levels" : `Show levels (${levels.length})`}
+                  </Button>
+                </div>
+                {expanded &&
+                  (levels.length === 0 ? (
+                    <p className="text-small text-secondary">No values yet — levels appear as you type them.</p>
+                  ) : (
+                    levels.map((level) => {
+                      const key = `${name}:${level.name}`;
+                      const draft = renames[key] ?? level.name;
+                      const canRename =
+                        !calculated &&
+                        draft.trim() !== "" &&
+                        draft.trim().toLowerCase() !== level.name.toLowerCase();
+                      const rename = () => {
+                        update(renameLevel(data, name, level.name, draft), "Rename Level");
+                        clearRename(key);
+                      };
+                      return (
+                        <div key={level.name} className="flex items-center gap-2 pl-4">
+                          <span className="min-w-0 flex-1 truncate text-small">
+                            {level.name} · {level.count}
+                            {level.excluded > 0 ? ` (${level.excluded} excluded)` : ""}
+                          </span>
+                          {!calculated && (
+                            <>
+                              <Input
+                                value={draft}
+                                aria-label={`Rename level ${level.name}`}
+                                className="w-28"
+                                onChange={(e) => setRenames((r) => ({ ...r, [key]: e.target.value }))}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && canRename) rename();
+                                }}
+                              />
+                              <Button size="small" disabled={!canRename} onClick={rename}>
+                                Rename
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })
+                  ))}
+                {calculated && (
+                  <p className="text-small text-secondary">A calculated column's levels come from its formula.</p>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
+      {shown.length === 0 && (
+        <p className="text-small text-secondary">
+          No {filter === "all" ? "" : `${typeLabel(filter).toLowerCase()} `}variables.
+        </p>
+      )}
+      <p className="text-small text-secondary">
+        A gray dot is auto-detected from the values; an orange dot was set by hand and stays put. A column of numbers
+        is Continuous, text is Categorical, and an ID column with more than 10 distinct values is a Label.
+      </p>
+    </Section>
+  );
+}
+
 function CalculatedVariablesPanel({
   data,
   update,

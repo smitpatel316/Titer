@@ -19,6 +19,7 @@ import {
 } from "./types";
 import { TRANSFORM_NAMES, transformTable } from "../lib/transform";
 import { recomputeCalculated } from "../lib/calcvars";
+import { refreshVariableTypes } from "../lib/variable-types";
 import { remapQualifiedOptions, restoreForeignPoints } from "../lib/multi-table";
 import { MAX_INFO_SHEETS, newInfoSheetData } from "../lib/info-sheets";
 import type { AnalysisParams, AnalysisPickerValue, AnalysisResult, AnalysisType } from "../stats/types";
@@ -839,8 +840,12 @@ function applyAction(state: ProjectState, action: Action): ProjectState {
         // source value, pasting, inserting rows, an MCP write — because the
         // recompute runs here, the one funnel every edit passes through. A
         // table computed from another (a Transform) never recomputes: its
-        // values come from its source table, not from formulas.
+        // values come from its source table, not from formulas. A Multiple
+        // Variables table's types are re-detected here too (gray in Prism):
+        // an auto type follows the values the user just typed, a manual
+        // type (orange) sticks; a Transform keeps its computed types as-is.
         if (!before.transform) data = recomputeCalculated(data);
+        if (!before.transform && before.tableType === "multiple") data = refreshVariableTypes(data);
         nodes[id] = { ...before, data };
         // The table's analyses and graphs follow its renamed columns and groups, its moved
         // rows and its deleted columns.

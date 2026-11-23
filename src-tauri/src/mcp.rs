@@ -2880,7 +2880,8 @@ pub struct EditTableArgs {
     /// delete-columns, rename-column, rename-group, exclude-cells,
     /// include-cells, freeze-title, convert-comma-decimals,
     /// set-summary-format, add-calculated-variable, set-calculated-variable,
-    /// remove-calculated-variable, paste-link, remove-link, generate-series or paste-transposed (seq 230).
+    /// remove-calculated-variable, set-variable-type, paste-link,
+    /// remove-link, generate-series or paste-transposed (seq 230).
     pub op: String,
     /// insert/delete-rows, insert/delete-columns: the 0-based row or
     /// column to act at (rows and columns are 0-based; column 0 holds the
@@ -2943,6 +2944,11 @@ pub struct EditTableArgs {
     /// or mean-upper-lower (grouped, xy and nested tables only).
     #[serde(default)]
     pub format: Option<String>,
+    /// set-variable-type: the variable type — categorical, continuous or
+    /// label (Multiple Variables tables only); set by hand, auto-detect
+    /// never overwrites it afterwards.
+    #[serde(default)]
+    pub variable_type: Option<String>,
 }
 
 /// Args for `titer_refresh_linked_data`: the table whose linked source file
@@ -4589,7 +4595,7 @@ impl TiterMcpServer {
     /// file as a link, or break that link.
     #[tool(
         name = "titer_edit_table",
-        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, set-summary-format, add-calculated-variable, set-calculated-variable, remove-calculated-variable, paste-link, remove-link, generate-series or paste-transposed. Rows and columns are 0-based; column 0 holds the row titles. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. paste-transposed { rows, at_row, at_col } pastes the block with rows and columns swapped, as Edit ▸ Paste Transposed does. paste-link { source_path, row?, column?, auto_update? } pastes a data file (.csv, .tsv, .txt or .xlsx) as a link at (row, column) — the values land and stay linked, so titer_refresh_linked_data re-reads the file into the same region later; auto_update (default true) refreshes the link when the project opens. remove-link { } keeps the values and drops the link. generate-series { column, at, count, first, mode, step } fills a column with an arithmetic series (add step, default) or a geometric one (multiply by step): column defaults to the X column (1) on XY and Survival tables, at defaults to row 0, count to the table's stored rows, first to 0, step to 1; at most 10,000 values. set-summary-format { format } changes a grouped, xy or nested table's sub-column format between raw replicates and pre-calculated summaries (mean-sd-n, mean-sem-n, mean-sd, mean-sem, mean-cv-n, mean-cv, mean-plus-minus, mean-upper-lower, or replicates); values stay in their group's slot.",
+        description = "Edit a table with one grid-menu op: insert-rows, delete-rows, insert-columns, delete-columns, rename-column, rename-group, exclude-cells, include-cells, freeze-title, convert-comma-decimals, set-summary-format, add-calculated-variable, set-calculated-variable, remove-calculated-variable, set-variable-type, paste-link, remove-link, generate-series or paste-transposed. Rows and columns are 0-based; column 0 holds the row titles. The calculated-variable ops only work on Multiple Variables tables: add-calculated-variable { name, formula } makes a new column from a whole-variable formula (e.g. `=Dose * 2`), set-calculated-variable { name, formula } changes its formula, remove-calculated-variable { name } deletes it with its column. set-variable-type { column, variable_type } sets a Multiple Variables column's type by hand — categorical, continuous or label — and auto-detect never overwrites a hand-set type; read the types back from titer_list_tables' variable_type fields. paste-transposed { rows, at_row, at_col } pastes the block with rows and columns swapped, as Edit ▸ Paste Transposed does. paste-link { source_path, row?, column?, auto_update? } pastes a data file (.csv, .tsv, .txt or .xlsx) as a link at (row, column) — the values land and stay linked, so titer_refresh_linked_data re-reads the file into the same region later; auto_update (default true) refreshes the link when the project opens. remove-link { } keeps the values and drops the link. generate-series { column, at, count, first, mode, step } fills a column with an arithmetic series (add step, default) or a geometric one (multiply by step): column defaults to the X column (1) on XY and Survival tables, at defaults to row 0, count to the table's stored rows, first to 0, step to 1; at most 10,000 values. set-summary-format { format } changes a grouped, xy or nested table's sub-column format between raw replicates and pre-calculated summaries (mean-sd-n, mean-sem-n, mean-sd, mean-sem, mean-cv-n, mean-cv, mean-plus-minus, mean-upper-lower, or replicates); values stay in their group's slot.",
         annotations(
             title = "Edit table",
             read_only_hint = false,
@@ -4619,6 +4625,7 @@ impl TiterMcpServer {
             "step": args.step,
             "mode": args.mode,
             "format": args.format,
+            "variable_type": args.variable_type,
         });
         let outcome: Result<serde_json::Value, String> = async {
             let (id, snap) = McpState::pick_snapshot(&snapshots, &last, args.project_id.as_deref())?;
@@ -4648,6 +4655,7 @@ impl TiterMcpServer {
                 "add-calculated-variable",
                 "set-calculated-variable",
                 "remove-calculated-variable",
+                "set-variable-type",
                 "paste-link",
                 "generate-series",
                 "remove-link",
@@ -4718,6 +4726,19 @@ impl TiterMcpServer {
                     Some(n) if !n.trim().is_empty() => {}
                     _ => return Err(format!("op {} needs a non-empty name.", args.op)),
                 },
+                "set-variable-type" => {
+                    if args.column.is_none() {
+                        return Err("op set-variable-type needs column (the data column's index).".into());
+                    }
+                    match args.variable_type.as_deref() {
+                        Some("categorical") | Some("continuous") | Some("label") => {}
+                        _ => {
+                            return Err(
+                                "op set-variable-type needs variable_type (categorical, continuous or label).".into(),
+                            )
+                        }
+                    }
+                }
                 "paste-transposed" => match &args.rows {
                     Some(rows) if !rows.is_empty() => {}
                     _ => return Err("op paste-transposed needs rows (at least one row of values).".into()),
@@ -4767,6 +4788,7 @@ impl TiterMcpServer {
                     "step": args.step,
                     "mode": args.mode,
                     "format": args.format,
+                    "variable_type": args.variable_type,
                 }),
             )
             .await
@@ -9046,7 +9068,7 @@ fn table_summary(
         } else {
             serde_json::Value::Null
         };
-        column_summaries.push(serde_json::json!({
+        let mut summary = serde_json::json!({
             "name": header,
             "role": column_role(table_type, data_col, &data),
             "unit_hint": unit_hint(header),
@@ -9054,7 +9076,26 @@ fn table_summary(
             "missing_values": missing,
             "non_numeric_values": non_numeric,
             "range": range,
-        }));
+        });
+        // Multiple Variables tables only (seq 331): the column's type and
+        // whether it was set by hand. Both keys are present with null when
+        // the table carries no entry for the column (a fresh table, or an
+        // older file) — null is not a type.
+        if table_type == "multiple" {
+            let (vtype, manual) = data
+                .get("variableTypes")
+                .and_then(|v| v.get(header.as_str()))
+                .map(|v| {
+                    (
+                        v.get("type").and_then(|t| t.as_str()).map(|s| s.to_string()),
+                        v.get("manual").and_then(|m| m.as_bool()),
+                    )
+                })
+                .unwrap_or((None, None));
+            summary["variable_type"] = serde_json::json!(vtype);
+            summary["variable_type_manual"] = serde_json::json!(manual);
+        }
+        column_summaries.push(summary);
     }
     let mut out = serde_json::json!({
         "project_id": project_id,
@@ -9580,6 +9621,51 @@ mod tests {
         assert_eq!(resp_b["missing_values"], 1);
         assert_eq!(resp_b["non_numeric_values"], 0);
         assert_eq!(out["excluded_cells"], 1);
+    }
+
+    #[test]
+    fn table_summary_variable_types_on_multiple() {
+        // Seq 331: a Multiple Variables table's columns carry their type
+        // and whether it was set by hand; a column with no stored entry
+        // reads null for both (a fresh table, or an older file). A
+        // non-MV table carries neither key.
+        let snap = json!({
+            "filePath": "/tmp/MV.hlx",
+            "revision": 1,
+            "nodes": {
+                "m1": {
+                    "id": "m1", "type": "table", "name": "Subjects", "parentId": null,
+                    "tableType": "multiple",
+                    "data": {
+                        "columns": ["", "Sex", "Age", "ID"],
+                        "rows": [
+                            ["1", "Female", "34", "S001"],
+                            ["2", "Male", "41", "S002"],
+                            ["3", "female", "29", "S003"],
+                        ],
+                        "variableTypes": {
+                            "Sex": { "type": "categorical", "manual": true },
+                        },
+                    }
+                },
+            },
+            "rootOrder": ["m1"],
+            "childOrder": { "m1": [] },
+            "activeNodeId": "m1",
+        });
+        let out = table_summary("project-1", &snap, "m1", false, 100).expect("summary");
+        assert_eq!(out["table_type"], "Multiple variables");
+        let sex = &out["columns"][0];
+        assert_eq!(sex["variable_type"], "categorical");
+        assert_eq!(sex["variable_type_manual"], true);
+        // Age has no stored entry: null, not a guessed type.
+        let age = &out["columns"][1];
+        assert_eq!(age["variable_type"], serde_json::Value::Null);
+        assert_eq!(age["variable_type_manual"], serde_json::Value::Null);
+        // The XY fixture carries neither key.
+        let xy = table_summary("project-1", &snapshot(), "t1", false, 100).expect("summary");
+        assert!(xy["columns"][0].get("variable_type").is_none());
+        assert!(xy["columns"][0].get("variable_type_manual").is_none());
     }
 
     #[test]

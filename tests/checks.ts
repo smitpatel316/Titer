@@ -74,6 +74,16 @@ import {
   renameVariableInFormula,
   setCalculatedFormula,
 } from "../src/lib/calcvars";
+import {
+  categoricalLevels,
+  detectVariableType,
+  readVariableTypes,
+  refreshVariableTypes,
+  renameLevel,
+  setVariableType,
+  setVariableTypeAuto,
+  variableTypesOf,
+} from "../src/lib/variable-types";
 import { writePrism, type PrismWriteReport } from "../src/lib/prism-write";
 import {
   infoSheetsOf,
@@ -30469,6 +30479,244 @@ check("linked-168: a whole-table write drops the link, so a refresh can't overwr
   harness.sync();
   strictEqual(harness.state().nodes[tableId]?.data?.linkedPaste, undefined);
   strictEqual(harness.state().nodes[tableId]?.data?.rows[0]?.[1], "9");
+});
+
+// ── seq 331: MV variable types (HALF A) ─────────────────────────────────
+// A Multiple Variables table's columns are typed — Categorical, Continuous
+// or Label — auto-detected from their values, set by hand in the Variable
+// Types panel (or titer_edit_table's set-variable-type), and stored on the
+// table. A manual type sticks; an auto type follows the values.
+
+const mv331 = (): TableData => ({
+  columns: ["Title", "Sex", "Age", "ID"],
+  rows: [
+    ["1", "Female", "34", "S001"],
+    ["2", "Male", "41", "S002"],
+    ["3", "female", "29", "S003"],
+    ["4", "Mael", "52", "S004"],
+    ["5", "male", "38", "S005"],
+  ],
+});
+
+check("seq 331: auto-detect classifies numeric, text, ID and empty columns (Prism's rule)", () => {
+  strictEqual(detectVariableType(["34", "41", "29"]), "continuous");
+  strictEqual(detectVariableType(["1,23", "4,56"]), "continuous", "a decimal comma is still a number");
+  strictEqual(detectVariableType(["1e3", "2.5E-2"]), "continuous", "scientific notation is still a number");
+  strictEqual(detectVariableType(["Female", "Male"]), "categorical");
+  strictEqual(detectVariableType(["12", "Male"]), "categorical", "mixed numbers and text are categorical");
+  strictEqual(
+    detectVariableType(["S001", "S002", "S003", "S004", "S005", "S006", "S007", "S008", "S009", "S010"]),
+    "categorical",
+    "10 distinct values are still categorical",
+  );
+  strictEqual(
+    detectVariableType([
+      "S001", "S002", "S003", "S004", "S005", "S006", "S007", "S008", "S009", "S010", "S011",
+    ]),
+    "label",
+    "more than 10 distinct values read as an ID column",
+  );
+  strictEqual(detectVariableType([]), "continuous", "an empty column reads continuous");
+  strictEqual(detectVariableType(["", null, "  "]), "continuous", "blanks alone read continuous");
+});
+
+check("seq 331: a manual type survives value edits — auto-detect never overwrites it", () => {
+  let data = refreshVariableTypes(mv331());
+  strictEqual(data.variableTypes?.Sex?.type, "categorical");
+  strictEqual(data.variableTypes?.Sex?.manual, false);
+  data = setVariableType(data, "Sex", "label");
+  strictEqual(data.variableTypes?.Sex?.manual, true);
+  // Every value becomes a number — an auto type would flip to continuous.
+  const edited = writeBlock(data, 0, 1, [["34"], ["41"], ["29"], ["52"], ["38"]], "multiple");
+  const refreshed = refreshVariableTypes(edited);
+  strictEqual(refreshed.variableTypes?.Sex?.type, "label", "the hand-set type sticks");
+  strictEqual(refreshed.variableTypes?.Sex?.manual, true);
+  // Turning Auto back on re-detects at once.
+  strictEqual(setVariableTypeAuto(refreshed, "Sex", true).variableTypes?.Sex?.type, "continuous");
+});
+
+check("seq 331: an auto type follows the values when they change", () => {
+  let data = refreshVariableTypes(mv331());
+  strictEqual(data.variableTypes?.Sex?.type, "categorical");
+  const edited = writeBlock(data, 0, 1, [["1"], ["2"], ["3"], ["4"], ["5"]], "multiple");
+  strictEqual(refreshVariableTypes(edited).variableTypes?.Sex?.type, "continuous");
+  // A column nobody typed in keeps its detected type, and a refresh that
+  // moves nothing returns the same record (no phantom undo step).
+  strictEqual(refreshVariableTypes(data), data);
+  // A manual entry with the same value as the detection is kept as-is too.
+  const manual = setVariableType(data, "Age", "continuous");
+  strictEqual(refreshVariableTypes(manual).variableTypes?.Age?.manual, true);
+});
+
+check("seq 331: levels group case-insensitively, with counts and excluded rows", () => {
+  const data: TableData = { ...mv331(), excluded: ["3,1"] };
+  const levels = categoricalLevels(data, "Sex");
+  const byName = Object.fromEntries(levels.map((l) => [l.name, l]));
+  strictEqual(levels.length, 3, "Male/male are one level, Female/female are one level");
+  strictEqual(byName.Female.count, 2, "Female + female");
+  strictEqual(byName.Female.excluded, 0);
+  strictEqual(byName.Male.count, 2, "Male + male");
+  strictEqual(byName.Male.excluded, 0);
+  strictEqual(byName.Mael.count, 0, "the only Mael row is excluded");
+  strictEqual(byName.Mael.excluded, 1);
+  strictEqual(byName.Female.name, "Female", "the first-seen spelling is the display name");
+  deepStrictEqual(categoricalLevels(data, "Nope"), [], "an unknown column has no levels");
+});
+
+check("seq 331: renaming a level rewrites every row and merges onto an existing level", () => {
+  const data: TableData = { ...mv331(), excluded: ["3,1"] };
+  const renamed = renameLevel(data, "Sex", "Mael", "Male");
+  strictEqual(renamed.rows[3]?.[1], "Male", "the typo row takes the new name");
+  strictEqual(renamed.rows[4]?.[1], "male", "other rows keep their spelling");
+  strictEqual(renamed.excluded?.[0], "3,1", "the exclusion stays on its row");
+  const levels = categoricalLevels(renamed, "Sex");
+  strictEqual(levels.length, 2, "Mael folded into Male");
+  const male = levels.find((l) => l.name === "Male")!;
+  strictEqual(male.count, 2, "Male + male (the renamed row is excluded, so it counts there)");
+  strictEqual(male.excluded, 1, "the excluded Mael row is still excluded, as Male");
+  // Renaming onto the same level in another case, or to blank, is a no-op.
+  strictEqual(renameLevel(data, "Sex", "Mael", "mael"), data);
+  strictEqual(renameLevel(data, "Sex", "Mael", "  "), data);
+  strictEqual(renameLevel(data, "Sex", "Nope", "Male"), data);
+});
+
+check("seq 331: a rename carries the type, a delete drops it", () => {
+  let data = refreshVariableTypes(mv331());
+  data = setVariableType(data, "Age", "label");
+  const renamed = renameColumn(data, 2, "AgeYears");
+  strictEqual(renamed.variableTypes?.AgeYears?.type, "label", "the type follows the rename");
+  strictEqual(renamed.variableTypes?.AgeYears?.manual, true);
+  strictEqual(renamed.variableTypes?.Age, undefined);
+  strictEqual(renamed.columns[2], "AgeYears");
+  const deleted = deleteColumns(renamed, 2, 1);
+  strictEqual(deleted.variableTypes?.AgeYears, undefined, "a deleted column takes its type with it");
+  strictEqual(deleted.variableTypes?.Sex?.type, "categorical", "the surviving columns keep theirs");
+  strictEqual(deleted.columns.join(","), "Title,Sex,ID");
+});
+
+check("seq 331: types and manual flags persist through a .hlx save/reload; bogus entries drop", () => {
+  let data = refreshVariableTypes(mv331());
+  data = setVariableType(data, "Sex", "categorical"); // manual, same value as detected
+  const payload: ProjectFilePayload = {
+    nodes: {
+      mv: { id: "mv", type: "table", name: "Subjects", parentId: null, tableType: "multiple", data },
+    },
+    rootOrder: ["mv"],
+    childOrder: { mv: [] },
+    activeNodeId: "mv",
+  };
+  const resaved = parseProjectFile(JSON.parse(serializeProjectFile(payload)));
+  if ("error" in resaved) throw new Error(resaved.error);
+  const reloaded = (resaved.project.nodes.mv as ProjectNode).data!;
+  deepStrictEqual(reloaded.variableTypes?.Sex, { type: "categorical", manual: true });
+  strictEqual(reloaded.variableTypes?.Age?.type, "continuous", "the auto entry round-trips too");
+  strictEqual(reloaded.variableTypes?.Age?.manual, false);
+  strictEqual(reloaded.variableTypes?.ID?.type, "categorical", "5 IDs are too few to read as a label");
+  // A hand-edited file holding a bogus type, an entry for the Title column
+  // or an entry for a column that is gone loses that entry on its own.
+  const tampered = JSON.parse(serializeProjectFile(payload)) as Record<string, unknown>;
+  const tamperedNodes = (tampered.project as Record<string, Record<string, { data: Record<string, unknown> }>>)
+    .nodes;
+  const tamperedData = tamperedNodes.mv.data;
+  tamperedData.variableTypes = {
+    Sex: { type: "categorical", manual: true },
+    Age: { type: "weird", manual: true },
+    Title: { type: "label", manual: true },
+    Gone: { type: "continuous", manual: false },
+  };
+  const reparsed = parseProjectFile(tampered);
+  if ("error" in reparsed) throw new Error(reparsed.error);
+  const fixed = (reparsed.project.nodes.mv as ProjectNode).data!;
+  deepStrictEqual(Object.keys(fixed.variableTypes ?? {}), ["Sex"], "only the valid entry survives");
+  // The reader itself is strict the same way, on its own.
+  deepStrictEqual(readVariableTypes({ Age: { type: "bogus" }, Sex: { type: "label" } }, ["Title", "Sex"]), {
+    Sex: { type: "label", manual: false },
+  });
+});
+
+check("seq 331: MCP set-variable-type sets a column's type by hand and sticks through later writes", async () => {
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-331-table", "create-table", {
+    table_type: "multiple",
+    columns: ["", "Sex", "Age"],
+    rows: [
+      ["1", "Female", "34"],
+      ["2", "Male", "41"],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  // Creating the table typed its columns on the way in.
+  const created = harness.state().nodes[tableId]!.data!;
+  strictEqual(variableTypesOf(created).Sex.type, "categorical");
+  strictEqual(variableTypesOf(created).Age.type, "continuous");
+  strictEqual(variableTypesOf(created).Age.manual, false);
+  await harness.run("job-331-set", "edit-table", {
+    table_id: tableId,
+    op: "set-variable-type",
+    column: 2,
+    variable_type: "label",
+  });
+  harness.sync();
+  deepStrictEqual(harness.state().nodes[tableId]!.data!.variableTypes?.Age, { type: "label", manual: true });
+  // Setting it again is a no-op success: no second undo step.
+  const pastLen = harness.state().past.length;
+  await harness.run("job-331-set-again", "edit-table", {
+    table_id: tableId,
+    op: "set-variable-type",
+    column: 2,
+    variable_type: "label",
+  });
+  harness.sync();
+  strictEqual(harness.state().past.length, pastLen);
+  // A later write re-detects the auto columns and leaves the manual one alone.
+  await harness.run("job-331-write", "write-table", {
+    table_id: tableId,
+    columns: ["", "Sex", "Age"],
+    rows: [
+      ["1", "Female", "34"],
+      ["2", "Male", "41"],
+      ["3", "Other", "29"],
+    ],
+  });
+  harness.sync();
+  strictEqual(harness.state().nodes[tableId]!.data!.variableTypes?.Age?.type, "label");
+  strictEqual(harness.state().nodes[tableId]!.data!.variableTypes?.Sex?.type, "categorical");
+  // Errors: a non-MV table, an unknown type, and a column that isn't there.
+  const col = await harness.run("job-331-col", "create-table", {
+    table_type: "column",
+    columns: ["", "A"],
+    rows: [["1", "1"]],
+  });
+  const colId = (col.result as { table_id: string }).table_id;
+  harness.sync();
+  await rejects(
+    harness.run("job-331-bad-table", "edit-table", {
+      table_id: colId,
+      op: "set-variable-type",
+      column: 1,
+      variable_type: "label",
+    }),
+    /only Multiple Variables tables/,
+  );
+  await rejects(
+    harness.run("job-331-bad-type", "edit-table", {
+      table_id: tableId,
+      op: "set-variable-type",
+      column: 1,
+      variable_type: "weird",
+    }),
+    /has no variable type/,
+  );
+  await rejects(
+    harness.run("job-331-bad-col", "edit-table", {
+      table_id: tableId,
+      op: "set-variable-type",
+      column: 9,
+      variable_type: "label",
+    }),
+    /has no column 9/,
+  );
 });
 
 // ── Run ──────────────────────────────────────────────────────────────────

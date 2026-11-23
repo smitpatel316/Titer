@@ -291,6 +291,15 @@ function widthsOf(widths: TableData["widths"], columns: string[]): TableData["wi
   return kept?.length ? Object.fromEntries(kept) : undefined;
 }
 
+/** The variable types of `columns` alone: a column gone takes its type with it. */
+function variableTypesOfColumns(
+  types: TableData["variableTypes"],
+  columns: string[],
+): TableData["variableTypes"] {
+  const kept = types && Object.entries(types).filter(([name]) => columns.includes(name));
+  return kept?.length ? Object.fromEntries(kept) : undefined;
+}
+
 /** Deletes `count` columns from column `at` (≥ 1); at least one data column remains. */
 export function deleteColumns(data: TableData, at: number, count: number): TableData {
   const n = Math.min(count, data.columns.length - 2);
@@ -303,6 +312,7 @@ export function deleteColumns(data: TableData, at: number, count: number): Table
     rows: data.rows.map((row) => row.filter(keep)),
     excluded: remapExcluded(data, (r, c) => (c < at ? [r, c] : c >= at + n ? [r, c - n] : null)),
     widths: widthsOf(data.widths, columns),
+    variableTypes: variableTypesOfColumns(data.variableTypes, columns),
     linkedPaste: data.linkedPaste ? linkedPasteAfterDelete(data.linkedPaste, "col", at, n) : undefined,
     // A deleted calculated variable goes with its column; a formula that
     // used a deleted source keeps its text and reads as an error until it
@@ -320,7 +330,7 @@ function renameKey<T>(map: Record<string, T> | undefined, from: string, to: stri
   return { ...rest, [to]: value };
 }
 
-/** Renames column `c`, carrying its width over — and, for a Multiple
+/** Renames column `c`, carrying its width and its variable type over — and, for a Multiple
  *  Variables table, carrying the rename through its calculated variables'
  *  formulas, so `=A + B` still reads `A` after `A` becomes `Dose`. */
 export function renameColumn(data: TableData, c: number, name: string): TableData {
@@ -330,6 +340,7 @@ export function renameColumn(data: TableData, c: number, name: string): TableDat
     ...data,
     columns: data.columns.map((n, i) => (i === c ? name : n)),
     widths: renameKey(data.widths, old, name),
+    variableTypes: renameKey(data.variableTypes, old, name),
   };
   return renameCalculatedReferences(next, old, name);
 }
