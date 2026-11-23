@@ -18,6 +18,11 @@ import {
   type PrintOrientation,
   type PrintSettings,
 } from "../lib/print-settings";
+import {
+  loadDecimalSeparator,
+  saveDecimalSeparator,
+  type DecimalSeparator,
+} from "../lib/decimal-format";
 import { isNative, mcpFeedbackConsent, mcpSetFeedbackConsent } from "../native";
 
 function Section({ id, title, children }: { id: PreferenceSection; title: string; children: React.ReactNode }) {
@@ -37,6 +42,7 @@ export function PreferencesDialog() {
   const [autosave, setAutosave] = React.useState(isAutosaveEnabled);
   const [theme, setThemeState] = React.useState<Theme>(loadTheme);
   const [print, setPrint] = React.useState<PrintSettings>(loadPrintSettings);
+  const [decimalSeparator, setDecimalSeparator] = React.useState<DecimalSeparator>(loadDecimalSeparator);
   const [feedbackSharing, setFeedbackSharing] = React.useState<boolean | null>(null);
   const [feedbackBusy, setFeedbackBusy] = React.useState(false);
 
@@ -48,6 +54,7 @@ export function PreferencesDialog() {
     setAutosave(isAutosaveEnabled());
     setThemeState(loadTheme());
     setPrint(loadPrintSettings());
+    setDecimalSeparator(loadDecimalSeparator());
     if (!isNative) return;
     let cancelled = false;
     void (async () => {
@@ -113,6 +120,26 @@ export function PreferencesDialog() {
             {autosave
               ? `Saves ${AUTOSAVE_DEBOUNCE_MS / 1000} seconds after you stop editing.`
               : "Off — remember to save (⌘S) or your changes are lost when the window closes."}
+          </p>
+        </Section>
+
+        <Section id="data-entry" title="Data Entry">
+          <Field label="Decimal separator">
+            <Segmented<DecimalSeparator>
+              value={decimalSeparator}
+              onChange={(v) => {
+                setDecimalSeparator(v);
+                saveDecimalSeparator(v);
+              }}
+              options={[
+                { value: ".", label: "Period (1.5)" },
+                { value: ",", label: "Comma (1,5)" },
+              ]}
+            />
+          </Field>
+          <p className="text-small text-secondary">
+            How numbers are entered, pasted, shown, copied and exported as text. Stored values always keep full
+            precision with a period.
           </p>
         </Section>
 

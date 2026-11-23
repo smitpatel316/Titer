@@ -6,6 +6,7 @@ import { hasXColumn, type TableData, type TableType } from "../../store/types";
 import type { TableMove } from "../../store/references";
 import type { MenuItems } from "../../native";
 import { isGrouped, isNested, leadOf } from "../../lib/dataset";
+import { decimalsSupported, setDecimalPlaces } from "../../lib/decimal-format";
 import {
   convertCommaDecimals,
   deleteColumns,
@@ -151,6 +152,40 @@ export function gridMenu({ data, type, zone, range, update, rename, renameGroup,
         text: "Rename Group",
         enabled: !tableFrozen,
         action: () => renameGroup(range.c0),
+      });
+    }
+  }
+
+  // Per-column decimal places (Prism 11, seq 333): Default (full precision)
+  // or 0–6 decimals, applied to every stored data column the selection
+  // covers. Display-only — the values keep full precision. Not offered on
+  // contingency or survival-Y tables.
+  if (decimalsSupported(type) && zone !== "row" && onCells && range.c1 >= 1) {
+    const first = Math.max(range.c0, 1);
+    const last = Math.min(range.c1, data.columns.length - 1);
+    if (first <= last) {
+      const current = data.decimals?.[data.columns[first]];
+      const setPlaces = (places: number | undefined) => {
+        let next = data;
+        for (let c = first; c <= last; c++) next = setDecimalPlaces(next, data.columns[c], places);
+        update(next, places === undefined ? "Decimal Places: Default" : `Decimal Places: ${places}`);
+      };
+      items.push(SEPARATOR, {
+        text: "Decimal Places",
+        items: [
+          {
+            text: "Default (full precision)",
+            checked: current === undefined,
+            enabled: !tableFrozen,
+            action: () => setPlaces(undefined),
+          },
+          ...[0, 1, 2, 3, 4, 5, 6].map((n) => ({
+            text: `${n} decimal${n === 1 ? "" : "s"}`,
+            checked: current === n,
+            enabled: !tableFrozen,
+            action: () => setPlaces(n),
+          })),
+        ],
       });
     }
   }

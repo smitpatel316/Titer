@@ -11,6 +11,12 @@ import { clamp, type TableData, type TableType } from "../../store/types";
 import type { TableMove } from "../../store/references";
 import type { EditCommand } from "../../app-menu";
 import { parseCell } from "../../lib/numeric";
+import {
+  DECIMAL_SEPARATOR_CHANGED_EVENT,
+  displayCellValue,
+  loadDecimalSeparator,
+  type DecimalSeparator,
+} from "../../lib/decimal-format";
 import { fileName } from "../../lib/paths";
 import { seriesKeyOf } from "../../lib/columns";
 import { isGrouped, isNested, leadOf } from "../../lib/dataset";
@@ -192,6 +198,14 @@ export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps)
   };
   const range = toRange(sel);
   const active = sel.anchor; // the cell typing goes to, as in Excel
+  // The decimal separator (Preferences ▸ Data Entry): entry, paste, copy
+  // and the cell display all read it; changing it re-renders at once.
+  const [separator, setSeparator] = React.useState<DecimalSeparator>(loadDecimalSeparator);
+  React.useEffect(() => {
+    const onSep = () => setSeparator(loadDecimalSeparator());
+    window.addEventListener(DECIMAL_SEPARATOR_CHANGED_EVENT, onSep);
+    return () => window.removeEventListener(DECIMAL_SEPARATOR_CHANGED_EVENT, onSep);
+  }, []);
 
   // Keep the selection inside the table when it shrinks (undo, delete, resize).
   const clampPoint = (p: Point): Point => ({
@@ -246,7 +260,7 @@ export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps)
   // ── Editing ──────────────────────────────────────────────────────────
 
   const write = (r: number, c: number, block: (string | null)[][], label: string) =>
-    update(writeBlock(data, r, c, block, type), label);
+    update(writeBlock(data, r, c, block, type, separator), label);
   const clear = (g: Range, label = "Clear") => update(fillRange(data, g, null), label);
 
   /** The range, cut at the stored data when it runs to the end of the shown rows or
@@ -423,7 +437,7 @@ export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps)
   const onCopy = (e: React.ClipboardEvent, cut = false) => {
     if (editing) return;
     e.preventDefault();
-    e.clipboardData.setData("text/plain", toTSV(data, range));
+    e.clipboardData.setData("text/plain", toTSV(data, range, separator));
     if (cut) clear(range, "Cut");
   };
 
@@ -834,7 +848,20 @@ export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps)
   );
 
   const cells = (from: number, to: number, origin: number) => (
-    <Cells data={data} excluded={excluded} query={query} xs={xs} r0={r0} r1={r1} c0={from} c1={to} origin={origin} />
+    <Cells
+      data={data}
+      excluded={excluded}
+      query={query}
+      xs={xs}
+      r0={r0}
+      r1={r1}
+      c0={from}
+      c1={to}
+      origin={origin}
+      decimals={data.decimals}
+      separator={separator}
+      active={active}
+    />
   );
 
   const cellEvents = {
@@ -1073,7 +1100,9 @@ export function Grid({ data, type, update, showGroups, tableFrozen }: GridProps)
 }
 
 /** The cells of rows r0–r1 and columns c0–c1, laid out from column `origin`'s left edge.
- *  Apart from the grid, so moving the selection or typing in a cell redraws none of them. */
+ *  Apart from the grid, so moving the selection or typing in a cell redraws none of them.
+ *  A column's decimal-places setting rounds what a cell shows — except the
+ *  focused cell, which shows the full stored digits (seq 333). */
 function Cells({
   data,
   excluded,
@@ -1084,6 +1113,9 @@ function Cells({
   c0,
   c1,
   origin,
+  decimals,
+  separator,
+  active,
 }: {
   data: TableData;
   excluded: Set<string>;
@@ -1094,12 +1126,21 @@ function Cells({
   c0: number;
   c1: number;
   origin: number;
+  decimals?: Record<string, number>;
+  separator: DecimalSeparator;
+  active: Point;
 }) {
   const found = query?.toLowerCase();
   const cells: React.ReactNode[] = [];
   for (let r = r0; r <= r1; r++) {
     for (let c = c0; c <= c1; c++) {
       const value = data.rows[r]?.[c];
+      const shown = displayCellValue(
+        value ?? null,
+        c >= 1 ? decimals?.[data.columns[c]] : undefined,
+        separator,
+        r === active.r && c === active.c,
+      );
       cells.push(
         <div
           key={`${r}:${c}`}
@@ -1111,7 +1152,7 @@ function Cells({
           )}
           style={{ left: xs[c] - xs[origin], top: r * ROW_H, width: xs[c + 1] - xs[c], height: ROW_H }}
         >
-          {value}
+          {shown}
         </div>,
       );
     }

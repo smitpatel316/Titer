@@ -800,6 +800,13 @@ export interface TableData {
   excluded?: string[];
   /** Column widths (px) the user set, keyed by column name; others fit their content. */
   widths?: Record<string, number>;
+  /** Per-column decimal places (Prism 11, seq 333): how many decimals the
+   *  grid shows for a column's numbers, keyed by column name. Display-only
+   *  — the stored values keep full precision, and the focused cell shows
+   *  them; analyses, graphs, export and copy always use the full values.
+   *  Omitted = full precision. Not offered on contingency or survival-Y
+   *  tables (see `decimalsSupported`). */
+  decimals?: Record<string, number>;
   /** Keep column 0 (the row titles) visible while scrolling right. */
   freezeTitle?: boolean;
   /** Provenance note (e.g. a simulated table's distribution + seed) — kept

@@ -47,6 +47,18 @@ import {
 import { highlightStyle, searchProject } from "../src/lib/project-search";
 import { galleryItems } from "../src/lib/gallery";
 import { loadPrintSettings, printPageCss, savePrintSettings } from "../src/lib/print-settings";
+import {
+  DECIMAL_SEPARATOR_KEY,
+  clampDecimalPlaces,
+  decimalsSupported,
+  displayCellValue,
+  formatDecimalCell,
+  loadDecimalSeparator,
+  normalizeDecimalInput,
+  saveDecimalSeparator,
+  setDecimalPlaces,
+  type DecimalSeparator,
+} from "../src/lib/decimal-format";
 import { formatMergeReport, mergeProjects, type MergeInput as ProjectMergeInput } from "../src/lib/project-merge";
 import { kaplanMeier } from "../src/lib/kaplan-meier";
 import {
@@ -132,6 +144,7 @@ import {
   setRowGroupCount,
   setRowGroupName,
   toggleExcluded,
+  toTSV,
   transposeBlock,
   writeBlock,
 } from "../src/views/tables/table-data";
@@ -326,7 +339,7 @@ import {
   parseXlsx,
   rowsToTable,
 } from "../src/lib/tabular-import";
-import { executeExportTableData, tableToCsv, tableToTxt, tableToXml, tableToXlsx } from "../src/store/mcp-export";
+import { executeExportTableData, tableTextRows, tableToCsv, tableToTxt, tableToXml, tableToXlsx } from "../src/store/mcp-export";
 import {
   exportTableData,
   serializeTableData,
@@ -5845,6 +5858,150 @@ check("seq 220: a number format survives a .hlx save/load round-trip; a broken o
   const reread = read(JSON.stringify(broken)).project.nodes.g1!.graphOptions;
   strictEqual(reread!.yNumberFormat, undefined);
   deepStrictEqual(reread!.xNumberFormat, { format: "decimal", decimals: 1 });
+});
+
+// seq 333: per-column decimal places (display format, Prism 11). On the
+// pre-fix code nothing here exists (no `decimals` on TableData, no
+// decimal-format helpers, no separator preference), so this check fails
+// there. Display-only: the grid rounds what it shows, the stored values
+// keep full precision, and the focused cell shows them.
+check("seq 333: decimal places round the grid display, keep full precision everywhere else", async () => {
+  // The formatter: rounds to the column's places, swaps in the separator;
+  // text and blanks pass through untouched.
+  strictEqual(formatDecimalCell("1.23456", 2, "."), "1.23");
+  strictEqual(formatDecimalCell("1.23556", 2, "."), "1.24");
+  strictEqual(formatDecimalCell("1.23456", 0, "."), "1");
+  strictEqual(formatDecimalCell("2.4", 0, "."), "2");
+  strictEqual(formatDecimalCell("1e3", 2, "."), "1000.00");
+  strictEqual(formatDecimalCell("-0.001", 2, "."), "-0.00");
+  strictEqual(formatDecimalCell("1.23456", undefined, "."), "1.23456"); // no setting: full digits
+  strictEqual(formatDecimalCell("1.23456", 2, ","), "1,23");
+  strictEqual(formatDecimalCell("1.23456", undefined, ","), "1,23456");
+  strictEqual(formatDecimalCell("hello", 2, "."), "hello");
+  strictEqual(formatDecimalCell("1.234.56", 2, "."), "1.234.56");
+  strictEqual(formatDecimalCell(null, 2, "."), "");
+  strictEqual(clampDecimalPlaces(99), 15);
+  strictEqual(clampDecimalPlaces(-3), 0);
+  strictEqual(clampDecimalPlaces(2.5), 2);
+  strictEqual(clampDecimalPlaces(NaN), 0);
+  // The focused cell shows the full stored digits, whatever the setting.
+  strictEqual(displayCellValue("1.23456", 2, ".", false), "1.23");
+  strictEqual(displayCellValue("1.23456", 2, ".", true), "1.23456");
+  strictEqual(displayCellValue("1.23456", 2, ",", true), "1.23456");
+
+  const t: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "1.23456", "2.5"],
+      ["r2", "3.14159", "4"],
+    ],
+  };
+  // The setting lives on the column, keyed by name; setting it never mutates.
+  const two = setDecimalPlaces(t, "A", 2);
+  deepStrictEqual(two.decimals, { A: 2 });
+  strictEqual(t.decimals, undefined);
+  deepStrictEqual(setDecimalPlaces(two, "A", undefined).decimals, undefined);
+  deepStrictEqual(setDecimalPlaces(t, "A", 99).decimals, { A: 15 });
+  deepStrictEqual(setDecimalPlaces(t, "A", -3).decimals, { A: 0 });
+  // Not offered on contingency or survival-Y tables.
+  strictEqual(decimalsSupported("column"), true);
+  strictEqual(decimalsSupported("xy"), true);
+  strictEqual(decimalsSupported("grouped"), true);
+  strictEqual(decimalsSupported("multiple"), true);
+  strictEqual(decimalsSupported("contingency"), false);
+  strictEqual(decimalsSupported("survival"), false);
+  // Entry parsing: with a comma separator, "1,5" typed or pasted stores as
+  // 1.5; with a period separator it stores as typed (the menu's conversion
+  // offers to fix it, as before). Text with a comma is never touched.
+  strictEqual(normalizeDecimalInput("1,5", ","), "1.5");
+  strictEqual(normalizeDecimalInput("-2,75", ","), "-2.75");
+  strictEqual(normalizeDecimalInput("1,5e3", ","), "1.5e3");
+  strictEqual(normalizeDecimalInput("1,5", "."), "1,5");
+  strictEqual(normalizeDecimalInput("hello, world", ","), "hello, world");
+  strictEqual(writeBlock(t, 0, 1, [["1,5"]], "column", ",").rows[0]?.[1], "1.5");
+  strictEqual(writeBlock(t, 0, 1, [["1,5"]], "column", ".").rows[0]?.[1], "1,5");
+  strictEqual(writeBlock(t, 0, 1, [["1,5"]], "column").rows[0]?.[1], "1,5"); // default: period
+  // Copy and export carry full precision — the setting never rounds a value
+  // — and render the separator.
+  const withDec = setDecimalPlaces(t, "A", 2);
+  strictEqual(toTSV(withDec, { r0: 0, r1: 1, c0: 0, c1: 2 }), "r1\t1.23456\t2.5\nr2\t3.14159\t4");
+  strictEqual(toTSV(withDec, { r0: 0, r1: 1, c0: 0, c1: 2 }, ","), "r1\t1,23456\t2,5\nr2\t3,14159\t4");
+  strictEqual(tableToCsv(withDec), "Title,A,B\nr1,1.23456,2.5\nr2,3.14159,4");
+  strictEqual(tableToCsv(withDec, ","), "Title,A,B\nr1,\"1,23456\",\"2,5\"\nr2,\"3,14159\",4");
+  strictEqual(tableToTxt(withDec, ","), "Title\tA\tB\nr1\t1,23456\t2,5\nr2\t3,14159\t4");
+  deepStrictEqual(tableTextRows(withDec, ","), [
+    ["r1", "1,23456", "2,5"],
+    ["r2", "3,14159", "4"],
+  ]);
+  const xml = new TextDecoder().decode(tableToXml(withDec, "Doses", "column"));
+  ok(xml.includes("1.23456"), "Prism XML must keep the stored value");
+  ok(!xml.includes("1,23456"), "Prism XML is a machine format — it keeps the period");
+  // The setting follows its column through a rename, and goes with a deleted one.
+  deepStrictEqual(renameColumn(withDec, 1, "Dose").decimals, { Dose: 2 });
+  deepStrictEqual(deleteColumns(withDec, 2, 1).decimals, { A: 2 });
+  strictEqual(deleteColumns(withDec, 1, 1).decimals, undefined);
+  // The setting survives a .hlx save/load round-trip; a broken one reads as none.
+  const decTable: ProjectNode = {
+    id: "t9",
+    type: "table",
+    name: "Dec",
+    parentId: null,
+    tableType: "column",
+    data: withDec,
+  };
+  const decPayload: ProjectFilePayload = {
+    nodes: { t9: decTable },
+    rootOrder: ["t9"],
+    childOrder: {},
+    activeNodeId: "t9",
+  };
+  const back = read(serializeProjectFile(decPayload));
+  deepStrictEqual((back.project.nodes.t9 as ProjectNode).data?.decimals, { A: 2 });
+  strictEqual(back.updated, false);
+  const broken = JSON.parse(serializeProjectFile(decPayload)) as { project: ProjectFilePayload };
+  (broken.project.nodes.t9 as ProjectNode).data!.decimals = { A: 2, B: 99, Nope: 1, Title: 1 };
+  deepStrictEqual(
+    (read(JSON.stringify(broken)).project.nodes.t9 as ProjectNode).data?.decimals,
+    { A: 2 },
+  );
+  // The separator preference: period by default, comma when saved, period
+  // again for anything unusable — never throws without localStorage.
+  strictEqual(loadDecimalSeparator(), ".");
+  const store = new Map<string, string>();
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+  };
+  try {
+    saveDecimalSeparator(",");
+    strictEqual(loadDecimalSeparator(), ",");
+    store.set(DECIMAL_SEPARATOR_KEY, "semicolon");
+    strictEqual(loadDecimalSeparator(), ".");
+    store.set(DECIMAL_SEPARATOR_KEY, "");
+    strictEqual(loadDecimalSeparator(), ".");
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+  // The UI wiring: the grid formats its cells (focused cell full digits),
+  // the menu offers the control off contingency/survival tables, and
+  // Preferences holds the separator.
+  const gridSrc = readFileSync("src/views/tables/grid.tsx", "utf8");
+  ok(/decimals=\{data\.decimals\}/.test(gridSrc), "grid doesn't pass the decimal settings to its cells");
+  ok(/active=\{active\}/.test(gridSrc), "grid doesn't tell its cells which one is focused");
+  ok(/displayCellValue\(/.test(gridSrc), "grid doesn't format cells by decimal places");
+  const menuSrc = readFileSync("src/views/tables/grid-menu.ts", "utf8");
+  ok(
+    /Decimal Places/.test(menuSrc) && /decimalsSupported\(type\)/.test(menuSrc),
+    "grid menu offers no decimal-places control, or offers it on contingency/survival tables",
+  );
+  const prefsSrc = readFileSync("src/components/preferences-dialog.tsx", "utf8");
+  ok(
+    /Decimal separator/.test(prefsSrc) && /decimalSeparator/.test(prefsSrc),
+    "Preferences has no decimal-separator control",
+  );
+  // The type itself: a separator is only ever "." or ",".
+  const sep: DecimalSeparator = ",";
+  strictEqual(sep, ",");
 });
 
 check("seq 220: MCP update-graph accepts a number format and rejects a bad one", () => {

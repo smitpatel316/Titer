@@ -743,6 +743,13 @@ function buildTableData(
     const widths = Object.fromEntries(Object.entries(base.widths).filter(([name]) => columns.includes(name)));
     if (Object.keys(widths).length) data.widths = widths;
   }
+  // A replace keeps the decimal-places settings too (seq 333): they are
+  // display-only, so a table rewrite must not silently drop them. There is
+  // no edit-table op to set them yet — that is a follow-up for the PM.
+  if (base.decimals) {
+    const decimals = Object.fromEntries(Object.entries(base.decimals).filter(([name]) => columns.includes(name)));
+    if (Object.keys(decimals).length) data.decimals = decimals;
+  }
   if (base.errorFormat) data.errorFormat = base.errorFormat;
   if (base.freezeTitle) data.freezeTitle = true;
   if (base.notes) data.notes = base.notes;

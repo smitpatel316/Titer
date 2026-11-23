@@ -710,6 +710,7 @@ export function removeCalculatedVariable(data: TableData, name: string): TableDa
     calculated: (data.calculated ?? []).filter((v) => v.name !== name),
     excluded: remapExcludedAfterDelete(data, c),
     widths: widthsWithout(data.widths, name),
+    decimals: decimalsWithout(data.decimals, name),
   };
 }
 
@@ -726,6 +727,12 @@ function remapExcludedAfterDelete(data: TableData, c: number): string[] | undefi
 function widthsWithout(widths: TableData["widths"], name: string): TableData["widths"] {
   if (!widths || widths[name] === undefined) return widths;
   const { [name]: _, ...rest } = widths;
+  return Object.keys(rest).length ? rest : undefined;
+}
+
+function decimalsWithout(decimals: TableData["decimals"], name: string): TableData["decimals"] {
+  if (!decimals || decimals[name] === undefined) return decimals;
+  const { [name]: _, ...rest } = decimals;
   return Object.keys(rest).length ? rest : undefined;
 }
 

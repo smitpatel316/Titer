@@ -244,7 +244,7 @@ const NODE_KEYS = Object.keys({
 // prettier-ignore
 const DATA_KEYS = Object.keys({
   columns: 1, rows: 1, groups: 1, replicates: 1, subgroups: 1, rowGroups: 1, excluded: 1,
-  widths: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1, linkedPaste: 1, simulation: 1,
+  widths: 1, decimals: 1, freezeTitle: 1, notes: 1, summaryFormat: 1, errorFormat: 1, calculated: 1, linkedPaste: 1, simulation: 1,
 } satisfies Record<keyof TableData, 1>);
 
 // Graph options without a default, by the kind of value they hold.
@@ -715,6 +715,22 @@ function readData(
         Object.entries(d.widths).filter(([name, w]) => columns.includes(name) && isFiniteNumber(w) && w > 0),
       )
     : {};
+  // A decimal-places setting survives only as an integer 0–15 on a data
+  // column (column 0 holds the row titles): a hand-edited file holding
+  // anything else reads as no setting for that column.
+  const decimals = isObj(d.decimals)
+    ? Object.fromEntries(
+        Object.entries(d.decimals).filter(
+          ([name, v]) =>
+            columns.includes(name) &&
+            columns.indexOf(name) >= 1 &&
+            typeof v === "number" &&
+            Number.isInteger(v) &&
+            v >= 0 &&
+            v <= 15,
+        ),
+      )
+    : {};
   const rowGroups = readRowGroups(d.rowGroups);
   // Calculated variables survive only as entries naming a column with a
   // non-empty formula; a stored error is dropped — the values are recomputed
@@ -738,6 +754,7 @@ function readData(
     rowGroups: rowGroups.groups,
     excluded: excluded.length ? excluded : undefined,
     widths: Object.keys(widths).length ? (widths as Record<string, number>) : undefined,
+    decimals: Object.keys(decimals).length ? (decimals as Record<string, number>) : undefined,
     freezeTitle: d.freezeTitle === true || undefined,
     // Only "sd" or "sem" survives: a hand-edited file holding anything else
     // reads as SEM, the default, instead of carrying a bogus format.
@@ -1583,6 +1600,19 @@ function readFrozenData(raw: unknown): TableData | undefined {
         Object.entries(d.widths).filter(([name, w]) => columns.includes(name) && isFiniteNumber(w) && w > 0),
       )
     : {};
+  const decimals = isObj(d.decimals)
+    ? Object.fromEntries(
+        Object.entries(d.decimals).filter(
+          ([name, v]) =>
+            columns.includes(name) &&
+            columns.indexOf(name) >= 1 &&
+            typeof v === "number" &&
+            Number.isInteger(v) &&
+            v >= 0 &&
+            v <= 15,
+        ),
+      )
+    : {};
   return defined({
     columns,
     rows,
@@ -1591,6 +1621,7 @@ function readFrozenData(raw: unknown): TableData | undefined {
     subgroups: isCount(d.subgroups) ? (d.subgroups as number) : undefined,
     excluded: Array.isArray(d.excluded) ? d.excluded.filter(onCell) : undefined,
     widths: Object.keys(widths).length ? widths : undefined,
+    decimals: Object.keys(decimals).length ? decimals : undefined,
     freezeTitle: d.freezeTitle === true || undefined,
     errorFormat: oneOf(["sd", "sem"] as const, d.errorFormat),
     summaryFormat: isSummaryFormatValue(d.summaryFormat) ? d.summaryFormat : undefined,

@@ -39,7 +39,7 @@ export type { ProjectNode } from "./types";
 
 /** What the universal selector is currently choosing. */
 /** The Preferences dialog's sections (seq 225). */
-export type PreferenceSection = "general" | "appearance" | "ai" | "feedback" | "print";
+export type PreferenceSection = "general" | "data-entry" | "appearance" | "ai" | "feedback" | "print";
 
 type Selector =
   | { kind: "new-table" }

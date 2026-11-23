@@ -6,6 +6,7 @@
 // menu is byte-identical to one written by the tool: excluded cells empty,
 // cell values kept as stored strings (an ID like "0123" never becomes 123).
 import { alert, pickSavePath, writeFile } from "../../native";
+import { loadDecimalSeparator } from "../../lib/decimal-format";
 import {
   sanitizeFileStem,
   tableToCsv,
@@ -60,9 +61,9 @@ export async function serializeTableData(
   format: TableDataFormat,
   tableType: ProjectNode["tableType"] = "column",
 ): Promise<string | Uint8Array> {
-  if (format === "csv") return tableToCsv(data);
-  if (format === "txt") return tableToTxt(data);
-  if (format === "xlsx") return tableToXlsx(data, name);
+  if (format === "csv") return tableToCsv(data, loadDecimalSeparator());
+  if (format === "txt") return tableToTxt(data, loadDecimalSeparator());
+  if (format === "xlsx") return tableToXlsx(data, name, loadDecimalSeparator());
   if (format === "xml") return tableToXml(data, name, tableType);
   throw new Error(`has no table format “${String(format)}” — the formats are csv, xlsx, txt, xml.`);
 }
