@@ -3246,7 +3246,8 @@
           "y-plus-x",
           "y-times-x",
           "x-minus-y",
-          "user-defined"
+          "user-defined",
+          "hill-plot"
         ],
         "default": "log10",
         "required": false
@@ -3307,7 +3308,8 @@
           "y-minus-x",
           "y-plus-x",
           "y-times-x",
-          "x-minus-y"
+          "x-minus-y",
+          "hill-plot"
         ],
         "required": false,
         "description": "The function applied to the X values (XY tables); omitted: X passes through unchanged (seq 341)."
@@ -3336,6 +3338,18 @@
         "type": "string",
         "required": false,
         "description": "The user-defined transform (function \"user-defined\", seq 341): lines separated by `;` or newlines, each optionally starting with a designator `<Name>` (only that data set) or `<~Name>` (all data sets except it), then an expression with an optional `Y =` prefix."
+      },
+      {
+        "name": "ymax",
+        "type": "number",
+        "required": false,
+        "description": "The maximum response Ymax for the Hill plot (function \"hill-plot\", seq 383): Y becomes log10(Y/(Ymax−Y)). Required — the run errors without it — and it must be greater than 0."
+      },
+      {
+        "name": "xIsLog",
+        "type": "boolean",
+        "required": false,
+        "description": "Whether the X values were entered as log(concentration) (function \"hill-plot\", seq 383): true leaves X unchanged; omitted or false means concentrations, so X becomes log10(X)."
       },
       {
         "name": "sets",

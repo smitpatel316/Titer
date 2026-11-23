@@ -230,8 +230,10 @@ export const CORRELATION_METHODS = ["pearson", "spearman"] as const;
  *  Y+Random, rounding, Y^K, 10^Y, 2^Y, −log10, the X/Y cross-column functions
  *  and user-defined transforms. The arithmetic functions read the constant
  *  from TransformDataParams.constant (or per-data-set from `constants`).
- *  The six pharmacology transforms (Eadie-Hofstee, Hanes-Woolf, Hill,
- *  Lineweaver-Burk, Log-log, Scatchard) are NOT here — a separate follow-up. */
+ *  The Hill plot landed in seq 383 (Y becomes log10(Y/(Ymax−Y)), X becomes
+ *  log10(X) unless entered as log(concentration)); the other five
+ *  pharmacology transforms (Eadie-Hofstee, Hanes-Woolf, Lineweaver-Burk,
+ *  Log-log, Scatchard) are separate follow-ups. */
 export const TRANSFORM_FUNCTIONS = [
   "log10",
   "ln",
@@ -268,6 +270,7 @@ export const TRANSFORM_FUNCTIONS = [
   "y-times-x",
   "x-minus-y",
   "user-defined",
+  "hill-plot",
 ] as const;
 export type TransformFunction = (typeof TRANSFORM_FUNCTIONS)[number];
 /** The arithmetic Transform functions — the ones that need a constant K
@@ -1474,6 +1477,14 @@ export interface TransformDataParams {
   errorMode?: TransformErrorMode;
   /** The user-defined transform (function "user-defined", seq 341): lines separated by `;` or newlines, each optionally starting with a designator `<Name>` (only that data set) or `<~Name>` (all data sets except it), then an expression with an optional `Y =` prefix. */
   formula?: string;
+  /** The maximum response Ymax for the Hill plot (function "hill-plot",
+   *  seq 383): Y becomes log10(Y/(Ymax−Y)). Required — the run errors
+   *  without it — and it must be greater than 0. */
+  ymax?: number;
+  /** Whether the X values were entered as log(concentration) (function
+   *  "hill-plot", seq 383): true leaves X unchanged; omitted or false
+   *  means concentrations, so X becomes log10(X). */
+  xIsLog?: boolean;
 }
 /** Molar concentration units (Prism's set), in descending magnitude: each
  *  step is a factor of 1000. µ is U+00B5 MICRO SIGN, matching the bUnits in

@@ -12,8 +12,8 @@
 // Y+Random, rounding, Y^K, 10^Y, 2^Y, −log10, the X/Y cross-column functions,
 // X transforms + interchange, per-data-set K, error-bar handling on
 // mean±SD/SEM tables, and user-defined transforms through the calcvars
-// evaluator. The six pharmacology transforms are a separate follow-up, not
-// here. Pure TypeScript, no R for the values themselves; the transformed
+// evaluator — plus the Hill plot (seq 383), the first of Prism's six
+// pharmacology transforms. The other five are separate follow-ups. Pure TypeScript, no R for the values themselves; the transformed
 // groups' descriptives come from `describe` (R), like every other analysis.
 // The one exception is the to-CI error mode, whose t critical values come
 // from the pure-TS `tCrit95` (src/lib/student-t.ts).
@@ -93,6 +93,7 @@ export const TRANSFORM_LABEL: Record<TransformFunction, string> = {
   "y-times-x": "Y×X",
   "x-minus-y": "X−Y",
   "user-defined": "user-defined",
+  "hill-plot": "Hill plot",
 };
 
 /** Why a value of this function is left blank, for the notes. */
@@ -132,6 +133,7 @@ const EXCLUDED_REASON: Record<TransformFunction, string> = {
   "y-times-x": "the paired X value is missing",
   "x-minus-y": "the paired X value is missing",
   "user-defined": "the formula left it blank (dividing by zero, or a value outside a function's domain)",
+  "hill-plot": "the Hill plot is undefined for Y ≤ 0 or Y ≥ Ymax",
 };
 
 /** Φ⁻¹(p) — Peter Acklam's rational approximation (relative error < 1.2e-9),
@@ -220,13 +222,13 @@ export function zscoreValues(byRow: (number | null)[]): (number | null)[] {
 /** One value transformed, or null when the function is undefined for it
  *  (or the input is not finite). Null is a blank in the results, never NaN.
  *  `constant` is the K of the K-needing functions — required for those.
- *  `other` is the paired value from the other column (cross-column
- *  functions); `role` says whether `value` is the Y or the X of the pair —
- *  the cross-column formulas are always in absolute (Y, X) terms. `random`
- *  is the run's standard-normal draw (Y+Random); without one there is
- *  nothing to add. Rank, zscore and user-defined are column/formula
- *  functions, not single-value ones — they blank here (the runner handles
- *  them at the column level). */
+ *  `ymax` is the Ymax of the Hill plot — required for it. `other` is the
+ *  paired value from the other column (cross-column functions); `role` says
+ *  whether `value` is the Y or the X of the pair — the cross-column formulas
+ *  are always in absolute (Y, X) terms. `random` is the run's standard-normal
+ *  draw (Y+Random); without one there is nothing to add. Rank, zscore and
+ *  user-defined are column/formula functions, not single-value ones — they
+ *  blank here (the runner handles them at the column level). */
 export function transformValue(
   fn: TransformFunction,
   value: number,
@@ -234,11 +236,15 @@ export function transformValue(
   other?: number | null,
   role: "y" | "x" = "y",
   random?: () => number,
+  ymax?: number,
 ): number | null {
   if (!Number.isFinite(value)) return null;
   // A K-needing function without its constant has nothing to apply — blank,
   // never NaN. The runner refuses such a run outright; this is the backstop.
   if (isKTransform(fn) && !Number.isFinite(constant)) return null;
+  // The Hill plot without its Ymax has nothing to divide by — blank, never
+  // NaN. The runner refuses such a run outright; this is the backstop.
+  if (fn === "hill-plot" && (!Number.isFinite(ymax) || ymax! <= 0)) return null;
   // A cross-column function without its paired value has nothing to pair.
   if (isCrossTransform(fn)) {
     const y = role === "y" ? value : other;
@@ -364,6 +370,12 @@ export function transformValue(
       break;
     case "x-minus-y":
       out = x! - y!;
+      break;
+    case "hill-plot":
+      // log10(Y/(Ymax−Y)): undefined for Y ≤ 0 (the ratio is not positive)
+      // and for Y ≥ Ymax (the denominator is not positive).
+      if (value <= 0 || value >= ymax!) return null;
+      out = Math.log10(value / (ymax! - value));
       break;
     case "rank":
     case "zscore":
@@ -592,6 +604,15 @@ export async function runTransformData(
     return { error: `Unknown transform function for X: “${xFn}”.` };
   if (xFn === "user-defined")
     return { error: "A user-defined transform applies to the Y values — choose a built-in function for the X values." };
+  // Hill plot (seq 383): X becomes log10(X) unless the data were entered
+  // as log(concentration) — the X transform rides the existing xFunction
+  // machinery, so the notes and the X entry read exactly as if the caller
+  // had asked for log10 on X. An explicit xFunction wins over the derived
+  // one. The X column is NOT required for a Hill plot: without one, only
+  // the Y values transform (needsX below still uses the caller's xFunction).
+  const hillXFn: TransformFunction | undefined =
+    fn === "hill-plot" && xFn === undefined && params?.xIsLog !== true ? "log10" : undefined;
+  const effXFn = xFn ?? hillXFn;
   const errorMode: TransformErrorMode = params?.errorMode ?? "mean-only";
   if (!["mean-only", "erase", "to-ci"].includes(errorMode))
     return { error: `Unknown error handling: “${errorMode}”.` };
@@ -690,6 +711,13 @@ export async function runTransformData(
     const err = kError(xFn, resolveK(xCol), xCol);
     if (err) return { error: err };
   }
+  // Hill plot (seq 383): Ymax is required, like K for the K-needing
+  // functions — and it must be positive, or every Y would be blank.
+  if (fn === "hill-plot") {
+    const ymax = params?.ymax;
+    if (!Number.isFinite(ymax)) return { error: "“Hill plot” needs a Ymax — enter one and try again." };
+    if (ymax! <= 0) return { error: "“Hill plot” needs a Ymax greater than 0." };
+  }
 
   // One seeded generator per run (Y+Random): the same run twice draws the
   // same noise, in entry order.
@@ -750,15 +778,15 @@ export async function runTransformData(
       return { one: () => null, whole: fn === "rank" ? rankValues : zscoreValues };
     }
     const k = isKTransform(fn) ? resolveK(column) : undefined;
-    return { one: (value, _row, paired) => transformValue(fn, value, k, paired, "y", rng) };
+    return { one: (value, _row, paired) => transformValue(fn, value, k, paired, "y", rng, params?.ymax) };
   };
   /** How one column's values are transformed by the X function. */
   const xTransform = (column: Column): ValueTransform => {
-    if (isColumnTransform(xFn!)) {
-      return { one: () => null, whole: xFn === "rank" ? rankValues : zscoreValues };
+    if (isColumnTransform(effXFn!)) {
+      return { one: () => null, whole: effXFn === "rank" ? rankValues : zscoreValues };
     }
-    const k = isKTransform(xFn!) ? resolveK(column) : undefined;
-    return { one: (value, _row, paired) => transformValue(xFn!, value, k, paired, "x", rng) };
+    const k = isKTransform(effXFn!) ? resolveK(column) : undefined;
+    return { one: (value, _row, paired) => transformValue(effXFn!, value, k, paired, "x", rng, params?.ymax) };
   };
 
   /** One results entry from a column and its transform (null: pass through). */
@@ -849,9 +877,13 @@ export async function runTransformData(
       );
       noteK(column, fn);
     }
-    if (xFn !== undefined && xCol && xCol.values.length > 0) {
-      entries.push(buildEntry(xCol, TRANSFORM_LABEL[xFn], xTransform(xCol), "data", EXCLUDED_REASON[xFn], yCols[0]));
-      noteK(xCol, xFn);
+    if (effXFn !== undefined && xCol && xCol.values.length > 0) {
+      entries.push(buildEntry(xCol, TRANSFORM_LABEL[effXFn], xTransform(xCol), "data", EXCLUDED_REASON[effXFn], yCols[0]));
+      noteK(xCol, effXFn);
+    } else if (fn === "hill-plot" && params?.xIsLog === true && xCol && xCol.values.length > 0) {
+      // Entered as log(concentration): X passes through unchanged, so the
+      // results still carry the X column to plot against.
+      entries.push(buildEntry(xCol, "unchanged", null, "passthrough", ""));
     }
   } else if (interchange) {
     // Interchange: the old X column takes the Y function (paired with the
@@ -866,11 +898,11 @@ export async function runTransformData(
       noteK(xCol, fn);
     }
     for (const column of yCols) {
-      if (xFn === undefined) {
+      if (effXFn === undefined) {
         entries.push(buildEntry(column, "unchanged", null, "passthrough", ""));
       } else {
-        entries.push(buildEntry(column, TRANSFORM_LABEL[xFn], xTransform(column), "data", EXCLUDED_REASON[xFn], xCol));
-        noteK(column, xFn);
+        entries.push(buildEntry(column, TRANSFORM_LABEL[effXFn], xTransform(column), "data", EXCLUDED_REASON[effXFn], xCol));
+        noteK(column, effXFn);
       }
     }
   } else {
@@ -883,9 +915,13 @@ export async function runTransformData(
       );
       noteK(column, fn);
     }
-    if (xFn !== undefined && xCol && xCol.values.length > 0) {
-      entries.push(buildEntry(xCol, TRANSFORM_LABEL[xFn], xTransform(xCol), "data", EXCLUDED_REASON[xFn], yCols[0]));
-      noteK(xCol, xFn);
+    if (effXFn !== undefined && xCol && xCol.values.length > 0) {
+      entries.push(buildEntry(xCol, TRANSFORM_LABEL[effXFn], xTransform(xCol), "data", EXCLUDED_REASON[effXFn], yCols[0]));
+      noteK(xCol, effXFn);
+    } else if (fn === "hill-plot" && params?.xIsLog === true && xCol && xCol.values.length > 0) {
+      // Entered as log(concentration): X passes through unchanged, so the
+      // results still carry the X column to plot against.
+      entries.push(buildEntry(xCol, "unchanged", null, "passthrough", ""));
     }
   }
 
@@ -928,11 +964,14 @@ export async function runTransformData(
   const notes = [
     "The source table is unchanged — these are the transformed values as a results sheet.",
     kNote,
-    xFn !== undefined ? `X values transformed with ${TRANSFORM_LABEL[xFn]}.` : "",
+    effXFn !== undefined ? `X values transformed with ${TRANSFORM_LABEL[effXFn]}.` : "",
+    fn === "hill-plot" && params?.xIsLog === true && xCol
+      ? "X values were entered as log(concentration), so they were left unchanged."
+      : "",
     interchange
       ? "X and Y interchanged before transforming: the Y function applies to the values that were in X, and the X function to the values that were in Y."
       : "",
-    xFn !== undefined && isCrossTransform(xFn) && yCols[0]
+    effXFn !== undefined && isCrossTransform(effXFn) && yCols[0]
       ? `The X function pairs each X value with the first Y column (“${yCols[0].name}”).`
       : "",
     fn === "y-plus-random" ? "Y+Random adds Gaussian noise (mean 0, SD = K) from a fixed seed, so repeating the run gives the same values." : "",
