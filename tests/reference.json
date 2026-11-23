@@ -44724,12 +44724,20 @@
     "p": true
    },
    {
-    "label": "Treatment partial eta squared",
-    "value": 0.9857433809
+    "label": "Treatment % of total variation",
+    "value": 50.38051398
    },
    {
     "label": "Treatment eta squared",
     "value": 0.5038051398
+   },
+   {
+    "label": "Treatment partial eta squared",
+    "value": 0.9857433809
+   },
+   {
+    "label": "Treatment Cohen's f",
+    "value": 8.315218406
    },
    {
     "label": "Time F",
@@ -44745,12 +44753,20 @@
     "p": true
    },
    {
-    "label": "Time partial eta squared",
-    "value": 0.9857433809
+    "label": "Time % of total variation",
+    "value": 50.38051398
    },
    {
     "label": "Time eta squared",
     "value": 0.5038051398
+   },
+   {
+    "label": "Time partial eta squared",
+    "value": 0.9857433809
+   },
+   {
+    "label": "Time Cohen's f",
+    "value": 8.315218406
    },
    {
     "label": "Genotype F",
@@ -44766,12 +44782,20 @@
     "p": true
    },
    {
-    "label": "Genotype partial eta squared",
-    "value": 0.9442532691
+    "label": "Genotype % of total variation",
+    "value": 12.34196654
    },
    {
     "label": "Genotype eta squared",
     "value": 0.1234196654
+   },
+   {
+    "label": "Genotype partial eta squared",
+    "value": 0.9442532691
+   },
+   {
+    "label": "Genotype Cohen's f",
+    "value": 4.115613151
    },
    {
     "label": "Treatment:Time F",
@@ -44787,12 +44811,20 @@
     "p": true
    },
    {
-    "label": "Treatment:Time partial eta squared",
-    "value": 0.8557618926
+    "label": "Treatment:Time % of total variation",
+    "value": 4.323029513
    },
    {
     "label": "Treatment:Time eta squared",
     "value": 0.04323029513
+   },
+   {
+    "label": "Treatment:Time partial eta squared",
+    "value": 0.8557618926
+   },
+   {
+    "label": "Treatment:Time Cohen's f",
+    "value": 2.435771048
    },
    {
     "label": "Treatment:Genotype F",
@@ -44808,12 +44840,20 @@
     "p": true
    },
    {
-    "label": "Treatment:Genotype partial eta squared",
-    "value": 0.00700525394
+    "label": "Treatment:Genotype % of total variation",
+    "value": 0.005140344249
    },
    {
     "label": "Treatment:Genotype eta squared",
     "value": 0.00005140344249
+   },
+   {
+    "label": "Treatment:Genotype partial eta squared",
+    "value": 0.00700525394
+   },
+   {
+    "label": "Treatment:Genotype Cohen's f",
+    "value": 0.08399210511
    },
    {
     "label": "Time:Genotype F",
@@ -44829,12 +44869,20 @@
     "p": true
    },
    {
-    "label": "Time:Genotype partial eta squared",
-    "value": 0.718050721
+    "label": "Time:Genotype % of total variation",
+    "value": 1.855664274
    },
    {
     "label": "Time:Genotype eta squared",
     "value": 0.01855664274
+   },
+   {
+    "label": "Time:Genotype partial eta squared",
+    "value": 0.718050721
+   },
+   {
+    "label": "Time:Genotype Cohen's f",
+    "value": 1.595849997
    },
    {
     "label": "Treatment:Time:Genotype F",
@@ -44850,12 +44898,20 @@
     "p": true
    },
    {
-    "label": "Treatment:Time:Genotype partial eta squared",
-    "value": 0.3636363636
+    "label": "Treatment:Time:Genotype % of total variation",
+    "value": 0.4163678842
    },
    {
     "label": "Treatment:Time:Genotype eta squared",
     "value": 0.004163678842
+   },
+   {
+    "label": "Treatment:Time:Genotype partial eta squared",
+    "value": 0.3636363636
+   },
+   {
+    "label": "Treatment:Time:Genotype Cohen's f",
+    "value": 0.755928946
    },
    {
     "label": "DFd (residual)",
@@ -44960,12 +45016,20 @@
     "p": true
    },
    {
-    "label": "Treatment partial eta squared",
-    "value": 0.9857433809
+    "label": "Treatment % of total variation",
+    "value": 50.38051398
    },
    {
     "label": "Treatment eta squared",
     "value": 0.5038051398
+   },
+   {
+    "label": "Treatment partial eta squared",
+    "value": 0.9857433809
+   },
+   {
+    "label": "Treatment Cohen's f",
+    "value": 8.315218406
    },
    {
     "label": "Time F",
@@ -44981,12 +45045,20 @@
     "p": true
    },
    {
-    "label": "Time partial eta squared",
-    "value": 0.9857433809
+    "label": "Time % of total variation",
+    "value": 50.38051398
    },
    {
     "label": "Time eta squared",
     "value": 0.5038051398
+   },
+   {
+    "label": "Time partial eta squared",
+    "value": 0.9857433809
+   },
+   {
+    "label": "Time Cohen's f",
+    "value": 8.315218406
    },
    {
     "label": "Genotype F",
@@ -45002,12 +45074,20 @@
     "p": true
    },
    {
-    "label": "Genotype partial eta squared",
-    "value": 0.9442532691
+    "label": "Genotype % of total variation",
+    "value": 12.34196654
    },
    {
     "label": "Genotype eta squared",
     "value": 0.1234196654
+   },
+   {
+    "label": "Genotype partial eta squared",
+    "value": 0.9442532691
+   },
+   {
+    "label": "Genotype Cohen's f",
+    "value": 4.115613151
    },
    {
     "label": "Treatment:Time F",
@@ -45023,12 +45103,20 @@
     "p": true
    },
    {
-    "label": "Treatment:Time partial eta squared",
-    "value": 0.8557618926
+    "label": "Treatment:Time % of total variation",
+    "value": 4.323029513
    },
    {
     "label": "Treatment:Time eta squared",
     "value": 0.04323029513
+   },
+   {
+    "label": "Treatment:Time partial eta squared",
+    "value": 0.8557618926
+   },
+   {
+    "label": "Treatment:Time Cohen's f",
+    "value": 2.435771048
    },
    {
     "label": "Treatment:Genotype F",
@@ -45044,12 +45132,20 @@
     "p": true
    },
    {
-    "label": "Treatment:Genotype partial eta squared",
-    "value": 0.00700525394
+    "label": "Treatment:Genotype % of total variation",
+    "value": 0.005140344249
    },
    {
     "label": "Treatment:Genotype eta squared",
     "value": 0.00005140344249
+   },
+   {
+    "label": "Treatment:Genotype partial eta squared",
+    "value": 0.00700525394
+   },
+   {
+    "label": "Treatment:Genotype Cohen's f",
+    "value": 0.08399210511
    },
    {
     "label": "Time:Genotype F",
@@ -45065,12 +45161,20 @@
     "p": true
    },
    {
-    "label": "Time:Genotype partial eta squared",
-    "value": 0.718050721
+    "label": "Time:Genotype % of total variation",
+    "value": 1.855664274
    },
    {
     "label": "Time:Genotype eta squared",
     "value": 0.01855664274
+   },
+   {
+    "label": "Time:Genotype partial eta squared",
+    "value": 0.718050721
+   },
+   {
+    "label": "Time:Genotype Cohen's f",
+    "value": 1.595849997
    },
    {
     "label": "Treatment:Time:Genotype F",
@@ -45086,12 +45190,20 @@
     "p": true
    },
    {
-    "label": "Treatment:Time:Genotype partial eta squared",
-    "value": 0.3636363636
+    "label": "Treatment:Time:Genotype % of total variation",
+    "value": 0.4163678842
    },
    {
     "label": "Treatment:Time:Genotype eta squared",
     "value": 0.004163678842
+   },
+   {
+    "label": "Treatment:Time:Genotype partial eta squared",
+    "value": 0.3636363636
+   },
+   {
+    "label": "Treatment:Time:Genotype Cohen's f",
+    "value": 0.755928946
    },
    {
     "label": "DFd (residual)",
@@ -45235,12 +45347,20 @@
     "p": true
    },
    {
-    "label": "Treatment partial eta squared",
-    "value": 0.9857433809
+    "label": "Treatment % of total variation",
+    "value": 50.38051398
    },
    {
     "label": "Treatment eta squared",
     "value": 0.5038051398
+   },
+   {
+    "label": "Treatment partial eta squared",
+    "value": 0.9857433809
+   },
+   {
+    "label": "Treatment Cohen's f",
+    "value": 8.315218406
    },
    {
     "label": "Time F",
@@ -45256,12 +45376,20 @@
     "p": true
    },
    {
-    "label": "Time partial eta squared",
-    "value": 0.9857433809
+    "label": "Time % of total variation",
+    "value": 50.38051398
    },
    {
     "label": "Time eta squared",
     "value": 0.5038051398
+   },
+   {
+    "label": "Time partial eta squared",
+    "value": 0.9857433809
+   },
+   {
+    "label": "Time Cohen's f",
+    "value": 8.315218406
    },
    {
     "label": "Genotype F",
@@ -45277,12 +45405,20 @@
     "p": true
    },
    {
-    "label": "Genotype partial eta squared",
-    "value": 0.9442532691
+    "label": "Genotype % of total variation",
+    "value": 12.34196654
    },
    {
     "label": "Genotype eta squared",
     "value": 0.1234196654
+   },
+   {
+    "label": "Genotype partial eta squared",
+    "value": 0.9442532691
+   },
+   {
+    "label": "Genotype Cohen's f",
+    "value": 4.115613151
    },
    {
     "label": "Treatment:Time F",
@@ -45298,12 +45434,20 @@
     "p": true
    },
    {
-    "label": "Treatment:Time partial eta squared",
-    "value": 0.8557618926
+    "label": "Treatment:Time % of total variation",
+    "value": 4.323029513
    },
    {
     "label": "Treatment:Time eta squared",
     "value": 0.04323029513
+   },
+   {
+    "label": "Treatment:Time partial eta squared",
+    "value": 0.8557618926
+   },
+   {
+    "label": "Treatment:Time Cohen's f",
+    "value": 2.435771048
    },
    {
     "label": "Treatment:Genotype F",
@@ -45319,12 +45463,20 @@
     "p": true
    },
    {
-    "label": "Treatment:Genotype partial eta squared",
-    "value": 0.00700525394
+    "label": "Treatment:Genotype % of total variation",
+    "value": 0.005140344249
    },
    {
     "label": "Treatment:Genotype eta squared",
     "value": 0.00005140344249
+   },
+   {
+    "label": "Treatment:Genotype partial eta squared",
+    "value": 0.00700525394
+   },
+   {
+    "label": "Treatment:Genotype Cohen's f",
+    "value": 0.08399210511
    },
    {
     "label": "Time:Genotype F",
@@ -45340,12 +45492,20 @@
     "p": true
    },
    {
-    "label": "Time:Genotype partial eta squared",
-    "value": 0.718050721
+    "label": "Time:Genotype % of total variation",
+    "value": 1.855664274
    },
    {
     "label": "Time:Genotype eta squared",
     "value": 0.01855664274
+   },
+   {
+    "label": "Time:Genotype partial eta squared",
+    "value": 0.718050721
+   },
+   {
+    "label": "Time:Genotype Cohen's f",
+    "value": 1.595849997
    },
    {
     "label": "Treatment:Time:Genotype F",
@@ -45361,12 +45521,20 @@
     "p": true
    },
    {
-    "label": "Treatment:Time:Genotype partial eta squared",
-    "value": 0.3636363636
+    "label": "Treatment:Time:Genotype % of total variation",
+    "value": 0.4163678842
    },
    {
     "label": "Treatment:Time:Genotype eta squared",
     "value": 0.004163678842
+   },
+   {
+    "label": "Treatment:Time:Genotype partial eta squared",
+    "value": 0.3636363636
+   },
+   {
+    "label": "Treatment:Time:Genotype Cohen's f",
+    "value": 0.755928946
    },
    {
     "label": "DFd (residual)",
@@ -45642,12 +45810,20 @@
     "p": true
    },
    {
-    "label": "Treatment partial eta squared",
-    "value": 0.9445807892
+    "label": "Treatment % of total variation",
+    "value": 34.6450683
    },
    {
     "label": "Treatment eta squared",
     "value": 0.346450683
+   },
+   {
+    "label": "Treatment partial eta squared",
+    "value": 0.9445807892
+   },
+   {
+    "label": "Treatment Cohen's f",
+    "value": 4.128472405
    },
    {
     "label": "Time F",
@@ -45663,12 +45839,20 @@
     "p": true
    },
    {
-    "label": "Time partial eta squared",
-    "value": 0.9666124608
+    "label": "Time % of total variation",
+    "value": 58.84785379
    },
    {
     "label": "Time eta squared",
     "value": 0.5884785379
+   },
+   {
+    "label": "Time partial eta squared",
+    "value": 0.9666124608
+   },
+   {
+    "label": "Time Cohen's f",
+    "value": 5.380640663
    },
    {
     "label": "Genotype F",
@@ -45684,12 +45868,20 @@
     "p": true
    },
    {
-    "label": "Genotype partial eta squared",
-    "value": 0.6322132652
+    "label": "Genotype % of total variation",
+    "value": 3.494058666
    },
    {
     "label": "Genotype eta squared",
     "value": 0.03494058666
+   },
+   {
+    "label": "Genotype partial eta squared",
+    "value": 0.6322132652
+   },
+   {
+    "label": "Genotype Cohen's f",
+    "value": 1.311093823
    },
    {
     "label": "Sex F",
@@ -45705,12 +45897,20 @@
     "p": true
    },
    {
-    "label": "Sex partial eta squared",
-    "value": 0.003460207612
+    "label": "Sex % of total variation",
+    "value": 0.007057813238
    },
    {
     "label": "Sex eta squared",
     "value": 0.00007057813238
+   },
+   {
+    "label": "Sex partial eta squared",
+    "value": 0.003460207612
+   },
+   {
+    "label": "Sex Cohen's f",
+    "value": 0.0589255651
    },
    {
     "label": "Treatment:Time F",
@@ -45726,12 +45926,20 @@
     "p": true
    },
    {
-    "label": "Treatment:Time partial eta squared",
-    "value": 0.7251098956
+    "label": "Treatment:Time % of total variation",
+    "value": 5.361760064
    },
    {
     "label": "Treatment:Time eta squared",
     "value": 0.05361760064
+   },
+   {
+    "label": "Treatment:Time partial eta squared",
+    "value": 0.7251098956
+   },
+   {
+    "label": "Treatment:Time Cohen's f",
+    "value": 1.624135888
    },
    {
     "label": "Treatment:Genotype F",
@@ -45747,12 +45955,20 @@
     "p": true
    },
    {
-    "label": "Treatment:Genotype partial eta squared",
-    "value": 0.3193752077
+    "label": "Treatment:Genotype % of total variation",
+    "value": 0.9537972921
    },
    {
     "label": "Treatment:Genotype eta squared",
     "value": 0.009537972921
+   },
+   {
+    "label": "Treatment:Genotype partial eta squared",
+    "value": 0.3193752077
+   },
+   {
+    "label": "Treatment:Genotype Cohen's f",
+    "value": 0.6850096943
    },
    {
     "label": "Treatment:Sex F",
@@ -45768,12 +45984,20 @@
     "p": true
    },
    {
-    "label": "Treatment:Sex partial eta squared",
-    "value": 0.003460207612
+    "label": "Treatment:Sex % of total variation",
+    "value": 0.007057813238
    },
    {
     "label": "Treatment:Sex eta squared",
     "value": 0.00007057813238
+   },
+   {
+    "label": "Treatment:Sex partial eta squared",
+    "value": 0.003460207612
+   },
+   {
+    "label": "Treatment:Sex Cohen's f",
+    "value": 0.0589255651
    },
    {
     "label": "Time:Genotype F",
@@ -45789,12 +46013,20 @@
     "p": true
    },
    {
-    "label": "Time:Genotype partial eta squared",
-    "value": 0.3193752077
+    "label": "Time:Genotype % of total variation",
+    "value": 0.9537972921
    },
    {
     "label": "Time:Genotype eta squared",
     "value": 0.009537972921
+   },
+   {
+    "label": "Time:Genotype partial eta squared",
+    "value": 0.3193752077
+   },
+   {
+    "label": "Time:Genotype Cohen's f",
+    "value": 0.6850096943
    },
    {
     "label": "Time:Sex F",
@@ -45810,12 +46042,20 @@
     "p": true
    },
    {
-    "label": "Time:Sex partial eta squared",
-    "value": 0.003460207612
+    "label": "Time:Sex % of total variation",
+    "value": 0.007057813238
    },
    {
     "label": "Time:Sex eta squared",
     "value": 0.00007057813238
+   },
+   {
+    "label": "Time:Sex partial eta squared",
+    "value": 0.003460207612
+   },
+   {
+    "label": "Time:Sex Cohen's f",
+    "value": 0.0589255651
    },
    {
     "label": "Genotype:Sex F",
@@ -45831,12 +46071,20 @@
     "p": true
    },
    {
-    "label": "Genotype:Sex partial eta squared",
-    "value": 0.2433808136
+    "label": "Genotype:Sex % of total variation",
+    "value": 0.6538402295
    },
    {
     "label": "Genotype:Sex eta squared",
     "value": 0.006538402295
+   },
+   {
+    "label": "Genotype:Sex partial eta squared",
+    "value": 0.2433808136
+   },
+   {
+    "label": "Genotype:Sex Cohen's f",
+    "value": 0.5671585641
    },
    {
     "label": "Treatment:Time:Genotype F",
@@ -45852,12 +46100,20 @@
     "p": true
    },
    {
-    "label": "Treatment:Time:Genotype partial eta squared",
-    "value": 0.3193752077
+    "label": "Treatment:Time:Genotype % of total variation",
+    "value": 0.9537972921
    },
    {
     "label": "Treatment:Time:Genotype eta squared",
     "value": 0.009537972921
+   },
+   {
+    "label": "Treatment:Time:Genotype partial eta squared",
+    "value": 0.3193752077
+   },
+   {
+    "label": "Treatment:Time:Genotype Cohen's f",
+    "value": 0.6850096943
    },
    {
     "label": "Treatment:Time:Sex F",
@@ -45873,12 +46129,20 @@
     "p": true
    },
    {
-    "label": "Treatment:Time:Sex partial eta squared",
-    "value": 0.003460207612
+    "label": "Treatment:Time:Sex % of total variation",
+    "value": 0.007057813238
    },
    {
     "label": "Treatment:Time:Sex eta squared",
     "value": 0.00007057813238
+   },
+   {
+    "label": "Treatment:Time:Sex partial eta squared",
+    "value": 0.003460207612
+   },
+   {
+    "label": "Treatment:Time:Sex Cohen's f",
+    "value": 0.0589255651
    },
    {
     "label": "Treatment:Genotype:Sex F",
@@ -45894,12 +46158,20 @@
     "p": true
    },
    {
-    "label": "Treatment:Genotype:Sex partial eta squared",
-    "value": 0.003460207612
+    "label": "Treatment:Genotype:Sex % of total variation",
+    "value": 0.007057813238
    },
    {
     "label": "Treatment:Genotype:Sex eta squared",
     "value": 0.00007057813238
+   },
+   {
+    "label": "Treatment:Genotype:Sex partial eta squared",
+    "value": 0.003460207612
+   },
+   {
+    "label": "Treatment:Genotype:Sex Cohen's f",
+    "value": 0.0589255651
    },
    {
     "label": "Time:Genotype:Sex F",
@@ -45915,12 +46187,20 @@
     "p": true
    },
    {
-    "label": "Time:Genotype:Sex partial eta squared",
-    "value": 0.003460207612
+    "label": "Time:Genotype:Sex % of total variation",
+    "value": 0.007057813238
    },
    {
     "label": "Time:Genotype:Sex eta squared",
     "value": 0.00007057813238
+   },
+   {
+    "label": "Time:Genotype:Sex partial eta squared",
+    "value": 0.003460207612
+   },
+   {
+    "label": "Time:Genotype:Sex Cohen's f",
+    "value": 0.0589255651
    },
    {
     "label": "DFd (residual)",
@@ -46089,12 +46369,20 @@
     "p": true
    },
    {
-    "label": "Treatment partial eta squared",
-    "value": 0.9796587487
+    "label": "Treatment % of total variation",
+    "value": 97.96587487
    },
    {
     "label": "Treatment eta squared",
     "value": 0.9796587487
+   },
+   {
+    "label": "Treatment partial eta squared",
+    "value": 0.9796587487
+   },
+   {
+    "label": "Treatment Cohen's f",
+    "value": 6.93982595
    },
    {
     "label": "DFd (residual)",

@@ -35358,6 +35358,100 @@ check("seq 379: a label variable is refused as a multifactor ANOVA factor", asyn
   ok("error" in auto && auto.error.includes("needs at least one factor"), JSON.stringify(auto));
 });
 
+// ── seq 389: multifactor Cohen's f + % of total variation ──
+// Balanced 2×2, two replicates per cell, cell means 0/2/4/6 with ±1
+// replicates: SS_Fertilizer = 32, SS_Watering = 8, SS_interaction = 0,
+// SS_resid = 8, SS_total = 48 (balanced, so Type III = Type I = II).
+// Hand-computed: Fertilizer η² = 32/48, partial η² = 32/40 = 0.8,
+// f = √(0.8/0.2) = 2; Watering η² = 8/48, partial η² = 8/16 = 0.5,
+// f = 1; interaction 0 throughout. The same formulas give Prism's docs
+// example (partial η² 0.7543390 → f √(0.7543390/0.2456610) = 1.752327;
+// η² 0.4150244 → 41.50244%).
+check("seq 389: multifactor ANOVA reports Cohen's f and % of total variation per term", async () => {
+  const data: TableData = refreshVariableTypes({
+    columns: ["Title", "Y", "Fertilizer", "Watering"],
+    rows: [
+      ["1", "-1", "Low", "Low"],
+      ["2", "1", "Low", "Low"],
+      ["3", "1", "Low", "High"],
+      ["4", "3", "Low", "High"],
+      ["5", "3", "High", "Low"],
+      ["6", "5", "High", "Low"],
+      ["7", "5", "High", "High"],
+      ["8", "7", "High", "High"],
+    ],
+  });
+  const out = await runAnalysis("multifactor-anova", data, {
+    response: "Y",
+    factors: ["Fertilizer", "Watering"],
+    posthoc: "none",
+  });
+  ok(!("error" in out), JSON.stringify(out));
+  const row = (label: string) => out.stats.find((s) => s.label === label)?.value;
+  const close = (got: number | null | undefined, want: number, tol = 1e-9) => {
+    ok(got !== null && got !== undefined && Math.abs(got - want) <= tol, `expected ${want}, got ${got}`);
+  };
+  close(row("Fertilizer % of total variation"), 200 / 3);
+  close(row("Fertilizer eta squared"), 2 / 3);
+  close(row("Fertilizer partial eta squared"), 0.8);
+  close(row("Fertilizer Cohen's f"), 2);
+  close(row("Watering % of total variation"), 100 / 6);
+  close(row("Watering eta squared"), 1 / 6);
+  close(row("Watering partial eta squared"), 0.5);
+  close(row("Watering Cohen's f"), 1);
+  close(row("Fertilizer:Watering % of total variation"), 0);
+  close(row("Fertilizer:Watering eta squared"), 0);
+  close(row("Fertilizer:Watering partial eta squared"), 0);
+  close(row("Fertilizer:Watering Cohen's f"), 0);
+  // Prism's column order for the effect-size rows: % of total variation,
+  // eta squared, partial eta squared, Cohen's f.
+  const labels = out.stats.map((s) => s.label);
+  const at = (label: string) => labels.indexOf(label);
+  for (const term of ["Fertilizer", "Watering", "Fertilizer:Watering"]) {
+    ok(at(`${term} % of total variation`) < at(`${term} eta squared`), `seq 389 order ${term} %`);
+    ok(at(`${term} eta squared`) < at(`${term} partial eta squared`), `seq 389 order ${term} eta`);
+    ok(at(`${term} partial eta squared`) < at(`${term} Cohen's f`), `seq 389 order ${term} partial`);
+  }
+});
+
+// A perfect fit (no residual error) leaves partial eta squared at 1, so
+// Cohen's f is null — never Infinity. Same 2×2 means as above, but with
+// identical replicates: SS_resid = 0, SS_total = 40.
+check("seq 389: Cohen's f is null when partial eta squared is 1", async () => {
+  const data: TableData = refreshVariableTypes({
+    columns: ["Title", "Y", "Fertilizer", "Watering"],
+    rows: [
+      ["1", "0", "Low", "Low"],
+      ["2", "0", "Low", "Low"],
+      ["3", "2", "Low", "High"],
+      ["4", "2", "Low", "High"],
+      ["5", "4", "High", "Low"],
+      ["6", "4", "High", "Low"],
+      ["7", "6", "High", "High"],
+      ["8", "6", "High", "High"],
+    ],
+  });
+  const out = await runAnalysis("multifactor-anova", data, {
+    response: "Y",
+    factors: ["Fertilizer", "Watering"],
+    posthoc: "none",
+  });
+  ok(!("error" in out), JSON.stringify(out));
+  const row = (label: string) => out.stats.find((s) => s.label === label)?.value;
+  const close = (got: number | null | undefined, want: number, tol = 1e-9) => {
+    ok(got !== null && got !== undefined && Math.abs(got - want) <= tol, `expected ${want}, got ${got}`);
+  };
+  strictEqual(row("Fertilizer Cohen's f"), null, "Fertilizer f at partial eta squared 1");
+  strictEqual(row("Watering Cohen's f"), null, "Watering f at partial eta squared 1");
+  // The % of total variation still reads off eta squared with no error term.
+  close(row("Fertilizer % of total variation"), 80);
+  close(row("Watering % of total variation"), 20);
+  // The interaction's f is deliberately NOT pinned here: on a perfect fit
+  // R's drop1 returns floating-point noise for the zero-SS term (mse ~1e-30,
+  // interaction SS ~1e-32), so its partial eta squared is a meaningless
+  // ratio of two residuals rather than 0/0.
+});
+
 check("seq 379: a label variable is refused as an extract-rearrange grouping / factor", async () => {
   const data = mv379Typed();
   const run = (params: object) => runAnalysis("extract-rearrange", data, params);
