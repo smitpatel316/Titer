@@ -2953,7 +2953,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
   // log2, sqrt, reciprocal, exp, square) plus the arithmetic transforms
   // (seq 205) and the rest of Prism's documented set (seq 341): logit,
   // probit, rank, zscore, trig, ABS, Y+Random, rounding, Y^K, 10^Y, 2^Y,
-  // −log10, the X/Y cross-column functions (XY tables only — there is no X
+  // −log10, log-log (seq 385: log10 of both X and Y), the X/Y cross-column functions (XY tables only — there is no X
   // column to pair with on other tables), X transforms + interchange (XY),
   // a K per data set, error-bar handling on summary tables, and
   // user-defined transforms (one formula line per data set, `;`-separated) —
@@ -3017,6 +3017,7 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ["ten-power-y", "10^Y — 10 to the power of Y"],
         ["two-power-y", "2^Y — 2 to the power of Y"],
         ["neg-log10", "−log10(Y) — negative logarithm, base 10"],
+        ["log-log", "log-log — log10 of both X and Y"],
         ...(xName
           ? ([
               ["x-divided-by-y", "X/Y — divide X by Y"],
@@ -3030,8 +3031,10 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
         ["user-defined", "User-defined — write your own formula"],
       ];
       // The X function takes any built-in function (a user-defined transform
-      // applies to the Y values only — the runner refuses it for X).
-      const xFnOptions = fnOptions.filter(([v]) => v !== "user-defined");
+      // applies to the Y values only — the runner refuses it for X). Log-log
+      // is not offered for X: as an X function it is just log10, which the
+      // list already has (the runner still accepts it directly).
+      const xFnOptions = fnOptions.filter(([v]) => v !== "user-defined" && v !== "log-log");
       const xFn = (a.xFunction as TransformFunction | undefined) ?? "log10";
       return [
         ...setsQ,
@@ -3088,10 +3091,19 @@ export const WIZARDS: Partial<Record<AnalysisPickerValue, Wizard>> = {
     finish: (a, table, type) => {
       const fn = (a.function as TransformFunction | undefined) ?? "log10";
       const { xName, ySetNames } = transformXY(table, type);
-      const xFn = a.transformX === "yes" ? ((a.xFunction as TransformFunction | undefined) ?? "log10") : undefined;
+      // Log-log (seq 385) transforms both axes: unless the user said not to
+      // touch X, the X values go through the existing xFn path with log10 —
+      // the same function the Y values get. An explicit X choice wins.
+      const xFn =
+        a.transformX === "yes"
+          ? ((a.xFunction as TransformFunction | undefined) ?? "log10")
+          : fn === "log-log" && xName !== undefined && a.transformX !== "no"
+            ? "log10"
+            : undefined;
       const interchange = xName !== undefined && a.interchange === "yes";
       const needsX =
-        xName !== undefined && (isCrossTransform(fn) || xFn !== undefined || interchange || fn === "user-defined");
+        xName !== undefined &&
+        (isCrossTransform(fn) || xFn !== undefined || interchange || fn === "user-defined" || fn === "log-log");
       const params: { function: TransformFunction } & Partial<TransformDataParams> = { function: fn };
       // The K: one constant, or one per data set (keyed by data-set name);
       // the X column's K joins the per-set map under the X column's name.
