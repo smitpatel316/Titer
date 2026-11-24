@@ -54,6 +54,7 @@ import {
   renameGroup,
   renameSubgroup,
   setColumnWidth,
+  toHTMLTable,
   toTSV,
   toggleExcluded,
   transposeBlock,
@@ -506,6 +507,10 @@ export function Grid({
     if (editing) return;
     e.preventDefault();
     e.clipboardData.setData("text/plain", toTSV(data, range, separator));
+    // A real table alongside the text (seq 430): Word and Excel paste the
+    // HTML form as a table instead of unformatted text. The TSV stays — other
+    // consumers depend on it.
+    e.clipboardData.setData("text/html", toHTMLTable(data, range, separator));
     if (cut) clear(range, "Cut");
   };
 

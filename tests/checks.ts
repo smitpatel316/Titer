@@ -197,6 +197,7 @@ import {
   setRowGroupCount,
   setRowGroupName,
   toggleExcluded,
+  toHTMLTable,
   toTSV,
   transposeBlock,
   writeBlock,
@@ -8402,6 +8403,67 @@ check("seq 333: decimal places round the grid display, keep full precision every
   // The type itself: a separator is only ever "." or ",".
   const sep: DecimalSeparator = ",";
   strictEqual(sep, ",");
+});
+
+check("copy-430: grid copy writes a real HTML table alongside the TSV text", () => {
+  const t: TableData = {
+    columns: ["Title", "A", "B"],
+    rows: [
+      ["r1", "1.23456", "2.5"],
+      ["r2", "3.14159", "4"],
+    ],
+  };
+  // The TSV form is unchanged — other consumers depend on it.
+  strictEqual(toTSV(t, { r0: 0, r1: 1, c0: 0, c1: 2 }), "r1\t1.23456\t2.5\nr2\t3.14159\t4");
+  const html = toHTMLTable(t, { r0: 0, r1: 1, c0: 0, c1: 2 });
+  // A real table: a header row names the copied columns, body rows carry the cells.
+  ok(html.startsWith("<table>") && html.endsWith("</table>"), "HTML form is a table fragment");
+  ok(html.includes("<th>Title</th><th>A</th><th>B</th>"), "header row names the copied columns");
+  ok(html.includes("<td>r1</td><td>1.23456</td><td>2.5</td>"), "first row carries the cells");
+  ok(html.includes("<td>r2</td><td>3.14159</td><td>4</td>"), "second row carries the cells");
+  // Full precision, like the TSV form — a decimal-places setting never rounds.
+  const withDec = setDecimalPlaces(t, "A", 2);
+  ok(
+    toHTMLTable(withDec, { r0: 0, r1: 1, c0: 0, c1: 2 }).includes("<td>1.23456</td>"),
+    "HTML keeps full precision",
+  );
+  // A comma separator renders in the HTML too, and markup is escaped.
+  ok(
+    toHTMLTable(t, { r0: 0, r1: 1, c0: 0, c1: 2 }, ",").includes("<td>1,23456</td>"),
+    "HTML renders the separator",
+  );
+  const tricky: TableData = { columns: ["Title", "A&B"], rows: [["a<b", "1<2"]] };
+  const th = toHTMLTable(tricky, { r0: 0, r1: 0, c0: 0, c1: 1 });
+  ok(
+    th.includes("<th>A&amp;B</th>") && th.includes("<td>a&lt;b</td>") && th.includes("<td>1&lt;2</td>"),
+    "names and values are escaped",
+  );
+  // A sub-range copies only its columns, and a grouped table's header shows
+  // the sub-column part the grid shows, not the "Group: R1" storage name.
+  ok(
+    toHTMLTable(t, { r0: 0, r1: 0, c0: 1, c1: 2 }).includes("<th>A</th><th>B</th>"),
+    "sub-range header names only its columns",
+  );
+  const grouped: TableData = {
+    columns: ["Title", "Control:R1", "Control:R2"],
+    rows: [["r1", "1", "2"]],
+    groups: 1,
+    replicates: 2,
+  };
+  ok(
+    toHTMLTable(grouped, { r0: 0, r1: 0, c0: 0, c1: 2 }).includes("<th>Title</th><th>R1</th><th>R2</th>"),
+    "grouped header shows the sub-column part",
+  );
+  // The grid wires both forms onto the clipboard on copy.
+  const gridSrc = readFileSync("src/views/tables/grid.tsx", "utf8");
+  ok(
+    gridSrc.includes('setData("text/html", toHTMLTable(data, range, separator))'),
+    "grid sets the HTML form on copy",
+  );
+  ok(
+    gridSrc.includes('setData("text/plain", toTSV(data, range, separator))'),
+    "grid still sets the TSV form",
+  );
 });
 
 check("seq 220: MCP update-graph accepts a number format and rejects a bad one", () => {
