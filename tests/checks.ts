@@ -39595,6 +39595,37 @@ check("m3 gates: R system() and library() are caught by the static scan", () => 
   strictEqual(scanPluginRCodeExtended("c(mean=mean(g0))").length, 0, "clean R code passes");
 });
 
+// market-gates-dotcall40 (cycle 40): the native-code pattern was
+// /\b(dyn\.load|library\.dynam|\.Call|\.External|\.C)\s*\(/ — the \b can
+// never match before the dot-alternatives where R puts them (line start,
+// after whitespace or an operator), so .Call/.C/.External sailed through
+// every gate. The fix splits the pattern: \b for the word-char names,
+// (^|[^A-Za-z0-9_.]) for the dot names.
+check("m3 gates: native .Call/.C/.External trip the scan at line start and after <-", () => {
+  for (const code of [
+    '.Call("foo")',
+    'x <- .Call("myfun")',
+    'a <- .Call ("g")',
+    'y <- .C("f")',
+    '.C("f")',
+    'z <- .External("f")',
+    '.External("f")',
+    'f(.Call("g"))',
+  ]) {
+    const hits = scanPluginRCodeExtended(code, "evil.R");
+    ok(hits.length > 0, `${code} must be caught`);
+    ok(hits.some((f) => f.message.includes("native code")), `${code} must name the native-code rule`);
+  }
+  // Controls: dyn.load still trips, clean R still passes, and a dotted
+  // identifier that merely ends in .Call (a function literally named
+  // foo.Call) is not a native call.
+  ok(scanPluginRCodeExtended('x <- dyn.load("f")').length > 0, "dyn.load() must still be caught");
+  ok(scanPluginRCodeExtended('x <- library.dynam("f")').length > 0, "library.dynam() must still be caught");
+  strictEqual(scanPluginRCodeExtended("c(mean=mean(g0))").length, 0, "clean R code passes");
+  strictEqual(scanPluginRCodeExtended('foo.Call("x")').length, 0, "foo.Call() is a dotted name, not .Call()");
+  strictEqual(scanPluginRCodeExtended('x <- my.Call("f")').length, 0, "my.Call() is a dotted name, not .Call()");
+});
+
 check("m3 gates: load-time scanPluginRCode shares the gates denylist (one source of truth)", async () => {
   const { scanPluginRCode } = await import("../src/plugins/analysis-spec");
   ok(

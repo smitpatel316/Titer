@@ -116,8 +116,21 @@ const EXTENDED_R_PATTERNS: RPattern[] = [
     message: "must not install packages (install.packages()) — declare them in requiredPackages",
   },
   {
-    pattern: /\b(dyn\.load|library\.dynam|\.Call|\.External|\.C)\s*\(/,
-    message: "must not call native code (.Call()/dyn.load()) — plugins are R + JS/TS only",
+    pattern: /\b(dyn\.load|library\.dynam)\s*\(/,
+    message: "must not call native code (dyn.load()/library.dynam()) — plugins are R + JS/TS only",
+  },
+  {
+    // `.Call`/`.External`/`.C` start with a dot, so `\b` can never match
+    // where R puts them (line start, after whitespace or an operator:
+    // `x <- .Call("f")`) — the old combined `\b(...|\.Call|...)` pattern
+    // silently missed every real native call (market-gates-dotcall40,
+    // cycle 40). Match them only when the dot is NOT part of a longer
+    // dotted name: a preceding word char or dot means the call is to a
+    // function literally named e.g. `foo.Call`, not to `.Call` — that
+    // case matched before via the same broken `\b` path and no longer
+    // trips, deliberately. `(` may follow whitespace (`a <- .Call ("g")`).
+    pattern: /(^|[^A-Za-z0-9_.])(\.Call|\.External|\.C)\s*\(/,
+    message: "must not call native code (.Call()/.External()/.C()) — plugins are R + JS/TS only",
   },
   { pattern: /\bload\s*\(/, message: "must not load saved workspaces (load())" },
 ];
