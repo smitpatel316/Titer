@@ -47,7 +47,7 @@ export async function fetchWithTimeout(
   }
 }
 
-/** The latest version out ("1.8.5"); throws when GitHub refuses the read. */
+/** The latest version out ("1.9.0"); throws when GitHub refuses the read. */
 export async function latestVersion(): Promise<unknown> {
   const main = await fetchWithTimeout(MAIN_PACKAGE);
   if (!main.ok) throw new Error(`GitHub answered ${main.status}`);
