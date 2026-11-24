@@ -451,6 +451,20 @@ import {
   parseXlsx,
   rowsToTable,
 } from "../src/lib/tabular-import";
+import {
+  IMPORT_CHOICE_TABS,
+  applyImportFilter,
+  applyImportPlacement,
+  computeImport,
+  dataColumnIndex,
+  dataColumnLetter,
+  defaultImportChoices,
+  extractInfoSections,
+  parseImportText,
+  resolveImportTableName,
+  type ImportChoices,
+  type ImportOffer,
+} from "../src/lib/import-choices";
 import { executeExportTableData, tableTextRows, tableToCsv, tableToTxt, tableToXml, tableToXlsx } from "../src/store/mcp-export";
 import {
   exportTableData,
@@ -35257,6 +35271,362 @@ check("import-427: .dat and .prn files import as delimited text tables", async (
   ok(shell.includes('"dat"') && shell.includes('"prn"'), "native panel / text reader misses .dat/.prn");
   const dispatch = readFileSync("src/store/mcp-dispatch.ts", "utf8");
   ok(dispatch.includes('ext !== "dat"') && dispatch.includes('ext !== "prn"'), "MCP import gate misses .dat/.prn");
+});
+
+// Seq 429 — Prism's Import and Paste Special Choices dialog, 5 tabs
+// (walk2/07–11, all five tabs dumped verbatim from real Prism 11.2.0).
+// Titer had no import dialog at all; the choices lived nowhere. The pure
+// engine is src/lib/import-choices.ts; the dialog is
+// src/views/tables/import-dialog.tsx; the store offers the parsed file and
+// applies the confirmed choices (use-document.ts).
+check("import-429: the 5-tab Import dialog's choices parse, filter and place as Prism's do", () => {
+  // The defaults are Prism's as captured: insert data only (no link),
+  // commas separate columns, spaces only in headings/X labels, asterisk
+  // exclusion on, rows/columns 1..last, rename with the file name,
+  // insertion at the live insertion point, arrangement maintained, blank
+  // rows left, no info/notes import.
+  const defaults = defaultImportChoices();
+  deepStrictEqual(defaults, {
+    source: { link: false, autoUpdate: true, comma: "separate", spaces: "headings" },
+    filter: {
+      missingMarker: "",
+      excludeAsterisks: true,
+      startRow: 1,
+      endRow: "last",
+      skipUntil: null,
+      skipAfter: null,
+      skipWhere: null,
+      decimate: 0,
+      startCol: 1,
+      endCol: "last",
+      unstack: null,
+      skipColumns: 0,
+    },
+    placement: {
+      rename: true,
+      renameFrom: "file",
+      renameRow: 1,
+      target: "insert",
+      useLiveInsertionPoint: true,
+      insertRow: 1,
+      insertCol: 1,
+      arrangement: "maintain",
+      byRowsRows: 1,
+      byColumnsValues: 1,
+      blankRows: "leave",
+      columnTitles: "auto",
+    },
+    info: {
+      infoMode: "none",
+      infoFromRow: 1,
+      infoEndRow: "last",
+      notesMode: "none",
+      notesFromRow: 1,
+      notesEndRow: "last",
+    },
+  });
+  deepStrictEqual(IMPORT_CHOICE_TABS, ["Source", "View", "Filter", "Placement", "Info & Notes"]);
+
+  // Source — commas: separate splits them; thousands joins "100,000" into
+  // one hundred thousand (only when the delimiter isn't a comma — a
+  // comma-delimited file's commas are separators by definition); decimal
+  // reads "100,000" as 100.000.
+  const withComma = (comma: ImportChoices["source"]["comma"]): ImportChoices => ({
+    ...defaults,
+    source: { ...defaults.source, comma },
+  });
+  deepStrictEqual(parseImportText("A,100,000\nB,200,000", "csv", withComma("separate")), [
+    ["A", "100", "000"],
+    ["B", "200", "000"],
+  ]);
+  deepStrictEqual(parseImportText("A\t100,000\nB\t200,000", "txt", withComma("thousands")), [
+    ["A", "100000"],
+    ["B", "200000"],
+  ]);
+  deepStrictEqual(parseImportText("A\t100,000\nB\t200,000", "txt", withComma("decimal")), [
+    ["A", "100.000"],
+    ["B", "200.000"],
+  ]);
+  // Source — spaces: "headings" keeps "A 1.5" one field; "separate" splits
+  // on runs of spaces (quoted fields keep theirs).
+  const withSpaces = (spaces: ImportChoices["source"]["spaces"]): ImportChoices => ({
+    ...defaults,
+    source: { ...defaults.source, spaces },
+  });
+  deepStrictEqual(parseImportText('Group Value\nA 1.5\n"New York" 2.5', "txt", withSpaces("headings")), [
+    ["Group Value"],
+    ["A 1.5"],
+    ["New York 2.5"],
+  ]);
+  deepStrictEqual(parseImportText('Group Value\nA 1.5\n"New York" 2.5', "txt", withSpaces("separate")), [
+    ["Group", "Value"],
+    ["A", "1.5"],
+    ["New York", "2.5"],
+  ]);
+
+  // Info & Notes — <Info>/<Notes> sections come out before the data, and
+  // the data rows keep nothing of them; "none" passes the file through.
+  const sectioned = [
+    ["<Info>"],
+    ["Date", "2026-01-09"],
+    ["Operator", "Smit"],
+    ["</Info>"],
+    ["<Notes>"],
+    ["Run 3, check baseline"],
+    ["</Notes>"],
+    ["Group", "Value"],
+    ["A", "1.5"],
+  ];
+  deepStrictEqual(extractInfoSections(sectioned, { ...defaults, info: { ...defaults.info, infoMode: "section", notesMode: "section" } }), {
+    dataRows: [
+      ["Group", "Value"],
+      ["A", "1.5"],
+    ],
+    infoRows: [
+      ["Date", "2026-01-09"],
+      ["Operator", "Smit"],
+    ],
+    notesRows: [["Run 3, check baseline"]],
+  });
+  deepStrictEqual(extractInfoSections(sectioned, defaults).dataRows, sectioned);
+
+  // Filter — the missing-value marker blanks its cells; asterisked values
+  // are excluded; row/column ranges slice; skip-where drops its rows;
+  // decimate keeps every (N+1)th row; unstack turns long data wide;
+  // skip-columns keeps every (N+1)th column.
+  const withFilter = (filter: Partial<ImportChoices["filter"]>): ImportChoices => ({
+    ...defaults,
+    filter: { ...defaults.filter, ...filter },
+  });
+  deepStrictEqual(
+    applyImportFilter(
+      [
+        ["A", "99"],
+        ["B", "45.6*"],
+        ["C", "*2.5"],
+        ["D", "3.5"],
+      ],
+      withFilter({ missingMarker: "99" }),
+    ).rows,
+    [
+      ["A", ""],
+      ["B", ""],
+      ["C", ""],
+      ["D", "3.5"],
+    ],
+  );
+  deepStrictEqual(
+    applyImportFilter(
+      [
+        ["A", "1"],
+        ["B", "2"],
+        ["C", "3"],
+        ["D", "4"],
+      ],
+      withFilter({ startRow: 2, endRow: 3 }),
+    ).rows,
+    [
+      ["B", "2"],
+      ["C", "3"],
+    ],
+  );
+  deepStrictEqual(
+    applyImportFilter(
+      [
+        ["A", "1"],
+        ["B", "2"],
+        ["C", "3"],
+      ],
+      withFilter({ skipWhere: { col: 2, op: ">", value: "2" } }),
+    ).rows,
+    [
+      ["A", "1"],
+      ["B", "2"],
+    ],
+  );
+  deepStrictEqual(
+    applyImportFilter([["A"], ["B"], ["C"], ["D"], ["E"]], withFilter({ decimate: 1 })).rows,
+    [["A"], ["C"], ["E"]],
+  );
+  deepStrictEqual(
+    applyImportFilter([["a", "b", "c", "d"]], withFilter({ startCol: 2, endCol: 3 })).rows,
+    [["b", "c"]],
+  );
+  deepStrictEqual(
+    applyImportFilter(
+      [
+        ["G", "1"],
+        ["G", "2"],
+        ["H", "3"],
+        ["G", "4"],
+        ["H", "5"],
+      ],
+      withFilter({ unstack: { dataCol: 2, groupCol: 1 } }),
+    ).rows,
+    [
+      ["G", "H"],
+      ["1", "3"],
+      ["2", "5"],
+      ["4", ""],
+    ],
+  );
+  deepStrictEqual(applyImportFilter([["a", "b", "c", "d", "e"]], withFilter({ skipColumns: 1 })).rows, [
+    ["a", "c", "e"],
+  ]);
+
+  // Placement — transpose swaps rows and columns; by-rows fills N values
+  // per new column reading across rows; by-columns stacks N values per
+  // column reading down them; blank rows are left or skipped.
+  const withPlacement = (placement: Partial<ImportChoices["placement"]>): ImportChoices => ({
+    ...defaults,
+    placement: { ...defaults.placement, ...placement },
+  });
+  deepStrictEqual(
+    applyImportPlacement(
+      [
+        ["a", "b"],
+        ["c", "d"],
+      ],
+      withPlacement({ arrangement: "transpose" }),
+    ).rows,
+    [
+      ["a", "c"],
+      ["b", "d"],
+    ],
+  );
+  deepStrictEqual(
+    applyImportPlacement([["a"], ["b"], ["c"], ["d"]], withPlacement({ arrangement: "byRows", byRowsRows: 2 })).rows,
+    [
+      ["a", "c"],
+      ["b", "d"],
+    ],
+  );
+  deepStrictEqual(
+    applyImportPlacement(
+      [
+        ["a", "b"],
+        ["c", "d"],
+        ["e", "f"],
+      ],
+      withPlacement({ arrangement: "byColumns", byColumnsValues: 2 }),
+    ).rows,
+    [
+      ["a", "e", "d"],
+      ["c", "b", "f"],
+    ],
+  );
+  deepStrictEqual(
+    applyImportPlacement(
+      [
+        ["a", ""],
+        ["", ""],
+        ["b", ""],
+      ],
+      withPlacement({ blankRows: "skip" }),
+    ).rows,
+    [
+      ["a", ""],
+      ["b", ""],
+    ],
+  );
+
+  // The whole pipeline: a messy file parses, loses its info section, drops
+  // its missing marker, and lands transposed with a note saying so.
+  const offer: ImportOffer = {
+    name: "import-test.csv",
+    path: "/tmp/import-test.csv",
+    text: "<Info>\nDate,2026-01-09\n</Info>\nGroup,Value\nA,99\nB,2.5\n",
+    xlsxRows: null,
+    sheetName: null,
+    otherSheets: [],
+  };
+  const piped = computeImport(offer, {
+    ...defaults,
+    info: { ...defaults.info, infoMode: "section" },
+    filter: { ...defaults.filter, missingMarker: "99" },
+    placement: { ...defaults.placement, arrangement: "transpose" },
+  });
+  deepStrictEqual(piped.rows, [
+    ["Group", "A", "B"],
+    ["Value", "", "2.5"],
+  ]);
+  deepStrictEqual(piped.infoConstants, [{ name: "Date", value: "2026-01-09" }]);
+  strictEqual(piped.notesText, "");
+
+  // Placement — the table name: the file name, or the text of the chosen
+  // row, or nothing when renaming is off (the caller keeps its own name).
+  strictEqual(resolveImportTableName(defaults, "import-test.csv", [["Group", "Value"]]), "import-test");
+  strictEqual(
+    resolveImportTableName(
+      { ...defaults, placement: { ...defaults.placement, renameFrom: "row", renameRow: 1 } },
+      "import-test.csv",
+      [["Dose response", ""], ["A", "1.5"]],
+    ),
+    "Dose response",
+  );
+  strictEqual(
+    resolveImportTableName(
+      { ...defaults, placement: { ...defaults.placement, rename: false } },
+      "import-test.csv",
+      [["Group", "Value"]],
+    ),
+    "",
+  );
+
+  // Column letters: A is the first data column, AA the 27th.
+  strictEqual(dataColumnLetter(0), "A");
+  strictEqual(dataColumnLetter(25), "Z");
+  strictEqual(dataColumnLetter(26), "AA");
+  strictEqual(dataColumnIndex("A"), 0);
+  strictEqual(dataColumnIndex("AA"), 26);
+  strictEqual(dataColumnIndex("1"), -1);
+
+  // The dialog itself carries all five tabs, worded as Prism words them.
+  const dialog = readFileSync("src/views/tables/import-dialog.tsx", "utf8");
+  for (const tab of IMPORT_CHOICE_TABS) ok(dialog.includes(`"${tab}"`), `Import dialog misses the ${tab} tab`);
+  for (const label of [
+    "Insert data only.",
+    "Insert and maintain link.",
+    "Automatically update Prism when the data file is changed.",
+    "To separate adjacent columns",
+    "To delineate thousands",
+    "As decimal place",
+    "Only separate words within column heading and X labels.",
+    "Separate adjacent columns.",
+    "Missing values are denoted by",
+    "Exclude values preceded or followed by asterisks",
+    "Decimate: Import a row, skip",
+    "Unstack. Column #",
+    "Skip columns. Import a column, skip",
+    "Rename data table, using",
+    "Imported file name",
+    "Text in row",
+    "The current position of the insertion point",
+    "Maintain row and column arrangement of the data source.",
+    "Transpose. Each row becomes a column.",
+    "By rows. Place",
+    "By columns. Stack",
+    "Leave a blank row in Prism",
+    "Skip over that row",
+    "Don't import info constants.",
+    "Don't import notes.",
+    "Import from portion of file between <Info> and </Info>.",
+    "Use these settings as the default for Import and Paste Special.",
+    "Restore original defaults",
+  ]) {
+    ok(dialog.includes(label), `Import dialog misses Prism's wording: ${label}`);
+  }
+  // And the store offers the parsed file to it, then applies the confirmed
+  // choices; the grid shows it over the live insertion point, the shell
+  // when no table is active.
+  const document = readFileSync("src/store/use-document.ts", "utf8");
+  ok(document.includes("pendingImport"), "use-document never offers the parsed file to the dialog");
+  ok(document.includes("confirmImport"), "use-document never applies the confirmed import choices");
+  ok(document.includes("computeImport"), "use-document never runs the choices pipeline");
+  const grid = readFileSync("src/views/tables/grid.tsx", "utf8");
+  ok(grid.includes("ImportDialog"), "the grid never shows the Import dialog");
+  const shell = readFileSync("src/components/app-shell.tsx", "utf8");
+  ok(shell.includes("ImportDialog"), "the shell never shows the Import dialog when no table is active");
 });
 
 // ── 1.8 seq 226: automatic backup ────────────────────────────────────────

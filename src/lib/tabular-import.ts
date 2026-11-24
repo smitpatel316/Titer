@@ -361,8 +361,11 @@ export const MAX_IMPORT_COLUMNS = 500;
 const cleanColumnName = (name: string): string => name.trim().replace(/:/g, "-").replace(/\s+/g, " ").slice(0, 100);
 
 /** Rows of cell strings as a Titer table. Throws when there is nothing to
- *  import. `source` names the file in the error and the notes. */
-export function rowsToTable(rows: string[][], source: string): TabularTable {
+ *  import. `source` names the file in the error and the notes. `header`
+ *  overrides the header-row reading: true reads the first row as column
+ *  names, false reads it as data, undefined auto-detects (the Import
+ *  dialog's "Column titles" choice, seq 429). */
+export function rowsToTable(rows: string[][], source: string, header?: boolean): TabularTable {
   // Trailing empty rows and columns are the file's padding, not data.
   let grid = rows.filter((row) => row.some((c) => c !== ""));
   while (grid.length && grid[grid.length - 1].every((c) => c === "")) grid.pop();
@@ -389,12 +392,14 @@ export function rowsToTable(rows: string[][], source: string): TabularTable {
   // A header row: every non-empty cell text (no numbers — a blank cell is
   // a trailing delimiter, not data) with at least one number below it. A
   // year ("2024") is a number, so a header of years is read as data
-  // instead — the values stay intact, only the names differ.
+  // instead — the values stay intact, only the names differ. `header`
+  // overrides the reading when the caller knows (the Import dialog).
   const firstRow = grid[0];
   const headerRow =
-    firstRow.some((c) => c !== "") &&
-    firstRow.every((c) => c === "" || parseCell(c) === null) &&
-    grid.slice(1).some((r) => r.some((c) => parseCell(c) !== null));
+    header ??
+    (firstRow.some((c) => c !== "") &&
+      firstRow.every((c) => c === "" || parseCell(c) === null) &&
+      grid.slice(1).some((r) => r.some((c) => parseCell(c) !== null)));
   const body = headerRow ? grid.slice(1) : grid;
   if (body.length === 0) throw new Error(`“${source}” has column names but no data rows to import.`);
   if (headerRow) notes.push("The first row was read as column names.");

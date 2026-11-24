@@ -22,6 +22,8 @@ import { WelcomeDialog } from "./welcome-dialog";
 import { openProjectsOrSay } from "../menus";
 import { ConflictDialog } from "./conflict-dialog";
 import { BackupRecoveryDialog } from "./backup-recovery-dialog";
+import { ImportDialog } from "../views/tables/import-dialog";
+import type { ImportChoices } from "../lib/import-choices";
 import { RemotePickerDialog } from "./remote-picker";
 import { CloudSettingsDialog } from "./cloud-settings";
 import { Button } from "../ui/controls";
@@ -65,11 +67,13 @@ export function AppShell() {
   useMcpJobDispatcher();
   const { projectUpdated, dismissProjectUpdated } = documentActions;
   const { prismImported, dismissPrismImported, dataImported, dismissDataImported } = documentActions;
+  const { pendingImport, confirmImport, cancelImport } = documentActions;
+  const { activeNode } = useProjectStore();
   const { prismSavedReport, dismissPrismSavedReport } = documentActions;
   const { projectMerged, dismissProjectMerged } = documentActions;
   const { templateNotice, dismissTemplateNotice } = documentActions;
   const { linkedNotice, dismissLinkedNotice } = documentActions;
-  const { sidebar } = useLayout();
+  const { sidebar, gallery } = useLayout();
   const [fullscreen, setFullscreen] = React.useState(false);
   React.useEffect(() => onFullscreenChange(setFullscreen), []);
   // Seq 227: the `@page` rule for the print settings (paper, orientation,
@@ -153,7 +157,17 @@ export function AppShell() {
             Save
           </Button>
         </div>
-        <Workspace />
+        <Workspace
+          importOffer={pendingImport}
+          onConfirmImport={(choices: ImportChoices, insertion: { r: number; c: number } | null) =>
+            void confirmImport(choices, insertion)
+          }
+          onCancelImport={cancelImport}
+          onChooseImportFile={() => {
+            cancelImport();
+            void documentActions.importData();
+          }}
+        />
       </main>
 
       <UniversalModal
@@ -310,6 +324,26 @@ export function AppShell() {
           </>
         }
       />
+
+      {/* The Import dialog when no table is showing it (seq 429): the grid
+          shows it over the live insertion point while a table is active,
+          but an empty project, a graph, or the Gallery has no grid — the
+          shell shows it instead, with no insertion point, so the import
+          creates a new table. */}
+      {pendingImport !== null && (activeNode?.type !== "table" || gallery) && (
+        <ImportDialog
+          offer={pendingImport}
+          insertionPoint={null}
+          onConfirm={(choices: ImportChoices, insertion: { r: number; c: number } | null) =>
+            void confirmImport(choices, insertion)
+          }
+          onCancel={cancelImport}
+          onChooseFile={() => {
+            cancelImport();
+            void documentActions.importData();
+          }}
+        />
+      )}
 
       {/* The "Linked Data" notice, in-app for the same Quirk-2 reason as
           "Data File Imported" above: the linked sources a project open
