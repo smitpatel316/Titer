@@ -210,16 +210,52 @@ export async function saveGraphImage(
   }
 }
 
-/** Starts the clipboard write inside the click, with a promised image, as WebKit
- *  requires. Clipboard images must be raster: always PNG. Grayscale applies;
- *  CMYK falls back to colour (the clipboard has no CMYK). */
+/** Whether this webview's clipboard takes a PDF item (seq 431 — Prism
+ *  copies a graph as vector PDF on Mac). Safari / WKWebView report it
+ *  through `ClipboardItem.supports` where present; a webview without
+ *  that API is treated as PDF-less, so the copy falls back to PNG-only —
+ *  the old behaviour, never a failed write. Safe to call in node (no
+ *  ClipboardItem there): returns false. */
+export function clipboardSupportsPdf(): boolean {
+  if (typeof ClipboardItem === "undefined") return false;
+  const supports = (ClipboardItem as unknown as { supports?: (type: string) => boolean }).supports;
+  return typeof supports === "function" ? supports("application/pdf") : false;
+}
+
+/** The clipboard payload for a graph/figure copy (seq 431): the vector
+ *  PDF first, with the PNG bitmap as the fallback for apps that take no
+ *  PDF. When `pdf` is undefined the item is PNG-only — the copy a
+ *  platform without PDF support gets, exactly the old behaviour. */
+export function vectorClipboardItem(
+  pdf: Promise<Blob> | undefined,
+  png: Promise<Blob>,
+): Record<string, Promise<Blob>> {
+  return pdf ? { "application/pdf": pdf, "image/png": png } : { "image/png": png };
+}
+
+/** Starts the clipboard write inside the click, with promised images, as
+ *  WebKit requires. Vector PDF first (seq 431 — Prism copies a graph as
+ *  vector PDF on Mac), PNG as the fallback for apps that take no PDF;
+ *  when this webview reports no PDF support the copy is PNG-only, the
+ *  old behaviour. A rejected vector write falls back to a PNG-only write,
+ *  so a platform that takes the PDF type but refuses the write still
+ *  leaves the PNG on the clipboard. Grayscale applies; CMYK falls back
+ *  to colour (the clipboard has no CMYK). */
 export function copyGraphImage(el: HTMLElement, size: Size, dpi: Resolution, colorMode: ColorMode = "color") {
   const why = tooLarge(size, dpi);
   if (why) return void alert("Couldn't Copy the Graph", why, "error");
   const mode = colorMode === "cmyk" ? "color" : colorMode;
+  // The PDF render only runs where the platform takes it (the raster
+  // fallback's size cap above still applies — the PNG is always drawn).
+  const pdf = clipboardSupportsPdf() ? toImage(el, size, "pdf", dpi, mode).then((out) => out.blob) : undefined;
+  const png = toImage(el, size, "png", dpi, mode).then((out) => out.blob);
   navigator.clipboard
-    .write([new ClipboardItem({ "image/png": toImage(el, size, "png", dpi, mode).then((out) => out.blob) })])
-    .catch((err) => alert("Couldn't Copy the Graph", reason(err), "error"));
+    .write([new ClipboardItem(vectorClipboardItem(pdf, png))])
+    .catch(() =>
+      navigator.clipboard
+        .write([new ClipboardItem({ "image/png": png })])
+        .catch((err) => alert("Couldn't Copy the Graph", reason(err), "error")),
+    );
 }
 
 /** One-click Send to Word / PowerPoint / Keynote (v2 item 19, seq 217):

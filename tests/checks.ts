@@ -19126,6 +19126,49 @@ check("seq 216: EPS is true vector PostScript with a BoundingBox", () => {
   ok(!cmyk.includes("setrgbcolor"), "CMYK EPS sets no RGB colour");
 });
 
+check("copy-431: graph/figure copy writes a vector PDF item with a PNG fallback", async () => {
+  const { clipboardSupportsPdf, vectorClipboardItem } = await import("../src/views/graphs/graph-export");
+  // The node harness has no ClipboardItem: the probe reports no PDF support.
+  strictEqual(clipboardSupportsPdf(), false, "no ClipboardItem here, so no PDF support");
+  // A real vector PDF from the same generator the copy path reuses.
+  const pdfBytes = svgToPdf(seq216Svg);
+  ok(new TextDecoder().decode(pdfBytes).startsWith("%PDF-1.4"), "svgToPdf yields valid PDF bytes");
+  const pdf = Promise.resolve(new Blob([pdfBytes as BlobPart], { type: "application/pdf" }));
+  // Real PNG bytes from the repo's own docs screenshot.
+  const pngBytes = readFileSync("docs/hero-dose-response.png");
+  const png = Promise.resolve(new Blob([pngBytes as BlobPart], { type: "image/png" }));
+  const withPdf = vectorClipboardItem(pdf, png);
+  deepStrictEqual(Object.keys(withPdf).sort(), ["application/pdf", "image/png"], "PDF first, PNG fallback");
+  const pdfBlob = await withPdf["application/pdf"]!;
+  strictEqual(pdfBlob.type, "application/pdf");
+  ok(
+    new TextDecoder().decode(new Uint8Array(await pdfBlob.arrayBuffer())).startsWith("%PDF-1.4"),
+    "the PDF item carries valid PDF bytes",
+  );
+  const pngBlob = await withPdf["image/png"]!;
+  strictEqual(pngBlob.type, "image/png");
+  deepStrictEqual(
+    [...new Uint8Array(await pngBlob.arrayBuffer()).slice(0, 8)],
+    [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+    "the PNG fallback carries real PNG bytes",
+  );
+  // Without a PDF promise the item is PNG-only — the old behaviour.
+  deepStrictEqual(Object.keys(vectorClipboardItem(undefined, png)), ["image/png"]);
+  // The copy flow itself: both copy functions offer the PDF item, and the
+  // raster-only comment/path is gone.
+  const graphSrc = readFileSync("src/views/graphs/graph-export.ts", "utf8");
+  ok(graphSrc.includes('"application/pdf"'), "copyGraphImage offers a PDF clipboard item");
+  ok(!graphSrc.includes("Clipboard images must be raster"), "the raster-only copy path is gone from graph-export");
+  const figureSrc = readFileSync("src/views/figures/figure-export.ts", "utf8");
+  ok(figureSrc.includes('"application/pdf"'), "copyFigureImage offers a PDF clipboard item");
+  ok(!figureSrc.includes("Clipboard images must be raster"), "the raster-only copy path is gone from figure-export");
+  ok(figureSrc.includes("renderFigurePdf"), "the figure copy reuses the PDF export's renderer");
+  ok(
+    /format === "pdf"\) \{\s*const out = await renderFigurePdf/.test(figureSrc),
+    "figure PDF export routes through renderFigurePdf",
+  );
+});
+
 check("seq 216: BMP is 24-bit bottom-up BGR with DPI in the header", () => {
   const bmp = bmpEncode({ width: 4, height: 3, rgba: fixtureRgba }, 1200);
   strictEqual(String.fromCharCode(bmp[0]!, bmp[1]!), "BM");
