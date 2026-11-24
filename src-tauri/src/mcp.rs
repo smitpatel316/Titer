@@ -109,7 +109,7 @@ const OPT_IN_FILE: &str = "mcp-opt-in.json";
 /// feedback-consent records beside it, same 0700 directory, same
 /// owner-only (0600) file. Missing, unreadable, or malformed reads as the
 /// default — only the `read` group — so a fresh install advertises just
-/// the six read-group tools (docs/mcp-server-contract.md §12).
+/// the seven read-group tools (docs/mcp-server-contract.md §12).
 const ALLOWLIST_FILE: &str = "mcp-allowlist.json";
 
 /// The feedback server: `POST {this}` with one saved entry's JSON, and it
@@ -1330,10 +1330,11 @@ struct AllowlistGroup {
     tools: &'static [&'static str],
 }
 
-/// The six read-group tools, on by default — the five Phase 1 tools plus
-/// `titer_list_backups` (seq 226). Note: `ANTIGRAVITY_ENABLED_TOOLS` below
+/// The seven read-group tools, on by default — the five Phase 1 tools plus
+/// `titer_list_backups` (seq 226) plus `titer_list_plugin_analyses`
+/// (marketplace M4). Note: `ANTIGRAVITY_ENABLED_TOOLS` below
 /// still allowlists exactly the five Phase 1 tools, by design; the
-/// server-side default is six.
+/// server-side default is seven.
 const ALLOWLIST_DEFAULT_GROUPS: &[&str] = &["read"];
 
 const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
@@ -1532,7 +1533,7 @@ fn write_allowlist_file(dir: &std::path::Path, groups: &HashSet<String>) -> Resu
 
 /// The tools this server may advertise and run, from the persisted
 /// record. No `mcp/` directory yet (tests, or a server started before
-/// any Settings visit) reads as the default — only the six read tools.
+/// any Settings visit) reads as the default — only the seven read tools.
 fn load_allowlist(state: &McpState) -> HashSet<String> {
     match state.dir() {
         Some(dir) => allowed_tools(&read_allowlist_groups(&dir)),
@@ -8905,8 +8906,8 @@ impl TiterMcpServer {
         // The allowlist (contract §12): read once per session, so a toggle
         // change in Settings applies when the client reconnects. A fresh
         // state with no `mcp/` directory yet reads as the default — only
-        // the six read-group tools (the five Phase 1 tools plus
-        // `titer_list_backups`).
+        // the seven read-group tools (the five Phase 1 tools plus
+        // `titer_list_backups` plus `titer_list_plugin_analyses`).
         let allowed = load_allowlist(&state);
         // Inspector 2.13.0 discards tools whose outputSchema has no `type`
         // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
@@ -12830,7 +12831,7 @@ mod tests {
         state.lock().dir = Some(dir.clone());
         let session2 = mcp_initialize(&client, &url).await;
         let names2 = mcp_list_tool_names(&client, &url, &session2).await;
-        assert_eq!(names2.len(), 8, "six reads + two destructive tools: {names2:?}");
+        assert_eq!(names2.len(), 9, "seven reads + two destructive tools: {names2:?}");
         assert!(names2.contains(&"titer_delete_node".to_string()), "delete appears: {names2:?}");
         assert!(names2.contains(&"titer_run_script".to_string()), "script appears: {names2:?}");
 
@@ -12851,9 +12852,9 @@ mod tests {
             call_raw_text(&resp)
         );
 
-        // The first session is untouched by the toggle: it still lists 6.
+        // The first session is untouched by the toggle: it still lists 7.
         let names_again = mcp_list_tool_names(&client, &url, &session).await;
-        assert_eq!(names_again.len(), 6, "existing session keeps its allowlist: {names_again:?}");
+        assert_eq!(names_again.len(), 7, "existing session keeps its allowlist: {names_again:?}");
 
         cancel.cancel();
         server.abort();
@@ -12886,7 +12887,7 @@ mod tests {
     }
 
     #[test]
-    fn allowlist_default_is_the_six_read_tools() {
+    fn allowlist_default_is_the_seven_read_tools() {
         let groups: HashSet<String> = ALLOWLIST_DEFAULT_GROUPS.iter().map(|g| g.to_string()).collect();
         let tools = allowed_tools(&groups);
         let mut names: Vec<&str> = tools.iter().map(String::as_str).collect();
@@ -12895,6 +12896,7 @@ mod tests {
             names,
             vec![
                 "titer_list_backups",
+                "titer_list_plugin_analyses",
                 "titer_list_projects",
                 "titer_list_tables",
                 "titer_read_graph",

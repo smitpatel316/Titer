@@ -762,9 +762,10 @@ approval. The allowlist makes the default 6-tool list real, server-side.
 
 ### 12.1 Default set
 
-By default only the six read-group tools are advertised or callable —
+By default only the seven read-group tools are advertised or callable —
 the five Phase 1 read tools plus `titer_list_backups` (automatic
-backups, added in 1.8.0, seq 226). Note the one-click "Connect to
+backups, added in 1.8.0, seq 226) plus `titer_list_plugin_analyses`
+(marketplace M4). Note the one-click "Connect to
 Antigravity" entry still allowlists exactly the five Phase 1 tools, by
 design — the server-side default is one tool wider:
 
