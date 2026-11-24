@@ -2633,11 +2633,68 @@ check("seq 241: Help offers the User Guide (F1) and the shell opens only the fix
   ok(/Titer User Guide/.test(menus), "Help menu lacks Titer User Guide");
   ok(/F1/.test(menus), "User Guide lacks the F1 shortcut");
   const native = readFileSync("src/native.ts", "utf8");
-  ok(/"github" \| "releases" \| "coffee" \| "guide"/.test(native), "openLink doesn't take a guide link");
+  const openLinkDecl = native.slice(native.indexOf("export const openLink"), native.indexOf(") => void invoke", native.indexOf("export const openLink")));
+  for (const key of ["github", "releases", "coffee", "guide", "curve-fitting", "statistics", "support", "support-policies", "site"]) {
+    ok(openLinkDecl.includes(`"${key}"`), `openLink doesn't take a ${key} link`);
+  }
   const shell = readFileSync("src-tauri/src/main.rs", "utf8");
   const guideUrls = shell.match(/"https:\/\/github\.com\/smitpatel316\/Titer"/g) ?? [];
   ok(guideUrls.length >= 4, `open_link's guide arm is missing (exact repo URL appears ${guideUrls.length}×, want 4: github + guide in both cfgs)`);
   ok(/"guide" =>/.test(shell), "open_link has no guide arm");
+});
+
+// seq 432 (Help → entries beyond the User Guide): the Help menu carries
+// Prism's Help entries in Prism's order, each with a live destination —
+// Prism's own Curve Fitting and Statistics guides (labelled as Prism's),
+// Titer Tips and How to Cite Titer as in-app dialogs, the support entries
+// on GitHub, and the Titer web site — and no Manage License (open source).
+check("seq 432: Help carries Prism's entries in order — guides, Tips, How to Cite, support — and no Manage License", () => {
+  const menus = readFileSync("src/menus.ts", "utf8");
+  const order = [
+    "Titer on GitHub",
+    "Titer User Guide",
+    "Prism Curve Fitting Guide",
+    "Prism Statistics Guide",
+    "Titer Tips",
+    "How to Cite Titer",
+    "Support Web Site",
+    "Personal Support…",
+    "Support Policies",
+    "Go to titer.smitpatel.net",
+    "Buy Me a Coffee",
+    "Sample Project",
+  ];
+  let at = -1;
+  for (const label of order) {
+    const i = menus.indexOf(`{ text: "${label}"`);
+    ok(i > at, `Help menu lacks ${label} in Prism order`);
+    at = i;
+  }
+  ok(!/{ text: "Manage License/.test(menus), "Help menu offers Manage License — Titer has no licence to manage");
+  ok(/accelerator: "F1"/.test(menus), "User Guide lost its F1 shortcut");
+  // The new destinations ride the same fixed-address openLink as the guide.
+  const native = readFileSync("src/native.ts", "utf8");
+  const openLinkDecl = native.slice(native.indexOf("export const openLink"), native.indexOf(") => void invoke", native.indexOf("export const openLink")));
+  for (const key of ["curve-fitting", "statistics", "support", "support-policies", "site"]) {
+    ok(openLinkDecl.includes(`"${key}"`), `openLink doesn't take the new Help destination ${key}`);
+  }
+  const shell = readFileSync("src-tauri/src/main.rs", "utf8");
+  const arms: [string, string][] = [
+    ["curve-fitting", "https://www.graphpad.com/guides/prism/latest/curve-fitting/"],
+    ["statistics", "https://www.graphpad.com/guides/prism/latest/statistics/"],
+    ["support", "https://github.com/smitpatel316/Titer/issues"],
+    ["support-policies", "https://github.com/smitpatel316/Titer/blob/main/SUPPORT.md"],
+    ["site", "https://titer.smitpatel.net/"],
+  ];
+  for (const [key, url] of arms) {
+    ok(new RegExp(`"${key}" =>`).test(shell), `open_link has no ${key} arm`);
+    const hits = shell.split(url).length - 1;
+    ok(hits >= 2, `open_link's ${key} address is missing (appears ${hits}×, want 2: one per cfg)`);
+  }
+  // Support Policies is a real page, not a dead link.
+  ok(existsSync("SUPPORT.md"), "SUPPORT.md is missing");
+  const support = readFileSync("SUPPORT.md", "utf8");
+  ok(/github\.com\/smitpatel316\/Titer\/issues/.test(support), "SUPPORT.md never says where to get support");
 });
 
 // ── seq 299 (Window menu: open-project window list) ─────────────────────

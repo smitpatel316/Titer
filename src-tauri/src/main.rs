@@ -1321,8 +1321,9 @@ fn set_spinner(window: WebviewWindow, at: Option<(f64, f64)>) {
     });
 }
 
-/// Titer's GitHub page, its releases, the user guide, or Buy Me a Coffee,
-/// in the default browser: fixed addresses, so the page can't open anything else.
+/// Titer's GitHub page, its releases, the user guide, the Prism guides, the
+/// support pages, the Titer web site, or Buy Me a Coffee, in the default
+/// browser: fixed addresses, so the page can't open anything else.
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn open_link(link: String) {
@@ -1331,6 +1332,11 @@ fn open_link(link: String) {
         "guide" => c"https://github.com/smitpatel316/Titer",
         "releases" => c"https://github.com/smitpatel316/Titer/releases/latest",
         "coffee" => c"https://www.buymeacoffee.com/smitpatel316",
+        "curve-fitting" => c"https://www.graphpad.com/guides/prism/latest/curve-fitting/",
+        "statistics" => c"https://www.graphpad.com/guides/prism/latest/statistics/",
+        "support" => c"https://github.com/smitpatel316/Titer/issues",
+        "support-policies" => c"https://github.com/smitpatel316/Titer/blob/main/SUPPORT.md",
+        "site" => c"https://titer.smitpatel.net/",
         _ => return,
     };
     unsafe {
@@ -1502,6 +1508,11 @@ fn open_link(link: String) {
         "guide" => "https://github.com/smitpatel316/Titer",
         "releases" => "https://github.com/smitpatel316/Titer/releases/latest",
         "coffee" => "https://www.buymeacoffee.com/smitpatel316",
+        "curve-fitting" => "https://www.graphpad.com/guides/prism/latest/curve-fitting/",
+        "statistics" => "https://www.graphpad.com/guides/prism/latest/statistics/",
+        "support" => "https://github.com/smitpatel316/Titer/issues",
+        "support-policies" => "https://github.com/smitpatel316/Titer/blob/main/SUPPORT.md",
+        "site" => "https://titer.smitpatel.net/",
         _ => return,
     };
     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
