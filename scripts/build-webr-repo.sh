@@ -196,7 +196,21 @@ echo "... ($(ls "$OUT" | wc -l) files)"
 # fails, so a repo without it wastes a failed fetch — plus a warning — on
 # the first install of every session. The upstream repo ships a PACKAGES.rds
 # but it indexes the whole repo (~20k packages); ours must index exactly the
-# vendored closure, so scripts/build-webr-repo-rds.mjs generates it from the
-# .tgz files with tools::write_PACKAGES (run in webR — Hatch has no desktop
-# R) and verifies it round-trips. Needs node + the repo's node_modules.
-node "$PYROOT/scripts/build-webr-repo-rds.mjs" "$PYCONTRIB"
+# vendored closure, so it is generated here from the .tgz files with
+# tools::write_PACKAGES and verified to round-trip. Prefer real R when it is
+# installed (Rscript on PATH); otherwise R runs in WASM via webR
+# (scripts/build-webr-repo-rds.mjs, needs node + the repo's node_modules).
+# Real R is REQUIRED on Windows: webR 0.6.0 cannot initialise under Node
+# there — its worker loads R.js via import(path.resolve(baseUrl + "R.js"))
+# and Node's ESM loader rejects a bare Windows drive-letter path
+# ("Received protocol 'd:'"). No baseUrl spelling fixes it: path.resolve
+# always returns a bare drive-letter path, and a file:// baseUrl breaks
+# both Node's Worker constructor (ERR_WORKER_PATH) and webR's path.resolve
+# call. The Windows CI job installs R (r-lib/actions/setup-r) so this
+# branch takes the Rscript path; Hatch and Mac have no desktop R, so they
+# keep the .mjs path.
+if command -v Rscript >/dev/null 2>&1; then
+  Rscript "$PYROOT/scripts/build-webr-repo-rds.R" "$PYCONTRIB"
+else
+  node "$PYROOT/scripts/build-webr-repo-rds.mjs" "$PYCONTRIB"
+fi

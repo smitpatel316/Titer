@@ -16,6 +16,13 @@
 // out — the trimmed PACKAGES / PACKAGES.gz stay the build script's, written
 // from the upstream index (scripts/build-webr-repo.sh).
 //
+// NOTE: this script cannot run on Windows — webR 0.6.0 cannot initialise
+// under Node there (its worker dynamic-imports path.resolve(baseUrl +
+// "R.js") and Node's ESM loader rejects a bare Windows drive-letter path:
+// "Received protocol 'd:'"). On Windows, build-webr-repo.sh uses
+// scripts/build-webr-repo-rds.R with real R instead. Do not "fix" this
+// script for Windows; fix webR or keep the Rscript path.
+//
 // Usage: node scripts/build-webr-repo-rds.mjs [contrib-dir]
 //   contrib-dir defaults to webr-repo/bin/emscripten/contrib/4.6.
 // Exits non-zero (loudly) if webR is not installed, no .tgz files are found,
