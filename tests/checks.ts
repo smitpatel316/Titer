@@ -307,6 +307,11 @@ import { XY_SCATTER_MAX_POINTS } from "../src/views/graphs/xy-scatter";
 import { addForestPlot } from "../src/views/graphs/forest-plot";
 import { addScreePlot } from "../src/views/graphs/scree-plot";
 import { addEstimationPlot, estimationDiffLabel } from "../src/views/graphs/estimation-plot";
+import { FLOW_FIXTURE_PARAMS, FLOW_FIXTURE_SAMPLE_ID, generateFixtureSample, loadFixtureSample } from "../src/flow/fixture";
+import { bin2D, downsampleIndices, FLOW_SCATTER_CAP, histogram1D, pointDensities, smoothGrid } from "../src/flow/density";
+import { getColumn, listSamples, sampleStats, unloadSample } from "../src/flow/store";
+import { buildFlowContourPlot, buildFlowDensityPlot, buildFlowDotPlot, buildFlowHistogram, buildFlowPseudocolorPlot } from "../src/flow/viewer";
+import { isFlowEnabled } from "../src/flow/feature-flag";
 import { evaluate as evaluateFittedCurve } from "../src/views/graphs/fitted-curve";
 import { addSchildPlot, schildPlotPoints } from "../src/views/graphs/schild-plot";
 import { addRegression, fitLinear } from "../src/views/graphs/regression-overlay";
@@ -40779,6 +40784,140 @@ check("plugin-m5 seam: the interceptor never calls executeJob or Tauri invoke di
   );
   ok(!/\bexecuteJob\s*\(/.test(src), "isolation.ts must never call executeJob itself");
   ok(!/\binvoke\s*\(/.test(src), "isolation.ts must never call Tauri invoke itself");
+});
+
+// flow-f1b (seq 442): the density-plot viewer on synthetic fixture data,
+// through the store API contract only. Binning/KDE counts correct on the
+// fixture, downsample/cap behavior correct, graph modules registered, and
+// the viewer reads data ONLY through src/flow/store.ts — never raw arrays
+// from elsewhere. Opt-in, off by default: no picker surface lists a flow
+// graph while the flow toggle is off.
+check("flow-f1b: density-plot viewer (dot / density / contour / pseudocolor / histogram) on the synthetic fixture", () => {
+  // The fixture is deterministic: the same seed regenerates the same events.
+  const a = generateFixtureSample(20000, 42);
+  const b = generateFixtureSample(20000, 42);
+  strictEqual(a.paramNames.join(","), FLOW_FIXTURE_PARAMS.join(","));
+  deepStrictEqual(Array.from(a.columns[2].slice(0, 100)), Array.from(b.columns[2].slice(0, 100)));
+  ok(a.columns.every((c) => c.length === 20000), "every fixture parameter holds 20000 events");
+
+  // Load through the store contract; stats come back from the store, not the arrays.
+  loadFixtureSample(20000, 42);
+  ok(listSamples().includes(FLOW_FIXTURE_SAMPLE_ID), "the fixture sample is listed");
+  const stats = sampleStats(FLOW_FIXTURE_SAMPLE_ID);
+  strictEqual(stats.eventCount, 20000);
+  strictEqual(stats.params.length, FLOW_FIXTURE_PARAMS.length);
+  for (const p of stats.params) ok(p.min < p.max, `${p.name} has a range`);
+  const cd4 = getColumn(FLOW_FIXTURE_SAMPLE_ID, "CD4");
+  strictEqual(cd4.length, 20000);
+  throws(() => getColumn(FLOW_FIXTURE_SAMPLE_ID, "NoSuchParam"), /unknown parameter/);
+
+  // 2-D binning: every valid event lands in exactly one bin.
+  const cd8 = getColumn(FLOW_FIXTURE_SAMPLE_ID, "CD8");
+  const grid = bin2D(cd4, cd8, 64, 64);
+  strictEqual(grid.counts.length, 64);
+  ok(grid.counts.every((row) => row.length === 64), "the grid is 64 x 64");
+  strictEqual(grid.counts.flat().reduce((s, v) => s + v, 0), grid.total);
+  strictEqual(grid.total, 20000, "all 20000 events are binned, none dropped");
+  strictEqual(grid.skipped, 0);
+
+  // Smoothing keeps the mass (within edge effects) and stays finite.
+  const smooth = smoothGrid(grid.counts, 1.5);
+  ok(smooth.flat().every((v) => Number.isFinite(v) && v >= 0), "smoothed densities are finite and non-negative");
+  const smoothTotal = smooth.flat().reduce((s, v) => s + v, 0);
+  ok(Math.abs(smoothTotal - grid.total) / grid.total < 0.1, `smoothing preserves mass (${smoothTotal} vs ${grid.total})`);
+  ok(smooth.flat().reduce((m, v) => Math.max(m, v), 0) > 0, "the smoothed grid has a peak");
+
+  // Per-point densities: one per event, normalised to [0, 1], peaking at 1.
+  const densities = pointDensities(cd4, cd8, smooth, grid.xEdges, grid.yEdges);
+  strictEqual(densities.length, 20000);
+  ok(densities.every((v) => Number.isFinite(v) && v >= 0 && v <= 1), "per-point densities lie in [0, 1]");
+  strictEqual(densities.reduce((m, v) => Math.max(m, v), 0), 1, "densities are normalised to a peak of 1");
+  // 1-D histogram: counts sum to the events, one bin per edge pair.
+  const hist = histogram1D(cd4, 32);
+  strictEqual(hist.counts.length, 32);
+  strictEqual(hist.counts.reduce((s, v) => s + v, 0), 20000);
+
+  // Downsampling: capped, deterministic, in range, strictly increasing.
+  strictEqual(FLOW_SCATTER_CAP, XY_SCATTER_MAX_POINTS, "the flow scatter cap matches the SVG scatter cap");
+  const idx = downsampleIndices(20000, FLOW_SCATTER_CAP, 7);
+  strictEqual(idx.length, FLOW_SCATTER_CAP);
+  ok(idx.every((v, i) => v < 20000 && (i === 0 || v > idx[i - 1])), "downsampled indices are in range and increasing");
+  deepStrictEqual(Array.from(downsampleIndices(20000, FLOW_SCATTER_CAP, 7)), Array.from(idx), "downsampling is deterministic");
+  strictEqual(downsampleIndices(100, FLOW_SCATTER_CAP, 7).length, 100, "a small sample is not padded up");
+
+  // Dot plot: WebGL scatter, density-aware — capped, never 1:1 at 100k scale.
+  const dot = buildFlowDotPlot({ sampleId: FLOW_FIXTURE_SAMPLE_ID, xParam: "CD4", yParam: "CD8" });
+  strictEqual(dot.data.length, 1);
+  strictEqual((dot.data[0] as { type: string }).type, "scattergl");
+  strictEqual(((dot.data[0] as { x: unknown[] }).x).length, FLOW_SCATTER_CAP, "the dot plot draws the cap, not all 20000 events");
+  // The export pipeline converts WebGL traces to plain scatter (graph-export reuse).
+  strictEqual((vectorTraces(dot.data)[0] as { type: string }).type, "scatter");
+
+  // Density plot: a heatmap over the smoothed binned grid.
+  const density = buildFlowDensityPlot({ sampleId: FLOW_FIXTURE_SAMPLE_ID, xParam: "CD4", yParam: "CD8", bins: 64 });
+  strictEqual((density.data[0] as { type: string }).type, "heatmap");
+  const z = (density.data[0] as { z: number[][] }).z;
+  strictEqual(z.length, 64);
+  ok(z.every((row) => row.length === 64), "density z is 64 x 64");
+  ok(z.flat().reduce((s, v) => s + v, 0) > 0, "the density grid holds events");
+
+  // Contour plot: contour lines over the same smoothed grid.
+  const contour = buildFlowContourPlot({ sampleId: FLOW_FIXTURE_SAMPLE_ID, xParam: "CD4", yParam: "CD8", bins: 64 });
+  strictEqual((contour.data[0] as { type: string }).type, "contour");
+  const cz = (contour.data[0] as { z: number[][] }).z;
+  strictEqual(cz.length, 64);
+  ok(cz.every((row) => row.length === 64), "contour z is 64 x 64");
+
+  // Pseudocolor plot: capped scattergl dots, each coloured by its local density.
+  const pseudo = buildFlowPseudocolorPlot({ sampleId: FLOW_FIXTURE_SAMPLE_ID, xParam: "CD4", yParam: "CD8" });
+  strictEqual((pseudo.data[0] as { type: string }).type, "scattergl");
+  const marker = (pseudo.data[0] as { marker: { color: number[]; colorscale: unknown } }).marker;
+  strictEqual(marker.color.length, FLOW_SCATTER_CAP, "one density colour per plotted dot");
+  ok(marker.color.every((v) => v >= 0 && v <= 1), "pseudocolor values lie in [0, 1]");
+  ok(marker.colorscale !== undefined, "pseudocolor carries a colorscale");
+
+  // Histogram: one bar trace per population, counts summing to each population.
+  const histFig = buildFlowHistogram({
+    sampleId: FLOW_FIXTURE_SAMPLE_ID,
+    param: "CD4",
+    bins: 32,
+    populations: [
+      { name: "CD4+", gate: { xParam: "CD4", yParam: "CD8", xMin: 1000, xMax: Infinity, yMin: -Infinity, yMax: Infinity } },
+      { name: "CD4-", gate: { xParam: "CD4", yParam: "CD8", xMin: -Infinity, xMax: 1000, yMin: -Infinity, yMax: Infinity } },
+    ],
+  });
+  strictEqual(histFig.data.length, 2, "one bar trace per population");
+  const counts = histFig.data.map((t) => ((t as { y: number[] }).y).reduce((s, v) => s + v, 0));
+  ok(counts[0] > 5000 && counts[0] < 7000, `the CD4+ population is ~6000 events (got ${counts[0]})`);
+  ok(counts[1] > 13000 && counts[1] < 15000, `the CD4- population is ~14000 events (got ${counts[1]})`);
+  strictEqual(counts[0] + counts[1], 20000, "the populations partition the sample");
+  const whole = buildFlowHistogram({ sampleId: FLOW_FIXTURE_SAMPLE_ID, param: "CD4", bins: 32 });
+  strictEqual(whole.data.length, 1);
+  strictEqual(((whole.data[0] as { y: number[] }).y).reduce((s, v) => s + v, 0), 20000);
+
+  // Registry: all five flow modules are registered — and none is offered in
+  // any graph picker while the flow toggle is off (opt-in, off by default).
+  for (const t of ["flow-dot-plot", "flow-density-plot", "flow-contour-plot", "flow-pseudocolor-plot", "flow-histogram"] as const) {
+    ok(t in GRAPHS, `${t} is registered`);
+  }
+  ok(!isFlowEnabled(), "flow is off by default");
+  for (const list of Object.values(GRAPH_OPTIONS_BY_TABLE)) {
+    ok(!list.some((o) => o.value.startsWith("flow-")), "no picker offers a flow graph while flow is off");
+  }
+  // The registry modules build from graph options (the export pipeline's path).
+  const regDot = GRAPHS["flow-dot-plot"].build([], { ...DEFAULT_GRAPH_OPTIONS, flowSampleId: FLOW_FIXTURE_SAMPLE_ID, flowXParam: "CD4", flowYParam: "CD8" } as never, paintOf(DEFAULT_GRAPH_OPTIONS, 1));
+  strictEqual((regDot.data[0] as { type: string }).type, "scattergl");
+
+  // The viewer reads ONLY through the store: unload the sample and every
+  // builder fails — there is no second copy of the data to fall back on.
+  unloadSample(FLOW_FIXTURE_SAMPLE_ID);
+  throws(() => buildFlowDotPlot({ sampleId: FLOW_FIXTURE_SAMPLE_ID, xParam: "CD4", yParam: "CD8" }), /not loaded/);
+  throws(() => buildFlowDensityPlot({ sampleId: FLOW_FIXTURE_SAMPLE_ID, xParam: "CD4", yParam: "CD8" }), /not loaded/);
+  ok(!listSamples().includes(FLOW_FIXTURE_SAMPLE_ID), "the sample is gone after unload");
+  const viewerSrc = readFileSync("src/flow/viewer.ts", "utf8");
+  ok(!/from "\.\.\//.test(viewerSrc), "viewer.ts imports nothing outside src/flow");
+  ok(!/\b(TableData|readTable)\b/.test(viewerSrc), "viewer.ts never touches the table grid");
+  loadFixtureSample(20000, 42);
 });
 
 

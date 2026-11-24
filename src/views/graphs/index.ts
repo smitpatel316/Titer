@@ -54,6 +54,7 @@ import { kmeansScatter } from "./kmeans-scatter";
 import { dendrogram, DENDROGRAM_SERIES } from "./dendrogram";
 import { elbowPlot, gapPlot, silhouettePlot, ELBOW_SERIES, GAP_SERIES, SILHOUETTE_SERIES } from "./choosing-k";
 import { histogram } from "./histogram";
+import { flowContourPlot, flowDensityPlot, flowDotPlot, flowHistogramPlot, flowPseudocolorPlot } from "./flow-plots";
 import {
   mvBarChart,
   mvBarStrip,
@@ -162,6 +163,14 @@ export const GRAPHS: Record<GraphType, GraphModule> = {
   "monte-carlo-histogram": monteCarloHistogram,
   "qq-plot": qqPlot,
   residuals,
+  // FlowJo (seq 442): registered, so the export pipeline + registry reuse
+  // is real — but offered in NO GRAPH_OPTIONS_BY_TABLE list, so no picker
+  // shows them while the flow toggle is off (opt-in, off by default).
+  "flow-dot-plot": flowDotPlot,
+  "flow-density-plot": flowDensityPlot,
+  "flow-contour-plot": flowContourPlot,
+  "flow-pseudocolor-plot": flowPseudocolorPlot,
+  "flow-histogram": flowHistogramPlot,
   "mv-strip-plot": mvStripPlot,
   "mv-summary-symbol": mvSummarySymbol,
   "mv-bar-strip": mvBarStrip,
