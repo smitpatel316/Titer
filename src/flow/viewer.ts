@@ -11,7 +11,15 @@
 // are capped/downsampled to FLOW_SCATTER_CAP.
 
 import { getColumn, sampleStats } from "./store";
-import { bin2D, binCenters, downsampleIndices, FLOW_SCATTER_CAP, histogram1D, pointDensities, smoothGrid } from "./density";
+import {
+  bin2D,
+  binCenters,
+  downsampleIndices,
+  FLOW_SCATTER_CAP,
+  histogram1D,
+  pointDensities,
+  smoothGrid,
+} from "./density";
 
 export interface FlowFigure {
   data: unknown[];
@@ -47,7 +55,12 @@ export interface FlowHistogramOptions {
   populations?: { name: string; gate: FlowGateRect }[];
 }
 
-const layoutFor = (title: string, xName: string, yName: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+const layoutFor = (
+  title: string,
+  xName: string,
+  yName: string,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> => ({
   title,
   xaxis: { title: xName },
   yaxis: { title: yName },

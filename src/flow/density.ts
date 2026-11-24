@@ -89,9 +89,14 @@ export function bin2D(
 }
 
 /** Separable Gaussian blur of a count grid (the KDE: binning + smoothing).
- *  Each output cell is a weighted mean renormalised over the weights that
- *  actually landed inside the grid, so edges don't dim and the total mass
- *  is preserved up to edge effects. */
+ *  Boundary-corrected by reflecting the DATA across each domain edge (the
+ *  edge cell repeats — numpy's `symmetric` mode, a mirror across the
+ *  boundary, not across the edge cell's centre): kernel mass that would
+ *  fall outside the grid folds back in, so the total mass is preserved
+ *  exactly and a constant grid stays constant. That matters for flow data,
+ *  whose populations hug the low edge of a linear range — a renormalised
+ *  blur silently loses a fifth of the events there, and a centre-mirror
+ *  loses three fifths of a corner peak. */
 export function smoothGrid(counts: number[][], sigma: number): number[][] {
   const rows = counts.length;
   const cols = counts[0]?.length ?? 0;
@@ -99,19 +104,17 @@ export function smoothGrid(counts: number[][], sigma: number): number[][] {
   const radius = Math.max(1, Math.ceil(3 * sigma));
   const kernel: number[] = [];
   for (let d = -radius; d <= radius; d++) kernel.push(Math.exp((-d * d) / (2 * sigma * sigma)));
-  const blur1D = (line: number[]): number[] =>
-    line.map((_, i) => {
+  const kernelSum = kernel.reduce((s, w) => s + w, 0);
+  const blur1D = (line: number[]): number[] => {
+    if (line.length <= 1) return [...line];
+    // Mirror across the domain boundary: -1 maps to 0, len maps to len-1.
+    const sym = (k: number): number => (k < 0 ? -1 - k : k >= line.length ? 2 * line.length - 1 - k : k);
+    return line.map((_, i) => {
       let sum = 0;
-      let weight = 0;
-      for (let d = -radius; d <= radius; d++) {
-        const j = i + d;
-        if (j < 0 || j >= line.length) continue;
-        const w = kernel[d + radius];
-        sum += w * line[j];
-        weight += w;
-      }
-      return weight > 0 ? sum / weight : 0;
+      for (let d = -radius; d <= radius; d++) sum += kernel[d + radius] * line[sym(i + d)];
+      return sum / kernelSum;
     });
+  };
   const across = counts.map(blur1D);
   const out: number[][] = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
   for (let c = 0; c < cols; c++) {
