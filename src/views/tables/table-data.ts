@@ -17,7 +17,7 @@ import { renameCalculatedReferences } from "../../lib/calcvars";
 import { normalizeDecimalInput, setDecimalPlaces, type DecimalSeparator } from "../../lib/decimal-format";
 import { parseCell } from "../../lib/numeric";
 import { seriesKeyOf, groupRuns } from "../../lib/columns";
-import { isGrouped, isNested } from "../../lib/dataset";
+import { isGrouped, isNested, leadOf } from "../../lib/dataset";
 import {
   summaryFormatOf,
   summarySubcolumns,
@@ -1158,6 +1158,36 @@ export function toTSV(data: TableData, range: Range, separator: DecimalSeparator
     lines.push(cells.join("\t"));
   }
   return lines.join("\n");
+}
+
+/** The copied cells as a real HTML table (seq 430, Prism E3.5): Word, Excel
+ *  and other apps paste it as a table instead of unformatted text. The header
+ *  row carries the copied columns' names, exactly as the grid shows them
+ *  (a grouped sub-column shows only its part after the group prefix); the
+ *  cells match the TSV form — full precision, decimal separator applied —
+ *  and names and values are HTML-escaped. The plain-text TSV form stays the
+ *  primary copy; this rides alongside it on the clipboard. */
+export function toHTMLTable(data: TableData, range: Range, separator: DecimalSeparator = "."): string {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const shown = (v: string) => (v !== "" && separator === "," && parseCell(v) !== null ? v.replace(".", ",") : v);
+  const c1 = Math.min(range.c1, data.columns.length - 1);
+  const nested = isNested(data);
+  const grouped = isGrouped(data) || nested;
+  const lead = leadOf(data);
+  const head: string[] = [];
+  for (let c = range.c0; c <= c1; c++) {
+    const name = data.columns[c] ?? "";
+    const shownName =
+      grouped && c >= lead ? name.slice((nested ? name.lastIndexOf(":") : name.indexOf(":")) + 1) : name;
+    head.push(`<th>${esc(shownName)}</th>`);
+  }
+  const rows: string[] = [];
+  for (let r = range.r0; r <= Math.min(range.r1, data.rows.length - 1); r++) {
+    const cells: string[] = [];
+    for (let c = range.c0; c <= c1; c++) cells.push(`<td>${esc(shown(data.rows[r]?.[c] ?? ""))}</td>`);
+    rows.push(`<tr>${cells.join("")}</tr>`);
+  }
+  return `<table><thead><tr>${head.join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
 
 /** Parses tab-separated text, including Excel's quoted cells (with tabs or line breaks inside). */
