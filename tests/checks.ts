@@ -503,6 +503,11 @@ import { goToSheetEntries, linkedSheetIds, pingPongTarget, pushHistory } from ".
 import { repointCandidates } from "../src/lib/repoint-analysis";
 import { addMonteCarloHistogram } from "../src/views/graphs/monte-carlo-histogram";
 import { addGeneratedCurves } from "../src/views/graphs/generated-curves";
+import { runPluginGates, scanPluginJsCode, scanPluginRCodeExtended } from "../src/plugins/gates";
+import { computeSafetyScorecard } from "../src/plugins/scorecard";
+import { grantSubsetIsValid, permissionChoices, splitGrant } from "../src/plugins/review";
+import { checkPluginCommand, dispatchPluginCommand } from "../src/plugins/ipc-guard";
+import { CapabilityDeniedError } from "../src/plugins/capabilities";
 
 const checks: [string, () => void | Promise<void>][] = [];
 const check = (name: string, fn: () => void | Promise<void>) => checks.push([name, fn]);
@@ -38726,6 +38731,1466 @@ check("seq 374: MCP set-decimal-places sets the places, clears to Default, and k
     }),
     /needs places/,
   );
+});
+
+// ── Plugin SDK (marketplace M1, seq 433) ──────────────────────────────────
+// Pins for the salvaged src/plugins/ groundwork: manifest validation,
+// registry namespacing, loader lifecycle, and the hello-analysis fixture.
+// The plugin modules are imported dynamically inside each check (the
+// precedent at "export presets" above) so a missing src/plugins/ fails
+// these checks instead of the whole file.
+
+check("plugin-sdk manifest: valid passes, invalid and unknown-permission rejected", async () => {
+  const { validatePluginManifest, pluginIncompatibility } = await import("../src/plugins/index");
+  const valid = {
+    id: "example.hello-analysis",
+    name: "Hello Analysis",
+    version: "1.0.0",
+    apiVersion: "3.0",
+    author: "Titer example author",
+    license: "MIT",
+    permissions: ["read-table"],
+  };
+  const good = validatePluginManifest(valid);
+  ok("manifest" in good, `valid manifest rejected: ${JSON.stringify(good)}`);
+  if ("manifest" in good) strictEqual(good.manifest.id, "example.hello-analysis");
+
+  const bad = validatePluginManifest({ ...valid, author: "", version: "one" });
+  ok("errors" in bad && bad.errors.length >= 2, "invalid manifest (empty author, bad version) must be rejected");
+
+  const unknownPerm = validatePluginManifest({ ...valid, permissions: ["read-table", "teleport"] });
+  ok(
+    "errors" in unknownPerm && unknownPerm.errors.some((e) => /Unknown permission/.test(e)),
+    "unknown permission must be rejected at install time",
+  );
+
+  const reserved = validatePluginManifest({ ...valid, id: "titer.hello" });
+  ok(
+    "errors" in reserved && reserved.errors.some((e) => /reserved for first-party/.test(e)),
+    "a titer. id must be rejected",
+  );
+
+  const oldApi = validatePluginManifest({ ...valid, apiVersion: "2.0" });
+  ok("manifest" in oldApi, "an old-apiVersion manifest still parses");
+  if ("manifest" in oldApi) {
+    const reason = pluginIncompatibility(oldApi.manifest, "3.0.0");
+    ok(reason !== null && /needs Titer 2\.x/.test(reason), `old API major must be incompatible, got: ${reason}`);
+  }
+  if ("manifest" in good) {
+    strictEqual(pluginIncompatibility(good.manifest, "3.0.0"), null);
+  }
+});
+
+check("plugin-sdk registry: plugin ids are namespaced and never shadow first-party", async () => {
+  const {
+    clearPluginRegistry,
+    getPluginAnalysis,
+    parsePluginAnalysisId,
+    pluginAnalysisId,
+    registerPluginAnalysis,
+    resolveAnalysis,
+  } = await import("../src/plugins/index");
+  clearPluginRegistry();
+  strictEqual(pluginAnalysisId("example.test", "double-mean"), "plugin:example.test:double-mean");
+  deepStrictEqual(parsePluginAnalysisId("plugin:example.test:double-mean"), {
+    pluginId: "example.test",
+    analysisId: "double-mean",
+  });
+  strictEqual(parsePluginAnalysisId("descriptive-statistics"), null);
+
+  const spec = {
+    id: "double-mean",
+    label: "Double mean",
+    tableTypes: ["column"],
+    minColumns: 1,
+    parameters: [],
+    questions: [],
+    compute: {
+      kind: "typescript",
+      run: ({ groups }: { groups: { values: number[] }[] }) => ({
+        stats: [{ label: "Doubled mean", value: 2 * (groups[0]?.values.reduce((a, b) => a + b, 0) ?? 0) }],
+      }),
+    },
+  };
+  const registered = registerPluginAnalysis("example.test", spec);
+  ok("id" in registered, `registration failed: ${JSON.stringify(registered)}`);
+  if ("id" in registered) strictEqual(registered.id, "plugin:example.test:double-mean");
+
+  // A duplicate registration is refused, and a titer. plugin id is refused.
+  const dup = registerPluginAnalysis("example.test", spec);
+  ok("errors" in dup && dup.errors.some((e) => /already registered/.test(e)), "duplicate registration must fail");
+  const reserved = registerPluginAnalysis("titer.bad", spec);
+  ok("errors" in reserved, "a titer. plugin id must not register");
+
+  // resolveAnalysis covers both sources, and the plugin side never shadows.
+  const firstParty = resolveAnalysis("descriptive-statistics");
+  ok(firstParty?.source === "first-party", "first-party analyses still resolve as first-party");
+  const plugin = resolveAnalysis("plugin:example.test:double-mean");
+  ok(plugin?.source === "plugin" && plugin.pluginId === "example.test", "plugin analysis resolves by namespaced id");
+  strictEqual(resolveAnalysis("no-such-analysis"), undefined);
+  strictEqual(getPluginAnalysis("plugin:example.test:double-mean")?.pluginId, "example.test");
+  clearPluginRegistry();
+});
+
+check("plugin-sdk loader: install → review → enable → disable lifecycle", async () => {
+  const {
+    clearPluginRegistry,
+    confirmEnable,
+    disablePlugin,
+    installPlugin,
+    loadPluginFromZip,
+    parsePluginPackage,
+    requestEnable,
+    resolveAnalysis,
+  } = await import("../src/plugins/index");
+  const JSZip = (await import("jszip")).default;
+  clearPluginRegistry();
+
+  const pluginJson = {
+    id: "example.hello-analysis",
+    name: "Hello Analysis",
+    version: "1.0.0",
+    apiVersion: "3.0",
+    author: "Titer example author",
+    license: "MIT",
+    permissions: ["read-table"],
+    analyses: [
+      {
+        id: "hello-mean",
+        label: "Hello mean",
+        tableTypes: ["column"],
+        minColumns: 1,
+        parameters: [],
+        questions: [],
+        compute: { kind: "r", code: "c(mean_value=mean(g0))" },
+      },
+    ],
+  };
+  const files = new Map([
+    ["plugin.json", JSON.stringify(pluginJson)],
+    ["README.md", "# Hello Analysis\n"],
+  ]);
+  const parsed = parsePluginPackage(files);
+  ok("package" in parsed, `hello package rejected: ${JSON.stringify(parsed)}`);
+  if (!("package" in parsed)) return;
+
+  // The same package loads from a zip (JSZip path).
+  const zip = new JSZip();
+  for (const [name, text] of files) zip.file(name, text);
+  const zipped = await loadPluginFromZip(await zip.generateAsync({ type: "uint8array" }), "hello.zip");
+  ok(
+    "package" in zipped && zipped.package.manifest.id === "example.hello-analysis",
+    `zip load failed: ${JSON.stringify(zipped)}`,
+  );
+
+  const installed = installPlugin(parsed.package, [], { kind: "folder", name: "hello-analysis" });
+  ok("record" in installed, `install failed: ${JSON.stringify(installed)}`);
+  if (!("record" in installed)) return;
+  strictEqual(installed.record.status, "disabled");
+  strictEqual(resolveAnalysis("plugin:example.hello-analysis:hello-mean"), undefined);
+
+  const duplicate = installPlugin(parsed.package, [installed.record.manifest.id], {
+    kind: "folder",
+    name: "hello-analysis",
+  });
+  ok("errors" in duplicate && duplicate.errors.some((e) => /already installed/.test(e)), "duplicate install refused");
+
+  const pending = requestEnable(installed.record);
+  strictEqual(pending.status, "pending-review");
+  throws(() => confirmEnable(pending, ["network"], "3.0.0"), /never declared/);
+  const enabled = confirmEnable(pending, ["read-table"], "3.0.0");
+  strictEqual(enabled.status, "enabled");
+  deepStrictEqual(enabled.grantedPermissions, ["read-table"]);
+  const resolved = resolveAnalysis("plugin:example.hello-analysis:hello-mean");
+  ok(resolved?.source === "plugin", "enabled plugin analyses resolve");
+
+  const disabled = disablePlugin(enabled);
+  strictEqual(disabled.status, "disabled");
+  strictEqual(
+    resolveAnalysis("plugin:example.hello-analysis:hello-mean"),
+    undefined,
+    "disabling unregisters the analyses at once",
+  );
+  clearPluginRegistry();
+});
+
+check("plugin-sdk hello: verifyHelloPlugin numbers", async () => {
+  const { clearPluginRegistry, verifyHelloPlugin } = await import("../src/plugins/index");
+  clearPluginRegistry();
+  const { ok: passed, checks: lines } = await verifyHelloPlugin();
+  ok(passed, `verifyHelloPlugin failed:\n  ${lines.join("\n  ")}`);
+  ok(
+    lines.some((l) => /hello-mean: mean of \[2, 4, 9\] is 5/.test(l)),
+    "hello-mean must be 5",
+  );
+  ok(
+    lines.some((l) => /hello-scaled-mean: mean 5 × 2 is 10/.test(l)),
+    "hello-scaled-mean must be 10",
+  );
+  ok(
+    lines.some((l) => /median 4 × 2 is 8/.test(l)),
+    "hello-scaled-mean (median) must be 8",
+  );
+  ok(
+    lines.some((l) => /multiplier 99 \(above max 10\) is refused/.test(l)),
+    "multiplier 99 must be refused",
+  );
+  clearPluginRegistry();
+});
+
+// ── M3 (seq 435): marketplace trust & safety pins ────────────────────────
+// Gates + scorecard + review grant-subset + IPC capability guard. The
+// fixtures are minimal plugin packages built inline (no M1 loader needed:
+// the pins drive the gates directly, the way the marketplace index will).
+
+const m3Manifest = (overrides: Record<string, unknown> = {}) => ({
+  id: "example.hello-analysis",
+  name: "Hello Analysis",
+  version: "1.0.0",
+  apiVersion: "3.0",
+  author: "Example",
+  license: "MIT",
+  permissions: ["read-table"],
+  entry: "index.js",
+  analyses: [
+    {
+      id: "hello-mean",
+      label: "Hello mean",
+      tableTypes: ["column"],
+      minColumns: 1,
+      parameters: [],
+      questions: [],
+      compute: { kind: "r", code: "c(mean=mean(g0))" },
+    },
+  ],
+  ...overrides,
+});
+
+const m3GoodFiles = (extra: [string, string][] = []) =>
+  new Map<string, string>([
+    ["plugin.json", JSON.stringify(m3Manifest())],
+    ["index.js", "export function run() { return 1; }\n"],
+    ["README.md", "# Hello\n"],
+    ...extra,
+  ]);
+
+const m3OwnSuiteOk = () => ({ ok: true, checks: ["hello-mean: mean of [2, 4, 9] is 5"] });
+
+check("m3 gates: a good plugin passes every gate", async () => {
+  const report = await runPluginGates({ manifestJson: m3Manifest(), files: m3GoodFiles(), runOwnSuite: m3OwnSuiteOk });
+  strictEqual(report.passed, true);
+  strictEqual(report.pluginId, "example.hello-analysis");
+  strictEqual(report.license, "MIT");
+  strictEqual(report.gates.length, 4);
+  for (const gate of report.gates) ok(gate.passed, `${gate.id} should pass: ${gate.detail}`);
+});
+
+check("m3 gates: an unknown permission fails the manifest gate", async () => {
+  const report = await runPluginGates({
+    manifestJson: m3Manifest({ permissions: ["read-table", "fly-to-the-moon"] }),
+    files: m3GoodFiles(),
+    runOwnSuite: m3OwnSuiteOk,
+  });
+  strictEqual(report.passed, false);
+  const manifestGate = report.gates.find((g) => g.id === "manifest");
+  ok(manifestGate && !manifestGate.passed, "the manifest gate must fail");
+  ok(manifestGate!.findings.some((f) => f.message.includes("fly-to-the-moon")), "the finding names the unknown permission");
+});
+
+check("m3 gates: R system() and library() are caught by the static scan", () => {
+  const systemHits = scanPluginRCodeExtended('c(x=system("ls"))', "evil.R");
+  ok(systemHits.some((f) => f.pattern.includes("system")), "system() must be caught");
+  strictEqual(systemHits[0]?.file, "evil.R");
+  const libraryHits = scanPluginRCodeExtended('library(dplyr)\nc(mean=mean(g0))', "evil.R");
+  ok(libraryHits.some((f) => f.pattern.includes("library")), "library() must be caught");
+  strictEqual(libraryHits.find((f) => f.pattern.includes("library"))?.line, 1);
+  strictEqual(scanPluginRCodeExtended("c(mean=mean(g0))").length, 0, "clean R code passes");
+});
+
+check("m3 gates: load-time scanPluginRCode shares the gates denylist (one source of truth)", async () => {
+  const { scanPluginRCode } = await import("../src/plugins/analysis-spec");
+  ok(
+    scanPluginRCode('x <- system2("ls")').length > 0,
+    "system2() (extended pattern) must trip the load-time scan too",
+  );
+  ok(
+    scanPluginRCode("c(mean=mean(g0))").length === 0,
+    "clean R code passes the load-time scan",
+  );
+  strictEqual(
+    scanPluginRCode('c(x=system("ls"))')[0],
+    'Plugin R code must not run shell commands (system()/shell()).',
+    "load-time message matches the gate message verbatim",
+  );
+});
+
+check("m3 gates: R code in the manifest analysis compute is scanned too", async () => {
+  const report = await runPluginGates({
+    manifestJson: m3Manifest({
+      analyses: [
+        {
+          id: "hello-mean",
+          label: "Hello mean",
+          tableTypes: ["column"],
+          minColumns: 1,
+          parameters: [],
+          questions: [],
+          compute: { kind: "r", code: 'c(x=system("id"))' },
+        },
+      ],
+    }),
+    files: m3GoodFiles(),
+    runOwnSuite: m3OwnSuiteOk,
+  });
+  strictEqual(report.passed, false);
+  const scanGate = report.gates.find((g) => g.id === "static-scan");
+  ok(scanGate && !scanGate.passed, "the scan gate must fail");
+  ok(scanGate!.findings.some((f) => (f.file ?? "").includes("hello-mean")), "the finding names the analysis");
+});
+
+check("m3 gates: JS eval() and the Function constructor are caught; clean JS passes", () => {
+  const evalHits = scanPluginJsCode("const f = eval(code);", "index.js", ["read-table"]);
+  ok(evalHits.some((f) => f.severity === "error" && f.pattern.includes("eval")), "eval() must be caught");
+  const fnHits = scanPluginJsCode("const f = new Function('x', 'return x');", "index.js", ["read-table"]);
+  ok(fnHits.some((f) => f.pattern.includes("Function")), "new Function() must be caught");
+  strictEqual(scanPluginJsCode("export function run() { return 1; }\n", "index.js", ["read-table"]).length, 0);
+});
+
+check("m3 gates: child_process and direct fs access are caught", () => {
+  const procHits = scanPluginJsCode('const cp = require("child_process");', "index.js", ["read-table"]);
+  ok(procHits.some((f) => f.severity === "error" && f.pattern.includes("child_process")));
+  const fsHits = scanPluginJsCode('import fs from "node:fs";', "index.js", ["read-table"]);
+  ok(fsHits.some((f) => f.severity === "error" && f.pattern.includes("fs")));
+});
+
+check("m3 gates: a Tauri invoke escape is caught", () => {
+  const hits = scanPluginJsCode('import { invoke } from "@tauri-apps/api/core";\ninvoke("read_text", { path });', "index.js", [
+    "read-table",
+  ]);
+  ok(hits.some((f) => f.severity === "error" && f.message.includes("titer.*")), "direct Tauri calls must be caught");
+});
+
+check("m3 gates: network fetch without the network permission fails; with it declared it is a warning only", () => {
+  const denied = scanPluginJsCode("const r = await fetch(url);", "index.js", ["read-table"]);
+  ok(denied.some((f) => f.severity === "error" && f.message.includes("network")), "undeclared fetch must fail");
+  const allowed = scanPluginJsCode("const r = await fetch(url);", "index.js", ["read-table", "network"]);
+  ok(!allowed.some((f) => f.severity === "error"), "declared fetch must not fail the scan");
+  ok(allowed.some((f) => f.severity === "warning"), "declared fetch is still flagged for the review step");
+  const xhr = scanPluginJsCode("const x = new XMLHttpRequest();", "index.js", ["read-table"]);
+  ok(xhr.some((f) => f.severity === "error"), "undeclared XHR must fail");
+});
+
+check("m3 gates: no verify entry point fails the own-suite gate", async () => {
+  const report = await runPluginGates({ manifestJson: m3Manifest(), files: m3GoodFiles() });
+  strictEqual(report.passed, false);
+  const suiteGate = report.gates.find((g) => g.id === "own-suite");
+  ok(suiteGate && !suiteGate.passed, "the own-suite gate must fail without a runner");
+  ok(suiteGate!.detail.includes("verify"), "the reason names the missing verify entry point");
+});
+
+check("m3 gates: a failing, empty, or throwing own-suite fails the gate", async () => {
+  const failing = await runPluginGates({
+    manifestJson: m3Manifest(),
+    files: m3GoodFiles(),
+    runOwnSuite: () => ({ ok: false, checks: ["hello-mean: expected mean 5, got 6"] }),
+  });
+  strictEqual(failing.gates.find((g) => g.id === "own-suite")?.passed, false);
+  const empty = await runPluginGates({
+    manifestJson: m3Manifest(),
+    files: m3GoodFiles(),
+    runOwnSuite: () => ({ ok: true, checks: [] }),
+  });
+  strictEqual(empty.gates.find((g) => g.id === "own-suite")?.passed, false, "a suite with no checks fails");
+  const throwing = await runPluginGates({
+    manifestJson: m3Manifest(),
+    files: m3GoodFiles(),
+    runOwnSuite: () => {
+      throw new Error("boom");
+    },
+  });
+  strictEqual(throwing.gates.find((g) => g.id === "own-suite")?.passed, false, "a throwing suite fails");
+});
+
+check("m3 gates: the license is recorded verbatim, never judged", async () => {
+  const report = await runPluginGates({
+    manifestJson: m3Manifest({ license: "Proprietary — all rights reserved" }),
+    files: m3GoodFiles(),
+    runOwnSuite: m3OwnSuiteOk,
+  });
+  strictEqual(report.passed, true, "an unlisted license must not fail the gates (Q7 open)");
+  strictEqual(report.license, "Proprietary — all rights reserved");
+  const licenseGate = report.gates.find((g) => g.id === "license");
+  ok(licenseGate && licenseGate.passed && licenseGate.detail.includes("Proprietary — all rights reserved"));
+});
+
+check("m3 scorecard: full inputs score 100 and pass", async () => {
+  const gates = await runPluginGates({ manifestJson: m3Manifest(), files: m3GoodFiles(), runOwnSuite: m3OwnSuiteOk });
+  const card = computeSafetyScorecard(gates, {
+    readmePresent: true,
+    screenshotsPresent: true,
+    versionHistoryPresent: true,
+    publisherVerified: true,
+  });
+  strictEqual(card.score, 100);
+  strictEqual(card.maxScore, 100);
+  strictEqual(card.verdict, "pass");
+  strictEqual(card.license, "MIT");
+  ok(card.items.every((item) => item.earned), "every input must show as earned");
+});
+
+check("m3 scorecard: failed gates fail the verdict whatever the listing shows", async () => {
+  const gates = await runPluginGates({ manifestJson: m3Manifest(), files: m3GoodFiles() });
+  const card = computeSafetyScorecard(gates, {
+    readmePresent: true,
+    screenshotsPresent: true,
+    versionHistoryPresent: true,
+    publisherVerified: true,
+  });
+  strictEqual(card.verdict, "fail");
+  ok(card.items.find((item) => item.key === "gates")?.earned === false, "the gates item shows as unearned");
+});
+
+check("m3 scorecard: missing README and screenshots cost exactly their weights", async () => {
+  const gates = await runPluginGates({ manifestJson: m3Manifest(), files: m3GoodFiles(), runOwnSuite: m3OwnSuiteOk });
+  const card = computeSafetyScorecard(gates, {
+    readmePresent: false,
+    screenshotsPresent: false,
+    versionHistoryPresent: true,
+    publisherVerified: true,
+  });
+  strictEqual(card.score, 85);
+  strictEqual(card.verdict, "pass");
+  strictEqual(card.items.find((item) => item.key === "readme")?.earned, false);
+  strictEqual(card.items.find((item) => item.key === "screenshots")?.earned, false);
+});
+
+check("m3 review: a grant outside the declared permissions is rejected; an empty grant is valid", () => {
+  const manifest = m3Manifest();
+  strictEqual(grantSubsetIsValid(manifest as never, ["read-table"]).ok, true);
+  const bad = grantSubsetIsValid(manifest as never, ["read-table", "network"]);
+  strictEqual(bad.ok, false);
+  if (!bad.ok) ok(bad.reason.includes("network"), "the reason names the undeclared permission");
+  strictEqual(grantSubsetIsValid(manifest as never, []).ok, true, "granting nothing is valid");
+});
+
+check("m3 review: splitGrant lists the denied remainder", () => {
+  const manifest = m3Manifest({ permissions: ["read-table", "run-analysis"] });
+  const split = splitGrant(manifest as never, ["read-table"]);
+  deepStrictEqual(split.granted, ["read-table"]);
+  deepStrictEqual(split.denied, ["run-analysis"]);
+  deepStrictEqual(split.invalid, []);
+});
+
+check("m3 review: permission choices carry plain-language lines", () => {
+  const choices = permissionChoices(m3Manifest() as never, []);
+  strictEqual(choices.length, 1);
+  strictEqual(choices[0]?.permission, "read-table");
+  ok(choices[0]?.description.includes("Read the open table"), "no raw permission string is shown alone");
+  strictEqual(choices[0]?.granted, false, "nothing is granted by default");
+});
+
+check("m3 guard: a granted permission allows, an undeclared command denies, an ungranted declared permission denies", async () => {
+  const ctx = { pluginId: "example.hello-analysis", grantedPermissions: ["read-table"] as const };
+  strictEqual(checkPluginCommand(ctx, "titer.readTable").allowed, true);
+  const undeclared = checkPluginCommand(ctx, "titer.fetch");
+  strictEqual(undeclared.allowed, false);
+  if (!undeclared.allowed) ok(undeclared.reason.includes("network"), "the denial names the missing permission");
+  const ungranted = checkPluginCommand(
+    { pluginId: "example.hello-analysis", grantedPermissions: [] as const },
+    "titer.readTable",
+  );
+  strictEqual(ungranted.allowed, false, "a declared-but-ungranted permission still denies");
+  strictEqual(await dispatchPluginCommand(ctx, "titer.readTable", () => 42), 42);
+  await rejects(dispatchPluginCommand(ctx, "titer.fetch", () => 42), CapabilityDeniedError);
+});
+
+check("m3 guard: an unknown command denies fail-closed", () => {
+  const ctx = { pluginId: "example.hello-analysis", grantedPermissions: ["read-table", "network"] as const };
+  const checkResult = checkPluginCommand(ctx, "titer.deleteEverything");
+  strictEqual(checkResult.allowed, false);
+  if (!checkResult.allowed) ok(checkResult.reason.includes("not a Titer plugin command"));
+});
+
+// ── Marketplace store (M2, seq 434) ───────────────────────────────────────
+// The marketplace store — browse/search/install/update/uninstall — built
+// against the DOCUMENTED loader API (src/plugins/loader.ts on
+// v3/plugin-api @ 7b5d9be; M1 lands it on check/marketplace). Until then
+// these pins run against a test double with the same signatures and the
+// same lifecycle (disabled → pending-review → enabled); the check-branch
+// gate re-runs them against the real loader. No network in any pin: the
+// bundled sample index + fixture zips are read from disk, and the store's
+// fetch hooks throw if called.
+
+import {
+  DEFAULT_INDEX_URL,
+  parseMarketplaceIndex,
+  searchListings,
+  type MarketplaceIndex,
+  type MarketplaceListing,
+} from "../src/marketplace/index";
+import { sha256Hex, verifySha256 } from "../src/marketplace/hash";
+import { availableUpdateFor, isUpdateOfferable, UPDATE_OFFER_DELAY_MS } from "../src/marketplace/updates";
+import { clearPin, loadPins, pinnedVersion, savePin } from "../src/marketplace/pins";
+import { createMemoryStorage } from "../src/marketplace/storage";
+import { checkPluginDependency, dependencyNotice } from "../src/marketplace/dependencies";
+import { MARKETPLACE_INSTALLED_KEY, MarketplaceStore, type MarketplaceStoreDeps } from "../src/marketplace/store";
+import type {
+  PluginAnalysisSpecJson,
+  PluginLoaderPort,
+  PluginPermission,
+} from "../src/marketplace/loader-port";
+
+/**
+ * A test double for the documented loader API: same signatures, same
+ * lifecycle (disabled → pending-review → enabled), minimal manifest
+ * validation. `enabledIds` is the double's registry, so pins can prove an
+ * enable registers and a disable/uninstall unregisters.
+ */
+function fakeLoaderPort(): PluginLoaderPort & { enabledIds: Set<string> } {
+  const enabledIds = new Set<string>();
+  const port: PluginLoaderPort = {
+    async loadPluginFromZip(bytes, name) {
+      let zip: JSZip;
+      try {
+        zip = await JSZip.loadAsync(bytes);
+      } catch {
+        return { errors: [`“${name}” is not a readable zip file.`] };
+      }
+      const entry = zip.file("plugin.json");
+      if (!entry) return { errors: ["This plugin has no plugin.json at its root — a plugin folder needs one."] };
+      let raw: unknown;
+      try {
+        raw = JSON.parse(await entry.async("string")) as unknown;
+      } catch {
+        return { errors: ["plugin.json is not valid JSON."] };
+      }
+      const v = raw as Record<string, unknown>;
+      const errors: string[] = [];
+      for (const field of ["id", "name", "version", "apiVersion", "author", "license"]) {
+        if (typeof v[field] !== "string" || !(v[field] as string).trim().length) {
+          errors.push(`Plugin ${field} must be a non-empty string.`);
+        }
+      }
+      if (!Array.isArray(v.permissions)) errors.push("Plugin permissions must be a list (possibly empty).");
+      if (!Array.isArray(v.analyses) || v.analyses.length === 0) {
+        errors.push("plugin.json must list at least one analysis under “analyses”.");
+      }
+      if (errors.length) return { errors };
+      return {
+        package: {
+          manifest: {
+            id: v.id as string,
+            name: (v.name as string).trim(),
+            version: v.version as string,
+            apiVersion: v.apiVersion as string,
+            author: (v.author as string).trim(),
+            license: (v.license as string).trim(),
+            permissions: [...(v.permissions as PluginPermission[])],
+          },
+          analyses: v.analyses as PluginAnalysisSpecJson[],
+          warnings: [],
+        },
+      };
+    },
+    installPlugin(parsed, existingIds, source) {
+      if (existingIds.includes(parsed.manifest.id)) {
+        return { errors: [`Plugin “${parsed.manifest.id}” is already installed.`] };
+      }
+      return {
+        record: {
+          manifest: parsed.manifest,
+          analyses: parsed.analyses,
+          status: "disabled",
+          installedAt: new Date().toISOString(),
+          grantedPermissions: [],
+          source,
+        },
+      };
+    },
+    requestEnable(record) {
+      if (record.status === "enabled") throw new Error(`Plugin “${record.manifest.id}” is already enabled.`);
+      if (record.status === "incompatible") {
+        throw new Error(record.incompatibility ?? `Plugin “${record.manifest.id}” is incompatible.`);
+      }
+      if (record.status === "pending-review") return record;
+      return { ...record, status: "pending-review" };
+    },
+    confirmEnable(record, granted, _appVersion) {
+      if (record.status !== "pending-review") {
+        throw new Error(`Plugin “${record.manifest.id}” is not awaiting review — call requestEnable first.`);
+      }
+      const undeclared = granted.filter((p) => !record.manifest.permissions.includes(p));
+      if (undeclared.length) {
+        throw new Error(`Cannot grant ${undeclared.join(", ")} — the plugin never declared ${undeclared.length > 1 ? "them" : "it"}.`);
+      }
+      enabledIds.add(record.manifest.id);
+      return { ...record, status: "enabled", grantedPermissions: [...granted], incompatibility: undefined };
+    },
+    disablePlugin(record) {
+      enabledIds.delete(record.manifest.id);
+      return { ...record, status: "disabled", incompatibility: undefined };
+    },
+    pluginReviewLines(record) {
+      const lines = [`“${record.manifest.name}” ${record.manifest.version} by ${record.manifest.author}.`];
+      if (record.manifest.permissions.length) lines.push(`Asks for: ${record.manifest.permissions.join(", ")}.`);
+      lines.push(
+        record.status === "disabled"
+          ? "Installed disabled — nothing runs until you enable it."
+          : `Status: ${record.status}.`,
+      );
+      return lines;
+    },
+  };
+  return { ...port, enabledIds };
+}
+
+/** Fixed "now" for the update-delay pins: Tue 2026-11-24 12:00 UTC. */
+const M2_NOW = Date.parse("2026-11-24T12:00:00Z");
+const M2_FIXTURES = "src/marketplace/fixtures";
+
+function m2StoreDeps(overrides: Partial<MarketplaceStoreDeps> = {}): MarketplaceStoreDeps {
+  return {
+    loader: fakeLoaderPort(),
+    storage: createMemoryStorage(),
+    fetchText: async () => {
+      throw new Error("M2 pin must not hit the network (fetchText).");
+    },
+    fetchBytes: async () => {
+      throw new Error("M2 pin must not hit the network (fetchBytes).");
+    },
+    loadBundledZip: async (name) => new Uint8Array(readFileSync(`${M2_FIXTURES}/${name}`)),
+    now: () => M2_NOW,
+    appVersion: "1.9.0",
+    ...overrides,
+  };
+}
+
+function m2SampleIndex(): MarketplaceIndex {
+  const parsed = parseMarketplaceIndex(readFileSync(`${M2_FIXTURES}/sample-index.json`, "utf8"));
+  if ("errors" in parsed) throw new Error(`bundled sample index does not parse: ${parsed.errors.join(" ")}`);
+  return parsed.index;
+}
+
+function m2Listing(): MarketplaceListing {
+  const listing = m2SampleIndex().listings[0];
+  if (!listing) throw new Error("bundled sample index has no listings");
+  return listing;
+}
+
+async function m2Install(store: MarketplaceStore, listing: MarketplaceListing, version?: string) {
+  const installed = await store.installListing(listing, version);
+  if ("errors" in installed) throw new Error(`install failed: ${installed.errors.join(" ")}`);
+  return installed.record;
+}
+
+/** One valid listing as plain JSON, for the invalid-index cases. */
+const m2ValidListingJson = (): Record<string, unknown> => ({
+  id: "example.hello-analysis",
+  name: "Hello Analysis",
+  version: "1.0.0",
+  apiVersion: "3.0",
+  author: "Titer example author",
+  license: "MIT",
+  description: "The smallest possible plugin.",
+  downloadUrl:
+    "https://raw.githubusercontent.com/smitpatel316/titer-marketplace/main/plugins/example.hello-analysis/1.0.0/hello-analysis-1.0.0.zip",
+  sha256: "a".repeat(64),
+  readme:
+    "https://raw.githubusercontent.com/smitpatel316/titer-marketplace/main/plugins/example.hello-analysis/1.0.0/README.md",
+  screenshots: [],
+  versions: [
+    {
+      version: "1.0.0",
+      publishedAt: "2026-11-10T10:00:00Z",
+      changelog: "First release.",
+      downloadUrl:
+        "https://raw.githubusercontent.com/smitpatel316/titer-marketplace/main/plugins/example.hello-analysis/1.0.0/hello-analysis-1.0.0.zip",
+      sha256: "a".repeat(64),
+    },
+  ],
+});
+
+check("M2-index: the bundled sample index parses (valid)", () => {
+  const index = m2SampleIndex();
+  strictEqual(index.formatVersion, 1);
+  strictEqual(index.listings.length, 1);
+  const listing = index.listings[0];
+  if (!listing) throw new Error("bundled sample index has no listings");
+  strictEqual(listing.id, "example.hello-analysis");
+  strictEqual(listing.name, "Hello Analysis");
+  strictEqual(listing.version, "1.1.0");
+  strictEqual(listing.apiVersion, "3.0");
+  strictEqual(listing.author, "Titer example author");
+  strictEqual(listing.license, "MIT");
+  ok(/^[0-9a-f]{64}$/.test(listing.sha256), "listing sha256 must be 64 hex chars");
+  ok(listing.downloadUrl.startsWith("https://raw.githubusercontent.com/"), "download URL must be a GitHub raw URL");
+  strictEqual(listing.versions.length, 2);
+  strictEqual(listing.versions[0]?.version, "1.1.0");
+  ok((listing.versions[0]?.changelog ?? "").length > 0, "version history needs a changelog");
+  strictEqual(listing.bundled, true);
+});
+
+check("M2-index: invalid indexes are rejected", () => {
+  const bad: [string, unknown, RegExp][] = [
+    ["not an object", 42, /object/],
+    ["not JSON", "{not json", /JSON/],
+    ["unknown formatVersion", { formatVersion: 2, listings: [] }, /formatVersion/],
+    ["listings not an array", { formatVersion: 1, listings: {} }, /listings/],
+    [
+      "listing missing id",
+      { formatVersion: 1, listings: [{ ...m2ValidListingJson(), id: undefined }] },
+      /id/,
+    ],
+    ["bad version", { formatVersion: 1, listings: [{ ...m2ValidListingJson(), version: "one" }] }, /version/],
+    ["bad apiVersion", { formatVersion: 1, listings: [{ ...m2ValidListingJson(), apiVersion: "three" }] }, /apiVersion/],
+    ["bad sha256", { formatVersion: 1, listings: [{ ...m2ValidListingJson(), sha256: "xyz" }] }, /sha256/],
+    ["bad downloadUrl", { formatVersion: 1, listings: [{ ...m2ValidListingJson(), downloadUrl: "not a url" }] }, /downloadUrl/],
+    [
+      "version history with a bad version",
+      {
+        formatVersion: 1,
+        listings: [
+          {
+            ...m2ValidListingJson(),
+            versions: [{ version: "x", publishedAt: "2026-11-10T10:00:00Z", changelog: "Bad.", downloadUrl: "https://raw.githubusercontent.com/x/y/z.zip", sha256: "a".repeat(64) }],
+          },
+        ],
+      },
+      /version/,
+    ],
+  ];
+  for (const [label, value, re] of bad) {
+    const parsed = parseMarketplaceIndex(value);
+    ok("errors" in parsed, `${label}: invalid index must be rejected`);
+    if ("errors" in parsed) {
+      ok(parsed.errors.some((e) => re.test(e)), `${label}: error should mention ${re} (got: ${parsed.errors.join(" | ")})`);
+    }
+  }
+});
+
+check("M2-search: browse/search matches name, id, author and description", () => {
+  const parsed = parseMarketplaceIndex({
+    formatVersion: 1,
+    updatedAt: "2026-11-24T00:00:00Z",
+    listings: [
+      m2ValidListingJson(),
+      {
+        ...m2ValidListingJson(),
+        id: "stats.anova-power",
+        name: "ANOVA Power Tools",
+        author: "Stats Co",
+        description: "Power analysis for ANOVA designs.",
+        version: "2.0.0",
+        downloadUrl: "https://raw.githubusercontent.com/x/y/anova-power-2.0.0.zip",
+        versions: [
+          {
+            version: "2.0.0",
+            publishedAt: "2026-11-10T10:00:00Z",
+            changelog: "First release.",
+            downloadUrl: "https://raw.githubusercontent.com/x/y/anova-power-2.0.0.zip",
+            sha256: "a".repeat(64),
+          },
+        ],
+      },
+    ],
+  });
+  if ("errors" in parsed) throw new Error(`valid index rejected: ${parsed.errors.join(" ")}`);
+  strictEqual(searchListings(parsed.index, "").length, 2);
+  strictEqual(searchListings(parsed.index, "hello").length, 1);
+  strictEqual(searchListings(parsed.index, "HELLO")[0]?.id, "example.hello-analysis");
+  strictEqual(searchListings(parsed.index, "anova")[0]?.id, "stats.anova-power");
+  strictEqual(searchListings(parsed.index, "stats co")[0]?.id, "stats.anova-power");
+  strictEqual(searchListings(parsed.index, "power analysis")[0]?.id, "stats.anova-power");
+  strictEqual(searchListings(parsed.index, "zzz").length, 0);
+});
+
+check("M2-hash: the fixture zip's sha256 matches the index, and tampering fails", async () => {
+  const listing = m2Listing();
+  const bytes = new Uint8Array(readFileSync(`${M2_FIXTURES}/hello-analysis-1.1.0.zip`));
+  strictEqual(await sha256Hex(bytes), listing.sha256);
+  ok(await verifySha256(bytes, listing.sha256), "matching hash must verify");
+  const tampered = new Uint8Array(bytes);
+  tampered[tampered.length - 1] = tampered[tampered.length - 1]! ^ 0xff;
+  ok(!(await verifySha256(tampered, listing.sha256)), "tampered bytes must not verify");
+  ok(!(await verifySha256(bytes, "0".repeat(64))), "a wrong hash must not verify");
+});
+
+check("M2-install: bundled install runs download → hash → parse → install disabled, then review → enable", async () => {
+  const loader = fakeLoaderPort();
+  const store = new MarketplaceStore(m2StoreDeps({ loader }));
+  const loaded = store.loadIndexFromText(readFileSync(`${M2_FIXTURES}/sample-index.json`, "utf8"));
+  if ("errors" in loaded) throw new Error(`sample index failed to load: ${loaded.errors.join(" ")}`);
+  const listing = loaded.index.listings[0];
+  if (!listing) throw new Error("sample index has no listings");
+  const installed = await store.installListing(listing);
+  if ("errors" in installed) throw new Error(`install failed: ${installed.errors.join(" ")}`);
+  strictEqual(installed.record.status, "disabled");
+  strictEqual(installed.record.manifest.id, "example.hello-analysis");
+  strictEqual(installed.record.manifest.version, "1.1.0");
+  ok(store.getInstalled("example.hello-analysis"), "record must persist in the store");
+  ok(store.hasCachedZip("example.hello-analysis"), "installed zip bytes must be cached");
+  strictEqual(loader.enabledIds.size, 0, "nothing runs before the review step");
+  const lines = store.reviewLines("example.hello-analysis");
+  ok(lines.some((l) => /disabled/i.test(l)), "review lines must say installed-disabled");
+  const reviewed = store.requestEnable("example.hello-analysis");
+  strictEqual(reviewed.status, "pending-review");
+  const enabled = store.confirmEnable("example.hello-analysis", ["read-table"]);
+  strictEqual(enabled.status, "enabled");
+  ok(loader.enabledIds.has("example.hello-analysis"), "enable must register the plugin");
+  // A fresh store over the same storage sees the enabled record.
+  const reloaded = new MarketplaceStore(m2StoreDeps({ loader, storage: store.storage }));
+  strictEqual(reloaded.getInstalled("example.hello-analysis")?.status, "enabled");
+});
+
+check("M2-install: a hash mismatch refuses loudly and installs nothing", async () => {
+  const listing = m2Listing();
+  const store = new MarketplaceStore(
+    m2StoreDeps({
+      loadBundledZip: async () => {
+        const bytes = new Uint8Array(readFileSync(`${M2_FIXTURES}/hello-analysis-1.1.0.zip`));
+        bytes[0] = bytes[0]! ^ 0xff;
+        return bytes;
+      },
+    }),
+  );
+  const installed = await store.installListing(listing);
+  ok("errors" in installed, "mismatched hash must refuse the install");
+  if ("errors" in installed) {
+    ok(installed.errors.some((e) => /hash mismatch/i.test(e)), `error must say hash mismatch (got: ${installed.errors.join(" | ")})`);
+  }
+  strictEqual(store.listInstalled().length, 0);
+});
+
+check("M2-install: a duplicate install is refused", async () => {
+  const store = new MarketplaceStore(m2StoreDeps());
+  const listing = m2Listing();
+  await m2Install(store, listing);
+  const again = await store.installListing(listing);
+  ok("errors" in again && again.errors.some((e) => /already installed/i.test(e)), "second install must be refused");
+});
+
+check("M2-update: a new version is only offered after the delay, never the hour it ships", () => {
+  const hourAgo = new Date(M2_NOW - 60 * 60 * 1000).toISOString();
+  const dayAgo = new Date(M2_NOW - 25 * 60 * 60 * 1000).toISOString();
+  const atDelay = new Date(M2_NOW - UPDATE_OFFER_DELAY_MS).toISOString();
+  strictEqual(isUpdateOfferable(hourAgo, M2_NOW), false);
+  strictEqual(isUpdateOfferable(dayAgo, M2_NOW), true);
+  strictEqual(isUpdateOfferable(atDelay, M2_NOW), true);
+  strictEqual(isUpdateOfferable("not a date", M2_NOW), false);
+  const listing = m2Listing();
+  strictEqual(availableUpdateFor(listing, "1.0.0", null, M2_NOW), "1.1.0");
+  strictEqual(availableUpdateFor(listing, "1.1.0", null, M2_NOW), null);
+  strictEqual(availableUpdateFor(listing, "1.0.0", "1.0.0", M2_NOW), null);
+  // A version published an hour ago is never offered, however new it is.
+  const fresh: MarketplaceListing = {
+    ...listing,
+    version: "1.2.0",
+    versions: [
+      { version: "1.2.0", publishedAt: hourAgo, changelog: "Fresh.", downloadUrl: listing.downloadUrl, sha256: listing.sha256 },
+      ...listing.versions,
+    ],
+  };
+  strictEqual(availableUpdateFor(fresh, "1.1.0", null, M2_NOW), null);
+});
+
+check("M2-pin: a pin persists across reloads and survives an update", async () => {
+  const storage = createMemoryStorage();
+  const store = new MarketplaceStore(m2StoreDeps({ storage }));
+  const listing = m2Listing();
+  await m2Install(store, listing, "1.0.0");
+  strictEqual(store.getInstalled("example.hello-analysis")?.manifest.version, "1.0.0");
+  store.setPin("example.hello-analysis", "1.0.0");
+  strictEqual(store.pinnedVersion("example.hello-analysis"), "1.0.0");
+  strictEqual(pinnedVersion(storage, "example.hello-analysis"), "1.0.0");
+  strictEqual(savePin(storage, "example.hello-analysis", "1.0.0"), "1.0.0");
+  // Same storage, fresh store: the pin is still there, and no update is offered while pinned.
+  const reloaded = new MarketplaceStore(m2StoreDeps({ storage }));
+  reloaded.loadIndexFromText(readFileSync(`${M2_FIXTURES}/sample-index.json`, "utf8"));
+  strictEqual(reloaded.pinnedVersion("example.hello-analysis"), "1.0.0");
+  strictEqual(reloaded.availableUpdate("example.hello-analysis"), null);
+  // An explicit update to 1.1.0 keeps the pin (re-pointed at the new version).
+  const updated = await reloaded.updatePlugin("example.hello-analysis", { toVersion: "1.1.0" });
+  if ("errors" in updated) throw new Error(`update failed: ${updated.errors.join(" ")}`);
+  strictEqual(updated.record.manifest.version, "1.1.0");
+  strictEqual(reloaded.pinnedVersion("example.hello-analysis"), "1.1.0");
+  strictEqual(loadPins(storage)["example.hello-analysis"], "1.1.0");
+  reloaded.clearPin("example.hello-analysis");
+  strictEqual(reloaded.pinnedVersion("example.hello-analysis"), null);
+  clearPin(storage, "example.hello-analysis");
+  strictEqual(pinnedVersion(storage, "example.hello-analysis"), null);
+});
+
+check("M2-uninstall: uninstall disables and removes the files cleanly", async () => {
+  const loader = fakeLoaderPort();
+  const storage = createMemoryStorage();
+  const store = new MarketplaceStore(m2StoreDeps({ loader, storage }));
+  const listing = m2Listing();
+  await m2Install(store, listing);
+  store.requestEnable("example.hello-analysis");
+  store.confirmEnable("example.hello-analysis", ["read-table"]);
+  ok(loader.enabledIds.has("example.hello-analysis"));
+  const removed = store.uninstall("example.hello-analysis");
+  if ("errors" in removed) throw new Error(`uninstall failed: ${removed.errors.join(" ")}`);
+  strictEqual(store.getInstalled("example.hello-analysis"), undefined);
+  strictEqual(store.listInstalled().length, 0);
+  ok(!loader.enabledIds.has("example.hello-analysis"), "uninstall must unregister the plugin");
+  ok(!store.hasCachedZip("example.hello-analysis"), "uninstall must drop the cached zip");
+  const persisted = JSON.parse(storage.getItem(MARKETPLACE_INSTALLED_KEY) ?? "[]") as unknown[];
+  strictEqual(persisted.length, 0, "uninstall must leave no installed record in storage");
+  const again = store.uninstall("example.hello-analysis");
+  ok("errors" in again && again.errors.some((e) => /not installed/i.test(e)), "second uninstall must report not installed");
+});
+
+check("M2-review: enable requires the review step, and grants cannot exceed the manifest", async () => {
+  const store = new MarketplaceStore(m2StoreDeps());
+  await m2Install(store, m2Listing());
+  throws(() => store.confirmEnable("example.hello-analysis", ["read-table"]), /review/);
+  const reviewed = store.requestEnable("example.hello-analysis");
+  strictEqual(reviewed.status, "pending-review");
+  const again = store.requestEnable("example.hello-analysis");
+  strictEqual(again.status, "pending-review");
+  throws(() => store.confirmEnable("example.hello-analysis", ["network"]), /never declared/);
+  const enabled = store.confirmEnable("example.hello-analysis", ["read-table"]);
+  strictEqual(enabled.status, "enabled");
+  throws(() => store.requestEnable("example.hello-analysis"), /already enabled/);
+});
+
+check("M2-dependency: a missing plugin degrades to an install notice, never a break", () => {
+  const dep = { pluginId: "example.hello-analysis", pluginName: "Hello Analysis" };
+  const missing = checkPluginDependency(dep, { installed: false, enabled: false });
+  strictEqual(missing.ok, false);
+  if (!missing.ok) {
+    strictEqual(missing.action, "install");
+    ok(/needs plugin “Hello Analysis” — install it\?/.test(missing.notice), `notice must name the plugin and offer install (got: ${missing.notice})`);
+  }
+  const notice = dependencyNotice(dep, { installed: false, enabled: false });
+  ok(notice !== null && /needs plugin “Hello Analysis” — install it\?/.test(notice), "dependencyNotice must return the same notice");
+  const disabled = checkPluginDependency(dep, { installed: true, enabled: false });
+  strictEqual(disabled.ok, false);
+  if (!disabled.ok) {
+    strictEqual(disabled.action, "enable");
+    ok(/installed but disabled — enable it/.test(disabled.notice), `disabled notice must offer enable (got: ${disabled.notice})`);
+  }
+  ok(dependencyNotice(dep, { installed: true, enabled: false })?.includes("enable it"), "disabled notice must mention enabling");
+  strictEqual(checkPluginDependency(dep, { installed: true, enabled: true }).ok, true);
+  strictEqual(dependencyNotice(dep, { installed: true, enabled: true }), null);
+  // Without a friendly name the id is used.
+  const byId = checkPluginDependency({ pluginId: "example.hello-analysis" }, { installed: false, enabled: false });
+  if (!byId.ok) ok(byId.notice.includes("example.hello-analysis"), "notice must fall back to the plugin id");
+});
+
+check("M2-wiring: Marketplace dialog, menu entry and selector kind exist", () => {
+  const dialog = readFileSync("src/components/marketplace-dialog.tsx", "utf8");
+  ok(/MarketplaceDialog/.test(dialog), "marketplace dialog component missing");
+  ok(/listing\.name/.test(dialog) && /listing\.version/.test(dialog) && /listing\.author/.test(dialog), "dialog must show name, version and author");
+  ok(/scorecard/i.test(dialog), "dialog must leave a scorecard slot (M3 renders it)");
+  ok(/Install/.test(dialog) && /Uninstall/.test(dialog), "dialog must offer install and uninstall");
+  const menu = readFileSync("src/app-menu.ts", "utf8");
+  ok(/Marketplace…/.test(menu), "Settings menu has no Marketplace entry");
+  const store = readFileSync("src/store/use-project-store.tsx", "utf8");
+  ok(/kind: "marketplace"/.test(store), "selector has no marketplace kind");
+  const shell = readFileSync("src/components/app-shell.tsx", "utf8");
+  ok(/MarketplaceDialog/.test(shell), "app shell doesn't mount the Marketplace dialog");
+});
+
+check("M2-index: the default index URL is a GitHub raw URL (Q8: no hosted server)", () => {
+  ok(DEFAULT_INDEX_URL.startsWith("https://raw.githubusercontent.com/"), `default index URL must be a GitHub raw URL (got: ${DEFAULT_INDEX_URL})`);
+  ok(!/localhost|127\.0\.0\.1/.test(DEFAULT_INDEX_URL), "default index URL must not point at localhost");
+});
+
+
+// ── M4: plugin analyses in the product + MCP (seq 436) ───────────────────
+// The pins run before the wiring lands (FAIL) and after (PASS); each names
+// the seam it pins so a failure points at the missing piece, not the suite.
+check("plugin-m4 picker: offers a plugin analysis for an applicable table and not for an inapplicable one", async () => {
+  const { clearPluginRegistry, registerHelloPlugin } = await import("../src/plugins/index");
+  const { analysisOptionsForTable, isAnalysisOffered } = await import("../src/views/analyses");
+  clearPluginRegistry();
+  const registered = registerHelloPlugin();
+  ok(!("errors" in registered), `hello plugin must register: ${"errors" in registered ? registered.errors.join(" ") : ""}`);
+  const columnValues = analysisOptionsForTable("column").map((o) => o.value);
+  ok(
+    columnValues.includes("plugin:example.hello-analysis:hello-mean" as never),
+    "the picker offers hello-mean on a Column table",
+  );
+  ok(
+    columnValues.includes("plugin:example.hello-analysis:hello-scaled-mean" as never),
+    "the picker offers hello-scaled-mean on a Column table",
+  );
+  const xyValues = analysisOptionsForTable("xy").map((o) => o.value);
+  ok(
+    !xyValues.includes("plugin:example.hello-analysis:hello-mean" as never),
+    "the picker does not offer hello-mean on an XY table (it applies to Column tables only)",
+  );
+  ok(
+    !xyValues.includes("plugin:example.hello-analysis:hello-scaled-mean" as never),
+    "the picker does not offer hello-scaled-mean on an XY table",
+  );
+  ok(
+    isAnalysisOffered("plugin:example.hello-analysis:hello-mean" as never, "column"),
+    "hello-mean is offered on a Column table",
+  );
+  ok(
+    !isAnalysisOffered("plugin:example.hello-analysis:hello-mean" as never, "xy"),
+    "hello-mean is not offered on an XY table",
+  );
+  clearPluginRegistry();
+  ok(
+    !analysisOptionsForTable("column").some((o) => o.value.startsWith("plugin:")),
+    "with no plugin registered, the picker offers no plugin analyses",
+  );
+});
+
+check("plugin-m4 wizard: plugin questions round-trip to the expected params", async () => {
+  const { answersToParams, clearPluginRegistry, getPluginAnalysis, registerHelloPlugin, toWizardQuestions } =
+    await import("../src/plugins/index");
+  const { pluginWizardFinish, pluginWizardQuestions } = await import("../src/views/analyses/plugin-wizard");
+  clearPluginRegistry();
+  registerHelloPlugin();
+  const entry = getPluginAnalysis("plugin:example.hello-analysis:hello-scaled-mean");
+  ok(entry, "hello-scaled-mean must be registered");
+  const questions = toWizardQuestions(entry!.spec, ["Control"]);
+  strictEqual(questions.length, 2, "hello-scaled-mean asks two questions");
+  // The helper the wizard component uses asks the same questions.
+  const asked = pluginWizardQuestions("plugin:example.hello-analysis:hello-scaled-mean", ["Control"]);
+  deepStrictEqual(
+    asked.map((q) => q.id),
+    ["statistic", "multiplier"],
+    "the wizard asks the statistic, then the multiplier",
+  );
+  deepStrictEqual(
+    pluginWizardFinish("plugin:example.hello-analysis:hello-scaled-mean", { statistic: "median", multiplier: 2 }),
+    { statistic: "median", multiplier: 2 },
+    "answered questions become the run's params",
+  );
+  // Unanswered params keep their defaults.
+  deepStrictEqual(
+    pluginWizardFinish("plugin:example.hello-analysis:hello-scaled-mean", {}),
+    { statistic: "mean", multiplier: 1 },
+    "no answers still runs on the defaults",
+  );
+  // The SDK functions underneath agree.
+  deepStrictEqual(
+    answersToParams(entry!.spec, { statistic: "median", multiplier: 2 }),
+    { statistic: "median", multiplier: 2 },
+    "answersToParams files each answer under its parameter key",
+  );
+  clearPluginRegistry();
+});
+
+check("plugin-m4 results view: accepts a PluginAnalysisResult", async () => {
+  const { clearPluginRegistry, helloColumn, registerHelloPlugin, runPluginAnalysis } =
+    await import("../src/plugins/index");
+  const { analysisResultLabel } = await import("../src/views/analyses");
+  const { AnalysisResultsView } = await import("../src/views/analyses/analysis-results-view");
+  const React = await import("react");
+  clearPluginRegistry();
+  registerHelloPlugin();
+  const outcome = await runPluginAnalysis(
+    "plugin:example.hello-analysis:hello-scaled-mean",
+    [helloColumn("Control", [2, 4, 9])],
+    { statistic: "mean", multiplier: 2 },
+  );
+  ok(!("error" in outcome), `hello-scaled-mean must run: ${"error" in outcome ? outcome.error : ""}`);
+  strictEqual(analysisResultLabel(outcome), "Hello scaled mean", "a plugin result is labelled by its analysis");
+  // A first-party result keeps its own label.
+  strictEqual(
+    analysisResultLabel({ testType: "descriptive-statistics", stats: [], groups: [], notes: "" }),
+    "Descriptive statistics",
+    "a first-party result is labelled by its test",
+  );
+  // The view itself takes the plugin result as its `result` prop.
+  const el = React.createElement(AnalysisResultsView, { result: outcome });
+  ok(el, "the results view element builds from a plugin result");
+  clearPluginRegistry();
+});
+
+check("plugin-m4 cache: plugin results cache per table version", async () => {
+  const { clearPluginRegistry, registerPluginAnalysis, runPluginAnalysisOnTable } =
+    await import("../src/plugins/index");
+  clearPluginRegistry();
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-m4-cache-table", "create-table", {
+    table_type: "column",
+    columns: ["", "Control"],
+    rows: [
+      ["r1", 2],
+      ["r2", 4],
+      ["r3", 9],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  const data = harness.state().nodes[tableId]!.data!;
+  let runs = 0;
+  const registered = registerPluginAnalysis("example.cache-count", {
+    id: "count-mean",
+    label: "Count mean",
+    tableTypes: ["column"],
+    minColumns: 1,
+    parameters: [{ kind: "number", key: "multiplier", label: "Multiplier", default: 1, min: 0.1, max: 10 }],
+    questions: [],
+    compute: {
+      kind: "typescript",
+      run: (input: { groups: { values: number[] }[]; params: { multiplier?: unknown } }) => {
+        runs++;
+        const values = input.groups[0]?.values ?? [];
+        const mean = values.reduce((a, b) => a + b, 0) / values.length;
+        const multiplier = typeof input.params.multiplier === "number" ? input.params.multiplier : 1;
+        return { stats: [{ label: "Scaled mean", value: mean * multiplier }] };
+      },
+    },
+  });
+  ok(!("errors" in registered), `counting plugin must register: ${"errors" in registered ? registered.errors.join(" ") : ""}`);
+  const id = "plugin:example.cache-count:count-mean";
+  const first = runPluginAnalysisOnTable(id, data);
+  const second = runPluginAnalysisOnTable(id, data);
+  strictEqual(first, second, "the same table version reuses the same run");
+  const out = await first;
+  strictEqual(runs, 1, "the compute ran once for two asks");
+  ok(!("error" in out) && out.stats[0]?.value === 5, "the cached result is the mean of [2, 4, 9]");
+  // A new table version (same numbers, new TableData) misses the cache.
+  const made2 = await harness.run("job-m4-cache-table2", "create-table", {
+    table_type: "column",
+    columns: ["", "Control"],
+    rows: [
+      ["r1", 2],
+      ["r2", 4],
+      ["r3", 9],
+    ],
+  });
+  harness.sync();
+  const data2 = harness.state().nodes[(made2.result as { table_id: string }).table_id]!.data!;
+  const third = runPluginAnalysisOnTable(id, data2);
+  ok(third !== first, "a new table version runs again");
+  await third;
+  strictEqual(runs, 2, "the new version computed once");
+  // A failed run is not cached: an ask after the error resolved runs
+  // again (it fails validation before the compute, so `runs` stays 2).
+  // Two asks made at once still share the one in-flight run, as
+  // first-party `runAnalysis` does — the eviction happens on resolution.
+  const bad1 = runPluginAnalysisOnTable(id, data, { multiplier: 99 });
+  ok("error" in (await bad1), "the first ask reports the range error");
+  const bad2 = runPluginAnalysisOnTable(id, data, { multiplier: 99 });
+  ok(bad1 !== bad2, "an error outcome is not cached");
+  ok("error" in (await bad2), "the second ask reports the range error too");
+  strictEqual(runs, 2, "the failed runs never reached the compute");
+  clearPluginRegistry();
+});
+
+check("plugin-m4 mcp: list and run plugin analyses against the hello plugin", async () => {
+  const { clearPluginRegistry, registerHelloPlugin } = await import("../src/plugins/index");
+  clearPluginRegistry();
+  registerHelloPlugin();
+  const harness = mcpLaggingHarness(true);
+  const made = await harness.run("job-m4-mcp-table", "create-table", {
+    table_type: "column",
+    columns: ["", "Control"],
+    rows: [
+      ["r1", 2],
+      ["r2", 4],
+      ["r3", 9],
+    ],
+  });
+  const tableId = (made.result as { table_id: string }).table_id;
+  harness.sync();
+  const listed = await harness.run("job-m4-mcp-list", "list-plugin-analyses", {});
+  const analyses = (
+    listed.result as { plugin_analyses: { id: string; plugin_id: string; table_types: string[] }[] }
+  ).plugin_analyses;
+  ok(
+    analyses.some(
+      (a) => a.id === "plugin:example.hello-analysis:hello-mean" && a.table_types.includes("column"),
+    ),
+    "the list names hello-mean with its Column applicability",
+  );
+  ok(
+    analyses.some((a) => a.id === "plugin:example.hello-analysis:hello-scaled-mean"),
+    "the list names hello-scaled-mean",
+  );
+  // Create + run the pure-TS hello analysis through the jobs, as
+  // titer_run_plugin_analysis does (create-plugin-analysis, then run-analysis).
+  const created: string[] = [];
+  harness.deps.createPluginAnalysis = (parentId, pluginId, params) => {
+    created.push(pluginId);
+    harness.dispatch({
+      type: "create",
+      node: {
+        id: `analysis_${pluginId}`,
+        type: "analysis",
+        name: "Hello",
+        parentId,
+        pluginAnalysisId: pluginId,
+        pluginAnalysisParams: params,
+      },
+    });
+    return `analysis_${pluginId}`;
+  };
+  const runOne = async (jobPrefix: string, pluginId: string, params: unknown, label: string) => {
+    const done = await harness.run(`${jobPrefix}-create`, "create-plugin-analysis", {
+      table_id: tableId,
+      analysis_id: pluginId,
+      params,
+    });
+    const analysisId = (done.result as { analysis_id: string }).analysis_id;
+    harness.sync();
+    const run = await harness.run(`${jobPrefix}-run`, "run-analysis", { analysis_id: analysisId });
+    const outcome = run.result as { stats?: { label: string; value: number | null }[]; error?: string };
+    ok(!outcome.error, `${label} must run: ${outcome.error ?? ""}`);
+    return outcome.stats?.find((s) => s.label === label)?.value;
+  };
+  strictEqual(
+    await runOne("job-m4-mcp-ts", "plugin:example.hello-analysis:hello-scaled-mean", { statistic: "mean", multiplier: 2 }, "Scaled mean"),
+    10,
+    "hello-scaled-mean: mean 5 × 2 is 10",
+  );
+  strictEqual(
+    await runOne("job-m4-mcp-r", "plugin:example.hello-analysis:hello-mean", undefined, "Mean value"),
+    5,
+    "hello-mean (R): mean of [2, 4, 9] is 5",
+  );
+  deepStrictEqual(created, [
+    "plugin:example.hello-analysis:hello-scaled-mean",
+    "plugin:example.hello-analysis:hello-mean",
+  ]);
+  clearPluginRegistry();
+});
+
+check("plugin-m4 workflow: a missing or disabled plugin reports a needs-plugin notice", async () => {
+  const { checkPluginDependency, clearPluginRegistry, registerHelloPlugin, unregisterPlugin } =
+    await import("../src/plugins/index");
+  clearPluginRegistry();
+  const missing = checkPluginDependency({ pluginId: "example.hello-analysis" });
+  strictEqual(missing.ok, false, "an uninstalled plugin is not ok");
+  ok(missing.notice.includes("needs plugin"), "the notice names the missing plugin");
+  ok(missing.notice.includes("install it?"), "the notice asks to install it instead of failing");
+  registerHelloPlugin();
+  strictEqual(
+    checkPluginDependency({ pluginId: "example.hello-analysis" }).ok,
+    true,
+    "an enabled plugin passes",
+  );
+  strictEqual(
+    checkPluginDependency({ pluginId: "example.hello-analysis", versionRange: "^1.0.0" }).ok,
+    true,
+    "a satisfied version range passes",
+  );
+  const mismatch = checkPluginDependency({ pluginId: "example.hello-analysis", versionRange: ">=99.0.0" });
+  strictEqual(mismatch.ok, false, "an unsatisfied version range is not ok");
+  ok(mismatch.notice.includes("1.0.0"), "the version notice names the installed version");
+  unregisterPlugin("example.hello-analysis");
+  const disabled = checkPluginDependency({ pluginId: "example.hello-analysis" });
+  strictEqual(disabled.ok, false, "a disabled plugin is not ok");
+  ok(disabled.notice.includes("install it?"), "a disabled plugin gets the install notice too");
+  clearPluginRegistry();
+});
+
+
+// ── M5: plugin Isolation webview (seq 437) ─────────────────────────────
+// The pins run before the isolation lane lands (FAIL) and after (PASS).
+// The guard contract is M1/M3's: `dispatchPluginCommand` (ipc-guard.ts)
+// is the ONLY path a plugin `titer.*` call may take, with the calling
+// plugin's granted permissions, fail-closed. The Isolation webview
+// (src/plugins/isolation.ts) is the first execution path for plugin JS —
+// the loader never ran plugin code — so the guard is wired in from the
+// start. The honest line, in every string this lane adds: a capability
+// boundary, NOT a sandbox.
+check("plugin-m5 guard: declared+granted call allowed; undeclared, declared-but-ungranted and unknown denied", async () => {
+  const {
+    clearPluginRegistry,
+    confirmEnable,
+    installPlugin,
+    interceptPluginCall,
+    launchPluginWebview,
+    parsePluginPackage,
+    registerHelloPlugin,
+    requestEnable,
+    teardownAllPluginWebviews,
+  } = await import("../src/plugins/index");
+  clearPluginRegistry();
+  teardownAllPluginWebviews();
+  const registered = registerHelloPlugin();
+  ok(!("errors" in registered), `hello plugin must register: ${"errors" in registered ? registered.errors.join(" ") : ""}`);
+  if ("errors" in registered) return;
+  // The hello plugin declares and is granted only "read-table".
+  const calls: { command: string; args: unknown }[] = [];
+  const host = async (command: string, args: unknown) => {
+    calls.push({ command, args });
+    return { ok: command };
+  };
+  const launched = launchPluginWebview(registered.record, { source: "// hello entry" });
+  ok("session" in launched, `launch failed: ${JSON.stringify(launched)}`);
+  if (!("session" in launched)) return;
+  const session = launched.session;
+  deepStrictEqual(await interceptPluginCall(session, "titer.readTable", { table: "t1" }, host), {
+    ok: "titer.readTable",
+  });
+  strictEqual(calls.length, 1, "the allowed call reaches the host handler once");
+  // Undeclared (and ungranted): hello never declares run-analysis.
+  await rejects(interceptPluginCall(session, "titer.runAnalysis", {}, host), /not granted/);
+  // Unknown command: fail-closed, never passed through.
+  await rejects(interceptPluginCall(session, "titer.teleport", {}, host), /is not a Titer plugin command/);
+  strictEqual(calls.length, 1, "denied calls must never reach the host handler");
+
+  // Declared-but-ungranted: a plugin that declares run-analysis but was
+  // granted only read-table at the enable review step.
+  const pluginJson = {
+    id: "example.declared-ungranted",
+    name: "Declared Ungranted",
+    version: "1.0.0",
+    apiVersion: "3.0",
+    author: "Titer example author",
+    license: "MIT",
+    permissions: ["read-table", "run-analysis"],
+    analyses: [
+      {
+        id: "hello-mean",
+        label: "Hello mean",
+        tableTypes: ["column"],
+        minColumns: 1,
+        parameters: [],
+        questions: [],
+        compute: { kind: "r", code: "c(mean_value=mean(g0))" },
+      },
+    ],
+  };
+  const parsed = parsePluginPackage(new Map([["plugin.json", JSON.stringify(pluginJson)]]));
+  ok("package" in parsed, `declared-ungranted package rejected: ${JSON.stringify(parsed)}`);
+  if (!("package" in parsed)) return;
+  const installed = installPlugin(parsed.package, ["example.hello-analysis"], { kind: "folder", name: "declared" });
+  ok("record" in installed, `declared-ungranted install failed: ${JSON.stringify(installed)}`);
+  if (!("record" in installed)) return;
+  const enabled = confirmEnable(requestEnable(installed.record), ["read-table"], "3.0.0");
+  strictEqual(enabled.status, "enabled", "the declared-but-ungranted plugin enables with only read-table granted");
+  const launched2 = launchPluginWebview(enabled, { source: "// declared entry" });
+  ok("session" in launched2, `second launch failed: ${JSON.stringify(launched2)}`);
+  if (!("session" in launched2)) return;
+  await rejects(
+    interceptPluginCall(launched2.session, "titer.runAnalysis", {}, host),
+    /needs the “run-analysis” permission, which was not granted/,
+  );
+  strictEqual(calls.length, 1, "a declared-but-ungranted call must never reach the host handler");
+  teardownAllPluginWebviews();
+  clearPluginRegistry();
+});
+
+check("plugin-m5 lifecycle: a disabled plugin cannot execute and teardown ends execution (no orphan)", async () => {
+  const {
+    clearPluginRegistry,
+    disablePlugin,
+    interceptPluginCall,
+    isPluginWebviewRunning,
+    launchPluginWebview,
+    listPluginWebviews,
+    onPluginDisabled,
+    registerHelloPlugin,
+    teardownAllPluginWebviews,
+    teardownPluginWebview,
+  } = await import("../src/plugins/index");
+  clearPluginRegistry();
+  teardownAllPluginWebviews();
+  const registered = registerHelloPlugin();
+  ok(!("errors" in registered), `hello plugin must register: ${"errors" in registered ? registered.errors.join(" ") : ""}`);
+  if ("errors" in registered) return;
+  const host = async () => "ran";
+  const launched = launchPluginWebview(registered.record, { source: "// hello entry" });
+  ok("session" in launched, `launch failed: ${JSON.stringify(launched)}`);
+  if (!("session" in launched)) return;
+  strictEqual(isPluginWebviewRunning("example.hello-analysis"), true, "the launched webview is running");
+  strictEqual(await interceptPluginCall(launched.session, "titer.readTable", {}, host), "ran");
+  // Disable the plugin (loader: analyses unregister at once) and tell the
+  // isolation layer: the webview is torn down, and no call gets through.
+  const disabled = disablePlugin(registered.record);
+  strictEqual(disabled.status, "disabled");
+  strictEqual(onPluginDisabled("example.hello-analysis"), true, "disabling tears down the running webview");
+  strictEqual(isPluginWebviewRunning("example.hello-analysis"), false, "no webview survives its plugin being disabled");
+  await rejects(interceptPluginCall(launched.session, "titer.readTable", {}, host), /torn down|disabled/);
+  // A disabled record cannot launch a new webview at all.
+  const relaunch = launchPluginWebview(disabled, { source: "// hello entry" });
+  ok("error" in relaunch, "launching a disabled plugin must fail");
+  if ("error" in relaunch) ok(/disabled|install it/.test(relaunch.error), `launch error must say disabled: ${relaunch.error}`);
+  // Teardown is idempotent and leaves no orphan behind.
+  strictEqual(teardownPluginWebview("example.hello-analysis"), false, "tearing down an already-torn-down webview is a no-op");
+  strictEqual(listPluginWebviews().length, 0, "no webview sessions remain");
+  teardownAllPluginWebviews();
+  clearPluginRegistry();
+});
+
+check("plugin-m5 copy: UI states a capability boundary, not a sandbox", async () => {
+  const { PLUGIN_SAFETY_NOTICE, isolationNoticeForPlugin } = await import("../src/plugins/index");
+  ok(
+    /capability boundary, not a sandbox/i.test(PLUGIN_SAFETY_NOTICE),
+    `the safety notice must say "capability boundary, not a sandbox" (got: ${PLUGIN_SAFETY_NOTICE})`,
+  );
+  ok(/no true JS sandbox/i.test(PLUGIN_SAFETY_NOTICE), "the safety notice must say there is no true JS sandbox");
+  ok(
+    !/sandboxed|fully isolated|completely safe/i.test(PLUGIN_SAFETY_NOTICE),
+    "the safety notice must not claim sandboxing or full isolation",
+  );
+  ok(
+    isolationNoticeForPlugin("Hello Analysis").includes("Hello Analysis"),
+    "the per-plugin notice names the plugin",
+  );
+  ok(
+    /capability boundary, not a sandbox/i.test(isolationNoticeForPlugin("Hello Analysis")),
+    "the per-plugin notice carries the same honest line",
+  );
+  const view = readFileSync("src/plugins/isolation-view.tsx", "utf8");
+  ok(/PLUGIN_SAFETY_NOTICE/.test(view), "the isolation view renders the shared notice, not its own copy");
+  const review = readFileSync("src/plugins/review-view.tsx", "utf8");
+  ok(/PluginIsolationNotice/.test(review), "the enable review renders the same isolation notice");
+});
+
+check("plugin-m5 frame: plugin JS runs in a sandboxed iframe with only the titer.* bridge", async () => {
+  const { buildPluginWebviewSrcDoc, PLUGIN_WEBVIEW_SANDBOX } = await import("../src/plugins/index");
+  strictEqual(PLUGIN_WEBVIEW_SANDBOX, "allow-scripts", "the frame allows scripts and nothing else");
+  const doc = buildPluginWebviewSrcDoc("window.titer.call('titer.readTable', {})", "example.hello-analysis");
+  ok(doc.includes("postMessage"), "the frame bridges plugin calls to the host with postMessage");
+  ok(doc.includes("example.hello-analysis"), "the frame doc carries its plugin id");
+  ok(
+    !/executeJob|__TAURI__|@tauri-apps|invoke\(/.test(doc),
+    "the frame exposes no host invoke or job seam — only the intercepted titer.* bridge",
+  );
+  // Entry source cannot break out of its script tag and inject another one.
+  const evil = buildPluginWebviewSrcDoc("</script><script>alert(1)</script>", "example.evil");
+  ok(!evil.includes("</script><script>alert"), "entry source must be escaped so it cannot inject a script tag");
+});
+
+check("plugin-m5 host router: a granted command with no host handler fails closed", async () => {
+  const { createPluginHostRouter, launchPluginWebview, registerHelloPlugin, teardownAllPluginWebviews, clearPluginRegistry, interceptPluginCall } =
+    await import("../src/plugins/index");
+  clearPluginRegistry();
+  teardownAllPluginWebviews();
+  const router = createPluginHostRouter({ "titer.readTable": async () => "table" });
+  strictEqual(await router("titer.readTable", { table: "t1" }), "table", "a mapped command runs through its host handler");
+  await rejects(router("titer.runAnalysis", {}), /No host handler/);
+  await rejects(router("titer.teleport", {}), /is not a Titer plugin command/);
+  // The router is the host side of the interceptor: a denied command never
+  // reaches it, and an allowed-but-unmapped one still fails closed.
+  const registered = registerHelloPlugin();
+  ok(!("errors" in registered), `hello plugin must register: ${"errors" in registered ? registered.errors.join(" ") : ""}`);
+  if ("errors" in registered) return;
+  const launched = launchPluginWebview(registered.record, { source: "// hello entry" });
+  ok("session" in launched, `launch failed: ${JSON.stringify(launched)}`);
+  if (!("session" in launched)) return;
+  const emptyRouter = createPluginHostRouter({});
+  await rejects(
+    interceptPluginCall(launched.session, "titer.readTable", {}, emptyRouter),
+    /No host handler/,
+  );
+  teardownAllPluginWebviews();
+  clearPluginRegistry();
+});
+
+check("plugin-m5 seam: the interceptor never calls executeJob or Tauri invoke directly", () => {
+  const src = readFileSync("src/plugins/isolation.ts", "utf8");
+  ok(/dispatchPluginCommand/.test(src), "every plugin call routes through dispatchPluginCommand");
+  ok(
+    !/from "\.\.\/store\/mcp-dispatch"/.test(src) && !/from "\.\.\/native"/.test(src),
+    "isolation.ts must not import executeJob or Tauri invoke — the host supplies the handler",
+  );
+  ok(!/\bexecuteJob\s*\(/.test(src), "isolation.ts must never call executeJob itself");
+  ok(!/\binvoke\s*\(/.test(src), "isolation.ts must never call Tauri invoke itself");
 });
 
 

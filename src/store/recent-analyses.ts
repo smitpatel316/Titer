@@ -5,6 +5,7 @@
 // the project file. The picker records a run on wizard completion (and on a
 // direct run, which is the same pick with nothing to ask).
 import { ANALYSIS_OPTIONS_BY_TABLE, analysisLabel } from "../views/analyses";
+import { parsePluginAnalysisId } from "../plugins";
 import type { AnalysisPickerValue } from "../stats/types";
 
 const KEY = "titer.recent-analyses";
@@ -19,14 +20,21 @@ const KNOWN_TYPES = new Set<string>(
 );
 
 /** Parses a stored list: well-formed entries for known tests as-is, anything
- *  else left out. Pure, so checks.ts pins it. */
+ *  else left out. A plugin analysis is known by its namespaced id shape —
+ *  the plugin may be disabled since the run, in which case replay shows
+ *  the not-applicable note (as for a first-party test no longer offered).
+ *  Pure, so checks.ts pins it. */
 export function parseRecentAnalyses(raw: unknown): RecentAnalysisEntry[] {
   if (!Array.isArray(raw)) return [];
   const entries: RecentAnalysisEntry[] = [];
   for (const item of raw) {
     if (typeof item !== "object" || item === null) continue;
     const entry = item as Partial<RecentAnalysisEntry>;
-    if (typeof entry.type !== "string" || !KNOWN_TYPES.has(entry.type)) continue;
+    if (
+      typeof entry.type !== "string" ||
+      (!KNOWN_TYPES.has(entry.type) && !parsePluginAnalysisId(entry.type))
+    )
+      continue;
     if (typeof entry.label !== "string" || entry.label === "") continue;
     if (typeof entry.at !== "number" || !Number.isFinite(entry.at)) continue;
     entries.push({ type: entry.type as AnalysisPickerValue, label: entry.label, at: entry.at });

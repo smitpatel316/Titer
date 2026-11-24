@@ -41,10 +41,10 @@ export const AI_STARTER_PROMPT_SECTIONS: string[] = [
   "Report gaps: `titer_send_feedback` — if something is missing or broken, report it (see ground rules). It always saves the report on this Mac for me to review; it only sends it to the Titer team if I have turned on feedback sharing in Settings → AI Connections.",
 
   // Appended by the allowlist (v1.7.4, contract §12): by default only the
-  // six read tools above are available — the rest answer "not enabled"
+  // seven read tools above are available — the rest answer "not enabled"
   // until the user turns their group on. The agent must say which group
   // it needs instead of working around the refusal.
-  "Tool allowlist: only the tool groups I enabled in Settings → AI Connections are available — by default just the six read tools. If a tool you need answers that it is not enabled, tell me which group to turn on (the message names it) instead of working around it.",
+  "Tool allowlist: only the tool groups I enabled in Settings → AI Connections are available — by default just the seven read tools. If a tool you need answers that it is not enabled, tell me which group to turn on (the message names it) instead of working around it.",
 ];
 
 /** The full starter prompt, paragraphs separated by a blank line. */

@@ -2,9 +2,9 @@
 //
 // The Rust core runs an MCP server on 127.0.0.1 (Streamable HTTP, rmcp +
 // axum), OFF by default: it starts only when the user opts in via
-// Settings → AI connections. 76 tools: 20 read-only (list/read/job/
-// activity/cloud reads + feedback + the three 1.7.4 discovery tools + the 1.8 backup list + refresh-linked-data)
-// and 56 mutating (incl. the 1.8.2 graph-regenerate pair + the 1.8.3 sample-size-power tool + the 1.9 cell-background tool), via the L0 Rust→frontend dispatch + job queue —
+// Settings → AI connections. 78 tools: 21 read-only (list/read/job/
+// activity/cloud reads + feedback + the three 1.7.4 discovery tools + the 1.8 backup list + refresh-linked-data + the plugin list)
+// and 57 mutating (incl. the 1.8.2 graph-regenerate pair + the 1.8.3 sample-size-power tool + the 1.9 cell-background tool + the plugin run tool), via the L0 Rust→frontend dispatch + job queue —
 // run-analysis, build-graph, export and cloud tools included (Phase 2).
 //
 // Why rmcp, not tauri-plugin-mcp-commands — see the lane log
@@ -43,7 +43,7 @@
 //
 // BUILD VERIFICATION PENDING (v1 owns the box; no Rust toolchain here):
 // `cargo fmt --check`, `cargo test`, and a live smoke test against Claude
-// Code (initialize 2025-11-25, tools/list, tools/call on all 76 tools).
+// Code (initialize 2025-11-25, tools/list, tools/call on all 78 tools).
 // If rmcp 3.8.0 is not on the index at first build, fall back to 3.7 —
 // ServerConfig exists in both.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
@@ -109,7 +109,7 @@ const OPT_IN_FILE: &str = "mcp-opt-in.json";
 /// feedback-consent records beside it, same 0700 directory, same
 /// owner-only (0600) file. Missing, unreadable, or malformed reads as the
 /// default — only the `read` group — so a fresh install advertises just
-/// the six read-group tools (docs/mcp-server-contract.md §12).
+/// the seven read-group tools (docs/mcp-server-contract.md §12).
 const ALLOWLIST_FILE: &str = "mcp-allowlist.json";
 
 /// The feedback server: `POST {this}` with one saved entry's JSON, and it
@@ -1330,10 +1330,11 @@ struct AllowlistGroup {
     tools: &'static [&'static str],
 }
 
-/// The six read-group tools, on by default — the five Phase 1 tools plus
-/// `titer_list_backups` (seq 226). Note: `ANTIGRAVITY_ENABLED_TOOLS` below
+/// The seven read-group tools, on by default — the five Phase 1 tools plus
+/// `titer_list_backups` (seq 226) plus `titer_list_plugin_analyses`
+/// (marketplace M4). Note: `ANTIGRAVITY_ENABLED_TOOLS` below
 /// still allowlists exactly the five Phase 1 tools, by design; the
-/// server-side default is six.
+/// server-side default is seven.
 const ALLOWLIST_DEFAULT_GROUPS: &[&str] = &["read"];
 
 const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
@@ -1348,6 +1349,7 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
             "titer_read_results",
             "titer_read_graph",
             "titer_list_backups",
+            "titer_list_plugin_analyses",
         ],
     },
     AllowlistGroup {
@@ -1400,6 +1402,7 @@ const ALLOWLIST_GROUPS: &[AllowlistGroup] = &[
         tools: &[
             "titer_run_analysis",
             "titer_rerun_analysis",
+            "titer_run_plugin_analysis",
             "titer_freeze_analysis",
             "titer_set_result_cell_background",
             "titer_clone_analysis",
@@ -1530,7 +1533,7 @@ fn write_allowlist_file(dir: &std::path::Path, groups: &HashSet<String>) -> Resu
 
 /// The tools this server may advertise and run, from the persisted
 /// record. No `mcp/` directory yet (tests, or a server started before
-/// any Settings visit) reads as the default — only the six read tools.
+/// any Settings visit) reads as the default — only the seven read tools.
 fn load_allowlist(state: &McpState) -> HashSet<String> {
     match state.dir() {
         Some(dir) => allowed_tools(&read_allowlist_groups(&dir)),
@@ -2197,7 +2200,7 @@ async fn auth_middleware(
 /// the corruption hits every tool that returns non-ASCII text, not just
 /// transform-concentrations. Appending `; charset=utf-8` here, the one
 /// shared path every MCP response flows through, fixes the echo for all
-/// 76 tools. Returns the new header value, or `None` when the type is
+/// 78 tools. Returns the new header value, or `None` when the type is
 /// already labelled or is not one of the textual MCP response types.
 fn utf8_charset(content_type: &str) -> Option<String> {
     let lower = content_type.to_ascii_lowercase();
@@ -3079,6 +3082,46 @@ pub struct RunAnalysisArgs {
     #[serde(default)]
     pub params: Option<serde_json::Value>,
     /// Display name for the new analysis node; omit for the test's own name.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Wait for the run to finish (up to await_seconds) and return its
+    /// result inline instead of just a job_id; a run still going at the
+    /// window falls back to the queued shape (poll titer_read_job).
+    /// Default false: the run returns immediately with a job_id.
+    #[serde(default)]
+    pub await_result: bool,
+    /// Seconds to wait when await_result is true (default 30, 1–120).
+    #[serde(default)]
+    pub await_seconds: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ListPluginAnalysesArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    /// The list itself is app-wide (the plugin registry is not per-project),
+    /// but the job that reads it runs in a project window, so a project must
+    /// be open.
+    #[serde(default)]
+    pub project_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RunPluginAnalysisArgs {
+    /// Window label of the project ("project-1"); omit for the front project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// The table to analyse, as shown by titer_list_tables.
+    pub table_id: String,
+    /// A plugin analysis id (plugin:<plugin-id>:<analysis-id>), as shown by
+    /// titer_list_plugin_analyses.
+    pub analysis_id: String,
+    /// Params for that analysis (the plugin's declared parameters); omit for
+    /// the defaults. An unknown or out-of-range param is rejected with the
+    /// valid choices, never silently defaulted.
+    #[serde(default)]
+    pub params: Option<serde_json::Value>,
+    /// Display name for the new analysis node; omit for the plugin
+    /// analysis's own name.
     #[serde(default)]
     pub name: Option<String>,
     /// Wait for the run to finish (up to await_seconds) and return its
@@ -6076,6 +6119,150 @@ impl TiterMcpServer {
         }
     }
 
+    /// List the installed plugin analyses: every registered plugin
+    /// analysis with its label and the table types it applies to — the
+    /// discovery call before `titer_run_plugin_analysis`. The list is
+    /// app-wide (the registry is not per-project), but the job that reads
+    /// it runs in a project window, so a project must be open.
+    #[tool(
+        name = "titer_list_plugin_analyses",
+        description = "List the installed plugin analyses: each one's namespaced id (plugin:<plugin-id>:<analysis-id>), label, and the table types it applies to. Ask this before titer_run_plugin_analysis instead of guessing an id. A project must be open (the list is read through a project window).",
+        annotations(
+            title = "List plugin analyses",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn list_plugin_analyses(
+        &self,
+        Parameters(args): Parameters<ListPluginAnalysesArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let list_args = serde_json::json!({ "project_id": args.project_id });
+        let result: Result<serde_json::Value, String> = async {
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            let job = self.state.enqueue_job(
+                &project_id,
+                "list-plugin-analyses",
+                serde_json::json!({}),
+                serde_json::json!({}),
+            )?;
+            let done = self.state.await_job(&job.job_id, Duration::from_secs(30)).await?;
+            if done.status != JobStatus::Done {
+                return Err(done.error.unwrap_or_else(|| "Listing the plugin analyses failed.".to_string()));
+            }
+            done.result.ok_or_else(|| "The list finished without reporting a result.".to_string())
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_list_plugin_analyses", list_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_list_plugin_analyses", list_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
+    /// Run a plugin analysis on a table: creates the analysis node and
+    /// enqueues the run, returning immediately with a job_id to poll
+    /// (titer_read_job) — unless await_result is set, in which case a run
+    /// that finishes within await_seconds returns its result inline
+    /// instead. params must match the plugin's declared parameters; an
+    /// unknown or out-of-range param is rejected with the valid choices,
+    /// never silently defaulted. Ask titer_list_plugin_analyses for the
+    /// installed ids first.
+    #[tool(
+        name = "titer_run_plugin_analysis",
+        description = "Run a plugin analysis on a table: creates the analysis node and enqueues the run, returning immediately with a job_id to poll (titer_read_job). With await_result true, a run that finishes within await_seconds (default 30, 1-120) returns its result inline instead (status done); a slower run falls back to the queued shape. params must match the plugin analysis's declared parameters; an unknown or out-of-range param is rejected with the valid choices, never silently defaulted. Ask titer_list_plugin_analyses for the installed ids first.",
+        annotations(
+            title = "Run plugin analysis",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn run_plugin_analysis(
+        &self,
+        Parameters(args): Parameters<RunPluginAnalysisArgs>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let run_args = serde_json::json!({
+            "project_id": args.project_id,
+            "table_id": args.table_id,
+            "analysis_id": args.analysis_id,
+            "params": args.params,
+            "name": args.name,
+            "await_result": args.await_result,
+            "await_seconds": args.await_seconds,
+        });
+        let result: Result<serde_json::Value, String> = async {
+            if !args.analysis_id.starts_with("plugin:") || args.analysis_id.split(':').count() != 3 {
+                return Err(format!(
+                    "“{}” is not a plugin analysis id — pass a namespaced id (plugin:<plugin-id>:<analysis-id>). Ask titer_list_plugin_analyses for the installed ones.",
+                    args.analysis_id
+                ));
+            }
+            if let Some(params) = &args.params {
+                if !params.is_object() {
+                    return Err("“params” must be an object of named parameters.".into());
+                }
+            }
+            let window = Self::await_window(args.await_seconds)?;
+            let project_id = self.state.resolve_project(args.project_id.as_deref())?;
+            {
+                let snapshots = self.state.snapshots();
+                let snap = snapshots.get(&project_id).ok_or_else(|| {
+                    format!("No open project with id “{project_id}”. Ask titer_list_projects for the open projects.")
+                })?;
+                snapshot_node(snap, &args.table_id, "table")?;
+            }
+            let mut create_args = serde_json::json!({
+                "table_id": args.table_id,
+                "analysis_id": args.analysis_id,
+            });
+            if let Some(params) = &args.params {
+                create_args["params"] = params.clone();
+            }
+            if let Some(name) = &args.name {
+                if name.is_empty() {
+                    return Err("“name” must not be empty.".into());
+                }
+                create_args["name"] = serde_json::Value::String(name.clone());
+            }
+            let created = self
+                .state
+                .enqueue_job(&project_id, "create-plugin-analysis", create_args, serde_json::json!({}))?;
+            let done = self.state.await_job(&created.job_id, Duration::from_secs(30)).await?;
+            if done.status != JobStatus::Done {
+                return Err(done.error.unwrap_or_else(|| "Creating the plugin analysis failed.".to_string()));
+            }
+            let analysis_id = done
+                .result
+                .as_ref()
+                .and_then(|r| r.get("analysis_id"))
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "The plugin analysis was created without reporting its id.".to_string())?
+                .to_string();
+            self.enqueue_run(&project_id, &analysis_id, &args.analysis_id, None, args.await_result, window)
+                .await
+        }
+        .await;
+        match result {
+            Ok(out) => {
+                self.state.log_call("titer_run_plugin_analysis", run_args, true, None);
+                Ok(Json(out))
+            }
+            Err(e) => {
+                self.state.log_call("titer_run_plugin_analysis", run_args, false, Some(&e));
+                Err(e)
+            }
+        }
+    }
+
     /// Re-run an existing analysis node: no new node is created, so a
     /// method/wand-created analysis becomes runnable without duplicating
     /// it, and re-running after a data edit stops requiring a brand-new
@@ -8719,8 +8906,8 @@ impl TiterMcpServer {
         // The allowlist (contract §12): read once per session, so a toggle
         // change in Settings applies when the client reconnects. A fresh
         // state with no `mcp/` directory yet reads as the default — only
-        // the six read-group tools (the five Phase 1 tools plus
-        // `titer_list_backups`).
+        // the seven read-group tools (the five Phase 1 tools plus
+        // `titer_list_backups` plus `titer_list_plugin_analyses`).
         let allowed = load_allowlist(&state);
         // Inspector 2.13.0 discards tools whose outputSchema has no `type`
         // field: rmcp emits a bare `{"$schema": ...}` for the `Json<Value>`
@@ -9064,10 +9251,10 @@ impl ServerHandler for TiterMcpServer {
             .with_server_info(Implementation::new("titer", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Titer is a local-only scientific data-analysis app (a GraphPad Prism alternative). \
-                It exposes up to 76 tools, gated by the allowlist in Settings → AI Connections \
+                It exposes up to 78 tools, gated by the allowlist in Settings → AI Connections \
                 (contract §12): by default only the 6 read tools below are enabled, and the user \
                 can enable more groups there — a tool that is not listed cannot be called. \
-                20 of the 76 are read-only and 56 change the open project. \
+                21 of the 78 are read-only and 57 change the open project. \
                 Read-only: titer_list_projects (projects, tables, analyses, graphs, figures, info sheets), \
                 titer_project_summary (the same discovery, as counts plus ids and names), \
                 titer_search (find a node by name), \
@@ -9233,6 +9420,7 @@ fn listing_entry(nid: &str, node: &serde_json::Value) -> serde_json::Value {
         "name": node_name(node),
         "table_type": node.get("tableType").and_then(|v| v.as_str()),
         "analysis_type": node.get("analysisType").and_then(|v| v.as_str()),
+        "plugin_analysis_id": node.get("pluginAnalysisId").and_then(|v| v.as_str()),
         "graph_type": node.get("graphType").and_then(|v| v.as_str()),
     })
 }
@@ -11411,7 +11599,7 @@ mod tests {
     async fn mcp_smoke_job_plumbing_over_http() {
         let state = job_state();
         // The allowlist gates tools/list and tools/call (contract §12):
-        // this test drives all 76 tools, so it enables every group first.
+        // this test drives all 78 tools, so it enables every group first.
         // The default-allowlist behaviour is covered by
         // `mcp_smoke_allowlist_default_over_http` below.
         let allowlist_dir = allowlist_scratch_dir(
@@ -11464,8 +11652,8 @@ mod tests {
             list["result"]["tools"].as_array().expect("tools").iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(
             names.len(),
-            76,
-            "six read tools + four read-more tools + three discovery tools + seven project tools + ten table tools + thirteen analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + six export tools + nine cloud tools + two destructive tools: {names:?}"
+            78,
+            "seven read tools + four read-more tools + three discovery tools + seven project tools + ten table tools + fourteen analysis tools (incl. three job tools) + sixteen graph/figure/info-sheet/drawing tools + six export tools + nine cloud tools + two destructive tools: {names:?}"
         );
         for name in ["titer_list_backups"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
@@ -11505,6 +11693,9 @@ mod tests {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
         for name in ["titer_run_analysis", "titer_rerun_analysis", "titer_freeze_analysis", "titer_clone_analysis"] {
+            assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
+        }
+        for name in ["titer_list_plugin_analyses", "titer_run_plugin_analysis"] {
             assert!(names.contains(&name), "{name} missing from tools/list: {names:?}");
         }
         for name in [
@@ -12590,7 +12781,7 @@ mod tests {
     #[tokio::test]
     async fn mcp_smoke_allowlist_default_over_http() {
         // No `mcp/` directory at all: the default allowlist — exactly the
-        // six read-group tools, nothing else. This is the audit's §5
+        // seven read-group tools, nothing else. This is the audit's §5
         // finding made into a test: the server must not advertise the
         // destructive tools (or `titer_run_script`) to a fresh client.
         let state = job_state();
@@ -12604,13 +12795,14 @@ mod tests {
             names,
             vec![
                 "titer_list_backups",
+                "titer_list_plugin_analyses",
                 "titer_list_projects",
                 "titer_list_tables",
                 "titer_read_graph",
                 "titer_read_results",
                 "titer_read_table_summary",
             ],
-            "default tools/list is exactly the six read-group tools: {names:?}"
+            "default tools/list is exactly the seven read-group tools: {names:?}"
         );
 
         // A disallowed call is rejected server-side with a message naming
@@ -12639,7 +12831,7 @@ mod tests {
         state.lock().dir = Some(dir.clone());
         let session2 = mcp_initialize(&client, &url).await;
         let names2 = mcp_list_tool_names(&client, &url, &session2).await;
-        assert_eq!(names2.len(), 8, "six reads + two destructive tools: {names2:?}");
+        assert_eq!(names2.len(), 9, "seven reads + two destructive tools: {names2:?}");
         assert!(names2.contains(&"titer_delete_node".to_string()), "delete appears: {names2:?}");
         assert!(names2.contains(&"titer_run_script".to_string()), "script appears: {names2:?}");
 
@@ -12660,9 +12852,9 @@ mod tests {
             call_raw_text(&resp)
         );
 
-        // The first session is untouched by the toggle: it still lists 6.
+        // The first session is untouched by the toggle: it still lists 7.
         let names_again = mcp_list_tool_names(&client, &url, &session).await;
-        assert_eq!(names_again.len(), 6, "existing session keeps its allowlist: {names_again:?}");
+        assert_eq!(names_again.len(), 7, "existing session keeps its allowlist: {names_again:?}");
 
         cancel.cancel();
         server.abort();
@@ -12679,7 +12871,7 @@ mod tests {
         // the part that actually catches it.
         let mut all: Vec<&str> = ALLOWLIST_GROUPS.iter().flat_map(|g| g.tools.iter().copied()).collect();
         all.sort_unstable();
-        assert_eq!(all.len(), 76, "tool inventory changed — assign the new tool a group: {all:?}");
+        assert_eq!(all.len(), 78, "tool inventory changed — assign the new tool a group: {all:?}");
         let mut deduped = all.clone();
         deduped.dedup();
         assert_eq!(deduped, all, "a tool is in two groups: {all:?}");
@@ -12695,7 +12887,7 @@ mod tests {
     }
 
     #[test]
-    fn allowlist_default_is_the_six_read_tools() {
+    fn allowlist_default_is_the_seven_read_tools() {
         let groups: HashSet<String> = ALLOWLIST_DEFAULT_GROUPS.iter().map(|g| g.to_string()).collect();
         let tools = allowed_tools(&groups);
         let mut names: Vec<&str> = tools.iter().map(String::as_str).collect();
@@ -12704,6 +12896,7 @@ mod tests {
             names,
             vec![
                 "titer_list_backups",
+                "titer_list_plugin_analyses",
                 "titer_list_projects",
                 "titer_list_tables",
                 "titer_read_graph",
@@ -12804,7 +12997,7 @@ mod tests {
         // that (and the tool count) at the choke point.
         let server = TiterMcpServer::new(job_state());
         let tools = server.tool_router.list_all();
-        assert_eq!(tools.len(), 76, "tool count changed — update this pin");
+        assert_eq!(tools.len(), 78, "tool count changed — update this pin");
         for t in &tools {
             let schema = t
                 .output_schema

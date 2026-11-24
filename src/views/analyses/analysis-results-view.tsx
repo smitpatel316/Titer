@@ -6,7 +6,8 @@
 import type * as React from "react";
 import { createContext, useContext } from "react";
 import { CheckCircleIcon, WarningIcon } from "@phosphor-icons/react";
-import type { AnalysisResult, Analyzed, Check, GroupDescriptives, StatRow } from "../../stats/types";
+import type { Analyzed, Check, GroupDescriptives, StatRow } from "../../stats/types";
+import type { AnyAnalysisResult } from ".";
 import type { TableData, TableType } from "../../store/types";
 import { Button, cn } from "../../ui/controls";
 import { isSignificant, num, pStars, pValue } from "../../lib/format";
@@ -223,7 +224,10 @@ export function AnalysisResultsView({
   cellBackgrounds,
   onSetCellBackground,
 }: {
-  result: AnalysisResult;
+  // A first-party result, or a plugin one (its `testType` is the namespaced
+  // id string): the view renders both the same way — statistics, groups,
+  // notes — and the per-test tables below only match first-party types.
+  result: AnyAnalysisResult;
   onCreateTable?: (tableType: TableType, table: TableData) => void;
   /** The analysis node's painted results cells, by `"section|row|col"` address. */
   cellBackgrounds?: Record<string, CellBackgroundColor>;

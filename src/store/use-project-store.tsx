@@ -23,6 +23,7 @@ import { refreshLevelOrder, refreshVariableTypes } from "../lib/variable-types";
 import { remapQualifiedOptions, restoreForeignPoints } from "../lib/multi-table";
 import { MAX_INFO_SHEETS, newInfoSheetData } from "../lib/info-sheets";
 import type { AnalysisParams, AnalysisPickerValue, AnalysisResult, AnalysisType } from "../stats/types";
+import { resolveAnalysis, type PluginAnalysisResult, type PluginParamValues } from "../plugins";
 import { TABLES } from "../views/tables";
 import { GRAPHS, GRAPH_OPTIONS_BY_TABLE, newGraphOptions } from "../views/graphs";
 import type { TemplateKind } from "../lib/template";
@@ -66,6 +67,8 @@ type Selector =
   | { kind: "remote-picker" }
   | { kind: "cloud-settings" }
   | { kind: "ai-connections" }
+  // Marketplace (M2, seq 434): the in-app plugin store.
+  | { kind: "marketplace" }
   | { kind: "preferences"; section?: PreferenceSection }
   | { kind: "export-all-graphs" };
 
@@ -155,7 +158,7 @@ type Action =
   /** The view's last successful live run, kept on the node so a frozen or
    *  orphaned sheet can show it. Not an Undo step (a snapshot, not an edit),
    *  but it does dirty the file — the result is saved with the node. */
-  | { type: "cacheAnalysisResult"; id: string; result: AnalysisResult }
+  | { type: "cacheAnalysisResult"; id: string; result: AnalysisResult | PluginAnalysisResult }
   /** Freeze (or unfreeze) a results sheet: frozen, it shows its cached
    *  result and stops auto-updating when the data change. */
   | { type: "setAnalysisFrozen"; id: string; frozen: boolean }
@@ -1392,6 +1395,9 @@ interface ProjectActions {
   /** A table computed from `from`'s values (Transform or Normalize). */
   createTransformed: (from: string, transform: Omit<Transform, "from">) => void;
   createAnalysis: (parentId: string, analysisType: AnalysisType, analysisParams?: AnalysisParams) => string;
+  /** A plugin analysis node on a table: named for the plugin analysis, and
+   *  carrying its namespaced id + params instead of an `AnalysisType`. */
+  createPluginAnalysis: (parentId: string, pluginId: string, pluginParams?: PluginParamValues) => string;
   /** `graphOptions` (plan 38, Apply Method): the cloned options of a method
    *  file's graph, with its analysis links remapped; omitted, the graph gets
    *  its defaults as today. `sourceTableIds` (#48): the extra tables the
@@ -1457,7 +1463,7 @@ interface ProjectActions {
   removeNode: (id: string) => void;
   /** Keeps a successful live run on its analysis node, so a frozen or
    *  orphaned sheet can show it. */
-  cacheAnalysisResult: (id: string, result: AnalysisResult) => void;
+  cacheAnalysisResult: (id: string, result: AnalysisResult | PluginAnalysisResult) => void;
   /** Freeze (or unfreeze) a results sheet. Orphaned sheets can't freeze. */
   setAnalysisFrozen: (id: string, frozen: boolean) => void;
   /** Freeze (or unfreeze) a data table: frozen, it can't be edited. */
@@ -1671,6 +1677,23 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
             parentId,
             analysisType,
             analysisParams,
+          },
+        });
+        return id;
+      },
+      // Named for the plugin analysis it runs (an unregistered plugin
+      // keeps its id as the name until it is re-enabled).
+      createPluginAnalysis: (parentId, pluginId, pluginParams) => {
+        const id = genId("analysis");
+        dispatch({
+          type: "create",
+          node: {
+            id,
+            type: "analysis",
+            name: resolveAnalysis(pluginId)?.label ?? pluginId,
+            parentId,
+            pluginAnalysisId: pluginId,
+            pluginAnalysisParams: pluginParams,
           },
         });
         return id;

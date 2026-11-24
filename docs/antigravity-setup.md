@@ -82,7 +82,7 @@ button. Paste it into Gemini. In short, it tells Gemini:
 - Save only when you ask — nothing is saved until `titer_save_project` runs.
 - Everything is local: data never leaves this Mac.
 - If something is missing or broken, report it with `titer_send_feedback` instead of working around it silently.
-- Only the tool groups enabled in Settings → AI Connections are available — by default just the six read tools. If a tool answers that it isn't enabled, Gemini should say which group to turn on instead of working around it.
+- Only the tool groups enabled in Settings → AI Connections are available — by default just the seven read tools. If a tool answers that it isn't enabled, Gemini should say which group to turn on instead of working around it.
 
 **The dialog is the source of truth for the prompt** — copy it from
 there rather than from an old copy of this doc. The prompt text itself
@@ -123,7 +123,7 @@ Then restart Antigravity (or open the MCP manager with `/mcp` and enable `titer`
 - **401 / unauthorized:** the token is wrong, or MCP is off in Titer. Check "Allow AI apps to connect" in Settings → AI Connections (since 1.7.3 it stays on once flipped). If you regenerated the token, re-copy it (manual path only — the one-click stdio entry never holds a token).
 - **Connection refused:** Titer isn't running, or it's on a different port. Check the endpoint in the AI Connections panel.
 - **Tools don't show up in Antigravity:** restart Antigravity after connecting, or click Refresh under Installed MCP Servers, then check `/mcp` — `titer` should be listed and enabled.
-- **A tool answers that it isn't enabled:** turn on the group it names in Settings → AI Connections, then reconnect your AI app. By default only the six read tools are on.
+- **A tool answers that it isn't enabled:** turn on the group it names in Settings → AI Connections, then reconnect your AI app. By default only the seven read tools are on.
 - **A long analysis seems stuck:** it runs as a job. Ask Gemini to poll `titer_read_job` instead of starting it again.
 - **A result says `not_computed`:** the analysis hasn't been run in this Titer session. Run it in Titer (or ask Gemini to run it, with the Run analyses group on) — the agent must not invent a result.
 
