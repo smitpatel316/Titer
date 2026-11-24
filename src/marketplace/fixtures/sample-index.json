@@ -1,0 +1,39 @@
+{
+  "formatVersion": 1,
+  "updatedAt": "2026-11-24T00:00:00Z",
+  "listings": [
+    {
+      "id": "example.hello-analysis",
+      "name": "Hello Analysis",
+      "version": "1.1.0",
+      "apiVersion": "3.0",
+      "author": "Titer example author",
+      "license": "MIT",
+      "description": "The smallest possible plugin: one analysis, the mean of the first column, computed in R through the webR engine.",
+      "downloadUrl": "https://raw.githubusercontent.com/smitpatel316/titer-marketplace/main/plugins/example.hello-analysis/1.1.0/hello-analysis-1.1.0.zip",
+      "sha256": "df1da6424961d747a686066eeb0bbd2eef3b660a736639b82119f4cf2346480f",
+      "readme": "https://raw.githubusercontent.com/smitpatel316/titer-marketplace/main/plugins/example.hello-analysis/1.1.0/README.md",
+      "screenshots": [],
+      "bundled": true,
+      "bundledFile": "hello-analysis-1.1.0.zip",
+      "versions": [
+        {
+          "version": "1.1.0",
+          "publishedAt": "2026-11-20T10:00:00Z",
+          "changelog": "Adds the hello-scaled-mean analysis (pure TypeScript compute).",
+          "downloadUrl": "https://raw.githubusercontent.com/smitpatel316/titer-marketplace/main/plugins/example.hello-analysis/1.1.0/hello-analysis-1.1.0.zip",
+          "sha256": "df1da6424961d747a686066eeb0bbd2eef3b660a736639b82119f4cf2346480f",
+          "bundledFile": "hello-analysis-1.1.0.zip"
+        },
+        {
+          "version": "1.0.0",
+          "publishedAt": "2026-11-10T10:00:00Z",
+          "changelog": "First release.",
+          "downloadUrl": "https://raw.githubusercontent.com/smitpatel316/titer-marketplace/main/plugins/example.hello-analysis/1.0.0/hello-analysis-1.0.0.zip",
+          "sha256": "6c9f42350f6a006f108f235fe47785053f6eb6a27279386e56e0343744bc00a9",
+          "bundledFile": "hello-analysis-1.0.0.zip"
+        }
+      ]
+    }
+  ]
+}

@@ -39127,6 +39127,494 @@ check("m3 guard: an unknown command denies fail-closed", () => {
   if (!checkResult.allowed) ok(checkResult.reason.includes("not a Titer plugin command"));
 });
 
+// ── Marketplace store (M2, seq 434) ───────────────────────────────────────
+// The marketplace store — browse/search/install/update/uninstall — built
+// against the DOCUMENTED loader API (src/plugins/loader.ts on
+// v3/plugin-api @ 7b5d9be; M1 lands it on check/marketplace). Until then
+// these pins run against a test double with the same signatures and the
+// same lifecycle (disabled → pending-review → enabled); the check-branch
+// gate re-runs them against the real loader. No network in any pin: the
+// bundled sample index + fixture zips are read from disk, and the store's
+// fetch hooks throw if called.
+
+import {
+  DEFAULT_INDEX_URL,
+  parseMarketplaceIndex,
+  searchListings,
+  type MarketplaceIndex,
+  type MarketplaceListing,
+} from "../src/marketplace/index";
+import { sha256Hex, verifySha256 } from "../src/marketplace/hash";
+import { availableUpdateFor, isUpdateOfferable, UPDATE_OFFER_DELAY_MS } from "../src/marketplace/updates";
+import { clearPin, loadPins, pinnedVersion, savePin } from "../src/marketplace/pins";
+import { createMemoryStorage } from "../src/marketplace/storage";
+import { checkPluginDependency, dependencyNotice } from "../src/marketplace/dependencies";
+import { MARKETPLACE_INSTALLED_KEY, MarketplaceStore, type MarketplaceStoreDeps } from "../src/marketplace/store";
+import type {
+  PluginAnalysisSpecJson,
+  PluginLoaderPort,
+  PluginPermission,
+} from "../src/marketplace/loader-port";
+
+/**
+ * A test double for the documented loader API: same signatures, same
+ * lifecycle (disabled → pending-review → enabled), minimal manifest
+ * validation. `enabledIds` is the double's registry, so pins can prove an
+ * enable registers and a disable/uninstall unregisters.
+ */
+function fakeLoaderPort(): PluginLoaderPort & { enabledIds: Set<string> } {
+  const enabledIds = new Set<string>();
+  const port: PluginLoaderPort = {
+    async loadPluginFromZip(bytes, name) {
+      let zip: JSZip;
+      try {
+        zip = await JSZip.loadAsync(bytes);
+      } catch {
+        return { errors: [`“${name}” is not a readable zip file.`] };
+      }
+      const entry = zip.file("plugin.json");
+      if (!entry) return { errors: ["This plugin has no plugin.json at its root — a plugin folder needs one."] };
+      let raw: unknown;
+      try {
+        raw = JSON.parse(await entry.async("string")) as unknown;
+      } catch {
+        return { errors: ["plugin.json is not valid JSON."] };
+      }
+      const v = raw as Record<string, unknown>;
+      const errors: string[] = [];
+      for (const field of ["id", "name", "version", "apiVersion", "author", "license"]) {
+        if (typeof v[field] !== "string" || !(v[field] as string).trim().length) {
+          errors.push(`Plugin ${field} must be a non-empty string.`);
+        }
+      }
+      if (!Array.isArray(v.permissions)) errors.push("Plugin permissions must be a list (possibly empty).");
+      if (!Array.isArray(v.analyses) || v.analyses.length === 0) {
+        errors.push("plugin.json must list at least one analysis under “analyses”.");
+      }
+      if (errors.length) return { errors };
+      return {
+        package: {
+          manifest: {
+            id: v.id as string,
+            name: (v.name as string).trim(),
+            version: v.version as string,
+            apiVersion: v.apiVersion as string,
+            author: (v.author as string).trim(),
+            license: (v.license as string).trim(),
+            permissions: [...(v.permissions as PluginPermission[])],
+          },
+          analyses: v.analyses as PluginAnalysisSpecJson[],
+          warnings: [],
+        },
+      };
+    },
+    installPlugin(parsed, existingIds, source) {
+      if (existingIds.includes(parsed.manifest.id)) {
+        return { errors: [`Plugin “${parsed.manifest.id}” is already installed.`] };
+      }
+      return {
+        record: {
+          manifest: parsed.manifest,
+          analyses: parsed.analyses,
+          status: "disabled",
+          installedAt: new Date().toISOString(),
+          grantedPermissions: [],
+          source,
+        },
+      };
+    },
+    requestEnable(record) {
+      if (record.status === "enabled") throw new Error(`Plugin “${record.manifest.id}” is already enabled.`);
+      if (record.status === "incompatible") {
+        throw new Error(record.incompatibility ?? `Plugin “${record.manifest.id}” is incompatible.`);
+      }
+      if (record.status === "pending-review") return record;
+      return { ...record, status: "pending-review" };
+    },
+    confirmEnable(record, granted, _appVersion) {
+      if (record.status !== "pending-review") {
+        throw new Error(`Plugin “${record.manifest.id}” is not awaiting review — call requestEnable first.`);
+      }
+      const undeclared = granted.filter((p) => !record.manifest.permissions.includes(p));
+      if (undeclared.length) {
+        throw new Error(`Cannot grant ${undeclared.join(", ")} — the plugin never declared ${undeclared.length > 1 ? "them" : "it"}.`);
+      }
+      enabledIds.add(record.manifest.id);
+      return { ...record, status: "enabled", grantedPermissions: [...granted], incompatibility: undefined };
+    },
+    disablePlugin(record) {
+      enabledIds.delete(record.manifest.id);
+      return { ...record, status: "disabled", incompatibility: undefined };
+    },
+    pluginReviewLines(record) {
+      const lines = [`“${record.manifest.name}” ${record.manifest.version} by ${record.manifest.author}.`];
+      if (record.manifest.permissions.length) lines.push(`Asks for: ${record.manifest.permissions.join(", ")}.`);
+      lines.push(
+        record.status === "disabled"
+          ? "Installed disabled — nothing runs until you enable it."
+          : `Status: ${record.status}.`,
+      );
+      return lines;
+    },
+  };
+  return { ...port, enabledIds };
+}
+
+/** Fixed "now" for the update-delay pins: Tue 2026-11-24 12:00 UTC. */
+const M2_NOW = Date.parse("2026-11-24T12:00:00Z");
+const M2_FIXTURES = "src/marketplace/fixtures";
+
+function m2StoreDeps(overrides: Partial<MarketplaceStoreDeps> = {}): MarketplaceStoreDeps {
+  return {
+    loader: fakeLoaderPort(),
+    storage: createMemoryStorage(),
+    fetchText: async () => {
+      throw new Error("M2 pin must not hit the network (fetchText).");
+    },
+    fetchBytes: async () => {
+      throw new Error("M2 pin must not hit the network (fetchBytes).");
+    },
+    loadBundledZip: async (name) => new Uint8Array(readFileSync(`${M2_FIXTURES}/${name}`)),
+    now: () => M2_NOW,
+    appVersion: "1.9.0",
+    ...overrides,
+  };
+}
+
+function m2SampleIndex(): MarketplaceIndex {
+  const parsed = parseMarketplaceIndex(readFileSync(`${M2_FIXTURES}/sample-index.json`, "utf8"));
+  if ("errors" in parsed) throw new Error(`bundled sample index does not parse: ${parsed.errors.join(" ")}`);
+  return parsed.index;
+}
+
+function m2Listing(): MarketplaceListing {
+  const listing = m2SampleIndex().listings[0];
+  if (!listing) throw new Error("bundled sample index has no listings");
+  return listing;
+}
+
+async function m2Install(store: MarketplaceStore, listing: MarketplaceListing, version?: string) {
+  const installed = await store.installListing(listing, version);
+  if ("errors" in installed) throw new Error(`install failed: ${installed.errors.join(" ")}`);
+  return installed.record;
+}
+
+/** One valid listing as plain JSON, for the invalid-index cases. */
+const m2ValidListingJson = (): Record<string, unknown> => ({
+  id: "example.hello-analysis",
+  name: "Hello Analysis",
+  version: "1.0.0",
+  apiVersion: "3.0",
+  author: "Titer example author",
+  license: "MIT",
+  description: "The smallest possible plugin.",
+  downloadUrl:
+    "https://raw.githubusercontent.com/smitpatel316/titer-marketplace/main/plugins/example.hello-analysis/1.0.0/hello-analysis-1.0.0.zip",
+  sha256: "a".repeat(64),
+  readme:
+    "https://raw.githubusercontent.com/smitpatel316/titer-marketplace/main/plugins/example.hello-analysis/1.0.0/README.md",
+  screenshots: [],
+  versions: [
+    {
+      version: "1.0.0",
+      publishedAt: "2026-11-10T10:00:00Z",
+      changelog: "First release.",
+      downloadUrl:
+        "https://raw.githubusercontent.com/smitpatel316/titer-marketplace/main/plugins/example.hello-analysis/1.0.0/hello-analysis-1.0.0.zip",
+      sha256: "a".repeat(64),
+    },
+  ],
+});
+
+check("M2-index: the bundled sample index parses (valid)", () => {
+  const index = m2SampleIndex();
+  strictEqual(index.formatVersion, 1);
+  strictEqual(index.listings.length, 1);
+  const listing = index.listings[0];
+  if (!listing) throw new Error("bundled sample index has no listings");
+  strictEqual(listing.id, "example.hello-analysis");
+  strictEqual(listing.name, "Hello Analysis");
+  strictEqual(listing.version, "1.1.0");
+  strictEqual(listing.apiVersion, "3.0");
+  strictEqual(listing.author, "Titer example author");
+  strictEqual(listing.license, "MIT");
+  ok(/^[0-9a-f]{64}$/.test(listing.sha256), "listing sha256 must be 64 hex chars");
+  ok(listing.downloadUrl.startsWith("https://raw.githubusercontent.com/"), "download URL must be a GitHub raw URL");
+  strictEqual(listing.versions.length, 2);
+  strictEqual(listing.versions[0]?.version, "1.1.0");
+  ok((listing.versions[0]?.changelog ?? "").length > 0, "version history needs a changelog");
+  strictEqual(listing.bundled, true);
+});
+
+check("M2-index: invalid indexes are rejected", () => {
+  const bad: [string, unknown, RegExp][] = [
+    ["not an object", 42, /object/],
+    ["not JSON", "{not json", /JSON/],
+    ["unknown formatVersion", { formatVersion: 2, listings: [] }, /formatVersion/],
+    ["listings not an array", { formatVersion: 1, listings: {} }, /listings/],
+    [
+      "listing missing id",
+      { formatVersion: 1, listings: [{ ...m2ValidListingJson(), id: undefined }] },
+      /id/,
+    ],
+    ["bad version", { formatVersion: 1, listings: [{ ...m2ValidListingJson(), version: "one" }] }, /version/],
+    ["bad apiVersion", { formatVersion: 1, listings: [{ ...m2ValidListingJson(), apiVersion: "three" }] }, /apiVersion/],
+    ["bad sha256", { formatVersion: 1, listings: [{ ...m2ValidListingJson(), sha256: "xyz" }] }, /sha256/],
+    ["bad downloadUrl", { formatVersion: 1, listings: [{ ...m2ValidListingJson(), downloadUrl: "not a url" }] }, /downloadUrl/],
+    [
+      "version history with a bad version",
+      {
+        formatVersion: 1,
+        listings: [
+          {
+            ...m2ValidListingJson(),
+            versions: [{ version: "x", publishedAt: "2026-11-10T10:00:00Z", changelog: "Bad.", downloadUrl: "https://raw.githubusercontent.com/x/y/z.zip", sha256: "a".repeat(64) }],
+          },
+        ],
+      },
+      /version/,
+    ],
+  ];
+  for (const [label, value, re] of bad) {
+    const parsed = parseMarketplaceIndex(value);
+    ok("errors" in parsed, `${label}: invalid index must be rejected`);
+    if ("errors" in parsed) {
+      ok(parsed.errors.some((e) => re.test(e)), `${label}: error should mention ${re} (got: ${parsed.errors.join(" | ")})`);
+    }
+  }
+});
+
+check("M2-search: browse/search matches name, id, author and description", () => {
+  const parsed = parseMarketplaceIndex({
+    formatVersion: 1,
+    updatedAt: "2026-11-24T00:00:00Z",
+    listings: [
+      m2ValidListingJson(),
+      {
+        ...m2ValidListingJson(),
+        id: "stats.anova-power",
+        name: "ANOVA Power Tools",
+        author: "Stats Co",
+        description: "Power analysis for ANOVA designs.",
+        version: "2.0.0",
+        downloadUrl: "https://raw.githubusercontent.com/x/y/anova-power-2.0.0.zip",
+        versions: [
+          {
+            version: "2.0.0",
+            publishedAt: "2026-11-10T10:00:00Z",
+            changelog: "First release.",
+            downloadUrl: "https://raw.githubusercontent.com/x/y/anova-power-2.0.0.zip",
+            sha256: "a".repeat(64),
+          },
+        ],
+      },
+    ],
+  });
+  if ("errors" in parsed) throw new Error(`valid index rejected: ${parsed.errors.join(" ")}`);
+  strictEqual(searchListings(parsed.index, "").length, 2);
+  strictEqual(searchListings(parsed.index, "hello").length, 1);
+  strictEqual(searchListings(parsed.index, "HELLO")[0]?.id, "example.hello-analysis");
+  strictEqual(searchListings(parsed.index, "anova")[0]?.id, "stats.anova-power");
+  strictEqual(searchListings(parsed.index, "stats co")[0]?.id, "stats.anova-power");
+  strictEqual(searchListings(parsed.index, "power analysis")[0]?.id, "stats.anova-power");
+  strictEqual(searchListings(parsed.index, "zzz").length, 0);
+});
+
+check("M2-hash: the fixture zip's sha256 matches the index, and tampering fails", async () => {
+  const listing = m2Listing();
+  const bytes = new Uint8Array(readFileSync(`${M2_FIXTURES}/hello-analysis-1.1.0.zip`));
+  strictEqual(await sha256Hex(bytes), listing.sha256);
+  ok(await verifySha256(bytes, listing.sha256), "matching hash must verify");
+  const tampered = new Uint8Array(bytes);
+  tampered[tampered.length - 1] = tampered[tampered.length - 1]! ^ 0xff;
+  ok(!(await verifySha256(tampered, listing.sha256)), "tampered bytes must not verify");
+  ok(!(await verifySha256(bytes, "0".repeat(64))), "a wrong hash must not verify");
+});
+
+check("M2-install: bundled install runs download → hash → parse → install disabled, then review → enable", async () => {
+  const loader = fakeLoaderPort();
+  const store = new MarketplaceStore(m2StoreDeps({ loader }));
+  const loaded = store.loadIndexFromText(readFileSync(`${M2_FIXTURES}/sample-index.json`, "utf8"));
+  if ("errors" in loaded) throw new Error(`sample index failed to load: ${loaded.errors.join(" ")}`);
+  const listing = loaded.index.listings[0];
+  if (!listing) throw new Error("sample index has no listings");
+  const installed = await store.installListing(listing);
+  if ("errors" in installed) throw new Error(`install failed: ${installed.errors.join(" ")}`);
+  strictEqual(installed.record.status, "disabled");
+  strictEqual(installed.record.manifest.id, "example.hello-analysis");
+  strictEqual(installed.record.manifest.version, "1.1.0");
+  ok(store.getInstalled("example.hello-analysis"), "record must persist in the store");
+  ok(store.hasCachedZip("example.hello-analysis"), "installed zip bytes must be cached");
+  strictEqual(loader.enabledIds.size, 0, "nothing runs before the review step");
+  const lines = store.reviewLines("example.hello-analysis");
+  ok(lines.some((l) => /disabled/i.test(l)), "review lines must say installed-disabled");
+  const reviewed = store.requestEnable("example.hello-analysis");
+  strictEqual(reviewed.status, "pending-review");
+  const enabled = store.confirmEnable("example.hello-analysis", ["read-table"]);
+  strictEqual(enabled.status, "enabled");
+  ok(loader.enabledIds.has("example.hello-analysis"), "enable must register the plugin");
+  // A fresh store over the same storage sees the enabled record.
+  const reloaded = new MarketplaceStore(m2StoreDeps({ loader, storage: store.storage }));
+  strictEqual(reloaded.getInstalled("example.hello-analysis")?.status, "enabled");
+});
+
+check("M2-install: a hash mismatch refuses loudly and installs nothing", async () => {
+  const listing = m2Listing();
+  const store = new MarketplaceStore(
+    m2StoreDeps({
+      loadBundledZip: async () => {
+        const bytes = new Uint8Array(readFileSync(`${M2_FIXTURES}/hello-analysis-1.1.0.zip`));
+        bytes[0] = bytes[0]! ^ 0xff;
+        return bytes;
+      },
+    }),
+  );
+  const installed = await store.installListing(listing);
+  ok("errors" in installed, "mismatched hash must refuse the install");
+  if ("errors" in installed) {
+    ok(installed.errors.some((e) => /hash mismatch/i.test(e)), `error must say hash mismatch (got: ${installed.errors.join(" | ")})`);
+  }
+  strictEqual(store.listInstalled().length, 0);
+});
+
+check("M2-install: a duplicate install is refused", async () => {
+  const store = new MarketplaceStore(m2StoreDeps());
+  const listing = m2Listing();
+  await m2Install(store, listing);
+  const again = await store.installListing(listing);
+  ok("errors" in again && again.errors.some((e) => /already installed/i.test(e)), "second install must be refused");
+});
+
+check("M2-update: a new version is only offered after the delay, never the hour it ships", () => {
+  const hourAgo = new Date(M2_NOW - 60 * 60 * 1000).toISOString();
+  const dayAgo = new Date(M2_NOW - 25 * 60 * 60 * 1000).toISOString();
+  const atDelay = new Date(M2_NOW - UPDATE_OFFER_DELAY_MS).toISOString();
+  strictEqual(isUpdateOfferable(hourAgo, M2_NOW), false);
+  strictEqual(isUpdateOfferable(dayAgo, M2_NOW), true);
+  strictEqual(isUpdateOfferable(atDelay, M2_NOW), true);
+  strictEqual(isUpdateOfferable("not a date", M2_NOW), false);
+  const listing = m2Listing();
+  strictEqual(availableUpdateFor(listing, "1.0.0", null, M2_NOW), "1.1.0");
+  strictEqual(availableUpdateFor(listing, "1.1.0", null, M2_NOW), null);
+  strictEqual(availableUpdateFor(listing, "1.0.0", "1.0.0", M2_NOW), null);
+  // A version published an hour ago is never offered, however new it is.
+  const fresh: MarketplaceListing = {
+    ...listing,
+    version: "1.2.0",
+    versions: [
+      { version: "1.2.0", publishedAt: hourAgo, changelog: "Fresh.", downloadUrl: listing.downloadUrl, sha256: listing.sha256 },
+      ...listing.versions,
+    ],
+  };
+  strictEqual(availableUpdateFor(fresh, "1.1.0", null, M2_NOW), null);
+});
+
+check("M2-pin: a pin persists across reloads and survives an update", async () => {
+  const storage = createMemoryStorage();
+  const store = new MarketplaceStore(m2StoreDeps({ storage }));
+  const listing = m2Listing();
+  await m2Install(store, listing, "1.0.0");
+  strictEqual(store.getInstalled("example.hello-analysis")?.manifest.version, "1.0.0");
+  store.setPin("example.hello-analysis", "1.0.0");
+  strictEqual(store.pinnedVersion("example.hello-analysis"), "1.0.0");
+  strictEqual(pinnedVersion(storage, "example.hello-analysis"), "1.0.0");
+  strictEqual(savePin(storage, "example.hello-analysis", "1.0.0"), "1.0.0");
+  // Same storage, fresh store: the pin is still there, and no update is offered while pinned.
+  const reloaded = new MarketplaceStore(m2StoreDeps({ storage }));
+  reloaded.loadIndexFromText(readFileSync(`${M2_FIXTURES}/sample-index.json`, "utf8"));
+  strictEqual(reloaded.pinnedVersion("example.hello-analysis"), "1.0.0");
+  strictEqual(reloaded.availableUpdate("example.hello-analysis"), null);
+  // An explicit update to 1.1.0 keeps the pin (re-pointed at the new version).
+  const updated = await reloaded.updatePlugin("example.hello-analysis", { toVersion: "1.1.0" });
+  if ("errors" in updated) throw new Error(`update failed: ${updated.errors.join(" ")}`);
+  strictEqual(updated.record.manifest.version, "1.1.0");
+  strictEqual(reloaded.pinnedVersion("example.hello-analysis"), "1.1.0");
+  strictEqual(loadPins(storage)["example.hello-analysis"], "1.1.0");
+  reloaded.clearPin("example.hello-analysis");
+  strictEqual(reloaded.pinnedVersion("example.hello-analysis"), null);
+  clearPin(storage, "example.hello-analysis");
+  strictEqual(pinnedVersion(storage, "example.hello-analysis"), null);
+});
+
+check("M2-uninstall: uninstall disables and removes the files cleanly", async () => {
+  const loader = fakeLoaderPort();
+  const storage = createMemoryStorage();
+  const store = new MarketplaceStore(m2StoreDeps({ loader, storage }));
+  const listing = m2Listing();
+  await m2Install(store, listing);
+  store.requestEnable("example.hello-analysis");
+  store.confirmEnable("example.hello-analysis", ["read-table"]);
+  ok(loader.enabledIds.has("example.hello-analysis"));
+  const removed = store.uninstall("example.hello-analysis");
+  if ("errors" in removed) throw new Error(`uninstall failed: ${removed.errors.join(" ")}`);
+  strictEqual(store.getInstalled("example.hello-analysis"), undefined);
+  strictEqual(store.listInstalled().length, 0);
+  ok(!loader.enabledIds.has("example.hello-analysis"), "uninstall must unregister the plugin");
+  ok(!store.hasCachedZip("example.hello-analysis"), "uninstall must drop the cached zip");
+  const persisted = JSON.parse(storage.getItem(MARKETPLACE_INSTALLED_KEY) ?? "[]") as unknown[];
+  strictEqual(persisted.length, 0, "uninstall must leave no installed record in storage");
+  const again = store.uninstall("example.hello-analysis");
+  ok("errors" in again && again.errors.some((e) => /not installed/i.test(e)), "second uninstall must report not installed");
+});
+
+check("M2-review: enable requires the review step, and grants cannot exceed the manifest", async () => {
+  const store = new MarketplaceStore(m2StoreDeps());
+  await m2Install(store, m2Listing());
+  throws(() => store.confirmEnable("example.hello-analysis", ["read-table"]), /review/);
+  const reviewed = store.requestEnable("example.hello-analysis");
+  strictEqual(reviewed.status, "pending-review");
+  const again = store.requestEnable("example.hello-analysis");
+  strictEqual(again.status, "pending-review");
+  throws(() => store.confirmEnable("example.hello-analysis", ["network"]), /never declared/);
+  const enabled = store.confirmEnable("example.hello-analysis", ["read-table"]);
+  strictEqual(enabled.status, "enabled");
+  throws(() => store.requestEnable("example.hello-analysis"), /already enabled/);
+});
+
+check("M2-dependency: a missing plugin degrades to an install notice, never a break", () => {
+  const dep = { pluginId: "example.hello-analysis", pluginName: "Hello Analysis" };
+  const missing = checkPluginDependency(dep, { installed: false, enabled: false });
+  strictEqual(missing.ok, false);
+  if (!missing.ok) {
+    strictEqual(missing.action, "install");
+    ok(/needs plugin “Hello Analysis” — install it\?/.test(missing.notice), `notice must name the plugin and offer install (got: ${missing.notice})`);
+  }
+  const notice = dependencyNotice(dep, { installed: false, enabled: false });
+  ok(notice !== null && /needs plugin “Hello Analysis” — install it\?/.test(notice), "dependencyNotice must return the same notice");
+  const disabled = checkPluginDependency(dep, { installed: true, enabled: false });
+  strictEqual(disabled.ok, false);
+  if (!disabled.ok) {
+    strictEqual(disabled.action, "enable");
+    ok(/installed but disabled — enable it/.test(disabled.notice), `disabled notice must offer enable (got: ${disabled.notice})`);
+  }
+  ok(dependencyNotice(dep, { installed: true, enabled: false })?.includes("enable it"), "disabled notice must mention enabling");
+  strictEqual(checkPluginDependency(dep, { installed: true, enabled: true }).ok, true);
+  strictEqual(dependencyNotice(dep, { installed: true, enabled: true }), null);
+  // Without a friendly name the id is used.
+  const byId = checkPluginDependency({ pluginId: "example.hello-analysis" }, { installed: false, enabled: false });
+  if (!byId.ok) ok(byId.notice.includes("example.hello-analysis"), "notice must fall back to the plugin id");
+});
+
+check("M2-wiring: Marketplace dialog, menu entry and selector kind exist", () => {
+  const dialog = readFileSync("src/components/marketplace-dialog.tsx", "utf8");
+  ok(/MarketplaceDialog/.test(dialog), "marketplace dialog component missing");
+  ok(/listing\.name/.test(dialog) && /listing\.version/.test(dialog) && /listing\.author/.test(dialog), "dialog must show name, version and author");
+  ok(/scorecard/i.test(dialog), "dialog must leave a scorecard slot (M3 renders it)");
+  ok(/Install/.test(dialog) && /Uninstall/.test(dialog), "dialog must offer install and uninstall");
+  const menu = readFileSync("src/app-menu.ts", "utf8");
+  ok(/Marketplace…/.test(menu), "Settings menu has no Marketplace entry");
+  const store = readFileSync("src/store/use-project-store.tsx", "utf8");
+  ok(/kind: "marketplace"/.test(store), "selector has no marketplace kind");
+  const shell = readFileSync("src/components/app-shell.tsx", "utf8");
+  ok(/MarketplaceDialog/.test(shell), "app shell doesn't mount the Marketplace dialog");
+});
+
+check("M2-index: the default index URL is a GitHub raw URL (Q8: no hosted server)", () => {
+  ok(DEFAULT_INDEX_URL.startsWith("https://raw.githubusercontent.com/"), `default index URL must be a GitHub raw URL (got: ${DEFAULT_INDEX_URL})`);
+  ok(!/localhost|127\.0\.0\.1/.test(DEFAULT_INDEX_URL), "default index URL must not point at localhost");
+});
+
+
 // ── Run ──────────────────────────────────────────────────────────────────
 
 // Descriptives are computed by R since the v1.0.7 rebase, so checks that run

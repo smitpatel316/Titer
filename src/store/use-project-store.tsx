@@ -66,6 +66,8 @@ type Selector =
   | { kind: "remote-picker" }
   | { kind: "cloud-settings" }
   | { kind: "ai-connections" }
+  // Marketplace (M2, seq 434): the in-app plugin store.
+  | { kind: "marketplace" }
   | { kind: "preferences"; section?: PreferenceSection }
   | { kind: "export-all-graphs" };
 

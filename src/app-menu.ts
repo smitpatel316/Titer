@@ -761,6 +761,10 @@ export function useAppMenu(doc: DocumentActions) {
             text: "AI Connections…",
             action: () => latest.current.store.openSelector({ kind: "ai-connections" }),
           },
+          {
+            text: "Marketplace…",
+            action: () => latest.current.store.openSelector({ kind: "marketplace" }),
+          },
         ],
       },
       {
