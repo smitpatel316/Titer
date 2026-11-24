@@ -13,14 +13,12 @@ Branch `v3/plugin-api`. Groundwork only — no marketplace.
 | Registry | `registry.ts` | Plugin analyses under namespaced ids (`plugin:<plugin-id>:<analysis-id>`) so they can never collide with or shadow first-party analyses. `resolveAnalysis` covers both sources in one call. `runPluginAnalysis` mirrors `runAnalysis`: params resolve + re-check, packages install first via `ensurePackages`, R via `evalNamedVector`, pure-TS via `lib/summary`, failures as error outcomes. `runPluginAnalysisOnTable` (M4) is the cached entry point: same-keyed as first-party `runAnalysis` — one `WeakMap<TableData, Map<string, Promise<…>>>` per table version, errors not cached. The registry also tracks each plugin's installed version (`setPluginVersion` / `getPluginVersion`, set by the loader on enable) for the workflow-dependency check. |
 | Loader | `loader.ts` | Folder/zip loading (JSZip, text files only). Install DISABLED by default → `requestEnable` (pending-review) → `confirmEnable` (granted subset) → enabled; disable unregisters at once; app-update recheck disables incompatibles with the clear message and never auto-enables. |
 | Workflow dependency | `workflow-dependency.ts` | M4: a step declares its plugin dependency (`{ pluginId, versionRange? }`); `checkPluginDependency` reports a missing/disabled plugin as a "needs plugin X — install it?" notice (and a version mismatch as an update notice) instead of failing. The workflow engine does not exist yet — this is the utility it will call. |
+| Isolation webview | `isolation.ts` + `isolation-view.tsx` | M5: the first execution path for plugin JS — a sandboxed `<iframe sandbox="allow-scripts">` (no `allow-same-origin`) running the plugin's entry source plus a `titer.*` bridge that only `postMessage`s calls to the host. `interceptPluginCall` inspects every call before it reaches the host, routing it through `dispatchPluginCommand` (ipc-guard.ts) with the plugin's granted permissions, fail-closed. `launchPluginWebview` refuses a non-enabled plugin (via M4's `checkPluginDependency`, reused — no third copy); `onPluginDisabled` / `onPluginUninstalled` tear the frame down at once, and the interceptor re-checks liveness against the live registry on every call. `createPluginHostRouter` maps granted commands to the app's host seams (the dispatch seam for table/analysis work, the Tauri dialog commands for file dialogs); a granted command with no handler wired fails closed. The honest line is the single shared string `PLUGIN_SAFETY_NOTICE`: a capability boundary, not a sandbox. |
 | Product wiring | — | M4: the picker offers plugin analyses for the table types they apply to (`src/views/analyses/index.ts`, `pluginAnalysisOptionsForTable`), the wizard asks their parameters through the same Steps dialog (`plugin-wizard.ts` → `toWizardQuestions` + `answersToParams`), plugin analyses get persistent nodes (`pluginAnalysisId` / `pluginAnalysisParams` on `ProjectNode`), the results view accepts `PluginAnalysisResult`, and the MCP tools `titer_list_plugin_analyses` + `titer_run_plugin_analysis` (contract `docs/mcp-server-contract.md`) expose them to agents the same way the UI runs them. |
 | Fixture | `examples/hello-analysis/` | `plugin.json` + `index.ts`: `hello-mean` (R, through the install path) and `hello-scaled-mean` (pure-TS, choice + ranged-number params, in code). `verifyHelloPlugin()` runs both on synthetic columns and checks the numbers. |
 
 ## What is deliberately NOT here
 
-- Plugin JS is never executed. There is no Isolation webview yet (Phase 4)
-  — executing third-party JS without it would be the no-sandbox default
-  the roadmap explicitly does not borrow.
 - No marketplace UI/server, listing/review flow, delayed auto-updates,
   safety scorecards, publisher verification, paid-plugin handling.
 - Graph significance overlays do not read plugin results yet (a plugin
@@ -58,6 +56,11 @@ security proof.
   pins live in the same file ("plugin-sdk manifest/registry/loader").
   The M4 product + MCP wiring is pinned in the same file ("plugin-m4
   picker/wizard/results-view/cache/mcp/workflow"), Nov 24, 2026.
+  The M5 Isolation webview is pinned in the same file ("plugin-m5
+  guard/lifecycle/copy/frame/host-router/seam"), Nov 24, 2026: the guard
+  allow/deny cases, disabled-plugin teardown, the honest-line copy, the
+  sandboxed frame document, the fail-closed host router, and the
+  no-direct-seam static check.
 - Rust touched (M4): two MCP tools in `src-tauri/src/mcp.rs`
   (`titer_list_plugin_analyses`, `titer_run_plugin_analysis`; 76 → 78
   tools, read/analyses allowlist groups) — the first Rust in this

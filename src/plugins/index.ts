@@ -103,6 +103,28 @@ export {
   type PluginDependencyCheck,
 } from "./workflow-dependency";
 export {
+  PLUGIN_SAFETY_NOTICE,
+  PLUGIN_WEBVIEW_SANDBOX,
+  buildPluginWebviewSrcDoc,
+  createPluginHostRouter,
+  escapePluginSource,
+  getPluginWebview,
+  interceptPluginCall,
+  isPluginWebviewRunning,
+  isolationNoticeForPlugin,
+  launchPluginWebview,
+  listPluginWebviews,
+  onPluginDisabled,
+  onPluginUninstalled,
+  pluginListingSafetyLine,
+  teardownAllPluginWebviews,
+  teardownPluginWebview,
+  type PluginHostHandler,
+  type PluginHostHandlers,
+  type PluginWebviewLaunchOptions,
+  type PluginWebviewSession,
+} from "./isolation";
+export {
   HELLO_MEAN_ID,
   HELLO_PLUGIN_ID,
   HELLO_SCALED_MEAN_ID,

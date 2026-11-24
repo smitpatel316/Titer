@@ -33,6 +33,7 @@ import type { PluginManifest, PluginPermission } from "./manifest";
 import { grantSubsetIsValid, permissionChoices } from "./review";
 import type { SafetyScorecard } from "./scorecard";
 import { SafetyScorecardView } from "./scorecard-view";
+import { PluginIsolationNotice } from "./isolation-view";
 
 export function PluginEnableReview({
   manifest,
@@ -97,10 +98,7 @@ export function PluginEnableReview({
             </p>
           </fieldset>
         )}
-        <p className="text-xs text-secondary">
-          Plugins run behind a capability boundary, not a sandbox: a plugin can only call the Titer commands you grant
-          here, and nothing else. There is no true JS sandbox in a desktop webview.
-        </p>
+        <PluginIsolationNotice />
         {error && <p className="text-sm text-primary">{error}</p>}
       </div>
     </Dialog>
