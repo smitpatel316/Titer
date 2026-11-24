@@ -500,6 +500,11 @@ import { goToSheetEntries, linkedSheetIds, pingPongTarget, pushHistory } from ".
 import { repointCandidates } from "../src/lib/repoint-analysis";
 import { addMonteCarloHistogram } from "../src/views/graphs/monte-carlo-histogram";
 import { addGeneratedCurves } from "../src/views/graphs/generated-curves";
+import { runPluginGates, scanPluginJsCode, scanPluginRCodeExtended } from "../src/plugins/gates";
+import { computeSafetyScorecard } from "../src/plugins/scorecard";
+import { grantSubsetIsValid, permissionChoices, splitGrant } from "../src/plugins/review";
+import { checkPluginCommand, dispatchPluginCommand } from "../src/plugins/ipc-guard";
+import { CapabilityDeniedError } from "../src/plugins/capabilities";
 
 const checks: [string, () => void | Promise<void>][] = [];
 const check = (name: string, fn: () => void | Promise<void>) => checks.push([name, fn]);
@@ -38644,6 +38649,261 @@ check("seq 374: MCP set-decimal-places sets the places, clears to Default, and k
   );
 });
 
+// ── M3 (seq 435): marketplace trust & safety pins ────────────────────────
+// Gates + scorecard + review grant-subset + IPC capability guard. The
+// fixtures are minimal plugin packages built inline (no M1 loader needed:
+// the pins drive the gates directly, the way the marketplace index will).
+
+const m3Manifest = (overrides: Record<string, unknown> = {}) => ({
+  id: "example.hello-analysis",
+  name: "Hello Analysis",
+  version: "1.0.0",
+  apiVersion: "3.0",
+  author: "Example",
+  license: "MIT",
+  permissions: ["read-table"],
+  entry: "index.js",
+  analyses: [
+    {
+      id: "hello-mean",
+      label: "Hello mean",
+      tableTypes: ["column"],
+      minColumns: 1,
+      parameters: [],
+      questions: [],
+      compute: { kind: "r", code: "c(mean=mean(g0))" },
+    },
+  ],
+  ...overrides,
+});
+
+const m3GoodFiles = (extra: [string, string][] = []) =>
+  new Map<string, string>([
+    ["plugin.json", JSON.stringify(m3Manifest())],
+    ["index.js", "export function run() { return 1; }\n"],
+    ["README.md", "# Hello\n"],
+    ...extra,
+  ]);
+
+const m3OwnSuiteOk = () => ({ ok: true, checks: ["hello-mean: mean of [2, 4, 9] is 5"] });
+
+check("m3 gates: a good plugin passes every gate", async () => {
+  const report = await runPluginGates({ manifestJson: m3Manifest(), files: m3GoodFiles(), runOwnSuite: m3OwnSuiteOk });
+  strictEqual(report.passed, true);
+  strictEqual(report.pluginId, "example.hello-analysis");
+  strictEqual(report.license, "MIT");
+  strictEqual(report.gates.length, 4);
+  for (const gate of report.gates) ok(gate.passed, `${gate.id} should pass: ${gate.detail}`);
+});
+
+check("m3 gates: an unknown permission fails the manifest gate", async () => {
+  const report = await runPluginGates({
+    manifestJson: m3Manifest({ permissions: ["read-table", "fly-to-the-moon"] }),
+    files: m3GoodFiles(),
+    runOwnSuite: m3OwnSuiteOk,
+  });
+  strictEqual(report.passed, false);
+  const manifestGate = report.gates.find((g) => g.id === "manifest");
+  ok(manifestGate && !manifestGate.passed, "the manifest gate must fail");
+  ok(manifestGate!.findings.some((f) => f.message.includes("fly-to-the-moon")), "the finding names the unknown permission");
+});
+
+check("m3 gates: R system() and library() are caught by the static scan", () => {
+  const systemHits = scanPluginRCodeExtended('c(x=system("ls"))', "evil.R");
+  ok(systemHits.some((f) => f.pattern.includes("system")), "system() must be caught");
+  strictEqual(systemHits[0]?.file, "evil.R");
+  const libraryHits = scanPluginRCodeExtended('library(dplyr)\nc(mean=mean(g0))', "evil.R");
+  ok(libraryHits.some((f) => f.pattern.includes("library")), "library() must be caught");
+  strictEqual(libraryHits.find((f) => f.pattern.includes("library"))?.line, 1);
+  strictEqual(scanPluginRCodeExtended("c(mean=mean(g0))").length, 0, "clean R code passes");
+});
+
+check("m3 gates: R code in the manifest analysis compute is scanned too", async () => {
+  const report = await runPluginGates({
+    manifestJson: m3Manifest({
+      analyses: [
+        {
+          id: "hello-mean",
+          label: "Hello mean",
+          tableTypes: ["column"],
+          minColumns: 1,
+          parameters: [],
+          questions: [],
+          compute: { kind: "r", code: 'c(x=system("id"))' },
+        },
+      ],
+    }),
+    files: m3GoodFiles(),
+    runOwnSuite: m3OwnSuiteOk,
+  });
+  strictEqual(report.passed, false);
+  const scanGate = report.gates.find((g) => g.id === "static-scan");
+  ok(scanGate && !scanGate.passed, "the scan gate must fail");
+  ok(scanGate!.findings.some((f) => (f.file ?? "").includes("hello-mean")), "the finding names the analysis");
+});
+
+check("m3 gates: JS eval() and the Function constructor are caught; clean JS passes", () => {
+  const evalHits = scanPluginJsCode("const f = eval(code);", "index.js", ["read-table"]);
+  ok(evalHits.some((f) => f.severity === "error" && f.pattern.includes("eval")), "eval() must be caught");
+  const fnHits = scanPluginJsCode("const f = new Function('x', 'return x');", "index.js", ["read-table"]);
+  ok(fnHits.some((f) => f.pattern.includes("Function")), "new Function() must be caught");
+  strictEqual(scanPluginJsCode("export function run() { return 1; }\n", "index.js", ["read-table"]).length, 0);
+});
+
+check("m3 gates: child_process and direct fs access are caught", () => {
+  const procHits = scanPluginJsCode('const cp = require("child_process");', "index.js", ["read-table"]);
+  ok(procHits.some((f) => f.severity === "error" && f.pattern.includes("child_process")));
+  const fsHits = scanPluginJsCode('import fs from "node:fs";', "index.js", ["read-table"]);
+  ok(fsHits.some((f) => f.severity === "error" && f.pattern.includes("fs")));
+});
+
+check("m3 gates: a Tauri invoke escape is caught", () => {
+  const hits = scanPluginJsCode('import { invoke } from "@tauri-apps/api/core";\ninvoke("read_text", { path });', "index.js", [
+    "read-table",
+  ]);
+  ok(hits.some((f) => f.severity === "error" && f.message.includes("titer.*")), "direct Tauri calls must be caught");
+});
+
+check("m3 gates: network fetch without the network permission fails; with it declared it is a warning only", () => {
+  const denied = scanPluginJsCode("const r = await fetch(url);", "index.js", ["read-table"]);
+  ok(denied.some((f) => f.severity === "error" && f.message.includes("network")), "undeclared fetch must fail");
+  const allowed = scanPluginJsCode("const r = await fetch(url);", "index.js", ["read-table", "network"]);
+  ok(!allowed.some((f) => f.severity === "error"), "declared fetch must not fail the scan");
+  ok(allowed.some((f) => f.severity === "warning"), "declared fetch is still flagged for the review step");
+  const xhr = scanPluginJsCode("const x = new XMLHttpRequest();", "index.js", ["read-table"]);
+  ok(xhr.some((f) => f.severity === "error"), "undeclared XHR must fail");
+});
+
+check("m3 gates: no verify entry point fails the own-suite gate", async () => {
+  const report = await runPluginGates({ manifestJson: m3Manifest(), files: m3GoodFiles() });
+  strictEqual(report.passed, false);
+  const suiteGate = report.gates.find((g) => g.id === "own-suite");
+  ok(suiteGate && !suiteGate.passed, "the own-suite gate must fail without a runner");
+  ok(suiteGate!.detail.includes("verify"), "the reason names the missing verify entry point");
+});
+
+check("m3 gates: a failing, empty, or throwing own-suite fails the gate", async () => {
+  const failing = await runPluginGates({
+    manifestJson: m3Manifest(),
+    files: m3GoodFiles(),
+    runOwnSuite: () => ({ ok: false, checks: ["hello-mean: expected mean 5, got 6"] }),
+  });
+  strictEqual(failing.gates.find((g) => g.id === "own-suite")?.passed, false);
+  const empty = await runPluginGates({
+    manifestJson: m3Manifest(),
+    files: m3GoodFiles(),
+    runOwnSuite: () => ({ ok: true, checks: [] }),
+  });
+  strictEqual(empty.gates.find((g) => g.id === "own-suite")?.passed, false, "a suite with no checks fails");
+  const throwing = await runPluginGates({
+    manifestJson: m3Manifest(),
+    files: m3GoodFiles(),
+    runOwnSuite: () => {
+      throw new Error("boom");
+    },
+  });
+  strictEqual(throwing.gates.find((g) => g.id === "own-suite")?.passed, false, "a throwing suite fails");
+});
+
+check("m3 gates: the license is recorded verbatim, never judged", async () => {
+  const report = await runPluginGates({
+    manifestJson: m3Manifest({ license: "Proprietary — all rights reserved" }),
+    files: m3GoodFiles(),
+    runOwnSuite: m3OwnSuiteOk,
+  });
+  strictEqual(report.passed, true, "an unlisted license must not fail the gates (Q7 open)");
+  strictEqual(report.license, "Proprietary — all rights reserved");
+  const licenseGate = report.gates.find((g) => g.id === "license");
+  ok(licenseGate && licenseGate.passed && licenseGate.detail.includes("Proprietary — all rights reserved"));
+});
+
+check("m3 scorecard: full inputs score 100 and pass", async () => {
+  const gates = await runPluginGates({ manifestJson: m3Manifest(), files: m3GoodFiles(), runOwnSuite: m3OwnSuiteOk });
+  const card = computeSafetyScorecard(gates, {
+    readmePresent: true,
+    screenshotsPresent: true,
+    versionHistoryPresent: true,
+    publisherVerified: true,
+  });
+  strictEqual(card.score, 100);
+  strictEqual(card.maxScore, 100);
+  strictEqual(card.verdict, "pass");
+  strictEqual(card.license, "MIT");
+  ok(card.items.every((item) => item.earned), "every input must show as earned");
+});
+
+check("m3 scorecard: failed gates fail the verdict whatever the listing shows", async () => {
+  const gates = await runPluginGates({ manifestJson: m3Manifest(), files: m3GoodFiles() });
+  const card = computeSafetyScorecard(gates, {
+    readmePresent: true,
+    screenshotsPresent: true,
+    versionHistoryPresent: true,
+    publisherVerified: true,
+  });
+  strictEqual(card.verdict, "fail");
+  ok(card.items.find((item) => item.key === "gates")?.earned === false, "the gates item shows as unearned");
+});
+
+check("m3 scorecard: missing README and screenshots cost exactly their weights", async () => {
+  const gates = await runPluginGates({ manifestJson: m3Manifest(), files: m3GoodFiles(), runOwnSuite: m3OwnSuiteOk });
+  const card = computeSafetyScorecard(gates, {
+    readmePresent: false,
+    screenshotsPresent: false,
+    versionHistoryPresent: true,
+    publisherVerified: true,
+  });
+  strictEqual(card.score, 85);
+  strictEqual(card.verdict, "pass");
+  strictEqual(card.items.find((item) => item.key === "readme")?.earned, false);
+  strictEqual(card.items.find((item) => item.key === "screenshots")?.earned, false);
+});
+
+check("m3 review: a grant outside the declared permissions is rejected; an empty grant is valid", () => {
+  const manifest = m3Manifest();
+  strictEqual(grantSubsetIsValid(manifest as never, ["read-table"]).ok, true);
+  const bad = grantSubsetIsValid(manifest as never, ["read-table", "network"]);
+  strictEqual(bad.ok, false);
+  if (!bad.ok) ok(bad.reason.includes("network"), "the reason names the undeclared permission");
+  strictEqual(grantSubsetIsValid(manifest as never, []).ok, true, "granting nothing is valid");
+});
+
+check("m3 review: splitGrant lists the denied remainder", () => {
+  const manifest = m3Manifest({ permissions: ["read-table", "run-analysis"] });
+  const split = splitGrant(manifest as never, ["read-table"]);
+  deepStrictEqual(split.granted, ["read-table"]);
+  deepStrictEqual(split.denied, ["run-analysis"]);
+  deepStrictEqual(split.invalid, []);
+});
+
+check("m3 review: permission choices carry plain-language lines", () => {
+  const choices = permissionChoices(m3Manifest() as never, []);
+  strictEqual(choices.length, 1);
+  strictEqual(choices[0]?.permission, "read-table");
+  ok(choices[0]?.description.includes("Read the open table"), "no raw permission string is shown alone");
+  strictEqual(choices[0]?.granted, false, "nothing is granted by default");
+});
+
+check("m3 guard: a granted permission allows, an undeclared command denies, an ungranted declared permission denies", async () => {
+  const ctx = { pluginId: "example.hello-analysis", grantedPermissions: ["read-table"] as const };
+  strictEqual(checkPluginCommand(ctx, "titer.readTable").allowed, true);
+  const undeclared = checkPluginCommand(ctx, "titer.fetch");
+  strictEqual(undeclared.allowed, false);
+  if (!undeclared.allowed) ok(undeclared.reason.includes("network"), "the denial names the missing permission");
+  const ungranted = checkPluginCommand(
+    { pluginId: "example.hello-analysis", grantedPermissions: [] as const },
+    "titer.readTable",
+  );
+  strictEqual(ungranted.allowed, false, "a declared-but-ungranted permission still denies");
+  strictEqual(await dispatchPluginCommand(ctx, "titer.readTable", () => 42), 42);
+  await rejects(dispatchPluginCommand(ctx, "titer.fetch", () => 42), CapabilityDeniedError);
+});
+
+check("m3 guard: an unknown command denies fail-closed", () => {
+  const ctx = { pluginId: "example.hello-analysis", grantedPermissions: ["read-table", "network"] as const };
+  const checkResult = checkPluginCommand(ctx, "titer.deleteEverything");
+  strictEqual(checkResult.allowed, false);
+  if (!checkResult.allowed) ok(checkResult.reason.includes("not a Titer plugin command"));
+});
 
 // ── Run ──────────────────────────────────────────────────────────────────
 
