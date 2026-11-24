@@ -11,6 +11,7 @@ import { Dialog } from "../ui/dialog";
 import { ConverterDialog } from "./converter-dialog";
 import { ExportAllDialog } from "./export-all-dialog";
 import { AiConnectionsDialog } from "./ai-connections-dialog";
+import { MarketplaceDialog } from "./marketplace-dialog";
 import { FeedbackConsentDialog } from "./feedback-consent-dialog";
 import { useMcpSnapshotPublisher } from "../store/mcp-publish";
 import { useMcpJobDispatcher } from "../store/mcp-dispatch";
@@ -364,6 +365,8 @@ export function AppShell() {
       <ExportAllDialog />
 
       <AiConnectionsDialog />
+
+      <MarketplaceDialog />
 
       <PreferencesDialog />
 
