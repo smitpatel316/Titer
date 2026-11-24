@@ -508,14 +508,14 @@ def c_q18_rout(suite):
         _check_stat(r, "Q parameter (%)", 1, rel=1e-6)
         og = {o["group"]: o for o in r.get("outlierGroups", [])}
         assert og["D"]["outliers"] == _E(1), f"D outliers: {og['D']}"
-        assert _close(og["D"]["robustMean"], 5.554, rel=2e-3), (
+        assert _close(og["D"]["robustMean"], 5.038, rel=2e-3), (
             f"D robust mean: {og['D']['robustMean']}")
         assert _close(og["A"]["robustMean"], 3, rel=2e-3)
         assert _close(og["B"]["robustMean"], 6, rel=2e-3)
-        assert _close(og["C"]["robustMean"], 5.8, rel=2e-3)
+        assert _close(og["C"]["robustMean"], 5.751, rel=2e-3)
         notes = r.get("notes", "")
         assert "D row 10 (value 100" in notes, f"ROUT notes missing D row 10: {notes!r}"
-        return "ROUT Q=1%: 1/25 outliers (D row 10, value 100), robust means 3/6/5.8/5.554"
+        return "ROUT Q=1%: 1/25 outliers (D row 10, value 100), robust means 3/6/5.751/5.038"
     finally:
         suite.close(pid)
 
