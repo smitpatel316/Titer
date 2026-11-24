@@ -31,6 +31,8 @@ import { alert, askPasteLink, popupMenu } from "../../native";
 import { XIcon } from "@phosphor-icons/react";
 import { cn, Button, IconButton } from "../../ui/controls";
 import { CreateSeriesDialog, type CreateSeriesTarget } from "../../components/create-series-dialog";
+import { ImportDialog } from "./import-dialog";
+import type { ImportChoices, ImportOffer } from "../../lib/import-choices";
 import { fillSeries, generateSeries, type SeriesSpec } from "../../lib/series";
 import { gridMenu, type MenuZone } from "./grid-menu";
 import {
@@ -150,9 +152,31 @@ interface GridProps {
   showDataSets: () => void;
   /** The table is frozen: no editing until unfrozen (seq 165). */
   tableFrozen?: boolean;
+  /** A file offered to the Import dialog (seq 429): the grid shows the
+   *  dialog over the live insertion point (`active`). Null when no import
+   *  is in flight. */
+  importOffer?: ImportOffer | null;
+  /** The dialog's Import button: the confirmed choices plus the resolved
+   *  insertion point (TableData coords), or null for a new table. */
+  onConfirmImport?: (choices: ImportChoices, insertion: { r: number; c: number } | null) => void;
+  /** The dialog's Cancel (or backdrop): drop the offer, import nothing. */
+  onCancelImport?: () => void;
+  /** The dialog's Choose…: pick a different file instead. */
+  onChooseImportFile?: () => void;
 }
 
-export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen }: GridProps) {
+export function Grid({
+  data,
+  type,
+  update,
+  showGroups,
+  showDataSets,
+  tableFrozen,
+  importOffer,
+  onConfirmImport,
+  onCancelImport,
+  onChooseImportFile,
+}: GridProps) {
   const nested = isNested(data);
   const grouped = isGrouped(data) || nested;
   const replicates = data.replicates ?? 1;
@@ -1239,6 +1263,15 @@ export function Grid({ data, type, update, showGroups, showDataSets, tableFrozen
         </div>
       )}
       <CreateSeriesDialog open={series !== null} target={seriesTarget} onClose={() => setSeries(null)} onGenerate={runSeries} />
+      {importOffer != null && onConfirmImport && onCancelImport && onChooseImportFile && (
+        <ImportDialog
+          offer={importOffer}
+          insertionPoint={active}
+          onConfirm={onConfirmImport}
+          onCancel={onCancelImport}
+          onChooseFile={onChooseImportFile}
+        />
+      )}
     </div>
   );
 }

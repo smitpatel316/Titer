@@ -10,11 +10,23 @@ import { FigureView } from "../views/figures/figure-view";
 import { InfoSheetView } from "../views/info/info-sheet-view";
 import { GRAPHS } from "../views/graphs";
 import { ANALYSES } from "../stats";
+import type { ImportChoices, ImportOffer } from "../lib/import-choices";
 
 const NEWER = "It was made with a newer version of Titer.";
 
 /** Shows the active node's view — or the Gallery (seq 229), every graph on one sheet. */
-export function Workspace() {
+export function Workspace({
+  importOffer,
+  onConfirmImport,
+  onCancelImport,
+  onChooseImportFile,
+}: {
+  /** A file offered to the Import dialog (seq 429), passed to the table view. */
+  importOffer?: ImportOffer | null;
+  onConfirmImport?: (choices: ImportChoices, insertion: { r: number; c: number } | null) => void;
+  onCancelImport?: () => void;
+  onChooseImportFile?: () => void;
+}) {
   const { activeNode: node } = useProjectStore();
   const { gallery } = useLayout();
 
@@ -27,7 +39,13 @@ export function Workspace() {
   if (node?.type === "table" && node.data)
     return (
       <Shown key={node.id}>
-        <TableView node={node} />
+        <TableView
+          node={node}
+          importOffer={importOffer}
+          onConfirmImport={onConfirmImport}
+          onCancelImport={onCancelImport}
+          onChooseImportFile={onChooseImportFile}
+        />
       </Shown>
     );
   if (node?.type === "analysis" && node.analysisType) {

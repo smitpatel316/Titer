@@ -18,6 +18,7 @@ import { Button, Checkbox, IconButton, Input, NumberInput, RadioList, Segmented,
 import { useLayout } from "../../store/use-layout";
 import { ColumnsIcon, MinusIcon, PlusIcon, SnowflakeIcon } from "@phosphor-icons/react";
 import { Grid } from "./grid";
+import type { ImportChoices, ImportOffer } from "../../lib/import-choices";
 import {
   addRowGroup,
   applySummaryFormat,
@@ -72,7 +73,20 @@ import { TABLES } from ".";
 
 // ── View ───────────────────────────────────────────────────────────────
 
-export function TableView({ node }: { node: ProjectNode }) {
+export function TableView({
+  node,
+  importOffer,
+  onConfirmImport,
+  onCancelImport,
+  onChooseImportFile,
+}: {
+  node: ProjectNode;
+  /** A file offered to the Import dialog (seq 429), passed to the grid. */
+  importOffer?: ImportOffer | null;
+  onConfirmImport?: (choices: ImportChoices, insertion: { r: number; c: number } | null) => void;
+  onCancelImport?: () => void;
+  onChooseImportFile?: () => void;
+}) {
   const data = node.data!;
   const { updateTable, setTableFrozen } = useProjectActions();
   const update = (next: TableData, label: string, move?: TableMove) => {
@@ -137,6 +151,10 @@ export function TableView({ node }: { node: ProjectNode }) {
       showGroups={() => setLayout({ inspector: true })}
       showDataSets={() => setDataSetsOpen(true)}
       tableFrozen={node.frozen}
+      importOffer={importOffer}
+      onConfirmImport={onConfirmImport}
+      onCancelImport={onCancelImport}
+      onChooseImportFile={onChooseImportFile}
     />
   );
   // The sheet the notes pin to: the grid fills it, and the layer covers it.

@@ -29,12 +29,17 @@ import {
   setRegenPlans,
   type GraphPlan,
 } from "../lib/prism-graph-regen";
+import { isDataFilePath, parseXlsx, rowsToTable } from "../lib/tabular-import";
 import {
-  importTabularFile,
-  isDataFilePath,
-  mergeIntoTable,
-  type TabularTable,
-} from "../lib/tabular-import";
+  computeImport,
+  dataColumnLetter,
+  resolveImportTableName,
+  type ImportChoices,
+  type ImportOffer,
+} from "../lib/import-choices";
+import { applyLinkedBlock, linkedPasteKindOf, type LinkedPaste } from "../lib/linked-paste";
+import { columnsBeyond, writeBlock } from "../views/tables/table-data";
+import { newConstantId } from "../lib/info-sheets";
 import { formatWriteReport, writePrism, type PrismWriteReport } from "../lib/prism-write";
 import { loadPrismSaveChoice, nextSaveAction, savePrismSaveChoice } from "../lib/prism-nudge";
 import { AUTOSAVE_DEBOUNCE_MS, isAutosaveEnabled } from "../lib/autosave";
@@ -150,6 +155,12 @@ export function useDocument() {
   // notice is up.
   const [dataImported, setDataImported] = React.useState<string[] | null>(null);
   const dismissDataImported = () => setDataImported(null);
+  // The file offered to the Import and Paste Special Choices dialog (seq
+  // 429): parsed, but placed nowhere yet. The dialog (grid, or the shell
+  // when no table is active) edits the choices; confirmImport applies
+  // them. Null when no import is in flight.
+  const [pendingImport, setPendingImport] = React.useState<ImportOffer | null>(null);
+  const cancelImport = () => setPendingImport(null);
   // The "Linked Data" notice, in-app rather than as a native dialog (Quirk 2,
   // as above): the linked sources a project open couldn't refresh, each named
   // with its table. Shown only when a refresh fails; a clean refresh is silent.
@@ -2178,43 +2189,125 @@ export function useDocument() {
     return mergeProjectContent(parsed.project, name, parsed.issues.map((i) => i.message));
   };
 
-  /** Puts an imported data file's table in the project (seq 155): a new
-   *  table, or — when its shape matches the active table (same kind, same
-   *  number of columns) — appended to that table, if the user picks it.
-   *  Unlike a Prism import, this never discards the project, so there is
-   *  no save question. Notes the importer made (assumptions, padded rows,
-   *  skipped sheets) are shown in-app; a clean import just opens the table. */
-  const importDataTable = async (table: TabularTable, name: string): Promise<void> => {
-    const rows = table.data.rows.length;
-    const cols = table.data.columns.length - 1;
+  /** The dialog's Import button (seq 429): runs the confirmed choices over
+   *  the offered file and places the result. Into the active table, the
+   *  values land raw at the insertion point, as Prism does — no header
+   *  interpretation, and the table is renamed when the Placement tab asked
+   *  for it (the walk2 import renamed its table "import-test"). As a new
+   *  table, the header reading applies and the table takes the chosen
+   *  name. A link stores the source on the table either way, so Update
+   *  Linked Data can refresh it. Info constants and notes go to a new
+   *  info sheet linked to the table. A choices combination that leaves
+   *  nothing to import says so and leaves the dialog open, so the user
+   *  can loosen the filter instead of starting over. */
+  const confirmImport = async (
+    choices: ImportChoices,
+    insertion: { r: number; c: number } | null,
+  ): Promise<void> => {
+    const offer = pendingImport;
+    if (!offer) return;
+    let computed;
+    try {
+      computed = computeImport(offer, choices);
+    } catch (err) {
+      report();
+      await native.alert(
+        "Couldn't Import File",
+        err instanceof Error ? err.message : "This file couldn't be imported.",
+        "error",
+      );
+      return;
+    }
+    const p = choices.placement;
+    const tableName = resolveImportTableName(choices, offer.name, computed.rows);
+    const lines: string[] = [];
+    let tableId: string | null = null;
     const activeId = latest.current.activeTableId;
     const active = activeId ? latest.current.nodes[activeId] : undefined;
-    const merged =
-      active?.type === "table" && active.data && active.tableType
-        ? mergeIntoTable(active.data, active.tableType, table)
-        : null;
-    if (merged && activeId && active) {
-      const choice = await native.askImportTarget(active.name);
-      if (choice === "cancel") return;
-      if (choice === "append") {
-        latest.current.updateTable(activeId, merged, "Import");
-        const renamed = active.data!.columns.some((c, i) => c !== table.data.columns[i]);
-        const lines = [
-          `Added ${rows} row${rows === 1 ? "" : "s"} from “${name}” to “${active.name}”.`,
-          ...(renamed ? ["The imported columns had different names, so the values were added by position, not by name."] : []),
-          ...table.notes.map((n) => `• ${n}`),
-        ];
-        if (table.notes.length > 0 || renamed) setDataImported(lines);
-        return;
+    const activeTable =
+      activeId && active?.type === "table" && active.data && active.tableType
+        ? { id: activeId, data: active.data, type: active.tableType, name: active.name }
+        : undefined;
+
+    if (p.target === "insert" && activeTable && insertion) {
+      const block = computed.rows.map((row) => row.map((c) => (c === "" ? null : c)));
+      const dropped = columnsBeyond(activeTable.data, insertion.c, block);
+      let next = activeTable.data;
+      if (choices.source.link) {
+        const link: LinkedPaste = {
+          sourcePath: offer.path ?? offer.name,
+          sourceName: fileName(offer.name),
+          kind: linkedPasteKindOf(offer.name),
+          row: insertion.r,
+          col: insertion.c,
+          rows: block.length,
+          cols: Math.max(0, ...block.map((r) => r.length)),
+          autoUpdate: choices.source.autoUpdate,
+        };
+        next = applyLinkedBlock(next, link, block, activeTable.type).data;
+      } else {
+        next = writeBlock(next, insertion.r, insertion.c, block, activeTable.type);
+      }
+      latest.current.updateTable(activeTable.id, next, "Import");
+      tableId = activeTable.id;
+      if (tableName !== "") latest.current.renameNode(activeTable.id, tableName);
+      lines.push(
+        `Added ${computed.rows.length} row${computed.rows.length === 1 ? "" : "s"} from “${offer.name}” to “${tableName === "" ? activeTable.name : tableName}” at row ${insertion.r + 1}, column ${insertion.c <= 0 ? "A" : dataColumnLetter(insertion.c - 1)}.`,
+      );
+      if (dropped > 0)
+        lines.push(
+          `${dropped} column${dropped === 1 ? "" : "s"} didn't fit in the table. Add groups or sub-columns in the Groups panel, then import again.`,
+        );
+    } else {
+      // A new table: the header reading applies (or the Placement tab's
+      // override), and it takes the chosen name — the file name when
+      // renaming is off, as an import always did.
+      const header =
+        p.columnTitles === "firstRow" ? true : p.columnTitles === "none" ? false : undefined;
+      const table = rowsToTable(computed.rows, offer.name, header);
+      const name = tableName === "" ? fileTitle(offer.name) : tableName;
+      let data = table.data;
+      if (choices.source.link) {
+        data = {
+          ...data,
+          linkedPaste: {
+            sourcePath: offer.path ?? offer.name,
+            sourceName: fileName(offer.name),
+            kind: linkedPasteKindOf(offer.name),
+            row: 0,
+            col: 1,
+            rows: data.rows.length,
+            cols: data.columns.length - 1,
+            autoUpdate: choices.source.autoUpdate,
+          },
+        };
+      }
+      tableId = latest.current.createTableWithData(table.tableType, data, name);
+      lines.push(
+        `Imported ${computed.rows.length} row${computed.rows.length === 1 ? "" : "s"} × ${table.data.columns.length - 1} column${table.data.columns.length - 1 === 1 ? "" : "s"} from “${offer.name}” as a new table “${name}”.`,
+      );
+      if (offer.otherSheets.length > 0)
+        lines.push(
+          `Sheet “${offer.sheetName ?? "Sheet1"}” was imported; ${offer.otherSheets.length} other sheet${offer.otherSheets.length === 1 ? "" : "s"} (${offer.otherSheets.map((s) => `“${s}”`).join(", ")}) ${offer.otherSheets.length === 1 ? "was" : "were"} not imported — one file makes one table.`,
+        );
+    }
+    if (offer.parseNotes) lines.push(...offer.parseNotes.map((n) => `• ${n}`));
+    if (computed.infoConstants.length > 0 || computed.notesText !== "") {
+      if (tableId) {
+        const infoId = latest.current.createInfoSheet(tableId);
+        latest.current.updateInfoSheet(infoId, {
+          constants: computed.infoConstants.map((c) => ({ id: newConstantId(), name: c.name, value: c.value })),
+          notes: computed.notesText,
+          linkedTableId: tableId,
+        });
+        lines.push(
+          `Imported ${computed.infoConstants.length} info constant${computed.infoConstants.length === 1 ? "" : "s"} and notes into a new info sheet.`,
+        );
       }
     }
-    latest.current.createTableWithData(table.tableType, table.data, name);
-    if (table.notes.length > 0) {
-      setDataImported([
-        `Imported ${rows} row${rows === 1 ? "" : "s"} × ${cols} column${cols === 1 ? "" : "s"} from “${name}” as a new table.`,
-        ...table.notes.map((n) => `• ${n}`),
-      ]);
-    }
+    lines.push(...computed.notes.map((n) => `• ${n}`));
+    setPendingImport(null);
+    if (lines.length > 1 || computed.notes.length > 0) setDataImported(lines);
   };
 
   /** Linked paste (Prism 11, seq 168): after a project loads, every table
@@ -2247,22 +2340,53 @@ export function useDocument() {
     return lines;
   };
 
-  /** Imports a data file's contents (text for CSV/TXT, bytes for XLSX).
-   *  A file that can't be parsed says why, in plain language. */
-  const importDataContent = async (name: string, content: string | Uint8Array): Promise<void> => {
-    let table: TabularTable;
-    try {
-      table = await importTabularFile(name, content);
-    } catch (err) {
-      report();
-      await native.alert(
-        "Couldn't Import File",
-        err instanceof Error ? err.message : "This file couldn't be imported.",
-        "error",
-      );
+  /** Imports a data file's contents (text for CSV/TXT, bytes for XLSX) —
+   *  as an offer to the Import dialog, not straight into a table. The
+   *  dialog previews the file as read, and confirmImport places it. A
+   *  file that can't be parsed says why, in plain language. `path` is the
+   *  file as the OS names it (desktop picks and drops); null on the web
+   *  build, where there is no path to link back to. */
+  const importDataContent = async (
+    name: string,
+    content: string | Uint8Array,
+    path: string | null = null,
+  ): Promise<void> => {
+    const ext = name.toLowerCase().split(".").pop() ?? "";
+    if (ext === "xlsx") {
+      if (typeof content === "string") {
+        report();
+        await native.alert("Couldn't Import File", `“${name}” couldn't be read as an .xlsx file.`, "error");
+        return;
+      }
+      let parsed;
+      try {
+        parsed = await parseXlsx(content);
+      } catch (err) {
+        report();
+        await native.alert(
+          "Couldn't Import File",
+          err instanceof Error ? err.message : "This file couldn't be imported.",
+          "error",
+        );
+        return;
+      }
+      setPendingImport({
+        name,
+        path,
+        text: null,
+        xlsxRows: parsed.sheet.rows,
+        sheetName: parsed.sheet.name,
+        otherSheets: parsed.otherSheets,
+        parseNotes: parsed.notes,
+      });
       return;
     }
-    await importDataTable(table, fileTitle(name));
+    if (typeof content !== "string") {
+      report();
+      await native.alert("Couldn't Import File", `“${name}” couldn't be read as a text file.`, "error");
+      return;
+    }
+    setPendingImport({ name, path, text: content, xlsxRows: null, sheetName: null, otherSheets: [] });
   };
 
   /** Imports a data file at `path` (a dropped file, or the picker). */
@@ -2275,7 +2399,7 @@ export function useDocument() {
         report();
         return native.alert("Couldn't Import File", `“${fileName(path)}” couldn't be read.`, "error");
       }
-      return importDataContent(path, bytes);
+      return importDataContent(path, bytes, path);
     }
     let text: string;
     try {
@@ -2284,7 +2408,7 @@ export function useDocument() {
       report();
       return native.alert("Couldn't Import File", `“${fileName(path)}” couldn't be read.`, "error");
     }
-    return importDataContent(path, text);
+    return importDataContent(path, text, path);
   };
 
   /** File ▸ Import Data File…: pick a data file (`.csv`, `.tsv`, `.txt`,
@@ -2596,6 +2720,9 @@ export function useDocument() {
     dismissPrismSavedReport,
     dataImported,
     dismissDataImported,
+    pendingImport,
+    confirmImport,
+    cancelImport,
     linkedNotice,
     dismissLinkedNotice,
     regenPlans,
