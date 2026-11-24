@@ -36,10 +36,12 @@ export interface PluginManifest {
 }
 
 /**
- * A plugin.json analysis spec, carried through opaquely — M4 interprets it.
- * (The documented type is PluginAnalysisSpecJson in analysis-spec.ts.)
+ * A plugin.json analysis spec — the real type from analysis-spec.ts
+ * (type-only import: no runtime dependency on the loader).
+ * M4 interprets it.
  */
-export type PluginAnalysisSpecJson = Record<string, unknown>;
+import type { PluginAnalysisSpecJson } from "../plugins/analysis-spec";
+export type { PluginAnalysisSpecJson };
 
 /** A parsed plugin package, before install (documented, loader.ts). */
 export interface ParsedPluginPackage {

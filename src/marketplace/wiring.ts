@@ -25,8 +25,6 @@ export function getMarketplaceStore(): Promise<MarketplaceStore> {
 }
 
 async function createMarketplaceStore(): Promise<MarketplaceStore> {
-  // @ts-expect-error — src/plugins/loader.ts lands with M1 (seq 433); remove
-  // this directive at integration (it becomes an unused-directive error).
   const loaderModule = await import("../plugins/loader");
   const port: PluginLoaderPort = {
     loadPluginFromZip: loaderModule.loadPluginFromZip,
