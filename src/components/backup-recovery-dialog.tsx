@@ -55,13 +55,17 @@ export function BackupRecoveryDialog({
   onChoose: (choice: BackupRecoveryChoice) => void;
 }) {
   const panelRef = React.useRef<HTMLDivElement>(null);
+  const open = recovery !== null;
 
-  // Focus the panel on open, so Escape/Return work immediately; Tab stays
-  // inside the sheet while it stands.
+  // Focus the panel when the sheet opens, so Escape/Return work
+  // immediately; Tab stays inside the sheet while it stands. The listeners
+  // live only while the sheet is open — the component stays mounted with
+  // no recovery the rest of the time, and must not answer keys then.
   React.useEffect(() => {
-    panelRef.current?.focus();
-  }, []);
+    if (open) panelRef.current?.focus();
+  }, [open]);
   React.useEffect(() => {
+    if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
       const action = recoverySheetKeyAction(e.key, e.target instanceof HTMLButtonElement);
       if (action) {
@@ -84,7 +88,7 @@ export function BackupRecoveryDialog({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onChoose]);
+  }, [open, onChoose]);
 
   if (!recovery) return null;
   const { entry } = recovery;
