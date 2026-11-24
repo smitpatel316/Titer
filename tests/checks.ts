@@ -39902,6 +39902,214 @@ check("plugin-m4 workflow: a missing or disabled plugin reports a needs-plugin n
 });
 
 
+// ── M5: plugin Isolation webview (seq 437) ─────────────────────────────
+// The pins run before the isolation lane lands (FAIL) and after (PASS).
+// The guard contract is M1/M3's: `dispatchPluginCommand` (ipc-guard.ts)
+// is the ONLY path a plugin `titer.*` call may take, with the calling
+// plugin's granted permissions, fail-closed. The Isolation webview
+// (src/plugins/isolation.ts) is the first execution path for plugin JS —
+// the loader never ran plugin code — so the guard is wired in from the
+// start. The honest line, in every string this lane adds: a capability
+// boundary, NOT a sandbox.
+check("plugin-m5 guard: declared+granted call allowed; undeclared, declared-but-ungranted and unknown denied", async () => {
+  const {
+    clearPluginRegistry,
+    confirmEnable,
+    installPlugin,
+    interceptPluginCall,
+    launchPluginWebview,
+    parsePluginPackage,
+    registerHelloPlugin,
+    requestEnable,
+    teardownAllPluginWebviews,
+  } = await import("../src/plugins/index");
+  clearPluginRegistry();
+  teardownAllPluginWebviews();
+  const registered = registerHelloPlugin();
+  ok(!("errors" in registered), `hello plugin must register: ${"errors" in registered ? registered.errors.join(" ") : ""}`);
+  if ("errors" in registered) return;
+  // The hello plugin declares and is granted only "read-table".
+  const calls: { command: string; args: unknown }[] = [];
+  const host = async (command: string, args: unknown) => {
+    calls.push({ command, args });
+    return { ok: command };
+  };
+  const launched = launchPluginWebview(registered.record, { source: "// hello entry" });
+  ok("session" in launched, `launch failed: ${JSON.stringify(launched)}`);
+  if (!("session" in launched)) return;
+  const session = launched.session;
+  deepStrictEqual(await interceptPluginCall(session, "titer.readTable", { table: "t1" }, host), {
+    ok: "titer.readTable",
+  });
+  strictEqual(calls.length, 1, "the allowed call reaches the host handler once");
+  // Undeclared (and ungranted): hello never declares run-analysis.
+  await rejects(interceptPluginCall(session, "titer.runAnalysis", {}, host), /not granted/);
+  // Unknown command: fail-closed, never passed through.
+  await rejects(interceptPluginCall(session, "titer.teleport", {}, host), /is not a Titer plugin command/);
+  strictEqual(calls.length, 1, "denied calls must never reach the host handler");
+
+  // Declared-but-ungranted: a plugin that declares run-analysis but was
+  // granted only read-table at the enable review step.
+  const pluginJson = {
+    id: "example.declared-ungranted",
+    name: "Declared Ungranted",
+    version: "1.0.0",
+    apiVersion: "3.0",
+    author: "Titer example author",
+    license: "MIT",
+    permissions: ["read-table", "run-analysis"],
+    analyses: [
+      {
+        id: "hello-mean",
+        label: "Hello mean",
+        tableTypes: ["column"],
+        minColumns: 1,
+        parameters: [],
+        questions: [],
+        compute: { kind: "r", code: "c(mean_value=mean(g0))" },
+      },
+    ],
+  };
+  const parsed = parsePluginPackage(new Map([["plugin.json", JSON.stringify(pluginJson)]]));
+  ok("package" in parsed, `declared-ungranted package rejected: ${JSON.stringify(parsed)}`);
+  if (!("package" in parsed)) return;
+  const installed = installPlugin(parsed.package, ["example.hello-analysis"], { kind: "folder", name: "declared" });
+  ok("record" in installed, `declared-ungranted install failed: ${JSON.stringify(installed)}`);
+  if (!("record" in installed)) return;
+  const enabled = confirmEnable(requestEnable(installed.record), ["read-table"], "3.0.0");
+  strictEqual(enabled.status, "enabled", "the declared-but-ungranted plugin enables with only read-table granted");
+  const launched2 = launchPluginWebview(enabled, { source: "// declared entry" });
+  ok("session" in launched2, `second launch failed: ${JSON.stringify(launched2)}`);
+  if (!("session" in launched2)) return;
+  await rejects(
+    interceptPluginCall(launched2.session, "titer.runAnalysis", {}, host),
+    /needs the “run-analysis” permission, which was not granted/,
+  );
+  strictEqual(calls.length, 1, "a declared-but-ungranted call must never reach the host handler");
+  teardownAllPluginWebviews();
+  clearPluginRegistry();
+});
+
+check("plugin-m5 lifecycle: a disabled plugin cannot execute and teardown ends execution (no orphan)", async () => {
+  const {
+    clearPluginRegistry,
+    disablePlugin,
+    interceptPluginCall,
+    isPluginWebviewRunning,
+    launchPluginWebview,
+    listPluginWebviews,
+    onPluginDisabled,
+    registerHelloPlugin,
+    teardownAllPluginWebviews,
+    teardownPluginWebview,
+  } = await import("../src/plugins/index");
+  clearPluginRegistry();
+  teardownAllPluginWebviews();
+  const registered = registerHelloPlugin();
+  ok(!("errors" in registered), `hello plugin must register: ${"errors" in registered ? registered.errors.join(" ") : ""}`);
+  if ("errors" in registered) return;
+  const host = async () => "ran";
+  const launched = launchPluginWebview(registered.record, { source: "// hello entry" });
+  ok("session" in launched, `launch failed: ${JSON.stringify(launched)}`);
+  if (!("session" in launched)) return;
+  strictEqual(isPluginWebviewRunning("example.hello-analysis"), true, "the launched webview is running");
+  strictEqual(await interceptPluginCall(launched.session, "titer.readTable", {}, host), "ran");
+  // Disable the plugin (loader: analyses unregister at once) and tell the
+  // isolation layer: the webview is torn down, and no call gets through.
+  const disabled = disablePlugin(registered.record);
+  strictEqual(disabled.status, "disabled");
+  strictEqual(onPluginDisabled("example.hello-analysis"), true, "disabling tears down the running webview");
+  strictEqual(isPluginWebviewRunning("example.hello-analysis"), false, "no webview survives its plugin being disabled");
+  await rejects(interceptPluginCall(launched.session, "titer.readTable", {}, host), /torn down|disabled/);
+  // A disabled record cannot launch a new webview at all.
+  const relaunch = launchPluginWebview(disabled, { source: "// hello entry" });
+  ok("error" in relaunch, "launching a disabled plugin must fail");
+  if ("error" in relaunch) ok(/disabled|install it/.test(relaunch.error), `launch error must say disabled: ${relaunch.error}`);
+  // Teardown is idempotent and leaves no orphan behind.
+  strictEqual(teardownPluginWebview("example.hello-analysis"), false, "tearing down an already-torn-down webview is a no-op");
+  strictEqual(listPluginWebviews().length, 0, "no webview sessions remain");
+  teardownAllPluginWebviews();
+  clearPluginRegistry();
+});
+
+check("plugin-m5 copy: UI states a capability boundary, not a sandbox", async () => {
+  const { PLUGIN_SAFETY_NOTICE, isolationNoticeForPlugin } = await import("../src/plugins/index");
+  ok(
+    /capability boundary, not a sandbox/i.test(PLUGIN_SAFETY_NOTICE),
+    `the safety notice must say "capability boundary, not a sandbox" (got: ${PLUGIN_SAFETY_NOTICE})`,
+  );
+  ok(/no true JS sandbox/i.test(PLUGIN_SAFETY_NOTICE), "the safety notice must say there is no true JS sandbox");
+  ok(
+    !/sandboxed|fully isolated|completely safe/i.test(PLUGIN_SAFETY_NOTICE),
+    "the safety notice must not claim sandboxing or full isolation",
+  );
+  ok(
+    isolationNoticeForPlugin("Hello Analysis").includes("Hello Analysis"),
+    "the per-plugin notice names the plugin",
+  );
+  ok(
+    /capability boundary, not a sandbox/i.test(isolationNoticeForPlugin("Hello Analysis")),
+    "the per-plugin notice carries the same honest line",
+  );
+  const view = readFileSync("src/plugins/isolation-view.tsx", "utf8");
+  ok(/PLUGIN_SAFETY_NOTICE/.test(view), "the isolation view renders the shared notice, not its own copy");
+  const review = readFileSync("src/plugins/review-view.tsx", "utf8");
+  ok(/PluginIsolationNotice/.test(review), "the enable review renders the same isolation notice");
+});
+
+check("plugin-m5 frame: plugin JS runs in a sandboxed iframe with only the titer.* bridge", async () => {
+  const { buildPluginWebviewSrcDoc, PLUGIN_WEBVIEW_SANDBOX } = await import("../src/plugins/index");
+  strictEqual(PLUGIN_WEBVIEW_SANDBOX, "allow-scripts", "the frame allows scripts and nothing else");
+  const doc = buildPluginWebviewSrcDoc("window.titer.call('titer.readTable', {})", "example.hello-analysis");
+  ok(doc.includes("postMessage"), "the frame bridges plugin calls to the host with postMessage");
+  ok(doc.includes("example.hello-analysis"), "the frame doc carries its plugin id");
+  ok(
+    !/executeJob|__TAURI__|@tauri-apps|invoke\(/.test(doc),
+    "the frame exposes no host invoke or job seam — only the intercepted titer.* bridge",
+  );
+  // Entry source cannot break out of its script tag and inject another one.
+  const evil = buildPluginWebviewSrcDoc("</script><script>alert(1)</script>", "example.evil");
+  ok(!evil.includes("</script><script>alert"), "entry source must be escaped so it cannot inject a script tag");
+});
+
+check("plugin-m5 host router: a granted command with no host handler fails closed", async () => {
+  const { createPluginHostRouter, launchPluginWebview, registerHelloPlugin, teardownAllPluginWebviews, clearPluginRegistry, interceptPluginCall } =
+    await import("../src/plugins/index");
+  clearPluginRegistry();
+  teardownAllPluginWebviews();
+  const router = createPluginHostRouter({ "titer.readTable": async () => "table" });
+  strictEqual(await router("titer.readTable", { table: "t1" }), "table", "a mapped command runs through its host handler");
+  await rejects(router("titer.runAnalysis", {}), /No host handler/);
+  await rejects(router("titer.teleport", {}), /is not a Titer plugin command/);
+  // The router is the host side of the interceptor: a denied command never
+  // reaches it, and an allowed-but-unmapped one still fails closed.
+  const registered = registerHelloPlugin();
+  ok(!("errors" in registered), `hello plugin must register: ${"errors" in registered ? registered.errors.join(" ") : ""}`);
+  if ("errors" in registered) return;
+  const launched = launchPluginWebview(registered.record, { source: "// hello entry" });
+  ok("session" in launched, `launch failed: ${JSON.stringify(launched)}`);
+  if (!("session" in launched)) return;
+  const emptyRouter = createPluginHostRouter({});
+  await rejects(
+    interceptPluginCall(launched.session, "titer.readTable", {}, emptyRouter),
+    /No host handler/,
+  );
+  teardownAllPluginWebviews();
+  clearPluginRegistry();
+});
+
+check("plugin-m5 seam: the interceptor never calls executeJob or Tauri invoke directly", () => {
+  const src = readFileSync("src/plugins/isolation.ts", "utf8");
+  ok(/dispatchPluginCommand/.test(src), "every plugin call routes through dispatchPluginCommand");
+  ok(
+    !/from "\.\.\/store\/mcp-dispatch"/.test(src) && !/from "\.\.\/native"/.test(src),
+    "isolation.ts must not import executeJob or Tauri invoke — the host supplies the handler",
+  );
+  ok(!/\bexecuteJob\s*\(/.test(src), "isolation.ts must never call executeJob itself");
+  ok(!/\binvoke\s*\(/.test(src), "isolation.ts must never call Tauri invoke itself");
+});
+
+
 // ── Run ──────────────────────────────────────────────────────────────────
 
 // Descriptives are computed by R since the v1.0.7 rebase, so checks that run
