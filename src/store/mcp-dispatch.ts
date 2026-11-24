@@ -2113,6 +2113,7 @@ export async function executeJob(job: McpJob, deps: JobDeps): Promise<JobComplet
             ...(op === "set-summary-format" ? { summary_format: summaryFormatOf(data) } : {}),
             ...(op === "add-data-set" || op === "reorder-data-set"
               ? { data_sets: dataSetsOf(data, type).map((s) => s.name) }
+              : {}),
             ...(op === "set-x-format"
               ? { x_format: xFormatOf(data), x_conversion: data.xConversion ?? null }
               : {}),
