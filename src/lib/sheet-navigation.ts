@@ -56,7 +56,7 @@ export function linkedSheetIds(
 /** One row of Go to Sheet: the sheet's id, its section, and its name. */
 export interface GoToSheetEntry {
   id: string;
-  section: "Data" | "Results" | "Graphs" | "Layouts" | "Info";
+  section: "Data" | "Results" | "Graphs" | "Layouts" | "Info" | "Samples";
   label: string;
 }
 
@@ -66,6 +66,9 @@ const SECTION_OF: Record<ProjectNode["type"], GoToSheetEntry["section"]> = {
   graph: "Graphs",
   figure: "Layouts",
   info: "Info",
+  // A flow sample is its own sheet (seq 441): it groups under "Samples"
+  // in Go to Sheet, and only ever appears once a sample node exists.
+  sample: "Samples",
 };
 
 /** Every sheet in outline order — tables with their children, then the

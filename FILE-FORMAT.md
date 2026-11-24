@@ -96,8 +96,8 @@ Opening a template:
 
 ## Items
 
-Every item has `id`, `type` (`"table"`, `"analysis"`, `"graph"` or `"figure"`),
-`name`, and `parentId`: `null` for a table or a figure, the table's id for an
+Every item has `id`, `type` (`"table"`, `"analysis"`, `"graph"`, `"figure"`, `"info"` or `"sample"`),
+`name`, and `parentId`: `null` for a table, a figure, an info sheet or a sample, the table's id for an
 analysis or a graph. Any item may also carry `floatingNotes`: color-coded notes
 pinned to that sheet for review, as `{ "id", "text", "color", "x", "y" }` per
 note — `color` one of `"yellow"`, `"gray"`, `"green"`, `"pink"`, `"blue"`, and
@@ -370,3 +370,51 @@ transferred on import (the converter's transfer report says so — "not
 transferred — re-create the figure in Titer"), and exporting a Titer figure to
 Prism format is out of scope (the converter offers the figure's panels as
 individual graphs instead, and says so).
+
+### Flow sample
+
+A flow sample (FlowJo track, seq 441) is a reference to a cytometry sample's
+event data — never the data itself. The events live in the columnar store
+(one `Float32Array` per parameter, in Rust), loaded from the file `sourcePath`
+names; the `.hlx` file holds only the reference below, so a flow project is
+no longer a single self-contained file (the same trade-off Prism makes with
+linked data). A sample node lives at the project root (`parentId: null`), and
+its id is the event-store sample id by convention.
+
+```json
+{
+  "id": "sample_a1b2", "type": "sample", "name": "Sample 1", "parentId": null,
+  "flowSample": {
+    "sampleId": "sample_a1b2",
+    "sourcePath": "sample1.fcs",
+    "sourceKind": "fcs",
+    "name": "Sample 1",
+    "eventCount": 50000,
+    "parameters": [{ "name": "FSC-A", "range": 262144 }, { "name": "CD4", "stain": "CD4-BV421" }],
+    "instrument": "BD FACSymphony"
+  }
+}
+```
+
+- `sourcePath`: the FCS file's path as saved (it may be relative to the `.hlx`
+  file); `sourceKind` is `"fcs"`, or `"sidecar"` for a Titer `.tfcs` sidecar
+  binary (a little-endian column-major f32 dump — see `flow_store.rs`).
+- `parameters`: the parameters in file order, each at least a `name` (`$PnN`);
+  `stain` (`$PnS`), `range` (`$PnR`), `bits` (`$PnB`) and `displayScale`
+  (`"linear"`, `"log"` or `"logicle"`) when known.
+- `compensation` (the spillover matrix: `fluorochromes` + `spillover`, where it
+  came from, whether applied), `transforms` (one per-parameter display
+  transform) and `gating` (the population tree) are placeholders the later
+  FlowJo lanes fill in; all three are optional and read forgivingly.
+- A table or analysis derived from a sample names its samples in
+  `flowSourceSampleIds` (a list of sample ids), so the link back to the store
+  stays explicit.
+
+Forgiving reading (samples):
+
+- A sample without an id, or with no readable parameters, is not a sample:
+  the node is left out on its own, and Titer says so.
+- A wrong-typed field falls back to its default (`sourceKind` to `"fcs"`,
+  `eventCount` to `0`, a parameter without a name dropped); unknown fields
+  are preserved and written back, like any other node's.
+- A project whose only items are samples still opens — the samples are the work.

@@ -10,6 +10,8 @@ mod cloud_box;
 // Automatic backup (Plane seq 226, 1.8.0): the separate-copy store — see
 // backup.rs. The commands below are its frontend face.
 mod backup;
+// FlowJo track (seq 441, F1a): the columnar event store — see flow_store.rs.
+mod flow_store;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 #[cfg(target_os = "macos")]
 use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
@@ -1779,6 +1781,7 @@ fn main() {
         .manage(Projects::default())
         .manage(REngine::default())
         .manage(cloud::MockProvider::new())
+        .manage(flow_store::FlowStore::default())
         .manage(mcp::McpState::default())
         .setup(|app| {
             ask_before_quitting(app.handle());
@@ -1873,7 +1876,14 @@ fn main() {
             mcp::mcp_publish_snapshot,
             mcp::mcp_publish_result,
             mcp::mcp_take_jobs,
-            mcp::mcp_complete_job
+            mcp::mcp_complete_job,
+            flow_store::flow_load_sample,
+            flow_store::flow_load_sample_file,
+            flow_store::flow_get_column,
+            flow_store::flow_list_samples,
+            flow_store::flow_unload_sample,
+            flow_store::flow_sample_stats,
+            flow_store::flow_store_status
         ])
         .build(tauri::generate_context!())
         .expect("failed to start Titer")
