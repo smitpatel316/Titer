@@ -28182,18 +28182,27 @@ check("MCP apply-template replaces the pristine table, adds on a worked project,
 check("the release pipeline builds webr-repo/, and the CSP allows the CDN fallback (R3-01)", () => {
   const root = fileURLToPath(new URL("../", import.meta.url));
   const release = readFileSync(join(root, ".github/workflows/release.yml"), "utf8");
-  // Both CI jobs (check and build) run the script, each before the step
-  // that needs the repo: npm test in check, tauri-action in build.
+  // Every CI job that needs the repo runs the script, each before the step
+  // that needs it: npm test in check, tauri-action in build, tauri-action
+  // in windows. The per-action assertion below (not a single first/last
+  // indexOf) is what enforces it: a job added later that forgot the repo
+  // build would fail here even though an earlier job built it.
   const occurrences = release.split("build-webr-repo.sh").length - 1;
   ok(occurrences >= 2, `release.yml runs build-webr-repo.sh ${occurrences} time(s), want >= 2 (check + build jobs)`);
   ok(
     release.indexOf("build-webr-repo.sh") < release.indexOf("npm test"),
     "release.yml must build webr-repo/ before npm test (or packages.ts skips)",
   );
-  ok(
-    release.lastIndexOf("build-webr-repo.sh") < release.indexOf("tauri-apps/tauri-action"),
-    "release.yml must build webr-repo/ before tauri-action (or vite build omits it from dist/)",
-  );
+  const tauriUses = [...release.matchAll(/tauri-apps\/tauri-action/g)].map((m) => m.index!);
+  const repoBuilds = [...release.matchAll(/build-webr-repo\.sh/g)].map((m) => m.index!);
+  ok(tauriUses.length >= 1, "release.yml has a tauri-action step");
+  for (const t of tauriUses) {
+    const prevTauri = Math.max(0, ...tauriUses.filter((x) => x < t));
+    ok(
+      repoBuilds.some((r) => r > prevTauri && r < t),
+      "release.yml must build webr-repo/ before every tauri-action (or vite build omits it from dist/)",
+    );
+  }
   const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
     scripts: Record<string, string>;
   };
