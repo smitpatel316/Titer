@@ -168,6 +168,7 @@ import {
   changeErrorFormat,
   changeXConversion,
   changeXFormat,
+  clearDecimalsForRange,
   columnsBeyond,
   defaultRowGroups,
   deleteColumns,
@@ -179,6 +180,8 @@ import {
   newGroupedTable,
   newNestedTable,
   newTable,
+  parseClipboardHTML,
+  pasteSpecialBlock,
   regroupLoses,
   regroupTable,
   removeRowGroup,
@@ -618,6 +621,87 @@ check("a transposed block pastes at the selection's top-left, growing the table"
   strictEqual(pasted.rows[1][0], "r2");
   strictEqual(pasted.rows[0][1], "1");
   strictEqual(pasted.rows[1][1], "2");
+});
+
+// ── Paste Special digit + legacy-format options (seq 428) ───────────────
+// Prism's Import and Paste Special Choices, Source tab (walk2/07): two
+// checkboxes Titer's Paste Special (seq 230, Values / Transpose only) never
+// offered — "Paste as many digits as possible. If Excel rounds to 1.23
+// paste 1.23456." and "Paste older text-based clipboard format. Not
+// recommended." Per the Prism 11 guide ("Options when pasting data from
+// Excel") and FAQ 1534: Excel copies in two formats, plain text and HTML;
+// Prism pastes the HTML one by default (the values as shown in Excel),
+// the older text one pastes the full values, and the HTML copy from older
+// Excel carries each number twice — shown and full-precision (x:num) —
+// which the many-digits option selects.
+const EXCEL_HTML_428 =
+  '<html><body><table>' +
+  '<tr><td x:num="1.23456">1.23</td><td x:num="2.5">2.50</td><td>label</td></tr>' +
+  '<tr><td x:num="10">10</td><td>&nbsp;</td><td><b>bold</b> text</td></tr>' +
+  "</table></body></html>";
+
+check("paste-428: Paste Special offers Prism's digit + legacy-format options", () => {
+  // The HTML clipboard parses to the values as shown in Excel; the
+  // many-digits option takes the full-precision x:num copy instead.
+  deepStrictEqual(parseClipboardHTML(EXCEL_HTML_428, false), [
+    ["1.23", "2.50", "label"],
+    ["10", null, "bold text"],
+  ]);
+  deepStrictEqual(parseClipboardHTML(EXCEL_HTML_428, true), [
+    ["1.23456", "2.5", "label"],
+    ["10", null, "bold text"],
+  ]);
+  // A cell with no x:num keeps its shown text either way; HTML with no
+  // table in it is not a pasteable block.
+  deepStrictEqual(parseClipboardHTML("<p>no table here</p>", true), []);
+  deepStrictEqual(parseClipboardHTML(EXCEL_HTML_428.replace(' x:num="2.5"', ""), true), [
+    ["1.23456", "2.50", "label"],
+    ["10", null, "bold text"],
+  ]);
+
+  // Format choice: the older text format parses the plain text even when
+  // HTML is on the clipboard; otherwise the HTML copy wins; with no HTML
+  // the text is all there is.
+  const text428 = "9.99\t8.88\n7.77\t";
+  deepStrictEqual(
+    pasteSpecialBlock(EXCEL_HTML_428, text428, { olderTextFormat: true, manyDigits: true }),
+    [
+      ["9.99", "8.88"],
+      ["7.77", null],
+    ],
+  );
+  deepStrictEqual(
+    pasteSpecialBlock(EXCEL_HTML_428, text428, { olderTextFormat: false, manyDigits: true }),
+    [
+      ["1.23456", "2.5", "label"],
+      ["10", null, "bold text"],
+    ],
+  );
+  deepStrictEqual(
+    pasteSpecialBlock(null, text428, { olderTextFormat: false, manyDigits: true }),
+    [
+      ["9.99", "8.88"],
+      ["7.77", null],
+    ],
+  );
+
+  // Many digits must be visible: pasting with the option on clears the
+  // decimal-places display setting on the pasted data columns (never the
+  // title column), so the extra digits aren't rounded away on screen.
+  const t428: TableData = { columns: ["Title", "A", "B"], rows: [] };
+  const withDecimals = setDecimalPlaces(setDecimalPlaces(t428, "A", 2), "B", 4);
+  deepStrictEqual(clearDecimalsForRange(withDecimals, 1, 2).decimals, undefined);
+  deepStrictEqual(clearDecimalsForRange(withDecimals, 1, 1).decimals, { B: 4 });
+  deepStrictEqual(clearDecimalsForRange(withDecimals, 0, 1).decimals, { A: 2, B: 4 });
+
+  // The dialog itself carries both options, worded as Prism words them.
+  const grid428 = readFileSync("src/views/tables/grid.tsx", "utf8");
+  ok(grid428.includes("Paste as many digits as possible"), "Paste Special must offer Prism's many-digits option");
+  ok(grid428.includes("Paste older text-based clipboard format"), "Paste Special must offer Prism's older-text option");
+  ok(
+    grid428.includes("olderTextFormat") && grid428.includes("manyDigits"),
+    "Paste Special must carry both options in its offer state",
+  );
 });
 
 // ── Gallery (seq 229) ────────────────────────────────────────────────────
