@@ -38923,6 +38923,23 @@ check("m3 gates: R system() and library() are caught by the static scan", () => 
   strictEqual(scanPluginRCodeExtended("c(mean=mean(g0))").length, 0, "clean R code passes");
 });
 
+check("m3 gates: load-time scanPluginRCode shares the gates denylist (one source of truth)", async () => {
+  const { scanPluginRCode } = await import("../src/plugins/analysis-spec");
+  ok(
+    scanPluginRCode('x <- system2("ls")').length > 0,
+    "system2() (extended pattern) must trip the load-time scan too",
+  );
+  ok(
+    scanPluginRCode("c(mean=mean(g0))").length === 0,
+    "clean R code passes the load-time scan",
+  );
+  strictEqual(
+    scanPluginRCode('c(x=system("ls"))')[0],
+    'Plugin R code must not run shell commands (system()/shell()).',
+    "load-time message matches the gate message verbatim",
+  );
+});
+
 check("m3 gates: R code in the manifest analysis compute is scanned too", async () => {
   const report = await runPluginGates({
     manifestJson: m3Manifest({

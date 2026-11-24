@@ -12,13 +12,12 @@
 // IPC layer by ipc-guard.ts). The scan only fails a plugin early with a
 // clear message instead of letting it reach the engine.
 //
-// Groundwork reuse + one seam to unify at integration: the R denylist
-// below starts from the exact patterns in analysis-spec.ts
-// (`scanPluginRCode`, 7b5d9be) and extends them. That file lives on the
-// M1 lane; when the lanes merge, `scanPluginRCode` should delegate to
-// `scanPluginRCodeExtended` here (or vice versa) so the R denylist has
-// one source of truth — the coordinator resolves it. The patterns and
-// messages in BASE_R_PATTERNS are verbatim from the groundwork.
+// One source of truth for the R denylist: BASE_R_PATTERNS below starts
+// from the exact groundwork patterns (analysis-spec.ts, 7b5d9be, verbatim)
+// and EXTENDED_R_PATTERNS adds process/file-write/package-install/native
+// calls. analysis-spec.ts `scanPluginRCode` delegates to
+// `scanPluginRCodeExtended` here, so load-time validation and the gates
+// can never drift apart.
 
 import { validatePluginManifest, type PluginManifest, type PluginPermission } from "./manifest";
 

@@ -28,6 +28,7 @@
 // bridge) plus the capability boundary (capabilities.ts).
 
 import { PACKAGE_REGISTRY } from "../stats/webr";
+import { scanPluginRCodeExtended } from "./gates";
 import type { GroupDescriptives, StatRow } from "../stats/types";
 import type { Group } from "../stats/column/base";
 import type { Column } from "../lib/dataset";
@@ -139,35 +140,15 @@ export interface PluginAnalysisSpec {
 }
 
 // ── R static scan ──────────────────────────────────────────────────────────
-// Load-time tripwire for the obvious escapes. The list is deliberately
-// short and explicit: anything that reads files, runs processes, loads
-// packages inline, or reaches the network. This is NOT the containment —
-// webR + the capability boundary are — it only fails a plugin early with a
-// clear message instead of letting it reach the engine.
-const FORBIDDEN_R_PATTERNS: { pattern: RegExp; message: string }[] = [
-  { pattern: /\b(system|shell)\s*\(/, message: "must not run shell commands (system()/shell())" },
-  {
-    pattern: /\b(library|require)\s*\(/,
-    message: "must not load packages inline (library()/require()) — declare them in requiredPackages",
-  },
-  { pattern: /\bsource\s*\(/, message: "must not source files (source())" },
-  {
-    pattern: /\b(download\.file|url|socketConnection)\s*\(/,
-    message: "must not reach the network (download.file()/url()/socketConnection())",
-  },
-  {
-    pattern: /\b(readLines|read\.csv|read\.table|scan)\s*\(/,
-    message: "must not read files (readLines()/read.csv()/read.table()/scan())",
-  },
-  { pattern: /\b(file|list\.files|dir)\s*\(/, message: "must not touch the filesystem (file()/list.files()/dir())" },
-  { pattern: /\beval\s*\(/, message: "must not evaluate generated code (eval())" },
-];
+// One source of truth: the full R denylist lives in gates.ts
+// (BASE_R_PATTERNS + EXTENDED_R_PATTERNS). Load-time validation here
+// delegates to the extended scan, so a spec the gates reject is rejected
+// at load too and the two can never drift apart. The scan is only a
+// tripwire: webR + the capability boundary are the containment.
 
 /** The forbidden-pattern problems in R code, if any (empty: clean). */
 export function scanPluginRCode(code: string): string[] {
-  return FORBIDDEN_R_PATTERNS.filter(({ pattern }) => pattern.test(code)).map(
-    ({ message }) => `Plugin R code ${message}.`,
-  );
+  return scanPluginRCodeExtended(code).map((f) => f.message);
 }
 
 const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
