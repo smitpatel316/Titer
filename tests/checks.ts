@@ -38644,6 +38644,211 @@ check("seq 374: MCP set-decimal-places sets the places, clears to Default, and k
   );
 });
 
+// ── Plugin SDK (marketplace M1, seq 433) ──────────────────────────────────
+// Pins for the salvaged src/plugins/ groundwork: manifest validation,
+// registry namespacing, loader lifecycle, and the hello-analysis fixture.
+// The plugin modules are imported dynamically inside each check (the
+// precedent at "export presets" above) so a missing src/plugins/ fails
+// these checks instead of the whole file.
+
+check("plugin-sdk manifest: valid passes, invalid and unknown-permission rejected", async () => {
+  const { validatePluginManifest, pluginIncompatibility } = await import("../src/plugins/index");
+  const valid = {
+    id: "example.hello-analysis",
+    name: "Hello Analysis",
+    version: "1.0.0",
+    apiVersion: "3.0",
+    author: "Titer example author",
+    license: "MIT",
+    permissions: ["read-table"],
+  };
+  const good = validatePluginManifest(valid);
+  ok("manifest" in good, `valid manifest rejected: ${JSON.stringify(good)}`);
+  if ("manifest" in good) strictEqual(good.manifest.id, "example.hello-analysis");
+
+  const bad = validatePluginManifest({ ...valid, author: "", version: "one" });
+  ok("errors" in bad && bad.errors.length >= 2, "invalid manifest (empty author, bad version) must be rejected");
+
+  const unknownPerm = validatePluginManifest({ ...valid, permissions: ["read-table", "teleport"] });
+  ok(
+    "errors" in unknownPerm && unknownPerm.errors.some((e) => /Unknown permission/.test(e)),
+    "unknown permission must be rejected at install time",
+  );
+
+  const reserved = validatePluginManifest({ ...valid, id: "titer.hello" });
+  ok(
+    "errors" in reserved && reserved.errors.some((e) => /reserved for first-party/.test(e)),
+    "a titer. id must be rejected",
+  );
+
+  const oldApi = validatePluginManifest({ ...valid, apiVersion: "2.0" });
+  ok("manifest" in oldApi, "an old-apiVersion manifest still parses");
+  if ("manifest" in oldApi) {
+    const reason = pluginIncompatibility(oldApi.manifest, "3.0.0");
+    ok(reason !== null && /needs Titer 2\.x/.test(reason), `old API major must be incompatible, got: ${reason}`);
+  }
+  if ("manifest" in good) {
+    strictEqual(pluginIncompatibility(good.manifest, "3.0.0"), null);
+  }
+});
+
+check("plugin-sdk registry: plugin ids are namespaced and never shadow first-party", async () => {
+  const {
+    clearPluginRegistry,
+    getPluginAnalysis,
+    parsePluginAnalysisId,
+    pluginAnalysisId,
+    registerPluginAnalysis,
+    resolveAnalysis,
+  } = await import("../src/plugins/index");
+  clearPluginRegistry();
+  strictEqual(pluginAnalysisId("example.test", "double-mean"), "plugin:example.test:double-mean");
+  deepStrictEqual(parsePluginAnalysisId("plugin:example.test:double-mean"), {
+    pluginId: "example.test",
+    analysisId: "double-mean",
+  });
+  strictEqual(parsePluginAnalysisId("descriptive-statistics"), null);
+
+  const spec = {
+    id: "double-mean",
+    label: "Double mean",
+    tableTypes: ["column"],
+    minColumns: 1,
+    parameters: [],
+    questions: [],
+    compute: {
+      kind: "typescript",
+      run: ({ groups }: { groups: { values: number[] }[] }) => ({
+        stats: [{ label: "Doubled mean", value: 2 * (groups[0]?.values.reduce((a, b) => a + b, 0) ?? 0) }],
+      }),
+    },
+  };
+  const registered = registerPluginAnalysis("example.test", spec);
+  ok("id" in registered, `registration failed: ${JSON.stringify(registered)}`);
+  if ("id" in registered) strictEqual(registered.id, "plugin:example.test:double-mean");
+
+  // A duplicate registration is refused, and a titer. plugin id is refused.
+  const dup = registerPluginAnalysis("example.test", spec);
+  ok("errors" in dup && dup.errors.some((e) => /already registered/.test(e)), "duplicate registration must fail");
+  const reserved = registerPluginAnalysis("titer.bad", spec);
+  ok("errors" in reserved, "a titer. plugin id must not register");
+
+  // resolveAnalysis covers both sources, and the plugin side never shadows.
+  const firstParty = resolveAnalysis("descriptive-statistics");
+  ok(firstParty?.source === "first-party", "first-party analyses still resolve as first-party");
+  const plugin = resolveAnalysis("plugin:example.test:double-mean");
+  ok(plugin?.source === "plugin" && plugin.pluginId === "example.test", "plugin analysis resolves by namespaced id");
+  strictEqual(resolveAnalysis("no-such-analysis"), undefined);
+  strictEqual(getPluginAnalysis("plugin:example.test:double-mean")?.pluginId, "example.test");
+  clearPluginRegistry();
+});
+
+check("plugin-sdk loader: install → review → enable → disable lifecycle", async () => {
+  const {
+    clearPluginRegistry,
+    confirmEnable,
+    disablePlugin,
+    installPlugin,
+    loadPluginFromZip,
+    parsePluginPackage,
+    requestEnable,
+    resolveAnalysis,
+  } = await import("../src/plugins/index");
+  const JSZip = (await import("jszip")).default;
+  clearPluginRegistry();
+
+  const pluginJson = {
+    id: "example.hello-analysis",
+    name: "Hello Analysis",
+    version: "1.0.0",
+    apiVersion: "3.0",
+    author: "Titer example author",
+    license: "MIT",
+    permissions: ["read-table"],
+    analyses: [
+      {
+        id: "hello-mean",
+        label: "Hello mean",
+        tableTypes: ["column"],
+        minColumns: 1,
+        parameters: [],
+        questions: [],
+        compute: { kind: "r", code: "c(mean_value=mean(g0))" },
+      },
+    ],
+  };
+  const files = new Map([
+    ["plugin.json", JSON.stringify(pluginJson)],
+    ["README.md", "# Hello Analysis\n"],
+  ]);
+  const parsed = parsePluginPackage(files);
+  ok("package" in parsed, `hello package rejected: ${JSON.stringify(parsed)}`);
+  if (!("package" in parsed)) return;
+
+  // The same package loads from a zip (JSZip path).
+  const zip = new JSZip();
+  for (const [name, text] of files) zip.file(name, text);
+  const zipped = await loadPluginFromZip(await zip.generateAsync({ type: "uint8array" }), "hello.zip");
+  ok(
+    "package" in zipped && zipped.package.manifest.id === "example.hello-analysis",
+    `zip load failed: ${JSON.stringify(zipped)}`,
+  );
+
+  const installed = installPlugin(parsed.package, [], { kind: "folder", name: "hello-analysis" });
+  ok("record" in installed, `install failed: ${JSON.stringify(installed)}`);
+  if (!("record" in installed)) return;
+  strictEqual(installed.record.status, "disabled");
+  strictEqual(resolveAnalysis("plugin:example.hello-analysis:hello-mean"), undefined);
+
+  const duplicate = installPlugin(parsed.package, [installed.record.manifest.id], {
+    kind: "folder",
+    name: "hello-analysis",
+  });
+  ok("errors" in duplicate && duplicate.errors.some((e) => /already installed/.test(e)), "duplicate install refused");
+
+  const pending = requestEnable(installed.record);
+  strictEqual(pending.status, "pending-review");
+  throws(() => confirmEnable(pending, ["network"], "3.0.0"), /never declared/);
+  const enabled = confirmEnable(pending, ["read-table"], "3.0.0");
+  strictEqual(enabled.status, "enabled");
+  deepStrictEqual(enabled.grantedPermissions, ["read-table"]);
+  const resolved = resolveAnalysis("plugin:example.hello-analysis:hello-mean");
+  ok(resolved?.source === "plugin", "enabled plugin analyses resolve");
+
+  const disabled = disablePlugin(enabled);
+  strictEqual(disabled.status, "disabled");
+  strictEqual(
+    resolveAnalysis("plugin:example.hello-analysis:hello-mean"),
+    undefined,
+    "disabling unregisters the analyses at once",
+  );
+  clearPluginRegistry();
+});
+
+check("plugin-sdk hello: verifyHelloPlugin numbers", async () => {
+  const { clearPluginRegistry, verifyHelloPlugin } = await import("../src/plugins/index");
+  clearPluginRegistry();
+  const { ok: passed, checks: lines } = await verifyHelloPlugin();
+  ok(passed, `verifyHelloPlugin failed:\n  ${lines.join("\n  ")}`);
+  ok(
+    lines.some((l) => /hello-mean: mean of \[2, 4, 9\] is 5/.test(l)),
+    "hello-mean must be 5",
+  );
+  ok(
+    lines.some((l) => /hello-scaled-mean: mean 5 × 2 is 10/.test(l)),
+    "hello-scaled-mean must be 10",
+  );
+  ok(
+    lines.some((l) => /median 4 × 2 is 8/.test(l)),
+    "hello-scaled-mean (median) must be 8",
+  );
+  ok(
+    lines.some((l) => /multiplier 99 \(above max 10\) is refused/.test(l)),
+    "multiplier 99 must be refused",
+  );
+  clearPluginRegistry();
+});
+
 
 // ── Run ──────────────────────────────────────────────────────────────────
 
