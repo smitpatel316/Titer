@@ -38,10 +38,12 @@ trap 'rm -rf "$TMP"' EXIT
 # and cannot open MSYS POSIX paths (/d/...) when the path is embedded in
 # code (python -c) or passed through stdin — MSYS only converts direct
 # argv paths. Convert once for every python/node invocation; bash, curl
-# and gzip keep using the POSIX form.
+# and gzip keep using the POSIX form. Forward slashes throughout: a
+# backslash path embedded in a python string literal would eat escapes
+# (D:\a\... reads \a as BEL) — Windows accepts forward slashes everywhere.
 if command -v cygpath >/dev/null 2>&1; then
-  PYROOT="$(cygpath -w "$ROOT")"
-  PYTMP="$(cygpath -w "$TMP")"
+  PYROOT="$(cygpath -w "$ROOT" | tr '\\' '/')"
+  PYTMP="$(cygpath -w "$TMP" | tr '\\' '/')"
 else
   PYROOT="$ROOT"
   PYTMP="$TMP"
